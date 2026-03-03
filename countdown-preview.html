@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TeraSwap — Countdown Preview</title>
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --surface: #080B10;
+    --surface-secondary: #0E1219;
+    --cream: #F5F0E8;
+    --cream-gold: #C8B89A;
+    --cream-65: rgba(245,240,232,0.65);
+    --cream-50: rgba(245,240,232,0.50);
+    --cream-35: rgba(245,240,232,0.35);
+    --cream-20: rgba(245,240,232,0.20);
+    --cream-15: rgba(245,240,232,0.15);
+    --cream-08: rgba(245,240,232,0.08);
+    --cream-04: rgba(245,240,232,0.04);
+  }
+
+  body {
+    background: var(--surface);
+    color: var(--cream);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .font-display { font-family: 'Clash Display', sans-serif; }
+
+  /* ── Header ── */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--cream-08);
+    backdrop-filter: blur(12px);
+    position: relative; z-index: 20;
+  }
+  .logo {
+    font-family: 'Clash Display', sans-serif;
+    font-size: 20px; font-weight: 700;
+    letter-spacing: 2px; color: var(--cream);
+  }
+  .logo span { color: var(--cream-gold); }
+  .header-links { display: flex; gap: 24px; }
+  .header-links a {
+    color: var(--cream-50); text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    transition: color 0.2s;
+  }
+  .header-links a:hover { color: var(--cream); }
+
+  /* ── Main ── */
+  .main {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    position: relative; padding: 40px 20px;
+  }
+
+  /* Glow */
+  .glow {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 450px; height: 450px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(200,184,154,0.15) 0%, transparent 70%);
+    filter: blur(100px);
+    pointer-events: none;
+  }
+
+  /* Content */
+  .content {
+    position: relative; z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 32px;
+  }
+
+  /* Badge */
+  .badge {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--cream-15);
+    background: var(--cream-04);
+    border-radius: 999px; padding: 6px 16px;
+  }
+  .badge-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--cream-gold);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .badge-text {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--cream-65);
+  }
+
+  /* Headline */
+  .headline-group { text-align: center; }
+  .headline {
+    font-family: 'Clash Display', sans-serif;
+    font-size: clamp(36px, 6vw, 56px);
+    font-weight: 700; letter-spacing: -0.5px;
+    color: var(--cream); margin-bottom: 12px;
+  }
+  .subtitle {
+    font-size: 15px; line-height: 1.6;
+    color: var(--cream-50); max-width: 420px; margin: 0 auto;
+  }
+
+  /* ── Countdown ── */
+  .countdown {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .block {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 8px;
+  }
+  .block-inner {
+    width: 78px; height: 88px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 12px;
+    border: 1px solid var(--cream-15);
+    background: rgba(14,18,25,0.8);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+  .block-value {
+    font-family: 'Clash Display', sans-serif;
+    font-size: 36px; font-weight: 700;
+    color: var(--cream);
+    font-variant-numeric: tabular-nums;
+  }
+  .block-label {
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--cream-35);
+  }
+
+  /* Separator dots */
+  .separator {
+    display: flex; flex-direction: column;
+    gap: 6px; padding-bottom: 24px;
+  }
+  .sep-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--cream-35);
+  }
+
+  /* Progress bar */
+  .progress-wrap {
+    width: 100%; max-width: 340px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .progress-bar {
+    height: 4px; border-radius: 999px;
+    background: var(--cream-08); overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #C8B89A, #A89878);
+    transition: width 1s ease;
+  }
+  .progress-labels {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--cream-35);
+  }
+
+  /* Back button */
+  .back-btn {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--cream-08);
+    background: var(--cream-04);
+    border-radius: 999px; padding: 10px 20px;
+    color: var(--cream-50); font-size: 12px;
+    font-weight: 500; cursor: pointer;
+    transition: all 0.2s; margin-top: 8px;
+  }
+  .back-btn:hover {
+    border-color: var(--cream-15);
+    background: var(--cream-08);
+    color: var(--cream);
+  }
+  .back-btn svg { width: 14px; height: 14px; }
+
+  /* ── Particles (subtle) ── */
+  .particles {
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0.3;
+  }
+  .particle {
+    position: absolute; width: 2px; height: 2px;
+    background: var(--cream-gold); border-radius: 50%;
+    animation: float linear infinite;
+  }
+  @keyframes float {
+    0% { transform: translateY(0) scale(1); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(-100vh) scale(0.5); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Particles -->
+<div class="particles" id="particles"></div>
+
+<!-- Header -->
+<header class="header">
+  <div class="logo">TERA<span>SWAP</span></div>
+  <div class="header-links">
+    <a href="#">Docs</a>
+    <a href="#">About</a>
+  </div>
+</header>
+
+<!-- Main -->
+<main class="main">
+  <div class="glow"></div>
+
+  <div class="content">
+    <!-- Badge -->
+    <div class="badge">
+      <div class="badge-dot"></div>
+      <span class="badge-text">Launching Soon</span>
+    </div>
+
+    <!-- Headline -->
+    <div class="headline-group">
+      <h1 class="headline">Almost There</h1>
+      <p class="subtitle">TeraSwap is deployed and ready. The protocol will go live automatically when the countdown reaches zero.</p>
+    </div>
+
+    <!-- Countdown -->
+    <div class="countdown" id="countdown">
+      <div class="block">
+        <div class="block-inner"><span class="block-value" id="days">01</span></div>
+        <span class="block-label">Days</span>
+      </div>
+      <div class="separator"><div class="sep-dot"></div><div class="sep-dot"></div></div>
+      <div class="block">
+        <div class="block-inner"><span class="block-value" id="hours">23</span></div>
+        <span class="block-label">Hours</span>
+      </div>
+      <div class="separator"><div class="sep-dot"></div><div class="sep-dot"></div></div>
+      <div class="block">
+        <div class="block-inner"><span class="block-value" id="minutes">45</span></div>
+        <span class="block-label">Min</span>
+      </div>
+      <div class="separator"><div class="sep-dot"></div><div class="sep-dot"></div></div>
+      <div class="block">
+        <div class="block-inner"><span class="block-value" id="seconds">12</span></div>
+        <span class="block-label">Sec</span>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-wrap">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress" style="width: 35%"></div>
+      </div>
+      <div class="progress-labels">
+        <span>Deployed</span>
+        <span>Live</span>
+      </div>
+    </div>
+
+    <!-- Back -->
+    <button class="back-btn">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+      </svg>
+      Explore TeraSwap
+    </button>
+  </div>
+</main>
+
+<script>
+  // Live countdown — 2 days from now
+  const LAUNCH = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+  const COUNTDOWN_WINDOW = 48 * 60 * 60 * 1000;
+  const START = LAUNCH.getTime() - COUNTDOWN_WINDOW;
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function tick() {
+    const now = Date.now();
+    const total = Math.max(0, LAUNCH.getTime() - now);
+    const d = Math.floor(total / (1000*60*60*24));
+    const h = Math.floor((total / (1000*60*60)) % 24);
+    const m = Math.floor((total / (1000*60)) % 60);
+    const s = Math.floor((total / 1000) % 60);
+
+    document.getElementById('days').textContent = pad(d);
+    document.getElementById('hours').textContent = pad(h);
+    document.getElementById('minutes').textContent = pad(m);
+    document.getElementById('seconds').textContent = pad(s);
+
+    const elapsed = now - START;
+    const pct = Math.min(100, Math.max(0, (elapsed / COUNTDOWN_WINDOW) * 100));
+    document.getElementById('progress').style.width = pct + '%';
+  }
+
+  setInterval(tick, 1000);
+  tick();
+
+  // Particles
+  const container = document.getElementById('particles');
+  for (let i = 0; i < 30; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.left = Math.random() * 100 + '%';
+    p.style.top = (100 + Math.random() * 20) + '%';
+    p.style.animationDuration = (8 + Math.random() * 12) + 's';
+    p.style.animationDelay = Math.random() * 10 + 's';
+    p.style.width = p.style.height = (1 + Math.random() * 2) + 'px';
+    container.appendChild(p);
+  }
+</script>
+</body>
+</html>

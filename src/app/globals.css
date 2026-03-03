@@ -1,0 +1,291 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* Clash Display — loaded via CDN (self-hosted fallback: Inter 800) */
+@font-face {
+  font-family: 'Clash Display';
+  src: url('https://cdn.fontshare.com/wf/BPYOJXAOZVHRZK2YLFWMFWU5HEA2GNLK/TPHK4DOJQVNZWU3XPQAESXNV6DGY7PEZ/LUVMMEVY6IOL4R6YQIMAHLHVH33LNQHD.woff2') format('woff2');
+  font-weight: 400 800;
+  font-display: swap;
+}
+
+/* ── Dark theme (default) ── */
+html, html.dark {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  --bg-primary: #080B10;
+  --bg-secondary: #0F1318;
+  --bg-tertiary: #151A22;
+  --bg-hover: #1E2530;
+  --text-primary: #F5F0E8;
+  --text-secondary: rgba(245, 240, 232, 0.75);
+  --text-muted: rgba(245, 240, 232, 0.50);
+  --text-subtle: rgba(245, 240, 232, 0.35);
+  --border-default: rgba(245, 240, 232, 0.08);
+  --border-hover: rgba(200, 184, 154, 0.40);
+  --border-card: #1E2530;
+  --particle-color: 232, 220, 196;
+  --scrollbar-thumb: rgba(200, 184, 154, 0.15);
+  --scrollbar-hover: rgba(200, 184, 154, 0.25);
+  --focus-ring: rgba(200, 184, 154, 0.25);
+  --tap-highlight: rgba(200, 184, 154, 0.1);
+  --header-blur: rgba(8, 11, 16, 0.92);
+}
+
+/* ── Light theme ── */
+html.light {
+  color-scheme: light;
+  --bg-primary: #F5F0E8;
+  --bg-secondary: #FFFDF8;
+  --bg-tertiary: #F0EBE2;
+  --bg-hover: #E8E2D6;
+  --text-primary: #1A1814;
+  --text-secondary: rgba(26, 24, 20, 0.75);
+  --text-muted: rgba(26, 24, 20, 0.50);
+  --text-subtle: rgba(26, 24, 20, 0.35);
+  --border-default: rgba(26, 24, 20, 0.10);
+  --border-hover: rgba(140, 128, 108, 0.40);
+  --border-card: #E0D9CC;
+  --particle-color: 140, 128, 108;
+  --scrollbar-thumb: rgba(140, 128, 108, 0.2);
+  --scrollbar-hover: rgba(140, 128, 108, 0.35);
+  --focus-ring: rgba(140, 128, 108, 0.35);
+  --tap-highlight: rgba(140, 128, 108, 0.12);
+  --header-blur: rgba(245, 240, 232, 0.92);
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ── Light theme overrides for Tailwind classes ── */
+/* Surface backgrounds */
+html.light .bg-surface { background-color: var(--bg-primary) !important; }
+html.light .bg-surface-secondary { background-color: var(--bg-secondary) !important; }
+html.light .bg-surface-secondary\/85 { background-color: rgba(255, 253, 248, 0.85) !important; }
+html.light .bg-surface-tertiary { background-color: var(--bg-tertiary) !important; }
+html.light .bg-surface-hover { background-color: var(--bg-hover) !important; }
+
+/* Text colors */
+html.light .text-cream { color: var(--text-primary) !important; }
+html.light .text-cream-95 { color: rgba(26, 24, 20, 0.95) !important; }
+html.light .text-cream-80 { color: rgba(26, 24, 20, 0.80) !important; }
+html.light .text-cream-75 { color: rgba(26, 24, 20, 0.75) !important; }
+html.light .text-cream-65 { color: rgba(26, 24, 20, 0.65) !important; }
+html.light .text-cream-50 { color: rgba(26, 24, 20, 0.50) !important; }
+html.light .text-cream-35 { color: rgba(26, 24, 20, 0.35) !important; }
+html.light .text-cream-20 { color: rgba(26, 24, 20, 0.20) !important; }
+
+/* Placeholder */
+html.light .placeholder\:text-cream-35::placeholder { color: rgba(26, 24, 20, 0.35) !important; }
+
+/* Border colors */
+html.light .border-cream-08 { border-color: var(--border-default) !important; }
+html.light .border-cream-15 { border-color: rgba(26, 24, 20, 0.12) !important; }
+html.light .border-cream-35 { border-color: rgba(26, 24, 20, 0.20) !important; }
+html.light .border-cream-50 { border-color: rgba(26, 24, 20, 0.30) !important; }
+html.light .border-cream-gold { border-color: #A89878 !important; }
+
+/* Background opacity variants */
+html.light .bg-cream-04 { background-color: rgba(26, 24, 20, 0.04) !important; }
+html.light .bg-cream-08 { background-color: rgba(26, 24, 20, 0.06) !important; }
+
+/* Gold accents — slightly darker in light mode */
+html.light .text-gold { color: #8C7A5A !important; }
+html.light .text-gold-light { color: #A89878 !important; }
+html.light .text-gold-dark { color: #6B5D44 !important; }
+html.light .bg-gold { background-color: #8C7A5A !important; }
+html.light .bg-gold-light { background-color: #A89878 !important; }
+
+/* Header blur in light mode */
+html.light .bg-\[rgba\(8\,11\,16\,0\.92\)\] { background-color: var(--header-blur) !important; }
+
+/* Gradient overrides for buttons */
+html.light .hover\:from-gold:hover { --tw-gradient-from: #8C7A5A !important; }
+html.light .hover\:to-gold-light:hover { --tw-gradient-to: #A89878 !important; }
+html.light .hover\:text-\[\#080B10\]:hover { color: #FFFDF8 !important; }
+
+/* Shadow adjustments */
+html.light .shadow-xl { box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06) !important; }
+html.light .shadow-black\/20 { --tw-shadow-color: rgba(0, 0, 0, 0.06) !important; }
+html.light .shadow-black\/30 { --tw-shadow-color: rgba(0, 0, 0, 0.08) !important; }
+
+/* Success color stays the same */
+html.light .text-success { color: #16A34A !important; }
+html.light .bg-success { background-color: #16A34A !important; }
+
+/* Danger stays the same but slightly adjusted */
+html.light .text-danger { color: #DC2626 !important; }
+
+/* Warning */
+html.light .text-warning { color: #D97706 !important; }
+
+/* Shimmer text in light mode */
+html.light .text-shimmer {
+  background: linear-gradient(
+    90deg,
+    #1A1814 0%,
+    #1A1814 40%,
+    #8C7A5A 50%,
+    #1A1814 60%,
+    #1A1814 100%
+  ) !important;
+  background-size: 200% auto !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* Scan line in light mode */
+html.light .scan-line::after {
+  background: linear-gradient(180deg, transparent, rgba(140, 128, 108, 0.06), transparent) !important;
+}
+
+/* Backdrop blur containers in light mode */
+html.light .backdrop-blur-lg,
+html.light .backdrop-blur-2xl {
+  backdrop-filter: blur(24px) !important;
+}
+
+/* Number input spinners */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* Focus ring */
+*:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── Shimmer animation for "Gold Standard" / "performance" ── */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    #F5F0E8 0%,
+    #F5F0E8 40%,
+    #E8D5B7 50%,
+    #F5F0E8 60%,
+    #F5F0E8 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.2s ease-in-out forwards;
+  animation-delay: 1.2s;
+}
+
+/* ── Scan line for Performance section ── */
+@keyframes scanLine {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+.scan-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgba(200,184,154,0.04), transparent);
+  height: 1px;
+  animation: scanLine 4s linear infinite;
+  pointer-events: none;
+}
+
+/* ── Shield draw animation ── */
+@keyframes drawStroke {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* ── Pulsing glow for CTA section ── */
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); opacity: 0.08; }
+  50% { transform: scale(1.4); opacity: 0.04; }
+}
+
+/* ── Red flash for "predatory extraction" ── */
+@keyframes dangerFlash {
+  0% { background-color: transparent; }
+  30% { background-color: rgba(239, 68, 68, 0.05); }
+  100% { background-color: transparent; }
+}
+
+.danger-flash {
+  animation: dangerFlash 0.5s ease-out forwards;
+}
+
+/* ── Underline draw for "Elite" ── */
+@keyframes drawUnderline {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+/* ── Theme transition ── */
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 0ms;
+}
+html.transitioning * {
+  transition-duration: 300ms !important;
+  transition-timing-function: ease !important;
+}
+
+/* ── Mobile optimizations ───────────────────────────────── */
+
+/* Prevent iOS auto-zoom on input focus (triggers at font-size < 16px) */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Smooth momentum scrolling on iOS */
+.overflow-y-auto, .overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe-area padding for notched phones (iPhone X+, etc.) */
+@supports (padding: env(safe-area-inset-bottom)) {
+  footer {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+  .fixed.inset-x-0.top-0 {
+    padding-top: calc(1rem + env(safe-area-inset-top));
+  }
+}
+
+/* Better tap highlight on mobile */
+@media (hover: none) {
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: var(--tap-highlight);
+  }
+}
+
+/* Hide scrollbar but keep scroll functionality */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

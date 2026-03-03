@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#080B10"/>
+  <text x="16" y="22" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-weight="800" font-size="18" fill="#F5F0E8">T</text>
+  <rect x="4" y="26" width="24" height="1.5" rx="0.75" fill="#C8B89A" opacity="0.6"/>
+</svg>
