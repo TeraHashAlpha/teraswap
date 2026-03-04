@@ -185,17 +185,15 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: () => voi
           )}
         </div>
 
-        {/* Close button */}
-        {t.type !== 'loading' && (
-          <button
-            onClick={onDismiss}
-            className="shrink-0 self-start rounded p-0.5 text-cream-35 transition-colors hover:text-cream"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
+        {/* Close button — always visible, including on loading toasts */}
+        <button
+          onClick={onDismiss}
+          className="shrink-0 self-start rounded p-0.5 text-cream-35 transition-colors hover:text-cream"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
     </motion.div>
   )

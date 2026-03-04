@@ -390,8 +390,8 @@ export default function SwapBox() {
               const savedPercent = worstOut > 0 ? ((bestOut - worstOut) / worstOut * 100) : 0
               const savedDisplay = savedPercent > 0.01 ? savedPercent.toFixed(2) : null
               const shareText = savedDisplay
-                ? `I just saved ${savedDisplay}% on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates 11 DEX sources for the best price.\nhttps://teraswap.xyz`
-                : `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://teraswap.xyz`
+                ? `I just saved ${savedDisplay}% on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates 11 DEX sources for the best price.\nhttps://teraswap.app`
+                : `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://teraswap.app`
               return (
                 <button
                   onClick={() => {

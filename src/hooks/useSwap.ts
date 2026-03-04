@@ -6,7 +6,8 @@ import {
   useWaitForTransactionReceipt,
   useSignTypedData,
 } from 'wagmi'
-import { parseUnits } from 'viem'
+import { parseUnits, erc20Abi, createPublicClient, http } from 'viem'
+import { mainnet } from 'viem/chains'
 import { fetchSwapFromSource, validateFeeIntegrity, validateRouterAddress, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
@@ -120,6 +121,30 @@ export function useSwap(
       const rawAmountBn = parseUnits(amountIn, tokenIn!.decimals)
       const apiValue = BigInt(swapData.tx.value || '0')
       const txValue = isNativeIn && apiValue === 0n ? rawAmountBn : apiValue
+
+      // Pre-flight: verify ERC-20 allowance before sending tx (prevents STF reverts)
+      if (!isNativeIn && address) {
+        try {
+          const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+          const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+          const allowance = await client.readContract({
+            address: tokenIn!.address as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, swapData.tx.to as `0x${string}`],
+          })
+          if (allowance < rawAmountBn) {
+            throw new Error(
+              `Insufficient allowance for ${tokenIn!.symbol}. Please approve the router first. ` +
+              `(Have: ${allowance.toString()}, Need: ${rawAmountBn.toString()})`
+            )
+          }
+        } catch (err) {
+          // If it's our own allowance error, rethrow; otherwise log and continue
+          if (err instanceof Error && err.message.includes('Insufficient allowance')) throw err
+          console.warn('[TeraSwap] Pre-flight allowance check failed:', err)
+        }
+      }
 
       setStatus('swapping')
       sendTransaction({
