@@ -9,7 +9,7 @@ import {
 import { parseUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
 import { mainnet } from 'viem/chains'
 import { fetchSwapFromSource, validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
-import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, type AggregatorName } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 
 export type SwapStatus =
@@ -70,13 +70,22 @@ export function useSwap(
     setStatus('fetching_swap')
 
     try {
-      const rawAmount = parseUnits(amountIn, tokenIn.decimals).toString()
+      const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
+      const routeViaFeeCollector = usesFeeCollector(source)
+
+      // For FeeCollector routing: the contract deducts 0.1% fee first,
+      // then forwards the NET amount to the DEX router. So we must build
+      // the router calldata for the net amount, not the full amount.
+      // This matches the exact amount FeeCollector approves to the router.
+      const apiAmountBn = routeViaFeeCollector
+        ? rawAmountBn - (rawAmountBn * BigInt(FEE_BPS) / 10000n)
+        : rawAmountBn
 
       const swapData = await fetchSwapFromSource(
         source,
         tokenIn.address,
         tokenOut.address,
-        rawAmount,
+        apiAmountBn.toString(),
         address,
         slippage,
         tokenIn.decimals,
@@ -118,14 +127,14 @@ export function useSwap(
       // return value='0', causing TRANSFER_FROM_FAILED because the router tries
       // transferFrom(WETH) instead of receiving ETH via msg.value.
       const isNativeIn = tokenIn && isNativeETH(tokenIn)
-      const rawAmountBn = parseUnits(amountIn, tokenIn!.decimals)
       const apiValue = BigInt(swapData.tx.value || '0')
-      const txValue = isNativeIn && apiValue === 0n ? rawAmountBn : apiValue
+      // For non-FeeCollector: use apiAmountBn as fallback value for ETH
+      // For FeeCollector: txValue is not used (FeeCollector gets full rawAmountBn)
+      const txValue = isNativeIn && apiValue === 0n ? apiAmountBn : apiValue
 
       // ── FeeCollector routing ──
-      // For sources without native fee params, route through FeeCollector contract.
-      // FeeCollector takes 0.1% fee and forwards the rest to the actual router.
-      const routeViaFeeCollector = usesFeeCollector(source)
+      // All sources (except 0x/CoW) route through FeeCollector contract.
+      // FeeCollector takes 0.1% fee and forwards the net amount to the DEX router.
 
       if (routeViaFeeCollector) {
         // Route through FeeCollector
@@ -134,6 +143,7 @@ export function useSwap(
 
         if (isNativeIn) {
           // ETH input: FeeCollector.swapETHWithFee{value: totalAmount}(router, routerData)
+          // Send the FULL amount — FeeCollector deducts fee and forwards net to router
           const feeCollectorCalldata = encodeFunctionData({
             abi: FEE_COLLECTOR_ABI,
             functionName: 'swapETHWithFee',
@@ -144,7 +154,7 @@ export function useSwap(
           sendTransaction({
             to: FEE_COLLECTOR_ADDRESS,
             data: feeCollectorCalldata,
-            value: txValue,
+            value: rawAmountBn, // FULL amount — FeeCollector takes fee from this
             gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 60_000n : undefined, // extra gas for fee logic
           })
         } else {
@@ -192,7 +202,8 @@ export function useSwap(
           })
         }
       } else {
-        // Direct routing (fee-native sources: 1inch, KyberSwap, 0x)
+        // Direct routing (FeeCollector-incompatible sources only: 0x, CoW)
+        // NOTE: No fee collected on these swaps — they're excluded from quotes when FeeCollector is active.
         // Pre-flight: verify ERC-20 allowance before sending tx (prevents STF reverts)
         if (!isNativeIn && address) {
           try {

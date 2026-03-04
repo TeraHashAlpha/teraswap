@@ -5,6 +5,7 @@ import {
   FEE_RECIPIENT,
   FEE_COLLECTOR_ADDRESS,
   FEE_NATIVE_SOURCES,
+  FEE_INCOMPATIBLE_SOURCES,
   DEFAULT_SLIPPAGE,
   QUOTE_TIMEOUT_MS,
   CHAIN_ID,
@@ -146,8 +147,8 @@ async function fetch1inchSwap(
   const params = new URLSearchParams({
     src, dst, amount, from,
     slippage: slippage.toString(),
-    fee: FEE_PERCENT.toString(),
-    referrerAddress: FEE_RECIPIENT,
+    // Fee collection handled by FeeCollector contract (API fee params
+    // require registered partner accounts which we don't have)
     includeProtocols: 'true',
     disableEstimate: 'false',
     allowPartialFill: 'false',
@@ -214,10 +215,8 @@ async function fetch0xSwap(
     sellAmount: amount,
     taker: from,
     slippageBps: Math.round(clampSlippage(slippage) * 100).toString(), // v2 usa bps
-    // Fee collection: 0x v2 takes swap fee from sell token
-    swapFeeRecipient: FEE_RECIPIENT,
-    swapFeeBps: Math.round(FEE_PERCENT * 100).toString(), // 0.1% → 10 bps
-    swapFeeToken: src, // take fee from input token
+    // Fee collection: 0x excluded from FeeCollector (Permit2-based).
+    // API fee params removed — they require registered partner accounts.
   })
   const res = await fetch(`${base}/swap/permit2/quote?${params}`, {
     headers: {
@@ -532,11 +531,8 @@ async function fetchKyberSwapSwap(
       recipient: from,
       slippageTolerance: Math.round(clampSlippage(slippage) * 100), // bps
       source: 'TeraSwap',
-      // Fee collection: KyberSwap takes fee from input token and sends to feeReceiver
-      feeReceiver: FEE_RECIPIENT,
-      chargeFeeBy: 'currency_in',
-      feeAmount: Math.round(FEE_PERCENT * 100), // 0.1% → 10 bps
-      isInBps: true,
+      // Fee collection handled by FeeCollector contract (API fee params
+      // require registered partner accounts which we don't have)
     }),
   })
   if (!buildRes.ok) throw new Error(`KyberSwap build ${buildRes.status}`)
@@ -1681,21 +1677,32 @@ export async function fetchMetaQuote(
     throw new Error('Rate limited — too many requests. Please wait a moment.')
   }
 
-  const sourceNames: AggregatorName[] = ['1inch', '0x', 'velora', 'odos', 'kyberswap', 'cowswap', 'uniswapv3', 'openocean', 'sushiswap', 'balancer', 'curve']
+  // All available sources and their quote fetchers
+  const allSources: { name: AggregatorName; fetch: () => Promise<NormalizedQuote> }[] = [
+    { name: '1inch', fetch: () => fetch1inchQuote(src, dst, amount) },
+    { name: '0x', fetch: () => fetch0xQuote(src, dst, amount) },
+    { name: 'velora', fetch: () => fetchVeloraQuote(src, dst, amount, srcDecimals, dstDecimals) },
+    { name: 'odos', fetch: () => fetchOdosQuote(src, dst, amount) },
+    { name: 'kyberswap', fetch: () => fetchKyberSwapQuote(src, dst, amount) },
+    { name: 'cowswap', fetch: () => fetchCowSwapQuote(src, dst, amount) },
+    { name: 'uniswapv3', fetch: () => fetchUniswapV3Quote(src, dst, amount) },
+    { name: 'openocean', fetch: () => fetchOpenOceanQuote(src, dst, amount) },
+    { name: 'sushiswap', fetch: () => fetchSushiSwapQuote(src, dst, amount) },
+    { name: 'balancer', fetch: () => fetchBalancerQuote(src, dst, amount) },
+    { name: 'curve', fetch: () => fetchCurveQuote(src, dst, amount) },
+  ]
+
+  // When FeeCollector is active, exclude incompatible sources to guarantee
+  // fee collection on every swap (0x uses Permit2, CoW is intent-based)
+  const activeSources = isFeeCollectorActive()
+    ? allSources.filter(s => !FEE_INCOMPATIBLE_SOURCES.includes(s.name))
+    : allSources
+
+  const sourceNames: AggregatorName[] = activeSources.map(s => s.name)
   const startTime = Date.now()
-  const results = await Promise.allSettled([
-    withTimeout(fetch1inchQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetch0xQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchVeloraQuote(src, dst, amount, srcDecimals, dstDecimals), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchOdosQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchKyberSwapQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchCowSwapQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchUniswapV3Quote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchOpenOceanQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchSushiSwapQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchBalancerQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchCurveQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-  ])
+  const results = await Promise.allSettled(
+    activeSources.map(s => withTimeout(s.fetch(), QUOTE_TIMEOUT_MS))
+  )
   const elapsed = Date.now() - startTime
 
   // ── Source monitoring: record success/failure per aggregator ──
@@ -1901,11 +1908,11 @@ export function isFeeCollectorActive(): boolean {
 
 /**
  * Check if a source uses the FeeCollector proxy for fee collection.
- * Fee-native sources (1inch, KyberSwap, 0x) handle fees via API params.
- * All other sources route through FeeCollector (if deployed).
+ * All sources route through FeeCollector EXCEPT incompatible ones
+ * (0x uses Permit2, CoW is intent-based).
  */
 export function usesFeeCollector(source: AggregatorName): boolean {
-  return isFeeCollectorActive() && !FEE_NATIVE_SOURCES.includes(source)
+  return isFeeCollectorActive() && !FEE_INCOMPATIBLE_SOURCES.includes(source)
 }
 
 /**

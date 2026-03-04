@@ -89,7 +89,16 @@ export const FEE_COLLECTOR_ADDRESS = (process.env.NEXT_PUBLIC_FEE_COLLECTOR ??
   '') as `0x${string}`
 
 // Sources that collect fees natively via their API (no FeeCollector needed)
-export const FEE_NATIVE_SOURCES: AggregatorName[] = ['1inch', '0x', 'kyberswap']
+// EMPTY: API fee params require registered partner accounts to work.
+// All fee collection now goes through the FeeCollector smart contract.
+export const FEE_NATIVE_SOURCES: AggregatorName[] = []
+
+// Sources incompatible with FeeCollector proxy routing:
+// - 0x: Uses Permit2 pull model (not standard ERC-20 approve)
+// - cowswap: Intent-based (EIP-712 signing, no on-chain tx to intercept)
+// These sources are excluded from quotes when FeeCollector is active
+// to guarantee fee collection on every swap.
+export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = ['0x', 'cowswap']
 
 // FeeCollector ABI (only the functions we call from the frontend)
 export const FEE_COLLECTOR_ABI = [
