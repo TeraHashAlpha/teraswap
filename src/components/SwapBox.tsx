@@ -102,7 +102,7 @@ export default function SwapBox() {
     useSplitRoute(meta, tokenIn, tokenOut, amountIn, isConnected && isCorrectChain)
 
   const { estimate: gasEstimateFn } = useEthGasCost()
-  const { toast } = useToast()
+  const { toast, dismiss } = useToast()
   const swapToastId = useRef<string | null>(null)
 
   // ── Toast: swap initiated (loading) ──
@@ -119,10 +119,9 @@ export default function SwapBox() {
   useEffect(() => {
     if (swapStatus === 'success' && txHash && tokenIn && tokenOut && meta?.best) {
       playSwapSuccess()
-      // Update loading toast → success
+      // Dismiss loading toast → fire fresh success with Etherscan link
       if (swapToastId.current) {
-        // dismiss old loading toast, fire fresh success
-        // (update would work too, but a new toast with txHash renders the Etherscan link)
+        dismiss(swapToastId.current)
       }
       toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${formatDisplay(Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)), 4)} ${tokenOut.symbol}`, txHash, duration: 10000 })
       swapToastId.current = null
@@ -178,6 +177,7 @@ export default function SwapBox() {
   useEffect(() => {
     if (swapStatus === 'error') {
       playError()
+      if (swapToastId.current) { dismiss(swapToastId.current) }
       toast({ type: 'error', title: 'Swap failed', description: swapError || 'Transaction was rejected or failed.' })
       swapToastId.current = null
     }
