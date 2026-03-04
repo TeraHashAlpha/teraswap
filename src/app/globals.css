@@ -71,6 +71,7 @@ body {
 html.light .bg-surface { background-color: var(--bg-primary) !important; }
 html.light .bg-surface-secondary { background-color: var(--bg-secondary) !important; }
 html.light .bg-surface-secondary\/85 { background-color: rgba(255, 253, 248, 0.85) !important; }
+html.light .bg-surface-secondary\/95 { background-color: rgba(255, 253, 248, 0.95) !important; }
 html.light .bg-surface-tertiary { background-color: var(--bg-tertiary) !important; }
 html.light .bg-surface-hover { background-color: var(--bg-hover) !important; }
 
@@ -93,6 +94,8 @@ html.light .border-cream-15 { border-color: rgba(26, 24, 20, 0.12) !important; }
 html.light .border-cream-35 { border-color: rgba(26, 24, 20, 0.20) !important; }
 html.light .border-cream-50 { border-color: rgba(26, 24, 20, 0.30) !important; }
 html.light .border-cream-gold { border-color: #A89878 !important; }
+html.light .text-cream-gold { color: #8C7A5A !important; }
+html.light .bg-cream-gold { background-color: #A89878 !important; }
 
 /* Background opacity variants */
 html.light .bg-cream-04 { background-color: rgba(26, 24, 20, 0.04) !important; }
