@@ -310,7 +310,8 @@ async function fetchVeloraSwap(
     srcToken: src,
     destToken: dst,
     srcAmount: amount,
-    destAmount: String(priceData.priceRoute.destAmount),
+    // NOTE: ParaSwap v6.2 does NOT allow both destAmount AND slippage.
+    // Use slippage only — the API derives minDestAmount from priceRoute.
     slippage: Math.round(clampSlippage(slippage) * 100), // bps (integer)
     priceRoute: priceData.priceRoute,
     userAddress: from,
