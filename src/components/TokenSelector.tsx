@@ -1,8 +1,11 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { DEFAULT_TOKENS, getAllTokens, type Token } from '@/lib/tokens'
+import { useAccount, useBalance, useReadContracts } from 'wagmi'
+import { formatUnits, erc20Abi } from 'viem'
+import { DEFAULT_TOKENS, getAllTokens, isNativeETH, type Token } from '@/lib/tokens'
 import { useTokenImport } from '@/hooks/useTokenImport'
+import { CHAIN_ID } from '@/lib/constants'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
@@ -27,11 +30,96 @@ interface Props {
   disabledAddress?: string
 }
 
+// ── Hook: fetch ERC-20 balances for all default tokens via multicall ──
+function useTokenBalances() {
+  const { address, isConnected, chain } = useAccount()
+  const isCorrectChain = chain?.id === CHAIN_ID
+
+  // Native ETH balance
+  const { data: ethBalance } = useBalance({
+    address,
+    query: { enabled: isConnected && isCorrectChain },
+  })
+
+  // ERC-20 balances via multicall
+  const erc20Tokens = useMemo(
+    () => DEFAULT_TOKENS.filter((t) => !isNativeETH(t)),
+    [],
+  )
+
+  const contracts = useMemo(
+    () =>
+      erc20Tokens.map((t) => ({
+        address: t.address as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf' as const,
+        args: [address!] as const,
+      })),
+    [address, erc20Tokens],
+  )
+
+  const { data: erc20Results } = useReadContracts({
+    contracts: isConnected && isCorrectChain && address ? contracts : [],
+    query: {
+      enabled: isConnected && isCorrectChain && !!address,
+      refetchInterval: 30_000, // refresh every 30s
+    },
+  })
+
+  // Build a map: address → formatted balance string
+  const balanceMap = useMemo(() => {
+    const map = new Map<string, { raw: bigint; formatted: string }>()
+
+    // ETH native
+    if (ethBalance) {
+      const ethToken = DEFAULT_TOKENS.find((t) => isNativeETH(t))
+      if (ethToken) {
+        map.set(ethToken.address.toLowerCase(), {
+          raw: ethBalance.value,
+          formatted: formatBalance(ethBalance.value, 18),
+        })
+      }
+    }
+
+    // ERC-20s
+    if (erc20Results) {
+      erc20Results.forEach((result, i) => {
+        if (result.status === 'success' && result.result != null) {
+          const val = result.result as bigint
+          if (val > 0n) {
+            map.set(erc20Tokens[i].address.toLowerCase(), {
+              raw: val,
+              formatted: formatBalance(val, erc20Tokens[i].decimals),
+            })
+          }
+        }
+      })
+    }
+
+    return map
+  }, [ethBalance, erc20Results, erc20Tokens])
+
+  return balanceMap
+}
+
+// Format balance nicely: show up to 6 significant digits
+function formatBalance(value: bigint, decimals: number): string {
+  if (value === 0n) return '0'
+  const full = formatUnits(value, decimals)
+  const num = parseFloat(full)
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`
+  if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`
+  if (num >= 1) return num.toFixed(4).replace(/\.?0+$/, '')
+  if (num >= 0.0001) return num.toFixed(6).replace(/\.?0+$/, '')
+  return '<0.0001'
+}
+
 export default function TokenSelector({ selected, onSelect, disabledAddress }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const { importToken, importing, error: importError } = useTokenImport()
+  const balanceMap = useTokenBalances()
 
   // Focus input when modal opens
   useEffect(() => {
@@ -55,17 +143,39 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     )
   }, [search, disabledAddress])
 
-  // Build category groups (only when not searching)
+  // Tokens with balance — sorted highest first, shown above categories
+  const tokensWithBalance = useMemo(() => {
+    const disabled = disabledAddress?.toLowerCase()
+    return DEFAULT_TOKENS
+      .filter((t) => {
+        const addr = t.address.toLowerCase()
+        return addr !== disabled && balanceMap.has(addr)
+      })
+      .sort((a, b) => {
+        const balA = balanceMap.get(a.address.toLowerCase())?.raw ?? 0n
+        const balB = balanceMap.get(b.address.toLowerCase())?.raw ?? 0n
+        // Sort by USD-approximate value: raw * rough price factor
+        // For simplicity, sort by raw amount (tokens with balance first)
+        if (balB > balA) return 1
+        if (balA > balB) return -1
+        return 0
+      })
+  }, [disabledAddress, balanceMap])
+
+  // Build category groups (only when not searching), excluding tokens already shown in "Your tokens"
   const groups = useMemo(() => {
     if (isSearching) return null
     const disabled = disabledAddress?.toLowerCase()
+    const balanceAddrs = new Set(tokensWithBalance.map((t) => t.address.toLowerCase()))
     return CATEGORIES.map((cat) => {
       const tokens = DEFAULT_TOKENS.slice(cat.start, cat.end + 1).filter(
-        (t) => t.address.toLowerCase() !== disabled,
+        (t) =>
+          t.address.toLowerCase() !== disabled &&
+          !balanceAddrs.has(t.address.toLowerCase()),
       )
       return tokens.length > 0 ? { label: cat.label, tokens } : null
     }).filter(Boolean) as { label: string; tokens: Token[] }[]
-  }, [disabledAddress, isSearching])
+  }, [disabledAddress, isSearching, tokensWithBalance])
 
   const popularTokens = useMemo(() => {
     const disabled = disabledAddress?.toLowerCase()
@@ -107,10 +217,10 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
         <span className="text-cream-50">&#9662;</span>
       </button>
 
-      {/* Modal */}
+      {/* Modal — fully opaque backdrop so text behind is invisible */}
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-start sm:pt-[15vh]"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/90 sm:items-start sm:pt-[15vh]"
           onClick={() => setOpen(false)}
         >
           <div
@@ -163,7 +273,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                     </p>
                   )}
                   {filtered.map((token) => (
-                    <TokenRow key={token.address} token={token} onSelect={handleSelect} />
+                    <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
                   ))}
 
                   {/* Import custom token by address */}
@@ -191,17 +301,36 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                   )}
                 </>
               ) : (
-                /* Categorized list */
-                groups?.map((group) => (
-                  <div key={group.label} className="mb-1">
-                    <p className="sticky top-0 z-10 bg-surface-secondary px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
-                      {group.label}
-                    </p>
-                    {group.tokens.map((token) => (
-                      <TokenRow key={token.address} token={token} onSelect={handleSelect} />
-                    ))}
-                  </div>
-                ))
+                <>
+                  {/* ── Your tokens (with balance) — shown first ── */}
+                  {tokensWithBalance.length > 0 && (
+                    <div className="mb-1">
+                      <p className="sticky top-0 z-10 bg-surface-secondary px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-gold">
+                        Your Tokens
+                      </p>
+                      {tokensWithBalance.map((token) => (
+                        <TokenRow
+                          key={token.address}
+                          token={token}
+                          onSelect={handleSelect}
+                          balance={balanceMap.get(token.address.toLowerCase())?.formatted}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── Categorized list (without tokens already in "Your Tokens") ── */}
+                  {groups?.map((group) => (
+                    <div key={group.label} className="mb-1">
+                      <p className="sticky top-0 z-10 bg-surface-secondary px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
+                        {group.label}
+                      </p>
+                      {group.tokens.map((token) => (
+                        <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
+                      ))}
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           </div>
@@ -212,7 +341,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
 }
 
 // ── Token row component ─────────────────────────────────────
-function TokenRow({ token, onSelect }: { token: Token; onSelect: (t: Token) => void }) {
+function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: Token) => void; balance?: string }) {
   return (
     <button
       onClick={() => onSelect(token)}
@@ -231,6 +360,11 @@ function TokenRow({ token, onSelect }: { token: Token; onSelect: (t: Token) => v
         <div className="text-sm font-medium text-cream">{token.symbol}</div>
         <div className="truncate text-xs text-cream-35">{token.name}</div>
       </div>
+      {balance && (
+        <div className="text-right">
+          <div className="text-sm font-medium text-cream-80">{balance}</div>
+        </div>
+      )}
     </button>
   )
 }
