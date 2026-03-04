@@ -243,14 +243,15 @@ async function fetch0xSwap(
 // ══════════════════════════════════════════════════════════
 async function fetchVeloraQuote(
   src: string, dst: string, amount: string,
+  srcDecimals: number = 18, destDecimals: number = 18,
 ): Promise<NormalizedQuote> {
   const { base } = AGGREGATOR_APIS.velora
   const params = new URLSearchParams({
     srcToken: src,
     destToken: dst,
     amount,
-    srcDecimals: '18',
-    destDecimals: '18',
+    srcDecimals: srcDecimals.toString(),
+    destDecimals: destDecimals.toString(),
     side: 'SELL',
     network: CHAIN_ID.toString(),
     partner: 'teraswap',
@@ -294,7 +295,9 @@ async function fetchVeloraSwap(
     partnerFeeBps: Math.round(FEE_PERCENT * 100).toString(),
     version: '6.2',
   })
-  const priceRes = await fetch(`${base}/prices?${priceParams}`)
+  const priceRes = await fetch(`${base}/prices?${priceParams}`, {
+    headers: { Accept: 'application/json' },
+  })
   if (!priceRes.ok) throw new Error(`Velora price ${priceRes.status}`)
   const priceData = await priceRes.json()
 
@@ -1664,7 +1667,7 @@ export async function fetchMetaQuote(
   const results = await Promise.allSettled([
     withTimeout(fetch1inchQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
     withTimeout(fetch0xQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
-    withTimeout(fetchVeloraQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
+    withTimeout(fetchVeloraQuote(src, dst, amount, srcDecimals, dstDecimals), QUOTE_TIMEOUT_MS),
     withTimeout(fetchOdosQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
     withTimeout(fetchKyberSwapQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
     withTimeout(fetchCowSwapQuote(src, dst, amount), QUOTE_TIMEOUT_MS),
