@@ -254,8 +254,6 @@ async function fetchVeloraQuote(
     destDecimals: destDecimals.toString(),
     side: 'SELL',
     network: CHAIN_ID.toString(),
-    partner: 'teraswap',
-    partnerFeeBps: Math.round(FEE_PERCENT * 100).toString(),
     version: '6.2',
   })
   const res = await fetch(`${base}/prices?${params}`, {
@@ -291,8 +289,6 @@ async function fetchVeloraSwap(
     destDecimals: destDecimals.toString(),
     side: 'SELL',
     network: CHAIN_ID.toString(),
-    partner: 'teraswap',
-    partnerFeeBps: Math.round(FEE_PERCENT * 100).toString(),
     version: '6.2',
   })
   const priceRes = await fetch(`${base}/prices?${priceParams}`, {
@@ -302,6 +298,9 @@ async function fetchVeloraSwap(
   const priceData = await priceRes.json()
 
   // Step 2: build tx
+  // Note: partner/partnerAddress/partnerFeeBps removed because ParaSwap requires
+  // registered partners. Unregistered partner names return HTTP 400.
+  // Fee collection will be handled by our own fee router in a future update.
   const txRes = await fetch(`${base}/transactions/${CHAIN_ID}?ignoreChecks=true`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -313,9 +312,6 @@ async function fetchVeloraSwap(
       slippage: clampSlippage(slippage) * 100, // bps
       priceRoute: priceData.priceRoute,
       userAddress: from,
-      partner: 'teraswap',
-      partnerAddress: FEE_RECIPIENT,
-      partnerFeeBps: Math.round(FEE_PERCENT * 100),
     }),
   })
   if (!txRes.ok) throw new Error(`Velora tx ${txRes.status}`)
@@ -447,12 +443,12 @@ async function fetchKyberSwapQuote(
   src: string, dst: string, amount: string,
 ): Promise<NormalizedQuote> {
   const { base } = AGGREGATOR_APIS.kyberswap
-  // KyberSwap uses WETH for native ETH in their API
-  const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
-  const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
+  // KyberSwap supports native ETH with 0xEeee... sentinel address.
+  // Do NOT convert to WETH — that causes the router to use transferFrom(WETH)
+  // instead of receiving native ETH via msg.value, resulting in TRANSFER_FROM_FAILED.
   const params = new URLSearchParams({
-    tokenIn: sellToken,
-    tokenOut: buyToken,
+    tokenIn: src,
+    tokenOut: dst,
     amountIn: amount,
     saveGas: '0',
     gasInclude: 'true',
@@ -485,13 +481,12 @@ async function fetchKyberSwapSwap(
   src: string, dst: string, amount: string, from: string, slippage: number,
 ): Promise<NormalizedQuote> {
   const { base } = AGGREGATOR_APIS.kyberswap
-  const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
-  const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
+  // Use native ETH address directly — KyberSwap handles wrapping internally
 
   // Step 1: get route
   const routeParams = new URLSearchParams({
-    tokenIn: sellToken,
-    tokenOut: buyToken,
+    tokenIn: src,
+    tokenOut: dst,
     amountIn: amount,
     saveGas: '0',
     gasInclude: 'true',
