@@ -212,6 +212,10 @@ async function fetch0xSwap(
     sellAmount: amount,
     taker: from,
     slippageBps: Math.round(clampSlippage(slippage) * 100).toString(), // v2 usa bps
+    // Fee collection: 0x v2 takes swap fee from sell token
+    swapFeeRecipient: FEE_RECIPIENT,
+    swapFeeBps: Math.round(FEE_PERCENT * 100).toString(), // 0.1% → 10 bps
+    swapFeeToken: src, // take fee from input token
   })
   const res = await fetch(`${base}/swap/permit2/quote?${params}`, {
     headers: {
@@ -518,6 +522,11 @@ async function fetchKyberSwapSwap(
       recipient: from,
       slippageTolerance: Math.round(clampSlippage(slippage) * 100), // bps
       source: 'TeraSwap',
+      // Fee collection: KyberSwap takes fee from input token and sends to feeReceiver
+      feeReceiver: FEE_RECIPIENT,
+      chargeFeeBy: 'currency_in',
+      feeAmount: Math.round(FEE_PERCENT * 100), // 0.1% → 10 bps
+      isInBps: true,
     }),
   })
   if (!buildRes.ok) throw new Error(`KyberSwap build ${buildRes.status}`)
@@ -983,8 +992,9 @@ async function detectUniswapV3FeeTier(params: {
 async function fetchUniswapV3Quote(
   src: string, dst: string, amount: string,
 ): Promise<NormalizedQuote> {
-  // Deduct platform fee from amountIn
-  const { netAmount } = deductFee(amount)
+  // Direct swaps: no platform fee (no smart contract to collect it).
+  // Fee is only collected via aggregator APIs that support it (1inch, KyberSwap, 0x).
+  const netAmount = BigInt(amount)
 
   // Auto-detect best fee tier (uses cache if available)
   const detection = await detectUniswapV3FeeTier({
@@ -1020,8 +1030,8 @@ async function fetchUniswapV3Swap(
   src: string, dst: string, amount: string, from: string, slippage: number,
   cachedFee?: number,
 ): Promise<NormalizedQuote> {
-  // Step 1: deduct platform fee
-  const { netAmount } = deductFee(amount)
+  // Direct swaps: no platform fee (no smart contract to collect it)
+  const netAmount = BigInt(amount)
 
   // Step 2: detect fee tier (use cache / cachedFee to skip redundant RPC)
   let feeTier = cachedFee ?? getCachedFeeTier(src, dst)
@@ -1493,8 +1503,8 @@ function buildCurveRoute(
 async function fetchCurveQuote(
   src: string, dst: string, amount: string,
 ): Promise<NormalizedQuote> {
-  // Deduct platform fee
-  const { netAmount } = deductFee(amount)
+  // Direct swaps: no platform fee (no smart contract to collect it)
+  const netAmount = BigInt(amount)
 
   // Resolve native ETH to WETH for pool matching (but keep ETH sentinel for stETH pool)
   const tokenIn = src.toLowerCase()
@@ -1556,8 +1566,8 @@ async function fetchCurveQuote(
 async function fetchCurveSwap(
   src: string, dst: string, amount: string, from: string, slippage: number,
 ): Promise<NormalizedQuote> {
-  // Deduct platform fee
-  const { netAmount } = deductFee(amount)
+  // Direct swaps: no platform fee (no smart contract to collect it)
+  const netAmount = BigInt(amount)
 
   const tokenIn = src.toLowerCase()
   const tokenOut = dst.toLowerCase()

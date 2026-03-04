@@ -44,7 +44,10 @@ export default function QuoteBreakdown({
   const outputAmount = Number(formatUnits(BigInt(best.toAmount), tokenOut.decimals))
   const inputAmount = Number(amountIn)
   const rate = inputAmount > 0 ? formatDisplay(outputAmount / inputAmount, 4) : '—'
-  const feeAbsolute = (inputAmount * FEE_PERCENT) / 100
+  // Fee is only collected on aggregators with native fee support
+  const FEE_SUPPORTED_SOURCES: AggregatorName[] = ['1inch', '0x', 'kyberswap']
+  const feeCollected = FEE_SUPPORTED_SOURCES.includes(best.source)
+  const feeAbsolute = feeCollected ? (inputAmount * FEE_PERCENT) / 100 : 0
   const minOutput = outputAmount * (1 - slippage / 100)
 
   const secondBest = meta.all[1]
@@ -215,15 +218,19 @@ export default function QuoteBreakdown({
         {/* Platform fee */}
         <div className="mb-1 flex items-center justify-between font-medium text-cream-80">
           <span className="flex items-center gap-1">
-            Platform fee ({FEE_PERCENT}%)
-            <span className="cursor-help text-cream-35" title="This fee supports platform development. Transparent and applied by the aggregator API.">&#9432;</span>
+            Platform fee {feeCollected ? `(${FEE_PERCENT}%)` : ''}
+            <span className="cursor-help text-cream-35" title={feeCollected ? 'This fee supports platform development. Collected by the aggregator API.' : 'No fee for this route. Fees are collected on 1inch, 0x, and KyberSwap routes.'}>&#9432;</span>
           </span>
-          <span>
-            {formatDisplay(feeAbsolute, 6)} {tokenIn.symbol}
-            {priceCheck.chainlinkPrice != null && (
-              <span className="ml-1 font-normal text-cream-50">(${(feeAbsolute * priceCheck.chainlinkPrice).toFixed(2)})</span>
-            )}
-          </span>
+          {feeCollected ? (
+            <span>
+              {formatDisplay(feeAbsolute, 6)} {tokenIn.symbol}
+              {priceCheck.chainlinkPrice != null && (
+                <span className="ml-1 font-normal text-cream-50">(${(feeAbsolute * priceCheck.chainlinkPrice).toFixed(2)})</span>
+              )}
+            </span>
+          ) : (
+            <span className="text-xs font-semibold text-success">Free</span>
+          )}
         </div>
 
         {/* Approval method */}
