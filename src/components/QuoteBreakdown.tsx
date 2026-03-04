@@ -4,7 +4,8 @@ import type { MetaQuoteResult } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import type { PriceCheck } from '@/lib/chainlink'
 import type { ApprovalPlan } from '@/lib/approvals'
-import { FEE_PERCENT, AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { isFeeCollectorActive } from '@/lib/api'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
 
@@ -44,9 +45,8 @@ export default function QuoteBreakdown({
   const outputAmount = Number(formatUnits(BigInt(best.toAmount), tokenOut.decimals))
   const inputAmount = Number(amountIn)
   const rate = inputAmount > 0 ? formatDisplay(outputAmount / inputAmount, 4) : '—'
-  // Fee is only collected on aggregators with native fee support
-  const FEE_SUPPORTED_SOURCES: AggregatorName[] = ['1inch', '0x', 'kyberswap']
-  const feeCollected = FEE_SUPPORTED_SOURCES.includes(best.source)
+  // Fee is collected when: source has native fee API params, OR FeeCollector proxy is active
+  const feeCollected = FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()
   const feeAbsolute = feeCollected ? (inputAmount * FEE_PERCENT) / 100 : 0
   const minOutput = outputAmount * (1 - slippage / 100)
 

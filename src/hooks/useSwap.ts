@@ -6,10 +6,10 @@ import {
   useWaitForTransactionReceipt,
   useSignTypedData,
 } from 'wagmi'
-import { parseUnits, erc20Abi, createPublicClient, http } from 'viem'
+import { parseUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
 import { mainnet } from 'viem/chains'
-import { fetchSwapFromSource, validateFeeIntegrity, validateRouterAddress, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
-import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, type AggregatorName } from '@/lib/constants'
+import { fetchSwapFromSource, validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
+import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 
 export type SwapStatus =
@@ -122,37 +122,108 @@ export function useSwap(
       const apiValue = BigInt(swapData.tx.value || '0')
       const txValue = isNativeIn && apiValue === 0n ? rawAmountBn : apiValue
 
-      // Pre-flight: verify ERC-20 allowance before sending tx (prevents STF reverts)
-      if (!isNativeIn && address) {
-        try {
-          const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
-          const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
-          const allowance = await client.readContract({
-            address: tokenIn!.address as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [address, swapData.tx.to as `0x${string}`],
-          })
-          if (allowance < rawAmountBn) {
-            throw new Error(
-              `Insufficient allowance for ${tokenIn!.symbol}. Please approve the router first. ` +
-              `(Have: ${allowance.toString()}, Need: ${rawAmountBn.toString()})`
-            )
-          }
-        } catch (err) {
-          // If it's our own allowance error, rethrow; otherwise log and continue
-          if (err instanceof Error && err.message.includes('Insufficient allowance')) throw err
-          console.warn('[TeraSwap] Pre-flight allowance check failed:', err)
-        }
-      }
+      // ── FeeCollector routing ──
+      // For sources without native fee params, route through FeeCollector contract.
+      // FeeCollector takes 0.1% fee and forwards the rest to the actual router.
+      const routeViaFeeCollector = usesFeeCollector(source)
 
-      setStatus('swapping')
-      sendTransaction({
-        to: swapData.tx.to,
-        data: swapData.tx.data,
-        value: txValue,
-        gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : undefined,
-      })
+      if (routeViaFeeCollector) {
+        // Route through FeeCollector
+        const router = swapData.tx.to as `0x${string}`
+        const routerData = swapData.tx.data as `0x${string}`
+
+        if (isNativeIn) {
+          // ETH input: FeeCollector.swapETHWithFee{value: totalAmount}(router, routerData)
+          const feeCollectorCalldata = encodeFunctionData({
+            abi: FEE_COLLECTOR_ABI,
+            functionName: 'swapETHWithFee',
+            args: [router, routerData],
+          })
+
+          setStatus('swapping')
+          sendTransaction({
+            to: FEE_COLLECTOR_ADDRESS,
+            data: feeCollectorCalldata,
+            value: txValue,
+            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 60_000n : undefined, // extra gas for fee logic
+          })
+        } else {
+          // ERC-20 input: FeeCollector.swapTokenWithFee(token, amount, router, routerData)
+          // Pre-flight: verify user approved FeeCollector for the full amount
+          if (address) {
+            try {
+              const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+              const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+              const allowance = await client.readContract({
+                address: tokenIn!.address as `0x${string}`,
+                abi: erc20Abi,
+                functionName: 'allowance',
+                args: [address, FEE_COLLECTOR_ADDRESS],
+              })
+              if (allowance < rawAmountBn) {
+                throw new Error(
+                  `Insufficient allowance for ${tokenIn!.symbol}. Please approve the FeeCollector first. ` +
+                  `(Have: ${allowance.toString()}, Need: ${rawAmountBn.toString()})`
+                )
+              }
+            } catch (err) {
+              if (err instanceof Error && err.message.includes('Insufficient allowance')) throw err
+              console.warn('[TeraSwap] Pre-flight FeeCollector allowance check failed:', err)
+            }
+          }
+
+          const feeCollectorCalldata = encodeFunctionData({
+            abi: FEE_COLLECTOR_ABI,
+            functionName: 'swapTokenWithFee',
+            args: [
+              tokenIn!.address as `0x${string}`,
+              rawAmountBn,
+              router,
+              routerData,
+            ],
+          })
+
+          setStatus('swapping')
+          sendTransaction({
+            to: FEE_COLLECTOR_ADDRESS,
+            data: feeCollectorCalldata,
+            value: 0n,
+            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 80_000n : undefined,
+          })
+        }
+      } else {
+        // Direct routing (fee-native sources: 1inch, KyberSwap, 0x)
+        // Pre-flight: verify ERC-20 allowance before sending tx (prevents STF reverts)
+        if (!isNativeIn && address) {
+          try {
+            const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+            const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+            const allowance = await client.readContract({
+              address: tokenIn!.address as `0x${string}`,
+              abi: erc20Abi,
+              functionName: 'allowance',
+              args: [address, swapData.tx.to as `0x${string}`],
+            })
+            if (allowance < rawAmountBn) {
+              throw new Error(
+                `Insufficient allowance for ${tokenIn!.symbol}. Please approve the router first. ` +
+                `(Have: ${allowance.toString()}, Need: ${rawAmountBn.toString()})`
+              )
+            }
+          } catch (err) {
+            if (err instanceof Error && err.message.includes('Insufficient allowance')) throw err
+            console.warn('[TeraSwap] Pre-flight allowance check failed:', err)
+          }
+        }
+
+        setStatus('swapping')
+        sendTransaction({
+          to: swapData.tx.to,
+          data: swapData.tx.data,
+          value: txValue,
+          gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : undefined,
+        })
+      }
     } catch (err) {
       setStatus('error')
       setErrorMessage(err instanceof Error ? err.message : 'Unknown error')

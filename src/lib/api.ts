@@ -3,6 +3,8 @@ import {
   AGGREGATOR_APIS,
   FEE_PERCENT,
   FEE_RECIPIENT,
+  FEE_COLLECTOR_ADDRESS,
+  FEE_NATIVE_SOURCES,
   DEFAULT_SLIPPAGE,
   QUOTE_TIMEOUT_MS,
   CHAIN_ID,
@@ -569,6 +571,13 @@ async function fetchCowSwapQuote(
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
 
+  // CoW API v2: appData is a JSON string containing metadata, API hashes it internally
+  const appDataDoc = JSON.stringify({
+    version: '1.1.0',
+    appCode: 'TeraSwap',
+    metadata: {},
+  })
+
   const res = await fetch(`${base}/quote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -579,7 +588,7 @@ async function fetchCowSwapQuote(
       kind: 'sell',
       from: '0x0000000000000000000000000000000000000000',
       receiver: '0x0000000000000000000000000000000000000000',
-      appData: JSON.stringify({ appCode: 'TeraSwap', metadata: {} }),
+      appData: appDataDoc,
       appDataHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
       partiallyFillable: false,
       sellTokenBalance: 'erc20',
@@ -589,7 +598,12 @@ async function fetchCowSwapQuote(
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(`CoW ${res.status}: ${err.description || 'quote failed'}`)
+    const desc = err.description || err.errorType || 'quote failed'
+    // Provide friendly error for common cases
+    if (desc.includes('SellAmountDoesNotCoverFee') || desc.includes('NoLiquidity')) {
+      throw new Error(`CoW: Amount too small or no liquidity for this pair`)
+    }
+    throw new Error(`CoW ${res.status}: ${desc}`)
   }
   const data = await res.json()
   const quote = data.quote
@@ -1879,9 +1893,32 @@ export async function fetchSwapFromSource(
 }
 
 /**
+ * Check if FeeCollector proxy is deployed and configured.
+ */
+export function isFeeCollectorActive(): boolean {
+  return !!FEE_COLLECTOR_ADDRESS && FEE_COLLECTOR_ADDRESS.length === 42
+}
+
+/**
+ * Check if a source uses the FeeCollector proxy for fee collection.
+ * Fee-native sources (1inch, KyberSwap, 0x) handle fees via API params.
+ * All other sources route through FeeCollector (if deployed).
+ */
+export function usesFeeCollector(source: AggregatorName): boolean {
+  return isFeeCollectorActive() && !FEE_NATIVE_SOURCES.includes(source)
+}
+
+/**
  * Fetch approved spender address for a given source.
+ * If FeeCollector is active for this source, user approves FeeCollector
+ * (which then approves the actual router internally).
  */
 export async function fetchApproveSpender(source: AggregatorName): Promise<`0x${string}`> {
+  // If FeeCollector handles this source, user approves FeeCollector
+  if (usesFeeCollector(source)) {
+    return FEE_COLLECTOR_ADDRESS
+  }
+
   switch (source) {
     case '1inch': {
       const { base, key } = AGGREGATOR_APIS['1inch']
@@ -1958,6 +1995,8 @@ const ROUTER_WHITELIST: Set<string> = new Set([
   '0x6352a56caadc4f1e25cd6c75970fa768a3304e64', // OpenOcean Exchange Proxy
   '0x46b3fdf7b5cde91ac049936bf0bdb12c5d22202e', // SushiSwap RouteProcessor4
   '0xba12222222228d8ba445958a75a0704d566bf2c8', // Balancer Vault V2
+  // FeeCollector proxy (dynamically added if configured)
+  ...(FEE_COLLECTOR_ADDRESS ? [FEE_COLLECTOR_ADDRESS.toLowerCase()] : []),
 ])
 
 /**

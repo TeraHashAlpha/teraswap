@@ -80,8 +80,42 @@ export const AGGREGATOR_META: Record<AggregatorName, {
 
 // ── Fee ──────────────────────────────────────────────────
 export const FEE_PERCENT = Number(process.env.NEXT_PUBLIC_FEE_PERCENT ?? '0.1')
+export const FEE_BPS = Math.round(FEE_PERCENT * 100) // 0.1% → 10 bps
 export const FEE_RECIPIENT = (process.env.NEXT_PUBLIC_FEE_RECIPIENT ??
   '0x0000000000000000000000000000000000000000') as `0x${string}`
+
+// FeeCollector proxy — deploy contracts/TeraSwapFeeCollector.sol and set this env var
+export const FEE_COLLECTOR_ADDRESS = (process.env.NEXT_PUBLIC_FEE_COLLECTOR ??
+  '') as `0x${string}`
+
+// Sources that collect fees natively via their API (no FeeCollector needed)
+export const FEE_NATIVE_SOURCES: AggregatorName[] = ['1inch', '0x', 'kyberswap']
+
+// FeeCollector ABI (only the functions we call from the frontend)
+export const FEE_COLLECTOR_ABI = [
+  {
+    name: 'swapETHWithFee',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'router', type: 'address' },
+      { name: 'routerData', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'swapTokenWithFee',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'token', type: 'address' },
+      { name: 'totalAmount', type: 'uint256' },
+      { name: 'router', type: 'address' },
+      { name: 'routerData', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+] as const
 
 // ── Swap defaults ────────────────────────────────────────
 export const DEFAULT_SLIPPAGE = 0.5
