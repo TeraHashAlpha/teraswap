@@ -112,11 +112,20 @@ export function useSwap(
         }
       }
 
+      // For native ETH swaps, the router needs msg.value = input amount to wrap.
+      // Some aggregators (KyberSwap, Odos) route through WETH internally and may
+      // return value='0', causing TRANSFER_FROM_FAILED because the router tries
+      // transferFrom(WETH) instead of receiving ETH via msg.value.
+      const isNativeIn = tokenIn && isNativeETH(tokenIn)
+      const rawAmountBn = parseUnits(amountIn, tokenIn!.decimals)
+      const apiValue = BigInt(swapData.tx.value || '0')
+      const txValue = isNativeIn && apiValue === 0n ? rawAmountBn : apiValue
+
       setStatus('swapping')
       sendTransaction({
         to: swapData.tx.to,
         data: swapData.tx.data,
-        value: BigInt(swapData.tx.value || '0'),
+        value: txValue,
         gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : undefined,
       })
     } catch (err) {
