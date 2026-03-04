@@ -56,15 +56,16 @@ export function useChainlinkPrice(
     }
   }
 
-  // Check staleness (>1 hour = stale)
+  // Check staleness — most Chainlink mainnet feeds have a 24h heartbeat
+  // (they only update sooner if price deviates >1%). Use 25h threshold.
   const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
-  if (ageSeconds > 3600) {
+  if (ageSeconds > 90_000) { // 25 hours
     return {
       chainlinkPrice,
       executionPrice: executionPriceUsd,
       deviation: 0,
       level: 'warn',
-      message: `Chainlink oracle data outdated (${Math.floor(ageSeconds / 60)} min old). Verify price manually.`,
+      message: `Chainlink oracle data outdated (${Math.floor(ageSeconds / 3600)}h old). Verify price manually.`,
       oracleUnavailable: false,
     }
   }
