@@ -579,12 +579,8 @@ async function fetchCowSwapQuote(
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
 
-  // CoW API v2: appData is a JSON string containing metadata, API hashes it internally
-  const appDataDoc = JSON.stringify({
-    version: '1.1.0',
-    appCode: 'TeraSwap',
-    metadata: {},
-  })
+  // CoW API v2: pass only appData as JSON string, let API hash it
+  const appData = JSON.stringify({ version: '1.1.0', appCode: 'TeraSwap', metadata: {} })
 
   const res = await fetch(`${base}/quote`, {
     method: 'POST',
@@ -594,10 +590,8 @@ async function fetchCowSwapQuote(
       buyToken,
       sellAmountBeforeFee: amount,
       kind: 'sell',
-      from: '0x0000000000000000000000000000000000000000',
-      receiver: '0x0000000000000000000000000000000000000000',
-      appData: appDataDoc,
-      appDataHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      from: FEE_RECIPIENT, // valid address required by CoW API
+      appData,
       partiallyFillable: false,
       sellTokenBalance: 'erc20',
       buyTokenBalance: 'erc20',
@@ -607,7 +601,6 @@ async function fetchCowSwapQuote(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     const desc = err.description || err.errorType || 'quote failed'
-    // Provide friendly error for common cases
     if (desc.includes('SellAmountDoesNotCoverFee') || desc.includes('NoLiquidity')) {
       throw new Error(`CoW: Amount too small or no liquidity for this pair`)
     }
@@ -638,6 +631,11 @@ async function fetchCowSwapOrder(
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
 
   // Step 1: get quote with real user address
+  const appData = JSON.stringify({
+    version: '1.1.0',
+    appCode: 'TeraSwap',
+    metadata: { referrer: { address: FEE_RECIPIENT, version: '1.0.0' } },
+  })
   const quoteRes = await fetch(`${base}/quote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -648,13 +646,7 @@ async function fetchCowSwapOrder(
       kind: 'sell',
       from,
       receiver: from,
-      appData: JSON.stringify({
-        appCode: 'TeraSwap',
-        metadata: {
-          referrer: { address: FEE_RECIPIENT, version: '1.0.0' },
-        },
-      }),
-      appDataHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      appData,
       partiallyFillable: false,
       sellTokenBalance: 'erc20',
       buyTokenBalance: 'erc20',
