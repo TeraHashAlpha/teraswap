@@ -307,20 +307,28 @@ async function fetchVeloraSwap(
   // Note: partner/partnerAddress/partnerFeeBps removed because ParaSwap requires
   // registered partners. Unregistered partner names return HTTP 400.
   // Fee collection will be handled by our own fee router in a future update.
-  const txRes = await fetch(`${base}/transactions/${CHAIN_ID}?ignoreChecks=true`, {
+  const txBody = {
+    srcToken: src,
+    destToken: dst,
+    srcAmount: amount,
+    destAmount: String(priceData.priceRoute.destAmount),
+    slippage: Math.round(clampSlippage(slippage) * 100), // bps (integer)
+    priceRoute: priceData.priceRoute,
+    userAddress: from,
+    receiver: from,     // explicit receiver
+    txOrigin: from,     // needed for some v6 routes
+    deadline: Math.floor(Date.now() / 1000) + 600, // 10 min deadline
+  }
+  const txRes = await fetch(`${base}/transactions/${CHAIN_ID}?ignoreChecks=true&ignoreGasEstimate=true&onlyParams=false`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      srcToken: src,
-      destToken: dst,
-      srcAmount: amount,
-      destAmount: priceData.priceRoute.destAmount,
-      slippage: clampSlippage(slippage) * 100, // bps
-      priceRoute: priceData.priceRoute,
-      userAddress: from,
-    }),
+    body: JSON.stringify(txBody),
   })
-  if (!txRes.ok) throw new Error(`Velora tx ${txRes.status}`)
+  if (!txRes.ok) {
+    let errMsg = `Velora tx ${txRes.status}`
+    try { const e = await txRes.json(); errMsg = e?.error || e?.message || errMsg } catch {}
+    throw new Error(errMsg)
+  }
   const txData = await txRes.json()
 
   return {
