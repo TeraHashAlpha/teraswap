@@ -11,6 +11,7 @@ import { mainnet } from 'viem/chains'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
+import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 
 /**
  * Fetch swap calldata via server-side API route (avoids CORS).
@@ -156,6 +157,20 @@ export function useSwap(
       // ── FeeCollector routing ──
       // All sources (except 0x/CoW) route through FeeCollector contract.
       // FeeCollector takes 0.1% fee and forwards the net amount to the DEX router.
+
+      // ── Log swap to Supabase (fire-and-forget) ──
+      logSwapToSupabase({
+        wallet: address,
+        source,
+        tokenIn,
+        tokenOut,
+        amountIn: rawAmountBn.toString(),
+        amountOut: swapData.toAmount,
+        slippage,
+        mevProtected: AGGREGATOR_META[source]?.mevProtected ?? false,
+        feeCollected: routeViaFeeCollector,
+        status: 'pending',
+      })
 
       if (routeViaFeeCollector) {
         // Route through FeeCollector
@@ -356,6 +371,20 @@ export function useSwap(
       const orderUid = await submitCowOrder(orderParams, signature)
       setCowOrderUid(orderUid)
 
+      // Log CoW swap (fire-and-forget)
+      logSwapToSupabase({
+        wallet: address,
+        source: 'cowswap',
+        tokenIn,
+        tokenOut,
+        amountIn: rawAmount,
+        amountOut: orderParams.buyAmount,
+        slippage,
+        mevProtected: true,
+        feeCollected: false,
+        status: 'pending',
+      })
+
       // Step 3: Poll for order fulfillment
       const result = await pollCowOrderStatus(orderUid)
 
@@ -394,15 +423,19 @@ export function useSwap(
 
   // Track standard tx confirmation
   useEffect(() => {
-    if (swapConfirmed) setStatus('success')
-  }, [swapConfirmed])
+    if (swapConfirmed) {
+      setStatus('success')
+      if (swapHash) updateSwapStatus(swapHash, 'confirmed')
+    }
+  }, [swapConfirmed, swapHash])
 
   useEffect(() => {
     if (sendError) {
       setStatus('error')
       setErrorMessage(parseWagmiError(sendError))
+      if (swapHash) updateSwapStatus(swapHash, 'failed')
     }
-  }, [sendError])
+  }, [sendError, swapHash])
 
   // Merge txHash from both flows
   const txHash = swapHash || txHashState

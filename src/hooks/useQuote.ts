@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { parseUnits } from 'viem'
+import { useAccount } from 'wagmi'
 import { useDebounce } from './useDebounce'
 import { type MetaQuoteResult } from '@/lib/api'
 import { INPUT_DEBOUNCE_MS, QUOTE_REFRESH_MS } from '@/lib/constants'
 import type { Token } from '@/lib/tokens'
+import { logQuoteToSupabase } from '@/lib/analytics'
 
 /**
  * Fetch meta-quotes via the server-side API route.
@@ -49,6 +51,7 @@ export function useQuote(
   amountIn: string,
   enabled: boolean,
 ): UseQuoteResult {
+  const { address } = useAccount()
   const [meta, setMeta] = useState<MetaQuoteResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +70,7 @@ export function useQuote(
     setLoading(true)
     setError(null)
 
+    const startTime = Date.now()
     try {
       const rawAmount = parseUnits(debouncedAmount, tokenIn.decimals).toString()
       const result = await fetchQuoteViaApi(
@@ -78,13 +82,23 @@ export function useQuote(
       )
       setMeta(result)
       setCountdown(QUOTE_REFRESH_MS / 1000)
+
+      // Log quote analytics (fire-and-forget)
+      logQuoteToSupabase({
+        tokenIn,
+        tokenOut,
+        amountIn: rawAmount,
+        meta: result,
+        responseTimeMs: Date.now() - startTime,
+        wallet: address,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch quotes')
       setMeta(null)
     } finally {
       setLoading(false)
     }
-  }, [tokenIn, tokenOut, debouncedAmount])
+  }, [tokenIn, tokenOut, debouncedAmount, address])
 
   useEffect(() => {
     if (!enabled) {
