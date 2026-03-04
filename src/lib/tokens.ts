@@ -13,9 +13,9 @@ function logo(addr: string): string {
   return `https://tokens.1inch.io/${addr.toLowerCase()}.png`
 }
 
-// ── Top 50 tokens by Uniswap V3 Ethereum 24h volume ─────
+// ── Top 80+ tokens by Ethereum on-chain volume ──────────
 // Source: Uniswap default token list + on-chain volume data
-// Last updated: 22 Feb 2026
+// Last updated: 4 Mar 2026
 export const DEFAULT_TOKENS: Token[] = [
   // ─── Native + Wrapped ETH ───────────────────────────────
   {
@@ -90,6 +90,20 @@ export const DEFAULT_TOKENS: Token[] = [
     decimals: 18,
     logoURI: logo('0xdc035d45d973e3ec169d2276ddab16f1e407384f'),
   },
+  {
+    address: '0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f',
+    symbol: 'GHO',
+    name: 'Aave GHO',
+    decimals: 18,
+    logoURI: logo('0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f'),
+  },
+  {
+    address: '0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E',
+    symbol: 'crvUSD',
+    name: 'Curve USD',
+    decimals: 18,
+    logoURI: logo('0xf939e0a03fb07f59a73314e73794be0e57ac1b4e'),
+  },
 
   // ─── BTC Wrapped ────────────────────────────────────────
   {
@@ -105,6 +119,13 @@ export const DEFAULT_TOKENS: Token[] = [
     name: 'Coinbase Wrapped BTC',
     decimals: 8,
     logoURI: logo('0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf'),
+  },
+  {
+    address: '0x18084fbA666a33d37592fA2633fD49a74DD93a88',
+    symbol: 'tBTC',
+    name: 'tBTC v2',
+    decimals: 18,
+    logoURI: logo('0x18084fba666a33d37592fa2633fd49a74dd93a88'),
   },
 
   // ─── Liquid Staking ─────────────────────────────────────
@@ -135,6 +156,55 @@ export const DEFAULT_TOKENS: Token[] = [
     name: 'KelpDAO Restaked ETH',
     decimals: 18,
     logoURI: logo('0xa1290d69c65a6fe4df752f95823fae25cb99e5a7'),
+  },
+  {
+    address: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84',
+    symbol: 'stETH',
+    name: 'Lido Staked ETH',
+    decimals: 18,
+    logoURI: logo('0xae7ab96520de3a18e5e111b5eaab095312d7fe84'),
+  },
+  {
+    address: '0xae78736Cd615f374D3085123A210448E74Fc6393',
+    symbol: 'rETH',
+    name: 'Rocket Pool ETH',
+    decimals: 18,
+    logoURI: logo('0xae78736cd615f374d3085123a210448e74fc6393'),
+  },
+  {
+    address: '0xac3E018457B222d93114458476f3E3416Abbe38F',
+    symbol: 'sfrxETH',
+    name: 'Staked Frax Ether',
+    decimals: 18,
+    logoURI: logo('0xac3e018457b222d93114458476f3e3416abbe38f'),
+  },
+  {
+    address: '0xbf5495Efe5DB9ce00f80364C8B423567e58d2110',
+    symbol: 'ezETH',
+    name: 'Renzo Restaked ETH',
+    decimals: 18,
+    logoURI: logo('0xbf5495efe5db9ce00f80364c8b423567e58d2110'),
+  },
+  {
+    address: '0xd5F7838F5C461fefF7FE49ea5ebaF7728bB0ADfa',
+    symbol: 'mETH',
+    name: 'Mantle Staked ETH',
+    decimals: 18,
+    logoURI: logo('0xd5f7838f5c461feff7fe49ea5ebaf7728bb0adfa'),
+  },
+  {
+    address: '0xA35b1B31Ce002FBF2058D22F30f95D405200A15b',
+    symbol: 'ETHx',
+    name: 'Stader ETHx',
+    decimals: 18,
+    logoURI: logo('0xa35b1b31ce002fbf2058d22f30f95d405200a15b'),
+  },
+  {
+    address: '0xf951E335afb289353dc249e82926178EaC7DEd78',
+    symbol: 'swETH',
+    name: 'Swell ETH',
+    decimals: 18,
+    logoURI: logo('0xf951e335afb289353dc249e82926178eac7ded78'),
   },
 
   // ─── DeFi Blue Chips ────────────────────────────────────
@@ -250,6 +320,48 @@ export const DEFAULT_TOKENS: Token[] = [
     decimals: 18,
     logoURI: logo('0xfaba6f8e4a5e8ab82f62fe7c39859fa577269be3'),
   },
+  {
+    address: '0x808507121B80c02388fAd14726482e061B8da827',
+    symbol: 'PENDLE',
+    name: 'Pendle',
+    decimals: 18,
+    logoURI: logo('0x808507121b80c02388fad14726482e061b8da827'),
+  },
+  {
+    address: '0xD33526068D116cE69F19A9ee46F0bd304F21A51f',
+    symbol: 'RPL',
+    name: 'Rocket Pool',
+    decimals: 18,
+    logoURI: logo('0xd33526068d116ce69f19a9ee46f0bd304f21a51f'),
+  },
+  {
+    address: '0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e',
+    symbol: 'YFI',
+    name: 'yearn.finance',
+    decimals: 18,
+    logoURI: logo('0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e'),
+  },
+  {
+    address: '0xec53bF9167f50cDEB3Ae105f56099aaaB9061F83',
+    symbol: 'EIGEN',
+    name: 'EigenLayer',
+    decimals: 18,
+    logoURI: logo('0xec53bf9167f50cdeb3ae105f56099aaab9061f83'),
+  },
+  {
+    address: '0x9994E35Db50125E0DF82e4c2dde62496CE330999',
+    symbol: 'MORPHO',
+    name: 'Morpho',
+    decimals: 18,
+    logoURI: logo('0x9994e35db50125e0df82e4c2dde62496ce330999'),
+  },
+  {
+    address: '0x9D65fF81a3c488d585bBfb0Bfe3c7707c7917f54',
+    symbol: 'SSV',
+    name: 'SSV Network',
+    decimals: 18,
+    logoURI: logo('0x9d65ff81a3c488d585bbfb0bfe3c7707c7917f54'),
+  },
 
   // ─── L2 / Infrastructure ────────────────────────────────
   {
@@ -301,6 +413,20 @@ export const DEFAULT_TOKENS: Token[] = [
     decimals: 18,
     logoURI: logo('0x5afe3855358e112b5647b952709e6165e1c1eeee'),
   },
+  {
+    address: '0xB0fFa8000886e57F86dd5264b987b9993715e059',
+    symbol: 'W',
+    name: 'Wormhole',
+    decimals: 18,
+    logoURI: logo('0xb0ffa8000886e57f86dd5264b987b9993715e059'),
+  },
+  {
+    address: '0x8457CA5040ad67fdebbCC8EdCE889A335Bc0fbFB',
+    symbol: 'ALT',
+    name: 'AltLayer',
+    decimals: 18,
+    logoURI: logo('0x8457ca5040ad67fdebbc8edce889a335bc0fbfb'),
+  },
 
   // ─── AI / Data / Compute ────────────────────────────────
   {
@@ -323,6 +449,13 @@ export const DEFAULT_TOKENS: Token[] = [
     name: 'Arkham',
     decimals: 18,
     logoURI: logo('0x6e2a43be0b1d33b726f0ca3b8de60b3482b8b050'),
+  },
+  {
+    address: '0x163f8C2467924be0ae7B5347228CABF260318753',
+    symbol: 'WLD',
+    name: 'Worldcoin',
+    decimals: 18,
+    logoURI: logo('0x163f8c2467924be0ae7b5347228cabf260318753'),
   },
 
   // ─── Memecoins (high volume) ────────────────────────────
@@ -361,6 +494,20 @@ export const DEFAULT_TOKENS: Token[] = [
     decimals: 18,
     logoURI: logo('0xaaee1a9723aadb7afa2810263653a34ba2c21c7a'),
   },
+  {
+    address: '0xE0f63A424a4439cBE457D80E4f4b51aD25b2c56C',
+    symbol: 'SPX',
+    name: 'SPX6900',
+    decimals: 8,
+    logoURI: logo('0xe0f63a424a4439cbe457d80e4f4b51ad25b2c56c'),
+  },
+  {
+    address: '0x9813037ee2218799597d83D4a5B6F3b6778218d9',
+    symbol: 'BONE',
+    name: 'Bone ShibaSwap',
+    decimals: 18,
+    logoURI: logo('0x9813037ee2218799597d83d4a5b6f3b6778218d9'),
+  },
 
   // ─── Gaming / Metaverse ─────────────────────────────────
   {
@@ -390,6 +537,27 @@ export const DEFAULT_TOKENS: Token[] = [
     name: 'Blur',
     decimals: 18,
     logoURI: logo('0x5283d291dbcf85356a21ba090e6db59121208b44'),
+  },
+  {
+    address: '0x4d224452801ACEd8B2F0aebE155379bb5D594381',
+    symbol: 'APE',
+    name: 'ApeCoin',
+    decimals: 18,
+    logoURI: logo('0x4d224452801aced8b2f0aebe155379bb5d594381'),
+  },
+  {
+    address: '0x3845badAde8e6dFF049820680d1F14bD3903a5d0',
+    symbol: 'SAND',
+    name: 'The Sandbox',
+    decimals: 18,
+    logoURI: logo('0x3845badade8e6dff049820680d1f14bd3903a5d0'),
+  },
+  {
+    address: '0x0F5D2fB29fb7d3CFeE444a200298f468908cC942',
+    symbol: 'MANA',
+    name: 'Decentraland',
+    decimals: 18,
+    logoURI: logo('0x0f5d2fb29fb7d3cfee444a200298f468908cc942'),
   },
 
   // ─── Other High Volume ──────────────────────────────────
@@ -427,6 +595,27 @@ export const DEFAULT_TOKENS: Token[] = [
     name: 'Liquity',
     decimals: 18,
     logoURI: logo('0x6dea81c8171d0ba574754ef6f8b412f2ed88c54d'),
+  },
+  {
+    address: '0xBBbbCA6A901c926F240b89EacB641d8Aec7AEafD',
+    symbol: 'LRC',
+    name: 'Loopring',
+    decimals: 18,
+    logoURI: logo('0xbbbbca6a901c926f240b89eacb641d8aec7aeafd'),
+  },
+  {
+    address: '0x69af81e73A73B40adF4f3d4223Cd9b1ECE623074',
+    symbol: 'MASK',
+    name: 'Mask Network',
+    decimals: 18,
+    logoURI: logo('0x69af81e73a73b40adf4f3d4223cd9b1ece623074'),
+  },
+  {
+    address: '0x090185f2135308BaD17527004364eBcC2D37e5F6',
+    symbol: 'SPELL',
+    name: 'Spell Token',
+    decimals: 18,
+    logoURI: logo('0x090185f2135308bad17527004364ebcc2d37e5f6'),
   },
 ]
 
