@@ -131,7 +131,8 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     function sweep(address token) external {
         if (msg.sender != feeRecipient) revert NotAuthorized();
         if (token == address(0)) {
-            payable(feeRecipient).transfer(address(this).balance);
+            (bool ok, ) = feeRecipient.call{value: address(this).balance}("");
+            require(ok, "ETH sweep failed");
         } else {
             IERC20(token).safeTransfer(
                 feeRecipient,
