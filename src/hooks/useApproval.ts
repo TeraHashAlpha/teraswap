@@ -84,8 +84,15 @@ export function useApproval(
       return
     }
 
-    const newPlan = planApproval(hasPermit2Allowance, tokenSupportsEip2612, isNative)
-    setPlan(newPlan)
+    // Always use exact approve to the actual spender.
+    // Permit2/EIP-2612 paths require swap-level signing integration which most
+    // DEX routers don't support. Direct exact approve is universally compatible.
+    setPlan({
+      method: 'exact',
+      needsOnChainApprove: true,
+      label: 'Exact approval (1 transaction)',
+      extraGas: 46_000,
+    })
     setStatus('idle')
   }, [tokenIn, rawAmount, hasPermit2Allowance, tokenSupportsEip2612, hasDirectAllowance, isNative])
 
