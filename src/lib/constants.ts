@@ -130,7 +130,7 @@ export const FEE_COLLECTOR_ABI = [
 export const DEFAULT_SLIPPAGE = 0.5
 export const QUOTE_REFRESH_MS = 15_000
 export const INPUT_DEBOUNCE_MS = 500
-export const QUOTE_TIMEOUT_MS = 5_000
+export const QUOTE_TIMEOUT_MS = 10_000
 
 // ── Contracts ────────────────────────────────────────────
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const

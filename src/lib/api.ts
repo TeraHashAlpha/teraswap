@@ -121,7 +121,8 @@ async function fetch1inchQuote(
   if (!key) throw new Error('1inch API key not configured')
   const params = new URLSearchParams({
     src, dst, amount,
-    fee: FEE_PERCENT.toString(),
+    // Fee collection handled by FeeCollector contract — API fee params
+    // require registered partner accounts which we don't have
     includeProtocols: 'true',
   })
   const res = await fetch(`${base}/quote?${params}`, {

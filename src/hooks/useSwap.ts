@@ -8,9 +8,30 @@ import {
 } from 'wagmi'
 import { parseUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
 import { mainnet } from 'viem/chains'
-import { fetchSwapFromSource, validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
+import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
+
+/**
+ * Fetch swap calldata via server-side API route (avoids CORS).
+ */
+async function fetchSwapViaApi(
+  source: string, src: string, dst: string, amount: string,
+  from: string, slippage: number, srcDecimals: number, dstDecimals: number,
+  quoteMeta?: any,
+): Promise<NormalizedQuote & { cowOrderParams?: any }> {
+  const res = await fetch('/api/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source, src, dst, amount, from, slippage,
+      srcDecimals, dstDecimals, quoteMeta,
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || `Swap API error ${res.status}`)
+  return data
+}
 
 export type SwapStatus =
   | 'idle'
@@ -81,7 +102,7 @@ export function useSwap(
         ? rawAmountBn - (rawAmountBn * BigInt(FEE_BPS) / 10000n)
         : rawAmountBn
 
-      const swapData = await fetchSwapFromSource(
+      const swapData = await fetchSwapViaApi(
         source,
         tokenIn.address,
         tokenOut.address,
@@ -251,7 +272,7 @@ export function useSwap(
     try {
       const rawAmount = parseUnits(amountIn, tokenIn.decimals).toString()
 
-      const swapData = await fetchSwapFromSource(
+      const swapData = await fetchSwapViaApi(
         'cowswap',
         tokenIn.address,
         tokenOut.address,

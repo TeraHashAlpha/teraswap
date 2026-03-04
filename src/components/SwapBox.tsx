@@ -17,7 +17,7 @@ import { trackTrade } from '@/lib/analytics-tracker'
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
-import { fetchApproveSpender, addToRouterWhitelist } from '@/lib/api'
+import { addToRouterWhitelist } from '@/lib/api'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META } from '@/lib/constants'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
@@ -71,11 +71,14 @@ export default function SwapBox() {
   useEffect(() => {
     if (meta?.best.source) {
       playQuoteReceived()
-      fetchApproveSpender(meta.best.source).then((addr) => {
-        setSpender(addr)
-        // Security: register dynamic spender in router whitelist
-        addToRouterWhitelist(addr)
-      }).catch(() => {})
+      fetch(`/api/spender?source=${meta.best.source}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.spender) {
+            setSpender(data.spender as `0x${string}`)
+            addToRouterWhitelist(data.spender as `0x${string}`)
+          }
+        }).catch(() => {})
     }
   }, [meta?.best.source])
 

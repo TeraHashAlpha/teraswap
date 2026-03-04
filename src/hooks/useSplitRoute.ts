@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseUnits, formatUnits } from 'viem'
 import type { MetaQuoteResult, NormalizedQuote } from '@/lib/api'
-import { fetchMetaQuote } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import { fetchSplitQuotes, findBestSplit } from '@/lib/split-router'
 import {
@@ -86,13 +85,16 @@ export function useSplitRoute(
         // Fetch quotes at sub-amounts by calling fetchMetaQuote at reduced amounts
         const fetchQuoteAtAmount = async (subAmount: string): Promise<NormalizedQuote[]> => {
           try {
-            const subMeta = await fetchMetaQuote(
-              currentTokenIn.address,
-              currentTokenOut.address,
-              subAmount,
-              currentTokenIn.decimals,
-              currentTokenOut.decimals,
-            )
+            const params = new URLSearchParams({
+              src: currentTokenIn.address,
+              dst: currentTokenOut.address,
+              amount: subAmount,
+              srcDecimals: currentTokenIn.decimals.toString(),
+              dstDecimals: currentTokenOut.decimals.toString(),
+            })
+            const res = await fetch(`/api/quote?${params}`)
+            if (!res.ok) return []
+            const subMeta: MetaQuoteResult = await res.json()
             return subMeta.all.filter(q => SPLIT_ELIGIBLE_SOURCES.has(q.source))
           } catch {
             return []

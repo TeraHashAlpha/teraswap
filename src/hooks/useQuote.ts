@@ -1,9 +1,39 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { parseUnits } from 'viem'
 import { useDebounce } from './useDebounce'
-import { fetchMetaQuote, type MetaQuoteResult } from '@/lib/api'
+import { type MetaQuoteResult } from '@/lib/api'
 import { INPUT_DEBOUNCE_MS, QUOTE_REFRESH_MS } from '@/lib/constants'
 import type { Token } from '@/lib/tokens'
+
+/**
+ * Fetch meta-quotes via the server-side API route.
+ * This avoids browser CORS restrictions that block direct calls to
+ * 1inch, Odos, 0x, Balancer, CoW and other DEX APIs.
+ */
+async function fetchQuoteViaApi(
+  src: string,
+  dst: string,
+  amount: string,
+  srcDecimals: number,
+  dstDecimals: number,
+): Promise<MetaQuoteResult> {
+  const params = new URLSearchParams({
+    src,
+    dst,
+    amount,
+    srcDecimals: srcDecimals.toString(),
+    dstDecimals: dstDecimals.toString(),
+  })
+
+  const res = await fetch(`/api/quote?${params}`)
+  const data = await res.json()
+
+  if (!res.ok) {
+    throw new Error(data.error || `Quote API error ${res.status}`)
+  }
+
+  return data as MetaQuoteResult
+}
 
 interface UseQuoteResult {
   meta: MetaQuoteResult | null
@@ -39,7 +69,7 @@ export function useQuote(
 
     try {
       const rawAmount = parseUnits(debouncedAmount, tokenIn.decimals).toString()
-      const result = await fetchMetaQuote(
+      const result = await fetchQuoteViaApi(
         tokenIn.address,
         tokenOut.address,
         rawAmount,
