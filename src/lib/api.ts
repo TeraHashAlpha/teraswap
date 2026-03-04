@@ -1693,11 +1693,10 @@ export async function fetchMetaQuote(
     { name: 'curve', fetch: () => fetchCurveQuote(src, dst, amount) },
   ]
 
-  // When FeeCollector is active, exclude incompatible sources to guarantee
-  // fee collection on every swap (0x uses Permit2, CoW is intent-based)
-  const activeSources = isFeeCollectorActive()
-    ? allSources.filter(s => !FEE_INCOMPATIBLE_SOURCES.includes(s.name))
-    : allSources
+  // NOTE: FEE_INCOMPATIBLE_SOURCES (0x, CoW) are NOT filtered from quotes.
+  // They still appear so users can choose them (e.g. MEV Protection via CoW).
+  // Fee collection is skipped at execution time via usesFeeCollector() check.
+  const activeSources = allSources
 
   const sourceNames: AggregatorName[] = activeSources.map(s => s.name)
   const startTime = Date.now()
