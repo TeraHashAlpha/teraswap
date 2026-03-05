@@ -527,16 +527,16 @@ const FEATURES = [
     desc: 'On-chain oracles block price deviations above 5% — mathematical security, always on.',
   },
   {
-    title: 'Smart DCA Engine',
-    desc: 'Automated dollar-cost averaging with price-aware buying windows. Monitors 24h price context via Chainlink to time each purchase intelligently.',
+    title: 'Smart DCA Engine — Coming Soon',
+    desc: 'Automated dollar-cost averaging with price-aware buying windows. Fully autonomous execution powered by Gelato Network — no browser required. Almost ready.',
   },
   {
-    title: 'Limit Orders',
-    desc: 'Set your target price and walk away. CoW Protocol solvers execute when the market reaches your level — zero gas, MEV-protected, partially fillable.',
+    title: 'Limit Orders — Coming Soon',
+    desc: 'Set your target price and walk away. CoW Protocol solvers execute when the market reaches your level — zero gas, MEV-protected. Finishing implementation.',
   },
   {
-    title: 'Stop Loss / Take Profit',
-    desc: 'Protect positions or lock in gains. Chainlink oracles watch the price in real-time, auto-submit a CoW order when your trigger fires.',
+    title: 'Stop Loss / Take Profit — Coming Soon',
+    desc: 'Protect positions or lock in gains. Chainlink oracles trigger autonomous on-chain execution via our order engine. Launching very soon.',
   },
   {
     title: 'Split Routing',
