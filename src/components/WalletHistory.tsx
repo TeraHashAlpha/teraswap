@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useAccount } from 'wagmi'
+import { formatUnits } from 'viem'
 import { ETHERSCAN_TX } from '@/lib/constants'
 
 interface SwapRecord {
@@ -40,14 +41,44 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(days / 30)}mo ago`
 }
 
-function formatAmount(val: string): string {
-  const n = Number(val)
-  if (isNaN(n)) return val
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`
-  if (n >= 1) return n.toFixed(2)
-  if (n >= 0.0001) return n.toFixed(4)
-  return '<0.0001'
+// Common token decimals — amounts from Supabase are stored in raw units (wei)
+const TOKEN_DECIMALS: Record<string, number> = {
+  ETH: 18, WETH: 18, stETH: 18, wstETH: 18, cbETH: 18, rETH: 18,
+  USDC: 6, USDT: 6,
+  DAI: 18, FRAX: 18, LUSD: 18, sUSD: 18, crvUSD: 18, GHO: 18, PYUSD: 6,
+  WBTC: 8, renBTC: 8, tBTC: 18,
+  UNI: 18, LINK: 18, AAVE: 18, MKR: 18, SNX: 18, CRV: 18, LDO: 18,
+  COMP: 18, BAL: 18, SUSHI: 18, '1INCH': 18, MATIC: 18, ARB: 18, OP: 18,
+  SHIB: 18, PEPE: 18, APE: 18, DYDX: 18, ENS: 18, RPL: 18,
+}
+
+function getDecimals(symbol: string): number {
+  return TOKEN_DECIMALS[symbol?.toUpperCase()] ?? 18
+}
+
+function formatHumanAmount(rawVal: string, symbol: string): string {
+  try {
+    const decimals = getDecimals(symbol)
+    // Check if value looks like it's already in raw units (very large number)
+    const n = Number(rawVal)
+    if (isNaN(n)) return rawVal
+
+    // Heuristic: if the value is extremely large relative to what makes sense
+    // for this token, it's probably in raw units and needs conversion
+    const threshold = decimals === 6 ? 1e9 : decimals === 8 ? 1e11 : 1e15
+    const humanVal = n > threshold
+      ? Number(formatUnits(BigInt(rawVal.split('.')[0]), decimals))
+      : n
+
+    if (humanVal >= 1_000_000) return `${(humanVal / 1_000_000).toFixed(2)}M`
+    if (humanVal >= 1_000) return `${(humanVal / 1_000).toFixed(2)}K`
+    if (humanVal >= 1) return humanVal.toFixed(2)
+    if (humanVal >= 0.0001) return humanVal.toFixed(4)
+    if (humanVal > 0) return '<0.0001'
+    return '0'
+  } catch {
+    return rawVal
+  }
 }
 
 function sourceLabel(s: string): string {
@@ -170,11 +201,11 @@ export default function WalletHistory() {
                 <div>
                   <div className="flex items-center gap-2 text-xs">
                     <span className="font-semibold text-cream-65">
-                      {formatAmount(swap.amount_in)} {swap.token_in_symbol}
+                      {formatHumanAmount(swap.amount_in, swap.token_in_symbol)} {swap.token_in_symbol}
                     </span>
                     <span className="text-cream-35">→</span>
                     <span className="font-semibold text-cream-65">
-                      {formatAmount(swap.amount_out)} {swap.token_out_symbol}
+                      {formatHumanAmount(swap.amount_out, swap.token_out_symbol)} {swap.token_out_symbol}
                     </span>
                     {statusBadge(swap.status)}
                   </div>
