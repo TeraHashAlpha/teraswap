@@ -144,36 +144,36 @@ export default function Home() {
             </button>
             <button
               onClick={() => setSwapMode('dca')}
-              className={`flex flex-1 flex-col items-center justify-center gap-0 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
                 swapMode === 'dca'
                   ? 'bg-cream-gold text-[#080B10]'
                   : 'text-cream-35 hover:text-cream-50'
               }`}
             >
               DCA
-              <span className={`text-[7px] font-medium uppercase tracking-wider sm:text-[8px] ${swapMode === 'dca' ? 'text-[#080B10]/60' : 'text-cream-20'}`}>soon</span>
+              <span className={`rounded-full px-1.5 py-[1px] text-[8px] font-semibold uppercase leading-none tracking-wide sm:text-[9px] ${swapMode === 'dca' ? 'bg-[#080B10]/20 text-[#080B10]/70' : 'bg-cream-15/40 text-cream-50'}`}>soon</span>
             </button>
             <button
               onClick={() => setSwapMode('limit')}
-              className={`flex flex-1 flex-col items-center justify-center gap-0 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
                 swapMode === 'limit'
                   ? 'bg-cream-gold text-[#080B10]'
                   : 'text-cream-35 hover:text-cream-50'
               }`}
             >
               Limit
-              <span className={`text-[7px] font-medium uppercase tracking-wider sm:text-[8px] ${swapMode === 'limit' ? 'text-[#080B10]/60' : 'text-cream-20'}`}>soon</span>
+              <span className={`rounded-full px-1.5 py-[1px] text-[8px] font-semibold uppercase leading-none tracking-wide sm:text-[9px] ${swapMode === 'limit' ? 'bg-[#080B10]/20 text-[#080B10]/70' : 'bg-cream-15/40 text-cream-50'}`}>soon</span>
             </button>
             <button
               onClick={() => setSwapMode('sltp')}
-              className={`flex flex-1 flex-col items-center justify-center gap-0 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
                 swapMode === 'sltp'
                   ? 'bg-cream-gold text-[#080B10]'
                   : 'text-cream-35 hover:text-cream-50'
               }`}
             >
               SL / TP
-              <span className={`text-[7px] font-medium uppercase tracking-wider sm:text-[8px] ${swapMode === 'sltp' ? 'text-[#080B10]/60' : 'text-cream-20'}`}>soon</span>
+              <span className={`rounded-full px-1.5 py-[1px] text-[8px] font-semibold uppercase leading-none tracking-wide sm:text-[9px] ${swapMode === 'sltp' ? 'bg-[#080B10]/20 text-[#080B10]/70' : 'bg-cream-15/40 text-cream-50'}`}>soon</span>
             </button>
             <button
               onClick={() => setSwapMode('history')}
