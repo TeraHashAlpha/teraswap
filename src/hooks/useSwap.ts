@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   useAccount,
   useChainId,
@@ -12,6 +12,13 @@ import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCo
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
+
+// ── Fallback receipt polling ──────────────────────────────
+// wagmi's useWaitForTransactionReceipt can stall when the RPC is slow
+// or returns transient errors. This manual poller provides a safety net.
+const FALLBACK_POLL_INTERVAL = 3_000 // 3 seconds
+const FALLBACK_START_DELAY = 8_000   // wait 8s before activating fallback
+const SWAP_TIMEOUT_MS = 120_000      // 2 minutes hard timeout
 
 /**
  * Fetch swap calldata via server-side API route (avoids CORS).
@@ -82,7 +89,11 @@ export function useSwap(
     signTypedDataAsync,
   } = useSignTypedData()
 
-  const { isSuccess: swapConfirmed } = useWaitForTransactionReceipt({ hash: swapHash })
+  const { isSuccess: swapConfirmed } = useWaitForTransactionReceipt({
+    hash: swapHash,
+    confirmations: 1,
+    pollingInterval: 2_000, // poll every 2s (wagmi default is 4s)
+  })
 
   // ── Standard swap flow (1inch, 0x, Velora, Odos, KyberSwap) ──
   const executeStandardSwap = useCallback(async (source: AggregatorName) => {
@@ -191,7 +202,10 @@ export function useSwap(
             to: FEE_COLLECTOR_ADDRESS,
             data: feeCollectorCalldata,
             value: rawAmountBn, // FULL amount — FeeCollector takes fee from this
-            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 60_000n : undefined, // extra gas for fee logic
+            // Extra gas buffer: FeeCollector adds ~40k overhead (fee transfer, approval, refund),
+            // plus Uniswap multicall paths can underestimate by 30-50k.
+            // Using 100k buffer to prevent out-of-gas reverts.
+            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined,
           })
         } else {
           // ERC-20 input: FeeCollector.swapTokenWithFee(token, amount, router, routerData)
@@ -234,7 +248,10 @@ export function useSwap(
             to: FEE_COLLECTOR_ADDRESS,
             data: feeCollectorCalldata,
             value: 0n,
-            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 80_000n : undefined,
+            // ERC-20 FeeCollector routing needs more gas: safeTransferFrom + fee transfer
+            // + forceApprove + router call + revoke approval + refund leftover.
+            // Using 120k buffer for complex Uniswap multi-hop paths.
+            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined,
           })
         }
       } else {
@@ -421,13 +438,91 @@ export function useSwap(
     return executeStandardSwap(source)
   }, [executeCowSwap, executeStandardSwap])
 
-  // Track standard tx confirmation
+  // Track standard tx confirmation (wagmi's built-in hook)
   useEffect(() => {
     if (swapConfirmed) {
       setStatus('success')
       if (swapHash) updateSwapStatus(swapHash, 'confirmed')
     }
   }, [swapConfirmed, swapHash])
+
+  // ── Fallback receipt polling ─────────────────────────────
+  // If wagmi's useWaitForTransactionReceipt stalls (RPC errors, slow node),
+  // we manually poll eth_getTransactionReceipt as a safety net.
+  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const swapStartTimeRef = useRef<number>(0)
+
+  useEffect(() => {
+    // Start tracking time when entering 'swapping' state
+    if (status === 'swapping') {
+      swapStartTimeRef.current = Date.now()
+    }
+  }, [status])
+
+  useEffect(() => {
+    if (!swapHash || status !== 'swapping') {
+      // Clear fallback if status changes or no hash
+      if (fallbackTimerRef.current) {
+        clearInterval(fallbackTimerRef.current)
+        fallbackTimerRef.current = null
+      }
+      return
+    }
+
+    // Give wagmi's hook a head start, then activate fallback
+    const activateTimeout = setTimeout(() => {
+      if (status !== 'swapping') return // already resolved
+
+      console.log('[TeraSwap] Activating fallback receipt polling for', swapHash)
+      const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+      const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+
+      fallbackTimerRef.current = setInterval(async () => {
+        try {
+          const receipt = await client.getTransactionReceipt({ hash: swapHash })
+          if (receipt) {
+            console.log('[TeraSwap] Fallback detected tx confirmation:', receipt.status)
+            if (receipt.status === 'success') {
+              setStatus('success')
+              updateSwapStatus(swapHash, 'confirmed')
+            } else {
+              setStatus('error')
+              setErrorMessage('Transaction reverted on-chain. Try increasing slippage.')
+              updateSwapStatus(swapHash, 'failed')
+            }
+            if (fallbackTimerRef.current) {
+              clearInterval(fallbackTimerRef.current)
+              fallbackTimerRef.current = null
+            }
+          }
+        } catch {
+          // Receipt not available yet — keep polling
+        }
+
+        // Hard timeout: after 2 minutes, stop polling and show timeout message
+        if (Date.now() - swapStartTimeRef.current > SWAP_TIMEOUT_MS) {
+          console.warn('[TeraSwap] Swap timeout reached for', swapHash)
+          setStatus('error')
+          setErrorMessage(
+            `Transaction sent but confirmation is taking too long. ` +
+            `Check your wallet or Etherscan for tx: ${swapHash.slice(0, 10)}...`
+          )
+          if (fallbackTimerRef.current) {
+            clearInterval(fallbackTimerRef.current)
+            fallbackTimerRef.current = null
+          }
+        }
+      }, FALLBACK_POLL_INTERVAL)
+    }, FALLBACK_START_DELAY)
+
+    return () => {
+      clearTimeout(activateTimeout)
+      if (fallbackTimerRef.current) {
+        clearInterval(fallbackTimerRef.current)
+        fallbackTimerRef.current = null
+      }
+    }
+  }, [swapHash, status])
 
   useEffect(() => {
     if (sendError) {

@@ -380,6 +380,15 @@ export default function SwapBox() {
         {/* Swap Button */}
         <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={priceBlocked} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
+        {/* Pending tx link — show Etherscan link while waiting for confirmation */}
+        {swapStatus === 'swapping' && txHash && (
+          <div className="mt-3 text-center text-sm">
+            <a href={`${ETHERSCAN_TX}${txHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-35 transition hover:text-cream hover:underline">
+              Transaction sent — track on Etherscan &#8599;
+            </a>
+          </div>
+        )}
+
         {/* Success link + Share button */}
         {swapStatus === 'success' && txHash && (
           <div className="mt-3 space-y-2">
