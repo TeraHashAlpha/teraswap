@@ -2,33 +2,29 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useAccount } from 'wagmi'
-import { formatUnits } from 'viem'
 import { ETHERSCAN_TX } from '@/lib/constants'
 
-interface EtherscanTx {
+interface AlchemyTransfer {
   hash: string
   from: string
   to: string
-  value: string
-  timeStamp: string
-  gasUsed: string
-  gasPrice: string
-  isError: string
-  functionName: string
-  methodId: string
-  blockNumber: string
+  value: number | null
+  asset: string | null
+  category: string
+  blockNum: string
+  metadata: { blockTimestamp: string }
+  direction: 'sent' | 'received'
 }
 
 interface ParsedTx {
   hash: string
   direction: 'sent' | 'received'
-  value: string // ETH
-  gasCost: string // ETH
+  value: string
+  asset: string
   timestamp: number
   to: string
   from: string
-  status: 'success' | 'failed'
-  method: string
+  category: string
 }
 
 function shortenAddress(addr: string): string {
@@ -36,7 +32,7 @@ function shortenAddress(addr: string): string {
 }
 
 function timeAgo(ts: number): string {
-  const diff = Date.now() - ts * 1000
+  const diff = Date.now() - ts
   const mins = Math.floor(diff / 60_000)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`
@@ -47,30 +43,14 @@ function timeAgo(ts: number): string {
   return `${Math.floor(days / 30)}mo ago`
 }
 
-function parseMethodName(fn: string): string {
-  if (!fn) return 'Transfer'
-  const match = fn.match(/^(\w+)\(/)
-  if (match) {
-    const name = match[1]
-    // Common DeFi methods
-    const labels: Record<string, string> = {
-      swap: 'Swap',
-      swapExactTokensForTokens: 'Swap',
-      swapExactETHForTokens: 'Swap',
-      swapTokensForExactETH: 'Swap',
-      multicall: 'Multicall',
-      execute: 'Execute',
-      approve: 'Approve',
-      transfer: 'Transfer',
-      deposit: 'Deposit',
-      withdraw: 'Withdraw',
-      claim: 'Claim',
-      stake: 'Stake',
-      unstake: 'Unstake',
-    }
-    return labels[name] || name.charAt(0).toUpperCase() + name.slice(1)
+function categoryLabel(cat: string): string {
+  const labels: Record<string, string> = {
+    external: 'Transfer',
+    erc20: 'Token Transfer',
+    erc721: 'NFT Transfer',
+    erc1155: 'NFT Transfer',
   }
-  return 'Contract Call'
+  return labels[cat] || cat
 }
 
 export default function WalletHistory() {
@@ -85,44 +65,48 @@ export default function WalletHistory() {
     setError(null)
 
     try {
-      // Use Etherscan API (free tier, no key needed for basic calls)
-      const res = await fetch(
-        `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=25&sort=desc`
-      )
-      if (!res.ok) throw new Error(`Etherscan returned ${res.status}`)
+      const res = await fetch(`/api/wallet-history?address=${address}`)
+      if (!res.ok) throw new Error(`API returned ${res.status}`)
       const json = await res.json()
 
-      if (json.status !== '1' || !json.result || !Array.isArray(json.result)) {
-        if (json.message === 'No transactions found') {
-          setTransactions([])
-        } else {
-          setError('Could not fetch transaction history')
-        }
+      if (json.error) {
+        setError(json.error)
         setLoading(false)
         return
       }
 
-      const parsed: ParsedTx[] = json.result.map((tx: EtherscanTx) => {
-        const isSent = tx.from.toLowerCase() === address.toLowerCase()
-        const value = formatUnits(BigInt(tx.value || '0'), 18)
-        const gasCost = formatUnits(BigInt(tx.gasUsed || '0') * BigInt(tx.gasPrice || '0'), 18)
+      if (!json.transfers || json.transfers.length === 0) {
+        setTransactions([])
+        setLoading(false)
+        return
+      }
 
-        return {
-          hash: tx.hash,
+      // Deduplicate by hash (same tx can appear in sent + received)
+      const seen = new Set<string>()
+      const parsed: ParsedTx[] = []
+
+      for (const t of json.transfers as AlchemyTransfer[]) {
+        const key = `${t.hash}-${t.direction}`
+        if (seen.has(key)) continue
+        seen.add(key)
+
+        const isSent = t.from.toLowerCase() === address.toLowerCase()
+
+        parsed.push({
+          hash: t.hash,
           direction: isSent ? 'sent' : 'received',
-          value: Number(value).toFixed(4),
-          gasCost: Number(gasCost).toFixed(5),
-          timestamp: Number(tx.timeStamp),
-          to: tx.to,
-          from: tx.from,
-          status: tx.isError === '0' ? 'success' : 'failed',
-          method: parseMethodName(tx.functionName),
-        }
-      })
+          value: t.value != null ? (t.value < 0.0001 ? '<0.0001' : t.value.toFixed(4)) : '0',
+          asset: t.asset || 'ETH',
+          timestamp: new Date(t.metadata.blockTimestamp).getTime(),
+          to: t.to || '',
+          from: t.from || '',
+          category: t.category,
+        })
+      }
 
       setTransactions(parsed)
     } catch {
-      setError('Network error fetching history')
+      setError('Could not fetch transaction history')
     }
     setLoading(false)
   }, [address])
@@ -167,38 +151,34 @@ export default function WalletHistory() {
         </div>
       )}
 
-      {/* Transaction list */}
+      {/* Empty state */}
       {!loading && transactions.length === 0 && !error && (
         <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-6 text-center">
           <p className="text-sm text-cream-35">No transactions found</p>
         </div>
       )}
 
+      {/* Transaction list */}
       {transactions.length > 0 && (
         <div className="space-y-1.5">
-          {transactions.map((tx) => (
+          {transactions.map((tx, idx) => (
             <div
-              key={tx.hash}
+              key={`${tx.hash}-${tx.direction}-${idx}`}
               className="flex items-center justify-between rounded-xl border border-cream-08 bg-surface-tertiary px-3 py-2.5 transition hover:border-cream-15"
             >
               <div className="flex items-center gap-3">
                 {/* Direction icon */}
                 <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ${
-                  tx.status === 'failed'
-                    ? 'bg-danger/15 text-danger'
-                    : tx.direction === 'sent'
+                  tx.direction === 'sent'
                     ? 'bg-cream-08 text-cream-50'
                     : 'bg-success/15 text-success'
                 }`}>
-                  {tx.status === 'failed' ? '✕' : tx.direction === 'sent' ? '↑' : '↓'}
+                  {tx.direction === 'sent' ? '↑' : '↓'}
                 </div>
 
                 <div>
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="font-semibold text-cream-65">{tx.method}</span>
-                    {tx.status === 'failed' && (
-                      <span className="rounded bg-danger/20 px-1 py-0.5 text-[9px] font-bold text-danger">FAILED</span>
-                    )}
+                    <span className="font-semibold text-cream-65">{categoryLabel(tx.category)}</span>
                   </div>
                   <div className="text-[11px] text-cream-35">
                     {tx.direction === 'sent' ? 'To' : 'From'}: {shortenAddress(tx.direction === 'sent' ? tx.to : tx.from)}
@@ -207,11 +187,11 @@ export default function WalletHistory() {
               </div>
 
               <div className="text-right">
-                {Number(tx.value) > 0 && (
+                {tx.value !== '0' && (
                   <div className={`text-xs font-medium tabular-nums ${
                     tx.direction === 'received' ? 'text-success' : 'text-cream-65'
                   }`}>
-                    {tx.direction === 'sent' ? '-' : '+'}{tx.value} ETH
+                    {tx.direction === 'sent' ? '-' : '+'}{tx.value} {tx.asset}
                   </div>
                 )}
                 <div className="flex items-center gap-1.5 text-[10px] text-cream-35">
@@ -232,10 +212,10 @@ export default function WalletHistory() {
         </div>
       )}
 
-      {/* Etherscan attribution */}
+      {/* Attribution */}
       {transactions.length > 0 && (
         <p className="text-center text-[10px] text-cream-20">
-          Showing last 25 transactions via Etherscan
+          Showing recent transactions via Alchemy
         </p>
       )}
     </div>
