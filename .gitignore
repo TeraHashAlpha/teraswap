@@ -33,3 +33,4 @@ yarn-error.log*
 
 # Scripts (local dev only)
 scripts/*.sh
+TeraSwap_OrderEngine_SecurityAudit.pdf
