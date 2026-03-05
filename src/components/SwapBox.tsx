@@ -16,6 +16,7 @@ import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
+import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { addToRouterWhitelist } from '@/lib/api'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
@@ -104,6 +105,25 @@ export default function SwapBox() {
   const { splitResult, analyzing: splitAnalyzing, splitRecommended, useSplit, toggleSplit } =
     useSplitRoute(meta, tokenIn, tokenOut, amountIn, isConnected && isCorrectChain)
 
+  const {
+    status: splitSwapStatus,
+    legs: splitLegs,
+    completedLegs: splitCompleted,
+    totalLegs: splitTotal,
+    errorMessage: splitSwapError,
+    execute: executeSplitSwap,
+    reset: resetSplitSwap,
+  } = useSplitSwap(tokenIn, tokenOut, amountIn, slippage)
+
+  // Unified status: use split swap status when split is active, else single swap
+  const isSplitActive = useSplit && splitResult?.bestSplit.isSplit
+  const effectiveSwapStatus = isSplitActive ? (
+    splitSwapStatus === 'executing' ? 'swapping' as const :
+    splitSwapStatus === 'partial' ? 'error' as const :
+    splitSwapStatus as any
+  ) : swapStatus
+  const effectiveError = isSplitActive ? splitSwapError : swapError
+
   const { estimate: gasEstimateFn } = useEthGasCost()
   const { toast, dismiss } = useToast()
   const swapToastId = useRef<string | null>(null)
@@ -186,6 +206,20 @@ export default function SwapBox() {
     }
   }, [swapStatus])
 
+  // Split swap toasts
+  useEffect(() => {
+    if (splitSwapStatus === 'success') {
+      playSwapSuccess()
+      toast({ type: 'success', title: 'Split swap complete!', description: `All ${splitTotal} legs executed successfully.`, duration: 10000 })
+    } else if (splitSwapStatus === 'partial') {
+      playError()
+      toast({ type: 'warning', title: 'Split swap partially complete', description: splitSwapError || `${splitCompleted}/${splitTotal} legs succeeded.`, duration: 10000 })
+    } else if (splitSwapStatus === 'error') {
+      playError()
+      toast({ type: 'error', title: 'Split swap failed', description: splitSwapError || 'Transaction was rejected or failed.' })
+    }
+  }, [splitSwapStatus])
+
   // ── Toast: approval error ──
   useEffect(() => {
     if (approvalError) {
@@ -217,6 +251,7 @@ export default function SwapBox() {
     if (clean === '' || /^\d*\.?\d*$/.test(clean)) {
       setDisplayAmountIn(formatWithSeparator(clean))
       if (swapStatus !== 'idle') resetSwap()
+      if (splitSwapStatus !== 'idle') resetSplitSwap()
     }
   }
 
@@ -225,6 +260,7 @@ export default function SwapBox() {
     setTokenOut(tokenIn)
     setDisplayAmountIn('')
     resetSwap()
+    resetSplitSwap()
     setShowCowWarning(false)
   }
 
@@ -239,14 +275,22 @@ export default function SwapBox() {
     if (priceBlocked) return // hard block — never execute above deviation threshold
     if (!approvalReady) { playApproval(); await approve(); return }
     playSwapInitiated()
-    if (meta?.best.source) executeSwap(meta.best.source)
-  }, [approvalReady, approve, meta?.best.source, executeSwap, priceBlocked])
+    if (isSplitActive && splitResult?.bestSplit) {
+      executeSplitSwap(splitResult.bestSplit)
+    } else if (meta?.best.source) {
+      executeSwap(meta.best.source)
+    }
+  }, [approvalReady, approve, meta?.best.source, executeSwap, priceBlocked, isSplitActive, splitResult, executeSplitSwap])
 
   const handleSwap = useCallback(() => {
     if (priceBlocked) return // hard block
     playSwapInitiated()
-    if (meta?.best.source) executeSwap(meta.best.source)
-  }, [meta?.best.source, executeSwap, priceBlocked])
+    if (isSplitActive && splitResult?.bestSplit) {
+      executeSplitSwap(splitResult.bestSplit)
+    } else if (meta?.best.source) {
+      executeSwap(meta.best.source)
+    }
+  }, [meta?.best.source, executeSwap, priceBlocked, isSplitActive, splitResult, executeSplitSwap])
 
   return (
     <>
@@ -351,9 +395,54 @@ export default function SwapBox() {
           </div>
         )}
 
+        {/* Split Swap Progress */}
+        {isSplitActive && splitSwapStatus !== 'idle' && (
+          <div className="mb-4 rounded-xl border border-cream-08 bg-surface-tertiary p-3">
+            <div className="mb-2 flex items-center justify-between text-xs">
+              <span className="font-semibold text-cream-65">Split Execution</span>
+              <span className="font-mono text-cream-50">{splitCompleted}/{splitTotal} legs</span>
+            </div>
+            {/* Progress bar */}
+            <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-cream-08">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${splitTotal > 0 ? (splitCompleted / splitTotal) * 100 : 0}%`,
+                  background: 'linear-gradient(90deg, #C8B89A, #4ADE80)',
+                }}
+              />
+            </div>
+            {/* Per-leg status */}
+            <div className="space-y-1">
+              {splitLegs.map((leg, i) => (
+                <div key={i} className="flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-1.5">
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${
+                      leg.status === 'success' ? 'bg-success' :
+                      leg.status === 'error' ? 'bg-danger' :
+                      leg.status === 'pending' ? 'bg-cream-20' :
+                      'bg-cream-gold animate-pulse'
+                    }`} />
+                    <span className="text-cream-50">{AGGREGATOR_META[leg.source]?.label || leg.source}</span>
+                    <span className="text-cream-20">{leg.percent}%</span>
+                  </span>
+                  <span className="text-cream-35">
+                    {leg.status === 'pending' ? 'Waiting' :
+                     leg.status === 'fetching' ? 'Getting route...' :
+                     leg.status === 'signing' ? 'Confirm in wallet' :
+                     leg.status === 'confirming' ? 'Confirming...' :
+                     leg.status === 'success' ? '✓ Done' :
+                     leg.error || 'Failed'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Errors */}
         {quoteError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{quoteError}</div>}
-        {swapError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{swapError}</div>}
+        {effectiveError && !isSplitActive && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
         {approvalError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{approvalError}</div>}
         {/* Price impact warning (>3%) — amber for caution, red for high */}
         {!priceBlocked && priceCheck.deviation > 0.03 && (
