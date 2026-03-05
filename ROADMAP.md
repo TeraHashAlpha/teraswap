@@ -9,14 +9,18 @@
 - **Swap reliability fix** — Fallback receipt polling, increased gas buffers, pending tx Etherscan link
 - **Supabase analytics** — Swap history tracking, quote analytics, aggregator win-rates
 - **Analytics dashboard** — Volume trends, popular pairs, protocol performance
-- **Wallet history** — Full on-chain tx history per wallet
+- **Swap history** — Per-wallet swap records via Supabase with wei-to-human conversion
 - **Active approvals manager** — View and revoke token allowances
+- **Split routing execution** — Multi-leg split swap across DEXes for large trades (analysis + visualization + execution)
+- **Smart contract audit skill** — 4-phase MAP→HUNT→ATTACK→REPORT methodology with 40+ vulnerability patterns
+- **Landing page & Coming Soon UI** — Feature cards updated, DCA/Limit/SL·TP tabs with "Soon" badges
 
 ---
 
-## Phase 1 — Autonomous Order Engine _(In Progress)_
+## Phase 1 — Autonomous Order Engine _(Next Up)_
 
 Replace browser-dependent execution with fully autonomous on-chain orders.
+Branch `order-engine-backup` contains the initial implementation ready for hardening.
 
 ### 1.1 Smart Contract Hardening
 - [ ] Fix H-01: Include `router` address in EIP-712 signed order data (prevents executor from choosing arbitrary router)
@@ -27,6 +31,7 @@ Replace browser-dependent execution with fully autonomous on-chain orders.
 - [ ] Add M-02: Timelock for admin functions (router whitelist changes)
 - [ ] Add L-03: Minimum output amount per order (user-configurable slippage)
 - [ ] Comprehensive unit + integration tests (Foundry)
+- [ ] Run full audit using `sc-audit` skill before deployment
 
 ### 1.2 Gelato Web3 Function
 - [ ] Implement `fetchSwapRoute()` — call TeraSwap aggregation API from Gelato function
@@ -63,9 +68,9 @@ Replace browser-dependent execution with fully autonomous on-chain orders.
 
 ## Phase 3 — Advanced Trading Features
 
-- [ ] Split routing optimization (auto-split large trades across DEXes)
-- [ ] TWAP orders (time-weighted average price execution)
-- [ ] Trailing stop loss
+- [x] ~~Split routing optimization~~ _(Completed — multi-leg execution in useSplitSwap.ts)_
+- [ ] TWAP orders (time-weighted average price execution) — requires Order Engine (Phase 1)
+- [ ] Trailing stop loss — requires Order Engine (Phase 1)
 - [ ] Portfolio rebalancing
 - [ ] Price alerts (email / push notifications)
 
