@@ -59,16 +59,16 @@ function getDecimals(symbol: string): number {
 function formatHumanAmount(rawVal: string, symbol: string): string {
   try {
     const decimals = getDecimals(symbol)
-    // Check if value looks like it's already in raw units (very large number)
     const n = Number(rawVal)
     if (isNaN(n)) return rawVal
 
-    // Heuristic: if the value is extremely large relative to what makes sense
-    // for this token, it's probably in raw units and needs conversion
-    const threshold = decimals === 6 ? 1e9 : decimals === 8 ? 1e11 : 1e15
-    const humanVal = n > threshold
-      ? Number(formatUnits(BigInt(rawVal.split('.')[0]), decimals))
-      : n
+    // Values from Supabase are always in raw units (wei).
+    // Always convert using the token's decimals.
+    // Only skip conversion if the value is already a small decimal (contains '.' with few digits)
+    const looksHumanReadable = rawVal.includes('.') && n < 1e6
+    const humanVal = looksHumanReadable
+      ? n
+      : Number(formatUnits(BigInt(rawVal.split('.')[0]), decimals))
 
     if (humanVal >= 1_000_000) return `${(humanVal / 1_000_000).toFixed(2)}M`
     if (humanVal >= 1_000) return `${(humanVal / 1_000).toFixed(2)}K`

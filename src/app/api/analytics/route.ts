@@ -126,24 +126,63 @@ function emptyDashboard(): DashboardResponse {
   }
 }
 
+// Token decimals for converting raw wei to human-readable amounts
+const TOKEN_DECIMALS: Record<string, number> = {
+  ETH: 18, WETH: 18, stETH: 18, wstETH: 18, cbETH: 18, rETH: 18,
+  USDC: 6, USDT: 6,
+  DAI: 18, FRAX: 18, LUSD: 18, sUSD: 18, crvUSD: 18, GHO: 18, PYUSD: 6,
+  WBTC: 8, renBTC: 8, tBTC: 18,
+  UNI: 18, LINK: 18, AAVE: 18, MKR: 18, SNX: 18, CRV: 18, LDO: 18,
+  COMP: 18, BAL: 18, SUSHI: 18, '1INCH': 18, MATIC: 18, ARB: 18, OP: 18,
+}
+
+// Approximate USD prices for volume estimation when amount_in_usd is null
+const APPROX_PRICES: Record<string, number> = {
+  ETH: 3500, WETH: 3500, stETH: 3500, wstETH: 4000, cbETH: 3600, rETH: 3800,
+  USDC: 1, USDT: 1, DAI: 1, FRAX: 1, LUSD: 1, sUSD: 1, crvUSD: 1, GHO: 1, PYUSD: 1,
+  WBTC: 95000, renBTC: 95000, tBTC: 95000,
+  UNI: 12, LINK: 18, AAVE: 200, MKR: 1500, CRV: 0.5, LDO: 2,
+}
+
+function rawToHuman(rawVal: string, symbol: string): number {
+  try {
+    const decimals = TOKEN_DECIMALS[symbol?.toUpperCase()] ?? 18
+    const intPart = rawVal.split('.')[0]
+    return Number(BigInt(intPart)) / Math.pow(10, decimals)
+  } catch {
+    return Number(rawVal) || 0
+  }
+}
+
+function estimateUsdValue(rawAmount: string, symbol: string): number {
+  const human = rawToHuman(rawAmount, symbol)
+  const price = APPROX_PRICES[symbol?.toUpperCase()] ?? 0
+  return human * price
+}
+
 /** Convert a Supabase swap row into a TradeEvent for the dashboard */
 function swapToEvent(row: Record<string, unknown>): TradeEvent {
   const createdAt = row.created_at ? new Date(row.created_at as string) : new Date()
   const ts = createdAt.getTime()
 
-  // Estimate USD value from amount_in_usd or amount_out_usd, fall back to 0
-  const amountInUsd = Number(row.amount_in_usd) || 0
-  const amountOutUsd = Number(row.amount_out_usd) || 0
-  const volumeUsd = amountInUsd || amountOutUsd
+  const tokenInSymbol = (row.token_in_symbol as string) || ''
+  const tokenOutSymbol = (row.token_out_symbol as string) || ''
+  const rawAmountIn = (row.amount_in as string) || '0'
+  const rawAmountOut = (row.amount_out as string) || '0'
 
-  // Fee: if fee_amount is set, estimate fee USD; otherwise derive from fee_collected flag
+  // Use stored USD if available, otherwise estimate from raw wei + approximate prices
+  const storedUsd = Number(row.amount_in_usd) || 0
+  const volumeUsd = storedUsd > 0
+    ? storedUsd
+    : estimateUsdValue(rawAmountIn, tokenInSymbol)
+
+  // Fee: 0.1% of volume
   const feeCollected = row.fee_collected as boolean
-  const feeAmount = row.fee_amount as string | null
-  let feeUsd = 0
-  if (feeCollected && feeAmount) {
-    // fee_amount is in output token wei — use amountOutUsd as proxy for value
-    feeUsd = volumeUsd * 0.001 // 0.1% fee estimate
-  }
+  const feeUsd = feeCollected ? volumeUsd * 0.001 : 0
+
+  // Convert raw wei to human-readable for display
+  const humanIn = rawToHuman(rawAmountIn, tokenInSymbol)
+  const humanOut = rawToHuman(rawAmountOut, tokenOutSymbol)
 
   return {
     id: row.id as string,
@@ -151,12 +190,12 @@ function swapToEvent(row: Record<string, unknown>): TradeEvent {
     wallet: row.wallet as string,
     timestamp: ts,
     hour: createdAt.getUTCHours(),
-    tokenIn: (row.token_in_symbol as string) || '',
+    tokenIn: tokenInSymbol,
     tokenInAddress: (row.token_in as string) || '',
-    tokenOut: (row.token_out_symbol as string) || '',
+    tokenOut: tokenOutSymbol,
     tokenOutAddress: (row.token_out as string) || '',
-    amountIn: (row.amount_in as string) || '0',
-    amountOut: (row.amount_out as string) || '0',
+    amountIn: humanIn.toString(),
+    amountOut: humanOut.toString(),
     volumeUsd,
     feeUsd,
     source: (row.source as string) || 'unknown',
