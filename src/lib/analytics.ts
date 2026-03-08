@@ -62,13 +62,16 @@ export function updateSwapStatus(
   status: 'confirmed' | 'failed',
   gasUsed?: string,
   gasPrice?: string,
+  wallet?: string,
 ): void {
   try {
     fetch('/api/log-swap', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txHash, status, gasUsed, gasPrice }),
-    }).catch(() => {})
+      body: JSON.stringify({ txHash, status, gasUsed, gasPrice, wallet }),
+    }).catch((err) => {
+      console.warn('[analytics] updateSwapStatus failed:', err)
+    })
   } catch {
     // silently ignore
   }

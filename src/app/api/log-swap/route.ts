@@ -90,7 +90,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { txHash, status, gasUsed, gasPrice } = body
+    const { txHash, status, gasUsed, gasPrice, wallet } = body
 
     if (!txHash) {
       return NextResponse.json(
@@ -99,17 +99,35 @@ export async function PATCH(req: NextRequest) {
       )
     }
 
-    const update: Record<string, unknown> = { status }
+    const update: Record<string, unknown> = { status, tx_hash: txHash }
     if (gasUsed) update.gas_used = gasUsed
     if (gasPrice) update.gas_price = gasPrice
 
-    const { error } = await supabase
+    // Try 1: Match by tx_hash (row already has the hash)
+    const { data: matched, error: err1 } = await supabase
       .from('swaps')
       .update(update)
       .eq('tx_hash', txHash)
+      .select('id')
 
-    if (error) {
-      console.error('[log-swap] Supabase update error:', error.message)
+    if (err1) {
+      console.error('[log-swap] PATCH by tx_hash error:', err1.message)
+    }
+
+    // Try 2: If no row matched (initial log had tx_hash=null), find latest pending for this wallet
+    if ((!matched || matched.length === 0) && wallet) {
+      const { error: err2 } = await supabase
+        .from('swaps')
+        .update(update)
+        .eq('wallet', wallet.toLowerCase())
+        .eq('status', 'pending')
+        .is('tx_hash', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (err2) {
+        console.error('[log-swap] PATCH by wallet fallback error:', err2.message)
+      }
     }
 
     return NextResponse.json({ ok: true })

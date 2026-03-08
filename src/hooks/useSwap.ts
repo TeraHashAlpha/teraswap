@@ -460,9 +460,9 @@ export function useSwap(
   useEffect(() => {
     if (swapConfirmed) {
       setStatus('success')
-      if (swapHash) updateSwapStatus(swapHash, 'confirmed')
+      if (swapHash) updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)
     }
-  }, [swapConfirmed, swapHash])
+  }, [swapConfirmed, swapHash, address])
 
   // ── Fallback receipt polling ─────────────────────────────
   // If wagmi's useWaitForTransactionReceipt stalls (RPC errors, slow node),
@@ -502,11 +502,11 @@ export function useSwap(
             console.log('[TeraSwap] Fallback detected tx confirmation:', receipt.status)
             if (receipt.status === 'success') {
               setStatus('success')
-              updateSwapStatus(swapHash, 'confirmed')
+              updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)
             } else {
               setStatus('error')
               setErrorMessage('Transaction reverted on-chain. Try increasing slippage.')
-              updateSwapStatus(swapHash, 'failed')
+              updateSwapStatus(swapHash, 'failed', undefined, undefined, address)
             }
             if (fallbackTimerRef.current) {
               clearInterval(fallbackTimerRef.current)
@@ -546,9 +546,9 @@ export function useSwap(
     if (sendError) {
       setStatus('error')
       setErrorMessage(parseWagmiError(sendError))
-      if (swapHash) updateSwapStatus(swapHash, 'failed')
+      if (swapHash) updateSwapStatus(swapHash, 'failed', undefined, undefined, address)
     }
-  }, [sendError, swapHash])
+  }, [sendError, swapHash, address])
 
   // Merge txHash from both flows
   const txHash = swapHash || txHashState
