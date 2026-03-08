@@ -12,6 +12,7 @@ import {
   PERMIT2_ADDRESS,
   COW_VAULT_RELAYER,
   COW_SETTLEMENT,
+  getCowApiBase,
   ODOS_ROUTER_V3,
   UNISWAP_SWAP_ROUTER_02,
   UNISWAP_QUOTER_V2,
@@ -571,8 +572,10 @@ async function fetchKyberSwapSwap(
  */
 async function fetchCowSwapQuote(
   src: string, dst: string, amount: string,
+  _from?: string, _slippage?: number, _srcDec?: number, _dstDec?: number,
+  _meta?: any, chainId: number = CHAIN_ID,
 ): Promise<NormalizedQuote> {
-  const { base } = AGGREGATOR_APIS.cowswap
+  const base = getCowApiBase(chainId)
   // CoW uses WETH address for native ETH
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
@@ -623,8 +626,9 @@ async function fetchCowSwapQuote(
  */
 async function fetchCowSwapOrder(
   src: string, dst: string, amount: string, from: string, slippage: number,
+  _srcDec?: number, _dstDec?: number, _meta?: any, chainId: number = CHAIN_ID,
 ): Promise<NormalizedQuote & { cowOrderParams?: any }> {
-  const { base } = AGGREGATOR_APIS.cowswap
+  const base = getCowApiBase(chainId)
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
 
@@ -686,8 +690,9 @@ async function fetchCowSwapOrder(
 export async function submitCowOrder(
   orderParams: any,
   signature: string,
+  chainId: number = CHAIN_ID,
 ): Promise<string> {
-  const { base } = AGGREGATOR_APIS.cowswap
+  const base = getCowApiBase(chainId)
 
   const res = await fetch(`${base}/orders`, {
     method: 'POST',
@@ -727,8 +732,9 @@ export async function submitCowOrder(
 export async function pollCowOrderStatus(
   orderUid: string,
   maxWaitMs: number = 120_000,
+  chainId: number = CHAIN_ID,
 ): Promise<{ status: 'fulfilled' | 'expired' | 'cancelled'; txHash?: string }> {
-  const { base } = AGGREGATOR_APIS.cowswap
+  const base = getCowApiBase(chainId)
   const start = Date.now()
   const pollInterval = 3000
 
@@ -1871,6 +1877,7 @@ export async function fetchSwapFromSource(
   srcDecimals: number = 18,
   dstDecimals: number = 18,
   quoteMeta?: NormalizedQuote['meta'],
+  chainId?: number,
 ): Promise<NormalizedQuote> {
   switch (source) {
     case '1inch':
@@ -1884,7 +1891,7 @@ export async function fetchSwapFromSource(
     case 'kyberswap':
       return fetchKyberSwapSwap(src, dst, amount, from, slippage)
     case 'cowswap':
-      return fetchCowSwapOrder(src, dst, amount, from, slippage)
+      return fetchCowSwapOrder(src, dst, amount, from, slippage, undefined, undefined, undefined, chainId)
     case 'uniswapv3':
       return fetchUniswapV3Swap(src, dst, amount, from, slippage, quoteMeta?.uniswapV3Fee)
     case 'openocean':
@@ -1929,12 +1936,10 @@ export async function fetchApproveSpender(source: AggregatorName): Promise<`0x${
 
   switch (source) {
     case '1inch': {
-      const { base, key } = AGGREGATOR_APIS['1inch']
-      const res = await fetch(`${base}/approve/spender`, {
-        headers: { Authorization: `Bearer ${key}` },
-      })
-      if (!res.ok) throw new Error('1inch spender failed')
-      return (await res.json()).address
+      // [N-03] Hardcoded AggregationRouterV6 address (mainnet)
+      // Previously fetched dynamically from 1inch API — trust-on-first-use vulnerability.
+      // This address is immutable on-chain, so hardcoding is both safer and faster.
+      return '0x111111125421cA6dc452d289314280a0f8842A65' as `0x${string}`
     }
     case '0x': {
       // 0x v2 uses Permit2 — approve to Permit2 contract

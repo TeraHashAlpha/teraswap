@@ -5,11 +5,13 @@ export const CHAIN_ID = 1 // Ethereum mainnet
 export const AGGREGATOR_APIS = {
   '1inch': {
     base: 'https://api.1inch.dev/swap/v6.0/1',
-    key: process.env.NEXT_PUBLIC_1INCH_API_KEY ?? '',
+    // [Audit] API keys moved to server-only env vars (no NEXT_PUBLIC_ prefix)
+    // Falls back to NEXT_PUBLIC_ for backward compatibility during migration
+    get key() { return process.env.ONEINCH_API_KEY || process.env.NEXT_PUBLIC_1INCH_API_KEY || '' },
   },
   '0x': {
     base: 'https://api.0x.org',
-    key: process.env.NEXT_PUBLIC_0X_API_KEY ?? '',
+    get key() { return process.env.ZEROX_API_KEY || process.env.NEXT_PUBLIC_0X_API_KEY || '' },
   },
   velora: {
     base: 'https://api.paraswap.io',
@@ -51,9 +53,25 @@ export const AGGREGATOR_APIS = {
     base: '', // on-chain — uses RateProvider + CurveRouterNG contracts
     key: '',
   },
+  teraswap_order_engine: {
+    base: '', // autonomous — self-hosted executor + Chainlink execution
+    key: '',
+  },
 } as const
 
 export type AggregatorName = keyof typeof AGGREGATOR_APIS
+
+// ── CoW Protocol chain-aware API URLs ─────────────────────
+// The static AGGREGATOR_APIS.cowswap.base is mainnet-only.
+// Use getCowApiBase(chainId) for multi-chain support.
+const COW_API_URLS: Record<number, string> = {
+  1: 'https://api.cow.fi/mainnet/api/v1',
+  11155111: 'https://api.cow.fi/sepolia/api/v1',
+  100: 'https://api.cow.fi/xdai/api/v1',
+}
+export function getCowApiBase(chainId: number): string {
+  return COW_API_URLS[chainId] || COW_API_URLS[1]
+}
 
 // ── Aggregator metadata (for UI) ─────────────────────────
 export const AGGREGATOR_META: Record<AggregatorName, {
@@ -76,6 +94,7 @@ export const AGGREGATOR_META: Record<AggregatorName, {
   sushiswap: { label: 'SushiSwap', mevProtected: false, intentBased: false, isDirect: false },
   balancer: { label: 'Balancer', mevProtected: false, intentBased: false, isDirect: false },
   curve: { label: 'Curve Finance', mevProtected: false, intentBased: false, isDirect: true },
+  teraswap_order_engine: { label: 'TeraSwap Order Engine', mevProtected: true, intentBased: false, isDirect: false },
 }
 
 // ── Fee ──────────────────────────────────────────────────

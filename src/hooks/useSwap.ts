@@ -6,10 +6,10 @@ import {
   useWaitForTransactionReceipt,
   useSignTypedData,
 } from 'wagmi'
-import { parseUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
-import { mainnet } from 'viem/chains'
+import { parseUnits, formatUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
+import { mainnet, sepolia } from 'viem/chains'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
-import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, type AggregatorName } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 
@@ -26,14 +26,14 @@ const SWAP_TIMEOUT_MS = 120_000      // 2 minutes hard timeout
 async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
-  quoteMeta?: any,
+  quoteMeta?: any, chainId?: number,
 ): Promise<NormalizedQuote & { cowOrderParams?: any }> {
   const res = await fetch('/api/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       source, src, dst, amount, from, slippage,
-      srcDecimals, dstDecimals, quoteMeta,
+      srcDecimals, dstDecimals, quoteMeta, chainId,
     }),
   })
   const data = await res.json()
@@ -319,7 +319,61 @@ export function useSwap(
     setStatus('fetching_swap')
 
     try {
-      const rawAmount = parseUnits(amountIn, tokenIn.decimals).toString()
+      // ── [FIX] Block native ETH — CoW requires WETH (no ETH-flow support yet) ──
+      if (isNativeETH(tokenIn)) {
+        throw new Error(
+          'CoW Protocol requires WETH, not native ETH. Please wrap your ETH to WETH first, or select a different aggregator.'
+        )
+      }
+
+      const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
+      const rawAmount = rawAmountBn.toString()
+
+      // ── [FIX] Pre-flight balance check ──
+      // CoW orderbook rejects orders when the user doesn't have enough tokens.
+      // Check locally first for a better error message.
+      const viemChain = chainId === 11155111 ? sepolia : mainnet
+      const client = createPublicClient({ chain: viemChain, transport: http() })
+      try {
+        const balance = await client.readContract({
+          address: tokenIn.address as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [address],
+        })
+        if (balance < rawAmountBn) {
+          const have = formatUnits(balance, tokenIn.decimals)
+          const need = formatUnits(rawAmountBn, tokenIn.decimals)
+          throw new Error(
+            `Insufficient ${tokenIn.symbol} balance. You have ${have} but need ${need}.`
+          )
+        }
+      } catch (balErr) {
+        // Re-throw our own balance error, ignore RPC errors (let CoW API catch them)
+        if (balErr instanceof Error && balErr.message.includes('Insufficient')) throw balErr
+        console.warn('[TeraSwap] Pre-flight balance check failed:', balErr)
+      }
+
+      // ── [FIX] Pre-flight allowance check ──
+      // Verify VaultRelayer has sufficient allowance before signing + submitting.
+      try {
+        const allowance = await client.readContract({
+          address: tokenIn.address as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [address, COW_VAULT_RELAYER as `0x${string}`],
+        })
+        if (allowance < rawAmountBn) {
+          const have = formatUnits(allowance, tokenIn.decimals)
+          const need = formatUnits(rawAmountBn, tokenIn.decimals)
+          throw new Error(
+            `Insufficient ${tokenIn.symbol} allowance for CoW VaultRelayer. Approved: ${have}, needed: ${need}. Please approve again.`
+          )
+        }
+      } catch (allowErr) {
+        if (allowErr instanceof Error && allowErr.message.includes('Insufficient')) throw allowErr
+        console.warn('[TeraSwap] Pre-flight allowance check failed:', allowErr)
+      }
 
       const swapData = await fetchSwapViaApi(
         'cowswap',
@@ -330,6 +384,8 @@ export function useSwap(
         slippage,
         tokenIn.decimals,
         tokenOut.decimals,
+        undefined,
+        chainId,
       ) as NormalizedQuote & { cowOrderParams?: any }
 
       if (!swapData.cowOrderParams) {
@@ -339,7 +395,6 @@ export function useSwap(
       const orderParams = swapData.cowOrderParams
 
       // Security: verify receiver matches user wallet (Balancer manageUserBalance lesson)
-      // Prevents API manipulation where funds are routed to attacker's address
       const receiver = (orderParams.receiver || '').toLowerCase()
       if (receiver && receiver !== address.toLowerCase()) {
         throw new Error(`CoW order receiver (${receiver}) does not match your wallet. Possible API compromise.`)
@@ -402,7 +457,7 @@ export function useSwap(
 
       // Step 2: Submit signed order to CoW orderbook
       setStatus('cow_pending')
-      const orderUid = await submitCowOrder(orderParams, signature)
+      const orderUid = await submitCowOrder(orderParams, signature, chainId)
       setCowOrderUid(orderUid)
 
       // Log CoW swap (fire-and-forget)
@@ -421,7 +476,7 @@ export function useSwap(
       })
 
       // Step 3: Poll for order fulfillment
-      const result = await pollCowOrderStatus(orderUid)
+      const result = await pollCowOrderStatus(orderUid, 120_000, chainId)
 
       if (result.status === 'fulfilled' && result.txHash) {
         setTxHashState(result.txHash as `0x${string}`)
@@ -439,14 +494,21 @@ export function useSwap(
         const msg = err.message.toLowerCase()
         if (msg.includes('user rejected') || msg.includes('user denied')) {
           setErrorMessage('Signature rejected in wallet.')
+        } else if (msg.includes('funds worth at least') || msg.includes('insufficient balance')) {
+          // [FIX] Better error for CoW funds check — parse and show the required amount
+          setErrorMessage(
+            `Insufficient balance or allowance for this CoW swap. Ensure you have enough ${tokenIn?.symbol ?? 'tokens'} and have approved the CoW VaultRelayer.`
+          )
+        } else if (msg.includes('insufficient') && msg.includes('allowance')) {
+          setErrorMessage(err.message)
         } else {
-          setErrorMessage(err.message.slice(0, 120))
+          setErrorMessage(err.message.slice(0, 200))
         }
       } else {
         setErrorMessage('Unknown error')
       }
     }
-  }, [tokenIn, tokenOut, address, amountIn, slippage, signTypedDataAsync])
+  }, [tokenIn, tokenOut, address, amountIn, slippage, chainId, signTypedDataAsync])
 
   // ── Main execute dispatcher ──
   const execute = useCallback(async (source: AggregatorName) => {
