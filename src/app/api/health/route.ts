@@ -86,6 +86,17 @@ export async function GET() {
     checks.totalSwaps = count
   }
 
+  // Test 5: Sample raw data (for debugging format issues)
+  const { data: sampleRows } = await supabase
+    .from('swaps')
+    .select('id, wallet, source, token_in_symbol, token_out_symbol, amount_in, amount_out, amount_in_usd, amount_out_usd, status, fee_collected, fee_amount, chain_id, created_at')
+    .order('created_at', { ascending: false })
+    .limit(3)
+
+  if (sampleRows) {
+    checks.sampleSwaps = sampleRows
+  }
+
   // Overall status
   const allOk = checks.swapsTableExists && checks.quotesTableExists && checks.canInsert
   checks.status = allOk ? 'OK' : 'FAIL'
