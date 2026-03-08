@@ -14,6 +14,7 @@ import type { Token } from './tokens'
 interface LogSwapParams {
   wallet: string
   txHash?: string
+  chainId?: number   // [FIX] Send actual chain ID (was defaulting to 1)
   source: string
   tokenIn: Token
   tokenOut: Token
@@ -34,6 +35,7 @@ export function logSwapToSupabase(params: LogSwapParams): void {
       body: JSON.stringify({
         wallet: params.wallet,
         txHash: params.txHash,
+        chainId: params.chainId,
         source: params.source,
         tokenIn: params.tokenIn.address,
         tokenInSymbol: params.tokenIn.symbol,
@@ -47,7 +49,9 @@ export function logSwapToSupabase(params: LogSwapParams): void {
         feeAmount: params.feeAmount,
         status: params.status ?? 'pending',
       }),
-    }).catch(() => {}) // swallow network errors
+    }).catch((err) => {
+      console.warn('[analytics] logSwap failed:', err)
+    })
   } catch {
     // silently ignore
   }

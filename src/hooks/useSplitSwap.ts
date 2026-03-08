@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { parseUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
 import { mainnet } from 'viem/chains'
-import { useAccount, useSendTransaction, useSignTypedData } from 'wagmi'
+import { useAccount, useChainId, useSendTransaction, useSignTypedData } from 'wagmi'
 import {
   validateFeeIntegrity,
   validateRouterAddress,
@@ -97,6 +97,7 @@ export function useSplitSwap(
   slippage: number = DEFAULT_SLIPPAGE,
 ): UseSplitSwapResult {
   const { address } = useAccount()
+  const chainId = useChainId()
   const { sendTransactionAsync } = useSendTransaction()
 
   const [status, setStatus] = useState<SplitSwapStatus>('idle')
@@ -228,6 +229,7 @@ export function useSplitSwap(
           successCount++
           logSwapToSupabase({
             wallet: address,
+            chainId,
             source,
             tokenIn,
             tokenOut,

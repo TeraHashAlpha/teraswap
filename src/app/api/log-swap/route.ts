@@ -11,7 +11,8 @@ export async function POST(req: NextRequest) {
   try {
     const supabase = getSupabase()
     if (!supabase) {
-      return NextResponse.json({ ok: true, skipped: true })
+      console.warn('[log-swap] Supabase not configured — swap NOT logged. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars.')
+      return NextResponse.json({ ok: false, skipped: true, reason: 'supabase_not_configured' })
     }
 
     const body = await req.json()
@@ -64,14 +65,14 @@ export async function POST(req: NextRequest) {
     })
 
     if (error) {
-      console.error('[log-swap] Supabase insert error:', error.message)
-      // Don't fail the response — logging is non-critical
+      console.error('[log-swap] Supabase insert error:', error.message, error.details, error.hint)
+      return NextResponse.json({ ok: false, error: error.message })
     }
 
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[log-swap] Error:', err)
-    return NextResponse.json({ ok: true }) // Never fail — logging is fire-and-forget
+    return NextResponse.json({ ok: false, error: String(err) })
   }
 }
 
@@ -84,7 +85,8 @@ export async function PATCH(req: NextRequest) {
   try {
     const supabase = getSupabase()
     if (!supabase) {
-      return NextResponse.json({ ok: true, skipped: true })
+      console.warn('[log-swap] PATCH skipped — Supabase not configured')
+      return NextResponse.json({ ok: false, skipped: true, reason: 'supabase_not_configured' })
     }
 
     const body = await req.json()
