@@ -47,26 +47,32 @@ export function useLimitOrder() {
   const [latestEvent, setLatestEvent] = useState<LimitOrderEvent | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // [BUGFIX] Use ref to always access latest orders in callbacks (avoids stale closures)
+  const ordersRef = useRef<LimitOrder[]>(orders)
+  ordersRef.current = orders
 
   // Load from localStorage on mount
   useEffect(() => {
     setOrders(loadOrders())
   }, [])
 
-  // Save whenever orders change
+  // Save whenever orders change (including clearing when empty)
   useEffect(() => {
-    if (orders.length > 0) saveOrders(orders)
+    // [BUGFIX] Also persist when orders array is empty — prevents stale data in localStorage
+    saveOrders(orders)
   }, [orders])
 
   // ── Poll open orders for status changes ────────────────────
+  const openCount = orders.filter(o => o.status === 'open' || o.status === 'partiallyFilled').length
   useEffect(() => {
-    const openOrders = orders.filter(o => o.status === 'open' || o.status === 'partiallyFilled')
-    if (openOrders.length === 0) {
+    if (openCount === 0) {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
       return
     }
 
     async function pollAll() {
+      // [BUGFIX] Read from ref for fresh data
+      const openOrders = ordersRef.current.filter(o => o.status === 'open' || o.status === 'partiallyFilled')
       for (const order of openOrders) {
         try {
           const result = await fetchLimitOrderStatus(order.orderUid)
@@ -105,7 +111,7 @@ export function useLimitOrder() {
     pollAll()
     pollRef.current = setInterval(pollAll, LIMIT_POLL_INTERVAL_MS)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [orders.filter(o => o.status === 'open' || o.status === 'partiallyFilled').length])
+  }, [openCount])
 
   // ── Create + sign + submit limit order ─────────────────────
   const createOrder = useCallback(async (config: LimitOrderConfig) => {
@@ -213,7 +219,8 @@ export function useLimitOrder() {
 
   // ── Cancel order ───────────────────────────────────────────
   const cancelOrder = useCallback(async (orderId: string) => {
-    const order = orders.find(o => o.id === orderId)
+    // [BUGFIX] Use ref to avoid stale closure
+    const order = ordersRef.current.find(o => o.id === orderId)
     if (!order || !order.orderUid) return
 
     // Mark as cancelled locally (CoW cancellation via API requires signing
@@ -225,7 +232,7 @@ export function useLimitOrder() {
         : o
     ))
     setLatestEvent({ type: 'order_cancelled', orderId })
-  }, [orders])
+  }, [])
 
   // ── Remove order from list ─────────────────────────────────
   const removeOrder = useCallback((orderId: string) => {

@@ -4,7 +4,7 @@ import type { MetaQuoteResult } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import type { PriceCheck } from '@/lib/chainlink'
 import type { ApprovalPlan } from '@/lib/approvals'
-import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { isFeeCollectorActive } from '@/lib/api'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
@@ -251,7 +251,7 @@ export default function QuoteBreakdown({
         {/* Price impact estimate */}
         {priceCheck.chainlinkPrice != null && priceCheck.executionPrice != null && priceCheck.deviation > 0.005 && (
           <div className={`mb-1 flex items-center justify-between ${
-            priceCheck.deviation > 0.05 ? 'text-danger font-semibold' : priceCheck.deviation > 0.02 ? 'text-warning' : 'text-cream-50'
+            priceCheck.deviation > PRICE_DEVIATION_BLOCK ? 'text-danger font-semibold' : priceCheck.deviation > PRICE_DEVIATION_WARN ? 'text-warning' : 'text-cream-50'
           }`}>
             <span className="flex items-center gap-1">
               Price impact

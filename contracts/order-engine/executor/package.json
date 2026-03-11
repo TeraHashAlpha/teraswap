@@ -1,0 +1,13 @@
+{
+  "name": "teraswap-order-executor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node executor.js",
+    "dev": "node --watch executor.js"
+  },
+  "dependencies": {
+    "ethers": "^6.16.0"
+  }
+}

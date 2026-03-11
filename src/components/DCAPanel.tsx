@@ -1,41 +1,75 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
 import TokenSelector from './TokenSelector'
-import { useDCAEngine } from '@/hooks/useDCAEngine'
-import { DCA_INTERVALS, type DCAToken } from '@/lib/dca-types'
+import { useOrderEngine } from '@/hooks/useOrderEngine'
+import {
+  OrderType,
+  PriceCondition,
+  DCA_INTERVAL_PRESETS,
+  DCA_TOTAL_PRESETS,
+  EXPIRY_PRESETS,
+  getDefaultRouter,
+  getChainlinkFeeds,
+} from '@/lib/order-engine'
+import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
-import { playClick, playDCABuy, playError } from '@/lib/sounds'
+import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, playError, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
+import { useOrderNotifications } from '@/hooks/useOrderNotifications'
+import { ETHERSCAN_TX } from '@/lib/constants'
+
+// ── Map token symbols to Chainlink feeds ─────────────────
+// Returns empty string if no feed found — callers must check before submitting.
+function findPriceFeed(token: Token, chainId: number): string {
+  const feeds = getChainlinkFeeds(chainId)
+  const key = `${token.symbol}/USD`
+  return feeds[key]?.address ?? ''
+}
 
 // ══════════════════════════════════════════════════════════
-//  DCA PANEL — Configuration + Active Positions + Smart Window
+//  DCA PANEL — Autonomous DCA via TeraSwapOrderExecutor v2
 // ══════════════════════════════════════════════════════════
 
 export default function DCAPanel() {
   const { address, isConnected } = useAccount()
+  const chainId = useChainId()
   const {
-    positions,
-    activeSnapshots,
+    dcaOrders,
+    activeOrders,
+    historyOrders,
     latestEvent,
-    createPosition,
-    pausePosition,
-    resumePosition,
-    cancelPosition,
-    isReady,
-  } = useDCAEngine()
+    isSubmitting,
+    createOrder,
+    cancelOrder,
+    cancelAllOrders,
+    removeOrder,
+  } = useOrderEngine()
 
   const { toast } = useToast()
+
+  // Browser push notifications (fires when tab is in background)
+  useOrderNotifications(latestEvent)
 
   // ── Sound effects + toasts on events ────────────────────
   useEffect(() => {
     if (!latestEvent) return
-    if (latestEvent.type === 'execution_success') {
-      playDCABuy()
-      toast({ type: 'success', title: 'DCA buy executed', description: `Buy #${latestEvent.executionIndex + 1} completed at best available price.`, txHash: latestEvent.txHash })
+    if (latestEvent.type === 'order_created') {
+      stopWaitingSound()
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'DCA order placed', description: 'Your DCA is live — it will execute automatically on schedule.' })
+    }
+    if (latestEvent.type === 'dca_execution') {
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'DCA buy executed', description: `Buy #${latestEvent.executionNumber} completed autonomously.` })
+    }
+    if (latestEvent.type === 'order_filled') {
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'DCA complete!', description: 'All DCA buys executed successfully.', txHash: latestEvent.txHash, duration: 10000 })
       if (address) {
         trackTrade({
           type: 'dca_buy',
@@ -44,21 +78,30 @@ export default function DCAPanel() {
           tokenOut: '', tokenOutAddress: '',
           amountIn: '0', amountOut: '0',
           volumeUsd: 0,
-          source: 'uniswapv3',
+          source: 'teraswap_order_engine',
           txHash: latestEvent.txHash || '',
         })
       }
     }
-    if (latestEvent.type === 'execution_failed') {
-      playError()
-      toast({ type: 'error', title: 'DCA buy failed', description: latestEvent.error || 'Execution was rejected or failed.' })
+    if (latestEvent.type === 'order_cancelled') {
+      playCancelOrderMP3()
+      toast({ type: 'success', title: 'DCA order cancelled', description: 'Your DCA order has been cancelled on-chain.' })
+    }
+    if (latestEvent.type === 'order_error') {
+      stopWaitingSound()
+      playCancelOrderMP3()
+      toast({ type: 'error', title: 'DCA order failed', description: latestEvent.error || 'Order could not be submitted.' })
     }
   }, [latestEvent])
 
   // ── Tab state ──────────────────────────────────────────
   const [tab, setTab] = useState<'create' | 'positions'>('create')
-  const activePositions = positions.filter(p => p.status === 'active' || p.status === 'paused')
-  const historyPositions = positions.filter(p => p.status === 'completed' || p.status === 'cancelled')
+  const activeDCA = dcaOrders.filter(o =>
+    o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled' || o.status === 'signing'
+  )
+  const historyDCA = dcaOrders.filter(o =>
+    o.status === 'filled' || o.status === 'expired' || o.status === 'cancelled' || o.status === 'error'
+  )
 
   return (
     <div className="w-full max-w-[calc(100vw-2rem)] sm:max-w-[460px]">
@@ -82,30 +125,29 @@ export default function DCAPanel() {
               : 'text-cream-50 hover:text-cream'
           }`}
         >
-          Positions {activePositions.length > 0 && `(${activePositions.length})`}
+          Positions {activeDCA.length > 0 && `(${activeDCA.length})`}
         </button>
       </div>
 
       {tab === 'create' ? (
         <CreateDCAForm
           isConnected={isConnected}
-          onCreate={createPosition}
+          isSubmitting={isSubmitting}
+          onSubmit={createOrder}
         />
       ) : (
-        <PositionsList
-          activePositions={activePositions}
-          historyPositions={historyPositions}
-          activeSnapshots={activeSnapshots}
-          onPause={pausePosition}
-          onResume={resumePosition}
-          onCancel={cancelPosition}
+        <DCAPositionsList
+          active={activeDCA}
+          history={historyDCA}
+          onCancel={cancelOrder}
+          onCancelAll={cancelAllOrders}
+          onRemove={removeOrder}
         />
       )}
 
-      {/* Browser notice */}
-      <div className="mt-3 rounded-lg border border-cream-08 bg-surface-secondary/50 px-3 py-2 text-[11px] text-cream-35">
-        <span className="text-cream-50">Note:</span> DCA executions require your browser to be open.
-        Each buy prompts your wallet for confirmation. Fully autonomous DCA via smart contracts is on our roadmap.
+      {/* Autonomous notice */}
+      <div className="mt-3 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-50">
+        <span className="font-semibold text-cream-gold">Autonomous execution</span> — DCA orders run 24/7 via Chainlink oracles. No browser required. Your wallet only signs once.
       </div>
     </div>
   )
@@ -117,18 +159,14 @@ export default function DCAPanel() {
 
 function CreateDCAForm({
   isConnected,
-  onCreate,
+  isSubmitting,
+  onSubmit,
 }: {
   isConnected: boolean
-  onCreate: (
-    tokenIn: DCAToken,
-    tokenOut: DCAToken,
-    totalAmount: string,
-    numberOfParts: number,
-    intervalMs: number,
-    slippage?: number,
-  ) => void
+  isSubmitting: boolean
+  onSubmit: (config: CreateOrderConfig) => Promise<void>
 }) {
+  const chainId = useChainId()
   const [tokenIn, setTokenIn] = useState<Token | null>(
     DEFAULT_TOKENS.find(t => t.symbol === 'USDC') ?? null
   )
@@ -136,51 +174,65 @@ function CreateDCAForm({
     DEFAULT_TOKENS.find(t => t.symbol === 'ETH') ?? null
   )
   const [totalDisplay, setTotalDisplay] = useState('')
-  const [parts, setParts] = useState('7')
-  const [intervalIdx, setIntervalIdx] = useState(3) // default: 1 day
+  const [partsIdx, setPartsIdx] = useState(2) // default: 7
+  const [intervalIdx, setIntervalIdx] = useState(3) // default: 1d
+  const [expiryIdx, setExpiryIdx] = useState(3) // default: 30d
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [slippage, setSlippage] = useState('0.5')
 
-  const interval = DCA_INTERVALS[intervalIdx]
+  const parts = DCA_TOTAL_PRESETS[partsIdx]
+  const interval = DCA_INTERVAL_PRESETS[intervalIdx]
+  const expiry = EXPIRY_PRESETS[expiryIdx]
 
   // Derived values
   const perPart = useMemo(() => {
-    const n = Number(parts)
     const total = Number(totalDisplay)
-    if (!n || !total || n <= 0) return '0'
-    return (total / n).toFixed(tokenIn?.decimals === 6 ? 2 : 6)
+    if (!parts || !total || parts <= 0) return '0'
+    return (total / parts).toFixed(tokenIn?.decimals === 6 ? 2 : 6)
   }, [totalDisplay, parts, tokenIn])
 
   const totalDuration = useMemo(() => {
-    const n = Number(parts)
-    if (!n || n <= 0) return ''
-    const totalMs = n * interval.ms
-    const hours = totalMs / (60 * 60 * 1000)
+    if (!parts || parts <= 0) return ''
+    const totalSec = parts * interval.seconds
+    const hours = totalSec / 3600
     if (hours < 24) return `${hours.toFixed(0)} hours`
     const days = hours / 24
     if (days < 30) return `${days.toFixed(1)} days`
     return `${(days / 30).toFixed(1)} months`
   }, [parts, interval])
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && Number(parts) > 0
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
-    playClick()
+    startWaitingSound()
 
-    const rawAmount = parseUnits(totalDisplay, tokenIn.decimals).toString()
-    onCreate(
-      tokenIn,
-      tokenOut,
-      rawAmount,
-      Number(parts),
-      interval.ms,
-      Number(slippage),
-    )
+    let amountIn: string
+    try {
+      amountIn = parseUnits(totalDisplay, tokenIn.decimals).toString()
+    } catch {
+      return // Invalid input (e.g. too many decimals)
+    }
+    // minAmountOut = 0 for DCA (per-fill slippage is managed by the DCA executor)
+    const minAmountOut = '0'
 
-    // Reset form
+    const config: CreateOrderConfig = {
+      tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
+      tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
+      amountIn,
+      minAmountOut,
+      orderType: OrderType.DCA,
+      condition: PriceCondition.ABOVE, // DCA: price >= $0 is always true → executes at any price
+      targetPrice: '0', // Target $0 with ABOVE = always passes price check
+      priceFeed: findPriceFeed(tokenOut, chainId), // Track buy token price
+      expirySeconds: expiry.seconds,
+      router: getDefaultRouter(chainId).address, // Best aggregated price
+      dcaInterval: interval.seconds,
+      dcaTotal: parts,
+    }
+
+    await onSubmit(config)
     setTotalDisplay('')
-    setParts('7')
   }
 
   return (
@@ -192,7 +244,7 @@ function CreateDCAForm({
       {/* Sell token */}
       <div className="mb-3">
         <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
-          Spend
+          Total to spend
         </label>
         <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-primary px-3 py-2.5">
           <TokenSelector
@@ -205,7 +257,12 @@ function CreateDCAForm({
             inputMode="decimal"
             placeholder="0.00"
             value={totalDisplay}
-            onChange={e => setTotalDisplay(e.target.value.replace(/[^0-9.]/g, ''))}
+            // [BUGFIX] Prevent multiple decimal points
+            onChange={e => {
+              const v = e.target.value.replace(/[^0-9.]/g, '')
+              const parts = v.split('.')
+              setTotalDisplay(parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : v)
+            }}
             className="flex-1 bg-transparent text-right text-lg font-semibold text-cream outline-none placeholder:text-cream-20"
           />
         </div>
@@ -241,12 +298,12 @@ function CreateDCAForm({
           Number of Buys
         </label>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          {[3, 5, 7, 10, 14, 30].map(n => (
+          {DCA_TOTAL_PRESETS.map((n, idx) => (
             <button
               key={n}
-              onClick={() => { setParts(String(n)); playClick() }}
+              onClick={() => { setPartsIdx(idx); playClick() }}
               className={`flex-1 rounded-lg border py-1.5 text-[13px] font-semibold transition-all ${
-                parts === String(n)
+                partsIdx === idx
                   ? 'border-cream-gold bg-cream-gold/10 text-cream'
                   : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
               }`}
@@ -263,9 +320,9 @@ function CreateDCAForm({
           Interval
         </label>
         <div className="flex gap-2 flex-wrap">
-          {DCA_INTERVALS.map((iv, idx) => (
+          {DCA_INTERVAL_PRESETS.map((iv, idx) => (
             <button
-              key={iv.ms}
+              key={iv.seconds}
               onClick={() => { setIntervalIdx(idx); playClick() }}
               className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all ${
                 intervalIdx === idx
@@ -280,7 +337,7 @@ function CreateDCAForm({
       </div>
 
       {/* Summary */}
-      {Number(totalDisplay) > 0 && Number(parts) > 0 && (
+      {Number(totalDisplay) > 0 && (
         <div className="mb-4 rounded-xl border border-cream-08 bg-surface-primary p-3 text-[13px]">
           <div className="flex justify-between text-cream-50">
             <span>Per buy</span>
@@ -291,14 +348,16 @@ function CreateDCAForm({
             <span className="text-cream font-medium">{totalDuration}</span>
           </div>
           <div className="mt-1 flex justify-between text-cream-50">
-            <span>Smart window</span>
-            <span className="text-cream font-medium">
-              Opens {(interval.ms * 0.1 / 60_000).toFixed(0)} min before each buy
-            </span>
+            <span>Execution</span>
+            <span className="text-cream font-medium">Every {interval.label}</span>
+          </div>
+          <div className="mt-1 flex justify-between text-cream-50">
+            <span>Expires</span>
+            <span className="text-cream font-medium">{expiry.label}</span>
           </div>
           <div className="mt-2 border-t border-cream-08 pt-2 text-[11px] text-cream-35">
-            Each buy uses all 11 DEX sources to find the best price.
-            Smart windows monitor Chainlink prices and buy on dips when possible.
+            Each buy routes through 11 DEX sources via 1inch aggregation.
+            Orders execute autonomously — no browser needed.
           </div>
         </div>
       )}
@@ -311,110 +370,146 @@ function CreateDCAForm({
         {showAdvanced ? '▾' : '▸'} Advanced settings
       </button>
       {showAdvanced && (
-        <div className="mb-4 rounded-xl border border-cream-08 bg-surface-primary p-3">
-          <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
-            Slippage tolerance
-          </label>
-          <div className="flex gap-2">
-            {['0.3', '0.5', '1.0'].map(s => (
-              <button
-                key={s}
-                onClick={() => setSlippage(s)}
-                className={`rounded-lg border px-3 py-1 text-[12px] font-semibold transition-all ${
-                  slippage === s
-                    ? 'border-cream-gold bg-cream-gold/10 text-cream'
-                    : 'border-cream-08 text-cream-35 hover:text-cream-50'
-                }`}
-              >
-                {s}%
-              </button>
-            ))}
+        <div className="mb-4 space-y-3">
+          {/* Slippage */}
+          <div className="rounded-xl border border-cream-08 bg-surface-primary p-3">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
+              Slippage tolerance
+            </label>
+            <div className="flex gap-2">
+              {['0.3', '0.5', '1.0'].map(s => (
+                <button
+                  key={s}
+                  onClick={() => setSlippage(s)}
+                  className={`rounded-lg border px-3 py-1 text-[12px] font-semibold transition-all ${
+                    slippage === s
+                      ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                      : 'border-cream-08 text-cream-35 hover:text-cream-50'
+                  }`}
+                >
+                  {s}%
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Expiry */}
+          <div className="rounded-xl border border-cream-08 bg-surface-primary p-3">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
+              Order expiry
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              {EXPIRY_PRESETS.map((e, idx) => (
+                <button
+                  key={e.seconds}
+                  onClick={() => { setExpiryIdx(idx); playClick() }}
+                  className={`rounded-lg border px-3 py-1 text-[12px] font-semibold transition-all ${
+                    expiryIdx === idx
+                      ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                      : 'border-cream-08 text-cream-35 hover:text-cream-50'
+                  }`}
+                >
+                  {e.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {/* Create button */}
-      <button
-        disabled={!canCreate}
-        onClick={handleCreate}
-        className={`w-full rounded-xl py-3 text-[14px] font-bold uppercase tracking-wider transition-all ${
-          canCreate
-            ? 'bg-gradient-to-r from-gold to-gold-light text-[#080B10] hover:brightness-110 active:scale-[0.98]'
-            : 'bg-cream-08 text-cream-20 cursor-not-allowed'
-        }`}
-      >
-        {!isConnected
-          ? 'Connect Wallet'
-          : !tokenIn || !tokenOut
-          ? 'Select Tokens'
-          : Number(totalDisplay) <= 0
-          ? 'Enter Amount'
-          : `Start DCA — ${parts} buys over ${totalDuration}`
-        }
-      </button>
+      {!isConnected ? (
+        <div className="flex justify-center">
+          <ConnectButton />
+        </div>
+      ) : (
+        <button
+          disabled={!canCreate}
+          // [BUGFIX] await async handleCreate to catch errors properly
+          onClick={async () => { playTouchMP3(); await handleCreate() }}
+          className={`w-full rounded-xl py-3 text-[14px] font-bold uppercase tracking-wider transition-all ${
+            canCreate
+              ? 'bg-gradient-to-r from-gold to-gold-light text-[#080B10] hover:brightness-110 active:scale-[0.98]'
+              : 'bg-cream-08 text-cream-20 cursor-not-allowed'
+          }`}
+        >
+          {isSubmitting
+            ? 'Signing order...'
+            : !tokenIn || !tokenOut
+            ? 'Select Tokens'
+            : Number(totalDisplay) <= 0
+            ? 'Enter Amount'
+            : `Start DCA — ${parts} buys over ${totalDuration}`
+          }
+        </button>
+      )}
     </div>
   )
 }
 
 // ══════════════════════════════════════════════════════════
-//  POSITIONS LIST
+//  DCA POSITIONS LIST
 // ══════════════════════════════════════════════════════════
 
-function PositionsList({
-  activePositions,
-  historyPositions,
-  activeSnapshots,
-  onPause,
-  onResume,
+function DCAPositionsList({
+  active,
+  history,
   onCancel,
+  onCancelAll,
+  onRemove,
 }: {
-  activePositions: import('@/lib/dca-types').DCAPosition[]
-  historyPositions: import('@/lib/dca-types').DCAPosition[]
-  activeSnapshots: import('@/lib/dca-types').SmartWindowSnapshot[]
-  onPause: (id: string) => void
-  onResume: (id: string) => void
+  active: AutonomousOrder[]
+  history: AutonomousOrder[]
   onCancel: (id: string) => void
+  onCancelAll: () => Promise<void>
+  onRemove: (id: string) => void
 }) {
-  if (activePositions.length === 0 && historyPositions.length === 0) {
+  if (active.length === 0 && history.length === 0) {
     return (
       <div className="rounded-2xl border border-cream-08 bg-surface-secondary p-8 text-center">
         <p className="text-[15px] text-cream-50">No DCA positions yet</p>
-        <p className="mt-1 text-[12px] text-cream-35">Create one to start dollar cost averaging</p>
+        <p className="mt-1 text-[12px] text-cream-35">Create one to start autonomous dollar cost averaging</p>
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
-      {/* Active positions */}
-      {activePositions.map(pos => {
-        const snapshot = activeSnapshots.find(s => s.positionId === pos.config.id)
-        return (
-          <PositionCard
-            key={pos.config.id}
-            position={pos}
-            snapshot={snapshot}
-            onPause={() => { playClick(); onPause(pos.config.id) }}
-            onResume={() => { playClick(); onResume(pos.config.id) }}
-            onCancel={() => { playClick(); onCancel(pos.config.id) }}
-          />
-        )
-      })}
-
-      {/* History */}
-      {historyPositions.length > 0 && (
+      {active.length > 0 && (
         <>
-          <div className="px-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-cream-35">
-            History
+          {active.length > 1 && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => { onCancelAll(); playClick() }}
+                className="rounded-lg border border-danger/30 px-2.5 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors"
+              >
+                Cancel All
+              </button>
+            </div>
+          )}
+          {active.map(order => (
+            <DCAOrderCard key={order.id} order={order} onCancel={() => { playClick(); onCancel(order.id) }} />
+          ))}
+        </>
+      )}
+
+      {history.length > 0 && (
+        <>
+          <div className="flex items-center justify-between px-1 pt-2">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-cream-35">
+              History
+            </span>
+            {history.length > 1 && (
+              <button
+                onClick={() => { history.forEach(o => onRemove(o.id)); playClick() }}
+                className="rounded-lg border border-cream-08 px-2.5 py-1 text-[10px] text-cream-35 hover:text-cream-50 transition-colors"
+              >
+                Remove All
+              </button>
+            )}
           </div>
-          {historyPositions.map(pos => (
-            <PositionCard
-              key={pos.config.id}
-              position={pos}
-              onPause={() => {}}
-              onResume={() => {}}
-              onCancel={() => {}}
-            />
+          {history.map(order => (
+            <DCAOrderCard key={order.id} order={order} onRemove={() => { playClick(); onRemove(order.id) }} />
           ))}
         </>
       )}
@@ -423,59 +518,51 @@ function PositionsList({
 }
 
 // ══════════════════════════════════════════════════════════
-//  POSITION CARD
+//  DCA ORDER CARD
 // ══════════════════════════════════════════════════════════
 
-function PositionCard({
-  position,
-  snapshot,
-  onPause,
-  onResume,
+function DCAOrderCard({
+  order,
   onCancel,
+  onRemove,
 }: {
-  position: import('@/lib/dca-types').DCAPosition
-  snapshot?: import('@/lib/dca-types').SmartWindowSnapshot
-  onPause: () => void
-  onResume: () => void
-  onCancel: () => void
+  order: AutonomousOrder
+  onCancel?: () => void
+  onRemove?: () => void
 }) {
-  const { config, executions, status, totalExecuted } = position
-  const progress = totalExecuted / config.numberOfParts
-  const isActive = status === 'active'
-  const isPaused = status === 'paused'
+  const progress = order.dcaTotal > 0 ? order.dcaExecuted / order.dcaTotal : 0
+  const isActive = order.status === 'active' || order.status === 'executing' || order.status === 'partially_filled'
 
-  // Next execution info
-  const nextExec = executions.find(e =>
-    e.status === 'scheduled' || e.status === 'window_open' || e.status === 'executing' || e.status === 'awaiting_sig'
-  )
-  const [countdown, setCountdown] = useState('')
-
-  useEffect(() => {
-    if (!nextExec || !isActive) return
-    const timer = setInterval(() => {
-      const target = nextExec.status === 'window_open' ? nextExec.windowCloseTime : nextExec.windowOpenTime
-      const diff = Math.max(0, target - Date.now())
-      const h = Math.floor(diff / 3600000)
-      const m = Math.floor((diff % 3600000) / 60000)
-      const s = Math.floor((diff % 60000) / 1000)
-      setCountdown(h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [nextExec, isActive])
-
-  const statusColor = {
+  const statusColor: Record<string, string> = {
+    signing: 'bg-yellow-400',
     active: 'bg-success',
-    paused: 'bg-warning',
-    completed: 'bg-cream-50',
+    executing: 'bg-blue-400',
+    partially_filled: 'bg-cyan-400',
+    filled: 'bg-cream-50',
     cancelled: 'bg-danger',
-  }[status]
+    expired: 'bg-cream-35',
+    error: 'bg-danger',
+  }
 
-  const statusLabel = {
+  const statusLabel: Record<string, string> = {
+    signing: 'Signing...',
     active: 'Active',
-    paused: 'Paused',
-    completed: 'Completed',
+    executing: 'Executing...',
+    partially_filled: `${order.dcaExecuted}/${order.dcaTotal} fills`,
+    filled: 'Completed',
     cancelled: 'Cancelled',
-  }[status]
+    expired: 'Expired',
+    error: 'Failed',
+  }
+
+  const amountIn = order.order?.amountIn
+    ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
+    : '—'
+
+  // Time remaining
+  const timeLeft = order.expiresAt - Date.now()
+  const daysLeft = Math.max(0, Math.floor(timeLeft / (1000 * 60 * 60 * 24)))
+  const hoursLeft = Math.max(0, Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)))
 
   return (
     <div className="rounded-2xl border border-cream-08 bg-surface-secondary p-4">
@@ -483,31 +570,24 @@ function PositionCard({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-[15px] font-semibold text-cream">
-            {config.tokenIn.symbol} → {config.tokenOut.symbol}
+            {order.tokenInSymbol} → {order.tokenOutSymbol}
           </span>
           <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-            isActive ? 'bg-success/15 text-success' : isPaused ? 'bg-warning/15 text-warning' : 'bg-cream-08 text-cream-35'
+            isActive ? 'bg-success/15 text-success' : order.status === 'error' ? 'bg-danger/15 text-danger' : 'bg-cream-08 text-cream-35'
           }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${statusColor}`} />
-            {statusLabel}
+            <span className={`h-1.5 w-1.5 rounded-full ${statusColor[order.status] || 'bg-cream-35'}`} />
+            {statusLabel[order.status] || order.status}
           </span>
         </div>
-        {(isActive || isPaused) && (
-          <div className="flex gap-1">
-            {isActive && (
-              <button onClick={onPause} className="rounded-lg border border-cream-08 px-2 py-1 text-[10px] text-cream-50 hover:text-cream transition-colors">
-                Pause
-              </button>
-            )}
-            {isPaused && (
-              <button onClick={onResume} className="rounded-lg border border-cream-08 px-2 py-1 text-[10px] text-cream-50 hover:text-cream transition-colors">
-                Resume
-              </button>
-            )}
-            <button onClick={onCancel} className="rounded-lg border border-danger/30 px-2 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors">
-              Cancel
-            </button>
-          </div>
+        {isActive && onCancel && (
+          <button onClick={onCancel} className="rounded-lg border border-danger/30 px-2 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors">
+            Cancel
+          </button>
+        )}
+        {!isActive && onRemove && (
+          <button onClick={onRemove} className="rounded-lg border border-cream-08 px-2 py-1 text-[10px] text-cream-50 hover:text-cream transition-colors">
+            Remove
+          </button>
         )}
       </div>
 
@@ -519,94 +599,35 @@ function PositionCard({
         />
       </div>
       <div className="flex justify-between text-[11px] text-cream-35 mb-3">
-        <span>{totalExecuted} of {config.numberOfParts} buys</span>
-        <span>
-          {formatUnits(BigInt(position.totalSpent || '0'), config.tokenIn.decimals)} {config.tokenIn.symbol} spent
-        </span>
+        <span>{order.dcaExecuted} of {order.dcaTotal} buys</span>
+        <span>{Number(amountIn).toFixed(2)} {order.tokenInSymbol} total</span>
       </div>
 
-      {/* Smart window status (if active) */}
-      {snapshot && (
-        <div className="rounded-xl border border-cream-gold/20 bg-cream-gold/5 p-3 mb-3">
-          <div className="flex items-center gap-1.5 mb-2">
-            <span className="h-2 w-2 rounded-full bg-cream-gold animate-pulse" />
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-cream-gold">
-              Smart Window Active
-            </span>
-          </div>
-          <p className="text-[12px] text-cream-65 leading-relaxed">
-            {snapshot.reason}
-          </p>
-          {snapshot.priceYesterday !== null && (
-            <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
-              <div>
-                <span className="text-cream-35">Yesterday</span>
-                <div className="font-medium text-cream">${snapshot.priceYesterday?.toFixed(2)}</div>
-              </div>
-              <div>
-                <span className="text-cream-35">Window open</span>
-                <div className="font-medium text-cream">${snapshot.priceAtWindowOpen?.toFixed(2)}</div>
-              </div>
-              <div>
-                <span className="text-cream-35">Target</span>
-                <div className="font-medium text-success">${snapshot.targetDipPrice?.toFixed(2)}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Next execution countdown */}
-      {nextExec && isActive && !snapshot && (
-        <div className="rounded-xl border border-cream-08 bg-surface-primary p-2.5 text-[12px]">
+      {/* Time remaining */}
+      {isActive && timeLeft > 0 && (
+        <div className="rounded-xl border border-cream-08 bg-surface-primary p-2.5 text-[12px] mb-3">
           <div className="flex justify-between">
-            <span className="text-cream-35">
-              {nextExec.status === 'window_open' ? 'Window closes in' : 'Next window opens in'}
-            </span>
-            <span className="font-semibold text-cream">{countdown}</span>
+            <span className="text-cream-35">Expires in</span>
+            <span className="font-semibold text-cream">{daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h`}</span>
           </div>
         </div>
       )}
 
-      {/* Recent executions (last 3) */}
-      {executions.filter(e => e.status === 'executed' || e.status === 'failed').length > 0 && (
-        <div className="mt-3 border-t border-cream-08 pt-3">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-cream-35 mb-2">
-            Recent Buys
-          </div>
-          {executions
-            .filter(e => e.status === 'executed' || e.status === 'failed')
-            .slice(-3)
-            .reverse()
-            .map(exec => (
-              <div key={exec.id} className="flex items-center justify-between py-1 text-[11px]">
-                <span className="text-cream-50">Buy #{exec.index + 1}</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                  exec.status === 'executed' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
-                }`}>
-                  {exec.status === 'executed'
-                    ? exec.executionReason === 'price_below_yesterday'
-                      ? '↓ Price drop'
-                      : exec.executionReason === 'dip_achieved'
-                      ? '↓ 0.3% dip'
-                      : '⏱ Window expired'
-                    : '✗ Failed'
-                  }
-                </span>
-                {exec.txHash && (
-                  <a
-                    href={`https://etherscan.io/tx/${exec.txHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-cream-35 hover:text-cream-50"
-                  >
-                    ↗
-                  </a>
-                )}
-              </div>
-            ))
-          }
-        </div>
+      {/* Error */}
+      {order.error && (
+        <p className="mb-2 text-[11px] text-red-400">{order.error}</p>
+      )}
+
+      {/* Tx hash */}
+      {order.txHash && (
+        <a
+          href={`${ETHERSCAN_TX}${order.txHash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-[11px] text-cream-gold hover:underline"
+        >
+          View on Etherscan ↗
+        </a>
       )}
     </div>
   )

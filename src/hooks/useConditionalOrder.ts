@@ -56,26 +56,33 @@ export function useConditionalOrder() {
   const pricePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const orderPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const triggeringRef = useRef<Set<string>>(new Set()) // prevent double triggers
+  // [BUGFIX] Use ref to always access latest orders in callbacks (avoids stale closures)
+  const ordersRef = useRef<ConditionalOrder[]>(orders)
+  ordersRef.current = orders
 
   // Load on mount
   useEffect(() => {
     setOrders(loadOrders())
   }, [])
 
-  // Save on change
+  // Save on change (including clearing when empty)
   useEffect(() => {
-    if (orders.length > 0) saveOrders(orders)
+    // [BUGFIX] Also persist when orders array is empty — prevents stale data in localStorage
+    saveOrders(orders)
   }, [orders])
 
   // ── Price monitoring for 'monitoring' orders ──────────────
+  const monitoringCount = orders.filter(o => o.status === 'monitoring').length
   useEffect(() => {
-    const monitoringOrders = orders.filter(o => o.status === 'monitoring')
-    if (monitoringOrders.length === 0) {
+    if (monitoringCount === 0) {
       if (pricePollRef.current) { clearInterval(pricePollRef.current); pricePollRef.current = null }
       return
     }
 
     async function pollPrices() {
+      // [BUGFIX] Read from ref to avoid stale closure
+      const monitoringOrders = ordersRef.current.filter(o => o.status === 'monitoring')
+      if (monitoringOrders.length === 0) return
       // Get unique token addresses to poll
       const tokenAddresses = [...new Set(monitoringOrders.map(o => o.monitorTokenAddress))]
 
@@ -110,11 +117,15 @@ export function useConditionalOrder() {
     pollPrices()
     pricePollRef.current = setInterval(pollPrices, PRICE_POLL_INTERVAL_MS)
     return () => { if (pricePollRef.current) clearInterval(pricePollRef.current) }
-  }, [orders.filter(o => o.status === 'monitoring').length])
+  }, [monitoringCount])
 
   // ── Poll submitted CoW orders for fill status ─────────────
+  const submittedCount = orders.filter(o =>
+    (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
+  ).length
   useEffect(() => {
-    const submittedOrders = orders.filter(o =>
+    // [BUGFIX] Read from ref for fresh data
+    const submittedOrders = ordersRef.current.filter(o =>
       (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
     )
     if (submittedOrders.length === 0) {
@@ -160,11 +171,12 @@ export function useConditionalOrder() {
     pollOrders()
     orderPollRef.current = setInterval(pollOrders, ORDER_POLL_INTERVAL_MS)
     return () => { if (orderPollRef.current) clearInterval(orderPollRef.current) }
-  }, [orders.filter(o => o.status === 'submitted' || o.status === 'partiallyFilled').length])
+  }, [submittedCount])
 
   // ── Handle trigger: sign + submit CoW order ───────────────
   const handleTrigger = useCallback(async (orderId: string) => {
-    const order = orders.find(o => o.id === orderId)
+    // [BUGFIX] Use ref to avoid stale closure over orders array
+    const order = ordersRef.current.find(o => o.id === orderId)
     if (!order || !address) return
 
     try {
@@ -253,7 +265,7 @@ export function useConditionalOrder() {
     } finally {
       triggeringRef.current.delete(orderId)
     }
-  }, [orders, address, chainId, signTypedDataAsync])
+  }, [address, chainId, signTypedDataAsync])
 
   // ── Create conditional order ──────────────────────────────
   const createOrder = useCallback(async (config: ConditionalOrderConfig) => {

@@ -13,5 +13,23 @@
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
       ]
     }
-  ]
+  ],
+  "env": {
+    "NEXT_PUBLIC_RPC_URL": "@rpc-url",
+    "NEXT_PUBLIC_FALLBACK_RPC_1": "@fallback-rpc-1",
+    "NEXT_PUBLIC_FALLBACK_RPC_2": "@fallback-rpc-2",
+    "ONEINCH_API_KEY": "@oneinch-api-key",
+    "ZEROX_API_KEY": "@zerox-api-key",
+    "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID": "@walletconnect-project-id",
+    "NEXT_PUBLIC_FEE_RECIPIENT": "@fee-recipient",
+    "NEXT_PUBLIC_FEE_PERCENT": "@fee-percent",
+    "NEXT_PUBLIC_FEE_COLLECTOR": "@fee-collector",
+    "SUPABASE_URL": "@supabase-url",
+    "SUPABASE_SERVICE_ROLE_KEY": "@supabase-service-role-key",
+    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url-public",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key",
+    "NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS": "@order-executor-address",
+    "CHAIN_ID": "@chain-id",
+    "NEXT_PUBLIC_ADMIN_WALLET": "@admin-wallet"
+  }
 }

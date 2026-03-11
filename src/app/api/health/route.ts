@@ -1,13 +1,32 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase, isSupabaseEnabled } from '@/lib/supabase'
 
 /**
- * GET /api/health
+ * GET /api/health?token=<HEALTH_TOKEN>
  *
  * Diagnostics endpoint — checks if analytics pipeline is working.
- * Tests: env vars → Supabase connection → tables exist → insert/delete test row.
+ * Tests: env vars → Supabase connection → tables exist → row count.
+ *
+ * [H-02] Protected by HEALTH_TOKEN env var to prevent data leakage.
+ * Without a valid token, only returns basic status (no sample data).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // ── Auth check ─────────────────────────────────────────────
+  const healthToken = process.env.HEALTH_TOKEN
+  const providedToken = request.nextUrl.searchParams.get('token')
+  const isAuthed = healthToken && providedToken === healthToken
+
+  // Public check: return minimal health status without data
+  if (!isAuthed) {
+    const supabaseOk = isSupabaseEnabled()
+    return NextResponse.json({
+      status: supabaseOk ? 'OK' : 'DEGRADED',
+      timestamp: new Date().toISOString(),
+      hint: 'Provide ?token=HEALTH_TOKEN for detailed diagnostics.',
+    }, { status: supabaseOk ? 200 : 503 })
+  }
+
+  // ── Authenticated: full diagnostics ────────────────────────
   const checks: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
     supabaseUrlSet: !!process.env.SUPABASE_URL,
@@ -52,30 +71,10 @@ export async function GET() {
     checks.quotesTableError = quoteErr.message
   }
 
-  // Test 3: Insert + delete a test row to verify write permissions
-  const { error: insertErr } = await supabase.from('swaps').insert({
-    wallet: '0x_health_check_test',
-    source: '_health_check',
-    token_in: '0x0000000000000000000000000000000000000000',
-    token_in_symbol: 'TEST',
-    token_out: '0x0000000000000000000000000000000000000001',
-    token_out_symbol: 'TEST',
-    amount_in: '0',
-    amount_out: '0',
-    status: 'failed',
-    chain_id: 0,
-  })
-
-  checks.canInsert = !insertErr
-  if (insertErr) {
-    checks.insertError = insertErr.message
-  } else {
-    // Clean up test row
-    await supabase
-      .from('swaps')
-      .delete()
-      .eq('wallet', '0x_health_check_test')
-  }
+  // [BUGFIX] Write test removed — inserting/deleting test rows into production tables
+  // can contaminate data if the cleanup fails or is interrupted mid-operation.
+  // Read-access verification (Tests 1–2) plus row count (Test 4) is sufficient
+  // to confirm the analytics pipeline is functional.
 
   // Test 4: Count total swaps
   const { count, error: countErr } = await supabase
@@ -98,7 +97,7 @@ export async function GET() {
   }
 
   // Overall status
-  const allOk = checks.swapsTableExists && checks.quotesTableExists && checks.canInsert
+  const allOk = checks.swapsTableExists && checks.quotesTableExists
   checks.status = allOk ? 'OK' : 'FAIL'
 
   return NextResponse.json(checks, { status: allOk ? 200 : 503 })

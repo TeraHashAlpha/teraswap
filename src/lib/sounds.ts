@@ -6,11 +6,117 @@
  * impactful sound for swap success.
  */
 
+// Safari compat: webkitAudioContext fallback
+type WebkitWindow = Window & { webkitAudioContext?: typeof AudioContext }
+
 let audioCtx: AudioContext | null = null
+
+// ── MP3-based sound players ──────────────────────────────
+const audioCache = new Map<string, HTMLAudioElement>()
+
+function playMP3(src: string, volume = 1.0) {
+  try {
+    // Clone from cache for overlapping playback support
+    let template = audioCache.get(src)
+    if (!template) {
+      template = new Audio(src)
+      template.preload = 'auto'
+      audioCache.set(src, template)
+    }
+    const audio = template.cloneNode(true) as HTMLAudioElement
+    audio.volume = volume
+    audio.play().catch(() => {})
+  } catch { /* silent fail */ }
+}
+
+/** Button touch / hover — plays uploaded toque.mp3 */
+export function playTouchMP3() {
+  playMP3('/sounds/touch.mp3', 0.5)
+}
+
+/** Swap confirmed — plays uploaded Swap?.mp3 */
+export function playSwapConfirmMP3() {
+  playMP3('/sounds/swap-confirm.mp3', 0.7)
+}
+
+/** Order cancelled — plays uploaded Cancelar ordens.mp3 */
+export function playCancelOrderMP3() {
+  playMP3('/sounds/cancel-order.mp3', 0.7)
+}
+
+// ── Background Music Manager ─────────────────────────────
+let bgMusic: HTMLAudioElement | null = null
+let bgMusicEnabled = true
+
+export function startBackgroundMusic() {
+  if (bgMusic) return // already playing
+  try {
+    bgMusic = new Audio('/sounds/background.mp3')
+    bgMusic.loop = true
+    bgMusic.volume = 0.08 // very low background volume
+    bgMusic.play().catch(() => {
+      // Autoplay blocked — will retry on first user interaction
+      const resumeOnInteraction = () => {
+        if (bgMusic && bgMusicEnabled) {
+          bgMusic.play().catch(() => {})
+        }
+        document.removeEventListener('click', resumeOnInteraction)
+        document.removeEventListener('keydown', resumeOnInteraction)
+      }
+      document.addEventListener('click', resumeOnInteraction, { once: true })
+      document.addEventListener('keydown', resumeOnInteraction, { once: true })
+    })
+  } catch { /* silent fail */ }
+}
+
+export function stopBackgroundMusic() {
+  if (bgMusic) {
+    bgMusic.pause()
+    bgMusic.currentTime = 0
+    bgMusic = null
+  }
+}
+
+export function toggleBackgroundMusic(): boolean {
+  bgMusicEnabled = !bgMusicEnabled
+  if (bgMusicEnabled) {
+    startBackgroundMusic()
+  } else {
+    stopBackgroundMusic()
+  }
+  return bgMusicEnabled
+}
+
+export function isBackgroundMusicPlaying(): boolean {
+  return bgMusicEnabled && bgMusic !== null && !bgMusic.paused
+}
+
+// ── Waiting/Pending Sound (loops until stopped) ──────────
+let waitingAudio: HTMLAudioElement | null = null
+
+/** Start looping waiting sound — call stopWaitingSound() when done */
+export function startWaitingSound() {
+  stopWaitingSound() // stop any existing
+  try {
+    waitingAudio = new Audio('/sounds/waiting.mp3')
+    waitingAudio.loop = true
+    waitingAudio.volume = 0.5
+    waitingAudio.play().catch(() => {})
+  } catch { /* silent fail */ }
+}
+
+/** Stop the waiting sound loop */
+export function stopWaitingSound() {
+  if (waitingAudio) {
+    waitingAudio.pause()
+    waitingAudio.currentTime = 0
+    waitingAudio = null
+  }
+}
 
 function getCtx(): AudioContext {
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    audioCtx = new (window.AudioContext || (window as WebkitWindow).webkitAudioContext!)()
   }
   if (audioCtx.state === 'suspended') {
     audioCtx.resume()

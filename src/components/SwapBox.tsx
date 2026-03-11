@@ -9,7 +9,7 @@ import SwapButton from './SwapButton'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
-import { useSwap } from '@/hooks/useSwap'
+import { useSwap, type SwapStatus } from '@/hooks/useSwap'
 import { useApproval } from '@/hooks/useApproval'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
@@ -22,7 +22,7 @@ import { addToRouterWhitelist } from '@/lib/api'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META } from '@/lib/constants'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
-import { playSwapSuccess, playSwapInitiated, playApproval, playError, playQuoteReceived } from '@/lib/sounds'
+import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval, playError, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
@@ -69,10 +69,12 @@ export default function SwapBox() {
   }, [rawMeta, mevProtected])
 
   // Play subtle sound when a new quote arrives
+  // [BUGFIX] Use AbortController to cancel stale spender fetch on rapid source changes
   useEffect(() => {
     if (meta?.best.source) {
       playQuoteReceived()
-      fetch(`/api/spender?source=${meta.best.source}`)
+      const controller = new AbortController()
+      fetch(`/api/spender?source=${meta.best.source}`, { signal: controller.signal })
         .then(r => r.json())
         .then(data => {
           if (data.spender) {
@@ -80,6 +82,10 @@ export default function SwapBox() {
             addToRouterWhitelist(data.spender as `0x${string}`)
           }
         }).catch(() => {})
+      return () => controller.abort()
+    } else {
+      // [BUGFIX] Clear spender when MEV filter nullifies meta
+      setSpender(undefined)
     }
   }, [meta?.best.source])
 
@@ -117,11 +123,14 @@ export default function SwapBox() {
 
   // Unified status: use split swap status when split is active, else single swap
   const isSplitActive = useSplit && splitResult?.bestSplit.isSplit
-  const effectiveSwapStatus = isSplitActive ? (
-    splitSwapStatus === 'executing' ? 'swapping' as const :
-    splitSwapStatus === 'partial' ? 'error' as const :
-    splitSwapStatus as any
-  ) : swapStatus
+  // Map SplitSwapStatus → SwapStatus for unified UI handling
+  const splitStatusMap: Record<string, SwapStatus> = {
+    idle: 'idle', executing: 'swapping', success: 'success',
+    error: 'error', partial: 'error',
+  }
+  const effectiveSwapStatus: SwapStatus = isSplitActive
+    ? (splitStatusMap[splitSwapStatus] ?? 'idle')
+    : swapStatus
   const effectiveError = isSplitActive ? splitSwapError : swapError
 
   const { estimate: gasEstimateFn } = useEthGasCost()
@@ -141,7 +150,8 @@ export default function SwapBox() {
   // ── Track swap success: history + approvals ──
   useEffect(() => {
     if (swapStatus === 'success' && txHash && tokenIn && tokenOut && meta?.best) {
-      playSwapSuccess()
+      stopWaitingSound()
+      playSwapConfirmMP3()
       // Dismiss loading toast → fire fresh success with Etherscan link
       if (swapToastId.current) {
         dismiss(swapToastId.current)
@@ -199,7 +209,8 @@ export default function SwapBox() {
   // Play error sound + toast on swap failure
   useEffect(() => {
     if (swapStatus === 'error') {
-      playError()
+      stopWaitingSound()
+      playCancelOrderMP3()
       if (swapToastId.current) { dismiss(swapToastId.current) }
       toast({ type: 'error', title: 'Swap failed', description: swapError || 'Transaction was rejected or failed.' })
       swapToastId.current = null
@@ -209,13 +220,16 @@ export default function SwapBox() {
   // Split swap toasts
   useEffect(() => {
     if (splitSwapStatus === 'success') {
-      playSwapSuccess()
+      stopWaitingSound()
+      playSwapConfirmMP3()
       toast({ type: 'success', title: 'Split swap complete!', description: `All ${splitTotal} legs executed successfully.`, duration: 10000 })
     } else if (splitSwapStatus === 'partial') {
-      playError()
+      stopWaitingSound()
+      playCancelOrderMP3()
       toast({ type: 'warning', title: 'Split swap partially complete', description: splitSwapError || `${splitCompleted}/${splitTotal} legs succeeded.`, duration: 10000 })
     } else if (splitSwapStatus === 'error') {
-      playError()
+      stopWaitingSound()
+      playCancelOrderMP3()
       toast({ type: 'error', title: 'Split swap failed', description: splitSwapError || 'Transaction was rejected or failed.' })
     }
   }, [splitSwapStatus])
@@ -235,7 +249,10 @@ export default function SwapBox() {
   }, [quoteError])
 
   const hasAmount = !!amountIn && Number(amountIn) > 0
-  const hasSufficientBalance = !hasAmount || !balanceIn || !tokenIn || parseUnits(amountIn, tokenIn.decimals) <= balanceIn.value
+  // [BUGFIX] Wrap parseUnits in try/catch — malformed input (e.g. "1.2.3") would crash
+  const hasSufficientBalance = !hasAmount || !balanceIn || !tokenIn || (() => {
+    try { return parseUnits(amountIn, tokenIn.decimals) <= balanceIn.value } catch { return false }
+  })()
   const outputDisplay = meta?.best && tokenOut
     ? formatDisplay(Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)), 4)
     : '0.0'
@@ -273,8 +290,9 @@ export default function SwapBox() {
 
   const handleApproveAndSwap = useCallback(async () => {
     if (priceBlocked) return // hard block — never execute above deviation threshold
-    if (!approvalReady) { playApproval(); await approve(); return }
-    playSwapInitiated()
+    startWaitingSound()
+    if (!approvalReady) { await approve(); return }
+
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
     } else if (meta?.best.source) {
@@ -284,7 +302,7 @@ export default function SwapBox() {
 
   const handleSwap = useCallback(() => {
     if (priceBlocked) return // hard block
-    playSwapInitiated()
+    startWaitingSound()
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
     } else if (meta?.best.source) {

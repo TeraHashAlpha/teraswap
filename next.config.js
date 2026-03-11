@@ -18,8 +18,8 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              // Scripts: self + inline (Next.js requires it) + eval for dev
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              // Scripts: self + inline (Next.js requires it); unsafe-eval only in dev
+              `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}`,
               // Styles: self + inline (Tailwind/Next.js) + Google Fonts CSS
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               // Images: self + token icon CDNs + data URIs
@@ -27,7 +27,7 @@ const nextConfig = {
               // Fonts: self + Google Fonts + Fontshare CDN
               "font-src 'self' data: https://fonts.gstatic.com https://cdn.fontshare.com",
               // Connect: aggregator APIs + RPC + WalletConnect + CoW + Etherscan
-              "connect-src 'self' https://api.1inch.dev https://api.0x.org https://api.paraswap.io https://api.odos.xyz https://aggregator-api.kyberswap.com https://api.cow.fi https://open-api.openocean.finance https://api.sushi.com https://api-v3.balancer.fi https://eth.llamarpc.com https://*.infura.io https://*.alchemy.com wss://*.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://explorer-api.walletconnect.com https://rpc.walletconnect.com https://relay.walletconnect.com https://api.etherscan.io https://api.web3modal.org https://api.web3modal.com",
+              "connect-src 'self' https://api.1inch.dev https://api.0x.org https://api.paraswap.io https://api.odos.xyz https://aggregator-api.kyberswap.com https://api.cow.fi https://open-api.openocean.finance https://api.sushi.com https://api-v3.balancer.fi https://eth.llamarpc.com https://*.infura.io https://*.alchemy.com wss://*.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://explorer-api.walletconnect.com https://rpc.walletconnect.com https://relay.walletconnect.com https://api.etherscan.io https://api.web3modal.org https://api.web3modal.com https://*.supabase.co wss://*.supabase.co https://rpc.ankr.com https://ethereum-rpc.publicnode.com https://eth.merkle.io",
               // Frames: none (clickjacking protection)
               "frame-src 'none'",
               "frame-ancestors 'none'",

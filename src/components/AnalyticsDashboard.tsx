@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
-import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { AGGREGATOR_META, ETHERSCAN_TX, type AggregatorName } from '@/lib/constants'
 import type { DashboardData, PeriodMetrics } from '@/lib/analytics-types'
 
 // ── Helpers ──
@@ -120,7 +120,7 @@ function ActivityFeed({ trades }: { trades: DashboardData['recentTrades'] }) {
               <span>{sourceLabel(t.source)}</span>
               <span>{timeAgo(t.timestamp)}</span>
               {t.txHash && (
-                <a href={`https://etherscan.io/tx/${t.txHash}`} target="_blank" rel="noopener noreferrer"
+                <a href={`${ETHERSCAN_TX}${t.txHash}`} target="_blank" rel="noopener noreferrer"
                   className="text-cream-35 transition hover:text-cream" title="View on Etherscan">↗</a>
               )}
             </span>

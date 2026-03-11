@@ -6,10 +6,15 @@ node_modules/
 out/
 dist/
 
-# Environment (secrets)
+# Environment (secrets) — NEVER commit any .env file with real keys
+.env
 .env.local
+.env.local.*
 .env*.local
+.env.production
 .env.production.local
+.env.staging
+.env.executor
 
 # Build artifacts
 *.tsbuildinfo
@@ -34,3 +39,11 @@ yarn-error.log*
 # Scripts (local dev only)
 scripts/*.sh
 TeraSwap_OrderEngine_SecurityAudit.pdf
+
+# Order Engine deployment secrets
+.deployer-*.json
+.env.gelato
+.env.executor
+contracts/order-engine/deployment-*.json
+contracts/order-engine/executor/.env.executor
+contracts/order-engine/executor/node_modules/

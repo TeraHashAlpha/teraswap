@@ -52,12 +52,14 @@ function emit(event: DCAEvent) {
 // ══════════════════════════════════════════════════════════
 
 function persist() {
+  if (typeof window === 'undefined') return
   try {
     localStorage.setItem(DCA_STORAGE_KEY, JSON.stringify(positions))
   } catch { /* quota exceeded — silent */ }
 }
 
 export function loadFromStorage() {
+  if (typeof window === 'undefined') return
   try {
     const raw = localStorage.getItem(DCA_STORAGE_KEY)
     if (raw) {
@@ -519,7 +521,7 @@ async function triggerExecution(position: DCAPosition, execution: DCAExecution) 
         executionIndex: execution.index,
       })
 
-      const txHash = await signCowOrderFn({ orderParams: (swap as any).cowOrderParams })
+      const txHash = await signCowOrderFn({ orderParams: swap.cowOrderParams })
       execution.txHash = txHash
     } else if (swap.tx) {
       // Standard swap: send transaction

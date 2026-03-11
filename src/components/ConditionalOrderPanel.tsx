@@ -1,18 +1,25 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useAccount } from 'wagmi'
+import { useState, useEffect, useMemo } from 'react'
+import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useConditionalOrder } from '@/hooks/useConditionalOrder'
+import { useOrderEngine } from '@/hooks/useOrderEngine'
 import { getTokenPriceUSD } from '@/lib/price-monitor'
-import { fetchCurrentPrice } from '@/lib/limit-order-api'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
-import { LIMIT_EXPIRY_PRESETS } from '@/lib/limit-order-types'
-import type { ConditionalOrderConfig, ConditionalOrderType, ConditionalOrder } from '@/lib/conditional-order-types'
-import { playClick, playLimitPlaced, playTriggerAlert, playApproval, playError } from '@/lib/sounds'
+import {
+  OrderType,
+  PriceCondition,
+  EXPIRY_PRESETS,
+  getDefaultRouter,
+  getChainlinkFeeds,
+} from '@/lib/order-engine'
+import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
+import { playClick, playTouchMP3, playSwapConfirmMP3, playTriggerAlert, playCancelOrderMP3, playError, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
+import { useOrderNotifications } from '@/hooks/useOrderNotifications'
+import { ETHERSCAN_TX } from '@/lib/constants'
 import TokenSelector from './TokenSelector'
 
 // ── Stablecoin detection ─────────────────────────────────
@@ -23,29 +30,40 @@ function isStablecoin(token: Token): boolean {
   return STABLECOIN_SYMBOLS.has(token.symbol)
 }
 
+// ── Map token to Chainlink feed ──────────────────────────
+// Returns empty string if no feed found — callers must check before submitting.
+function findPriceFeed(token: Token, chainId: number): string {
+  const feeds = getChainlinkFeeds(chainId)
+  const key = `${token.symbol}/USD`
+  return feeds[key]?.address ?? ''
+}
+
+type ConditionalOrderType = 'stop_loss' | 'take_profit'
+
 // ══════════════════════════════════════════════════════════
 //  MAIN PANEL
 // ══════════════════════════════════════════════════════════
 export default function ConditionalOrderPanel() {
   const [tab, setTab] = useState<'create' | 'orders'>('create')
-  const { activeOrders, historyOrders, latestEvent, createOrder, cancelOrder, removeOrder } = useConditionalOrder()
+  const { stopLossOrders, latestEvent, isSubmitting, createOrder, cancelOrder, removeOrder } = useOrderEngine()
   const { address } = useAccount()
+  const chainId = useChainId()
 
   const { toast } = useToast()
+
+  // Browser push notifications (fires when tab is in background)
+  useOrderNotifications(latestEvent)
 
   // Sound effects + toasts
   useEffect(() => {
     if (!latestEvent) return
-    if (latestEvent.type === 'price_triggered') {
-      playTriggerAlert()
-      toast({ type: 'warning', title: 'Price trigger hit!', description: `Price reached $${latestEvent.price.toFixed(2)} — submitting order...`, duration: 6000 })
-    }
-    if (latestEvent.type === 'order_submitted') {
-      playLimitPlaced()
-      toast({ type: 'info', title: 'Order submitted', description: 'CoW solvers are working on your fill.' })
+    if (latestEvent.type === 'order_created') {
+      stopWaitingSound()
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'Order placed', description: 'Chainlink oracles are monitoring your trigger price. Your order will execute automatically.' })
     }
     if (latestEvent.type === 'order_filled') {
-      playApproval()
+      playSwapConfirmMP3()
       toast({ type: 'success', title: 'Order filled!', description: 'Your conditional order executed successfully.', txHash: latestEvent.txHash, duration: 10000 })
       if (address) {
         trackTrade({
@@ -55,17 +73,23 @@ export default function ConditionalOrderPanel() {
           tokenOut: '', tokenOutAddress: '',
           amountIn: '0', amountOut: '0',
           volumeUsd: 0,
-          source: 'cowswap', txHash: latestEvent.txHash || '',
+          source: 'teraswap_order_engine', txHash: latestEvent.txHash || '',
         })
       }
     }
     if (latestEvent.type === 'order_error') {
-      playError()
+      stopWaitingSound()
+      playCancelOrderMP3()
       toast({ type: 'error', title: 'Order failed', description: latestEvent.error || 'The conditional order could not execute.' })
     }
   }, [latestEvent, address])
 
-  const orderCount = activeOrders.length
+  const activeSLTP = stopLossOrders.filter(o =>
+    o.status === 'active' || o.status === 'executing' || o.status === 'signing'
+  )
+  const historySLTP = stopLossOrders.filter(o =>
+    o.status === 'filled' || o.status === 'expired' || o.status === 'cancelled' || o.status === 'error'
+  )
 
   return (
     <div className="w-full max-w-[calc(100vw-2rem)] sm:max-w-[460px]">
@@ -89,16 +113,16 @@ export default function ConditionalOrderPanel() {
               : 'text-cream-50 hover:text-cream'
           }`}
         >
-          Orders{orderCount > 0 && ` (${orderCount})`}
+          Orders{activeSLTP.length > 0 && ` (${activeSLTP.length})`}
         </button>
       </div>
 
       {tab === 'create' ? (
-        <CreateConditionalForm onSubmit={createOrder} />
+        <CreateConditionalForm onSubmit={createOrder} isSubmitting={isSubmitting} />
       ) : (
         <ConditionalOrdersList
-          active={activeOrders}
-          history={historyOrders}
+          active={activeSLTP}
+          history={historySLTP}
           onCancel={cancelOrder}
           onRemove={removeOrder}
         />
@@ -112,26 +136,24 @@ export default function ConditionalOrderPanel() {
 // ══════════════════════════════════════════════════════════
 function CreateConditionalForm({
   onSubmit,
+  isSubmitting,
 }: {
-  onSubmit: (config: ConditionalOrderConfig) => Promise<void>
+  onSubmit: (config: CreateOrderConfig) => Promise<void>
+  isSubmitting: boolean
 }) {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
+  const chainId = useChainId()
 
   const [orderType, setOrderType] = useState<ConditionalOrderType>('stop_loss')
   const [tokenIn, setTokenIn] = useState<Token>(DEFAULT_TOKENS[0])   // ETH
   const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
   const [amount, setAmount] = useState('')
   const [triggerPrice, setTriggerPrice] = useState('')
-  const [expiryIdx, setExpiryIdx] = useState(2)
-  const [partialFill, setPartialFill] = useState(true)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [expiryIdx, setExpiryIdx] = useState(3) // 30d default
 
   // Live USD price of tokenIn
   const [currentUsdPrice, setCurrentUsdPrice] = useState<number>(0)
   const [loadingPrice, setLoadingPrice] = useState(false)
-
-  // Market price in tokenOut per tokenIn (for limit order)
-  const [marketPrice, setMarketPrice] = useState<number>(0)
 
   // Fetch current USD price of tokenIn
   useEffect(() => {
@@ -140,38 +162,19 @@ function CreateConditionalForm({
     getTokenPriceUSD(tokenIn.address).then(p => {
       setCurrentUsdPrice(p)
       setLoadingPrice(false)
-    }).catch(() => setLoadingPrice(false))
+    }).catch(() => {
+      setCurrentUsdPrice(0)
+      setLoadingPrice(false)
+    })
   }, [tokenIn?.address])
 
-  // Fetch market price (tokenOut per tokenIn)
-  useEffect(() => {
-    if (!tokenIn || !tokenOut) return
-    const fetchMkt = async () => {
-      try {
-        const oneUnit = parseUnits('1', tokenIn.decimals).toString()
-        const price = await fetchCurrentPrice(
-          tokenIn.address,
-          tokenOut.address,
-          oneUnit,
-          tokenIn.decimals,
-          tokenOut.decimals,
-        )
-        setMarketPrice(price)
-      } catch { /* silent */ }
-    }
-    fetchMkt()
-  }, [tokenIn?.address, tokenOut?.address])
-
   // Auto-fill trigger price based on type
+  const DEFAULT_SL_FACTOR = 0.9  // 10% below current
+  const DEFAULT_TP_FACTOR = 1.2  // 20% above current
   useEffect(() => {
     if (currentUsdPrice > 0 && !triggerPrice) {
-      if (orderType === 'stop_loss') {
-        // Default SL: 10% below current
-        setTriggerPrice((currentUsdPrice * 0.9).toFixed(2))
-      } else {
-        // Default TP: 20% above current
-        setTriggerPrice((currentUsdPrice * 1.2).toFixed(2))
-      }
+      const factor = orderType === 'stop_loss' ? DEFAULT_SL_FACTOR : DEFAULT_TP_FACTOR
+      setTriggerPrice((currentUsdPrice * factor).toFixed(2))
     }
   }, [currentUsdPrice, orderType])
 
@@ -182,38 +185,57 @@ function CreateConditionalForm({
     return ((trigger - currentUsdPrice) / currentUsdPrice) * 100
   }, [triggerPrice, currentUsdPrice])
 
-  // Limit price (slightly worse than market to ensure fill)
-  const limitPrice = useMemo(() => {
-    if (marketPrice <= 0) return 0
-    // For SL: set limit price 2% below market (accept slightly worse fill)
-    // For TP: set limit price at market (or slightly above)
-    if (orderType === 'stop_loss') return marketPrice * 0.98
-    return marketPrice * 1.0
-  }, [marketPrice, orderType])
-
   const handleSubmit = async () => {
-    if (!amount || !triggerPrice || !isConnected || limitPrice <= 0) return
-    playClick()
-    setIsSubmitting(true)
+    if (!amount || !triggerPrice || !isConnected) return
+    startWaitingSound()
 
+    let amountIn: string
     try {
-      const rawAmount = parseUnits(amount, tokenIn.decimals).toString()
-      const config: ConditionalOrderConfig = {
-        type: orderType,
-        tokenIn,
-        tokenOut,
-        sellAmount: rawAmount,
-        triggerPrice: parseFloat(triggerPrice),
-        triggerDirection: orderType === 'stop_loss' ? 'below' : 'above',
-        limitPrice,
-        expirySeconds: LIMIT_EXPIRY_PRESETS[expiryIdx].seconds,
-        partiallyFillable: partialFill,
-      }
-      await onSubmit(config)
-      setAmount('')
-      setTriggerPrice('')
-    } catch { /* handled in hook */ }
-    setIsSubmitting(false)
+      amountIn = parseUnits(amount, tokenIn.decimals).toString()
+    } catch {
+      return // Invalid input (e.g. too many decimals)
+    }
+    const triggerPriceFloat = parseFloat(triggerPrice)
+
+    // Target price in Chainlink 8-decimal format
+    const targetPrice8dec = Math.round(triggerPriceFloat * 1e8).toString()
+
+    // Condition: SL → triggers when price drops BELOW target, TP → triggers when ABOVE
+    const condition = orderType === 'stop_loss'
+      ? PriceCondition.BELOW
+      : PriceCondition.ABOVE
+
+    // Min amount out: for SL accept 5% slippage (urgent exit), for TP accept 2%
+    // [BUGFIX] Use BigInt arithmetic to avoid precision loss beyond 2^53
+    const slippageBps = orderType === 'stop_loss' ? 95n : 98n // 95% or 98% of expected
+    const amountInBn = BigInt(amountIn)
+    const priceBn = BigInt(Math.round(triggerPriceFloat * 1e18))
+    const expectedOutRaw = amountInBn * priceBn / BigInt(1e18)
+    // Adjust for decimal difference between tokenIn and tokenOut
+    const decDiff = tokenOut.decimals - tokenIn.decimals
+    const expectedOutAdjusted = decDiff > 0
+      ? expectedOutRaw * BigInt(10 ** decDiff)
+      : decDiff < 0
+        ? expectedOutRaw / BigInt(10 ** Math.abs(decDiff))
+        : expectedOutRaw
+    const minAmountOut = (expectedOutAdjusted * slippageBps / 100n).toString()
+
+    const config: CreateOrderConfig = {
+      tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
+      tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
+      amountIn,
+      minAmountOut,
+      orderType: OrderType.STOP_LOSS, // Contract uses STOP_LOSS for both SL and TP
+      condition,
+      targetPrice: targetPrice8dec,
+      priceFeed: findPriceFeed(tokenIn, chainId), // Monitor the sell token price
+      expirySeconds: EXPIRY_PRESETS[expiryIdx].seconds,
+      router: getDefaultRouter(chainId).address,
+    }
+
+    await onSubmit(config)
+    setAmount('')
+    setTriggerPrice('')
   }
 
   const handleTokenInSelect = (token: Token) => {
@@ -221,13 +243,11 @@ function CreateConditionalForm({
     setTokenIn(token)
     setTriggerPrice('')
     setCurrentUsdPrice(0)
-    setMarketPrice(0)
   }
 
   const handleTokenOutSelect = (token: Token) => {
     if (token.address === tokenIn.address) setTokenIn(tokenOut)
     setTokenOut(token)
-    setMarketPrice(0)
   }
 
   const handleSwapTokens = () => {
@@ -238,10 +258,8 @@ function CreateConditionalForm({
     setTokenOut(prevIn)
     setTriggerPrice('')
     setCurrentUsdPrice(0)
-    setMarketPrice(0)
   }
 
-  // Quick percentage buttons for trigger price
   const applyPercentToTrigger = (percent: number) => {
     if (currentUsdPrice <= 0) return
     playClick()
@@ -312,7 +330,12 @@ function CreateConditionalForm({
             inputMode="decimal"
             placeholder="0.00"
             value={amount}
-            onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            // [BUGFIX] Prevent multiple decimal points (old regex /[^0-9.]/g allowed "1.2.3")
+            onChange={e => {
+              const v = e.target.value.replace(/[^0-9.]/g, '')
+              const parts = v.split('.')
+              setAmount(parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : v)
+            }}
             className="flex-1 bg-transparent text-right text-lg font-semibold text-cream outline-none placeholder:text-cream-20"
           />
         </div>
@@ -335,8 +358,8 @@ function CreateConditionalForm({
         <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-primary px-3 py-2.5">
           <TokenSelector selected={tokenOut} onSelect={handleTokenOutSelect} disabledAddress={tokenIn?.address} />
           <span className="flex-1 text-right text-sm text-cream-35">
-            {marketPrice > 0 && amount
-              ? `≈ ${(parseFloat(amount) * marketPrice).toFixed(isStablecoin(tokenOut) ? 2 : 6)}`
+            {currentUsdPrice > 0 && amount
+              ? `≈ ${(parseFloat(amount) * parseFloat(triggerPrice || '0')).toFixed(isStablecoin(tokenOut) ? 2 : 6)}`
               : 'Set trigger price below'}
           </span>
         </div>
@@ -406,16 +429,16 @@ function CreateConditionalForm({
         )}
       </div>
 
-      {/* Expiry (after trigger) */}
+      {/* Expiry */}
       <div className="mb-3">
-        <label className="mb-1 block text-xs text-cream-50">Order expires (after trigger)</label>
+        <label className="mb-1 block text-xs text-cream-50">Order expires</label>
         <div className="flex gap-1.5">
-          {LIMIT_EXPIRY_PRESETS.slice(0, 3).map((preset, i) => (
+          {EXPIRY_PRESETS.slice(1, 5).map((preset, i) => (
             <button
               key={preset.seconds}
-              onClick={() => { setExpiryIdx(i); playClick() }}
+              onClick={() => { setExpiryIdx(i + 1); playClick() }}
               className={`flex-1 rounded-lg py-2 text-[11px] font-medium transition ${
-                expiryIdx === i
+                expiryIdx === i + 1
                   ? 'border border-cream bg-cream text-black'
                   : 'border border-cream-08 bg-surface-tertiary text-cream-65 hover:border-cream-35'
               }`}
@@ -433,7 +456,8 @@ function CreateConditionalForm({
         </div>
       ) : (
         <button
-          onClick={handleSubmit}
+          // [BUGFIX] await async handleSubmit to catch errors properly
+          onClick={async () => { playTouchMP3(); await handleSubmit() }}
           disabled={isSubmitting || !amount || !triggerPrice}
           className={`w-full rounded-xl py-3 text-sm font-bold transition-all ${
             isSubmitting || !amount || !triggerPrice
@@ -444,7 +468,7 @@ function CreateConditionalForm({
           }`}
         >
           {isSubmitting
-            ? 'Creating...'
+            ? 'Signing order...'
             : orderType === 'stop_loss'
               ? `Set Stop Loss at $${triggerPrice || '—'}`
               : `Set Take Profit at $${triggerPrice || '—'}`}
@@ -452,10 +476,9 @@ function CreateConditionalForm({
       )}
 
       {/* Info badge */}
-      <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2">
-        <span className="text-[10px] text-cream-35">
-          Price monitored via Chainlink oracles. When triggered, a CoW Protocol limit order is
-          auto-submitted for MEV-protected execution.
+      <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2">
+        <span className="text-[10px] text-cream-50">
+          <span className="font-semibold text-cream-gold">Autonomous execution</span> — Chainlink oracles monitor price on-chain. Your order executes automatically when target is hit. Sign once, no browser needed.
         </span>
       </div>
     </div>
@@ -471,8 +494,8 @@ function ConditionalOrdersList({
   onCancel,
   onRemove,
 }: {
-  active: ConditionalOrder[]
-  history: ConditionalOrder[]
+  active: AutonomousOrder[]
+  history: AutonomousOrder[]
   onCancel: (id: string) => void
   onRemove: (id: string) => void
 }) {
@@ -515,45 +538,49 @@ function ConditionalOrderCard({
   onCancel,
   onRemove,
 }: {
-  order: ConditionalOrder
+  order: AutonomousOrder
   onCancel?: (id: string) => void
   onRemove?: (id: string) => void
 }) {
-  const isSL = order.config.type === 'stop_loss'
+  // Determine if SL or TP based on condition
+  const isSL = order.order?.condition === PriceCondition.BELOW
   const typeColor = isSL ? 'text-red-400' : 'text-green-400'
   const typeLabel = isSL ? 'Stop Loss' : 'Take Profit'
 
   const statusColors: Record<string, string> = {
-    monitoring: 'text-blue-400',
-    triggered: 'text-yellow-400',
-    submitted: 'text-cyan-400',
+    signing: 'text-yellow-400',
+    active: 'text-blue-400',
+    executing: 'text-cyan-400',
     filled: 'text-green-400',
-    partiallyFilled: 'text-cyan-400',
     expired: 'text-cream-35',
     cancelled: 'text-cream-35',
     error: 'text-red-400',
   }
 
   const statusLabels: Record<string, string> = {
-    monitoring: 'Watching...',
-    triggered: 'Triggered!',
-    submitted: 'Order placed',
+    signing: 'Signing...',
+    active: 'Watching...',
+    executing: 'Executing...',
     filled: 'Filled',
-    partiallyFilled: `Filled ${order.filledPercent}%`,
     expired: 'Expired',
     cancelled: 'Cancelled',
     error: 'Failed',
   }
 
-  const sellFormatted = formatUnits(
-    BigInt(order.config.sellAmount),
-    order.config.tokenIn.decimals,
-  )
+  const amountIn = order.order?.amountIn
+    ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
+    : '—'
 
-  // Distance from trigger
-  const distancePercent = order.currentPrice > 0 && order.triggerPrice > 0
-    ? ((order.currentPrice - order.triggerPrice) / order.currentPrice) * 100
-    : null
+  // Target price from 8-decimal Chainlink format
+  const targetPriceUsd = order.order?.targetPrice
+    ? Number(BigInt(order.order.targetPrice.toString())) / 1e8
+    : 0
+
+  const isActive = order.status === 'active' || order.status === 'executing' || order.status === 'signing'
+
+  const timeLeft = order.expiresAt - Date.now()
+  const daysLeft = Math.max(0, Math.floor(timeLeft / (1000 * 60 * 60 * 24)))
+  const hoursLeft = Math.max(0, Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)))
 
   return (
     <div className="rounded-xl border border-cream-08 bg-surface-secondary p-3">
@@ -561,58 +588,24 @@ function ConditionalOrderCard({
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`text-[11px] font-bold ${typeColor}`}>{typeLabel}</span>
-          <img src={order.config.tokenIn.logoURI} alt="" className="h-4 w-4 rounded-full" />
           <span className="text-sm font-medium text-cream">
-            {Number(sellFormatted).toFixed(4)} {order.config.tokenIn.symbol}
+            {Number(amountIn).toFixed(4)} {order.tokenInSymbol}
           </span>
           <span className="text-cream-35">→</span>
-          <img src={order.config.tokenOut.logoURI} alt="" className="h-4 w-4 rounded-full" />
-          <span className="text-sm text-cream-50">{order.config.tokenOut.symbol}</span>
+          <span className="text-sm text-cream-50">{order.tokenOutSymbol}</span>
         </div>
         <span className={`text-[11px] font-semibold ${statusColors[order.status] || 'text-cream-50'}`}>
           {statusLabels[order.status] || order.status}
         </span>
       </div>
 
-      {/* Prices */}
+      {/* Trigger price + expiry */}
       <div className="mb-2 flex items-center justify-between text-[11px] text-cream-50">
-        <span>Trigger: ${order.triggerPrice.toFixed(2)}</span>
-        {order.status === 'monitoring' && order.currentPrice > 0 && (
-          <span>Now: ${order.currentPrice.toFixed(2)}</span>
+        <span>Trigger: ${targetPriceUsd.toFixed(2)}</span>
+        {isActive && timeLeft > 0 && (
+          <span>{daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h`} left</span>
         )}
       </div>
-
-      {/* Distance from trigger (for monitoring) */}
-      {order.status === 'monitoring' && distancePercent !== null && (
-        <div className="mb-2">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="text-cream-35">Distance to trigger</span>
-            <span className={Math.abs(distancePercent) < 3 ? 'text-yellow-400' : 'text-cream-50'}>
-              {Math.abs(distancePercent).toFixed(2)}%
-            </span>
-          </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-tertiary">
-            <div
-              className={`h-full rounded-full transition-all ${
-                Math.abs(distancePercent) < 3
-                  ? 'bg-yellow-400'
-                  : isSL ? 'bg-red-400/50' : 'bg-green-400/50'
-              }`}
-              style={{ width: `${Math.min(100, 100 - Math.abs(distancePercent))}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Fill progress */}
-      {(order.status === 'submitted' || order.status === 'partiallyFilled') && order.filledPercent > 0 && (
-        <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-tertiary">
-          <div
-            className="h-full rounded-full bg-cream-gold transition-all"
-            style={{ width: `${order.filledPercent}%` }}
-          />
-        </div>
-      )}
 
       {/* Error */}
       {order.error && (
@@ -622,7 +615,7 @@ function ConditionalOrderCard({
       {/* Tx hash */}
       {order.txHash && (
         <a
-          href={`https://etherscan.io/tx/${order.txHash}`}
+          href={`${ETHERSCAN_TX}${order.txHash}`}
           target="_blank"
           rel="noopener noreferrer"
           className="mb-2 block text-[11px] text-cream-gold hover:underline"
@@ -633,7 +626,7 @@ function ConditionalOrderCard({
 
       {/* Actions */}
       <div className="flex gap-2">
-        {onCancel && (order.status === 'monitoring' || order.status === 'submitted') && (
+        {onCancel && isActive && (
           <button
             onClick={() => { onCancel(order.id); playClick() }}
             className="rounded-lg border border-cream-08 px-3 py-1.5 text-[11px] text-cream-50 transition hover:border-red-400 hover:text-red-400"
@@ -641,7 +634,7 @@ function ConditionalOrderCard({
             Cancel
           </button>
         )}
-        {onRemove && (order.status === 'filled' || order.status === 'expired' || order.status === 'cancelled' || order.status === 'error') && (
+        {onRemove && !isActive && (
           <button
             onClick={() => { onRemove(order.id); playClick() }}
             className="rounded-lg border border-cream-08 px-3 py-1.5 text-[11px] text-cream-50 transition hover:border-cream-35 hover:text-cream"

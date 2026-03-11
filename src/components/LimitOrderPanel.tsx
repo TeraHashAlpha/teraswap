@@ -1,16 +1,25 @@
 'use client'
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useLimitOrder } from '@/hooks/useLimitOrder'
+import { useOrderEngine } from '@/hooks/useOrderEngine'
 import { fetchCurrentPrice } from '@/lib/limit-order-api'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
-import { LIMIT_EXPIRY_PRESETS, type LimitOrderConfig } from '@/lib/limit-order-types'
-import { playClick, playLimitPlaced, playApproval, playError } from '@/lib/sounds'
+import {
+  OrderType,
+  PriceCondition,
+  EXPIRY_PRESETS,
+  getDefaultRouter,
+  getChainlinkFeeds,
+} from '@/lib/order-engine'
+import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
+import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, playError, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
+import { useOrderNotifications } from '@/hooks/useOrderNotifications'
+import { ETHERSCAN_TX } from '@/lib/constants'
 import TokenSelector from './TokenSelector'
 
 // ── Stablecoin detection ─────────────────────────────────
@@ -21,7 +30,15 @@ function isStablecoin(token: Token): boolean {
   return STABLECOIN_SYMBOLS.has(token.symbol)
 }
 
-// Percentage preset buttons for quick price adjustment
+// ── Map token to Chainlink feed ──────────────────────────
+// Returns empty string if no feed found — callers must check before submitting.
+function findPriceFeed(token: Token, chainId: number): string {
+  const feeds = getChainlinkFeeds(chainId)
+  const key = `${token.symbol}/USD`
+  return feeds[key]?.address ?? ''
+}
+
+// Percentage preset buttons
 const PRICE_PERCENT_PRESETS = [
   { label: '-10%', value: -10 },
   { label: '-5%', value: -5 },
@@ -34,20 +51,25 @@ const PRICE_PERCENT_PRESETS = [
 // ══════════════════════════════════════════════════════════
 export default function LimitOrderPanel() {
   const [tab, setTab] = useState<'create' | 'orders'>('create')
-  const { activeOrders, historyOrders, latestEvent, isSubmitting, createOrder, cancelOrder, removeOrder } = useLimitOrder()
+  const { limitOrders, latestEvent, isSubmitting, createOrder, cancelOrder, cancelAllOrders, removeOrder } = useOrderEngine()
   const { address } = useAccount()
+  const chainId = useChainId()
 
   const { toast } = useToast()
+
+  // Browser push notifications (fires when tab is in background)
+  useOrderNotifications(latestEvent)
 
   // Sound effects + toasts on events
   useEffect(() => {
     if (!latestEvent) return
-    if (latestEvent.type === 'order_signed') {
-      playLimitPlaced()
-      toast({ type: 'success', title: 'Limit order placed', description: 'Your order is live — CoW solvers will compete to fill it.' })
+    if (latestEvent.type === 'order_created') {
+      stopWaitingSound()
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'Limit order placed', description: 'Your order is live — it will execute automatically when your target price is reached.' })
     }
     if (latestEvent.type === 'order_filled') {
-      playApproval()
+      playSwapConfirmMP3()
       toast({ type: 'success', title: 'Limit order filled!', description: 'Your limit order has been executed.', txHash: latestEvent.txHash, duration: 10000 })
       if (address) {
         trackTrade({
@@ -57,17 +79,27 @@ export default function LimitOrderPanel() {
           tokenOut: '', tokenOutAddress: '',
           amountIn: '0', amountOut: '0',
           volumeUsd: 0,
-          source: 'cowswap', txHash: latestEvent.txHash || '',
+          source: 'teraswap_order_engine', txHash: latestEvent.txHash || '',
         })
       }
     }
+    if (latestEvent.type === 'order_cancelled') {
+      playCancelOrderMP3()
+      toast({ type: 'success', title: 'Limit order cancelled', description: 'Your order has been cancelled on-chain.' })
+    }
     if (latestEvent.type === 'order_error') {
-      playError()
+      stopWaitingSound()
+      playCancelOrderMP3()
       toast({ type: 'error', title: 'Limit order failed', description: latestEvent.error || 'Order could not be submitted.' })
     }
   }, [latestEvent, address])
 
-  const orderCount = activeOrders.length
+  const activeLimit = limitOrders.filter(o =>
+    o.status === 'active' || o.status === 'executing' || o.status === 'signing'
+  )
+  const historyLimit = limitOrders.filter(o =>
+    o.status === 'filled' || o.status === 'expired' || o.status === 'cancelled' || o.status === 'error'
+  )
 
   return (
     <div className="w-full max-w-[calc(100vw-2rem)] sm:max-w-[460px]">
@@ -91,7 +123,7 @@ export default function LimitOrderPanel() {
               : 'text-cream-50 hover:text-cream'
           }`}
         >
-          Orders{orderCount > 0 && ` (${orderCount})`}
+          Orders{activeLimit.length > 0 && ` (${activeLimit.length})`}
         </button>
       </div>
 
@@ -99,9 +131,10 @@ export default function LimitOrderPanel() {
         <CreateLimitForm onSubmit={createOrder} isSubmitting={isSubmitting} />
       ) : (
         <OrdersList
-          active={activeOrders}
-          history={historyOrders}
+          active={activeLimit}
+          history={historyLimit}
           onCancel={cancelOrder}
+          onCancelAll={cancelAllOrders}
           onRemove={removeOrder}
         />
       )}
@@ -116,43 +149,36 @@ function CreateLimitForm({
   onSubmit,
   isSubmitting,
 }: {
-  onSubmit: (config: LimitOrderConfig) => Promise<void>
+  onSubmit: (config: CreateOrderConfig) => Promise<void>
   isSubmitting: boolean
 }) {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
+  const chainId = useChainId()
 
   const [tokenIn, setTokenIn] = useState<Token>(DEFAULT_TOKENS[0])   // ETH
   const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
   const [amount, setAmount] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(2) // 7 days default
-  const [partialFill, setPartialFill] = useState(true)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // ── Price state ──────────────────────────────────────────
-  // Internal targetPrice is ALWAYS in "tokenOut per tokenIn" (what CoW needs)
   const [targetPrice, setTargetPrice] = useState('')
-  // Display price input is what the user sees/types (may be inverted)
   const [displayPriceInput, setDisplayPriceInput] = useState('')
   const [marketPrice, setMarketPrice] = useState<number>(0)
   const [loadingPrice, setLoadingPrice] = useState(false)
 
-  // Display price can be inverted for readability
-  // "inverted" means we show "1 tokenOut = ? tokenIn" instead of "1 tokenIn = ? tokenOut"
   const [priceInverted, setPriceInverted] = useState(false)
 
-  // Auto-detect: if selling a stablecoin to buy a non-stablecoin, invert by default
-  // so user sees "1 ETH = X USDC" instead of "1 USDC = 0.000X ETH"
+  // Auto-detect: if selling stablecoin for crypto, invert
   useEffect(() => {
     const sellIsStable = isStablecoin(tokenIn)
     const buyIsStable = isStablecoin(tokenOut)
     setPriceInverted(sellIsStable && !buyIsStable)
   }, [tokenIn?.address, tokenOut?.address])
 
-  // ── Display price helpers ─────────────────────────────────
   const baseToken = priceInverted ? tokenOut : tokenIn
   const quoteToken = priceInverted ? tokenIn : tokenOut
 
-  // Convert between internal (tokenOut/tokenIn) and display price
   const internalToDisplay = useCallback((internal: number): number => {
     if (!priceInverted || internal <= 0) return internal
     return 1 / internal
@@ -182,7 +208,6 @@ function CreateLimitForm({
           tokenOut.decimals,
         )
         setMarketPrice(price)
-        // Pre-fill target price if empty
         if (!targetPrice && price > 0) {
           setTargetPrice(formatPrice(price, tokenOut))
           setDisplayPriceInput(formatPrice(internalToDisplay(price), priceInverted ? tokenIn : tokenOut))
@@ -193,7 +218,6 @@ function CreateLimitForm({
     fetchPrice()
   }, [tokenIn?.address, tokenOut?.address])
 
-  // Sync display input when toggling price direction
   useEffect(() => {
     const internal = parseFloat(targetPrice)
     if (!isNaN(internal) && internal > 0) {
@@ -202,27 +226,21 @@ function CreateLimitForm({
     }
   }, [priceInverted])
 
-  // ── Display price input handler ──────────────────────────
   const handleDisplayPriceChange = (rawInput: string) => {
     setDisplayPriceInput(rawInput)
-    if (!rawInput) {
-      setTargetPrice('')
-      return
-    }
+    if (!rawInput) { setTargetPrice(''); return }
     const dp = parseFloat(rawInput)
     if (isNaN(dp) || dp <= 0) return
     const internal = displayToInternal(dp)
     setTargetPrice(internal.toString())
   }
 
-  // Set internal price and sync display
   const setInternalPrice = useCallback((internal: number) => {
     setTargetPrice(formatPrice(internal, tokenOut))
     const dp = internalToDisplay(internal)
     setDisplayPriceInput(formatPrice(dp, quoteToken))
   }, [tokenOut, quoteToken, internalToDisplay])
 
-  // ── Percentage adjustment ────────────────────────────────
   const applyPercentAdjust = (percent: number) => {
     if (marketPrice <= 0) return
     playClick()
@@ -230,25 +248,31 @@ function CreateLimitForm({
     setInternalPrice(adjusted)
   }
 
-  // ── Toggle price direction ───────────────────────────────
   const togglePriceDirection = () => {
     setPriceInverted(prev => !prev)
     playClick()
   }
 
-  // Compute buy amount preview
   const buyPreview = useMemo(() => {
     if (!amount || !targetPrice) return ''
     try {
       const sellRaw = parseUnits(amount, tokenIn.decimals)
       const price = parseFloat(targetPrice)
       if (price <= 0) return ''
-      const buyRaw = Number(sellRaw) * price / (10 ** tokenIn.decimals)
-      return buyRaw.toFixed(tokenOut.decimals <= 6 ? 2 : 6)
+      // [BUGFIX] Use BigInt arithmetic to avoid precision loss for large amounts
+      // (Number(sellRaw) overflows past 2^53)
+      const priceBn = BigInt(Math.round(price * 1e18))
+      const expectedRaw = sellRaw * priceBn / BigInt(1e18)
+      const decDiff = tokenOut.decimals - tokenIn.decimals
+      const adjusted = decDiff > 0
+        ? expectedRaw * BigInt(10 ** decDiff)
+        : decDiff < 0
+          ? expectedRaw / BigInt(10 ** Math.abs(decDiff))
+          : expectedRaw
+      return Number(formatUnits(adjusted, tokenOut.decimals)).toFixed(tokenOut.decimals <= 6 ? 2 : 6)
     } catch { return '' }
   }, [amount, targetPrice, tokenIn, tokenOut])
 
-  // Price difference from market (always in internal terms)
   const priceDiffPercent = useMemo(() => {
     if (!targetPrice || !marketPrice) return null
     const target = parseFloat(targetPrice)
@@ -256,16 +280,13 @@ function CreateLimitForm({
     return ((target - marketPrice) / marketPrice) * 100
   }, [targetPrice, marketPrice])
 
-  // Contextual label: selling stablecoin for crypto = "Buy below" intent
   const orderIntent = useMemo(() => {
     const sellIsStable = isStablecoin(tokenIn)
     const buyIsStable = isStablecoin(tokenOut)
     if (sellIsStable && !buyIsStable) {
-      // "Buy ETH with USDC" — user wants to buy below market
       return { label: 'Buy below', hint: `Buy ${tokenOut.symbol} when price drops` }
     }
     if (!sellIsStable && buyIsStable) {
-      // "Sell ETH for USDC" — user wants to sell above market (take profit)
       return { label: 'Take profit', hint: `Sell ${tokenIn.symbol} when price rises` }
     }
     return null
@@ -273,19 +294,56 @@ function CreateLimitForm({
 
   const handleSubmit = async () => {
     if (!amount || !targetPrice || !isConnected) return
-    playClick()
+    startWaitingSound()
 
-    const rawAmount = parseUnits(amount, tokenIn.decimals).toString()
-    const config: LimitOrderConfig = {
-      tokenIn,
-      tokenOut,
-      sellAmount: rawAmount,
-      targetPrice: parseFloat(targetPrice), // always internal (tokenOut per tokenIn)
-      kind: 'sell',
-      expirySeconds: LIMIT_EXPIRY_PRESETS[expiryIdx].seconds,
-      partiallyFillable: partialFill,
-      slippage: 0,
+    let amountIn: string
+    try {
+      amountIn = parseUnits(amount, tokenIn.decimals).toString()
+    } catch {
+      return // Invalid input (e.g. too many decimals)
     }
+    // Convert target price to Chainlink 8-decimal format
+    const targetPriceFloat = parseFloat(targetPrice)
+    // For limit: if selling stablecoin to buy crypto → condition BELOW (buy when price drops)
+    // If selling crypto for stablecoin → condition ABOVE (sell when price rises)
+    const sellIsStable = isStablecoin(tokenIn)
+    const condition = sellIsStable ? PriceCondition.BELOW : PriceCondition.ABOVE
+
+    // Target price in Chainlink 8-decimal format (USD price)
+    // We use the display price (USD) for the Chainlink feed
+    const usdPrice = displayMarketPrice > 0
+      ? (targetPriceFloat / marketPrice) * displayMarketPrice
+      : targetPriceFloat
+    const targetPrice8dec = Math.round(usdPrice * 1e8).toString()
+
+    // Min amount out (with 2% slippage from expected)
+    // [BUGFIX] Use BigInt arithmetic to avoid precision loss beyond 2^53
+    const amountInBn = BigInt(amountIn)
+    const priceBn = BigInt(Math.round(targetPriceFloat * 1e18))
+    const expectedOutRaw = amountInBn * priceBn / BigInt(1e18)
+    // Adjust for decimal difference between tokenIn and tokenOut
+    const decDiff = tokenOut.decimals - tokenIn.decimals
+    const expectedOutAdjusted = decDiff > 0
+      ? expectedOutRaw * BigInt(10 ** decDiff)
+      : decDiff < 0
+        ? expectedOutRaw / BigInt(10 ** Math.abs(decDiff))
+        : expectedOutRaw
+    // Apply 2% slippage: multiply by 98, divide by 100
+    const minAmountOut = (expectedOutAdjusted * 98n / 100n).toString()
+
+    const config: CreateOrderConfig = {
+      tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
+      tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
+      amountIn,
+      minAmountOut,
+      orderType: OrderType.LIMIT,
+      condition,
+      targetPrice: targetPrice8dec,
+      priceFeed: findPriceFeed(sellIsStable ? tokenOut : tokenIn, chainId),
+      expirySeconds: EXPIRY_PRESETS[expiryIdx].seconds,
+      router: getDefaultRouter(chainId).address,
+    }
+
     await onSubmit(config)
     setAmount('')
   }
@@ -308,7 +366,6 @@ function CreateLimitForm({
     clearPrice()
   }
 
-  // Swap sell ↔ buy tokens
   const handleSwapTokens = () => {
     playClick()
     const prevIn = tokenIn
@@ -318,12 +375,8 @@ function CreateLimitForm({
     clearPrice()
   }
 
-  // Use market price button
   const setMarketAsTarget = () => {
-    if (marketPrice > 0) {
-      setInternalPrice(marketPrice)
-      playClick()
-    }
+    if (marketPrice > 0) { setInternalPrice(marketPrice); playClick() }
   }
 
   return (
@@ -346,7 +399,13 @@ function CreateLimitForm({
             inputMode="decimal"
             placeholder="0.00"
             value={amount}
-            onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            // [BUGFIX] Prevent multiple decimal points (old regex /[^0-9.]/g allowed "1.2.3")
+            onChange={e => {
+              const v = e.target.value.replace(/[^0-9.]/g, '')
+              // Only allow one decimal point
+              const parts = v.split('.')
+              setAmount(parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : v)
+            }}
             className="flex-1 bg-transparent text-right text-lg font-semibold text-cream outline-none placeholder:text-cream-20"
           />
         </div>
@@ -436,7 +495,7 @@ function CreateLimitForm({
       <div className="mb-3">
         <label className="mb-1 block text-xs text-cream-50">Expires in</label>
         <div className="flex gap-1.5">
-          {LIMIT_EXPIRY_PRESETS.map((preset, i) => (
+          {EXPIRY_PRESETS.slice(0, 4).map((preset, i) => (
             <button
               key={preset.seconds}
               onClick={() => { setExpiryIdx(i); playClick() }}
@@ -452,31 +511,6 @@ function CreateLimitForm({
         </div>
       </div>
 
-      {/* Advanced toggle */}
-      <button
-        onClick={() => setShowAdvanced(!showAdvanced)}
-        className="mb-2 text-[11px] text-cream-35 hover:text-cream"
-      >
-        {showAdvanced ? '▾ Hide advanced' : '▸ Advanced options'}
-      </button>
-
-      {showAdvanced && (
-        <div className="mb-3 rounded-lg border border-cream-08 bg-surface-tertiary p-3">
-          <label className="flex items-center gap-2 text-xs text-cream-65">
-            <input
-              type="checkbox"
-              checked={partialFill}
-              onChange={(e) => setPartialFill(e.target.checked)}
-              className="accent-cream-gold"
-            />
-            Allow partial fills
-          </label>
-          <p className="mt-1 text-[10px] text-cream-35">
-            If enabled, the order can be filled across multiple solver batches.
-          </p>
-        </div>
-      )}
-
       {/* Submit */}
       {!isConnected ? (
         <div className="flex justify-center">
@@ -484,7 +518,8 @@ function CreateLimitForm({
         </div>
       ) : (
         <button
-          onClick={handleSubmit}
+          // [BUGFIX] await async handleSubmit to catch errors properly
+          onClick={async () => { playTouchMP3(); await handleSubmit() }}
           disabled={isSubmitting || !amount || !targetPrice}
           className={`w-full rounded-xl py-3 text-sm font-bold transition-all ${
             isSubmitting || !amount || !targetPrice
@@ -497,12 +532,11 @@ function CreateLimitForm({
       )}
 
       {/* Info badge */}
-      <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2">
-        <span className="text-[10px] text-cream-35">
-          Powered by CoW Protocol — zero gas fees, MEV-protected, solvers compete to fill your order at the best price.
+      <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2">
+        <span className="text-[10px] text-cream-50">
+          <span className="font-semibold text-cream-gold">Autonomous execution</span> — Chainlink oracles monitor price. Your order executes via 1inch when target is hit. Sign once, no browser needed.
         </span>
       </div>
-
     </div>
   )
 }
@@ -514,11 +548,13 @@ function OrdersList({
   active,
   history,
   onCancel,
+  onCancelAll,
   onRemove,
 }: {
-  active: import('@/lib/limit-order-types').LimitOrder[]
-  history: import('@/lib/limit-order-types').LimitOrder[]
+  active: AutonomousOrder[]
+  history: AutonomousOrder[]
   onCancel: (id: string) => void
+  onCancelAll: () => Promise<void>
   onRemove: (id: string) => void
 }) {
   if (active.length === 0 && history.length === 0) {
@@ -533,7 +569,17 @@ function OrdersList({
     <div className="space-y-2">
       {active.length > 0 && (
         <>
-          <h4 className="text-xs font-semibold text-cream-50">Active Orders</h4>
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-semibold text-cream-50">Active Orders</h4>
+            {active.length > 1 && (
+              <button
+                onClick={() => { onCancelAll(); playClick() }}
+                className="rounded-lg border border-danger/30 px-2.5 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors"
+              >
+                Cancel All
+              </button>
+            )}
+          </div>
           {active.map(order => (
             <OrderCard key={order.id} order={order} onCancel={onCancel} />
           ))}
@@ -542,7 +588,17 @@ function OrdersList({
 
       {history.length > 0 && (
         <>
-          <h4 className="mt-3 text-xs font-semibold text-cream-50">History</h4>
+          <div className="flex items-center justify-between mt-3">
+            <h4 className="text-xs font-semibold text-cream-50">History</h4>
+            {history.length > 1 && (
+              <button
+                onClick={() => { history.forEach(o => onRemove(o.id)); playClick() }}
+                className="rounded-lg border border-cream-08 px-2.5 py-1 text-[10px] text-cream-35 hover:text-cream-50 transition-colors"
+              >
+                Remove All
+              </button>
+            )}
+          </div>
           {history.map(order => (
             <OrderCard key={order.id} order={order} onRemove={onRemove} />
           ))}
@@ -560,15 +616,17 @@ function OrderCard({
   onCancel,
   onRemove,
 }: {
-  order: import('@/lib/limit-order-types').LimitOrder
+  order: AutonomousOrder
   onCancel?: (id: string) => void
   onRemove?: (id: string) => void
 }) {
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null)
+
   const statusColors: Record<string, string> = {
     signing: 'text-yellow-400',
-    open: 'text-blue-400',
-    partiallyFilled: 'text-cyan-400',
-    fulfilled: 'text-green-400',
+    active: 'text-blue-400',
+    executing: 'text-cyan-400',
+    filled: 'text-green-400',
     expired: 'text-cream-35',
     cancelled: 'text-cream-35',
     error: 'text-red-400',
@@ -576,40 +634,77 @@ function OrderCard({
 
   const statusLabels: Record<string, string> = {
     signing: 'Signing...',
-    open: 'Open',
-    partiallyFilled: `Filled ${order.filledPercent}%`,
-    fulfilled: 'Filled',
+    active: 'Watching...',
+    executing: 'Executing...',
+    filled: 'Filled',
     expired: 'Expired',
     cancelled: 'Cancelled',
     error: 'Failed',
   }
 
-  const sellFormatted = formatUnits(
-    BigInt(order.config.sellAmount),
-    order.config.tokenIn.decimals,
-  )
-  const buyFormatted = formatUnits(
-    BigInt(order.buyAmount),
-    order.config.tokenOut.decimals,
-  )
+  const amountIn = order.order?.amountIn
+    ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
+    : '—'
 
-  const timeLeft = order.validTo * 1000 - Date.now()
+  // Target price from Chainlink 8-decimal format
+  const targetPriceUsd = useMemo(() => {
+    if (!order.order?.targetPrice) return null
+    return Number(BigInt(order.order.targetPrice.toString())) / 1e8
+  }, [order.order?.targetPrice])
+
+  // Condition label (buy when price ≥ or ≤ target)
+  const conditionLabel = order.order?.condition === PriceCondition.ABOVE ? '≥' : '≤'
+
+  const timeLeft = order.expiresAt - Date.now()
   const hoursLeft = Math.max(0, Math.floor(timeLeft / (1000 * 60 * 60)))
   const daysLeft = Math.floor(hoursLeft / 24)
+
+  const isActive = order.status === 'active' || order.status === 'executing' || order.status === 'signing'
+
+  // Fetch current price every 30s for active orders
+  useEffect(() => {
+    if (!isActive || !order.order?.amountIn) return
+
+    let cancelled = false
+    const fetchPrice = async () => {
+      try {
+        const tokenIn = order.order.tokenIn
+        const tokenOut = order.order.tokenOut
+        const sellAmount = order.order.amountIn.toString()
+        const price = await fetchCurrentPrice(
+          tokenIn, tokenOut, sellAmount,
+          order.tokenInDecimals, order.tokenOutDecimals,
+        )
+        if (!cancelled && price > 0) setCurrentPrice(price)
+      } catch { /* silently ignore */ }
+    }
+
+    fetchPrice()
+    const interval = setInterval(fetchPrice, 30_000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [isActive, order.order?.tokenIn, order.order?.tokenOut, order.order?.amountIn, order.tokenInDecimals, order.tokenOutDecimals])
+
+  // Price distance percentage
+  const priceInfo = useMemo(() => {
+    if (!targetPriceUsd || !currentPrice || currentPrice === 0) return null
+    const diff = ((currentPrice - targetPriceUsd) / targetPriceUsd) * 100
+    const absDiff = Math.abs(diff)
+    // Progress: 100% = at target, 0% = far from target
+    const progress = Math.max(0, Math.min(100, 100 - absDiff))
+    return { diff, absDiff, progress }
+  }, [targetPriceUsd, currentPrice])
 
   return (
     <div className="rounded-xl border border-cream-08 bg-surface-secondary p-3">
       {/* Header row */}
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <img src={order.config.tokenIn.logoURI} alt="" className="h-5 w-5 rounded-full" />
           <span className="text-sm font-medium text-cream">
-            {Number(sellFormatted).toFixed(4)} {order.config.tokenIn.symbol}
+            {Number(amountIn).toFixed(4)} {order.tokenInSymbol}
           </span>
           <span className="text-cream-35">→</span>
-          <img src={order.config.tokenOut.logoURI} alt="" className="h-5 w-5 rounded-full" />
           <span className="text-sm font-medium text-cream">
-            {Number(buyFormatted).toFixed(4)} {order.config.tokenOut.symbol}
+            {order.tokenOutSymbol}
           </span>
         </div>
         <span className={`text-[11px] font-semibold ${statusColors[order.status] || 'text-cream-50'}`}>
@@ -617,23 +712,49 @@ function OrderCard({
         </span>
       </div>
 
-      {/* Price + expiry */}
+      {/* Price info */}
+      {targetPriceUsd !== null && targetPriceUsd > 0 && (
+        <div className="mb-2 rounded-lg bg-cream-04 px-2.5 py-2">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-cream-50">Target ({conditionLabel})</span>
+            <span className="font-medium text-cream-gold">${targetPriceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
+          {currentPrice !== null && currentPrice > 0 && (
+            <>
+              <div className="mt-1 flex items-center justify-between text-[11px]">
+                <span className="text-cream-50">Current</span>
+                <span className="font-medium text-cream">${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              {priceInfo && (
+                <div className="mt-1.5">
+                  <div className="mb-0.5 flex items-center justify-between text-[10px]">
+                    <span className="text-cream-35">
+                      {priceInfo.absDiff < 0.5 ? '🟢 Almost there!' : `${priceInfo.absDiff.toFixed(1)}% away`}
+                    </span>
+                  </div>
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-cream-08">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${priceInfo.progress}%`,
+                        backgroundColor: priceInfo.progress > 90 ? '#22c55e' : priceInfo.progress > 50 ? '#eab308' : '#64748b',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Expiry */}
       <div className="mb-2 flex items-center justify-between text-[11px] text-cream-50">
-        <span>@ {order.config.targetPrice.toFixed(tokenPriceDecimals(order.config.tokenOut))} {order.config.tokenOut.symbol}/{order.config.tokenIn.symbol}</span>
-        {order.status === 'open' && timeLeft > 0 && (
+        <span>Limit order</span>
+        {isActive && timeLeft > 0 && (
           <span>{daysLeft > 0 ? `${daysLeft}d ${hoursLeft % 24}h` : `${hoursLeft}h`} left</span>
         )}
       </div>
-
-      {/* Fill progress bar */}
-      {(order.status === 'open' || order.status === 'partiallyFilled') && order.filledPercent > 0 && (
-        <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-tertiary">
-          <div
-            className="h-full rounded-full bg-cream-gold transition-all"
-            style={{ width: `${order.filledPercent}%` }}
-          />
-        </div>
-      )}
 
       {/* Error */}
       {order.error && (
@@ -643,7 +764,7 @@ function OrderCard({
       {/* Tx hash */}
       {order.txHash && (
         <a
-          href={`https://etherscan.io/tx/${order.txHash}`}
+          href={`${ETHERSCAN_TX}${order.txHash}`}
           target="_blank"
           rel="noopener noreferrer"
           className="mb-2 block text-[11px] text-cream-gold hover:underline"
@@ -654,15 +775,15 @@ function OrderCard({
 
       {/* Actions */}
       <div className="flex gap-2">
-        {onCancel && (order.status === 'open' || order.status === 'partiallyFilled') && (
+        {onCancel && isActive && (
           <button
             onClick={() => { onCancel(order.id); playClick() }}
-            className="rounded-lg border border-cream-08 px-3 py-1.5 text-[11px] text-cream-50 transition hover:border-red-400 hover:text-red-400"
+            className="rounded-lg border border-danger/30 px-3 py-1.5 text-[11px] text-danger/70 hover:text-danger transition-colors"
           >
             Cancel
           </button>
         )}
-        {onRemove && (order.status === 'fulfilled' || order.status === 'expired' || order.status === 'cancelled' || order.status === 'error') && (
+        {onRemove && !isActive && (
           <button
             onClick={() => { onRemove(order.id); playClick() }}
             className="rounded-lg border border-cream-08 px-3 py-1.5 text-[11px] text-cream-50 transition hover:border-cream-35 hover:text-cream"
@@ -678,15 +799,8 @@ function OrderCard({
 // ── Helper: format price with smart decimals ────────────────
 function formatPrice(value: number, quoteToken: Token): string {
   if (value === 0) return '0'
-  // For stablecoin quotes (USDC, USDT etc.), use 2 decimals
   if (isStablecoin(quoteToken)) return value.toFixed(2)
-  // For very small values (< 0.001) use more decimals
   if (value < 0.001) return value.toFixed(8)
   if (value < 1) return value.toFixed(6)
   return value.toFixed(quoteToken.decimals <= 6 ? 2 : 6)
-}
-
-// ── Helper: decimals for price display ─────────────────────
-function tokenPriceDecimals(token: Token): number {
-  return token.decimals <= 6 ? 2 : 6
 }

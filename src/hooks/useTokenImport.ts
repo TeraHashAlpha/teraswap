@@ -44,12 +44,22 @@ export function useTokenImport() {
         return null
       }
 
-      const symbol = decodeString(symbolRes)
-      const name = nameRes ? decodeString(nameRes) : symbol
+      const rawSymbol = decodeString(symbolRes)
+      const rawName = nameRes ? decodeString(nameRes) : rawSymbol
       const decimals = parseInt(decimalsRes as string, 16)
 
-      if (!symbol || isNaN(decimals)) {
+      if (!rawSymbol || isNaN(decimals)) {
         setError('Could not read token data')
+        setImporting(false)
+        return null
+      }
+
+      // [F-03] Sanitize symbol/name — strip HTML/script tags, limit length, alphanumeric only
+      const symbol = sanitizeTokenField(rawSymbol, 20)
+      const name = sanitizeTokenField(rawName, 64)
+
+      if (!symbol) {
+        setError('Token symbol contains invalid characters')
         setImporting(false)
         return null
       }
@@ -95,6 +105,16 @@ async function callRpc(rpcUrl: string, to: string, data: string): Promise<string
   } catch {
     return null
   }
+}
+
+// [F-03] Sanitize token name/symbol to prevent XSS via malicious ERC-20 contracts
+function sanitizeTokenField(raw: string, maxLen: number): string {
+  // Strip HTML tags completely
+  const noHtml = raw.replace(/<[^>]*>/g, '')
+  // Allow only printable ASCII characters, common currency symbols, spaces, dots, hyphens
+  const cleaned = noHtml.replace(/[^\x20-\x7E]/g, '').trim()
+  // Truncate to max length
+  return cleaned.slice(0, maxLen)
 }
 
 function decodeString(hex: string): string {

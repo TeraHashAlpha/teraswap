@@ -367,6 +367,8 @@ export function clearAnalytics(): void {
 
 // ══════════════════════════════════════════════════════════
 //  SEED — Generate realistic demo data for visualization
+//  [M-07] PRODUCTION: This entire block is stripped via tree-shaking
+//  when seedDemoData is not imported. Additionally guarded at runtime.
 // ══════════════════════════════════════════════════════════
 
 const SEED_WALLETS = [
@@ -423,6 +425,12 @@ function randomTxHash(): string {
 }
 
 export function seedDemoData(tradeCount = 350): number {
+  // [M-07] Block in production — demo data must NEVER be seeded on mainnet
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('[TeraSwap] seedDemoData() blocked in production')
+    return 0
+  }
+
   const events: TradeEvent[] = []
   const now = Date.now()
   const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000

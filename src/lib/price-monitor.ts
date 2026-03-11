@@ -7,7 +7,7 @@
  * Falls back to CoW quote API for tokens without Chainlink feeds.
  */
 
-import { createPublicClient, http, parseAbi } from 'viem'
+import { createPublicClient, http, parseAbi, erc20Abi } from 'viem'
 import { mainnet } from 'viem/chains'
 import { CHAINLINK_ETH_USD, CHAINLINK_FEEDS, NATIVE_ETH, WETH_ADDRESS } from './constants'
 import { fetchCurrentPrice } from './limit-order-api'
@@ -24,8 +24,9 @@ const aggregatorAbi = parseAbi([
   'function decimals() view returns (uint8)',
 ])
 
-// ── Cache for feed decimals ────────────────────────────────
+// ── Cache for feed decimals + token decimals ──────────────
 const feedDecimalsCache = new Map<string, number>()
+const tokenDecimalsCache = new Map<string, number>()
 
 async function getFeedDecimals(feedAddress: `0x${string}`): Promise<number> {
   const cached = feedDecimalsCache.get(feedAddress)
@@ -82,11 +83,38 @@ export async function getTokenPriceUSD(tokenAddress: string): Promise<number> {
   // Fallback: get price via CoW (1 token → USDC)
   try {
     const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+    const addr = tokenAddress.toLowerCase()
+
+    // [BUGFIX] Determine actual token decimals instead of hardcoding 18
+    // ETH/WETH = 18, but USDC = 6, WBTC = 8, etc.
+    let tokenDecimals = 18
+    const isEth =
+      addr === NATIVE_ETH.toLowerCase() ||
+      addr === WETH_ADDRESS.toLowerCase()
+
+    if (!isEth) {
+      const cached = tokenDecimalsCache.get(addr)
+      if (cached !== undefined) {
+        tokenDecimals = cached
+      } else {
+        try {
+          const dec = await publicClient.readContract({
+            address: addr as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'decimals',
+          })
+          tokenDecimals = Number(dec)
+          tokenDecimalsCache.set(addr, tokenDecimals)
+        } catch { /* default to 18 */ }
+      }
+    }
+
+    const oneToken = (10n ** BigInt(tokenDecimals)).toString()
     const price = await fetchCurrentPrice(
       tokenAddress,
       USDC,
-      '1000000000000000000', // 1e18 (assume 18 decimals, will be adjusted)
-      18,
+      oneToken,
+      tokenDecimals,
       6,
     )
     return price // This gives approximate USD value

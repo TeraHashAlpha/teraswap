@@ -1,6 +1,12 @@
 import type { Metadata } from 'next'
-import Providers from './providers'
+import dynamic from 'next/dynamic'
 import './globals.css'
+
+// [SSR-FIX] Dynamically import Providers with ssr: false.
+// WalletConnect (used by wagmi/RainbowKit) accesses localStorage during init,
+// which crashes Next.js static page prerendering. Lazy-loading the provider tree
+// ensures all wallet/web3 code only runs on the client.
+const Providers = dynamic(() => import('./providers'), { ssr: false })
 
 const SITE_URL = 'https://teraswap.io'
 const SITE_TITLE = 'TeraSwap — The Gold Standard of DeFi Trading'
