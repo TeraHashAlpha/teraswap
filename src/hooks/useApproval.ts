@@ -28,9 +28,14 @@ export function useApproval(
   const [approvalError, setApprovalError] = useState<string | null>(null)
 
   const isNative = tokenIn ? isNativeETH(tokenIn) : true
-  const rawAmount = tokenIn && amountIn && Number(amountIn) > 0
-    ? parseUnits(amountIn, tokenIn.decimals)
-    : 0n
+  let rawAmount = 0n
+  try {
+    if (tokenIn && amountIn && Number(amountIn) > 0) {
+      rawAmount = parseUnits(amountIn, tokenIn.decimals)
+    }
+  } catch {
+    // Invalid input (e.g. too many decimals) — treat as zero
+  }
 
   // ── Check 1: Does user have allowance to Permit2 contract? ──
   const { data: permit2TokenAllowance } = useReadContract({

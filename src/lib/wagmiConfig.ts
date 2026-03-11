@@ -9,7 +9,7 @@ const primaryRpc = process.env.NEXT_PUBLIC_RPC_URL
 const fallbackRpc1 = process.env.NEXT_PUBLIC_FALLBACK_RPC_1
 const fallbackRpc2 = process.env.NEXT_PUBLIC_FALLBACK_RPC_2
 
-function buildTransport() {
+function buildMainnetTransport() {
   const transports = []
 
   // Primary RPC (configured by user — fastest, highest limits)
@@ -28,12 +28,25 @@ function buildTransport() {
   return fallback(transports, { rank: true, retryCount: 2 })
 }
 
+// [BUGFIX] Validate WalletConnect projectId — empty string causes silent failures
+const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? ''
+if (!walletConnectProjectId && typeof window !== 'undefined') {
+  console.warn(
+    '[TeraSwap] NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set. ' +
+    'WalletConnect will not work. Get one at https://cloud.walletconnect.com'
+  )
+}
+
+// [H-01] PRODUCTION: Only mainnet — Sepolia removed for mainnet deployment.
+// For testnet development, add sepolia back temporarily:
+//   import { sepolia } from 'wagmi/chains'
+//   chains: [mainnet, sepolia]
 export const config = getDefaultConfig({
   appName: 'TeraSwap',
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? '',
+  projectId: walletConnectProjectId,
   chains: [mainnet],
   transports: {
-    [mainnet.id]: buildTransport(),
+    [mainnet.id]: buildMainnetTransport(),
   },
   ssr: true,
 })

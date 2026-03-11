@@ -9,18 +9,31 @@ import type { AggregatorName } from '@/lib/constants'
  * when fetching swap calldata from external DEX APIs.
  */
 
-// ── [Audit B-06] Rate limiting ──────────────────────────
+// ── [Audit B-06 / M-02] Rate limiting ───────────────────
+// NOTE: In-memory rate limiting resets on serverless cold starts.
+// For production, replace with Redis/KV store or use Vercel's
+// edge rate limiting middleware.
+//
+// This still provides protection against sustained abuse within
+// a single instance's lifetime (typically 5-15 min on Vercel).
 const RATE_LIMIT_WINDOW_MS = 60_000 // 1 minute
-const RATE_LIMIT_MAX = 30           // 30 requests per minute per IP
+const RATE_LIMIT_MAX = 20           // [M-02] Reduced from 30 to 20 for tighter control
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 
-// Periodic cleanup every 5 minutes to prevent memory leak
-setInterval(() => {
-  const now = Date.now()
-  for (const [key, value] of rateLimitMap.entries()) {
-    if (now > value.resetAt) rateLimitMap.delete(key)
+// Periodic cleanup every 2 minutes to prevent memory leak
+// (shorter interval since serverless instances are short-lived)
+if (typeof globalThis !== 'undefined') {
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now()
+    for (const [key, value] of rateLimitMap.entries()) {
+      if (now > value.resetAt) rateLimitMap.delete(key)
+    }
+  }, 120_000)
+  // Don't prevent process from exiting
+  if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) {
+    (cleanupTimer as NodeJS.Timeout).unref()
   }
-}, 300_000)
+}
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now()
@@ -53,7 +66,7 @@ export async function POST(req: NextRequest) {
     }
 
     // [Audit] Request size check
-    const contentLength = parseInt(req.headers.get('content-length') || '0')
+    const contentLength = parseInt(req.headers.get('content-length') || '0', 10)
     if (contentLength > MAX_BODY_SIZE) {
       return NextResponse.json(
         { error: 'Request body too large' },
@@ -91,11 +104,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // [Audit] Validate slippage range
+    // [Audit / L-01] Validate slippage range — max 15% for mainnet safety
     const slippageNum = Number(slippage)
-    if (isNaN(slippageNum) || slippageNum < 0 || slippageNum > 50) {
+    if (isNaN(slippageNum) || slippageNum < 0 || slippageNum > 15) {
       return NextResponse.json(
-        { error: 'Slippage must be between 0 and 50' },
+        { error: 'Slippage must be between 0 and 15%' },
         { status: 400 },
       )
     }

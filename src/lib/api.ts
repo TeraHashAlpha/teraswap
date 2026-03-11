@@ -26,8 +26,10 @@ import { globalLimiter } from './rate-limiter'
 // ── Slippage safety clamp ────────────────────────────────
 // Ensures slippage % is always in the safe range [0.01, 49.99]
 // Prevents negative slippage factors when slippage >= 100
+// [L-01] Slippage cap reduced from 49.99% to 15% for mainnet safety.
+// 15% covers even volatile memecoins. Anything above is almost certainly user error.
 function clampSlippage(s: number): number {
-  return Math.min(Math.max(s, 0.01), 49.99)
+  return Math.min(Math.max(s, 0.01), 15)
 }
 
 // ── Normalized types (common across all aggregators) ─────
@@ -63,6 +65,8 @@ export interface NormalizedQuote {
   }
   /** CoW Protocol: order UID returned after submission (intent-based) */
   cowOrderUid?: string
+  /** CoW Protocol: order parameters for EIP-712 signing (dynamic fields from CoW API) */
+  cowOrderParams?: Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
   /** Extra metadata per source (e.g. Uniswap V3 fee tier info) */
   meta?: {
     uniswapV3Fee?: number
@@ -627,7 +631,7 @@ async function fetchCowSwapQuote(
 async function fetchCowSwapOrder(
   src: string, dst: string, amount: string, from: string, slippage: number,
   _srcDec?: number, _dstDec?: number, _meta?: any, chainId: number = CHAIN_ID,
-): Promise<NormalizedQuote & { cowOrderParams?: any }> {
+): Promise<NormalizedQuote> {
   const base = getCowApiBase(chainId)
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
@@ -1946,11 +1950,11 @@ export async function fetchApproveSpender(source: AggregatorName): Promise<`0x${
       return PERMIT2_ADDRESS as `0x${string}`
     }
     case 'velora': {
-      const { base } = AGGREGATOR_APIS.velora
-      const res = await fetch(`${base}/adapters/contracts?network=${CHAIN_ID}`)
-      if (!res.ok) throw new Error('Velora spender failed')
-      const data = await res.json()
-      return data.TokenTransferProxy || data.AugustusSwapper
+      // [L-03] Hardcoded ParaSwap TokenTransferProxy (mainnet).
+      // Previously fetched dynamically from ParaSwap API — trust-on-first-use vulnerability.
+      // Same pattern as 1inch: the TokenTransferProxy is an immutable proxy contract.
+      // ParaSwap Augustus V6 delegates to TokenTransferProxy for token approvals.
+      return '0x216B4B4Ba9F3e719726886d34a177484278BfcaE' as `0x${string}`
     }
     case 'odos': {
       // Odos Router V3 — same address on all EVM chains
@@ -2008,7 +2012,17 @@ const ROUTER_WHITELIST: Set<string> = new Set([
   '0x6352a56caadc4f1e25cd6c75970fa768a3304e64', // OpenOcean Exchange Proxy
   '0x46b3fdf7b5cde91ac049936bf0bdb12c5d22202e', // SushiSwap RouteProcessor4
   '0xba12222222228d8ba445958a75a0704d566bf2c8', // Balancer Vault V2
-  // FeeCollector proxy (dynamically added if configured)
+  // [C-06] 1inch, 0x, Velora — known mainnet router addresses
+  // Previously these were bypassed with `return { valid: true }` for any address.
+  // Now they're whitelisted explicitly. If an aggregator changes their router,
+  // the address must be added here (not auto-trusted from API).
+  '0x111111125421ca6dc452d289314280a0f8842a65', // 1inch AggregationRouter v6
+  '0x1111111254eeb25477b68fb85ed929f73a960582', // 1inch AggregationRouter v5 (legacy)
+  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x Exchange Proxy (mainnet)
+  '0xdef171fe48cf0115b1d80b88dc8eab59176fee57', // ParaSwap Augustus V6 (Velora)
+  '0x216b4b4ba9f3e719726886d34a177484278bfcae', // ParaSwap Augustus V6.2
+  CURVE_ROUTER_NG.toLowerCase(),                   // Curve CurveRouterNG (mainnet)
+  // FeeCollector proxy (always whitelisted if configured)
   ...(FEE_COLLECTOR_ADDRESS ? [FEE_COLLECTOR_ADDRESS.toLowerCase()] : []),
 ])
 
@@ -2017,27 +2031,27 @@ const ROUTER_WHITELIST: Set<string> = new Set([
  * This prevents attacks where a compromised aggregator API returns
  * a malicious contract address as the swap target.
  *
- * @returns true if the address is whitelisted (or dynamically verified)
+ * [C-06] ALL sources now validated against the whitelist.
+ * No more bypass for 1inch/0x/Velora — their known router addresses
+ * are added to ROUTER_WHITELIST above.
+ *
+ * @returns true if the address is whitelisted
  */
 export function validateRouterAddress(
   txTo: string,
   source: AggregatorName,
 ): { valid: boolean; reason?: string } {
-  // For 1inch, 0x, Velora — router address is dynamic (fetched from API)
-  // We must trust the API response for these, but log for monitoring
-  const dynamicSources: AggregatorName[] = ['1inch', '0x', 'velora']
-  if (dynamicSources.includes(source)) {
-    // Log dynamic router for audit trail
-    if (typeof window !== 'undefined') {
-      console.info(`[TeraSwap] Dynamic router for ${source}: ${txTo}`)
-    }
-    return { valid: true }
-  }
-
   const normalized = txTo.toLowerCase()
+
   if (ROUTER_WHITELIST.has(normalized)) {
     return { valid: true }
   }
+
+  // [C-06] Log unknown routers for monitoring (but BLOCK the swap)
+  console.error(
+    `[TeraSwap] BLOCKED: Swap target ${txTo} for ${source} is NOT in the router whitelist. ` +
+    `If this is a legitimate new router, add it to ROUTER_WHITELIST in api.ts.`
+  )
 
   return {
     valid: false,
@@ -2047,8 +2061,19 @@ export function validateRouterAddress(
 
 /**
  * Add a dynamically-fetched router address to the whitelist.
- * Called after fetching spender from API (1inch, 0x, Velora).
+ *
+ * [H-03] SECURITY: This is now restricted — only addresses that pass
+ * basic validation are added. The caller must verify the source.
+ * In production, this should only be called from trusted server-side code.
  */
-export function addToRouterWhitelist(address: string): void {
+export function addToRouterWhitelist(address: string, source?: AggregatorName): void {
+  // Basic validation: must be a valid Ethereum address
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    console.error(`[TeraSwap] Rejected invalid address for whitelist: ${address}`)
+    return
+  }
+
+  // Log for audit trail
+  console.info(`[TeraSwap] Dynamic router added to whitelist: ${address} (source: ${source ?? 'unknown'})`)
   ROUTER_WHITELIST.add(address.toLowerCase())
 }

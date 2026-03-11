@@ -3,6 +3,7 @@
 import { useAccount, useSwitchChain } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { CHAIN_ID } from '@/lib/constants'
+import { playTouchMP3 } from '@/lib/sounds'
 import type { SwapStatus } from '@/hooks/useSwap'
 import type { ApprovalStatus } from '@/hooks/useApproval'
 
@@ -95,7 +96,7 @@ export default function SwapButton({
   return (
     <div>
       <button
-        onClick={config.onClick}
+        onClick={() => { playTouchMP3(); config.onClick() }}
         disabled={config.disabled}
         className={`w-full rounded-full border-2 bg-transparent py-4 text-[15px] font-bold uppercase tracking-[1.5px] transition-all ${variantClasses[config.variant]}`}
       >

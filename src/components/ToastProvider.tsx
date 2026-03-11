@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useCallback, useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { ETHERSCAN_TX } from '@/lib/constants'
 
 /* ── Types ── */
 export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading'
@@ -161,7 +162,7 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: () => voi
           {/* Tx hash link */}
           {t.txHash && (
             <a
-              href={`https://etherscan.io/tx/${t.txHash}`}
+              href={`${ETHERSCAN_TX}${t.txHash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-cream-gold transition-colors hover:text-cream"

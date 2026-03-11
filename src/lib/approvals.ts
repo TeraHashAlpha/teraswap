@@ -38,11 +38,22 @@ export const eip2612DetectionAbi = [
 ] as const
 
 // ── Permit2 EIP-712 Types ────────────────────────────────
+// [H-04] chainId must be dynamic — using `as const` hardcoded it to 1.
+// The domain must match the connected wallet's chain for valid signatures.
+export function getPermit2Domain(chainId: number) {
+  return {
+    name: 'Permit2' as const,
+    chainId,
+    verifyingContract: PERMIT2_ADDRESS,
+  }
+}
+
+/** @deprecated Use getPermit2Domain(chainId) instead */
 export const PERMIT2_DOMAIN = {
   name: 'Permit2',
   chainId: 1,
   verifyingContract: PERMIT2_ADDRESS,
-} as const
+}
 
 export const PERMIT_SINGLE_TYPES = {
   PermitSingle: [

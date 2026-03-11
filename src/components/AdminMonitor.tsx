@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
-import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { AGGREGATOR_META, ETHERSCAN_TX, type AggregatorName } from '@/lib/constants'
 import { scoreAllWallets, detectWalletClusters } from '@/lib/sybil-detector'
 import { seedDemoData, clearAnalytics } from '@/lib/analytics-tracker'
 import type { SybilScore, WalletCluster } from '@/lib/sybil-detector'
@@ -833,7 +833,7 @@ function ActivityTab({ trades, period }: { trades: TradeEvent[]; period: Period 
                 <span className="text-[#556677]">{sourceLabel(t.source)}</span>
                 <span className="w-8 text-right text-[#445566]">{timeAgo(t.timestamp)}</span>
                 {t.txHash && (
-                  <a href={`https://etherscan.io/tx/${t.txHash}`} target="_blank" rel="noopener noreferrer"
+                  <a href={`${ETHERSCAN_TX}${t.txHash}`} target="_blank" rel="noopener noreferrer"
                     className="text-[#334455] hover:text-[#4fc3f7]">↗</a>
                 )}
               </span>

@@ -53,7 +53,7 @@ interface UseSplitSwapResult {
 async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
-): Promise<NormalizedQuote & { cowOrderParams?: any }> {
+): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -126,7 +126,14 @@ export function useSplitSwap(
     setErrorMessage(null)
     setStatus('executing')
 
-    const totalRaw = parseUnits(amountIn, tokenIn.decimals)
+    let totalRaw: bigint
+    try {
+      totalRaw = parseUnits(amountIn, tokenIn.decimals)
+    } catch {
+      setStatus('error')
+      setErrorMessage('Invalid input amount.')
+      return
+    }
 
     // Initialize leg statuses
     const initialLegs: LegStatus[] = splitRoute.legs.map(leg => ({

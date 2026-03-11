@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -27,8 +27,15 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public immutable feeRecipient;
+    address public admin;
     uint256 public constant FEE_BPS = 10; // 0.1%
     uint256 public constant BPS_DENOMINATOR = 10_000;
+
+    /// @notice [Audit L-01] Emergency pause
+    bool public paused;
+
+    /// @notice [Audit] Router whitelist for FeeCollector
+    mapping(address => bool) public whitelistedRouters;
 
     event SwapWithFee(
         address indexed user,
@@ -37,6 +44,10 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         uint256 totalAmount,
         uint256 feeAmount
     );
+    event Paused(address indexed admin);
+    event Unpaused(address indexed admin);
+    event RouterWhitelisted(address indexed router, bool status);
+    event Sweep(address indexed token);
 
     error ZeroAddress();
     error ZeroAmount();
@@ -44,10 +55,42 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     error SwapFailed(bytes reason);
     error RefundFailed();
     error NotAuthorized();
+    error ContractPaused();
+    error RouterNotWhitelisted();
 
-    constructor(address _feeRecipient) {
-        if (_feeRecipient == address(0)) revert ZeroAddress();
+    constructor(address _feeRecipient, address _admin) {
+        if (_feeRecipient == address(0) || _admin == address(0)) revert ZeroAddress();
         feeRecipient = _feeRecipient;
+        admin = _admin;
+    }
+
+    modifier whenNotPaused() {
+        if (paused) revert ContractPaused();
+        _;
+    }
+
+    modifier onlyAdmin() {
+        if (msg.sender != admin) revert NotAuthorized();
+        _;
+    }
+
+    /// @notice Whitelist routers for FeeCollector
+    function setRouter(address router, bool status) external onlyAdmin {
+        if (router == address(0)) revert ZeroAddress();
+        whitelistedRouters[router] = status;
+        emit RouterWhitelisted(router, status);
+    }
+
+    /// @notice Emergency pause
+    function pause() external onlyAdmin {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /// @notice Unpause
+    function unpause() external onlyAdmin {
+        paused = false;
+        emit Unpaused(msg.sender);
     }
 
     /// @notice Swap native ETH with fee collection
@@ -56,8 +99,9 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     function swapETHWithFee(
         address router,
         bytes calldata routerData
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         if (msg.value == 0) revert ZeroAmount();
+        if (!whitelistedRouters[router]) revert RouterNotWhitelisted();
 
         uint256 fee = (msg.value * FEE_BPS) / BPS_DENOMINATOR;
         uint256 netValue = msg.value - fee;
@@ -90,8 +134,9 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         uint256 totalAmount,
         address router,
         bytes calldata routerData
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         if (totalAmount == 0) revert ZeroAmount();
+        if (!whitelistedRouters[router]) revert RouterNotWhitelisted();
 
         uint256 fee = (totalAmount * FEE_BPS) / BPS_DENOMINATOR;
         uint256 netAmount = totalAmount - fee;
@@ -127,18 +172,23 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         emit SwapWithFee(msg.sender, router, token, totalAmount, fee);
     }
 
-    /// @notice Rescue stuck funds (only feeRecipient can call)
-    function sweep(address token) external {
-        if (msg.sender != feeRecipient) revert NotAuthorized();
+    /// @notice [Audit F-09] Sweep with admin-only + pause check (prevents instant drain)
+    /// @dev Admin-gated instead of feeRecipient-gated. Funds always go to feeRecipient.
+    ///      Pause check ensures sweep cannot happen during an emergency pause.
+    function sweep(address token) external onlyAdmin whenNotPaused {
         if (token == address(0)) {
-            (bool ok, ) = feeRecipient.call{value: address(this).balance}("");
-            require(ok, "ETH sweep failed");
+            uint256 bal = address(this).balance;
+            if (bal > 0) {
+                (bool ok, ) = feeRecipient.call{value: bal}("");
+                require(ok, "ETH sweep failed");
+            }
         } else {
-            IERC20(token).safeTransfer(
-                feeRecipient,
-                IERC20(token).balanceOf(address(this))
-            );
+            uint256 bal = IERC20(token).balanceOf(address(this));
+            if (bal > 0) {
+                IERC20(token).safeTransfer(feeRecipient, bal);
+            }
         }
+        emit Sweep(token);
     }
 
     /// @notice Accept ETH from routers (e.g. WETH unwrap, partial refunds)

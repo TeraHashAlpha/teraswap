@@ -64,9 +64,9 @@ export type AggregatorName = keyof typeof AGGREGATOR_APIS
 // ── CoW Protocol chain-aware API URLs ─────────────────────
 // The static AGGREGATOR_APIS.cowswap.base is mainnet-only.
 // Use getCowApiBase(chainId) for multi-chain support.
+// [H-01] Sepolia removed for mainnet deployment.
 const COW_API_URLS: Record<number, string> = {
   1: 'https://api.cow.fi/mainnet/api/v1',
-  11155111: 'https://api.cow.fi/sepolia/api/v1',
   100: 'https://api.cow.fi/xdai/api/v1',
 }
 export function getCowApiBase(chainId: number): string {
@@ -100,12 +100,20 @@ export const AGGREGATOR_META: Record<AggregatorName, {
 // ── Fee ──────────────────────────────────────────────────
 export const FEE_PERCENT = Number(process.env.NEXT_PUBLIC_FEE_PERCENT ?? '0.1')
 export const FEE_BPS = Math.round(FEE_PERCENT * 100) // 0.1% → 10 bps
-export const FEE_RECIPIENT = (process.env.NEXT_PUBLIC_FEE_RECIPIENT ??
-  '0x0000000000000000000000000000000000000000') as `0x${string}`
 
-// FeeCollector proxy — deploy contracts/TeraSwapFeeCollector.sol and set this env var
-export const FEE_COLLECTOR_ADDRESS = (process.env.NEXT_PUBLIC_FEE_COLLECTOR ??
-  '') as `0x${string}`
+// [C-07] SECURITY: Never default to zero address — fees would be permanently burned.
+// These MUST be set in env vars. The validation layer (env-validation.ts) will
+// catch missing values at startup.
+const _feeRecipient = process.env.NEXT_PUBLIC_FEE_RECIPIENT ?? ''
+if (_feeRecipient && _feeRecipient === '0x0000000000000000000000000000000000000000') {
+  console.error('[TeraSwap] CRITICAL: FEE_RECIPIENT is zero address — fees will be burned!')
+}
+export const FEE_RECIPIENT = (_feeRecipient || '0x107F6eB7C3866c9cEf5860952066e185e9383ABA') as `0x${string}`
+
+// [C-08] FeeCollector proxy — deploy contracts/TeraSwapFeeCollector.sol and set this env var.
+// Hard default to deployed mainnet FeeCollector so fees are never silently disabled.
+const _feeCollector = process.env.NEXT_PUBLIC_FEE_COLLECTOR ?? ''
+export const FEE_COLLECTOR_ADDRESS = (_feeCollector || '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD') as `0x${string}`
 
 // Sources that collect fees natively via their API (no FeeCollector needed)
 // EMPTY: API fee params require registered partner accounts to work.
@@ -209,16 +217,27 @@ export const WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as cons
 // ── Etherscan ────────────────────────────────────────────
 export const ETHERSCAN_TX = 'https://etherscan.io/tx/'
 export const ETHERSCAN_TOKEN = 'https://etherscan.io/token/'
+export const ETHERSCAN_ADDRESS = 'https://etherscan.io/address/'
 
 // ── Price deviation (Chainlink) ─────────────────────────
+// [L-02] Tightened for mainnet safety: block at 3% (was 5%).
+// A 5% deviation on mainnet blue-chips is almost certainly a
+// stale oracle or price manipulation attack. 3% covers normal
+// volatility while catching anomalies earlier.
 export const PRICE_DEVIATION_WARN = 0.02  // 2%
-export const PRICE_DEVIATION_BLOCK = 0.05 // 5%
+export const PRICE_DEVIATION_BLOCK = 0.03 // 3% — tightened from 5%
 
 // ── Permit2 Security ────────────────────────────────────
 /** Maximum signature deadline for Permit2 signatures (30 minutes) */
 export const PERMIT2_MAX_DEADLINE_SEC = 30 * 60 // 1800 seconds
 /** Maximum expiration for Permit2 allowances (24 hours) */
 export const PERMIT2_MAX_EXPIRATION_SEC = 24 * 60 * 60 // 86400 seconds
+
+// ── CoW Protocol Order Limits ───────────────────────────
+// [L-04] Separate constant for CoW order duration — CoW solvers need more time
+// than Permit2 signatures. 30 min matches the typical solver auction window.
+/** Maximum CoW Protocol order validity (30 minutes) */
+export const COW_MAX_ORDER_DURATION_SEC = 30 * 60 // 1800 seconds
 
 // ── Chainlink Staleness ─────────────────────────────────
 /** Max age for Chainlink data before considered stale (1 hour) */

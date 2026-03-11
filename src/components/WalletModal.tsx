@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useBalance, useDisconnect, useEnsName, useEnsAvatar } from 'wagmi'
 import { mainnet } from 'wagmi/chains'
+import { ETHERSCAN_ADDRESS } from '@/lib/constants'
 
 interface Props {
   open: boolean
@@ -207,7 +208,7 @@ export default function WalletModal({ open, onClose }: Props) {
         <div className="grid grid-cols-3 gap-2 p-4">
           {/* View on Etherscan */}
           <a
-            href={`https://etherscan.io/address/${address}`}
+            href={`${ETHERSCAN_ADDRESS}${address}`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-cream-08 bg-cream-04 px-2 py-2.5 text-[10px] font-medium text-cream-65 transition-all hover:border-cream-15 hover:bg-cream-08 hover:text-cream"

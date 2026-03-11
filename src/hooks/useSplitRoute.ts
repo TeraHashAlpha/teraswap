@@ -73,7 +73,13 @@ export function useSplitRoute(
     }
 
     const runId = ++abortRef.current
-    const rawAmount = parseUnits(amountIn, tokenIn.decimals).toString()
+    let rawAmount: string
+    try {
+      rawAmount = parseUnits(amountIn, tokenIn.decimals).toString()
+    } catch {
+      setSplitResult(null)
+      return
+    }
     // Capture current values to avoid null checks inside async
     const currentMeta = meta
     const currentTokenIn = tokenIn

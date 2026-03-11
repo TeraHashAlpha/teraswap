@@ -7,9 +7,9 @@ import {
   useSignTypedData,
 } from 'wagmi'
 import { parseUnits, formatUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
-import { mainnet, sepolia } from 'viem/chains'
+import { mainnet } from 'viem/chains'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
-import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, PERMIT2_MAX_DEADLINE_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 
@@ -27,7 +27,7 @@ async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
   quoteMeta?: any, chainId?: number,
-): Promise<NormalizedQuote & { cowOrderParams?: any }> {
+): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -161,13 +161,17 @@ export function useSwap(
         throw new Error(`Unrecognized swap function selector (${selector}). Contact support if this persists.`)
       }
 
-      // Fee integrity check: verify aggregator applied partner fee
+      // [M-01] Fee integrity check: verify aggregator applied partner fee
+      // BLOCKING in production — if the aggregator returns suspicious output
+      // (significantly MORE than quoted), the fee may have been bypassed.
       if (quoteToAmount) {
         const feeCheck = validateFeeIntegrity(quoteToAmount, swapData.toAmount, source)
         if (!feeCheck.valid) {
-          console.warn('[TeraSwap] Fee integrity warning:', feeCheck.reason)
-          // Log but don't block — aggregator may legitimately return better price
-          // In production with custom router, this would be enforced on-chain
+          console.error('[TeraSwap] Fee integrity BLOCKED:', feeCheck.reason)
+          throw new Error(
+            'Fee verification failed — swap output is unexpectedly high. ' +
+            'This may indicate the partner fee was not applied. Swap blocked for safety.'
+          )
         }
       }
 
@@ -332,7 +336,8 @@ export function useSwap(
       // ── [FIX] Pre-flight balance check ──
       // CoW orderbook rejects orders when the user doesn't have enough tokens.
       // Check locally first for a better error message.
-      const viemChain = chainId === 11155111 ? sepolia : mainnet
+      // [H-01] Mainnet only — Sepolia removed for production
+      const viemChain = mainnet
       const client = createPublicClient({ chain: viemChain, transport: http() })
       try {
         const balance = await client.readContract({
@@ -386,7 +391,7 @@ export function useSwap(
         tokenOut.decimals,
         undefined,
         chainId,
-      ) as NormalizedQuote & { cowOrderParams?: any }
+      )
 
       if (!swapData.cowOrderParams) {
         throw new Error('CoW Protocol did not return order parameters')
@@ -400,8 +405,9 @@ export function useSwap(
         throw new Error(`CoW order receiver (${receiver}) does not match your wallet. Possible API compromise.`)
       }
 
-      // Security: cap validTo to max 30 minutes from now
-      const maxValidTo = Math.floor(Date.now() / 1000) + PERMIT2_MAX_DEADLINE_SEC
+      // [L-04] Security: cap validTo to max 30 minutes from now
+      // Uses CoW-specific constant (not Permit2) for semantic clarity
+      const maxValidTo = Math.floor(Date.now() / 1000) + COW_MAX_ORDER_DURATION_SEC
       if (orderParams.validTo > maxValidTo) {
         orderParams.validTo = maxValidTo
       }
@@ -553,7 +559,7 @@ export function useSwap(
     const activateTimeout = setTimeout(() => {
       if (status !== 'swapping') return // already resolved
 
-      console.log('[TeraSwap] Activating fallback receipt polling for', swapHash)
+      // Fallback receipt polling activated
       const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
       const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
 
@@ -561,7 +567,7 @@ export function useSwap(
         try {
           const receipt = await client.getTransactionReceipt({ hash: swapHash })
           if (receipt) {
-            console.log('[TeraSwap] Fallback detected tx confirmation:', receipt.status)
+            // Fallback detected tx confirmation
             if (receipt.status === 'success') {
               setStatus('success')
               updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)

@@ -14,45 +14,52 @@
 - **Split routing execution** — Multi-leg split swap across DEXes for large trades (analysis + visualization + execution)
 - **Smart contract audit skill** — 4-phase MAP→HUNT→ATTACK→REPORT methodology with 40+ vulnerability patterns
 - **Landing page & Coming Soon UI** — Feature cards updated, DCA/Limit/SL·TP tabs with "Soon" badges
+- **Order Engine Phase 1 — complete** — Hardened contract v2, self-hosted executor (replaced Gelato), Supabase backend, API routes, frontend SDK, 22/22 tests passing, full security audit (0 Critical, 0 High)
+- **Sepolia deployment** — Contract `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130`, Supabase tables live, self-hosted executor running
 
 ---
 
-## Phase 1 — Autonomous Order Engine _(Next Up)_
+## Phase 1 — Autonomous Order Engine ✅
 
-Replace browser-dependent execution with fully autonomous on-chain orders.
-Branch `order-engine-backup` contains the initial implementation ready for hardening.
+Fully autonomous on-chain order execution — no browser required.
+TeraSwapOrderExecutor v2 deployed with all audit findings resolved.
 
-### 1.1 Smart Contract Hardening
-- [ ] Fix H-01: Include `router` address in EIP-712 signed order data (prevents executor from choosing arbitrary router)
-- [ ] Fix H-02: Add ETH output handling (wrap to WETH or use `call{value}`)
-- [ ] Fix H-03: Add on-chain cancellation mapping (prevent cancelled orders from being executed)
-- [ ] Fix H-04: Implement MEV-resistant execution (Flashbots Protect / private mempool relay)
-- [ ] Add M-01: Pre-execution balance check
-- [ ] Add M-02: Timelock for admin functions (router whitelist changes)
-- [ ] Add L-03: Minimum output amount per order (user-configurable slippage)
-- [ ] Comprehensive unit + integration tests (Foundry)
-- [ ] Run full audit using `sc-audit` skill before deployment
+### 1.1 Smart Contract Hardening ✅
+- [x] Fix H-01: Include `router` address in EIP-712 signed order data
+- [x] Fix H-02: Add ETH output handling (wrap to WETH via `call{value}`)
+- [x] Fix H-03: Add on-chain cancellation mapping (`cancelledOrders` + `invalidateNonces`)
+- [x] Fix H-04: MEV-resistant execution (Flashbots Protect relay in Gelato function)
+- [x] Add M-01: Pre-execution balance check (`canExecute` view function)
+- [x] Add M-02: Timelock for admin functions (48h `TimelockController` for router whitelist)
+- [x] Add L-03: Minimum output amount per order (`minAmountOut` field)
+- [x] Comprehensive unit + integration tests — 22/22 passing (Hardhat + custom runner)
+- [x] Full audit using `sc-audit` skill — 0 Critical, 0 High, 3 Medium (all fixed)
 
-### 1.2 Gelato Web3 Function
-- [ ] Implement `fetchSwapRoute()` — call TeraSwap aggregation API from Gelato function
-- [ ] Fix M-03: Atomic check-and-execute (race condition prevention)
-- [ ] Fix M-04: Scope Gelato API key to read-only where possible
-- [ ] Fix L-04: Batch multiple order executions per cycle
-- [ ] Add order prioritization (oldest first, then by gas efficiency)
+### 1.2 Autonomous Executor ✅
+- [x] Implement `fetchSwapRoute()` — calls TeraSwap aggregation API
+- [x] Fix M-03: Atomic check-and-execute (nonce invalidation prevents race conditions)
+- [x] Fix L-04: Batch multiple order executions per cycle
+- [x] Order prioritization (oldest first, then by gas efficiency)
+- [x] Self-hosted executor (`contracts/order-engine/executor/`) — replaces Gelato Web3 Functions (deprecated March 2026)
+- [x] Gas price safety cap (MAX_GAS_PRICE_GWEI = 100)
+- [x] Stale lock recovery (60s timeout on "executing" status)
+- [x] DCA execution tracking with Supabase `order_executions` table
 
-### 1.3 Backend / Supabase
-- [ ] Fix L-05: Add proper RLS policies (user can only read/cancel own orders)
-- [ ] Fix L-06: Add wallet address validation (checksum + format)
-- [ ] Fix M-05: Add signature verification on order creation (API side)
-- [ ] Add rate limiting on order creation endpoint
-- [ ] Add order status webhooks / real-time subscriptions
+### 1.3 Backend / Supabase ✅
+- [x] Fix L-05: RLS policies (user can only read/cancel own orders)
+- [x] Fix L-06: Wallet address validation (checksum + format)
+- [x] Fix M-05: Signature verification on order creation (API-side EIP-712 recovery)
+- [x] Rate limiting on order creation endpoint
+- [x] Real-time order status via Supabase `postgres_changes` subscriptions
 
-### 1.4 Frontend Integration
-- [ ] Remove "Coming Soon" notices from DCA / Limit / SL·TP tabs
-- [ ] Connect panels to the new autonomous order engine
-- [ ] Add order management UI (view active orders, cancel, edit)
-- [ ] Add execution history per order (fills, partial fills)
-- [ ] Real-time order status via Supabase subscriptions
+### 1.4 Frontend Integration ✅
+- [x] Remove "Coming Soon" notices from DCA / Limit / SL·TP tabs
+- [x] Order Engine SDK (`src/lib/order-engine/`) — ABI, types, config, Supabase client
+- [x] `useOrderEngine` hook — EIP-712 signing, Supabase CRUD, real-time polling
+- [x] Connect panels to autonomous order engine
+- [x] Real-time order status via Supabase subscriptions
+- [ ] Order management UI polish (view active orders, cancel, edit) — _Phase 1.5_
+- [ ] Execution history per order (fills, partial fills) — _Phase 1.5_
 
 ---
 
@@ -86,4 +93,4 @@ Branch `order-engine-backup` contains the initial implementation ready for harde
 
 ---
 
-_Branch `order-engine-backup` contains the initial Order Engine implementation (contract + Gelato + schema + API) ready for Phase 1 hardening._
+_Phase 1 Order Engine deliverables: `contracts/order-engine/` (contract v2 + self-hosted executor + Supabase schema + API routes + test suite + audit report), `src/lib/order-engine/` (frontend SDK), `src/hooks/useOrderEngine.ts` (React hook)._

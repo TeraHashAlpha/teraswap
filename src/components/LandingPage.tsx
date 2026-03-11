@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
+import { playTouchMP3 } from '@/lib/sounds'
 
 interface Props {
   onLaunchApp: () => void
@@ -117,7 +118,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         transition={{ duration: 0.5, delay: 0.4 }}
         whileHover={{ scale: 1.03, boxShadow: '0 0 40px rgba(200,184,154,0.4)' }}
         whileTap={{ scale: 0.96 }}
-        onClick={onLaunchApp}
+        onClick={() => { playTouchMP3(); onLaunchApp() }}
         style={{ background: 'linear-gradient(135deg, #C8B89A 0%, #E8D5B7 50%, #C8B89A 100%)' }}
         className="group relative z-10 inline-flex h-14 items-center gap-1.5 rounded-full px-8 text-base font-semibold tracking-[0.04em] text-[#080B10]"
       >
@@ -527,16 +528,16 @@ const FEATURES = [
     desc: 'On-chain oracles block price deviations above 5% — mathematical security, always on.',
   },
   {
-    title: 'Smart DCA Engine — Coming Soon',
-    desc: 'Automated dollar-cost averaging with price-aware buying windows. Fully autonomous execution powered by Gelato Network — no browser required. Almost ready.',
+    title: 'Smart DCA Engine',
+    desc: 'Automated dollar-cost averaging with price-aware buying windows. Fully autonomous execution powered by Chainlink oracles — no browser required.',
   },
   {
-    title: 'Limit Orders — Coming Soon',
-    desc: 'Set your target price and walk away. CoW Protocol solvers execute when the market reaches your level — zero gas, MEV-protected. Finishing implementation.',
+    title: 'Limit Orders',
+    desc: 'Set your target price and walk away. CoW Protocol solvers execute when the market reaches your level — zero gas, MEV-protected.',
   },
   {
-    title: 'Stop Loss / Take Profit — Coming Soon',
-    desc: 'Protect positions or lock in gains. Chainlink oracles trigger autonomous on-chain execution via our order engine. Launching very soon.',
+    title: 'Stop Loss / Take Profit',
+    desc: 'Protect positions or lock in gains. Chainlink oracles trigger autonomous on-chain execution via our order engine.',
   },
   {
     title: 'Split Routing',
@@ -662,7 +663,7 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
         transition={{ delay: 0.4, duration: 0.5 }}
         whileHover={{ scale: 1.03, boxShadow: '0 0 60px rgba(200,184,154,0.4)' }}
         whileTap={{ scale: 0.96 }}
-        onClick={onLaunchApp}
+        onClick={() => { playTouchMP3(); onLaunchApp() }}
         style={{ background: 'linear-gradient(135deg, #C8B89A 0%, #E8D5B7 50%, #C8B89A 100%)' }}
         className="relative z-10 inline-flex h-16 w-[220px] items-center justify-center rounded-full text-base font-semibold tracking-[0.04em] text-[#080B10]"
       >
