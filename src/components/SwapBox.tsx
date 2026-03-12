@@ -18,7 +18,6 @@ import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
-import { addToRouterWhitelist } from '@/lib/api'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META } from '@/lib/constants'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
@@ -79,7 +78,6 @@ export default function SwapBox() {
         .then(data => {
           if (data.spender) {
             setSpender(data.spender as `0x${string}`)
-            addToRouterWhitelist(data.spender as `0x${string}`)
           }
         }).catch(() => {})
       return () => controller.abort()
