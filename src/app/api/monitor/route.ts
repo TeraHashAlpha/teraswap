@@ -1,6 +1,18 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 
+// CORS headers — allows local file:// (origin null) and the production domain
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+}
+
+/** Preflight handler for CORS */
+export function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+}
+
 interface SwapEvent {
   ts: number
   wallet: string
@@ -28,12 +40,12 @@ export async function GET(req: Request) {
   const secret = process.env.MONITOR_SECRET
 
   if (!secret || !key || key !== secret) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: CORS_HEADERS })
   }
 
   const supabase = getSupabase()
   if (!supabase) {
-    return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
+    return NextResponse.json({ error: 'Supabase not configured' }, { status: 503, headers: CORS_HEADERS })
   }
 
   try {
@@ -265,11 +277,12 @@ export async function GET(req: Request) {
       dailyTimeseries,
     }, {
       headers: {
+        ...CORS_HEADERS,
         'Cache-Control': 'private, s-maxage=15, stale-while-revalidate=30',
       },
     })
   } catch (err) {
     console.error('[monitor] Error:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal error' }, { status: 500, headers: CORS_HEADERS })
   }
 }
