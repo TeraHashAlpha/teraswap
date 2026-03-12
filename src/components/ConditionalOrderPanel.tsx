@@ -220,6 +220,11 @@ function CreateConditionalForm({
         : expectedOutRaw
     const minAmountOut = (expectedOutAdjusted * slippageBps / 100n).toString()
 
+    const priceFeed = findPriceFeed(tokenIn, chainId)
+    if (!priceFeed) {
+      throw new Error(`No Chainlink price feed available for ${tokenIn.symbol}. Select a supported token.`)
+    }
+
     const config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
@@ -228,7 +233,7 @@ function CreateConditionalForm({
       orderType: OrderType.STOP_LOSS, // Contract uses STOP_LOSS for both SL and TP
       condition,
       targetPrice: targetPrice8dec,
-      priceFeed: findPriceFeed(tokenIn, chainId), // Monitor the sell token price
+      priceFeed, // Monitor the sell token price
       expirySeconds: EXPIRY_PRESETS[expiryIdx].seconds,
       router: getDefaultRouter(chainId).address,
     }
