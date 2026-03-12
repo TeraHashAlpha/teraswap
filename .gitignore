@@ -47,3 +47,4 @@ TeraSwap_OrderEngine_SecurityAudit.pdf
 contracts/order-engine/deployment-*.json
 contracts/order-engine/executor/.env.executor
 contracts/order-engine/executor/node_modules/
+.vercel
