@@ -14,6 +14,7 @@ import { useApproval } from '@/hooks/useApproval'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { trackTrade } from '@/lib/analytics-tracker'
+// Security tracking moved server-side — events are recorded by /api/log-swap
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
@@ -25,6 +26,7 @@ import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval
 import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
+import BetaDisclaimer from './BetaDisclaimer'
 
 export default function SwapBox() {
   const [tokenIn, setTokenIn] = useState<Token | null>(findToken('ETH') ?? null)
@@ -182,6 +184,8 @@ export default function SwapBox() {
         source: meta.best.source,
         txHash,
       })
+
+      // Security tracking is handled server-side by /api/log-swap
 
       // Track approval for revoke — only if it leaves a residual allowance
       const source = meta.best.source
@@ -598,6 +602,9 @@ export default function SwapBox() {
 
       {/* Active Approvals — below the swap box */}
       <ActiveApprovals />
+
+      {/* Beta disclaimer */}
+      <BetaDisclaimer />
     </>
   )
 }

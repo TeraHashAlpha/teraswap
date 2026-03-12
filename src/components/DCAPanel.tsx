@@ -22,6 +22,7 @@ import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
 import { ETHERSCAN_TX } from '@/lib/constants'
+import BetaDisclaimer from './BetaDisclaimer'
 
 // ── Map token symbols to Chainlink feeds ─────────────────
 // Returns empty string if no feed found — callers must check before submitting.
@@ -149,6 +150,9 @@ export default function DCAPanel() {
       <div className="mt-3 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-50">
         <span className="font-semibold text-cream-gold">Autonomous execution</span> — DCA orders run 24/7 via Chainlink oracles. No browser required. Your wallet only signs once.
       </div>
+
+      {/* Beta disclaimer */}
+      <BetaDisclaimer />
     </div>
   )
 }

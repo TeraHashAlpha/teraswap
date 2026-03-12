@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 
 /**
  * POST /api/log-swap
@@ -35,6 +36,9 @@ export async function POST(req: NextRequest) {
       feeCollected = false,
       feeAmount,
       status = 'pending',
+      // Security metadata (sent by client for server-side tracking)
+      oracleUnavailable = false,
+      priceDeviation = 0,
     } = body
 
     if (!wallet || !source || !tokenIn || !tokenOut || !amountIn || !amountOut) {
@@ -67,6 +71,24 @@ export async function POST(req: NextRequest) {
     if (error) {
       console.error('[log-swap] Supabase insert error:', error.message, error.details, error.hint)
       return NextResponse.json({ ok: false, error: error.message })
+    }
+
+    // ── Server-side security event tracking (fire-and-forget) ──
+    const tradeUsd = Number(amountInUsd) || 0
+
+    // Large trade monitoring (>$50k)
+    if (tradeUsd >= 50_000) {
+      trackLargeTrade({ wallet, tokenIn: tokenInSymbol, tokenOut: tokenOutSymbol, amountUsd: tradeUsd, source })
+    }
+
+    // Oracle unavailable warning
+    if (oracleUnavailable) {
+      trackOracleUnavailable({ wallet, tokenIn: tokenInSymbol, tokenOut: tokenOutSymbol, amountUsd: tradeUsd, blocked: false })
+    }
+
+    // Price deviation from Chainlink (≥2%)
+    if (Number(priceDeviation) >= 0.02) {
+      trackOracleDeviation({ wallet, tokenIn: tokenInSymbol, tokenOut: tokenOutSymbol, deviation: Number(priceDeviation), amountUsd: tradeUsd, blocked: false })
     }
 
     return NextResponse.json({ ok: true })
@@ -102,6 +124,11 @@ export async function PATCH(req: NextRequest) {
     const update: Record<string, unknown> = { status, tx_hash: txHash }
     if (gasUsed) update.gas_used = gasUsed
     if (gasPrice) update.gas_price = gasPrice
+
+    // Track failed swap server-side
+    if (status === 'failed' && wallet) {
+      trackSwapFailed({ wallet, tokenIn: '', tokenOut: '', amountUsd: 0, source: '', error: 'Transaction reverted' })
+    }
 
     // Try 1: Match by tx_hash (row already has the hash)
     const { data: matched, error: err1 } = await supabase

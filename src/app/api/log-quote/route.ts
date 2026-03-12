@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { trackQuoteFailure } from '@/lib/security-tracker'
 
 /**
  * POST /api/log-quote
@@ -55,6 +56,14 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error('[log-quote] Supabase insert error:', error.message)
+    }
+
+    // ── Server-side: track sources that failed to respond ──
+    const failed = (sourcesQueried as string[]).filter(
+      (s: string) => !(sourcesResponded as string[]).includes(s)
+    )
+    for (const src of failed) {
+      trackQuoteFailure({ source: src, tokenIn: tokenInSymbol || tokenIn, tokenOut: tokenOutSymbol || tokenOut, error: 'No response' })
     }
 
     return NextResponse.json({ ok: true })

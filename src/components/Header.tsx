@@ -36,20 +36,29 @@ export default function Header({ onLogoClick, showNav = false, onDocsClick }: Pr
 
   return (
     <header
-      className={`fixed inset-x-0 top-0 z-50 flex items-center justify-between px-3 py-3 transition-all duration-500 sm:px-4 sm:py-4 md:px-8 ${
+      className={`fixed inset-x-0 z-50 flex items-center justify-between px-3 py-3 transition-all duration-500 sm:px-4 sm:py-4 md:px-8 ${
         scrolled
           ? 'backdrop-blur-2xl border-b border-cream-08'
           : 'bg-transparent border-b border-transparent'
       }`}
-      style={scrolled ? { backgroundColor: 'var(--header-blur)' } : undefined}
+      style={{
+        top: 'var(--beta-banner-h, 0px)',
+        ...(scrolled ? { backgroundColor: 'var(--header-blur)' } : undefined),
+      }}
     >
       {/* Logo */}
       <div
         className="flex cursor-pointer flex-col transition-opacity hover:opacity-80"
         onClick={onLogoClick}
       >
-        <span className="font-display text-xl font-extrabold uppercase tracking-[4px] text-cream">
+        <span className="flex items-center gap-1.5 font-display text-xl font-extrabold uppercase tracking-[4px] text-cream">
           TERASWAP
+          <span
+            className="inline-block -rotate-3 select-none text-[11px] font-semibold italic tracking-normal text-[#F59E0B]"
+            style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+          >
+            beta
+          </span>
         </span>
         <span className="mt-[-2px] text-[11px] font-medium tracking-[0.12em] text-cream-50">
           Meta-Aggregator

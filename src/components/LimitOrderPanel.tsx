@@ -21,6 +21,7 @@ import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
 import { ETHERSCAN_TX } from '@/lib/constants'
 import TokenSelector from './TokenSelector'
+import BetaDisclaimer from './BetaDisclaimer'
 
 // ── Stablecoin detection ─────────────────────────────────
 const STABLECOIN_SYMBOLS = new Set([
@@ -138,6 +139,9 @@ export default function LimitOrderPanel() {
           onRemove={removeOrder}
         />
       )}
+
+      {/* Beta disclaimer */}
+      <BetaDisclaimer />
     </div>
   )
 }

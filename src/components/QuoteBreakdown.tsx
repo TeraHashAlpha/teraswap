@@ -73,7 +73,12 @@ export default function QuoteBreakdown({
         <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">{priceCheck.message}</div>
       )}
 
-      {/* Oracle unavailable — inline tooltip only */}
+      {/* Oracle unavailable — prominent warning */}
+      {priceCheck.oracleUnavailable && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300">
+          <span className="font-semibold">&#9888; No Chainlink oracle</span> for {tokenIn.symbol} — the quoted price is <strong>not independently verified</strong>. Multi-source comparison is your only protection. Verify the rate manually before swapping.
+        </div>
+      )}
 
       {/* Main breakdown */}
       <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-3 text-sm">
@@ -130,13 +135,14 @@ export default function QuoteBreakdown({
             className="text-cream-35"
             title={
               priceCheck.oracleUnavailable
-                ? `No Chainlink oracle for ${tokenIn.symbol} — price not independently verified`
+                ? `⚠ No Chainlink oracle for ${tokenIn.symbol} — price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
                 : priceCheck.chainlinkPrice != null
-                  ? `Verified by Chainlink ($${priceCheck.chainlinkPrice.toFixed(2)})`
+                  ? `✓ Verified by Chainlink ($${priceCheck.chainlinkPrice.toFixed(2)})`
                   : undefined
             }
           >
-            Rate
+            Rate {priceCheck.oracleUnavailable && <span className="text-amber-400">&#9888;</span>}
+            {priceCheck.chainlinkPrice != null && !priceCheck.oracleUnavailable && <span className="text-success">&#10003;</span>}
           </span>
           <span className="truncate text-cream-80 text-xs sm:text-sm">1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</span>
         </div>
