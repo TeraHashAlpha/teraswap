@@ -45,14 +45,15 @@ export default function BetaBanner() {
       {/* Fixed banner */}
       <div
         ref={ref}
-        className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-3 bg-[#78350F] px-4 py-2 text-center text-[12px] font-medium text-[#FCD34D] sm:text-[13px]"
+        className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-2 border-b border-white/[0.06] px-4 py-1.5 text-center text-[11px] text-white/40"
+        style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}
       >
         <span>
-          TeraSwap is in <strong>beta</strong>. Smart contracts are unaudited. Use at your own risk and never trade more than you can afford to lose.
+          Beta version — smart contracts are unaudited. Use with caution.
         </span>
         <button
           onClick={dismiss}
-          className="ml-2 flex-shrink-0 rounded px-1.5 py-0.5 text-[#FCD34D]/70 transition-colors hover:bg-[#FCD34D]/10 hover:text-[#FCD34D]"
+          className="ml-1 flex-shrink-0 rounded px-1 py-0.5 text-white/25 transition-colors hover:text-white/50"
           aria-label="Dismiss beta warning"
         >
           ✕
