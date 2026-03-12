@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
+import { ORDER_EXECUTOR_ADDRESS } from '@/lib/order-engine/config'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
@@ -91,14 +92,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid or missing Chainlink price feed address' }, { status: 400 })
     }
 
-    // [BUGFIX] Signature verification is MANDATORY — reject if executor address not configured
-    const executorAddress = process.env.NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS || process.env.ORDER_EXECUTOR_ADDRESS
-    if (!executorAddress) {
-      return NextResponse.json(
-        { error: 'Order executor not configured — cannot verify signatures' },
-        { status: 503 },
-      )
-    }
+    // Signature verification — uses ORDER_EXECUTOR_ADDRESS from config (with env override)
+    const executorAddress = ORDER_EXECUTOR_ADDRESS
     {
       try {
         const chainId = parseInt(process.env.CHAIN_ID || '1', 10)
