@@ -1,0 +1,13 @@
+{
+  "name": "teraswap-order-executor-w3f",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "npx w3f deploy web3Function.ts"
+  },
+  "dependencies": {
+    "@gelatonetwork/web3-functions-sdk": "^2.4.0",
+    "ethers": "^6.16.0"
+  }
+}

@@ -331,6 +331,12 @@ function CreateLimitForm({
     // Apply 2% slippage: multiply by 98, divide by 100
     const minAmountOut = (expectedOutAdjusted * 98n / 100n).toString()
 
+    const feedToken = sellIsStable ? tokenOut : tokenIn
+    const priceFeed = findPriceFeed(feedToken, chainId)
+    if (!priceFeed) {
+      throw new Error(`No Chainlink price feed available for ${feedToken.symbol}. Select a supported token.`)
+    }
+
     const config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
@@ -339,7 +345,7 @@ function CreateLimitForm({
       orderType: OrderType.LIMIT,
       condition,
       targetPrice: targetPrice8dec,
-      priceFeed: findPriceFeed(sellIsStable ? tokenOut : tokenIn, chainId),
+      priceFeed,
       expirySeconds: EXPIRY_PRESETS[expiryIdx].seconds,
       router: getDefaultRouter(chainId).address,
     }

@@ -85,6 +85,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'tokenIn and tokenOut must differ' }, { status: 400 })
     }
 
+    // Validate priceFeed — must be a valid non-zero address
+    const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
+    if (!body.priceFeed || body.priceFeed === ZERO_ADDR || !body.priceFeed.startsWith('0x') || body.priceFeed.length !== 42) {
+      return NextResponse.json({ error: 'Invalid or missing Chainlink price feed address' }, { status: 400 })
+    }
+
     // [BUGFIX] Signature verification is MANDATORY — reject if executor address not configured
     const executorAddress = process.env.NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS || process.env.ORDER_EXECUTOR_ADDRESS
     if (!executorAddress) {
@@ -161,7 +167,7 @@ export async function POST(req: NextRequest) {
         amount_in: body.amountIn,
         min_amount_out: body.minAmountOut,
         target_price: body.targetPrice,
-        price_feed: (body.priceFeed ?? '0x0000000000000000000000000000000000000000').toLowerCase(),
+        price_feed: body.priceFeed?.toLowerCase() || '',
         price_condition: body.priceCondition,
         expiry: body.expiry,
         nonce: body.nonce,

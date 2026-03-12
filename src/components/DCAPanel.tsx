@@ -216,6 +216,11 @@ function CreateDCAForm({
     // minAmountOut = 0 for DCA (per-fill slippage is managed by the DCA executor)
     const minAmountOut = '0'
 
+    const priceFeed = findPriceFeed(tokenOut, chainId)
+    if (!priceFeed) {
+      throw new Error(`No Chainlink price feed available for ${tokenOut.symbol}. Select a supported token.`)
+    }
+
     const config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
@@ -224,7 +229,7 @@ function CreateDCAForm({
       orderType: OrderType.DCA,
       condition: PriceCondition.ABOVE, // DCA: price >= $0 is always true → executes at any price
       targetPrice: '0', // Target $0 with ABOVE = always passes price check
-      priceFeed: findPriceFeed(tokenOut, chainId), // Track buy token price
+      priceFeed, // Track buy token price
       expirySeconds: expiry.seconds,
       router: getDefaultRouter(chainId).address, // Best aggregated price
       dcaInterval: interval.seconds,
