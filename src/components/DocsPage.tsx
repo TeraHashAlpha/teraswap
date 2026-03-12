@@ -225,7 +225,7 @@ export default function DocsPage() {
           <SectionTitle icon="◈" title="Overview" />
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
             TeraSwap is a <strong className="text-cream">meta-aggregator</strong> for decentralized exchanges on Ethereum.
-            Instead of searching manually across multiple DEXs, TeraSwap queries <strong className="text-cream">10 independent
+            Instead of searching manually across multiple DEXs, TeraSwap queries <strong className="text-cream">11 independent
             liquidity sources</strong> simultaneously and automatically routes your trade through whichever offers the best
             net output — accounting for gas costs, slippage, and pool fees.
           </p>
@@ -421,7 +421,7 @@ export default function DocsPage() {
         <AnimatedSection id="limit">
           <SectionTitle icon="⊕" title="Limit Orders" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            Set your target price and let CoW Protocol solvers execute when the market reaches your level. Zero gas fees, MEV-protected, and partially fillable.
+            Set your target price and let CoW Protocol solvers execute when the market reaches your level. Zero gas fees, MEV-protected, and partially fillable. Limit orders use <strong className="text-cream">2% default slippage</strong> and are ideal for precise entry and exit targets where you want solver competition to deliver the best possible fill price.
           </p>
 
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
@@ -453,9 +453,12 @@ export default function DocsPage() {
         {/* ═══ STOP LOSS / TAKE PROFIT ═══ */}
         <AnimatedSection id="sltp">
           <SectionTitle icon="⛊" title="Stop Loss / Take Profit" />
-          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
             Protect your positions or lock in gains automatically. Chainlink oracles monitor prices in real-time, and when your trigger is hit, a CoW Protocol limit order is auto-submitted for MEV-protected execution.
           </p>
+          <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
+            <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses <strong className="text-cream-65">5% default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses <strong className="text-cream-65">2% slippage</strong> like limit orders.
+          </div>
 
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="space-y-4"
@@ -465,6 +468,7 @@ export default function DocsPage() {
               { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'Prices are polled every 5 seconds via Chainlink on-chain oracles — the industry standard for reliable, tamper-proof price feeds.' },
               { num: '03', title: 'Automatic Execution', desc: 'When your trigger fires, a CoW Protocol limit order is automatically created and submitted. You sign once upfront — no manual action needed at trigger time.' },
               { num: '04', title: 'MEV-Protected Fill', desc: 'The triggered order goes through CoW Protocol\'s solver competition, ensuring MEV-protected execution with zero gas fees.' },
+              { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
                 className="flex gap-4 rounded-xl border p-5"
@@ -582,21 +586,22 @@ export default function DocsPage() {
                 'Slippage safety clamp across all sources',
                 'Dynamic multi-chain EIP-712 signing',
                 'Limit orders via CoW Protocol (zero gas, partially fillable)',
-                'Stop loss + take profit (Chainlink-triggered)',
+                'Stop loss + take profit (Chainlink-triggered, adaptive slippage)',
                 'Split routing (multi-DEX trade optimization)',
                 'Public analytics dashboard (volume, routes, pairs, activity)',
                 'Private admin monitor (revenue, sybil detection, wallet cohorts)',
                 'Sybil/wash trading detector (6 heuristics + wallet clustering)',
                 'Airdrop-ready wallet snapshots & exports',
+                'Supabase backend (24/7 order monitoring without PC)',
+                'Fee collection smart contract (audited)',
+                'Order Engine smart contract (EIP-712 signed orders)',
               ] },
               { phase: 'Phase 2', status: 'Next', color: '#C8B89A', items: [
-                'Supabase migration (24/7 monitoring without PC)',
                 'Own DCA smart contracts (Chainlink Automation)',
                 'Trailing stop loss (auto-adjust trigger)',
                 'Bebop RFQ (12th source)',
                 'Base network support',
                 'Multi-hop Curve routing',
-                'Fee collection smart contract',
                 'Private RPC (Flashbots Protect / MEV Blocker)',
               ] },
               { phase: 'Phase 3', status: 'Planned', color: 'rgba(200,184,154,0.4)', items: [

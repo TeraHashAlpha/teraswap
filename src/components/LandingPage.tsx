@@ -533,11 +533,11 @@ const FEATURES = [
   },
   {
     title: 'Limit Orders',
-    desc: 'Set your target price and walk away. CoW Protocol solvers execute when the market reaches your level — zero gas, MEV-protected.',
+    desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order — zero gas, MEV-protected, with partial fills and price improvement. Ideal for precise entry and exit targets with 2% default slippage.',
   },
   {
     title: 'Stop Loss / Take Profit',
-    desc: 'Protect positions or lock in gains. Chainlink oracles trigger autonomous on-chain execution via our order engine.',
+    desc: 'Automated position protection powered by Chainlink oracles. Prices are monitored in real-time — when your trigger fires, a CoW limit order is auto-submitted. Stop loss uses 5% slippage for urgent exits; take profit uses 2%.',
   },
   {
     title: 'Split Routing',
