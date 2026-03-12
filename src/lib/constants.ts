@@ -227,6 +227,16 @@ export const ETHERSCAN_ADDRESS = 'https://etherscan.io/address/'
 export const PRICE_DEVIATION_WARN = 0.02  // 2%
 export const PRICE_DEVIATION_BLOCK = 0.03 // 3% — tightened from 5%
 
+// ── Oracle Unavailable Protection ───────────────────────
+// When no Chainlink feed exists for a token, we can't independently verify the
+// swap price. Large swaps on unverified tokens are extremely dangerous (see: $50M
+// aEthUSDT→aEthAAVE incident via CoW Protocol, where aggregators couldn't price
+// wrapped Aave tokens). These thresholds add friction for unverified swaps.
+/** USD value above which unverified swaps show a strong warning */
+export const UNVERIFIED_SWAP_WARN_USD = 1_000
+/** USD value above which unverified swaps are hard-blocked */
+export const UNVERIFIED_SWAP_BLOCK_USD = 10_000
+
 // ── Permit2 Security ────────────────────────────────────
 /** Maximum signature deadline for Permit2 signatures (30 minutes) */
 export const PERMIT2_MAX_DEADLINE_SEC = 30 * 60 // 1800 seconds

@@ -36,8 +36,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Scripts (local dev only)
+# Scripts & tools (local dev only — never deployed)
 scripts/*.sh
+tools/
 TeraSwap_OrderEngine_SecurityAudit.pdf
 
 # Order Engine deployment secrets

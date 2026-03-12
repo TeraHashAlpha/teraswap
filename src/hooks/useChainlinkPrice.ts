@@ -25,9 +25,19 @@ export function useChainlinkPrice(
     query: { enabled: !!feedAddress },
   })
 
-  // No feed available → flag oracle as unavailable for this token
+  // No feed available → flag oracle as unavailable and warn user
+  // [SECURITY] Previously returned level: 'none' with no visible warning.
+  // After the $50M aEthUSDT→aEthAAVE incident, unverified tokens MUST show a warning.
   if (!feedAddress) {
-    return { chainlinkPrice: null, executionPrice: executionPriceUsd, deviation: 0, level: 'none', message: null, oracleUnavailable: !!tokenAddress }
+    const isReal = !!tokenAddress
+    return {
+      chainlinkPrice: null,
+      executionPrice: executionPriceUsd,
+      deviation: 0,
+      level: isReal ? 'warn' : 'none',
+      message: isReal ? 'No Chainlink oracle available — price cannot be independently verified. Proceed with caution.' : null,
+      oracleUnavailable: isReal,
+    }
   }
 
   // Feed exists but data not loaded yet

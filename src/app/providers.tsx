@@ -8,6 +8,7 @@ import { config } from '@/lib/wagmiConfig'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { ToastProvider } from '@/components/ToastProvider'
 import BackgroundMusic from '@/components/BackgroundMusic'
+import BetaBanner from '@/components/BetaBanner'
 import { assertEnv } from '@/lib/env-validation'
 
 import '@rainbow-me/rainbowkit/styles.css'
@@ -57,6 +58,7 @@ export default function Providers({ children }: { children: ReactNode }) {
           <RainbowKitWithTheme>
             <ToastProvider>
               <BackgroundMusic />
+              <BetaBanner />
               {children}
             </ToastProvider>
           </RainbowKitWithTheme>

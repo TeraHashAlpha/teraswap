@@ -61,6 +61,26 @@ export interface Database {
         }
         Update: Partial<Database['public']['Tables']['quotes']['Insert']>
       }
+      security_events: {
+        Row: {
+          id: string
+          type: string
+          severity: 'info' | 'warn' | 'critical'
+          timestamp: string
+          wallet: string | null
+          token_in: string | null
+          token_out: string | null
+          amount_usd: number | null
+          deviation: number | null
+          source: string | null
+          message: string
+          metadata: Record<string, unknown> | null
+        }
+        Insert: Omit<Database['public']['Tables']['security_events']['Row'], 'timestamp'> & {
+          timestamp?: string
+        }
+        Update: Partial<Database['public']['Tables']['security_events']['Insert']>
+      }
     }
     Views: Record<string, never>
     Functions: Record<string, never>

@@ -25,6 +25,10 @@ interface LogSwapParams {
   feeCollected: boolean
   feeAmount?: string
   status?: 'pending' | 'confirmed' | 'failed'
+  // Security metadata for server-side tracking
+  oracleUnavailable?: boolean
+  priceDeviation?: number
+  amountInUsd?: number
 }
 
 export function logSwapToSupabase(params: LogSwapParams): void {
@@ -48,6 +52,9 @@ export function logSwapToSupabase(params: LogSwapParams): void {
         feeCollected: params.feeCollected,
         feeAmount: params.feeAmount,
         status: params.status ?? 'pending',
+        amountInUsd: params.amountInUsd,
+        oracleUnavailable: params.oracleUnavailable ?? false,
+        priceDeviation: params.priceDeviation ?? 0,
       }),
     }).catch((err) => {
       console.warn('[analytics] logSwap failed:', err)

@@ -83,6 +83,32 @@ CREATE INDEX IF NOT EXISTS idx_quotes_created_at   ON quotes (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_quotes_best_source  ON quotes (best_source);
 CREATE INDEX IF NOT EXISTS idx_quotes_pair         ON quotes (token_in, token_out);
 
+-- ── Security Events table ──────────────────────────────────
+-- Records all security-relevant events: oracle deviations, blocked swaps,
+-- quote failures, abnormal patterns. Used by /api/monitor dashboard.
+CREATE TABLE IF NOT EXISTS security_events (
+  id          TEXT PRIMARY KEY,                     -- generated ID
+  type        TEXT NOT NULL,                        -- oracle_deviation_warn, oracle_unavailable, etc.
+  severity    TEXT NOT NULL DEFAULT 'info',         -- info | warn | critical
+  timestamp   TIMESTAMPTZ DEFAULT now() NOT NULL,
+
+  -- Context
+  wallet      TEXT,
+  token_in    TEXT,
+  token_out   TEXT,
+  amount_usd  NUMERIC(18,2),
+  deviation   NUMERIC(8,4),                        -- price deviation (e.g. 0.0345 = 3.45%)
+  source      TEXT,                                 -- aggregator source (for quote failures)
+  message     TEXT NOT NULL,
+  metadata    JSONB                                 -- flexible extra data
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_type      ON security_events (type);
+CREATE INDEX IF NOT EXISTS idx_security_timestamp ON security_events (timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_security_severity  ON security_events (severity);
+
+ALTER TABLE security_events ENABLE ROW LEVEL SECURITY;
+
 -- ── RLS (Row Level Security) ────────────────────────────────
 -- Disable RLS since we use service-role key from server-side API routes.
 -- No client-side access to these tables.
