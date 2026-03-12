@@ -2059,21 +2059,3 @@ export function validateRouterAddress(
   }
 }
 
-/**
- * Add a dynamically-fetched router address to the whitelist.
- *
- * [H-03] SECURITY: This is now restricted — only addresses that pass
- * basic validation are added. The caller must verify the source.
- * In production, this should only be called from trusted server-side code.
- */
-export function addToRouterWhitelist(address: string, source?: AggregatorName): void {
-  // Basic validation: must be a valid Ethereum address
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
-    console.error(`[TeraSwap] Rejected invalid address for whitelist: ${address}`)
-    return
-  }
-
-  // Log for audit trail
-  console.info(`[TeraSwap] Dynamic router added to whitelist: ${address} (source: ${source ?? 'unknown'})`)
-  ROUTER_WHITELIST.add(address.toLowerCase())
-}
