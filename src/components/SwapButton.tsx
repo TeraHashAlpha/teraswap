@@ -17,6 +17,8 @@ interface Props {
   quoteLoading: boolean
   /** When true, price deviation from Chainlink exceeds the block threshold — swap MUST be blocked */
   priceBlocked: boolean
+  /** Reason for the block: 'warn' (2-3% deviation), 'danger' (>3%), 'oracle' (no oracle + high value) */
+  blockReason?: 'warn' | 'danger' | 'oracle'
   onApprove: () => void
   onSwap: () => void
 }
@@ -24,7 +26,7 @@ interface Props {
 export default function SwapButton({
   swapStatus, approvalStatus, approvalReady,
   hasAmount, hasSufficientBalance, hasQuote, quoteLoading,
-  priceBlocked,
+  priceBlocked, blockReason,
   onApprove, onSwap,
 }: Props) {
   const { isConnected, chain } = useAccount()
@@ -47,8 +49,14 @@ export default function SwapButton({
       return { text: 'Finding best route...', disabled: true, onClick: () => {}, variant: 'disabled' }
     if (!hasQuote)
       return { text: 'No quotes available', disabled: true, onClick: () => {}, variant: 'disabled' }
-    if (priceBlocked)
-      return { text: 'Price deviation too high — blocked', disabled: true, onClick: () => {}, variant: 'error' }
+    if (priceBlocked) {
+      const msg = blockReason === 'warn'
+        ? 'Price outside safe range — waiting...'
+        : blockReason === 'oracle'
+          ? 'No oracle — swap blocked'
+          : 'Price deviation too high — blocked'
+      return { text: msg, disabled: true, onClick: () => {}, variant: blockReason === 'warn' ? 'warning' : 'error' }
+    }
     if (approvalStatus === 'approving_permit2')
       return { text: 'Approving...', disabled: true, onClick: () => {}, variant: 'loading' }
     if (approvalStatus === 'signing')
