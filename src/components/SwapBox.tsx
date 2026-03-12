@@ -19,7 +19,7 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META } from '@/lib/constants'
+import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD } from '@/lib/constants'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
 import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval, playError, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
@@ -284,10 +284,30 @@ export default function SwapBox() {
   }
 
   // ── Security: block swap when Chainlink deviation exceeds threshold ──
-  const priceBlocked = priceCheck.level === 'danger'
+  // Block at BOTH warn (≥2%) and danger (≥3%) — button only re-enables when price
+  // returns fully within parameters (deviation < PRICE_DEVIATION_WARN).
+  // oracleUnavailable tokens are handled separately by the tiered oracle system below.
+  const priceBlocked = (priceCheck.level === 'danger' || priceCheck.level === 'warn') && !priceCheck.oracleUnavailable
+
+  // ── Security: block large swaps on tokens without Chainlink oracle ──
+  // Estimate USD value of the swap input (only reliable when input is a stablecoin or ETH)
+  const estimatedInputUsd = useMemo(() => {
+    if (!tokenIn || !amountIn || Number(amountIn) <= 0) return 0
+    if (['USDC', 'USDT', 'DAI', 'USDe'].includes(tokenIn.symbol)) return Number(amountIn)
+    // If we have a Chainlink price for the input token, use it
+    if (priceCheck.chainlinkPrice != null) return Number(amountIn) * priceCheck.chainlinkPrice
+    // For ETH without a loaded price yet, use a conservative estimate
+    if (isNativeETH(tokenIn) || tokenIn.symbol === 'WETH') return Number(amountIn) * 2000
+    return 0 // unknown — can't estimate
+  }, [tokenIn, amountIn, priceCheck.chainlinkPrice])
+
+  const oracleUnavailable = priceCheck.oracleUnavailable
+  const oracleWarnThreshold = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_WARN_USD
+  const oracleBlocked = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_BLOCK_USD
+  const anyBlocked = priceBlocked || oracleBlocked
 
   const handleApproveAndSwap = useCallback(async () => {
-    if (priceBlocked) return // hard block — never execute above deviation threshold
+    if (anyBlocked) return // hard block — never execute above deviation threshold or unverified large swap
     startWaitingSound()
     if (!approvalReady) { await approve(); return }
 
@@ -296,17 +316,17 @@ export default function SwapBox() {
     } else if (meta?.best.source) {
       executeSwap(meta.best.source)
     }
-  }, [approvalReady, approve, meta?.best.source, executeSwap, priceBlocked, isSplitActive, splitResult, executeSplitSwap])
+  }, [approvalReady, approve, meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap])
 
   const handleSwap = useCallback(() => {
-    if (priceBlocked) return // hard block
+    if (anyBlocked) return // hard block
     startWaitingSound()
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
     } else if (meta?.best.source) {
       executeSwap(meta.best.source)
     }
-  }, [meta?.best.source, executeSwap, priceBlocked, isSplitActive, splitResult, executeSplitSwap])
+  }, [meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap])
 
   return (
     <>
@@ -460,30 +480,51 @@ export default function SwapBox() {
         {quoteError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{quoteError}</div>}
         {effectiveError && !isSplitActive && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
         {approvalError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{approvalError}</div>}
-        {/* Price impact warning (>3%) — amber for caution, red for high */}
-        {!priceBlocked && priceCheck.deviation > 0.03 && (
-          <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
-            priceCheck.deviation > 0.05
-              ? 'border-danger/30 bg-danger/10 text-danger'
-              : 'border-warning/30 bg-warning/10 text-warning'
-          }`}>
-            <span className="font-semibold">&#9888; High price impact: ~{(priceCheck.deviation * 100).toFixed(1)}%</span>
-            <span className="ml-1 text-cream-50">
-              {priceCheck.deviation > 0.05
-                ? 'This trade is very large relative to available liquidity. Consider splitting into smaller trades.'
-                : 'You may receive significantly less than expected. Consider reducing the trade size.'}
-            </span>
+        {/* Price deviation — warn level (2-3%): swap paused until price converges */}
+        {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && (
+          <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <span className="font-semibold">&#9888; Swap paused:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
+            Waiting for price to return within safe parameters. The button will re-enable automatically.
           </div>
         )}
-        {priceBlocked && (
+        {/* Price deviation — danger level (>3%): hard block */}
+        {priceBlocked && priceCheck.level === 'danger' && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
             This may indicate price manipulation or extreme low liquidity. Swap disabled for your protection.
           </div>
         )}
+        {/* Oracle unavailable — tiered warnings */}
+        {oracleUnavailable && hasAmount && meta && !priceBlocked && (
+          <>
+            {oracleBlocked ? (
+              <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+                <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
+                This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
+                <span className="mt-1 block text-[10px] text-danger/80">
+                  This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
+                </span>
+              </div>
+            ) : oracleWarnThreshold ? (
+              <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                <span className="font-semibold">&#9888; No oracle verification — high value swap.</span>{' '}
+                This token has no Chainlink price feed. The quoted price cannot be independently verified.
+                Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} will be blocked.
+                <span className="mt-1 block text-[10px] text-warning/80">
+                  Verify the price manually on CoinGecko or Etherscan before proceeding.
+                </span>
+              </div>
+            ) : (
+              <div className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300">
+                <span className="font-semibold">&#9432; No oracle available</span> for {tokenIn?.symbol}.{' '}
+                Price is based on aggregator quotes only — not independently verified by Chainlink.
+              </div>
+            )}
+          </>
+        )}
 
         {/* Swap Button */}
-        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={priceBlocked} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* Pending tx link — show Etherscan link while waiting for confirmation */}
         {swapStatus === 'swapping' && txHash && (
