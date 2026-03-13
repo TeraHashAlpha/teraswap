@@ -4,6 +4,7 @@ import { erc20Abi, parseUnits } from 'viem'
 import { PERMIT2_ADDRESS } from '@/lib/constants'
 import { permit2Abi, eip2612DetectionAbi, planApproval, PERMIT2_DOMAIN, PERMIT_SINGLE_TYPES, type ApprovalMethod, type ApprovalPlan } from '@/lib/approvals'
 import { isNativeETH, type Token } from '@/lib/tokens'
+import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 
 export type ApprovalStatus = 'idle' | 'checking' | 'approving_permit2' | 'signing' | 'ready' | 'error'
 
@@ -130,6 +131,13 @@ export function useApproval(
     if (!plan || !tokenIn || !address || rawAmount === 0n) return
     setApprovalError(null)
 
+    // [Wallet Activity] Track approval start
+    trackWalletActivity(address, {
+      category: 'approval', action: 'approval_started',
+      token_in: tokenIn.symbol,
+      metadata: { method: plan.method, spender: spenderAddress },
+    })
+
     try {
       if (plan.method === 'permit2' && !hasPermit2Allowance) {
         // Step 1: approve token → Permit2 contract (max, since Permit2 manages permissions)
@@ -167,6 +175,14 @@ export function useApproval(
   useEffect(() => {
     if (permit2ApproveConfirmed && status === 'approving_permit2') {
       setStatus('ready')
+      if (address && tokenIn) {
+        trackWalletActivity(address, {
+          category: 'approval', action: 'approval_confirmed',
+          token_in: tokenIn.symbol, success: true,
+          tx_hash: approvePermit2Hash,
+          metadata: { method: 'permit2' },
+        })
+      }
     }
   }, [permit2ApproveConfirmed])
 
@@ -174,6 +190,14 @@ export function useApproval(
     if (exactApproveConfirmed) {
       refetchAllowance()
       setStatus('ready')
+      if (address && tokenIn) {
+        trackWalletActivity(address, {
+          category: 'approval', action: 'approval_confirmed',
+          token_in: tokenIn.symbol, success: true,
+          tx_hash: exactApproveHash,
+          metadata: { method: 'exact', spender: spenderAddress },
+        })
+      }
     }
   }, [exactApproveConfirmed])
 
@@ -181,11 +205,35 @@ export function useApproval(
   useEffect(() => {
     if (approvePermit2Error) {
       setStatus('error')
-      setApprovalError(parseApprovalError(approvePermit2Error))
+      const errMsg = parseApprovalError(approvePermit2Error)
+      setApprovalError(errMsg)
+      if (address && tokenIn) {
+        const isRejected = approvePermit2Error.message.toLowerCase().includes('user rejected') ||
+          approvePermit2Error.message.toLowerCase().includes('user denied')
+        trackWalletActivity(address, {
+          category: 'approval',
+          action: isRejected ? 'approval_rejected' : 'approval_failed',
+          token_in: tokenIn.symbol, success: false,
+          error_code: isRejected ? 'user_rejected' : 'tx_error',
+          error_msg: errMsg,
+        })
+      }
     }
     if (exactApproveError) {
       setStatus('error')
-      setApprovalError(parseApprovalError(exactApproveError))
+      const errMsg = parseApprovalError(exactApproveError)
+      setApprovalError(errMsg)
+      if (address && tokenIn) {
+        const isRejected = exactApproveError.message.toLowerCase().includes('user rejected') ||
+          exactApproveError.message.toLowerCase().includes('user denied')
+        trackWalletActivity(address, {
+          category: 'approval',
+          action: isRejected ? 'approval_rejected' : 'approval_failed',
+          token_in: tokenIn.symbol, success: false,
+          error_code: isRejected ? 'user_rejected' : 'tx_error',
+          error_msg: errMsg,
+        })
+      }
     }
   }, [approvePermit2Error, exactApproveError])
 

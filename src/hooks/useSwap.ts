@@ -12,6 +12,7 @@ import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCo
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
+import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 
 // ── Fallback receipt polling ──────────────────────────────
 // wagmi's useWaitForTransactionReceipt can stall when the RPC is slow
@@ -101,6 +102,14 @@ export function useSwap(
 
     setErrorMessage(null)
     setStatus('fetching_swap')
+    const swapStartTime = Date.now()
+
+    // [Wallet Activity] Track swap initiation
+    trackWalletActivity(address, {
+      category: 'swap', action: 'swap_initiated', source,
+      token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+      metadata: { amountIn, slippage },
+    })
 
     try {
       const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
@@ -219,6 +228,12 @@ export function useSwap(
           })
 
           setStatus('swapping')
+          trackWalletActivity(address, {
+            category: 'swap', action: 'swap_submitted', source,
+            token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+            duration_ms: Date.now() - swapStartTime,
+            metadata: { routing: 'fee_collector_eth' },
+          })
           sendTransaction({
             to: FEE_COLLECTOR_ADDRESS,
             data: feeCollectorCalldata,
@@ -265,6 +280,12 @@ export function useSwap(
           })
 
           setStatus('swapping')
+          trackWalletActivity(address, {
+            category: 'swap', action: 'swap_submitted', source,
+            token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+            duration_ms: Date.now() - swapStartTime,
+            metadata: { routing: 'fee_collector_erc20' },
+          })
           sendTransaction({
             to: FEE_COLLECTOR_ADDRESS,
             data: feeCollectorCalldata,
@@ -302,6 +323,12 @@ export function useSwap(
         }
 
         setStatus('swapping')
+        trackWalletActivity(address, {
+          category: 'swap', action: 'swap_submitted', source,
+          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+          duration_ms: Date.now() - swapStartTime,
+          metadata: { routing: 'direct' },
+        })
         sendTransaction({
           to: swapData.tx.to,
           data: swapData.tx.data,
@@ -311,7 +338,14 @@ export function useSwap(
       }
     } catch (err) {
       setStatus('error')
-      setErrorMessage(err instanceof Error ? err.message : 'Unknown error')
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      setErrorMessage(errMsg)
+      trackWalletActivity(address, {
+        category: 'swap', action: 'swap_failed', source,
+        token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+        success: false, error_msg: errMsg.slice(0, 200),
+        duration_ms: Date.now() - swapStartTime,
+      })
     }
   }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction])
 
@@ -321,6 +355,14 @@ export function useSwap(
 
     setErrorMessage(null)
     setStatus('fetching_swap')
+    const cowStartTime = Date.now()
+
+    // [Wallet Activity] Track CoW swap initiation
+    trackWalletActivity(address, {
+      category: 'swap', action: 'swap_initiated', source: 'cowswap',
+      token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+      metadata: { amountIn, slippage, flow: 'cow' },
+    })
 
     try {
       // ── [FIX] Block native ETH — CoW requires WETH (no ETH-flow support yet) ──
@@ -414,6 +456,11 @@ export function useSwap(
 
       // Step 1: User signs the order via EIP-712
       setStatus('cow_signing')
+      trackWalletActivity(address, {
+        category: 'swap', action: 'cow_signing', source: 'cowswap',
+        token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+        duration_ms: Date.now() - cowStartTime,
+      })
 
       const domain = {
         name: 'Gnosis Protocol',
@@ -465,6 +512,12 @@ export function useSwap(
       setStatus('cow_pending')
       const orderUid = await submitCowOrder(orderParams, signature, chainId)
       setCowOrderUid(orderUid)
+      trackWalletActivity(address, {
+        category: 'swap', action: 'cow_submitted', source: 'cowswap',
+        token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+        order_id: orderUid,
+        duration_ms: Date.now() - cowStartTime,
+      })
 
       // Log CoW swap (fire-and-forget)
       logSwapToSupabase({
@@ -487,32 +540,58 @@ export function useSwap(
       if (result.status === 'fulfilled' && result.txHash) {
         setTxHashState(result.txHash as `0x${string}`)
         setStatus('success')
+        trackWalletActivity(address, {
+          category: 'swap', action: 'swap_confirmed', source: 'cowswap',
+          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+          success: true, tx_hash: result.txHash, order_id: orderUid,
+          duration_ms: Date.now() - cowStartTime,
+        })
       } else if (result.status === 'cancelled') {
         setStatus('error')
         setErrorMessage('Order was cancelled by the protocol.')
+        trackWalletActivity(address, {
+          category: 'swap', action: 'cow_cancelled', source: 'cowswap',
+          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+          success: false, error_code: 'cancelled', order_id: orderUid,
+          duration_ms: Date.now() - cowStartTime,
+        })
       } else {
         setStatus('error')
         setErrorMessage('Order expired. No solver filled it within the time limit. Try again or increase slippage.')
+        trackWalletActivity(address, {
+          category: 'swap', action: 'cow_expired', source: 'cowswap',
+          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+          success: false, error_code: 'expired', order_id: orderUid,
+          duration_ms: Date.now() - cowStartTime,
+        })
       }
     } catch (err) {
       setStatus('error')
+      let cowErrMsg = 'Unknown error'
+      let cowErrCode = 'unknown'
       if (err instanceof Error) {
         const msg = err.message.toLowerCase()
         if (msg.includes('user rejected') || msg.includes('user denied')) {
-          setErrorMessage('Signature rejected in wallet.')
+          cowErrMsg = 'Signature rejected in wallet.'
+          cowErrCode = 'user_rejected'
         } else if (msg.includes('funds worth at least') || msg.includes('insufficient balance')) {
-          // [FIX] Better error for CoW funds check — parse and show the required amount
-          setErrorMessage(
-            `Insufficient balance or allowance for this CoW swap. Ensure you have enough ${tokenIn?.symbol ?? 'tokens'} and have approved the CoW VaultRelayer.`
-          )
+          cowErrMsg = `Insufficient balance or allowance for this CoW swap. Ensure you have enough ${tokenIn?.symbol ?? 'tokens'} and have approved the CoW VaultRelayer.`
+          cowErrCode = 'insufficient_balance'
         } else if (msg.includes('insufficient') && msg.includes('allowance')) {
-          setErrorMessage(err.message)
+          cowErrMsg = err.message
+          cowErrCode = 'insufficient_allowance'
         } else {
-          setErrorMessage(err.message.slice(0, 200))
+          cowErrMsg = err.message.slice(0, 200)
+          cowErrCode = 'cow_error'
         }
-      } else {
-        setErrorMessage('Unknown error')
       }
+      setErrorMessage(cowErrMsg)
+      trackWalletActivity(address!, {
+        category: 'swap', action: 'swap_rejected', source: 'cowswap',
+        token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
+        success: false, error_code: cowErrCode, error_msg: cowErrMsg.slice(0, 200),
+        duration_ms: Date.now() - cowStartTime,
+      })
     }
   }, [tokenIn, tokenOut, address, amountIn, slippage, chainId, signTypedDataAsync])
 
@@ -529,6 +608,13 @@ export function useSwap(
     if (swapConfirmed) {
       setStatus('success')
       if (swapHash) updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)
+      if (address && swapHash) {
+        trackWalletActivity(address, {
+          category: 'swap', action: 'swap_confirmed',
+          token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
+          success: true, tx_hash: swapHash,
+        })
+      }
     }
   }, [swapConfirmed, swapHash, address])
 
@@ -571,10 +657,24 @@ export function useSwap(
             if (receipt.status === 'success') {
               setStatus('success')
               updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)
+              if (address) {
+                trackWalletActivity(address, {
+                  category: 'swap', action: 'swap_confirmed',
+                  success: true, tx_hash: swapHash,
+                  metadata: { detection: 'fallback_poll' },
+                })
+              }
             } else {
               setStatus('error')
               setErrorMessage('Transaction reverted on-chain. Try increasing slippage.')
               updateSwapStatus(swapHash, 'failed', undefined, undefined, address)
+              if (address) {
+                trackWalletActivity(address, {
+                  category: 'swap', action: 'swap_failed',
+                  success: false, error_code: 'reverted', tx_hash: swapHash,
+                  error_msg: 'Transaction reverted on-chain',
+                })
+              }
             }
             if (fallbackTimerRef.current) {
               clearInterval(fallbackTimerRef.current)
@@ -593,6 +693,13 @@ export function useSwap(
             `Transaction sent but confirmation is taking too long. ` +
             `Check your wallet or Etherscan for tx: ${swapHash.slice(0, 10)}...`
           )
+          if (address) {
+            trackWalletActivity(address, {
+              category: 'swap', action: 'swap_timeout',
+              success: false, error_code: 'timeout', tx_hash: swapHash,
+              duration_ms: SWAP_TIMEOUT_MS,
+            })
+          }
           if (fallbackTimerRef.current) {
             clearInterval(fallbackTimerRef.current)
             fallbackTimerRef.current = null
@@ -613,8 +720,22 @@ export function useSwap(
   useEffect(() => {
     if (sendError) {
       setStatus('error')
-      setErrorMessage(parseWagmiError(sendError))
+      const parsedErr = parseWagmiError(sendError)
+      setErrorMessage(parsedErr)
       if (swapHash) updateSwapStatus(swapHash, 'failed', undefined, undefined, address)
+      if (address) {
+        const isRejected = sendError.message.toLowerCase().includes('user rejected') ||
+          sendError.message.toLowerCase().includes('user denied')
+        trackWalletActivity(address, {
+          category: 'swap',
+          action: isRejected ? 'swap_rejected' : 'swap_failed',
+          token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
+          success: false,
+          error_code: isRejected ? 'user_rejected' : 'tx_error',
+          error_msg: parsedErr.slice(0, 200),
+          tx_hash: swapHash,
+        })
+      }
     }
   }, [sendError, swapHash, address])
 

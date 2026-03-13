@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 import { trackQuoteFailure } from '@/lib/security-tracker'
+import { trackWalletAction } from '@/lib/wallet-activity-server'
 
 /**
  * POST /api/log-quote
@@ -56,6 +57,23 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error('[log-quote] Supabase insert error:', error.message)
+    }
+
+    // ── Server-side wallet activity tracking (fire-and-forget) ──
+    if (wallet) {
+      trackWalletAction(wallet, {
+        category: 'quote',
+        action: 'quote_requested',
+        tokenIn: tokenInSymbol || tokenIn,
+        tokenOut: tokenOutSymbol || tokenOut,
+        source: bestSource ?? undefined,
+        durationMs: responseTimeMs,
+        metadata: {
+          sourcesQueried: (sourcesQueried as string[]).length,
+          sourcesResponded: (sourcesResponded as string[]).length,
+          bestSource,
+        },
+      })
     }
 
     // ── Server-side: track sources that failed to respond ──
