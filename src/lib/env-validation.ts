@@ -118,17 +118,18 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   }
 
   // ── Cross-checks ──
-  // Warn if NEXT_PUBLIC_ API keys are still set (should be server-only)
+  // BLOCK if NEXT_PUBLIC_ API keys are set — they leak keys into the browser bundle.
+  // The fallbacks were removed from constants.ts; these vars must NOT be used.
   if (process.env.NEXT_PUBLIC_1INCH_API_KEY) {
-    warnings.push(
-      '⚠️  NEXT_PUBLIC_1INCH_API_KEY is set — this exposes the key in the browser bundle. ' +
-      'Use ONEINCH_API_KEY (server-only) instead.'
+    errors.push(
+      '❌ NEXT_PUBLIC_1INCH_API_KEY is set — this exposes the key in the browser bundle! ' +
+      'Remove it and use ONEINCH_API_KEY (server-only) instead.'
     )
   }
   if (process.env.NEXT_PUBLIC_0X_API_KEY) {
-    warnings.push(
-      '⚠️  NEXT_PUBLIC_0X_API_KEY is set — this exposes the key in the browser bundle. ' +
-      'Use ZEROX_API_KEY (server-only) instead.'
+    errors.push(
+      '❌ NEXT_PUBLIC_0X_API_KEY is set — this exposes the key in the browser bundle! ' +
+      'Remove it and use ZEROX_API_KEY (server-only) instead.'
     )
   }
 
