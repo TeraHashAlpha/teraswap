@@ -75,7 +75,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
 const API_URL = process.env.TERASWAP_API_URL || ""
-const CHAIN_ID = parseInt(process.env.CHAIN_ID || "11155111")
+const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
 
 // [B-02] Flashbots Protect RPC — prevents MEV/sandwich attacks on executor txs
 const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
@@ -402,20 +402,19 @@ async function executeCycle(wallet, contract) {
         continue
       }
 
-      // [C-01] Compute routerDataHash from actual swap calldata
-      // The user signed the hash of the routerData at order creation time.
-      // We verify it matches here before sending.
-      const actualRouterDataHash = ethers.keccak256(swapData.data)
-      if (orderStruct.routerDataHash !== ethers.ZeroHash &&
-          actualRouterDataHash !== orderStruct.routerDataHash) {
-        log(`  ⚠ Order ${dbOrder.id.slice(0, 8)}… routerData hash mismatch, refreshing...`)
-        // For DCA and live orders, the routerData changes each execution.
-        // Update the orderStruct with the new hash (user must re-sign for non-DCA).
-        // DCA orders use ZeroHash as routerDataHash since calldata varies per execution.
-      }
-      // For DCA orders, set routerDataHash to hash of current routerData
-      if (orderStruct.routerDataHash === ethers.ZeroHash) {
-        orderStruct.routerDataHash = actualRouterDataHash
+      // [C-01] Verify routerData hash for non-DCA orders.
+      // DCA orders use ZeroHash as routerDataHash since calldata varies per execution —
+      // the contract now skips the hash check when routerDataHash == bytes32(0).
+      // IMPORTANT: Do NOT modify orderStruct.routerDataHash — it must match the
+      // original signed value or EIP-712 signature verification will fail.
+      if (orderStruct.routerDataHash !== ethers.ZeroHash) {
+        const actualRouterDataHash = ethers.keccak256(swapData.data)
+        if (actualRouterDataHash !== orderStruct.routerDataHash) {
+          log(`  ⚠ Order ${dbOrder.id.slice(0, 8)}… routerData hash mismatch, skipping`)
+          await updateOrderStatus(dbOrder.id, "active") // Unlock
+          skipped++
+          continue
+        }
       }
 
       // Gas price safety check

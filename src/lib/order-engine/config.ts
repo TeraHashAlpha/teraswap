@@ -7,7 +7,7 @@
 // Env var override available for migration/upgrade scenarios.
 export const ORDER_EXECUTOR_ADDRESS = (
   process.env.NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS ??
-  '0xa298e6ed9CF510b708a1F16c9729Bd69c6ee00f2'
+  '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
 ) as `0x${string}`
 
 // ── EIP-712 domain ───────────────────────────────────────

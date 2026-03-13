@@ -16,6 +16,7 @@
     "@nomicfoundation/hardhat-network-helpers": "^3.0.4",
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
     "chai": "^6.2.2",
+    "dotenv": "^17.3.1",
     "ethers": "^6.16.0",
     "hardhat": "^3.1.10",
     "solc": "^0.8.28"
