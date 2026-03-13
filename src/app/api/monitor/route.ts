@@ -48,6 +48,78 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 503, headers: CORS_HEADERS })
   }
 
+  // ── Wallet Lookup mode: ?wallet=0x... returns per-wallet timeline ──
+  const url = new URL(req.url)
+  const walletQuery = url.searchParams.get('wallet')?.toLowerCase()
+
+  if (walletQuery && /^0x[a-f0-9]{40}$/i.test(walletQuery)) {
+    try {
+      const [activityRes, walletSwapsRes, walletQuotesRes, walletSecurityRes] = await Promise.all([
+        Promise.resolve(
+          supabase
+            .from('wallet_activity')
+            .select('created_at, category, action, source, token_in, token_out, amount_usd, success, error_code, error_msg, tx_hash, order_id, duration_ms, metadata')
+            .eq('wallet', walletQuery)
+            .order('created_at', { ascending: false })
+            .limit(200)
+        ).catch(() => ({ data: null, error: { message: 'wallet_activity table not found' } })),
+        supabase
+          .from('swaps')
+          .select('created_at, source, token_in_symbol, token_out_symbol, amount_in_usd, status, tx_hash, mev_protected')
+          .eq('wallet', walletQuery)
+          .order('created_at', { ascending: false })
+          .limit(100),
+        supabase
+          .from('quotes')
+          .select('created_at, token_in_symbol, token_out_symbol, best_source, response_time_ms, sources_queried, sources_responded')
+          .eq('wallet', walletQuery)
+          .order('created_at', { ascending: false })
+          .limit(100),
+        Promise.resolve(
+          supabase
+            .from('security_events')
+            .select('type, severity, timestamp, message, amount_usd, deviation')
+            .eq('wallet', walletQuery)
+            .order('timestamp', { ascending: false })
+            .limit(50)
+        ).catch(() => ({ data: null, error: null })),
+      ])
+
+      const activity = activityRes.data || []
+      const swaps = walletSwapsRes.data || []
+      const quotes = walletQuotesRes.data || []
+      const security = walletSecurityRes.data || []
+
+      // Summary stats
+      const totalSwaps = swaps.length
+      const successfulSwaps = swaps.filter((s: Record<string, unknown>) => s.status === 'confirmed').length
+      const failedSwaps = swaps.filter((s: Record<string, unknown>) => s.status === 'failed').length
+      const totalVolume = swaps.reduce((acc: number, s: Record<string, unknown>) => acc + (Number(s.amount_in_usd) || 0), 0)
+      const lastActive = activity.length > 0 ? activity[0].created_at : (swaps.length > 0 ? (swaps[0] as Record<string, unknown>).created_at : null)
+
+      return NextResponse.json({
+        wallet: walletQuery,
+        summary: {
+          totalSwaps,
+          successfulSwaps,
+          failedSwaps,
+          successRate: totalSwaps > 0 ? Math.round((successfulSwaps / totalSwaps) * 10000) / 100 : 0,
+          totalVolume: Math.round(totalVolume),
+          totalQuotes: quotes.length,
+          securityEvents: security.length,
+          lastActive,
+        },
+        activity,
+        swaps,
+        quotes,
+        security,
+      }, { headers: CORS_HEADERS })
+    } catch (err) {
+      console.error('[monitor] Wallet lookup error:', err)
+      return NextResponse.json({ error: 'Wallet lookup failed' }, { status: 500, headers: CORS_HEADERS })
+    }
+  }
+
   try {
     // Parallel fetch — select ONLY needed columns (never select('*') for security & performance)
     const [swapsRes, quotesRes, securityRes, usageRes] = await Promise.all([

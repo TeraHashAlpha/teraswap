@@ -155,3 +155,47 @@ CREATE INDEX IF NOT EXISTS idx_usage_session_id  ON usage_events (session_id);
 CREATE INDEX IF NOT EXISTS idx_usage_page        ON usage_events (page);
 
 ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
+
+-- ── Wallet Activity table ───────────────────────────────
+-- Per-wallet activity timeline for debugging & support.
+-- When a user reports a problem, look up their wallet to see every action
+-- they took: quotes, approvals, swaps, errors, timing.
+-- Populated by client-side wallet-activity-tracker → /api/log-activity,
+-- and server-side wallet-activity-server from API routes.
+CREATE TABLE IF NOT EXISTS wallet_activity (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at  TIMESTAMPTZ DEFAULT now() NOT NULL,
+
+  -- Wallet address (always lowercased)
+  wallet      TEXT NOT NULL,
+  session_id  TEXT,
+
+  -- Event classification
+  category    TEXT NOT NULL,                        -- swap | approval | quote | order | ui | error
+  action      TEXT NOT NULL,                        -- e.g. 'swap_initiated', 'approval_confirmed'
+
+  -- Trade context
+  source      TEXT,                                  -- DEX source: '1inch', 'cowswap', 'odos', etc.
+  token_in    TEXT,
+  token_out   TEXT,
+  amount_usd  NUMERIC,
+
+  -- Outcome
+  success     BOOLEAN,
+  error_code  TEXT,
+  error_msg   TEXT,
+
+  -- Transaction
+  tx_hash     TEXT,
+  order_id    TEXT,                                  -- CoW order UID
+  duration_ms INTEGER,                               -- time from action start
+
+  -- Flexible extra data
+  metadata    JSONB DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_wallet_activity_wallet  ON wallet_activity (wallet, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_activity_created ON wallet_activity (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_activity_action  ON wallet_activity (action);
+
+ALTER TABLE wallet_activity ENABLE ROW LEVEL SECURITY;

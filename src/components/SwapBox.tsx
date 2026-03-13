@@ -26,6 +26,7 @@ import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval
 import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
+import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import BetaDisclaimer from './BetaDisclaimer'
 
 export default function SwapBox() {
@@ -311,7 +312,22 @@ export default function SwapBox() {
   const anyBlocked = priceBlocked || oracleBlocked
 
   const handleApproveAndSwap = useCallback(async () => {
-    if (anyBlocked) return // hard block — never execute above deviation threshold or unverified large swap
+    if (anyBlocked) {
+      // [Wallet Activity] Track security block
+      if (address) {
+        trackWalletActivity(address, {
+          category: 'ui',
+          action: priceBlocked ? 'swap_blocked_security' : 'swap_blocked_oracle',
+          token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
+          metadata: {
+            reason: priceBlocked ? `price_deviation_${priceCheck.level}` : 'oracle_unavailable_large_swap',
+            deviation: priceCheck.deviation,
+            estimatedUsd: estimatedInputUsd,
+          },
+        })
+      }
+      return // hard block — never execute above deviation threshold or unverified large swap
+    }
     startWaitingSound()
     if (!approvalReady) { await approve(); return }
 
@@ -323,7 +339,21 @@ export default function SwapBox() {
   }, [approvalReady, approve, meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap])
 
   const handleSwap = useCallback(() => {
-    if (anyBlocked) return // hard block
+    if (anyBlocked) {
+      if (address) {
+        trackWalletActivity(address, {
+          category: 'ui',
+          action: priceBlocked ? 'swap_blocked_security' : 'swap_blocked_oracle',
+          token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
+          metadata: {
+            reason: priceBlocked ? `price_deviation_${priceCheck.level}` : 'oracle_unavailable_large_swap',
+            deviation: priceCheck.deviation,
+            estimatedUsd: estimatedInputUsd,
+          },
+        })
+      }
+      return // hard block
+    }
     startWaitingSound()
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)

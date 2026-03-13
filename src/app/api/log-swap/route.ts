@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
+import { trackWalletAction } from '@/lib/wallet-activity-server'
 
 /**
  * POST /api/log-swap
@@ -73,6 +74,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: error.message })
     }
 
+    // ── Server-side wallet activity tracking (fire-and-forget) ──
+    trackWalletAction(wallet, {
+      category: 'swap',
+      action: 'swap_logged',
+      source,
+      tokenIn: tokenInSymbol,
+      tokenOut: tokenOutSymbol,
+      amountUsd: Number(amountInUsd) || undefined,
+      txHash: txHash ?? undefined,
+      metadata: { status, slippage, mevProtected, feeCollected },
+    })
+
     // ── Server-side security event tracking (fire-and-forget) ──
     const tradeUsd = Number(amountInUsd) || 0
 
@@ -128,6 +141,10 @@ export async function PATCH(req: NextRequest) {
     // Track failed swap server-side
     if (status === 'failed' && wallet) {
       trackSwapFailed({ wallet, tokenIn: '', tokenOut: '', amountUsd: 0, source: '', error: 'Transaction reverted' })
+      trackWalletAction(wallet, {
+        category: 'swap', action: 'swap_status_update',
+        txHash, metadata: { status: 'failed' },
+      })
     }
 
     // Try 1: Match by tx_hash (row already has the hash)
