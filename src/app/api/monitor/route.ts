@@ -50,7 +50,7 @@ export async function GET(req: Request) {
 
   try {
     // Parallel fetch — select ONLY needed columns (never select('*') for security & performance)
-    const [swapsRes, quotesRes, securityRes] = await Promise.all([
+    const [swapsRes, quotesRes, securityRes, usageRes] = await Promise.all([
       supabase
         .from('swaps')
         .select('created_at, wallet, source, token_in_symbol, token_out_symbol, amount_in_usd, status, mev_protected, fee_collected')
@@ -68,11 +68,19 @@ export async function GET(req: Request) {
           .order('timestamp', { ascending: false })
           .limit(1000)
       ).catch(() => ({ data: null, error: { message: 'security_events table not found' } })),
+      Promise.resolve(
+        supabase
+          .from('usage_events')
+          .select('created_at, session_id, event_type, page, click_target, click_tag, click_id, duration_ms, screen_w, user_agent')
+          .order('created_at', { ascending: false })
+          .limit(10000)
+      ).catch(() => ({ data: null, error: { message: 'usage_events table not found' } })),
     ])
 
     const swaps = swapsRes.data || []
     const quotes = quotesRes.data || []
     const securityEvents = securityRes.data || []
+    const usageEvents = usageRes.data || []
 
     // ── 1. Trade metrics ──
     const now = Date.now()
@@ -234,6 +242,121 @@ export async function GET(req: Request) {
       .map(([date, d]) => ({ date, volume: Math.round(d.volume), trades: d.trades, wallets: d.wallets.size, fees: Math.round(d.fees * 100) / 100 }))
       .sort((a, b) => a.date.localeCompare(b.date))
 
+    // ── 6. Usage analytics ──
+    interface UsageEvent {
+      created_at: string
+      session_id: string
+      event_type: string
+      page: string
+      click_target: string | null
+      click_tag: string | null
+      click_id: string | null
+      duration_ms: number | null
+      screen_w: number | null
+      user_agent: string | null
+    }
+
+    const typedUsage = usageEvents as UsageEvent[]
+
+    // Page views
+    const pageViews = typedUsage.filter(e => e.event_type === 'page_view')
+    const clicks = typedUsage.filter(e => e.event_type === 'click')
+    const sessions = typedUsage.filter(e => e.event_type === 'session_end')
+
+    // Unique sessions & page views by period
+    function usagePeriodStats(cutoff: number) {
+      const filtered = pageViews.filter(e => new Date(e.created_at).getTime() >= cutoff)
+      const uniqueSessions = new Set(filtered.map(e => e.session_id))
+      return { pageViews: filtered.length, uniqueVisitors: uniqueSessions.size }
+    }
+
+    // Page breakdown
+    const pageCounts: Record<string, { views: number; clicks: number; avgDuration: number; durations: number[] }> = {}
+    for (const pv of pageViews) {
+      if (!pageCounts[pv.page]) pageCounts[pv.page] = { views: 0, clicks: 0, avgDuration: 0, durations: [] }
+      pageCounts[pv.page].views++
+    }
+    for (const c of clicks) {
+      if (!pageCounts[c.page]) pageCounts[c.page] = { views: 0, clicks: 0, avgDuration: 0, durations: [] }
+      pageCounts[c.page].clicks++
+    }
+    for (const s of sessions) {
+      if (s.duration_ms != null && pageCounts[s.page]) {
+        pageCounts[s.page].durations.push(s.duration_ms)
+      }
+    }
+    const pageBreakdown = Object.entries(pageCounts)
+      .map(([page, stats]) => ({
+        page,
+        views: stats.views,
+        clicks: stats.clicks,
+        avgDurationSec: stats.durations.length > 0
+          ? Math.round(stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length / 1000)
+          : 0,
+      }))
+      .sort((a, b) => b.views - a.views)
+
+    // Click breakdown — top clicked elements
+    const clickCounts: Record<string, { count: number; tag: string; id: string | null; page: string }> = {}
+    for (const c of clicks) {
+      const label = c.click_target || c.click_id || c.click_tag || 'unknown'
+      const key = `${c.page}::${label}`
+      if (!clickCounts[key]) clickCounts[key] = { count: 0, tag: c.click_tag || '', id: c.click_id, page: c.page }
+      clickCounts[key].count++
+    }
+    const topClicks = Object.entries(clickCounts)
+      .map(([key, stats]) => ({
+        label: key.split('::')[1] || 'unknown',
+        page: stats.page,
+        tag: stats.tag,
+        id: stats.id,
+        count: stats.count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 50)
+
+    // Device breakdown (mobile <768, tablet 768-1024, desktop >1024)
+    const devices = { mobile: 0, tablet: 0, desktop: 0 }
+    const sessionDevices = new Map<string, number>()
+    for (const pv of pageViews) {
+      if (pv.screen_w != null && !sessionDevices.has(pv.session_id)) {
+        sessionDevices.set(pv.session_id, pv.screen_w)
+      }
+    }
+    for (const [, w] of sessionDevices) {
+      if (w < 768) devices.mobile++
+      else if (w <= 1024) devices.tablet++
+      else devices.desktop++
+    }
+
+    // Average session duration
+    const allDurations = sessions.filter(s => s.duration_ms != null).map(s => s.duration_ms as number)
+    const avgSessionDurationSec = allDurations.length > 0
+      ? Math.round(allDurations.reduce((a, b) => a + b, 0) / allDurations.length / 1000)
+      : 0
+
+    // Daily usage timeseries (last 30d)
+    const dailyUsageMap = new Map<string, { views: number; visitors: Set<string>; clicks: number }>()
+    for (const pv of pageViews) {
+      const ts = new Date(pv.created_at).getTime()
+      if (ts < d30) continue
+      const date = new Date(ts).toISOString().split('T')[0]
+      const entry = dailyUsageMap.get(date) || { views: 0, visitors: new Set<string>(), clicks: 0 }
+      entry.views++
+      entry.visitors.add(pv.session_id)
+      dailyUsageMap.set(date, entry)
+    }
+    for (const c of clicks) {
+      const ts = new Date(c.created_at).getTime()
+      if (ts < d30) continue
+      const date = new Date(ts).toISOString().split('T')[0]
+      const entry = dailyUsageMap.get(date)
+      if (entry) entry.clicks++
+    }
+    const dailyUsageTimeseries = Array.from(dailyUsageMap.entries())
+      .map(([date, d]) => ({ date, views: d.views, visitors: d.visitors.size, clicks: d.clicks }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+
     // ── Response ──
     return NextResponse.json({
       timestamp: new Date().toISOString(),
@@ -275,6 +398,20 @@ export async function GET(req: Request) {
         ],
       },
       dailyTimeseries,
+      usage: {
+        totals: {
+          allTime: usagePeriodStats(0),
+          last24h: usagePeriodStats(h24),
+          last7d: usagePeriodStats(d7),
+          last30d: usagePeriodStats(d30),
+        },
+        totalClicks: clicks.length,
+        avgSessionDurationSec,
+        devices,
+        pageBreakdown,
+        topClicks,
+        dailyUsageTimeseries,
+      },
     }, {
       headers: {
         ...CORS_HEADERS,

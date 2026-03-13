@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { ToastProvider } from '@/components/ToastProvider'
 import BackgroundMusic from '@/components/BackgroundMusic'
 import BetaBanner from '@/components/BetaBanner'
+import UsageTracker from '@/components/UsageTracker'
 import { assertEnv } from '@/lib/env-validation'
 
 import '@rainbow-me/rainbowkit/styles.css'
@@ -59,6 +60,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             <ToastProvider>
               <BackgroundMusic />
               <BetaBanner />
+              <UsageTracker />
               {children}
             </ToastProvider>
           </RainbowKitWithTheme>

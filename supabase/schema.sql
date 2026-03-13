@@ -119,3 +119,39 @@ ALTER TABLE quotes ENABLE ROW LEVEL SECURITY;
 -- If you later want anon read access for a public dashboard:
 -- CREATE POLICY "Public read swaps" ON swaps FOR SELECT USING (true);
 -- CREATE POLICY "Public read quotes" ON quotes FOR SELECT USING (true);
+
+-- ── Usage Events table ────────────────────────────────────
+-- Records page views, clicks, and session durations for platform analytics.
+-- Populated by client-side UsageTracker → /api/log-event endpoint.
+CREATE TABLE IF NOT EXISTS usage_events (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at  TIMESTAMPTZ DEFAULT now() NOT NULL,
+
+  -- Session
+  session_id  TEXT NOT NULL,                        -- anonymous per-session UUID
+  event_type  TEXT NOT NULL,                        -- page_view | click | session_end
+
+  -- Page context
+  page        TEXT NOT NULL,                        -- e.g. '/', '/limit', '/dca'
+  referrer    TEXT,                                  -- document.referrer (first page only)
+
+  -- Click details (null for page_view / session_end)
+  click_target  TEXT,                               -- text content or aria-label of clicked element
+  click_tag     TEXT,                               -- tag name: BUTTON, A, etc.
+  click_id      TEXT,                               -- element id if present
+  click_class   TEXT,                               -- primary class name if present
+
+  -- Session duration (for session_end events)
+  duration_ms   INTEGER,                            -- time spent on page in ms
+
+  -- Device info
+  screen_w    INTEGER,                              -- screen width
+  user_agent  TEXT                                   -- navigator.userAgent (for device breakdown)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_created_at  ON usage_events (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_event_type  ON usage_events (event_type);
+CREATE INDEX IF NOT EXISTS idx_usage_session_id  ON usage_events (session_id);
+CREATE INDEX IF NOT EXISTS idx_usage_page        ON usage_events (page);
+
+ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
