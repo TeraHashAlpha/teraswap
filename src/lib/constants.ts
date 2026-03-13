@@ -5,13 +5,14 @@ export const CHAIN_ID = 1 // Ethereum mainnet
 export const AGGREGATOR_APIS = {
   '1inch': {
     base: 'https://api.1inch.dev/swap/v6.0/1',
-    // [Audit] API keys moved to server-only env vars (no NEXT_PUBLIC_ prefix)
-    // Falls back to NEXT_PUBLIC_ for backward compatibility during migration
-    get key() { return process.env.ONEINCH_API_KEY || process.env.NEXT_PUBLIC_1INCH_API_KEY || '' },
+    // [Audit] API keys are server-only env vars — NEVER use NEXT_PUBLIC_ prefix.
+    // Set ONEINCH_API_KEY in Vercel Environment Variables (server-only).
+    get key() { return process.env.ONEINCH_API_KEY || '' },
   },
   '0x': {
     base: 'https://api.0x.org',
-    get key() { return process.env.ZEROX_API_KEY || process.env.NEXT_PUBLIC_0X_API_KEY || '' },
+    // Set ZEROX_API_KEY in Vercel Environment Variables (server-only).
+    get key() { return process.env.ZEROX_API_KEY || '' },
   },
   velora: {
     base: 'https://api.paraswap.io',

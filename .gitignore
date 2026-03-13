@@ -8,6 +8,7 @@ dist/
 
 # Environment (secrets) — NEVER commit any .env file with real keys
 .env
+.env.*
 .env.local
 .env.local.*
 .env*.local
@@ -15,6 +16,10 @@ dist/
 .env.production.local
 .env.staging
 .env.executor
+.env.save
+**/.env
+**/.env.*
+**/.env.save
 
 # Build artifacts
 *.tsbuildinfo
