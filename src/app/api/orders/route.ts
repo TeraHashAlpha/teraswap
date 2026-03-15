@@ -86,10 +86,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'tokenIn and tokenOut must differ' }, { status: 400 })
     }
 
-    // Validate priceFeed — must be a valid non-zero address
+    // Validate priceFeed — must be a valid address.
+    // DCA orders may use address(0) to skip price condition (execute at any price on schedule).
     const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
-    if (!body.priceFeed || body.priceFeed === ZERO_ADDR || !body.priceFeed.startsWith('0x') || body.priceFeed.length !== 42) {
+    if (!body.priceFeed || !body.priceFeed.startsWith('0x') || body.priceFeed.length !== 42) {
       return NextResponse.json({ error: 'Invalid or missing Chainlink price feed address' }, { status: 400 })
+    }
+    // Non-DCA orders must have a real price feed (not zero address)
+    if (body.orderType !== 'dca' && body.priceFeed === ZERO_ADDR) {
+      return NextResponse.json({ error: 'Limit/Stop-Loss orders require a Chainlink price feed' }, { status: 400 })
     }
 
     // Signature verification — uses ORDER_EXECUTOR_ADDRESS from config (with env override)

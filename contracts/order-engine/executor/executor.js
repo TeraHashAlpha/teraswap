@@ -454,8 +454,21 @@ async function executeCycle(wallet, contract) {
         // Update status based on order type
         if (dbOrder.order_type === "dca") {
           const newExecCount = (dbOrder.dca_executed || 0) + 1
+          const now = new Date().toISOString()
           if (newExecCount >= dbOrder.dca_total) {
-            await updateOrderStatus(dbOrder.id, "executed")
+            // All DCA executions complete
+            await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
+              method: "PATCH",
+              headers: { Prefer: "return=minimal" },
+              body: JSON.stringify({
+                status: "executed",
+                dca_executed: newExecCount,
+                dca_last_exec: now,
+                executed_at: now,
+                tx_hash: tx.hash,
+                updated_at: now,
+              }),
+            })
           } else {
             // DCA: back to active for next interval
             await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
@@ -464,12 +477,24 @@ async function executeCycle(wallet, contract) {
               body: JSON.stringify({
                 status: "active",
                 dca_executed: newExecCount,
-                updated_at: new Date().toISOString(),
+                dca_last_exec: now,
+                tx_hash: tx.hash,
+                updated_at: now,
               }),
             })
           }
         } else {
-          await updateOrderStatus(dbOrder.id, "executed")
+          // Limit / Stop-Loss: single execution
+          await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
+            method: "PATCH",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify({
+              status: "executed",
+              executed_at: new Date().toISOString(),
+              tx_hash: tx.hash,
+              updated_at: new Date().toISOString(),
+            }),
+          })
         }
 
         // Record execution

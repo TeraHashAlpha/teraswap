@@ -217,13 +217,14 @@ function CreateDCAForm({
     } catch {
       return // Invalid input (e.g. too many decimals)
     }
-    // minAmountOut = 0 for DCA (per-fill slippage is managed by the DCA executor)
-    const minAmountOut = '0'
+    // minAmountOut = 1 wei for DCA — cannot be 0 (contract reverts with InvalidMinOutput).
+    // Actual slippage protection is handled per-fill by the executor's swap route.
+    const minAmountOut = '1'
 
-    const priceFeed = findPriceFeed(tokenOut, chainId)
-    if (!priceFeed) {
-      throw new Error(`No Chainlink price feed available for ${tokenOut.symbol}. Select a supported token.`)
-    }
+    // DCA uses priceFeed = address(0) — the contract skips the Chainlink price check
+    // entirely, executing on schedule at any price. This avoids MAX_STALENESS rejections
+    // (contract has 300s staleness vs Chainlink's 3600s heartbeat).
+    const priceFeed = '0x0000000000000000000000000000000000000000'
 
     const config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
@@ -231,9 +232,9 @@ function CreateDCAForm({
       amountIn,
       minAmountOut,
       orderType: OrderType.DCA,
-      condition: PriceCondition.ABOVE, // DCA: price >= $0 is always true → executes at any price
-      targetPrice: '0', // Target $0 with ABOVE = always passes price check
-      priceFeed, // Track buy token price
+      condition: PriceCondition.ABOVE, // Unused when priceFeed = address(0)
+      targetPrice: '0', // Unused when priceFeed = address(0)
+      priceFeed, // address(0) = no price condition (DCA executes on schedule)
       expirySeconds: expiry.seconds,
       router: getDefaultRouter(chainId).address, // Best aggregated price
       dcaInterval: interval.seconds,

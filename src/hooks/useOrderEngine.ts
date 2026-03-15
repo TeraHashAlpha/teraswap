@@ -142,6 +142,15 @@ function saveOrders(orders: AutonomousOrder[]) {
 }
 
 // ── Convert Supabase row → UI order ──────────────────────
+
+/** Map DB status strings to UI status strings.
+ *  DB uses 'executed'/'failed', UI uses 'filled'/'error'. */
+function mapDbStatus(dbStatus: string): AutonomousOrderStatus {
+  if (dbStatus === 'executed') return 'filled'
+  if (dbStatus === 'failed') return 'error'
+  return dbStatus as AutonomousOrderStatus
+}
+
 function rowToOrder(row: OrderRow): AutonomousOrder {
   const typeMap: Record<string, OrderType> = {
     limit: OrderType.LIMIT,
@@ -154,7 +163,7 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     orderHash: row.order_hash,
     order: row.order_data as unknown as OnChainOrder,
     signature: row.signature,
-    status: row.status as AutonomousOrderStatus,
+    status: mapDbStatus(row.status as string),
     orderType: typeMap[row.order_type] ?? OrderType.LIMIT,
     tokenInSymbol: '', // Will be enriched by UI
     tokenInDecimals: 18,
@@ -255,7 +264,7 @@ export function useOrderEngine() {
           for (const row of rows) {
             const idx = updated.findIndex(o => o.orderHash === row.order_hash)
             if (idx >= 0) {
-              const newStatus = row.status as AutonomousOrderStatus
+              const newStatus = mapDbStatus(row.status as string)
               if (updated[idx].status !== newStatus) {
                 updated[idx] = { ...updated[idx], status: newStatus, dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error }
 
@@ -282,7 +291,7 @@ export function useOrderEngine() {
     const unsub = subscribeToOrders(address, (row: OrderRow) => {
       setOrders(prev => prev.map(o =>
         o.orderHash === row.order_hash
-          ? { ...o, status: row.status as AutonomousOrderStatus, dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error, executedAt: row.executed_at ? new Date(row.executed_at).getTime() : o.executedAt }
+          ? { ...o, status: mapDbStatus(row.status as string), dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error, executedAt: row.executed_at ? new Date(row.executed_at).getTime() : o.executedAt }
           : o
       ))
     })
