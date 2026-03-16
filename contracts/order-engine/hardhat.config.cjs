@@ -1,4 +1,5 @@
 require("dotenv/config");
+require("@nomicfoundation/hardhat-verify");
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -23,5 +24,8 @@ module.exports = {
         ? [process.env.DEPLOYER_PRIVATE_KEY]
         : [],
     },
+  },
+  etherscan: {
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
   },
 };

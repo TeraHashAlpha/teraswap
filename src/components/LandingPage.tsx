@@ -506,7 +506,7 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 //  SECTION 05: FEATURES
 // ══════════════════════════════════════════════════════════
 
-const FEATURES = [
+const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
   {
     title: '11 Liquidity Sources',
     desc: 'Simultaneous queries across 7 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
@@ -530,14 +530,17 @@ const FEATURES = [
   {
     title: 'Smart DCA Engine',
     desc: 'Automated dollar-cost averaging with price-aware buying windows. Fully autonomous execution powered by Chainlink oracles — no browser required.',
+    comingSoon: true,
   },
   {
     title: 'Limit Orders',
-    desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order — zero gas, MEV-protected, with partial fills and price improvement. Ideal for precise entry and exit targets with 2% default slippage.',
+    desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order — zero gas, MEV-protected, with partial fills and price improvement.',
+    comingSoon: true,
   },
   {
     title: 'Stop Loss / Take Profit',
-    desc: 'Automated position protection powered by Chainlink oracles. Prices are monitored in real-time — when your trigger fires, a CoW limit order is auto-submitted. Stop loss uses 5% slippage for urgent exits; take profit uses 2%.',
+    desc: 'Automated position protection powered by Chainlink oracles. Prices are monitored in real-time — when your trigger fires, a CoW limit order is auto-submitted.',
+    comingSoon: true,
   },
   {
     title: 'Split Routing',
@@ -596,8 +599,13 @@ function FeaturesSection() {
               style={{ borderColor: '#1E2530' }}
             >
               {/* Title */}
-              <h3 className="mb-3 text-lg font-semibold text-cream">
+              <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-cream">
                 {feature.title}
+                {'comingSoon' in feature && feature.comingSoon && (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                    Coming Soon
+                  </span>
+                )}
               </h3>
 
               {/* Separator */}
