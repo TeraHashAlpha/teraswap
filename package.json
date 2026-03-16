@@ -11,9 +11,21 @@
     "typecheck": "tsc --noEmit",
     "fork": "./scripts/fork-test.sh",
     "deal": "./scripts/deal-tokens.sh",
-    "check:fee": "./scripts/check-fee.sh"
+    "check:fee": "./scripts/check-fee.sh",
+    "cap:init:ios": "npx cap add ios",
+    "cap:init:android": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:open:ios": "npx cap open ios",
+    "cap:open:android": "npx cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/browser": "^8.0.2",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/ios": "^8.2.0",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.1",
     "@rainbow-me/rainbowkit": "2.1.0",
     "@sentry/nextjs": "^10.43.0",
     "@supabase/supabase-js": "^2.99.1",

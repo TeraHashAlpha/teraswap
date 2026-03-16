@@ -21,7 +21,9 @@ const nextConfig = {
             value: [
               "default-src 'self'",
               // Scripts: self + inline (Next.js requires it); unsafe-eval only in dev
+              // worker-src 'self' required for service worker registration
               `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}`,
+              "worker-src 'self'",
               // Styles: self + inline (Tailwind/Next.js) + Google Fonts CSS
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               // Images: self + token icon CDNs + data URIs
