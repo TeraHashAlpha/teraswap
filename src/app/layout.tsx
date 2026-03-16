@@ -1,14 +1,8 @@
 import type { Metadata } from 'next'
-import dynamic from 'next/dynamic'
+import ClientProviders from './client-providers'
 import './globals.css'
 
-// [SSR-FIX] Dynamically import Providers with ssr: false.
-// WalletConnect (used by wagmi/RainbowKit) accesses localStorage during init,
-// which crashes Next.js static page prerendering. Lazy-loading the provider tree
-// ensures all wallet/web3 code only runs on the client.
-const Providers = dynamic(() => import('./providers'), { ssr: false })
-
-const SITE_URL = 'https://teraswap.io'
+const SITE_URL = 'https://teraswap.app'
 const SITE_TITLE = 'TeraSwap — The Gold Standard of DeFi Trading'
 const SITE_DESCRIPTION =
   'Maximum liquidity. Absolute protection. TeraSwap is an Ethereum meta-aggregator that queries 1inch, 0x, ParaSwap, Odos, KyberSwap, CoW Protocol and Uniswap V3 to find the best swap rate — with Chainlink price verification and zero infinite approvals.'
@@ -72,7 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <ClientProviders>{children}</ClientProviders>
       </body>
     </html>
   )
