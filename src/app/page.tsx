@@ -13,6 +13,7 @@ import SwapHistory from '@/components/SwapHistory'
 // import LimitOrderPanel from '@/components/LimitOrderPanel'
 // import ConditionalOrderPanel from '@/components/ConditionalOrderPanel'
 import AnalyticsDashboard from '@/components/AnalyticsDashboard'
+import OrderDashboard from '@/components/OrderDashboard'
 import WalletHistory from '@/components/WalletHistory'
 import Footer from '@/components/Footer'
 import HelpButton from '@/components/HelpButton'
@@ -20,7 +21,7 @@ import NotificationBanner from '@/components/NotificationBanner'
 import { playTouchMP3 } from '@/lib/sounds'
 
 export type AppPage = 'landing' | 'swap' | 'docs' | 'privacy' | 'terms'
-export type SwapMode = 'instant' | 'dca' | 'limit' | 'sltp' | 'history' | 'analytics'
+export type SwapMode = 'instant' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
 
 const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
 
@@ -112,6 +113,7 @@ export default function Home() {
               ['dca', 'DCA'],
               ['limit', 'Limit'],
               ['sltp', 'SL / TP'],
+              ['orders', 'Orders'],
               ['history', 'History'],
               ['analytics', 'Analytics'],
             ] as [SwapMode, string][]).map(([mode, label]) => (
@@ -145,6 +147,10 @@ export default function Home() {
           ) : COMING_SOON_MODES.has(swapMode) ? (
             <div className="w-full max-w-[460px]">
               <ComingSoonPanel mode={swapMode} onSwap={() => setSwapMode('instant')} />
+            </div>
+          ) : swapMode === 'orders' ? (
+            <div className="w-full max-w-[460px]">
+              <OrderDashboard />
             </div>
           ) : swapMode === 'history' ? (
             <div className="w-full max-w-[460px]">
