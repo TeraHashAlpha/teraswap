@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchSwapFromSource } from '@/lib/api'
 import type { AggregatorName } from '@/lib/constants'
+import { validateSwapPrice } from '@/lib/defillama'
 
 /**
  * Server-side proxy for swap calldata requests.
@@ -125,6 +126,49 @@ export async function POST(req: NextRequest) {
       quoteMeta,
       chainId ? Number(chainId) : undefined,
     )
+
+    // ── [Security] Server-side price validation via DefiLlama ──
+    // Validates swap output against independent oracle to catch
+    // price manipulation, extreme slippage, or rogue aggregator responses.
+    // Non-blocking: if DefiLlama is unreachable, swap proceeds normally.
+    if (result.toAmount) {
+      try {
+        const priceCheck = await validateSwapPrice({
+          tokenIn: src,
+          tokenOut: dst,
+          amountIn: amount,
+          amountOut: result.toAmount,
+          decimalsIn: srcDecimals,
+          decimalsOut: dstDecimals,
+        })
+
+        if (priceCheck && !priceCheck.valid) {
+          console.warn(
+            `[PRICE-GUARD] Blocked swap ${source}: ${src} → ${dst}`,
+            `deviation=${(priceCheck.deviation * 100).toFixed(1)}%`,
+            `reason=${priceCheck.reason}`,
+          )
+          return NextResponse.json(
+            {
+              error: priceCheck.reason,
+              priceGuard: true,
+              deviation: priceCheck.deviation,
+            },
+            { status: 422 },
+          )
+        }
+
+        // Attach oracle info for client-side display (non-blocking data)
+        if (priceCheck) {
+          const ext = result as unknown as Record<string, unknown>
+          ext.oracleDeviation = priceCheck.deviation
+          ext.oraclePriceIn = priceCheck.oraclePriceIn
+          ext.oraclePriceOut = priceCheck.oraclePriceOut
+        }
+      } catch {
+        // Never block swaps due to oracle errors
+      }
+    }
 
     return NextResponse.json(result, {
       headers: {

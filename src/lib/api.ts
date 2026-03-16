@@ -79,6 +79,10 @@ export interface MetaQuoteResult {
   best: NormalizedQuote
   all: NormalizedQuote[]     // sorted by netOutput desc
   fetchedAt: number          // timestamp
+  /** Cross-quote validation: deviation of best quote vs median of all quotes */
+  crossQuoteDeviation?: number   // e.g. 0.05 = best is 5% above median
+  /** True if best quote was flagged as suspicious vs the consensus */
+  crossQuoteWarning?: boolean
 }
 
 // ── Timeout wrapper ──────────────────────────────────────
@@ -1812,12 +1816,34 @@ export async function fetchMetaQuote(
           return true
         }
       })
+
+      // ── Cross-quote validation ──
+      // Compare best quote against median consensus. If the winning quote
+      // deviates >5% from median, flag it as suspicious. The UI can show
+      // a warning and the server-side DefiLlama check provides a second opinion.
+      const CROSS_QUOTE_WARN_THRESHOLD = 0.05 // 5% above median
+      let crossQuoteDeviation: number | undefined
+      let crossQuoteWarning = false
+
+      if (filtered.length > 0) {
+        try {
+          const bestAmount = BigInt(filtered[0].toAmount)
+          // deviation = (best - median) / median
+          crossQuoteDeviation = Number(bestAmount - median) / Number(median)
+          if (crossQuoteDeviation > CROSS_QUOTE_WARN_THRESHOLD) {
+            crossQuoteWarning = true
+          }
+        } catch { /* ignore calculation errors */ }
+      }
+
       // Only use filtered list if we still have at least 1 valid quote
       if (filtered.length > 0) {
         return {
           best: filtered[0],
           all: filtered, // hide outliers from UI to avoid misleading users
           fetchedAt: Date.now(),
+          crossQuoteDeviation,
+          crossQuoteWarning,
         }
       }
     }
