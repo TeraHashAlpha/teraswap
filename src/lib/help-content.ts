@@ -22,7 +22,7 @@ export const helpSections: HelpSection[] = [
       },
       {
         q: 'Is TeraSwap free to use?',
-        a: 'TeraSwap charges zero protocol fees. You only pay the standard Ethereum network gas fee and any DEX-level fees built into the swap rate you see.',
+        a: 'TeraSwap charges a 0.1% platform fee on swaps, deducted from the input amount before execution. You also pay the standard Ethereum network gas fee. CoW Protocol swaps are gasless for users. The fee is fully transparent and shown before you confirm.',
       },
       {
         q: 'Which networks are supported?',
@@ -99,19 +99,23 @@ export const helpSections: HelpSection[] = [
     ],
   },
   {
-    title: 'Security',
+    title: 'Security & Privacy',
     items: [
       {
         q: 'Is TeraSwap safe?',
-        a: 'TeraSwap is a non-custodial frontend — your tokens never leave your wallet until you sign a transaction. We use Permit2 for gasless approvals and all swap routes go through audited DEX contracts.',
+        a: 'TeraSwap is a non-custodial frontend — your tokens never leave your wallet until you sign a transaction. We use Permit2 for gasless approvals and all swap routes go through audited DEX contracts. Multi-layer price protection (Chainlink + DefiLlama + cross-quote consensus) guards against manipulation.',
       },
       {
         q: 'Has TeraSwap been audited?',
-        a: 'TeraSwap itself is a routing layer — it does not hold funds or run smart contracts. All swaps execute through the audited contracts of the underlying DEXs (Uniswap, Balancer, Curve, etc.).',
+        a: 'TeraSwap itself is a routing layer — it does not hold funds or run smart contracts. All swaps execute through the audited contracts of the underlying DEXs (Uniswap, Balancer, Curve, etc.). Our FeeCollector smart contract is deployed and verified on Etherscan.',
+      },
+      {
+        q: 'How does TeraSwap protect my privacy?',
+        a: 'All blockchain reads (balance checks, price feeds, transaction receipts) and aggregator API calls are routed through a server-side privacy proxy. Your IP address is never exposed to RPC providers like Alchemy or external DEX APIs. Only our server communicates with these services.',
       },
       {
         q: 'What data does TeraSwap collect?',
-        a: 'Minimal. We do not track wallets, store private keys, or collect personal information. See our Privacy Policy for full details.',
+        a: 'Minimal. We do not track wallets, store private keys, or collect personal information. Your IP address is actively protected by our privacy proxy. See our Privacy Policy for full details.',
       },
     ],
   },

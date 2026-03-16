@@ -8,7 +8,7 @@ interface Props {
   type: LegalType
 }
 
-const LAST_UPDATED = 'February 25, 2026'
+const LAST_UPDATED = 'March 16, 2026'
 
 /* ────────────────────────────────────────────────────────────────
    PRIVACY POLICY
@@ -74,38 +74,56 @@ function PrivacyPolicy() {
         <li>Detect and prevent fraud, security breaches, and other harmful activities</li>
       </UL>
 
-      <SectionTitle id="pp-sharing">5. Data Sharing &amp; Third Parties</SectionTitle>
+      <SectionTitle id="pp-proxy">5. Privacy Proxy &amp; IP Protection</SectionTitle>
+      <P>
+        TeraSwap implements a server-side privacy proxy that shields your IP address from external
+        services. All blockchain read operations (token balances, price feeds, transaction receipts)
+        and all aggregator API requests are routed through our server-side proxy. Only our server
+        communicates with third-party RPC providers and DEX APIs — your browser never makes direct
+        requests to these services.
+      </P>
+      <P>
+        <strong className="text-cream-80">What is protected:</strong> Token balance checks, ERC-20
+        allowance reads, transaction receipt polling, Chainlink price feed queries, custom token
+        imports, and all swap/quote requests to aggregator APIs (1inch, 0x, CoW Protocol, etc.).
+      </P>
+      <P>
+        <strong className="text-cream-80">What is not protected (by design):</strong> Your
+        wallet&rsquo;s own RPC connection (MetaMask, Coinbase Wallet, etc.) is controlled by your
+        wallet settings. Transaction signing and submission are handled by your wallet directly.
+        We recommend using a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots
+        Protect) for maximum privacy.
+      </P>
+
+      <SectionTitle id="pp-sharing">6. Data Sharing &amp; Third Parties</SectionTitle>
       <P>
         When you request a swap quote, the Interface sends your wallet address and transaction
-        parameters to the APIs of third-party aggregator and DEX protocols. Each of these protocols
-        has its own privacy policy. We encourage you to review them.
+        parameters to the APIs of third-party aggregator and DEX protocols via our server-side
+        proxy. Your IP address is not exposed to these services. Each protocol has its own privacy
+        policy. We encourage you to review them.
       </P>
       <P>
         We may share wallet addresses with blockchain analytics providers to comply with applicable
         laws and regulations. We do not sell, rent, or trade your personal information to any
         third party for marketing purposes.
       </P>
+
+      <SectionTitle id="pp-chainlink">7. Oracle Price Verification</SectionTitle>
       <P>
-        Third-party infrastructure providers (such as RPC node providers) may process your requests
-        as part of normal blockchain operations. These providers may have access to your wallet
-        address and transaction data.
+        TeraSwap queries Chainlink price oracle smart contracts and the DefiLlama Price API to verify
+        that swap prices are within acceptable deviation thresholds. Chainlink verification occurs
+        on-chain and involves publicly-available data. DefiLlama verification occurs server-side
+        through our privacy proxy. No personal data is transmitted as part of either process.
       </P>
 
-      <SectionTitle id="pp-chainlink">6. Chainlink Oracle Verification</SectionTitle>
-      <P>
-        TeraSwap queries Chainlink price oracle smart contracts to verify that swap prices are
-        within acceptable deviation thresholds. This verification occurs on-chain and involves
-        publicly-available data. No personal data is transmitted as part of this process.
-      </P>
-
-      <SectionTitle id="pp-cookies">7. Cookies &amp; Tracking</SectionTitle>
+      <SectionTitle id="pp-cookies">8. Cookies &amp; Tracking</SectionTitle>
       <P>
         The Interface does not use cookies for tracking or advertising purposes. We do not employ
         any third-party analytics or advertising scripts. Any data stored in your browser
         (via localStorage) is used solely for your convenience and remains on your device.
       </P>
 
-      <SectionTitle id="pp-security">8. Data Security</SectionTitle>
+      <SectionTitle id="pp-security">9. Data Security</SectionTitle>
       <P>
         We implement reasonable technical safeguards to protect the limited data we process.
         However, no method of electronic transmission or storage is 100% secure. You are
@@ -113,14 +131,14 @@ function PrivacyPolicy() {
         ask for your private keys or seed phrases.
       </P>
 
-      <SectionTitle id="pp-retention">9. Data Retention</SectionTitle>
+      <SectionTitle id="pp-retention">10. Data Retention</SectionTitle>
       <P>
         We retain automatically collected technical data only for as long as necessary to fulfill
         the purposes outlined in this Privacy Policy. On-chain data exists permanently on public
         blockchains, which we cannot modify or delete.
       </P>
 
-      <SectionTitle id="pp-rights">10. Your Rights</SectionTitle>
+      <SectionTitle id="pp-rights">11. Your Rights</SectionTitle>
       <P>
         Depending on your jurisdiction, you may have the right to access, correct, or delete your
         personal data. Because the Interface collects minimal personal data and most data is stored
@@ -132,21 +150,21 @@ function PrivacyPolicy() {
         data and wallet addresses, as these are immutable by design.
       </P>
 
-      <SectionTitle id="pp-children">11. Children&rsquo;s Privacy</SectionTitle>
+      <SectionTitle id="pp-children">12. Children&rsquo;s Privacy</SectionTitle>
       <P>
         The Interface is not intended for individuals under the age of 18. We do not knowingly
         collect personal information from children. If you believe that a child has provided us
         with personal information, please contact us so we can take appropriate action.
       </P>
 
-      <SectionTitle id="pp-changes">12. Changes to This Policy</SectionTitle>
+      <SectionTitle id="pp-changes">13. Changes to This Policy</SectionTitle>
       <P>
         We may update this Privacy Policy from time to time. Changes will be posted on this page
         with an updated &ldquo;Last Updated&rdquo; date. Your continued use of the Interface after
         any changes constitutes your acceptance of the revised Privacy Policy.
       </P>
 
-      <SectionTitle id="pp-contact">13. Contact</SectionTitle>
+      <SectionTitle id="pp-contact">14. Contact</SectionTitle>
       <P>
         If you have questions about this Privacy Policy or wish to exercise your data rights,
         please contact us at <span className="text-cream-65 font-medium">legal@teraswap.io</span>.

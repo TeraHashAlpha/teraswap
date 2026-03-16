@@ -50,6 +50,29 @@ All external aggregator API calls are also proxied server-side:
 
 ---
 
+## Multi-Oracle Price Protection
+
+TeraSwap uses three independent layers of price validation to protect users from manipulation:
+
+### Layer 1: Chainlink On-Chain Oracles (Client-Side)
+- 24 token pairs with dedicated Chainlink price feeds
+- Warns at 2% deviation from oracle price
+- **Blocks at 3% deviation** (tightened from 5%)
+- Validates data freshness and round integrity
+
+### Layer 2: DefiLlama Server-Side Validation
+- Free, independent price oracle covering thousands of tokens
+- Validates swap output on the server (`/api/swap`) before returning calldata
+- **Blocks if output is >8% below fair market value**
+- 5-minute cache, 3-second timeout — never blocks swap flow on failure
+
+### Layer 3: Cross-Quote Consensus
+- Compares winning quote against median of all 11 aggregator responses
+- Warns if best quote deviates >5% from consensus
+- Automatically removes quotes >3× above median (outlier detection)
+
+---
+
 ## Smart Contract Security
 
 ### Content Security Policy (CSP)

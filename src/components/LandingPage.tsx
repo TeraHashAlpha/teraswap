@@ -138,6 +138,8 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         <span>Ethereum Mainnet</span>
         <span style={{ color: 'rgba(200,184,154,0.25)' }}>·</span>
         <span>Powered by Chainlink</span>
+        <span style={{ color: 'rgba(200,184,154,0.25)' }}>·</span>
+        <span>IP Protected</span>
       </motion.div>
     </section>
   )
@@ -284,8 +286,8 @@ function RouteVisualization() {
 function SecuritySection() {
   const stats = [
     { value: 100, suffix: '%', label: 'Front-running blocked' },
-    { value: 5, prefix: '< ', suffix: '%', label: 'Chainlink enforced deviation' },
-    { value: 0, suffix: '', label: 'Gasless · Permit2', isText: true, textValue: 'Gasless' },
+    { value: 3, prefix: '< ', suffix: '%', label: 'Chainlink enforced deviation' },
+    { value: 0, suffix: '', label: 'IP Protected', isText: true, textValue: '🛡' },
   ]
 
   return (
@@ -353,15 +355,20 @@ function SecuritySection() {
         >
           <p>
             MEV bots never sleep — but neither does our protection. Through our native integration with
-            CoW Protocol and real-time Chainlink price validation, your trades are executed via batch
-            auctions that eliminate front-running and slippage manipulation entirely.
+            CoW Protocol, real-time Chainlink price validation, and an independent DefiLlama oracle layer,
+            your trades are executed via batch auctions that eliminate front-running and slippage manipulation entirely.
+          </p>
+          <p className="mt-4">
+            Your privacy matters too. All blockchain reads and aggregator API calls are routed through our{' '}
+            <span className="font-semibold">server-side privacy proxy</span> — your IP address is never exposed
+            to external infrastructure providers.
           </p>
           <p className="mt-4 text-center font-semibold text-cream">
-            Zero predatory extraction. Zero compromises.
+            Zero predatory extraction. Zero data leaks. Zero compromises.
           </p>
           <p className="mt-4">
             TeraSwap was built around one non-negotiable principle:{' '}
-            <span className="font-semibold">your profitability comes first.</span>
+            <span className="font-semibold">your profitability and privacy come first.</span>
           </p>
         </motion.div>
 
@@ -524,8 +531,12 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
     desc: 'True median-based filtering across all 11 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
   },
   {
-    title: 'Chainlink Price Validation',
-    desc: 'On-chain oracles block price deviations above 5% — mathematical security, always on.',
+    title: 'Multi-Oracle Price Protection',
+    desc: 'Chainlink on-chain oracles block deviations above 3%. DefiLlama server-side validation adds a second independent price check. Cross-quote consensus across all 11 sources catches outliers automatically.',
+  },
+  {
+    title: 'Privacy-First Architecture',
+    desc: 'All RPC reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external blockchain providers or DEX APIs.',
   },
   {
     title: 'Smart DCA Engine',
@@ -684,7 +695,7 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
         variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.6 } } }}
         className="relative z-10 mt-6 text-[11px] font-medium uppercase tracking-[0.08em] text-cream-50"
       >
-        Non-custodial · Ethereum Mainnet · Powered by Chainlink
+        Non-custodial · Ethereum Mainnet · Powered by Chainlink · IP Protected
       </motion.div>
     </section>
   )

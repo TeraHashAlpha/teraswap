@@ -36,6 +36,7 @@ const SECTIONS: DocSection[] = [
   { id: 'sources', title: 'Liquidity Sources', icon: '◉' },
   { id: 'routing', title: 'Smart Routing', icon: '⟁' },
   { id: 'security', title: 'Security', icon: '⬢' },
+  { id: 'privacy', title: 'Privacy', icon: '◍' },
   { id: 'fees', title: 'Fee Structure', icon: '◇' },
   { id: 'limit', title: 'Limit Orders', icon: '⊕' },
   { id: 'sltp', title: 'Stop Loss / Take Profit', icon: '⛊' },
@@ -230,16 +231,19 @@ export default function DocsPage() {
             net output — accounting for gas costs, slippage, and pool fees.
           </p>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            Every swap is validated against <strong className="text-cream">Chainlink price oracles</strong> to protect
-            against price manipulation, and intent-based execution via CoW Protocol provides <strong className="text-cream">MEV
-            protection</strong> out of the box.
+            Every swap is validated against <strong className="text-cream">Chainlink price oracles</strong> and{' '}
+            <strong className="text-cream">DefiLlama</strong> to protect against price manipulation, and intent-based
+            execution via CoW Protocol provides <strong className="text-cream">MEV protection</strong> out of the box.
+            All external requests are routed through a <strong className="text-cream">server-side privacy proxy</strong> that
+            shields your IP from blockchain providers.
           </p>
           <div className="flex flex-wrap gap-2">
             <Tag>Non-custodial</Tag>
             <Tag>Open source</Tag>
             <Tag>11 DEX sources</Tag>
-            <Tag>Chainlink verified</Tag>
+            <Tag>Multi-oracle verified</Tag>
             <Tag>MEV protected</Tag>
+            <Tag>IP protected</Tag>
           </div>
         </AnimatedSection>
 
@@ -318,9 +322,10 @@ export default function DocsPage() {
               { num: '02', title: 'Gas-Aware Ranking', desc: 'Quotes ranked by net output considering estimated gas costs in USD. When outputs are close, cheaper gas wins the tiebreak. CoW Protocol (gasless for users) naturally benefits.' },
               { num: '03', title: 'Statistical Outlier Detection', desc: 'True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above 3× median is rejected.' },
               { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: 'Automatically tests all 4 fee tiers (0.01%, 0.05%, 0.3%, 1%) and selects the pool with best output. Results are cached for faster subsequent quotes.' },
-              { num: '05', title: 'Oracle Validation', desc: 'Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above 2% trigger a warning; above 5% the swap is blocked.' },
-              { num: '06', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 49.99%] — impossible to create negative factors. Enforced at both UI input and calculation level across all 11 sources.' },
-              { num: '07', title: 'Multi-Chain EIP-712', desc: 'CoW Protocol signing uses the wallet\'s current chainId dynamically, enabling future multi-chain support without code changes.' },
+              { num: '05', title: 'Oracle Validation', desc: 'Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above 2% trigger a warning; above 3% the swap is blocked. A second server-side check via DefiLlama blocks swaps >8% below fair market value.' },
+              { num: '06', title: 'Cross-Quote Consensus', desc: 'The winning quote is compared against the median of all 11 sources. If it deviates >5% from consensus, a warning is raised. Quotes >3× above median are automatically removed as outliers.' },
+              { num: '07', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 15%] — impossible to create negative factors. Enforced at both UI input and calculation level across all 11 sources.' },
+              { num: '08', title: 'Multi-Chain EIP-712', desc: 'CoW Protocol signing uses the wallet\'s current chainId dynamically, enabling future multi-chain support without code changes.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
                 className="flex gap-4 rounded-xl border p-5"
@@ -349,7 +354,10 @@ export default function DocsPage() {
             variants={stagger} className="grid gap-4 sm:grid-cols-2"
           >
             {[
-              { title: 'Chainlink Oracle Validation', desc: 'Every swap rate is cross-referenced with decentralized price feeds. Supports 22+ token pairs with automatic deviation detection.', badge: 'Oracle' },
+              { title: 'Chainlink Oracle Validation', desc: 'Every swap rate is cross-referenced with decentralized price feeds. Supports 24+ token pairs with automatic deviation detection. Warns at 2%, blocks at 3%.', badge: 'Oracle' },
+              { title: 'DefiLlama Server-Side Check', desc: 'A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >8% below fair market value. Covers thousands of tokens.', badge: 'Oracle' },
+              { title: 'Cross-Quote Consensus', desc: 'The winning quote is validated against the median of all aggregator responses. Deviations >5% are flagged; quotes >3× above median are removed automatically.', badge: 'Safety' },
+              { title: 'Privacy Proxy', desc: 'All blockchain reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external RPC providers or DEX APIs.', badge: 'Privacy' },
               { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where professional solvers compete — your trade is never exposed to sandwich attacks.', badge: 'MEV' },
               { title: 'Permit2 Approvals', desc: 'Off-chain signature-based approvals eliminate the need for unlimited token allowances. Your tokens stay under your control.', badge: 'Approval' },
               { title: 'No Infinite Approvals', desc: 'Each approval is scoped to the exact amount needed for the swap. Nothing more, nothing less.', badge: 'Wallet' },
@@ -369,6 +377,73 @@ export default function DocsPage() {
               </motion.div>
             ))}
           </motion.div>
+        </AnimatedSection>
+
+        <Divider />
+
+        {/* ═══ PRIVACY ═══ */}
+        <AnimatedSection id="privacy">
+          <SectionTitle icon="◍" title="Privacy" />
+          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+            TeraSwap implements a privacy-preserving architecture that protects users&apos; IP addresses
+            from external blockchain infrastructure providers and aggregator APIs.
+          </p>
+
+          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
+            variants={stagger} className="space-y-4"
+          >
+            {[
+              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to Alchemy, LlamaRPC, and other providers — never yours.' },
+              { num: '02', title: 'API Proxy Layer', desc: 'All external aggregator API calls (1inch, 0x, CoW, Odos, KyberSwap, etc.) are also proxied server-side through /api/quote and /api/swap. Your browser never makes direct requests to these services.' },
+              { num: '03', title: 'Method Whitelist', desc: 'The RPC proxy only allows read-only methods (eth_call, eth_getTransactionReceipt, eth_getBalance, etc.). Write methods like eth_sendRawTransaction are blocked to prevent misuse.' },
+              { num: '04', title: 'Rate Limiting', desc: '60 requests per IP per minute on the RPC proxy to prevent abuse. Swap endpoint limited to 20 requests per minute.' },
+              { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
+            ].map((step) => (
+              <motion.div key={step.num} variants={childFade}
+                className="flex gap-4 rounded-xl border p-5"
+                style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
+              >
+                <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
+                <div>
+                  <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
+                  <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+
+          <div className="mt-6 overflow-hidden rounded-xl border" style={{ borderColor: '#1E2530' }}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: 'rgba(200,184,154,0.06)' }}>
+                  <th className="px-5 py-3 text-left font-semibold text-cream-65">External Service</th>
+                  <th className="px-5 py-3 text-left font-semibold text-cream-65">Proxy Endpoint</th>
+                  <th className="px-5 py-3 text-left font-semibold text-cream-65">IP Hidden</th>
+                </tr>
+              </thead>
+              <tbody className="text-cream-50">
+                {[
+                  ['All DEX aggregator quotes', '/api/quote', 'Yes'],
+                  ['Swap calldata from all aggregators', '/api/swap', 'Yes'],
+                  ['RPC reads (eth_call, receipts, etc.)', '/api/rpc', 'Yes'],
+                  ['CoW Protocol order submission', '/api/orders', 'Yes'],
+                  ['Spender addresses', '/api/spender', 'Yes'],
+                ].map(([service, endpoint, hidden], i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #1E2530' }}>
+                    <td className="px-5 py-2.5 font-medium text-cream">{service}</td>
+                    <td className="px-5 py-2.5 font-mono text-xs" style={{ color: '#C8B89A' }}>{endpoint}</td>
+                    <td className="px-5 py-2.5 font-bold" style={{ color: '#4ADE80' }}>{hidden}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
+            <span className="font-semibold text-cream-65">Note:</span> Your wallet&apos;s own RPC connection (MetaMask, Coinbase Wallet, etc.)
+            and transaction signing are handled by your wallet directly and are not proxied. For maximum privacy,
+            configure a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect).
+          </div>
         </AnimatedSection>
 
         <Divider />
@@ -575,7 +650,10 @@ export default function DocsPage() {
             {[
               { phase: 'Phase 1', status: 'Live', color: '#4ADE80', items: [
                 'Meta-aggregator with 11 liquidity sources',
-                'Chainlink oracle price validation',
+                'Chainlink oracle price validation (2% warn / 3% block)',
+                'DefiLlama server-side oracle validation',
+                'Cross-quote median consensus validation',
+                'Privacy proxy (IP hidden from all external services)',
                 'MEV protection via CoW Protocol',
                 'Permit2 + EIP-2612 gasless approvals',
                 'Active approvals manager with revoke',
@@ -593,8 +671,9 @@ export default function DocsPage() {
                 'Sybil/wash trading detector (6 heuristics + wallet clustering)',
                 'Airdrop-ready wallet snapshots & exports',
                 'Supabase backend (24/7 order monitoring without PC)',
-                'Fee collection smart contract (audited)',
+                'Fee collection smart contract (verified on Etherscan)',
                 'Order Engine smart contract (EIP-712 signed orders)',
+                'Sentry error monitoring',
               ] },
               { phase: 'Phase 2', status: 'Next', color: '#C8B89A', items: [
                 'Own DCA smart contracts (Chainlink Automation)',
@@ -602,7 +681,6 @@ export default function DocsPage() {
                 'Bebop RFQ (12th source)',
                 'Base network support',
                 'Multi-hop Curve routing',
-                'Private RPC (Flashbots Protect / MEV Blocker)',
               ] },
               { phase: 'Phase 3', status: 'Planned', color: 'rgba(200,184,154,0.4)', items: [
                 'Multi-chain expansion (Arbitrum, Optimism, Base)',
