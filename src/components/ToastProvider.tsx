@@ -80,7 +80,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider value={{ toast, dismiss, update }}>
       {children}
       {/* ── Toast container ── */}
-      <div className="fixed bottom-4 right-4 z-[200] flex w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-2">
+      <div className="fixed bottom-4 left-4 right-4 z-[200] mx-auto flex max-w-[360px] flex-col gap-2 sm:left-auto">
         <AnimatePresence mode="popLayout">
           {toasts.map(t => (
             <ToastItem key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />

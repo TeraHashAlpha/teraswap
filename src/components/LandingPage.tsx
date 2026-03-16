@@ -150,7 +150,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 function PerformanceSection() {
   return (
     <section id="performance" className="scan-line relative py-28 px-6">
-      <div className="mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-[55%_45%]">
+      <div className="mx-auto grid max-w-6xl items-center gap-8 sm:gap-12 lg:grid-cols-[55%_45%] lg:gap-16">
         {/* Copy */}
         <div>
           <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -254,7 +254,7 @@ function RouteVisualization() {
         whileInView={{ opacity: 1, scale: 1 }}
         viewport={{ once: true }}
         transition={{ delay: 1, duration: 0.5 }}
-        className="my-4 ml-32 flex h-14 w-48 items-center justify-center rounded-xl border"
+        className="my-4 ml-8 flex h-14 w-48 items-center justify-center rounded-xl border sm:ml-16 lg:ml-32"
         style={{ borderColor: 'rgba(200,184,154,0.3)', background: 'linear-gradient(90deg, rgba(200,184,154,0.08), rgba(200,184,154,0.04))' }}
       >
         <span className="text-sm font-semibold" style={{ color: '#C8B89A' }}>TeraSwap Engine</span>
@@ -266,7 +266,7 @@ function RouteVisualization() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ delay: 1.3, duration: 0.4 }}
-        className="ml-32 flex items-center gap-2"
+        className="ml-8 flex items-center gap-2 sm:ml-16 lg:ml-32"
       >
         <div className="h-[2px] w-20" style={{ background: 'linear-gradient(90deg, #C8B89A, #4ADE80)' }} />
         <div className="rounded-lg border px-4 py-2 text-sm font-semibold" style={{ borderColor: 'rgba(74,222,128,0.3)', background: 'rgba(74,222,128,0.05)', color: '#4ADE80' }}>
@@ -408,7 +408,7 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         </span>
       </div>
 
-      <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-2">
+      <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-8 sm:gap-12 lg:grid-cols-2 lg:gap-16">
         {/* Copy */}
         <div>
           <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -587,7 +587,7 @@ function FeaturesSection() {
           whileInView="visible"
           viewport={{ once: true, amount: 0.2 }}
           variants={staggerContainer}
-          className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3"
         >
           {FEATURES.map((feature) => (
             <motion.div

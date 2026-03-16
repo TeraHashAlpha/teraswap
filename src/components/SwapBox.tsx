@@ -389,7 +389,7 @@ export default function SwapBox() {
 
         {/* Invert */}
         <div className="relative z-10 -my-2 flex justify-center">
-          <button onClick={handleInvert} className="flex h-9 w-9 items-center justify-center rounded-xl border border-cream-15 bg-surface-secondary text-cream-65 transition-all hover:border-cream-50 hover:text-cream hover:rotate-180">&#8645;</button>
+          <button onClick={handleInvert} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cream-15 bg-surface-secondary text-cream-65 transition-all hover:border-cream-50 hover:text-cream hover:rotate-180">&#8645;</button>
         </div>
 
         {/* Receive */}

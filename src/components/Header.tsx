@@ -90,7 +90,7 @@ export default function Header({ onLogoClick, showNav = false, onDocsClick }: Pr
       {showNav && (
         <button
           onClick={() => setMobileMenu(!mobileMenu)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream-15 text-cream-65 transition hover:text-cream md:hidden"
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-cream-15 text-cream-65 transition hover:text-cream md:hidden"
           aria-label="Menu"
         >
           {mobileMenu ? '✕' : '☰'}
