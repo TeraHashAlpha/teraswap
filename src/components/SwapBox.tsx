@@ -93,7 +93,7 @@ export default function SwapBox() {
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady } =
     useApproval(tokenIn, amountIn, spender)
 
-  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, execute: executeSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, execute: executeSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
@@ -512,7 +512,18 @@ export default function SwapBox() {
 
         {/* Errors */}
         {quoteError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{quoteError}</div>}
-        {effectiveError && !isSplitActive && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
+        {/* DefiLlama Price Guard — server-side oracle blocked the swap */}
+        {priceGuardBlocked && (
+          <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <span className="font-semibold">&#128737; Swap blocked by server-side price protection.</span>{' '}
+            The swap output is {priceGuardDeviation != null ? `${(Math.abs(priceGuardDeviation) * 100).toFixed(1)}%` : 'significantly'} below the fair market price
+            verified by DefiLlama oracle. This may indicate extreme slippage, low liquidity, or a mispriced token.
+            <span className="mt-1 block text-[10px] text-danger/80">
+              Try a smaller amount, a different token pair, or wait for liquidity to stabilize. This protection cannot be overridden.
+            </span>
+          </div>
+        )}
+        {effectiveError && !isSplitActive && !priceGuardBlocked && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
         {approvalError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{approvalError}</div>}
         {/* Price deviation — warn level (2-3%): swap paused until price converges */}
         {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && (

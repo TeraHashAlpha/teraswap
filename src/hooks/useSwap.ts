@@ -14,6 +14,16 @@ import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 
+// ── Price Guard error (DefiLlama server-side block) ──────
+class PriceGuardError extends Error {
+  deviation: number
+  constructor(message: string, deviation: number) {
+    super(message)
+    this.name = 'PriceGuardError'
+    this.deviation = deviation
+  }
+}
+
 // ── Fallback receipt polling ──────────────────────────────
 // wagmi's useWaitForTransactionReceipt can stall when the RPC is slow
 // or returns transient errors. This manual poller provides a safety net.
@@ -38,7 +48,16 @@ async function fetchSwapViaApi(
     }),
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `Swap API error ${res.status}`)
+  if (!res.ok) {
+    // Detect server-side DefiLlama price guard block (HTTP 422)
+    if (data.priceGuard) {
+      throw new PriceGuardError(
+        data.error || 'Swap blocked by server-side price protection.',
+        typeof data.deviation === 'number' ? data.deviation : 0,
+      )
+    }
+    throw new Error(data.error || `Swap API error ${res.status}`)
+  }
   return data
 }
 
@@ -56,6 +75,10 @@ interface UseSwapResult {
   txHash: `0x${string}` | undefined
   errorMessage: string | null
   cowOrderUid: string | null
+  /** True when DefiLlama server-side oracle blocked the swap (output too far below fair value) */
+  priceGuardBlocked: boolean
+  /** Oracle deviation that triggered the price guard (e.g. -0.12 = 12% below fair value) */
+  priceGuardDeviation: number | null
   execute: (source: AggregatorName) => Promise<void>
   reset: () => void
 }
@@ -78,6 +101,8 @@ export function useSwap(
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cowOrderUid, setCowOrderUid] = useState<string | null>(null)
   const [txHashState, setTxHashState] = useState<`0x${string}` | undefined>()
+  const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
+  const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
 
   const {
     sendTransaction,
@@ -338,11 +363,21 @@ export function useSwap(
       setStatus('error')
       const errMsg = err instanceof Error ? err.message : 'Unknown error'
       setErrorMessage(errMsg)
+      // Detect DefiLlama price guard block
+      if (err instanceof PriceGuardError) {
+        setPriceGuardBlocked(true)
+        setPriceGuardDeviation(err.deviation)
+      }
       trackWalletActivity(address, {
-        category: 'swap', action: 'swap_failed', source,
+        category: 'swap',
+        action: err instanceof PriceGuardError ? 'swap_blocked_price_guard' : 'swap_failed',
+        source,
         token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-        success: false, error_msg: errMsg.slice(0, 200),
+        success: false,
+        error_code: err instanceof PriceGuardError ? 'price_guard' : undefined,
+        error_msg: errMsg.slice(0, 200),
         duration_ms: Date.now() - swapStartTime,
+        metadata: err instanceof PriceGuardError ? { deviation: err.deviation } : undefined,
       })
     }
   }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction])
@@ -564,6 +599,11 @@ export function useSwap(
       }
     } catch (err) {
       setStatus('error')
+      // Detect DefiLlama price guard block in CoW flow too
+      if (err instanceof PriceGuardError) {
+        setPriceGuardBlocked(true)
+        setPriceGuardDeviation(err.deviation)
+      }
       let cowErrMsg = 'Unknown error'
       let cowErrCode = 'unknown'
       if (err instanceof Error) {
@@ -743,10 +783,12 @@ export function useSwap(
     setErrorMessage(null)
     setCowOrderUid(null)
     setTxHashState(undefined)
+    setPriceGuardBlocked(false)
+    setPriceGuardDeviation(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, execute, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, execute, reset }
 }
 
 function parseWagmiError(error: Error): string {
