@@ -24,6 +24,9 @@ dist/
 # Build artifacts
 *.tsbuildinfo
 next-env.d.ts
+contracts/order-engine/build/
+contracts/order-engine/cache/
+contracts/order-engine/artifacts/
 
 # IDE
 .vscode/
@@ -46,6 +49,13 @@ scripts/*.sh
 tools/
 TeraSwap_OrderEngine_SecurityAudit.pdf
 
+# Internal docs (infrastructure, deployment guides)
+TeraSwap_Infrastructure_Guide.docx
+TeraSwapOrderExecutor_DEPLOY.sol
+
+# Audit remediation docs (keep PDFs, remove internal docs)
+Audits/*.docx
+
 # Order Engine deployment secrets
 .deployer-*.json
 .env.gelato
@@ -54,3 +64,4 @@ contracts/order-engine/deployment-*.json
 contracts/order-engine/executor/.env.executor
 contracts/order-engine/executor/node_modules/
 .vercel
+contracts/order-engine/.env
