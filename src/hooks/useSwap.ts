@@ -6,8 +6,8 @@ import {
   useWaitForTransactionReceipt,
   useSignTypedData,
 } from 'wagmi'
-import { parseUnits, formatUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
-import { mainnet } from 'viem/chains'
+import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
+import { getPrivateClient } from '@/lib/rpc'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
@@ -248,8 +248,7 @@ export function useSwap(
           // Pre-flight: verify user approved FeeCollector for the full amount
           if (address) {
             try {
-              const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
-              const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+              const client = getPrivateClient()
               const allowance = await client.readContract({
                 address: tokenIn!.address as `0x${string}`,
                 abi: erc20Abi,
@@ -302,8 +301,7 @@ export function useSwap(
         // Pre-flight: verify ERC-20 allowance before sending tx (prevents STF reverts)
         if (!isNativeIn && address) {
           try {
-            const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
-            const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+            const client = getPrivateClient()
             const allowance = await client.readContract({
               address: tokenIn!.address as `0x${string}`,
               abi: erc20Abi,
@@ -379,8 +377,7 @@ export function useSwap(
       // CoW orderbook rejects orders when the user doesn't have enough tokens.
       // Check locally first for a better error message.
       // [H-01] Mainnet only — Sepolia removed for production
-      const viemChain = mainnet
-      const client = createPublicClient({ chain: viemChain, transport: http() })
+      const client = getPrivateClient()
       try {
         const balance = await client.readContract({
           address: tokenIn.address as `0x${string}`,
@@ -646,8 +643,7 @@ export function useSwap(
       if (status !== 'swapping') return // already resolved
 
       // Fallback receipt polling activated
-      const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
-      const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+      const client = getPrivateClient()
 
       fallbackTimerRef.current = setInterval(async () => {
         try {

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
-import { parseUnits, encodeFunctionData, erc20Abi, createPublicClient, http } from 'viem'
-import { mainnet } from 'viem/chains'
+import { parseUnits, encodeFunctionData, erc20Abi } from 'viem'
+import { getPrivateClient } from '@/lib/rpc'
 import { useAccount, useChainId, useSendTransaction, useSignTypedData } from 'wagmi'
 import {
   validateFeeIntegrity,
@@ -70,8 +70,7 @@ async function waitForReceipt(
   txHash: `0x${string}`,
   timeoutMs = 120_000,
 ): Promise<'success' | 'reverted' | 'timeout'> {
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
-  const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+  const client = getPrivateClient()
   const start = Date.now()
 
   while (Date.now() - start < timeoutMs) {

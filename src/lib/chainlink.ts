@@ -116,7 +116,9 @@ export function evaluateDeviation(
 // ══════════════════════════════════════════════════════════
 
 function getRpcUrl(): string {
-  return process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+  // In browser context, route through privacy proxy to hide user IP
+  if (typeof window !== 'undefined') return '/api/rpc'
+  return process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
 }
 
 /** Raw RPC call helper */

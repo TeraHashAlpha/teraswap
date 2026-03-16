@@ -7,16 +7,18 @@
  * Falls back to CoW quote API for tokens without Chainlink feeds.
  */
 
-import { createPublicClient, http, parseAbi, erc20Abi } from 'viem'
-import { mainnet } from 'viem/chains'
+import { parseAbi, erc20Abi } from 'viem'
 import { CHAINLINK_ETH_USD, CHAINLINK_FEEDS, NATIVE_ETH, WETH_ADDRESS } from './constants'
 import { fetchCurrentPrice } from './limit-order-api'
+import { getPrivateClient } from './rpc'
 
-// ── Viem public client for Chainlink reads ─────────────────
-const publicClient = createPublicClient({
-  chain: mainnet,
-  transport: http(),
-})
+// ── Viem public client for Chainlink reads (privacy-preserving) ──
+// Lazy-initialized to avoid calling getPrivateClient at module load time
+let _publicClient: ReturnType<typeof getPrivateClient> | null = null
+function getClient() {
+  if (!_publicClient) _publicClient = getPrivateClient()
+  return _publicClient
+}
 
 // Chainlink AggregatorV3 ABI (minimal)
 const aggregatorAbi = parseAbi([
@@ -32,7 +34,7 @@ async function getFeedDecimals(feedAddress: `0x${string}`): Promise<number> {
   const cached = feedDecimalsCache.get(feedAddress)
   if (cached !== undefined) return cached
 
-  const decimals = await publicClient.readContract({
+  const decimals = await getClient().readContract({
     address: feedAddress,
     abi: aggregatorAbi,
     functionName: 'decimals',
@@ -60,7 +62,7 @@ export async function getChainlinkPriceUSD(
   if (!feedAddress) return null
 
   try {
-    const [, answer] = await publicClient.readContract({
+    const [, answer] = await getClient().readContract({
       address: feedAddress,
       abi: aggregatorAbi,
       functionName: 'latestRoundData',
@@ -98,7 +100,7 @@ export async function getTokenPriceUSD(tokenAddress: string): Promise<number> {
         tokenDecimals = cached
       } else {
         try {
-          const dec = await publicClient.readContract({
+          const dec = await getClient().readContract({
             address: addr as `0x${string}`,
             abi: erc20Abi,
             functionName: 'decimals',

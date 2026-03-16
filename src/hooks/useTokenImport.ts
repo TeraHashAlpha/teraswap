@@ -28,8 +28,8 @@ export function useTokenImport() {
 
     setImporting(true)
     try {
-      // Use fetch to call the RPC directly for simplicity (wagmi hooks are for components)
-      const rpcUrl = 'https://eth.llamarpc.com'
+      // Use fetch to call our RPC proxy for privacy (hides user IP from RPC provider)
+      const rpcUrl = '/api/rpc'
       const addr = address.toLowerCase() as `0x${string}`
 
       const [symbolRes, nameRes, decimalsRes] = await Promise.all([
