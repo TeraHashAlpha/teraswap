@@ -13,6 +13,7 @@ import { useSwap, type SwapStatus } from '@/hooks/useSwap'
 import { useApproval } from '@/hooks/useApproval'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
+import { setParticleTurbo } from './ParticleNetwork'
 import { trackTrade } from '@/lib/analytics-tracker'
 // Security tracking moved server-side — events are recorded by /api/log-swap
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
@@ -137,6 +138,13 @@ export default function SwapBox() {
   const { estimate: gasEstimateFn } = useEthGasCost()
   const { toast, dismiss } = useToast()
   const swapToastId = useRef<string | null>(null)
+
+  // ── Particle turbo mode during active swap ──
+  useEffect(() => {
+    const isSwapping = effectiveSwapStatus === 'swapping' || effectiveSwapStatus === 'cow_signing' || effectiveSwapStatus === 'cow_pending'
+    setParticleTurbo(isSwapping)
+    return () => setParticleTurbo(false)
+  }, [effectiveSwapStatus])
 
   // ── Toast: swap initiated (loading) ──
   useEffect(() => {

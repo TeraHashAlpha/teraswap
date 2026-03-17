@@ -9,6 +9,8 @@ interface Particle {
   vy: number
   r: number
   alpha: number
+  baseVx: number   // original velocity (for lerp back to calm)
+  baseVy: number
 }
 
 const PARTICLE_COUNT = 80
@@ -17,17 +19,31 @@ const MOUSE_DIST = 200
 const MOUSE_REPEL = 120
 
 // ── Cursor proximity settings ──
-// When cursor is within CURSOR_GLOW_RADIUS of a connection line midpoint,
-// the connection brightens from its base opacity up to the boosted opacity.
 const CURSOR_GLOW_RADIUS = 250
-const BASE_LINE_OPACITY = 0.08     // default connection opacity (subtle)
-const MAX_LINE_OPACITY = 0.35      // connection opacity directly under cursor
-const BASE_DOT_ALPHA_MULT = 0.7    // dim particles slightly at rest
-const MAX_DOT_ALPHA_MULT = 1.4     // brighten particles near cursor
+const BASE_LINE_OPACITY = 0.08
+const MAX_LINE_OPACITY = 0.35
+const BASE_DOT_ALPHA_MULT = 0.7
+const MAX_DOT_ALPHA_MULT = 1.4
+
+// ── Turbo mode settings (active during swap transactions) ──
+const TURBO_SPEED_MULT = 4.5       // velocity multiplier during turbo
+const TURBO_MAX_DIST = 220          // larger connection radius
+const TURBO_LINE_OPACITY = 0.25     // brighter base connections
+const TURBO_DOT_ALPHA_MULT = 1.6    // brighter dots
+const TURBO_GLOW_RADIUS = 6         // larger glow halos
+const TURBO_LERP_IN = 0.04          // speed of transition into turbo
+const TURBO_LERP_OUT = 0.02         // speed of transition back to calm
 
 function getParticleColor(): string {
   if (typeof document === 'undefined') return '232, 220, 196'
   return getComputedStyle(document.documentElement).getPropertyValue('--particle-color').trim() || '232, 220, 196'
+}
+
+// ── Global turbo state (set via custom events from SwapBox) ──
+let globalTurbo = false
+export function setParticleTurbo(active: boolean) {
+  globalTurbo = active
+  window.dispatchEvent(new CustomEvent('particle-turbo', { detail: { active } }))
 }
 
 export default function ParticleNetwork() {
@@ -36,6 +52,7 @@ export default function ParticleNetwork() {
   const particlesRef = useRef<Particle[]>([])
   const animRef = useRef<number>(0)
   const colorRef = useRef(getParticleColor())
+  const turboRef = useRef(0) // 0 = calm, 1 = full turbo (lerped)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -51,11 +68,13 @@ export default function ParticleNetwork() {
     }
 
     function createParticle(): Particle {
+      const vx = (Math.random() - 0.5) * 0.4
+      const vy = (Math.random() - 0.5) * 0.4
       return {
         x: Math.random() * W,
         y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4,
+        vx, vy,
+        baseVx: vx, baseVy: vy,
         r: Math.random() * 2 + 1,
         alpha: Math.random() * 0.5 + 0.2,
       }
@@ -74,17 +93,27 @@ export default function ParticleNetwork() {
       const mouse = mouseRef.current
       ctx!.clearRect(0, 0, W, H)
 
-      // Draw connections between particles — brightness depends on cursor proximity
+      // ── Lerp turbo intensity ──
+      const targetTurbo = globalTurbo ? 1 : 0
+      turboRef.current += (targetTurbo - turboRef.current) * (globalTurbo ? TURBO_LERP_IN : TURBO_LERP_OUT)
+      if (Math.abs(turboRef.current - targetTurbo) < 0.001) turboRef.current = targetTurbo
+      const t = turboRef.current // 0-1 turbo intensity
+
+      // ── Interpolated settings ──
+      const maxDist = MAX_DIST + (TURBO_MAX_DIST - MAX_DIST) * t
+      const baseLineOp = BASE_LINE_OPACITY + (TURBO_LINE_OPACITY - BASE_LINE_OPACITY) * t
+      const baseDotMult = BASE_DOT_ALPHA_MULT + (TURBO_DOT_ALPHA_MULT - BASE_DOT_ALPHA_MULT) * t
+      const speedLimit = 0.8 + (0.8 * TURBO_SPEED_MULT - 0.8) * t
+
+      // Draw connections between particles — brightness depends on cursor proximity + turbo
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x
           const dy = particles[i].y - particles[j].y
           const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < MAX_DIST) {
-            // Base factor: closer particles = more visible
-            const distFactor = 1 - dist / MAX_DIST
+          if (dist < maxDist) {
+            const distFactor = 1 - dist / maxDist
 
-            // Cursor proximity: measure distance from cursor to midpoint of this line
             const midX = (particles[i].x + particles[j].x) / 2
             const midY = (particles[i].y + particles[j].y) / 2
             const cmDx = midX - mouse.x
@@ -92,54 +121,56 @@ export default function ParticleNetwork() {
             const cursorDist = Math.sqrt(cmDx * cmDx + cmDy * cmDy)
             const cursorFactor = Math.max(0, 1 - cursorDist / CURSOR_GLOW_RADIUS)
 
-            // Blend: base subtle opacity + cursor boost
-            const opacity = distFactor * (BASE_LINE_OPACITY + (MAX_LINE_OPACITY - BASE_LINE_OPACITY) * cursorFactor * cursorFactor)
+            const opacity = distFactor * (baseLineOp + (MAX_LINE_OPACITY - baseLineOp) * cursorFactor * cursorFactor)
 
             ctx!.beginPath()
             ctx!.moveTo(particles[i].x, particles[i].y)
             ctx!.lineTo(particles[j].x, particles[j].y)
             ctx!.strokeStyle = `rgba(${colorRef.current}, ${opacity})`
-            ctx!.lineWidth = 0.5 + cursorFactor * 0.5
+            ctx!.lineWidth = 0.5 + cursorFactor * 0.5 + t * 0.3
             ctx!.stroke()
           }
         }
 
-        // Mouse interaction lines (cursor → particle)
+        // Mouse interaction lines
         const mdx = particles[i].x - mouse.x
         const mdy = particles[i].y - mouse.y
         const mDist = Math.sqrt(mdx * mdx + mdy * mdy)
         if (mDist < MOUSE_DIST) {
-          const opacity = (1 - mDist / MOUSE_DIST) * 0.25
+          const opacity = (1 - mDist / MOUSE_DIST) * (0.25 + t * 0.15)
           ctx!.beginPath()
           ctx!.moveTo(particles[i].x, particles[i].y)
           ctx!.lineTo(mouse.x, mouse.y)
           ctx!.strokeStyle = `rgba(${colorRef.current}, ${opacity})`
-          ctx!.lineWidth = 0.5
+          ctx!.lineWidth = 0.5 + t * 0.3
           ctx!.stroke()
         }
       }
 
-      // Draw particles with glow — also brighten near cursor
+      // Draw particles with glow
       for (const p of particles) {
         const pdx = p.x - mouse.x
         const pdy = p.y - mouse.y
         const pDist = Math.sqrt(pdx * pdx + pdy * pdy)
         const pCursorFactor = Math.max(0, 1 - pDist / CURSOR_GLOW_RADIUS)
-        const alphaMult = BASE_DOT_ALPHA_MULT + (MAX_DOT_ALPHA_MULT - BASE_DOT_ALPHA_MULT) * pCursorFactor
+        const alphaMult = baseDotMult + (MAX_DOT_ALPHA_MULT - baseDotMult) * pCursorFactor
         const dotAlpha = Math.min(1, p.alpha * alphaMult)
 
+        // During turbo: slightly larger dots
+        const drawR = p.r + t * 0.8
+
         ctx!.beginPath()
-        ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+        ctx!.arc(p.x, p.y, drawR, 0, Math.PI * 2)
         ctx!.fillStyle = `rgba(${colorRef.current}, ${dotAlpha})`
         ctx!.fill()
 
-        // Glow halo for larger particles
-        if (p.r > 2 || pCursorFactor > 0.3) {
-          const glowRadius = p.r * (3 + pCursorFactor * 2)
+        // Glow halo — always on during turbo, bigger halos
+        if (p.r > 2 || pCursorFactor > 0.3 || t > 0.2) {
+          const glowRadius = drawR * (3 + pCursorFactor * 2 + t * TURBO_GLOW_RADIUS)
           ctx!.beginPath()
           ctx!.arc(p.x, p.y, glowRadius, 0, Math.PI * 2)
           const g = ctx!.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius)
-          g.addColorStop(0, `rgba(${colorRef.current}, ${dotAlpha * 0.3})`)
+          g.addColorStop(0, `rgba(${colorRef.current}, ${dotAlpha * (0.3 + t * 0.2)})`)
           g.addColorStop(1, `rgba(${colorRef.current}, 0)`)
           ctx!.fillStyle = g
           ctx!.fill()
@@ -148,6 +179,13 @@ export default function ParticleNetwork() {
 
       // Update positions
       for (const p of particles) {
+        // During turbo: accelerate particles with random jitter
+        if (t > 0.01) {
+          const turboForce = t * 0.015
+          p.vx += (Math.random() - 0.5) * turboForce
+          p.vy += (Math.random() - 0.5) * turboForce
+        }
+
         p.x += p.vx
         p.y += p.vy
 
@@ -163,11 +201,17 @@ export default function ParticleNetwork() {
           p.vy += mdy2 * 0.0002
         }
 
-        // Speed limit
+        // Speed limit (higher during turbo)
         const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy)
-        if (speed > 0.8) {
-          p.vx *= 0.8 / speed
-          p.vy *= 0.8 / speed
+        if (speed > speedLimit) {
+          p.vx *= speedLimit / speed
+          p.vy *= speedLimit / speed
+        }
+
+        // When turbo ends, gently pull velocities back toward base
+        if (t < 0.05 && !globalTurbo) {
+          p.vx += (p.baseVx - p.vx) * 0.01
+          p.vy += (p.baseVy - p.vy) * 0.01
         }
       }
 
