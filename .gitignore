@@ -65,3 +65,11 @@ contracts/order-engine/executor/.env.executor
 contracts/order-engine/executor/node_modules/
 .vercel
 contracts/order-engine/.env
+
+# Capacitor native builds (generated, large, device-specific)
+ios/App/Pods/
+ios/App/build/
+ios/App/App/public/
+android/app/build/
+android/.gradle/
+android/app/src/main/assets/public/
