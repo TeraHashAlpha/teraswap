@@ -107,7 +107,7 @@ export default function Home() {
           </div>
 
           {/* Swap / DCA mode toggle */}
-          <div className="no-scrollbar mb-4 flex w-full max-w-[calc(100vw-1.5rem)] gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/60 p-1 sm:max-w-[540px]">
+          <div className="no-scrollbar sticky top-8 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
             {([
               ['instant', 'Swap'],
               ['dca', 'DCA'],
