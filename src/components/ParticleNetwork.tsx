@@ -26,13 +26,14 @@ const BASE_DOT_ALPHA_MULT = 0.7
 const MAX_DOT_ALPHA_MULT = 1.4
 
 // ── Turbo mode settings (active during swap transactions) ──
-const TURBO_SPEED_MULT = 4.5       // velocity multiplier during turbo
-const TURBO_MAX_DIST = 220          // larger connection radius
-const TURBO_LINE_OPACITY = 0.25     // brighter base connections
-const TURBO_DOT_ALPHA_MULT = 1.6    // brighter dots
-const TURBO_GLOW_RADIUS = 6         // larger glow halos
-const TURBO_LERP_IN = 0.04          // speed of transition into turbo
-const TURBO_LERP_OUT = 0.02         // speed of transition back to calm
+const TURBO_SPEED_MULT = 12         // velocity multiplier during turbo (was 4.5)
+const TURBO_MAX_DIST = 280          // much larger connection radius (was 220)
+const TURBO_LINE_OPACITY = 0.45     // much brighter base connections (was 0.25)
+const TURBO_DOT_ALPHA_MULT = 2.2    // much brighter dots (was 1.6)
+const TURBO_GLOW_RADIUS = 10        // much larger glow halos (was 6)
+const TURBO_LERP_IN = 0.08          // faster transition into turbo (was 0.04)
+const TURBO_LERP_OUT = 0.015        // slower fade out for dramatic effect
+const TURBO_JITTER = 0.06           // random directional jitter force (was 0.015)
 
 function getParticleColor(): string {
   if (typeof document === 'undefined') return '232, 220, 196'
@@ -127,7 +128,7 @@ export default function ParticleNetwork() {
             ctx!.moveTo(particles[i].x, particles[i].y)
             ctx!.lineTo(particles[j].x, particles[j].y)
             ctx!.strokeStyle = `rgba(${colorRef.current}, ${opacity})`
-            ctx!.lineWidth = 0.5 + cursorFactor * 0.5 + t * 0.3
+            ctx!.lineWidth = 0.5 + cursorFactor * 0.5 + t * 1.2
             ctx!.stroke()
           }
         }
@@ -156,8 +157,8 @@ export default function ParticleNetwork() {
         const alphaMult = baseDotMult + (MAX_DOT_ALPHA_MULT - baseDotMult) * pCursorFactor
         const dotAlpha = Math.min(1, p.alpha * alphaMult)
 
-        // During turbo: slightly larger dots
-        const drawR = p.r + t * 0.8
+        // During turbo: noticeably larger dots
+        const drawR = p.r + t * 2.0
 
         ctx!.beginPath()
         ctx!.arc(p.x, p.y, drawR, 0, Math.PI * 2)
@@ -179,11 +180,16 @@ export default function ParticleNetwork() {
 
       // Update positions
       for (const p of particles) {
-        // During turbo: accelerate particles with random jitter
+        // During turbo: aggressive random jitter — particles dart around chaotically
         if (t > 0.01) {
-          const turboForce = t * 0.015
+          const turboForce = t * TURBO_JITTER
           p.vx += (Math.random() - 0.5) * turboForce
           p.vy += (Math.random() - 0.5) * turboForce
+          // Occasional burst: 10% chance of extra kick
+          if (Math.random() < 0.1) {
+            p.vx += (Math.random() - 0.5) * turboForce * 3
+            p.vy += (Math.random() - 0.5) * turboForce * 3
+          }
         }
 
         p.x += p.vx
