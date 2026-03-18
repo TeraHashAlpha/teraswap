@@ -24,6 +24,7 @@ export async function GET() {
     const { data: swaps, error } = await supabase
       .from('swaps')
       .select('*')
+      .eq('status', 'confirmed')
       .order('created_at', { ascending: false })
       .limit(5000)
 
