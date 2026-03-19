@@ -250,12 +250,27 @@ If DNS is compromised:
 
 | Protocol | Incident | Loss | Root Cause | TeraSwap Status |
 |----------|----------|------|------------|----------------|
-| KyberSwap | Elastic Pool exploit (Nov 2023) | $47M | Tick manipulation in concentrated liquidity | N/A — TeraSwap doesn't have pools |
-| SushiSwap | RouteProcessor3 (Apr 2023) | $3.3M | Unvalidated callback in processor contract | Protected — router whitelist |
-| Curve | DNS hijack (Aug 2022) | ~$573K | Registrar credential theft | Needs DNS hardening (Section 4) |
-| BadgerDAO | Frontend attack (Dec 2021) | $120M | Cloudflare API key compromised, injected approvals | Protected — CSP blocks external scripts |
-| 1inch | Fusion resolver issues | Minor | Resolver manipulation | N/A — no resolver architecture |
-| Paraswap | Augustus V5 vulnerability | Patched pre-exploit | Unvalidated delegatecall target | Protected — no delegatecall in FeeCollector |
+| KyberSwap | Elastic Pool exploit (Nov 2023) | **$47M** | Tick boundary precision error in concentrated liquidity | N/A — no pools |
+| SushiSwap | RouteProcessor2 (Apr 2023) | **$3.3M** | Arbitrary external call → approval drain | **Protected** — router + selector whitelist |
+| Curve | Vyper compiler reentrancy (Jul 2023) | **$70M+** | Compiler storage collision broke nonreentrant | N/A — Solidity, not Vyper |
+| Curve | DNS hijack (Aug 2022) | **~$573K** | Registrar credential theft | **Needs fix** — Section 4 |
+| BadgerDAO | Frontend supply chain (Dec 2021) | **$120M** | Cloudflare API key → injected approvals | **Protected** — CSP headers |
+| Paraswap | Augustus V6 access control (Mar 2024) | **$5.7M at risk** | Missing access control on transferFrom | **Protected** — no generic transferFrom |
+| 1inch | Clipper function vuln (Mar 2023) | **Patched** | clipperSwap could drain approved tokens | **Protected** — selector validation |
+| Balancer | Read-only reentrancy (Jan 2024) | **$1.8M+** | View functions manipulated during callbacks | **Protected** — uses Chainlink, not spot |
+| Ledger | Connect Kit npm attack (Dec 2023) | **$600K+** | npm package injected drain modal | **Partial** — CSP mitigates |
+| CoW | Solver "Barter" manipulation (2023) | **Ongoing** | Suboptimal routing by malicious solver | N/A — no solver model |
+
+### Historical Loss by Attack Vector
+
+| Rank | Attack Vector | Cumulative Loss | TeraSwap? |
+|------|--------------|----------------|-----------|
+| 1 | Frontend/supply chain | $120M+ | Partial (CSP yes, DNS needs work) |
+| 2 | Compiler bugs | $70M+ | Yes (Solidity 0.8.24) |
+| 3 | AMM math errors | $47M | N/A (no pools) |
+| 4 | Oracle manipulation | $10-100M | Yes (multi-oracle) |
+| 5 | Approval drain | $3-6M/incident | Yes (router whitelist) |
+| 6 | MEV/sandwich | Billions cumulative | Partial (CoW toggle) |
 
 ### Industry Best Practices vs TeraSwap
 
