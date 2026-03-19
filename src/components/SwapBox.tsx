@@ -14,7 +14,7 @@ import { useApproval } from '@/hooks/useApproval'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
-import { trackTrade } from '@/lib/analytics-tracker'
+// analytics-tracker removed (dead code — server-side /api/analytics is the source of truth)
 // Security tracking moved server-side — events are recorded by /api/log-swap
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
@@ -177,22 +177,7 @@ export default function SwapBox() {
         txHash, status: 'confirmed',
       })
 
-      // Analytics tracking
-      const inUsd = ['USDC', 'USDT', 'DAI'].includes(tokenIn.symbol) ? Number(amountIn) : 0
-      const outUsd = ['USDC', 'USDT', 'DAI'].includes(tokenOut.symbol) ? Number(outAmount) : 0
-      trackTrade({
-        type: 'swap',
-        wallet: address || '',
-        tokenIn: tokenIn.symbol,
-        tokenInAddress: tokenIn.address,
-        tokenOut: tokenOut.symbol,
-        tokenOutAddress: tokenOut.address,
-        amountIn,
-        amountOut: outAmount,
-        volumeUsd: inUsd || outUsd || Number(amountIn) * 2000, // rough ETH fallback
-        source: meta.best.source,
-        txHash,
-      })
+      // Analytics: server-side /api/log-swap handles tracking (Q2 — removed client-side analytics-tracker)
 
       // Security tracking is handled server-side by /api/log-swap
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchMetaQuote } from '@/lib/api'
+import { isValidAddress } from '@/lib/validation'
 
 /**
  * Server-side proxy for meta-quote requests.
@@ -21,6 +22,11 @@ export async function GET(req: NextRequest) {
       { error: 'Missing required params: src, dst, amount' },
       { status: 400 },
     )
+  }
+
+  // Q8: Validate address format
+  if (!isValidAddress(src) || !isValidAddress(dst)) {
+    return NextResponse.json({ error: 'Invalid token address format' }, { status: 400 })
   }
 
   try {

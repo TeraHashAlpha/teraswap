@@ -13,7 +13,11 @@ interface Particle {
   baseVy: number
 }
 
-const PARTICLE_COUNT = 80
+// Q17: Reduce particles on mobile for performance; Q35: respect prefers-reduced-motion
+const IS_BROWSER = typeof window !== 'undefined'
+const IS_MOBILE = IS_BROWSER && window.innerWidth < 768
+const PREFERS_REDUCED_MOTION = IS_BROWSER && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const PARTICLE_COUNT = PREFERS_REDUCED_MOTION ? 20 : IS_MOBILE ? 40 : 80
 const MAX_DIST = 160
 const MOUSE_DIST = 200
 const MOUSE_REPEL = 120
@@ -33,7 +37,7 @@ const TURBO_DOT_ALPHA_MULT = 2.2    // much brighter dots (was 1.6)
 const TURBO_GLOW_RADIUS = 10        // much larger glow halos (was 6)
 const TURBO_LERP_IN = 0.08          // faster transition into turbo (was 0.04)
 const TURBO_LERP_OUT = 0.015        // slower fade out for dramatic effect
-const TURBO_JITTER = 0.06           // random directional jitter force (was 0.015)
+const TURBO_JITTER = PREFERS_REDUCED_MOTION ? 0.01 : 0.06 // Q35: minimal jitter for reduced motion
 
 function getParticleColor(): string {
   if (typeof document === 'undefined') return '232, 220, 196'

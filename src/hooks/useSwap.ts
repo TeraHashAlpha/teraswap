@@ -104,6 +104,13 @@ export function useSwap(
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
 
+  // Q24: Mounted ref to prevent state updates after unmount (polling race condition)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
   const {
     sendTransaction,
     data: swapHash,
@@ -686,9 +693,14 @@ export function useSwap(
       const client = getPrivateClient()
 
       fallbackTimerRef.current = setInterval(async () => {
+        if (!mountedRef.current) { // Q24: stop polling if unmounted
+          if (fallbackTimerRef.current) clearInterval(fallbackTimerRef.current)
+          return
+        }
         try {
           const receipt = await client.getTransactionReceipt({ hash: swapHash })
           if (receipt) {
+            if (!mountedRef.current) return // Q24: check again after async
             // Fallback detected tx confirmation
             if (receipt.status === 'success') {
               setStatus('success')

@@ -8,14 +8,13 @@ import LegalPage from '@/components/LegalPage'
 import Header from '@/components/Header'
 import SwapBox from '@/components/SwapBox'
 import SwapHistory from '@/components/SwapHistory'
-// DCA, Limit & SL/TP — coming soon (re-enable after L2 launch)
-// import DCAPanel from '@/components/DCAPanel'
-// import LimitOrderPanel from '@/components/LimitOrderPanel'
-// import ConditionalOrderPanel from '@/components/ConditionalOrderPanel'
-import AnalyticsDashboard from '@/components/AnalyticsDashboard'
-import OrderDashboard from '@/components/OrderDashboard'
-import WalletHistory from '@/components/WalletHistory'
+import dynamic from 'next/dynamic'
+// Q5: Dynamic imports for heavy components (charts, tables) — loaded on demand
+const AnalyticsDashboard = dynamic(() => import('@/components/AnalyticsDashboard'), { ssr: false })
+const OrderDashboard = dynamic(() => import('@/components/OrderDashboard'), { ssr: false })
+const WalletHistory = dynamic(() => import('@/components/WalletHistory'), { ssr: false })
 import Footer from '@/components/Footer'
+import SwapErrorBoundary from '@/components/SwapErrorBoundary'
 import HelpButton from '@/components/HelpButton'
 import NotificationBanner from '@/components/NotificationBanner'
 import { playTouchMP3 } from '@/lib/sounds'
@@ -107,7 +106,7 @@ export default function Home() {
           </div>
 
           {/* Swap / DCA mode toggle */}
-          <div className="no-scrollbar sticky top-8 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
+          <div className="no-scrollbar sticky top-0 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
             {([
               ['instant', 'Swap'],
               ['dca', 'DCA'],
@@ -139,7 +138,9 @@ export default function Home() {
 
           {swapMode === 'instant' ? (
             <>
-              <SwapBox />
+              <SwapErrorBoundary>
+                <SwapBox />
+              </SwapErrorBoundary>
               <div className="w-full max-w-[460px]">
                 <SwapHistory />
               </div>

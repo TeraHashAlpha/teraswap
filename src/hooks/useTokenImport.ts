@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useReadContract } from 'wagmi'
-import { erc20Abi } from 'viem'
+import { erc20Abi, getAddress } from 'viem'
 import { addCustomToken, findTokenByAddress, type Token } from '@/lib/tokens'
 
 /**
@@ -16,14 +16,17 @@ export function useTokenImport() {
   const importToken = useCallback(async (address: string): Promise<Token | null> => {
     setError(null)
 
-    // Validate address format
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      setError('Invalid address format')
+    // Q16: Validate and normalize address with EIP-55 checksum via viem
+    let checksumAddr: string
+    try {
+      checksumAddr = getAddress(address)
+    } catch {
+      setError('Invalid Ethereum address')
       return null
     }
 
     // Check if already exists
-    const existing = findTokenByAddress(address)
+    const existing = findTokenByAddress(checksumAddr)
     if (existing) return existing
 
     setImporting(true)

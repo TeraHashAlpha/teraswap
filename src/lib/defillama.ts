@@ -18,7 +18,7 @@ export interface DefiLlamaPrice {
 
 // ── Simple in-memory cache (5 min TTL) ────────────────────
 const cache = new Map<string, { data: DefiLlamaPrice; expiresAt: number }>()
-const CACHE_TTL_MS = 300_000 // 5 minutes
+const CACHE_TTL_MS = 120_000 // 2 minutes (Q60: reduced from 5min for faster price updates)
 
 /**
  * Fetch current USD price for an Ethereum token from DefiLlama.
@@ -50,7 +50,10 @@ export async function fetchDefiLlamaPrice(
 
     const json = await res.json()
     const coin = json.coins?.[key]
-    if (!coin || !coin.price || coin.price <= 0) return null
+    // Q59: Validate response structure — reject malformed/zero/negative prices
+    if (!coin || typeof coin.price !== 'number' || coin.price <= 0 || !isFinite(coin.price)) return null
+    // Reject low-confidence prices (< 0.5) — could be stale or unreliable
+    if (typeof coin.confidence === 'number' && coin.confidence < 0.5) return null
 
     const data: DefiLlamaPrice = {
       price: coin.price,

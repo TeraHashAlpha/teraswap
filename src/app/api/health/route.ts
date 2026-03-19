@@ -11,9 +11,10 @@ import { getSupabase, isSupabaseEnabled } from '@/lib/supabase'
  * Without a valid token, only returns basic status (no sample data).
  */
 export async function GET(request: NextRequest) {
-  // ── Auth check ─────────────────────────────────────────────
+  // ── Auth check (Q10: moved from query params to Authorization header) ──
   const healthToken = process.env.HEALTH_TOKEN
-  const providedToken = request.nextUrl.searchParams.get('token')
+  const authHeader = request.headers.get('authorization')
+  const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : request.nextUrl.searchParams.get('token')
   const isAuthed = healthToken && providedToken === healthToken
 
   // Public check: return minimal health status without data

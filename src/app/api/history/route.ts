@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { isValidAddress } from '@/lib/validation'
 
 /**
  * GET /api/history?wallet=0x...&limit=50
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100)
   const offset = Number(searchParams.get('offset') ?? '0')
 
-  if (!wallet) {
+  if (!wallet || !isValidAddress(`0x${wallet.replace('0x', '')}`)) {
     return NextResponse.json(
       { error: 'Missing required param: wallet' },
       { status: 400 },
