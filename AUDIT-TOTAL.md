@@ -362,7 +362,42 @@ If DNS is compromised:
 | DNS-03 | Medium | Infrastructure | Certificate transparency not monitored |
 | DNS-04 | Medium | Infrastructure | HSTS preload not submitted |
 
-**Total: 5 Critical, 11 High, 17 Medium, 8 Low = 41 findings**
+**Total: 5 Critical, 12 High, 18 Medium, 11 Low = 46 findings**
+
+---
+
+## SECTION 7: DEPENDENCY & INFRASTRUCTURE FINDINGS
+
+### High
+
+#### [DEP-HIGH-01] socket.io-parser Vulnerability (Unbounded Binary Attachments)
+**Package:** `socket.io-parser` 4.0.0-4.2.5 (GHSA-677m-j7p3-52f9)
+**Impact:** Denial of service via crafted binary attachments.
+**Fix:** `npm audit fix`
+
+### Medium
+
+#### [DEP-MED-01] .env.production Exists on Disk with Real Addresses
+**Description:** `/Users/tiagocruz/Desktop/Claude/dex-aggregator 2/.env.production` contains real wallet addresses. While `.gitignore` should prevent tracking, verify with `git ls-files | grep .env`.
+**Fix:** Confirm not tracked. If tracked, remove from git history with `git rm --cached`.
+
+### Low
+
+| ID | Title | Fix |
+|----|-------|-----|
+| DEP-LOW-01 | `@capacitor/cli` in dependencies instead of devDependencies | Move to devDependencies |
+| DEP-LOW-02 | Mobile app loads from remote URL — susceptible to domain compromise | Consider certificate pinning |
+| DEP-LOW-03 | `order_executions` no anon SELECT policy — client DCA reads may silently fail | Add policy or route through API |
+
+### Positive Findings (Pass)
+- Next.js security headers: comprehensive CSP, HSTS, X-Frame-Options DENY
+- Source maps hidden from browser (Sentry only)
+- Zero `console.log()` in production code
+- `seedDemoData()` double-guarded (tree-shaking + runtime check)
+- API keys properly server-only with explicit NEXT_PUBLIC_ guard
+- `.gitignore` correctly excludes all `.env` files
+- Service Worker correctly never caches API/data requests
+- All dependencies from trusted, high-download npm packages
 
 ---
 
