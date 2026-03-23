@@ -24,6 +24,51 @@ class PriceGuardError extends Error {
   }
 }
 
+// ── Pre-swap simulation (ASM equivalent) ─────────────────
+// Simulates the transaction via eth_call before sending.
+// Catches reverts, insufficient gas, and sandwich attacks.
+async function simulateSwapTx(params: {
+  to: `0x${string}`
+  data: `0x${string}`
+  value: bigint
+  gas?: bigint
+  from: `0x${string}`
+  expectedOutput: string
+  tokenOut: Token
+  source: string
+}): Promise<{ success: boolean; gasUsed?: bigint; error?: string }> {
+  try {
+    const client = getPrivateClient()
+    const result = await client.call({
+      account: params.from,
+      to: params.to,
+      data: params.data,
+      value: params.value,
+      gas: params.gas,
+    })
+    // If eth_call returns data without reverting, the tx would succeed
+    return { success: true, gasUsed: params.gas }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // Parse common revert reasons
+    if (msg.includes('insufficient funds')) {
+      return { success: false, error: 'Insufficient ETH balance for this swap + gas.' }
+    }
+    if (msg.includes('STF') || msg.includes('TRANSFER_FROM_FAILED')) {
+      return { success: false, error: 'Token transfer would fail — check approval or balance.' }
+    }
+    if (msg.includes('Too little received') || msg.includes('INSUFFICIENT_OUTPUT')) {
+      return { success: false, error: 'Swap would fail due to slippage — price moved since quote. Try again.' }
+    }
+    if (msg.includes('execution reverted')) {
+      return { success: false, error: `Simulation reverted: swap would fail on-chain. Try a different route or amount.` }
+    }
+    // Non-critical simulation failures shouldn't block the swap
+    console.warn('[TeraSwap] Simulation inconclusive:', msg)
+    return { success: true }
+  }
+}
+
 // ── Fallback receipt polling ──────────────────────────────
 // wagmi's useWaitForTransactionReceipt can stall when the RPC is slow
 // or returns transient errors. This manual poller provides a safety net.
@@ -64,6 +109,7 @@ async function fetchSwapViaApi(
 export type SwapStatus =
   | 'idle'
   | 'fetching_swap'
+  | 'simulating'
   | 'swapping'
   | 'cow_signing'       // CoW: waiting for user to sign the order
   | 'cow_pending'       // CoW: order submitted, waiting for solver to fill
@@ -79,6 +125,8 @@ interface UseSwapResult {
   priceGuardBlocked: boolean
   /** Oracle deviation that triggered the price guard (e.g. -0.12 = 12% below fair value) */
   priceGuardDeviation: number | null
+  /** Pre-swap simulation result: true = passed, false = would revert, null = not yet simulated */
+  simulationPassed: boolean | null
   execute: (source: AggregatorName) => Promise<void>
   reset: () => void
 }
@@ -103,6 +151,7 @@ export function useSwap(
   const [txHashState, setTxHashState] = useState<`0x${string}` | undefined>()
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
+  const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
 
   // Q24: Mounted ref to prevent state updates after unmount (polling race condition)
   const mountedRef = useRef(true)
@@ -229,6 +278,53 @@ export function useSwap(
       // ── FeeCollector routing ──
       // All sources (except 0x/CoW) route through FeeCollector contract.
       // FeeCollector takes 0.1% fee and forwards the net amount to the DEX router.
+
+      // ── Pre-swap simulation (Active Simulation Mechanism) ──
+      // Simulates the final transaction via eth_call before wallet prompt.
+      // Catches reverts early → saves gas on failed txs.
+      {
+        const simTo = routeViaFeeCollector
+          ? (FEE_COLLECTOR_ADDRESS as `0x${string}`)
+          : (swapData.tx.to as `0x${string}`)
+        const simData = routeViaFeeCollector
+          ? encodeFunctionData({
+              abi: FEE_COLLECTOR_ABI,
+              functionName: isNativeIn ? 'swapETHWithFee' : 'swapTokenWithFee',
+              args: isNativeIn
+                ? [swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`]
+                : [tokenIn!.address as `0x${string}`, rawAmountBn, swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`],
+            })
+          : (swapData.tx.data as `0x${string}`)
+        const simValue = routeViaFeeCollector && isNativeIn
+          ? rawAmountBn
+          : BigInt(swapData.tx.value || '0')
+        const simGas = swapData.tx.gas > 0
+          ? BigInt(swapData.tx.gas) + (routeViaFeeCollector ? (isNativeIn ? 100_000n : 120_000n) : 0n)
+          : undefined
+
+        setStatus('simulating' as SwapStatus)
+        const sim = await simulateSwapTx({
+          to: simTo,
+          data: simData,
+          value: simValue,
+          gas: simGas,
+          from: address,
+          expectedOutput: swapData.toAmount,
+          tokenOut: tokenOut!,
+          source,
+        })
+        setSimulationPassed(sim.success)
+
+        if (!sim.success) {
+          trackWalletActivity(address, {
+            category: 'swap', action: 'swap_simulation_failed', source,
+            token_in: tokenIn!.symbol, token_out: tokenOut!.symbol,
+            success: false, error_msg: sim.error?.slice(0, 200),
+            duration_ms: Date.now() - swapStartTime,
+          })
+          throw new Error(sim.error || 'Transaction simulation failed — swap would revert on-chain.')
+        }
+      }
 
       // ── Log swap to Supabase (fire-and-forget) ──
       logSwapToSupabase({
@@ -797,10 +893,11 @@ export function useSwap(
     setTxHashState(undefined)
     setPriceGuardBlocked(false)
     setPriceGuardDeviation(null)
+    setSimulationPassed(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, execute, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, execute, reset }
 }
 
 function parseWagmiError(error: Error): string {

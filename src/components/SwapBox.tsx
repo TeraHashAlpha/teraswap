@@ -94,7 +94,7 @@ export default function SwapBox() {
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady } =
     useApproval(tokenIn, amountIn, spender)
 
-  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, execute: executeSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, execute: executeSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut

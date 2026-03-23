@@ -18,6 +18,7 @@ async function fetchQuoteViaApi(
   amount: string,
   srcDecimals: number,
   dstDecimals: number,
+  excludeSources?: string[],
 ): Promise<MetaQuoteResult> {
   const params = new URLSearchParams({
     src,
@@ -26,6 +27,9 @@ async function fetchQuoteViaApi(
     srcDecimals: srcDecimals.toString(),
     dstDecimals: dstDecimals.toString(),
   })
+  if (excludeSources && excludeSources.length > 0) {
+    params.set('exclude', excludeSources.join(','))
+  }
 
   const res = await fetch(`/api/quote?${params}`)
   const data = await res.json()
@@ -50,6 +54,7 @@ export function useQuote(
   tokenOut: Token | null,
   amountIn: string,
   enabled: boolean,
+  excludeSources?: string[],
 ): UseQuoteResult {
   const { address } = useAccount()
   const [meta, setMeta] = useState<MetaQuoteResult | null>(null)
@@ -79,6 +84,7 @@ export function useQuote(
         rawAmount,
         tokenIn.decimals,
         tokenOut.decimals,
+        excludeSources,
       )
       setMeta(result)
       setCountdown(QUOTE_REFRESH_MS / 1000)
@@ -98,7 +104,8 @@ export function useQuote(
     } finally {
       setLoading(false)
     }
-  }, [tokenIn, tokenOut, debouncedAmount, address])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenIn, tokenOut, debouncedAmount, address, excludeSources?.join(',')])
 
   useEffect(() => {
     if (!enabled) {

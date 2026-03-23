@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
   const amount = searchParams.get('amount')
   const srcDecimals = Number(searchParams.get('srcDecimals') ?? '18')
   const dstDecimals = Number(searchParams.get('dstDecimals') ?? '18')
+  const excludeParam = searchParams.get('exclude') // comma-separated source names to exclude
 
   if (!src || !dst || !amount) {
     return NextResponse.json(
@@ -57,7 +58,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals)
+    const excludeSources = excludeParam ? excludeParam.split(',').map(s => s.trim()) : undefined
+    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources)
 
     // Serialize BigInt-safe (toAmount is already a string in NormalizedQuote)
     return NextResponse.json(result, {

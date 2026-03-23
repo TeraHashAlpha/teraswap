@@ -67,6 +67,8 @@ export default function SwapButton({
       return { text: 'Approve & Swap', disabled: false, onClick: onApprove, variant: 'primary' }
     if (swapStatus === 'fetching_swap')
       return { text: 'Preparing swap...', disabled: true, onClick: () => {}, variant: 'loading' }
+    if (swapStatus === 'simulating')
+      return { text: 'Simulating transaction...', disabled: true, onClick: () => {}, variant: 'loading' }
     if (swapStatus === 'cow_signing')
       return { text: 'Sign order in wallet...', disabled: true, onClick: () => {}, variant: 'cow' }
     if (swapStatus === 'cow_pending')
@@ -93,12 +95,12 @@ export default function SwapButton({
   }
 
   const isSpinning = ['approving_permit2', 'signing'].includes(approvalStatus) ||
-    ['fetching_swap', 'swapping', 'cow_signing', 'cow_pending'].includes(swapStatus)
+    ['fetching_swap', 'simulating', 'swapping', 'cow_signing', 'cow_pending'].includes(swapStatus)
 
   const isCowFlow = swapStatus === 'cow_signing' || swapStatus === 'cow_pending'
   const showStepper = isSpinning || approvalStatus === 'approving_permit2'
   const approveActive = ['approving_permit2', 'signing'].includes(approvalStatus)
-  const swapActive = ['fetching_swap', 'swapping', 'cow_signing', 'cow_pending'].includes(swapStatus)
+  const swapActive = ['fetching_swap', 'simulating', 'swapping', 'cow_signing', 'cow_pending'].includes(swapStatus)
   const approveDone = approvalReady && (swapActive || swapStatus === 'success')
 
   return (
