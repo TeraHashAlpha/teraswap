@@ -174,6 +174,9 @@ export const ORDER_EXECUTOR_ABI = [
     inputs: [
       { indexed: true, name: 'orderHash', type: 'bytes32' },
       { indexed: true, name: 'owner', type: 'address' },
+      { indexed: true, name: 'orderType', type: 'uint8' },
+      { indexed: false, name: 'tokenIn', type: 'address' },
+      { indexed: false, name: 'tokenOut', type: 'address' },
       { indexed: false, name: 'amountIn', type: 'uint256' },
       { indexed: false, name: 'amountOut', type: 'uint256' },
       { indexed: false, name: 'fee', type: 'uint256' },

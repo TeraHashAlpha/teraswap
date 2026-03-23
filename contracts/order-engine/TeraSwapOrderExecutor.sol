@@ -166,6 +166,16 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     /// @notice Whether initial bootstrap has been used (one-time router setup)
     bool public bootstrapped;
 
+    // [HIGH-004] Per-feed oracle configuration
+    struct OracleConfig {
+        uint8 decimals;          // Feed decimals (8 or 18)
+        uint256 maxStaleness;    // Per-feed staleness (0 = use global MAX_STALENESS)
+        int256 minPrice;         // Floor price (0 = no min)
+        int256 maxPrice;         // Ceiling price (0 = no max)
+        bool registered;         // Whether this feed has been configured
+    }
+    mapping(address => OracleConfig) public oracleConfigs;
+
     // ══════════════════════════════════════════════════════════════════
     //  EVENTS
     // ══════════════════════════════════════════════════════════════════
@@ -193,6 +203,7 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     event ExecutorWhitelisted(address indexed executor, bool status);
     event Paused(address indexed admin);
     event Unpaused(address indexed admin);
+    event OracleConfigured(address indexed feed, uint8 decimals, uint256 maxStaleness, int256 minPrice, int256 maxPrice);
     event SweepQueued(bytes32 indexed actionId, address token);
 
     // ══════════════════════════════════════════════════════════════════
@@ -382,11 +393,12 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
         if (!whitelistedRouters[order.router]) revert RouterNotWhitelisted();
 
         // ── [C-01] Verify routerData matches the hash signed by the user ──
-        // DCA orders use routerDataHash = bytes32(0) since calldata varies per execution.
-        // Only enforce the hash check for non-DCA orders that signed a specific hash.
-        if (order.routerDataHash != bytes32(0)) {
+        // [MEDIUM-006] Non-DCA orders MUST commit to specific routerData (no bytes32(0) bypass)
+        if (order.orderType != OrderType.DCA) {
+            if (order.routerDataHash == bytes32(0)) revert RouterDataMismatch();
             if (keccak256(routerData) != order.routerDataHash) revert RouterDataMismatch();
         }
+        // DCA orders: routerDataHash = bytes32(0) allowed since calldata varies per execution
 
         // ── [H-03] Check nonce invalidation ──
         if (order.nonce < invalidatedNonces[order.owner]) revert NonceBelowInvalidation();
@@ -403,15 +415,19 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
             if (block.timestamp < dcaLastExecution[orderHash] + order.dcaInterval) {
                 revert DCAIntervalNotReached();
             }
-            // [Audit M-02] Last execution gets remainder to prevent dust loss
+            // [HIGH-003 fix] Cumulative DCA tracking eliminates dust accumulation.
+            // Instead of simple division, track how much has been executed cumulatively
+            // and give the remainder to the final execution.
             uint256 perExecution = order.amountIn / order.dcaTotal;
             // [Audit H-02] Per-execution amount must meet minimum to prevent zero-fee attack
             if (perExecution < MIN_ORDER_AMOUNT) revert DCAChunkTooSmall();
+            // Cumulative approach: what SHOULD have been executed by now (inclusive)
+            uint256 cumulativeTarget = (order.amountIn * (execCount + 1)) / order.dcaTotal;
+            uint256 previouslyExecuted = (order.amountIn * execCount) / order.dcaTotal;
+            executeAmount = cumulativeTarget - previouslyExecuted;
+            // Safety: last execution gets exact remainder
             if (execCount == order.dcaTotal - 1) {
-                // Last execution: amountIn - (perExecution * executed so far)
-                executeAmount = order.amountIn - (perExecution * execCount);
-            } else {
-                executeAmount = perExecution;
+                executeAmount = order.amountIn - previouslyExecuted;
             }
         } else {
             if (nonces[order.owner] != order.nonce) revert OrderAlreadyExecuted();
@@ -759,6 +775,44 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    //  ORACLE CONFIGURATION [HIGH-004]
+    // ══════════════════════════════════════════════════════════════════
+
+    /// @notice Register/update a Chainlink price feed with per-feed bounds
+    /// @param feed The Chainlink AggregatorV3 address
+    /// @param maxStaleness Max seconds since last update (0 = use global MAX_STALENESS)
+    /// @param minPrice Floor price (0 = no minimum)
+    /// @param maxPrice Ceiling price (0 = no maximum)
+    function setOracleConfig(
+        address feed,
+        uint256 maxStaleness,
+        int256 minPrice,
+        int256 maxPrice
+    ) external {
+        if (msg.sender != admin) revert NotAdmin();
+        if (feed == address(0)) revert ZeroAddress();
+
+        // [HIGH-004] Read actual decimals from the feed
+        uint8 feedDecimals = AggregatorV3Interface(feed).decimals();
+        require(feedDecimals == 8 || feedDecimals == 18, "Unexpected feed decimals");
+
+        // Validate feed returns reasonable data
+        (, int256 testPrice, , uint256 testUpdatedAt, ) = AggregatorV3Interface(feed).latestRoundData();
+        require(testPrice > 0, "Feed returns invalid price");
+        require(block.timestamp - testUpdatedAt < 86400, "Feed seems dead (>24h stale)");
+
+        oracleConfigs[feed] = OracleConfig({
+            decimals: feedDecimals,
+            maxStaleness: maxStaleness,
+            minPrice: minPrice,
+            maxPrice: maxPrice,
+            registered: true
+        });
+
+        emit OracleConfigured(feed, feedDecimals, maxStaleness, minPrice, maxPrice);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     //  INTERNAL
     // ══════════════════════════════════════════════════════════════════
 
@@ -789,9 +843,22 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
         ) = feed.latestRoundData();
 
         if (price <= 0) return (false, "Invalid price");
-        if (block.timestamp - updatedAt > MAX_STALENESS) return (false, "Stale price feed");
+
+        // [HIGH-004] Use per-feed staleness if configured, else global
+        OracleConfig memory config = oracleConfigs[priceFeed];
+        uint256 staleness = (config.registered && config.maxStaleness > 0)
+            ? config.maxStaleness
+            : MAX_STALENESS;
+        if (block.timestamp - updatedAt > staleness) return (false, "Stale price feed");
+
         // Validate that this round is complete
         if (answeredInRound < roundId) return (false, "Incomplete round");
+
+        // [HIGH-004] Per-feed price bounds check
+        if (config.registered) {
+            if (config.minPrice > 0 && price < config.minPrice) return (false, "Price below floor");
+            if (config.maxPrice > 0 && price > config.maxPrice) return (false, "Price above ceiling");
+        }
 
         uint256 currentPrice = uint256(price);
 
