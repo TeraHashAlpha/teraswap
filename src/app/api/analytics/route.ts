@@ -20,11 +20,12 @@ export async function GET() {
   }
 
   try {
-    // Fetch all swaps (limit 5000 for performance)
+    // Fetch all real swaps: confirmed + pending-with-tx (real txns whose status wasn't updated)
+    // Excludes: pending without tx_hash (user cancelled in wallet), failed, abandoned
     const { data: swaps, error } = await supabase
       .from('swaps')
       .select('*')
-      .eq('status', 'confirmed')
+      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
       .order('created_at', { ascending: false })
       .limit(5000)
 

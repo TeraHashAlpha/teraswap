@@ -13,11 +13,11 @@ export async function GET() {
   }
 
   try {
-    // Total swaps
+    // Total swaps: confirmed + pending-with-tx (real txns whose status wasn't updated)
     const { count: totalSwaps } = await supabase
       .from('swaps')
       .select('*', { count: 'exact', head: true })
-      .eq('status', 'confirmed')
+      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
 
     // Total quotes
     const { count: totalQuotes } = await supabase
@@ -28,7 +28,7 @@ export async function GET() {
     const { data: sourceStats } = await supabase
       .from('swaps')
       .select('source')
-      .eq('status', 'confirmed')
+      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
 
     const sourceCounts: Record<string, number> = {}
     for (const row of sourceStats ?? []) {
