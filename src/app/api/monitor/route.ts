@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { safeCompare, isAllowedOrigin } from '@/lib/validation'
 
-// CORS headers — allows local file:// (origin null) and the production domain
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+// API-HIGH-03: CORS restricted to app domain (was wildcard *)
+function corsHeaders(req: Request) {
+  const origin = req.headers.get('origin')
+  return {
+    'Access-Control-Allow-Origin': isAllowedOrigin(origin) ? origin! : 'https://teraswap.app',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  }
 }
 
 /** Preflight handler for CORS */
-export function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export function OPTIONS(req: Request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req) })
 }
 
 interface SwapEvent {
@@ -39,13 +43,14 @@ export async function GET(req: Request) {
   const key = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
   const secret = process.env.MONITOR_SECRET
 
-  if (!secret || !key || key !== secret) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: CORS_HEADERS })
+  // API-CRITICAL-01: Timing-safe comparison prevents token brute-force
+  if (!secret || !key || !safeCompare(key, secret)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders(req) })
   }
 
   const supabase = getSupabase()
   if (!supabase) {
-    return NextResponse.json({ error: 'Supabase not configured' }, { status: 503, headers: CORS_HEADERS })
+    return NextResponse.json({ error: 'Supabase not configured' }, { status: 503, headers: corsHeaders(req) })
   }
 
   // ── Wallet Lookup mode: ?wallet=0x... returns per-wallet timeline ──
@@ -113,10 +118,10 @@ export async function GET(req: Request) {
         swaps,
         quotes,
         security,
-      }, { headers: CORS_HEADERS })
+      }, { headers: corsHeaders(req) })
     } catch (err) {
       console.error('[monitor] Wallet lookup error:', err)
-      return NextResponse.json({ error: 'Wallet lookup failed' }, { status: 500, headers: CORS_HEADERS })
+      return NextResponse.json({ error: 'Wallet lookup failed' }, { status: 500, headers: corsHeaders(req) })
     }
   }
 
@@ -486,12 +491,12 @@ export async function GET(req: Request) {
       },
     }, {
       headers: {
-        ...CORS_HEADERS,
+        ...corsHeaders(req),
         'Cache-Control': 'private, s-maxage=15, stale-while-revalidate=30',
       },
     })
   } catch (err) {
     console.error('[monitor] Error:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500, headers: CORS_HEADERS })
+    return NextResponse.json({ error: 'Internal error' }, { status: 500, headers: corsHeaders(req) })
   }
 }

@@ -3,6 +3,8 @@
  * Centralizes address/amount/txHash validation to avoid inconsistencies.
  */
 
+import { timingSafeEqual } from 'crypto'
+
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/
 
@@ -38,4 +40,18 @@ export function isAllowedOrigin(origin: string | null): boolean {
     origin.startsWith('http://localhost:') ||
     origin.startsWith('http://127.0.0.1:')
   )
+}
+
+/**
+ * API-CRITICAL-01: Timing-safe string comparison for secrets.
+ * Prevents timing side-channel attacks on bearer tokens.
+ */
+export function safeCompare(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (a.length !== b.length) return false
+  try {
+    return timingSafeEqual(Buffer.from(a), Buffer.from(b))
+  } catch {
+    return false
+  }
 }

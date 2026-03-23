@@ -272,8 +272,11 @@ function computeFromSwaps(swaps: Record<string, unknown>[]): DashboardResponse {
   // Unique wallets
   const totalWallets = new Set(events.map(e => e.wallet)).size
 
-  // Recent trades (latest 50)
-  const recentTrades = events.slice(0, 50)
+  // Recent trades (latest 50) — API-MED-07: strip wallet addresses from public response
+  const recentTrades = events.slice(0, 50).map(e => ({
+    ...e,
+    wallet: e.wallet ? `${e.wallet.slice(0, 6)}...${e.wallet.slice(-4)}` : '',
+  }))
 
   // Daily volume (last 30 days)
   const dailyMap = new Map<string, { volume: number; count: number }>()

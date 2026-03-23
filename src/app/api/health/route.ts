@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase, isSupabaseEnabled } from '@/lib/supabase'
+import { safeCompare } from '@/lib/validation'
 
 /**
  * GET /api/health?token=<HEALTH_TOKEN>
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   const healthToken = process.env.HEALTH_TOKEN
   const authHeader = request.headers.get('authorization')
   const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : request.nextUrl.searchParams.get('token')
-  const isAuthed = healthToken && providedToken === healthToken
+  const isAuthed = !!(healthToken && providedToken && safeCompare(providedToken, healthToken))
 
   // Public check: return minimal health status without data
   if (!isAuthed) {

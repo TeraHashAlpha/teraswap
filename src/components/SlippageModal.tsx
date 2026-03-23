@@ -104,14 +104,14 @@ export default function SlippageModal({ value, onChange, onClose, isAuto, onAuto
 
         <div className="flex items-center gap-2">
           <input
-            type="number" step="0.1" min="0.01" max="49.99" placeholder="Custom" value={custom}
+            type="number" step="0.1" min="0.01" max="15" placeholder="Custom" value={custom}
             onChange={(e) => setCustom(e.target.value)}
             className="flex-1 rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-sm text-cream outline-none focus:border-cream-35"
           />
           <button
             onClick={() => {
-              const val = Math.min(Math.max(Number(custom), 0.01), 49.99)
-              if (val > 0 && val < 100) { onAutoChange(false); onChange(val); onClose() }
+              const val = Math.min(Math.max(Number(custom), 0.01), 15)
+              if (val > 0 && val <= 15) { onAutoChange(false); onChange(val); onClose() }
             }}
             className="rounded-lg border border-cream bg-transparent px-3 py-2 text-sm font-medium text-cream transition hover:bg-cream hover:text-black"
           >

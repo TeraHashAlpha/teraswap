@@ -178,6 +178,35 @@ export function useSplitSwap(
         const routerCheck = validateRouterAddress(swapData.tx.to, source)
         if (!routerCheck.valid) throw new Error(routerCheck.reason || 'Router not whitelisted')
 
+        // FE-HIGH-01: Calldata validations (mirrors useSwap.ts safety checks)
+        const calldataHex = swapData.tx.data as string
+        if (!calldataHex || calldataHex.length < 10) {
+          throw new Error('Swap calldata is empty or too short.')
+        }
+        if (calldataHex.length > 200_000) {
+          throw new Error('Swap calldata abnormally large — possible injection.')
+        }
+        const selector = calldataHex.slice(0, 10).toLowerCase()
+        const KNOWN_SELECTORS = new Set([
+          '0x12aa3caf', '0xe449022e', '0x0502b1c5', '0x2e95b6c8', // 1inch
+          '0xd9627aa4', '0x415565b0',                               // 0x
+          '0x3598d8ab', '0xa94e78ef', '0x46c67b6d',                 // Paraswap
+          '0x83800a8e',                                               // Odos
+          '0xe21fd0e9',                                               // KyberSwap
+          '0xac9650d8', '0x5ae401dc', '0x04e45aaf', '0xb858183f',   // Uniswap V3
+          '0x472b43f3', '0x38ed1739', '0x7ff36ab5', '0x18cbafe5',   // Uniswap V2 / Sushi
+        ])
+        if (!KNOWN_SELECTORS.has(selector)) {
+          throw new Error(`Unknown swap selector ${selector} in split leg. Blocked for safety.`)
+        }
+        // Fee integrity check
+        if (leg.quote?.toAmount) {
+          const feeCheck = validateFeeIntegrity(leg.quote.toAmount, swapData.toAmount, source)
+          if (!feeCheck.valid) {
+            throw new Error('Fee integrity failed on split leg — output unexpectedly high.')
+          }
+        }
+
         // Step 2: Send transaction
         updateLeg(i, { status: 'signing' })
 
