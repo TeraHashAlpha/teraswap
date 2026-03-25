@@ -564,6 +564,18 @@ export default function SwapBox() {
         {/* Swap Button */}
         <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
+        {/* Pre-swap simulation status */}
+        {simulationPassed === true && (swapStatus === 'swapping' || swapStatus === 'success') && (
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-emerald-400/80">
+            <span>&#10003;</span> Pre-swap simulation passed — transaction verified safe
+          </div>
+        )}
+        {simulationPassed === false && swapStatus === 'error' && (
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-danger/80">
+            <span>&#10007;</span> Pre-swap simulation caught a revert — no gas was spent
+          </div>
+        )}
+
         {/* Pending tx link — show Etherscan link while waiting for confirmation */}
         {swapStatus === 'swapping' && txHash && (
           <div className="mt-3 text-center text-sm">
