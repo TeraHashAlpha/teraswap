@@ -7,6 +7,7 @@ import TokenSelector from './TokenSelector'
 import QuoteBreakdown from './QuoteBreakdown'
 import SwapButton from './SwapButton'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
+import SourceToggle from './SourceToggle'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
@@ -40,6 +41,16 @@ export default function SwapBox() {
   const [spender, setSpender] = useState<`0x${string}` | undefined>()
   const [showCowWarning, setShowCowWarning] = useState(false)
   const [mevProtected, setMevProtected] = useState(false)
+  const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
+
+  const handleSourceToggle = useCallback((source: string) => {
+    setExcludedSources(prev => {
+      const next = new Set(prev)
+      if (next.has(source)) next.delete(source)
+      else next.add(source)
+      return next
+    })
+  }, [])
 
   // Recalculate auto-slippage when token pair changes
   useEffect(() => {
@@ -60,8 +71,9 @@ export default function SwapBox() {
     query: { enabled: isConnected && isCorrectChain && !!tokenIn },
   })
 
+  const excludeArray = useMemo(() => excludedSources.size > 0 ? Array.from(excludedSources) : undefined, [excludedSources])
   const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown } =
-    useQuote(tokenIn, tokenOut, amountIn, isConnected && isCorrectChain)
+    useQuote(tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, excludeArray)
 
   // Filter to MEV-protected sources only when toggle is on
   const meta = useMemo(() => {
@@ -395,7 +407,10 @@ export default function SwapBox() {
             <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {meta && meta.all.length > 1 && (
-            <div className="mt-1 px-1 text-right text-[10px] text-cream-35">{meta.all.length} sources queried</div>
+            <div className="mt-1 flex items-center justify-between px-1">
+              <SourceToggle excludedSources={excludedSources} onToggle={handleSourceToggle} />
+              <span className="text-[10px] text-cream-35">{meta.all.length} sources queried</span>
+            </div>
           )}
         </div>
 
