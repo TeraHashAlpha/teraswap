@@ -42,6 +42,8 @@ export default function SwapBox() {
   const [showCowWarning, setShowCowWarning] = useState(false)
   const [mevProtected, setMevProtected] = useState(false)
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
+  const [exactOut, setExactOut] = useState(false)
+  const [displayAmountOut, setDisplayAmountOut] = useState('')
 
   const handleSourceToggle = useCallback((source: string) => {
     setExcludedSources(prev => {
@@ -293,6 +295,19 @@ export default function SwapBox() {
     setDisplayAmountIn(formatWithSeparator(value))
   }
 
+  // Exact Out: when user types desired output, estimate required input from best quote ratio
+  useEffect(() => {
+    if (!exactOut || !displayAmountOut || !meta?.best || !tokenIn || !tokenOut) return
+    const desiredOut = Number(displayAmountOut)
+    if (isNaN(desiredOut) || desiredOut <= 0) return
+    const currentOut = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals))
+    const currentIn = Number(amountIn)
+    if (currentOut <= 0 || currentIn <= 0) return
+    const ratio = currentIn / currentOut
+    const estimatedIn = (desiredOut * ratio).toFixed(tokenIn.decimals > 6 ? 6 : tokenIn.decimals)
+    setDisplayAmountIn(formatWithSeparator(estimatedIn))
+  }, [exactOut, displayAmountOut, meta?.best?.toAmount]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Security: block swap when Chainlink deviation exceeds threshold ──
   // Block at BOTH warn (≥2%) and danger (≥3%) — button only re-enables when price
   // returns fully within parameters (deviation < PRICE_DEVIATION_WARN).
@@ -374,11 +389,17 @@ export default function SwapBox() {
         <div className="mb-1">
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[1.5px] text-cream-35">Sell</label>
           <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3 transition-colors focus-within:border-cream-35">
-            <input
-              type="text" inputMode="decimal" placeholder="0.0" value={displayAmountIn}
-              onChange={(e) => handleAmountChange(e.target.value)}
-              className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
-            />
+            {exactOut && meta?.best ? (
+              <span className="min-w-0 flex-1 text-lg font-semibold text-cream-65 sm:text-2xl">
+                {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${displayAmountIn || '0'}`}
+              </span>
+            ) : (
+              <input
+                type="text" inputMode="decimal" placeholder="0.0" value={displayAmountIn}
+                onChange={(e) => handleAmountChange(e.target.value)}
+                className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
+              />
+            )}
             <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); resetSwap() }} disabledAddress={tokenOut?.address} />
           </div>
           {balanceIn && tokenIn && (
@@ -399,11 +420,29 @@ export default function SwapBox() {
 
         {/* Receive */}
         <div className="mb-4 mt-1">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[1.5px] text-cream-35">Receive</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="block text-[11px] font-semibold uppercase tracking-[1.5px] text-cream-35">Receive</label>
+            {/* Exact Out toggle */}
+            <button
+              onClick={() => { setExactOut(!exactOut); setDisplayAmountOut(''); resetSwap() }}
+              className={`rounded px-1.5 py-0.5 text-[9px] font-medium transition ${exactOut ? 'bg-cream-gold/20 text-cream-gold' : 'text-cream-35 hover:text-cream-50'}`}
+              title={exactOut ? 'You set the exact output amount' : 'Click to set exact output amount'}
+            >
+              {exactOut ? 'EXACT OUT' : 'EXACT IN'}
+            </button>
+          </div>
           <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3">
-            <span className="min-w-0 flex-1 text-2xl font-semibold text-cream-65">
-              {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${outputDisplay}`}
-            </span>
+            {exactOut ? (
+              <input
+                type="text" inputMode="decimal" placeholder="0.0" value={displayAmountOut}
+                onChange={(e) => { setDisplayAmountOut(e.target.value.replace(/[^0-9.]/g, '')) }}
+                className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
+              />
+            ) : (
+              <span className="min-w-0 flex-1 text-2xl font-semibold text-cream-65">
+                {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${outputDisplay}`}
+              </span>
+            )}
             <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {meta && meta.all.length > 1 && (
