@@ -16,11 +16,13 @@ import {
   withTimeout,
   friendlyError,
 } from './adapters'
+import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
 import type { NormalizedQuote, MetaQuoteResult } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
 export type { NormalizedQuote, MetaQuoteResult, FeeTierCandidate, FeeTierDetection } from './adapters'
 export { submitCowOrder, pollCowOrderStatus, detectUniswapV3FeeTier } from './adapters'
+export { getAllCircuitStates }
 
 // ══════════════════════════════════════════════════════════
 //  META-AGGREGATOR ORCHESTRATOR
@@ -49,18 +51,26 @@ export async function fetchMetaQuote(
     fetch: () => a.fetchQuote({ src, dst, amount, srcDecimals, dstDecimals }) as Promise<NormalizedQuote>,
   }))
 
+  // [CB-01] Skip sources with OPEN circuit breaker
+  const cbFiltered = allSources.filter(s => {
+    const cb = getCircuitBreaker(s.name)
+    return !cb.isOpen() // isOpen() handles OPEN → HALF_OPEN transition internally
+  })
+
   // NOTE: FEE_INCOMPATIBLE_SOURCES (0x, CoW) are NOT filtered from quotes.
   // They still appear so users can choose them (e.g. MEV Protection via CoW).
   // Fee collection is skipped at execution time via usesFeeCollector() check.
   const excludeSet = excludeSources ? new Set(excludeSources.map(s => s.toLowerCase())) : null
   const activeSources = excludeSet
-    ? allSources.filter(s => !excludeSet.has(s.name.toLowerCase()))
-    : allSources
+    ? cbFiltered.filter(s => !excludeSet.has(s.name.toLowerCase()))
+    : cbFiltered
 
   const sourceNames: AggregatorName[] = activeSources.map(s => s.name)
   const startTime = Date.now()
   const results = await Promise.allSettled(
-    activeSources.map(s => withTimeout(s.fetch(), QUOTE_TIMEOUT_MS))
+    activeSources.map(s =>
+      withCircuitBreaker(s.name, () => withTimeout(s.fetch(), QUOTE_TIMEOUT_MS))
+    )
   )
   const elapsed = Date.now() - startTime
 
@@ -229,12 +239,14 @@ export async function fetchSwapFromSource(
   const adapter = ADAPTER_REGISTRY.find(a => a.name === source)
   if (!adapter) throw new Error(`Unknown source: ${source}`)
 
-  const result = await adapter.fetchSwapData({
-    src, dst, amount, from, slippage,
-    srcDecimals, dstDecimals,
-    quoteMeta: quoteMeta as Record<string, any> | undefined,
-    chainId,
-  })
+  const result = await withCircuitBreaker(source, () =>
+    adapter.fetchSwapData({
+      src, dst, amount, from, slippage,
+      srcDecimals, dstDecimals,
+      quoteMeta: quoteMeta as Record<string, any> | undefined,
+      chainId,
+    })
+  )
   if (!result) throw new Error(`${source}: no swap data returned`)
   return result
 }
