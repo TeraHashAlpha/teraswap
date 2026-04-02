@@ -36,6 +36,15 @@ export default function Footer({ onDocs, onPrivacy, onTerms }: Props) {
       <button onClick={onTerms} className="text-cream-50 transition hover:text-cream">Terms</button>
       <span className="text-cream-15">|</span>
       <span>&copy; 2026 TeraSwap</span>
+      <span className="text-cream-15">|</span>
+      <a
+        href="https://terahelps.netlify.app/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-cream-gold transition hover:text-cream"
+      >
+        TeraHelps
+      </a>
     </footer>
   )
 }
