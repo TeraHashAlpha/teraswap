@@ -122,7 +122,15 @@ function validateConfig() {
   }
 
   if (hasKey && !hasKms && !hasVault) {
-    console.warn("⚠  Using plaintext EXECUTOR_PRIVATE_KEY — migrate to KMS/Vault before mainnet!")
+    if (CHAIN_ID === 1) {
+      // [EX-01] Hard-fail on mainnet with plaintext key — too dangerous
+      console.error("❌ FATAL: plaintext EXECUTOR_PRIVATE_KEY is not allowed on mainnet (CHAIN_ID=1).")
+      console.error("   Configure KMS_KEY_ID (AWS KMS) or VAULT_ADDR (HashiCorp Vault) instead.")
+      console.error("   If you intentionally want to run with a plaintext key, set ALLOW_PLAINTEXT_KEY_MAINNET=true")
+      if (!process.env.ALLOW_PLAINTEXT_KEY_MAINNET) process.exit(1)
+    } else {
+      console.warn("⚠  Using plaintext EXECUTOR_PRIVATE_KEY — migrate to KMS/Vault before mainnet!")
+    }
   }
 }
 
