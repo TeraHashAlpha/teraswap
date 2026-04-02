@@ -20,6 +20,9 @@ export interface DefiLlamaPrice {
 const cache = new Map<string, { data: DefiLlamaPrice; expiresAt: number }>()
 const CACHE_TTL_MS = 120_000 // 2 minutes (Q60: reduced from 5min for faster price updates)
 
+// [INT-01] High-value swap threshold — above this, DefiLlama validation is blocking
+export const HIGH_VALUE_THRESHOLD_USD = 10_000
+
 /**
  * Fetch current USD price for an Ethereum token from DefiLlama.
  * Returns null on any error (non-blocking — swaps should never fail because of this).
@@ -148,12 +151,15 @@ export async function validateSwapPrice(params: {
   amountOut: string
   decimalsIn: number
   decimalsOut: number
+  estimatedValueUsd?: number  // [INT-01] If provided, used for high-value threshold logic
 }): Promise<{
   valid: boolean
-  deviation: number       // 0.05 = 5%
+  blocked: boolean           // [INT-01] true = swap must be blocked
+  deviation: number          // 0.05 = 5%
   oraclePriceIn: number | null
   oraclePriceOut: number | null
   reason?: string
+  estimatedValueUsd?: number // [INT-01] Estimated USD value of the swap
 } | null> {
   const { tokenIn, tokenOut, amountIn, amountOut, decimalsIn, decimalsOut } = params
 
@@ -164,10 +170,39 @@ export async function validateSwapPrice(params: {
   ])
 
   // Need both prices to validate
-  if (!priceIn || !priceOut) return null
+  if (!priceIn || !priceOut) {
+    const valueUsd = params.estimatedValueUsd ?? 0
+    // [INT-01] DefiLlama blocking for high-value swaps — defense against oracle manipulation window
+    if (valueUsd > HIGH_VALUE_THRESHOLD_USD) {
+      return {
+        valid: false,
+        blocked: true,
+        deviation: 0,
+        oraclePriceIn: priceIn?.price ?? null,
+        oraclePriceOut: priceOut?.price ?? null,
+        estimatedValueUsd: valueUsd,
+        reason: `Price validation unavailable for high-value swap (~$${Math.round(valueUsd).toLocaleString()}). Secondary oracle (DefiLlama) is unreachable. Try again in a few moments.`,
+      }
+    }
+    return null // Small swaps: fail-open (current behaviour)
+  }
 
   // Skip low-confidence prices
-  if (priceIn.confidence < 0.5 || priceOut.confidence < 0.5) return null
+  if (priceIn.confidence < 0.5 || priceOut.confidence < 0.5) {
+    const valueUsd = params.estimatedValueUsd ?? 0
+    if (valueUsd > HIGH_VALUE_THRESHOLD_USD) {
+      return {
+        valid: false,
+        blocked: true,
+        deviation: 0,
+        oraclePriceIn: priceIn.price,
+        oraclePriceOut: priceOut.price,
+        estimatedValueUsd: valueUsd,
+        reason: `Price validation confidence too low for high-value swap (~$${Math.round(valueUsd).toLocaleString()}). Oracle data may be stale.`,
+      }
+    }
+    return null
+  }
 
   try {
     // Calculate fair exchange rate from oracle
@@ -192,20 +227,36 @@ export async function validateSwapPrice(params: {
     if (deviation < BLOCK_THRESHOLD) {
       return {
         valid: false,
+        blocked: true,
         deviation,
         oraclePriceIn: priceIn.price,
         oraclePriceOut: priceOut.price,
+        estimatedValueUsd: params.estimatedValueUsd,
         reason: `Swap output is ${Math.abs(deviation * 100).toFixed(1)}% below fair market value (DefiLlama oracle). Possible price manipulation or extreme slippage.`,
       }
     }
 
     return {
       valid: true,
+      blocked: false,
       deviation,
       oraclePriceIn: priceIn.price,
       oraclePriceOut: priceOut.price,
+      estimatedValueUsd: params.estimatedValueUsd,
     }
   } catch {
-    return null // Don't block on calculation errors
+    const valueUsd = params.estimatedValueUsd ?? 0
+    if (valueUsd > HIGH_VALUE_THRESHOLD_USD) {
+      return {
+        valid: false,
+        blocked: true,
+        deviation: 0,
+        oraclePriceIn: null,
+        oraclePriceOut: null,
+        estimatedValueUsd: valueUsd,
+        reason: 'Price validation error for high-value swap. Secondary oracle validation could not be completed.',
+      }
+    }
+    return null // Don't block small swaps on calculation errors
   }
 }

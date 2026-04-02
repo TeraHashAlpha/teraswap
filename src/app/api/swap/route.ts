@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchSwapFromSource } from '@/lib/api'
 import type { AggregatorName } from '@/lib/constants'
-import { validateSwapPrice } from '@/lib/defillama'
+import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 
@@ -113,8 +113,20 @@ export async function POST(req: NextRequest) {
     // ── [Security] Server-side price validation via DefiLlama ──
     // Validates swap output against independent oracle to catch
     // price manipulation, extreme slippage, or rogue aggregator responses.
-    // Non-blocking: if DefiLlama is unreachable, swap proceeds normally.
+    // [INT-01] Blocking for high-value swaps (>$10k). Fail-open for small swaps.
     if (result.toAmount) {
+      // [INT-01] Estimate swap value in USD for threshold-based blocking
+      let estimatedValueUsd = 0
+      try {
+        const tokenInPrice = await fetchDefiLlamaPrice(src)
+        if (tokenInPrice) {
+          const amountFloat = Number(amount) / 10 ** srcDecimals
+          estimatedValueUsd = amountFloat * tokenInPrice.price
+        }
+      } catch {
+        // If price estimation fails, assume 0 → fail-open for threshold logic
+      }
+
       try {
         const priceCheck = await validateSwapPrice({
           tokenIn: src,
@@ -123,12 +135,14 @@ export async function POST(req: NextRequest) {
           amountOut: result.toAmount,
           decimalsIn: srcDecimals,
           decimalsOut: dstDecimals,
+          estimatedValueUsd,
         })
 
         if (priceCheck && !priceCheck.valid) {
           console.warn(
             `[PRICE-GUARD] Blocked swap ${source}: ${src} → ${dst}`,
             `deviation=${(priceCheck.deviation * 100).toFixed(1)}%`,
+            `estimatedUsd=$${Math.round(priceCheck.estimatedValueUsd ?? 0)}`,
             `reason=${priceCheck.reason}`,
           )
           return NextResponse.json(
@@ -136,6 +150,7 @@ export async function POST(req: NextRequest) {
               error: priceCheck.reason,
               priceGuard: true,
               deviation: priceCheck.deviation,
+              blocked: priceCheck.blocked,
             },
             { status: 422 },
           )
@@ -148,8 +163,21 @@ export async function POST(req: NextRequest) {
           ext.oraclePriceIn = priceCheck.oraclePriceIn
           ext.oraclePriceOut = priceCheck.oraclePriceOut
         }
-      } catch {
-        // Never block swaps due to oracle errors
+      } catch (oracleErr) {
+        // [INT-01] For high-value swaps, oracle failures are blocking
+        if (estimatedValueUsd > HIGH_VALUE_THRESHOLD_USD) {
+          console.warn('[PRICE-GUARD] Oracle error on high-value swap, blocking:', oracleErr)
+          return NextResponse.json(
+            {
+              error: 'Price validation unavailable for high-value swap. Please try again.',
+              priceGuard: true,
+              blocked: true,
+            },
+            { status: 422 },
+          )
+        }
+        // Small swaps: fail-open (original behaviour)
+        console.warn('[PRICE-GUARD] Oracle error (non-blocking):', oracleErr)
       }
     }
 
