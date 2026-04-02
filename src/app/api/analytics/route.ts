@@ -20,12 +20,13 @@ export async function GET() {
   }
 
   try {
-    // Fetch all real swaps: confirmed + pending-with-tx (real txns whose status wasn't updated)
-    // Excludes: pending without tx_hash (user cancelled in wallet), failed, abandoned
+    // Fetch only confirmed swaps for volume/fee metrics.
+    // Excludes: pending (not yet mined or user cancelled), failed, abandoned.
+    // This ensures cancelled wallet rejections are never counted as volume.
     const { data: swaps, error } = await supabase
       .from('swaps')
       .select('*')
-      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
+      .eq('status', 'confirmed')
       .order('created_at', { ascending: false })
       .limit(5000)
 
