@@ -1,0 +1,73 @@
+# [SC-SUPPLY] Weekly security audit + CI gate
+# High/critical vulns fail the build. Moderate vulns are advisory.
+# Runs: weekly (Monday 08:00 UTC), on push to main, on PRs to main
+
+name: "Security Audit"
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for high/critical vulnerabilities
+        run: npm audit --audit-level=high
+
+      - name: Check for moderate vulnerabilities (advisory)
+        run: npm audit --audit-level=moderate || true
+        continue-on-error: true
+
+      - name: Audit summary
+        if: always()
+        run: |
+          npm audit --json 2>/dev/null | node -e '
+            const chunks = [];
+            process.stdin.on("data", c => chunks.push(c));
+            process.stdin.on("end", () => {
+              try {
+                const data = JSON.parse(Buffer.concat(chunks).toString());
+                const meta = data.metadata?.vulnerabilities || {};
+                const total = Object.values(meta).reduce((a, b) => a + b, 0);
+                const lines = [
+                  "## 🔒 Security Audit Summary",
+                  "",
+                  "| Severity | Count |",
+                  "|----------|-------|",
+                ];
+                for (const sev of ["critical", "high", "moderate", "low", "info"]) {
+                  if (meta[sev] > 0) lines.push("| " + sev + " | " + meta[sev] + " |");
+                }
+                if (total === 0) lines.push("| ✅ none | 0 |");
+                lines.push("", "**Total: " + total + " vulnerabilities**");
+                const summary = lines.join("\n");
+                console.log(summary);
+                const fs = require("fs");
+                const path = process.env.GITHUB_STEP_SUMMARY;
+                if (path) fs.appendFileSync(path, summary + "\n");
+              } catch {
+                console.log("⚠ Could not parse npm audit output");
+              }
+            });
+          '
