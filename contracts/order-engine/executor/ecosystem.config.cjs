@@ -21,6 +21,7 @@ module.exports = {
       max_memory_restart: '256M',
       env: {
         NODE_ENV: 'production',
+        METRICS_PORT: '9090',     // Prometheus metrics endpoint
       },
       // Logging
       log_date_format: 'YYYY-MM-DD HH:mm:ss',

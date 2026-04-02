@@ -42,6 +42,7 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import { createServer } from "http"
 import { createExecutorSigner } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
+import { ExecutorMonitor } from "./monitor.js"          // [EX-MON] Prometheus + Telegram
 
 // ── Load .env.executor manually (no dotenv dependency) ──────────
 
@@ -291,8 +292,9 @@ function log(msg) {
 
 // ── Main execution loop ─────────────────────────────────────────
 
-async function executeCycle(wallet, contract) {
+async function executeCycle(wallet, contract, monitor = null) {
   log("🔄 Starting execution cycle...")
+  if (monitor) monitor.onCycleStart()
 
   // 0. Unlock stale orders
   await unlockStaleOrders()
@@ -309,6 +311,7 @@ async function executeCycle(wallet, contract) {
 
   let executed = 0
   let skipped = 0
+  let errors = 0
 
   for (const dbOrder of orders) {
     if (executed >= MAX_BATCH) break
@@ -459,6 +462,12 @@ async function executeCycle(wallet, contract) {
       if (receipt.status === 1) {
         log(`  ✅ Order ${dbOrder.id.slice(0, 8)}… executed! Gas: ${receipt.gasUsed.toString()}`)
 
+        // [EX-MON] Track gas spent
+        if (monitor && receipt.gasUsed) {
+          const gasPrice = receipt.effectiveGasPrice || receipt.gasPrice || 0n
+          monitor.onGasSpent(receipt.gasUsed * gasPrice)
+        }
+
         // Update status based on order type
         if (dbOrder.order_type === "dca") {
           const newExecCount = (dbOrder.dca_executed || 0) + 1
@@ -521,6 +530,7 @@ async function executeCycle(wallet, contract) {
       }
     } catch (err) {
       console.error(`  💥 Order ${dbOrder.id.slice(0, 8)}… error:`, err.message)
+      errors++
       stats.totalErrors++
       stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
 
@@ -548,6 +558,8 @@ async function executeCycle(wallet, contract) {
   stats.totalSkipped += skipped
   stats.lastCycleAt = new Date().toISOString()
   if (executed > 0) stats.lastExecutionAt = new Date().toISOString()
+
+  if (monitor) monitor.onCycleEnd(executed, errors)
 
   log(`  📊 Cycle done: ${executed} executed, ${skipped} skipped`)
 }
@@ -668,14 +680,20 @@ async function main() {
   // Start health check server
   startHealthServer(wallet)
 
+  // [EX-MON] Start monitoring & alerting
+  const monitor = new ExecutorMonitor(stats)
+  monitor.startMetricsServer()
+  monitor.startHeartbeat()
+
   // Run immediately, then on interval
-  await executeCycle(wallet, contract)
+  await executeCycle(wallet, contract, monitor)
 
   setInterval(async () => {
     try {
-      await executeCycle(wallet, contract)
+      await executeCycle(wallet, contract, monitor)
     } catch (err) {
       console.error("💥 Cycle error:", err.message)
+      if (monitor) monitor.onCycleError(err)
     }
   }, POLL_INTERVAL_MS)
 
