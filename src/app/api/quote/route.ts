@@ -1,30 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchMetaQuote } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
-
-// API-HIGH-04: Rate limiting for quote endpoint (30 reqs/min per IP)
-const RATE_LIMIT_WINDOW_MS = 60_000
-const RATE_LIMIT_MAX = 30
-const rateLimitMap = new Map<string, number[]>()
-const cleanupTimer = setInterval(() => {
-  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS
-  for (const [ip, timestamps] of rateLimitMap) {
-    const filtered = timestamps.filter(t => t > cutoff)
-    if (filtered.length === 0) rateLimitMap.delete(ip)
-    else rateLimitMap.set(ip, filtered)
-  }
-}, 60_000)
-cleanupTimer.unref?.()
-
-function checkQuoteRateLimit(req: NextRequest): boolean {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const now = Date.now()
-  const cutoff = now - RATE_LIMIT_WINDOW_MS
-  const timestamps = (rateLimitMap.get(ip) || []).filter(t => t > cutoff)
-  timestamps.push(now)
-  rateLimitMap.set(ip, timestamps)
-  return timestamps.length <= RATE_LIMIT_MAX
-}
+import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 
 /**
  * Server-side proxy for meta-quote requests.
@@ -34,8 +11,19 @@ function checkQuoteRateLimit(req: NextRequest): boolean {
  * KyberSwap and ParaSwap happen to allow browser CORS, but most do not.
  */
 export async function GET(req: NextRequest) {
-  if (!checkQuoteRateLimit(req)) {
-    return NextResponse.json({ error: 'Rate limit exceeded. Try again in a minute.' }, { status: 429 })
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  const rateCheck = await checkRateLimit(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Try again in a minute.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
+    )
   }
   const { searchParams } = req.nextUrl
   const src = searchParams.get('src')
@@ -65,6 +53,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(result, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
+        'X-RateLimit-Remaining': String(rateCheck.remaining),
+        'X-RateLimit-Reset': String(rateCheck.resetAt),
       },
     })
   } catch (err) {
@@ -75,8 +65,19 @@ export async function GET(req: NextRequest) {
 
 // Also support POST for larger payloads (future-proofing)
 export async function POST(req: NextRequest) {
-  if (!checkQuoteRateLimit(req)) {
-    return NextResponse.json({ error: 'Rate limit exceeded.' }, { status: 429 })
+  const postIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  const postRateCheck = await checkRateLimit(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
+  if (!postRateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(postRateCheck.resetAt),
+        },
+      },
+    )
   }
   try {
     const body = await req.json()
@@ -99,6 +100,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
+        'X-RateLimit-Remaining': String(postRateCheck.remaining),
+        'X-RateLimit-Reset': String(postRateCheck.resetAt),
       },
     })
   } catch (err) {

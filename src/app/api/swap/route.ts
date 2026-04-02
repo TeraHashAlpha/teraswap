@@ -3,6 +3,7 @@ import { fetchSwapFromSource } from '@/lib/api'
 import type { AggregatorName } from '@/lib/constants'
 import { validateSwapPrice } from '@/lib/defillama'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
+import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 
 /**
  * Server-side proxy for swap calldata requests.
@@ -11,61 +12,30 @@ import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
  * when fetching swap calldata from external DEX APIs.
  */
 
-// ── [Audit B-06 / M-02] Rate limiting ───────────────────
-// NOTE: In-memory rate limiting resets on serverless cold starts.
-// For production, replace with Redis/KV store or use Vercel's
-// edge rate limiting middleware.
-//
-// This still provides protection against sustained abuse within
-// a single instance's lifetime (typically 5-15 min on Vercel).
-const RATE_LIMIT_WINDOW_MS = 60_000 // 1 minute
-const RATE_LIMIT_MAX = 20           // [M-02] Reduced from 30 to 20 for tighter control
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
-
-// Periodic cleanup every 2 minutes to prevent memory leak
-// (shorter interval since serverless instances are short-lived)
-if (typeof globalThis !== 'undefined') {
-  const cleanupTimer = setInterval(() => {
-    const now = Date.now()
-    for (const [key, value] of rateLimitMap.entries()) {
-      if (now > value.resetAt) rateLimitMap.delete(key)
-    }
-  }, 120_000)
-  // Don't prevent process from exiting
-  if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) {
-    (cleanupTimer as NodeJS.Timeout).unref()
-  }
-}
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now()
-  const entry = rateLimitMap.get(ip)
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
-    return true
-  }
-
-  entry.count++
-  return entry.count <= RATE_LIMIT_MAX
-}
-
 // ── [Audit] Max request body size (prevent oversized payloads)
 const MAX_BODY_SIZE = 10_000 // 10KB
 
 export async function POST(req: NextRequest) {
-  try {
-    // [Audit B-06] Rate limiting by IP
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-      || req.headers.get('x-real-ip')
-      || 'unknown'
+  // [Audit B-06] Rate limiting by IP — persistent via Vercel KV
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || req.headers.get('x-real-ip')
+    || 'unknown'
+  const rateCheck = await checkRateLimit(`swap:${ip}`, SWAP_RATE_LIMIT.limit, SWAP_RATE_LIMIT.windowMs)
 
-    if (!checkRateLimit(ip)) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Try again in 60 seconds.' },
-        { status: 429 },
-      )
-    }
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Try again in 60 seconds.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
+    )
+  }
+
+  try {
 
     // [Audit] Request size check
     const contentLength = parseInt(req.headers.get('content-length') || '0', 10)
@@ -186,6 +156,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
+        'X-RateLimit-Remaining': String(rateCheck.remaining),
+        'X-RateLimit-Reset': String(rateCheck.resetAt),
       },
     })
   } catch (err) {

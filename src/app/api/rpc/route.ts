@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 
 /**
  * Privacy-preserving RPC proxy.
@@ -31,43 +32,24 @@ const RPC_URL = process.env.RPC_URL
   || process.env.NEXT_PUBLIC_RPC_URL
   || 'https://eth.llamarpc.com'
 
-// Simple rate limiting: max 60 requests per IP per minute
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
-const RATE_LIMIT = 60
-const RATE_WINDOW_MS = 60_000
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now()
-  const entry = rateLimitMap.get(ip)
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
-    return true
-  }
-
-  if (entry.count >= RATE_LIMIT) return false
-  entry.count++
-  return true
-}
-
-// Cleanup stale entries every 5 minutes
-setInterval(() => {
-  const now = Date.now()
-  for (const [ip, entry] of rateLimitMap) {
-    if (now > entry.resetAt) rateLimitMap.delete(ip)
-  }
-}, 300_000)
-
 export async function POST(req: NextRequest) {
+  // [B-06] Rate limiting by IP — persistent via Vercel KV
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  const rateCheck = await checkRateLimit(`rpc:${ip}`, RPC_RATE_LIMIT.limit, RPC_RATE_LIMIT.windowMs)
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Rate limit exceeded' } },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
+    )
+  }
+
   try {
-    // Rate limit by IP
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-    if (!checkRateLimit(ip)) {
-      return NextResponse.json(
-        { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Rate limit exceeded' } },
-        { status: 429 },
-      )
-    }
 
     const body = await req.json()
 
@@ -104,6 +86,8 @@ export async function POST(req: NextRequest) {
       status: upstream.status,
       headers: {
         'Cache-Control': 'no-store',
+        'X-RateLimit-Remaining': String(rateCheck.remaining),
+        'X-RateLimit-Reset': String(rateCheck.resetAt),
       },
     })
   } catch (err) {
