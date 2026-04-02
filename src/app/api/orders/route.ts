@@ -11,6 +11,8 @@ import { ORDER_EXECUTOR_ADDRESS } from '@/lib/order-engine/config'
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
 const MAX_ACTIVE_ORDERS = 20
+// [API-02] Mirror contract MIN_ORDER_AMOUNT to fail-fast before Supabase insert
+const MIN_ORDER_AMOUNT = BigInt(10_000)
 
 const EIP712_DOMAIN = { name: 'TeraSwapOrderExecutor', version: '2' }
 const ORDER_TYPES = {
@@ -63,6 +65,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'amountIn must be positive' }, { status: 400 })
     }
 
+    // [API-02] Validate amountIn >= contract MIN_ORDER_AMOUNT
+    try {
+      if (BigInt(body.amountIn) < MIN_ORDER_AMOUNT) {
+        return NextResponse.json(
+          { error: 'Order amount below minimum (10,000 wei)', minimum: '10000' },
+          { status: 400 },
+        )
+      }
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid amountIn: must be a numeric string' },
+        { status: 400 },
+      )
+    }
+
     // Validate expiry
     const now = Math.floor(Date.now() / 1000)
     if (body.expiry <= now) {
@@ -79,6 +96,18 @@ export async function POST(req: NextRequest) {
       }
       if (!body.dcaTotal || body.dcaTotal < 2 || body.dcaTotal > 365) {
         return NextResponse.json({ error: 'DCA must have 2-365 executions' }, { status: 400 })
+      }
+      // [API-02] Validate individual DCA chunk >= MIN_ORDER_AMOUNT
+      const chunkAmount = BigInt(body.amountIn) / BigInt(body.dcaTotal)
+      if (chunkAmount < MIN_ORDER_AMOUNT) {
+        return NextResponse.json(
+          {
+            error: 'DCA chunk amount below minimum (10,000 wei). Increase total amount or reduce number of executions.',
+            minimum: '10000',
+            chunkAmount: chunkAmount.toString(),
+          },
+          { status: 400 },
+        )
       }
     }
 
