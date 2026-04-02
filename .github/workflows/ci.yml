@@ -1,5 +1,6 @@
-# CI pipeline: lint → typecheck → security audit → build
-# Security audit blocks merge if high/critical vulnerabilities exist
+# CI pipeline — parallel jobs: lint, typecheck, audit, contract tests
+# Build runs after lint + typecheck + audit pass.
+# Contract tests run independently (Foundry/Forge).
 
 name: "CI"
 
@@ -17,29 +18,62 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20.x"
           cache: "npm"
+      - run: npm ci
+      - run: npm run lint
 
-      - name: Install
-        run: npm ci
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - run: npm ci
       - name: Security audit (high/critical)
         run: npm audit --audit-level=high
 
-      - name: Build
-        run: npm run build
+  test-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Run forge tests
+        working-directory: contracts/order-engine
+        run: forge test -vvv
+
+  build:
+    needs: [lint, typecheck, audit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
