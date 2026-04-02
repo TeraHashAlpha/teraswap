@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { fetchSwapFromSource } from '@/lib/api'
 import type { AggregatorName } from '@/lib/constants'
 import { validateSwapPrice } from '@/lib/defillama'
+import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 
 /**
  * Server-side proxy for swap calldata requests.
@@ -126,6 +127,18 @@ export async function POST(req: NextRequest) {
       quoteMeta,
       chainId ? Number(chainId) : undefined,
     )
+
+    // [SC-04] Server-side defense-in-depth — mirrors frontend KNOWN_SWAP_SELECTORS
+    if (result.tx?.data) {
+      if (!isKnownSwapSelector(result.tx.data as string)) {
+        const selector = getSelector(result.tx.data as string)
+        console.warn('[SC-04] Rejected unknown swap selector:', selector, 'source:', source)
+        return NextResponse.json(
+          { error: 'Unknown swap function selector', selector },
+          { status: 400 },
+        )
+      }
+    }
 
     // ── [Security] Server-side price validation via DefiLlama ──
     // Validates swap output against independent oracle to catch

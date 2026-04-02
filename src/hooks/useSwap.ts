@@ -13,6 +13,7 @@ import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, C
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
+import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 
 // ── Price Guard error (DefiLlama server-side block) ──────
 class PriceGuardError extends Error {
@@ -237,15 +238,6 @@ export function useSwap(
 
       // [N-05] Validate function selector is a known swap method
       const selector = swapData.tx.data?.slice(0, 10)?.toLowerCase()
-      const KNOWN_SWAP_SELECTORS = new Set([
-        '0x12aa3caf', '0xe449022e', '0x0502b1c5', '0x2e95b6c8', // 1inch
-        '0xd9627aa4', '0x415565b0',                               // 0x
-        '0x3598d8ab', '0xa94e78ef', '0x46c67b6d',                 // Paraswap
-        '0x83800a8e',                                               // Odos
-        '0xe21fd0e9',                                               // KyberSwap
-        '0xac9650d8', '0x5ae401dc', '0x04e45aaf', '0xb858183f',   // Uniswap V3
-        '0x472b43f3', '0x38ed1739', '0x7ff36ab5', '0x18cbafe5',   // Uniswap V2 / Sushi
-      ])
       if (selector && !KNOWN_SWAP_SELECTORS.has(selector)) {
         console.warn(`[TeraSwap] Unknown swap selector ${selector} from ${source}. Blocking for safety.`)
         throw new Error(`Unrecognized swap function selector (${selector}). Contact support if this persists.`)
