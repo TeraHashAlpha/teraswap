@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { useAccount } from 'wagmi'
+import { useState } from 'react'
+import { useAccount, useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
-import { OrderType } from '@/lib/order-engine'
+import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { AutonomousOrder, AutonomousOrderStatus } from '@/lib/order-engine'
+import { chainlinkAggregatorAbi } from '@/lib/chainlink'
 import ExecutionTimeline from './ExecutionTimeline'
 import { playTouchMP3 } from '@/lib/sounds'
 
@@ -21,13 +22,9 @@ const STATUS_CONFIG: Record<AutonomousOrderStatus, { label: string; color: strin
   error:            { label: 'Failed',           color: 'text-red-400',    dot: 'bg-red-400'    },
 }
 
-const TYPE_LABELS: Record<number, { label: string; icon: string }> = {
-  [OrderType.LIMIT]:     { label: 'Limit',          icon: '⇅' },
-  [OrderType.STOP_LOSS]: { label: 'Stop Loss / TP', icon: '⛨' },
-  [OrderType.DCA]:       { label: 'DCA',            icon: '⟳' },
-}
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
 
-type FilterType = 'all' | 'active' | 'history'
+type FilterType = 'active' | 'completed' | 'cancelled'
 
 // ── Main component ─────────────────────────────────────
 export default function OrderDashboard() {
@@ -38,12 +35,16 @@ export default function OrderDashboard() {
     isLoading,
   } = useOrderEngine()
 
-  const [filter, setFilter] = useState<FilterType>('all')
+  const [filter, setFilter] = useState<FilterType>('active')
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
+  // [Melhoria 1] Derived lists
+  const completedOrders = orders.filter(o => o.status === 'filled')
+  const cancelledOrders = orders.filter(o => ['cancelled', 'expired', 'error'].includes(o.status))
+
   const filteredOrders = filter === 'active' ? activeOrders
-    : filter === 'history' ? historyOrders
-    : orders
+    : filter === 'completed' ? completedOrders
+    : cancelledOrders
 
   if (!address) {
     return (
@@ -54,10 +55,20 @@ export default function OrderDashboard() {
     )
   }
 
+  // [Melhoria 5] Loading skeletons
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center rounded-2xl border border-cream-08 bg-surface-secondary/60 px-6 py-12 backdrop-blur-md">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-cream-20 border-t-cream" />
+      <div className="flex flex-col gap-2">
+        {[0, 1, 2].map(i => (
+          <div key={i} className="flex items-center gap-3 rounded-2xl border border-cream-08 bg-surface-secondary/60 px-4 py-3 backdrop-blur-md">
+            <div className="h-9 w-9 shrink-0 animate-pulse rounded-xl bg-cream-08" />
+            <div className="flex flex-1 flex-col gap-1.5">
+              <div className="h-3.5 w-32 animate-pulse rounded bg-cream-08" />
+              <div className="h-2.5 w-20 animate-pulse rounded bg-cream-08" />
+            </div>
+            <div className="h-3 w-14 animate-pulse rounded bg-cream-08" />
+          </div>
+        ))}
       </div>
     )
   }
@@ -65,7 +76,7 @@ export default function OrderDashboard() {
   return (
     <div className="flex flex-col gap-3">
       {/* Header row */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-bold text-cream">
           My Orders
           {orders.length > 0 && (
@@ -84,17 +95,17 @@ export default function OrderDashboard() {
         )}
       </div>
 
-      {/* Filter tabs */}
+      {/* [Melhoria 1] Filter tabs: Active / Completed / Cancelled */}
       <div className="flex gap-1 rounded-xl border border-cream-08 bg-surface-secondary/40 p-0.5">
         {([
-          ['all', `All (${orders.length})`],
           ['active', `Active (${activeOrders.length})`],
-          ['history', `History (${historyOrders.length})`],
+          ['completed', `Completed (${completedOrders.length})`],
+          ['cancelled', `Cancelled (${cancelledOrders.length})`],
         ] as [FilterType, string][]).map(([key, label]) => (
           <button
             key={key}
             onClick={() => { playTouchMP3(); setFilter(key) }}
-            className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-all ${
+            className={`min-w-0 flex-1 truncate rounded-lg py-1.5 text-[11px] font-semibold transition-all ${
               filter === key
                 ? 'bg-cream-gold text-[#080B10]'
                 : 'text-cream-50 hover:text-cream'
@@ -110,7 +121,7 @@ export default function OrderDashboard() {
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-cream-08 bg-surface-secondary/60 px-6 py-10 text-center backdrop-blur-md">
           <span className="text-3xl opacity-30">📋</span>
           <p className="text-xs text-cream-40">
-            {filter === 'active' ? 'No active orders' : filter === 'history' ? 'No order history' : 'No orders yet'}
+            {filter === 'active' ? 'No active orders' : filter === 'completed' ? 'No completed orders' : 'No cancelled orders'}
           </p>
         </div>
       ) : (
@@ -131,6 +142,39 @@ export default function OrderDashboard() {
   )
 }
 
+// ── Live Chainlink Price ──────────────────────────────
+function LivePrice({ priceFeed, targetPrice, decimals = 8 }: {
+  priceFeed: string
+  targetPrice: string
+  decimals?: number
+}) {
+  const { data } = useReadContract({
+    address: priceFeed as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'latestRoundData',
+    query: { refetchInterval: 30_000, enabled: priceFeed !== ZERO_ADDR },
+  })
+
+  if (!data) return null
+
+  const answer = (data as readonly [bigint, bigint, bigint, bigint, bigint])[1]
+  if (!answer || answer <= 0n) return null
+
+  const currentPrice = Number(formatUnits(answer, decimals))
+  const target = Number(formatUnits(BigInt(targetPrice), decimals))
+  if (target === 0) return null
+
+  const pctDiff = ((currentPrice - target) / target) * 100
+  const isClose = Math.abs(pctDiff) < 2
+
+  return (
+    <span className={`text-[10px] ${isClose ? 'text-amber-300' : 'text-cream-30'}`}>
+      Now ${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      {' '}({pctDiff >= 0 ? '+' : ''}{pctDiff.toFixed(1)}%)
+    </span>
+  )
+}
+
 // ── Order Card ─────────────────────────────────────────
 function OrderCard({
   order, expanded, onToggle, onCancel, onRemove,
@@ -142,12 +186,35 @@ function OrderCard({
   onRemove: () => void
 }) {
   const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.error
-  const typeCfg = TYPE_LABELS[order.orderType] || TYPE_LABELS[OrderType.LIMIT]
   const isActive = ['signing', 'active', 'executing', 'partially_filled'].includes(order.status)
   const isDCA = order.orderType === OrderType.DCA
   const dcaProgress = isDCA && order.dcaTotal > 0
     ? Math.min((order.dcaExecuted ?? 0) / order.dcaTotal, 1)
     : 0
+
+  // [Melhoria 4] Separate Stop Loss and Take Profit
+  const typeCfg = (() => {
+    if (order.orderType === OrderType.LIMIT) return { label: 'Limit', icon: '⇅' }
+    if (order.orderType === OrderType.DCA) return { label: 'DCA', icon: '⟳' }
+    // OrderType.STOP_LOSS — differentiate by condition
+    if (order.order.condition === PriceCondition.ABOVE) return { label: 'Take Profit', icon: '🎯' }
+    return { label: 'Stop Loss', icon: '🛡️' }
+  })()
+
+  // [Melhoria 2] Target price
+  const hasPrice = order.orderType !== OrderType.DCA && order.order.priceFeed !== ZERO_ADDR
+  const targetPriceStr = hasPrice ? (() => {
+    try {
+      const val = Number(formatUnits(BigInt(order.order.targetPrice.toString()), 8))
+      return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    } catch { return null }
+  })() : null
+
+  const targetLabel = targetPriceStr ? (() => {
+    if (order.orderType === OrderType.LIMIT) return `@ $${targetPriceStr}`
+    if (order.order.condition === PriceCondition.BELOW) return `SL ≤ $${targetPriceStr}`
+    return `TP ≥ $${targetPriceStr}`
+  })() : null
 
   // Format amounts
   const amountIn = (() => {
@@ -192,10 +259,14 @@ function OrderCard({
               {order.tokenOutSymbol || '?'}
             </span>
           </div>
-          <div className="flex items-center gap-2 text-[10px]">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
             <span className="rounded bg-cream-08 px-1.5 py-0.5 font-medium text-cream-50">
               {typeCfg.label}
             </span>
+            {/* [Melhoria 2] Target price badge */}
+            {targetLabel && (
+              <span className="text-cream-40">{targetLabel}</span>
+            )}
             {isDCA && order.dcaTotal > 0 && (
               <span className="text-cream-40">
                 {order.dcaExecuted ?? 0}/{order.dcaTotal} fills
@@ -203,6 +274,13 @@ function OrderCard({
             )}
             {timeLeft && (
               <span className="text-cream-30">⏱ {timeLeft}</span>
+            )}
+            {/* [Melhoria 3] Live Chainlink price */}
+            {hasPrice && isActive && (
+              <LivePrice
+                priceFeed={order.order.priceFeed as string}
+                targetPrice={order.order.targetPrice.toString()}
+              />
             )}
           </div>
         </div>
@@ -235,8 +313,8 @@ function OrderCard({
       {/* Expanded details */}
       {expanded && (
         <div className="border-t border-cream-08 px-4 py-3">
-          {/* Order details grid */}
-          <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
+          {/* [Melhoria 6] Responsive grid: 1 col mobile, 2 col desktop */}
+          <div className="mb-3 grid grid-cols-1 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-2">
             <div>
               <span className="text-cream-40">Created</span>
               <p className="font-medium text-cream-70">
