@@ -25,6 +25,8 @@ export class ExecutorMonitor {
     this.lastCycleStartTime = null
     this.lastCycleDurationMs = 0
     this.gasSpent = 0n // BigInt, accumulator of gas cost in wei
+    this.gasSkips = { NORMAL: 0, ELEVATED: 0, URGENT_ONLY: 0, SKIP: 0 }
+    this.lastGasGwei = 0
     this.alertCooldown = new Map() // type → lastSentTimestamp
   }
 
@@ -77,6 +79,20 @@ export class ExecutorMonitor {
     } catch {
       // Ignore invalid values
     }
+  }
+
+  /** Track an order skipped due to gas tier */
+  onGasSkip(tier) {
+    if (this.gasSkips[tier] !== undefined) {
+      this.gasSkips[tier]++
+    }
+  }
+
+  /** Track the last observed gas price (for Prometheus gauge) */
+  onGasObserved(gasPriceWei) {
+    try {
+      this.lastGasGwei = Number(gasPriceWei) / 1e9
+    } catch { /* ignore */ }
   }
 
   /**
@@ -141,6 +157,16 @@ export class ExecutorMonitor {
       "# HELP teraswap_executor_gas_spent_wei Total gas spent in wei",
       "# TYPE teraswap_executor_gas_spent_wei counter",
       `teraswap_executor_gas_spent_wei ${this.gasSpent.toString()}`,
+      "",
+      "# HELP teraswap_executor_gas_skips_total Orders skipped by gas tier",
+      "# TYPE teraswap_executor_gas_skips_total counter",
+      `teraswap_executor_gas_skips_total{tier="ELEVATED"} ${this.gasSkips.ELEVATED}`,
+      `teraswap_executor_gas_skips_total{tier="URGENT_ONLY"} ${this.gasSkips.URGENT_ONLY}`,
+      `teraswap_executor_gas_skips_total{tier="SKIP"} ${this.gasSkips.SKIP}`,
+      "",
+      "# HELP teraswap_executor_current_gas_gwei Last observed gas price in gwei",
+      "# TYPE teraswap_executor_current_gas_gwei gauge",
+      `teraswap_executor_current_gas_gwei ${this.lastGasGwei.toFixed(2)}`,
       "",
       "# HELP teraswap_executor_uptime_seconds Executor uptime in seconds",
       "# TYPE teraswap_executor_uptime_seconds gauge",

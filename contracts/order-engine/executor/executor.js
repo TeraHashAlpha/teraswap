@@ -95,7 +95,25 @@ const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
-const MAX_GAS_PRICE_GWEI = 100  // Safety cap on gas price
+// ── Gas Strategy Tiers ──────────────────────────────────────
+// Configurable via env vars. Defaults maintain previous behavior
+// (everything executes up to 100 gwei, nothing above).
+const GAS_TIER_NORMAL   = parseInt(process.env.GAS_TIER_NORMAL_GWEI   || "30")
+const GAS_TIER_ELEVATED = parseInt(process.env.GAS_TIER_ELEVATED_GWEI || "80")
+const GAS_TIER_URGENT   = parseInt(process.env.GAS_TIER_URGENT_GWEI   || "100")
+
+// EIP-1559 priority fees per tier (in gwei)
+const PRIORITY_FEE_NORMAL   = parseFloat(process.env.GAS_PRIORITY_NORMAL_GWEI   || "1.5")
+const PRIORITY_FEE_ELEVATED = parseFloat(process.env.GAS_PRIORITY_ELEVATED_GWEI || "2.5")
+const PRIORITY_FEE_URGENT   = parseFloat(process.env.GAS_PRIORITY_URGENT_GWEI   || "4")
+
+// Base fee multipliers per tier
+const BASEFEE_MULT_NORMAL   = parseFloat(process.env.GAS_BASEFEE_MULT_NORMAL   || "2")
+const BASEFEE_MULT_ELEVATED = parseFloat(process.env.GAS_BASEFEE_MULT_ELEVATED || "2.5")
+const BASEFEE_MULT_URGENT   = parseFloat(process.env.GAS_BASEFEE_MULT_URGENT   || "3")
+
+// Urgency thresholds
+const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "7200") // 2 hours
 const MAX_RETRIES = 3           // [Audit] Max retries per order before marking failed
 const RETRY_BACKOFF_BASE = 5_000 // [Audit] Base backoff 5s (exponential: 5s, 10s, 20s)
 
@@ -388,6 +406,89 @@ function log(msg) {
   console.log(`[${ts}] ${msg}`)
 }
 
+// ── Gas Strategy: urgency classification + tier resolution ──────────
+
+/**
+ * Classify order urgency for gas tier filtering.
+ * @param {object} dbOrder - Order from Supabase
+ * @param {object} orderStruct - Parsed on-chain order struct
+ * @returns {"URGENT" | "ELEVATED" | "NORMAL"}
+ */
+function classifyOrderUrgency(dbOrder, orderStruct) {
+  const nowSec = Math.floor(Date.now() / 1000)
+
+  // Stop-losses are always urgent (capital protection)
+  // orderType 1 = STOP_LOSS, condition 1 = BELOW (price dropping)
+  if (Number(orderStruct.orderType) === 1 && Number(orderStruct.condition) === 1) {
+    return "URGENT"
+  }
+
+  // Orders expiring within EXPIRY_URGENCY_SECONDS are urgent
+  const expiryTs = Number(orderStruct.expiry)
+  if (expiryTs > 0 && expiryTs - nowSec < EXPIRY_URGENCY_SECONDS) {
+    return "URGENT"
+  }
+
+  // DCA orders that missed at least one full interval are elevated
+  if (dbOrder.order_type === "dca" && dbOrder.dca_last_exec) {
+    const lastExec = Math.floor(new Date(dbOrder.dca_last_exec).getTime() / 1000)
+    const interval = Number(orderStruct.dcaInterval)
+    if (interval > 0 && nowSec - lastExec > interval * 2) {
+      return "ELEVATED"
+    }
+  }
+
+  // Take-profit: orderType 1 + condition 0 (ABOVE) — opportunity, not emergency
+  if (Number(orderStruct.orderType) === 1 && Number(orderStruct.condition) === 0) {
+    return "ELEVATED"
+  }
+
+  return "NORMAL"
+}
+
+/**
+ * Determine if an order should execute at the current gas price,
+ * and return EIP-1559 parameters if so.
+ * @param {bigint} currentGasPrice
+ * @param {bigint} baseFee
+ * @param {"URGENT" | "ELEVATED" | "NORMAL"} urgency
+ * @returns {{ execute: boolean, tier: string, maxFeePerGas?: bigint, maxPriorityFeePerGas?: bigint }}
+ */
+function resolveGasTier(currentGasPrice, baseFee, urgency) {
+  const gasPriceGwei = Number(formatUnits(currentGasPrice, 9))
+
+  if (gasPriceGwei > GAS_TIER_URGENT) {
+    return { execute: false, tier: "SKIP" }
+  }
+
+  if (gasPriceGwei > GAS_TIER_ELEVATED) {
+    if (urgency !== "URGENT") return { execute: false, tier: "URGENT_ONLY" }
+    const priority = parseGwei(String(PRIORITY_FEE_URGENT))
+    return {
+      execute: true, tier: "URGENT_ONLY",
+      maxPriorityFeePerGas: priority,
+      maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_URGENT)) / 1n + priority,
+    }
+  }
+
+  if (gasPriceGwei > GAS_TIER_NORMAL) {
+    if (urgency === "NORMAL") return { execute: false, tier: "ELEVATED" }
+    const priority = parseGwei(String(PRIORITY_FEE_ELEVATED))
+    return {
+      execute: true, tier: "ELEVATED",
+      maxPriorityFeePerGas: priority,
+      maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_ELEVATED)) / 1n + priority,
+    }
+  }
+
+  const priority = parseGwei(String(PRIORITY_FEE_NORMAL))
+  return {
+    execute: true, tier: "NORMAL",
+    maxPriorityFeePerGas: priority,
+    maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_NORMAL)) / 1n + priority,
+  }
+}
+
 // ---- Main execution loop -----------------------------------------------
 
 async function executeCycle(publicClient, walletClient, contract, flashbotsPublicClient, flashbotsWalletClient, monitor = null) {
@@ -529,18 +630,30 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         }
       }
 
-      // Gas price safety check
-      const gasPrice = await publicClient.getGasPrice()
-      const maxGas = parseGwei(String(MAX_GAS_PRICE_GWEI))
+      // ── Gas Strategy: tier-based execution ──
+      const [gasPrice, latestBlock] = await Promise.all([
+        publicClient.getGasPrice(),
+        publicClient.getBlock({ blockTag: "latest" }),
+      ])
+      const baseFee = latestBlock.baseFeePerGas || 0n
 
-      if (gasPrice > maxGas) {
-        log(`  Gas too high (${formatUnits(gasPrice, 9)} gwei), skipping cycle`)
+      if (monitor) monitor.onGasObserved(gasPrice)
+
+      const urgency = classifyOrderUrgency(dbOrder, orderStruct)
+      const gasTier = resolveGasTier(gasPrice, baseFee, urgency)
+
+      log(`  Gas: ${formatUnits(gasPrice, 9)} gwei | baseFee: ${formatUnits(baseFee, 9)} gwei | urgency: ${urgency} | tier: ${gasTier.tier}`)
+
+      if (!gasTier.execute) {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... skipped by gas tier (${gasTier.tier}, urgency: ${urgency})`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
-        break // Skip all remaining orders this cycle
+        if (monitor) monitor.onGasSkip(gasTier.tier)
+        if (gasTier.tier === "SKIP") break  // Above max — skip remaining orders too
+        continue  // ELEVATED/URGENT_ONLY — skip this order, try next
       }
 
       // Send transaction!
-      log(`  Executing order ${dbOrder.id.slice(0, 8)}... (${dbOrder.order_type})`)
+      log(`  Executing order ${dbOrder.id.slice(0, 8)}... (${dbOrder.order_type}, tier: ${gasTier.tier})`)
 
       // [B-02] Use Flashbots Protect RPC if configured (prevents MEV/sandwich attacks)
       const txWalletClient = FLASHBOTS_RPC ? flashbotsWalletClient : walletClient
@@ -551,6 +664,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         abi: ORDER_EXECUTOR_ABI,
         functionName: "executeOrder",
         args: [orderStruct, dbOrder.signature, swapData.data],
+        maxFeePerGas: gasTier.maxFeePerGas,
+        maxPriorityFeePerGas: gasTier.maxPriorityFeePerGas,
       })
 
       log(`  TX sent: ${txHash}`)
@@ -737,6 +852,13 @@ function startHealthServer() {
 async function main() {
   validateConfig()
 
+  // Validate gas tier ordering
+  if (GAS_TIER_NORMAL >= GAS_TIER_ELEVATED || GAS_TIER_ELEVATED >= GAS_TIER_URGENT) {
+    throw new Error(
+      `Invalid gas tier ordering: NORMAL(${GAS_TIER_NORMAL}) < ELEVATED(${GAS_TIER_ELEVATED}) < URGENT(${GAS_TIER_URGENT}) required`
+    )
+  }
+
   console.log("")
   console.log("+===========================================+")
   console.log("|   TeraSwap Order Executor v1.1 (viem)     |")
@@ -784,7 +906,8 @@ async function main() {
   log(`Contract: ${CONTRACT_ADDRESS}`)
   log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
   log(`Max batch: ${MAX_BATCH}`)
-  log(`Max gas: ${MAX_GAS_PRICE_GWEI} gwei`)
+  log(`Gas tiers: NORMAL ≤${GAS_TIER_NORMAL}gwei | ELEVATED ≤${GAS_TIER_ELEVATED}gwei | URGENT ≤${GAS_TIER_URGENT}gwei | >URGENT → SKIP`)
+  log(`Priority fees: NORMAL ${PRIORITY_FEE_NORMAL}gwei | ELEVATED ${PRIORITY_FEE_ELEVATED}gwei | URGENT ${PRIORITY_FEE_URGENT}gwei`)
   console.log("")
 
   if (balance === 0n) {
