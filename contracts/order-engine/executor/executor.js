@@ -96,8 +96,8 @@ const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
 // ── Gas Strategy Tiers ──────────────────────────────────────
-// Configurable via env vars. Defaults maintain previous behavior
-// (everything executes up to 100 gwei, nothing above).
+// Defaults preserve 100 gwei ceiling but add tiered filtering: NORMAL ≤30, ELEVATED ≤80, URGENT ≤100.
+// Orders below ceiling but above their tier threshold may be deferred — this is intentional.
 const GAS_TIER_NORMAL   = parseInt(process.env.GAS_TIER_NORMAL_GWEI   || "30")
 const GAS_TIER_ELEVATED = parseInt(process.env.GAS_TIER_ELEVATED_GWEI || "80")
 const GAS_TIER_URGENT   = parseInt(process.env.GAS_TIER_URGENT_GWEI   || "100")
@@ -438,7 +438,7 @@ function classifyOrderUrgency(dbOrder, orderStruct) {
     }
   }
 
-  // Take-profit: orderType 1 + condition 0 (ABOVE) — opportunity, not emergency
+  // Stop-Loss with ABOVE condition (functionally a take-profit) — opportunity, not emergency
   if (Number(orderStruct.orderType) === 1 && Number(orderStruct.condition) === 0) {
     return "ELEVATED"
   }

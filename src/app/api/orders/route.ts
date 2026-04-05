@@ -61,6 +61,10 @@ export async function POST(req: NextRequest) {
     if (!body.signature || !body.orderHash) {
       return NextResponse.json({ error: 'Missing signature or orderHash' }, { status: 400 })
     }
+    // [M-01] Validate signature format before passing to viem
+    if (typeof body.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(body.signature)) {
+      return NextResponse.json({ error: 'Invalid signature format' }, { status: 400 })
+    }
     if (!body.amountIn || body.amountIn === '0') {
       return NextResponse.json({ error: 'amountIn must be positive' }, { status: 400 })
     }
