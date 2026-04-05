@@ -1,8 +1,8 @@
 /**
- * TeraSwap KMS Signer — AWS KMS + HashiCorp Vault integration
+ * TeraSwap KMS Signer -- AWS KMS + HashiCorp Vault integration
  *
  * [C-02/B-01] Replaces plaintext EXECUTOR_PRIVATE_KEY with HSM-backed signing.
- * The private key never leaves the HSM — only signatures are returned.
+ * The private key never leaves the HSM -- only signatures are returned.
  *
  * SETUP (AWS KMS):
  *   1. Create asymmetric key in AWS KMS:
@@ -39,110 +39,124 @@
  *      VAULT_KEY_NAME=teraswap-executor
  */
 
-import { ethers } from "ethers"
+import {
+  bytesToHex,
+  hexToBytes,
+  hashMessage,
+  hashTypedData,
+  keccak256,
+  serializeTransaction,
+  recoverAddress,
+} from "viem"
+import { toAccount, publicKeyToAddress } from "viem/accounts"
+import { privateKeyToAccount } from "viem/accounts"
 
-// ── AWS KMS Signer ──────────────────────────────────────────────
+// ---- AWS KMS Account (viem toAccount pattern) --------------------------
 
-export class AwsKmsSigner extends ethers.AbstractSigner {
-  #keyId
-  #region
-  #kmsClient
-  #address
+/**
+ * Creates a viem-compatible account backed by AWS KMS.
+ * The private key never leaves the HSM.
+ */
+export async function createKmsAccount(keyId, region) {
+  let kmsClient = null
+  let cachedAddress = null
 
-  constructor(keyId, region, provider) {
-    super(provider)
-    this.#keyId = keyId
-    this.#region = region
-    this.#kmsClient = null
-    this.#address = null
+  async function getKmsClient() {
+    if (kmsClient) return kmsClient
+    const { KMSClient } = await import("@aws-sdk/client-kms")
+    kmsClient = new KMSClient({ region })
+    return kmsClient
   }
 
-  async #getKmsClient() {
-    if (this.#kmsClient) return this.#kmsClient
+  async function getAddress() {
+    if (cachedAddress) return cachedAddress
 
-    // Dynamic import — only needed when KMS is used
-    const { KMSClient, SignCommand, GetPublicKeyCommand } = await import("@aws-sdk/client-kms")
-    this.#kmsClient = new KMSClient({ region: this.#region })
-    return this.#kmsClient
-  }
-
-  async getAddress() {
-    if (this.#address) return this.#address
-
-    const kms = await this.#getKmsClient()
+    const kms = await getKmsClient()
     const { GetPublicKeyCommand } = await import("@aws-sdk/client-kms")
 
-    const response = await kms.send(new GetPublicKeyCommand({ KeyId: this.#keyId }))
+    const response = await kms.send(new GetPublicKeyCommand({ KeyId: keyId }))
     const publicKeyDer = Buffer.from(response.PublicKey)
 
-    // DER-encoded SubjectPublicKeyInfo → uncompressed EC point
+    // DER-encoded SubjectPublicKeyInfo -> uncompressed EC point
     // secp256k1 public key starts at offset 23 in DER encoding (65 bytes uncompressed)
     const uncompressed = publicKeyDer.slice(-65)
-    this.#address = ethers.computeAddress(ethers.hexlify(uncompressed))
+    cachedAddress = publicKeyToAddress(bytesToHex(uncompressed))
 
-    return this.#address
+    return cachedAddress
   }
 
-  connect(provider) {
-    return new AwsKmsSigner(this.#keyId, this.#region, provider)
-  }
-
-  async signTransaction(tx) {
-    const unsignedTx = ethers.Transaction.from(tx)
-    const hash = unsignedTx.unsignedHash
-
-    const signature = await this.#kmsSign(hash)
-    unsignedTx.signature = signature
-
-    return unsignedTx.serialized
-  }
-
-  async signMessage(message) {
-    const hash = ethers.hashMessage(message)
-    return this.#kmsSign(hash)
-  }
-
-  async signTypedData(domain, types, value) {
-    const hash = ethers.TypedDataEncoder.hash(domain, types, value)
-    return this.#kmsSign(hash)
-  }
-
-  async #kmsSign(digestHex) {
-    const kms = await this.#getKmsClient()
+  async function kmsSign(digestHex) {
+    const kms = await getKmsClient()
     const { SignCommand } = await import("@aws-sdk/client-kms")
 
-    const digest = ethers.getBytes(digestHex)
+    const digest = hexToBytes(digestHex)
 
     const response = await kms.send(new SignCommand({
-      KeyId: this.#keyId,
+      KeyId: keyId,
       Message: digest,
       MessageType: "DIGEST",
       SigningAlgorithm: "ECDSA_SHA_256",
     }))
 
-    // KMS returns DER-encoded ECDSA signature → decode to r, s
+    // KMS returns DER-encoded ECDSA signature -> decode to r, s
     const derSig = Buffer.from(response.Signature)
     const { r, s } = decodeDerSignature(derSig)
 
     // Determine recovery parameter (v)
-    const address = await this.getAddress()
-    for (let v = 27; v <= 28; v++) {
+    const address = await getAddress()
+    for (let v = 27n; v <= 28n; v++) {
       try {
-        const sig = ethers.Signature.from({ r, s, v })
-        const recovered = ethers.recoverAddress(digestHex, sig)
+        const yParity = v === 27n ? 0 : 1
+        const signature = `0x${r.slice(2)}${s.slice(2)}${yParity === 0 ? "1b" : "1c"}`
+        const recovered = await recoverAddress({ hash: digestHex, signature })
         if (recovered.toLowerCase() === address.toLowerCase()) {
-          return sig.serialized
+          // Return compact signature (65 bytes: r + s + v)
+          return signature
         }
       } catch {
         continue
       }
     }
 
-    throw new Error("KMS signature recovery failed — could not determine v")
+    throw new Error("KMS signature recovery failed -- could not determine v")
   }
+
+  // Resolve address before creating the account
+  const address = await getAddress()
+
+  return toAccount({
+    address,
+
+    async signMessage({ message }) {
+      const hash = hashMessage(message)
+      return kmsSign(hash)
+    },
+
+    async signTransaction(transaction, { serializer } = {}) {
+      const serialized = (serializer || serializeTransaction)(transaction)
+      const hash = keccak256(serialized)
+      const signature = await kmsSign(hash)
+      // Re-serialize with signature
+      const sigBytes = hexToBytes(signature)
+      const r = bytesToHex(sigBytes.slice(0, 32))
+      const s = bytesToHex(sigBytes.slice(32, 64))
+      const v = sigBytes[64]
+      const yParity = v === 27 ? 0 : 1
+      return (serializer || serializeTransaction)(transaction, {
+        r,
+        s,
+        yParity,
+      })
+    },
+
+    async signTypedData({ domain, types, primaryType, message }) {
+      const hash = hashTypedData({ domain, types, primaryType, message })
+      return kmsSign(hash)
+    },
+  })
 }
 
-// ── DER Signature Decoder ──────────────────────────────────────
+// ---- DER Signature Decoder ---------------------------------------------
 
 function decodeDerSignature(der) {
   // DER: 0x30 [total-len] 0x02 [r-len] [r] 0x02 [s-len] [s]
@@ -178,9 +192,15 @@ function decodeDerSignature(der) {
   }
 }
 
-// ── Factory: Create signer based on environment ────────────────
+// ---- Factory: Create account based on environment ----------------------
 
-export async function createExecutorSigner(provider) {
+/**
+ * Creates a viem account based on available signing configuration.
+ * Returns { account, address } where account is a viem LocalAccount.
+ *
+ * Priority: KMS > Vault > Plaintext key
+ */
+export async function createExecutorAccount() {
   const kmsKeyId = process.env.KMS_KEY_ID
   const kmsRegion = process.env.KMS_REGION || "us-east-1"
   const vaultAddr = process.env.VAULT_ADDR
@@ -189,21 +209,21 @@ export async function createExecutorSigner(provider) {
   // Priority: KMS > Vault > Plaintext key
   if (kmsKeyId) {
     console.log("[C-02] Using AWS KMS signer (key never leaves HSM)")
-    const signer = new AwsKmsSigner(kmsKeyId, kmsRegion, provider)
-    const address = await signer.getAddress()
-    console.log(`[C-02] KMS executor address: ${address}`)
-    return signer
+    const account = await createKmsAccount(kmsKeyId, kmsRegion)
+    console.log(`[C-02] KMS executor address: ${account.address}`)
+    return account
   }
 
   if (vaultAddr) {
     console.log("[C-02] Vault signer configured but not yet implemented")
-    console.log("[C-02] Falling back to plaintext key — implement Vault integration for production")
+    console.log("[C-02] Falling back to plaintext key -- implement Vault integration for production")
     // TODO: Implement HashiCorp Vault Transit signer
   }
 
   if (privateKey) {
-    console.warn("[C-02] WARNING: Using plaintext private key — migrate to KMS for mainnet!")
-    return new ethers.Wallet(privateKey, provider)
+    console.warn("[C-02] WARNING: Using plaintext private key -- migrate to KMS for mainnet!")
+    const key = privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`
+    return privateKeyToAccount(key)
   }
 
   throw new Error("No signing method configured. Set KMS_KEY_ID, VAULT_ADDR, or EXECUTOR_PRIVATE_KEY")

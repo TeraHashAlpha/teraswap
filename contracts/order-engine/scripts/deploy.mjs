@@ -17,7 +17,15 @@
  *   EXECUTOR_ADDRESS      — Executor wallet address (default: deployer)
  */
 
-import { ethers } from "ethers";
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  formatEther,
+  getAddress,
+  getContract,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -51,24 +59,32 @@ if (!RPC_URL || !DEPLOYER_KEY) {
 // ── Load compiled artifacts ──────────────────────────────────
 const buildDir = path.join(__dirname, "..", "build");
 const abi = JSON.parse(fs.readFileSync(path.join(buildDir, "TeraSwapOrderExecutor.abi.json"), "utf8"));
-const bytecode = "0x" + fs.readFileSync(path.join(buildDir, "TeraSwapOrderExecutor.bin"), "utf8").trim();
+const bytecode = `0x${fs.readFileSync(path.join(buildDir, "TeraSwapOrderExecutor.bin"), "utf8").trim()}`;
 
 // ── Connect ──────────────────────────────────────────────────
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-const wallet = new ethers.Wallet(DEPLOYER_KEY, provider);
+const account = privateKeyToAccount(DEPLOYER_KEY.startsWith("0x") ? DEPLOYER_KEY : `0x${DEPLOYER_KEY}`);
+
+const publicClient = createPublicClient({
+  transport: http(RPC_URL),
+});
+
+const walletClient = createWalletClient({
+  account,
+  transport: http(RPC_URL),
+});
 
 // ── Constructor args ─────────────────────────────────────────
-const WETH = ethers.getAddress("0xc02aaa39b223fe8d0a6e5c4f27ead9083c756cc2"); // Mainnet WETH
-const FEE_RECIPIENT = process.env.FEE_RECIPIENT || wallet.address;
-const ADMIN = process.env.ADMIN_ADDRESS || wallet.address;
-const EXECUTOR = process.env.EXECUTOR_ADDRESS || wallet.address;
+const WETH = getAddress("0xc02aaa39b223fe8d0a6e5c4f27ead9083c756cc2"); // Mainnet WETH
+const FEE_RECIPIENT = process.env.FEE_RECIPIENT || account.address;
+const ADMIN = process.env.ADMIN_ADDRESS || account.address;
+const EXECUTOR = process.env.EXECUTOR_ADDRESS || account.address;
 
 // Mainnet routers (same as config.ts)
 const ROUTERS = [
-  ethers.getAddress("0x111111125421ca6dc452d289314280a0f8842a65"), // 1inch v6
-  ethers.getAddress("0xdef1c0ded9bec7f1a1670819833240f027b25eff"), // 0x Exchange Proxy
-  ethers.getAddress("0xdef171fe48cf0115b1d80b88dc8eab59176fee57"), // Paraswap Augustus v6
-  ethers.getAddress("0xe592427a0aece92de3edee1f18e0157c05861564"), // Uniswap V3 SwapRouter
+  getAddress("0x111111125421ca6dc452d289314280a0f8842a65"), // 1inch v6
+  getAddress("0xdef1c0ded9bec7f1a1670819833240f027b25eff"), // 0x Exchange Proxy
+  getAddress("0xdef171fe48cf0115b1d80b88dc8eab59176fee57"), // Paraswap Augustus v6
+  getAddress("0xe592427a0aece92de3edee1f18e0157c05861564"), // Uniswap V3 SwapRouter
 ];
 
 async function main() {
@@ -76,12 +92,12 @@ async function main() {
   console.log("  TeraSwapOrderExecutor v2 — Deploy");
   console.log("══════════════════════════════════════════════════\n");
 
-  const network = await provider.getNetwork();
-  console.log("Network:    ", network.name, `(chainId: ${network.chainId})`);
-  console.log("Deployer:   ", wallet.address);
+  const chainId = await publicClient.getChainId();
+  console.log("Network:    ", `chainId: ${chainId}`);
+  console.log("Deployer:   ", account.address);
 
-  const balance = await provider.getBalance(wallet.address);
-  console.log("Balance:    ", ethers.formatEther(balance), "ETH\n");
+  const balance = await publicClient.getBalance({ address: account.address });
+  console.log("Balance:    ", formatEther(balance), "ETH\n");
 
   if (balance === 0n) {
     console.error("❌ Deployer has no ETH for gas!");
@@ -96,21 +112,31 @@ async function main() {
 
   // ── Deploy ────────────────────────────────────────────────
   console.log("📦 Deploying contract...");
-  const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-  const contract = await factory.deploy(FEE_RECIPIENT, ADMIN, WETH);
+  const hash = await walletClient.deployContract({
+    abi,
+    bytecode,
+    args: [FEE_RECIPIENT, ADMIN, WETH],
+  });
 
-  console.log("⏳ Tx sent:", contract.deploymentTransaction().hash);
+  console.log("⏳ Tx sent:", hash);
   console.log("   Waiting for confirmation...\n");
 
-  await contract.waitForDeployment();
-  const address = await contract.getAddress();
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  const address = receipt.contractAddress;
   console.log("✅ Contract deployed at:", address);
 
   // ── Bootstrap (routers + executor) ────────────────────────
   console.log("\n📦 Bootstrapping routers and executor...");
-  const tx = await contract.bootstrap(ROUTERS, [EXECUTOR]);
-  console.log("⏳ Bootstrap tx:", tx.hash);
-  await tx.wait();
+
+  const contract = getContract({
+    address,
+    abi,
+    client: { public: publicClient, wallet: walletClient },
+  });
+
+  const bootstrapHash = await contract.write.bootstrap([ROUTERS, [EXECUTOR]]);
+  console.log("⏳ Bootstrap tx:", bootstrapHash);
+  await publicClient.waitForTransactionReceipt({ hash: bootstrapHash });
   console.log("✅ Bootstrap complete!\n");
 
   // ── Summary ───────────────────────────────────────────────

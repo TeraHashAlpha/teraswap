@@ -21,7 +21,15 @@
  *   WETH          — WETH address (auto-detected per chain)
  */
 
-import { ethers } from 'ethers'
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  formatEther,
+  getContract,
+  encodeDeployData,
+} from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 import fs from 'fs'
 import path from 'path'
 
@@ -56,7 +64,7 @@ if (!fs.existsSync(abiPath) || !fs.existsSync(binPath)) {
 }
 
 const abi = JSON.parse(fs.readFileSync(abiPath, 'utf8'))
-const bytecode = '0x' + fs.readFileSync(binPath, 'utf8').trim()
+const bytecode = `0x${fs.readFileSync(binPath, 'utf8').trim()}`
 
 // ── Deploy ──────────────────────────────────────────────────
 async function main() {
@@ -65,23 +73,31 @@ async function main() {
   console.log('═══════════════════════════════════════════════════')
   console.log()
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL)
-  const wallet = new ethers.Wallet(PRIVATE_KEY, provider)
+  const account = privateKeyToAccount(PRIVATE_KEY.startsWith('0x') ? PRIVATE_KEY : `0x${PRIVATE_KEY}`)
 
-  const network = await provider.getNetwork()
-  const balance = await provider.getBalance(wallet.address)
-  const FEE_RECIPIENT = process.env.FEE_RECIPIENT || wallet.address
-  const ADMIN = process.env.ADMIN || wallet.address
-  const WETH = process.env.WETH || WETH_ADDRESSES[Number(network.chainId)]
+  const publicClient = createPublicClient({
+    transport: http(RPC_URL),
+  })
+
+  const walletClient = createWalletClient({
+    account,
+    transport: http(RPC_URL),
+  })
+
+  const chainId = await publicClient.getChainId()
+  const balance = await publicClient.getBalance({ address: account.address })
+  const FEE_RECIPIENT = process.env.FEE_RECIPIENT || account.address
+  const ADMIN = process.env.ADMIN || account.address
+  const WETH = process.env.WETH || WETH_ADDRESSES[chainId]
 
   if (!WETH) {
-    console.error(`❌ No WETH address for chain ${network.chainId}. Set WETH env var.`)
+    console.error(`❌ No WETH address for chain ${chainId}. Set WETH env var.`)
     process.exit(1)
   }
 
-  console.log(`  Network:       ${network.name} (chain ${network.chainId})`)
-  console.log(`  Deployer:      ${wallet.address}`)
-  console.log(`  Balance:       ${ethers.formatEther(balance)} ETH`)
+  console.log(`  Network:       chain ${chainId}`)
+  console.log(`  Deployer:      ${account.address}`)
+  console.log(`  Balance:       ${formatEther(balance)} ETH`)
   console.log(`  Fee recipient: ${FEE_RECIPIENT}`)
   console.log(`  Admin:         ${ADMIN}`)
   console.log(`  WETH:          ${WETH}`)
@@ -93,16 +109,15 @@ async function main() {
   }
 
   // Estimate gas
-  const factory = new ethers.ContractFactory(abi, bytecode, wallet)
   console.log('⏳ Estimating gas...')
 
-  const deployTx = await factory.getDeployTransaction(FEE_RECIPIENT, ADMIN, WETH)
-  const gasEstimate = await provider.estimateGas({ ...deployTx, from: wallet.address })
-  const feeData = await provider.getFeeData()
+  const deployData = encodeDeployData({ abi, bytecode, args: [FEE_RECIPIENT, ADMIN, WETH] })
+  const gasEstimate = await publicClient.estimateGas({ data: deployData, account: account.address })
+  const gasPrice = await publicClient.getGasPrice()
 
-  const estimatedCost = gasEstimate * (feeData.gasPrice || 0n)
+  const estimatedCost = gasEstimate * gasPrice
   console.log(`  Gas estimate:  ${gasEstimate.toString()}`)
-  console.log(`  Est. cost:     ${ethers.formatEther(estimatedCost)} ETH`)
+  console.log(`  Est. cost:     ${formatEther(estimatedCost)} ETH`)
   console.log()
 
   if (balance < estimatedCost * 2n) {
@@ -111,13 +126,17 @@ async function main() {
 
   // Deploy
   console.log('🚀 Deploying...')
-  const contract = await factory.deploy(FEE_RECIPIENT, ADMIN, WETH)
-  console.log(`  Tx hash:       ${contract.deploymentTransaction().hash}`)
+  const hash = await walletClient.deployContract({
+    abi,
+    bytecode,
+    args: [FEE_RECIPIENT, ADMIN, WETH],
+  })
+  console.log(`  Tx hash:       ${hash}`)
 
   console.log('⏳ Waiting for confirmation...')
-  await contract.waitForDeployment()
+  const receipt = await publicClient.waitForTransactionReceipt({ hash })
 
-  const address = await contract.getAddress()
+  const address = receipt.contractAddress
   console.log()
   console.log('═══════════════════════════════════════════════════')
   console.log(`  ✅ Deployed at: ${address}`)
@@ -131,13 +150,19 @@ async function main() {
     'uniswap-v3': '0xE592427A0AEce92De3Edee1F18E0157C05861564',
   }
 
-  // Only whitelist on Sepolia if we're on Sepolia (some routers might not exist)
-  if (Number(network.chainId) === 1) {
+  const contract = getContract({
+    address,
+    abi,
+    client: { public: publicClient, wallet: walletClient },
+  })
+
+  // Only whitelist on mainnet (some routers might not exist on testnet)
+  if (chainId === 1) {
     console.log('⏳ Whitelisting routers...')
     for (const [name, addr] of Object.entries(routers)) {
       try {
-        const tx = await contract.setRouterWhitelist(addr, true)
-        await tx.wait()
+        const txHash = await contract.write.setRouterWhitelist([addr, true])
+        await publicClient.waitForTransactionReceipt({ hash: txHash })
         console.log(`  ✅ ${name}: ${addr}`)
       } catch (err) {
         console.warn(`  ⚠️  ${name}: ${err.message}`)
@@ -151,17 +176,16 @@ async function main() {
   // ── Save deployment info ──────────────────────────────────
   const deployInfo = {
     address,
-    chainId: Number(network.chainId),
-    deployer: wallet.address,
+    chainId,
+    deployer: account.address,
     feeRecipient: FEE_RECIPIENT,
     admin: ADMIN,
     weth: WETH,
-    txHash: contract.deploymentTransaction().hash,
-    blockNumber: contract.deploymentTransaction().blockNumber,
+    txHash: hash,
     timestamp: new Date().toISOString(),
   }
 
-  const deployPath = path.join(basePath, `deployment-${Number(network.chainId)}.json`)
+  const deployPath = path.join(basePath, `deployment-${chainId}.json`)
   fs.writeFileSync(deployPath, JSON.stringify(deployInfo, null, 2))
   console.log()
   console.log(`📄 Deployment info saved to: ${deployPath}`)

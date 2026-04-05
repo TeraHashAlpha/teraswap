@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { ethers } from 'ethers'
+import { recoverTypedDataAddress, zeroHash } from 'viem'
 import { ORDER_EXECUTOR_ADDRESS } from '@/lib/order-engine/config'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
@@ -141,11 +141,17 @@ export async function POST(req: NextRequest) {
           orderType: orderTypeEnum, condition: conditionEnum,
           targetPrice: body.targetPrice, priceFeed: body.priceFeed,
           expiry: body.expiry, nonce: body.nonce, router: body.router,
-          routerDataHash: body.routerDataHash ?? ethers.ZeroHash,  // [C-01]
+          routerDataHash: body.routerDataHash ?? zeroHash,  // [C-01]
           dcaInterval: body.dcaInterval ?? 0, dcaTotal: body.dcaTotal ?? 1,
         }
 
-        const recovered = ethers.verifyTypedData(domain, ORDER_TYPES, message, body.signature)
+        const recovered = await recoverTypedDataAddress({
+          domain: domain as { name: string; version: string; chainId: number; verifyingContract: `0x${string}` },
+          types: ORDER_TYPES,
+          primaryType: 'Order' as const,
+          message,
+          signature: body.signature as `0x${string}`,
+        })
         if (recovered.toLowerCase() !== body.wallet.toLowerCase()) {
           return NextResponse.json({ error: 'Signature mismatch' }, { status: 400 })
         }

@@ -32,7 +32,16 @@
  *   DRY_RUN       — Set to "1" to estimate gas only (no deploy)
  */
 
-import { ethers } from "ethers"
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  formatEther,
+  parseEther,
+  getContract,
+  encodeDeployData,
+} from "viem"
+import { privateKeyToAccount } from "viem/accounts"
 import fs from "fs"
 import path from "path"
 import solc from "solc"
@@ -56,6 +65,26 @@ if (!PRIVATE_KEY) {
   console.error("Usage: PRIVATE_KEY=0x... node deploy-sepolia.js")
   process.exit(1)
 }
+
+const sepoliaChain = {
+  id: CHAIN_ID,
+  name: "sepolia",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+}
+
+const account = privateKeyToAccount(PRIVATE_KEY.startsWith("0x") ? PRIVATE_KEY : `0x${PRIVATE_KEY}`)
+
+const publicClient = createPublicClient({
+  chain: sepoliaChain,
+  transport: http(RPC_URL),
+})
+
+const walletClient = createWalletClient({
+  account,
+  chain: sepoliaChain,
+  transport: http(RPC_URL),
+})
 
 // ══════════════════════════════════════════════════════════════════
 //  COMPILE
@@ -154,7 +183,7 @@ function compileContracts() {
 
         artifacts[contractName] = {
           abi: data.abi,
-          bytecode: "0x" + data.evm.bytecode.object,
+          bytecode: `0x${data.evm.bytecode.object}`,
         }
         console.log(`   ✅ ${contractName} compiled`)
       }
@@ -181,7 +210,7 @@ function loadExistingArtifacts() {
 
     artifacts[name] = {
       abi: JSON.parse(fs.readFileSync(abiPath, "utf8")),
-      bytecode: "0x" + fs.readFileSync(binPath, "utf8").trim(),
+      bytecode: `0x${fs.readFileSync(binPath, "utf8").trim()}`,
     }
     console.log(`   ✅ ${name} loaded`)
   }
@@ -199,26 +228,24 @@ async function main() {
   console.log("═══════════════════════════════════════════════════════════")
 
   // ── Step 0: Connect ───────────────────────────────────────────
-  const provider = new ethers.JsonRpcProvider(RPC_URL)
-  const wallet = new ethers.Wallet(PRIVATE_KEY, provider)
-  const network = await provider.getNetwork()
+  const chainId = await publicClient.getChainId()
 
-  if (Number(network.chainId) !== CHAIN_ID) {
-    console.error(`❌ Expected Sepolia (${CHAIN_ID}), got chain ${network.chainId}`)
+  if (chainId !== CHAIN_ID) {
+    console.error(`❌ Expected Sepolia (${CHAIN_ID}), got chain ${chainId}`)
     console.error("   This script is for Sepolia testnet only.")
     console.error("   For mainnet, use a dedicated mainnet deploy script with extra safeguards.")
     process.exit(1)
   }
 
-  const balance = await provider.getBalance(wallet.address)
-  const FEE_RECIPIENT = process.env.FEE_RECIPIENT || wallet.address
-  const ADMIN = process.env.ADMIN || wallet.address
-  const EXECUTOR = process.env.EXECUTOR || wallet.address
+  const balance = await publicClient.getBalance({ address: account.address })
+  const FEE_RECIPIENT = process.env.FEE_RECIPIENT || account.address
+  const ADMIN = process.env.ADMIN || account.address
+  const EXECUTOR = process.env.EXECUTOR || account.address
 
   console.log(`\n   Network:       Sepolia (${CHAIN_ID})`)
   console.log(`   RPC:           ${RPC_URL}`)
-  console.log(`   Deployer:      ${wallet.address}`)
-  console.log(`   Balance:       ${ethers.formatEther(balance)} ETH`)
+  console.log(`   Deployer:      ${account.address}`)
+  console.log(`   Balance:       ${formatEther(balance)} ETH`)
   console.log(`   Fee Recipient: ${FEE_RECIPIENT}`)
   console.log(`   Admin:         ${ADMIN}`)
   console.log(`   Executor:      ${EXECUTOR}`)
@@ -231,7 +258,7 @@ async function main() {
     process.exit(1)
   }
 
-  const minRequired = ethers.parseEther("0.01")
+  const minRequired = parseEther("0.01")
   if (balance < minRequired) {
     console.warn(`\n⚠️  Low balance (< 0.01 ETH). Deployment may fail.`)
   }
@@ -242,31 +269,20 @@ async function main() {
   // ── Step 2: Gas Estimation ─────────────────────────────────────
   console.log("\n⏳ Estimating gas costs...")
 
-  const feeCollectorFactory = new ethers.ContractFactory(
-    artifacts.TeraSwapFeeCollector.abi,
-    artifacts.TeraSwapFeeCollector.bytecode,
-    wallet
-  )
-  const executorFactory = new ethers.ContractFactory(
-    artifacts.TeraSwapOrderExecutor.abi,
-    artifacts.TeraSwapOrderExecutor.bytecode,
-    wallet
-  )
+  const fcDeployData = encodeDeployData({
+    abi: artifacts.TeraSwapFeeCollector.abi,
+    bytecode: artifacts.TeraSwapFeeCollector.bytecode,
+    args: [FEE_RECIPIENT, ADMIN],
+  })
+  const exDeployData = encodeDeployData({
+    abi: artifacts.TeraSwapOrderExecutor.abi,
+    bytecode: artifacts.TeraSwapOrderExecutor.bytecode,
+    args: [FEE_RECIPIENT, ADMIN, WETH_SEPOLIA],
+  })
 
-  const fcDeployTx = await feeCollectorFactory.getDeployTransaction(
-    FEE_RECIPIENT,
-    ADMIN
-  )
-  const exDeployTx = await executorFactory.getDeployTransaction(
-    FEE_RECIPIENT,
-    ADMIN,
-    WETH_SEPOLIA
-  )
-
-  const fcGas = await provider.estimateGas({ ...fcDeployTx, from: wallet.address })
-  const exGas = await provider.estimateGas({ ...exDeployTx, from: wallet.address })
-  const feeData = await provider.getFeeData()
-  const gasPrice = feeData.gasPrice || 0n
+  const fcGas = await publicClient.estimateGas({ data: fcDeployData, account: account.address })
+  const exGas = await publicClient.estimateGas({ data: exDeployData, account: account.address })
+  const gasPrice = await publicClient.getGasPrice()
 
   const fcCost = fcGas * gasPrice
   const exCost = exGas * gasPrice
@@ -274,11 +290,11 @@ async function main() {
   const bsCost = bootstrapEstimate * gasPrice
   const totalCost = fcCost + exCost + bsCost
 
-  console.log(`   FeeCollector:     ${fcGas.toString()} gas  (~${ethers.formatEther(fcCost)} ETH)`)
-  console.log(`   OrderExecutor:    ${exGas.toString()} gas  (~${ethers.formatEther(exCost)} ETH)`)
-  console.log(`   Bootstrap (est):  ${bootstrapEstimate.toString()} gas  (~${ethers.formatEther(bsCost)} ETH)`)
+  console.log(`   FeeCollector:     ${fcGas.toString()} gas  (~${formatEther(fcCost)} ETH)`)
+  console.log(`   OrderExecutor:    ${exGas.toString()} gas  (~${formatEther(exCost)} ETH)`)
+  console.log(`   Bootstrap (est):  ${bootstrapEstimate.toString()} gas  (~${formatEther(bsCost)} ETH)`)
   console.log(`   ────────────────────────────────────`)
-  console.log(`   Total estimate:   ~${ethers.formatEther(totalCost)} ETH`)
+  console.log(`   Total estimate:   ~${formatEther(totalCost)} ETH`)
 
   if (balance < totalCost * 2n) {
     console.warn("   ⚠️  Balance is tight — deployment might fail if gas spikes")
@@ -286,44 +302,55 @@ async function main() {
 
   if (DRY_RUN) {
     console.log("\n🏁 DRY RUN complete. No contracts deployed.")
-    console.log(`   Required balance: ~${ethers.formatEther(totalCost * 2n)} ETH (2x safety margin)`)
+    console.log(`   Required balance: ~${formatEther(totalCost * 2n)} ETH (2x safety margin)`)
     process.exit(0)
   }
 
   // ── Step 3: Deploy TeraSwapFeeCollector ────────────────────────
   console.log("\n🚀 [1/3] Deploying TeraSwapFeeCollector...")
-  const feeCollector = await feeCollectorFactory.deploy(FEE_RECIPIENT, ADMIN)
-  console.log(`   Tx: ${feeCollector.deploymentTransaction().hash}`)
+  const fcHash = await walletClient.deployContract({
+    abi: artifacts.TeraSwapFeeCollector.abi,
+    bytecode: artifacts.TeraSwapFeeCollector.bytecode,
+    args: [FEE_RECIPIENT, ADMIN],
+  })
+  console.log(`   Tx: ${fcHash}`)
   console.log("   ⏳ Waiting for confirmation...")
-  await feeCollector.waitForDeployment()
-  const fcAddress = await feeCollector.getAddress()
+  const fcReceipt = await publicClient.waitForTransactionReceipt({ hash: fcHash })
+  const fcAddress = fcReceipt.contractAddress
   console.log(`   ✅ FeeCollector deployed: ${fcAddress}`)
 
   // ── Step 4: Deploy TeraSwapOrderExecutor ───────────────────────
   console.log("\n🚀 [2/3] Deploying TeraSwapOrderExecutor...")
-  const executor = await executorFactory.deploy(FEE_RECIPIENT, ADMIN, WETH_SEPOLIA)
-  console.log(`   Tx: ${executor.deploymentTransaction().hash}`)
+  const exHash = await walletClient.deployContract({
+    abi: artifacts.TeraSwapOrderExecutor.abi,
+    bytecode: artifacts.TeraSwapOrderExecutor.bytecode,
+    args: [FEE_RECIPIENT, ADMIN, WETH_SEPOLIA],
+  })
+  console.log(`   Tx: ${exHash}`)
   console.log("   ⏳ Waiting for confirmation...")
-  await executor.waitForDeployment()
-  const exAddress = await executor.getAddress()
+  const exReceipt = await publicClient.waitForTransactionReceipt({ hash: exHash })
+  const exAddress = exReceipt.contractAddress
   console.log(`   ✅ OrderExecutor deployed: ${exAddress}`)
 
   // ── Step 5: Bootstrap OrderExecutor ────────────────────────────
   console.log("\n🚀 [3/3] Bootstrapping OrderExecutor...")
   console.log("   Setting up routers + executors in a single tx...")
 
-  // FeeCollector acts as the primary "router" for the OrderExecutor
-  // (orders route through FeeCollector → DEX router)
-  // Also add the FeeCollector address directly as a whitelisted router
   const routers = [fcAddress]
   const executors = [EXECUTOR]
 
   console.log(`   Routers:   [${routers.join(", ")}]`)
   console.log(`   Executors: [${executors.join(", ")}]`)
 
-  const bootstrapTx = await executor.bootstrap(routers, executors)
-  console.log(`   Tx: ${bootstrapTx.hash}`)
-  await bootstrapTx.wait()
+  const executorContract = getContract({
+    address: exAddress,
+    abi: artifacts.TeraSwapOrderExecutor.abi,
+    client: { public: publicClient, wallet: walletClient },
+  })
+
+  const bootstrapHash = await executorContract.write.bootstrap([routers, executors])
+  console.log(`   Tx: ${bootstrapHash}`)
+  await publicClient.waitForTransactionReceipt({ hash: bootstrapHash })
   console.log("   ✅ Bootstrap complete")
 
   // ── Step 6: Verify On-Chain State ──────────────────────────────
@@ -331,9 +358,15 @@ async function main() {
   let allOk = true
 
   // FeeCollector checks
-  const fcFeeRecipient = await feeCollector.feeRecipient()
-  const fcAdmin = await feeCollector.admin()
-  const fcPaused = await feeCollector.paused()
+  const feeCollectorContract = getContract({
+    address: fcAddress,
+    abi: artifacts.TeraSwapFeeCollector.abi,
+    client: publicClient,
+  })
+
+  const fcFeeRecipient = await feeCollectorContract.read.feeRecipient()
+  const fcAdmin = await feeCollectorContract.read.admin()
+  const fcPaused = await feeCollectorContract.read.paused()
 
   console.log(`\n   TeraSwapFeeCollector (${fcAddress}):`)
   check("feeRecipient", fcFeeRecipient, FEE_RECIPIENT)
@@ -341,13 +374,13 @@ async function main() {
   check("paused", fcPaused, false)
 
   // OrderExecutor checks
-  const exFeeRecipient = await executor.feeRecipient()
-  const exAdmin = await executor.admin()
-  const exWeth = await executor.WETH()
-  const exPaused = await executor.paused()
-  const exBootstrapped = await executor.bootstrapped()
-  const routerWhitelisted = await executor.whitelistedRouters(fcAddress)
-  const executorWhitelisted = await executor.whitelistedExecutors(EXECUTOR)
+  const exFeeRecipient = await executorContract.read.feeRecipient()
+  const exAdmin = await executorContract.read.admin()
+  const exWeth = await executorContract.read.WETH()
+  const exPaused = await executorContract.read.paused()
+  const exBootstrapped = await executorContract.read.bootstrapped()
+  const routerWhitelisted = await executorContract.read.whitelistedRouters([fcAddress])
+  const executorWhitelisted = await executorContract.read.whitelistedExecutors([EXECUTOR])
 
   console.log(`\n   TeraSwapOrderExecutor (${exAddress}):`)
   check("feeRecipient", exFeeRecipient, FEE_RECIPIENT)
@@ -380,7 +413,7 @@ async function main() {
     network: "sepolia",
     chainId: CHAIN_ID,
     deployedAt: new Date().toISOString(),
-    deployer: wallet.address,
+    deployer: account.address,
     admin: ADMIN,
     feeRecipient: FEE_RECIPIENT,
     executor: EXECUTOR,
@@ -388,19 +421,19 @@ async function main() {
     contracts: {
       TeraSwapFeeCollector: {
         address: fcAddress,
-        txHash: feeCollector.deploymentTransaction().hash,
+        txHash: fcHash,
         constructorArgs: [FEE_RECIPIENT, ADMIN],
       },
       TeraSwapOrderExecutor: {
         address: exAddress,
-        txHash: executor.deploymentTransaction().hash,
+        txHash: exHash,
         constructorArgs: [FEE_RECIPIENT, ADMIN, WETH_SEPOLIA],
       },
     },
     bootstrap: {
       routers,
       executors,
-      txHash: bootstrapTx.hash,
+      txHash: bootstrapHash,
     },
     etherscan: {
       feeCollector: `https://sepolia.etherscan.io/address/${fcAddress}`,
@@ -421,10 +454,10 @@ async function main() {
       {
         address: fcAddress,
         chainId: CHAIN_ID,
-        deployer: wallet.address,
+        deployer: account.address,
         feeRecipient: FEE_RECIPIENT,
         admin: ADMIN,
-        txHash: feeCollector.deploymentTransaction().hash,
+        txHash: fcHash,
         timestamp: new Date().toISOString(),
       },
       null,

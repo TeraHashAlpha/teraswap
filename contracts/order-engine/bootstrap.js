@@ -11,7 +11,13 @@
  *   PRIVATE_KEY=0x... RPC_URL=https://ethereum-sepolia.publicnode.com CONTRACT=0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130 node bootstrap.js
  */
 
-import { ethers } from 'ethers'
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  getContract,
+} from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 
 // ── Router addresses per chain ──────────────────────────────
 
@@ -41,10 +47,34 @@ const ROUTERS = {
 }
 
 const BOOTSTRAP_ABI = [
-  'function bootstrap(address[] calldata routers) external',
-  'function bootstrapped() view returns (bool)',
-  'function admin() view returns (address)',
-  'function whitelistedRouters(address) view returns (bool)',
+  {
+    name: 'bootstrap',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'routers', type: 'address[]' }],
+    outputs: [],
+  },
+  {
+    name: 'bootstrapped',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'admin',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'whitelistedRouters',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'router', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
 ]
 
 async function main() {
@@ -57,34 +87,46 @@ async function main() {
     process.exit(1)
   }
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL)
-  const wallet = new ethers.Wallet(PRIVATE_KEY, provider)
-  const contract = new ethers.Contract(CONTRACT, BOOTSTRAP_ABI, wallet)
+  const account = privateKeyToAccount(PRIVATE_KEY.startsWith('0x') ? PRIVATE_KEY : `0x${PRIVATE_KEY}`)
 
-  const network = await provider.getNetwork()
-  const chainId = Number(network.chainId)
+  const publicClient = createPublicClient({
+    transport: http(RPC_URL),
+  })
 
-  console.log(`\n🔗 Chain: ${network.name} (${chainId})`)
-  console.log(`👤 Admin: ${wallet.address}`)
+  const walletClient = createWalletClient({
+    account,
+    transport: http(RPC_URL),
+  })
+
+  const chainId = await publicClient.getChainId()
+
+  const contract = getContract({
+    address: CONTRACT,
+    abi: BOOTSTRAP_ABI,
+    client: { public: publicClient, wallet: walletClient },
+  })
+
+  console.log(`\n🔗 Chain: ${chainId}`)
+  console.log(`👤 Admin: ${account.address}`)
   console.log(`📜 Contract: ${CONTRACT}\n`)
 
   // Check if already bootstrapped
-  const alreadyBootstrapped = await contract.bootstrapped()
+  const alreadyBootstrapped = await contract.read.bootstrapped()
   if (alreadyBootstrapped) {
     console.log('✅ Contract already bootstrapped. Checking router status...\n')
 
     const routerList = ROUTERS[chainId] || []
     for (const router of routerList) {
-      const isWhitelisted = await contract.whitelistedRouters(router.address)
+      const isWhitelisted = await contract.read.whitelistedRouters([router.address])
       console.log(`  ${isWhitelisted ? '✅' : '❌'} ${router.label}: ${router.address}`)
     }
     return
   }
 
   // Check admin
-  const admin = await contract.admin()
-  if (admin.toLowerCase() !== wallet.address.toLowerCase()) {
-    console.error(`❌ Wallet ${wallet.address} is not the admin (${admin})`)
+  const admin = await contract.read.admin()
+  if (admin.toLowerCase() !== account.address.toLowerCase()) {
+    console.error(`❌ Wallet ${account.address} is not the admin (${admin})`)
     process.exit(1)
   }
 
@@ -104,10 +146,10 @@ async function main() {
 
   // Execute bootstrap
   const addresses = routerList.map(r => r.address)
-  const tx = await contract.bootstrap(addresses)
-  console.log(`📤 TX sent: ${tx.hash}`)
+  const hash = await contract.write.bootstrap([addresses])
+  console.log(`📤 TX sent: ${hash}`)
 
-  const receipt = await tx.wait(1)
+  const receipt = await publicClient.waitForTransactionReceipt({ hash })
   console.log(`✅ Bootstrap complete! Gas used: ${receipt.gasUsed.toString()}`)
   console.log(`\n🎉 ${routerList.length} router(s) whitelisted. Orders can now be executed.\n`)
 }

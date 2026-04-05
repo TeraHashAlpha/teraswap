@@ -1,50 +1,61 @@
 /**
- * TeraSwap Order Executor — Self-hosted keeper
+ * TeraSwap Order Executor -- Self-hosted keeper
  *
  * Replaces Gelato Web3 Functions with a standalone Node.js process.
  * Runs every POLL_INTERVAL_MS, checks Supabase for active orders,
  * verifies on-chain conditions via canExecute(), fetches swap routes,
  * and sends executeOrder() transactions directly.
  *
- * ┌──────────────────────────────────────────────────────────────┐
- * │  Self-hosted Executor (runs every 30s)                       │
- * │                                                              │
- * │  1. Unlock stale "executing" orders (>60s stuck)             │
- * │  2. Fetch active orders from Supabase (oldest first)         │
- * │  3. For each order (up to MAX_BATCH):                        │
- * │     a. Atomic lock: set status → "executing"                 │
- * │     b. Call contract.canExecute() on-chain                   │
- * │     c. Fetch swap route from TeraSwap API                    │
- * │     d. Send executeOrder() transaction                       │
- * │     e. Record execution in order_executions table            │
- * │     f. Update order status                                   │
- * │  4. Log results, wait, repeat                                │
- * └──────────────────────────────────────────────────────────────┘
+ * +---------------------------------------------------------+
+ * |  Self-hosted Executor (runs every 30s)                   |
+ * |                                                          |
+ * |  1. Unlock stale "executing" orders (>60s stuck)         |
+ * |  2. Fetch active orders from Supabase (oldest first)     |
+ * |  3. For each order (up to MAX_BATCH):                    |
+ * |     a. Atomic lock: set status -> "executing"            |
+ * |     b. Call contract.canExecute() on-chain               |
+ * |     c. Fetch swap route from TeraSwap API                |
+ * |     d. Send executeOrder() transaction                   |
+ * |     e. Record execution in order_executions table        |
+ * |     f. Update order status                               |
+ * |  4. Log results, wait, repeat                            |
+ * +---------------------------------------------------------+
  *
  * DEPLOYMENT:
- *   1. Copy .env.executor.example → .env.executor
+ *   1. Copy .env.executor.example -> .env.executor
  *   2. Fill in secrets
  *   3. npm install
  *   4. npm start  (or use pm2 / systemd for production)
  *
  * REQUIRED ENV VARS:
- *   RPC_URL                     — Ethereum RPC endpoint
- *   EXECUTOR_PRIVATE_KEY        — Private key for the executor wallet (pays gas)
- *   SUPABASE_URL                — Supabase project URL
- *   SUPABASE_SERVICE_ROLE_KEY   — Supabase service role key (server-side)
- *   ORDER_EXECUTOR_ADDRESS      — Deployed contract address
- *   TERASWAP_API_URL            — (optional) Base URL for swap route API
- *   CHAIN_ID                    — (optional) Chain ID, defaults to 11155111 (Sepolia)
+ *   RPC_URL                     -- Ethereum RPC endpoint
+ *   EXECUTOR_PRIVATE_KEY        -- Private key for the executor wallet (pays gas)
+ *   SUPABASE_URL                -- Supabase project URL
+ *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
+ *   ORDER_EXECUTOR_ADDRESS      -- Deployed contract address
+ *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
+ *   CHAIN_ID                    -- (optional) Chain ID, defaults to 11155111 (Sepolia)
  */
 
-import { ethers } from "ethers"
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  getContract,
+  getAddress,
+  keccak256,
+  parseGwei,
+  formatUnits,
+  formatEther,
+  zeroHash,
+} from "viem"
 import { readFileSync } from "fs"
 import { join } from "path"
 import { createServer } from "http"
-import { createExecutorSigner } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
-import { ExecutorMonitor } from "./monitor.js"          // [EX-MON] Prometheus + Telegram
+import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
+import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 
-// ── Load .env.executor manually (no dotenv dependency) ──────────
+// ---- Load .env.executor manually (no dotenv dependency) ----------------
 
 function loadEnv(filePath) {
   try {
@@ -61,14 +72,14 @@ function loadEnv(filePath) {
       }
     }
   } catch (err) {
-    console.warn(`⚠ Could not load ${filePath}: ${err.message}`)
+    console.warn(`WARNING: Could not load ${filePath}: ${err.message}`)
   }
 }
 
-// Use process.cwd() — works with spaces in path
+// Use process.cwd() -- works with spaces in path
 loadEnv(join(process.cwd(), ".env.executor"))
 
-// ── Configuration ───────────────────────────────────────────────
+// ---- Configuration -----------------------------------------------------
 
 const RPC_URL = process.env.RPC_URL
 const PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY
@@ -78,20 +89,29 @@ const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
 const API_URL = process.env.TERASWAP_API_URL || ""
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
 
-// [B-02] Flashbots Protect RPC — prevents MEV/sandwich attacks on executor txs
+// [B-02] Flashbots Protect RPC -- prevents MEV/sandwich attacks on executor txs
 const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
 
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const MAX_BATCH = 5             // Max orders per cycle
-const LOCK_TIMEOUT_MS = 60_000  // 60s — unlock stale orders
+const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
 const MAX_GAS_PRICE_GWEI = 100  // Safety cap on gas price
 const MAX_RETRIES = 3           // [Audit] Max retries per order before marking failed
 const RETRY_BACKOFF_BASE = 5_000 // [Audit] Base backoff 5s (exponential: 5s, 10s, 20s)
 
 // [Audit] Per-order retry tracking
-const orderRetries = new Map()   // orderId → { count, lastAttempt }
+const orderRetries = new Map()   // orderId -> { count, lastAttempt }
 
-// ── Validate config ─────────────────────────────────────────────
+// ---- Chain config (minimal, supports any chain ID) ---------------------
+
+const chain = {
+  id: CHAIN_ID,
+  name: "ethereum",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL || ""] } },
+}
+
+// ---- Validate config ---------------------------------------------------
 
 function validateConfig() {
   const required = {
@@ -106,8 +126,8 @@ function validateConfig() {
     .map(([k]) => k)
 
   if (missing.length > 0) {
-    console.error(`❌ Missing required env vars: ${missing.join(", ")}`)
-    console.error("   Copy .env.executor.example → .env.executor and fill in values")
+    console.error(`FATAL: Missing required env vars: ${missing.join(", ")}`)
+    console.error("   Copy .env.executor.example -> .env.executor and fill in values")
     process.exit(1)
   }
 
@@ -117,33 +137,111 @@ function validateConfig() {
   const hasKey = !!PRIVATE_KEY
 
   if (!hasKms && !hasVault && !hasKey) {
-    console.error("❌ No signing method configured.")
+    console.error("FATAL: No signing method configured.")
     console.error("   Set KMS_KEY_ID (recommended), VAULT_ADDR, or EXECUTOR_PRIVATE_KEY")
     process.exit(1)
   }
 
   if (hasKey && !hasKms && !hasVault) {
     if (CHAIN_ID === 1) {
-      // [EX-01] Hard-fail on mainnet with plaintext key — too dangerous
-      console.error("❌ FATAL: plaintext EXECUTOR_PRIVATE_KEY is not allowed on mainnet (CHAIN_ID=1).")
+      // [EX-01] Hard-fail on mainnet with plaintext key -- too dangerous
+      console.error("FATAL: plaintext EXECUTOR_PRIVATE_KEY is not allowed on mainnet (CHAIN_ID=1).")
       console.error("   Configure KMS_KEY_ID (AWS KMS) or VAULT_ADDR (HashiCorp Vault) instead.")
       console.error("   If you intentionally want to run with a plaintext key, set ALLOW_PLAINTEXT_KEY_MAINNET=true")
       if (!process.env.ALLOW_PLAINTEXT_KEY_MAINNET) process.exit(1)
     } else {
-      console.warn("⚠  Using plaintext EXECUTOR_PRIVATE_KEY — migrate to KMS/Vault before mainnet!")
+      console.warn("WARNING: Using plaintext EXECUTOR_PRIVATE_KEY -- migrate to KMS/Vault before mainnet!")
     }
   }
 }
 
-// ── ABI fragments ───────────────────────────────────────────────
+// ---- ABI (JSON format for viem) ----------------------------------------
 
 const ORDER_EXECUTOR_ABI = [
-  // [C-01] v3: includes routerDataHash in Order struct
-  "function canExecute(tuple(address owner, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, uint8 orderType, uint8 condition, uint256 targetPrice, address priceFeed, uint256 expiry, uint256 nonce, address router, bytes32 routerDataHash, uint256 dcaInterval, uint256 dcaTotal) order, bytes signature) view returns (bool canExec, string reason)",
-  "function executeOrder(tuple(address owner, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, uint8 orderType, uint8 condition, uint256 targetPrice, address priceFeed, uint256 expiry, uint256 nonce, address router, bytes32 routerDataHash, uint256 dcaInterval, uint256 dcaTotal) order, bytes signature, bytes routerData)",
+  {
+    name: "canExecute",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "routerDataHash", type: "bytes32" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [
+      { name: "canExec", type: "bool" },
+      { name: "reason", type: "string" },
+    ],
+  },
+  {
+    name: "executeOrder",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "routerDataHash", type: "bytes32" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+      { name: "routerData", type: "bytes" },
+    ],
+    outputs: [],
+  },
 ]
 
-// ── Types ────────────────────────────────────────────────────────
+// Chainlink price feed ABI (for debug logging)
+const PRICE_FEED_ABI = [
+  {
+    name: "latestRoundData",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "roundId", type: "uint80" },
+      { name: "answer", type: "int256" },
+      { name: "startedAt", type: "uint256" },
+      { name: "updatedAt", type: "uint256" },
+      { name: "answeredInRound", type: "uint80" },
+    ],
+  },
+]
+
+// ---- Types -------------------------------------------------------------
 
 function orderTypeToEnum(type) {
   switch (type) {
@@ -154,7 +252,7 @@ function orderTypeToEnum(type) {
   }
 }
 
-// ── Supabase helpers ─────────────────────────────────────────────
+// ---- Supabase helpers --------------------------------------------------
 
 async function supabaseFetch(path, options = {}) {
   const url = `${SUPABASE_URL}/rest/v1/${path}`
@@ -172,17 +270,17 @@ async function supabaseFetch(path, options = {}) {
 
 async function fetchActiveOrders() {
   const query = `orders?status=eq.active&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`
-  log(`  🔍 Querying: ${SUPABASE_URL}/rest/v1/${query.slice(0, 80)}…`)
+  log(`  Querying: ${SUPABASE_URL}/rest/v1/${query.slice(0, 80)}...`)
   const res = await supabaseFetch(query)
   if (!res.ok) {
     const body = await res.text()
-    console.error(`  ⚠ Supabase fetch error: ${res.status} — ${body}`)
+    console.error(`  Supabase fetch error: ${res.status} -- ${body}`)
     return []
   }
   const data = await res.json()
-  log(`  📦 Supabase returned ${data.length} row(s)`)
+  log(`  Supabase returned ${data.length} row(s)`)
   if (data.length > 0) {
-    log(`  📋 First order: id=${data[0].id?.slice(0,8)}, status=${data[0].status}, wallet=${data[0].wallet?.slice(0,10)}…`)
+    log(`  First order: id=${data[0].id?.slice(0,8)}, status=${data[0].status}, wallet=${data[0].wallet?.slice(0,10)}...`)
   }
   return data
 }
@@ -242,11 +340,11 @@ async function recordExecution(orderId, txHash, amountIn, amountOut, gasUsed) {
   })
 }
 
-// ── Swap route fetcher ──────────────────────────────────────────
+// ---- Swap route fetcher ------------------------------------------------
 
 async function fetchSwapRoute(tokenIn, tokenOut, amount, from, router) {
   if (!API_URL) {
-    log("  ⚠ TERASWAP_API_URL not configured — skipping swap route")
+    log("  TERASWAP_API_URL not configured -- skipping swap route")
     return null
   }
 
@@ -266,34 +364,34 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, router) {
     })
 
     if (!res.ok) {
-      console.error(`  ⚠ Swap API error: ${res.status}`)
+      console.error(`  Swap API error: ${res.status}`)
       return null
     }
 
     const data = await res.json()
     if (!data.tx?.data) {
-      console.error("  ⚠ Swap route: missing tx data")
+      console.error("  Swap route: missing tx data")
       return null
     }
 
     return { data: data.tx.data }
   } catch (err) {
-    console.error("  ⚠ fetchSwapRoute error:", err.message)
+    console.error("  fetchSwapRoute error:", err.message)
     return null
   }
 }
 
-// ── Logging ─────────────────────────────────────────────────────
+// ---- Logging -----------------------------------------------------------
 
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 19)
   console.log(`[${ts}] ${msg}`)
 }
 
-// ── Main execution loop ─────────────────────────────────────────
+// ---- Main execution loop -----------------------------------------------
 
-async function executeCycle(wallet, contract, monitor = null) {
-  log("🔄 Starting execution cycle...")
+async function executeCycle(publicClient, walletClient, contract, flashbotsPublicClient, flashbotsWalletClient, monitor = null) {
+  log("Starting execution cycle...")
   if (monitor) monitor.onCycleStart()
 
   // 0. Unlock stale orders
@@ -303,11 +401,11 @@ async function executeCycle(wallet, contract, monitor = null) {
   const orders = await fetchActiveOrders()
 
   if (orders.length === 0) {
-    log("  💤 No active orders")
+    log("  No active orders")
     return
   }
 
-  log(`  📋 Found ${orders.length} active order(s)`)
+  log(`  Found ${orders.length} active order(s)`)
 
   let executed = 0
   let skipped = 0
@@ -318,15 +416,14 @@ async function executeCycle(wallet, contract, monitor = null) {
 
     try {
       // Check if expired (off-chain pre-filter)
-      // expiry is stored as ISO string in Supabase
       const expiryTs = Number(dbOrder.expiry)
       if (expiryTs < Math.floor(Date.now() / 1000)) {
         await updateOrderStatus(dbOrder.id, "expired")
-        log(`  ⏰ Order ${dbOrder.id.slice(0, 8)}… expired (expiry: ${dbOrder.expiry})`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
         continue
       }
 
-      // [Audit] Check retry backoff — skip if too soon
+      // [Audit] Check retry backoff -- skip if too soon
       const retryState = orderRetries.get(dbOrder.id)
       if (retryState) {
         const backoff = RETRY_BACKOFF_BASE * Math.pow(2, retryState.count - 1)
@@ -338,7 +435,7 @@ async function executeCycle(wallet, contract, monitor = null) {
       // Atomic lock
       const locked = await lockOrder(dbOrder.id)
       if (!locked) {
-        log(`  🔒 Order ${dbOrder.id.slice(0, 8)}… already locked`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... already locked`)
         skipped++
         continue
       }
@@ -346,52 +443,56 @@ async function executeCycle(wallet, contract, monitor = null) {
       // Build order struct from order_data JSON (has all fields with correct types)
       const od = dbOrder.order_data
       if (!od) {
-        log(`  ⚠ Order ${dbOrder.id.slice(0, 8)}… missing order_data, skipping`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... missing order_data, skipping`)
         await updateOrderStatus(dbOrder.id, "active")
         skipped++
         continue
       }
 
-      // Use order_data directly — it has the exact values that were EIP-712 signed
+      // Use order_data directly -- it has the exact values that were EIP-712 signed
       const orderStruct = {
-        owner: ethers.getAddress(od.owner),                  // checksum address
-        tokenIn: ethers.getAddress(od.tokenIn),
-        tokenOut: ethers.getAddress(od.tokenOut),
+        owner: getAddress(od.owner),                         // checksum address
+        tokenIn: getAddress(od.tokenIn),
+        tokenOut: getAddress(od.tokenOut),
         amountIn: BigInt(od.amountIn),                       // uint256
         minAmountOut: BigInt(od.minAmountOut),
         orderType: Number(od.orderType),                     // uint8
         condition: Number(od.condition),                     // uint8
         targetPrice: BigInt(od.targetPrice),                 // uint256
-        priceFeed: ethers.getAddress(od.priceFeed),
+        priceFeed: getAddress(od.priceFeed),
         expiry: BigInt(od.expiry),                           // uint256
         nonce: BigInt(od.nonce),                             // uint256
-        router: ethers.getAddress(od.router),
-        routerDataHash: od.routerDataHash || ethers.ZeroHash, // [C-01] keccak256 of routerData
+        router: getAddress(od.router),
+        routerDataHash: od.routerDataHash || zeroHash,       // [C-01] keccak256 of routerData
         dcaInterval: BigInt(od.dcaInterval),                 // uint256
         dcaTotal: BigInt(od.dcaTotal),                       // uint256
       }
 
-      log(`  📦 Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}`)
+      log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}`)
 
       // Debug: read current Chainlink price
       try {
-        const feedAbi = ["function latestRoundData() view returns (uint80, int256, uint256, uint256, uint80)"]
-        const feedContract = new ethers.Contract(orderStruct.priceFeed, feedAbi, wallet)
-        const [, answer] = await feedContract.latestRoundData()
-        log(`  💰 Chainlink price from ${orderStruct.priceFeed.slice(0,10)}…: ${answer.toString()} (=$${Number(answer) / 1e8})`)
-        log(`  🎯 Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
+        const [, answer] = await publicClient.readContract({
+          address: orderStruct.priceFeed,
+          abi: PRICE_FEED_ABI,
+          functionName: "latestRoundData",
+        })
+        log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
+        log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
       } catch (e) {
-        log(`  ⚠ Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+        log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
       }
 
       // Check via contract
-      const [canExec, reason] = await contract.canExecute(
-        orderStruct,
-        dbOrder.signature
-      )
+      const [canExec, reason] = await publicClient.readContract({
+        address: CONTRACT_ADDRESS,
+        abi: ORDER_EXECUTOR_ABI,
+        functionName: "canExecute",
+        args: [orderStruct, dbOrder.signature],
+      })
 
       if (!canExec) {
-        log(`  ❌ Order ${dbOrder.id.slice(0, 8)}… — ${reason}`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... -- ${reason}`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
         skipped++
         continue
@@ -407,21 +508,21 @@ async function executeCycle(wallet, contract, monitor = null) {
       )
 
       if (!swapData) {
-        log(`  ⚠ Order ${dbOrder.id.slice(0, 8)}… — no swap route, will retry`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route, will retry`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
         skipped++
         continue
       }
 
       // [C-01] Verify routerData hash for non-DCA orders.
-      // DCA orders use ZeroHash as routerDataHash since calldata varies per execution —
+      // DCA orders use ZeroHash as routerDataHash since calldata varies per execution --
       // the contract now skips the hash check when routerDataHash == bytes32(0).
-      // IMPORTANT: Do NOT modify orderStruct.routerDataHash — it must match the
+      // IMPORTANT: Do NOT modify orderStruct.routerDataHash -- it must match the
       // original signed value or EIP-712 signature verification will fail.
-      if (orderStruct.routerDataHash !== ethers.ZeroHash) {
-        const actualRouterDataHash = ethers.keccak256(swapData.data)
+      if (orderStruct.routerDataHash !== zeroHash) {
+        const actualRouterDataHash = keccak256(swapData.data)
         if (actualRouterDataHash !== orderStruct.routerDataHash) {
-          log(`  ⚠ Order ${dbOrder.id.slice(0, 8)}… routerData hash mismatch, skipping`)
+          log(`  Order ${dbOrder.id.slice(0, 8)}... routerData hash mismatch, skipping`)
           await updateOrderStatus(dbOrder.id, "active") // Unlock
           skipped++
           continue
@@ -429,43 +530,41 @@ async function executeCycle(wallet, contract, monitor = null) {
       }
 
       // Gas price safety check
-      const feeData = await wallet.provider.getFeeData()
-      const gasPrice = feeData.gasPrice || 0n
-      const maxGas = ethers.parseUnits(String(MAX_GAS_PRICE_GWEI), "gwei")
+      const gasPrice = await publicClient.getGasPrice()
+      const maxGas = parseGwei(String(MAX_GAS_PRICE_GWEI))
 
       if (gasPrice > maxGas) {
-        log(`  ⛽ Gas too high (${ethers.formatUnits(gasPrice, "gwei")} gwei), skipping cycle`)
+        log(`  Gas too high (${formatUnits(gasPrice, 9)} gwei), skipping cycle`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
         break // Skip all remaining orders this cycle
       }
 
       // Send transaction!
-      log(`  🚀 Executing order ${dbOrder.id.slice(0, 8)}… (${dbOrder.order_type})`)
+      log(`  Executing order ${dbOrder.id.slice(0, 8)}... (${dbOrder.order_type})`)
 
       // [B-02] Use Flashbots Protect RPC if configured (prevents MEV/sandwich attacks)
-      const txSigner = FLASHBOTS_RPC ? flashbotsWallet : wallet
-      const txContract = FLASHBOTS_RPC
-        ? new ethers.Contract(CONTRACT_ADDRESS, ORDER_EXECUTOR_ABI, flashbotsWallet)
-        : contract
+      const txWalletClient = FLASHBOTS_RPC ? flashbotsWalletClient : walletClient
+      const txPublicClient = FLASHBOTS_RPC ? flashbotsPublicClient : publicClient
 
-      const tx = await txContract.executeOrder(
-        orderStruct,
-        dbOrder.signature,
-        swapData.data
-      )
+      const txHash = await txWalletClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: ORDER_EXECUTOR_ABI,
+        functionName: "executeOrder",
+        args: [orderStruct, dbOrder.signature, swapData.data],
+      })
 
-      log(`  📤 TX sent: ${tx.hash}`)
+      log(`  TX sent: ${txHash}`)
 
       // Wait for confirmation
-      const receipt = await tx.wait(1)
+      const receipt = await txPublicClient.waitForTransactionReceipt({ hash: txHash })
 
-      if (receipt.status === 1) {
-        log(`  ✅ Order ${dbOrder.id.slice(0, 8)}… executed! Gas: ${receipt.gasUsed.toString()}`)
+      if (receipt.status === "success") {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... executed! Gas: ${receipt.gasUsed.toString()}`)
 
         // [EX-MON] Track gas spent
         if (monitor && receipt.gasUsed) {
-          const gasPrice = receipt.effectiveGasPrice || receipt.gasPrice || 0n
-          monitor.onGasSpent(receipt.gasUsed * gasPrice)
+          const effectiveGasPrice = receipt.effectiveGasPrice || 0n
+          monitor.onGasSpent(receipt.gasUsed * effectiveGasPrice)
         }
 
         // Update status based on order type
@@ -482,7 +581,7 @@ async function executeCycle(wallet, contract, monitor = null) {
                 dca_executed: newExecCount,
                 dca_last_exec: now,
                 executed_at: now,
-                tx_hash: tx.hash,
+                tx_hash: txHash,
                 updated_at: now,
               }),
             })
@@ -495,7 +594,7 @@ async function executeCycle(wallet, contract, monitor = null) {
                 status: "active",
                 dca_executed: newExecCount,
                 dca_last_exec: now,
-                tx_hash: tx.hash,
+                tx_hash: txHash,
                 updated_at: now,
               }),
             })
@@ -508,7 +607,7 @@ async function executeCycle(wallet, contract, monitor = null) {
             body: JSON.stringify({
               status: "executed",
               executed_at: new Date().toISOString(),
-              tx_hash: tx.hash,
+              tx_hash: txHash,
               updated_at: new Date().toISOString(),
             }),
           })
@@ -517,7 +616,7 @@ async function executeCycle(wallet, contract, monitor = null) {
         // Record execution
         await recordExecution(
           dbOrder.id,
-          tx.hash,
+          txHash,
           dbOrder.amount_in,
           null, // amountOut from events (could parse logs)
           receipt.gasUsed.toString()
@@ -525,11 +624,11 @@ async function executeCycle(wallet, contract, monitor = null) {
 
         executed++
       } else {
-        log(`  ❌ TX reverted: ${tx.hash}`)
+        log(`  TX reverted: ${txHash}`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock for retry
       }
     } catch (err) {
-      console.error(`  💥 Order ${dbOrder.id.slice(0, 8)}… error:`, err.message)
+      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
       errors++
       stats.totalErrors++
       stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
@@ -541,12 +640,12 @@ async function executeCycle(wallet, contract, monitor = null) {
       orderRetries.set(dbOrder.id, retryState)
 
       if (retryState.count >= MAX_RETRIES) {
-        log(`  🚫 Order ${dbOrder.id.slice(0, 8)}… max retries (${MAX_RETRIES}) reached, marking failed`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... max retries (${MAX_RETRIES}) reached, marking failed`)
         await updateOrderStatus(dbOrder.id, "failed")
         orderRetries.delete(dbOrder.id)
       } else {
         const backoff = RETRY_BACKOFF_BASE * Math.pow(2, retryState.count - 1)
-        log(`  🔄 Order ${dbOrder.id.slice(0, 8)}… retry ${retryState.count}/${MAX_RETRIES}, backoff ${backoff / 1000}s`)
+        log(`  Order ${dbOrder.id.slice(0, 8)}... retry ${retryState.count}/${MAX_RETRIES}, backoff ${backoff / 1000}s`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock for retry
       }
     }
@@ -561,10 +660,10 @@ async function executeCycle(wallet, contract, monitor = null) {
 
   if (monitor) monitor.onCycleEnd(executed, errors)
 
-  log(`  📊 Cycle done: ${executed} executed, ${skipped} skipped`)
+  log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
 }
 
-// ── Stats tracking ──────────────────────────────────────────────
+// ---- Stats tracking ----------------------------------------------------
 
 const stats = {
   startedAt: new Date().toISOString(),
@@ -577,11 +676,11 @@ const stats = {
   lastError: null,
 }
 
-// ── Health check HTTP server ────────────────────────────────────
+// ---- Health check HTTP server ------------------------------------------
 
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || "3001")
 
-function startHealthServer(wallet) {
+function startHealthServer() {
   // [Audit] Health endpoint access token (optional, set in .env.executor)
   const HEALTH_TOKEN = process.env.HEALTH_TOKEN || ""
 
@@ -599,7 +698,7 @@ function startHealthServer(wallet) {
       }
 
       res.writeHead(200, { "Content-Type": "application/json" })
-      // [Audit B-05] Sanitized response — no executor address or sensitive data
+      // [Audit B-05] Sanitized response -- no executor address or sensitive data
       res.end(JSON.stringify({
         status: "ok",
         chainId: CHAIN_ID,
@@ -622,63 +721,79 @@ function startHealthServer(wallet) {
   })
 
   server.listen(HEALTH_PORT, () => {
-    log(`🏥 Health check: http://localhost:${HEALTH_PORT}/health`)
+    log(`Health check: http://localhost:${HEALTH_PORT}/health`)
   })
 
   server.on("error", (err) => {
-    // Port in use — health check is optional, don't crash
+    // Port in use -- health check is optional, don't crash
     if (err.code === "EADDRINUSE") {
-      log(`⚠ Health check port ${HEALTH_PORT} in use — skipping`)
+      log(`Health check port ${HEALTH_PORT} in use -- skipping`)
     }
   })
 }
 
-// ── Entrypoint ──────────────────────────────────────────────────
+// ---- Entrypoint --------------------------------------------------------
 
 async function main() {
   validateConfig()
 
   console.log("")
-  console.log("╔══════════════════════════════════════════╗")
-  console.log("║   TeraSwap Order Executor v1.0           ║")
-  console.log("║   Self-hosted keeper (replaces Gelato)    ║")
-  console.log("╚══════════════════════════════════════════╝")
+  console.log("+===========================================+")
+  console.log("|   TeraSwap Order Executor v1.1 (viem)     |")
+  console.log("|   Self-hosted keeper (replaces Gelato)     |")
+  console.log("+===========================================+")
   console.log("")
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID)
+  // Create public client for reading chain state
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(RPC_URL),
+  })
 
-  // [C-02/B-01] Use KMS/Vault signer if configured, otherwise plaintext key
-  const wallet = await createExecutorSigner(provider)
-  const contract = new ethers.Contract(CONTRACT_ADDRESS, ORDER_EXECUTOR_ABI, wallet)
+  // [C-02/B-01] Use KMS/Vault account if configured, otherwise plaintext key
+  const account = await createExecutorAccount()
 
-  // [B-02] Flashbots wallet for MEV-protected transaction submission
-  let flashbotsWallet = wallet
+  // Create wallet client for sending transactions
+  const walletClient = createWalletClient({
+    account,
+    chain,
+    transport: http(RPC_URL),
+  })
+
+  // [B-02] Flashbots clients for MEV-protected transaction submission
+  let flashbotsPublicClient = null
+  let flashbotsWalletClient = null
   if (FLASHBOTS_RPC) {
-    const flashbotsProvider = new ethers.JsonRpcProvider(FLASHBOTS_RPC, CHAIN_ID)
-    // For KMS signer, connect to Flashbots provider; for Wallet, create new instance
-    flashbotsWallet = wallet.connect ? wallet.connect(flashbotsProvider) : new ethers.Wallet(PRIVATE_KEY, flashbotsProvider)
-    log(`🛡️  Flashbots Protect RPC enabled: ${FLASHBOTS_RPC.slice(0, 40)}…`)
+    flashbotsPublicClient = createPublicClient({
+      chain,
+      transport: http(FLASHBOTS_RPC),
+    })
+    flashbotsWalletClient = createWalletClient({
+      account,
+      chain,
+      transport: http(FLASHBOTS_RPC),
+    })
+    log(`Flashbots Protect RPC enabled: ${FLASHBOTS_RPC.slice(0, 40)}...`)
   }
 
-  const balance = await provider.getBalance(wallet.address)
-  const network = await provider.getNetwork()
+  const balance = await publicClient.getBalance({ address: account.address })
 
-  log(`🔑 Executor wallet: ${wallet.address}`)
-  log(`⛓  Chain: ${network.name} (${network.chainId})`)
-  log(`💰 Balance: ${ethers.formatEther(balance)} ETH`)
-  log(`📜 Contract: ${CONTRACT_ADDRESS}`)
-  log(`⏱  Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
-  log(`📦 Max batch: ${MAX_BATCH}`)
-  log(`⛽ Max gas: ${MAX_GAS_PRICE_GWEI} gwei`)
+  log(`Executor wallet: ${account.address}`)
+  log(`Chain: ${CHAIN_ID}`)
+  log(`Balance: ${formatEther(balance)} ETH`)
+  log(`Contract: ${CONTRACT_ADDRESS}`)
+  log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
+  log(`Max batch: ${MAX_BATCH}`)
+  log(`Max gas: ${MAX_GAS_PRICE_GWEI} gwei`)
   console.log("")
 
   if (balance === 0n) {
-    console.warn("⚠  Executor wallet has 0 ETH — transactions will fail!")
+    console.warn("WARNING: Executor wallet has 0 ETH -- transactions will fail!")
     console.warn("   Fund the wallet before starting execution.\n")
   }
 
   // Start health check server
-  startHealthServer(wallet)
+  startHealthServer()
 
   // [EX-MON] Start monitoring & alerting
   const monitor = new ExecutorMonitor(stats)
@@ -686,28 +801,28 @@ async function main() {
   monitor.startHeartbeat()
 
   // Run immediately, then on interval
-  await executeCycle(wallet, contract, monitor)
+  await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
 
   setInterval(async () => {
     try {
-      await executeCycle(wallet, contract, monitor)
+      await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
     } catch (err) {
-      console.error("💥 Cycle error:", err.message)
+      console.error("Cycle error:", err.message)
       if (monitor) monitor.onCycleError(err)
     }
   }, POLL_INTERVAL_MS)
 
-  log("🟢 Executor running. Press Ctrl+C to stop.")
+  log("Executor running. Press Ctrl+C to stop.")
 }
 
 // Handle graceful shutdown
 process.on("SIGINT", () => {
-  log("🛑 Shutting down executor...")
+  log("Shutting down executor...")
   process.exit(0)
 })
 
 process.on("SIGTERM", () => {
-  log("🛑 Shutting down executor...")
+  log("Shutting down executor...")
   process.exit(0)
 })
 

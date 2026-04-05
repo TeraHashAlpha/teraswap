@@ -21,7 +21,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { ethers } from 'ethers'
+import { recoverTypedDataAddress } from 'viem'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -128,7 +128,7 @@ export async function createOrder(body: CreateOrderRequest) {
   }
 
   // ── [M-05] Server-side signature verification ──
-  const sigValid = verifyOrderSignature(body)
+  const sigValid = await verifyOrderSignature(body)
   if (!sigValid.valid) {
     return { error: `Invalid signature: ${sigValid.reason}` }
   }
@@ -295,7 +295,7 @@ function getSupabase() {
  * [M-05] Verify EIP-712 signature matches the order data.
  * This prevents submitting orders with tampered data.
  */
-function verifyOrderSignature(body: CreateOrderRequest): { valid: boolean; reason?: string } {
+async function verifyOrderSignature(body: CreateOrderRequest): Promise<{ valid: boolean; reason?: string }> {
   try {
     const chainId = parseInt(process.env.CHAIN_ID || '1')
     const verifyingContract = process.env.ORDER_EXECUTOR_ADDRESS
@@ -307,7 +307,7 @@ function verifyOrderSignature(body: CreateOrderRequest): { valid: boolean; reaso
     const domain = {
       ...EIP712_DOMAIN,
       chainId,
-      verifyingContract,
+      verifyingContract: verifyingContract as `0x${string}`,
     }
 
     const orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
@@ -331,12 +331,13 @@ function verifyOrderSignature(body: CreateOrderRequest): { valid: boolean; reaso
     }
 
     // Recover signer from EIP-712 typed data signature
-    const recoveredAddress = ethers.verifyTypedData(
+    const recoveredAddress = await recoverTypedDataAddress({
       domain,
-      ORDER_TYPES,
+      types: ORDER_TYPES,
+      primaryType: 'Order' as const,
       message,
-      body.signature,
-    )
+      signature: body.signature as `0x${string}`,
+    })
 
     if (recoveredAddress.toLowerCase() !== body.wallet.toLowerCase()) {
       return { valid: false, reason: `Signer mismatch: expected ${body.wallet}, got ${recoveredAddress}` }

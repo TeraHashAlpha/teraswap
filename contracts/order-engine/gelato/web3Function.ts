@@ -32,30 +32,94 @@
  *   RPC_URL (Ethereum mainnet)
  *   ORDER_EXECUTOR_ADDRESS
  *   TERASWAP_API_URL (optional, defaults to /api/swap)
+ *
+ * NOTE: This file uses the Gelato Web3 Functions SDK which internally
+ * provides an ethers-compatible provider via multiChainProvider.
+ * We use viem for ABI encoding/decoding and the Gelato provider
+ * only for raw eth_call RPC calls.
  */
 
 import {
   Web3Function,
   Web3FunctionContext,
 } from "@gelatonetwork/web3-functions-sdk"
-import { Contract, ethers } from "ethers"
+import {
+  encodeFunctionData,
+  decodeFunctionResult,
+  type Abi,
+} from "viem"
 
 // ── Constants ──────────────────────────────────────────────
 
 const MAX_BATCH = 5 // Max orders to execute per Gelato cycle
 const LOCK_TIMEOUT_MS = 60_000 // 60s — unlock stale "executing" orders
 
-// ── ABI fragments (v2: router is part of Order struct) ─────
+// ── ABI (JSON format for viem) ────────────────────────────
 
 const ORDER_EXECUTOR_ABI = [
-  "function canExecute(tuple(address owner, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, uint8 orderType, uint8 condition, uint256 targetPrice, address priceFeed, uint256 expiry, uint256 nonce, address router, uint256 dcaInterval, uint256 dcaTotal) order, bytes signature) view returns (bool canExec, string reason)",
-  "function executeOrder(tuple(address owner, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, uint8 orderType, uint8 condition, uint256 targetPrice, address priceFeed, uint256 expiry, uint256 nonce, address router, uint256 dcaInterval, uint256 dcaTotal) order, bytes signature, bytes routerData)",
-]
-
-const ERC20_ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-]
+  {
+    name: "canExecute",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [
+      { name: "canExec", type: "bool" },
+      { name: "reason", type: "string" },
+    ],
+  },
+  {
+    name: "executeOrder",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+      { name: "routerData", type: "bytes" },
+    ],
+    outputs: [],
+  },
+] as const satisfies Abi
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -101,8 +165,8 @@ Web3Function.onRun(async (context: Web3FunctionContext) => {
     return { canExec: false, message: "Missing secrets" }
   }
 
+  // Gelato provides an ethers-compatible provider; we use it for raw eth_call only
   const provider = multiChainProvider.default()
-  const executor = new Contract(executorAddress, ORDER_EXECUTOR_ABI, provider)
 
   // ── 0. Unlock stale "executing" orders (M-03: race condition prevention) ──
   await unlockStaleOrders(supabaseUrl, supabaseKey)
@@ -136,27 +200,41 @@ Web3Function.onRun(async (context: Web3FunctionContext) => {
 
       // Build order struct for v2 contract (includes router)
       const orderStruct = {
-        owner: dbOrder.wallet,
-        tokenIn: dbOrder.token_in,
-        tokenOut: dbOrder.token_out,
-        amountIn: dbOrder.amount_in,
-        minAmountOut: dbOrder.min_amount_out,
+        owner: dbOrder.wallet as `0x${string}`,
+        tokenIn: dbOrder.token_in as `0x${string}`,
+        tokenOut: dbOrder.token_out as `0x${string}`,
+        amountIn: BigInt(dbOrder.amount_in),
+        minAmountOut: BigInt(dbOrder.min_amount_out),
         orderType: orderTypeToEnum(dbOrder.order_type),
         condition: dbOrder.price_condition === "above" ? 0 : 1,
-        targetPrice: dbOrder.target_price,
-        priceFeed: dbOrder.price_feed,
-        expiry: dbOrder.expiry,
-        nonce: dbOrder.nonce,
-        router: dbOrder.router, // [H-01] Router from signed order
-        dcaInterval: dbOrder.dca_interval || 0,
-        dcaTotal: dbOrder.dca_total || 1,
+        targetPrice: BigInt(dbOrder.target_price),
+        priceFeed: dbOrder.price_feed as `0x${string}`,
+        expiry: BigInt(dbOrder.expiry),
+        nonce: BigInt(dbOrder.nonce),
+        router: dbOrder.router as `0x${string}`, // [H-01] Router from signed order
+        dcaInterval: BigInt(dbOrder.dca_interval || 0),
+        dcaTotal: BigInt(dbOrder.dca_total || 1),
       }
 
-      // Check via contract (includes price, balance, allowance checks)
-      const [canExec, reason] = await executor.canExecute(
-        orderStruct,
-        dbOrder.signature,
-      )
+      // Encode canExecute call via viem
+      const canExecuteData = encodeFunctionData({
+        abi: ORDER_EXECUTOR_ABI,
+        functionName: "canExecute",
+        args: [orderStruct, dbOrder.signature as `0x${string}`],
+      })
+
+      // Use Gelato's ethers provider for the raw eth_call
+      const rawResult = await provider.call({
+        to: executorAddress,
+        data: canExecuteData,
+      })
+
+      // Decode the result via viem
+      const [canExec, reason] = decodeFunctionResult({
+        abi: ORDER_EXECUTOR_ABI,
+        functionName: "canExecute",
+        data: rawResult as `0x${string}`,
+      })
 
       if (!canExec) {
         console.log(`Order ${dbOrder.id}: Cannot execute — ${reason}`)
@@ -182,15 +260,16 @@ Web3Function.onRun(async (context: Web3FunctionContext) => {
         continue
       }
 
-      // ── 4. Build executeOrder calldata ──
-      // v2: executeOrder(order, signature, routerData) — no separate router param
+      // ── 4. Build executeOrder calldata via viem ──
+      const executeCalldata = encodeFunctionData({
+        abi: ORDER_EXECUTOR_ABI,
+        functionName: "executeOrder",
+        args: [orderStruct, dbOrder.signature as `0x${string}`, swapData.data as `0x${string}`],
+      })
+
       callDatas.push({
         to: executorAddress,
-        data: executor.interface.encodeFunctionData("executeOrder", [
-          orderStruct,
-          dbOrder.signature,
-          swapData.data,
-        ]),
+        data: executeCalldata,
       })
 
       console.log(`Order ${dbOrder.id}: Queued for execution`)
