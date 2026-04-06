@@ -21,6 +21,7 @@ import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import type { SplitRoute, SplitLeg } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
+import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 
 // ── Types ──
 
@@ -190,6 +191,13 @@ export function useSplitSwap(
         const selector = calldataHex.slice(0, 10).toLowerCase()
         if (!KNOWN_SWAP_SELECTORS.has(selector)) {
           throw new Error(`Unknown swap selector ${selector} in split leg. Blocked for safety.`)
+        }
+        // [R1] Validate recipient in calldata matches connected wallet
+        if (address) {
+          const recipientCheck = validateCallDataRecipient(calldataHex, address)
+          if (!recipientCheck.valid) {
+            throw new Error(`Split leg recipient mismatch: tokens would go to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet.`)
+          }
         }
         // Fee integrity check
         if (leg.quote?.toAmount) {

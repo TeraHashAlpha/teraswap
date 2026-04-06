@@ -3,6 +3,7 @@ import { fetchSwapFromSource } from '@/lib/api'
 import type { AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
+import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 
 /**
@@ -107,6 +108,27 @@ export async function POST(req: NextRequest) {
           { error: 'Unknown swap function selector', selector },
           { status: 400 },
         )
+      }
+
+      // [R1] Validate recipient in calldata matches the requesting wallet
+      if (from) {
+        const recipientCheck = validateCallDataRecipient(result.tx.data as string, from)
+        if (!recipientCheck.valid) {
+          console.error(
+            `[R1] BLOCKED: Recipient mismatch in ${source} calldata.`,
+            `Expected: ${from}, Got: ${recipientCheck.extracted}`,
+            `Reason: ${recipientCheck.reason}`,
+          )
+          return NextResponse.json(
+            { error: 'Swap calldata recipient does not match your wallet. Possible API compromise.' },
+            { status: 400 },
+          )
+        }
+        if (recipientCheck.extracted) {
+          console.log(`[R1] Recipient validated: ${recipientCheck.extracted.slice(0, 10)}... (${source})`)
+        } else if (!recipientCheck.implicitRecipient) {
+          console.warn(`[R1] Could not extract recipient for ${source} (selector unsupported)`)
+        }
       }
     }
 

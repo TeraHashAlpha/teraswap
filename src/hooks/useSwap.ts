@@ -14,6 +14,7 @@ import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
+import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 
 // ── Price Guard error (DefiLlama server-side block) ──────
 class PriceGuardError extends Error {
@@ -241,6 +242,15 @@ export function useSwap(
       if (selector && !KNOWN_SWAP_SELECTORS.has(selector)) {
         console.warn(`[TeraSwap] Unknown swap selector ${selector} from ${source}. Blocking for safety.`)
         throw new Error(`Unrecognized swap function selector (${selector}). Contact support if this persists.`)
+      }
+
+      // [R1] Validate recipient in calldata matches connected wallet
+      const recipientCheck = validateCallDataRecipient(swapData.tx.data as string, address)
+      if (!recipientCheck.valid) {
+        console.error('[R1] Recipient mismatch:', recipientCheck)
+        throw new Error(
+          `Swap recipient mismatch: calldata would send tokens to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet. Swap blocked.`
+        )
       }
 
       // [M-01] Fee integrity check: verify aggregator applied partner fee
