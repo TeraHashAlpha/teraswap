@@ -52,6 +52,17 @@ jobs:
       - name: Security audit (high/critical)
         run: npm audit --audit-level=high
 
+  lockfile-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Validate lockfile integrity
+        run: npx lockfile-lint@4 --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
+
   test-contracts:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +78,7 @@ jobs:
         run: forge test -vvv
 
   build:
-    needs: [lint, typecheck, audit]
+    needs: [lint, typecheck, audit, lockfile-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
