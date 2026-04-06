@@ -204,11 +204,13 @@ contract TeraSwapOrderExecutorTest is Test {
         // Deploy executor
         executor = new TeraSwapOrderExecutor(feeRecipient, admin, address(weth));
 
-        // Bootstrap router
+        // Bootstrap router + executor (test contract is the executor)
         address[] memory routers = new address[](1);
         routers[0] = address(router);
+        address[] memory executors = new address[](1);
+        executors[0] = address(this);
         vm.prank(admin);
-        executor.bootstrap(routers);
+        executor.bootstrap(routers, executors);
 
         // Fund user
         tokenIn.mint(user, 100_000e18);
@@ -237,6 +239,7 @@ contract TeraSwapOrderExecutorTest is Test {
             expiry: block.timestamp + EXPIRY_DELTA,
             nonce: 0,
             router: address(router),
+            routerDataHash: keccak256(hex"01"),
             dcaInterval: 0,
             dcaTotal: 0
         });
@@ -279,7 +282,7 @@ contract TeraSwapOrderExecutorTest is Test {
                 "Order(address owner,address tokenIn,address tokenOut,uint256 amountIn,"
                 "uint256 minAmountOut,uint8 orderType,uint8 condition,uint256 targetPrice,"
                 "address priceFeed,uint256 expiry,uint256 nonce,address router,"
-                "uint256 dcaInterval,uint256 dcaTotal)"
+                "bytes32 routerDataHash,uint256 dcaInterval,uint256 dcaTotal)"
             ),
             order.owner,
             order.tokenIn,
@@ -293,6 +296,7 @@ contract TeraSwapOrderExecutorTest is Test {
             order.expiry,
             order.nonce,
             order.router,
+            order.routerDataHash,
             order.dcaInterval,
             order.dcaTotal
         ));
@@ -310,7 +314,7 @@ contract TeraSwapOrderExecutorTest is Test {
     function _executeDefault() internal returns (TeraSwapOrderExecutor.Order memory, bytes memory) {
         TeraSwapOrderExecutor.Order memory order = _defaultOrder();
         bytes memory sig = _signOrderMemory(order);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
         return (order, sig);
     }
 
@@ -346,7 +350,7 @@ contract TeraSwapOrderExecutorTest is Test {
         uint256 userBalBefore = tokenIn.balanceOf(user);
         uint256 feeRecipientBalBefore = tokenIn.balanceOf(feeRecipient);
 
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
 
         // User should have received output tokens
         uint256 outputBal = tokenOut.balanceOf(user);
@@ -389,7 +393,7 @@ contract TeraSwapOrderExecutorTest is Test {
             0
         );
 
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -407,7 +411,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory badSig = abi.encodePacked(r, s, v);
 
         vm.expectRevert(TeraSwapOrderExecutor.InvalidSignature.selector);
-        executor.executeOrder(order, badSig, "");
+        executor.executeOrder(order, badSig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -441,7 +445,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.RouterNotWhitelisted.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -481,7 +485,7 @@ contract TeraSwapOrderExecutorTest is Test {
 
         // Order with nonce 0 should now fail
         vm.expectRevert(TeraSwapOrderExecutor.NonceBelowInvalidation.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_H03_invalidateNonces_emitsEvent() public {
@@ -518,7 +522,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.InsufficientBalance.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_M01_insufficientAllowance() public {
@@ -530,7 +534,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.InsufficientAllowance.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -578,6 +582,102 @@ contract TeraSwapOrderExecutorTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════════
+    //  R-12: PROGRESSIVE TIMELOCK
+    // ══════════════════════════════════════════════════════════════
+
+    function test_R12_adminTransferRequires7Days() public {
+        address newAdmin = address(0xBEEF);
+
+        // Queue admin change
+        vm.prank(admin);
+        executor.queueAdminChange(newAdmin);
+        bytes32 actionHash = keccak256(abi.encode("setAdmin", newAdmin));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp 48h — should revert (needs 7 days)
+        vm.warp(block.timestamp + 48 hours);
+        vm.prank(admin);
+        vm.expectRevert(TeraSwapOrderExecutor.TimelockNotReady.selector);
+        executor.executeAdminChange(actionId, newAdmin);
+
+        // Warp to 7 days total — should succeed
+        vm.warp(block.timestamp + 7 days - 48 hours);
+        vm.prank(admin);
+        executor.executeAdminChange(actionId, newAdmin);
+
+        assertEq(executor.admin(), newAdmin);
+    }
+
+    function test_R12_routerChangeStill48h() public {
+        MockRouter newRouter = new MockRouter(tokenOut, 1);
+
+        vm.prank(admin);
+        executor.queueRouterChange(address(newRouter), true);
+        bytes32 actionHash = keccak256(abi.encode("setRouter", address(newRouter), true));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp 48h + 1s — should succeed
+        vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(admin);
+        executor.executeRouterChange(actionId, address(newRouter), true);
+
+        assertTrue(executor.whitelistedRouters(address(newRouter)));
+    }
+
+    function test_R12_sweepStill48h() public {
+        tokenIn.mint(address(executor), 50e18);
+
+        vm.prank(admin);
+        executor.queueSweep(address(tokenIn));
+        bytes32 actionHash = keccak256(abi.encode("sweep", address(tokenIn)));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp 48h + 1s — should succeed
+        vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(admin);
+        executor.executeSweep(actionId, address(tokenIn));
+
+        assertEq(tokenIn.balanceOf(admin), 50e18);
+    }
+
+    function test_R12_adminTransferAt48hReverts() public {
+        address newAdmin = address(0xBEEF);
+
+        vm.prank(admin);
+        executor.queueAdminChange(newAdmin);
+        bytes32 actionHash = keccak256(abi.encode("setAdmin", newAdmin));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp exactly 48h — should revert (admin needs 7 days)
+        vm.warp(block.timestamp + 48 hours);
+        vm.prank(admin);
+        vm.expectRevert(TeraSwapOrderExecutor.TimelockNotReady.selector);
+        executor.executeAdminChange(actionId, newAdmin);
+    }
+
+    function test_R12_getTimelockDelays() public view {
+        (uint256 adminTransfer, uint256 routerChange, uint256 sweep) = executor.getTimelockDelays();
+        assertEq(adminTransfer, 7 days, "Admin transfer should be 7 days");
+        assertEq(routerChange, 48 hours, "Router change should be 48 hours");
+        assertEq(sweep, 48 hours, "Sweep should be 48 hours");
+    }
+
+    function test_R12_adminTransferGracePeriodStill7Days() public {
+        address newAdmin = address(0xBEEF);
+
+        vm.prank(admin);
+        executor.queueAdminChange(newAdmin);
+        bytes32 actionHash = keccak256(abi.encode("setAdmin", newAdmin));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp past 7 days (timelock) + 7 days (grace) + 1s — should revert TimelockExpired
+        vm.warp(block.timestamp + 7 days + 7 days + 1);
+        vm.prank(admin);
+        vm.expectRevert(TeraSwapOrderExecutor.TimelockExpired.selector);
+        executor.executeAdminChange(actionId, newAdmin);
+    }
+
+    // ══════════════════════════════════════════════════════════════
     //  L-03: MIN OUTPUT VALIDATION
     // ══════════════════════════════════════════════════════════════
 
@@ -587,7 +687,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.InvalidMinOutput.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -602,7 +702,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.PriceConditionNotMet.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_chainlink_incompleteRoundReverts() public {
@@ -612,7 +712,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.PriceConditionNotMet.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_chainlink_negativePriceReverts() public {
@@ -625,7 +725,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.PriceConditionNotMet.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -638,7 +738,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.OrderExpired.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_orderCancelled() public {
@@ -650,7 +750,7 @@ contract TeraSwapOrderExecutorTest is Test {
         executor.cancelOrder(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.OrderCancelledError.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_cancelOrder_onlyOwner() public {
@@ -666,11 +766,11 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         // First execution succeeds
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
 
         // Second execution reverts (nonce already incremented)
         vm.expectRevert(TeraSwapOrderExecutor.OrderAlreadyExecuted.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -684,7 +784,7 @@ contract TeraSwapOrderExecutorTest is Test {
         order.targetPrice = TARGET_PRICE; // price == target, should pass (>=)
         bytes memory sig = _signOrderMemory(order);
 
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
         // Should not revert
     }
 
@@ -697,7 +797,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.PriceConditionNotMet.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_priceConditionBelow_met() public {
@@ -707,7 +807,7 @@ contract TeraSwapOrderExecutorTest is Test {
         order.condition = TeraSwapOrderExecutor.PriceCondition.BELOW;
         bytes memory sig = _signOrderMemory(order);
 
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_priceConditionBelow_notMet() public {
@@ -718,7 +818,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.PriceConditionNotMet.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -735,7 +835,7 @@ contract TeraSwapOrderExecutorTest is Test {
 
         // Execute 5 times
         for (uint256 i = 0; i < 5; i++) {
-            executor.executeOrder(order, sig, "");
+            executor.executeOrder(order, sig, hex"01");
             if (i < 4) {
                 vm.warp(block.timestamp + 1 hours + 1);
             }
@@ -744,7 +844,7 @@ contract TeraSwapOrderExecutorTest is Test {
         // 6th execution should fail
         vm.warp(block.timestamp + 1 hours + 1);
         vm.expectRevert(TeraSwapOrderExecutor.DCAComplete.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_dca_intervalNotReached() public {
@@ -756,11 +856,11 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         // First execution
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
 
         // Try immediately — should fail
         vm.expectRevert(TeraSwapOrderExecutor.DCAIntervalNotReached.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_dca_doesNotIncrementNonce() public {
@@ -771,7 +871,7 @@ contract TeraSwapOrderExecutorTest is Test {
         order.priceFeed = address(0);
         bytes memory sig = _signOrderMemory(order);
 
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
         assertEq(executor.nonces(user), 0, "DCA should not increment nonce");
     }
 
@@ -787,7 +887,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert(TeraSwapOrderExecutor.InsufficientOutput.selector);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     function test_swapFailed_reverts() public {
@@ -797,7 +897,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         vm.expectRevert();
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -808,10 +908,11 @@ contract TeraSwapOrderExecutorTest is Test {
         // Already bootstrapped in setUp
         address[] memory routers = new address[](1);
         routers[0] = address(0x999);
+        address[] memory executors = new address[](0);
 
         vm.prank(admin);
         vm.expectRevert(TeraSwapOrderExecutor.AlreadyBootstrapped.selector);
-        executor.bootstrap(routers);
+        executor.bootstrap(routers, executors);
     }
 
     function test_bootstrap_onlyAdmin() public {
@@ -822,10 +923,11 @@ contract TeraSwapOrderExecutorTest is Test {
 
         address[] memory routers = new address[](1);
         routers[0] = address(router);
+        address[] memory executors = new address[](0);
 
         vm.prank(user);
         vm.expectRevert(TeraSwapOrderExecutor.NotAdmin.selector);
-        fresh.bootstrap(routers);
+        fresh.bootstrap(routers, executors);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -836,8 +938,17 @@ contract TeraSwapOrderExecutorTest is Test {
         // Send some tokens to executor accidentally
         tokenIn.mint(address(executor), 100e18);
 
+        // Queue sweep
         vm.prank(admin);
-        executor.sweep(address(tokenIn));
+        executor.queueSweep(address(tokenIn));
+        bytes32 actionHash = keccak256(abi.encode("sweep", address(tokenIn)));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp past timelock
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.prank(admin);
+        executor.executeSweep(actionId, address(tokenIn));
 
         assertEq(tokenIn.balanceOf(admin), 100e18);
         assertEq(tokenIn.balanceOf(address(executor)), 0);
@@ -849,8 +960,17 @@ contract TeraSwapOrderExecutorTest is Test {
 
         uint256 adminBalBefore = admin.balance;
 
+        // Queue sweep
         vm.prank(admin);
-        executor.sweep(address(0));
+        executor.queueSweep(address(0));
+        bytes32 actionHash = keccak256(abi.encode("sweep", address(0)));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        // Warp past timelock
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.prank(admin);
+        executor.executeSweep(actionId, address(0));
 
         assertEq(admin.balance - adminBalBefore, 1 ether);
     }
@@ -858,7 +978,7 @@ contract TeraSwapOrderExecutorTest is Test {
     function test_sweep_onlyAdmin() public {
         vm.prank(user);
         vm.expectRevert(TeraSwapOrderExecutor.NotAdmin.selector);
-        executor.sweep(address(tokenIn));
+        executor.queueSweep(address(tokenIn));
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -928,7 +1048,7 @@ contract TeraSwapOrderExecutorTest is Test {
         TeraSwapOrderExecutor.Order memory order = _defaultOrder();
         bytes memory sig = _signOrderMemory(order);
 
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
 
         // Contract should have no leftover tokenIn
         assertEq(tokenIn.balanceOf(address(executor)), 0, "No dust should remain");
@@ -943,7 +1063,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         uint256 feeBalBefore = tokenIn.balanceOf(feeRecipient);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
         uint256 feeCollected = tokenIn.balanceOf(feeRecipient) - feeBalBefore;
 
         // 0.1% of 1000e18 = 1e18
@@ -962,7 +1082,7 @@ contract TeraSwapOrderExecutorTest is Test {
         bytes memory sig = _signOrderMemory(order);
 
         uint256 feeBalBefore = tokenIn.balanceOf(feeRecipient);
-        executor.executeOrder(order, sig, "");
+        executor.executeOrder(order, sig, hex"01");
         uint256 feeCollected = tokenIn.balanceOf(feeRecipient) - feeBalBefore;
 
         uint256 expectedFee = (amountIn * 10) / 10_000;

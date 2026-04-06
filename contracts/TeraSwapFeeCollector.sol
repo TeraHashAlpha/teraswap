@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -37,6 +37,23 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     /// @notice [Audit] Router whitelist for FeeCollector
     mapping(address => bool) public whitelistedRouters;
 
+    /// @notice [R-12] Timelock constants for router changes
+    uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 public constant TIMELOCK_GRACE = 7 days;
+
+    /// @notice Pending timelock action
+    struct TimelockAction {
+        bytes32 actionHash;
+        uint256 readyAt;
+        bool exists;
+    }
+
+    /// @notice Timelock actions: actionId => TimelockAction
+    mapping(bytes32 => TimelockAction) public timelockActions;
+
+    /// @notice Whether initial bootstrap has been used (one-time router setup)
+    bool public bootstrapped;
+
     event SwapWithFee(
         address indexed user,
         address indexed router,
@@ -48,6 +65,10 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     event Unpaused(address indexed admin);
     event RouterWhitelisted(address indexed router, bool status);
     event Sweep(address indexed token);
+    event TimelockQueued(bytes32 indexed actionId, bytes32 actionHash, uint256 readyAt);
+    event TimelockExecuted(bytes32 indexed actionId, string actionType, bytes data);
+    event TimelockCancelled(bytes32 indexed actionId);
+    event Bootstrap(address indexed router);
 
     error ZeroAddress();
     error ZeroAmount();
@@ -57,6 +78,12 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     error NotAuthorized();
     error ContractPaused();
     error RouterNotWhitelisted();
+    error TimelockAlreadyQueued();
+    error TimelockNotQueued();
+    error TimelockNotReady();
+    error TimelockExpired();
+    error TimelockHashMismatch();
+    error AlreadyBootstrapped();
 
     constructor(address _feeRecipient, address _admin) {
         if (_feeRecipient == address(0) || _admin == address(0)) revert ZeroAddress();
@@ -74,11 +101,59 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         _;
     }
 
-    /// @notice Whitelist routers for FeeCollector
-    function setRouter(address router, bool status) external onlyAdmin {
+    /// @notice [R-12] Queue a router whitelist change (48h delay)
+    function queueRouterChange(address router, bool status) external onlyAdmin {
         if (router == address(0)) revert ZeroAddress();
+
+        bytes32 actionHash = keccak256(abi.encode("setRouter", router, status));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        if (timelockActions[actionId].exists) revert TimelockAlreadyQueued();
+
+        timelockActions[actionId] = TimelockAction({
+            actionHash: actionHash,
+            readyAt: block.timestamp + TIMELOCK_DELAY,
+            exists: true
+        });
+
+        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_DELAY);
+    }
+
+    /// @notice Execute a queued router whitelist change after timelock
+    function executeRouterChange(bytes32 actionId, address router, bool status) external onlyAdmin {
+        TimelockAction storage action = timelockActions[actionId];
+        if (!action.exists) revert TimelockNotQueued();
+        if (block.timestamp < action.readyAt) revert TimelockNotReady();
+        if (block.timestamp > action.readyAt + TIMELOCK_GRACE) revert TimelockExpired();
+
+        bytes32 expectedHash = keccak256(abi.encode("setRouter", router, status));
+        if (action.actionHash != expectedHash) revert TimelockHashMismatch();
+
+        delete timelockActions[actionId];
         whitelistedRouters[router] = status;
+
+        emit TimelockExecuted(actionId, "setRouter", abi.encode(router, status));
         emit RouterWhitelisted(router, status);
+    }
+
+    /// @notice Cancel a queued timelock action
+    function cancelTimelockAction(bytes32 actionId) external onlyAdmin {
+        if (!timelockActions[actionId].exists) revert TimelockNotQueued();
+        delete timelockActions[actionId];
+        emit TimelockCancelled(actionId);
+    }
+
+    /// @notice One-time bootstrap: whitelist initial routers without timelock
+    /// @param routers Array of router addresses to whitelist
+    function bootstrapRouters(address[] calldata routers) external onlyAdmin {
+        if (bootstrapped) revert AlreadyBootstrapped();
+        bootstrapped = true;
+
+        for (uint256 i = 0; i < routers.length; i++) {
+            if (routers[i] == address(0)) revert ZeroAddress();
+            whitelistedRouters[routers[i]] = true;
+            emit Bootstrap(routers[i]);
+        }
     }
 
     /// @notice Emergency pause

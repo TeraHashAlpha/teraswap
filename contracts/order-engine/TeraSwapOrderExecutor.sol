@@ -118,8 +118,10 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     uint256 public constant FEE_BPS = 10;           // 0.1% fee
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant MAX_STALENESS = 300;      // [H-03] 5 min staleness (was 3600s/1h)
-    uint256 public constant TIMELOCK_DELAY = 48 hours; // [M-02] Admin timelock
-    uint256 public constant TIMELOCK_GRACE = 7 days;   // [Audit M-03] Timelock expiry window
+    uint256 public constant TIMELOCK_ADMIN_TRANSFER = 7 days;   // [R-12] Admin transfer requires 7-day delay
+    uint256 public constant TIMELOCK_ROUTER_CHANGE  = 48 hours; // [R-12] Router whitelist change delay
+    uint256 public constant TIMELOCK_SWEEP          = 48 hours; // [R-12] Sweep action delay
+    uint256 public constant TIMELOCK_GRACE = 7 days;            // [Audit M-03] Timelock expiry window
     uint256 public constant MIN_ORDER_AMOUNT = 10_000; // [Audit M-01] Min order to prevent zero-fee
 
     // ══════════════════════════════════════════════════════════════════
@@ -589,11 +591,11 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
 
         timelockActions[actionId] = TimelockAction({
             actionHash: actionHash,
-            readyAt: block.timestamp + TIMELOCK_DELAY,
+            readyAt: block.timestamp + TIMELOCK_ROUTER_CHANGE,
             exists: true
         });
 
-        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_DELAY);
+        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_ROUTER_CHANGE);
     }
 
     /// @notice Execute a queued router whitelist change after timelock
@@ -631,11 +633,11 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
 
         timelockActions[actionId] = TimelockAction({
             actionHash: actionHash,
-            readyAt: block.timestamp + TIMELOCK_DELAY,
+            readyAt: block.timestamp + TIMELOCK_ADMIN_TRANSFER,
             exists: true
         });
 
-        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_DELAY);
+        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_ADMIN_TRANSFER);
     }
 
     /// @notice Execute a queued admin transfer after timelock
@@ -666,6 +668,18 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
         if (!timelockActions[actionId].exists) revert TimelockNotQueued();
         delete timelockActions[actionId];
         emit TimelockCancelled(actionId);
+    }
+
+    /// @notice [R-12] Returns all progressive timelock delays for transparency
+    /// @return adminTransfer Delay for admin transfer (7 days)
+    /// @return routerChange Delay for router whitelist changes (48 hours)
+    /// @return sweep Delay for sweep actions (48 hours)
+    function getTimelockDelays() external pure returns (
+        uint256 adminTransfer,
+        uint256 routerChange,
+        uint256 sweep
+    ) {
+        return (TIMELOCK_ADMIN_TRANSFER, TIMELOCK_ROUTER_CHANGE, TIMELOCK_SWEEP);
     }
 
     /**
@@ -708,12 +722,12 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
 
         timelockActions[actionId] = TimelockAction({
             actionHash: actionHash,
-            readyAt: block.timestamp + TIMELOCK_DELAY,
+            readyAt: block.timestamp + TIMELOCK_SWEEP,
             exists: true
         });
 
         emit SweepQueued(actionId, token);
-        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_DELAY);
+        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_SWEEP);
     }
 
     /// @notice Execute a queued sweep after timelock
