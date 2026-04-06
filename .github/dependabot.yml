@@ -1,5 +1,5 @@
 # [SC-SUPPLY] Dependabot — automated dependency updates
-# Major bumps for next, react, wagmi are ignored (require manual migration)
+# Major bumps for next, react, wagmi, typescript are ignored (require manual migration)
 # See: https://docs.github.com/en/code-security/dependabot
 
 version: 2
@@ -21,6 +21,8 @@ updates:
       - dependency-name: "react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "wagmi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps"
