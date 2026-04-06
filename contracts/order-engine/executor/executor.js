@@ -53,6 +53,7 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
+import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
@@ -922,6 +923,9 @@ async function main() {
   const monitor = new ExecutorMonitor(stats)
   monitor.startMetricsServer()
   monitor.startHeartbeat()
+
+  // [EX-WATCH] Start on-chain admin event watcher
+  startEventWatcher(publicClient, CONTRACT_ADDRESS, monitor)
 
   // Run immediately, then on interval
   await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)

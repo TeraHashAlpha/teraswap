@@ -27,6 +27,8 @@ export class ExecutorMonitor {
     this.gasSpent = 0n // BigInt, accumulator of gas cost in wei
     this.gasSkips = { NORMAL: 0, ELEVATED: 0, URGENT_ONLY: 0, SKIP: 0 }
     this.lastGasGwei = 0
+    this.adminEvents = {}
+    this.lastAdminEventTimestamp = 0
     this.alertCooldown = new Map() // type → lastSentTimestamp
   }
 
@@ -86,6 +88,12 @@ export class ExecutorMonitor {
     if (this.gasSkips[tier] !== undefined) {
       this.gasSkips[tier]++
     }
+  }
+
+  /** Track an admin event detected on-chain */
+  onAdminEvent(eventName) {
+    this.adminEvents[eventName] = (this.adminEvents[eventName] || 0) + 1
+    this.lastAdminEventTimestamp = Math.floor(Date.now() / 1000)
   }
 
   /** Track the last observed gas price (for Prometheus gauge) */
@@ -167,6 +175,16 @@ export class ExecutorMonitor {
       "# HELP teraswap_executor_current_gas_gwei Last observed gas price in gwei",
       "# TYPE teraswap_executor_current_gas_gwei gauge",
       `teraswap_executor_current_gas_gwei ${this.lastGasGwei.toFixed(2)}`,
+      "",
+      "# HELP teraswap_executor_admin_events_total Admin events detected on-chain",
+      "# TYPE teraswap_executor_admin_events_total counter",
+      ...Object.entries(this.adminEvents).map(
+        ([event, count]) => `teraswap_executor_admin_events_total{event_type="${event}"} ${count}`
+      ),
+      "",
+      "# HELP teraswap_executor_last_admin_event_timestamp Unix timestamp of last admin event",
+      "# TYPE teraswap_executor_last_admin_event_timestamp gauge",
+      `teraswap_executor_last_admin_event_timestamp ${this.lastAdminEventTimestamp}`,
       "",
       "# HELP teraswap_executor_uptime_seconds Executor uptime in seconds",
       "# TYPE teraswap_executor_uptime_seconds gauge",

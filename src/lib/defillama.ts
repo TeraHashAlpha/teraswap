@@ -23,6 +23,35 @@ const CACHE_TTL_MS = 120_000 // 2 minutes (Q60: reduced from 5min for faster pri
 // [INT-01] High-value swap threshold — above this, DefiLlama validation is blocking
 export const HIGH_VALUE_THRESHOLD_USD = 10_000
 
+// ── Consecutive block tracking ──────────────────────────────
+const CONSECUTIVE_BLOCK_THRESHOLD = 3
+const CONSECUTIVE_BLOCK_WINDOW_MS = 10 * 60 * 1000
+const consecutiveBlocksMap = new Map<string, { count: number; firstBlockAt: number }>()
+
+function getTokenPairKey(tokenIn: string, tokenOut: string): string {
+  const [a, b] = [tokenIn.toLowerCase(), tokenOut.toLowerCase()].sort()
+  return `${a}:${b}`
+}
+
+function trackConsecutiveBlock(tokenIn: string, tokenOut: string): void {
+  const key = getTokenPairKey(tokenIn, tokenOut)
+  const now = Date.now()
+  const state = consecutiveBlocksMap.get(key)
+  if (state && now - state.firstBlockAt < CONSECUTIVE_BLOCK_WINDOW_MS) {
+    state.count++
+  } else {
+    consecutiveBlocksMap.set(key, { count: 1, firstBlockAt: now })
+    return
+  }
+  if (state.count >= CONSECUTIVE_BLOCK_THRESHOLD) {
+    console.warn(`[PRICE-GUARD] ${state.count} consecutive blocks for ${key} in ${Math.round((now - state.firstBlockAt) / 1000)}s`)
+  }
+}
+
+function resetConsecutiveBlocks(tokenIn: string, tokenOut: string): void {
+  consecutiveBlocksMap.delete(getTokenPairKey(tokenIn, tokenOut))
+}
+
 /**
  * Fetch current USD price for an Ethereum token from DefiLlama.
  * Returns null on any error (non-blocking — swaps should never fail because of this).
@@ -174,6 +203,7 @@ export async function validateSwapPrice(params: {
     const valueUsd = params.estimatedValueUsd ?? 0
     // [INT-01] DefiLlama blocking for high-value swaps — defense against oracle manipulation window
     if (valueUsd > HIGH_VALUE_THRESHOLD_USD) {
+      trackConsecutiveBlock(tokenIn, tokenOut)
       return {
         valid: false,
         blocked: true,
@@ -191,6 +221,7 @@ export async function validateSwapPrice(params: {
   if (priceIn.confidence < 0.5 || priceOut.confidence < 0.5) {
     const valueUsd = params.estimatedValueUsd ?? 0
     if (valueUsd > HIGH_VALUE_THRESHOLD_USD) {
+      trackConsecutiveBlock(tokenIn, tokenOut)
       return {
         valid: false,
         blocked: true,
@@ -225,6 +256,7 @@ export async function validateSwapPrice(params: {
     const BLOCK_THRESHOLD = -0.08
 
     if (deviation < BLOCK_THRESHOLD) {
+      trackConsecutiveBlock(params.tokenIn, params.tokenOut)
       return {
         valid: false,
         blocked: true,
@@ -236,6 +268,7 @@ export async function validateSwapPrice(params: {
       }
     }
 
+    resetConsecutiveBlocks(params.tokenIn, params.tokenOut)
     return {
       valid: true,
       blocked: false,
@@ -247,6 +280,7 @@ export async function validateSwapPrice(params: {
   } catch {
     const valueUsd = params.estimatedValueUsd ?? 0
     if (valueUsd > HIGH_VALUE_THRESHOLD_USD) {
+      trackConsecutiveBlock(tokenIn, tokenOut)
       return {
         valid: false,
         blocked: true,
