@@ -11,9 +11,7 @@ const eslintConfig = [
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
   {
     rules: {
-      // Allow unused vars prefixed with _ (common pattern)
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      // Allow any in specific cases (aggregator API responses are untyped)
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
