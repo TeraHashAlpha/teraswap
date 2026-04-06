@@ -1,6 +1,22 @@
 # CI pipeline — parallel jobs: lint, typecheck, audit, contract tests
 # Build runs after lint + typecheck + audit + lockfile-lint pass.
 # Contract tests run independently (Foundry/Forge).
+#
+# ── SECURITY NOTE (M-01) ─────────────────────────────────────────────
+# We run `npm ci --ignore-scripts=false` intentionally because our
+# postinstall hook runs `prisma generate` (required for the build).
+# This means npm lifecycle scripts ARE executed during CI installs.
+#
+# Mitigations:
+#   1. lockfile-lint job validates that all resolved URLs point to the
+#      official npm registry over HTTPS and that integrity hashes match.
+#   2. Dependabot keeps dependencies up-to-date, reducing the window
+#      for supply-chain attacks via compromised transitive packages.
+#   3. npm audit (high/critical gate) catches known-vulnerable packages.
+#
+# If you remove the prisma dependency, switch back to plain `npm ci`
+# (which defaults to --ignore-scripts=true in CI).
+# ─────────────────────────────────────────────────────────────────────
 
 name: "CI"
 
@@ -21,8 +37,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: "npm"
@@ -33,8 +49,8 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: "npm"
@@ -44,8 +60,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: "npm"
@@ -56,8 +72,8 @@ jobs:
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: "npm"
@@ -68,11 +84,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           submodules: recursive
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1
         with:
           version: stable
       - name: Run forge tests
@@ -83,8 +99,8 @@ jobs:
     needs: [lint, typecheck, audit, lockfile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: "npm"

@@ -4,6 +4,9 @@
  * Polls for contract events every 30 seconds using viem's getLogs.
  * Sends Telegram alerts for governance-critical events (timelock, pause, admin transfer).
  *
+ * Supports monitoring multiple contracts (e.g. OrderExecutor + FeeCollector).
+ * Each contract's logs are tagged with a label for clear alert attribution.
+ *
  * Design:
  *   - Polling-based (getLogs), NOT WebSocket subscriptions
  *   - On first poll, records current block number — no history replay
@@ -15,7 +18,7 @@
 import { parseAbiItem, formatEther, decodeEventLog } from "viem"
 import { sendTelegramAlert } from "./alert.js"
 
-// ── Events to monitor ───────────────────────────────────────
+// ── Events to monitor (OrderExecutor) ──────────────────────
 const WATCHED_EVENTS = [
   parseAbiItem("event TimelockQueued(bytes32 indexed actionId, bytes32 actionHash, uint256 readyAt)"),
   parseAbiItem("event TimelockExecuted(bytes32 indexed actionId, string actionType, bytes data)"),
@@ -26,6 +29,14 @@ const WATCHED_EVENTS = [
   parseAbiItem("event Unpaused(address indexed admin)"),
   parseAbiItem("event SweepQueued(bytes32 indexed actionId, address token)"),
 ]
+
+// ── Events to monitor (FeeCollector) ────────────────────────
+const FEE_COLLECTOR_EVENTS = [
+  parseAbiItem("event TimelockExecuted(bytes32 indexed actionId)"),
+]
+
+// Combined event list for decoding
+const ALL_WATCHED_EVENTS = [...WATCHED_EVENTS, ...FEE_COLLECTOR_EVENTS]
 
 // Build a lookup map: topic0 → ABI item
 const EVENT_BY_TOPIC = new Map()
@@ -143,11 +154,16 @@ const EVENT_CONFIG = {
  * Start polling for on-chain admin events.
  *
  * @param {import('viem').PublicClient} publicClient — viem public client
- * @param {string} contractAddress — TeraSwapOrderExecutor address
+ * @param {Array<{ address: string, label: string }>|string} contracts — contracts to monitor
  * @param {import('./monitor.js').ExecutorMonitor|null} monitor — optional Prometheus monitor
  * @returns {{ stop: () => void }}
  */
-export function startEventWatcher(publicClient, contractAddress, monitor = null) {
+export function startEventWatcher(publicClient, contracts, monitor = null) {
+  // Backward compatibility: accept a single address string
+  if (typeof contracts === 'string') {
+    contracts = [{ address: contracts, label: 'OrderExecutor' }]
+  }
+
   let lastBlock = null
   let consecutiveFailures = 0
   let backoffMs = INITIAL_BACKOFF_MS
@@ -172,54 +188,59 @@ export function startEventWatcher(publicClient, contractAddress, monitor = null)
       // No new blocks
       if (currentBlock <= lastBlock) return
 
-      // Fetch ALL logs from the contract in the block range, then decode
-      const logs = await publicClient.getLogs({
-        address: contractAddress,
-        fromBlock: lastBlock + 1n,
-        toBlock: currentBlock,
-      })
+      // Fetch logs from each monitored contract
+      for (const { address, label } of contracts) {
+        const logs = await publicClient.getLogs({
+          address,
+          fromBlock: lastBlock + 1n,
+          toBlock: currentBlock,
+        })
 
-      for (const log of logs) {
-        try {
-          // Try to decode against each watched event ABI
-          let decoded = null
-          let matchedName = null
+        for (const log of logs) {
+          // Tag with contract label for alert attribution
+          log._contractLabel = label
 
-          for (const abi of WATCHED_EVENTS) {
-            try {
-              decoded = decodeEventLog({
-                abi: [abi],
-                data: log.data,
-                topics: log.topics,
-              })
-              matchedName = decoded.eventName
-              break
-            } catch {
-              // Not this event, try next
+          try {
+            // Try to decode against each watched event ABI
+            let decoded = null
+            let matchedName = null
+
+            for (const abi of ALL_WATCHED_EVENTS) {
+              try {
+                decoded = decodeEventLog({
+                  abi: [abi],
+                  data: log.data,
+                  topics: log.topics,
+                })
+                matchedName = decoded.eventName
+                break
+              } catch {
+                // Not this event, try next
+              }
             }
+
+            if (!decoded || !matchedName) continue
+
+            const config = EVENT_CONFIG[matchedName]
+            if (!config) continue
+
+            const message = [
+              `${config.emoji} <b>${config.severity}</b> — [${log._contractLabel}] On-chain Event`,
+              ``,
+              config.format(decoded.args, log.transactionHash),
+              `Block: ${log.blockNumber}`,
+            ].join("\n")
+
+            console.log(`[EVENT-WATCHER] [${log._contractLabel}] ${matchedName} at block ${log.blockNumber}`)
+            await sendTelegramAlert(message)
+
+            // Report to Prometheus monitor
+            if (monitor?.onAdminEvent) {
+              monitor.onAdminEvent(matchedName)
+            }
+          } catch (decodeErr) {
+            // Skip unrecognized events silently
           }
-
-          if (!decoded || !matchedName) continue
-
-          const config = EVENT_CONFIG[matchedName]
-          if (!config) continue
-
-          const message = [
-            `${config.emoji} <b>${config.severity}</b> — On-chain Event`,
-            ``,
-            config.format(decoded.args, log.transactionHash),
-            `Block: ${log.blockNumber}`,
-          ].join("\n")
-
-          console.log(`[EVENT-WATCHER] ${matchedName} at block ${log.blockNumber}`)
-          await sendTelegramAlert(message)
-
-          // Report to Prometheus monitor
-          if (monitor?.onAdminEvent) {
-            monitor.onAdminEvent(matchedName)
-          }
-        } catch (decodeErr) {
-          // Skip unrecognized events silently
         }
       }
 
@@ -248,7 +269,8 @@ export function startEventWatcher(publicClient, contractAddress, monitor = null)
   timer = setInterval(poll, POLL_INTERVAL_MS)
   if (timer.unref) timer.unref()
 
-  console.log(`[EVENT-WATCHER] Started — polling every ${POLL_INTERVAL_MS / 1000}s for ${contractAddress}`)
+  const contractList = contracts.map(c => `${c.label}(${c.address})`).join(', ')
+  console.log(`[EVENT-WATCHER] Started — polling every ${POLL_INTERVAL_MS / 1000}s for: ${contractList}`)
 
   return {
     stop() {

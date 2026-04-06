@@ -87,6 +87,7 @@ const PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
+const FEE_COLLECTOR_ADDRESS = process.env.FEE_COLLECTOR_ADDRESS || ""
 const API_URL = process.env.TERASWAP_API_URL || ""
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
 
@@ -924,8 +925,14 @@ async function main() {
   monitor.startMetricsServer()
   monitor.startHeartbeat()
 
-  // [EX-WATCH] Start on-chain admin event watcher
-  startEventWatcher(publicClient, CONTRACT_ADDRESS, monitor)
+  // [EX-WATCH] Start on-chain admin event watcher (L-02: monitor FeeCollector too)
+  const watchedContracts = [
+    { address: CONTRACT_ADDRESS, label: 'OrderExecutor' },
+  ]
+  if (FEE_COLLECTOR_ADDRESS) {
+    watchedContracts.push({ address: FEE_COLLECTOR_ADDRESS, label: 'FeeCollector' })
+  }
+  startEventWatcher(publicClient, watchedContracts, monitor)
 
   // Run immediately, then on interval
   await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
