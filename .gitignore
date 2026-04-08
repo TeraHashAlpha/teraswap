@@ -73,3 +73,8 @@ ios/App/App/public/
 android/app/build/
 android/.gradle/
 android/app/src/main/assets/public/
+
+# Security: prevent accidental commit of key material
+*.pem
+*.key
+credentials.json
