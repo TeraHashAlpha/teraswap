@@ -220,7 +220,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
       {/* Modal — fully opaque backdrop so text behind is invisible */}
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/90 sm:items-start sm:pt-[15vh]"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black sm:items-start sm:pt-[15vh]"
           onClick={() => setOpen(false)}
         >
           <div
@@ -263,7 +263,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
             <div className="mb-2 border-t border-cream-08" />
 
             {/* Token list */}
-            <div className="max-h-[50vh] overflow-y-auto scrollbar-thin sm:max-h-72">
+            <div className="max-h-[50vh] overflow-y-auto bg-[#0F1318] scrollbar-thin sm:max-h-72">
               {isSearching ? (
                 /* Flat search results */
                 <>
@@ -305,7 +305,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                   {/* ── Your tokens (with balance) — shown first ── */}
                   {tokensWithBalance.length > 0 && (
                     <div className="mb-1">
-                      <p className="sticky top-0 z-10 bg-surface-secondary px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-gold">
+                      <p className="sticky top-0 z-10 bg-[#0F1318] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-gold">
                         Your Tokens
                       </p>
                       {tokensWithBalance.map((token) => (
@@ -322,7 +322,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                   {/* ── Categorized list (without tokens already in "Your Tokens") ── */}
                   {groups?.map((group) => (
                     <div key={group.label} className="mb-1">
-                      <p className="sticky top-0 z-10 bg-surface-secondary px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
+                      <p className="sticky top-0 z-10 bg-[#0F1318] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
                         {group.label}
                       </p>
                       {group.tokens.map((token) => (
@@ -345,7 +345,7 @@ function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: To
   return (
     <button
       onClick={() => onSelect(token)}
-      className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-surface-hover"
+      className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-[#1E2530]"
     >
       <img
         src={token.logoURI}
