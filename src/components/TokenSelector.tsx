@@ -224,7 +224,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-t-2xl border border-cream-08 bg-surface-secondary p-4 shadow-2xl shadow-black/40 sm:rounded-2xl"
+            className="w-full max-w-sm rounded-t-2xl border border-cream-08 bg-[#0F1318] p-4 shadow-2xl shadow-black/60 sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
