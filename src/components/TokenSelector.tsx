@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useAccount, useBalance, useReadContracts } from 'wagmi'
 import { formatUnits, erc20Abi } from 'viem'
 import { DEFAULT_TOKENS, getAllTokens, isNativeETH, type Token } from '@/lib/tokens'
@@ -217,10 +218,10 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
         <span className="text-cream-50">&#9662;</span>
       </button>
 
-      {/* Modal — fully opaque backdrop so text behind is invisible */}
-      {open && (
+      {/* Modal — rendered via Portal to escape backdrop-filter containing block */}
+      {open && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black sm:items-start sm:pt-[15vh]"
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-[#080B10] sm:items-start sm:pt-[15vh]"
           onClick={() => setOpen(false)}
         >
           <div
@@ -334,7 +335,8 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )
