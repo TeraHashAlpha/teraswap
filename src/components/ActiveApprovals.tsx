@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi } from 'viem'
 import { useActiveApprovals, type ApprovalRecord } from '@/hooks/useActiveApprovals'
 import { ETHERSCAN_TX } from '@/lib/constants'
@@ -90,6 +90,7 @@ function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (
 }
 
 export default function ActiveApprovals() {
+  const { address } = useAccount()
   const { approvals, markRevoked, getActionable } = useActiveApprovals()
   const actionable = getActionable()
 
@@ -114,6 +115,23 @@ export default function ActiveApprovals() {
           <RevokeRow key={record.id} record={record} onRevoked={markRevoked} />
         ))}
       </div>
+
+      {/* Revoke.cash link for approvals outside TeraSwap */}
+      {address && (
+        <div className="mt-3 border-t border-cream-08 pt-3">
+          <p className="text-[10px] leading-relaxed text-cream-30">
+            TeraSwap only shows approvals granted to our contracts. To see Permit2 allowances and approvals granted to other dApps, check{' '}
+            <a
+              href={`https://revoke.cash/address/${address}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-cream-gold underline underline-offset-2 transition hover:text-cream"
+            >
+              Revoke.cash →
+            </a>
+          </p>
+        </div>
+      )}
     </div>
   )
 }

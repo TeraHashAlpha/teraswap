@@ -12,6 +12,7 @@ import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
 import { useApproval } from '@/hooks/useApproval'
+import Permit2EducationModal from '@/components/Permit2EducationModal'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
@@ -105,7 +106,7 @@ export default function SwapBox() {
     }
   }, [meta?.best.source])
 
-  const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady } =
+  const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } =
     useApproval(tokenIn, amountIn, spender)
 
   const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, execute: executeSwap, reset: resetSwap } =
@@ -702,6 +703,15 @@ export default function SwapBox() {
 
       {/* Active Approvals — below the swap box */}
       <ActiveApprovals />
+
+      {/* [R-UX-01] Permit2 education modal — shown once before first Permit2 signature */}
+      <Permit2EducationModal
+        open={needsPermit2Education}
+        onConfirm={confirmPermit2Education}
+        onCancel={cancelPermit2Education}
+        amount={amountIn}
+        tokenSymbol={tokenIn?.symbol}
+      />
 
       {/* Beta disclaimer */}
       <BetaDisclaimer />

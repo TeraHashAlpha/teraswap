@@ -5,8 +5,9 @@ import { PERMIT2_ADDRESS } from '@/lib/constants'
 import { permit2Abi, eip2612DetectionAbi, planApproval, PERMIT2_DOMAIN, PERMIT_SINGLE_TYPES, type ApprovalMethod, type ApprovalPlan } from '@/lib/approvals'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
+import { isPermit2Educated } from '@/components/Permit2EducationModal'
 
-export type ApprovalStatus = 'idle' | 'checking' | 'approving_permit2' | 'signing' | 'ready' | 'error'
+export type ApprovalStatus = 'idle' | 'checking' | 'approving_permit2' | 'awaiting_permit2_education' | 'signing' | 'ready' | 'error'
 
 interface UseApprovalResult {
   plan: ApprovalPlan | null
@@ -16,6 +17,12 @@ interface UseApprovalResult {
   approve: () => Promise<void>
   /** Is the token ready to be swapped? (no further approval needed) */
   isReady: boolean
+  /** True when Permit2 education modal should be shown */
+  needsPermit2Education: boolean
+  /** Call after user confirms the education modal */
+  confirmPermit2Education: () => void
+  /** Call when user cancels the education modal */
+  cancelPermit2Education: () => void
 }
 
 export function useApproval(
@@ -126,6 +133,27 @@ export function useApproval(
     hash: exactApproveHash,
   })
 
+  // ── Permit2 education modal gate ──
+  const needsPermit2Education = status === 'awaiting_permit2_education'
+
+  const cancelPermit2Education = useCallback(() => {
+    if (status === 'awaiting_permit2_education') setStatus('idle')
+  }, [status])
+
+  const confirmPermit2Education = useCallback(() => {
+    if (status !== 'awaiting_permit2_education') return
+    // User confirmed — proceed with actual Permit2 approval
+    setStatus('approving_permit2')
+    if (tokenIn) {
+      writeApprovePermit2({
+        address: tokenIn.address as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [PERMIT2_ADDRESS, BigInt('0xffffffffffffffffffffffffffffffffffffffff')],
+      })
+    }
+  }, [status, tokenIn, writeApprovePermit2])
+
   // ── Execute approval ──
   const approve = useCallback(async () => {
     if (!plan || !tokenIn || !address || rawAmount === 0n) return
@@ -140,6 +168,11 @@ export function useApproval(
 
     try {
       if (plan.method === 'permit2' && !hasPermit2Allowance) {
+        // [R-UX-01] Show education modal before first Permit2 signature
+        if (!isPermit2Educated()) {
+          setStatus('awaiting_permit2_education')
+          return // Modal will call confirmPermit2Education when user confirms
+        }
         // Step 1: approve token → Permit2 contract (max, since Permit2 manages permissions)
         setStatus('approving_permit2')
         writeApprovePermit2({
@@ -239,7 +272,7 @@ export function useApproval(
 
   const isReady = status === 'ready' || isNative || hasDirectAllowance
 
-  return { plan, status, error: approvalError, approve, isReady }
+  return { plan, status, error: approvalError, approve, isReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education }
 }
 
 function parseApprovalError(error: Error): string {
