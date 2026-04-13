@@ -73,6 +73,7 @@ export function useTokenImport() {
         name,
         decimals,
         logoURI: `https://tokens.1inch.io/${address.toLowerCase()}.png`,
+        category: 'Imported',
       }
 
       addCustomToken(token)

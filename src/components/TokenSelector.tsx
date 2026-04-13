@@ -4,26 +4,13 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useAccount, useBalance, useReadContracts } from 'wagmi'
 import { formatUnits, erc20Abi } from 'viem'
-import { DEFAULT_TOKENS, getAllTokens, isNativeETH, type Token } from '@/lib/tokens'
+import { DEFAULT_TOKENS, getAllTokens, isNativeETH, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { CHAIN_ID } from '@/lib/constants'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
 
-// ── Category ranges for visual grouping (index-based) ─────
-const CATEGORIES: { label: string; start: number; end: number }[] = [
-  { label: 'Native + Wrapped', start: 0, end: 1 },
-  { label: 'Stablecoins', start: 2, end: 9 },
-  { label: 'BTC Wrapped', start: 10, end: 11 },
-  { label: 'Liquid Staking', start: 12, end: 15 },
-  { label: 'DeFi Blue Chips', start: 16, end: 31 },
-  { label: 'L2 / Infrastructure', start: 32, end: 38 },
-  { label: 'AI / Data', start: 39, end: 41 },
-  { label: 'Memecoins', start: 42, end: 46 },
-  { label: 'Gaming', start: 47, end: 50 },
-  { label: 'Other', start: 51, end: 55 },
-]
 
 interface Props {
   selected: Token | null
@@ -168,14 +155,17 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     if (isSearching) return null
     const disabled = disabledAddress?.toLowerCase()
     const balanceAddrs = new Set(tokensWithBalance.map((t) => t.address.toLowerCase()))
-    return CATEGORIES.map((cat) => {
-      const tokens = DEFAULT_TOKENS.slice(cat.start, cat.end + 1).filter(
-        (t) =>
-          t.address.toLowerCase() !== disabled &&
-          !balanceAddrs.has(t.address.toLowerCase()),
-      )
-      return tokens.length > 0 ? { label: cat.label, tokens } : null
-    }).filter(Boolean) as { label: string; tokens: Token[] }[]
+    const categoryMap = new Map<string, Token[]>()
+    for (const token of DEFAULT_TOKENS) {
+      const addr = token.address.toLowerCase()
+      if (addr === disabled || balanceAddrs.has(addr)) continue
+      const cat = token.category || 'Other'
+      if (!categoryMap.has(cat)) categoryMap.set(cat, [])
+      categoryMap.get(cat)!.push(token)
+    }
+    return CATEGORY_DISPLAY_ORDER
+      .filter((cat) => categoryMap.has(cat))
+      .map((cat) => ({ label: cat, tokens: categoryMap.get(cat)! }))
   }, [disabledAddress, isSearching, tokensWithBalance])
 
   const popularTokens = useMemo(() => {
