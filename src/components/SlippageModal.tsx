@@ -16,7 +16,7 @@ const PRESETS = [0.1, 0.5, 1.0, 3.0]
 
 // ── Smart auto-slippage logic ──
 // Determines optimal slippage based on token pair characteristics
-const STABLECOINS = ['USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'PYUSD', 'USDe', 'USDS']
+const STABLECOINS = ['USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'PYUSD', 'USDe', 'USDS', 'BOLD']
 const MAJOR_TOKENS = ['ETH', 'WETH', 'WBTC', 'cbBTC', 'wstETH', 'cbETH', 'weETH', 'rsETH']
 const MEMECOINS = ['PEPE', 'SHIB', 'FLOKI', 'TURBO', 'MOG']
 

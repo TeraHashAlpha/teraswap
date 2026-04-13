@@ -104,6 +104,13 @@ export const DEFAULT_TOKENS: Token[] = [
     decimals: 18,
     logoURI: logo('0xf939e0a03fb07f59a73314e73794be0e57ac1b4e'),
   },
+  {
+    address: '0x6440f144b7e50D6a8439336510312d2F54beB01D',
+    symbol: 'BOLD',
+    name: 'Liquity BOLD',
+    decimals: 18,
+    logoURI: logo('0x6440f144b7e50d6a8439336510312d2f54beb01d'), // TODO: 1inch logo returns 403 — may need local fallback /public/tokens/bold.png
+  },
 
   // ─── BTC Wrapped ────────────────────────────────────────
   {

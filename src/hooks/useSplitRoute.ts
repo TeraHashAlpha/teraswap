@@ -52,9 +52,9 @@ export function useSplitRoute(
     const inAmount = Number(amountIn)
     if (inAmount <= 0) return null
     // If output token is a stablecoin, output amount ≈ USD
-    if (['USDC', 'USDT', 'DAI'].includes(tokenOut.symbol)) return outAmount
+    if (['USDC', 'USDT', 'DAI', 'BOLD'].includes(tokenOut.symbol)) return outAmount
     // If input token is a stablecoin, input amount ≈ USD
-    if (['USDC', 'USDT', 'DAI'].includes(tokenIn.symbol)) return inAmount
+    if (['USDC', 'USDT', 'DAI', 'BOLD'].includes(tokenIn.symbol)) return inAmount
     return null
   }, [meta, tokenIn, tokenOut, amountIn])
 

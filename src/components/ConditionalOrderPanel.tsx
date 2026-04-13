@@ -25,7 +25,7 @@ import BetaDisclaimer from './BetaDisclaimer'
 
 // ── Stablecoin detection ─────────────────────────────────
 const STABLECOIN_SYMBOLS = new Set([
-  'USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'PYUSD', 'USDe', 'USDS',
+  'USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'PYUSD', 'USDe', 'USDS', 'BOLD',
 ])
 function isStablecoin(token: Token): boolean {
   return STABLECOIN_SYMBOLS.has(token.symbol)
