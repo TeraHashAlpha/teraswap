@@ -56,7 +56,7 @@ export default function TokenAddressBadge({
     <span className="inline-flex items-center gap-1">
       {/* Verified / Imported indicator */}
       {verified ? (
-        <span title="Listed in TeraSwap default tokens" className="text-emerald-400">
+        <span title="Listed in TeraSwap default tokens" className="text-cream-gold">
           <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M16.403 12.652a3 3 0 010-5.304 3 3 0 00-2.108-2.751 3 3 0 00-3.75-3.75 3 3 0 00-5.304 0 3 3 0 00-2.751 2.108 3 3 0 00-3.75 3.75 3 3 0 000 5.304 3 3 0 002.108 2.751 3 3 0 003.75 3.75 3 3 0 005.304 0 3 3 0 002.751-2.108 3 3 0 003.75-3.75zm-2.442-4.691a.75.75 0 00-1.06-1.06L8.5 11.302 6.1 8.9a.75.75 0 00-1.06 1.06l3 3a.75.75 0 001.06 0l5-5z" clipRule="evenodd" />
           </svg>

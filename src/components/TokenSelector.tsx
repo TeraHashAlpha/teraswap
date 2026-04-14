@@ -356,7 +356,7 @@ function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: To
         }}
       />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-cream">{token.symbol}</div>
+        <div className="text-sm font-semibold text-cream-gold">{token.symbol}</div>
         <div className="truncate text-xs text-cream-35">{token.name}</div>
         <TokenAddressBadge address={token.address} size="sm" showExplorerLink={false} />
       </div>
