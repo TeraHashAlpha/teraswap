@@ -1,0 +1,5 @@
+{
+  "generatedAt": null,
+  "endpoints": {},
+  "_note": "Run 'npm run baseline:capture' after Cloudflare migration to populate"
+}
