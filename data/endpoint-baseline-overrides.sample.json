@@ -1,0 +1,7 @@
+{
+  "_note": "Copy to endpoint-baseline-overrides.json for local overrides. Committed sample — actual overrides are gitignored.",
+  "example-endpoint": {
+    "ignoreFingerprintMismatch": true,
+    "ignoreDnsMismatch": false
+  }
+}

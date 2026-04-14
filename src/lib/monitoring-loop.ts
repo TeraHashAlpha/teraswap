@@ -14,10 +14,18 @@ import { runHealthCheck } from './health-check'
 import {
   recordHealthCheck,
   checkAutoRecovery,
+  forceDisable,
   getAllStatuses,
   setTransitionCallback,
   type SourceState,
 } from './source-state-machine'
+import {
+  loadBaseline,
+  validateTLS,
+  validateDNS,
+  captureLiveTLS,
+  captureLiveDNS,
+} from './fingerprint-validator'
 
 // ── Alert on state transitions ──────────────────────────
 
@@ -107,6 +115,37 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
       return { id: ep.id, ...result }
     })
   )
+
+  // ── H2: TLS + DNS baseline validation ──────────────────
+  const baseline = loadBaseline()
+  if (baseline) {
+    await Promise.allSettled(
+      MONITORED_ENDPOINTS.map(async (ep) => {
+        try {
+          // TLS fingerprint check
+          const cert = await captureLiveTLS(ep.hostname)
+          if (cert) {
+            const tlsResult = validateTLS(ep.id, cert)
+            if (!tlsResult.ok) {
+              console.error(`[H2] 🚨 TLS mismatch for ${ep.id}: ${tlsResult.reason}`)
+              forceDisable(ep.id, `tls-fingerprint-change: ${tlsResult.reason}`)
+            }
+          }
+
+          // DNS record check
+          const dnsRecords = await captureLiveDNS(ep.hostname)
+          const dnsResult = validateDNS(ep.id, dnsRecords)
+          if (!dnsResult.ok) {
+            console.error(`[H2] 🚨 DNS mismatch for ${ep.id}: ${dnsResult.reason}`)
+            forceDisable(ep.id, `dns-record-change: ${dnsResult.reason}`)
+          }
+        } catch (err) {
+          // H2 errors don't block H1 — just log
+          console.warn(`[H2] Error validating ${ep.id}:`, err)
+        }
+      })
+    )
+  }
 
   // Detect state transitions
   for (const s of getAllStatuses()) {

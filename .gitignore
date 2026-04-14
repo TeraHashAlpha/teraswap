@@ -78,3 +78,6 @@ android/app/src/main/assets/public/
 *.pem
 *.key
 credentials.json
+
+# Endpoint baseline overrides (local testing only)
+data/endpoint-baseline-overrides.json
