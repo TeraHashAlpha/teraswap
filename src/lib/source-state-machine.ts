@@ -8,7 +8,7 @@
  *
  * forceDisable() and forceActivate() MUST only be invoked from:
  *   - monitoring-loop.ts (automatic transitions)
- *   - API routes with explicit authentication (CRON_SECRET, admin session, etc.)
+ *   - API routes with explicit authentication (MONITOR_CRON_SECRET, admin session, etc.)
  *
  * Exposing these as an unauthenticated endpoint creates a denial-of-service
  * vector and, in the case of forceActivate, a bypass of H2 kill-switch protection.
