@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useAccount, useBalance, useReadContracts } from 'wagmi'
 import { formatUnits, erc20Abi } from 'viem'
 import { DEFAULT_TOKENS, getAllTokens, isNativeETH, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
+import TokenAddressBadge from './TokenAddressBadge'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { CHAIN_ID } from '@/lib/constants'
 
@@ -271,6 +272,12 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                   {filtered.length === 0 && isAddressSearch && (
                     <div className="py-4 text-center">
                       <p className="mb-2 text-sm text-cream-50">Token not in list</p>
+                      <div className="mb-2">
+                        <TokenAddressBadge address={search.trim() as `0x${string}`} isVerified={false} size="md" />
+                      </div>
+                      <p className="mb-3 px-4 text-[10px] leading-relaxed text-amber-300/70">
+                        You are importing a token not in TeraSwap&apos;s default list. Anyone can create a token using any symbol or name. Verify the contract address matches the official source.
+                      </p>
                       <button
                         onClick={handleImportToken}
                         disabled={importing}
@@ -351,6 +358,7 @@ function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: To
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-cream">{token.symbol}</div>
         <div className="truncate text-xs text-cream-35">{token.name}</div>
+        <TokenAddressBadge address={token.address} size="sm" showExplorerLink={false} />
       </div>
       {balance && (
         <div className="text-right">

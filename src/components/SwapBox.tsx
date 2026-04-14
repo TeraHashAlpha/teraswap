@@ -13,6 +13,7 @@ import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
 import { useApproval } from '@/hooks/useApproval'
 import Permit2EducationModal from '@/components/Permit2EducationModal'
+import TokenAddressBadge from '@/components/TokenAddressBadge'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
@@ -403,13 +404,19 @@ export default function SwapBox() {
             )}
             <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); resetSwap() }} disabledAddress={tokenOut?.address} />
           </div>
-          {balanceIn && tokenIn && (
+          {tokenIn && (
             <div className="mt-1 flex items-center justify-between px-1 text-xs text-cream-35">
-              <span>Balance: {balanceDisplay} {tokenIn.symbol}</span>
-              <div className="flex gap-2">
-                <button onClick={() => handleSetAmount(formatUnits(balanceIn.value / 2n, balanceIn.decimals))} className="text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream">50%</button>
-                <button onClick={() => handleSetAmount(formatUnits(balanceIn.value, balanceIn.decimals))} className="text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream">MAX</button>
-              </div>
+              {balanceIn ? (
+                <span>Balance: {balanceDisplay} {tokenIn.symbol}</span>
+              ) : (
+                <TokenAddressBadge address={tokenIn.address} size="sm" showExplorerLink={false} />
+              )}
+              {balanceIn && (
+                <div className="flex gap-2">
+                  <button onClick={() => handleSetAmount(formatUnits(balanceIn.value / 2n, balanceIn.decimals))} className="text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream">50%</button>
+                  <button onClick={() => handleSetAmount(formatUnits(balanceIn.value, balanceIn.decimals))} className="text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream">MAX</button>
+                </div>
+              )}
             </div>
           )}
         </div>
