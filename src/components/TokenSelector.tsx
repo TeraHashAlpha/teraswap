@@ -312,8 +312,8 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
 
                   {/* ── Categorized list (without tokens already in "Your Tokens") ── */}
                   {groups?.map((group) => (
-                    <div key={group.label} className="mb-1">
-                      <p className="sticky top-0 z-10 bg-[#0F1318] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
+                    <div key={group.label} className="mb-2">
+                      <p className="bg-[#0F1318] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
                         {group.label}
                       </p>
                       {group.tokens.map((token) => (
