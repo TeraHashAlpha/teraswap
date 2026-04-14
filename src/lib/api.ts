@@ -1,6 +1,7 @@
 import {
   FEE_COLLECTOR_ADDRESS,
   FEE_INCOMPATIBLE_SOURCES,
+  DISABLED_SOURCES,
   DEFAULT_SLIPPAGE,
   QUOTE_TIMEOUT_MS,
   PERMIT2_ADDRESS,
@@ -46,10 +47,18 @@ export async function fetchMetaQuote(
   }
 
   // All available sources from adapter registry
-  const allSources = ADAPTER_REGISTRY.map(a => ({
-    name: a.name,
-    fetch: () => a.fetchQuote({ src, dst, amount, srcDecimals, dstDecimals }) as Promise<NormalizedQuote>,
-  }))
+  const allSources = ADAPTER_REGISTRY
+    .filter(a => {
+      if (DISABLED_SOURCES[a.name]) {
+        console.info(`[SOURCE] ${a.name} disabled: ${DISABLED_SOURCES[a.name]}`)
+        return false
+      }
+      return true
+    })
+    .map(a => ({
+      name: a.name,
+      fetch: () => a.fetchQuote({ src, dst, amount, srcDecimals, dstDecimals }) as Promise<NormalizedQuote>,
+    }))
 
   // [CB-01] Skip sources with OPEN circuit breaker
   const cbFiltered = allSources.filter(s => {
@@ -236,6 +245,7 @@ export async function fetchSwapFromSource(
   quoteMeta?: NormalizedQuote['meta'],
   chainId?: number,
 ): Promise<NormalizedQuote> {
+  if (DISABLED_SOURCES[source]) throw new Error(`${source} is disabled: ${DISABLED_SOURCES[source]}`)
   const adapter = ADAPTER_REGISTRY.find(a => a.name === source)
   if (!adapter) throw new Error(`Unknown source: ${source}`)
 

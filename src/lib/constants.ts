@@ -128,6 +128,13 @@ export const FEE_NATIVE_SOURCES: AggregatorName[] = []
 // to guarantee fee collection on every swap.
 export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = ['0x', 'cowswap']
 
+// ── Disabled Sources ────────────────────────────────────
+// Sources temporarily disabled for security/operational reasons.
+// Excluded from ALL quote and swap requests. Reversible by removing the entry.
+export const DISABLED_SOURCES: Record<string, string> = {
+  cowswap: 'Preventive: CoW frontend compromised 2026-04-14, awaiting post-mortem',
+}
+
 // FeeCollector ABI (only the functions we call from the frontend)
 export const FEE_COLLECTOR_ABI = [
   {
