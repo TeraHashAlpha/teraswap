@@ -1,0 +1,10 @@
+name = "teraswap-monitor-tick-cron"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+TICK_URL = "https://teraswap.app/api/monitor/tick"
+# MONITOR_CRON_SECRET is set via: wrangler secret put MONITOR_CRON_SECRET

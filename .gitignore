@@ -81,3 +81,6 @@ credentials.json
 
 # Endpoint baseline overrides (local testing only)
 data/endpoint-baseline-overrides.json
+
+# Cloudflare Workers node_modules
+workers/*/node_modules/
