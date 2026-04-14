@@ -9,9 +9,11 @@
  * Alert on state transitions only (not every tick).
  */
 
+import { kv } from '@vercel/kv'
 import { MONITORED_ENDPOINTS } from './monitored-endpoints'
 import { runHealthCheck } from './health-check'
 import {
+  beginTick,
   recordHealthCheck,
   checkAutoRecovery,
   forceDisable,
@@ -36,49 +38,52 @@ function initAlerts(): void {
   alertInitialized = true
 
   setTransitionCallback((id, from, to, reason) => {
-    // Only alert on transitions TO degraded or disabled
     if (to === 'degraded' || to === 'disabled') {
       const emoji = to === 'disabled' ? '🔴' : '⚠️'
       const message = `${emoji} Source ${to}: <b>${id}</b>\nFrom: ${from}\nReason: ${reason}\nTime: ${new Date().toISOString()}`
-
-      // Fire-and-forget alert via internal endpoint
-      sendInternalAlert(id, from, to, reason, message).catch(() => {})
+      sendTelegramAlert(message).catch(() => {})
     }
-    // Alert on recovery too
     if (to === 'active' && (from === 'degraded' || from === 'disabled')) {
       const message = `✅ Source recovered: <b>${id}</b>\nFrom: ${from}\nReason: ${reason}\nTime: ${new Date().toISOString()}`
-      sendInternalAlert(id, from, to, reason, message).catch(() => {})
+      sendTelegramAlert(message).catch(() => {})
     }
   })
 }
 
-async function sendInternalAlert(
-  id: string,
-  from: SourceState,
-  to: SourceState,
-  reason: string,
-  message: string,
-): Promise<void> {
-  // Try Telegram directly if env vars are available (serverless context)
+async function sendTelegramAlert(message: string): Promise<void> {
   const botToken = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
-  if (botToken && chatId) {
-    try {
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: `🚨 <b>TeraSwap Monitoring</b>\n\n${message}`,
-          parse_mode: 'HTML',
-        }),
-      })
-    } catch (err) {
-      console.warn('[MONITOR] Telegram alert failed:', err)
-    }
-  }
+  if (!botToken || !chatId) return
 
-  console.log(`[MONITOR-ALERT] ${id}: ${from} → ${to} (${reason})`)
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `🚨 <b>TeraSwap Monitoring</b>\n\n${message}`,
+        parse_mode: 'HTML',
+      }),
+    })
+  } catch (err) {
+    console.warn('[MONITOR] Telegram alert failed:', err)
+  }
+}
+
+// ── Heartbeat keys ──────────────────────────────────────
+
+const HEARTBEAT_KEY = 'teraswap:monitor:lastTick'
+const TICK_COUNT_KEY = 'teraswap:monitor:tickCount'
+
+async function writeHeartbeat(): Promise<void> {
+  try {
+    const pipeline = kv.pipeline()
+    pipeline.set(HEARTBEAT_KEY, new Date().toISOString(), { ex: 3600 }) // 1h TTL
+    pipeline.incr(TICK_COUNT_KEY)
+    await pipeline.exec()
+  } catch (err) {
+    console.warn('[MONITOR] Heartbeat write failed:', err instanceof Error ? err.message : err)
+  }
 }
 
 // ── Main tick function ──────────────────────────────────
@@ -89,7 +94,7 @@ export interface MonitoringTickResult {
   failures: number
   transitions: string[]
   recovered: string[]
-  statuses: ReturnType<typeof getAllStatuses>
+  statuses: Awaited<ReturnType<typeof getAllStatuses>>
 }
 
 /**
@@ -99,48 +104,46 @@ export interface MonitoringTickResult {
 export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   initAlerts()
 
+  // Invalidate per-tick cache (fresh reads from KV)
+  beginTick()
+
   const transitions: string[] = []
-  const originalStates = new Map(
-    getAllStatuses().map(s => [s.id, s.state])
-  )
+  const allBefore = await getAllStatuses()
+  const originalStates = new Map(allBefore.map(s => [s.id, s.state]))
 
   let failures = 0
 
-  // Run all health checks in parallel
-  const results = await Promise.allSettled(
+  // ── H1: Health checks ─────────────────────────────────
+  await Promise.allSettled(
     MONITORED_ENDPOINTS.map(async (ep) => {
       const result = await runHealthCheck(ep)
-      recordHealthCheck(ep.id, result)
+      await recordHealthCheck(ep.id, result)
       if (!result.ok) failures++
-      return { id: ep.id, ...result }
     })
   )
 
-  // ── H2: TLS + DNS baseline validation ──────────────────
+  // ── H2: TLS + DNS baseline validation ─────────────────
   const baseline = loadBaseline()
   if (baseline) {
     await Promise.allSettled(
       MONITORED_ENDPOINTS.map(async (ep) => {
         try {
-          // TLS fingerprint check
           const cert = await captureLiveTLS(ep.hostname)
           if (cert) {
             const tlsResult = validateTLS(ep.id, cert)
             if (!tlsResult.ok) {
               console.error(`[H2] 🚨 TLS mismatch for ${ep.id}: ${tlsResult.reason}`)
-              forceDisable(ep.id, `tls-fingerprint-change: ${tlsResult.reason}`)
+              await forceDisable(ep.id, `tls-fingerprint-change: ${tlsResult.reason}`)
             }
           }
 
-          // DNS record check
           const dnsRecords = await captureLiveDNS(ep.hostname)
           const dnsResult = validateDNS(ep.id, dnsRecords)
           if (!dnsResult.ok) {
             console.error(`[H2] 🚨 DNS mismatch for ${ep.id}: ${dnsResult.reason}`)
-            forceDisable(ep.id, `dns-record-change: ${dnsResult.reason}`)
+            await forceDisable(ep.id, `dns-record-change: ${dnsResult.reason}`)
           }
         } catch (err) {
-          // H2 errors don't block H1 — just log
           console.warn(`[H2] Error validating ${ep.id}:`, err)
         }
       })
@@ -148,7 +151,8 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   }
 
   // Detect state transitions
-  for (const s of getAllStatuses()) {
+  const allAfter = await getAllStatuses()
+  for (const s of allAfter) {
     const prev = originalStates.get(s.id)
     if (prev && prev !== s.state) {
       transitions.push(`${s.id}: ${prev} → ${s.state}`)
@@ -156,7 +160,10 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   }
 
   // Check for auto-recovery of non-critical disabled sources
-  const recovered = checkAutoRecovery()
+  const recovered = await checkAutoRecovery()
+
+  // Write heartbeat to KV (dead-man's-switch)
+  await writeHeartbeat()
 
   return {
     timestamp: new Date().toISOString(),
@@ -164,6 +171,6 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     failures,
     transitions,
     recovered,
-    statuses: getAllStatuses(),
+    statuses: allAfter,
   }
 }

@@ -1,17 +1,25 @@
 /**
- * Source availability state machine.
+ * @internal — server-only module.
  *
- * Tracks health of each aggregator/endpoint with 3 states:
- *   active → degraded → disabled → (manual or auto recovery) → active
+ * DO NOT import from:
+ *   - any file under src/app/(client)/
+ *   - any React component
+ *   - any 'use client' directive file
  *
- * State transitions:
- *   active → degraded:   3 consecutive failures OR p95 > 5000ms (last 10 checks)
- *   degraded → disabled: 2 more consecutive failures (total 5) OR forceDisable()
- *   degraded → active:   3 consecutive successes AND p95 < 2000ms
- *   disabled → active:   forceActivate() OR auto after 10min (non-critical only)
+ * forceDisable() and forceActivate() MUST only be invoked from:
+ *   - monitoring-loop.ts (automatic transitions)
+ *   - API routes with explicit authentication (CRON_SECRET, admin session, etc.)
  *
- * In-memory for MVP — structured for future Supabase persistence.
+ * Exposing these as an unauthenticated endpoint creates a denial-of-service
+ * vector and, in the case of forceActivate, a bypass of H2 kill-switch protection.
+ *
+ * State is persisted to Vercel KV (Upstash Redis) to survive serverless cold starts.
+ * Key scheme:
+ *   teraswap:source-state:{sourceId} — JSON SourceStatus, no TTL
+ *   teraswap:source-state:index     — Redis SET of all known source IDs
  */
+
+import { kv } from '@vercel/kv'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -20,13 +28,13 @@ export type SourceState = 'active' | 'degraded' | 'disabled'
 export interface SourceStatus {
   id: string
   state: SourceState
-  lastCheckAt: number        // Unix ms
-  failureCount: number       // consecutive failures
-  successCount: number       // consecutive successes (resets on failure)
-  latencyHistory: number[]   // last 10 latency values in ms
+  lastCheckAt: number
+  failureCount: number
+  successCount: number
+  latencyHistory: number[]
   disabledReason?: string
-  disabledAt?: number        // Unix ms when disabled
-  lastTransitionAt: number   // Unix ms of last state change
+  disabledAt?: number
+  lastTransitionAt: number
 }
 
 export interface HealthCheckResult {
@@ -45,35 +53,98 @@ const P0_REASONS = new Set([
 
 // ── Thresholds ──────────────────────────────────────────
 
-const FAILURE_TO_DEGRADED = 3         // consecutive failures → degraded
-const FAILURE_TO_DISABLED = 5         // consecutive failures → disabled (from active)
-const SUCCESS_TO_ACTIVE = 3           // consecutive successes → active (from degraded)
-const P95_DEGRADED_THRESHOLD = 5000   // ms
-const P95_RECOVERY_THRESHOLD = 2000   // ms
-const AUTO_RECOVERY_MS = 10 * 60_000  // 10 minutes
+const FAILURE_TO_DEGRADED = 3
+const FAILURE_TO_DISABLED = 5
+const SUCCESS_TO_ACTIVE = 3
+const P95_DEGRADED_THRESHOLD = 5000
+const P95_RECOVERY_THRESHOLD = 2000
+const AUTO_RECOVERY_MS = 10 * 60_000
 const MAX_LATENCY_HISTORY = 10
 
-// ── State store ─────────────────────────────────────────
-// Single boundary for future persistence upgrade
+// ── KV key helpers ──────────────────────────────────────
 
-const store = new Map<string, SourceStatus>()
+const KEY_PREFIX = 'teraswap:source-state:'
+const INDEX_KEY = 'teraswap:source-state:index'
 
-function getOrCreate(id: string): SourceStatus {
-  let status = store.get(id)
-  if (!status) {
-    status = {
-      id,
-      state: 'active',
-      lastCheckAt: 0,
-      failureCount: 0,
-      successCount: 0,
-      latencyHistory: [],
-      lastTransitionAt: Date.now(),
-    }
-    store.set(id, status)
-  }
-  return status
+function stateKey(id: string): string {
+  return `${KEY_PREFIX}${id}`
 }
+
+// ── Per-tick in-memory cache ────────────────────────────
+// Populated on first read per-id per tick. Cleared by beginTick().
+// Writes go through to KV immediately AND update the cache.
+
+const tickCache = new Map<string, SourceStatus>()
+
+/** Call at the start of each monitoring tick to invalidate the cache. */
+export function beginTick(): void {
+  tickCache.clear()
+}
+
+// ── KV read/write ───────────────────────────────────────
+
+function defaultStatus(id: string): SourceStatus {
+  return {
+    id,
+    state: 'active',
+    lastCheckAt: 0,
+    failureCount: 0,
+    successCount: 0,
+    latencyHistory: [],
+    lastTransitionAt: Date.now(),
+  }
+}
+
+async function loadFromKV(id: string): Promise<SourceStatus> {
+  // Check tick cache first
+  const cached = tickCache.get(id)
+  if (cached) return cached
+
+  try {
+    const data = await kv.get<SourceStatus>(stateKey(id))
+    const status = data || defaultStatus(id)
+    tickCache.set(id, status)
+    return status
+  } catch (err) {
+    console.warn(`[STATE] KV unavailable for ${id}, using default:`, err instanceof Error ? err.message : err)
+    // KV unavailable → fail open (treat as active)
+    const status = defaultStatus(id)
+    tickCache.set(id, status)
+    return status
+  }
+}
+
+async function saveToKV(status: SourceStatus): Promise<void> {
+  tickCache.set(status.id, status)
+  try {
+    const pipeline = kv.pipeline()
+    pipeline.set(stateKey(status.id), status)
+    pipeline.sadd(INDEX_KEY, status.id)
+    await pipeline.exec()
+  } catch (err) {
+    console.warn(`[STATE] KV write failed for ${status.id}:`, err instanceof Error ? err.message : err)
+    // P0 alert: broken state store is itself an incident
+    alertKVFailure(status.id, err)
+  }
+}
+
+function alertKVFailure(id: string, err: unknown): void {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (botToken && chatId) {
+    fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `🔴 <b>P0: KV STATE STORE UNAVAILABLE</b>\n\nFailed to persist state for <code>${id}</code>.\nError: ${err instanceof Error ? err.message : String(err)}\n\nSource states may reset on next cold start.`,
+        parse_mode: 'HTML',
+      }),
+    }).catch(() => {})
+  }
+}
+
+// ── Utility ─────────────────────────────────────────────
 
 function calcP95(history: number[]): number {
   if (history.length === 0) return 0
@@ -100,21 +171,28 @@ function transition(status: SourceStatus, newState: SourceState, reason: string)
   if (onTransition) onTransition(status.id, from, newState, reason)
 }
 
-// ── Public API ──────────────────────────────────────────
+// ── Public API (async — backed by KV) ───────────────────
 
-export function getStatus(sourceId: string): SourceStatus {
-  return getOrCreate(sourceId)
+export async function getStatus(sourceId: string): Promise<SourceStatus> {
+  return loadFromKV(sourceId)
 }
 
-export function getAllStatuses(): SourceStatus[] {
-  return Array.from(store.values())
+export async function getAllStatuses(): Promise<SourceStatus[]> {
+  try {
+    const ids = await kv.smembers(INDEX_KEY) as string[]
+    if (!ids || ids.length === 0) return []
+    const statuses = await Promise.all(ids.map(id => loadFromKV(id)))
+    return statuses
+  } catch (err) {
+    console.warn('[STATE] KV unavailable for getAllStatuses:', err instanceof Error ? err.message : err)
+    return Array.from(tickCache.values())
+  }
 }
 
-export function recordHealthCheck(sourceId: string, result: HealthCheckResult): void {
-  const s = getOrCreate(sourceId)
+export async function recordHealthCheck(sourceId: string, result: HealthCheckResult): Promise<void> {
+  const s = await loadFromKV(sourceId)
   s.lastCheckAt = Date.now()
 
-  // Update latency history
   s.latencyHistory.push(result.latencyMs)
   if (s.latencyHistory.length > MAX_LATENCY_HISTORY) {
     s.latencyHistory = s.latencyHistory.slice(-MAX_LATENCY_HISTORY)
@@ -124,7 +202,6 @@ export function recordHealthCheck(sourceId: string, result: HealthCheckResult): 
     s.successCount++
     s.failureCount = 0
 
-    // Recovery: degraded → active
     if (s.state === 'degraded') {
       const p95 = calcP95(s.latencyHistory)
       if (s.successCount >= SUCCESS_TO_ACTIVE && p95 < P95_RECOVERY_THRESHOLD) {
@@ -135,7 +212,6 @@ export function recordHealthCheck(sourceId: string, result: HealthCheckResult): 
     s.failureCount++
     s.successCount = 0
 
-    // Degradation: active → degraded
     if (s.state === 'active') {
       const p95 = calcP95(s.latencyHistory)
       if (s.failureCount >= FAILURE_TO_DEGRADED) {
@@ -145,50 +221,49 @@ export function recordHealthCheck(sourceId: string, result: HealthCheckResult): 
       }
     }
 
-    // Disabled: degraded → disabled (2 more failures after degraded = 5 total)
     if (s.state === 'degraded' && s.failureCount >= FAILURE_TO_DISABLED) {
       transition(s, 'disabled', `${s.failureCount} consecutive failures`)
       s.disabledAt = Date.now()
       s.disabledReason = result.error || 'health-check-failures'
     }
   }
+
+  await saveToKV(s)
 }
 
-export function forceDisable(sourceId: string, reason: string): void {
-  const s = getOrCreate(sourceId)
+export async function forceDisable(sourceId: string, reason: string): Promise<void> {
+  const s = await loadFromKV(sourceId)
   s.disabledReason = reason
   s.disabledAt = Date.now()
   transition(s, 'disabled', `force: ${reason}`)
+  await saveToKV(s)
 }
 
-export function forceActivate(sourceId: string): void {
-  const s = getOrCreate(sourceId)
+export async function forceActivate(sourceId: string): Promise<void> {
+  const s = await loadFromKV(sourceId)
   s.failureCount = 0
   s.successCount = 0
   s.disabledReason = undefined
   s.disabledAt = undefined
   transition(s, 'active', 'force activated')
+  await saveToKV(s)
 }
 
-/**
- * Check for auto-recovery of non-critical disabled sources.
- * Called periodically by the monitoring loop.
- */
-export function checkAutoRecovery(): string[] {
+export async function checkAutoRecovery(): Promise<string[]> {
   const recovered: string[] = []
   const now = Date.now()
+  const all = await getAllStatuses()
 
-  for (const s of store.values()) {
+  for (const s of all) {
     if (s.state !== 'disabled' || !s.disabledAt) continue
-    // P0 reasons block auto-recovery
     if (s.disabledReason && P0_REASONS.has(s.disabledReason)) continue
-    // Auto-recover after 10min
     if (now - s.disabledAt >= AUTO_RECOVERY_MS) {
       s.failureCount = 0
       s.successCount = 0
       s.disabledReason = undefined
       s.disabledAt = undefined
       transition(s, 'active', `auto-recovery after ${AUTO_RECOVERY_MS / 60_000}min`)
+      await saveToKV(s)
       recovered.push(s.id)
     }
   }
@@ -196,7 +271,21 @@ export function checkAutoRecovery(): string[] {
   return recovered
 }
 
-/** Reset all state (for testing) */
-export function resetAllStates(): void {
-  store.clear()
+/** Reset all state — FORBIDDEN in production. */
+export async function resetAllStates(): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('resetAllStates is forbidden in production')
+  }
+  tickCache.clear()
+  try {
+    const ids = await kv.smembers(INDEX_KEY) as string[]
+    if (ids?.length) {
+      const pipeline = kv.pipeline()
+      for (const id of ids) pipeline.del(stateKey(id))
+      pipeline.del(INDEX_KEY)
+      await pipeline.exec()
+    }
+  } catch {
+    // Test environment may not have KV
+  }
 }
