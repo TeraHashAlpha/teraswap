@@ -19,6 +19,7 @@
     "cap:open:android": "npx cap open android",
     "tokens:sync": "tsx scripts/sync-token-categories.ts",
     "baseline:capture": "tsx scripts/capture-endpoint-baseline.ts",
+    "telegram:setup-webhook": "tsx scripts/setup-telegram-webhook.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
