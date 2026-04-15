@@ -22,7 +22,7 @@
 
 import { NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
-import { timingSafeEqual } from 'node:crypto'
+import { timingSafeEqual, createHash } from 'node:crypto'
 import {
   beginTick,
   getAllStatuses,
@@ -34,12 +34,14 @@ import {
 } from '@/lib/source-state-machine'
 import type { QuorumCheckResult } from '@/lib/quorum-check'
 import { escapeHtml } from '@/lib/alert-channels/utils'
+import { isP0Reason } from '@/lib/p0-reasons'
 
 export const dynamic = 'force-dynamic'
 
 // ── Constants ──────────────────────────────────────────
 
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+const TELEGRAM_FETCH_TIMEOUT_MS = 5_000
 const GRACE_KV_KEY = 'teraswap:monitor:graceUntil'
 
 // ── Telegram types (minimal subset) ────────────────────
@@ -64,14 +66,19 @@ interface TelegramUpdate {
 
 // ── Auth helpers ───────────────────────────────────────
 
-/** Constant-time comparison of webhook secret. */
+/**
+ * Constant-time comparison of webhook secret via SHA-256 hash.
+ * Hashing both sides before comparing eliminates the length leak
+ * that would otherwise exist with a direct timingSafeEqual on
+ * variable-length inputs (the early return on different lengths
+ * leaks whether the lengths match).
+ */
 export function verifyWebhookSecret(provided: string, expected: string): boolean {
   if (!provided || !expected) return false
   try {
-    const a = Buffer.from(provided, 'utf-8')
-    const b = Buffer.from(expected, 'utf-8')
-    if (a.length !== b.length) return false
-    return timingSafeEqual(a, b)
+    const hashA = createHash('sha256').update(provided).digest()
+    const hashB = createHash('sha256').update(expected).digest()
+    return timingSafeEqual(hashA, hashB)
   } catch {
     return false
   }
@@ -103,6 +110,7 @@ async function sendMessage(chatId: number, text: string): Promise<void> {
   if (!botToken) return
 
   await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    signal: AbortSignal.timeout(TELEGRAM_FETCH_TIMEOUT_MS),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -305,7 +313,8 @@ async function handleActivate(args: string, userId: number): Promise<string> {
     return `\u26D4 Admin-only command. Your ID: ${userId}`
   }
 
-  const sourceId = args.split(/\s+/)[0]
+  const parts = args.split(/\s+/)
+  const sourceId = parts[0]
   if (!sourceId) {
     return 'Usage: /activate {sourceId}\nExample: /activate cowswap'
   }
@@ -316,6 +325,15 @@ async function handleActivate(args: string, userId: number): Promise<string> {
   const exists = allStatuses.some(s => s.id === sourceId.toLowerCase())
   if (!exists) {
     return `Source <b>${escapeHtml(sourceId)}</b> not found.`
+  }
+
+  // P0 confirmation gate: if source was disabled by P0 reason, require explicit "confirm"
+  const status = await getStatus(sourceId.toLowerCase())
+  if (status.state === 'disabled' && isP0Reason(status.disabledReason)) {
+    const hasConfirm = parts[1]?.toLowerCase() === 'confirm'
+    if (!hasConfirm) {
+      return `\u26A0\uFE0F Source was disabled by P0 reason: <b>${escapeHtml(status.disabledReason || 'unknown')}</b>\nSend <code>/activate ${escapeHtml(sourceId)} confirm</code> to proceed.`
+    }
   }
 
   await forceActivate(sourceId.toLowerCase())

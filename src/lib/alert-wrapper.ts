@@ -17,7 +17,7 @@
 import { kv } from '@vercel/kv'
 import type { SourceState } from './source-state-machine'
 import { isP0Reason } from './p0-reasons'
-import { isInGracePeriod } from './grace-period'
+import { isInGracePeriodAsync } from './grace-period'
 import { sendTelegramAlert } from './alert-channels/telegram'
 import { sendEmailAlert } from './alert-channels/email'
 import { sendDiscordAlert } from './alert-channels/discord'
@@ -82,7 +82,7 @@ export async function emitTransitionAlert(
   const critical = isP0Reason(reason)
 
   // ① Grace period check — P0/critical always bypasses
-  if (isInGracePeriod() && !critical) {
+  if (await isInGracePeriodAsync() && !critical) {
     console.log(`[ALERT] suppressed (grace period) ${sourceId}: ${from} → ${to}`)
     return
   }
@@ -125,7 +125,7 @@ export async function emitTransitionAlert(
 // ── Test helpers (exported for unit tests only) ──────────
 
 export const _internal = {
-  isInGracePeriod,
+  isInGracePeriodAsync,
   isP0Reason,
   isDuplicate,
   markSent,

@@ -59,7 +59,8 @@ async function main() {
   const info = await infoRes.json()
   console.log('\nCurrent webhook info:')
   console.log(`  URL: ${info.result?.url || 'none'}`)
-  console.log(`  Has secret: ${info.result?.has_custom_certificate !== undefined ? 'yes' : 'unknown'}`)
+  const urlMatch = info.result?.url === WEBHOOK_URL
+  console.log(`  URL matches: ${urlMatch ? 'yes' : 'NO — expected ' + WEBHOOK_URL}`)
   console.log(`  Pending updates: ${info.result?.pending_update_count ?? '?'}`)
   console.log(`  Allowed updates: ${JSON.stringify(info.result?.allowed_updates ?? [])}`)
 }

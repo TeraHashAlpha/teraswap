@@ -27,7 +27,7 @@ function getKvSet(key: string): Set<string> {
 }
 
 const mockKvGet = vi.fn(async (key: string) => kvStore.get(key) ?? null)
-const mockKvSet = vi.fn(async (key: string, value: unknown) => { kvStore.set(key, value) })
+const mockKvSet = vi.fn(async (key: string, value: unknown, _opts?: unknown) => { kvStore.set(key, value) })
 const mockKvSmembers = vi.fn(async (key: string) => Array.from(getKvSet(key)))
 const mockKvIncr = vi.fn(async (key: string) => {
   const current = (kvStore.get(key) as number) ?? 0
@@ -44,7 +44,7 @@ const mockPipelineDel = vi.fn()
 vi.mock('@vercel/kv', () => ({
   kv: {
     get: (...args: unknown[]) => mockKvGet(...(args as [string])),
-    set: (...args: unknown[]) => mockKvSet(...(args as [string, unknown])),
+    set: (...args: unknown[]) => mockKvSet(...(args as [string, unknown, unknown?])),
     smembers: (...args: unknown[]) => mockKvSmembers(...(args as [string])),
     incr: (...args: unknown[]) => mockKvIncr(...(args as [string])),
     pipeline: () => ({
@@ -155,8 +155,11 @@ describe('Telegram webhook', () => {
       expect(verifyWebhookSecret('wrong', 'abc123')).toBe(false)
     })
 
-    it('verifyWebhookSecret returns false for different-length secrets', () => {
-      expect(verifyWebhookSecret('short', 'much-longer-secret')).toBe(false)
+    it('verifyWebhookSecret handles different-length secrets via SHA-256 (no length leak)', () => {
+      // Pre-fix: timingSafeEqual on raw buffers would throw on length mismatch.
+      // Post-fix: SHA-256 produces fixed 32-byte digests regardless of input length.
+      expect(verifyWebhookSecret('a', 'much-longer-secret-that-is-very-different')).toBe(false)
+      expect(verifyWebhookSecret('much-longer-secret-that-is-very-different', 'a')).toBe(false)
     })
 
     it('verifyWebhookSecret returns false for empty strings', () => {
@@ -455,6 +458,101 @@ describe('Telegram webhook', () => {
       const body = JSON.parse(sendCalls[0][1].body)
       expect(body.text).toContain('Usage')
     })
+
+    it('requires "confirm" for P0-disabled source', async () => {
+      // Seed a source disabled with a P0 reason (quorum-correlated-anomaly)
+      getKvSet('teraswap:source-state:index').add('cowswap')
+      kvStore.set('teraswap:source-state:cowswap', {
+        id: 'cowswap',
+        state: 'disabled',
+        lastCheckAt: Date.now(),
+        failureCount: 10,
+        successCount: 0,
+        latencyHistory: [100, 120],
+        lastTransitionAt: Date.now(),
+        disabledReason: 'quorum-correlated-anomaly',
+        disabledAt: Date.now(),
+      })
+
+      const req = makeRequest(makeUpdate('/activate cowswap'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('P0 reason')
+      expect(body.text).toContain('confirm')
+      expect(body.text).toContain('quorum-correlated-anomaly')
+
+      // Source should still be disabled
+      beginTick()
+      const { getStatus } = await import('@/lib/source-state-machine')
+      const s = await getStatus('cowswap')
+      expect(s.state).toBe('disabled')
+    })
+
+    it('proceeds with "confirm" for P0-disabled source', async () => {
+      getKvSet('teraswap:source-state:index').add('cowswap')
+      kvStore.set('teraswap:source-state:cowswap', {
+        id: 'cowswap',
+        state: 'disabled',
+        lastCheckAt: Date.now(),
+        failureCount: 10,
+        successCount: 0,
+        latencyHistory: [100, 120],
+        lastTransitionAt: Date.now(),
+        disabledReason: 'quorum-correlated-anomaly',
+        disabledAt: Date.now(),
+      })
+
+      const req = makeRequest(makeUpdate('/activate cowswap confirm'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      beginTick()
+      const { getStatus } = await import('@/lib/source-state-machine')
+      const s = await getStatus('cowswap')
+      expect(s.state).toBe('active')
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('activated')
+    })
+
+    it('does NOT require "confirm" for non-P0 disabled source', async () => {
+      // operator-disable is NOT a P0 reason — should activate without confirm
+      getKvSet('teraswap:source-state:index').add('cowswap')
+      kvStore.set('teraswap:source-state:cowswap', {
+        id: 'cowswap',
+        state: 'disabled',
+        lastCheckAt: Date.now(),
+        failureCount: 5,
+        successCount: 0,
+        latencyHistory: [100],
+        lastTransitionAt: Date.now(),
+        disabledReason: 'operator-disable: test reason',
+        disabledAt: Date.now(),
+      })
+
+      const req = makeRequest(makeUpdate('/activate cowswap'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      beginTick()
+      const { getStatus } = await import('@/lib/source-state-machine')
+      const s = await getStatus('cowswap')
+      expect(s.state).toBe('active')
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('activated')
+    })
   })
 
   // ── /grace command ───────────────────────────────────
@@ -519,6 +617,35 @@ describe('Telegram webhook', () => {
       )
       const body = JSON.parse(sendCalls[0][1].body)
       expect(body.text).toContain('Usage')
+    })
+
+    it('sets KV key readable by isInGracePeriodAsync()', async () => {
+      const req = makeRequest(makeUpdate('/grace 15'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      // Verify the KV key was written
+      const graceValue = kvStore.get('teraswap:monitor:graceUntil') as string
+      expect(graceValue).toBeTruthy()
+
+      // isInGracePeriodAsync should detect the KV value
+      const { isInGracePeriodAsync } = await import('@/lib/grace-period')
+      const result = await isInGracePeriodAsync()
+      expect(result).toBe(true)
+    })
+
+    it('sets KV with TTL matching the requested minutes', async () => {
+      const req = makeRequest(makeUpdate('/grace 60'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      // Verify kv.set was called with correct TTL (ex: 3600 for 60 minutes)
+      const graceCalls = mockKvSet.mock.calls.filter(
+        (args: unknown[]) => args[0] === 'teraswap:monitor:graceUntil',
+      )
+      expect(graceCalls.length).toBe(1)
+      // Third arg is options { ex: minutes * 60 }
+      expect(graceCalls[0][2]).toEqual({ ex: 3600 })
     })
   })
 
@@ -676,6 +803,21 @@ describe('Telegram webhook', () => {
       })
       const res = await POST(req)
       expect(res.status).toBe(200)
+    })
+
+    it('sendMessage includes AbortSignal timeout on fetch calls', async () => {
+      seedSource('cowswap')
+      const req = makeRequest(makeUpdate('/status'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      expect(sendCalls.length).toBe(1)
+      // The second argument to fetch should contain a signal
+      const fetchOptions = sendCalls[0][1] as RequestInit
+      expect(fetchOptions.signal).toBeDefined()
     })
 
     it('no sensitive data in responses (no env vars, secrets, KV keys)', async () => {

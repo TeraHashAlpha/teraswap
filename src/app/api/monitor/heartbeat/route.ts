@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
 import { getAllStatuses } from '@/lib/source-state-machine'
-import { isInGracePeriod } from '@/lib/grace-period'
+import { isInGracePeriodAsync } from '@/lib/grace-period'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,7 +46,7 @@ export async function GET() {
     const ageSeconds = lastTickMs > 0 ? Math.round((Date.now() - lastTickMs) / 1000) : null
 
     // Health determination
-    const grace = isInGracePeriod()
+    const grace = await isInGracePeriodAsync()
     const tickFresh = ageSeconds !== null && ageSeconds < HEARTBEAT_STALE_SECONDS
     const healthy = grace || tickFresh
 
