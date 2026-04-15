@@ -6,7 +6,10 @@
  * performs one full round of checks. The cron job calls this
  * every 60s via /api/monitor/tick.
  *
- * Alert on state transitions only (not every tick).
+ * Alerts are emitted exclusively through emitTransitionAlert()
+ * in the alert-wrapper (fans out to Telegram/Email/Discord with
+ * dedup, grace period, and HTML escaping). No direct Telegram
+ * sends from this module — see I-02 audit finding.
  */
 
 import { kv } from '@vercel/kv'
@@ -18,8 +21,6 @@ import {
   checkAutoRecovery,
   forceDisable,
   getAllStatuses,
-  setTransitionCallback,
-  type SourceState,
 } from './source-state-machine'
 import {
   loadBaseline,
@@ -33,47 +34,6 @@ import {
   runQuorumCheck,
   type QuorumCheckResult,
 } from './quorum-check'
-
-// ── Alert on state transitions ──────────────────────────
-
-let alertInitialized = false
-
-function initAlerts(): void {
-  if (alertInitialized) return
-  alertInitialized = true
-
-  setTransitionCallback((id, from, to, reason) => {
-    if (to === 'degraded' || to === 'disabled') {
-      const emoji = to === 'disabled' ? '🔴' : '⚠️'
-      const message = `${emoji} Source ${to}: <b>${id}</b>\nFrom: ${from}\nReason: ${reason}\nTime: ${new Date().toISOString()}`
-      sendTelegramAlert(message).catch(() => {})
-    }
-    if (to === 'active' && (from === 'degraded' || from === 'disabled')) {
-      const message = `✅ Source recovered: <b>${id}</b>\nFrom: ${from}\nReason: ${reason}\nTime: ${new Date().toISOString()}`
-      sendTelegramAlert(message).catch(() => {})
-    }
-  })
-}
-
-async function sendTelegramAlert(message: string): Promise<void> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
-  const chatId = process.env.TELEGRAM_CHAT_ID
-  if (!botToken || !chatId) return
-
-  try {
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `🚨 <b>TeraSwap Monitoring</b>\n\n${message}`,
-        parse_mode: 'HTML',
-      }),
-    })
-  } catch (err) {
-    console.warn('[MONITOR] Telegram alert failed:', err)
-  }
-}
 
 // ── Heartbeat keys ──────────────────────────────────────
 
@@ -109,8 +69,6 @@ export interface MonitoringTickResult {
  * Returns a summary of the results for the API response.
  */
 export async function runMonitoringTick(): Promise<MonitoringTickResult> {
-  initAlerts()
-
   // Invalidate per-tick cache (fresh reads from KV)
   beginTick()
 

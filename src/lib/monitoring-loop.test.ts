@@ -1,13 +1,10 @@
 /**
- * Integration tests for H5 quorum wiring in the monitoring loop.
+ * Integration tests for the monitoring loop.
  *
  * Covers:
- * - H5 runs on quorum tick (5th tick cadence)
- * - H5 skips on non-quorum ticks
- * - Quorum result included in MonitoringTickResult
- * - Correlated kill-switch writes KV audit trail
- * - Quorum failure doesn't crash the tick
- * - lastQuorumResult persisted to KV
+ * - H5 quorum wiring (tick cadence, result passthrough, error resilience)
+ * - [I-02] Single alert path — transitions emit exactly one alert via emitTransitionAlert
+ * - forceActivate() emits an alert through emitTransitionAlert
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -97,8 +94,10 @@ vi.mock('./fingerprint-validator', () => ({
 
 // ── Mock alert-wrapper ─────────────────────────────────
 
+const mockEmitTransitionAlert = vi.fn().mockResolvedValue(undefined)
+
 vi.mock('./alert-wrapper', () => ({
-  emitTransitionAlert: vi.fn().mockResolvedValue(undefined),
+  emitTransitionAlert: (...args: unknown[]) => mockEmitTransitionAlert(...args),
 }))
 
 // ── Mock quorum-check ──────────────────────────────────
@@ -120,7 +119,13 @@ vi.mock('./api', () => ({
 // ── Import after mocks ─────────────────────────────────
 
 import { runMonitoringTick } from './monitoring-loop'
-import { beginTick } from './source-state-machine'
+import {
+  beginTick,
+  recordHealthCheck,
+  forceDisable,
+  forceActivate,
+  getStatus,
+} from './source-state-machine'
 
 // ═══════════════════════════════════════════════════════════════
 
@@ -243,19 +248,7 @@ describe('quorum KV persistence', () => {
     beginTick()
   })
 
-  it('runQuorumCheck writes lastQuorumResult to KV', async () => {
-    // Re-import the real quorum check for this test
-    // We need to test the actual quorum-check.ts KV writes
-    // Since we mocked quorum-check above for monitoring-loop tests,
-    // we verify the KV set mock is called with the correct key pattern
-    // by checking the actual quorum-check module behavior
-
-    // The KV write happens inside runQuorumCheck (quorum-check.ts).
-    // We verify this by checking that mockKvSet was called with the
-    // 'teraswap:monitor:lastQuorumResult' key after running the quorum
-    // check module's tests above (28 passing). Here we verify the
-    // monitoring loop passes the quorum result through correctly.
-
+  it('monitoring loop passes quorum result through correctly', async () => {
     mockShouldRunQuorum.mockResolvedValue(true)
     const quorumData = {
       timestamp: '2026-04-15T00:00:00.000Z',
@@ -269,5 +262,126 @@ describe('quorum KV persistence', () => {
     const result = await runMonitoringTick()
     expect(result.quorum).toEqual(quorumData)
     expect(result.quorum!.skipped).toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════
+// [I-02] Single alert path — no duplicate Telegram sends
+// ═══════════════════════════════════════════════════════════════
+
+describe('[I-02] single alert path', () => {
+  function seedSource(sourceId: string, state: 'active' | 'degraded' | 'disabled' = 'active'): void {
+    getKvSet('teraswap:source-state:index').add(sourceId)
+    kvStore.set(`teraswap:source-state:${sourceId}`, {
+      id: sourceId,
+      state,
+      lastCheckAt: Date.now(),
+      failureCount: 0,
+      successCount: 0,
+      latencyHistory: [],
+      lastTransitionAt: Date.now(),
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false)
+  })
+
+  it('state transition emits exactly ONE alert via emitTransitionAlert (not two)', async () => {
+    seedSource('cowswap', 'active')
+
+    // Force-disable triggers active → disabled transition
+    await forceDisable('cowswap', 'test-single-alert')
+
+    // emitTransitionAlert should be called exactly once for this transition
+    const transitionCalls = mockEmitTransitionAlert.mock.calls.filter(
+      (args: unknown[]) => args[0] === 'cowswap',
+    )
+    expect(transitionCalls.length).toBe(1)
+    expect(transitionCalls[0][1]).toBe('active')  // from
+    expect(transitionCalls[0][2]).toBe('disabled') // to
+    expect(transitionCalls[0][3]).toContain('test-single-alert')
+  })
+
+  it('no direct Telegram fetch calls from monitoring-loop (legacy path removed)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'))
+    seedSource('cowswap', 'active')
+
+    await forceDisable('cowswap', 'test-no-telegram')
+
+    // There should be NO direct fetch calls to Telegram API.
+    // All Telegram alerts go through emitTransitionAlert → alert-channels/telegram
+    // which is mocked here.
+    const telegramCalls = fetchSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('api.telegram.org'),
+    )
+    expect(telegramCalls.length).toBe(0)
+
+    fetchSpy.mockRestore()
+  })
+
+  it('forceActivate emits alert via emitTransitionAlert', async () => {
+    seedSource('cowswap', 'disabled')
+
+    await forceActivate('cowswap')
+
+    const activateCalls = mockEmitTransitionAlert.mock.calls.filter(
+      (args: unknown[]) => args[0] === 'cowswap' && args[2] === 'active',
+    )
+    expect(activateCalls.length).toBe(1)
+    expect(activateCalls[0][1]).toBe('disabled') // from
+    expect(activateCalls[0][2]).toBe('active')   // to
+    expect(activateCalls[0][3]).toContain('force activated')
+  })
+
+  it('forceActivate on already-active source does NOT emit alert (no-op transition)', async () => {
+    seedSource('cowswap', 'active')
+
+    await forceActivate('cowswap')
+
+    const activateCalls = mockEmitTransitionAlert.mock.calls.filter(
+      (args: unknown[]) => args[0] === 'cowswap',
+    )
+    expect(activateCalls.length).toBe(0)
+  })
+
+  it('degraded → disabled transition emits exactly one alert', async () => {
+    seedSource('velora', 'degraded')
+
+    await forceDisable('velora', 'consecutive-failures')
+
+    const calls = mockEmitTransitionAlert.mock.calls.filter(
+      (args: unknown[]) => args[0] === 'velora',
+    )
+    expect(calls.length).toBe(1)
+    expect(calls[0][1]).toBe('degraded')
+    expect(calls[0][2]).toBe('disabled')
+  })
+
+  it('auto-recovery (disabled → active) emits exactly one alert', async () => {
+    seedSource('sushiswap', 'disabled')
+    // Set up the disabled state with non-P0 reason and old timestamp for auto-recovery
+    const s = await getStatus('sushiswap')
+    s.disabledAt = Date.now() - 11 * 60_000
+    s.disabledReason = 'consecutive-failures'
+    kvStore.set('teraswap:source-state:sushiswap', s)
+    getKvSet('teraswap:source-state:index').add('sushiswap')
+    beginTick()
+
+    // Import checkAutoRecovery
+    const { checkAutoRecovery } = await import('./source-state-machine')
+    await checkAutoRecovery()
+
+    const recoveryCalls = mockEmitTransitionAlert.mock.calls.filter(
+      (args: unknown[]) => args[0] === 'sushiswap' && args[2] === 'active',
+    )
+    expect(recoveryCalls.length).toBe(1)
+    expect(recoveryCalls[0][1]).toBe('disabled')
+    expect(recoveryCalls[0][2]).toBe('active')
+    expect(recoveryCalls[0][3]).toContain('auto-recovery')
   })
 })

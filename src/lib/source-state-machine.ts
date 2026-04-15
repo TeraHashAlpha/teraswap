@@ -232,22 +232,15 @@ function calcP95(history: number[]): number {
 
 // ── State transition logic ──────────────────────────────
 
-type TransitionCallback = (id: string, from: SourceState, to: SourceState, reason: string) => void
-let onTransition: TransitionCallback | null = null
-
-export function setTransitionCallback(cb: TransitionCallback): void {
-  onTransition = cb
-}
-
 function transition(status: SourceStatus, newState: SourceState, reason: string): void {
   const from = status.state
   if (from === newState) return
   status.state = newState
   status.lastTransitionAt = Date.now()
   console.log(`[STATE] ${status.id}: ${from} → ${newState} (${reason})`)
-  if (onTransition) onTransition(status.id, from, newState, reason)
 
-  // Fire-and-forget alert — never blocks state machine
+  // Sole alert path — fans out to Telegram/Email/Discord via alert-wrapper
+  // with dedup, grace period, and HTML escaping. Fire-and-forget to never block.
   emitTransitionAlert(status.id, from, newState, reason).catch(err => {
     console.error(`[STATE] alert emission failed for ${status.id}:`, err instanceof Error ? err.message : err)
   })
