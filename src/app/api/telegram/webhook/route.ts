@@ -683,11 +683,12 @@ export async function POST(req: Request): Promise<Response> {
 
   // ── Handle callback queries (inline keyboard button presses) ──
   if (update.callback_query) {
-    const cbq = update.callback_query
-    handleCallbackQuery(cbq).catch(err => {
+    try {
+      await handleCallbackQuery(update.callback_query)
+    } catch (err) {
       console.error('[TELEGRAM] Callback query error:', err instanceof Error ? err.message : err)
-      answerCallbackQuery(cbq.id, 'Internal error').catch(() => {})
-    })
+      await answerCallbackQuery(update.callback_query.id, 'Internal error').catch(() => {})
+    }
     return NextResponse.json({ ok: true }, { status: 200 })
   }
 
@@ -703,17 +704,16 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true }, { status: 200 })
   }
 
-  // Process command asynchronously — respond 200 immediately, then send result
   const chatId = message.chat.id
   const userId = message.from.id
 
-  // Fire-and-forget: process command and send result via sendMessage
-  routeCommand(parsed.command, parsed.args, userId)
-    .then(reply => sendMessage(chatId, reply))
-    .catch(err => {
-      console.error('[TELEGRAM] Command error:', err instanceof Error ? err.message : err)
-      sendMessage(chatId, 'Internal error processing command.').catch(() => {})
-    })
+  try {
+    const reply = await routeCommand(parsed.command, parsed.args, userId)
+    await sendMessage(chatId, reply)
+  } catch (err) {
+    console.error('[TELEGRAM] Command error:', err instanceof Error ? err.message : err)
+    await sendMessage(chatId, 'Internal error processing command.').catch(() => {})
+  }
 
   return NextResponse.json({ ok: true }, { status: 200 })
 }
