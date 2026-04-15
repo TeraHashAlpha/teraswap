@@ -19,9 +19,15 @@ export default {
   },
 
   // HTTP fetch handler for manual invocation + health check
+  // Routes: /_cron/trigger (POST, auth required), /_cron/health (GET)
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
-    if (url.pathname === '/trigger') {
+    const path = url.pathname.replace(/\/$/, '') // strip trailing slash
+
+    if (path === '/_cron/trigger' || path === '/trigger') {
+      if (request.method !== 'POST') {
+        return new Response('method not allowed', { status: 405 })
+      }
       const auth = request.headers.get('authorization')
       if (auth !== `Bearer ${env.MONITOR_CRON_SECRET}`) {
         return new Response('unauthorized', { status: 401 })
@@ -29,7 +35,15 @@ export default {
       await triggerTick(env)
       return new Response('triggered', { status: 200 })
     }
-    return new Response('teraswap-monitor-tick-cron', { status: 200 })
+
+    if (path === '/_cron/health' || path === '/health') {
+      return new Response(JSON.stringify({ status: 'ok', worker: 'teraswap-monitor-tick-cron', ts: Date.now() }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    return new Response('not found', { status: 404 })
   },
 }
 

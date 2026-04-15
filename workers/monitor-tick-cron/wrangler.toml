@@ -2,6 +2,13 @@ name = "teraswap-monitor-tick-cron"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
+# Disable the default *.workers.dev route — only reachable via custom domain
+workers_dev = false
+
+[[routes]]
+pattern = "teraswap.app/_cron/*"
+zone_name = "teraswap.app"
+
 [triggers]
 crons = ["* * * * *"]
 

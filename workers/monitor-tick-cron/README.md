@@ -53,9 +53,25 @@ npm run tail
 4. Redeploy Vercel (or wait for next push)
 5. Verify: `npm run tail` should show `status=200`
 
+## Routes
+
+The Worker is bound to `teraswap.app/_cron/*` (the default `*.workers.dev` URL is disabled).
+
+| Path | Method | Auth | Description |
+|------|--------|------|-------------|
+| `/_cron/trigger` | POST | Bearer | Manual tick trigger |
+| `/_cron/health` | GET | — | Health check (JSON) |
+
 ## Manual trigger
 
 ```bash
-curl -X POST https://teraswap-monitor-tick-cron.<your-subdomain>.workers.dev/trigger \
+curl -X POST https://teraswap.app/_cron/trigger \
   -H "Authorization: Bearer <MONITOR_CRON_SECRET>"
+```
+
+## Health check
+
+```bash
+curl https://teraswap.app/_cron/health
+# {"status":"ok","worker":"teraswap-monitor-tick-cron","ts":...}
 ```
