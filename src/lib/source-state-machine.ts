@@ -20,6 +20,7 @@
  */
 
 import { kv } from '@vercel/kv'
+import { emitTransitionAlert } from './alert-wrapper'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -169,6 +170,11 @@ function transition(status: SourceStatus, newState: SourceState, reason: string)
   status.lastTransitionAt = Date.now()
   console.log(`[STATE] ${status.id}: ${from} → ${newState} (${reason})`)
   if (onTransition) onTransition(status.id, from, newState, reason)
+
+  // Fire-and-forget alert — never blocks state machine
+  emitTransitionAlert(status.id, from, newState, reason).catch(err => {
+    console.error(`[STATE] alert emission failed for ${status.id}:`, err instanceof Error ? err.message : err)
+  })
 }
 
 // ── Public API (async — backed by KV) ───────────────────
