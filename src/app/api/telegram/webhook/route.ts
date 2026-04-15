@@ -1,7 +1,8 @@
 /**
- * POST /api/telegram/webhook — Telegram bot command handler.
+ * POST /api/telegram/webhook — Telegram bot command + callback handler.
  *
- * Receives Telegram Update objects via webhook, parses bot commands,
+ * Receives Telegram Update objects via webhook, parses bot commands
+ * (update.message) and inline keyboard button presses (update.callback_query),
  * and responds with monitoring data or executes operator actions.
  *
  * Auth:
@@ -9,13 +10,15 @@
  *     constant-time comparison against TELEGRAM_WEBHOOK_SECRET.
  *   - Admin commands (/disable, /activate, /grace): sender's numeric
  *     Telegram user ID checked against TELEGRAM_ADMIN_IDS allowlist.
+ *   - Admin button actions (activate, keep, escalate): same admin check.
  *   - Read-only commands (/status, /quorum, /heartbeat, /help): any user.
+ *   - Ack button: any group member.
  *
  * Response model:
  *   Always returns 200 immediately (Telegram retries on non-2xx).
- *   For fast commands, the reply goes in the 200 body via Telegram's
- *   "method" response pattern. For slow commands (KV reads), we
- *   respond with 200 OK and send the result via sendMessage.
+ *   For slow commands (KV reads), we respond 200 OK and send the result
+ *   via sendMessage. For callback queries, we call answerCallbackQuery
+ *   to dismiss the spinner, then editMessageText to annotate the original.
  *
  * @internal — server-only route.
  */
@@ -35,6 +38,10 @@ import {
 import type { QuorumCheckResult } from '@/lib/quorum-check'
 import { escapeHtml } from '@/lib/alert-channels/utils'
 import { isP0Reason } from '@/lib/p0-reasons'
+import type { AlertPayload } from '@/lib/alert-wrapper'
+import { sendTelegramAlert } from '@/lib/alert-channels/telegram'
+import { sendEmailAlert } from '@/lib/alert-channels/email'
+import { sendDiscordAlert } from '@/lib/alert-channels/discord'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,10 +66,46 @@ interface TelegramMessage {
   text?: string
 }
 
+interface TelegramCallbackQuery {
+  id: string
+  from: TelegramUser
+  message?: TelegramMessage
+  data?: string
+}
+
 interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
+  callback_query?: TelegramCallbackQuery
 }
+
+// ── Callback data types ───────────────────────────────
+
+const CALLBACK_ACTIONS = ['activate', 'keep', 'escalate', 'ack'] as const
+type CallbackAction = (typeof CALLBACK_ACTIONS)[number]
+
+/** Admin-only button actions. ack is available to any group member. */
+const ADMIN_CALLBACK_ACTIONS: ReadonlySet<string> = new Set(['activate', 'keep', 'escalate'])
+
+export interface ParsedCallback {
+  action: CallbackAction
+  sourceId: string
+}
+
+/** Parse callback_data "action:sourceId". Returns null if invalid. */
+export function parseCallbackData(data: string): ParsedCallback | null {
+  const colonIdx = data.indexOf(':')
+  if (colonIdx < 1) return null
+  const action = data.slice(0, colonIdx)
+  const sourceId = data.slice(colonIdx + 1)
+  if (!sourceId) return null
+  if (!CALLBACK_ACTIONS.includes(action as CallbackAction)) return null
+  return { action: action as CallbackAction, sourceId }
+}
+
+// ── KV audit key prefix ───────────────────────────────
+
+const ACTION_AUDIT_PREFIX = 'teraswap:telegram:action:'
 
 // ── Auth helpers ───────────────────────────────────────
 
@@ -122,6 +165,48 @@ async function sendMessage(chatId: number, text: string): Promise<void> {
   }).catch(err => {
     console.error('[TELEGRAM] sendMessage failed:', err instanceof Error ? err.message : err)
   })
+}
+
+async function answerCallbackQuery(callbackQueryId: string, text: string, showAlert = false): Promise<void> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  if (!botToken) return
+
+  await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+    signal: AbortSignal.timeout(TELEGRAM_FETCH_TIMEOUT_MS),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: showAlert,
+    }),
+  }).catch(err => {
+    console.error('[TELEGRAM] answerCallbackQuery failed:', err instanceof Error ? err.message : err)
+  })
+}
+
+async function editMessageText(chatId: number, messageId: number, text: string): Promise<boolean> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  if (!botToken) return false
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+      signal: AbortSignal.timeout(TELEGRAM_FETCH_TIMEOUT_MS),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text: truncate(text),
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    })
+    return res.ok
+  } catch (err) {
+    console.error('[TELEGRAM] editMessageText failed:', err instanceof Error ? err.message : err)
+    return false
+  }
 }
 
 // ── Status formatting helpers ──────────────────────────
@@ -427,6 +512,150 @@ async function routeCommand(
   }
 }
 
+// ── Callback query handler ─────────────────────────────
+
+async function logButtonAction(
+  action: string,
+  sourceId: string,
+  userId: number,
+  username: string,
+): Promise<void> {
+  try {
+    const timestamp = new Date().toISOString()
+    await kv.set(`${ACTION_AUDIT_PREFIX}${timestamp}`, {
+      action,
+      sourceId,
+      userId,
+      username,
+      timestamp,
+    })
+  } catch (err) {
+    console.warn('[TELEGRAM] Audit trail write failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+  const data = query.data
+  if (!data) return
+
+  const parsed = parseCallbackData(data)
+  if (!parsed) return // stale/invalid button — ignore silently
+
+  const { action, sourceId } = parsed
+  const userId = query.from.id
+  const username = query.from.username || query.from.first_name || String(userId)
+  const chatId = query.message?.chat.id
+  const messageId = query.message?.message_id
+  const originalText = query.message?.text || ''
+
+  // Admin check for privileged actions
+  if (ADMIN_CALLBACK_ACTIONS.has(action) && !isAdmin(userId)) {
+    await answerCallbackQuery(query.id, '\u26D4 Admin only', true)
+    return
+  }
+
+  // Verify source exists
+  beginTick()
+  const allStatuses = await getAllStatuses()
+  const exists = allStatuses.some(s => s.id === sourceId)
+  if (!exists) {
+    await answerCallbackQuery(query.id, `Source "${sourceId}" not found`, true)
+    return
+  }
+
+  let answerText: string
+  let actionLabel: string
+
+  switch (action) {
+    case 'activate': {
+      const status = await getStatus(sourceId)
+      // Already active — no-op
+      if (status.state === 'active') {
+        await answerCallbackQuery(query.id, `\u2705 ${sourceId} already active \u2014 no change`)
+        await logButtonAction(action, sourceId, userId, username)
+        return
+      }
+      // P0-disabled → redirect to text command for safety
+      if (status.state === 'disabled' && isP0Reason(status.disabledReason)) {
+        await answerCallbackQuery(
+          query.id,
+          `\u26A0\uFE0F P0 source \u2014 use /activate ${sourceId} confirm in chat`,
+          true,
+        )
+        return
+      }
+      await forceActivate(sourceId)
+      answerText = `\u2705 ${sourceId} reactivated`
+      actionLabel = 'Reactivated'
+      break
+    }
+
+    case 'keep': {
+      // No state change — acknowledgement only
+      answerText = `\u{1F512} ${sourceId} kept disabled \u2014 noted`
+      actionLabel = 'Kept Disabled'
+      break
+    }
+
+    case 'escalate': {
+      // Re-alert ALL channels directly, bypassing grace + dedup.
+      // We fan out to channels here instead of going through emitTransitionAlert
+      // because escalation must always fire regardless of grace period or dedup.
+      const status = await getStatus(sourceId)
+      const escalationPayload: AlertPayload = {
+        sourceId,
+        from: status.state === 'disabled' ? 'active' : status.state,
+        to: status.state,
+        reason: `escalation: operator ${username} via button`,
+        timestamp: new Date().toISOString(),
+      }
+      const channels = [
+        { name: 'telegram', send: sendTelegramAlert },
+        { name: 'email', send: sendEmailAlert },
+        { name: 'discord', send: sendDiscordAlert },
+      ]
+      const results = await Promise.allSettled(
+        channels.map(ch =>
+          ch.send(escalationPayload).catch(err => {
+            console.error(`[ESCALATE:${ch.name}] failed: ${err instanceof Error ? err.message : err}`)
+            throw err
+          }),
+        ),
+      )
+      const ok = results.filter(r => r.status === 'fulfilled').length
+      answerText = `\u{1F6A8} Escalated \u2014 ${ok}/${channels.length} channels notified`
+      actionLabel = 'Escalated'
+      break
+    }
+
+    case 'ack': {
+      answerText = `\u{1F44D} Acknowledged by ${username}`
+      actionLabel = 'Acknowledged'
+      break
+    }
+
+    default:
+      return
+  }
+
+  // Always answer to dismiss spinner
+  await answerCallbackQuery(query.id, answerText)
+
+  // Log to audit trail (all actions, including ack)
+  await logButtonAction(action, sourceId, userId, username)
+
+  // Edit original message to annotate the action
+  if (chatId && messageId) {
+    const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    const annotation = `\n\n\u2014 <b>${actionLabel}</b> by ${escapeHtml(username)} at ${timestamp}`
+    const editOk = await editMessageText(chatId, messageId, originalText + annotation)
+    // If edit fails (e.g., message >48h old), send a new message instead
+    if (!editOk) {
+      await sendMessage(chatId, `${answerText}\n<i>(Could not update original message)</i>`)
+    }
+  }
+}
+
 // ── POST handler ───────────────────────────────────────
 
 export async function POST(req: Request): Promise<Response> {
@@ -452,6 +681,17 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true }, { status: 200 })
   }
 
+  // ── Handle callback queries (inline keyboard button presses) ──
+  if (update.callback_query) {
+    const cbq = update.callback_query
+    handleCallbackQuery(cbq).catch(err => {
+      console.error('[TELEGRAM] Callback query error:', err instanceof Error ? err.message : err)
+      answerCallbackQuery(cbq.id, 'Internal error').catch(() => {})
+    })
+    return NextResponse.json({ ok: true }, { status: 200 })
+  }
+
+  // ── Handle text commands ──
   const message = update.message
   if (!message?.text || !message.from) {
     return NextResponse.json({ ok: true }, { status: 200 })
