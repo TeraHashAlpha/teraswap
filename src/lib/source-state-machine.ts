@@ -19,6 +19,8 @@
  *   teraswap:source-state:index     — Redis SET of all known source IDs
  */
 
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { kv } from '@vercel/kv'
 import { emitTransitionAlert } from './alert-wrapper'
 
@@ -44,6 +46,65 @@ export interface HealthCheckResult {
   error?: string
 }
 
+// ── Per-source thresholds ───────────────────────────────
+
+export interface SourceThresholds {
+  failuresToDegraded: number
+  failuresToDisabled: number
+  successesToActive: number
+  p95LatencyThresholdMs: number
+}
+
+interface ThresholdsConfig {
+  defaults: SourceThresholds
+  overrides: Record<string, Partial<SourceThresholds> & { _comment?: string }>
+}
+
+const HARDCODED_DEFAULTS: SourceThresholds = {
+  failuresToDegraded: 3,
+  failuresToDisabled: 5,
+  successesToActive: 3,
+  p95LatencyThresholdMs: 5000,
+}
+
+let thresholdsConfig: ThresholdsConfig | null = null
+
+function loadThresholds(): ThresholdsConfig {
+  if (thresholdsConfig) return thresholdsConfig
+
+  try {
+    const filePath = join(process.cwd(), 'data', 'source-thresholds.json')
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as ThresholdsConfig
+    if (!raw?.defaults || typeof raw.defaults.failuresToDegraded !== 'number') {
+      throw new Error('Malformed thresholds JSON — missing or invalid defaults')
+    }
+    thresholdsConfig = raw
+    return thresholdsConfig
+  } catch (err) {
+    console.warn('[STATE] Failed to load source-thresholds.json, using hardcoded defaults:', err instanceof Error ? err.message : err)
+    thresholdsConfig = { defaults: HARDCODED_DEFAULTS, overrides: {} }
+    return thresholdsConfig
+  }
+}
+
+export function getThresholds(sourceId: string): SourceThresholds {
+  const config = loadThresholds()
+  const override = config.overrides[sourceId]
+  if (!override) return config.defaults
+
+  return {
+    failuresToDegraded: override.failuresToDegraded ?? config.defaults.failuresToDegraded,
+    failuresToDisabled: override.failuresToDisabled ?? config.defaults.failuresToDisabled,
+    successesToActive: override.successesToActive ?? config.defaults.successesToActive,
+    p95LatencyThresholdMs: override.p95LatencyThresholdMs ?? config.defaults.p95LatencyThresholdMs,
+  }
+}
+
+/** Reset cached thresholds — for testing only. */
+export function _resetThresholdsCache(): void {
+  thresholdsConfig = null
+}
+
 // ── Critical reasons that block auto-recovery ───────────
 
 const P0_REASONS = new Set([
@@ -52,12 +113,8 @@ const P0_REASONS = new Set([
   'kill-switch-triggered',
 ])
 
-// ── Thresholds ──────────────────────────────────────────
+// ── Non-configurable constants ──────────────────────────
 
-const FAILURE_TO_DEGRADED = 3
-const FAILURE_TO_DISABLED = 5
-const SUCCESS_TO_ACTIVE = 3
-const P95_DEGRADED_THRESHOLD = 5000
 const P95_RECOVERY_THRESHOLD = 2000
 const AUTO_RECOVERY_MS = 10 * 60_000
 const MAX_LATENCY_HISTORY = 10
@@ -197,6 +254,7 @@ export async function getAllStatuses(): Promise<SourceStatus[]> {
 
 export async function recordHealthCheck(sourceId: string, result: HealthCheckResult): Promise<void> {
   const s = await loadFromKV(sourceId)
+  const t = getThresholds(sourceId)
   s.lastCheckAt = Date.now()
 
   s.latencyHistory.push(result.latencyMs)
@@ -210,8 +268,8 @@ export async function recordHealthCheck(sourceId: string, result: HealthCheckRes
 
     if (s.state === 'degraded') {
       const p95 = calcP95(s.latencyHistory)
-      if (s.successCount >= SUCCESS_TO_ACTIVE && p95 < P95_RECOVERY_THRESHOLD) {
-        transition(s, 'active', `${SUCCESS_TO_ACTIVE} consecutive successes, p95=${Math.round(p95)}ms`)
+      if (s.successCount >= t.successesToActive && p95 < P95_RECOVERY_THRESHOLD) {
+        transition(s, 'active', `${t.successesToActive} consecutive successes, p95=${Math.round(p95)}ms`)
       }
     }
   } else {
@@ -220,14 +278,14 @@ export async function recordHealthCheck(sourceId: string, result: HealthCheckRes
 
     if (s.state === 'active') {
       const p95 = calcP95(s.latencyHistory)
-      if (s.failureCount >= FAILURE_TO_DEGRADED) {
+      if (s.failureCount >= t.failuresToDegraded) {
         transition(s, 'degraded', `${s.failureCount} consecutive failures`)
-      } else if (s.latencyHistory.length >= 5 && p95 > P95_DEGRADED_THRESHOLD) {
-        transition(s, 'degraded', `p95=${Math.round(p95)}ms exceeds ${P95_DEGRADED_THRESHOLD}ms`)
+      } else if (s.latencyHistory.length >= 5 && p95 > t.p95LatencyThresholdMs) {
+        transition(s, 'degraded', `p95=${Math.round(p95)}ms exceeds ${t.p95LatencyThresholdMs}ms`)
       }
     }
 
-    if (s.state === 'degraded' && s.failureCount >= FAILURE_TO_DISABLED) {
+    if (s.state === 'degraded' && s.failureCount >= t.failuresToDisabled) {
       transition(s, 'disabled', `${s.failureCount} consecutive failures`)
       s.disabledAt = Date.now()
       s.disabledReason = result.error || 'health-check-failures'

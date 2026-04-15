@@ -1,0 +1,42 @@
+name: Monitoring Watchdog
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Every 5 minutes
+  workflow_dispatch: {} # Manual trigger for testing
+
+jobs:
+  check-heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check monitoring heartbeat
+        run: |
+          RESPONSE=$(curl -sf --max-time 10 https://teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"error":"unreachable"}')
+          HEALTHY=$(echo "$RESPONSE" | jq -r '.healthy')
+          AGE=$(echo "$RESPONSE" | jq -r '.ageSeconds // "N/A"')
+          GRACE=$(echo "$RESPONSE" | jq -r '.grace // false')
+
+          echo "Healthy: $HEALTHY"
+          echo "Age: ${AGE}s"
+          echo "Grace: $GRACE"
+          echo "Full response: $RESPONSE"
+
+          if [ "$HEALTHY" != "true" ]; then
+            echo "::error::Monitoring heartbeat unhealthy! Age: ${AGE}s"
+            exit 1
+          fi
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          WATCHDOG_ALERT_WEBHOOK: ${{ secrets.WATCHDOG_ALERT_WEBHOOK }}
+        run: |
+          if [ -z "$WATCHDOG_ALERT_WEBHOOK" ]; then
+            echo "::warning::WATCHDOG_ALERT_WEBHOOK secret not set — cannot send alert"
+            exit 0
+          fi
+          curl -sf --max-time 10 -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"text":"🚨 TeraSwap monitoring watchdog FAILED. Heartbeat age: stale or unreachable. Check: https://teraswap.app/api/monitor/heartbeat"}' \
+            "$WATCHDOG_ALERT_WEBHOOK"
