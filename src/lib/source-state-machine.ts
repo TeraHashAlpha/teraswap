@@ -53,6 +53,10 @@ export interface SourceThresholds {
   failuresToDisabled: number
   successesToActive: number
   p95LatencyThresholdMs: number
+  /** H5 quorum: max deviation % for volatile pairs (default 5) */
+  quorumMaxDeviationPercent?: number
+  /** H5 quorum: max deviation % for stablecoin pairs (default 2) */
+  quorumStableMaxDeviationPercent?: number
 }
 
 interface ThresholdsConfig {
@@ -65,6 +69,8 @@ const HARDCODED_DEFAULTS: SourceThresholds = {
   failuresToDisabled: 5,
   successesToActive: 3,
   p95LatencyThresholdMs: 5000,
+  quorumMaxDeviationPercent: 5,
+  quorumStableMaxDeviationPercent: 2,
 }
 
 let thresholdsConfig: ThresholdsConfig | null = null
@@ -118,6 +124,8 @@ export function getThresholds(sourceId: string): SourceThresholds {
     failuresToDisabled: override.failuresToDisabled ?? config.defaults.failuresToDisabled,
     successesToActive: override.successesToActive ?? config.defaults.successesToActive,
     p95LatencyThresholdMs: override.p95LatencyThresholdMs ?? config.defaults.p95LatencyThresholdMs,
+    quorumMaxDeviationPercent: (override as Record<string, unknown>).quorumMaxDeviationPercent as number ?? config.defaults.quorumMaxDeviationPercent,
+    quorumStableMaxDeviationPercent: (override as Record<string, unknown>).quorumStableMaxDeviationPercent as number ?? config.defaults.quorumStableMaxDeviationPercent,
   }
   return validateThresholds(merged, sourceId)
 }

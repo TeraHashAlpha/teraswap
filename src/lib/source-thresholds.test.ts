@@ -85,6 +85,8 @@ describe('source thresholds', () => {
         failuresToDisabled: 5,
         successesToActive: 3,
         p95LatencyThresholdMs: 5000,
+        quorumMaxDeviationPercent: 5,
+        quorumStableMaxDeviationPercent: 2,
       })
     })
   })
