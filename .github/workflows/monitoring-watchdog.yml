@@ -5,6 +5,12 @@ on:
     - cron: '*/5 * * * *' # Every 5 minutes
   workflow_dispatch: {} # Manual trigger for testing
 
+permissions: {} # This workflow needs no repo permissions
+
+concurrency:
+  group: monitoring-watchdog
+  cancel-in-progress: true
+
 jobs:
   check-heartbeat:
     runs-on: ubuntu-latest
@@ -12,7 +18,7 @@ jobs:
     steps:
       - name: Check monitoring heartbeat
         run: |
-          RESPONSE=$(curl -sf --max-time 10 https://teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"error":"unreachable"}')
+          RESPONSE=$(curl -sf --max-time 10 https://teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"ageSeconds":-1}')
           HEALTHY=$(echo "$RESPONSE" | jq -r '.healthy')
           AGE=$(echo "$RESPONSE" | jq -r '.ageSeconds // "N/A"')
           GRACE=$(echo "$RESPONSE" | jq -r '.grace // false')
@@ -21,6 +27,9 @@ jobs:
           echo "Age: ${AGE}s"
           echo "Grace: $GRACE"
           echo "Full response: $RESPONSE"
+
+          echo "HEARTBEAT_AGE=$AGE" >> "$GITHUB_ENV"
+          echo "HEARTBEAT_HEALTHY=$HEALTHY" >> "$GITHUB_ENV"
 
           if [ "$HEALTHY" != "true" ]; then
             echo "::error::Monitoring heartbeat unhealthy! Age: ${AGE}s"
@@ -38,5 +47,5 @@ jobs:
           fi
           curl -sf --max-time 10 -X POST \
             -H "Content-Type: application/json" \
-            -d '{"text":"🚨 TeraSwap monitoring watchdog FAILED. Heartbeat age: stale or unreachable. Check: https://teraswap.app/api/monitor/heartbeat"}' \
+            -d "{\"text\":\"🚨 TeraSwap monitoring watchdog FAILED. Healthy: ${HEARTBEAT_HEALTHY}, Age: ${HEARTBEAT_AGE}s. Check: https://teraswap.app/api/monitor/heartbeat\"}" \
             "$WATCHDOG_ALERT_WEBHOOK"

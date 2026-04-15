@@ -16,6 +16,8 @@
 
 import { kv } from '@vercel/kv'
 import type { SourceState } from './source-state-machine'
+import { isP0Reason } from './p0-reasons'
+import { isInGracePeriod } from './grace-period'
 import { sendTelegramAlert } from './alert-channels/telegram'
 import { sendEmailAlert } from './alert-channels/email'
 import { sendDiscordAlert } from './alert-channels/discord'
@@ -35,19 +37,6 @@ export interface AlertPayload {
 const DEDUP_TTL_SECONDS = 3600     // 1 hour — standard alerts
 const DEDUP_TTL_P0_SECONDS = 300   // 5 minutes — P0/critical alerts
 const DEDUP_KEY_PREFIX = 'teraswap:alert:dedup:'
-
-// ── P0 / critical reasons ────────────────────────────────
-
-const P0_REASONS = [
-  'kill-switch-triggered',
-  'tls-fingerprint-change',
-  'dns-record-change',
-] as const
-
-function isCriticalAlert(reason?: string): boolean {
-  if (!reason) return false
-  return P0_REASONS.some(prefix => reason.startsWith(prefix))
-}
 
 // ── Dedup helpers ────────────────────────────────────────
 
@@ -74,21 +63,6 @@ async function markSent(sourceId: string, from: SourceState, to: SourceState, tt
   }
 }
 
-// ── Grace period ─────────────────────────────────────────
-
-function isInGracePeriod(): boolean {
-  const graceUntil = process.env.MONITOR_GRACE_UNTIL
-  if (!graceUntil) return false
-
-  const graceTs = new Date(graceUntil).getTime()
-  if (Number.isNaN(graceTs)) {
-    console.warn(`[ALERT] Invalid MONITOR_GRACE_UNTIL value: "${graceUntil}"`)
-    return false
-  }
-
-  return Date.now() < graceTs
-}
-
 // ── Fan-out ──────────────────────────────────────────────
 
 const CHANNELS = [
@@ -105,7 +79,7 @@ export async function emitTransitionAlert(
   to: SourceState,
   reason?: string,
 ): Promise<void> {
-  const critical = isCriticalAlert(reason)
+  const critical = isP0Reason(reason)
 
   // ① Grace period check — P0/critical always bypasses
   if (isInGracePeriod() && !critical) {
@@ -152,11 +126,10 @@ export async function emitTransitionAlert(
 
 export const _internal = {
   isInGracePeriod,
-  isCriticalAlert,
+  isP0Reason,
   isDuplicate,
   markSent,
   dedupKey,
   DEDUP_TTL_SECONDS,
   DEDUP_TTL_P0_SECONDS,
-  P0_REASONS,
 } as const

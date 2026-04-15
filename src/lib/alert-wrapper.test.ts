@@ -275,12 +275,15 @@ describe('alert-wrapper', () => {
         .toBe('teraswap:alert:dedup:1inch:active:degraded')
     })
 
-    it('isCriticalAlert returns true for all P0 reasons', () => {
-      expect(_internal.isCriticalAlert('kill-switch-triggered')).toBe(true)
-      expect(_internal.isCriticalAlert('tls-fingerprint-change')).toBe(true)
-      expect(_internal.isCriticalAlert('dns-record-change')).toBe(true)
-      expect(_internal.isCriticalAlert('health-check-failures')).toBe(false)
-      expect(_internal.isCriticalAlert(undefined)).toBe(false)
+    it('isP0Reason returns true for all P0 reasons (including suffixed)', () => {
+      expect(_internal.isP0Reason('kill-switch-triggered')).toBe(true)
+      expect(_internal.isP0Reason('tls-fingerprint-change')).toBe(true)
+      expect(_internal.isP0Reason('tls-fingerprint-change: Issuer changed from DigiCert to Let\'s Encrypt')).toBe(true)
+      expect(_internal.isP0Reason('dns-record-change')).toBe(true)
+      expect(_internal.isP0Reason('dns-record-change: NS mismatch')).toBe(true)
+      expect(_internal.isP0Reason('kv-store-failure: write — Connection refused')).toBe(true)
+      expect(_internal.isP0Reason('health-check-failures')).toBe(false)
+      expect(_internal.isP0Reason(undefined)).toBe(false)
     })
   })
 

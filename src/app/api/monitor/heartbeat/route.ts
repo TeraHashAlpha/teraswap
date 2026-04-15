@@ -12,18 +12,11 @@
 import { NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
 import { getAllStatuses } from '@/lib/source-state-machine'
+import { isInGracePeriod } from '@/lib/grace-period'
 
 export const dynamic = 'force-dynamic'
 
 const HEARTBEAT_STALE_SECONDS = 180 // 3 minutes — if tick is older, unhealthy
-
-function isInGracePeriod(): boolean {
-  const graceUntil = process.env.MONITOR_GRACE_UNTIL
-  if (!graceUntil) return false
-  const graceTs = new Date(graceUntil).getTime()
-  if (Number.isNaN(graceTs)) return false
-  return Date.now() < graceTs
-}
 
 export async function GET() {
   try {
@@ -64,7 +57,7 @@ export async function GET() {
 
     return NextResponse.json(body, {
       status: 200,
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
+      headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
     })
   } catch (err) {
     console.error('[HEARTBEAT] KV read failed:', err instanceof Error ? err.message : err)

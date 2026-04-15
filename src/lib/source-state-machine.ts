@@ -19,10 +19,10 @@
  *   teraswap:source-state:index     — Redis SET of all known source IDs
  */
 
-import { readFileSync } from 'fs'
-import { join } from 'path'
 import { kv } from '@vercel/kv'
 import { emitTransitionAlert } from './alert-wrapper'
+import { isP0Reason } from './p0-reasons'
+import thresholdsJson from '../../data/source-thresholds.json'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -69,16 +69,37 @@ const HARDCODED_DEFAULTS: SourceThresholds = {
 
 let thresholdsConfig: ThresholdsConfig | null = null
 
+function validateThresholds(t: SourceThresholds, sourceId: string): SourceThresholds {
+  const { failuresToDegraded, failuresToDisabled, successesToActive, p95LatencyThresholdMs } = t
+
+  if (!Number.isInteger(failuresToDegraded) || failuresToDegraded < 1 ||
+      !Number.isInteger(failuresToDisabled) || failuresToDisabled < 1 ||
+      !Number.isInteger(successesToActive) || successesToActive < 1) {
+    console.warn(`[STATE] Invalid thresholds for ${sourceId}: values must be positive integers, using defaults`)
+    return HARDCODED_DEFAULTS
+  }
+  if (failuresToDisabled <= failuresToDegraded) {
+    console.warn(`[STATE] Invalid thresholds for ${sourceId}: failuresToDisabled must exceed failuresToDegraded, using defaults`)
+    return HARDCODED_DEFAULTS
+  }
+  if (p95LatencyThresholdMs !== undefined && (!Number.isInteger(p95LatencyThresholdMs) || p95LatencyThresholdMs < 100)) {
+    console.warn(`[STATE] Invalid thresholds for ${sourceId}: p95LatencyThresholdMs must be >= 100, using defaults`)
+    return HARDCODED_DEFAULTS
+  }
+  return t
+}
+
 function loadThresholds(): ThresholdsConfig {
   if (thresholdsConfig) return thresholdsConfig
 
   try {
-    const filePath = join(process.cwd(), 'data', 'source-thresholds.json')
-    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as ThresholdsConfig
+    const raw = thresholdsJson as unknown as ThresholdsConfig
     if (!raw?.defaults || typeof raw.defaults.failuresToDegraded !== 'number') {
       throw new Error('Malformed thresholds JSON — missing or invalid defaults')
     }
-    thresholdsConfig = raw
+    // Validate defaults themselves
+    const validatedDefaults = validateThresholds(raw.defaults, '_defaults')
+    thresholdsConfig = { defaults: validatedDefaults, overrides: raw.overrides ?? {} }
     return thresholdsConfig
   } catch (err) {
     console.warn('[STATE] Failed to load source-thresholds.json, using hardcoded defaults:', err instanceof Error ? err.message : err)
@@ -92,26 +113,19 @@ export function getThresholds(sourceId: string): SourceThresholds {
   const override = config.overrides[sourceId]
   if (!override) return config.defaults
 
-  return {
+  const merged: SourceThresholds = {
     failuresToDegraded: override.failuresToDegraded ?? config.defaults.failuresToDegraded,
     failuresToDisabled: override.failuresToDisabled ?? config.defaults.failuresToDisabled,
     successesToActive: override.successesToActive ?? config.defaults.successesToActive,
     p95LatencyThresholdMs: override.p95LatencyThresholdMs ?? config.defaults.p95LatencyThresholdMs,
   }
+  return validateThresholds(merged, sourceId)
 }
 
 /** Reset cached thresholds — for testing only. */
 export function _resetThresholdsCache(): void {
   thresholdsConfig = null
 }
-
-// ── Critical reasons that block auto-recovery ───────────
-
-const P0_REASONS = new Set([
-  'tls-fingerprint-change',
-  'dns-record-change',
-  'kill-switch-triggered',
-])
 
 // ── Non-configurable constants ──────────────────────────
 
@@ -180,26 +194,23 @@ async function saveToKV(status: SourceStatus): Promise<void> {
     pipeline.sadd(INDEX_KEY, status.id)
     await pipeline.exec()
   } catch (err) {
-    console.warn(`[STATE] KV write failed for ${status.id}:`, err instanceof Error ? err.message : err)
     // P0 alert: broken state store is itself an incident
-    alertKVFailure(status.id, err)
+    alertKVFailure(status.id, 'write', err)
   }
 }
 
-function alertKVFailure(id: string, err: unknown): void {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
-  const chatId = process.env.TELEGRAM_CHAT_ID
-  if (botToken && chatId) {
-    fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `🔴 <b>P0: KV STATE STORE UNAVAILABLE</b>\n\nFailed to persist state for <code>${id}</code>.\nError: ${err instanceof Error ? err.message : String(err)}\n\nSource states may reset on next cold start.`,
-        parse_mode: 'HTML',
-      }),
-    }).catch(() => {})
-  }
+function alertKVFailure(sourceId: string, operation: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err)
+  console.error(`[STATE] KV ${operation} failed for ${sourceId}: ${message}`)
+
+  // Route through the standard alert pipeline (fans out to all channels, HTML-escaped).
+  // 'kv-store-failure' is a P0 reason → bypasses grace period and uses short dedup TTL.
+  // If KV is down, the dedup check in alert-wrapper will fail-open (existing behaviour).
+  emitTransitionAlert(sourceId, 'active', 'active', `kv-store-failure: ${operation} — ${message}`).catch(alertErr => {
+    // Last resort: if even the alert-wrapper fails, log to console.
+    // The GitHub Actions watchdog will catch the stale heartbeat.
+    console.error(`[STATE] Alert emission also failed: ${alertErr instanceof Error ? alertErr.message : alertErr}`)
+  })
 }
 
 // ── Utility ─────────────────────────────────────────────
@@ -320,7 +331,7 @@ export async function checkAutoRecovery(): Promise<string[]> {
 
   for (const s of all) {
     if (s.state !== 'disabled' || !s.disabledAt) continue
-    if (s.disabledReason && P0_REASONS.has(s.disabledReason)) continue
+    if (isP0Reason(s.disabledReason)) continue
     if (now - s.disabledAt >= AUTO_RECOVERY_MS) {
       s.failureCount = 0
       s.successCount = 0
