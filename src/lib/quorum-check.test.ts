@@ -1,8 +1,9 @@
 /**
  * Unit tests for H5 quorum cross-check.
  *
- * Covers: median calculation, deviation flagging, warning vs flagged vs correlated
- * classification, <3 active sources skip, tick counter, per-source threshold overrides.
+ * Covers: median calculation, BigInt precision, deviation flagging, warning vs
+ * flagged vs correlated classification, <3 active sources skip, tick counter
+ * (atomic incr), per-source threshold overrides, P0 correlated reason.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -21,6 +22,14 @@ const mockKvGet = vi.fn(async (key: string) => kvStore.get(key) ?? null)
 const mockKvSet = vi.fn(async (key: string, value: unknown) => { kvStore.set(key, value) })
 const mockKvSmembers = vi.fn(async (key: string) => Array.from(getKvSet(key)))
 
+// Atomic incr mock — mirrors Redis INCR (initializes to 1 if key absent)
+const mockKvIncr = vi.fn(async (key: string) => {
+  const current = (kvStore.get(key) as number) ?? 0
+  const next = current + 1
+  kvStore.set(key, next)
+  return next
+})
+
 const mockPipelineSet = vi.fn((key: string, value: unknown) => { kvStore.set(key, value) })
 const mockPipelineSadd = vi.fn((key: string, member: string) => { getKvSet(key).add(member) })
 const mockPipelineExec = vi.fn(async () => [])
@@ -31,6 +40,7 @@ vi.mock('@vercel/kv', () => ({
     get: (...args: unknown[]) => mockKvGet(...(args as [string])),
     set: (...args: unknown[]) => mockKvSet(...(args as [string, unknown])),
     smembers: (...args: unknown[]) => mockKvSmembers(...(args as [string])),
+    incr: (...args: unknown[]) => mockKvIncr(...(args as [string])),
     pipeline: () => ({
       set: (...args: unknown[]) => { mockPipelineSet(...(args as [string, unknown])); return { sadd: mockPipelineSadd, exec: mockPipelineExec, del: mockPipelineDel } },
       sadd: (...args: unknown[]) => { mockPipelineSadd(...(args as [string, string])); return { set: mockPipelineSet, exec: mockPipelineExec, del: mockPipelineDel } },
@@ -62,10 +72,11 @@ import {
   runQuorumCheck,
   shouldRunQuorum,
   computeMedian,
+  computeDeviationPercent,
   QUORUM_REFERENCE_PAIRS,
 } from './quorum-check'
-import type { QuorumCheckResult } from './quorum-check'
 import { beginTick } from './source-state-machine'
+import { isP0Reason, P0_REASONS } from './p0-reasons'
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -131,36 +142,90 @@ describe('quorum-check', () => {
     })
 
     it('handles large values (realistic quote amounts)', () => {
-      // Simulating ETH→USDC quotes around $3000 (6 decimal USDC)
       const amounts = [
-        3000000000n, // 3000 USDC
-        3010000000n, // 3010 USDC
-        2990000000n, // 2990 USDC
-        3005000000n, // 3005 USDC
-        2995000000n, // 2995 USDC
+        3000000000n, 3010000000n, 2990000000n, 3005000000n, 2995000000n,
       ]
       const median = computeMedian(amounts)
-      expect(median).toBe(3000000000n) // sorted middle = 3000
+      expect(median).toBe(3000000000n)
     })
   })
 
-  // ── Tick counter ──────────────────────────────────────
+  // ── BigInt-safe deviation calculation ─────────────────
+
+  describe('computeDeviationPercent', () => {
+    it('computes basic 10% deviation', () => {
+      expect(computeDeviationPercent(110n, 100n)).toBe(10)
+    })
+
+    it('computes negative deviation (source below median)', () => {
+      expect(computeDeviationPercent(90n, 100n)).toBe(10)
+    })
+
+    it('returns 0 for identical values', () => {
+      expect(computeDeviationPercent(100n, 100n)).toBe(0)
+    })
+
+    it('returns 0 when median is 0', () => {
+      expect(computeDeviationPercent(100n, 0n)).toBe(0)
+    })
+
+    it('handles BigInt amounts above Number.MAX_SAFE_INTEGER without precision loss', () => {
+      // 2^53 + 1 = 9007199254740993 — NOT representable as a Number
+      const base = 2n ** 53n
+      const median = base + 1n           // 9007199254740993
+      const sourceAmount = base + 100n   // 9007199254741092
+
+      // Tiny deviation: 99 / 9007199254740993 ≈ 0.000000001%
+      // BPS = (99 * 10000) / 9007199254740993 = 0 → correctly rounds to 0
+      const deviation = computeDeviationPercent(sourceAmount, median)
+      expect(deviation).toBe(0) // < 0.01% → rounds to 0 in BPS arithmetic
+
+      // Meaningful ~5% deviation at large scale.
+      // BigInt truncation: median * 5 / 100 drops the fractional part,
+      // giving 4.99% instead of 5.00% — this is correct BPS integer behaviour.
+      const fivePercentAbove = median + (median * 5n / 100n)
+      const largeDeviation = computeDeviationPercent(fivePercentAbove, median)
+      expect(largeDeviation).toBeGreaterThanOrEqual(4.99)
+      expect(largeDeviation).toBeLessThanOrEqual(5.0)
+
+      // The critical property: both BigInt BPS and Number approaches agree
+      // within ±0.01%, but BigInt never produces catastrophically wrong results
+      // (e.g., 0% for a 5% deviation) like Number() would for 2^53+ values
+      // where Number(2n**53n + 1n) === Number(2n**53n).
+      expect(largeDeviation).toBeGreaterThan(4)
+
+      // Verify: Number(median) loses the +1 (rounds to 2^53)
+      expect(Number(median)).toBe(Number(median - 1n)) // proves Number precision loss
+    })
+
+    it('handles sub-percent deviations correctly', () => {
+      // 0.5% deviation
+      expect(computeDeviationPercent(1005n, 1000n)).toBe(0.5)
+      // 0.01% deviation — below BPS resolution, rounds to 0
+      expect(computeDeviationPercent(10001n, 10000n)).toBe(0.01)
+    })
+  })
+
+  // ── Tick counter (atomic incr) ────────────────────────
 
   describe('shouldRunQuorum', () => {
-    it('returns true on every 5th tick', async () => {
+    it('returns true on every 5th tick (uses atomic kv.incr)', async () => {
       const results: boolean[] = []
       for (let i = 0; i < 10; i++) {
         results.push(await shouldRunQuorum())
       }
-      // Ticks 5, 10 should be true (counter starts at 0, increments before check)
+      // incr starts at 1 (not 0): tick 5, 10 are true
       expect(results).toEqual([
         false, false, false, false, true,
         false, false, false, false, true,
       ])
+      // Verify kv.incr was called (not get+set)
+      expect(mockKvIncr).toHaveBeenCalledTimes(10)
+      expect(mockKvGet).not.toHaveBeenCalled()
     })
 
     it('handles KV failure gracefully (returns false)', async () => {
-      mockKvGet.mockRejectedValueOnce(new Error('KV down'))
+      mockKvIncr.mockRejectedValueOnce(new Error('KV down'))
       expect(await shouldRunQuorum()).toBe(false)
     })
   })
@@ -195,7 +260,6 @@ describe('quorum-check', () => {
       seedSource('velora', 'active')
       seedSource('odos', 'active')
 
-      // All sources return similar amounts for both pairs
       mockFetchMetaQuote.mockResolvedValue(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '3000000000' },
@@ -236,7 +300,7 @@ describe('quorum-check', () => {
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '9998000000' },
           { source: 'cowswap', toAmount: '9999000000' },
-          { source: 'velora', toAmount: '9997000000' }, // within 2%
+          { source: 'velora', toAmount: '9997000000' },
           { source: 'odos', toAmount: '9998500000' },
         ]),
       )
@@ -250,7 +314,7 @@ describe('quorum-check', () => {
     })
   })
 
-  // ── Dual-pair flag → degraded ─────────────────────────
+  // ── Dual-pair flag → disabled ─────────────────────────
 
   describe('flagged classification (dual-pair outlier)', () => {
     it('disables source when outlier on both pairs', async () => {
@@ -264,7 +328,7 @@ describe('quorum-check', () => {
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '3000000000' },
           { source: 'cowswap', toAmount: '3005000000' },
-          { source: 'velora', toAmount: '3200000000' }, // ~6.6% above median
+          { source: 'velora', toAmount: '3200000000' },
           { source: 'odos', toAmount: '3002000000' },
         ]),
       )
@@ -274,27 +338,24 @@ describe('quorum-check', () => {
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '9998000000' },
           { source: 'cowswap', toAmount: '9999000000' },
-          { source: 'velora', toAmount: '10300000000' }, // ~3% above median
+          { source: 'velora', toAmount: '10300000000' },
           { source: 'odos', toAmount: '9998500000' },
         ]),
       )
 
       const result = await runQuorumCheck()
 
-      // velora should be flagged on both pairs
       const veloraOutliers = result.outliers.filter(o => o.sourceId === 'velora')
       expect(veloraOutliers.length).toBe(2)
       expect(veloraOutliers.every(o => o.classification === 'flagged')).toBe(true)
 
-      // State transition should have fired (forceDisable emits via transition())
-      // The forceDisable call triggers the alert internally via the state machine
       expect(result.correlatedOutlierCount).toBeLessThan(3)
     })
 
     it('does not act on already-disabled sources', async () => {
       seedSource('1inch', 'active')
       seedSource('cowswap', 'active')
-      seedSource('velora', 'disabled') // already disabled — excluded from quorum
+      seedSource('velora', 'disabled')
       seedSource('odos', 'active')
 
       mockFetchMetaQuote.mockResolvedValue(
@@ -306,7 +367,6 @@ describe('quorum-check', () => {
       )
 
       const result = await runQuorumCheck()
-      // velora is not in the quorum — only active sources participate
       expect(result.outliers.find(o => o.sourceId === 'velora')).toBeUndefined()
     })
   })
@@ -314,7 +374,7 @@ describe('quorum-check', () => {
   // ── Correlated outlier (≥3 sources) → kill-switch ────
 
   describe('correlated outlier detection', () => {
-    it('force-disables all flagged sources when ≥3 are correlated', async () => {
+    it('force-disables all flagged sources with P0 reason when ≥3 are correlated', async () => {
       // 7 sources: 4 normal consensus, 3 deviant
       seedSource('1inch', 'active')
       seedSource('cowswap', 'active')
@@ -325,9 +385,6 @@ describe('quorum-check', () => {
       seedSource('openocean', 'active')
 
       // First pair: 1inch, velora, odos deviate >5% from the 4-source consensus
-      // Normal cluster: ~3000, Deviant cluster: ~3200 (6.7% above)
-      // Sorted: 2998, 3000, 3002, 3005, 3200, 3200, 3200
-      // Median (idx 3) = 3005 → deviants are ~6.5% above
       mockFetchMetaQuote.mockResolvedValueOnce(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '3200000000' },
@@ -341,9 +398,6 @@ describe('quorum-check', () => {
       )
 
       // Second pair: same 3 deviant sources >2% from consensus
-      // Normal cluster: ~9998, Deviant cluster: ~10300 (3% above)
-      // Sorted: 9997, 9998, 9999, 10000, 10300, 10300, 10300
-      // Median (idx 3) = 10000 → deviants are 3% above
       mockFetchMetaQuote.mockResolvedValueOnce(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '10300000000' },
@@ -364,11 +418,34 @@ describe('quorum-check', () => {
       const correlated = result.outliers.filter(o => o.classification === 'correlated')
       expect(correlated.length).toBeGreaterThanOrEqual(6) // 3 sources × 2 pairs
 
-      // Correlated alert should have been emitted
-      const correlatedAlertCalls = mockEmitTransitionAlert.mock.calls.filter(
-        (args: unknown[]) => typeof args[3] === 'string' && (args[3] as string).includes('quorum-correlated'),
+      // No synthetic 'quorum-system' sourceId — alerts emitted per-source via forceDisable
+      const syntheticCalls = mockEmitTransitionAlert.mock.calls.filter(
+        (args: unknown[]) => args[0] === 'quorum-system',
       )
-      expect(correlatedAlertCalls.length).toBe(1)
+      expect(syntheticCalls.length).toBe(0)
+
+      // forceDisable emits alerts via transition() — check that the reason is P0
+      // The forceDisable reason starts with 'quorum-correlated-anomaly'
+      const transitionCalls = mockEmitTransitionAlert.mock.calls.filter(
+        (args: unknown[]) => typeof args[3] === 'string' && (args[3] as string).startsWith('force: quorum-correlated-anomaly'),
+      )
+      expect(transitionCalls.length).toBeGreaterThanOrEqual(3)
+    })
+  })
+
+  // ── P0 reason for correlated anomaly ──────────────────
+
+  describe('P0 reason classification', () => {
+    it('quorum-correlated-anomaly is in P0_REASONS', () => {
+      expect(P0_REASONS).toContain('quorum-correlated-anomaly')
+    })
+
+    it('isP0Reason matches quorum-correlated-anomaly with suffix', () => {
+      expect(isP0Reason('quorum-correlated-anomaly: deviation 6.5% on WETH→USDC')).toBe(true)
+    })
+
+    it('quorum-deviation is NOT P0 (single-source, allows auto-recovery)', () => {
+      expect(isP0Reason('quorum-deviation')).toBe(false)
     })
   })
 
@@ -380,10 +457,8 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
 
-      // First pair fails
       mockFetchMetaQuote.mockRejectedValueOnce(new Error('Rate limited'))
 
-      // Second pair succeeds
       mockFetchMetaQuote.mockResolvedValueOnce(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '9998000000' },
@@ -409,17 +484,15 @@ describe('quorum-check', () => {
       seedSource('velora', 'active')
       seedSource('odos', 'active')
 
-      // First pair (WETH→USDC): cowswap deviates 7% — within cowswap's 8% threshold
       mockFetchMetaQuote.mockResolvedValueOnce(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '3000000000' },
-          { source: 'cowswap', toAmount: '3210000000' }, // 7% above median — within 8%
+          { source: 'cowswap', toAmount: '3210000000' }, // 7% above — within 8%
           { source: 'velora', toAmount: '3005000000' },
           { source: 'odos', toAmount: '3002000000' },
         ]),
       )
 
-      // Second pair: all fine
       mockFetchMetaQuote.mockResolvedValueOnce(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '9998000000' },
@@ -430,7 +503,6 @@ describe('quorum-check', () => {
       )
 
       const result = await runQuorumCheck()
-      // cowswap should NOT be flagged (7% < 8% threshold)
       expect(result.outliers.find(o => o.sourceId === 'cowswap')).toBeUndefined()
     })
   })

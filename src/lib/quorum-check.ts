@@ -7,18 +7,25 @@
  *
  * Classification:
  *   - warning:    deviation > threshold on 1 pair only → log, no action
- *   - flagged:    deviation > threshold on 2/2 pairs → degrade source + alert
- *   - correlated: ≥3 sources flagged simultaneously → force-disable all + P0 alert
+ *   - flagged:    deviation > threshold on 2/2 pairs → disable source + alert
+ *   - correlated: ≥3 sources flagged simultaneously → force-disable all (P0) + alert
  *
  * Runs every 5th monitoring tick (every ~5 min) to stay within rate limits.
  * Consumes fetchMetaQuote() output — does NOT duplicate adapter fan-out.
+ *
+ * API call budget per quorum cycle (every 5 ticks / 5 min):
+ * - 2 reference pairs × N active sources = ~22 calls (if all 11 active)
+ * - Combined with H1 (11 calls/min): peak burst = ~33 calls in 1 min
+ * - Known rate-limit-sensitive adapters: 1inch (free tier), KyberSwap
+ * - If rate-limit cascading observed, consider staggering quorum
+ *   to non-H1-tick minutes or caching H1 quotes for reuse.
  *
  * @internal — server-only module.
  */
 
 import { kv } from '@vercel/kv'
 import { WETH_ADDRESS } from './constants'
-import type { NormalizedQuote, MetaQuoteResult } from './adapters'
+import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'
 import { getAllStatuses, getStatus, getThresholds, forceDisable } from './source-state-machine'
 import { emitTransitionAlert } from './alert-wrapper'
@@ -100,10 +107,9 @@ const QUORUM_TICK_INTERVAL = 5
 
 export async function shouldRunQuorum(): Promise<boolean> {
   try {
-    const count = await kv.get<number>(TICK_COUNTER_KEY) ?? 0
-    const next = count + 1
-    await kv.set(TICK_COUNTER_KEY, next)
-    return next % QUORUM_TICK_INTERVAL === 0
+    // Atomic increment — eliminates race condition between concurrent lambdas
+    const count = await kv.incr(TICK_COUNTER_KEY)
+    return count % QUORUM_TICK_INTERVAL === 0
   } catch (err) {
     console.warn('[QUORUM] KV tick counter failed, skipping:', err instanceof Error ? err.message : err)
     return false
@@ -120,6 +126,25 @@ export function computeMedian(values: bigint[]): bigint {
     return (sorted[mid - 1] + sorted[mid]) / 2n
   }
   return sorted[mid]
+}
+
+// ── BigInt-safe deviation calculation ───────────────────
+
+/**
+ * Compute deviation percentage using basis-point arithmetic entirely in BigInt.
+ * Avoids Number() precision loss for amounts exceeding Number.MAX_SAFE_INTEGER.
+ *
+ * @returns deviation as a percentage (e.g. 5.25 for 5.25% deviation)
+ */
+export function computeDeviationPercent(sourceAmount: bigint, median: bigint): number {
+  if (median === 0n) return 0
+  const diff = sourceAmount > median
+    ? sourceAmount - median
+    : median - sourceAmount
+  // Basis-point arithmetic: (diff * 10000) / median gives BPS as a BigInt.
+  // Safe to convert to Number: realistic deviations produce bps < 10000 (100%).
+  const deviationBps = (diff * 10000n) / median
+  return Number(deviationBps) / 100
 }
 
 // ── Per-source deviation threshold ──────────────────────
@@ -199,12 +224,13 @@ async function analyzePair(
   result.medianAmount = median.toString()
 
   if (median === 0n) {
+    console.warn(`[QUORUM] Median is zero for ${pair.label} — skipping pair`)
     result.skipped = true
-    result.skipReason = 'Median is zero'
+    result.skipReason = 'Median is zero — cannot compute deviation'
     return result
   }
 
-  // Check each source for deviation
+  // Check each source for deviation (BigInt-safe basis-point arithmetic)
   for (const quote of activeQuotes) {
     let sourceAmount: bigint
     try {
@@ -214,11 +240,7 @@ async function analyzePair(
     }
     if (sourceAmount === 0n) continue
 
-    const diff = sourceAmount > median
-      ? sourceAmount - median
-      : median - sourceAmount
-    const deviationPercent = (Number(diff) / Number(median)) * 100
-
+    const deviationPercent = computeDeviationPercent(sourceAmount, median)
     const maxDev = getMaxDeviation(quote.source, pair)
 
     if (deviationPercent > maxDev) {
@@ -246,6 +268,12 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
   const activeSources = allStatuses.filter(s => s.state === 'active')
   const activeSourceIds = new Set(activeSources.map(s => s.id))
 
+  // Trust model: quorum assumes majority of active sources are honest.
+  // With 3 sources, an attacker controlling 2 can invert the median and
+  // flag the honest source as an outlier. With 5+, needs to control 3.
+  // Minimum of 3 is acceptable for MVP (simultaneous compromise of 2
+  // independent aggregator APIs is high-difficulty). Revisit if source
+  // count drops below 5 sustained.
   if (activeSources.length < 3) {
     console.log(`[QUORUM] Skipped — only ${activeSources.length} active sources (need ≥3)`)
     return {
@@ -320,22 +348,17 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
     }
   }
 
-  // Correlated (≥3 sources flagged) → kill-switch all flagged sources
+  // Correlated (≥3 sources flagged) → kill-switch all flagged sources.
+  // 'quorum-correlated-anomaly' IS P0 — blocks auto-recovery, requires manual forceActivate().
   if (isCorrelated) {
     console.error(`[QUORUM] CORRELATED OUTLIER — ${correlatedOutlierCount} sources flagged. Triggering kill-switch.`)
     for (const sourceId of flaggedSourceIds) {
-      await forceDisable(sourceId, `quorum-kill-switch: correlated deviation across ${correlatedOutlierCount} sources`)
-      // quorum-kill-switch is NOT in P0_REASONS, so auto-recovery is allowed
+      // Find the worst deviation for this source across pairs for the alert context
+      const infos = outliersBySource.get(sourceId) || []
+      const worst = infos.reduce((max, i) => i.deviationPercent > max.deviationPercent ? i : max, infos[0])
+      const reason = `quorum-correlated-anomaly: deviation ${worst.deviationPercent}% on ${worst.pairLabel}`
+      await forceDisable(sourceId, reason)
     }
-    // Emit P0-level alert for the correlated event
-    emitTransitionAlert(
-      'quorum-system',
-      'active',
-      'disabled',
-      `quorum-correlated: ${correlatedOutlierCount} sources disabled — ${flaggedSourceIds.join(', ')}`,
-    ).catch(err => {
-      console.error('[QUORUM] Correlated alert emission failed:', err instanceof Error ? err.message : err)
-    })
   }
 
   // Log summary

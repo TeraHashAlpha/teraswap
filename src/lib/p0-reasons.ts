@@ -15,6 +15,7 @@ export const P0_REASONS = [
   'tls-fingerprint-change',
   'dns-record-change',
   'kv-store-failure',
+  'quorum-correlated-anomaly',
 ] as const
 
 export type P0Reason = (typeof P0_REASONS)[number]
