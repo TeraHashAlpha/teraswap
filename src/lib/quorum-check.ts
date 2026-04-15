@@ -100,10 +100,12 @@ export interface QuorumCheckResult {
   skipReason?: string
 }
 
-// ── Tick counter (run every 5th tick) ───────────────────
+// ── KV keys ────────────────────────────────────────────
 
 const TICK_COUNTER_KEY = 'teraswap:monitor:quorumTickCounter'
 const QUORUM_TICK_INTERVAL = 5
+const LAST_QUORUM_KEY = 'teraswap:monitor:lastQuorumResult'
+const KILLSWITCH_AUDIT_PREFIX = 'teraswap:quorum:killswitch:'
 
 export async function shouldRunQuorum(): Promise<boolean> {
   try {
@@ -359,6 +361,24 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
       const reason = `quorum-correlated-anomaly: deviation ${worst.deviationPercent}% on ${worst.pairLabel}`
       await forceDisable(sourceId, reason)
     }
+
+    // KV audit trail for correlated kill-switch — forensic/post-mortem record
+    try {
+      const auditEntry = {
+        timestamp,
+        flaggedSources: flaggedSourceIds,
+        correlatedOutlierCount,
+        outliers: allOutliers.filter(o => o.classification === 'correlated'),
+        pairResults: pairResults.map(p => ({
+          label: p.label,
+          medianAmount: p.medianAmount,
+          quotesCollected: p.quotesCollected,
+        })),
+      }
+      await kv.set(`${KILLSWITCH_AUDIT_PREFIX}${timestamp}`, auditEntry, { ex: 7 * 86_400 }) // 7-day TTL
+    } catch (err) {
+      console.warn('[QUORUM] Audit trail write failed:', err instanceof Error ? err.message : err)
+    }
   }
 
   // Log summary
@@ -370,11 +390,20 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
     console.log(`[QUORUM] All sources within tolerance (${activeSources.length} active, ${pairResults.filter(p => !p.skipped).length} pairs checked)`)
   }
 
-  return {
+  const result: QuorumCheckResult = {
     timestamp,
     pairs: pairResults,
     outliers: allOutliers,
     correlatedOutlierCount,
     skipped: false,
   }
+
+  // Persist latest result for heartbeat endpoint consumption
+  try {
+    await kv.set(LAST_QUORUM_KEY, result, { ex: 3600 }) // 1h TTL (matches heartbeat TTL)
+  } catch (err) {
+    console.warn('[QUORUM] Failed to write lastQuorumResult:', err instanceof Error ? err.message : err)
+  }
+
+  return result
 }

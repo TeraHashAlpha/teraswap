@@ -28,6 +28,11 @@ import {
   captureLiveTLS,
   captureLiveDNS,
 } from './fingerprint-validator'
+import {
+  shouldRunQuorum,
+  runQuorumCheck,
+  type QuorumCheckResult,
+} from './quorum-check'
 
 // ── Alert on state transitions ──────────────────────────
 
@@ -95,6 +100,8 @@ export interface MonitoringTickResult {
   transitions: string[]
   recovered: string[]
   statuses: Awaited<ReturnType<typeof getAllStatuses>>
+  /** Present only on quorum ticks (every 5th tick). */
+  quorum?: QuorumCheckResult
 }
 
 /**
@@ -150,7 +157,20 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     )
   }
 
-  // Detect state transitions
+  // ── H5: Quorum cross-check (every 5th tick) ──────────
+  let quorumResult: QuorumCheckResult | undefined
+  try {
+    if (await shouldRunQuorum()) {
+      quorumResult = await runQuorumCheck()
+      if (quorumResult.correlatedOutlierCount >= 3) {
+        console.error(`[MONITOR] H5 correlated anomaly — ${quorumResult.correlatedOutlierCount} sources flagged`)
+      }
+    }
+  } catch (err) {
+    console.warn('[MONITOR] Quorum check failed:', err instanceof Error ? err.message : err)
+  }
+
+  // Detect state transitions (after H1 + H2 + H5 may have changed states)
   const allAfter = await getAllStatuses()
   for (const s of allAfter) {
     const prev = originalStates.get(s.id)
@@ -172,5 +192,6 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     transitions,
     recovered,
     statuses: allAfter,
+    ...(quorumResult ? { quorum: quorumResult } : {}),
   }
 }

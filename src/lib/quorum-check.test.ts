@@ -507,6 +507,134 @@ describe('quorum-check', () => {
     })
   })
 
+  // ── KV persistence ────────────────────────────────────
+
+  describe('KV persistence', () => {
+    it('writes lastQuorumResult to KV after successful check', async () => {
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+
+      mockFetchMetaQuote.mockResolvedValue(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3000000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '2995000000' },
+          { source: 'odos', toAmount: '3002000000' },
+        ]),
+      )
+
+      await runQuorumCheck()
+
+      // Verify kv.set was called with the lastQuorumResult key
+      const lastQuorumCalls = mockKvSet.mock.calls.filter(
+        (args: unknown[]) => args[0] === 'teraswap:monitor:lastQuorumResult',
+      )
+      expect(lastQuorumCalls.length).toBe(1)
+
+      const savedResult = lastQuorumCalls[0][1] as Record<string, unknown>
+      expect(savedResult.skipped).toBe(false)
+      expect(savedResult.correlatedOutlierCount).toBe(0)
+      expect(savedResult.timestamp).toBeDefined()
+    })
+
+    it('writes correlated kill-switch audit trail to KV', async () => {
+      // 7 sources: 4 normal consensus, 3 deviant
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
+      seedSource('sushiswap', 'active')
+      seedSource('openocean', 'active')
+
+      mockFetchMetaQuote.mockResolvedValueOnce(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3200000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '3200000000' },
+          { source: 'odos', toAmount: '3200000000' },
+          { source: 'kyberswap', toAmount: '3000000000' },
+          { source: 'sushiswap', toAmount: '3002000000' },
+          { source: 'openocean', toAmount: '2998000000' },
+        ]),
+      )
+
+      mockFetchMetaQuote.mockResolvedValueOnce(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '10300000000' },
+          { source: 'cowswap', toAmount: '9999000000' },
+          { source: 'velora', toAmount: '10300000000' },
+          { source: 'odos', toAmount: '10300000000' },
+          { source: 'kyberswap', toAmount: '9998000000' },
+          { source: 'sushiswap', toAmount: '10000000000' },
+          { source: 'openocean', toAmount: '9997000000' },
+        ]),
+      )
+
+      const result = await runQuorumCheck()
+      expect(result.correlatedOutlierCount).toBeGreaterThanOrEqual(3)
+
+      // Verify audit trail was written with the killswitch prefix
+      const auditCalls = mockKvSet.mock.calls.filter(
+        (args: unknown[]) => typeof args[0] === 'string' && (args[0] as string).startsWith('teraswap:quorum:killswitch:'),
+      )
+      expect(auditCalls.length).toBe(1)
+
+      const auditEntry = auditCalls[0][1] as Record<string, unknown>
+      expect(auditEntry.flaggedSources).toBeDefined()
+      expect((auditEntry.flaggedSources as string[]).length).toBeGreaterThanOrEqual(3)
+      expect(auditEntry.correlatedOutlierCount).toBeGreaterThanOrEqual(3)
+    })
+
+    it('does NOT write audit trail for non-correlated outliers', async () => {
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+
+      // Only 1 source deviates (flagged, not correlated)
+      mockFetchMetaQuote.mockResolvedValueOnce(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3000000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '3200000000' },
+          { source: 'odos', toAmount: '3002000000' },
+        ]),
+      )
+
+      mockFetchMetaQuote.mockResolvedValueOnce(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '9998000000' },
+          { source: 'cowswap', toAmount: '9999000000' },
+          { source: 'velora', toAmount: '10300000000' },
+          { source: 'odos', toAmount: '9998500000' },
+        ]),
+      )
+
+      await runQuorumCheck()
+
+      const auditCalls = mockKvSet.mock.calls.filter(
+        (args: unknown[]) => typeof args[0] === 'string' && (args[0] as string).startsWith('teraswap:quorum:killswitch:'),
+      )
+      expect(auditCalls.length).toBe(0)
+    })
+
+    it('does NOT write lastQuorumResult when check is skipped (insufficient sources)', async () => {
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+
+      const result = await runQuorumCheck()
+      expect(result.skipped).toBe(true)
+
+      const lastQuorumCalls = mockKvSet.mock.calls.filter(
+        (args: unknown[]) => args[0] === 'teraswap:monitor:lastQuorumResult',
+      )
+      expect(lastQuorumCalls.length).toBe(0)
+    })
+  })
+
   // ── Reference pairs config ────────────────────────────
 
   describe('reference pairs configuration', () => {

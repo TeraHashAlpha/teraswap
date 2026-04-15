@@ -20,10 +20,17 @@ const HEARTBEAT_STALE_SECONDS = 180 // 3 minutes — if tick is older, unhealthy
 
 export async function GET() {
   try {
-    // Read heartbeat data from KV
-    const [lastTickIso, tickCount] = await Promise.all([
+    // Read heartbeat data + latest quorum result from KV
+    const [lastTickIso, tickCount, lastQuorum] = await Promise.all([
       kv.get<string>('teraswap:monitor:lastTick'),
       kv.get<number>('teraswap:monitor:tickCount'),
+      kv.get<{
+        timestamp: string
+        outliers: Array<{ sourceId: string; deviationPercent: number; classification: string; pairLabel: string }>
+        correlatedOutlierCount: number
+        skipped: boolean
+        skipReason?: string
+      }>('teraswap:monitor:lastQuorumResult'),
     ])
 
     // Read source state summary
@@ -43,12 +50,19 @@ export async function GET() {
     const tickFresh = ageSeconds !== null && ageSeconds < HEARTBEAT_STALE_SECONDS
     const healthy = grace || tickFresh
 
+    // Quorum health: healthy if no correlated anomaly and last check is recent
+    const quorumOutliers = lastQuorum?.outliers?.filter(o => o.classification === 'flagged' || o.classification === 'correlated') ?? []
+    const quorumHealthy = lastQuorum ? lastQuorum.correlatedOutlierCount === 0 : true // no data = assume ok
+
     const body: Record<string, unknown> = {
       lastTick: lastTickIso || null,
       tickCount: tickCount ?? 0,
       ageSeconds,
       healthy,
       sources,
+      lastQuorumCheck: lastQuorum?.timestamp ?? null,
+      quorumOutliers: quorumOutliers.length,
+      quorumHealthy,
     }
 
     if (grace) {
