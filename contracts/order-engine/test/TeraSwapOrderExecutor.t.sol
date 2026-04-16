@@ -742,10 +742,11 @@ contract TeraSwapOrderExecutorTest is Test {
     }
 
     function test_R12_getTimelockDelays() public view {
-        (uint256 adminTransfer, uint256 routerChange, uint256 sweep) = executor.getTimelockDelays();
+        (uint256 adminTransfer, uint256 routerChange, uint256 sweep, uint256 executorChange) = executor.getTimelockDelays();
         assertEq(adminTransfer, 7 days, "Admin transfer should be 7 days");
         assertEq(routerChange, 48 hours, "Router change should be 48 hours");
         assertEq(sweep, 48 hours, "Sweep should be 48 hours");
+        assertEq(executorChange, 48 hours, "Executor change should be 48 hours");
     }
 
     function test_R12_adminTransferGracePeriodStill7Days() public {
@@ -1353,6 +1354,82 @@ contract TeraSwapOrderExecutorTest is Test {
 
         vm.expectRevert(TeraSwapOrderExecutor.InsufficientOutput.selector);
         executor.executeOrder(order, sig, hex"01");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  SC-H-01: EXECUTOR TIMELOCK
+    // ══════════════════════════════════════════════════════════════
+
+    function test_SC_H01_proposeWait48hExecute_succeeds() public {
+        address newExecutor = address(0xE1);
+
+        // Propose
+        vm.prank(admin);
+        executor.proposeExecutor(newExecutor, true);
+
+        // Verify not yet active
+        assertFalse(executor.whitelistedExecutors(newExecutor), "Should not be active yet");
+
+        // Wait 48h
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        // Execute
+        vm.prank(admin);
+        executor.executeExecutorChange(newExecutor);
+
+        assertTrue(executor.whitelistedExecutors(newExecutor), "Should be active after timelock");
+    }
+
+    function test_SC_H01_proposeExecuteImmediately_reverts() public {
+        address newExecutor = address(0xE2);
+
+        vm.prank(admin);
+        executor.proposeExecutor(newExecutor, true);
+
+        // Try to execute immediately — should revert
+        vm.prank(admin);
+        vm.expectRevert(TeraSwapOrderExecutor.TimelockNotExpired.selector);
+        executor.executeExecutorChange(newExecutor);
+    }
+
+    function test_SC_H01_proposeWaitBeyondGrace_reverts() public {
+        address newExecutor = address(0xE3);
+
+        vm.prank(admin);
+        executor.proposeExecutor(newExecutor, true);
+
+        // Wait 48h (delay) + 7 days (grace) + 1s — expired
+        vm.warp(block.timestamp + 48 hours + 7 days + 1);
+
+        vm.prank(admin);
+        vm.expectRevert(TeraSwapOrderExecutor.ProposalExpired.selector);
+        executor.executeExecutorChange(newExecutor);
+    }
+
+    function test_SC_H01_proposeCancelExecute_reverts() public {
+        address newExecutor = address(0xE4);
+
+        // Propose
+        vm.prank(admin);
+        executor.proposeExecutor(newExecutor, true);
+
+        // Cancel
+        vm.prank(admin);
+        executor.cancelExecutorProposal(newExecutor);
+
+        // Wait and try to execute — should revert
+        vm.warp(block.timestamp + 48 hours + 1);
+        vm.prank(admin);
+        vm.expectRevert(TeraSwapOrderExecutor.NoActiveProposal.selector);
+        executor.executeExecutorChange(newExecutor);
+    }
+
+    function test_SC_H01_nonAdminPropose_reverts() public {
+        address newExecutor = address(0xE5);
+
+        vm.prank(user);
+        vm.expectRevert(TeraSwapOrderExecutor.NotAdmin.selector);
+        executor.proposeExecutor(newExecutor, true);
     }
 
     function test_SC_C01_DCA_recipientAlwaysOwner() public {

@@ -121,6 +121,7 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     uint256 public constant TIMELOCK_ADMIN_TRANSFER = 7 days;   // [R-12] Admin transfer requires 7-day delay
     uint256 public constant TIMELOCK_ROUTER_CHANGE  = 48 hours; // [R-12] Router whitelist change delay
     uint256 public constant TIMELOCK_SWEEP          = 48 hours; // [R-12] Sweep action delay
+    uint256 public constant TIMELOCK_EXECUTOR_CHANGE = 48 hours; // [SC-H-01] Executor whitelist change delay
     uint256 public constant TIMELOCK_GRACE = 7 days;            // [Audit M-03] Timelock expiry window
     uint256 public constant MIN_ORDER_AMOUNT = 10_000; // [Audit M-01] Min order to prevent zero-fee
 
@@ -168,6 +169,14 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     /// @notice Whether initial bootstrap has been used (one-time router setup)
     bool public bootstrapped;
 
+    /// @notice [SC-H-01] Pending executor whitelist change proposals
+    struct ExecutorProposal {
+        bool proposed;
+        bool newStatus;
+        uint256 executeAfter;
+    }
+    mapping(address => ExecutorProposal) public pendingExecutorChanges;
+
     // [HIGH-004] Per-feed oracle configuration
     struct OracleConfig {
         uint8 decimals;          // Feed decimals (8 or 18)
@@ -203,6 +212,9 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     event AdminTransferred(address indexed oldAdmin, address indexed newAdmin);
     event Bootstrap(address indexed router);
     event ExecutorWhitelisted(address indexed executor, bool status);
+    event ExecutorChangeProposed(address indexed executor, bool status, uint256 executeAfter);
+    event ExecutorChangeExecuted(address indexed executor, bool status);
+    event ExecutorChangeCancelled(address indexed executor);
     event Paused(address indexed admin);
     event Unpaused(address indexed admin);
     event OracleConfigured(address indexed feed, uint8 decimals, uint256 maxStaleness, int256 minPrice, int256 maxPrice);
@@ -247,6 +259,10 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     error InvalidDCATotal();        // [Audit L-04]
     error InvalidDCAInterval();     // [Audit L-04]
     error NotAContract();           // [Audit L-05]
+    error NoActiveProposal();       // [SC-H-01]
+    error ProposalAlreadyExists();  // [SC-H-01]
+    error ProposalExpired();        // [SC-H-01]
+    error TimelockNotExpired();     // [SC-H-01]
 
     // ══════════════════════════════════════════════════════════════════
     //  CONSTRUCTOR
@@ -679,12 +695,14 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     /// @return adminTransfer Delay for admin transfer (7 days)
     /// @return routerChange Delay for router whitelist changes (48 hours)
     /// @return sweep Delay for sweep actions (48 hours)
+    /// @return executorChange Delay for executor whitelist changes (48 hours)
     function getTimelockDelays() external pure returns (
         uint256 adminTransfer,
         uint256 routerChange,
-        uint256 sweep
+        uint256 sweep,
+        uint256 executorChange
     ) {
-        return (TIMELOCK_ADMIN_TRANSFER, TIMELOCK_ROUTER_CHANGE, TIMELOCK_SWEEP);
+        return (TIMELOCK_ADMIN_TRANSFER, TIMELOCK_ROUTER_CHANGE, TIMELOCK_SWEEP, TIMELOCK_EXECUTOR_CHANGE);
     }
 
     /**
@@ -764,15 +782,55 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    //  EXECUTOR MANAGEMENT (Audit H-01)
+    //  EXECUTOR MANAGEMENT — TIMELOCKED (SC-H-01)
     // ══════════════════════════════════════════════════════════════════
 
-    /// @notice Whitelist/remove an executor (admin only, immediate during bootstrap)
-    function setExecutor(address executor, bool status) external {
+    /// @notice Propose an executor whitelist change (48h delay, matching router timelock)
+    /// @param _executor The executor address to change
+    /// @param status true = whitelist, false = remove
+    function proposeExecutor(address _executor, bool status) external {
         if (msg.sender != admin) revert NotAdmin();
-        if (executor == address(0)) revert ZeroAddress();
-        whitelistedExecutors[executor] = status;
-        emit ExecutorWhitelisted(executor, status);
+        if (_executor == address(0)) revert ZeroAddress();
+        if (pendingExecutorChanges[_executor].proposed) revert ProposalAlreadyExists();
+
+        uint256 executeAfter = block.timestamp + TIMELOCK_EXECUTOR_CHANGE;
+        pendingExecutorChanges[_executor] = ExecutorProposal({
+            proposed: true,
+            newStatus: status,
+            executeAfter: executeAfter
+        });
+
+        emit ExecutorChangeProposed(_executor, status, executeAfter);
+    }
+
+    /// @notice Execute a pending executor whitelist change after the timelock expires
+    /// @param _executor The executor address whose proposal to execute
+    function executeExecutorChange(address _executor) external {
+        if (msg.sender != admin) revert NotAdmin();
+
+        ExecutorProposal storage proposal = pendingExecutorChanges[_executor];
+        if (!proposal.proposed) revert NoActiveProposal();
+        if (block.timestamp < proposal.executeAfter) revert TimelockNotExpired();
+        if (block.timestamp > proposal.executeAfter + TIMELOCK_GRACE) revert ProposalExpired();
+
+        bool newStatus = proposal.newStatus;
+        delete pendingExecutorChanges[_executor];
+
+        whitelistedExecutors[_executor] = newStatus;
+
+        emit ExecutorChangeExecuted(_executor, newStatus);
+        emit ExecutorWhitelisted(_executor, newStatus);
+    }
+
+    /// @notice Cancel a pending executor whitelist change proposal
+    /// @param _executor The executor address whose proposal to cancel
+    function cancelExecutorProposal(address _executor) external {
+        if (msg.sender != admin) revert NotAdmin();
+        if (!pendingExecutorChanges[_executor].proposed) revert NoActiveProposal();
+
+        delete pendingExecutorChanges[_executor];
+
+        emit ExecutorChangeCancelled(_executor);
     }
 
     // ══════════════════════════════════════════════════════════════════
