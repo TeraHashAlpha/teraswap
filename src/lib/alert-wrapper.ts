@@ -80,10 +80,26 @@ export async function emitTransitionAlert(
   reason?: string,
 ): Promise<void> {
   const critical = isP0Reason(reason)
+  const inGrace = await isInGracePeriodAsync()
 
-  // ① Grace period check — P0/critical always bypasses
-  if (await isInGracePeriodAsync() && !critical) {
-    console.log(`[ALERT] suppressed (grace period) ${sourceId}: ${from} → ${to}`)
+  // ① [API-H-03] Grace period: P0/critical bypasses entirely.
+  //    Non-P0 during grace → send to Telegram only with [GRACE] tag, skip dedup.
+  if (inGrace && !critical) {
+    const payload: AlertPayload = {
+      sourceId,
+      from,
+      to,
+      reason,
+      timestamp: new Date().toISOString(),
+    }
+
+    console.log(`[ALERT] grace-tagged (Telegram only) ${sourceId}: ${from} → ${to}`)
+
+    // Send to Telegram only with grace flag — no buttons, tagged message
+    // Do NOT mark dedup — post-grace alert for same transition should still fire
+    await sendTelegramAlert(payload, { grace: true }).catch(err => {
+      console.error(`[ALERT:telegram] grace delivery failed for ${sourceId}: ${err instanceof Error ? err.message : err}`)
+    })
     return
   }
 

@@ -130,16 +130,53 @@ describe('alert-wrapper', () => {
   // ── Grace period ─────────────────────────────────────────
 
   describe('grace period', () => {
-    it('suppresses alert when within grace period', async () => {
-      // Set grace to 1 hour from now
+    it('[API-H-03] sends grace-tagged alert to Telegram only during grace (non-P0)', async () => {
       const future = new Date(Date.now() + 3600_000).toISOString()
       setEnv('MONITOR_GRACE_UNTIL', future)
 
       await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
 
-      expect(mockTelegram).not.toHaveBeenCalled()
+      // Telegram called with grace option
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      expect(mockTelegram).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceId: '1inch', from: 'active', to: 'degraded' }),
+        { grace: true },
+      )
+
+      // Email and Discord NOT called during grace
       expect(mockEmail).not.toHaveBeenCalled()
       expect(mockDiscord).not.toHaveBeenCalled()
+    })
+
+    it('[API-H-03] grace alert does not consume dedup slot', async () => {
+      const future = new Date(Date.now() + 3600_000).toISOString()
+      setEnv('MONITOR_GRACE_UNTIL', future)
+
+      await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
+
+      // Dedup key should NOT have been written
+      expect(mockKvSet).not.toHaveBeenCalled()
+    })
+
+    it('[API-H-03] after grace expires, same transition fires normally (dedup not consumed)', async () => {
+      // During grace
+      const future = new Date(Date.now() + 3600_000).toISOString()
+      setEnv('MONITOR_GRACE_UNTIL', future)
+      await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
+
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      expect(mockKvSet).not.toHaveBeenCalled() // no dedup written
+
+      // Grace expires
+      delete process.env.MONITOR_GRACE_UNTIL
+      mockKvGet.mockResolvedValue(null) // no dedup key exists
+
+      await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
+
+      // Should fire normally to all channels
+      expect(mockTelegram).toHaveBeenCalledTimes(2)
+      expect(mockEmail).toHaveBeenCalledTimes(1)
+      expect(mockDiscord).toHaveBeenCalledTimes(1)
     })
 
     it('sends alert when grace period has expired', async () => {
@@ -160,14 +197,17 @@ describe('alert-wrapper', () => {
       expect(mockTelegram).toHaveBeenCalledTimes(1)
     })
 
-    it('ALWAYS sends kill-switch alerts during grace period', async () => {
+    it('ALWAYS sends P0 alerts to ALL channels during grace (no tag)', async () => {
       const future = new Date(Date.now() + 3600_000).toISOString()
       setEnv('MONITOR_GRACE_UNTIL', future)
 
       await emitTransitionAlert('cow', 'active', 'disabled', 'kill-switch-triggered')
 
-      // Kill-switch bypasses grace
+      // P0 bypasses grace entirely — all channels, no grace flag
       expect(mockTelegram).toHaveBeenCalledTimes(1)
+      expect(mockTelegram).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceId: 'cow' }),
+      )
       expect(mockEmail).toHaveBeenCalledTimes(1)
       expect(mockDiscord).toHaveBeenCalledTimes(1)
     })
@@ -367,13 +407,21 @@ describe('alert-wrapper', () => {
       expect(mockTelegram).toHaveBeenCalledTimes(1)
     })
 
-    it('non-P0 reason is still suppressed during grace', async () => {
+    it('non-P0 reason during grace sends to Telegram only with grace tag', async () => {
       const future = new Date(Date.now() + 3600_000).toISOString()
       setEnv('MONITOR_GRACE_UNTIL', future)
 
       await emitTransitionAlert('odos', 'active', 'degraded', 'high-latency')
 
-      expect(mockTelegram).not.toHaveBeenCalled()
+      // Telegram called with grace flag
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      expect(mockTelegram).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceId: 'odos' }),
+        { grace: true },
+      )
+      // Email/Discord skipped
+      expect(mockEmail).not.toHaveBeenCalled()
+      expect(mockDiscord).not.toHaveBeenCalled()
     })
   })
 

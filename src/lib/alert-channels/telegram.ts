@@ -44,9 +44,16 @@ export function buildAlertKeyboard(sourceId: string, to: string): InlineKeyboard
   return undefined
 }
 
+// ── Options ──────────────────────────────────────────
+
+export interface TelegramAlertOptions {
+  /** When true, alert is tagged as grace-period and keyboard is omitted. */
+  grace?: boolean
+}
+
 // ── Main send function ────────────────────────────────
 
-export async function sendTelegramAlert(payload: AlertPayload): Promise<void> {
+export async function sendTelegramAlert(payload: AlertPayload, options?: TelegramAlertOptions): Promise<void> {
   const botToken = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
 
@@ -55,24 +62,31 @@ export async function sendTelegramAlert(payload: AlertPayload): Promise<void> {
     return
   }
 
+  const isGrace = options?.grace === true
   const safeSourceId = escapeHtml(payload.sourceId)
   const safeReason = escapeHtml(payload.reason || 'unknown')
 
-  const emoji = payload.to === 'disabled' ? '\u{1F534}' // 🔴
+  // [API-H-03] Grace alerts use ⏸️ prefix instead of state emoji
+  const emoji = isGrace ? '\u23F8\uFE0F' // ⏸️
+    : payload.to === 'disabled' ? '\u{1F534}' // 🔴
     : payload.to === 'degraded' ? '\u{1F7E0}' // 🟠
     : '\u{1F7E2}' // 🟢
 
+  const gracePrefix = isGrace ? '[GRACE] ' : ''
+  const reasonSuffix = isGrace ? ' (during maintenance grace)' : ''
+
   const text = [
-    `${emoji} <b>Source ${payload.to.toUpperCase()}: ${safeSourceId}</b>`,
+    `${emoji} <b>${gracePrefix}Source ${payload.to.toUpperCase()}: ${safeSourceId}</b>`,
     '',
     `<b>Transition:</b> ${payload.from} \u2192 ${payload.to}`,
-    `<b>Reason:</b> ${safeReason}`,
+    `<b>Reason:</b> ${safeReason}${reasonSuffix}`,
     `<b>Time:</b> ${payload.timestamp}`,
     '',
     `<a href="https://teraswap.app/admin/monitor">Dashboard</a>`,
   ].join('\n')
 
-  const keyboard = buildAlertKeyboard(payload.sourceId, payload.to)
+  // [API-H-03] No action buttons on grace alerts — operator set the grace, no action needed
+  const keyboard = isGrace ? undefined : buildAlertKeyboard(payload.sourceId, payload.to)
 
   const body: Record<string, unknown> = {
     chat_id: chatId,
