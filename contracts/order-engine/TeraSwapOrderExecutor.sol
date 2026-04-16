@@ -169,6 +169,9 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     /// @notice Whether initial bootstrap has been used (one-time router setup)
     bool public bootstrapped;
 
+    /// @notice [SC-L] Guard: only accept ETH during active order execution
+    bool private _inExecution;
+
     /// @notice [SC-H-01] Pending executor whitelist change proposals
     struct ExecutorProposal {
         bool proposed;
@@ -263,6 +266,7 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
     error ProposalAlreadyExists();  // [SC-H-01]
     error ProposalExpired();        // [SC-H-01]
     error TimelockNotExpired();     // [SC-H-01]
+    error ETHNotAccepted();         // [SC-L]
 
     // ══════════════════════════════════════════════════════════════════
     //  CONSTRUCTOR
@@ -488,8 +492,10 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
         // [M-01] Record tokenOut balance BEFORE swap to use delta (not absolute)
         uint256 tokenOutBefore = IERC20(order.tokenOut).balanceOf(address(this));
 
+        _inExecution = true;
         (bool ok, bytes memory result) = order.router.call(routerData);
         if (!ok) revert SwapFailed(result);
+        _inExecution = false;
 
         // Revoke approval
         IERC20(order.tokenIn).forceApprove(order.router, 0);
@@ -981,5 +987,9 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
         return _domainSeparatorV4();
     }
 
-    receive() external payable {}
+    /// @notice Accept ETH only during active order execution (router ETH output / WETH unwrap)
+    /// @dev Reverts if called outside of executeOrder() to prevent accidental ETH deposits.
+    receive() external payable {
+        if (!_inExecution) revert ETHNotAccepted();
+    }
 }

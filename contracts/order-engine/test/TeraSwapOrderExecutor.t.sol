@@ -1432,6 +1432,89 @@ contract TeraSwapOrderExecutorTest is Test {
         executor.proposeExecutor(newExecutor, true);
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  SC-L: RECEIVE() RESTRICTION & SWEEP ETH
+    // ══════════════════════════════════════════════════════════════
+
+    function test_SCL_receiveOutsideExecution_reverts() public {
+        // Sending ETH directly to the contract outside of executeOrder should revert
+        vm.deal(user, 1 ether);
+        vm.prank(user);
+        (bool ok, ) = address(executor).call{value: 1 ether}("");
+        assertFalse(ok, "ETH sent outside execution should revert");
+    }
+
+    function test_SCL_sweepETH_sendsToAdmin() public {
+        // Use vm.deal to bypass receive() guard (directly sets balance)
+        vm.deal(address(executor), 3 ether);
+
+        uint256 adminBefore = admin.balance;
+
+        // Queue and execute sweep
+        vm.prank(admin);
+        executor.queueSweep(address(0));
+        bytes32 actionHash = keccak256(abi.encode("sweep", address(0)));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        vm.prank(admin);
+        executor.executeSweep(actionId, address(0));
+
+        assertEq(admin.balance - adminBefore, 3 ether, "ETH should go to admin");
+        assertEq(address(executor).balance, 0, "Executor should have no ETH left");
+    }
+
+    function test_SCL_ethAcceptedDuringExecution() public {
+        // ETH router test: router sends ETH back during execution, receive() must accept it
+        MockETHRouter ethRtr = new MockETHRouter(1 ether);
+        vm.deal(address(ethRtr), 10 ether);
+
+        // Deploy fresh executor for clean bootstrap
+        TeraSwapOrderExecutor freshExec = new TeraSwapOrderExecutor(
+            feeRecipient, admin, address(weth)
+        );
+        address[] memory routers = new address[](1);
+        routers[0] = address(ethRtr);
+        address[] memory executorAddrs = new address[](1);
+        executorAddrs[0] = address(this);
+        vm.prank(admin);
+        freshExec.bootstrap(routers, executorAddrs);
+
+        // Fund user
+        tokenIn.mint(user, AMOUNT_IN);
+        vm.prank(user);
+        tokenIn.approve(address(freshExec), type(uint256).max);
+
+        // Create order with WETH as output (ETH router path)
+        TeraSwapOrderExecutor.Order memory order = TeraSwapOrderExecutor.Order({
+            owner: user,
+            tokenIn: address(tokenIn),
+            tokenOut: address(weth),
+            amountIn: AMOUNT_IN,
+            minAmountOut: 1 ether,
+            orderType: TeraSwapOrderExecutor.OrderType.LIMIT,
+            condition: TeraSwapOrderExecutor.PriceCondition.ABOVE,
+            targetPrice: TARGET_PRICE,
+            priceFeed: address(priceFeed),
+            expiry: block.timestamp + EXPIRY_DELTA,
+            nonce: 0,
+            router: address(ethRtr),
+            routerDataHash: keccak256(hex"01"),
+            dcaInterval: 0,
+            dcaTotal: 0
+        });
+
+        bytes memory sig = _signOrderFor(freshExec, order);
+
+        // Execute — router returns ETH, receive() must work during execution
+        uint256 userEthBefore = user.balance;
+        freshExec.executeOrder(order, sig, hex"01");
+
+        // User should receive ETH (order executed successfully through H-02 ETH path)
+        assertGt(user.balance - userEthBefore, 0, "User should receive ETH output");
+    }
+
     function test_SC_C01_DCA_recipientAlwaysOwner() public {
         // Verify that DCA output always goes to order.owner, not an arbitrary address
         vm.warp(2 hours);

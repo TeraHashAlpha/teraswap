@@ -129,6 +129,31 @@ contract TeraSwapFeeCollectorTest is Test {
         assertFalse(collector.paused());
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  SC-L: RECEIVE() RESTRICTION & SWEEP ETH
+    // ══════════════════════════════════════════════════════════════
+
+    function test_SCL_receiveOutsideSwap_reverts() public {
+        // Sending ETH directly to the contract outside of a swap should revert
+        vm.deal(user, 1 ether);
+        vm.prank(user);
+        (bool ok, ) = address(collector).call{value: 1 ether}("");
+        assertFalse(ok, "ETH sent outside swap should revert");
+    }
+
+    function test_SCL_sweepETH_sendsToFeeRecipient() public {
+        // Use vm.deal to bypass receive() guard (directly sets balance)
+        vm.deal(address(collector), 2 ether);
+
+        uint256 recipientBefore = feeRecipient.balance;
+
+        vm.prank(admin);
+        collector.sweep(address(0));
+
+        assertEq(feeRecipient.balance - recipientBefore, 2 ether, "ETH should go to feeRecipient");
+        assertEq(address(collector).balance, 0, "Collector should have no ETH left");
+    }
+
     function test_R12_bootstrapRouters() public {
         // Deploy fresh collector (not bootstrapped)
         TeraSwapFeeCollector fresh = new TeraSwapFeeCollector(feeRecipient, admin);

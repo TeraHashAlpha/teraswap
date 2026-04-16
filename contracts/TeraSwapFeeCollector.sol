@@ -34,6 +34,9 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     /// @notice [Audit L-01] Emergency pause
     bool public paused;
 
+    /// @notice [SC-L] Guard: only accept ETH during active swap execution
+    bool private _inSwap;
+
     /// @notice [Audit] Router whitelist for FeeCollector
     mapping(address => bool) public whitelistedRouters;
 
@@ -84,6 +87,7 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     error TimelockExpired();
     error TimelockHashMismatch();
     error AlreadyBootstrapped();
+    error ETHNotAccepted();
 
     constructor(address _feeRecipient, address _admin) {
         if (_feeRecipient == address(0) || _admin == address(0)) revert ZeroAddress();
@@ -185,9 +189,11 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         (bool feeOk, ) = feeRecipient.call{value: fee}("");
         if (!feeOk) revert FeeFailed();
 
-        // Forward to router
+        // Forward to router (enable receive() for router ETH refunds)
+        _inSwap = true;
         (bool swapOk, bytes memory result) = router.call{value: netValue}(routerData);
         if (!swapOk) revert SwapFailed(result);
+        _inSwap = false;
 
         // Refund any leftover ETH (e.g. from partial fills)
         uint256 remaining = address(this).balance;
@@ -225,8 +231,10 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         // Approve router for net amount and execute swap
         IERC20(token).forceApprove(router, netAmount);
 
+        _inSwap = true;
         (bool ok, bytes memory result) = router.call(routerData);
         if (!ok) revert SwapFailed(result);
+        _inSwap = false;
 
         // Revoke leftover approval (safety)
         IERC20(token).forceApprove(router, 0);
@@ -266,6 +274,10 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         emit Sweep(token);
     }
 
-    /// @notice Accept ETH from routers (e.g. WETH unwrap, partial refunds)
-    receive() external payable {}
+    /// @notice Accept ETH from routers only during active swap execution
+    /// @dev Reverts if called outside of swapETHWithFee/swapTokenWithFee to prevent
+    ///      accidental ETH deposits that would be silently swallowed.
+    receive() external payable {
+        if (!_inSwap) revert ETHNotAccepted();
+    }
 }
