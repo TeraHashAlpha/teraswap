@@ -18,34 +18,22 @@ jobs:
     steps:
       - name: Check monitoring heartbeat
         run: |
-          RESPONSE=$(curl -sf --max-time 10 https://teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"ageSeconds":-1}')
+          # [API-H-01] Public heartbeat returns only: healthy, ageSeconds, tickFresh
+          RESPONSE=$(curl -sf --max-time 10 https://teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"ageSeconds":-1,"tickFresh":false}')
           HEALTHY=$(echo "$RESPONSE" | jq -r '.healthy')
           AGE=$(echo "$RESPONSE" | jq -r '.ageSeconds // "N/A"')
-          GRACE=$(echo "$RESPONSE" | jq -r '.grace // false')
-          QUORUM_HEALTHY=$(echo "$RESPONSE" | jq -r '.quorumHealthy // true')
-          QUORUM_OUTLIERS=$(echo "$RESPONSE" | jq -r '.quorumOutliers // 0')
-          LAST_QUORUM=$(echo "$RESPONSE" | jq -r '.lastQuorumCheck // "N/A"')
+          TICK_FRESH=$(echo "$RESPONSE" | jq -r '.tickFresh // false')
 
           echo "Healthy: $HEALTHY"
           echo "Age: ${AGE}s"
-          echo "Grace: $GRACE"
-          echo "Quorum healthy: $QUORUM_HEALTHY"
-          echo "Quorum outliers: $QUORUM_OUTLIERS"
-          echo "Last quorum: $LAST_QUORUM"
-          echo "Full response: $RESPONSE"
+          echo "Tick fresh: $TICK_FRESH"
 
           echo "HEARTBEAT_AGE=$AGE" >> "$GITHUB_ENV"
           echo "HEARTBEAT_HEALTHY=$HEALTHY" >> "$GITHUB_ENV"
-          echo "QUORUM_HEALTHY=$QUORUM_HEALTHY" >> "$GITHUB_ENV"
-          echo "QUORUM_OUTLIERS=$QUORUM_OUTLIERS" >> "$GITHUB_ENV"
 
           if [ "$HEALTHY" != "true" ]; then
-            echo "::error::Monitoring heartbeat unhealthy! Age: ${AGE}s"
+            echo "::error::Monitoring heartbeat unhealthy! Age: ${AGE}s, tickFresh: ${TICK_FRESH}"
             exit 1
-          fi
-
-          if [ "$QUORUM_HEALTHY" = "false" ]; then
-            echo "::warning::Quorum cross-check unhealthy — ${QUORUM_OUTLIERS} outlier(s) detected"
           fi
 
       - name: Alert on failure
@@ -59,5 +47,5 @@ jobs:
           fi
           curl -sf --max-time 10 -X POST \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"🚨 TeraSwap monitoring watchdog FAILED. Healthy: ${HEARTBEAT_HEALTHY}, Age: ${HEARTBEAT_AGE}s, Quorum: ${QUORUM_HEALTHY} (${QUORUM_OUTLIERS} outliers). Check: https://teraswap.app/api/monitor/heartbeat\"}" \
+            -d "{\"text\":\"🚨 TeraSwap monitoring watchdog FAILED. Healthy: ${HEARTBEAT_HEALTHY}, Age: ${HEARTBEAT_AGE}s. Check: https://teraswap.app/api/monitor/heartbeat\"}" \
             "$WATCHDOG_ALERT_WEBHOOK"
