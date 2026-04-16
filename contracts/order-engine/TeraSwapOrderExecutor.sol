@@ -400,7 +400,12 @@ contract TeraSwapOrderExecutor is ReentrancyGuard, EIP712 {
             if (order.routerDataHash == bytes32(0)) revert RouterDataMismatch();
             if (keccak256(routerData) != order.routerDataHash) revert RouterDataMismatch();
         }
-        // DCA orders: routerDataHash = bytes32(0) allowed since calldata varies per execution
+        // DCA orders: routerDataHash bypass (bytes32(0)) is safe because:
+        //   (a) minAmountOut enforces minimum output per-execution (line ~478, scaled proportionally)
+        //   (b) recipient is always order.owner — the executor receives swap output and transfers
+        //       to order.owner (lines ~501-524), NOT to an address from routerData
+        //   (c) nonReentrant prevents compound attacks during the router call
+        //   (d) router must be whitelisted (line ~395) — limits calldata to trusted contracts
 
         // ── [H-03] Check nonce invalidation ──
         if (order.nonce < invalidatedNonces[order.owner]) revert NonceBelowInvalidation();

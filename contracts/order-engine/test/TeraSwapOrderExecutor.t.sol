@@ -167,6 +167,92 @@ contract MockETHRouter {
 }
 
 
+/// @dev Malicious ERC-20 that attempts reentrancy during safeTransfer (transfer hook)
+///      Used to prove the nonReentrant guard on executeOrder() works.
+contract ReentrantToken is IERC20 {
+    string public name = "Reentrant Token";
+    string public symbol = "REENT";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    TeraSwapOrderExecutor public target;
+    TeraSwapOrderExecutor.Order public reentrantOrder;
+    bytes public reentrantSig;
+    bytes public reentrantData;
+    bool public attackEnabled;
+
+    function setAttack(
+        TeraSwapOrderExecutor _target,
+        TeraSwapOrderExecutor.Order memory _order,
+        bytes memory _sig,
+        bytes memory _data
+    ) external {
+        target = _target;
+        reentrantOrder = _order;
+        reentrantSig = _sig;
+        reentrantData = _data;
+        attackEnabled = true;
+    }
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(msg.sender, to, amount);
+
+        // Attempt reentrancy when the executor sends us output tokens
+        if (attackEnabled && msg.sender == address(target)) {
+            attackEnabled = false; // prevent infinite recursion
+            try target.executeOrder(reentrantOrder, reentrantSig, reentrantData) {
+                // If this succeeds, reentrancy guard is broken
+            } catch {
+                // Expected: should revert with ReentrancyGuardReentrantCall
+            }
+        }
+        return true;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        if (allowance[from][msg.sender] != type(uint256).max) {
+            allowance[from][msg.sender] -= amount;
+        }
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
+        return true;
+    }
+}
+
+/// @dev Router that mints ReentrantToken (used together with ReentrantToken for reentrancy test)
+contract ReentrantRouter {
+    ReentrantToken public outputToken;
+    uint256 public outputAmount;
+
+    constructor(ReentrantToken _outputToken, uint256 _outputAmount) {
+        outputToken = _outputToken;
+        outputAmount = _outputAmount;
+    }
+
+    fallback() external payable {
+        outputToken.mint(msg.sender, outputAmount);
+    }
+
+    receive() external payable {}
+}
+
+
 // ══════════════════════════════════════════════════════════════════
 //  TEST CONTRACT
 // ══════════════════════════════════════════════════════════════════
@@ -1087,5 +1173,209 @@ contract TeraSwapOrderExecutorTest is Test {
 
         uint256 expectedFee = (amountIn * 10) / 10_000;
         assertEq(feeCollected, expectedFee, "Fee should be exact 0.1%");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  SC-H-03: REENTRANCY GUARD VERIFICATION
+    // ══════════════════════════════════════════════════════════════
+
+    /// @dev Sign an order against a specific executor's EIP-712 domain
+    function _signOrderFor(
+        TeraSwapOrderExecutor _executor,
+        TeraSwapOrderExecutor.Order memory order
+    ) internal view returns (bytes memory) {
+        bytes32 orderHash = _computeOrderHash(order);
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            _executor.domainSeparator(),
+            orderHash
+        ));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function test_SC_H03_reentrancyDuringExecuteOrder() public {
+        // Deploy a malicious output token that tries to re-enter executeOrder()
+        // during the safeTransfer of output tokens to order.owner
+        ReentrantToken reentrantOut = new ReentrantToken();
+        ReentrantRouter reentrantRouter = new ReentrantRouter(reentrantOut, MIN_OUT + 100e18);
+
+        // Deploy fresh executor so we can bootstrap with the reentrant router
+        TeraSwapOrderExecutor freshExecutor = new TeraSwapOrderExecutor(
+            feeRecipient, admin, address(weth)
+        );
+        address[] memory routers = new address[](1);
+        routers[0] = address(reentrantRouter);
+        address[] memory executors = new address[](1);
+        executors[0] = address(this);
+        vm.prank(admin);
+        freshExecutor.bootstrap(routers, executors);
+
+        // Fund user with tokenIn and approve the FRESH executor
+        tokenIn.mint(user, AMOUNT_IN * 2);
+        vm.prank(user);
+        tokenIn.approve(address(freshExecutor), type(uint256).max);
+
+        // Create order using the reentrant output token — sign against freshExecutor's domain
+        TeraSwapOrderExecutor.Order memory order = TeraSwapOrderExecutor.Order({
+            owner: user,
+            tokenIn: address(tokenIn),
+            tokenOut: address(reentrantOut),
+            amountIn: AMOUNT_IN,
+            minAmountOut: MIN_OUT,
+            orderType: TeraSwapOrderExecutor.OrderType.LIMIT,
+            condition: TeraSwapOrderExecutor.PriceCondition.ABOVE,
+            targetPrice: TARGET_PRICE,
+            priceFeed: address(priceFeed),
+            expiry: block.timestamp + EXPIRY_DELTA,
+            nonce: 0,
+            router: address(reentrantRouter),
+            routerDataHash: keccak256(hex"AA"),
+            dcaInterval: 0,
+            dcaTotal: 0
+        });
+
+        bytes memory sig = _signOrderFor(freshExecutor, order);
+
+        // Set up the reentrancy attack: when the reentrant token is transferred
+        // to order.owner, it will try to call executeOrder again with a second order
+        TeraSwapOrderExecutor.Order memory secondOrder = TeraSwapOrderExecutor.Order({
+            owner: user,
+            tokenIn: address(tokenIn),
+            tokenOut: address(reentrantOut),
+            amountIn: AMOUNT_IN,
+            minAmountOut: MIN_OUT,
+            orderType: TeraSwapOrderExecutor.OrderType.LIMIT,
+            condition: TeraSwapOrderExecutor.PriceCondition.ABOVE,
+            targetPrice: TARGET_PRICE,
+            priceFeed: address(priceFeed),
+            expiry: block.timestamp + EXPIRY_DELTA,
+            nonce: 1, // next nonce
+            router: address(reentrantRouter),
+            routerDataHash: keccak256(hex"BB"),
+            dcaInterval: 0,
+            dcaTotal: 0
+        });
+        bytes memory sig2 = _signOrderFor(freshExecutor, secondOrder);
+
+        reentrantOut.setAttack(freshExecutor, secondOrder, sig2, hex"BB");
+
+        // Execute the first order — the reentrancy attempt during output
+        // transfer should be caught by nonReentrant and silently fail
+        // (the outer call should still succeed)
+        freshExecutor.executeOrder(order, sig, hex"AA");
+
+        // Verify the first order completed (nonce incremented to 1)
+        assertEq(freshExecutor.nonces(user), 1, "First order should complete");
+
+        // The reentrant call should NOT have succeeded (nonce should be 1, not 2)
+        // If reentrancy succeeded, nonce would be 2
+        assertTrue(freshExecutor.nonces(user) < 2, "Reentrant call must not succeed");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  SC-C-01: routerDataHash VERIFICATION
+    // ══════════════════════════════════════════════════════════════
+
+    function test_SC_C01_nonDCA_bytes32Zero_reverts() public {
+        TeraSwapOrderExecutor.Order memory order = _defaultOrder();
+        order.routerDataHash = bytes32(0); // Not allowed for non-DCA
+        bytes memory sig = _signOrderMemory(order);
+
+        vm.expectRevert(TeraSwapOrderExecutor.RouterDataMismatch.selector);
+        executor.executeOrder(order, sig, hex"01");
+    }
+
+    function test_SC_C01_nonDCA_wrongHash_reverts() public {
+        TeraSwapOrderExecutor.Order memory order = _defaultOrder();
+        order.routerDataHash = keccak256(hex"FF"); // Hash of 0xFF
+        bytes memory sig = _signOrderMemory(order);
+
+        // Execute with routerData = 0x01 (hash doesn't match 0xFF)
+        vm.expectRevert(TeraSwapOrderExecutor.RouterDataMismatch.selector);
+        executor.executeOrder(order, sig, hex"01");
+    }
+
+    function test_SC_C01_nonDCA_correctHash_succeeds() public {
+        TeraSwapOrderExecutor.Order memory order = _defaultOrder();
+        order.routerDataHash = keccak256(hex"01"); // Hash of 0x01
+        bytes memory sig = _signOrderMemory(order);
+
+        // Execute with matching routerData
+        executor.executeOrder(order, sig, hex"01");
+
+        // Nonce should have incremented (order executed)
+        assertEq(executor.nonces(user), 1, "Order should execute");
+    }
+
+    function test_SC_C01_DCA_bytes32Zero_succeedsIfMinOutMet() public {
+        // DCA orders ARE allowed to have routerDataHash = bytes32(0)
+        // Warp to a time where dcaInterval check passes (block.timestamp >= dcaInterval)
+        vm.warp(2 hours);
+
+        TeraSwapOrderExecutor.Order memory order = _defaultOrder();
+        order.orderType = TeraSwapOrderExecutor.OrderType.DCA;
+        order.routerDataHash = bytes32(0); // Allowed for DCA
+        order.dcaTotal = 4;
+        order.dcaInterval = 1 hours;
+        order.expiry = block.timestamp + EXPIRY_DELTA;
+        order.priceFeed = address(0); // No price check for DCA in this test
+
+        // Router output is > minAmountOut so it should succeed
+        router.setOutput(MIN_OUT + 100e18);
+
+        bytes memory sig = _signOrderMemory(order);
+        executor.executeOrder(order, sig, hex"01");
+
+        // Verify execution happened
+        bytes32 orderHash = _computeOrderHash(order);
+        assertEq(executor.dcaExecutions(orderHash), 1, "DCA should execute once");
+    }
+
+    function test_SC_C01_DCA_bytes32Zero_revertsIfMinOutNotMet() public {
+        // DCA with bytes32(0) but router returns less than minAmountOut
+        vm.warp(2 hours);
+
+        TeraSwapOrderExecutor.Order memory order = _defaultOrder();
+        order.orderType = TeraSwapOrderExecutor.OrderType.DCA;
+        order.routerDataHash = bytes32(0);
+        order.dcaTotal = 4;
+        order.dcaInterval = 1 hours;
+        order.expiry = block.timestamp + EXPIRY_DELTA;
+        order.priceFeed = address(0);
+
+        // Set router output to less than proportional minOut
+        // minOut per execution = (MIN_OUT * (AMOUNT_IN/4)) / AMOUNT_IN = MIN_OUT/4
+        // So output < MIN_OUT/4 should revert
+        router.setOutput(MIN_OUT / 4 - 1);
+
+        bytes memory sig = _signOrderMemory(order);
+
+        vm.expectRevert(TeraSwapOrderExecutor.InsufficientOutput.selector);
+        executor.executeOrder(order, sig, hex"01");
+    }
+
+    function test_SC_C01_DCA_recipientAlwaysOwner() public {
+        // Verify that DCA output always goes to order.owner, not an arbitrary address
+        vm.warp(2 hours);
+
+        TeraSwapOrderExecutor.Order memory order = _defaultOrder();
+        order.orderType = TeraSwapOrderExecutor.OrderType.DCA;
+        order.routerDataHash = bytes32(0);
+        order.dcaTotal = 2;
+        order.dcaInterval = 1 hours;
+        order.expiry = block.timestamp + EXPIRY_DELTA;
+        order.priceFeed = address(0);
+        router.setOutput(MIN_OUT + 100e18);
+
+        bytes memory sig = _signOrderMemory(order);
+
+        uint256 ownerBalBefore = tokenOut.balanceOf(user);
+        executor.executeOrder(order, sig, hex"01");
+        uint256 ownerBalAfter = tokenOut.balanceOf(user);
+
+        // Output MUST go to order.owner (user), not the executor or router
+        assertGt(ownerBalAfter - ownerBalBefore, 0, "Output must go to order.owner");
+        assertEq(tokenOut.balanceOf(address(executor)), 0, "Executor should hold no output");
     }
 }
