@@ -87,6 +87,8 @@ export interface PairResult {
   quotesCollected: number
   medianAmount: string
   outliers: OutlierInfo[]
+  iqrFiltered: number
+  iqrRange?: { q1: string; q3: string }
   skipped: boolean
   skipReason?: string
 }
@@ -149,6 +151,72 @@ export function computeDeviationPercent(sourceAmount: bigint, median: bigint): n
   return Number(deviationBps) / 100
 }
 
+// ── Constants ──────────────────────────────────────────
+
+export const MIN_ACTIVE_SOURCES = 5
+export const MIN_QUOTES_PER_PAIR = 3
+export const IQR_MULTIPLIER = 1.5
+
+// ── IQR outlier pre-filter ─────────────────────────────
+
+/**
+ * Compute Q1 (25th percentile) and Q3 (75th percentile) from sorted BigInt values.
+ * Uses linear interpolation between nearest ranks.
+ */
+function computeQuartiles(sorted: bigint[]): { q1: bigint; q3: bigint } {
+  const n = sorted.length
+  if (n < 4) {
+    // With fewer than 4 values, Q1=min, Q3=max (no filtering possible)
+    return { q1: sorted[0], q3: sorted[n - 1] }
+  }
+  // Q1 = value at 25th percentile index, Q3 = value at 75th percentile index
+  // Using floor index for simplicity (integer BigInt arithmetic)
+  const q1Idx = Math.floor((n - 1) * 0.25)
+  const q3Idx = Math.floor((n - 1) * 0.75)
+  return { q1: sorted[q1Idx], q3: sorted[q3Idx] }
+}
+
+/**
+ * IQR pre-filter: remove statistical outliers before median calculation.
+ * Outliers are values < Q1 - 1.5×IQR or > Q3 + 1.5×IQR.
+ *
+ * Returns the filtered values and the count of removed outliers.
+ * All arithmetic uses BigInt to avoid precision loss.
+ */
+export function iqrFilter(values: bigint[]): {
+  filtered: bigint[]
+  removed: number
+  q1: bigint
+  q3: bigint
+} {
+  if (values.length < 4) {
+    // IQR not meaningful with fewer than 4 data points
+    return { filtered: values, removed: 0, q1: 0n, q3: 0n }
+  }
+
+  const sorted = [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  const { q1, q3 } = computeQuartiles(sorted)
+  const iqr = q3 - q1
+
+  if (iqr === 0n) {
+    // All values in the middle 50% are identical — no filtering
+    return { filtered: values, removed: 0, q1, q3 }
+  }
+
+  // IQR bounds: use BigInt multiplication to avoid float (1.5 = 3/2)
+  const iqrScaled = iqr * 3n / 2n // 1.5 × IQR
+  const lowerBound = q1 - iqrScaled
+  const upperBound = q3 + iqrScaled
+
+  const filtered = values.filter(v => v >= lowerBound && v <= upperBound)
+  return {
+    filtered,
+    removed: values.length - filtered.length,
+    q1,
+    q3,
+  }
+}
+
 // ── Per-source deviation threshold ──────────────────────
 
 function getMaxDeviation(sourceId: string, pair: ReferencePair): number {
@@ -181,6 +249,7 @@ async function analyzePair(
     quotesCollected: 0,
     medianAmount: '0',
     outliers: [],
+    iqrFiltered: 0,
     skipped: false,
   }
 
@@ -205,24 +274,34 @@ async function analyzePair(
   const activeQuotes = metaResult.all.filter(q => activeSourceIds.has(q.source))
   result.quotesCollected = activeQuotes.length
 
-  if (activeQuotes.length < 3) {
+  if (activeQuotes.length < MIN_QUOTES_PER_PAIR) {
     result.skipped = true
-    result.skipReason = `Insufficient active quotes: ${activeQuotes.length} (need ≥3)`
+    result.skipReason = `Insufficient active quotes: ${activeQuotes.length} (need ≥${MIN_QUOTES_PER_PAIR})`
     return result
   }
 
-  // Compute median
+  // Compute median with IQR pre-filter
   const amounts = activeQuotes.map(q => {
     try { return BigInt(q.toAmount) } catch { return 0n }
   }).filter(a => a > 0n)
 
-  if (amounts.length < 3) {
+  if (amounts.length < MIN_QUOTES_PER_PAIR) {
     result.skipped = true
-    result.skipReason = `Insufficient valid amounts: ${amounts.length} (need ≥3)`
+    result.skipReason = `Insufficient valid amounts: ${amounts.length} (need ≥${MIN_QUOTES_PER_PAIR})`
     return result
   }
 
-  const median = computeMedian(amounts)
+  // [API-H-02] IQR outlier pre-filter: remove statistical outliers before median calc
+  // This prevents 1-2 extreme values from pulling the median toward an attacker's price
+  const { filtered: iqrCleanAmounts, removed: iqrRemoved, q1, q3 } = iqrFilter(amounts)
+  result.iqrFiltered = iqrRemoved
+  if (q1 > 0n || q3 > 0n) {
+    result.iqrRange = { q1: q1.toString(), q3: q3.toString() }
+  }
+
+  // Use IQR-filtered amounts for median if enough remain, else fall back to all
+  const medianAmounts = iqrCleanAmounts.length >= MIN_QUOTES_PER_PAIR ? iqrCleanAmounts : amounts
+  const median = computeMedian(medianAmounts)
   result.medianAmount = median.toString()
 
   if (median === 0n) {
@@ -270,21 +349,19 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
   const activeSources = allStatuses.filter(s => s.state === 'active')
   const activeSourceIds = new Set(activeSources.map(s => s.id))
 
-  // Trust model: quorum assumes majority of active sources are honest.
-  // With 3 sources, an attacker controlling 2 can invert the median and
-  // flag the honest source as an outlier. With 5+, needs to control 3.
-  // Minimum of 3 is acceptable for MVP (simultaneous compromise of 2
-  // independent aggregator APIs is high-difficulty). Revisit if source
-  // count drops below 5 sustained.
-  if (activeSources.length < 3) {
-    console.log(`[QUORUM] Skipped — only ${activeSources.length} active sources (need ≥3)`)
+  // [API-H-02] Trust model: quorum assumes majority of active sources are honest.
+  // With 5+ sources, an attacker needs to control 3 to invert the median.
+  // With 10-11 typically active, 5 is a safe floor. Below 5, quorum is
+  // unreliable and should be skipped.
+  if (activeSources.length < MIN_ACTIVE_SOURCES) {
+    console.log(`[QUORUM] Skipped — only ${activeSources.length} active sources (need ≥${MIN_ACTIVE_SOURCES})`)
     return {
       timestamp,
       pairs: [],
       outliers: [],
       correlatedOutlierCount: 0,
       skipped: true,
-      skipReason: `Insufficient active sources: ${activeSources.length} (need ≥3)`,
+      skipReason: `Insufficient active sources: ${activeSources.length} (need ≥${MIN_ACTIVE_SOURCES})`,
     }
   }
 

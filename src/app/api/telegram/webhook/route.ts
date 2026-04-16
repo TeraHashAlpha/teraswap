@@ -309,7 +309,8 @@ async function handleQuorum(): Promise<string> {
 
     if (!result.skipped) {
       for (const pair of result.pairs) {
-        const status = pair.skipped ? `\u26A0\uFE0F skipped (${pair.skipReason || '?'})` : `\u2705 ${pair.quotesCollected} quotes`
+        const iqrNote = pair.iqrFiltered && pair.iqrFiltered > 0 ? ` (${pair.iqrFiltered} IQR-filtered)` : ''
+        const status = pair.skipped ? `\u26A0\uFE0F skipped (${pair.skipReason || '?'})` : `\u2705 ${pair.quotesCollected} quotes${iqrNote}`
         lines.push(`<b>${escapeHtml(pair.label)}</b>: ${status}`)
         if (!pair.skipped && pair.outliers.length > 0) {
           for (const o of pair.outliers) {

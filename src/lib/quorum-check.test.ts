@@ -73,7 +73,9 @@ import {
   shouldRunQuorum,
   computeMedian,
   computeDeviationPercent,
+  iqrFilter,
   QUORUM_REFERENCE_PAIRS,
+  MIN_ACTIVE_SOURCES,
 } from './quorum-check'
 import { beginTick } from './source-state-machine'
 import { isP0Reason, P0_REASONS } from './p0-reasons'
@@ -230,17 +232,20 @@ describe('quorum-check', () => {
     })
   })
 
-  // ── Quorum with <3 active sources ─────────────────────
+  // ── Quorum with <5 active sources ─────────────────────
 
   describe('insufficient sources', () => {
-    it('skips quorum when <3 active sources', async () => {
+    it(`skips quorum when <${MIN_ACTIVE_SOURCES} active sources`, async () => {
       seedSource('1inch', 'active')
       seedSource('cowswap', 'active')
-      seedSource('velora', 'disabled')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'disabled')
 
       const result = await runQuorumCheck()
       expect(result.skipped).toBe(true)
-      expect(result.skipReason).toContain('Insufficient active sources: 2')
+      expect(result.skipReason).toContain('Insufficient active sources: 4')
+      expect(result.skipReason).toContain(`need ≥${MIN_ACTIVE_SOURCES}`)
       expect(result.pairs).toHaveLength(0)
     })
 
@@ -259,6 +264,7 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       mockFetchMetaQuote.mockResolvedValue(
         makeMetaQuoteResult([
@@ -266,6 +272,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '3005000000' },
           { source: 'velora', toAmount: '2995000000' },
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
         ]),
       )
 
@@ -284,6 +291,7 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       // First pair (WETH→USDC): velora deviates >5%
       mockFetchMetaQuote.mockResolvedValueOnce(
@@ -292,6 +300,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '3005000000' },
           { source: 'velora', toAmount: '3200000000' }, // ~6.6% above median
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
         ]),
       )
 
@@ -302,6 +311,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '9999000000' },
           { source: 'velora', toAmount: '9997000000' },
           { source: 'odos', toAmount: '9998500000' },
+          { source: 'kyberswap', toAmount: '9998000000' },
         ]),
       )
 
@@ -322,6 +332,7 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       // First pair (WETH→USDC): velora deviates >5%
       mockFetchMetaQuote.mockResolvedValueOnce(
@@ -330,6 +341,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '3005000000' },
           { source: 'velora', toAmount: '3200000000' },
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
         ]),
       )
 
@@ -340,6 +352,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '9999000000' },
           { source: 'velora', toAmount: '10300000000' },
           { source: 'odos', toAmount: '9998500000' },
+          { source: 'kyberswap', toAmount: '9998000000' },
         ]),
       )
 
@@ -357,12 +370,16 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'disabled')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
+      seedSource('sushiswap', 'active')
 
       mockFetchMetaQuote.mockResolvedValue(
         makeMetaQuoteResult([
           { source: '1inch', toAmount: '3000000000' },
           { source: 'cowswap', toAmount: '3005000000' },
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
+          { source: 'sushiswap', toAmount: '3003000000' },
         ]),
       )
 
@@ -456,6 +473,8 @@ describe('quorum-check', () => {
       seedSource('1inch', 'active')
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       mockFetchMetaQuote.mockRejectedValueOnce(new Error('Rate limited'))
 
@@ -464,6 +483,8 @@ describe('quorum-check', () => {
           { source: '1inch', toAmount: '9998000000' },
           { source: 'cowswap', toAmount: '9999000000' },
           { source: 'velora', toAmount: '9997000000' },
+          { source: 'odos', toAmount: '9998500000' },
+          { source: 'kyberswap', toAmount: '9998000000' },
         ]),
       )
 
@@ -483,6 +504,7 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       mockFetchMetaQuote.mockResolvedValueOnce(
         makeMetaQuoteResult([
@@ -490,6 +512,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '3210000000' }, // 7% above — within 8%
           { source: 'velora', toAmount: '3005000000' },
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
         ]),
       )
 
@@ -499,6 +522,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '9999000000' },
           { source: 'velora', toAmount: '9997000000' },
           { source: 'odos', toAmount: '9998500000' },
+          { source: 'kyberswap', toAmount: '9998000000' },
         ]),
       )
 
@@ -515,6 +539,7 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       mockFetchMetaQuote.mockResolvedValue(
         makeMetaQuoteResult([
@@ -522,6 +547,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '3005000000' },
           { source: 'velora', toAmount: '2995000000' },
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
         ]),
       )
 
@@ -593,6 +619,7 @@ describe('quorum-check', () => {
       seedSource('cowswap', 'active')
       seedSource('velora', 'active')
       seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
 
       // Only 1 source deviates (flagged, not correlated)
       mockFetchMetaQuote.mockResolvedValueOnce(
@@ -601,6 +628,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '3005000000' },
           { source: 'velora', toAmount: '3200000000' },
           { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
         ]),
       )
 
@@ -610,6 +638,7 @@ describe('quorum-check', () => {
           { source: 'cowswap', toAmount: '9999000000' },
           { source: 'velora', toAmount: '10300000000' },
           { source: 'odos', toAmount: '9998500000' },
+          { source: 'kyberswap', toAmount: '9998000000' },
         ]),
       )
 
@@ -624,6 +653,9 @@ describe('quorum-check', () => {
     it('does NOT write lastQuorumResult when check is skipped (insufficient sources)', async () => {
       seedSource('1inch', 'active')
       seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      // Only 4 active — below MIN_ACTIVE_SOURCES (5)
 
       const result = await runQuorumCheck()
       expect(result.skipped).toBe(true)
@@ -632,6 +664,94 @@ describe('quorum-check', () => {
         (args: unknown[]) => args[0] === 'teraswap:monitor:lastQuorumResult',
       )
       expect(lastQuorumCalls.length).toBe(0)
+    })
+  })
+
+  // ── IQR outlier pre-filter ─────────────────────────────
+
+  describe('iqrFilter', () => {
+    it('returns all values when no statistical outliers', () => {
+      const values = [100n, 102n, 98n, 101n, 99n]
+      const { filtered, removed } = iqrFilter(values)
+      expect(removed).toBe(0)
+      expect(filtered).toHaveLength(5)
+    })
+
+    it('removes extreme outlier from 5 values', () => {
+      // 4 values cluster around 100, one extreme at 200
+      const values = [100n, 101n, 99n, 102n, 200n]
+      const { filtered, removed, q1, q3 } = iqrFilter(values)
+      expect(removed).toBe(1)
+      expect(filtered).toHaveLength(4)
+      expect(filtered).not.toContain(200n)
+      expect(q1).toBeGreaterThan(0n)
+      expect(q3).toBeGreaterThan(0n)
+    })
+
+    it('removes low extreme outlier', () => {
+      const values = [100n, 101n, 99n, 102n, 10n]
+      const { filtered, removed } = iqrFilter(values)
+      expect(removed).toBe(1)
+      expect(filtered).not.toContain(10n)
+    })
+
+    it('does not filter with fewer than 4 values', () => {
+      const values = [100n, 200n, 300n]
+      const { filtered, removed } = iqrFilter(values)
+      expect(removed).toBe(0)
+      expect(filtered).toHaveLength(3)
+    })
+
+    it('handles all identical values (IQR = 0)', () => {
+      const values = [100n, 100n, 100n, 100n, 100n]
+      const { filtered, removed } = iqrFilter(values)
+      expect(removed).toBe(0)
+      expect(filtered).toHaveLength(5)
+    })
+
+    it('1 extreme in 5 realistic quote amounts → filtered, median unaffected', () => {
+      // 4 honest quotes ~3000 USDC, 1 manipulated at 4000
+      const honest = [3000000000n, 3005000000n, 2995000000n, 3002000000n]
+      const manipulated = 4000000000n
+      const all = [...honest, manipulated]
+
+      const { filtered, removed } = iqrFilter(all)
+      expect(removed).toBe(1)
+      expect(filtered).not.toContain(manipulated)
+
+      // Median of filtered should match median of honest quotes
+      const filteredMedian = computeMedian(filtered)
+      const honestMedian = computeMedian(honest)
+      expect(filteredMedian).toBe(honestMedian)
+    })
+  })
+
+  describe('IQR integration in runQuorumCheck', () => {
+    it('pair result includes iqrFiltered count', async () => {
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
+
+      mockFetchMetaQuote.mockResolvedValue(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3000000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '2995000000' },
+          { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
+        ]),
+      )
+
+      const result = await runQuorumCheck()
+      expect(result.skipped).toBe(false)
+      for (const pair of result.pairs) {
+        if (!pair.skipped) {
+          expect(pair.iqrFiltered).toBeDefined()
+          expect(typeof pair.iqrFiltered).toBe('number')
+        }
+      }
     })
   })
 
