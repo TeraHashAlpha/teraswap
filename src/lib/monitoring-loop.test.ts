@@ -126,6 +126,7 @@ import {
   forceActivate,
   getStatus,
 } from './source-state-machine'
+import { runHealthCheck } from './health-check'
 
 // ═══════════════════════════════════════════════════════════════
 
@@ -383,5 +384,98 @@ describe('[I-02] single alert path', () => {
     expect(recoveryCalls[0][1]).toBe('disabled')
     expect(recoveryCalls[0][2]).toBe('active')
     expect(recoveryCalls[0][3]).toContain('auto-recovery')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════
+// Cold-start warmup detection
+// ═══════════════════════════════════════════════════════════════
+
+describe('cold-start warmup detection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false)
+  })
+
+  it('flags warmup when last tick was >5 minutes ago', async () => {
+    // Last tick 10 minutes ago → cold start
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString()
+    kvStore.set('teraswap:monitor:lastTick', tenMinAgo)
+
+    const result = await runMonitoringTick()
+
+    expect(result.warmup).toBe(true)
+  })
+
+  it('does NOT flag warmup when last tick was 50s ago', async () => {
+    // Last tick 50 seconds ago → warm
+    const recent = new Date(Date.now() - 50_000).toISOString()
+    kvStore.set('teraswap:monitor:lastTick', recent)
+
+    const result = await runMonitoringTick()
+
+    expect(result.warmup).toBeUndefined()
+  })
+
+  it('flags warmup on first-ever tick (no lastTick in KV)', async () => {
+    // No lastTick key → first tick
+    const result = await runMonitoringTick()
+
+    expect(result.warmup).toBe(true)
+  })
+
+  it('warmup tick still records success/failure counts', async () => {
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString()
+    kvStore.set('teraswap:monitor:lastTick', tenMinAgo)
+
+    // Mock health check returns ok: true
+    const mockHC = vi.mocked(runHealthCheck)
+    mockHC.mockResolvedValue({ ok: true, latencyMs: 8000 })
+
+    const result = await runMonitoringTick()
+
+    expect(result.warmup).toBe(true)
+    expect(result.checksRun).toBe(1)
+    expect(result.failures).toBe(0)
+
+    // Verify the source status was updated (success counted) but latency NOT recorded
+    beginTick() // clear cache to read from KV
+    const status = await getStatus('1inch')
+    expect(status.successCount).toBeGreaterThanOrEqual(1)
+    // Latency history should be empty — warmup skipped recording
+    expect(status.latencyHistory).toEqual([])
+  })
+
+  it('warm tick records latency normally', async () => {
+    const recent = new Date(Date.now() - 50_000).toISOString()
+    kvStore.set('teraswap:monitor:lastTick', recent)
+
+    const mockHC = vi.mocked(runHealthCheck)
+    mockHC.mockResolvedValue({ ok: true, latencyMs: 200 })
+
+    const result = await runMonitoringTick()
+
+    expect(result.warmup).toBeUndefined()
+
+    beginTick()
+    const status = await getStatus('1inch')
+    expect(status.latencyHistory).toContain(200)
+  })
+
+  it('writes warmup flag to KV for heartbeat', async () => {
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString()
+    kvStore.set('teraswap:monitor:lastTick', tenMinAgo)
+
+    await runMonitoringTick()
+
+    // Pipeline.set should have been called with the warmup key
+    const warmupCalls = mockPipelineSet.mock.calls.filter(
+      (args) => args[0] === 'teraswap:monitor:lastTickWarmup',
+    )
+    expect(warmupCalls.length).toBe(1)
+    expect(warmupCalls[0][1]).toBe(true)
   })
 })

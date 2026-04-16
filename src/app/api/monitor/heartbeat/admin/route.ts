@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [lastTickIso, tickCount, lastQuorum] = await Promise.all([
+    const [lastTickIso, tickCount, lastQuorum, lastTickWarmup] = await Promise.all([
       kv.get<string>('teraswap:monitor:lastTick'),
       kv.get<number>('teraswap:monitor:tickCount'),
       kv.get<{
@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
         skipped: boolean
         skipReason?: string
       }>('teraswap:monitor:lastQuorumResult'),
+      kv.get<boolean>('teraswap:monitor:lastTickWarmup'),
     ])
 
     const statuses = await getAllStatuses()
@@ -85,6 +86,10 @@ export async function GET(req: NextRequest) {
 
     if (grace) {
       body.grace = true
+    }
+
+    if (lastTickWarmup) {
+      body.lastTickWarmup = true
     }
 
     return NextResponse.json(body, {

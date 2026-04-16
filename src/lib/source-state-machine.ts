@@ -264,14 +264,27 @@ export async function getAllStatuses(): Promise<SourceStatus[]> {
   }
 }
 
-export async function recordHealthCheck(sourceId: string, result: HealthCheckResult): Promise<void> {
+export interface RecordHealthCheckOptions {
+  /** When true, latency is not recorded (cold-start warmup tick). */
+  skipLatency?: boolean
+}
+
+export async function recordHealthCheck(
+  sourceId: string,
+  result: HealthCheckResult,
+  options?: RecordHealthCheckOptions,
+): Promise<void> {
   const s = await loadFromKV(sourceId)
   const t = getThresholds(sourceId)
   s.lastCheckAt = Date.now()
 
-  s.latencyHistory.push(result.latencyMs)
-  if (s.latencyHistory.length > MAX_LATENCY_HISTORY) {
-    s.latencyHistory = s.latencyHistory.slice(-MAX_LATENCY_HISTORY)
+  // [WARMUP] Skip latency recording on cold-start ticks — inflated measurements
+  // would push p95 above threshold and cause false degradation alerts.
+  if (!options?.skipLatency) {
+    s.latencyHistory.push(result.latencyMs)
+    if (s.latencyHistory.length > MAX_LATENCY_HISTORY) {
+      s.latencyHistory = s.latencyHistory.slice(-MAX_LATENCY_HISTORY)
+    }
   }
 
   if (result.ok) {

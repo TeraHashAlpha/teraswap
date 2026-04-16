@@ -39,15 +39,37 @@ import {
 
 const HEARTBEAT_KEY = 'teraswap:monitor:lastTick'
 const TICK_COUNT_KEY = 'teraswap:monitor:tickCount'
+const WARMUP_KEY = 'teraswap:monitor:lastTickWarmup'
 
-async function writeHeartbeat(): Promise<void> {
+/** Gap between ticks that indicates a cold start (Vercel Hobby sleep). */
+const WARMUP_GAP_MS = 5 * 60 * 1000 // 5 minutes
+
+async function writeHeartbeat(warmup: boolean): Promise<void> {
   try {
     const pipeline = kv.pipeline()
     pipeline.set(HEARTBEAT_KEY, new Date().toISOString(), { ex: 3600 }) // 1h TTL
     pipeline.incr(TICK_COUNT_KEY)
+    pipeline.set(WARMUP_KEY, warmup, { ex: 3600 })
     await pipeline.exec()
   } catch (err) {
     console.warn('[MONITOR] Heartbeat write failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Detect cold-start warmup: if the gap since last tick exceeds WARMUP_GAP_MS,
+ * the function likely started from a cold state (Vercel Hobby sleep) and
+ * all latency measurements in this tick are inflated.
+ */
+async function detectWarmup(): Promise<boolean> {
+  try {
+    const lastTickIso = await kv.get<string>(HEARTBEAT_KEY)
+    if (!lastTickIso) return true // first tick ever → treat as warmup
+    const gap = Date.now() - new Date(lastTickIso).getTime()
+    return gap > WARMUP_GAP_MS
+  } catch (err) {
+    console.warn('[MONITOR] Warmup detection KV read failed, assuming warm:', err instanceof Error ? err.message : err)
+    return false // fail-open: assume warm to avoid silently discarding data
   }
 }
 
@@ -62,6 +84,8 @@ export interface MonitoringTickResult {
   statuses: Awaited<ReturnType<typeof getAllStatuses>>
   /** Present only on quorum ticks (every 5th tick). */
   quorum?: QuorumCheckResult
+  /** True when tick was flagged as cold-start warmup (latency discarded). */
+  warmup?: boolean
 }
 
 /**
@@ -72,6 +96,12 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   // Invalidate per-tick cache (fresh reads from KV)
   beginTick()
 
+  // ── Warmup detection (gap-based) ──────────────────────
+  const warmup = await detectWarmup()
+  if (warmup) {
+    console.log(`[TICK] Cold start detected — latency measurements discarded`)
+  }
+
   const transitions: string[] = []
   const allBefore = await getAllStatuses()
   const originalStates = new Map(allBefore.map(s => [s.id, s.state]))
@@ -79,10 +109,11 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   let failures = 0
 
   // ── H1: Health checks ─────────────────────────────────
+  // Warmup ticks still run checks (availability matters) but skip latency recording
   await Promise.allSettled(
     MONITORED_ENDPOINTS.map(async (ep) => {
       const result = await runHealthCheck(ep)
-      await recordHealthCheck(ep.id, result)
+      await recordHealthCheck(ep.id, result, { skipLatency: warmup })
       if (!result.ok) failures++
     })
   )
@@ -141,7 +172,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   const recovered = await checkAutoRecovery()
 
   // Write heartbeat to KV (dead-man's-switch)
-  await writeHeartbeat()
+  await writeHeartbeat(warmup)
 
   return {
     timestamp: new Date().toISOString(),
@@ -151,5 +182,6 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     recovered,
     statuses: allAfter,
     ...(quorumResult ? { quorum: quorumResult } : {}),
+    ...(warmup ? { warmup: true } : {}),
   }
 }
