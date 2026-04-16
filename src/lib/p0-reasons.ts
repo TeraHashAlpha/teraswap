@@ -16,6 +16,7 @@ export const P0_REASONS = [
   'dns-record-change',
   'kv-store-failure',
   'quorum-correlated-anomaly',
+  'operator-lock',
 ] as const
 
 export type P0Reason = (typeof P0_REASONS)[number]

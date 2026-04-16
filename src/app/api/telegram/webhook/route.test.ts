@@ -445,6 +445,137 @@ describe('Telegram webhook', () => {
     })
   })
 
+  // ── /lock command ────────────────────────────────────
+
+  describe('/lock', () => {
+    it('disables source with operator-lock: P0 reason', async () => {
+      seedSource('cowswap')
+
+      const req = makeRequest(makeUpdate('/lock cowswap dns compromise'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      beginTick()
+      const { getStatus } = await import('@/lib/source-state-machine')
+      const s = await getStatus('cowswap')
+      expect(s.state).toBe('disabled')
+      expect(s.disabledReason).toBe('operator-lock: dns compromise')
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('LOCKED')
+      expect(body.text).toContain('operator-lock')
+      expect(body.text).toContain('auto-recovery blocked')
+      expect(body.text).toContain('/activate')
+      expect(body.text).toContain('confirm')
+    })
+
+    it('operator-lock IS a P0 reason (blocks auto-recovery)', async () => {
+      const { isP0Reason } = await import('@/lib/p0-reasons')
+      expect(isP0Reason('operator-lock: dns compromise')).toBe(true)
+    })
+
+    it('requires reason (rejects without one)', async () => {
+      seedSource('cowswap')
+
+      const req = makeRequest(makeUpdate('/lock cowswap'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('Usage')
+      expect(body.text).toContain('Reason is required')
+    })
+
+    it('returns usage when no sourceId provided', async () => {
+      const req = makeRequest(makeUpdate('/lock'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('Usage')
+    })
+
+    it('rejects non-admin user', async () => {
+      seedSource('cowswap')
+
+      const req = makeRequest(makeUpdate('/lock cowswap reason', NON_ADMIN_ID), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('Admin-only command')
+    })
+
+    it('after /lock, /activate without confirm warns about P0', async () => {
+      seedSource('cowswap')
+
+      // Lock the source
+      const lockReq = makeRequest(makeUpdate('/lock cowswap dns issue'), WEBHOOK_SECRET)
+      await POST(lockReq)
+      await flushPromises()
+      mockFetch.mockClear()
+      beginTick()
+
+      // Try to activate without confirm
+      const activateReq = makeRequest(makeUpdate('/activate cowswap'), WEBHOOK_SECRET)
+      await POST(activateReq)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('P0 reason')
+      expect(body.text).toContain('confirm')
+      expect(body.text).toContain('operator-lock')
+    })
+
+    it('after /lock, /activate with confirm re-enables source', async () => {
+      seedSource('cowswap')
+
+      // Lock
+      const lockReq = makeRequest(makeUpdate('/lock cowswap dns issue'), WEBHOOK_SECRET)
+      await POST(lockReq)
+      await flushPromises()
+      mockFetch.mockClear()
+      beginTick()
+
+      // Activate with confirm
+      const activateReq = makeRequest(makeUpdate('/activate cowswap confirm'), WEBHOOK_SECRET)
+      await POST(activateReq)
+      await flushPromises()
+
+      beginTick()
+      const { getStatus } = await import('@/lib/source-state-machine')
+      const s = await getStatus('cowswap')
+      expect(s.state).toBe('active')
+    })
+
+    it('returns not found for unknown source', async () => {
+      const req = makeRequest(makeUpdate('/lock nonexistent dns issue'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      const sendCalls = mockFetch.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('sendMessage'),
+      )
+      const body = JSON.parse(sendCalls[0][1].body)
+      expect(body.text).toContain('not found')
+    })
+  })
+
   // ── /activate command ────────────────────────────────
 
   describe('/activate', () => {
@@ -744,10 +875,14 @@ describe('Telegram webhook', () => {
       expect(body.text).toContain('TeraSwap Monitor Commands')
       expect(body.text).toContain('/status')
       expect(body.text).toContain('/disable')
+      expect(body.text).toContain('/lock')
       expect(body.text).toContain('/activate')
       expect(body.text).toContain('/grace')
       expect(body.text).toContain('/quorum')
       expect(body.text).toContain('/heartbeat')
+      // Verify distinction between /disable and /lock
+      expect(body.text).toContain('Temporarily disable')
+      expect(body.text).toContain('Permanently disable')
     })
 
     it('/start also returns help (Telegram convention)', async () => {

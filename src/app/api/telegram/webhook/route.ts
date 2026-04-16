@@ -427,6 +427,33 @@ async function handleActivate(args: string, userId: number): Promise<string> {
   return `\u{1F7E2} <b>${escapeHtml(sourceId)}</b> activated.\nCounters reset. Source is now active.`
 }
 
+async function handleLock(args: string, userId: number): Promise<string> {
+  if (!isAdmin(userId)) {
+    return `\u26D4 Admin-only command. Your ID: ${userId}`
+  }
+
+  const parts = args.split(/\s+/)
+  const sourceId = parts[0]
+  const reason = parts.slice(1).join(' ')
+
+  if (!sourceId || !reason) {
+    return 'Usage: /lock {sourceId} {reason}\nReason is required \u2014 document why this source is being locked.\nExample: /lock cowswap dns registrar compromise confirmed'
+  }
+
+  // Verify source exists
+  beginTick()
+  const allStatuses = await getAllStatuses()
+  const exists = allStatuses.some(s => s.id === sourceId.toLowerCase())
+  if (!exists) {
+    return `Source <b>${escapeHtml(sourceId)}</b> not found.`
+  }
+
+  const fullReason = `operator-lock: ${reason}`
+  await forceDisable(sourceId.toLowerCase(), fullReason)
+
+  return `\u{1F512} <b>${escapeHtml(sourceId)}</b> LOCKED.\nReason: ${escapeHtml(fullReason)}\n\n<i>P0 \u2014 auto-recovery blocked. Use <code>/activate ${escapeHtml(sourceId)} confirm</code> to unlock.</i>`
+}
+
 async function handleGrace(args: string, userId: number): Promise<string> {
   if (!isAdmin(userId)) {
     return `\u26D4 Admin-only command. Your ID: ${userId}`
@@ -460,7 +487,8 @@ function handleHelp(): string {
     '/help \u2014 This message',
     '',
     '<b>Admin only:</b>',
-    '/disable {id} {reason} \u2014 Force-disable source',
+    '/disable {id} {reason} \u2014 Temporarily disable source (auto-recovery allowed)',
+    '/lock {id} {reason} \u2014 Permanently disable source (P0, no auto-recovery)',
     '/activate {id} \u2014 Re-activate source',
     '/grace {minutes} \u2014 Set maintenance grace period',
   ].join('\n')
@@ -501,6 +529,8 @@ async function routeCommand(
       return handleHeartbeat()
     case 'disable':
       return handleDisable(args, userId)
+    case 'lock':
+      return handleLock(args, userId)
     case 'activate':
       return handleActivate(args, userId)
     case 'grace':
