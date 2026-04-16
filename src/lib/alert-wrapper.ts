@@ -34,33 +34,91 @@ export interface AlertPayload {
 
 // ── Constants ────────────────────────────────────────────
 
-const DEDUP_TTL_SECONDS = 3600     // 1 hour — standard alerts
+const DEDUP_TTL_SECONDS = 900      // 15 minutes — counter-based window
 const DEDUP_TTL_P0_SECONDS = 300   // 5 minutes — P0/critical alerts
+const MAX_ALERTS_PER_WINDOW = 3    // max alerts before suppression within window
 const DEDUP_KEY_PREFIX = 'teraswap:alert:dedup:'
 
-// ── Dedup helpers ────────────────────────────────────────
+// ── Counter-based dedup ─────────────────────────────────
+
+interface DedupCounter {
+  count: number
+  firstAt: string
+  lastAt: string
+}
 
 function dedupKey(sourceId: string, from: SourceState, to: SourceState): string {
   return `${DEDUP_KEY_PREFIX}${sourceId}:${from}:${to}`
 }
 
-async function isDuplicate(sourceId: string, from: SourceState, to: SourceState): Promise<boolean> {
+/**
+ * Read the dedup counter. Returns null if no counter exists or KV fails (fail-open).
+ */
+async function getCounter(sourceId: string, from: SourceState, to: SourceState): Promise<DedupCounter | null> {
   try {
-    const existing = await kv.get(dedupKey(sourceId, from, to))
-    return existing !== null
+    return await kv.get<DedupCounter>(dedupKey(sourceId, from, to))
   } catch (err) {
-    // KV unavailable → fail open (allow alert through to avoid silent failures)
     console.warn('[ALERT] KV dedup check failed, allowing alert:', err instanceof Error ? err.message : err)
-    return false
+    return null
   }
 }
 
-async function markSent(sourceId: string, from: SourceState, to: SourceState, ttl: number = DEDUP_TTL_SECONDS): Promise<void> {
+/**
+ * Check if alert should be suppressed based on counter.
+ * Returns true only when count >= MAX_ALERTS_PER_WINDOW.
+ */
+async function shouldSuppress(sourceId: string, from: SourceState, to: SourceState): Promise<boolean> {
+  const counter = await getCounter(sourceId, from, to)
+  if (!counter) return false
+  return counter.count >= MAX_ALERTS_PER_WINDOW
+}
+
+/**
+ * Increment the dedup counter (or create if new). Returns the updated counter.
+ */
+async function incrementCounter(
+  sourceId: string,
+  from: SourceState,
+  to: SourceState,
+  ttl: number = DEDUP_TTL_SECONDS,
+): Promise<DedupCounter> {
+  const key = dedupKey(sourceId, from, to)
+  const now = new Date().toISOString()
+
   try {
-    await kv.set(dedupKey(sourceId, from, to), Date.now(), { ex: ttl })
+    const existing = await kv.get<DedupCounter>(key)
+    const updated: DedupCounter = existing
+      ? { count: existing.count + 1, firstAt: existing.firstAt, lastAt: now }
+      : { count: 1, firstAt: now, lastAt: now }
+
+    await kv.set(key, updated, { ex: ttl })
+    return updated
   } catch (err) {
-    console.warn('[ALERT] KV dedup mark failed:', err instanceof Error ? err.message : err)
+    console.warn('[ALERT] KV dedup increment failed:', err instanceof Error ? err.message : err)
+    return { count: 1, firstAt: now, lastAt: now }
   }
+}
+
+/**
+ * Build an occurrence note based on the counter state.
+ */
+function buildOccurrenceNote(counter: DedupCounter, sourceId: string): string | undefined {
+  if (counter.count <= 1) return undefined
+
+  const elapsedMs = new Date(counter.lastAt).getTime() - new Date(counter.firstAt).getTime()
+  const elapsedMin = Math.max(1, Math.round(elapsedMs / 60_000))
+
+  if (counter.count === MAX_ALERTS_PER_WINDOW) {
+    return `⚠️ Source ${sourceId} is oscillating — ${counter.count} transitions in ${elapsedMin}min. Consider maintenance grace (/grace ${elapsedMin}).`
+  }
+
+  return `(${ordinal(counter.count)} occurrence in ${elapsedMin}min)`
+}
+
+function ordinal(n: number): string {
+  if (n === 2) return '2nd'
+  if (n === 3) return '3rd'
+  return `${n}th`
 }
 
 // ── Fan-out ──────────────────────────────────────────────
@@ -103,24 +161,29 @@ export async function emitTransitionAlert(
     return
   }
 
-  // ② Dedup — same transition within window is skipped (P0 bypasses dedup)
-  if (!critical && await isDuplicate(sourceId, from, to)) {
-    console.log(`[ALERT] dedup hit, skipping ${sourceId}: ${from} → ${to}`)
+  // ② Counter-based dedup — suppress after MAX_ALERTS_PER_WINDOW (P0 bypasses)
+  const ttl = critical ? DEDUP_TTL_P0_SECONDS : DEDUP_TTL_SECONDS
+  if (!critical && await shouldSuppress(sourceId, from, to)) {
+    console.log(`[ALERT] dedup suppressed (≥${MAX_ALERTS_PER_WINDOW} in window), skipping ${sourceId}: ${from} → ${to}`)
     return
   }
 
-  // ③ Build payload
+  // ③ Increment counter BEFORE dispatching (at-most-once semantics)
+  const counter = await incrementCounter(sourceId, from, to, ttl)
+  const occurrenceNote = buildOccurrenceNote(counter, sourceId)
+
+  // ④ Build payload — append occurrence note to reason if present
+  const enrichedReason = occurrenceNote
+    ? reason ? `${reason} ${occurrenceNote}` : occurrenceNote
+    : reason
+
   const payload: AlertPayload = {
     sourceId,
     from,
     to,
-    reason,
+    reason: enrichedReason,
     timestamp: new Date().toISOString(),
   }
-
-  // ④ Mark sent BEFORE dispatching (at-most-once semantics for dedup)
-  //    P0 gets shorter TTL (5min) so repeated critical events aren't silenced long
-  await markSent(sourceId, from, to, critical ? DEDUP_TTL_P0_SECONDS : DEDUP_TTL_SECONDS)
 
   // ⑤ Fan out to all channels in parallel — never throw
   const results = await Promise.allSettled(
@@ -143,9 +206,12 @@ export async function emitTransitionAlert(
 export const _internal = {
   isInGracePeriodAsync,
   isP0Reason,
-  isDuplicate,
-  markSent,
+  shouldSuppress,
+  incrementCounter,
+  getCounter,
+  buildOccurrenceNote,
   dedupKey,
   DEDUP_TTL_SECONDS,
   DEDUP_TTL_P0_SECONDS,
+  MAX_ALERTS_PER_WINDOW,
 } as const

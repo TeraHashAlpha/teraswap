@@ -82,11 +82,11 @@ describe('alert-wrapper', () => {
     process.env = { ...originalEnv }
   })
 
-  // ── Dedup window ─────────────────────────────────────────
+  // ── Counter-based dedup ──────────────────────────────────
 
-  describe('dedup window', () => {
-    it('sends alert on first call (no dedup key in KV)', async () => {
-      mockKvGet.mockResolvedValue(null) // no existing dedup
+  describe('counter-based dedup', () => {
+    it('sends alert on first call (no counter in KV)', async () => {
+      mockKvGet.mockResolvedValue(null) // no existing counter
 
       await emitTransitionAlert('1inch', 'active', 'degraded', '3 consecutive failures')
 
@@ -95,8 +95,34 @@ describe('alert-wrapper', () => {
       expect(mockDiscord).toHaveBeenCalledTimes(1)
     })
 
-    it('skips alert on second call within 1h (dedup key exists)', async () => {
-      mockKvGet.mockResolvedValue(Date.now()) // dedup hit
+    it('sends alert on 2nd call with occurrence note (count < MAX)', async () => {
+      const now = new Date().toISOString()
+      // Simulate counter at 1 (first alert already sent)
+      mockKvGet.mockResolvedValue({ count: 1, firstAt: now, lastAt: now })
+
+      await emitTransitionAlert('1inch', 'active', 'degraded', '3 consecutive failures')
+
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      // Reason should include occurrence note
+      const payload = mockTelegram.mock.calls[0][0]
+      expect(payload.reason).toContain('2nd occurrence')
+    })
+
+    it('sends alert on 3rd call with oscillation warning (count = MAX)', async () => {
+      const firstAt = new Date(Date.now() - 300_000).toISOString() // 5 min ago
+      const lastAt = new Date().toISOString()
+      mockKvGet.mockResolvedValue({ count: 2, firstAt, lastAt })
+
+      await emitTransitionAlert('1inch', 'active', 'degraded', 'failures')
+
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      const payload = mockTelegram.mock.calls[0][0]
+      expect(payload.reason).toContain('oscillating')
+    })
+
+    it('suppresses alert when counter >= MAX_ALERTS_PER_WINDOW', async () => {
+      const now = new Date().toISOString()
+      mockKvGet.mockResolvedValue({ count: 3, firstAt: now, lastAt: now })
 
       await emitTransitionAlert('1inch', 'active', 'degraded', '3 consecutive failures')
 
@@ -105,15 +131,15 @@ describe('alert-wrapper', () => {
       expect(mockDiscord).not.toHaveBeenCalled()
     })
 
-    it('writes dedup key with correct TTL after sending', async () => {
+    it('writes counter with correct TTL after sending', async () => {
       mockKvGet.mockResolvedValue(null)
 
       await emitTransitionAlert('odos', 'degraded', 'disabled', '5 failures')
 
       expect(mockKvSet).toHaveBeenCalledWith(
         'teraswap:alert:dedup:odos:degraded:disabled',
-        expect.any(Number),
-        { ex: 3600 },
+        expect.objectContaining({ count: 1 }),
+        { ex: 900 },
       )
     })
 
@@ -272,15 +298,15 @@ describe('alert-wrapper', () => {
       })
     })
 
-    it('does not fire alerts when state does not change (dedup on second call)', async () => {
-      // First call: no dedup
+    it('suppresses after MAX alerts within window', async () => {
+      // First call: no counter
       mockKvGet.mockResolvedValue(null)
       await emitTransitionAlert('1inch', 'active', 'degraded', 'first')
-
       expect(mockTelegram).toHaveBeenCalledTimes(1)
 
-      // Second call: dedup hit
-      mockKvGet.mockResolvedValue(Date.now())
+      // Subsequent call: counter at MAX → suppressed
+      const now = new Date().toISOString()
+      mockKvGet.mockResolvedValue({ count: 3, firstAt: now, lastAt: now })
       await emitTransitionAlert('1inch', 'active', 'degraded', 'second')
 
       // Still only 1 call total
@@ -288,7 +314,7 @@ describe('alert-wrapper', () => {
     })
 
     it('sends separate alerts for different transitions on same source', async () => {
-      mockKvGet.mockResolvedValue(null) // no dedup for either
+      mockKvGet.mockResolvedValue(null) // no counter for either
 
       await emitTransitionAlert('odos', 'active', 'degraded', 'failure')
       await emitTransitionAlert('odos', 'degraded', 'disabled', 'more failures')
@@ -296,13 +322,13 @@ describe('alert-wrapper', () => {
       expect(mockTelegram).toHaveBeenCalledTimes(2)
       expect(mockKvSet).toHaveBeenCalledWith(
         'teraswap:alert:dedup:odos:active:degraded',
-        expect.any(Number),
-        { ex: 3600 },
+        expect.objectContaining({ count: 1 }),
+        { ex: 900 },
       )
       expect(mockKvSet).toHaveBeenCalledWith(
         'teraswap:alert:dedup:odos:degraded:disabled',
-        expect.any(Number),
-        { ex: 3600 },
+        expect.objectContaining({ count: 1 }),
+        { ex: 900 },
       )
     })
   })
@@ -324,6 +350,41 @@ describe('alert-wrapper', () => {
       expect(_internal.isP0Reason('kv-store-failure: write — Connection refused')).toBe(true)
       expect(_internal.isP0Reason('health-check-failures')).toBe(false)
       expect(_internal.isP0Reason(undefined)).toBe(false)
+    })
+
+    it('MAX_ALERTS_PER_WINDOW is 3', () => {
+      expect(_internal.MAX_ALERTS_PER_WINDOW).toBe(3)
+    })
+
+    it('DEDUP_TTL_SECONDS is 900 (15min)', () => {
+      expect(_internal.DEDUP_TTL_SECONDS).toBe(900)
+    })
+
+    it('buildOccurrenceNote returns undefined for count=1', () => {
+      const note = _internal.buildOccurrenceNote(
+        { count: 1, firstAt: new Date().toISOString(), lastAt: new Date().toISOString() },
+        'test',
+      )
+      expect(note).toBeUndefined()
+    })
+
+    it('buildOccurrenceNote returns ordinal note for count=2', () => {
+      const firstAt = new Date(Date.now() - 120_000).toISOString() // 2 min ago
+      const note = _internal.buildOccurrenceNote(
+        { count: 2, firstAt, lastAt: new Date().toISOString() },
+        'test',
+      )
+      expect(note).toContain('2nd occurrence')
+    })
+
+    it('buildOccurrenceNote returns oscillation warning at MAX', () => {
+      const firstAt = new Date(Date.now() - 300_000).toISOString() // 5 min ago
+      const note = _internal.buildOccurrenceNote(
+        { count: 3, firstAt, lastAt: new Date().toISOString() },
+        'test-src',
+      )
+      expect(note).toContain('oscillating')
+      expect(note).toContain('test-src')
     })
   })
 
@@ -428,8 +489,9 @@ describe('alert-wrapper', () => {
   // ── [M-04] P0 transitions bypass dedup ─────────────────
 
   describe('[M-04] P0 transitions bypass dedup', () => {
-    it('tls-fingerprint-change sends even when dedup key exists', async () => {
-      mockKvGet.mockResolvedValue(Date.now()) // dedup hit
+    it('tls-fingerprint-change sends even when counter >= MAX', async () => {
+      const now = new Date().toISOString()
+      mockKvGet.mockResolvedValue({ count: 5, firstAt: now, lastAt: now }) // well above MAX
 
       await emitTransitionAlert('kyberswap', 'active', 'disabled', 'tls-fingerprint-change')
 
@@ -439,16 +501,18 @@ describe('alert-wrapper', () => {
       expect(mockDiscord).toHaveBeenCalledTimes(1)
     })
 
-    it('kill-switch-triggered sends even when dedup key exists', async () => {
-      mockKvGet.mockResolvedValue(Date.now()) // dedup hit
+    it('kill-switch-triggered sends even when counter >= MAX', async () => {
+      const now = new Date().toISOString()
+      mockKvGet.mockResolvedValue({ count: 10, firstAt: now, lastAt: now })
 
       await emitTransitionAlert('cow', 'active', 'disabled', 'kill-switch-triggered')
 
       expect(mockTelegram).toHaveBeenCalledTimes(1)
     })
 
-    it('non-P0 reason is still deduped', async () => {
-      mockKvGet.mockResolvedValue(Date.now()) // dedup hit
+    it('non-P0 reason is suppressed when counter >= MAX', async () => {
+      const now = new Date().toISOString()
+      mockKvGet.mockResolvedValue({ count: 3, firstAt: now, lastAt: now })
 
       await emitTransitionAlert('1inch', 'active', 'degraded', 'health-check-failures')
 
@@ -459,23 +523,23 @@ describe('alert-wrapper', () => {
   // ── [M-05] P0 dedup TTL is 5 minutes ──────────────────
 
   describe('[M-05] P0 dedup TTL', () => {
-    it('P0 alert writes dedup key with 300s TTL', async () => {
+    it('P0 alert writes counter with 300s TTL', async () => {
       await emitTransitionAlert('zerox', 'active', 'disabled', 'tls-fingerprint-change')
 
       expect(mockKvSet).toHaveBeenCalledWith(
         'teraswap:alert:dedup:zerox:active:disabled',
-        expect.any(Number),
+        expect.objectContaining({ count: 1 }),
         { ex: 300 },
       )
     })
 
-    it('standard alert writes dedup key with 3600s TTL', async () => {
+    it('standard alert writes counter with 900s TTL', async () => {
       await emitTransitionAlert('1inch', 'active', 'degraded', 'high-latency')
 
       expect(mockKvSet).toHaveBeenCalledWith(
         'teraswap:alert:dedup:1inch:active:degraded',
-        expect.any(Number),
-        { ex: 3600 },
+        expect.objectContaining({ count: 1 }),
+        { ex: 900 },
       )
     })
   })
