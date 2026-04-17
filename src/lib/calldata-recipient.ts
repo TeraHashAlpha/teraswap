@@ -6,8 +6,10 @@
  * against compromised aggregator APIs that might try to redirect swap
  * output to an attacker-controlled address.
  *
- * Fail-open design: if we cannot parse the calldata, we allow the swap
- * through (with a warning) rather than blocking legitimate transactions.
+ * [API-M-02] Fail-closed design: unknown selectors are blocked by default.
+ * Only selectors in the VALIDATED_SELECTORS allowlist are permitted.
+ * Trusted router selectors (proprietary formats where the router sends to
+ * msg.sender by design) are allowed with implicitRecipient: true.
  */
 
 import { decodeAbiParameters, type Hex } from 'viem'
@@ -36,10 +38,64 @@ const MSG_SENDER_SELECTORS = new Set([
   '0x415565b0', // 0x transformERC20
 ])
 
-/** Group F: complex/proprietary selectors we cannot decode yet */
-const UNSUPPORTED_SELECTORS = new Set([
-  '0x83800a8e', // Odos
-  '0xe21fd0e9', // KyberSwap
+/**
+ * Group F: trusted router selectors — proprietary calldata formats where the
+ * router contract sends output to msg.sender by design. We cannot decode the
+ * recipient from calldata, but trust the router's behavior.
+ *
+ * Trusted-by-design (msg.sender delivery, not extractable from calldata):
+ *   - Odos, KyberSwap, ParaSwap
+ *
+ * If a source is added here, document why its router is trusted.
+ */
+const TRUSTED_ROUTER_SELECTORS = new Set([
+  '0x83800a8e', // Odos — swap(): proprietary encoding, router sends to msg.sender
+  '0xe21fd0e9', // KyberSwap — swap(): proprietary encoding, router sends to msg.sender
+  '0x3598d8ab', // ParaSwap megaSwap: proprietary encoding, router sends to msg.sender
+  '0xa94e78ef', // ParaSwap multiSwap: proprietary encoding, router sends to msg.sender
+  '0x46c67b6d', // ParaSwap simpleSwap: proprietary encoding, router sends to msg.sender
+])
+
+/**
+ * [API-M-02] Complete allowlist of validated selectors — union of all groups.
+ * Any selector NOT in this set is blocked (fail-closed). This list can be
+ * audited to understand exactly which calldata patterns are permitted.
+ *
+ * Validated-by-extraction (recipient decoded and checked):
+ *   Group B: Uniswap V2 / Sushi routers
+ *   Group C: Uniswap V3 routers
+ *   Group D: 1inch (swap, unoswapTo)
+ *
+ * Validated-by-design (msg.sender implicit):
+ *   Group A: 1inch uniswapV3Swap/unoswap, 0x sellToUniswap/transformERC20
+ *   Group F: Odos, KyberSwap, ParaSwap (trusted router selectors)
+ *
+ * Validated-by-recursion:
+ *   Group E: Uniswap multicall wrappers
+ */
+export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
+  // Group A — msg.sender implicit
+  '0xe449022e', // 1inch uniswapV3Swap
+  '0x0502b1c5', // 1inch unoswap
+  '0xd9627aa4', // 0x sellToUniswap
+  '0x415565b0', // 0x transformERC20
+  // Group B — V2 router (recipient extracted)
+  '0x472b43f3', // swapExactTokensForTokens (4 args)
+  '0x38ed1739', // swapExactTokensForTokens (5 args, with deadline)
+  '0x7ff36ab5', // swapExactETHForTokens
+  '0x18cbafe5', // swapExactTokensForETH
+  // Group C — V3 router (recipient extracted)
+  '0x04e45aaf', // exactInputSingle
+  '0xb858183f', // exactInput
+  // Group D — 1inch (recipient extracted)
+  '0x12aa3caf', // 1inch swap
+  '0x2e95b6c8', // 1inch unoswapTo
+  // Group E — Multicall wrappers (recursive validation)
+  '0xac9650d8', // multicall(bytes[])
+  '0x5ae401dc', // multicall(uint256,bytes[])
+  // Group F — Trusted router selectors (implicit msg.sender)
+  '0x83800a8e', // Odos swap
+  '0xe21fd0e9', // KyberSwap swap
   '0x3598d8ab', // ParaSwap megaSwap
   '0xa94e78ef', // ParaSwap multiSwap
   '0x46c67b6d', // ParaSwap simpleSwap
@@ -340,10 +396,10 @@ function validateCallDataRecipientInner(
   try {
     if (!calldata || calldata.length < 10) {
       return {
-        valid: true,
+        valid: false,
         extracted: null,
         implicitRecipient: false,
-        reason: 'Calldata too short to decode',
+        reason: 'Calldata too short to contain a valid selector',
       }
     }
 
@@ -355,15 +411,9 @@ function validateCallDataRecipientInner(
       return { valid: true, extracted: null, implicitRecipient: true }
     }
 
-    // Group F — unsupported proprietary formats
-    if (UNSUPPORTED_SELECTORS.has(selector)) {
-      return {
-        valid: true,
-        extracted: null,
-        implicitRecipient: false,
-        reason:
-          'Recipient extraction not yet supported for this selector',
-      }
+    // Group F — trusted router selectors (proprietary, msg.sender by design)
+    if (TRUSTED_ROUTER_SELECTORS.has(selector)) {
+      return { valid: true, extracted: null, implicitRecipient: true }
     }
 
     // Group B — V2 routers
@@ -414,18 +464,21 @@ function validateCallDataRecipientInner(
       return decodeMulticallRecipient(selector, data, expectedAddress, depth)
     }
 
-    // Unknown selector — fail open
+    // [API-M-02] Unknown selector — fail closed
+    console.warn(`[calldata-recipient] Blocked unknown selector ${selector} — add to VALIDATED_SELECTORS if legitimate`)
     return {
-      valid: true,
+      valid: false,
       extracted: null,
       implicitRecipient: false,
-      reason: `Unknown selector ${selector}`,
+      reason: `Unknown selector ${selector} — not in validated allowlist`,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.warn('[calldata-recipient] Decode error:', message)
+    // Decode error on a known selector = code bug, not attack. Fail closed
+    // to prevent malformed calldata from bypassing validation.
+    console.error(`[calldata-recipient] Decode error (blocked): ${message}`)
     return {
-      valid: true,
+      valid: false,
       extracted: null,
       implicitRecipient: false,
       reason: `Decode error: ${message}`,
