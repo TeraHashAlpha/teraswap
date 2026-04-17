@@ -17,6 +17,7 @@ export const P0_REASONS = [
   'kv-store-failure',
   'quorum-correlated-anomaly',
   'operator-lock',
+  'circuit-breaker-tripped',
 ] as const
 
 export type P0Reason = (typeof P0_REASONS)[number]

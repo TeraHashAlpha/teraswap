@@ -34,6 +34,10 @@ import {
   runQuorumCheck,
   type QuorumCheckResult,
 } from './quorum-check'
+import {
+  checkCircuitBreaker,
+  type CircuitBreakerResult,
+} from './circuit-breaker'
 
 // ── Heartbeat keys ──────────────────────────────────────
 
@@ -94,6 +98,8 @@ export interface MonitoringTickResult {
   statuses: Awaited<ReturnType<typeof getAllStatuses>>
   /** Present only on quorum ticks (every 5th tick). */
   quorum?: QuorumCheckResult
+  /** Circuit breaker evaluation result (present when ≥1 source is disabled). */
+  circuitBreaker?: CircuitBreakerResult
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
   /** True when tick was skipped due to concurrent lock. */
@@ -207,6 +213,17 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   // Check for auto-recovery of non-critical disabled sources
   const recovered = await checkAutoRecovery()
 
+  // ── P46: Circuit breaker — detect mass source disablement ──
+  // Runs after all state transitions (H1/H2/H5/auto-recovery) are complete.
+  let circuitBreakerResult: CircuitBreakerResult | undefined
+  try {
+    // Re-read statuses after auto-recovery may have changed states
+    const finalStatuses = await getAllStatuses()
+    circuitBreakerResult = await checkCircuitBreaker(finalStatuses)
+  } catch (err) {
+    console.error('[MONITOR] Circuit breaker check failed:', err instanceof Error ? err.message : err)
+  }
+
   // Write heartbeat to KV (dead-man's-switch)
   await writeHeartbeat(warmup)
 
@@ -218,6 +235,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     recovered,
     statuses: allAfter,
     ...(quorumResult ? { quorum: quorumResult } : {}),
+    ...(circuitBreakerResult ? { circuitBreaker: circuitBreakerResult } : {}),
     ...(warmup ? { warmup: true } : {}),
   }
 }
