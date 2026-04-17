@@ -25,10 +25,8 @@
       "_comment": "High-volume source, same as 1inch"
     },
     "cowswap": {
-      "failuresToDegraded": 2,
-      "failuresToDisabled": 3,
       "quorumMaxDeviationPercent": 8,
-      "_comment": "Post-incident heightened monitoring (INC-2026-04-14-001). Higher quorum tolerance due to batch auction mechanics."
+      "_comment": "Higher quorum tolerance due to batch auction surplus capture mechanics. Failure thresholds at defaults (post-incident heightened monitoring removed 2026-04-17, see INC-2026-04-14-001)."
     }
   }
 }
