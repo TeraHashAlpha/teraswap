@@ -1121,6 +1121,106 @@ describe('Telegram webhook', () => {
       const answerBody = JSON.parse(answerCalls[0][1].body)
       expect(answerBody.text).toContain('Escalated')
       expect(answerBody.text).toContain('3/3')
+
+      // Cooldown key should have been written
+      const cooldownCalls = mockKvSet.mock.calls.filter(
+        (args: unknown[]) => args[0] === 'teraswap:telegram:escalate:cowswap',
+      )
+      expect(cooldownCalls.length).toBe(1)
+      expect(cooldownCalls[0][2]).toEqual({ ex: 300 })
+    })
+
+    it('[API-M-04] second escalation within 5min for same source → rejected', async () => {
+      seedSource('cowswap', 'disabled')
+
+      // Set cooldown key (simulating recent escalation)
+      kvStore.set('teraswap:telegram:escalate:cowswap', new Date().toISOString())
+
+      const req = makeRequest(makeCallbackUpdate('escalate:cowswap'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      // Channels should NOT have been called
+      expect(mockSendTelegramAlert).not.toHaveBeenCalled()
+      expect(mockSendEmailAlert).not.toHaveBeenCalled()
+      expect(mockSendDiscordAlert).not.toHaveBeenCalled()
+
+      // Should show cooldown message
+      const answerCalls = findApiCalls('answerCallbackQuery')
+      expect(answerCalls.length).toBe(1)
+      const answerBody = JSON.parse(answerCalls[0][1].body)
+      expect(answerBody.text).toContain('cooldown')
+      expect(answerBody.show_alert).toBe(true)
+    })
+
+    it('[API-M-04] escalation of DIFFERENT source within 5min → succeeds', async () => {
+      seedSource('cowswap', 'disabled')
+      seedSource('1inch', 'disabled')
+
+      // Set cooldown for cowswap only
+      kvStore.set('teraswap:telegram:escalate:cowswap', new Date().toISOString())
+
+      // Escalate 1inch — different source, should succeed
+      const req = makeRequest(makeCallbackUpdate('escalate:1inch'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      expect(mockSendTelegramAlert).toHaveBeenCalledTimes(1)
+      const payload = mockSendTelegramAlert.mock.calls[0][0]
+      expect(payload.sourceId).toBe('1inch')
+
+      const answerCalls = findApiCalls('answerCallbackQuery')
+      const answerBody = JSON.parse(answerCalls[0][1].body)
+      expect(answerBody.text).toContain('Escalated')
+    })
+
+    it('[API-M-04] after cooldown expires → escalation succeeds again', async () => {
+      seedSource('cowswap', 'disabled')
+
+      // Set cooldown that expired 10s ago (>300s old)
+      const expiredAt = new Date(Date.now() - 310_000).toISOString()
+      kvStore.set('teraswap:telegram:escalate:cowswap', expiredAt)
+
+      // In production KV would have expired the key via TTL.
+      // Simulate expiry by deleting it before the call.
+      kvStore.delete('teraswap:telegram:escalate:cowswap')
+
+      const req = makeRequest(makeCallbackUpdate('escalate:cowswap'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      expect(mockSendTelegramAlert).toHaveBeenCalledTimes(1)
+      const answerCalls = findApiCalls('answerCallbackQuery')
+      const answerBody = JSON.parse(answerCalls[0][1].body)
+      expect(answerBody.text).toContain('Escalated')
+    })
+
+    it('[API-M-04] KV failure on rate-limit check → escalation proceeds (fail-open)', async () => {
+      seedSource('cowswap', 'disabled')
+
+      // Make kv.get throw for the escalate key
+      const originalGet = mockKvGet.getMockImplementation()!
+      mockKvGet.mockImplementation(async (key: string) => {
+        if (key === 'teraswap:telegram:escalate:cowswap') throw new Error('KV timeout')
+        return kvStore.get(key) ?? null
+      })
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const req = makeRequest(makeCallbackUpdate('escalate:cowswap'), WEBHOOK_SECRET)
+      await POST(req)
+      await flushPromises()
+
+      // Should have proceeded despite KV error
+      expect(mockSendTelegramAlert).toHaveBeenCalledTimes(1)
+
+      const warnLogs = consoleSpy.mock.calls.filter(
+        args => typeof args[0] === 'string' && args[0].includes('Escalate rate-limit check failed'),
+      )
+      expect(warnLogs.length).toBe(1)
+
+      consoleSpy.mockRestore()
+      mockKvGet.mockImplementation(originalGet)
     })
 
     it('ack button works for any group member (non-admin)', async () => {

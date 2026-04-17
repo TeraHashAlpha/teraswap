@@ -50,6 +50,8 @@ export const dynamic = 'force-dynamic'
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 const TELEGRAM_FETCH_TIMEOUT_MS = 5_000
 const GRACE_KV_KEY = 'teraswap:monitor:graceUntil'
+const ESCALATE_COOLDOWN_SECONDS = 300 // 5 minutes per-source
+const ESCALATE_KEY_PREFIX = 'teraswap:telegram:escalate:'
 
 // ── Telegram types (minimal subset) ────────────────────
 
@@ -629,6 +631,21 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     }
 
     case 'escalate': {
+      // [API-M-04] Rate-limit: max 1 escalation per source per 5 minutes
+      try {
+        const escalateKey = `${ESCALATE_KEY_PREFIX}${sourceId}`
+        const lastEscalation = await kv.get<string>(escalateKey)
+        if (lastEscalation) {
+          const elapsed = Math.round((Date.now() - new Date(lastEscalation).getTime()) / 1000)
+          const remaining = Math.max(0, ESCALATE_COOLDOWN_SECONDS - elapsed)
+          await answerCallbackQuery(query.id, `\u23F3 Escalation cooldown \u2014 retry in ${remaining}s`, true)
+          return
+        }
+      } catch (err) {
+        // Fail-open: KV error → allow escalation (emergency action)
+        console.warn('[TELEGRAM] Escalate rate-limit check failed (proceeding):', err instanceof Error ? err.message : err)
+      }
+
       // Re-alert ALL channels directly, bypassing grace + dedup.
       // We fan out to channels here instead of going through emitTransitionAlert
       // because escalation must always fire regardless of grace period or dedup.
@@ -654,6 +671,14 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
         ),
       )
       const ok = results.filter(r => r.status === 'fulfilled').length
+
+      // [API-M-04] Set cooldown after successful escalation
+      try {
+        await kv.set(`${ESCALATE_KEY_PREFIX}${sourceId}`, new Date().toISOString(), { ex: ESCALATE_COOLDOWN_SECONDS })
+      } catch (err) {
+        console.warn('[TELEGRAM] Escalate cooldown write failed:', err instanceof Error ? err.message : err)
+      }
+
       answerText = `\u{1F6A8} Escalated \u2014 ${ok}/${channels.length} channels notified`
       actionLabel = 'Escalated'
       break
