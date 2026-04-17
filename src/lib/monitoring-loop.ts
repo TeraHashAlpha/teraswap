@@ -38,6 +38,11 @@ import {
   checkCircuitBreaker,
   type CircuitBreakerResult,
 } from './circuit-breaker'
+import {
+  shouldRunOnChainScan,
+  runOnChainScan,
+  type OnChainScanResult,
+} from './on-chain-monitor'
 
 // ── Heartbeat keys ──────────────────────────────────────
 
@@ -100,6 +105,8 @@ export interface MonitoringTickResult {
   quorum?: QuorumCheckResult
   /** Circuit breaker evaluation result (present when ≥1 source is disabled). */
   circuitBreaker?: CircuitBreakerResult
+  /** On-chain event scan result (present on every 5th tick). */
+  onChainScan?: OnChainScanResult
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
   /** True when tick was skipped due to concurrent lock. */
@@ -201,6 +208,17 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     console.warn('[MONITOR] Quorum check failed:', err instanceof Error ? err.message : err)
   }
 
+  // ── P47: On-chain event scan (every 5th tick) ─────────
+  let onChainScanResult: OnChainScanResult | undefined
+  try {
+    if (await shouldRunOnChainScan()) {
+      const result = await runOnChainScan()
+      if (result) onChainScanResult = result
+    }
+  } catch (err) {
+    console.warn('[MONITOR] On-chain scan failed:', err instanceof Error ? err.message : err)
+  }
+
   // Detect state transitions (after H1 + H2 + H5 may have changed states)
   const allAfter = await getAllStatuses()
   for (const s of allAfter) {
@@ -236,6 +254,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     statuses: allAfter,
     ...(quorumResult ? { quorum: quorumResult } : {}),
     ...(circuitBreakerResult ? { circuitBreaker: circuitBreakerResult } : {}),
+    ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(warmup ? { warmup: true } : {}),
   }
 }
