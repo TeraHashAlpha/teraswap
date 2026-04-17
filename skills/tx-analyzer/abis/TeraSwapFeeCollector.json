@@ -1,0 +1,187 @@
+[
+  {
+    "type": "event",
+    "name": "SwapWithFee",
+    "inputs": [
+      { "name": "user", "type": "address", "indexed": true },
+      { "name": "router", "type": "address", "indexed": true },
+      { "name": "tokenIn", "type": "address", "indexed": false },
+      { "name": "totalAmount", "type": "uint256", "indexed": false },
+      { "name": "feeAmount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Paused",
+    "inputs": [
+      { "name": "admin", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Unpaused",
+    "inputs": [
+      { "name": "admin", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "RouterWhitelisted",
+    "inputs": [
+      { "name": "router", "type": "address", "indexed": true },
+      { "name": "status", "type": "bool", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Sweep",
+    "inputs": [
+      { "name": "token", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TimelockQueued",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true },
+      { "name": "actionHash", "type": "bytes32", "indexed": false },
+      { "name": "readyAt", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TimelockExecuted",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true },
+      { "name": "actionType", "type": "string", "indexed": false },
+      { "name": "data", "type": "bytes", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TimelockCancelled",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Bootstrap",
+    "inputs": [
+      { "name": "router", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      { "name": "previousOwner", "type": "address", "indexed": true },
+      { "name": "newOwner", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SelectorWhitelisted",
+    "inputs": [
+      { "name": "router", "type": "address", "indexed": true },
+      { "name": "selector", "type": "bytes4", "indexed": true },
+      { "name": "allowed", "type": "bool", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "AdminTransferred",
+    "inputs": [
+      { "name": "oldAdmin", "type": "address", "indexed": true },
+      { "name": "newAdmin", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "swapETHWithFee",
+    "stateMutability": "payable",
+    "inputs": [
+      { "name": "router", "type": "address" },
+      { "name": "routerData", "type": "bytes" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "swapTokenWithFee",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "token", "type": "address" },
+      { "name": "totalAmount", "type": "uint256" },
+      { "name": "router", "type": "address" },
+      { "name": "routerData", "type": "bytes" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "sweep",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "token", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "queueRouterChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "router", "type": "address" },
+      { "name": "status", "type": "bool" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "executeRouterChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32" },
+      { "name": "router", "type": "address" },
+      { "name": "status", "type": "bool" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "cancelTimelockAction",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "bootstrapRouters",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "routers", "type": "address[]" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "pause",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "unpause",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  }
+]

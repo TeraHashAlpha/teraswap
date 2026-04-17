@@ -1,0 +1,446 @@
+[
+  {
+    "type": "event",
+    "name": "OrderExecuted",
+    "inputs": [
+      { "name": "orderHash", "type": "bytes32", "indexed": true },
+      { "name": "owner", "type": "address", "indexed": true },
+      { "name": "orderType", "type": "uint8", "indexed": true },
+      { "name": "tokenIn", "type": "address", "indexed": false },
+      { "name": "tokenOut", "type": "address", "indexed": false },
+      { "name": "amountIn", "type": "uint256", "indexed": false },
+      { "name": "amountOut", "type": "uint256", "indexed": false },
+      { "name": "fee", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OrderCancelled",
+    "inputs": [
+      { "name": "orderHash", "type": "bytes32", "indexed": true },
+      { "name": "owner", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "NoncesInvalidated",
+    "inputs": [
+      { "name": "owner", "type": "address", "indexed": true },
+      { "name": "newNonce", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "RouterWhitelisted",
+    "inputs": [
+      { "name": "router", "type": "address", "indexed": true },
+      { "name": "status", "type": "bool", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TimelockQueued",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true },
+      { "name": "actionHash", "type": "bytes32", "indexed": false },
+      { "name": "readyAt", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TimelockExecuted",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true },
+      { "name": "actionType", "type": "string", "indexed": false },
+      { "name": "data", "type": "bytes", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "TimelockCancelled",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "AdminTransferred",
+    "inputs": [
+      { "name": "oldAdmin", "type": "address", "indexed": true },
+      { "name": "newAdmin", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Bootstrap",
+    "inputs": [
+      { "name": "router", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExecutorWhitelisted",
+    "inputs": [
+      { "name": "executor", "type": "address", "indexed": true },
+      { "name": "status", "type": "bool", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExecutorChangeProposed",
+    "inputs": [
+      { "name": "executor", "type": "address", "indexed": true },
+      { "name": "status", "type": "bool", "indexed": false },
+      { "name": "executeAfter", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExecutorChangeExecuted",
+    "inputs": [
+      { "name": "executor", "type": "address", "indexed": true },
+      { "name": "status", "type": "bool", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ExecutorChangeCancelled",
+    "inputs": [
+      { "name": "executor", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Paused",
+    "inputs": [
+      { "name": "admin", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "Unpaused",
+    "inputs": [
+      { "name": "admin", "type": "address", "indexed": true }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "OracleConfigured",
+    "inputs": [
+      { "name": "feed", "type": "address", "indexed": true },
+      { "name": "decimals", "type": "uint8", "indexed": false },
+      { "name": "maxStaleness", "type": "uint256", "indexed": false },
+      { "name": "minPrice", "type": "int256", "indexed": false },
+      { "name": "maxPrice", "type": "int256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SweepQueued",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32", "indexed": true },
+      { "name": "token", "type": "address", "indexed": false }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "executeOrder",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "components": [
+          { "name": "owner", "type": "address" },
+          { "name": "tokenIn", "type": "address" },
+          { "name": "tokenOut", "type": "address" },
+          { "name": "amountIn", "type": "uint256" },
+          { "name": "minAmountOut", "type": "uint256" },
+          { "name": "orderType", "type": "uint8" },
+          { "name": "condition", "type": "uint8" },
+          { "name": "targetPrice", "type": "uint256" },
+          { "name": "priceFeed", "type": "address" },
+          { "name": "expiry", "type": "uint256" },
+          { "name": "nonce", "type": "uint256" },
+          { "name": "router", "type": "address" },
+          { "name": "routerDataHash", "type": "bytes32" },
+          { "name": "dcaInterval", "type": "uint256" },
+          { "name": "dcaTotal", "type": "uint256" }
+        ]
+      },
+      { "name": "signature", "type": "bytes" },
+      { "name": "routerData", "type": "bytes" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "cancelOrder",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "components": [
+          { "name": "owner", "type": "address" },
+          { "name": "tokenIn", "type": "address" },
+          { "name": "tokenOut", "type": "address" },
+          { "name": "amountIn", "type": "uint256" },
+          { "name": "minAmountOut", "type": "uint256" },
+          { "name": "orderType", "type": "uint8" },
+          { "name": "condition", "type": "uint8" },
+          { "name": "targetPrice", "type": "uint256" },
+          { "name": "priceFeed", "type": "address" },
+          { "name": "expiry", "type": "uint256" },
+          { "name": "nonce", "type": "uint256" },
+          { "name": "router", "type": "address" },
+          { "name": "routerDataHash", "type": "bytes32" },
+          { "name": "dcaInterval", "type": "uint256" },
+          { "name": "dcaTotal", "type": "uint256" }
+        ]
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "canExecute",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "components": [
+          { "name": "owner", "type": "address" },
+          { "name": "tokenIn", "type": "address" },
+          { "name": "tokenOut", "type": "address" },
+          { "name": "amountIn", "type": "uint256" },
+          { "name": "minAmountOut", "type": "uint256" },
+          { "name": "orderType", "type": "uint8" },
+          { "name": "condition", "type": "uint8" },
+          { "name": "targetPrice", "type": "uint256" },
+          { "name": "priceFeed", "type": "address" },
+          { "name": "expiry", "type": "uint256" },
+          { "name": "nonce", "type": "uint256" },
+          { "name": "router", "type": "address" },
+          { "name": "routerDataHash", "type": "bytes32" },
+          { "name": "dcaInterval", "type": "uint256" },
+          { "name": "dcaTotal", "type": "uint256" }
+        ]
+      },
+      { "name": "signature", "type": "bytes" }
+    ],
+    "outputs": [
+      { "name": "canExec", "type": "bool" },
+      { "name": "reason", "type": "string" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "invalidateNonces",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "newNonce", "type": "uint256" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "getNonce",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "user", "type": "address" }
+    ],
+    "outputs": [
+      { "name": "", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getOrderHash",
+    "stateMutability": "pure",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "components": [
+          { "name": "owner", "type": "address" },
+          { "name": "tokenIn", "type": "address" },
+          { "name": "tokenOut", "type": "address" },
+          { "name": "amountIn", "type": "uint256" },
+          { "name": "minAmountOut", "type": "uint256" },
+          { "name": "orderType", "type": "uint8" },
+          { "name": "condition", "type": "uint8" },
+          { "name": "targetPrice", "type": "uint256" },
+          { "name": "priceFeed", "type": "address" },
+          { "name": "expiry", "type": "uint256" },
+          { "name": "nonce", "type": "uint256" },
+          { "name": "router", "type": "address" },
+          { "name": "routerDataHash", "type": "bytes32" },
+          { "name": "dcaInterval", "type": "uint256" },
+          { "name": "dcaTotal", "type": "uint256" }
+        ]
+      }
+    ],
+    "outputs": [
+      { "name": "", "type": "bytes32" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "domainSeparator",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      { "name": "", "type": "bytes32" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "queueRouterChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "router", "type": "address" },
+      { "name": "status", "type": "bool" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "executeRouterChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32" },
+      { "name": "router", "type": "address" },
+      { "name": "status", "type": "bool" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "queueAdminChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "newAdmin", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "executeAdminChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32" },
+      { "name": "newAdmin", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "cancelTimelockAction",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "getTimelockDelays",
+    "stateMutability": "pure",
+    "inputs": [],
+    "outputs": [
+      { "name": "adminTransfer", "type": "uint256" },
+      { "name": "routerChange", "type": "uint256" },
+      { "name": "sweep", "type": "uint256" },
+      { "name": "executorChange", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "bootstrap",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "routers", "type": "address[]" },
+      { "name": "executors", "type": "address[]" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "proposeExecutor",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "_executor", "type": "address" },
+      { "name": "status", "type": "bool" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "executeExecutorChange",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "_executor", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "cancelExecutorProposal",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "_executor", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "pause",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "unpause",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "queueSweep",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "token", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "executeSweep",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "actionId", "type": "bytes32" },
+      { "name": "token", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "setOracleConfig",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "feed", "type": "address" },
+      { "name": "maxStaleness", "type": "uint256" },
+      { "name": "minPrice", "type": "int256" },
+      { "name": "maxPrice", "type": "int256" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  }
+]
