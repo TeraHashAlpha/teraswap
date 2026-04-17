@@ -20,7 +20,14 @@ function getKvSet(key: string): Set<string> {
 }
 
 const mockKvGet = vi.fn(async (key: string) => kvStore.get(key) ?? null)
-const mockKvSet = vi.fn(async (key: string, value: unknown) => { kvStore.set(key, value) })
+const mockKvSet = vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+  // Support SET NX semantics for distributed lock tests
+  if (opts?.nx && kvStore.has(key)) {
+    return null // Key exists → NX fails
+  }
+  kvStore.set(key, value)
+  return 'OK'
+})
 const mockKvSmembers = vi.fn(async (key: string) => Array.from(getKvSet(key)))
 const mockKvIncr = vi.fn(async (key: string) => {
   const current = (kvStore.get(key) as number) ?? 0
@@ -477,5 +484,113 @@ describe('cold-start warmup detection', () => {
     )
     expect(warmupCalls.length).toBe(1)
     expect(warmupCalls[0][1]).toBe(true)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════
+// [API-M-03] Distributed lock — concurrent tick prevention
+// ═══════════════════════════════════════════════════════════════
+
+describe('[API-M-03] distributed tick lock', () => {
+  const LOCK_KEY = 'teraswap:monitor:tick-lock'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false)
+  })
+
+  it('first tick acquires lock and executes normally', async () => {
+    // Seed a recent lastTick so warmup doesn't flag
+    kvStore.set('teraswap:monitor:lastTick', new Date(Date.now() - 50_000).toISOString())
+
+    const result = await runMonitoringTick()
+
+    // Should have executed (not skipped)
+    expect(result.skipped).toBeUndefined()
+    expect(result.checksRun).toBe(1)
+    expect(result.timestamp).toBeDefined()
+
+    // Lock key should have been written via kv.set with NX
+    const lockCalls = mockKvSet.mock.calls.filter(
+      (args) => args[0] === LOCK_KEY,
+    )
+    expect(lockCalls.length).toBe(1)
+    // Should use NX + TTL
+    expect(lockCalls[0][2]).toMatchObject({ nx: true, ex: 55 })
+  })
+
+  it('concurrent tick while lock held → skipped', async () => {
+    // Pre-set the lock key (simulating another tick holding it)
+    kvStore.set(LOCK_KEY, Date.now().toString())
+
+    const result = await runMonitoringTick()
+
+    expect(result.skipped).toBe(true)
+    expect(result.reason).toBe('concurrent-tick-lock')
+    expect(result.checksRun).toBe(0)
+  })
+
+  it('skipped tick does NOT update lastTick heartbeat', async () => {
+    // Set an old lastTick value
+    const oldIso = '2026-04-16T00:00:00.000Z'
+    kvStore.set('teraswap:monitor:lastTick', oldIso)
+
+    // Pre-set lock to force skip
+    kvStore.set(LOCK_KEY, Date.now().toString())
+
+    await runMonitoringTick()
+
+    // The heartbeat pipeline should NOT have been called
+    const heartbeatCalls = mockPipelineSet.mock.calls.filter(
+      (args) => args[0] === 'teraswap:monitor:lastTick',
+    )
+    expect(heartbeatCalls.length).toBe(0)
+
+    // lastTick value should be unchanged
+    expect(kvStore.get('teraswap:monitor:lastTick')).toBe(oldIso)
+  })
+
+  it('lock expires after TTL → next tick proceeds', async () => {
+    // First tick acquires lock
+    const result1 = await runMonitoringTick()
+    expect(result1.skipped).toBeUndefined()
+
+    // Simulate lock expiry by clearing it
+    kvStore.delete(LOCK_KEY)
+    vi.clearAllMocks()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false)
+
+    // Next tick should succeed
+    const result2 = await runMonitoringTick()
+    expect(result2.skipped).toBeUndefined()
+    expect(result2.checksRun).toBe(1)
+  })
+
+  it('KV failure on lock acquire → tick proceeds (fail-open)', async () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // Make kv.set throw only for the lock key
+    mockKvSet.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (key === LOCK_KEY) throw new Error('KV connection refused')
+      if (opts?.nx && kvStore.has(key)) return null
+      kvStore.set(key, value)
+      return 'OK'
+    })
+
+    const result = await runMonitoringTick()
+
+    // Should NOT be skipped — fail-open proceeds with tick
+    expect(result.skipped).toBeUndefined()
+    expect(result.checksRun).toBe(1)
+
+    // Should have logged the warning
+    const warnLogs = consoleSpy.mock.calls.filter(
+      args => typeof args[0] === 'string' && args[0].includes('Lock acquire failed'),
+    )
+    expect(warnLogs.length).toBe(1)
+    consoleSpy.mockRestore()
   })
 })

@@ -50,6 +50,14 @@ export async function POST(req: NextRequest) {
   try {
     const result = await runMonitoringTick()
 
+    // [API-M-03] Skipped tick (concurrent lock) — 200 OK, not an error
+    if (result.skipped) {
+      return NextResponse.json(
+        { ok: true, skipped: true, reason: result.reason },
+        { headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+
     return NextResponse.json(result, {
       headers: { 'Cache-Control': 'no-store' },
     })

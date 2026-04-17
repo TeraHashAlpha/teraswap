@@ -44,6 +44,16 @@ const WARMUP_KEY = 'teraswap:monitor:lastTickWarmup'
 /** Gap between ticks that indicates a cold start (Vercel Hobby sleep). */
 const WARMUP_GAP_MS = 5 * 60 * 1000 // 5 minutes
 
+// ── Distributed lock ───────────────────────────────────
+
+const LOCK_KEY = 'teraswap:monitor:tick-lock'
+/**
+ * Lock TTL must be shorter than the 60s tick interval.
+ * No explicit unlock — TTL is the sole release mechanism. This prevents
+ * deadlocks if the Lambda crashes between acquire and release.
+ */
+const LOCK_TTL_SECONDS = 55
+
 async function writeHeartbeat(warmup: boolean): Promise<void> {
   try {
     const pipeline = kv.pipeline()
@@ -86,6 +96,10 @@ export interface MonitoringTickResult {
   quorum?: QuorumCheckResult
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
+  /** True when tick was skipped due to concurrent lock. */
+  skipped?: boolean
+  /** Reason the tick was skipped (e.g., 'concurrent-tick-lock'). */
+  reason?: string
 }
 
 /**
@@ -93,6 +107,28 @@ export interface MonitoringTickResult {
  * Returns a summary of the results for the API response.
  */
 export async function runMonitoringTick(): Promise<MonitoringTickResult> {
+  // ── [API-M-03] Distributed lock — prevent concurrent ticks ──
+  try {
+    const acquired = await kv.set(LOCK_KEY, Date.now().toString(), { nx: true, ex: LOCK_TTL_SECONDS })
+    if (!acquired) {
+      console.log('[TICK] Skipped — another tick is in progress')
+      return {
+        timestamp: new Date().toISOString(),
+        checksRun: 0,
+        failures: 0,
+        transitions: [],
+        recovered: [],
+        statuses: [],
+        skipped: true,
+        reason: 'concurrent-tick-lock',
+      }
+    }
+  } catch (err) {
+    // Fail-open: if KV is unreachable, proceed with the tick.
+    // Better to risk a rare duplicate than miss a tick entirely.
+    console.warn('[TICK] Lock acquire failed (proceeding):', err instanceof Error ? err.message : err)
+  }
+
   // Invalidate per-tick cache (fresh reads from KV)
   beginTick()
 
