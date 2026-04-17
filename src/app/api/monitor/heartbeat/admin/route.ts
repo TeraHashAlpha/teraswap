@@ -6,24 +6,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { timingSafeEqual, createHash } from 'node:crypto'
 import { kv } from '@vercel/kv'
 import { getAllStatuses } from '@/lib/source-state-machine'
 import { isInGracePeriodAsync } from '@/lib/grace-period'
+import { verifyBearerToken } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 const HEARTBEAT_STALE_SECONDS = 180
-
-function verifyBearerToken(provided: string, expected: string): boolean {
-  try {
-    const hashA = createHash('sha256').update(provided).digest()
-    const hashB = createHash('sha256').update(expected).digest()
-    return timingSafeEqual(hashA, hashB)
-  } catch {
-    return false
-  }
-}
 
 export async function GET(req: NextRequest) {
   const secret = process.env.MONITOR_CRON_SECRET
@@ -32,10 +22,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'not configured' }, { status: 503 })
   }
 
-  const authHeader = req.headers.get('authorization')
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
-
-  if (!token || !verifyBearerToken(token, secret)) {
+  if (!verifyBearerToken(req.headers.get('authorization'), secret)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 

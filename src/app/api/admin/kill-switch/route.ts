@@ -22,9 +22,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { timingSafeEqual } from 'crypto'
 import { kv } from '@vercel/kv'
 import { forceDisable, getStatus } from '@/lib/source-state-machine'
+import { verifyBearerToken } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,19 +57,6 @@ setInterval(() => {
     }
   }
 }, RATE_LIMIT_WINDOW_MS * 5).unref?.()
-
-// ── Auth helpers ────────────────────────────────────────
-
-function verifyToken(provided: string, expected: string): boolean {
-  if (provided.length !== expected.length) return false
-  return timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
-}
-
-function extractBearer(req: NextRequest): string | null {
-  const header = req.headers.get('authorization')
-  if (!header?.startsWith('Bearer ')) return null
-  return header.slice(7)
-}
 
 // ── KV audit trail ──────────────────────────────────────
 
@@ -123,9 +110,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  // ③ Authenticate — constant-time comparison, no info leakage
-  const token = extractBearer(req)
-  if (!token || !verifyToken(token, secret)) {
+  // ③ Authenticate — constant-time SHA-256 comparison via shared helper
+  if (!verifyBearerToken(req.headers.get('authorization'), secret)) {
     return NextResponse.json(
       { error: 'unauthorized' },
       { status: 401 },
@@ -206,5 +192,4 @@ export const _internal = {
   rateLimitMap,
   RATE_LIMIT_MAX,
   RATE_LIMIT_WINDOW_MS,
-  verifyToken,
 } as const

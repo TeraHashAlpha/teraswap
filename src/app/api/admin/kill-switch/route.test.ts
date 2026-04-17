@@ -144,21 +144,9 @@ describe('POST /api/admin/kill-switch', () => {
     })
   })
 
-  // ── Token comparison ──────────────────────────────────
-
-  describe('constant-time comparison', () => {
-    it('verifyToken returns true for matching tokens', () => {
-      expect(_internal.verifyToken('abc123', 'abc123')).toBe(true)
-    })
-
-    it('verifyToken returns false for non-matching tokens', () => {
-      expect(_internal.verifyToken('abc123', 'xyz789')).toBe(false)
-    })
-
-    it('verifyToken returns false for different-length tokens', () => {
-      expect(_internal.verifyToken('short', 'much-longer-token')).toBe(false)
-    })
-  })
+  // ── Token comparison (via shared auth helper) ─────────
+  // Constant-time SHA-256 comparison is now tested in src/lib/auth.test.ts.
+  // Route-level auth behavior is covered by the 'authentication' block above.
 
   // ── Validation ────────────────────────────────────────
 

@@ -11,26 +11,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { timingSafeEqual, createHash } from 'node:crypto'
 import { runMonitoringTick } from '@/lib/monitoring-loop'
+import { verifyBearerToken } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30 // Allow up to 30s for all health checks
-
-/**
- * Constant-time comparison of bearer token via SHA-256 pre-hash.
- * Hashing both sides produces fixed 32-byte digests, eliminating the
- * length leak that direct timingSafeEqual would have on variable inputs.
- */
-function verifyBearerToken(provided: string, expected: string): boolean {
-  try {
-    const hashA = createHash('sha256').update(provided).digest()
-    const hashB = createHash('sha256').update(expected).digest()
-    return timingSafeEqual(hashA, hashB)
-  } catch {
-    return false
-  }
-}
 
 export async function POST(req: NextRequest) {
   // [API-C-01] Auth is mandatory — 503 if secret not configured
@@ -40,10 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'not configured' }, { status: 503 })
   }
 
-  const authHeader = req.headers.get('authorization')
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
-
-  if (!token || !verifyBearerToken(token, secret)) {
+  if (!verifyBearerToken(req.headers.get('authorization'), secret)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
