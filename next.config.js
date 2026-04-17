@@ -11,6 +11,9 @@ const nextConfig = {
   },
 
   // ── Security Headers ──────────────────────────────────
+  // [FE-L-01] Defense-in-depth: vercel.json mirrors all headers below EXCEPT CSP.
+  // CSP is Next.js-only because it uses dynamic directives (unsafe-eval in dev).
+  // If you add/change a header here, sync vercel.json to keep the edge fallback current.
   async headers() {
     return [
       {
