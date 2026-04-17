@@ -31,7 +31,7 @@ export interface RecipientCheckResult {
 // ---------------------------------------------------------------------------
 
 /** Group A: msg.sender selectors — output goes to caller, no explicit recipient */
-const MSG_SENDER_SELECTORS = new Set([
+export const MSG_SENDER_SELECTORS = new Set([
   '0xe449022e', // 1inch uniswapV3Swap
   '0x0502b1c5', // 1inch unoswap
   '0xd9627aa4', // 0x sellToUniswap
@@ -48,7 +48,7 @@ const MSG_SENDER_SELECTORS = new Set([
  *
  * If a source is added here, document why its router is trusted.
  */
-const TRUSTED_ROUTER_SELECTORS = new Set([
+export const TRUSTED_ROUTER_SELECTORS = new Set([
   '0x83800a8e', // Odos — swap(): proprietary encoding, router sends to msg.sender
   '0xe21fd0e9', // KyberSwap — swap(): proprietary encoding, router sends to msg.sender
   '0x3598d8ab', // ParaSwap megaSwap: proprietary encoding, router sends to msg.sender

@@ -6,6 +6,7 @@ import { formatUnits, parseUnits } from 'viem'
 import TokenSelector from './TokenSelector'
 import QuoteBreakdown from './QuoteBreakdown'
 import SwapButton from './SwapButton'
+import TransactionPreview from './TransactionPreview'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import SourceToggle from './SourceToggle'
 import ActiveApprovals from './ActiveApprovals'
@@ -110,7 +111,7 @@ export default function SwapBox() {
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } =
     useApproval(tokenIn, amountIn, spender)
 
-  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, execute: executeSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, execute: executeSwap, confirmSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
@@ -719,6 +720,23 @@ export default function SwapBox() {
         amount={amountIn}
         tokenSymbol={tokenIn?.symbol}
       />
+
+      {/* Transaction preview confirmation modal */}
+      {swapStatus === 'confirming' && pendingSwap && address && (
+        <TransactionPreview
+          calldata={pendingSwap.routerCalldata}
+          routerAddress={pendingSwap.routerAddress}
+          source={pendingSwap.source}
+          userAddress={address}
+          tokenIn={tokenIn}
+          tokenOut={tokenOut}
+          amountInDisplay={displayAmountIn}
+          expectedOutput={meta?.best ? formatDisplay(formatUnits(BigInt(meta.best.toAmount), tokenOut?.decimals ?? 18)) : ''}
+          routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
+          onConfirm={confirmSwap}
+          onCancel={resetSwap}
+        />
+      )}
 
       {/* Beta disclaimer */}
       <BetaDisclaimer />

@@ -112,11 +112,34 @@ export type SwapStatus =
   | 'idle'
   | 'fetching_swap'
   | 'simulating'
+  | 'confirming'        // Waiting for user to review transaction preview
   | 'swapping'
   | 'cow_signing'       // CoW: waiting for user to sign the order
   | 'cow_pending'       // CoW: order submitted, waiting for solver to fill
   | 'success'
   | 'error'
+
+/** Prepared transaction data waiting for user confirmation in the preview modal. */
+export interface PendingSwapData {
+  source: AggregatorName
+  /** Final sendTransaction params */
+  txTo: `0x${string}`
+  txData: `0x${string}`
+  txValue: bigint
+  txGas: bigint | undefined
+  /** DEX router address (for calldata decoding in preview) */
+  routerAddress: string
+  /** DEX router calldata (for calldata decoding in preview) */
+  routerCalldata: string
+  routeViaFeeCollector: boolean
+  routeType: 'fee_collector_eth' | 'fee_collector_erc20' | 'direct'
+  /** Expected output amount (raw string) */
+  swapToAmount: string
+  /** Input amount in wei */
+  rawAmountBn: bigint
+  /** Timestamp when swap flow started */
+  swapStartTime: number
+}
 
 interface UseSwapResult {
   status: SwapStatus
@@ -129,7 +152,11 @@ interface UseSwapResult {
   priceGuardDeviation: number | null
   /** Pre-swap simulation result: true = passed, false = would revert, null = not yet simulated */
   simulationPassed: boolean | null
+  /** Prepared tx data waiting for user confirmation (non-null when status === 'confirming') */
+  pendingSwap: PendingSwapData | null
   execute: (source: AggregatorName) => Promise<void>
+  /** Confirm the pending swap after reviewing the transaction preview */
+  confirmSwap: () => void
   reset: () => void
 }
 
@@ -154,6 +181,7 @@ export function useSwap(
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
+  const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
 
   // Q24: Mounted ref to prevent state updates after unmount (polling race condition)
   const mountedRef = useRef(true)
@@ -328,53 +356,30 @@ export function useSwap(
         }
       }
 
-      // ── Log swap to Supabase (fire-and-forget) ──
-      logSwapToSupabase({
-        wallet: address,
-        chainId,
-        source,
-        tokenIn,
-        tokenOut,
-        amountIn: rawAmountBn.toString(),
-        amountOut: swapData.toAmount,
-        slippage,
-        mevProtected: AGGREGATOR_META[source]?.mevProtected ?? false,
-        feeCollected: routeViaFeeCollector,
-        status: 'pending',
-      })
+      // ── Build final tx params and show confirmation preview ──
+      // Prepare the transaction but pause for user review before signing.
+      let pendingTxTo: `0x${string}`
+      let pendingTxData: `0x${string}`
+      let pendingTxValue: bigint
+      let pendingTxGas: bigint | undefined
+      let pendingRouteType: PendingSwapData['routeType']
 
       if (routeViaFeeCollector) {
-        // Route through FeeCollector
         const router = swapData.tx.to as `0x${string}`
         const routerData = swapData.tx.data as `0x${string}`
 
         if (isNativeIn) {
-          // ETH input: FeeCollector.swapETHWithFee{value: totalAmount}(router, routerData)
-          // Send the FULL amount — FeeCollector deducts fee and forwards net to router
           const feeCollectorCalldata = encodeFunctionData({
             abi: FEE_COLLECTOR_ABI,
             functionName: 'swapETHWithFee',
             args: [router, routerData],
           })
-
-          setStatus('swapping')
-          trackWalletActivity(address, {
-            category: 'swap', action: 'swap_submitted', source,
-            token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-            duration_ms: Date.now() - swapStartTime,
-            metadata: { routing: 'fee_collector_eth' },
-          })
-          sendTransaction({
-            to: FEE_COLLECTOR_ADDRESS,
-            data: feeCollectorCalldata,
-            value: rawAmountBn, // FULL amount — FeeCollector takes fee from this
-            // Extra gas buffer: FeeCollector adds ~40k overhead (fee transfer, approval, refund),
-            // plus Uniswap multicall paths can underestimate by 30-50k.
-            // Using 100k buffer to prevent out-of-gas reverts.
-            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined,
-          })
+          pendingTxTo = FEE_COLLECTOR_ADDRESS
+          pendingTxData = feeCollectorCalldata
+          pendingTxValue = rawAmountBn
+          pendingTxGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined
+          pendingRouteType = 'fee_collector_eth'
         } else {
-          // ERC-20 input: FeeCollector.swapTokenWithFee(token, amount, router, routerData)
           // Pre-flight: verify user approved FeeCollector for the full amount
           if (address) {
             try {
@@ -407,28 +412,14 @@ export function useSwap(
               routerData,
             ],
           })
-
-          setStatus('swapping')
-          trackWalletActivity(address, {
-            category: 'swap', action: 'swap_submitted', source,
-            token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-            duration_ms: Date.now() - swapStartTime,
-            metadata: { routing: 'fee_collector_erc20' },
-          })
-          sendTransaction({
-            to: FEE_COLLECTOR_ADDRESS,
-            data: feeCollectorCalldata,
-            value: 0n,
-            // ERC-20 FeeCollector routing needs more gas: safeTransferFrom + fee transfer
-            // + forceApprove + router call + revoke approval + refund leftover.
-            // Using 120k buffer for complex Uniswap multi-hop paths.
-            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined,
-          })
+          pendingTxTo = FEE_COLLECTOR_ADDRESS
+          pendingTxData = feeCollectorCalldata
+          pendingTxValue = 0n
+          pendingTxGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined
+          pendingRouteType = 'fee_collector_erc20'
         }
       } else {
-        // Direct routing (FeeCollector-incompatible sources only: 0x, CoW)
-        // NOTE: No fee collected on these swaps — they're excluded from quotes when FeeCollector is active.
-        // Pre-flight: verify ERC-20 allowance before sending tx (prevents STF reverts)
+        // Direct routing — pre-flight allowance check
         if (!isNativeIn && address) {
           try {
             const client = getPrivateClient()
@@ -450,20 +441,29 @@ export function useSwap(
           }
         }
 
-        setStatus('swapping')
-        trackWalletActivity(address, {
-          category: 'swap', action: 'swap_submitted', source,
-          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-          duration_ms: Date.now() - swapStartTime,
-          metadata: { routing: 'direct' },
-        })
-        sendTransaction({
-          to: swapData.tx.to,
-          data: swapData.tx.data,
-          value: txValue,
-          gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : undefined,
-        })
+        pendingTxTo = swapData.tx.to as `0x${string}`
+        pendingTxData = swapData.tx.data as `0x${string}`
+        pendingTxValue = txValue
+        pendingTxGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : undefined
+        pendingRouteType = 'direct'
       }
+
+      // Store prepared tx and show confirmation modal
+      setPendingSwap({
+        source,
+        txTo: pendingTxTo,
+        txData: pendingTxData,
+        txValue: pendingTxValue,
+        txGas: pendingTxGas,
+        routerAddress: swapData.tx.to,
+        routerCalldata: swapData.tx.data,
+        routeViaFeeCollector,
+        routeType: pendingRouteType,
+        swapToAmount: swapData.toAmount,
+        rawAmountBn,
+        swapStartTime,
+      })
+      setStatus('confirming')
     } catch (err) {
       setStatus('error')
       const errMsg = err instanceof Error ? err.message : 'Unknown error'
@@ -745,6 +745,49 @@ export function useSwap(
     return executeStandardSwap(source)
   }, [executeCowSwap, executeStandardSwap])
 
+  // ── Confirm swap after user reviews transaction preview ──
+  const confirmSwap = useCallback(() => {
+    const data = pendingSwap
+    if (!data || !tokenIn || !tokenOut || !address) return
+
+    // Log swap to Supabase (fire-and-forget)
+    logSwapToSupabase({
+      wallet: address,
+      chainId,
+      source: data.source,
+      tokenIn,
+      tokenOut,
+      amountIn: data.rawAmountBn.toString(),
+      amountOut: data.swapToAmount,
+      slippage,
+      mevProtected: AGGREGATOR_META[data.source]?.mevProtected ?? false,
+      feeCollected: data.routeViaFeeCollector,
+      status: 'pending',
+    })
+
+    setStatus('swapping')
+    trackWalletActivity(address, {
+      category: 'swap', action: 'swap_submitted', source: data.source,
+      token_in: tokenIn.symbol, token_out: tokenOut.symbol,
+      duration_ms: Date.now() - data.swapStartTime,
+      metadata: { routing: data.routeType },
+    })
+
+    try {
+      sendTransaction({
+        to: data.txTo,
+        data: data.txData,
+        value: data.txValue,
+        gas: data.txGas,
+      })
+    } catch (err) {
+      setStatus('error')
+      setErrorMessage(err instanceof Error ? err.message : 'Transaction failed')
+    }
+
+    setPendingSwap(null)
+  }, [pendingSwap, tokenIn, tokenOut, address, chainId, slippage, sendTransaction])
+
   // Track standard tx confirmation (wagmi's built-in hook)
   useEffect(() => {
     if (swapConfirmed) {
@@ -896,10 +939,11 @@ export function useSwap(
     setPriceGuardBlocked(false)
     setPriceGuardDeviation(null)
     setSimulationPassed(null)
+    setPendingSwap(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, execute, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, execute, confirmSwap, reset }
 }
 
 function parseWagmiError(error: Error): string {
