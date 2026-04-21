@@ -102,8 +102,12 @@ describe('source thresholds', () => {
 
     it('returns custom thresholds for cowswap', () => {
       const t = getThresholds('cowswap')
-      expect(t.failuresToDegraded).toBe(2)
-      expect(t.failuresToDisabled).toBe(3)
+      // Failure thresholds use defaults (post-incident heightened monitoring
+      // removed 2026-04-17, see INC-2026-04-14-001). Only quorum deviation
+      // is customised for cowswap's batch-auction surplus capture.
+      expect(t.failuresToDegraded).toBe(3)
+      expect(t.failuresToDisabled).toBe(5)
+      expect(t.quorumMaxDeviationPercent).toBe(8)
     })
 
     it('returns custom thresholds for teraswap-self', () => {
@@ -121,13 +125,15 @@ describe('source thresholds', () => {
   })
 
   describe('threshold-driven state transitions', () => {
-    it('cowswap degrades after 2 failures (not 3)', async () => {
-      await recordHealthCheck('cowswap', { ok: false, latencyMs: 100, error: 'timeout' })
-      beginTick()
+    it('cowswap degrades after 3 failures (uses defaults post-INC-2026-04-14-001)', async () => {
+      for (let i = 0; i < 2; i++) {
+        await recordHealthCheck('cowswap', { ok: false, latencyMs: 100, error: 'timeout' })
+        beginTick()
+      }
 
       let s = await getStatus('cowswap')
       expect(s.state).toBe('active')
-      expect(s.failureCount).toBe(1)
+      expect(s.failureCount).toBe(2)
 
       await recordHealthCheck('cowswap', { ok: false, latencyMs: 100, error: 'timeout' })
       beginTick()
