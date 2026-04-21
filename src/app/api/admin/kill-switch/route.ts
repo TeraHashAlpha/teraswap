@@ -22,7 +22,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { forceDisable, getStatus } from '@/lib/source-state-machine'
 import { verifyBearerToken } from '@/lib/auth'
 

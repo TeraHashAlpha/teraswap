@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { getAllStatuses } from '@/lib/source-state-machine'
 import { isInGracePeriodAsync } from '@/lib/grace-period'
 import { verifyBearerToken } from '@/lib/auth'

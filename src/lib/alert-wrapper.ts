@@ -14,7 +14,7 @@
  * @internal — server-only module. Same import restrictions as source-state-machine.ts.
  */
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import type { SourceState } from './source-state-machine'
 import { isP0Reason } from './p0-reasons'
 import { isInGracePeriodAsync } from './grace-period'

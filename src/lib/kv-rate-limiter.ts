@@ -15,7 +15,7 @@
 // providing consistent rate enforcement regardless of when in the window
 // the requests arrive.
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 
 export const SWAP_RATE_LIMIT = { limit: 20, windowMs: 60_000 }
 export const QUOTE_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
@@ -48,7 +48,7 @@ export async function checkRateLimit(
     const windowStart = now - windowMs
 
     // Pipeline: prune old entries → count → add new entry → set TTL
-    // @vercel/kv uses HTTP-based Redis (Upstash) which doesn't support
+    // @upstash/redis uses HTTP-based Redis (Upstash) which doesn't support
     // traditional multi/exec. We use pipeline() for batching.
     const pipeline = kv.pipeline()
     pipeline.zremrangebyscore(redisKey, 0, windowStart)

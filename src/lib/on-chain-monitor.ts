@@ -20,7 +20,7 @@
 
 import { createPublicClient, http, keccak256, toBytes, type PublicClient, type Log } from 'viem'
 import { mainnet } from 'viem/chains'
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { FEE_COLLECTOR_ADDRESS } from './constants'
 import { ORDER_EXECUTOR_ADDRESS } from './order-engine/config'
 import { emitTransitionAlert } from './alert-wrapper'

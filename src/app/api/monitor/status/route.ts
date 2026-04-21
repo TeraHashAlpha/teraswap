@@ -14,7 +14,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { getAllStatuses } from '@/lib/source-state-machine'
 
 export const dynamic = 'force-dynamic'

@@ -12,7 +12,7 @@
  * sends from this module — see I-02 audit finding.
  */
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { MONITORED_ENDPOINTS } from './monitored-endpoints'
 import { runHealthCheck } from './health-check'
 import {

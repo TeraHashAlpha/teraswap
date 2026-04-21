@@ -19,7 +19,7 @@
  *   teraswap:source-state:index     — Redis SET of all known source IDs
  */
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { emitTransitionAlert } from './alert-wrapper'
 import { isP0Reason } from './p0-reasons'
 import thresholdsJson from '../../data/source-thresholds.json'

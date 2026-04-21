@@ -17,7 +17,7 @@
  * state transitions are processed.
  */
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { emitTransitionAlert } from './alert-wrapper'
 import type { SourceStatus } from './source-state-machine'
 

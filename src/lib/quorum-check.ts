@@ -23,7 +23,7 @@
  * @internal — server-only module.
  */
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { WETH_ADDRESS } from './constants'
 import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'

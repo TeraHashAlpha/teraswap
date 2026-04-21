@@ -18,7 +18,7 @@
 
 import { createPublicClient, http, parseAbi, formatUnits, type PublicClient, type Log } from 'viem'
 import { mainnet } from 'viem/chains'
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { emitTransitionAlert } from './alert-wrapper'
 import { forceDisable } from './source-state-machine'
 

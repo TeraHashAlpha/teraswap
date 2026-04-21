@@ -9,7 +9,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 import { isInGracePeriodAsync } from '@/lib/grace-period'
 
 export const dynamic = 'force-dynamic'

@@ -13,7 +13,7 @@
  * heartbeat endpoint (to report healthy during maintenance).
  */
 
-import { kv } from '@vercel/kv'
+import { kv } from '@/lib/kv'
 
 /** Parse an ISO timestamp, return epoch ms or 0 if invalid/empty. */
 function parseGraceTs(value?: string | null): number {
