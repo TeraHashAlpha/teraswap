@@ -19,7 +19,7 @@ jobs:
       - name: Check monitoring heartbeat
         run: |
           # [API-H-01] Public heartbeat returns only: healthy, ageSeconds, tickFresh
-          RESPONSE=$(curl -sf --max-time 10 https://teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"ageSeconds":-1,"tickFresh":false}')
+          RESPONSE=$(curl -sfL --max-time 10 https://www.teraswap.app/api/monitor/heartbeat || echo '{"healthy":false,"ageSeconds":-1,"tickFresh":false}')
           HEALTHY=$(echo "$RESPONSE" | jq -r '.healthy')
           AGE=$(echo "$RESPONSE" | jq -r '.ageSeconds // "N/A"')
           TICK_FRESH=$(echo "$RESPONSE" | jq -r '.tickFresh // false')
