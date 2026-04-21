@@ -8,7 +8,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 // Mock KV (telegram.ts imports alert-wrapper which imports kv)
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: {
     get: vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue(undefined),

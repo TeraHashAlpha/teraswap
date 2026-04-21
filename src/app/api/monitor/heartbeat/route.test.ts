@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock KV
 const mockKvGet = vi.fn()
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: { get: (...args: unknown[]) => mockKvGet(...args) },
 }))
 

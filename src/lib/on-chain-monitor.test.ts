@@ -36,7 +36,7 @@ const mockKvSet = vi.fn().mockResolvedValue(undefined)
 const mockKvGet = vi.fn().mockResolvedValue(null)
 const mockKvIncr = vi.fn().mockResolvedValue(5) // defaults to trigger (5 % 5 === 0)
 
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: {
     set: (...args: unknown[]) => mockKvSet(...args),
     get: (...args: unknown[]) => mockKvGet(...args),

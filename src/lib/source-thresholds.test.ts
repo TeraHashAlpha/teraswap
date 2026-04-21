@@ -22,7 +22,7 @@ const mockPipelineSadd = vi.fn((_key: string, id: string) => { kvSets.add(id) })
 const mockPipelineExec = vi.fn(async () => [])
 const mockPipelineDel = vi.fn()
 
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: {
     get: (...args: unknown[]) => mockKvGet(...(args as [string])),
     set: (...args: unknown[]) => mockKvSet(...(args as [string, unknown])),

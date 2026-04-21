@@ -16,12 +16,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// ── Mock @vercel/kv before any import that uses it ─────────────
+// ── Mock @/lib/kv before any import that uses it ─────────────
 
 const mockKvGet = vi.fn()
 const mockKvSet = vi.fn()
 
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: {
     get: (...args: unknown[]) => mockKvGet(...args),
     set: (...args: unknown[]) => mockKvSet(...args),

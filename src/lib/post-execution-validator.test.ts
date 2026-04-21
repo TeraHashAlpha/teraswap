@@ -30,7 +30,7 @@ vi.mock('viem', async () => {
 const mockKvSet = vi.fn().mockResolvedValue(undefined)
 const mockKvGet = vi.fn().mockResolvedValue(null)
 
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: {
     set: (...args: unknown[]) => mockKvSet(...args),
     get: (...args: unknown[]) => mockKvGet(...args),

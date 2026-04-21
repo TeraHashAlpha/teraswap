@@ -24,7 +24,7 @@ const mockPipelineSet = vi.fn()
 const mockPipelineSadd = vi.fn()
 const mockPipelineExec = vi.fn(async () => [])
 
-vi.mock('@vercel/kv', () => ({
+vi.mock('@/lib/kv', () => ({
   kv: {
     get: (...args: unknown[]) => mockKvGet(...(args as [string])),
     smembers: (...args: unknown[]) => mockKvSmembers(...(args as [string])),
