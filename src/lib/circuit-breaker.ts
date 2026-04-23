@@ -1,14 +1,17 @@
 /**
- * Automated circuit breaker — P46.
+ * Automated circuit breaker — P46 + [H-03] alert-and-halt.
  *
  * Detects mass source disablement and triggers a systemic P0 alert.
  * Two trigger conditions:
  *   1. Majority disabled: ≥6 of total sources currently disabled.
  *   2. Rapid cascade:    ≥4 sources disabled within a 10-minute window.
  *
- * Alert-only mechanism — does NOT automatically pause routing or alter
- * individual source states. Automatic swap halt is documented as a
- * future enhancement requiring manual override design.
+ * On trip:
+ *   - Writes audit trail (30-day TTL)
+ *   - Sets trigger cooldown (15min TTL, suppresses re-alert spam)
+ *   - Sets system halt flag (NO TTL — requires manual clearance via
+ *     Telegram /cleartrip). Halted system returns 503 from /api/quote
+ *     and /api/swap until cleared. Monitoring endpoints keep running.
  *
  * Cooldown: after triggering, suppresses re-trigger for 15 minutes
  * (prevents alert storm during prolonged outage). Cooldown tracked in KV.
@@ -39,6 +42,13 @@ export interface CircuitBreakerTrip {
   reason: string
 }
 
+/** System halt flag — persisted without TTL, cleared manually via /cleartrip. */
+export interface CircuitBreakerHalt {
+  timestamp: string
+  reason: string
+  disabledSources: string[]
+}
+
 // ── Constants ────────────────────────────────────────────
 
 /** ≥6 disabled = majority trip */
@@ -53,6 +63,7 @@ const COOLDOWN_MS = 15 * 60 * 1000
 /** KV keys */
 const LAST_TRIP_KEY = 'teraswap:circuit-breaker:last-trip'
 const COOLDOWN_KEY = 'teraswap:circuit-breaker:cooldown'
+const HALT_KEY = 'teraswap:circuit-breaker:halt'
 
 // ── Core evaluation ──────────────────────────────────────
 
@@ -142,10 +153,11 @@ export async function executeTrip(result: CircuitBreakerResult): Promise<void> {
     reason: result.triggerReason,
   }
 
-  // Write audit trail + cooldown in parallel
+  // Write audit trail + cooldown + halt flag in parallel
   await Promise.allSettled([
     writeAuditTrail(trip),
     setCooldown(),
+    setHaltFlag(result),
   ])
 
   // Emit systemic P0 alert via full fan-out
@@ -211,6 +223,67 @@ async function setCooldown(): Promise<void> {
   }
 }
 
+/**
+ * Set the system halt flag — persisted WITHOUT TTL.
+ * Must be cleared manually via Telegram /cleartrip (calls clearHalt).
+ */
+async function setHaltFlag(result: CircuitBreakerResult): Promise<void> {
+  const halt: CircuitBreakerHalt = {
+    timestamp: new Date().toISOString(),
+    reason: result.triggerReason ?? 'unknown',
+    disabledSources: result.disabledSources,
+  }
+  try {
+    // Intentionally no `ex` option — requires manual clearance.
+    await kv.set(HALT_KEY, halt)
+  } catch (err) {
+    console.warn('[CIRCUIT-BREAKER] Halt flag set failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+// ── System halt gates ────────────────────────────────────
+
+/**
+ * Check whether the system is currently halted by the circuit breaker.
+ *
+ * Called from /api/quote and /api/swap BEFORE rate limiting to return
+ * 503 to clients during a halt. Fails-open on KV error (returns false)
+ * to match the rest of the circuit breaker: if the underlying state
+ * store is unreachable, availability is preferred over partial detection.
+ */
+export async function isSystemHalted(): Promise<boolean> {
+  try {
+    const halt = await kv.get<CircuitBreakerHalt>(HALT_KEY)
+    return halt != null
+  } catch (err) {
+    console.warn('[CIRCUIT-BREAKER] Halt check KV read failed (allowing traffic):', err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
+/**
+ * Read the current halt payload (for diagnostics / 503 response body).
+ * Returns null if the system is not halted or KV is unreachable.
+ */
+export async function getHaltInfo(): Promise<CircuitBreakerHalt | null> {
+  try {
+    return await kv.get<CircuitBreakerHalt>(HALT_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Clear the system halt flag — resumes swap routing.
+ *
+ * Called by the admin /cleartrip Telegram command after an operator
+ * has verified the underlying cause is resolved. Does NOT reset the
+ * cooldown or audit trail (keep those for forensics).
+ */
+export async function clearHalt(): Promise<void> {
+  await kv.del(HALT_KEY)
+}
+
 // ── Read last trip (for debugging/admin) ─────────────────
 
 export async function getLastTrip(): Promise<CircuitBreakerTrip | null> {
@@ -230,4 +303,5 @@ export const _constants = {
   COOLDOWN_MS,
   LAST_TRIP_KEY,
   COOLDOWN_KEY,
+  HALT_KEY,
 } as const

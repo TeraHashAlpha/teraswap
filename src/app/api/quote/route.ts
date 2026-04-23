@@ -2,6 +2,21 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { fetchMetaQuote } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { isSystemHalted } from '@/lib/circuit-breaker'
+
+/**
+ * Shared 503 response for when the circuit breaker has halted routing.
+ * Returns Retry-After: 300 (5 min) so clients back off without hammering.
+ */
+function haltResponse(): NextResponse {
+  return NextResponse.json(
+    { error: 'System temporarily paused for safety. Please try again later.', halted: true },
+    {
+      status: 503,
+      headers: { 'Retry-After': '300' },
+    },
+  )
+}
 
 /**
  * Server-side proxy for meta-quote requests.
@@ -11,6 +26,9 @@ import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
  * KyberSwap and ParaSwap happen to allow browser CORS, but most do not.
  */
 export async function GET(req: NextRequest) {
+  // [H-03] Circuit breaker halt — short-circuit before rate limiting
+  if (await isSystemHalted()) return haltResponse()
+
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
   const rateCheck = await checkRateLimit(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
   if (!rateCheck.allowed) {
@@ -65,6 +83,9 @@ export async function GET(req: NextRequest) {
 
 // Also support POST for larger payloads (future-proofing)
 export async function POST(req: NextRequest) {
+  // [H-03] Circuit breaker halt — short-circuit before rate limiting
+  if (await isSystemHalted()) return haltResponse()
+
   const postIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
   const postRateCheck = await checkRateLimit(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
   if (!postRateCheck.allowed) {

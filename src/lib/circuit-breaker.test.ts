@@ -11,6 +11,8 @@ import {
   evaluateCircuitBreaker,
   checkCircuitBreaker,
   isInCooldown,
+  isSystemHalted,
+  clearHalt,
   _constants,
   type CircuitBreakerResult,
 } from './circuit-breaker'
@@ -20,11 +22,13 @@ import type { SourceStatus } from './source-state-machine'
 
 const mockKvSet = vi.fn().mockResolvedValue(undefined)
 const mockKvGet = vi.fn().mockResolvedValue(null)
+const mockKvDel = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/lib/kv', () => ({
   kv: {
     set: (...args: unknown[]) => mockKvSet(...args),
     get: (...args: unknown[]) => mockKvGet(...args),
+    del: (...args: unknown[]) => mockKvDel(...args),
   },
 }))
 
@@ -301,5 +305,95 @@ describe('isInCooldown', () => {
   it('returns false (fail-open) when KV read fails', async () => {
     mockKvGet.mockRejectedValue(new Error('KV unavailable'))
     expect(await isInCooldown()).toBe(false)
+  })
+})
+
+// ── [H-03] System halt flag ─────────────────────────────
+
+describe('system halt flag', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockKvGet.mockResolvedValue(null)
+    mockKvSet.mockResolvedValue(undefined)
+    mockKvDel.mockResolvedValue(undefined)
+  })
+
+  it('writes halt flag to KV when circuit breaker trips', async () => {
+    const statuses = makeSources(5, 6)
+    await checkCircuitBreaker(statuses)
+
+    const haltCall = mockKvSet.mock.calls.find(c => c[0] === _constants.HALT_KEY)
+    expect(haltCall).toBeDefined()
+  })
+
+  it('halt flag has NO TTL (requires manual clearance)', async () => {
+    const statuses = makeSources(5, 6)
+    await checkCircuitBreaker(statuses)
+
+    const haltCall = mockKvSet.mock.calls.find(c => c[0] === _constants.HALT_KEY)
+    expect(haltCall).toBeDefined()
+    // kv.set(HALT_KEY, value) is called with exactly 2 args — no options object.
+    expect(haltCall!.length).toBe(2)
+    expect(haltCall![2]).toBeUndefined()
+  })
+
+  it('halt flag payload contains timestamp, reason, and disabled sources', async () => {
+    const statuses = makeSources(5, 6)
+    await checkCircuitBreaker(statuses)
+
+    const haltCall = mockKvSet.mock.calls.find(c => c[0] === _constants.HALT_KEY)
+    expect(haltCall![1]).toMatchObject({
+      timestamp: expect.any(String),
+      reason: expect.stringContaining('majority'),
+      disabledSources: expect.arrayContaining(['source-disabled-0']),
+    })
+    expect((haltCall![1] as { disabledSources: string[] }).disabledSources).toHaveLength(6)
+  })
+
+  it('halt flag NOT written when circuit breaker does not trip', async () => {
+    const statuses = makeSources(8, 3)
+    await checkCircuitBreaker(statuses)
+
+    const haltCall = mockKvSet.mock.calls.find(c => c[0] === _constants.HALT_KEY)
+    expect(haltCall).toBeUndefined()
+  })
+
+  it('halt flag NOT written when suppressed by cooldown', async () => {
+    mockKvGet.mockImplementation(async (key: string) => {
+      if (key === _constants.COOLDOWN_KEY) return Date.now() - 5 * 60 * 1000
+      return null
+    })
+
+    const statuses = makeSources(5, 6)
+    await checkCircuitBreaker(statuses)
+
+    const haltCall = mockKvSet.mock.calls.find(c => c[0] === _constants.HALT_KEY)
+    expect(haltCall).toBeUndefined()
+  })
+
+  it('isSystemHalted returns true when halt flag present', async () => {
+    mockKvGet.mockImplementation(async (key: string) => {
+      if (key === _constants.HALT_KEY) {
+        return { timestamp: '2026-04-23T00:00:00Z', reason: 'test-trip', disabledSources: ['a', 'b'] }
+      }
+      return null
+    })
+    expect(await isSystemHalted()).toBe(true)
+  })
+
+  it('isSystemHalted returns false when halt flag absent', async () => {
+    mockKvGet.mockResolvedValue(null)
+    expect(await isSystemHalted()).toBe(false)
+  })
+
+  it('isSystemHalted fails-open (returns false) on KV error', async () => {
+    mockKvGet.mockRejectedValue(new Error('KV unavailable'))
+    expect(await isSystemHalted()).toBe(false)
+  })
+
+  it('clearHalt deletes the halt key', async () => {
+    await clearHalt()
+    expect(mockKvDel).toHaveBeenCalledTimes(1)
+    expect(mockKvDel).toHaveBeenCalledWith(_constants.HALT_KEY)
   })
 })

@@ -38,6 +38,7 @@ import {
 import type { QuorumCheckResult } from '@/lib/quorum-check'
 import { escapeHtml } from '@/lib/alert-channels/utils'
 import { isP0Reason } from '@/lib/p0-reasons'
+import { clearHalt, getHaltInfo } from '@/lib/circuit-breaker'
 import type { AlertPayload } from '@/lib/alert-wrapper'
 import { sendTelegramAlert } from '@/lib/alert-channels/telegram'
 import { sendEmailAlert } from '@/lib/alert-channels/email'
@@ -456,6 +457,26 @@ async function handleLock(args: string, userId: number): Promise<string> {
   return `\u{1F512} <b>${escapeHtml(sourceId)}</b> LOCKED.\nReason: ${escapeHtml(fullReason)}\n\n<i>P0 \u2014 auto-recovery blocked. Use <code>/activate ${escapeHtml(sourceId)} confirm</code> to unlock.</i>`
 }
 
+async function handleClearTrip(userId: number): Promise<string> {
+  if (!isAdmin(userId)) {
+    return `\u26D4 Admin-only command. Your ID: ${userId}`
+  }
+
+  try {
+    const before = await getHaltInfo()
+    if (!before) {
+      return '\u2139\uFE0F No active circuit breaker halt. Swap routing is already running normally.'
+    }
+
+    await clearHalt()
+
+    const reason = escapeHtml(before.reason)
+    return `\u2705 Circuit breaker halt cleared. Swap routing resumed.\n\n<i>Cleared halt triggered at ${before.timestamp}\nReason: ${reason}</i>`
+  } catch (err) {
+    return `Failed to clear halt: ${err instanceof Error ? err.message : String(err)}`
+  }
+}
+
 async function handleGrace(args: string, userId: number): Promise<string> {
   if (!isAdmin(userId)) {
     return `\u26D4 Admin-only command. Your ID: ${userId}`
@@ -493,6 +514,7 @@ function handleHelp(): string {
     '/lock {id} {reason} \u2014 Permanently disable source (P0, no auto-recovery)',
     '/activate {id} \u2014 Re-activate source',
     '/grace {minutes} \u2014 Set maintenance grace period',
+    '/cleartrip \u2014 Clear circuit breaker halt (re-enable swap routing)',
   ].join('\n')
 }
 
@@ -537,6 +559,8 @@ async function routeCommand(
       return handleActivate(args, userId)
     case 'grace':
       return handleGrace(args, userId)
+    case 'cleartrip':
+      return handleClearTrip(userId)
     case 'help':
     case 'start':
       return handleHelp()

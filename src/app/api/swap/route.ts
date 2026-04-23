@@ -5,6 +5,7 @@ import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { isSystemHalted } from '@/lib/circuit-breaker'
 
 /**
  * Server-side proxy for swap calldata requests.
@@ -17,6 +18,17 @@ import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 const MAX_BODY_SIZE = 10_000 // 10KB
 
 export async function POST(req: NextRequest) {
+  // [H-03] Circuit breaker halt — short-circuit before rate limiting
+  if (await isSystemHalted()) {
+    return NextResponse.json(
+      { error: 'System temporarily paused for safety. Please try again later.', halted: true },
+      {
+        status: 503,
+        headers: { 'Retry-After': '300' },
+      },
+    )
+  }
+
   // [Audit B-06] Rate limiting by IP — persistent via Vercel KV
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     || req.headers.get('x-real-ip')
