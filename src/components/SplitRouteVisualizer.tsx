@@ -104,6 +104,14 @@ export default function SplitRouteVisualizer({
         </button>
       </div>
 
+      {/* [H-02] Non-atomicity + per-leg MEV warning — only when split routing is ON */}
+      {useSplit && (
+        <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          <span className="font-semibold">⚠️ Non-atomic execution:</span> Split routes execute as separate transactions.
+          If one leg fails, you may end up with a partial swap. Each leg is independently visible to MEV searchers.
+        </div>
+      )}
+
       {/* Split visualization bar */}
       <div className="mb-2 flex h-6 w-full overflow-hidden rounded-lg">
         {bestSplit.legs.map((leg, i) => (
