@@ -62,7 +62,9 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
         address indexed router,
         address tokenIn,
         uint256 totalAmount,
-        uint256 feeAmount
+        uint256 feeAmount,
+        address tokenOut,
+        uint256 outputAmount
     );
     event Paused(address indexed admin);
     event Unpaused(address indexed admin);
@@ -88,6 +90,8 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     error TimelockHashMismatch();
     error AlreadyBootstrapped();
     error ETHNotAccepted();
+    /// @notice [H-04] Router returned less than the user's declared minimumOutput
+    error InsufficientOutput(uint256 actual, uint256 minimum);
 
     constructor(address _feeRecipient, address _admin) {
         if (_feeRecipient == address(0) || _admin == address(0)) revert ZeroAddress();
@@ -175,12 +179,22 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     /// @notice Swap native ETH with fee collection
     /// @param router Target DEX router contract
     /// @param routerData Encoded swap calldata for the router
+    /// @param tokenOut Output token address (address(0) for ETH — only meaningful for circular refunds)
+    /// @param minimumOutput Minimum tokens the user expects to receive; 0 disables the check
     function swapETHWithFee(
         address router,
-        bytes calldata routerData
+        bytes calldata routerData,
+        address tokenOut,
+        uint256 minimumOutput
     ) external payable nonReentrant whenNotPaused {
         if (msg.value == 0) revert ZeroAmount();
         if (!whitelistedRouters[router]) revert RouterNotWhitelisted();
+
+        // [H-04] Snapshot user's output balance BEFORE router call
+        uint256 ethBefore = msg.sender.balance;
+        uint256 tokenOutBefore = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(msg.sender)
+            : 0;
 
         uint256 fee = (msg.value * FEE_BPS) / BPS_DENOMINATOR;
         uint256 netValue = msg.value - fee;
@@ -202,7 +216,18 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
             if (!refundOk) revert RefundFailed();
         }
 
-        emit SwapWithFee(msg.sender, router, address(0), msg.value, fee);
+        // [H-04] Validate output AFTER router call + refunds
+        uint256 actualOutput;
+        if (tokenOut == address(0)) {
+            actualOutput = msg.sender.balance - ethBefore;
+        } else {
+            actualOutput = IERC20(tokenOut).balanceOf(msg.sender) - tokenOutBefore;
+        }
+        if (minimumOutput > 0 && actualOutput < minimumOutput) {
+            revert InsufficientOutput(actualOutput, minimumOutput);
+        }
+
+        emit SwapWithFee(msg.sender, router, address(0), msg.value, fee, tokenOut, actualOutput);
     }
 
     /// @notice Swap ERC-20 tokens with fee collection
@@ -210,14 +235,24 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
     /// @param totalAmount Total amount to pull from user (includes fee)
     /// @param router Target DEX router contract
     /// @param routerData Encoded swap calldata for the router
+    /// @param tokenOut Output token address (address(0) for ETH)
+    /// @param minimumOutput Minimum tokens the user expects to receive; 0 disables the check
     function swapTokenWithFee(
         address token,
         uint256 totalAmount,
         address router,
-        bytes calldata routerData
+        bytes calldata routerData,
+        address tokenOut,
+        uint256 minimumOutput
     ) external nonReentrant whenNotPaused {
         if (totalAmount == 0) revert ZeroAmount();
         if (!whitelistedRouters[router]) revert RouterNotWhitelisted();
+
+        // [H-04] Snapshot user's output balance BEFORE any state changes
+        uint256 ethBefore = msg.sender.balance;
+        uint256 tokenOutBefore = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(msg.sender)
+            : 0;
 
         uint256 fee = (totalAmount * FEE_BPS) / BPS_DENOMINATOR;
         uint256 netAmount = totalAmount - fee;
@@ -252,7 +287,18 @@ contract TeraSwapFeeCollector is ReentrancyGuard {
             if (!refundOk) revert RefundFailed();
         }
 
-        emit SwapWithFee(msg.sender, router, token, totalAmount, fee);
+        // [H-04] Validate output AFTER router call + refunds
+        uint256 actualOutput;
+        if (tokenOut == address(0)) {
+            actualOutput = msg.sender.balance - ethBefore;
+        } else {
+            actualOutput = IERC20(tokenOut).balanceOf(msg.sender) - tokenOutBefore;
+        }
+        if (minimumOutput > 0 && actualOutput < minimumOutput) {
+            revert InsufficientOutput(actualOutput, minimumOutput);
+        }
+
+        emit SwapWithFee(msg.sender, router, token, totalAmount, fee, tokenOut, actualOutput);
     }
 
     /// @notice [Audit F-09] Sweep with admin-only + pause check (prevents instant drain)
