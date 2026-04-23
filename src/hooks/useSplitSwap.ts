@@ -212,13 +212,29 @@ export function useSplitSwap(
 
         let txHash: `0x${string}`
 
+        // [H-04] Per-leg FeeCollector minimumOutput derived from leg toAmount + user slippage.
+        // ETH output uses address(0); otherwise the ERC-20 output token address.
+        const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+        const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
+        const legMinOutput = slippageBpsBn >= 10_000n
+          ? 0n
+          : (BigInt(swapData.toAmount) * (10_000n - slippageBpsBn)) / 10_000n
+        const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut)
+          ? ZERO_ADDRESS
+          : (tokenOut.address as `0x${string}`)
+
         if (routeViaFeeCollector) {
           // Route through FeeCollector
           if (isNativeETH(tokenIn)) {
             const feeCollectorData = encodeFunctionData({
               abi: FEE_COLLECTOR_ABI,
               functionName: 'swapETHWithFee',
-              args: [swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`],
+              args: [
+                swapData.tx.to as `0x${string}`,
+                swapData.tx.data as `0x${string}`,
+                tokenOutForFc,
+                legMinOutput,
+              ],
             })
             txHash = await sendTransactionAsync({
               to: FEE_COLLECTOR_ADDRESS as `0x${string}`,
@@ -235,6 +251,8 @@ export function useSplitSwap(
                 legAmount,
                 swapData.tx.to as `0x${string}`,
                 swapData.tx.data as `0x${string}`,
+                tokenOutForFc,
+                legMinOutput,
               ],
             })
             txHash = await sendTransactionAsync({

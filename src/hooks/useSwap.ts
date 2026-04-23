@@ -137,6 +137,8 @@ export interface PendingSwapData {
   swapToAmount: string
   /** Input amount in wei */
   rawAmountBn: bigint
+  /** [H-04] FeeCollector-enforced minimum output (raw wei). 0n when not routed via FeeCollector. */
+  minimumOutput: bigint
   /** Timestamp when swap flow started */
   swapStartTime: number
 }
@@ -305,6 +307,21 @@ export function useSwap(
       // For FeeCollector: txValue is not used (FeeCollector gets full rawAmountBn)
       const txValue = isNativeIn && apiValue === 0n ? apiAmountBn : apiValue
 
+      // ── [H-04] Compute FeeCollector-enforced minimumOutput ──
+      // minimumOutput = swap toAmount * (10000 - slippageBps) / 10000.
+      // `slippage` is a percentage (0.5 = 0.5%), so slippageBps = slippage * 100.
+      // The contract snapshots the user's tokenOut balance pre-swap and reverts
+      // via InsufficientOutput(actual, minimum) if the net delta is below this.
+      // For ETH output, pass address(0); otherwise the ERC-20 output token address.
+      const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+      const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
+      const minimumOutput = slippageBpsBn >= 10_000n
+        ? 0n
+        : (BigInt(swapData.toAmount) * (10_000n - slippageBpsBn)) / 10_000n
+      const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut!)
+        ? ZERO_ADDRESS
+        : (tokenOut!.address as `0x${string}`)
+
       // ── FeeCollector routing ──
       // All sources (except 0x/CoW) route through FeeCollector contract.
       // FeeCollector takes 0.1% fee and forwards the net amount to the DEX router.
@@ -321,8 +338,8 @@ export function useSwap(
               abi: FEE_COLLECTOR_ABI,
               functionName: isNativeIn ? 'swapETHWithFee' : 'swapTokenWithFee',
               args: isNativeIn
-                ? [swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`]
-                : [tokenIn!.address as `0x${string}`, rawAmountBn, swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`],
+                ? [swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`, tokenOutForFc, minimumOutput]
+                : [tokenIn!.address as `0x${string}`, rawAmountBn, swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`, tokenOutForFc, minimumOutput],
             })
           : (swapData.tx.data as `0x${string}`)
         const simValue = routeViaFeeCollector && isNativeIn
@@ -372,7 +389,7 @@ export function useSwap(
           const feeCollectorCalldata = encodeFunctionData({
             abi: FEE_COLLECTOR_ABI,
             functionName: 'swapETHWithFee',
-            args: [router, routerData],
+            args: [router, routerData, tokenOutForFc, minimumOutput],
           })
           pendingTxTo = FEE_COLLECTOR_ADDRESS
           pendingTxData = feeCollectorCalldata
@@ -410,6 +427,8 @@ export function useSwap(
               rawAmountBn,
               router,
               routerData,
+              tokenOutForFc,
+              minimumOutput,
             ],
           })
           pendingTxTo = FEE_COLLECTOR_ADDRESS
@@ -461,6 +480,8 @@ export function useSwap(
         routeType: pendingRouteType,
         swapToAmount: swapData.toAmount,
         rawAmountBn,
+        // [H-04] Only populated when routed via FeeCollector — 0x direct and CoW don't apply.
+        minimumOutput: routeViaFeeCollector ? minimumOutput : 0n,
         swapStartTime,
       })
       setStatus('confirming')

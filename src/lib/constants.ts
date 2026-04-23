@@ -136,6 +136,9 @@ export const DISABLED_SOURCES: Record<string, string> = {
 }
 
 // FeeCollector ABI (only the functions we call from the frontend)
+// [H-04] swapETHWithFee / swapTokenWithFee now take tokenOut + minimumOutput
+// and the contract reverts with InsufficientOutput if the user's post-swap
+// balance delta is below the declared minimum.
 export const FEE_COLLECTOR_ABI = [
   {
     name: 'swapETHWithFee',
@@ -144,6 +147,8 @@ export const FEE_COLLECTOR_ABI = [
     inputs: [
       { name: 'router', type: 'address' },
       { name: 'routerData', type: 'bytes' },
+      { name: 'tokenOut', type: 'address' },
+      { name: 'minimumOutput', type: 'uint256' },
     ],
     outputs: [],
   },
@@ -156,8 +161,32 @@ export const FEE_COLLECTOR_ABI = [
       { name: 'totalAmount', type: 'uint256' },
       { name: 'router', type: 'address' },
       { name: 'routerData', type: 'bytes' },
+      { name: 'tokenOut', type: 'address' },
+      { name: 'minimumOutput', type: 'uint256' },
     ],
     outputs: [],
+  },
+  {
+    name: 'SwapWithFee',
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'router', type: 'address', indexed: true },
+      { name: 'tokenIn', type: 'address', indexed: false },
+      { name: 'totalAmount', type: 'uint256', indexed: false },
+      { name: 'feeAmount', type: 'uint256', indexed: false },
+      { name: 'tokenOut', type: 'address', indexed: false },
+      { name: 'outputAmount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'InsufficientOutput',
+    type: 'error',
+    inputs: [
+      { name: 'actual', type: 'uint256' },
+      { name: 'minimum', type: 'uint256' },
+    ],
   },
 ] as const
 

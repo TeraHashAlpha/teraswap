@@ -127,7 +127,7 @@ describe('[H-01] in-memory fallback on KV failure', () => {
     await checkRateLimit('k1', 20, 60_000)
     await checkRateLimit('k2', 20, 60_000)
 
-    expect(warnSpy.mock.calls.some(c => /in-memory fallback/.test(String(c[0])))).toBe(true)
+    expect(warnSpy.mock.calls.some((c: unknown[]) => /in-memory fallback/.test(String(c[0])))).toBe(true)
   })
 
   it('logs BLOCKED warning when fallback limit exceeded', async () => {
@@ -139,7 +139,7 @@ describe('[H-01] in-memory fallback on KV failure', () => {
     const blocked = await checkRateLimit('blocker', 4, 60_000)
 
     expect(blocked.allowed).toBe(false)
-    expect(warnSpy.mock.calls.some(c => /BLOCKED/.test(String(c[0])))).toBe(true)
+    expect(warnSpy.mock.calls.some((c: unknown[]) => /BLOCKED/.test(String(c[0])))).toBe(true)
   })
 
   it('resets kvFailureAlerted flag when KV recovers', async () => {
@@ -152,7 +152,7 @@ describe('[H-01] in-memory fallback on KV failure', () => {
     mockPipelineExec.mockResolvedValueOnce(okPipeline(0))
     await checkRateLimit('k', 20, 60_000)
     expect(_internal.isKvFailureAlerted()).toBe(false)
-    expect(logSpy.mock.calls.some(c => /KV recovered/.test(String(c[0])))).toBe(true)
+    expect(logSpy.mock.calls.some((c: unknown[]) => /KV recovered/.test(String(c[0])))).toBe(true)
   })
 
   it('error level logged again after recovery + new outage', async () => {

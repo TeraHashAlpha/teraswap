@@ -29,6 +29,8 @@ interface TransactionPreviewProps {
   amountInDisplay: string
   expectedOutput: string
   routeViaFeeCollector: boolean
+  /** [H-04] FeeCollector-enforced minimum output in raw wei. Only meaningful when routeViaFeeCollector. */
+  minimumOutput?: bigint
   onConfirm: () => void
   onCancel: () => void
 }
@@ -81,6 +83,7 @@ export default function TransactionPreview({
   amountInDisplay,
   expectedOutput,
   routeViaFeeCollector,
+  minimumOutput,
   onConfirm,
   onCancel,
 }: TransactionPreviewProps) {
@@ -111,6 +114,23 @@ export default function TransactionPreview({
   // Formatted decoded amounts
   const _decodedAmountIn = formatDecodedAmount(preview.amountIn, tokenIn, preview.tokenIn)
   const decodedMinOut = formatDecodedAmount(preview.amountOutMin, tokenOut, preview.tokenOut)
+
+  // [H-04] FeeCollector-enforced minimum output — reverts with InsufficientOutput if not met.
+  // Takes precedence over the router-internal minOut decoded from calldata, because this is
+  // the value the FeeCollector contract actually checks against the user's balance delta.
+  const enforcedMinOutDisplay = useMemo(() => {
+    if (!routeViaFeeCollector || minimumOutput == null || minimumOutput <= 0n || !tokenOut) return null
+    try {
+      const val = formatUnits(minimumOutput, tokenOut.decimals)
+      const num = parseFloat(val)
+      if (num === 0) return null
+      return num < 0.001
+        ? `<0.001 ${tokenOut.symbol}`
+        : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${tokenOut.symbol}`
+    } catch {
+      return null
+    }
+  }, [routeViaFeeCollector, minimumOutput, tokenOut])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Review transaction">
@@ -164,12 +184,22 @@ export default function TransactionPreview({
                 {expectedOutput} {tokenOut?.symbol ?? ''}
               </span>
             </div>
-            {decodedMinOut && (
+            {enforcedMinOutDisplay ? (
+              // [H-04] FeeCollector-enforced minimum takes precedence — this is the value
+              // that triggers an on-chain revert if the user's balance delta is below it.
+              <div className="mt-2 flex items-center justify-between border-t border-cream-08 pt-2 text-xs">
+                <span className="flex items-center gap-1 text-cream-50">
+                  Minimum output
+                  <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success">Enforced on-chain</span>
+                </span>
+                <span className="font-mono text-cream">{enforcedMinOutDisplay}</span>
+              </div>
+            ) : decodedMinOut ? (
               <div className="mt-2 flex items-center justify-between border-t border-cream-08 pt-2 text-xs">
                 <span className="text-cream-35">Minimum output</span>
                 <span className="font-mono text-cream-50">{decodedMinOut}</span>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Recipient */}

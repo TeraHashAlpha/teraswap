@@ -733,6 +733,7 @@ export default function SwapBox() {
           amountInDisplay={displayAmountIn}
           expectedOutput={meta?.best ? formatDisplay(formatUnits(BigInt(meta.best.toAmount), tokenOut?.decimals ?? 18)) : ''}
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
+          minimumOutput={pendingSwap.minimumOutput}
           onConfirm={confirmSwap}
           onCancel={resetSwap}
         />
