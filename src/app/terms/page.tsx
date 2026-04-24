@@ -4,13 +4,11 @@ import { useRouter } from 'next/navigation'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import Header from '@/components/Header'
 import Footer from '@/components/Footer'
-import DocsPage from '@/components/DocsPage'
+import LegalPage from '@/components/LegalPage'
 
-export default function Docs() {
+export default function Terms() {
   const router = useRouter()
-  // Header logo routes back to the React-state-based home page. Footer
-  // Privacy/Terms links are now <Link> to /privacy and /terms directly,
-  // so no callback threading is needed.
+  // Header logo routes back to the React-state-based home page.
   const goHome = () => router.push('/')
 
   return (
@@ -18,7 +16,7 @@ export default function Docs() {
       <ParticleNetwork />
       <Header onLogoClick={goHome} showNav={false} />
       <main className="relative z-10 flex flex-1 flex-col">
-        <DocsPage />
+        <LegalPage type="terms" />
         <Footer />
       </main>
     </div>

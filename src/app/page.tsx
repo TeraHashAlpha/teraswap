@@ -3,7 +3,6 @@
 import { useState, useCallback } from 'react'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import LandingPage from '@/components/LandingPage'
-import LegalPage from '@/components/LegalPage'
 import Header from '@/components/Header'
 import SwapBox from '@/components/SwapBox'
 import SwapHistory from '@/components/SwapHistory'
@@ -18,9 +17,9 @@ import HelpButton from '@/components/HelpButton'
 import NotificationBanner from '@/components/NotificationBanner'
 import { playTouchMP3 } from '@/lib/sounds'
 
-// 'docs' is served as its own Next.js route (src/app/docs/page.tsx),
-// so it doesn't need to be part of the in-memory AppPage state machine.
-export type AppPage = 'landing' | 'swap' | 'privacy' | 'terms'
+// /docs, /privacy, and /terms each have their own Next.js route, so they
+// don't need to be part of the in-memory AppPage state machine.
+export type AppPage = 'landing' | 'swap'
 export type SwapMode = 'instant' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
 
 const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
@@ -60,12 +59,7 @@ export default function Home() {
     setPage('swap')
   }, [])
 
-  const footer = (
-    <Footer
-      onPrivacy={() => setPage('privacy')}
-      onTerms={() => setPage('terms')}
-    />
-  )
+  const footer = <Footer />
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -80,16 +74,6 @@ export default function Home() {
       {page === 'landing' ? (
         <main className="relative z-10 flex flex-1 flex-col">
           <LandingPage onLaunchApp={handleLaunchApp} />
-          {footer}
-        </main>
-      ) : page === 'privacy' ? (
-        <main className="relative z-10 flex flex-1 flex-col">
-          <LegalPage type="privacy" />
-          {footer}
-        </main>
-      ) : page === 'terms' ? (
-        <main className="relative z-10 flex flex-1 flex-col">
-          <LegalPage type="terms" />
           {footer}
         </main>
       ) : (
