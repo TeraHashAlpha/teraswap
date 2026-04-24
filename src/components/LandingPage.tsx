@@ -196,85 +196,180 @@ function PerformanceSection() {
           </motion.div>
         </div>
 
-        {/* Visual — Route flow diagram */}
+        {/* Visual — 11-source adapter constellation */}
         <motion.div
           initial="hidden" whileInView="visible" viewport={{ once: true }}
           variants={{ hidden: { opacity: 0, x: 40 }, visible: { opacity: 1, x: 0, transition: { duration: 0.7, delay: 0.2 } } }}
           className="relative flex flex-col items-center"
         >
-          <RouteVisualization />
+          <AdapterConstellation />
         </motion.div>
       </div>
     </section>
   )
 }
 
-// Animated route visualization (CSS-based, no Rive dependency)
-function RouteVisualization() {
-  const sources = [
-    { name: '1inch', color: '#E8D5B7' },
-    { name: 'Velora', color: '#C8B89A' },
-    { name: 'KyberSwap', color: '#E8D5B7' },
-    { name: 'Uniswap', color: '#C8B89A' },
-    { name: 'OpenOcean', color: '#E8D5B7' },
-    { name: 'SushiSwap', color: '#C8B89A' },
-    { name: 'Balancer', color: '#E8D5B7' },
-    { name: 'Curve', color: '#C8B89A' },
+// ── AdapterConstellation — 11-source orbital layout ───────
+// Central TeraSwap hub with 11 source nodes distributed on an elliptical
+// orbit. SVG draws the constellation lines (non-scaling stroke so they
+// stay crisp at any container size); HTML/React positions the nodes so
+// hover + category labels compose cleanly with the rest of the page.
+// Gentle twinkle (staggered opacity pulse) keeps motion subtle and does
+// NOT rotate the container, so text labels stay upright and legible.
+// Below the sm breakpoint, falls back to a simple vertical list.
+function AdapterConstellation() {
+  const adapters: { name: string; category: string }[] = [
+    { name: '1inch', category: 'API' },
+    { name: '0x', category: 'API' },
+    { name: 'Velora', category: 'API' },
+    { name: 'Odos', category: 'API' },
+    { name: 'KyberSwap', category: 'API' },
+    { name: 'OpenOcean', category: 'API' },
+    { name: 'SushiSwap', category: 'API' },
+    { name: 'Uniswap V3', category: 'On-chain' },
+    { name: 'Curve', category: 'On-chain' },
+    { name: 'CoW Protocol', category: 'Intent' },
+    { name: 'Balancer', category: 'Hybrid' },
   ]
 
+  // Distribute nodes on an ellipse; start at the top (-π/2) for a balanced look.
+  // Radius values are conservative (≤ ~38%) so bottom labels stay inside the
+  // container and top labels don't collide with the hub.
+  const RX = 42 // horizontal radius (%)
+  const RY = 36 // vertical radius (%) — slightly shorter to leave room for labels
+  const positions = adapters.map((_, i) => {
+    const angle = -Math.PI / 2 + (i / adapters.length) * 2 * Math.PI
+    return {
+      x: 50 + RX * Math.cos(angle),
+      y: 50 + RY * Math.sin(angle),
+      angle,
+    }
+  })
+
   return (
-    <div className="w-full max-w-sm">
-      {/* Source nodes */}
-      <div className="flex flex-col gap-3">
-        {sources.map((s, i) => (
-          <motion.div
-            key={s.name}
-            initial={{ opacity: 0, x: -20 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            transition={{ delay: 0.3 + i * 0.1, duration: 0.4 }}
-            className="flex items-center gap-3"
-          >
-            <div className="flex h-10 w-28 items-center justify-center rounded-lg border border-cream-08 bg-surface-secondary text-xs font-medium text-cream-65">
-              {s.name}
-            </div>
-            <motion.div
-              className="h-[1px] flex-1"
-              style={{ background: `linear-gradient(90deg, ${s.color}33, ${s.color}66)` }}
-              initial={{ scaleX: 0 }}
-              whileInView={{ scaleX: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.5 + i * 0.15, duration: 0.6, ease: 'easeOut' }}
+    <div className="w-full">
+      {/* Desktop: orbital constellation (sm+) */}
+      <div className="relative mx-auto hidden aspect-square w-full max-w-[520px] sm:block">
+        {/* Constellation lines — SVG with non-scaling stroke */}
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          {positions.map((p, i) => (
+            <line
+              key={i}
+              x1="50" y1="50"
+              x2={p.x} y2={p.y}
+              stroke="rgba(200,184,154,0.15)"
+              strokeWidth="0.2"
+              vectorEffect="non-scaling-stroke"
             />
-          </motion.div>
-        ))}
+          ))}
+        </svg>
+
+        {/* Central TeraSwap hub — gentle pulse */}
+        <motion.div
+          animate={{
+            boxShadow: [
+              '0 0 20px rgba(200,184,154,0.15)',
+              '0 0 44px rgba(200,184,154,0.35)',
+              '0 0 20px rgba(200,184,154,0.15)',
+            ],
+          }}
+          transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute left-1/2 top-1/2 flex h-14 w-36 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border"
+          style={{
+            borderColor: 'rgba(200,184,154,0.4)',
+            background: 'linear-gradient(135deg, rgba(200,184,154,0.1) 0%, rgba(200,184,154,0.04) 100%)',
+          }}
+        >
+          <span className="font-display text-sm font-bold" style={{ color: '#C8B89A' }}>
+            TeraSwap
+          </span>
+        </motion.div>
+
+        {/* Source nodes */}
+        {adapters.map((adapter, i) => {
+          const pos = positions[i]
+          return (
+            <div
+              key={adapter.name}
+              className="group absolute"
+              style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
+            >
+              <div className="flex flex-col items-center">
+                {/* Twinkling dot — staggered so nodes don't pulse in unison */}
+                <motion.div
+                  animate={{ opacity: [0.55, 1, 0.55] }}
+                  transition={{
+                    duration: 3 + (i % 3),
+                    repeat: Infinity,
+                    delay: i * 0.22,
+                    ease: 'easeInOut',
+                  }}
+                  className="h-3 w-3 rounded-full transition-transform group-hover:scale-150"
+                  style={{
+                    background: '#C8B89A',
+                    boxShadow: '0 0 8px rgba(200,184,154,0.4)',
+                  }}
+                />
+                <div className="mt-1.5 whitespace-nowrap text-center">
+                  <div className="text-[11px] font-medium text-cream-65 transition-all group-hover:text-cream">
+                    {adapter.name}
+                  </div>
+                  {/* Category — hidden by default, revealed on hover */}
+                  <div className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-cream-35 opacity-0 transition-opacity group-hover:opacity-100">
+                    {adapter.category}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
 
-      {/* Central engine node */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.8 }}
-        whileInView={{ opacity: 1, scale: 1 }}
-        viewport={{ once: true }}
-        transition={{ delay: 1, duration: 0.5 }}
-        className="my-4 ml-8 flex h-14 w-48 items-center justify-center rounded-xl border sm:ml-16 lg:ml-32"
-        style={{ borderColor: 'rgba(200,184,154,0.3)', background: 'linear-gradient(90deg, rgba(200,184,154,0.08), rgba(200,184,154,0.04))' }}
-      >
-        <span className="text-sm font-semibold" style={{ color: '#C8B89A' }}>TeraSwap Engine</span>
-      </motion.div>
-
-      {/* Output */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ delay: 1.3, duration: 0.4 }}
-        className="ml-8 flex items-center gap-2 sm:ml-16 lg:ml-32"
-      >
-        <div className="h-[2px] w-20" style={{ background: 'linear-gradient(90deg, #C8B89A, #4ADE80)' }} />
-        <div className="rounded-lg border px-4 py-2 text-sm font-semibold" style={{ borderColor: 'rgba(74,222,128,0.3)', background: 'rgba(74,222,128,0.05)', color: '#4ADE80' }}>
-          Best Price
+      {/* Mobile fallback (< sm): compact vertical list */}
+      <div className="block sm:hidden">
+        <div className="flex flex-col items-stretch gap-2">
+          {adapters.map((adapter, i) => (
+            <motion.div
+              key={adapter.name}
+              initial={{ opacity: 0, x: -12 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.08 + i * 0.05, duration: 0.35 }}
+              className="flex items-center justify-between gap-3 rounded-lg border border-cream-08 bg-surface-secondary px-3 py-2"
+            >
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: '#C8B89A', boxShadow: '0 0 6px rgba(200,184,154,0.5)' }}
+                />
+                <span className="text-sm font-medium text-cream">{adapter.name}</span>
+              </div>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-cream-35">
+                {adapter.category}
+              </span>
+            </motion.div>
+          ))}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.92 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.08 + adapters.length * 0.05, duration: 0.45 }}
+            className="mt-3 self-center rounded-full border px-5 py-2 text-sm font-semibold"
+            style={{
+              borderColor: 'rgba(200,184,154,0.4)',
+              background: 'linear-gradient(135deg, rgba(200,184,154,0.1) 0%, rgba(200,184,154,0.04) 100%)',
+              color: '#C8B89A',
+            }}
+          >
+            TeraSwap
+          </motion.div>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }
