@@ -1,12 +1,29 @@
 import { AGGREGATOR_APIS, CHAIN_ID, DEFAULT_SLIPPAGE } from '@/lib/constants'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
+/**
+ * Build request headers for Odos V3 endpoints.
+ *
+ * Odos retired the unauthenticated V2 API; V3 quote + assemble both require
+ * an enterprise API key served as `Authorization: Bearer ...`. If the
+ * ODOS_API_KEY env var is unset we still issue the request without the
+ * header so local dev doesn't hard-fail — the upstream will return 401 and
+ * the adapter surfaces that as a normal `Odos 401: ...` error, which lets
+ * the meta-quote engine fall through to the other 10 adapters.
+ */
+function odosHeaders(): Record<string, string> {
+  const apiKey = process.env.ODOS_API_KEY
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+  return headers
+}
+
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount } = params
   const { base } = AGGREGATOR_APIS.odos
   const res = await fetch(`${base}/sor/quote/v3`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: odosHeaders(),
     body: JSON.stringify({
       chainId: CHAIN_ID,
       inputTokens: [{ tokenAddress: src, amount }],
@@ -41,7 +58,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   // Step 1: quote via v3
   const quoteRes = await fetch(`${base}/sor/quote/v3`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: odosHeaders(),
     body: JSON.stringify({
       chainId: CHAIN_ID,
       inputTokens: [{ tokenAddress: src, amount }],
@@ -63,7 +80,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   // Step 2: assemble tx
   const assembleRes = await fetch(`${base}/sor/assemble`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: odosHeaders(),
     body: JSON.stringify({
       userAddr: from,
       pathId: quoteData.pathId,
