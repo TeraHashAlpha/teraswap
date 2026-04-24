@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import ThemeToggle from './ThemeToggle'
 import WalletModal from './WalletModal'
@@ -8,7 +9,6 @@ import WalletModal from './WalletModal'
 interface Props {
   onLogoClick?: () => void
   showNav?: boolean
-  onDocsClick?: () => void
 }
 
 const NAV_LINKS = [
@@ -18,7 +18,7 @@ const NAV_LINKS = [
   { label: 'Features', id: 'features' },
 ]
 
-export default function Header({ onLogoClick, showNav = false, onDocsClick }: Props) {
+export default function Header({ onLogoClick, showNav = false }: Props) {
   const [scrolled, setScrolled] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
   const [mobileMenu, setMobileMenu] = useState(false)
@@ -77,12 +77,12 @@ export default function Header({ onLogoClick, showNav = false, onDocsClick }: Pr
               {link.label}
             </button>
           ))}
-          <button
-            onClick={onDocsClick}
+          <Link
+            href="/docs"
             className="text-[13px] font-medium text-cream-50 transition-colors hover:text-cream"
           >
             Docs
-          </button>
+          </Link>
         </nav>
       )}
 
@@ -110,12 +110,13 @@ export default function Header({ onLogoClick, showNav = false, onDocsClick }: Pr
                 {link.label}
               </button>
             ))}
-            <button
-              onClick={() => { onDocsClick?.(); setMobileMenu(false) }}
+            <Link
+              href="/docs"
+              onClick={() => setMobileMenu(false)}
               className="text-left text-sm font-medium text-cream-65 transition-colors hover:text-cream"
             >
               Docs
-            </button>
+            </Link>
           </nav>
         </div>
       )}

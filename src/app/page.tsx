@@ -3,7 +3,6 @@
 import { useState, useCallback } from 'react'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import LandingPage from '@/components/LandingPage'
-import DocsPage from '@/components/DocsPage'
 import LegalPage from '@/components/LegalPage'
 import Header from '@/components/Header'
 import SwapBox from '@/components/SwapBox'
@@ -19,7 +18,9 @@ import HelpButton from '@/components/HelpButton'
 import NotificationBanner from '@/components/NotificationBanner'
 import { playTouchMP3 } from '@/lib/sounds'
 
-export type AppPage = 'landing' | 'swap' | 'docs' | 'privacy' | 'terms'
+// 'docs' is served as its own Next.js route (src/app/docs/page.tsx),
+// so it doesn't need to be part of the in-memory AppPage state machine.
+export type AppPage = 'landing' | 'swap' | 'privacy' | 'terms'
 export type SwapMode = 'instant' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
 
 const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
@@ -61,7 +62,6 @@ export default function Home() {
 
   const footer = (
     <Footer
-      onDocs={() => setPage('docs')}
       onPrivacy={() => setPage('privacy')}
       onTerms={() => setPage('terms')}
     />
@@ -75,17 +75,11 @@ export default function Home() {
       <Header
         onLogoClick={() => setPage('landing')}
         showNav={page === 'landing'}
-        onDocsClick={() => setPage('docs')}
       />
 
       {page === 'landing' ? (
         <main className="relative z-10 flex flex-1 flex-col">
-          <LandingPage onLaunchApp={handleLaunchApp} onDocs={() => setPage('docs')} />
-          {footer}
-        </main>
-      ) : page === 'docs' ? (
-        <main className="relative z-10 flex flex-1 flex-col">
-          <DocsPage />
+          <LandingPage onLaunchApp={handleLaunchApp} />
           {footer}
         </main>
       ) : page === 'privacy' ? (

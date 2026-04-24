@@ -1,20 +1,20 @@
 'use client'
 
+import Link from 'next/link'
 import { FEE_PERCENT } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
 
 interface Props {
-  onDocs?: () => void
   onPrivacy?: () => void
   onTerms?: () => void
 }
 
-export default function Footer({ onDocs, onPrivacy, onTerms }: Props) {
+export default function Footer({ onPrivacy, onTerms }: Props) {
   const { data: blockNumber } = useBlockNumber({ watch: true })
 
   return (
     <footer className="relative z-[1] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-cream-08 px-4 py-4 text-[11px] text-cream-35">
-      <button onClick={onDocs} className="text-cream-50 transition hover:text-cream">Docs</button>
+      <Link href="/docs" className="text-cream-50 transition hover:text-cream">Docs</Link>
       <span className="text-cream-15">|</span>
       <a href="#" className="text-cream-50 transition hover:text-cream">GitHub</a>
       <span className="text-cream-15">|</span>

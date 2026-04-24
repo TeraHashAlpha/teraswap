@@ -30,17 +30,19 @@ interface DocSection {
   icon: string
 }
 
+// Section IDs are kebab-case slugs that double as URL fragments
+// (e.g. /docs#security). They must match the `id` on each <AnimatedSection>.
 const SECTIONS: DocSection[] = [
   { id: 'overview', title: 'Overview', icon: '◈' },
   { id: 'architecture', title: 'Architecture', icon: '⬡' },
-  { id: 'sources', title: 'Liquidity Sources', icon: '◉' },
-  { id: 'routing', title: 'Smart Routing', icon: '⟁' },
+  { id: 'liquidity-sources', title: 'Liquidity Sources', icon: '◉' },
+  { id: 'smart-routing', title: 'Smart Routing', icon: '⟁' },
   { id: 'security', title: 'Security', icon: '⬢' },
   { id: 'privacy', title: 'Privacy', icon: '◍' },
-  { id: 'fees', title: 'Fee Structure', icon: '◇' },
-  { id: 'limit', title: 'Limit Orders', icon: '⊕' },
-  { id: 'sltp', title: 'Stop Loss / Take Profit', icon: '⛊' },
-  { id: 'split', title: 'Split Routing', icon: '⫘' },
+  { id: 'fee-structure', title: 'Fee Structure', icon: '◇' },
+  { id: 'limit-orders', title: 'Limit Orders', icon: '⊕' },
+  { id: 'stop-loss', title: 'Stop Loss / Take Profit', icon: '⛊' },
+  { id: 'split-routing', title: 'Split Routing', icon: '⫘' },
   { id: 'analytics', title: 'Analytics Dashboard', icon: '◫' },
   { id: 'roadmap', title: 'Roadmap', icon: '▸' },
 ]
@@ -268,7 +270,7 @@ export default function DocsPage() {
         <Divider />
 
         {/* ═══ LIQUIDITY SOURCES ═══ */}
-        <AnimatedSection id="sources">
+        <AnimatedSection id="liquidity-sources">
           <SectionTitle icon="◉" title="Liquidity Sources" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             TeraSwap integrates 11 liquidity sources across three categories: API aggregators that
@@ -308,7 +310,7 @@ export default function DocsPage() {
         <Divider />
 
         {/* ═══ SMART ROUTING ═══ */}
-        <AnimatedSection id="routing">
+        <AnimatedSection id="smart-routing">
           <SectionTitle icon="⟁" title="Smart Routing" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             The routing engine runs several optimization layers to find the true best execution:
@@ -449,7 +451,7 @@ export default function DocsPage() {
         <Divider />
 
         {/* ═══ FEES ═══ */}
-        <AnimatedSection id="fees">
+        <AnimatedSection id="fee-structure">
           <SectionTitle icon="◇" title="Fee Structure" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             TeraSwap maintains a transparent, simple fee structure with no hidden costs:
@@ -493,7 +495,7 @@ export default function DocsPage() {
         <Divider />
 
         {/* ═══ LIMIT ORDERS ═══ */}
-        <AnimatedSection id="limit">
+        <AnimatedSection id="limit-orders">
           <SectionTitle icon="⊕" title="Limit Orders" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             Set your target price and let CoW Protocol solvers execute when the market reaches your level. Zero gas fees, MEV-protected, and partially fillable. Limit orders use <strong className="text-cream">2% default slippage</strong> and are ideal for precise entry and exit targets where you want solver competition to deliver the best possible fill price.
@@ -526,7 +528,7 @@ export default function DocsPage() {
         <Divider />
 
         {/* ═══ STOP LOSS / TAKE PROFIT ═══ */}
-        <AnimatedSection id="sltp">
+        <AnimatedSection id="stop-loss">
           <SectionTitle icon="⛊" title="Stop Loss / Take Profit" />
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
             Protect your positions or lock in gains automatically. Chainlink oracles monitor prices in real-time, and when your trigger is hit, a CoW Protocol limit order is auto-submitted for MEV-protected execution.
@@ -562,7 +564,7 @@ export default function DocsPage() {
         <Divider />
 
         {/* ═══ SPLIT ROUTING ═══ */}
-        <AnimatedSection id="split">
+        <AnimatedSection id="split-routing">
           <SectionTitle icon="⫘" title="Split Routing" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             For large trades, routing 100% through a single DEX causes significant price impact.
