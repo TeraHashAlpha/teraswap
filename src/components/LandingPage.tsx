@@ -284,10 +284,10 @@ function RouteVisualization() {
 // ══════════════════════════════════════════════════════════
 
 function SecuritySection() {
-  const stats = [
-    { value: 100, suffix: '%', label: 'Front-running blocked' },
-    { value: 3, prefix: '< ', suffix: '%', label: 'Chainlink enforced deviation' },
-    { value: 0, suffix: '', label: 'IP Protected', isText: true, textValue: '🛡' },
+  const stats: { value: number; suffix: string; label: string; prefix?: string; isText?: boolean; textValue?: string }[] = [
+    { value: 7, suffix: '', label: 'Independent validation layers' },
+    { value: 29, suffix: '', label: 'Chainlink oracle price feeds' },
+    { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓' },
   ]
 
   return (
