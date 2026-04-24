@@ -280,6 +280,216 @@ function RouteVisualization() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  SECTION 03a: 7-LAYER VERIFIED EXECUTION
+// ══════════════════════════════════════════════════════════
+
+function SevenLayerSection() {
+  const LAYERS: { n: number; name: string; desc: string; badge?: string }[] = [
+    {
+      n: 1,
+      name: 'Input Validation',
+      desc: 'Address format, amount bounds, balance check, constant-time authentication',
+    },
+    {
+      n: 2,
+      name: 'Circuit Breaker',
+      desc: 'Per-source state machine — 3 failures trigger cooldown, outlier filter removes 3x median quotes',
+    },
+    {
+      n: 3,
+      name: 'Quorum Consensus',
+      desc: 'Cross-source IQR deviation detection — 3+ correlated outliers trigger automatic kill-switch',
+    },
+    {
+      n: 4,
+      name: 'Chainlink Oracle Check',
+      desc: '29 token price feeds — warns at 2%+ deviation, blocks at 3%. Staleness check every hour',
+      badge: 'PRE-SWAP',
+    },
+    {
+      n: 5,
+      name: 'Server-Side Guards',
+      desc: '19-selector swap allowlist (fail-closed), calldata recipient verification, DefiLlama price guard (above $10k)',
+    },
+    {
+      n: 6,
+      name: 'Simulation + Clear Signing',
+      desc: 'eth_call simulation catches reverts before gas is spent. TransactionPreview decodes calldata for human review',
+    },
+    {
+      n: 7,
+      name: 'Post-Execution Validation',
+      desc: 'Transfer event logs verify actual output vs expected. Shortfall above 2% = P0 alert + source auto-disabled',
+      badge: 'POST-SWAP',
+    },
+  ]
+
+  return (
+    <section id="seven-layer" className="relative py-28 px-6">
+      <div className="mx-auto max-w-3xl">
+        {/* Headline */}
+        <div className="mb-12 text-center">
+          <SectionHeadline className="mb-2 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+            Every Trade Is Verified
+          </SectionHeadline>
+          <motion.p
+            initial="hidden" whileInView="visible" viewport={{ once: true }}
+            variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { delay: 0.15, duration: 0.5 } } }}
+            className="font-display text-[18px] sm:text-[22px] font-semibold"
+            style={{ color: '#C8B89A' }}
+          >
+            7-Layer Verified Execution
+          </motion.p>
+        </div>
+
+        {/* Vertical pipeline with constellation-line connectors between cards */}
+        <motion.ol
+          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
+          variants={staggerContainer}
+          className="relative"
+        >
+          {LAYERS.map((l, i) => (
+            <motion.li key={l.n} variants={fadeInUpChild} className="list-none">
+              <motion.div
+                whileHover={{ boxShadow: '0 0 40px rgba(200,184,154,0.08)' }}
+                transition={{ duration: 0.2 }}
+                className="group flex items-start gap-4 rounded-xl border border-cream-08 bg-surface-secondary p-5"
+                style={{ borderLeft: '2px solid #C8B89A' }}
+              >
+                {/* Layer number */}
+                <div
+                  className="shrink-0 font-mono text-xl font-bold"
+                  style={{ color: '#C8B89A', minWidth: '2.25rem' }}
+                >
+                  {String(l.n).padStart(2, '0')}
+                </div>
+
+                {/* Content */}
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <span className="text-[15px] font-semibold text-cream">{l.name}</span>
+                    {l.badge && (
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[9px] font-bold tracking-[0.08em]"
+                        style={{ background: '#C8B89A', color: '#080B10' }}
+                      >
+                        {l.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[14px] leading-relaxed text-cream-65">{l.desc}</p>
+                </div>
+              </motion.div>
+
+              {/* Constellation-line connector between cards */}
+              {i < LAYERS.length - 1 && (
+                <div className="my-2 ml-6 h-3 w-[1px] bg-cream-08" aria-hidden="true" />
+              )}
+            </motion.li>
+          ))}
+        </motion.ol>
+
+        {/* Bottom quote */}
+        <motion.p
+          initial="hidden" whileInView="visible" viewport={{ once: true }}
+          variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.4, duration: 0.6 } } }}
+          className="mt-10 text-center text-[14px] italic text-cream-50"
+        >
+          &ldquo;No other aggregator verifies what you actually received after your trade settles on-chain.&rdquo;
+        </motion.p>
+      </div>
+    </section>
+  )
+}
+
+// ══════════════════════════════════════════════════════════
+//  SECTION 03b: WHAT MAKES TERASWAP DIFFERENT
+// ══════════════════════════════════════════════════════════
+
+function DiffNodesIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="4" cy="12" r="2" />
+      <circle cx="20" cy="5" r="2" />
+      <circle cx="20" cy="19" r="2" />
+      <line x1="5.7" y1="11.2" x2="18.3" y2="5.8" />
+      <line x1="5.7" y1="12.8" x2="18.3" y2="18.2" />
+    </svg>
+  )
+}
+
+function DiffShieldCheckIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2 L20 6 V12 C20 16.5 16.5 20.5 12 22 C7.5 20.5 4 16.5 4 12 V6 Z" />
+      <polyline points="8.5 12 11 14.5 15.5 10" />
+    </svg>
+  )
+}
+
+function DiffVerifiedDocIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 2 H6 a2 2 0 0 0 -2 2 v16 a2 2 0 0 0 2 2 h12 a2 2 0 0 0 2 -2 V8 z" />
+      <polyline points="14 2 14 8 20 8" />
+      <polyline points="8 14 11 17 16 12" />
+    </svg>
+  )
+}
+
+function DifferentiationSection() {
+  const CARDS: { icon: React.ReactNode; title: string; desc: string }[] = [
+    {
+      icon: <DiffNodesIcon />,
+      title: 'Meta-Aggregator',
+      desc: "We don't pick one routing model. TeraSwap compares intent-based solvers against traditional DEX routing — you get whichever gives the better price.",
+    },
+    {
+      icon: <DiffShieldCheckIcon />,
+      title: 'Oracle-Verified Execution',
+      desc: 'Every quote is checked against Chainlink price feeds before execution. Deviations above 3% are blocked automatically — before your trade happens, not after.',
+    },
+    {
+      icon: <DiffVerifiedDocIcon />,
+      title: 'Post-Execution Proof',
+      desc: "After your trade settles on-chain, we verify the actual output against what was expected. If there's a shortfall above 2%, the source is auto-disabled.",
+    },
+  ]
+
+  return (
+    <section id="why-teraswap" className="relative py-28 px-6">
+      <div className="mx-auto max-w-5xl">
+        <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+          What Makes TeraSwap Different
+        </SectionHeadline>
+
+        <motion.div
+          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.2 }}
+          variants={staggerContainer}
+          className="grid grid-cols-1 gap-6 md:grid-cols-3"
+        >
+          {CARDS.map((c) => (
+            <motion.div
+              key={c.title}
+              variants={fadeInUpChild}
+              whileHover={{ y: -4, borderColor: 'rgba(200,184,154,0.4)' }}
+              transition={{ duration: 0.2 }}
+              className="rounded-xl border border-cream-08 bg-surface-secondary p-6"
+            >
+              <div className="mb-4" style={{ color: '#C8B89A' }}>
+                {c.icon}
+              </div>
+              <h3 className="mb-2 text-lg font-semibold text-cream">{c.title}</h3>
+              <p className="text-[15px] leading-relaxed text-cream-65">{c.desc}</p>
+            </motion.div>
+          ))}
+        </motion.div>
+      </div>
+    </section>
+  )
+}
+
+// ══════════════════════════════════════════════════════════
 //  SECTION 03: SECURITY
 // ══════════════════════════════════════════════════════════
 
@@ -710,6 +920,8 @@ export default function LandingPage({ onLaunchApp, onDocs }: Props) {
     <div className="relative z-[1]">
       <HeroSection onLaunchApp={onLaunchApp} />
       <PerformanceSection />
+      <SevenLayerSection />
+      <DifferentiationSection />
       <SecuritySection />
       <ExperienceSection onLaunchApp={onLaunchApp} />
       <FeaturesSection />
