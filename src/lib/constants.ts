@@ -131,9 +131,9 @@ export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = ['0x', 'cowswap']
 // ── Disabled Sources ────────────────────────────────────
 // Sources temporarily disabled for security/operational reasons.
 // Excluded from ALL quote and swap requests. Reversible by removing the entry.
-export const DISABLED_SOURCES: Record<string, string> = {
-  cowswap: 'Preventive: CoW frontend compromised 2026-04-14, awaiting post-mortem',
-}
+// cowswap re-enabled 2026-04-23 — post-mortem complete, RegistryLock confirmed.
+// See INC-2026-04-14-001 for context.
+export const DISABLED_SOURCES: Record<string, string> = {}
 
 // FeeCollector ABI (only the functions we call from the frontend)
 // [H-04] swapETHWithFee / swapTokenWithFee now take tokenOut + minimumOutput
