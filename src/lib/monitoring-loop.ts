@@ -13,6 +13,7 @@
  */
 
 import { kv } from '@/lib/kv'
+import { getSupabase } from '@/lib/supabase'
 import { MONITORED_ENDPOINTS } from './monitored-endpoints'
 import { runHealthCheck } from './health-check'
 import {
@@ -49,6 +50,17 @@ import {
 const HEARTBEAT_KEY = 'teraswap:monitor:lastTick'
 const TICK_COUNT_KEY = 'teraswap:monitor:tickCount'
 const WARMUP_KEY = 'teraswap:monitor:lastTickWarmup'
+
+// ── Supabase keepalive ──────────────────────────────────
+// Free-tier Supabase pauses projects after 7 days of database inactivity.
+// We piggyback on the monitoring tick (already runs every 60s) but only
+// actually issue a query every 6 hours — that's 4 queries/day, which is
+// the minimum needed to keep the project alive without burning the daily
+// quota. The "last ping" timestamp is held in KV with a 7-day TTL so
+// the value survives Lambda cold starts.
+const SUPABASE_KEEPALIVE_KEY = 'teraswap:monitor:supabaseKeepalive'
+const SUPABASE_KEEPALIVE_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
+const SUPABASE_KEEPALIVE_TTL_SECONDS = 7 * 24 * 3600     // 7 days
 
 /** Gap between ticks that indicates a cold start (Vercel Hobby sleep). */
 const WARMUP_GAP_MS = 5 * 60 * 1000 // 5 minutes
@@ -113,6 +125,8 @@ export interface MonitoringTickResult {
   skipped?: boolean
   /** Reason the tick was skipped (e.g., 'concurrent-tick-lock'). */
   reason?: string
+  /** True when the 6-hourly Supabase keepalive ping fired during this tick. */
+  supabaseKeepalive?: boolean
 }
 
 /**
@@ -245,6 +259,41 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   // Write heartbeat to KV (dead-man's-switch)
   await writeHeartbeat(warmup)
 
+  // ── Supabase keepalive (prevent free-tier pause) ────────
+  // Non-blocking — any failure is logged and swallowed; tick result is
+  // unaffected (no health-check transitions, no alerts).
+  let supabaseKeepalivePinged = false
+  try {
+    const lastPing = await kv.get(SUPABASE_KEEPALIVE_KEY)
+    const shouldPing =
+      !lastPing || Date.now() - Number(lastPing) > SUPABASE_KEEPALIVE_INTERVAL_MS
+    if (shouldPing) {
+      const sb = getSupabase()
+      if (sb) {
+        // Try the cheapest path first (Postgres RPC) and fall back to a
+        // 1-row SELECT if the RPC isn't defined on this project. The
+        // Supabase query builder is a thenable but does not expose
+        // .catch() directly, so we use nested try/catch instead of
+        // a chained promise rejection handler.
+        try {
+          await sb.rpc('ping')
+        } catch {
+          await sb.from('orders').select('id').limit(1)
+        }
+        await kv.set(SUPABASE_KEEPALIVE_KEY, Date.now().toString(), {
+          ex: SUPABASE_KEEPALIVE_TTL_SECONDS,
+        })
+        supabaseKeepalivePinged = true
+        console.log('[TICK] Supabase keepalive ping sent')
+      }
+    }
+  } catch (err) {
+    console.warn(
+      '[TICK] Supabase keepalive failed (non-blocking):',
+      err instanceof Error ? err.message : err,
+    )
+  }
+
   return {
     timestamp: new Date().toISOString(),
     checksRun: MONITORED_ENDPOINTS.length,
@@ -256,5 +305,6 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(circuitBreakerResult ? { circuitBreaker: circuitBreakerResult } : {}),
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(warmup ? { warmup: true } : {}),
+    ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
   }
 }
