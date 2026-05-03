@@ -38,7 +38,7 @@
     "@tsparticles/react": "3.0.0",
     "@tsparticles/slim": "3.9.1",
     "@upstash/redis": "1.37.0",
-    "framer-motion": "12.36.0",
+    "framer-motion": "12.38.0",
     "next": "16.2.4",
     "react": "18.3.0",
     "react-dom": "18.3.0",
