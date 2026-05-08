@@ -112,9 +112,18 @@ if (_feeRecipient && _feeRecipient === '0x00000000000000000000000000000000000000
 export const FEE_RECIPIENT = (_feeRecipient || '0x107F6eB7C3866c9cEf5860952066e185e9383ABA') as `0x${string}`
 
 // [C-08] FeeCollector proxy — deploy contracts/TeraSwapFeeCollector.sol and set this env var.
-// Hard default to deployed mainnet FeeCollector so fees are never silently disabled.
+// Hard default to deployed mainnet FeeCollector V2 so fees are never silently disabled.
+//
+// V2 (current — swapETHWithFee/swapTokenWithFee accept tokenOut + minimumOutput
+//   and revert with InsufficientOutput when the user's balance delta is short [H-04]):
+//   0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459
+//
+// V1 (frozen — kept here for analytics continuity so historical swaps still
+//   resolve their FeeCollector hop on Etherscan and in our own history views):
+//   0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD
 const _feeCollector = process.env.NEXT_PUBLIC_FEE_COLLECTOR ?? ''
-export const FEE_COLLECTOR_ADDRESS = (_feeCollector || '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD') as `0x${string}`
+export const FEE_COLLECTOR_ADDRESS = (_feeCollector || '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459') as `0x${string}`
+export const FEE_COLLECTOR_V1_ADDRESS = '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD' as `0x${string}`
 
 // Sources that collect fees natively via their API (no FeeCollector needed)
 // EMPTY: API fee params require registered partner accounts to work.
