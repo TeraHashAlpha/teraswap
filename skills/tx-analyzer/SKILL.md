@@ -66,7 +66,8 @@ curl -s $RPC_URL -X POST -H "Content-Type: application/json" \
 
 1. **Identify the target contract** — check `to` against known addresses:
    - `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` = TeraSwapOrderExecutor
-   - `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` = TeraSwapFeeCollector
+   - `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` = TeraSwapFeeCollector V2 (current — `minimumOutput` enforced)
+   - `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` = TeraSwapFeeCollector V1 (frozen — historical txs only)
    - Common DEX routers (1inch, Uniswap, etc.)
 
 2. **Decode calldata** using the ABI files in `skills/tx-analyzer/abis/`:
@@ -174,7 +175,8 @@ These addresses should be labeled in the analysis output:
 | Address | Label |
 |---------|-------|
 | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` | TeraSwapOrderExecutor |
-| `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` | TeraSwapFeeCollector |
+| `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` | TeraSwapFeeCollector V2 (current) |
+| `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` | TeraSwapFeeCollector V1 (frozen) |
 | `0x107F6eB7C3866c9cEf5860952066e185e9383ABA` | Fee Recipient |
 | `0x111111125421cA6dc452d289314280a0f8842A65` | 1inch v6 Router |
 | `0xDef1C0ded9bec7F1a1670819833240f027b25EfF` | 0x Exchange Proxy |

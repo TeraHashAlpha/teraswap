@@ -21,7 +21,7 @@
 import { createPublicClient, http, keccak256, toBytes, type PublicClient, type Log } from 'viem'
 import { mainnet } from 'viem/chains'
 import { kv } from '@/lib/kv'
-import { FEE_COLLECTOR_ADDRESS } from './constants'
+import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from './constants'
 import { ORDER_EXECUTOR_ADDRESS } from './order-engine/config'
 import { emitTransitionAlert } from './alert-wrapper'
 
@@ -220,8 +220,12 @@ export async function scanContractEvents(
   // Cap range
   const effectiveTo = Math.min(toBlock, fromBlock + MAX_BLOCKS_PER_SCAN - 1)
 
-  // Fetch logs from both contracts in parallel
-  const [executorLogs, feeCollectorLogs] = await Promise.all([
+  // Fetch logs from OrderExecutor + both FeeCollector versions in parallel.
+  // V1 still emits Sweep on residual-balance recoveries even though no new
+  // swaps route there; merging V1's logs into feeCollectorLogs keeps any
+  // such admin actions visible to the classifier without changing downstream
+  // classification logic (V1 and V2 share the SwapWithFee event signature).
+  const [executorLogs, feeCollectorV2Logs, feeCollectorV1Logs] = await Promise.all([
     client.getLogs({
       address: ORDER_EXECUTOR_ADDRESS,
       fromBlock: BigInt(fromBlock),
@@ -232,7 +236,13 @@ export async function scanContractEvents(
       fromBlock: BigInt(fromBlock),
       toBlock: BigInt(effectiveTo),
     }),
+    client.getLogs({
+      address: FEE_COLLECTOR_V1_ADDRESS,
+      fromBlock: BigInt(fromBlock),
+      toBlock: BigInt(effectiveTo),
+    }),
   ])
+  const feeCollectorLogs = [...feeCollectorV2Logs, ...feeCollectorV1Logs]
 
   const events: OnChainEvent[] = []
 

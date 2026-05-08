@@ -13,7 +13,7 @@
  */
 
 import { decodeAbiParameters, type Hex } from 'viem'
-import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
+import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,6 +118,10 @@ function isValidRecipient(extracted: string, expected: string): boolean {
   if (FEE_COLLECTOR_ADDRESS) {
     validAddresses.push(FEE_COLLECTOR_ADDRESS.toLowerCase())
   }
+  // V1 is frozen but still a legitimate recipient on historical V1-targeted
+  // calldata (e.g. retried order-engine submissions). Allowing it here means
+  // we never spuriously fail a recipient check on inherited V1 swap data.
+  validAddresses.push(FEE_COLLECTOR_V1_ADDRESS.toLowerCase())
   return validAddresses.includes(extracted.toLowerCase())
 }
 

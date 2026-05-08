@@ -322,7 +322,8 @@ If assessment (Section 3) concludes no compromise:
 | Contract / Account | Address | Etherscan |
 |-------------------|---------|-----------|
 | TeraSwapOrderExecutor | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` | [Link](https://etherscan.io/address/0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130) |
-| TeraSwapFeeCollector | `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` | [Link](https://etherscan.io/address/0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD) |
+| TeraSwapFeeCollector (V2 — current) | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` | [Link](https://etherscan.io/address/0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459) |
+| TeraSwapFeeCollector (V1 — frozen) | `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` | [Link](https://etherscan.io/address/0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD) |
 | Fee Recipient | `0x107F6eB7C3866c9cEf5860952066e185e9383ABA` | [Link](https://etherscan.io/address/0x107F6eB7C3866c9cEf5860952066e185e9383ABA) |
 | Executor (current) | _Check `.env.executor` — do NOT commit here_ | — |
 
