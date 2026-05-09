@@ -25,7 +25,7 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD } from '@/lib/constants'
+import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
 import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval, playError, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
@@ -80,12 +80,66 @@ export default function SwapBox() {
   const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown } =
     useQuote(tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, excludeArray)
 
-  // Filter to MEV-protected sources only when toggle is on
-  const meta = useMemo(() => {
-    if (!rawMeta || !mevProtected) return rawMeta
-    const mevSources = rawMeta.all.filter(q => AGGREGATOR_META[q.source]?.mevProtected)
-    if (mevSources.length === 0) return null // no MEV-safe quotes available
-    return { ...rawMeta, best: mevSources[0], all: mevSources }
+  // [LP-04] Smart MEV routing.
+  //
+  // Two paths:
+  //   1. Force toggle ON  → filter quote set down to mevProtected sources
+  //      only (existing behaviour, used as a manual override).
+  //   2. Force toggle OFF → if a mevProtected quote exists in the set and
+  //      is within MEV_PREFERENCE_THRESHOLD (0.3%) of the highest output,
+  //      promote it into best. Otherwise leave best untouched and flag the
+  //      route as MEV-exposed so the UI can surface a hint.
+  //
+  // Returns the meta object plus two derived flags consumed by QuoteBreakdown.
+  const { meta, smartMevApplied, mevExposedBest } = useMemo(() => {
+    if (!rawMeta) {
+      return { meta: null, smartMevApplied: false, mevExposedBest: false }
+    }
+
+    // Path 1: forced — strict MEV-only filter (unchanged behaviour).
+    if (mevProtected) {
+      const mevSources = rawMeta.all.filter(q => AGGREGATOR_META[q.source]?.mevProtected)
+      if (mevSources.length === 0) {
+        return { meta: null, smartMevApplied: false, mevExposedBest: false }
+      }
+      return {
+        meta: { ...rawMeta, best: mevSources[0], all: mevSources },
+        smartMevApplied: false, // user forced it; not a smart-routing event
+        mevExposedBest: false,
+      }
+    }
+
+    // Path 2: smart preference — promote CoW if it's within threshold of best.
+    const bestIsMevProtected = AGGREGATOR_META[rawMeta.best.source]?.mevProtected ?? false
+    if (bestIsMevProtected) {
+      // Best already happens to be MEV-protected. No promotion needed; no
+      // exposure warning needed.
+      return { meta: rawMeta, smartMevApplied: false, mevExposedBest: false }
+    }
+
+    const cowQuote = rawMeta.all.find(q => AGGREGATOR_META[q.source]?.mevProtected)
+    if (cowQuote) {
+      const bestAmount = BigInt(rawMeta.best.toAmount)
+      const cowAmount = BigInt(cowQuote.toAmount)
+      if (bestAmount > 0n && cowAmount > 0n && cowAmount <= bestAmount) {
+        // Shortfall in basis points relative to best. Use BigInt math to
+        // avoid float precision issues on large token-decimals values.
+        const shortfallBps = ((bestAmount - cowAmount) * 10_000n) / bestAmount
+        const thresholdBps = BigInt(Math.round(MEV_PREFERENCE_THRESHOLD * 10_000))
+        if (shortfallBps <= thresholdBps) {
+          // Promote CoW into best; keep the rest in their original order.
+          const others = rawMeta.all.filter(q => q.source !== cowQuote.source)
+          return {
+            meta: { ...rawMeta, best: cowQuote, all: [cowQuote, ...others] },
+            smartMevApplied: true,
+            mevExposedBest: false,
+          }
+        }
+      }
+    }
+
+    // Best stays as-is; non-MEV-protected → mark exposed for the UI hint.
+    return { meta: rawMeta, smartMevApplied: false, mevExposedBest: true }
   }, [rawMeta, mevProtected])
 
   // Play subtle sound when a new quote arrives
@@ -462,15 +516,16 @@ export default function SwapBox() {
           )}
         </div>
 
-        {/* MEV Protection toggle */}
+        {/* Force MEV Protection toggle (smart preference is the default —
+            this toggle is the manual override for users who want CoW only) */}
         <div className="mb-3 flex items-center justify-between rounded-lg border border-cream-08 bg-surface-tertiary/50 px-3 py-2">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-semibold text-cream-65">
-              MEV Protection
+              Force MEV Protection
             </span>
             <span
               className="cursor-help text-[10px] text-cream-35"
-              title="Routes your swap exclusively through CoW Protocol, which uses batch auctions to protect against MEV (sandwich attacks, front-running). May result in slightly different rates."
+              title="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
             >
               &#9432;
             </span>
@@ -479,7 +534,7 @@ export default function SwapBox() {
             onClick={() => setMevProtected(!mevProtected)}
             className="relative flex h-6 w-10 items-center rounded-full transition-colors"
             style={{ backgroundColor: mevProtected ? '#C8B89A' : 'rgba(200,184,154,0.15)' }}
-            aria-label="Toggle MEV protection"
+            aria-label="Toggle force MEV protection"
           >
             <span
               className="h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -488,17 +543,17 @@ export default function SwapBox() {
           </button>
         </div>
 
-        {/* No MEV-safe quote warning */}
+        {/* No MEV-safe quote warning (force mode only) */}
         {mevProtected && !meta && rawMeta && !quoteLoading && (
           <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
-            No MEV-protected quote available. CoW Protocol may be temporarily unavailable. Try disabling MEV Protection or wait a moment.
+            No MEV-protected quote available. CoW Protocol may be temporarily unavailable. Try disabling Force MEV Protection or wait a moment.
           </div>
         )}
 
         {/* Quote Breakdown */}
         {meta && tokenIn && tokenOut && hasAmount && (
           <div className="mb-4">
-            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} />
+            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} />
           </div>
         )}
         {/* Quote loading skeleton */}
