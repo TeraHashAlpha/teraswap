@@ -38,6 +38,7 @@ const SECTIONS: DocSection[] = [
   { id: 'liquidity-sources', title: 'Liquidity Sources', icon: '◉' },
   { id: 'smart-routing', title: 'Smart Routing', icon: '⟁' },
   { id: 'security', title: 'Security', icon: '⬢' },
+  { id: 'mev-protection', title: 'MEV Protection', icon: '⌬' },
   { id: 'privacy', title: 'Privacy', icon: '◍' },
   { id: 'fee-structure', title: 'Fee Structure', icon: '◇' },
   { id: 'limit-orders', title: 'Limit Orders', icon: '⊕' },
@@ -379,6 +380,88 @@ export default function DocsPage() {
               </motion.div>
             ))}
           </motion.div>
+        </AnimatedSection>
+
+        <Divider />
+
+        {/* ═══ MEV PROTECTION ═══ */}
+        <AnimatedSection id="mev-protection">
+          <SectionTitle icon="⌬" title="MEV Protection" />
+          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+            Most DEX trades on Ethereum settle on a public mempool, which is where searchers and block
+            builders extract value from regular users. TeraSwap reduces that exposure by routing through
+            CoW Protocol whenever it offers the better price-and-MEV outcome — and by always letting the
+            user see the trade-off before they sign.
+          </p>
+
+          <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">
+            What is MEV?
+          </h3>
+          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+            MEV (Maximal Extractable Value) is profit that block builders and searchers can capture by
+            reordering, inserting, or censoring transactions inside the block they produce. For DEX users
+            this most often appears as a <strong className="text-cream">sandwich attack</strong>: a bot
+            spots a pending swap in the public mempool, places its own buy directly in front of it to
+            push the price up, then sells immediately after at the inflated price — taking the difference
+            out of the user&apos;s slippage budget. Researchers at Flashbots and elsewhere estimate
+            cumulative MEV extracted from Ethereum users in the billions of USD since 2020.
+          </p>
+
+          <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">
+            How TeraSwap protects you
+          </h3>
+          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
+            For every swap, TeraSwap evaluates CoW Protocol alongside the other ten liquidity sources.
+            When CoW wins, the swap follows an MEV-protected path:
+          </p>
+          <ul className="mb-6 list-disc space-y-2 pl-5 text-[15px] leading-relaxed text-cream-65 marker:text-cream-35">
+            <li>
+              You sign an <strong className="text-cream">off-chain EIP-712 order</strong>, not a
+              transaction. Nothing hits the public mempool.
+            </li>
+            <li>
+              Professional solvers compete in a <strong className="text-cream">batch auction</strong> to
+              fill the order. The auction picks the best execution across multiple venues at the same
+              block, so there&apos;s no in-block reordering window for a sandwicher to exploit.
+            </li>
+            <li>
+              <strong className="text-cream">Limit orders, stop-loss and take-profit</strong> all execute
+              through this path by default. Conditional orders are the highest-MEV-risk products on most
+              aggregators because the trigger price is publicly known; TeraSwap signs them off-chain so
+              they aren&apos;t observable until they fill.
+            </li>
+          </ul>
+          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+            For direct on-chain swaps (Uniswap V3, Curve, Balancer, SushiSwap), the trade does pass through
+            the public mempool and isn&apos;t MEV-protected — that&apos;s why the price comparison
+            explicitly accounts for the MEV-protected vs. public-mempool trade-off, and why CoW gets
+            evaluated on every quote.
+          </p>
+
+          <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">
+            Why meta-aggregation matters
+          </h3>
+          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
+            Most MEV-protected venues quote against their own internal liquidity. That solves the MEV
+            problem but caps the trade to a single source&apos;s pricing. Most general-purpose aggregators
+            do the opposite — they query 5-10 sources for the best public price but route through the
+            public mempool, accepting the MEV exposure as the cost of cheaper execution.
+          </p>
+          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
+            TeraSwap compares <strong className="text-cream">all 11 sources, including CoW</strong>, on
+            every quote. When CoW&apos;s batch-auction price (net of solver competition) beats the
+            public-mempool venues by more than the gas savings, the swap auto-routes through CoW — best
+            price <em>and</em> MEV protection, picked algorithmically. When a public-mempool venue
+            quotes materially better and the trade is small enough that MEV exposure is bounded by your
+            slippage tolerance, you keep the option to take the faster path. Either way, the
+            transaction-preview screen shows the route and the on-chain-enforced minimum output before
+            you sign.
+          </p>
+          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+            We don&apos;t claim &ldquo;zero MEV&rdquo; — we claim significantly reduced MEV exposure on
+            the paths that flow through CoW, no exposure at all on conditional orders, and an
+            algorithmic choice on every other swap that takes both price and MEV cost into account.
+          </p>
         </AnimatedSection>
 
         <Divider />
