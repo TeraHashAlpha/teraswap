@@ -6,6 +6,7 @@ import type { PriceCheck } from '@/lib/chainlink'
 import type { ApprovalPlan } from '@/lib/approvals'
 import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { isFeeCollectorActive } from '@/lib/api'
+import { estimateMevSavings } from '@/lib/mev-savings'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
 
@@ -70,6 +71,20 @@ export default function QuoteBreakdown({
   const bestIsIntent = isIntentBased(best.source)
   const bestTime = estimatedTime(best.source)
   const bestIsDirect = AGGREGATOR_META[best.source]?.isDirect ?? false
+
+  // [LP-05] Estimated MEV savings vs the non-CoW median (helper in
+  // src/lib/mev-savings.ts; same calc is reused by SwapBox for analytics
+  // logging on swap success so the displayed estimate matches what gets
+  // persisted). Returns null when CoW didn't win, when the comparison
+  // set is too small, or when CoW's quote isn't strictly above the
+  // non-CoW median — i.e. we never display a negative or zero savings.
+  const mevSavingsRaw = estimateMevSavings(meta)
+  const mevSavings = mevSavingsRaw
+    ? {
+        amount: Number(formatUnits(mevSavingsRaw.amountWei, tokenOut.decimals)),
+        pct: mevSavingsRaw.pct,
+      }
+    : null
 
   return (
     <div className="space-y-3">
@@ -172,6 +187,19 @@ export default function QuoteBreakdown({
           </span>
           <span className="truncate text-cream-80 text-xs sm:text-sm">1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</span>
         </div>
+
+        {/* [LP-05] Estimated MEV savings vs non-CoW median (CoW-only, positive only) */}
+        {mevSavings && (
+          <div
+            className="mb-2 flex items-center justify-between text-[11px] text-emerald-400/80"
+            title="Difference between CoW Protocol's quote and the median of the non-CoW (public-mempool) quotes for this pair. A rough lower-bound estimate of what MEV bots could have extracted on a non-protected route."
+          >
+            <span className="text-cream-35">Est. MEV savings</span>
+            <span className="font-mono tabular-nums">
+              +{formatDisplay(mevSavings.amount, 4)} {tokenOut.symbol} ({mevSavings.pct.toFixed(2)}%)
+            </span>
+          </div>
+        )}
 
         {/* Route */}
         <div className="mb-2 flex items-center justify-between">

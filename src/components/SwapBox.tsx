@@ -26,6 +26,8 @@ import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
+import { estimateMevSavings } from '@/lib/mev-savings'
+import { updateSwapStatus } from '@/lib/analytics'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
 import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval, playError, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
@@ -165,7 +167,7 @@ export default function SwapBox() {
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } =
     useApproval(tokenIn, amountIn, spender)
 
-  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, execute: executeSwap, confirmSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
@@ -179,6 +181,10 @@ export default function SwapBox() {
     : null
 
   const priceCheck = useChainlinkPrice(tokenIn?.address, executionPriceUsd)
+  // [LP-05] Output-token USD price for converting MEV surplus to a $ figure
+  // in the success toast. We pass null as the execution price because we
+  // only need chainlinkPrice; deviation isn't relevant here.
+  const tokenOutPriceCheck = useChainlinkPrice(tokenOut?.address, null)
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
   const { splitResult, analyzing: splitAnalyzing, splitRecommended, useSplit, toggleSplit } =
@@ -236,7 +242,31 @@ export default function SwapBox() {
       if (swapToastId.current) {
         dismiss(swapToastId.current)
       }
-      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${formatDisplay(Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)), 4)} ${tokenOut.symbol}`, txHash, duration: 10000 })
+
+      // [LP-05] MEV-savings — both pre-swap estimate (CoW vs non-CoW median)
+      // and post-swap realised surplus (CoW solver delivered > quoted).
+      // The toast appends a "you saved ~$X" line only when there is positive
+      // realised surplus AND the source was CoW; we don't display the
+      // estimate alone post-swap to avoid implying we measured what we
+      // didn't. Both values are still logged to analytics regardless.
+      const mevEstimate = estimateMevSavings(meta)
+      const isCowSuccess = meta.best.source === 'cowswap'
+      const realisedSurplusWei = isCowSuccess && mevSurplusActualWei && mevSurplusActualWei > 0n
+        ? mevSurplusActualWei
+        : null
+
+      let savingsLine = ''
+      if (realisedSurplusWei) {
+        const surplusTok = Number(formatUnits(realisedSurplusWei, tokenOut.decimals))
+        const tokenPriceUsd = tokenOutPriceCheck.chainlinkPrice
+        if (tokenPriceUsd != null && surplusTok * tokenPriceUsd >= 0.01) {
+          savingsLine = ` · You saved ~$${(surplusTok * tokenPriceUsd).toFixed(2)} vs public-mempool execution`
+        } else if (surplusTok > 0) {
+          savingsLine = ` · You saved ~${formatDisplay(surplusTok, 4)} ${tokenOut.symbol} vs public-mempool execution`
+        }
+      }
+
+      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${formatDisplay(Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)), 4)} ${tokenOut.symbol}${savingsLine}`, txHash, duration: 10000 })
       swapToastId.current = null
 
       const outAmount = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)).toFixed(4)
@@ -247,6 +277,22 @@ export default function SwapBox() {
         amountOut: outAmount,
         txHash, status: 'confirmed',
       })
+
+      // [LP-05] Patch the swap row with MEV-savings telemetry. Fire-and-forget;
+      // the swap-status update from useSwap already fired with the basic
+      // confirmed status, so this is additive — only sets the two new
+      // numeric columns when we have data for them.
+      if (address && (mevEstimate || realisedSurplusWei)) {
+        updateSwapStatus(
+          txHash,
+          'confirmed',
+          undefined,
+          undefined,
+          address,
+          mevEstimate ? mevEstimate.amountWei.toString() : undefined,
+          realisedSurplusWei ? realisedSurplusWei.toString() : undefined,
+        )
+      }
 
       // Analytics: server-side /api/log-swap handles tracking (Q2 — removed client-side analytics-tracker)
 

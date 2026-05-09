@@ -40,6 +40,9 @@ export async function POST(req: NextRequest) {
       // Security metadata (sent by client for server-side tracking)
       oracleUnavailable = false,
       priceDeviation = 0,
+      // [LP-05] MEV-savings telemetry (CoW-routed swaps only)
+      mevSavingsEstimate,
+      mevSavingsActual,
     } = body
 
     if (!wallet || !source || !tokenIn || !tokenOut || !amountIn || !amountOut) {
@@ -67,6 +70,10 @@ export async function POST(req: NextRequest) {
       fee_collected: feeCollected,
       fee_amount: feeAmount ?? null,
       status,
+      // [LP-05] Both columns are nullable numerics; existing rows are unaffected.
+      // Stored as raw output-token wei; USD conversion is a read-time concern.
+      mev_savings_estimate: mevSavingsEstimate ?? null,
+      mev_savings_actual: mevSavingsActual ?? null,
     })
 
     if (error) {
@@ -125,7 +132,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { txHash, status, gasUsed, gasPrice, wallet } = body
+    const { txHash, status, gasUsed, gasPrice, wallet, mevSavingsEstimate, mevSavingsActual } = body
 
     if (!txHash) {
       return NextResponse.json(
@@ -137,6 +144,10 @@ export async function PATCH(req: NextRequest) {
     const update: Record<string, unknown> = { status, tx_hash: txHash }
     if (gasUsed) update.gas_used = gasUsed
     if (gasPrice) update.gas_price = gasPrice
+    // [LP-05] Optional MEV-savings telemetry — only set when caller provided
+    // a value so we don't overwrite an existing row's columns with NULL.
+    if (mevSavingsEstimate != null) update.mev_savings_estimate = mevSavingsEstimate
+    if (mevSavingsActual != null) update.mev_savings_actual = mevSavingsActual
 
     // Track failed swap server-side
     if (status === 'failed' && wallet) {

@@ -29,6 +29,14 @@ interface LogSwapParams {
   oracleUnavailable?: boolean
   priceDeviation?: number
   amountInUsd?: number
+  /** [LP-05] Pre-swap MEV-savings estimate in output-token wei (raw). Computed
+   *  from CoW vs non-CoW median; only populated for CoW-routed swaps where
+   *  CoW's quote strictly beat the non-CoW median. */
+  mevSavingsEstimate?: string
+  /** [LP-05] Post-swap realised MEV surplus in output-token wei (raw):
+   *  executedBuyAmount − quotedBuyAmount. Only populated on confirmed CoW
+   *  swaps where the trades endpoint returned an executed amount. */
+  mevSavingsActual?: string
 }
 
 export function logSwapToSupabase(params: LogSwapParams): void {
@@ -55,6 +63,8 @@ export function logSwapToSupabase(params: LogSwapParams): void {
         amountInUsd: params.amountInUsd,
         oracleUnavailable: params.oracleUnavailable ?? false,
         priceDeviation: params.priceDeviation ?? 0,
+        mevSavingsEstimate: params.mevSavingsEstimate,
+        mevSavingsActual: params.mevSavingsActual,
       }),
     }).catch((err) => {
       console.warn('[analytics] logSwap failed:', err)
@@ -70,12 +80,20 @@ export function updateSwapStatus(
   gasUsed?: string,
   gasPrice?: string,
   wallet?: string,
+  /** [LP-05] Both fields are output-token wei strings; nullable in the row.
+   *  estimate is the pre-swap CoW-vs-non-CoW-median delta (computed at the
+   *  moment the swap was confirmed); actual is the realised solver surplus. */
+  mevSavingsEstimate?: string,
+  mevSavingsActual?: string,
 ): void {
   try {
     fetch('/api/log-swap', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txHash, status, gasUsed, gasPrice, wallet }),
+      body: JSON.stringify({
+        txHash, status, gasUsed, gasPrice, wallet,
+        mevSavingsEstimate, mevSavingsActual,
+      }),
     }).catch((err) => {
       console.warn('[analytics] updateSwapStatus failed:', err)
     })
