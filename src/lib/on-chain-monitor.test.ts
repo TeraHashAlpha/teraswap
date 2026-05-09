@@ -131,9 +131,22 @@ describe('event classification', () => {
   })
 
   describe('FeeCollector events', () => {
-    it('classifies SwapWithFee as info', () => {
+    it('classifies SwapWithFee (V2) as info', () => {
       const result = classifyFeeCollectorEvent(TOPICS.SwapWithFee)
       expect(result).toEqual({ eventName: 'SwapWithFee', severity: 'info', contract: 'FeeCollector' })
+    })
+
+    // [9B-I-01] V1 hash must continue to classify so the wind-down on
+    // 0x4dAE…58eD is still observable in the alert pipeline.
+    it('classifies SwapWithFee (V1) as info under SwapWithFeeV1', () => {
+      const result = classifyFeeCollectorEvent(TOPICS.SwapWithFeeV1)
+      expect(result).toEqual({ eventName: 'SwapWithFeeV1', severity: 'info', contract: 'FeeCollector' })
+    })
+
+    it('V1 and V2 topic hashes are distinct', () => {
+      // Sanity: the whole point of keeping both is that they're different
+      // hashes; if they collided we'd have nothing to fix.
+      expect(TOPICS.SwapWithFee).not.toBe(TOPICS.SwapWithFeeV1)
     })
 
     it('classifies OwnershipTransferred as critical', () => {
@@ -144,6 +157,46 @@ describe('event classification', () => {
     it('returns null for unknown topic', () => {
       expect(classifyFeeCollectorEvent('0xdeadbeef')).toBeNull()
     })
+  })
+})
+
+describe('large fee elevation — V1 backward compat [9B-I-01]', () => {
+  it('elevates SwapWithFeeV1 to warning when fee >= 1 ETH', () => {
+    // V1 data layout: tokenIn (32) + totalAmount (32) + feeAmount (32) — same
+    // first three slots as V2, so the parser is layout-agnostic.
+    const largeFee = LARGE_FEE_THRESHOLD.toString(16).padStart(64, '0')
+    const data = '0x' + '0'.repeat(64) + '0'.repeat(64) + largeFee
+    const log = makeLog(TOPICS.SwapWithFeeV1, { data })
+
+    const event: OnChainEvent = {
+      contract: 'FeeCollector',
+      eventName: 'SwapWithFeeV1',
+      txHash: '0x' + 'b'.repeat(64),
+      blockNumber: 20000000,
+      args: {},
+      severity: 'info',
+    }
+
+    const result = _internal.maybeElevateFeeEvent(event, log as any)
+    expect(result.severity).toBe('warning')
+  })
+
+  it('keeps SwapWithFeeV1 as info when fee is small', () => {
+    const smallFee = (LARGE_FEE_THRESHOLD - 1n).toString(16).padStart(64, '0')
+    const data = '0x' + '0'.repeat(64) + '0'.repeat(64) + smallFee
+    const log = makeLog(TOPICS.SwapWithFeeV1, { data })
+
+    const event: OnChainEvent = {
+      contract: 'FeeCollector',
+      eventName: 'SwapWithFeeV1',
+      txHash: '0x' + 'b'.repeat(64),
+      blockNumber: 20000000,
+      args: {},
+      severity: 'info',
+    }
+
+    const result = _internal.maybeElevateFeeEvent(event, log as any)
+    expect(result.severity).toBe('info')
   })
 })
 

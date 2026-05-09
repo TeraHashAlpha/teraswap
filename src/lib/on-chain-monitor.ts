@@ -79,7 +79,13 @@ const TOPICS = {
   Bootstrap: topic('Bootstrap(address)'),
 
   // FeeCollector events
-  SwapWithFee: topic('SwapWithFee(address,address,address,uint256,uint256)'),
+  // V2 (current — adds tokenOut + outputAmount per H-04 minimumOutput change)
+  SwapWithFee: topic('SwapWithFee(address,address,address,uint256,uint256,address,uint256)'),
+  // V1 (frozen — kept so residual swaps emitted by 0x4dAE…58eD still classify
+  // correctly during the V1 wind-down. V1 and V2 share the same first three
+  // non-indexed slots (tokenIn, totalAmount, feeAmount), so the large-fee
+  // parser at maybeElevateFeeEvent works for both without branching.) [9B-I-01]
+  SwapWithFeeV1: topic('SwapWithFee(address,address,address,uint256,uint256)'),
   // OwnershipTransferred — standard OpenZeppelin (FeeCollector is not Ownable,
   // but we monitor it on OrderExecutor's address too as a catch-all)
   OwnershipTransferred: topic('OwnershipTransferred(address,address)'),
@@ -147,6 +153,11 @@ function classifyFeeCollectorEvent(topic0: string): EventClassification | null {
   switch (topic0) {
     case TOPICS.SwapWithFee:
       return { eventName: 'SwapWithFee', severity: 'info', contract: 'FeeCollector' }
+    case TOPICS.SwapWithFeeV1:
+      // [9B-I-01] V1 swap events tagged distinctly so dashboards can show
+      // the wind-down separately from V2 traffic. Severity logic is identical
+      // (info → warning when feeAmount >= 1 ETH, see maybeElevateFeeEvent).
+      return { eventName: 'SwapWithFeeV1', severity: 'info', contract: 'FeeCollector' }
     case TOPICS.OwnershipTransferred:
       return { eventName: 'OwnershipTransferred', severity: 'critical', contract: 'FeeCollector' }
     default:
@@ -160,11 +171,14 @@ function classifyFeeCollectorEvent(topic0: string): EventClassification | null {
 const LARGE_FEE_THRESHOLD = BigInt('1000000000000000000') // 1 ETH in wei
 
 function maybeElevateFeeEvent(event: OnChainEvent, log: Log): OnChainEvent {
-  if (event.eventName !== 'SwapWithFee') return event
+  if (event.eventName !== 'SwapWithFee' && event.eventName !== 'SwapWithFeeV1') return event
   try {
-    // SwapWithFee data layout: tokenIn (address), totalAmount (uint256), feeAmount (uint256)
+    // SwapWithFee data layout (shared by V1 and V2 for the first 3 slots):
+    //   tokenIn (address), totalAmount (uint256), feeAmount (uint256)
+    // V2 adds two more trailing slots (tokenOut, outputAmount) but they sit
+    // after feeAmount, so the slice below is layout-agnostic.
     // Topics: [sig, user (indexed), router (indexed)]
-    // Data: tokenIn (32 bytes) + totalAmount (32 bytes) + feeAmount (32 bytes)
+    // Data: tokenIn (32 bytes) + totalAmount (32 bytes) + feeAmount (32 bytes) [+ V2: tokenOut (32) + outputAmount (32)]
     const data = log.data
     if (data.length >= 194) { // 0x + 3*64 chars = 194
       const feeHex = '0x' + data.slice(130, 194)
