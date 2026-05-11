@@ -6,6 +6,7 @@ import type { PriceCheck } from '@/lib/chainlink'
 import type { ApprovalPlan } from '@/lib/approvals'
 import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { isFeeCollectorActive } from '@/lib/api'
+import { estimateMevSavings } from '@/lib/mev-savings'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
 
@@ -20,6 +21,13 @@ interface Props {
   approvalPlan: ApprovalPlan | null
   onEditSlippage: () => void
   gasEstimate?: (gasUnits: number) => { eth: number; usd: number } | null
+  /** [LP-04] true when the SwapBox auto-promoted CoW into best because it
+   *  was within MEV_PREFERENCE_THRESHOLD of the highest-output quote. */
+  smartMevApplied?: boolean
+  /** [LP-04] true when best is non-MEV-protected AND the user has not
+   *  enabled Force MEV Protection AND no competitive CoW quote was found.
+   *  Triggers a small advisory inviting the user to enable the toggle. */
+  mevExposedBest?: boolean
 }
 
 function sourceLabel(source: AggregatorName): string {
@@ -40,6 +48,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 
 export default function QuoteBreakdown({
   meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, approvalPlan, onEditSlippage, gasEstimate,
+  smartMevApplied = false, mevExposedBest = false,
 }: Props) {
   const best = meta.best
   const outputAmount = Number(formatUnits(BigInt(best.toAmount), tokenOut.decimals))
@@ -63,6 +72,20 @@ export default function QuoteBreakdown({
   const bestTime = estimatedTime(best.source)
   const bestIsDirect = AGGREGATOR_META[best.source]?.isDirect ?? false
 
+  // [LP-05] Estimated MEV savings vs the non-CoW median (helper in
+  // src/lib/mev-savings.ts; same calc is reused by SwapBox for analytics
+  // logging on swap success so the displayed estimate matches what gets
+  // persisted). Returns null when CoW didn't win, when the comparison
+  // set is too small, or when CoW's quote isn't strictly above the
+  // non-CoW median — i.e. we never display a negative or zero savings.
+  const mevSavingsRaw = estimateMevSavings(meta)
+  const mevSavings = mevSavingsRaw
+    ? {
+        amount: Number(formatUnits(mevSavingsRaw.amountWei, tokenOut.decimals)),
+        pct: mevSavingsRaw.pct,
+      }
+    : null
+
   return (
     <div className="space-y-3">
       {/* Chainlink warnings */}
@@ -80,6 +103,15 @@ export default function QuoteBreakdown({
         </div>
       )}
 
+      {/* [LP-04] MEV exposure advisory — only when best route is non-MEV-protected
+          AND the user has not enabled Force MEV Protection. Subtle, not blocking. */}
+      {mevExposedBest && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/90">
+          <span className="font-semibold">&#9888; This route is not MEV-protected.</span>{' '}
+          Enable <span className="font-semibold">Force MEV Protection</span> to route through CoW Protocol and prevent sandwich attacks.
+        </div>
+      )}
+
       {/* Main breakdown */}
       <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-3 text-sm">
         {/* Winner badge */}
@@ -87,6 +119,15 @@ export default function QuoteBreakdown({
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-full bg-success" />
             <span className="text-xs font-medium text-success">Best via {sourceLabel(best.source)}</span>
+            {/* [LP-04] Annotate when CoW was auto-promoted (not strictly highest output) */}
+            {smartMevApplied && (
+              <span
+                className="text-[10px] font-medium text-cream-50"
+                title="CoW Protocol's price was within 0.3% of the highest quote, so TeraSwap routed through it for MEV protection."
+              >
+                · auto-selected for MEV protection
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-1 text-xs text-cream-35">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cream-50" />
@@ -146,6 +187,19 @@ export default function QuoteBreakdown({
           </span>
           <span className="truncate text-cream-80 text-xs sm:text-sm">1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</span>
         </div>
+
+        {/* [LP-05] Estimated MEV savings vs non-CoW median (CoW-only, positive only) */}
+        {mevSavings && (
+          <div
+            className="mb-2 flex items-center justify-between text-[11px] text-emerald-400/80"
+            title="Difference between CoW Protocol's quote and the median of the non-CoW (public-mempool) quotes for this pair. A rough lower-bound estimate of what MEV bots could have extracted on a non-protected route."
+          >
+            <span className="text-cream-35">Est. MEV savings</span>
+            <span className="font-mono tabular-nums">
+              +{formatDisplay(mevSavings.amount, 4)} {tokenOut.symbol} ({mevSavings.pct.toFixed(2)}%)
+            </span>
+          </div>
+        )}
 
         {/* Route */}
         <div className="mb-2 flex items-center justify-between">

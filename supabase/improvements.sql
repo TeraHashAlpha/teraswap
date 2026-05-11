@@ -69,3 +69,38 @@ WHERE created_at < NOW() - INTERVAL '90 days';
 --      DELETE FROM wallet_activity WHERE created_at < NOW() - INTERVAL '90 days';$$
 --  );
 -- ══════════════════════════════════════════════════════════
+
+
+-- ══════════════════════════════════════════════════════════
+--  [LP-05] MEV-savings telemetry on `swaps`
+--  Date: 2026-05-09
+--  Run once in the Supabase SQL Editor (or via your migration tool).
+--
+--  Adds two nullable numeric columns to the existing `swaps` table so
+--  the client can record both the pre-swap CoW-vs-non-CoW-median
+--  estimate and the post-swap realised solver surplus on CoW orders.
+--  Both values are stored in the OUTPUT TOKEN's raw wei (matching the
+--  convention of amount_in / amount_out which are also stored as raw
+--  amounts). USD conversion happens at read time using the swap's
+--  Chainlink price snapshot.
+--
+--  Note: spec referred to the table as `swap_logs`; the actual table
+--  in this project is `swaps`. Migration targets the real table name.
+-- ══════════════════════════════════════════════════════════
+
+ALTER TABLE swaps
+  ADD COLUMN IF NOT EXISTS mev_savings_estimate NUMERIC(78, 0),  -- raw output-token wei; max uint256 fits in 78 digits
+  ADD COLUMN IF NOT EXISTS mev_savings_actual   NUMERIC(78, 0);
+
+COMMENT ON COLUMN swaps.mev_savings_estimate IS
+  'Pre-swap MEV-savings estimate in raw output-token wei. Computed as (CoW quote output) − (median of non-CoW quote outputs). Only populated for CoW-routed swaps where CoW strictly beat the non-CoW median; NULL otherwise. See src/lib/mev-savings.ts.';
+
+COMMENT ON COLUMN swaps.mev_savings_actual IS
+  'Post-swap realised MEV surplus in raw output-token wei. Computed as (executedBuyAmount − quotedBuyAmount) from the CoW trades endpoint after order fulfilment. Only populated for confirmed CoW swaps with positive solver-delivered surplus; NULL otherwise.';
+
+-- Optional partial index for analytics dashboards filtering for swaps
+-- where MEV savings were materialised (skip the large NULL slice).
+CREATE INDEX IF NOT EXISTS idx_swaps_mev_savings_actual
+  ON swaps (created_at DESC)
+  WHERE mev_savings_actual IS NOT NULL;
+-- ══════════════════════════════════════════════════════════

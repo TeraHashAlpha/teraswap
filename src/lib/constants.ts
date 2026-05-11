@@ -205,6 +205,15 @@ export const QUOTE_REFRESH_MS = 15_000
 export const INPUT_DEBOUNCE_MS = 500
 export const QUOTE_TIMEOUT_MS = 10_000
 
+// [LP-04] Smart MEV preference threshold.
+// When the user has NOT toggled "Force MEV Protection" on, the SwapBox
+// auto-routes through CoW Protocol (or any other mevProtected source)
+// if its quoted output is within this fraction of the highest non-CoW
+// output. 0.003 = 0.3% — small enough to not materially compromise
+// price, large enough to catch the common case where CoW is just
+// behind the public-mempool venues by a sliver.
+export const MEV_PREFERENCE_THRESHOLD = 0.003
+
 // ── Contracts ────────────────────────────────────────────
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
 

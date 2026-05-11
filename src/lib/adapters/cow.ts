@@ -171,7 +171,14 @@ export async function pollCowOrderStatus(
   orderUid: string,
   maxWaitMs: number = 120_000,
   chainId: number = CHAIN_ID,
-): Promise<{ status: 'fulfilled' | 'expired' | 'cancelled'; txHash?: string }> {
+): Promise<{
+  status: 'fulfilled' | 'expired' | 'cancelled'
+  txHash?: string
+  /** [LP-05] Raw output amount the solver actually delivered (wei). Lets the
+   *  UI compute MEV-savings surplus client-side (executedBuy − quotedBuy)
+   *  without touching the post-execution validator. */
+  executedBuyAmount?: string
+}> {
   const base = getCowApiBase(chainId)
   const start = Date.now()
   const pollInterval = 3000
@@ -186,6 +193,7 @@ export async function pollCowOrderStatus(
         return {
           status: 'fulfilled',
           txHash: trades[0]?.txHash,
+          executedBuyAmount: trades[0]?.executedBuyAmount,
         }
       }
       if (order.status === 'cancelled' || order.status === 'expired') {

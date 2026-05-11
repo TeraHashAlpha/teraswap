@@ -156,6 +156,12 @@ interface UseSwapResult {
   simulationPassed: boolean | null
   /** Prepared tx data waiting for user confirmation (non-null when status === 'confirming') */
   pendingSwap: PendingSwapData | null
+  /** [LP-05] CoW-only: actual output-token surplus over the user's expected
+   *  quoted output, raw wei. Populated on successful CoW fulfillment when
+   *  the solver delivered more than originally quoted (positive price
+   *  improvement). Null on error, on non-CoW swaps, or when the trades
+   *  endpoint didn't return an executedBuyAmount. */
+  mevSurplusActualWei: bigint | null
   execute: (source: AggregatorName) => Promise<void>
   /** Confirm the pending swap after reviewing the transaction preview */
   confirmSwap: () => void
@@ -184,6 +190,7 @@ export function useSwap(
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
   const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
+  const [mevSurplusActualWei, setMevSurplusActualWei] = useState<bigint | null>(null)
 
   // Q24: Mounted ref to prevent state updates after unmount (polling race condition)
   const mountedRef = useRef(true)
@@ -698,6 +705,23 @@ export function useSwap(
       if (result.status === 'fulfilled' && result.txHash) {
         setTxHashState(result.txHash as `0x${string}`)
         setStatus('success')
+
+        // [LP-05] Compute realised MEV surplus: solver delivered amount
+        // (executedBuyAmount on the trade) minus the buyAmount we signed
+        // for. Positive values indicate price improvement from solver
+        // competition. We swallow parse errors silently — analytics is
+        // best-effort, must never break the success path.
+        if (result.executedBuyAmount) {
+          try {
+            const executed = BigInt(result.executedBuyAmount)
+            const quoted = BigInt(orderParams.buyAmount)
+            const surplus = executed - quoted
+            setMevSurplusActualWei(surplus > 0n ? surplus : 0n)
+          } catch {
+            setMevSurplusActualWei(null)
+          }
+        }
+
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed', source: 'cowswap',
           token_in: tokenIn.symbol, token_out: tokenOut.symbol,
@@ -961,10 +985,11 @@ export function useSwap(
     setPriceGuardDeviation(null)
     setSimulationPassed(null)
     setPendingSwap(null)
+    setMevSurplusActualWei(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, execute, confirmSwap, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
 }
 
 function parseWagmiError(error: Error): string {
