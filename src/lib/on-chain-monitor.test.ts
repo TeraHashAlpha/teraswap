@@ -408,3 +408,230 @@ describe('runOnChainScan', () => {
     expect(lastBlockWrite![1]).toBeLessThanOrEqual(19995001 + MAX_BLOCKS_PER_SCAN - 1)
   })
 })
+
+// ══════════════════════════════════════════════════════════════
+// [10-L-04] Alert dispatch resilience
+// ══════════════════════════════════════════════════════════════
+
+describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
+  // The test fixture's mockKvGet is value-based; the retry-queue path
+  // calls kv.get on a different key than the last-block path. We need
+  // a key-aware mock for these tests so each path sees the right value.
+  function setupKvByKey(values: Record<string, unknown>) {
+    mockKvGet.mockImplementation(async (key: string) => {
+      return key in values ? values[key] : null
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetBlockNumber.mockResolvedValue(20000100n)
+  })
+
+  it('does NOT advance lastScannedBlock when a critical alert fails', async () => {
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000000,
+      [_internal.ALERT_RETRY_KEY]: [],
+    })
+    // Critical AdminTransferred event in the scan range
+    mockGetLogs
+      .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
+        topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
+        transactionHash: '0x' + 'a'.repeat(64),
+      })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    // Telegram dispatch fails
+    mockEmitTransitionAlert.mockRejectedValue(new Error('telegram unavailable'))
+
+    const result = await runOnChainScan()
+
+    expect(result).not.toBeNull()
+    expect(result!.blockAdvanceHeld).toBe(true)
+    // Block KV write MUST NOT have happened
+    const lastBlockWrites = mockKvSet.mock.calls.filter(
+      (call: unknown[]) => call[0] === _internal.LAST_BLOCK_KEY,
+    )
+    expect(lastBlockWrites).toHaveLength(0)
+  })
+
+  it('pushes failed alert to the retry queue with attempts=1', async () => {
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000000,
+      [_internal.ALERT_RETRY_KEY]: [],
+    })
+    mockGetLogs
+      .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
+        topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
+        transactionHash: '0x' + 'b'.repeat(64),
+      })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    mockEmitTransitionAlert.mockRejectedValue(new Error('boom'))
+
+    await runOnChainScan()
+
+    const queueWrites = mockKvSet.mock.calls.filter(
+      (call: unknown[]) => call[0] === _internal.ALERT_RETRY_KEY,
+    )
+    expect(queueWrites.length).toBeGreaterThanOrEqual(1)
+    const finalQueue = queueWrites.at(-1)![1] as { event: { eventName: string }; attempts: number }[]
+    expect(finalQueue).toHaveLength(1)
+    expect(finalQueue[0].event.eventName).toBe('AdminTransferred')
+    expect(finalQueue[0].attempts).toBe(1)
+  })
+
+  it('advances block when alert succeeds even if KV audit-trail write fails', async () => {
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000000,
+      [_internal.ALERT_RETRY_KEY]: [],
+    })
+    mockGetLogs
+      .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
+        topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
+      })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    // Alert delivers successfully
+    mockEmitTransitionAlert.mockResolvedValue(undefined)
+    // KV audit-trail write fails (but not the block-advance write — we
+    // simulate the failure only on the CRITICAL_EVENTS_KEY-shaped call).
+    mockKvSet.mockImplementation(async (key: string) => {
+      if (key === 'teraswap:onchain:critical-events') throw new Error('kv unreachable')
+      return undefined
+    })
+
+    const result = await runOnChainScan()
+
+    expect(result).not.toBeNull()
+    expect(result!.blockAdvanceHeld).toBeUndefined() // not held
+    // Block-advance write DID happen even though audit-trail write failed.
+    const lastBlockWrites = mockKvSet.mock.calls.filter(
+      (call: unknown[]) => call[0] === _internal.LAST_BLOCK_KEY,
+    )
+    expect(lastBlockWrites).toHaveLength(1)
+    expect(lastBlockWrites[0][1]).toBe(20000100)
+  })
+
+  it('re-attempts queued alerts at the start of the next tick (success path)', async () => {
+    // Queue has one entry pending from a previous tick
+    const queued = [{
+      event: {
+        contract: 'OrderExecutor',
+        eventName: 'AdminTransferred',
+        txHash: '0x' + 'c'.repeat(64),
+        blockNumber: 19999500,
+        args: {},
+        severity: 'critical',
+      },
+      attempts: 1,
+      firstFailedAt: new Date().toISOString(),
+    }]
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000100, // no new blocks
+      [_internal.ALERT_RETRY_KEY]: queued,
+    })
+    mockGetBlockNumber.mockResolvedValue(20000100n)
+    mockEmitTransitionAlert.mockResolvedValue(undefined) // succeeds this time
+
+    const result = await runOnChainScan()
+
+    expect(result).not.toBeNull()
+    expect(result!.retriesDelivered).toBe(1)
+    // Queue persisted back as empty (entry removed on success)
+    const finalQueueWrite = mockKvSet.mock.calls
+      .filter((c: unknown[]) => c[0] === _internal.ALERT_RETRY_KEY)
+      .at(-1)
+    expect(finalQueueWrite).toBeDefined()
+    expect(finalQueueWrite![1]).toEqual([])
+  })
+
+  it('drops the entry + increments alerts_lost_total after MAX_ALERT_ATTEMPTS', async () => {
+    // Entry already at attempts = MAX-1; one more failure should evict.
+    const queued = [{
+      event: {
+        contract: 'OrderExecutor',
+        eventName: 'AdminTransferred',
+        txHash: '0x' + 'd'.repeat(64),
+        blockNumber: 19999500,
+        args: {},
+        severity: 'critical',
+      },
+      attempts: _internal.MAX_ALERT_ATTEMPTS - 1,
+      firstFailedAt: new Date().toISOString(),
+    }]
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000100,
+      [_internal.ALERT_RETRY_KEY]: queued,
+    })
+    mockGetBlockNumber.mockResolvedValue(20000100n)
+    mockEmitTransitionAlert.mockRejectedValue(new Error('still broken'))
+
+    const result = await runOnChainScan()
+
+    expect(result).not.toBeNull()
+    expect(result!.permanentlyLost).toBe(1)
+    // Queue persisted back as empty
+    const finalQueueWrite = mockKvSet.mock.calls
+      .filter((c: unknown[]) => c[0] === _internal.ALERT_RETRY_KEY)
+      .at(-1)
+    expect(finalQueueWrite![1]).toEqual([])
+    // alerts_lost_total incremented (kv.incr called on the metric key)
+    const incrCalls = mockKvIncr.mock.calls.filter(
+      (c: unknown[]) => c[0] === _internal.ALERTS_LOST_TOTAL_KEY,
+    )
+    expect(incrCalls).toHaveLength(1)
+  })
+
+  it('does NOT push duplicates when a block is re-scanned with the same failed event', async () => {
+    // First tick: failure → queue has 1 entry
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000000,
+      [_internal.ALERT_RETRY_KEY]: [],
+    })
+    mockGetLogs
+      .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
+        topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
+        transactionHash: '0x' + 'e'.repeat(64),
+        blockNumber: 20000050n,
+      })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    mockEmitTransitionAlert.mockRejectedValue(new Error('boom'))
+
+    await runOnChainScan()
+    const firstQueue = mockKvSet.mock.calls
+      .filter((c: unknown[]) => c[0] === _internal.ALERT_RETRY_KEY)
+      .at(-1)![1] as Array<{ attempts: number }>
+    expect(firstQueue).toHaveLength(1)
+    expect(firstQueue[0].attempts).toBe(1)
+
+    // Second tick: same scan range, same event, queue already has it.
+    // The block stayed at 20000000 (advance held), so the event is
+    // re-scanned. enqueueFailedAlerts should de-dup against the existing
+    // entry (no second copy added). processRetryQueue at the START of
+    // the second tick will bump attempts from 1 → 2.
+    mockKvSet.mockClear()
+    setupKvByKey({
+      [_internal.LAST_BLOCK_KEY]: 20000000,
+      [_internal.ALERT_RETRY_KEY]: firstQueue,
+    })
+    mockGetLogs
+      .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
+        topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
+        transactionHash: '0x' + 'e'.repeat(64),
+        blockNumber: 20000050n,
+      })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+
+    await runOnChainScan()
+    const queueWrites = mockKvSet.mock.calls
+      .filter((c: unknown[]) => c[0] === _internal.ALERT_RETRY_KEY)
+    // Last write should still have exactly one entry, attempts bumped
+    // to 2 by the retry-queue pass at the top of the tick.
+    const lastWrite = queueWrites.at(-1)![1] as Array<{ attempts: number }>
+    expect(lastWrite).toHaveLength(1)
+    expect(lastWrite[0].attempts).toBe(2)
+  })
+})
