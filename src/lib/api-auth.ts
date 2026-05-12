@@ -201,14 +201,24 @@ export async function verifyApiKey(req: NextRequest): Promise<ApiAuthResult> {
     return { ok: false, status: 503, error: 'Auth backend unavailable. Retry shortly.' }
   }
 
+  // [11-M-03] Unified 401 message — distinct error strings here would let
+  // an attacker enumerate which hashes exist and what state they are in
+  // (active-rate-limited vs revoked vs expired). The distinction is still
+  // logged server-side for operators; only the wire response is uniform.
+  const REJECTION_MESSAGE = 'Invalid or inactive API key.'
+  const hashPrefix = keyHash.slice(0, 8)
+
   if (!row) {
-    return { ok: false, status: 401, error: 'Invalid API key.' }
+    console.warn(`[api-auth] rejected: no key matched hash-prefix ${hashPrefix}`)
+    return { ok: false, status: 401, error: REJECTION_MESSAGE }
   }
   if (!row.is_active) {
-    return { ok: false, status: 401, error: 'API key has been revoked.' }
+    console.warn(`[api-auth] rejected: revoked key ${hashPrefix} (id=${row.id})`)
+    return { ok: false, status: 401, error: REJECTION_MESSAGE }
   }
   if (row.expires_at && Date.parse(row.expires_at) < Date.now()) {
-    return { ok: false, status: 401, error: 'API key has expired.' }
+    console.warn(`[api-auth] rejected: expired key ${hashPrefix} (id=${row.id}, expired_at=${row.expires_at})`)
+    return { ok: false, status: 401, error: REJECTION_MESSAGE }
   }
 
   // ── Rate limit: per-minute first, per-day second ────────
