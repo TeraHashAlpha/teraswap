@@ -43,10 +43,12 @@ function unauthorized(): NextResponse {
 }
 
 function supabaseUnavailable(): NextResponse {
-  return NextResponse.json(
-    { error: 'Supabase not configured — set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.' },
-    { status: 503 },
-  )
+  // [11-L-04 → covered by 11-M-02 sweep] Original message leaked the
+  // names of the missing env vars to anyone who could authenticate
+  // against this admin route. The operator-facing detail stays in the
+  // server log; the response is the generic envelope.
+  console.error('[api-keys] Supabase not configured — set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY')
+  return NextResponse.json({ error: 'Service unavailable.' }, { status: 503 })
 }
 
 /**

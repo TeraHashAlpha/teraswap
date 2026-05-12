@@ -136,14 +136,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     meta = await fetchMetaQuote(tokenIn, tokenOut, amount)
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown meta-quote error'
+    // [11-M-02] Keep err.message in server logs only — public catch
+    // paths must not leak adapter / limiter implementation details
+    // (rate limiter internal state, upstream URLs, adapter names, ...).
+    const internalMessage = err instanceof Error ? err.message : 'Unknown meta-quote error'
+    console.error('[v1/quote] meta-quote failed:', internalMessage)
     // The internal limiter (`globalLimiter`) throws "Rate limited" on
     // overflow — surface that as 429 even though the per-key limit
     // passed; otherwise treat as a 502 upstream failure.
-    if (/rate.limit/i.test(message)) {
-      return jsonError(429, message, auth.rateLimitHeaders)
+    if (/rate.limit/i.test(internalMessage)) {
+      return jsonError(429, 'Rate limit exceeded. Please retry.', auth.rateLimitHeaders)
     }
-    return jsonError(502, message, auth.rateLimitHeaders)
+    return jsonError(502, 'Upstream service error. Please retry.', auth.rateLimitHeaders)
   }
 
   // 5. Shape the response per the v1 contract. We surface

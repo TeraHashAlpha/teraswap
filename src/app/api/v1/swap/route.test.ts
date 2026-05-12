@@ -316,14 +316,17 @@ describe('POST /api/v1/swap — happy path with explicit source', () => {
     mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
     const res = await POST(makeRequest(validBody()))
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toMatch(/non-fee-collectable/)
+    // [11-M-02] Wire response is the generic envelope; the specific
+    // "non-fee-collectable" diagnostic now lives only in the server log.
+    expect((await res.json()).error).toMatch(/Internal error/)
   })
 
   it('502 when adapter does not return tx data', async () => {
     mockFetchSwapFromSource.mockResolvedValueOnce({ ...oneinchSwapData(), tx: undefined })
     const res = await POST(makeRequest(validBody()))
     expect(res.status).toBe(502)
-    expect((await res.json()).error).toMatch(/did not return transaction data/)
+    // [11-M-02] Adapter-shape complaint is internal; wire surface is generic.
+    expect((await res.json()).error).toMatch(/Upstream service error/)
   })
 
   it('502 when validateRouterAddress rejects (adapter returned non-whitelisted router)', async () => {
@@ -331,7 +334,8 @@ describe('POST /api/v1/swap — happy path with explicit source', () => {
     mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
     const res = await POST(makeRequest(validBody()))
     expect(res.status).toBe(502)
-    expect((await res.json()).error).toMatch(/whitelisted/)
+    // [11-M-02] Router-whitelist details would leak the allowlist logic — sanitised.
+    expect((await res.json()).error).toMatch(/Upstream service error/)
   })
 })
 
@@ -436,6 +440,7 @@ describe('POST /api/v1/swap — auto source selection (source omitted)', () => {
       sender: SENDER,
     }))
     expect(res.status).toBe(502)
-    expect((await res.json()).error).toMatch(/fee-collectable/)
+    // [11-M-02] Wire surface is generic; the "fee-collectable" reason is server-side only.
+    expect((await res.json()).error).toMatch(/Upstream service error/)
   })
 })

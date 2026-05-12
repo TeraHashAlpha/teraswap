@@ -217,21 +217,27 @@ async function autoSelectSource(
   try {
     meta = await fetchMetaQuote(tokenIn, tokenOut, amountWei)
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'meta-quote failed'
-    if (/rate.limit/i.test(message)) return jsonError(429, message)
-    return jsonError(502, message)
+    // [11-M-02] Internal message stays in server logs only — wire
+    // surface is generic to avoid leaking limiter / adapter details.
+    const internalMessage = err instanceof Error ? err.message : 'meta-quote failed'
+    console.error('[v1/swap] autoSelectSource meta-quote failed:', internalMessage)
+    if (/rate.limit/i.test(internalMessage)) return jsonError(429, 'Rate limit exceeded. Please retry.')
+    return jsonError(502, 'Upstream service error. Please retry.')
   }
 
   const candidate = meta.all.find(q => !FEE_INCOMPATIBLE_SOURCES.includes(q.source))
   if (!candidate) {
-    return jsonError(
-      502,
-      'No fee-collectable source returned a quote. Try again with an explicit `source` from /v1/quote.',
-    )
+    // [11-M-02] Hardcoded message referenced fee-collectable routing,
+    // which leaks internal architecture. The generic 502 mirrors the
+    // adapter-error fall-through so a caller can't distinguish "no
+    // source quoted" from "an adapter threw".
+    console.error('[v1/swap] autoSelectSource: no fee-collectable source in meta-quote response')
+    return jsonError(502, 'Upstream service error. Please retry.')
   }
   const quotedOutput = safeBigInt(candidate.toAmount)
   if (quotedOutput === null) {
-    return jsonError(502, 'Meta-quote returned a non-numeric toAmount; please retry.')
+    console.error('[v1/swap] autoSelectSource: candidate returned non-numeric toAmount')
+    return jsonError(502, 'Upstream service error. Please retry.')
   }
   return { source: candidate.source, quotedOutput }
 }
@@ -360,10 +366,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //    here exists so a future code change can't silently produce a
   //    direct-routed v1/swap response.
   if (!usesFeeCollector(source)) {
-    return jsonError(
-      500,
-      `Internal: source '${source}' resolved to a non-fee-collectable path; refusing to build a v1/swap response.`,
+    // [11-M-02] Original message identified the route and a code path
+    // — recon material. Sanitised to the generic 500 envelope; the
+    // diagnostic stays in the server log.
+    console.error(
+      `[v1/swap] guard tripped: source '${source}' resolved to a non-fee-collectable path`,
     )
+    return jsonError(500, 'Internal error.')
   }
 
   // 6. Fetch swap data at the NET amount. FeeCollector deducts the 0.1%
@@ -383,19 +392,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       parsed.slippage,
     )
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'fetchSwapFromSource failed'
-    if (/rate.limit/i.test(message)) return jsonError(429, message, auth.rateLimitHeaders)
-    if (/disabled|not whitelisted|unknown source/i.test(message)) {
-      return jsonError(400, message, auth.rateLimitHeaders)
+    // [11-M-02] err.message stays in the server log — never on the
+    // wire. Status code logic is preserved (429 on upstream rate-
+    // limited, 400 on disabled / not-whitelisted / unknown source
+    // because those are caller-recoverable, 502 otherwise).
+    const internalMessage = err instanceof Error ? err.message : 'fetchSwapFromSource failed'
+    console.error(`[v1/swap] fetchSwapFromSource(${source}) failed:`, internalMessage)
+    if (/rate.limit/i.test(internalMessage)) {
+      return jsonError(429, 'Rate limit exceeded. Please retry.', auth.rateLimitHeaders)
     }
-    return jsonError(502, message, auth.rateLimitHeaders)
+    if (/disabled|not whitelisted|unknown source/i.test(internalMessage)) {
+      return jsonError(400, 'Selected source is currently unavailable.', auth.rateLimitHeaders)
+    }
+    return jsonError(502, 'Upstream service error. Please retry.', auth.rateLimitHeaders)
   }
   if (!swapData.tx) {
-    return jsonError(
-      502,
-      `Adapter '${source}' did not return transaction data.`,
-      auth.rateLimitHeaders,
-    )
+    // [11-M-02] Adapter name in the public message leaks architecture.
+    console.error(`[v1/swap] adapter '${source}' did not return transaction data`)
+    return jsonError(502, 'Upstream service error. Please retry.', auth.rateLimitHeaders)
   }
 
   // 7. Wrap in FeeCollector V2 calldata.
@@ -409,8 +423,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       slippagePct: parsed.slippage,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'fee-collector wrap failed'
-    return jsonError(502, message, auth.rateLimitHeaders)
+    // [11-M-02] Wrapping errors include router-whitelist reasons and
+    // adapter shape complaints — both internal. Keep on server log.
+    const internalMessage = err instanceof Error ? err.message : 'fee-collector wrap failed'
+    console.error('[v1/swap] buildFeeCollectorTx failed:', internalMessage)
+    return jsonError(502, 'Upstream service error. Please retry.', auth.rateLimitHeaders)
   }
 
   // 8. Shape the v1 response. tx.gasEstimate is a string for parity with
