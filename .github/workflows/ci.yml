@@ -13,6 +13,8 @@
 #   2. Dependabot keeps dependencies up-to-date, reducing the window
 #      for supply-chain attacks via compromised transitive packages.
 #   3. npm audit (high/critical gate) catches known-vulnerable packages.
+#   4. .npmrc min-release-age=7d refuses packages published < 7 days,
+#      blocking zero-day supply chain attacks (e.g. Mini Shai-Hulud).
 #
 # If you remove the prisma dependency, switch back to plain `npm ci`
 # (which defaults to --ignore-scripts=true in CI).
@@ -79,6 +81,10 @@ jobs:
           cache: "npm"
       - name: Validate lockfile integrity
         run: npx lockfile-lint@4 --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
+      - name: Verify .npmrc hardening
+        run: |
+          grep -q 'min-release-age' .npmrc || (echo "ERROR: .npmrc missing min-release-age" && exit 1)
+          grep -q 'registry=https://registry.npmjs.org/' .npmrc || (echo "ERROR: .npmrc missing registry pin" && exit 1)
 
   test-contracts:
     runs-on: ubuntu-latest
