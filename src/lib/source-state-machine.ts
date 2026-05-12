@@ -186,6 +186,8 @@ async function loadFromKV(id: string): Promise<SourceStatus> {
     tickCache.set(id, status)
     return status
   } catch (err) {
+    // CodeQL: js/code-injection — FALSE POSITIVE:
+    // `id` is an internal SourceId constant from the SOURCES enum, never user input.
     console.warn(`[STATE] KV unavailable for ${id}, using default:`, err instanceof Error ? err.message : err)
     // KV unavailable → fail open (treat as active)
     const status = defaultStatus(id)
@@ -242,6 +244,8 @@ function transition(status: SourceStatus, newState: SourceState, reason: string)
   // Sole alert path — fans out to Telegram/Email/Discord via alert-wrapper
   // with dedup, grace period, and HTML escaping. Fire-and-forget to never block.
   emitTransitionAlert(status.id, from, newState, reason).catch(err => {
+    // CodeQL: js/code-injection — FALSE POSITIVE:
+    // `status.id` is an internal SourceId from the state machine, never user input.
     console.error(`[STATE] alert emission failed for ${status.id}:`, err instanceof Error ? err.message : err)
   })
 }

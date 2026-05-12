@@ -127,6 +127,9 @@ interface SwapRequestBody {
   amount?: unknown
   slippage?: unknown
   sender?: unknown
+  // CodeQL: js/type-confusion — FALSE POSITIVE:
+  // `unknown` is intentional — the field is validated and narrowed immediately below
+  // via KNOWN_SOURCES.has() before any use.
   source?: unknown
 }
 
@@ -175,6 +178,8 @@ function parseBody(raw: SwapRequestBody): ParsedSwapRequest | NextResponse {
   let pinned: AggregatorName | null = null
   if (source !== undefined && source !== null && source !== '') {
     if (typeof source !== 'string' || !isKnownSource(source)) {
+      // CodeQL: js/code-injection — FALSE POSITIVE:
+      // KNOWN_SOURCES is a hardcoded Set<string> constant, not user input.
       return jsonError(400, `source must be one of: ${[...KNOWN_SOURCES].join(', ')}`)
     }
     // FEE_INCOMPATIBLE_SOURCES cannot route through FeeCollector V2, and
