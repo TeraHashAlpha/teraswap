@@ -69,3 +69,30 @@ COMMENT ON COLUMN api_keys.is_active IS
 
 COMMENT ON COLUMN api_keys.total_requests IS
   'Monotonic counter incremented fire-and-forget on each successful auth. Not used for rate limiting (sliding-window KV check is the gate).';
+
+-- ── RLS (Row Level Security) ────────────────────────────────
+-- [11-M-01] Defence-in-depth. All other TeraSwap tables (swaps,
+-- quotes, orders, order_executions, security_events, usage_events,
+-- wallet_activity) have RLS enabled. The /v1/* hot path uses
+-- SUPABASE_SERVICE_ROLE_KEY which bypasses RLS, so there is no
+-- functional change — but if a future call site ever picks up the
+-- anon key by mistake, the deny-all default keeps key hashes and
+-- metadata out of reach.
+ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+
+-- Service role bypasses RLS at the engine level; the explicit policy
+-- is here so a `\d+ api_keys` dump documents the intent.
+DO $$ BEGIN
+  CREATE POLICY "Service role full access" ON api_keys
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Anon (and authenticated) get nothing — no SELECT, no INSERT, no UPDATE,
+-- no DELETE. RLS without policies for a role is already deny-by-default;
+-- the explicit USING (false) makes the intent unmistakable on inspection.
+DO $$ BEGIN
+  CREATE POLICY "Deny all to anon" ON api_keys
+    FOR ALL TO anon USING (false) WITH CHECK (false);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
