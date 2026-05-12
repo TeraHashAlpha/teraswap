@@ -266,7 +266,13 @@ function buildFeeCollectorTx(args: {
     throw new Error(`Router not whitelisted: ${routerCheck.reason ?? 'unknown reason'}`)
   }
 
-  const quotedOutput = BigInt(args.swapData.toAmount)
+  // [11-M-04] Adapter-returned toAmount comes from external HTTP — defend
+  // with safeBigInt so a malformed payload yields a 502 via the wrapping
+  // try/catch instead of an uncaught BigInt SyntaxError.
+  const quotedOutput = safeBigInt(args.swapData.toAmount)
+  if (quotedOutput === null) {
+    throw new Error('Adapter returned non-numeric toAmount.')
+  }
   const minimumOutput = computeMinimumOutput(quotedOutput, args.slippagePct)
 
   const tokenOutForFc: `0x${string}` = isNativeEthAddress(args.tokenOut)
