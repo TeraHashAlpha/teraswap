@@ -45,6 +45,24 @@ export interface OnChainScanResult {
   criticalCount: number
   warningCount: number
   infoCount: number
+  /** [10-L-04] True when the alert dispatcher had at least one failure
+   *  this tick AND we therefore held lastScannedBlock back to retry. */
+  blockAdvanceHeld?: boolean
+  /** [10-L-04] Number of events that reached the 3-attempt retry cap
+   *  this tick and were dropped to the alerts_lost_total counter. */
+  permanentlyLost?: number
+  /** [10-L-04] Number of retry-queue entries successfully delivered this tick. */
+  retriesDelivered?: number
+}
+
+/** [10-L-04] Persistent retry-queue entry shape. */
+export interface AlertRetryEntry {
+  event: OnChainEvent
+  /** 1 after the first failure; we drop + log lost when this would become > MAX_ALERT_ATTEMPTS. */
+  attempts: number
+  /** ISO timestamp of the first failed dispatch — useful for triage if an
+   *  alert is "stuck" in the queue for a long time. */
+  firstFailedAt: string
 }
 
 // ── Event topic hashes ───────────────────────────────────
@@ -207,6 +225,15 @@ const CRITICAL_EVENTS_TTL = 7 * 24 * 60 * 60
 const ONCHAIN_TICK_COUNTER_KEY = 'teraswap:onchain:tick-counter'
 const ONCHAIN_TICK_INTERVAL = 5
 
+/** [10-L-04] KV key for the alert retry queue. AlertRetryEntry[]. */
+const ALERT_RETRY_KEY = 'teraswap:onchain:alert-retry'
+/** [10-L-04] KV key for the cumulative permanently-lost counter (monotonic). */
+const ALERTS_LOST_TOTAL_KEY = 'teraswap:onchain:alerts-lost-total'
+/** [10-L-04] Cap on attempts before an event is declared permanently lost. */
+const MAX_ALERT_ATTEMPTS = 3
+/** [10-L-04] Cap on retry-queue length so a runaway producer can't blow up KV. */
+const MAX_RETRY_QUEUE_LENGTH = 256
+
 // ── RPC client ───────────────────────────────────────────
 
 function getServerClient(): PublicClient {
@@ -313,41 +340,69 @@ function extractArgs(log: Log): Record<string, unknown> {
 
 // ── Alert routing ────────────────────────────────────────
 
-async function routeAlerts(events: OnChainEvent[]): Promise<void> {
+/**
+ * [10-L-04] Dispatch the appropriate alert for a single event.
+ *
+ * Throws on dispatch failure so the caller can track per-event
+ * success/failure (the previous routeAlerts swallowed errors with a
+ * console.error and the failure was invisible at the call site).
+ * Info-severity events are no-ops (delivered=true).
+ */
+async function dispatchEventAlert(event: OnChainEvent): Promise<void> {
+  if (event.severity === 'info') return
+
+  if (event.severity === 'critical') {
+    const reason = `on-chain-critical: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})`
+    await emitTransitionAlert(
+      `onchain-${event.contract.toLowerCase()}`,
+      'active',
+      'disabled',
+      reason,
+    )
+    return
+  }
+
+  // warning
+  const reason = `on-chain-warning: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})`
+  await emitTransitionAlert(
+    `onchain-${event.contract.toLowerCase()}`,
+    'active',
+    'degraded',
+    reason,
+  )
+}
+
+/**
+ * [10-L-04] Dispatch alerts for a batch of events, returning per-event
+ * outcome. Used by both the new-events path (in runOnChainScan) and the
+ * retry-queue path (in processRetryQueue) so retry semantics stay
+ * identical to first-attempt semantics.
+ */
+async function routeAlertsTracking(events: OnChainEvent[]): Promise<{
+  delivered: OnChainEvent[]
+  failed: OnChainEvent[]
+}> {
+  const delivered: OnChainEvent[] = []
+  const failed: OnChainEvent[] = []
+
   for (const event of events) {
     if (event.severity === 'info') {
-      // Info: KV only (logged in storeCriticalEvents, no Telegram)
+      delivered.push(event) // info isn't dispatched but is still considered "not blocking"
       continue
     }
-
-    if (event.severity === 'critical') {
-      // Critical: P0 full fan-out
-      const reason = `on-chain-critical: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})`
-      try {
-        await emitTransitionAlert(
-          `onchain-${event.contract.toLowerCase()}`,
-          'active',
-          'disabled',
-          reason,
-        )
-      } catch (err) {
-        console.error(`[ONCHAIN] Alert emission failed for ${event.eventName}:`, err instanceof Error ? err.message : err)
-      }
-    } else if (event.severity === 'warning') {
-      // Warning: Telegram only (via transition alert with non-P0 reason)
-      const reason = `on-chain-warning: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})`
-      try {
-        await emitTransitionAlert(
-          `onchain-${event.contract.toLowerCase()}`,
-          'active',
-          'degraded',
-          reason,
-        )
-      } catch (err) {
-        console.error(`[ONCHAIN] Warning alert failed for ${event.eventName}:`, err instanceof Error ? err.message : err)
-      }
+    try {
+      await dispatchEventAlert(event)
+      delivered.push(event)
+    } catch (err) {
+      console.error(
+        `[ONCHAIN] Alert dispatch failed for ${event.eventName} (${event.txHash}):`,
+        err instanceof Error ? err.message : err,
+      )
+      failed.push(event)
     }
   }
+
+  return { delivered, failed }
 }
 
 // ── KV persistence ───────────────────────────────────────
@@ -382,6 +437,132 @@ async function storeCriticalEvents(events: OnChainEvent[]): Promise<void> {
   }
 }
 
+// ── [10-L-04] Alert retry queue ──────────────────────────────
+//
+// The retry queue is a flat array stored under ALERT_RETRY_KEY. Entries
+// carry their attempt count and first-failure timestamp so we can age
+// out events that are stuck. On every tick the queue is drained first,
+// before scanning new blocks — so a transient outage that resolves on
+// tick N+1 delivers the alert immediately rather than waiting for the
+// re-scan to find the event again.
+
+async function readRetryQueue(): Promise<AlertRetryEntry[]> {
+  try {
+    const raw = await kv.get<unknown>(ALERT_RETRY_KEY)
+    // Defensive: a stale KV record or a misconfigured environment could
+    // return something other than the array shape. Treat anything that
+    // isn't an array as empty rather than letting `for...of` crash.
+    if (!Array.isArray(raw)) return []
+    return raw as AlertRetryEntry[]
+  } catch (err) {
+    console.warn(
+      '[ONCHAIN] Retry queue read failed (treating as empty):',
+      err instanceof Error ? err.message : err,
+    )
+    return []
+  }
+}
+
+async function writeRetryQueue(queue: AlertRetryEntry[]): Promise<void> {
+  // Cap at MAX_RETRY_QUEUE_LENGTH so a runaway producer can't blow up KV.
+  const capped = queue.slice(-MAX_RETRY_QUEUE_LENGTH)
+  try {
+    if (capped.length === 0) {
+      await kv.set(ALERT_RETRY_KEY, [])
+    } else {
+      await kv.set(ALERT_RETRY_KEY, capped)
+    }
+  } catch (err) {
+    console.warn(
+      '[ONCHAIN] Retry queue write failed:',
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
+async function incrementAlertsLost(by: number): Promise<void> {
+  if (by <= 0) return
+  try {
+    // kv.incr is atomic; loop the increment when we need >1 (small N
+    // here — typically 1 at a time as events age out).
+    for (let i = 0; i < by; i++) {
+      await kv.incr(ALERTS_LOST_TOTAL_KEY)
+    }
+  } catch (err) {
+    console.warn(
+      '[ONCHAIN] alerts_lost_total increment failed:',
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
+/**
+ * [10-L-04] Drain the retry queue: re-attempt each entry, drop on success,
+ * bump attempts on failure, mark permanently lost when attempts hit the cap.
+ *
+ * Returns `{ delivered, permanentlyLost, stillPending }` for telemetry; the
+ * queue itself is persisted back to KV with only stillPending entries.
+ */
+async function processRetryQueue(): Promise<{
+  delivered: number
+  permanentlyLost: number
+  stillPending: number
+}> {
+  const queue = await readRetryQueue()
+  if (queue.length === 0) return { delivered: 0, permanentlyLost: 0, stillPending: 0 }
+
+  let delivered = 0
+  let permanentlyLost = 0
+  const stillPending: AlertRetryEntry[] = []
+
+  for (const entry of queue) {
+    try {
+      await dispatchEventAlert(entry.event)
+      delivered++
+    } catch (err) {
+      const nextAttempts = entry.attempts + 1
+      if (nextAttempts >= MAX_ALERT_ATTEMPTS) {
+        // Give up. Log + increment metric; do NOT add back to queue so
+        // the system can advance past this event.
+        console.error(
+          `[ONCHAIN] alerts_lost_total ++ — event permanently lost after ${nextAttempts} attempts: ` +
+            `${entry.event.contract}.${entry.event.eventName} tx=${entry.event.txHash} ` +
+            `block=${entry.event.blockNumber} firstFailedAt=${entry.firstFailedAt} ` +
+            `lastErr=${err instanceof Error ? err.message : String(err)}`,
+        )
+        permanentlyLost++
+      } else {
+        stillPending.push({ ...entry, attempts: nextAttempts })
+      }
+    }
+  }
+
+  await writeRetryQueue(stillPending)
+  if (permanentlyLost > 0) await incrementAlertsLost(permanentlyLost)
+
+  return { delivered, permanentlyLost, stillPending: stillPending.length }
+}
+
+/**
+ * [10-L-04] Append this tick's failed events to the retry queue. Each
+ * failure starts at `attempts: 1` (this dispatch counts as attempt #1).
+ * Entries are de-duped by (txHash, eventName, blockNumber) so a re-scan
+ * of the same block range doesn't double-stack the same event.
+ */
+async function enqueueFailedAlerts(failures: OnChainEvent[]): Promise<void> {
+  if (failures.length === 0) return
+  const existing = await readRetryQueue()
+  const key = (e: OnChainEvent) => `${e.txHash}|${e.eventName}|${e.blockNumber}`
+  const existingKeys = new Set(existing.map(en => key(en.event)))
+  const now = new Date().toISOString()
+  const additions: AlertRetryEntry[] = failures
+    .filter(e => !existingKeys.has(key(e)))
+    .map(event => ({ event, attempts: 1, firstFailedAt: now }))
+
+  if (additions.length === 0) return
+  await writeRetryQueue([...existing, ...additions])
+}
+
 // ── Tick cadence ─────────────────────────────────────────
 
 /**
@@ -403,13 +584,25 @@ export async function shouldRunOnChainScan(): Promise<boolean> {
 /**
  * Run one on-chain scan cycle. Called by runMonitoringTick() every 5th tick.
  *
- * 1. Read last scanned block from KV
- * 2. Get current block from RPC
- * 3. Scan events (capped to MAX_BLOCKS_PER_SCAN)
- * 4. Route alerts by severity
- * 5. Persist last scanned block (only on success)
+ * 1. Drain the alert retry queue (re-attempt prior failures) [10-L-04]
+ * 2. Read last scanned block from KV
+ * 3. Get current block from RPC
+ * 4. Scan events (capped to MAX_BLOCKS_PER_SCAN)
+ * 5. Dispatch alerts per-event, tracking success/failure
+ * 6. Enqueue failed alerts for retry on subsequent ticks
+ * 7. Persist critical-events audit trail (independent of advancement)
+ * 8. Advance lastScannedBlock ONLY when every non-info event delivered.
+ *    KV failure for the audit trail does NOT block advancement (the
+ *    alert was already delivered) — see quality criterion 3 on [10-L-04].
  */
 export async function runOnChainScan(): Promise<OnChainScanResult | null> {
+  // ── 1. Drain retry queue first ─────────────────────────────
+  // If an alert that failed N ticks ago succeeds now, we want to
+  // deliver it before chewing RPC budget on new blocks. Failures here
+  // bump the per-entry attempt count; events that hit MAX_ALERT_ATTEMPTS
+  // are dropped + alerts_lost_total++.
+  const retryResult = await processRetryQueue()
+
   let client: PublicClient
   try {
     client = getServerClient()
@@ -433,8 +626,19 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
   const fromBlock = lastScanned != null ? lastScanned + 1 : currentBlock - 100 // First run: scan last 100 blocks
 
   if (fromBlock > currentBlock) {
-    // No new blocks since last scan
-    return { fromBlock, toBlock: currentBlock, eventsFound: 0, criticalCount: 0, warningCount: 0, infoCount: 0 }
+    // No new blocks since last scan — but the retry queue may have done
+    // useful work; surface that on the result so the monitoring tick log
+    // line still reflects what happened.
+    return {
+      fromBlock,
+      toBlock: currentBlock,
+      eventsFound: 0,
+      criticalCount: 0,
+      warningCount: 0,
+      infoCount: 0,
+      ...(retryResult.permanentlyLost > 0 ? { permanentlyLost: retryResult.permanentlyLost } : {}),
+      ...(retryResult.delivered > 0 ? { retriesDelivered: retryResult.delivered } : {}),
+    }
   }
 
   // Cap to MAX_BLOCKS_PER_SCAN — remaining blocks will be scanned next tick
@@ -450,14 +654,38 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
     return null
   }
 
-  // Route alerts + persist
-  await Promise.allSettled([
-    routeAlerts(events),
-    storeCriticalEvents(events),
-  ])
+  // ── 5. Dispatch alerts per-event with success tracking ────
+  const { delivered: _deliveredEvents, failed: failedEvents } = await routeAlertsTracking(events)
 
-  // Advance last scanned block ONLY on success
-  await setLastScannedBlock(toBlock)
+  // ── 6. Push failures to the retry queue ───────────────────
+  // Filter out info-severity (dispatchEventAlert is a no-op for info, so
+  // failed won't contain info, but keep the filter as a defensive belt).
+  const failuresToRetry = failedEvents.filter(e => e.severity !== 'info')
+  if (failuresToRetry.length > 0) {
+    await enqueueFailedAlerts(failuresToRetry)
+  }
+
+  // ── 7. Persist audit trail (independent of advancement) ───
+  // This is the only path that writes to CRITICAL_EVENTS_KEY; KV failure
+  // here logs a warn but does NOT prevent block advancement, per
+  // [10-L-04] quality criterion: "Alert succeeds + KV fails → block
+  // advanced (alert was delivered)".
+  await storeCriticalEvents(events)
+
+  // ── 8. Gated block advancement ────────────────────────────
+  // Block advances only when every non-info event delivered. A single
+  // critical or warning failure holds the range back; next tick re-scans
+  // and `emitTransitionAlert`'s grace-period dedup prevents duplicate
+  // Telegram messages for the events that DID deliver this round.
+  const blockAdvanceHeld = failuresToRetry.length > 0
+  if (!blockAdvanceHeld) {
+    await setLastScannedBlock(toBlock)
+  } else {
+    console.warn(
+      `[ONCHAIN] Holding lastScannedBlock at ${lastScanned ?? 'unset'} — ${failuresToRetry.length} alert(s) failed; ` +
+        `events queued for retry (max ${MAX_ALERT_ATTEMPTS} attempts each).`,
+    )
+  }
 
   const criticalCount = events.filter(e => e.severity === 'critical').length
   const warningCount = events.filter(e => e.severity === 'warning').length
@@ -477,6 +705,9 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
     criticalCount,
     warningCount,
     infoCount,
+    ...(blockAdvanceHeld ? { blockAdvanceHeld: true } : {}),
+    ...(retryResult.permanentlyLost > 0 ? { permanentlyLost: retryResult.permanentlyLost } : {}),
+    ...(retryResult.delivered > 0 ? { retriesDelivered: retryResult.delivered } : {}),
   }
 }
 
@@ -491,4 +722,11 @@ export const _internal = {
   classifyFeeCollectorEvent,
   maybeElevateFeeEvent,
   LARGE_FEE_THRESHOLD,
+  // [10-L-04] retry-queue internals
+  ALERT_RETRY_KEY,
+  ALERTS_LOST_TOTAL_KEY,
+  MAX_ALERT_ATTEMPTS,
+  MAX_RETRY_QUEUE_LENGTH,
+  processRetryQueue,
+  enqueueFailedAlerts,
 } as const

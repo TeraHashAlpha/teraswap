@@ -19,6 +19,7 @@ import {
 } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
+import { safeBigInt } from '@/lib/utils'
 import type { SplitRoute, SplitLeg } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
@@ -216,9 +217,14 @@ export function useSplitSwap(
         // ETH output uses address(0); otherwise the ERC-20 output token address.
         const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
         const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
-        const legMinOutput = slippageBpsBn >= 10_000n
-          ? 0n
-          : (BigInt(swapData.toAmount) * (10_000n - slippageBpsBn)) / 10_000n
+        // [10-L-01] Same guard as useSwap: a malformed leg toAmount
+        // disables the on-chain minimumOutput check for that leg rather
+        // than throwing during calldata encoding.
+        const legToAmountBn = safeBigInt(swapData.toAmount)
+        const legMinOutput =
+          legToAmountBn === null || slippageBpsBn >= 10_000n
+            ? 0n
+            : (legToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
         const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut)
           ? ZERO_ADDRESS
           : (tokenOut.address as `0x${string}`)

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
+import { computeTokenAmountUsd } from '@/lib/chainlink'
 
 /**
  * POST /api/log-swap
@@ -52,6 +53,46 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ── [10-L-03] Server-side USD valuation ──
+    // We can no longer trust `amountInUsd` from the request body for
+    // monitoring thresholds: a malicious public-API consumer would just
+    // send `amountInUsd: 1` on a $50k swap to slip past trackLargeTrade.
+    // Server-compute it via Chainlink + the token's on-chain decimals;
+    // fall back to the client value only when Chainlink can't price
+    // the token (long-tail tokens with no feed). Track both for drift
+    // monitoring during the transition.
+    const [serverInUsdResult, serverOutUsdResult] = await Promise.all([
+      computeTokenAmountUsd(tokenIn, amountIn).catch(() => null),
+      amountOut ? computeTokenAmountUsd(tokenOut, amountOut).catch(() => null) : Promise.resolve(null),
+    ])
+
+    const clientInUsdNum = Number(amountInUsd)
+    const clientOutUsdNum = Number(amountOutUsd)
+
+    const serverInUsd = serverInUsdResult?.usd ?? null
+    const serverOutUsd = serverOutUsdResult?.usd ?? null
+
+    const finalInUsd: number | null =
+      serverInUsd ?? (Number.isFinite(clientInUsdNum) && clientInUsdNum > 0 ? clientInUsdNum : null)
+    const finalOutUsd: number | null =
+      serverOutUsd ?? (Number.isFinite(clientOutUsdNum) && clientOutUsdNum > 0 ? clientOutUsdNum : null)
+
+    const usdSourceInClient = serverInUsd === null && finalInUsd !== null
+    const usdSourceOutClient = serverOutUsd === null && finalOutUsd !== null
+
+    // Transitional drift monitoring: when both server + client agree on a
+    // value, log a warning if they disagree by >5%. Spot-checks production
+    // for client-side bugs and gives us evidence to fully drop the client
+    // field once usdSourceClient stays near zero.
+    if (serverInUsd != null && Number.isFinite(clientInUsdNum) && clientInUsdNum > 0) {
+      const drift = Math.abs(clientInUsdNum - serverInUsd) / serverInUsd
+      if (drift > 0.05) {
+        console.warn(
+          `[log-swap] USD drift on tokenIn: client=$${clientInUsdNum.toFixed(2)} server=$${serverInUsd.toFixed(2)} (drift=${(drift * 100).toFixed(1)}%) for ${tokenInSymbol} (${tokenIn})`,
+        )
+      }
+    }
+
     const { error } = await supabase.from('swaps').insert({
       wallet: wallet.toLowerCase(),
       tx_hash: txHash ?? null,
@@ -63,8 +104,9 @@ export async function POST(req: NextRequest) {
       token_out_symbol: tokenOutSymbol,
       amount_in: amountIn,
       amount_out: amountOut,
-      amount_in_usd: amountInUsd ?? null,
-      amount_out_usd: amountOutUsd ?? null,
+      // Use the server-computed value when available; client fallback otherwise.
+      amount_in_usd: finalInUsd,
+      amount_out_usd: finalOutUsd,
       slippage,
       mev_protected: mevProtected,
       fee_collected: feeCollected,
@@ -88,13 +130,17 @@ export async function POST(req: NextRequest) {
       source,
       tokenIn: tokenInSymbol,
       tokenOut: tokenOutSymbol,
-      amountUsd: Number(amountInUsd) || undefined,
+      // [10-L-03] Use server-computed amountUsd (with client fallback).
+      amountUsd: finalInUsd ?? undefined,
       txHash: txHash ?? undefined,
-      metadata: { status, slippage, mevProtected, feeCollected },
+      metadata: { status, slippage, mevProtected, feeCollected, usdSourceInClient, usdSourceOutClient },
     })
 
     // ── Server-side security event tracking (fire-and-forget) ──
-    const tradeUsd = Number(amountInUsd) || 0
+    // [10-L-03] tradeUsd is now derived from the server-computed value
+    // when available, so a malicious caller cannot suppress this alert
+    // by sending amountInUsd: 1 on a real $50k swap.
+    const tradeUsd = finalInUsd ?? 0
 
     // Large trade monitoring (>$50k)
     if (tradeUsd >= 50_000) {

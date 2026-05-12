@@ -10,6 +10,7 @@ import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
+import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
@@ -322,9 +323,15 @@ export function useSwap(
       // For ETH output, pass address(0); otherwise the ERC-20 output token address.
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
       const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
-      const minimumOutput = slippageBpsBn >= 10_000n
-        ? 0n
-        : (BigInt(swapData.toAmount) * (10_000n - slippageBpsBn)) / 10_000n
+      // [10-L-01] Guard against a malformed swapData.toAmount from a
+      // misbehaving adapter. If parsing fails we send 0n minimum (i.e.
+      // disable the on-chain InsufficientOutput check for this swap)
+      // rather than crashing the swap flow — better degraded than dead.
+      const swapToAmountBn = safeBigInt(swapData.toAmount)
+      const minimumOutput =
+        swapToAmountBn === null || slippageBpsBn >= 10_000n
+          ? 0n
+          : (swapToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
       const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut!)
         ? ZERO_ADDRESS
         : (tokenOut!.address as `0x${string}`)

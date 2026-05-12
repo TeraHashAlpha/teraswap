@@ -4,6 +4,7 @@ import { formatUnits } from 'viem'
 import type { SplitQuoteResult, SplitRoute, SplitLeg } from '@/lib/split-routing-types'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 import { formatDisplay } from '@/lib/format'
+import { safeBigInt } from '@/lib/utils'
 import type { Token } from '@/lib/tokens'
 
 interface Props {
@@ -67,8 +68,14 @@ export default function SplitRouteVisualizer({
 
   if (!bestSplit.isSplit) return null
 
-  const singleOutput = Number(formatUnits(BigInt(bestSingle.toAmount), tokenOut.decimals))
-  const splitOutput = Number(formatUnits(BigInt(bestSplit.totalOutput), tokenOut.decimals))
+  // [10-L-01] If either toAmount is malformed, drop out of the
+  // visualization entirely rather than rendering "NaN" / crashing.
+  const singleBn = safeBigInt(bestSingle.toAmount)
+  const splitTotalBn = safeBigInt(bestSplit.totalOutput)
+  if (singleBn === null || splitTotalBn === null) return null
+
+  const singleOutput = Number(formatUnits(singleBn, tokenOut.decimals))
+  const splitOutput = Number(formatUnits(splitTotalBn, tokenOut.decimals))
   const diff = splitOutput - singleOutput
   const improvementPercent = (bestSplit.improvementBps / 100).toFixed(2)
 

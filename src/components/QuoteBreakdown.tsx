@@ -7,6 +7,7 @@ import type { ApprovalPlan } from '@/lib/approvals'
 import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { isFeeCollectorActive } from '@/lib/api'
 import { estimateMevSavings } from '@/lib/mev-savings'
+import { safeBigInt } from '@/lib/utils'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
 
@@ -51,9 +52,18 @@ export default function QuoteBreakdown({
   smartMevApplied = false, mevExposedBest = false,
 }: Props) {
   const best = meta.best
-  const outputAmount = Number(formatUnits(BigInt(best.toAmount), tokenOut.decimals))
+  // [10-L-01] Guard against malformed toAmount on the winning quote.
+  // If parsing fails, every downstream derived value collapses to 0/—
+  // and the row renders gracefully instead of crashing the component tree.
+  const bestAmountBn = safeBigInt(best.toAmount)
+  const outputAmount = bestAmountBn !== null
+    ? Number(formatUnits(bestAmountBn, tokenOut.decimals))
+    : 0
+  const outputAmountValid = bestAmountBn !== null
   const inputAmount = Number(amountIn)
-  const rate = inputAmount > 0 ? formatDisplay(outputAmount / inputAmount, 4) : '—'
+  const rate = outputAmountValid && inputAmount > 0
+    ? formatDisplay(outputAmount / inputAmount, 4)
+    : '—'
   // Fee is collected when: source has native fee API params, OR FeeCollector proxy is active
   const feeCollected = FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()
   const feeAbsolute = feeCollected ? (inputAmount * FEE_PERCENT) / 100 : 0
@@ -61,10 +71,13 @@ export default function QuoteBreakdown({
 
   const secondBest = meta.all[1]
   let savingsVsSecond: string | null = null
-  if (secondBest) {
-    const secondOutput = Number(formatUnits(BigInt(secondBest.toAmount), tokenOut.decimals))
-    const diff = outputAmount - secondOutput
-    if (diff > 0) savingsVsSecond = `+${formatDisplay(diff, 4)} ${tokenOut.symbol} vs ${sourceLabel(secondBest.source)}`
+  if (secondBest && outputAmountValid) {
+    const secondBn = safeBigInt(secondBest.toAmount)
+    if (secondBn !== null) {
+      const secondOutput = Number(formatUnits(secondBn, tokenOut.decimals))
+      const diff = outputAmount - secondOutput
+      if (diff > 0) savingsVsSecond = `+${formatDisplay(diff, 4)} ${tokenOut.symbol} vs ${sourceLabel(secondBest.source)}`
+    }
   }
 
   const bestIsMevProtected = isMevProtected(best.source)
@@ -340,7 +353,10 @@ export default function QuoteBreakdown({
         <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-2">
           <p className="mb-1.5 text-[11px] font-semibold text-cream-35">Compare ({meta.all.length} sources)</p>
           {meta.all.map((q, i) => {
-            const out = Number(formatUnits(BigInt(q.toAmount), tokenOut.decimals))
+            // [10-L-01] Per-quote guard — a malformed entry shows "—"
+            // rather than crashing the whole comparison list.
+            const qBn = safeBigInt(q.toAmount)
+            const out = qBn !== null ? Number(formatUnits(qBn, tokenOut.decimals)) : null
             const isBest = i === 0
             const qMeta = AGGREGATOR_META[q.source]
             return (
@@ -369,7 +385,7 @@ export default function QuoteBreakdown({
                     </span>
                   )}
                 </span>
-                <span className="font-mono tabular-nums">{formatDisplay(out, 4)} {tokenOut.symbol}</span>
+                <span className="font-mono tabular-nums">{out !== null ? `${formatDisplay(out, 4)} ${tokenOut.symbol}` : '—'}</span>
               </div>
             )
           })}

@@ -17,6 +17,7 @@
  */
 
 import type { MetaQuoteResult } from '@/lib/api'
+import { safeBigInt } from '@/lib/utils'
 
 export interface MevSavingsEstimate {
   /** Output-token surplus over the non-CoW median, raw wei. */
@@ -39,10 +40,15 @@ export interface MevSavingsEstimate {
 export function estimateMevSavings(meta: MetaQuoteResult): MevSavingsEstimate | null {
   if (meta.best.source !== 'cowswap' || meta.all.length <= 1) return null
 
-  const nonCow = meta.all
-    .filter(q => q.source !== 'cowswap')
-    .map(q => BigInt(q.toAmount))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  // [10-L-01] Filter out malformed toAmount values via safeBigInt so a
+  // single bad quote from one source doesn't poison the whole median.
+  const nonCow: bigint[] = []
+  for (const q of meta.all) {
+    if (q.source === 'cowswap') continue
+    const parsed = safeBigInt(q.toAmount)
+    if (parsed !== null) nonCow.push(parsed)
+  }
+  nonCow.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
   if (nonCow.length === 0) return null
 
@@ -54,8 +60,8 @@ export function estimateMevSavings(meta: MetaQuoteResult): MevSavingsEstimate | 
 
   if (median === 0n) return null
 
-  const cow = BigInt(meta.best.toAmount)
-  if (cow <= median) return null
+  const cow = safeBigInt(meta.best.toAmount)
+  if (cow === null || cow <= median) return null
 
   const surplusWei = cow - median
   // bps × 100 = pct × 10_000; convert via two's-complement-safe BigInt math.

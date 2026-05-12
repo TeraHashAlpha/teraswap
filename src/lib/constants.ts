@@ -214,6 +214,35 @@ export const QUOTE_TIMEOUT_MS = 10_000
 // behind the public-mempool venues by a sliver.
 export const MEV_PREFERENCE_THRESHOLD = 0.003
 
+// ── [LP-08] Public API key tiers ─────────────────────────
+// Limits applied per-key via sliding-window KV rate limiting. Both
+// windows are enforced — a request must satisfy BOTH per-minute and
+// per-day quotas or auth returns 429.
+//
+// Changing a tier's limits here does NOT retroactively change existing
+// rows in `api_keys` — the per-key columns rate_limit_per_min /
+// rate_limit_per_day are snapshot-on-create. Use the admin route to
+// re-issue with the new tier defaults or update existing rows directly
+// in Supabase.
+
+export type ApiKeyTier = 'free' | 'pro' | 'enterprise'
+
+export interface ApiKeyTierLimits {
+  perMin: number
+  perDay: number
+}
+
+export const API_KEY_TIERS: Record<ApiKeyTier, ApiKeyTierLimits> = {
+  free: { perMin: 10, perDay: 100 },
+  pro: { perMin: 60, perDay: 10_000 },
+  enterprise: { perMin: 300, perDay: 100_000 },
+}
+
+/** Validate a tier name received from an untrusted source. */
+export function isApiKeyTier(value: unknown): value is ApiKeyTier {
+  return value === 'free' || value === 'pro' || value === 'enterprise'
+}
+
 // ── Contracts ────────────────────────────────────────────
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
 

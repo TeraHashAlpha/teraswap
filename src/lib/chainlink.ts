@@ -284,3 +284,91 @@ export async function fetchHistoricalPrice(
     return null
   }
 }
+
+// ══════════════════════════════════════════════════════════
+//  [10-L-03] SERVER-SIDE USD VALUATION
+//
+//  These helpers exist so server routes (e.g. /api/log-swap) can compute
+//  amountInUsd themselves rather than trusting a client-controlled value
+//  for monitoring thresholds. They reuse the same RPC channel as
+//  fetchChainlinkPriceRaw so there is no new oracle plumbing.
+// ══════════════════════════════════════════════════════════
+
+const ERC20_DECIMALS_ABI = [
+  {
+    type: 'function',
+    name: 'decimals',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint8' }],
+  },
+] as const
+
+/**
+ * Fetch an ERC-20 token's `decimals()` value via direct RPC.
+ *
+ * Returns null when the call fails or the result is outside the typical
+ * ERC-20 range (1..30) — defends against contracts that revert on
+ * decimals() or return garbage. Callers should treat null as "decimals
+ * unknown, skip server-side USD computation".
+ */
+export async function fetchErc20Decimals(tokenAddress: string): Promise<number | null> {
+  try {
+    const data = encodeFunctionData({ abi: ERC20_DECIMALS_ABI, functionName: 'decimals' })
+    const result = await rpcCall(tokenAddress, data)
+    if (!result || result === '0x') return null
+    const decoded = decodeFunctionResult({
+      abi: ERC20_DECIMALS_ABI,
+      functionName: 'decimals',
+      data: result as `0x${string}`,
+    }) as number
+    if (!Number.isInteger(decoded) || decoded < 1 || decoded > 30) return null
+    return decoded
+  } catch {
+    return null
+  }
+}
+
+/**
+ * [10-L-03] Server-trusted USD valuation of a raw wei token amount.
+ *
+ * Pulls the Chainlink price + the token's ERC-20 decimals via RPC and
+ * computes `usd = (rawAmount / 10^decimals) * price`. Returns null when
+ * any step fails — caller decides whether to fall back to a client-
+ * supplied figure (with a flag) or skip the threshold check.
+ *
+ * Uses BigInt arithmetic for the divisor to preserve precision on
+ * decimal-heavy tokens (USDC 6, WBTC 8, etc. — Number(rawWei) on 18-dec
+ * tokens above ~9007 ETH starts losing integer precision).
+ */
+export async function computeTokenAmountUsd(
+  tokenAddress: string,
+  rawAmountWei: string,
+): Promise<{ usd: number; price: number; decimals: number } | null> {
+  if (!tokenAddress || !rawAmountWei) return null
+
+  // Parallelise the two RPC calls — they're independent.
+  const [priceResult, decimals] = await Promise.all([
+    fetchChainlinkPriceRaw(tokenAddress).catch(() => null),
+    fetchErc20Decimals(tokenAddress).catch(() => null),
+  ])
+
+  if (!priceResult) return null
+  if (decimals === null) return null
+
+  try {
+    const rawBn = BigInt(rawAmountWei)
+    if (rawBn < 0n) return null
+    const divisor = 10n ** BigInt(decimals)
+    // Two-part conversion preserves precision: take the integer part as
+    // a BigInt → Number cast (always safe within 53 bits for any realistic
+    // token amount), then add the fractional part as a float.
+    const integerPart = Number(rawBn / divisor)
+    const fractionalPart = Number(rawBn % divisor) / Number(divisor)
+    const tokenAmount = integerPart + fractionalPart
+    if (!Number.isFinite(tokenAmount)) return null
+    return { usd: tokenAmount * priceResult.price, price: priceResult.price, decimals }
+  } catch {
+    return null
+  }
+}
