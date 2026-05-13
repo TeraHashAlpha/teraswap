@@ -13,7 +13,12 @@
  * Uses eth_getLogs with topic filters. Block range capped at 1000 per call
  * to prevent RPC timeouts; larger gaps are chunked across ticks.
  *
- * Runs every 5th monitoring tick (~5 min) via shouldRunOnChainScan().
+ * [P109/M-05] Runs every monitoring tick (~60 s — the Cloudflare Worker
+ * cron interval). Previously gated to every 5th tick, which delayed
+ * detection of AdminTransferred / Paused / OwnershipTransferred /
+ * RouterWhitelisted by up to 5 minutes. RPC cost is bounded by a
+ * process-scope `lastScannedBlock` cache (fast-path skip when no new
+ * blocks since the last tick) plus the existing KV-backed tracker.
  *
  * @internal — server-only module. Called by runMonitoringTick().
  */
@@ -221,9 +226,21 @@ const LAST_BLOCK_KEY = 'teraswap:onchain:last-block'
 /** KV key for recent critical events (7-day TTL) */
 const CRITICAL_EVENTS_KEY = 'teraswap:onchain:critical-events'
 const CRITICAL_EVENTS_TTL = 7 * 24 * 60 * 60
-/** KV tick counter for every-5th-tick cadence */
+/** [P109] Tick-counter KV key — kept for telemetry continuity (existing
+ *  dashboards graph the counter to detect a stalled monitoring worker).
+ *  No longer used to gate execution; see shouldRunOnChainScan(). */
 const ONCHAIN_TICK_COUNTER_KEY = 'teraswap:onchain:tick-counter'
-const ONCHAIN_TICK_INTERVAL = 5
+/** [P109] Legacy modulo divisor — every tick now scans (M-05). Kept
+ *  exported via `_internal` so downstream tooling that imports it for
+ *  display purposes doesn't break, but the scan loop ignores it. */
+const ONCHAIN_TICK_INTERVAL = 1
+
+/** [P109] Process-scope cache of the highest block we've successfully
+ *  scanned in this worker instance. Cold-start safe — when null we fall
+ *  through to the KV-backed lastScannedBlock; when set we skip the
+ *  eth_getLogs sweep if no new block has been mined since. Acceptable
+ *  to lose on a Lambda cold start; the KV value catches us up. */
+let lastScannedBlockInMemory: number | null = null
 
 /** [10-L-04] KV key for the alert retry queue. AlertRetryEntry[]. */
 const ALERT_RETRY_KEY = 'teraswap:onchain:alert-retry'
@@ -566,17 +583,27 @@ async function enqueueFailedAlerts(failures: OnChainEvent[]): Promise<void> {
 // ── Tick cadence ─────────────────────────────────────────
 
 /**
- * Should this tick run an on-chain scan?
- * Runs every 5th tick (same cadence as quorum, separate counter).
+ * [P109/M-05] Should this tick run an on-chain scan?
+ *
+ * Always returns `true` — the Cloudflare Worker cron fires at 60 s and
+ * we want every tick to surface admin events. The previous every-5th
+ * gating delayed critical-event detection (AdminTransferred, Paused,
+ * OwnershipTransferred, RouterWhitelisted) by up to 5 minutes.
+ *
+ * RPC cost is bounded inside `runOnChainScan()` by the in-memory
+ * `lastScannedBlockInMemory` fast-path: when `eth_blockNumber` returns
+ * a value we've already scanned, the function short-circuits without
+ * issuing `eth_getLogs`. The KV tick counter is still incremented so
+ * dashboards graphing cadence continuity keep working.
  */
 export async function shouldRunOnChainScan(): Promise<boolean> {
   try {
-    const count = await kv.incr(ONCHAIN_TICK_COUNTER_KEY)
-    return count % ONCHAIN_TICK_INTERVAL === 0
+    // Best-effort telemetry increment; failure is non-fatal.
+    await kv.incr(ONCHAIN_TICK_COUNTER_KEY)
   } catch (err) {
-    console.warn('[ONCHAIN] Tick counter KV failed, skipping:', err instanceof Error ? err.message : err)
-    return false
+    console.warn('[ONCHAIN] Tick counter KV increment failed (continuing):', err instanceof Error ? err.message : err)
   }
+  return true
 }
 
 // ── Main entry point ─────────────────────────────────────
@@ -619,6 +646,24 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
   } catch (err) {
     console.error('[ONCHAIN] Failed to get current block:', err instanceof Error ? err.message : err)
     return null
+  }
+
+  // [P109] In-memory fast-path: if we already scanned `currentBlock` in
+  // this process, the only "new" thing this tick could deliver is what
+  // already lives in the retry queue (drained above). Skip the KV read
+  // and the eth_getLogs sweep entirely. Cold-start safe — the cache is
+  // null on first call and we fall through to the KV-backed value.
+  if (lastScannedBlockInMemory !== null && currentBlock <= lastScannedBlockInMemory) {
+    return {
+      fromBlock: lastScannedBlockInMemory + 1,
+      toBlock: currentBlock,
+      eventsFound: 0,
+      criticalCount: 0,
+      warningCount: 0,
+      infoCount: 0,
+      ...(retryResult.permanentlyLost > 0 ? { permanentlyLost: retryResult.permanentlyLost } : {}),
+      ...(retryResult.delivered > 0 ? { retriesDelivered: retryResult.delivered } : {}),
+    }
   }
 
   // Determine scan range
@@ -680,6 +725,11 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
   const blockAdvanceHeld = failuresToRetry.length > 0
   if (!blockAdvanceHeld) {
     await setLastScannedBlock(toBlock)
+    // [P109] Update the in-memory fast-path cache so the next tick can
+    // short-circuit without re-reading KV. We only update on full
+    // success (no retry-held block) so the next tick still re-scans the
+    // problem range when something was held back.
+    lastScannedBlockInMemory = toBlock
   } else {
     console.warn(
       `[ONCHAIN] Holding lastScannedBlock at ${lastScanned ?? 'unset'} — ${failuresToRetry.length} alert(s) failed; ` +
@@ -713,6 +763,12 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
 
 // ── Exported for tests ───────────────────────────────────
 
+/** [P109] Reset the in-memory fast-path cache. Test-only — do not
+ *  call from production code. */
+export function _resetLastScannedBlockCache(): void {
+  lastScannedBlockInMemory = null
+}
+
 export const _internal = {
   TOPICS,
   MAX_BLOCKS_PER_SCAN,
@@ -729,4 +785,6 @@ export const _internal = {
   MAX_RETRY_QUEUE_LENGTH,
   processRetryQueue,
   enqueueFailedAlerts,
+  // [P109] in-memory cache reset
+  resetLastScannedBlockCache: _resetLastScannedBlockCache,
 } as const

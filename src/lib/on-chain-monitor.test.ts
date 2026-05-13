@@ -294,30 +294,44 @@ describe('scanContractEvents', () => {
   })
 })
 
-describe('shouldRunOnChainScan', () => {
+describe('shouldRunOnChainScan [P109/M-05]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('returns true on every 5th tick', async () => {
+  // [P109] The function now always returns true so on-chain events are
+  // scanned every Cloudflare-Worker tick (~60 s) instead of every 5th
+  // tick (~5 min). Closes M-05.
+  it('returns true on every tick (every-tick cadence)', async () => {
     mockKvIncr.mockResolvedValue(10)
     expect(await shouldRunOnChainScan()).toBe(true)
   })
 
-  it('returns false on non-5th tick', async () => {
+  it('returns true regardless of the tick-counter modulo', async () => {
     mockKvIncr.mockResolvedValue(7)
-    expect(await shouldRunOnChainScan()).toBe(false)
+    expect(await shouldRunOnChainScan()).toBe(true)
   })
 
-  it('returns false on KV failure', async () => {
+  it('returns true even when the KV tick-counter increment fails', async () => {
     mockKvIncr.mockRejectedValue(new Error('KV unavailable'))
-    expect(await shouldRunOnChainScan()).toBe(false)
+    // Failure is non-fatal — the increment is best-effort telemetry.
+    expect(await shouldRunOnChainScan()).toBe(true)
+  })
+
+  it('still increments the tick counter for telemetry continuity', async () => {
+    mockKvIncr.mockResolvedValue(42)
+    await shouldRunOnChainScan()
+    expect(mockKvIncr).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('runOnChainScan', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // [P109] Reset the process-scope in-memory cache so prior tests in
+    // this file don't leave it populated (the cache persists across
+    // calls within a process, which is the production behaviour).
+    _internal.resetLastScannedBlockCache()
     mockGetBlockNumber.mockResolvedValue(20000100n)
     mockKvGet.mockResolvedValue(20000000) // last scanned block
     mockGetLogs.mockResolvedValue([])
@@ -394,6 +408,39 @@ describe('runOnChainScan', () => {
     expect(result!.eventsFound).toBe(0)
   })
 
+  // [P109] In-memory cache fast-path. On the second call within the
+  // same process, when the current block hasn't advanced, the scanner
+  // must short-circuit without re-issuing eth_getLogs (the expensive
+  // call) and without re-reading the KV last-block tracker.
+  it('skips eth_getLogs on second tick when no new block has been mined', async () => {
+    // First call: scans 20000001 → 20000100 successfully.
+    await runOnChainScan()
+    expect(mockGetLogs).toHaveBeenCalled()
+
+    // Second call: same currentBlock, no advance. Expect the fast-path
+    // to fire — no further eth_getLogs calls. The retry-queue drain
+    // still touches KV, so we deliberately don't assert on KV call
+    // counts; the expensive RPC sweep is what the cache exists to skip.
+    const getLogsBefore = mockGetLogs.mock.calls.length
+    const result = await runOnChainScan()
+
+    expect(mockGetLogs.mock.calls.length).toBe(getLogsBefore)
+    expect(result).not.toBeNull()
+    expect(result!.eventsFound).toBe(0)
+  })
+
+  it('re-scans on the next tick when a new block has been mined', async () => {
+    // First call: scans up to 20000100.
+    await runOnChainScan()
+    const getLogsAfterFirst = mockGetLogs.mock.calls.length
+
+    // New block mined → second call should NOT short-circuit.
+    mockGetBlockNumber.mockResolvedValue(20000200n)
+    mockKvGet.mockResolvedValue(20000100)
+    await runOnChainScan()
+    expect(mockGetLogs.mock.calls.length).toBeGreaterThan(getLogsAfterFirst)
+  })
+
   it('caps scan range when gap > MAX_BLOCKS_PER_SCAN', async () => {
     mockKvGet.mockResolvedValue(19995000) // 5000 blocks behind
     mockGetBlockNumber.mockResolvedValue(20000100n)
@@ -425,6 +472,11 @@ describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // [P109] Reset the in-memory cache between resilience tests for the
+    // same reason as the main runOnChainScan suite — otherwise the
+    // second test in the file would short-circuit instead of exercising
+    // the retry-queue path.
+    _internal.resetLastScannedBlockCache()
     mockGetBlockNumber.mockResolvedValue(20000100n)
   })
 

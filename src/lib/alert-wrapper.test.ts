@@ -156,22 +156,30 @@ describe('alert-wrapper', () => {
   // ── Grace period ─────────────────────────────────────────
 
   describe('grace period', () => {
-    it('[API-H-03] sends grace-tagged alert to Telegram only during grace (non-P0)', async () => {
+    // [P110/M-04] During grace, every channel now receives the alert
+    // with `{ grace: true }` so the [GRACE] tag is consistent. The
+    // previous Telegram-only behaviour was M-04 — closed by P110.
+    it('[P110/M-04] sends grace-tagged alert to ALL channels during grace (non-P0)', async () => {
       const future = new Date(Date.now() + 3600_000).toISOString()
       setEnv('MONITOR_GRACE_UNTIL', future)
 
       await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
 
-      // Telegram called with grace option
-      expect(mockTelegram).toHaveBeenCalledTimes(1)
-      expect(mockTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ sourceId: '1inch', from: 'active', to: 'degraded' }),
-        { grace: true },
-      )
+      const expectedPayload = expect.objectContaining({
+        sourceId: '1inch',
+        from: 'active',
+        to: 'degraded',
+      })
+      const expectedOptions = { grace: true }
 
-      // Email and Discord NOT called during grace
-      expect(mockEmail).not.toHaveBeenCalled()
-      expect(mockDiscord).not.toHaveBeenCalled()
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      expect(mockTelegram).toHaveBeenCalledWith(expectedPayload, expectedOptions)
+
+      expect(mockEmail).toHaveBeenCalledTimes(1)
+      expect(mockEmail).toHaveBeenCalledWith(expectedPayload, expectedOptions)
+
+      expect(mockDiscord).toHaveBeenCalledTimes(1)
+      expect(mockDiscord).toHaveBeenCalledWith(expectedPayload, expectedOptions)
     })
 
     it('[API-H-03] grace alert does not consume dedup slot', async () => {
@@ -180,8 +188,13 @@ describe('alert-wrapper', () => {
 
       await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
 
-      // Dedup key should NOT have been written
-      expect(mockKvSet).not.toHaveBeenCalled()
+      // [P110/M-04] The grace path now writes a grace-counts entry to
+      // KV; assert only that no DEDUP key was written (the contract
+      // this test was originally guarding).
+      const dedupWrites = mockKvSet.mock.calls.filter((c: unknown[]) =>
+        String(c[0]).startsWith(_internal.dedupKey('', 'active', 'degraded').slice(0, 22)),
+      )
+      expect(dedupWrites).toHaveLength(0)
     })
 
     it('[API-H-03] after grace expires, same transition fires normally (dedup not consumed)', async () => {
@@ -190,19 +203,28 @@ describe('alert-wrapper', () => {
       setEnv('MONITOR_GRACE_UNTIL', future)
       await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
 
+      // [P110/M-04] All three channels were called during grace.
       expect(mockTelegram).toHaveBeenCalledTimes(1)
-      expect(mockKvSet).not.toHaveBeenCalled() // no dedup written
+      expect(mockEmail).toHaveBeenCalledTimes(1)
+      expect(mockDiscord).toHaveBeenCalledTimes(1)
 
       // Grace expires
       delete process.env.MONITOR_GRACE_UNTIL
-      mockKvGet.mockResolvedValue(null) // no dedup key exists
+      // After grace ends, the next emit first flushes the grace-end
+      // summary (one extra fan-out to each channel) THEN sends the
+      // current alert. Make readGraceCounts return empty and dedup
+      // counter return null so the test isolates the post-grace fire.
+      mockKvGet.mockResolvedValue(null)
 
       await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
 
-      // Should fire normally to all channels
+      // First emit (during grace) + summary-flush + post-grace alert
+      // = 3 calls per channel total when the previous run wrote
+      // grace-counts. The mockKvGet above returns null for the
+      // counts key, so flushGraceEndSummary is a no-op → 2 calls.
       expect(mockTelegram).toHaveBeenCalledTimes(2)
-      expect(mockEmail).toHaveBeenCalledTimes(1)
-      expect(mockDiscord).toHaveBeenCalledTimes(1)
+      expect(mockEmail).toHaveBeenCalledTimes(2)
+      expect(mockDiscord).toHaveBeenCalledTimes(2)
     })
 
     it('sends alert when grace period has expired', async () => {
@@ -245,6 +267,75 @@ describe('alert-wrapper', () => {
 
       // Invalid date → not in grace → alert goes through
       expect(mockTelegram).toHaveBeenCalledTimes(1)
+    })
+
+    // ── [P110/M-04] Grace tag consistency across channels ──
+
+    it('[P110/M-04] P0 alert during grace is NOT tagged on ANY channel', async () => {
+      const future = new Date(Date.now() + 3600_000).toISOString()
+      setEnv('MONITOR_GRACE_UNTIL', future)
+
+      await emitTransitionAlert('cow', 'active', 'disabled', 'kill-switch-triggered')
+
+      // P0 bypasses the grace tag entirely on every channel.
+      for (const mock of [mockTelegram, mockEmail, mockDiscord]) {
+        expect(mock).toHaveBeenCalledTimes(1)
+        const call = mock.mock.calls[0]
+        // Either no options argument or options.grace !== true.
+        if (call.length >= 2 && call[1]) {
+          expect(call[1].grace).not.toBe(true)
+        }
+      }
+    })
+
+    it('[P110/M-04] flushes grace-end summary to all channels when first post-grace alert fires', async () => {
+      // Simulate: grace had tagged 2 entries; grace has now ended.
+      delete process.env.MONITOR_GRACE_UNTIL
+      const counts = {
+        '1inch:active->degraded': 2,
+        'cow:active->disabled': 1,
+      }
+      // The emit path reads several KV keys in order:
+      //   1. teraswap:monitor:graceUntil  → isInGracePeriodAsync
+      //   2. teraswap:alert:grace-counts  → flushGraceEndSummary
+      //   3. teraswap:alert:dedup:…       → shouldSuppress + incrementCounter
+      // Drive each with a key-aware mock so reordering production code
+      // (e.g. an extra KV read) doesn't make this test flaky.
+      mockKvGet.mockImplementation(async (key: string) => {
+        if (key === _internal.GRACE_COUNTS_KEY) return counts
+        return null
+      })
+
+      await emitTransitionAlert('balancer', 'active', 'degraded', 'recovery-test')
+
+      // Each channel received:
+      //   - one grace-end-summary alert (3 alerts total)
+      //   - one post-grace alert for the balancer transition
+      // = 2 calls per channel.
+      expect(mockTelegram).toHaveBeenCalledTimes(2)
+      expect(mockEmail).toHaveBeenCalledTimes(2)
+      expect(mockDiscord).toHaveBeenCalledTimes(2)
+
+      // The first call to each channel is the summary — payload has the
+      // grace-end-summary sourceId and the breakdown text.
+      const firstTelegram = mockTelegram.mock.calls[0][0]
+      expect(firstTelegram.sourceId).toBe('grace-end-summary')
+      expect(firstTelegram.reason).toContain('Grace period ended')
+      expect(firstTelegram.reason).toContain('1inch:active->degraded')
+      expect(firstTelegram.reason).toContain('cow:active->disabled')
+    })
+
+    it('[P110/M-04] grace-end summary is a no-op when no alerts were tagged', async () => {
+      delete process.env.MONITOR_GRACE_UNTIL
+      mockKvGet.mockResolvedValue(null) // grace counts AND dedup both empty
+
+      await emitTransitionAlert('1inch', 'active', 'degraded', 'test')
+
+      // Only the regular post-grace alert — no summary fan-out.
+      expect(mockTelegram).toHaveBeenCalledTimes(1)
+      expect(mockTelegram).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceId: '1inch' }),
+      )
     })
   })
 
@@ -468,21 +559,22 @@ describe('alert-wrapper', () => {
       expect(mockTelegram).toHaveBeenCalledTimes(1)
     })
 
-    it('non-P0 reason during grace sends to Telegram only with grace tag', async () => {
+    it('[P110/M-04] non-P0 reason during grace sends the [GRACE]-tagged alert to ALL channels', async () => {
       const future = new Date(Date.now() + 3600_000).toISOString()
       setEnv('MONITOR_GRACE_UNTIL', future)
 
       await emitTransitionAlert('odos', 'active', 'degraded', 'high-latency')
 
-      // Telegram called with grace flag
+      const expectedPayload = expect.objectContaining({ sourceId: 'odos' })
+      const expectedOptions = { grace: true }
+
+      // [P110/M-04] All three channels receive the tagged alert.
       expect(mockTelegram).toHaveBeenCalledTimes(1)
-      expect(mockTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ sourceId: 'odos' }),
-        { grace: true },
-      )
-      // Email/Discord skipped
-      expect(mockEmail).not.toHaveBeenCalled()
-      expect(mockDiscord).not.toHaveBeenCalled()
+      expect(mockTelegram).toHaveBeenCalledWith(expectedPayload, expectedOptions)
+      expect(mockEmail).toHaveBeenCalledTimes(1)
+      expect(mockEmail).toHaveBeenCalledWith(expectedPayload, expectedOptions)
+      expect(mockDiscord).toHaveBeenCalledTimes(1)
+      expect(mockDiscord).toHaveBeenCalledWith(expectedPayload, expectedOptions)
     })
   })
 
