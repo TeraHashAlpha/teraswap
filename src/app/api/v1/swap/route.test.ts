@@ -499,10 +499,10 @@ describe('POST /api/v1/swap — gasless fields [P97]', () => {
   })
 })
 
-// [P102] Recipient field — input validation, plumb-through to adapter,
-// echo on response, calldata-mismatch detection.
+// [P102 + 14-FIX-01] Recipient field — input validation, plumb-through to
+// adapter, echo on response, and the post-audit constraint that recipient
+// must equal sender on v1/swap until FeeCollector V3 lands.
 describe('POST /api/v1/swap — recipient field [P102]', () => {
-  const RECIPIENT = '0xBeBcd07f2c69eF4DeC81B9eF45a9A92CcdAC23DC'
   const ZERO = '0x0000000000000000000000000000000000000000'
 
   beforeEach(() => {
@@ -527,12 +527,30 @@ describe('POST /api/v1/swap — recipient field [P102]', () => {
     expect((await res.json()).error).toMatch(/zero address/)
   })
 
-  it('threads recipient through to fetchSwapFromSource', async () => {
+  // [14-FIX-01] Block recipient ≠ sender before any adapter call.
+  // FeeCollector V2 (H-04) checks msg.sender's balance delta, so a split
+  // recipient would revert on-chain — we surface that as a 400 instead of
+  // burning the caller's gas. The full P101 adapter plumbing stays intact;
+  // FeeCollector V3 will flip the switch back on.
+  it('400 with FIX-01 message when recipient ≠ sender (audit 14-FIX-01)', async () => {
+    const DIFFERENT = '0xBeBcd07f2c69eF4DeC81B9eF45a9A92CcdAC23DC'
+    const res = await POST(makeRequest(validBody({ recipient: DIFFERENT })))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/recipient must equal sender/i)
+    expect(body.error).toMatch(/FeeCollector/i)
+    // fetchSwapFromSource must NOT have been invoked — fix lands before any
+    // adapter work happens.
+    expect(mockFetchSwapFromSource).not.toHaveBeenCalled()
+  })
+
+  it('threads recipient through to fetchSwapFromSource when recipient = sender', async () => {
+    // [14-FIX-01] Until FeeCollector V3, recipient must equal sender.
+    // The plumbing still fires — verify the adapter receives the value.
     mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
-    await POST(makeRequest(validBody({ recipient: RECIPIENT })))
-    // fetchSwapFromSource has recipient as its 11th positional arg
+    await POST(makeRequest(validBody({ recipient: SENDER })))
     const callArgs = mockFetchSwapFromSource.mock.calls[0]
-    expect(callArgs[10]).toBe(RECIPIENT)
+    expect(callArgs[10]).toBe(SENDER)
   })
 
   it('threads sender as recipient when caller omits it (backwards compat)', async () => {
@@ -542,12 +560,12 @@ describe('POST /api/v1/swap — recipient field [P102]', () => {
     expect(callArgs[10]).toBe(SENDER)
   })
 
-  it('echoes recipient + sender in the 200 response', async () => {
+  it('echoes recipient + sender in the 200 response when recipient = sender', async () => {
     mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
-    const res = await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    const res = await POST(makeRequest(validBody({ recipient: SENDER })))
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.recipient.toLowerCase()).toBe(RECIPIENT.toLowerCase())
+    expect(body.recipient.toLowerCase()).toBe(SENDER.toLowerCase())
     expect(body.sender.toLowerCase()).toBe(SENDER.toLowerCase())
   })
 
@@ -558,32 +576,22 @@ describe('POST /api/v1/swap — recipient field [P102]', () => {
     expect(body.recipient.toLowerCase()).toBe(SENDER.toLowerCase())
   })
 
-  it('400 when adapter calldata routes to a different recipient than requested', async () => {
-    // encode a Uniswap V3 exactInputSingle selector with a recipient that
-    // doesn't match what the caller asked for — proves the validator
-    // actually fires on a real selector with extractable recipient.
+  it('400 when adapter calldata routes output to an unexpected address (calldata tamper)', async () => {
+    // The audit fix means v1/swap forces recipient == sender, but the
+    // inner adapter calldata could still be tampered with — verify the
+    // calldata-recipient check fires when the adapter returns a router
+    // payload whose decoded recipient ≠ sender.
     const ATTACKER = '0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead'
-    // selector 0x04e45aaf = exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
-    // We construct a calldata blob whose recipient slot is ATTACKER.
-    // For unit-test purposes, the simplest path is to mock the adapter
-    // returning a multicall-wrapped router calldata that decodes to a
-    // mismatched recipient. We re-use the multicall selector 0x5ae401dc
-    // which the validator decodes; the wrapped inner blob is exactInputSingle.
-    //
-    // Easier: use a Uniswap V2-style selector with a different `to`. The
-    // validator decodes those without a multicall wrapper.
-    //   swapExactETHForTokens(uint256,address[],address,uint256)  selector 0x7ff36ab5
-    // arg layout (after selector): amountOutMin, path[], to, deadline
+    // swapExactETHForTokens(uint256,address[],address,uint256) — 0x7ff36ab5
+    // After-selector layout: amountOutMin, offset(path), to, deadline, path[].
     const selector = '0x7ff36ab5'
-    // path = single element (USDC), to = ATTACKER, deadline = 1
-    // Encode args by hand:
     const calldata =
       selector +
-      // amountOutMin (uint256) = 1
+      // amountOutMin = 1
       '0000000000000000000000000000000000000000000000000000000000000001' +
-      // offset to path[] = 0x80 (4 * 32)
+      // offset to path[] = 0x80
       '0000000000000000000000000000000000000000000000000000000000000080' +
-      // to (address) — padded
+      // to = ATTACKER (≠ sender)
       ATTACKER.slice(2).toLowerCase().padStart(64, '0') +
       // deadline = 1
       '0000000000000000000000000000000000000000000000000000000000000001' +
@@ -596,7 +604,9 @@ describe('POST /api/v1/swap — recipient field [P102]', () => {
       ...oneinchSwapData(),
       tx: { to: ROUTER_1INCH, data: calldata, value: '0', gas: 180000 },
     })
-    const res = await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    // No explicit recipient → effective recipient = sender; mismatch
+    // surfaces from the inner adapter calldata.
+    const res = await POST(makeRequest(validBody()))
     expect(res.status).toBe(400)
     expect((await res.json()).error).toMatch(/recipient/i)
   })
@@ -606,7 +616,7 @@ describe('POST /api/v1/swap — recipient field [P102]', () => {
     // extract a recipient. We let the request through (FeeCollector's
     // minimumOutput is the on-chain safety net).
     mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
-    const res = await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    const res = await POST(makeRequest(validBody({ recipient: SENDER })))
     expect(res.status).toBe(200)
   })
 })

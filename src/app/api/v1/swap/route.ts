@@ -186,6 +186,23 @@ function parseBody(raw: SwapRequestBody): ParsedSwapRequest | NextResponse {
     if (recipient.toLowerCase() === ZERO_ADDRESS.toLowerCase()) {
       return jsonError(400, 'recipient must not be the zero address (output would be unrecoverable).')
     }
+    // [14-FIX-01] FeeCollector V2's H-04 check measures `msg.sender`'s
+    // balance delta against `minimumOutput`. When recipient ≠ sender the
+    // router sends output to recipient, msg.sender's delta stays 0, and
+    // the contract reverts on-chain with InsufficientOutput(0, ...) —
+    // wasting the caller's gas on a tx that always fails.
+    //
+    // The full P101/P102 plumbing stays in place: adapters thread
+    // recipient through, v1/quote echoes it, and the field will light
+    // up automatically once FeeCollector V3 lands with a recipient-aware
+    // balance check. Until then v1/swap blocks the dead-end path.
+    if (recipient.toLowerCase() !== sender.toLowerCase()) {
+      return jsonError(
+        400,
+        'recipient must equal sender for FeeCollector-routed swaps. '
+          + 'Use /v1/quote with recipient for intent-based (gasless) flows.',
+      )
+    }
     parsedRecipient = recipient as `0x${string}`
   }
   // [10-L-01] safeBigInt rejects undefined/''/'NaN'/'0x123'/'1.5'/etc.
