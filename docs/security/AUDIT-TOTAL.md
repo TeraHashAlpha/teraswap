@@ -376,8 +376,21 @@ If DNS is compromised:
 | DNS-02 | High | Infrastructure | CAA records missing |
 | DNS-03 | Medium | Infrastructure | Certificate transparency not monitored |
 | DNS-04 | Medium | Infrastructure | HSTS preload not submitted |
+| EXT-H-01 | High | External | KV rate limiter fails open (CLOSED `aaa1f19`) |
+| EXT-H-02 | High | External | Split swap UI hides non-atomicity / MEV (CLOSED `bbedec0`) |
+| EXT-H-03 | High | External | Circuit breaker alert-only on mass disablement (CLOSED `926cd7b`) |
+| EXT-H-04 | High | External | FeeCollector lacks on-chain minimumOutput (CLOSED `94cb469`/`8097a86`/`f657a30`) |
+| EXT-M-01 | Medium | External | Zero React component/hook test coverage (CLOSED Phase 1 `79f6a81`/`33e93e9`) |
+| EXT-M-02 | Medium | External | Circuit breaker state not synced from KV on cold start (CLOSED `527a12f`) |
+| EXT-M-03 | Medium | External | Supabase service_role bypasses RLS in fire-and-forget paths (CLOSED `066876d`) |
+| EXT-M-04 | Medium | External | Grace-period alert inconsistency across channels (CLOSED `433a16d`) |
+| EXT-M-05 | Medium | External | On-chain monitor scans every 5th tick (CLOSED `8b1e9c6`) |
+| EXT-L-01 | Low | External | Backlog — pending triage (Sprint 17+) |
+| EXT-L-02 | Low | External | Backlog — pending triage (Sprint 17+) |
+| EXT-L-04 | Low | External | Backlog — pending triage (Sprint 17+) |
 
-**Total: 5 Critical, 12 High, 18 Medium, 11 Low = 46 findings**
+**Total: 5 Critical, 16 High, 23 Medium, 14 Low = 58 findings**
+**External analysis subtotal (Section 8): 4 High CLOSED, 5 Medium CLOSED, 3 Low backlog. EXT-L-03 was already mitigated on review (not counted).**
 
 ---
 
@@ -413,6 +426,49 @@ If DNS is compromised:
 - `.gitignore` correctly excludes all `.env` files
 - Service Worker correctly never caches API/data requests
 - All dependencies from trusted, high-download npm packages
+
+---
+
+## SECTION 8: EXTERNAL ANALYSIS FINDINGS
+
+> **Source:** `Audits/TeraSwap-Technical-Analysis-2026-04-22.pdf` (paid external technical analysis, 2026-04-22)
+> **Closure status (2026-05-13):** 4 High CLOSED, 5 Medium CLOSED, 3 Low in backlog.
+
+### High (4 CLOSED)
+
+| ID | Title | Sprint | Commit | Status |
+|----|-------|--------|--------|--------|
+| EXT-H-01 | KV rate limiter fails open on Upstash outage | 9A | `aaa1f19` | ✅ CLOSED — in-memory fallback added |
+| EXT-H-02 | Split swap UI hides non-atomicity / MEV exposure | 9A | `bbedec0` | ✅ CLOSED — explicit warning in SplitRouteVisualizer |
+| EXT-H-03 | Circuit breaker alert-only (no halt) on mass disablement | 9A | `926cd7b` | ✅ CLOSED — alert-and-halt with `/cleartrip` admin command |
+| EXT-H-04 | FeeCollector cannot enforce minimum output if router misbehaves | 9B | `94cb469` (contract) + `8097a86` (frontend) + `f657a30` (deploy) | ✅ CLOSED — FeeCollector V2 with on-chain `minimumOutput` validation |
+
+### Medium (5 CLOSED)
+
+| ID | Title | Sprint | Commit | Status |
+|----|-------|--------|--------|--------|
+| EXT-M-01 | Zero integration test coverage on React components/hooks | 16A | `79f6a81` (hooks) + `33e93e9` (components) | ✅ CLOSED — Phase 1: 4 security-critical hooks + 3 components |
+| EXT-M-02 | Circuit breaker state not synced from KV on cold start | 16A | `527a12f` | ✅ CLOSED — pre-seed adapter breakers from KV |
+| EXT-M-03 | Supabase service_role bypasses RLS for fire-and-forget logging | 16A | `066876d` | ✅ CLOSED — least-privilege INSERT-only logger role |
+| EXT-M-04 | Grace-period alert inconsistency across channels | 16A | `433a16d` | ✅ CLOSED — uniform `[GRACE]` tagging across all channels |
+| EXT-M-05 | On-chain monitor scans every 5th tick (event lag) | 16A | `8b1e9c6` | ✅ CLOSED — scan on every tick (60s cadence) |
+
+### Low (3 in BACKLOG)
+
+| ID | Title | Target | Status |
+|----|-------|--------|--------|
+| EXT-L-01 | (Pending triage — see source PDF) | Sprint 17+ | 📋 BACKLOG |
+| EXT-L-02 | (Pending triage — see source PDF) | Sprint 17+ | 📋 BACKLOG |
+| EXT-L-04 | (Pending triage — see source PDF) | Sprint 17+ | 📋 BACKLOG |
+
+> **Note:** EXT-L-03 (Telegram callback admin validation) was reviewed in Sprint 9A and found to be **already mitigated** by `ADMIN_CALLBACK_ACTIONS` in `src/app/api/telegram/webhook/route.ts:90` — it restricts `activate`/`keep`/`escalate` to admins, while `ack` is intentionally open to all group members.
+
+### Summary
+
+- All HIGH-severity external findings were closed before Sprint 9B mainnet readiness.
+- All MEDIUM-severity external findings were closed in Sprint 16A backlog-cleanup sprint.
+- LOW-severity items are scheduled for Sprint 17+ technical-debt cleanup; none gate Phase 2 work.
+- Detailed remediation context: `docs/Prompts/SPRINT-9A.md`, `docs/Prompts/SPRINT-9B.md`, `docs/Prompts/SPRINT-16A.md`.
 
 ---
 
