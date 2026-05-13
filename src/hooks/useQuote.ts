@@ -67,13 +67,45 @@ export function useQuote(
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // [hotfix] Capture the latest estimateGasCost in a ref so doFetch's
+  // identity doesn't churn every wagmi tick. `useEthGasCost` rebuilds
+  // its `estimate` closure on every call (it captures live ethPrice +
+  // gasPriceWei), so every wagmi refetch produced a new function ref.
+  // That ref was in doFetch's useCallback deps → doFetch identity
+  // changed → the polling useEffect re-ran → each re-run synchronously
+  // calls doFetch() at the top of the effect body. Result in prod:
+  // ~11 GET /api/quote requests in ~10s, all in flight, none debounced.
+  //
+  // Reading via a ref breaks the dependency chain — doFetch stays
+  // stable across renders and the polling timer is built exactly once
+  // per (tokens, amount, address, exclude) change.
+  const estimateGasCostRef = useRef(estimateGasCost)
+  useEffect(() => {
+    estimateGasCostRef.current = estimateGasCost
+  }, [estimateGasCost])
+
+  // [hotfix] In-flight guard: even if a future regression re-introduces
+  // effect churn, only one network request can be on the wire at a
+  // time. Belt-and-suspenders alongside the stable doFetch above.
+  const inFlightRef = useRef(false)
+
   const debouncedAmount = useDebounce(amountIn, INPUT_DEBOUNCE_MS)
+  // [hotfix] Stable string form of excludeSources for the dep array —
+  // the caller in SwapBox already memoises the array, but a missing
+  // useMemo there would have re-triggered the whole effect chain. The
+  // join shape (`a,b` vs `b,a` is fine — order only matters for the
+  // request URL) makes the dep cheap to compare and immune to upstream
+  // array-identity changes.
+  const excludeKey = excludeSources?.join(',') ?? ''
 
   const doFetch = useCallback(async () => {
     if (!tokenIn || !tokenOut || !debouncedAmount || Number(debouncedAmount) <= 0) {
       setMeta(null)
       return
     }
+
+    if (inFlightRef.current) return
+    inFlightRef.current = true
 
     setLoading(true)
     setError(null)
@@ -93,9 +125,10 @@ export function useQuote(
       // [P94] Compute the gasless recommendation client-side so it uses the
       // current ETH price + gas price (the server doesn't have either).
       // The best non-CoW quote is what the user would otherwise execute,
-      // so its gas estimate sets the savings figure.
+      // so its gas estimate sets the savings figure. Read the latest
+      // estimate via ref so this doesn't pull stale wagmi state.
       const bestNonCow = result.all.find((q) => q.source !== 'cowswap')
-      const refGas = bestNonCow ? estimateGasCost(bestNonCow.estimatedGas) : null
+      const refGas = bestNonCow ? estimateGasCostRef.current(bestNonCow.estimatedGas) : null
       const refGasUsd = refGas?.usd ?? bestNonCow?.gasUsd ?? 0
       const gasless = analyzeGasless(result.all, refGasUsd)
 
@@ -116,9 +149,10 @@ export function useQuote(
       setMeta(null)
     } finally {
       setLoading(false)
+      inFlightRef.current = false
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenIn, tokenOut, debouncedAmount, address, excludeSources?.join(','), estimateGasCost])
+  }, [tokenIn, tokenOut, debouncedAmount, address, excludeKey])
 
   useEffect(() => {
     if (!enabled) {
@@ -133,8 +167,14 @@ export function useQuote(
     }, 1000)
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-      if (countdownRef.current) clearInterval(countdownRef.current)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+        countdownRef.current = null
+      }
     }
   }, [doFetch, enabled])
 
