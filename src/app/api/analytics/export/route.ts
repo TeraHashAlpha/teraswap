@@ -55,16 +55,30 @@ function humanAmount(raw: string | null, symbol: string | null): string {
 }
 
 /**
- * Escape one CSV cell. RFC-4180: wrap in double quotes if the value
- * contains comma, quote, CR, or LF; double internal quotes.
+ * Escape one CSV cell. Two protections:
+ *
+ *   1. [13B-L-01] Prefix-sanitise cells starting with `=`, `+`, `-`,
+ *      `@`, tab, or CR. These trigger formula evaluation in Excel and
+ *      Google Sheets — a known CSV-injection vector for any data that
+ *      can contain attacker-controlled strings (and token symbols can:
+ *      scam ERC-20s with names like `=DROP` or `+APY` exist on-chain).
+ *      The OWASP-recommended mitigation is to prepend a tab character,
+ *      which the spreadsheet renders as the original value but doesn't
+ *      treat as a formula.
+ *   2. RFC-4180: wrap in double quotes if the value contains comma,
+ *      quote, CR, or LF; double internal quotes.
+ *
+ * Order matters — prefix-sanitisation happens BEFORE RFC-4180 escaping
+ * so the tab is included inside the quoted span when both apply.
  */
 export function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return ''
   const str = String(value)
-  if (/[",\r\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`
+  const safe = /^[=+\-@\t\r]/.test(str) ? `\t${str}` : str
+  if (/[",\r\n]/.test(safe)) {
+    return `"${safe.replace(/"/g, '""')}"`
   }
-  return str
+  return safe
 }
 
 interface ExportRow {
