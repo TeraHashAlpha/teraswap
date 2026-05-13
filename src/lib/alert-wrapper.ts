@@ -39,6 +39,14 @@ const DEDUP_TTL_P0_SECONDS = 300   // 5 minutes — P0/critical alerts
 const MAX_ALERTS_PER_WINDOW = 3    // max alerts before suppression within window
 const DEDUP_KEY_PREFIX = 'teraswap:alert:dedup:'
 
+/** [P110/M-04] KV key holding `Record<category, count>` of grace-tagged
+ *  alerts since the current grace period started. Cleared after the
+ *  post-grace summary is emitted. 24 h TTL is a defensive ceiling —
+ *  the normal lifecycle is "set during grace, cleared at first emit
+ *  after grace ends". */
+const GRACE_COUNTS_KEY = 'teraswap:alert:grace-counts'
+const GRACE_COUNTS_TTL = 24 * 60 * 60
+
 // ── Counter-based dedup ─────────────────────────────────
 
 interface DedupCounter {
@@ -129,6 +137,99 @@ const CHANNELS = [
   { name: 'discord', send: sendDiscordAlert },
 ] as const
 
+// ── [P110/M-04] Grace-period bookkeeping ─────────────────
+//
+// During grace, every non-P0 alert still fires on every channel but is
+// tagged with [GRACE] so on-call operators see the maintenance context.
+// We count how many alerts got tagged (keyed by sourceId:from→to) so
+// that the first alert after grace ends can render a single summary
+// instead of letting the operator infer the impact from scrollback.
+
+type GraceCounts = Record<string, number>
+
+async function readGraceCounts(): Promise<GraceCounts> {
+  try {
+    const raw = await kv.get<unknown>(GRACE_COUNTS_KEY)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    // Strict shape check: counts must be a flat Record<string, number>.
+    // This guards against KV returning a stale value with a different
+    // schema (e.g. a dedup counter) ending up parsed as grace counts.
+    const out: GraceCounts = {}
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+        out[k] = v
+      } else {
+        return {}
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+async function incrementGraceCount(category: string): Promise<void> {
+  try {
+    const counts = await readGraceCounts()
+    counts[category] = (counts[category] ?? 0) + 1
+    await kv.set(GRACE_COUNTS_KEY, counts, { ex: GRACE_COUNTS_TTL })
+  } catch (err) {
+    console.warn('[ALERT] grace-counts write failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+async function clearGraceCounts(): Promise<void> {
+  try {
+    await kv.set(GRACE_COUNTS_KEY, {}, { ex: GRACE_COUNTS_TTL })
+  } catch (err) {
+    console.warn('[ALERT] grace-counts clear failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * [P110/M-04] Emit a single summary alert to every channel when a grace
+ * period ends with at least one suppressed alert.
+ *
+ * Exported so the monitoring loop can also trigger the flush on its
+ * own cadence; it's safe to call any number of times (a no-op when
+ * counts are empty).
+ */
+export async function flushGraceEndSummary(): Promise<void> {
+  const counts = await readGraceCounts()
+  const total = Object.values(counts).reduce((a, b) => a + b, 0)
+  if (total === 0) return
+
+  // Build a one-line summary keyed by category, sorted desc by count.
+  const breakdown = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, n]) => `${cat}×${n}`)
+    .join(', ')
+
+  const summary: AlertPayload = {
+    sourceId: 'grace-end-summary',
+    from: 'degraded',
+    to: 'active',
+    reason:
+      `Grace period ended — normal alerting resumed. `
+      + `${total} alert(s) were tagged [GRACE] during the window: ${breakdown}.`,
+    timestamp: new Date().toISOString(),
+  }
+
+  // Each channel handles its own errors via .catch; the summary is
+  // best-effort and never throws.
+  await Promise.allSettled(
+    CHANNELS.map((ch) =>
+      ch.send(summary).catch((err) => {
+        console.error(
+          `[ALERT:${ch.name}] grace-end summary failed: ${err instanceof Error ? err.message : err}`,
+        )
+      }),
+    ),
+  )
+
+  await clearGraceCounts()
+}
+
 // ── Main entry point ─────────────────────────────────────
 
 export async function emitTransitionAlert(
@@ -140,8 +241,21 @@ export async function emitTransitionAlert(
   const critical = isP0Reason(reason)
   const inGrace = await isInGracePeriodAsync()
 
-  // ① [API-H-03] Grace period: P0/critical bypasses entirely.
-  //    Non-P0 during grace → send to Telegram only with [GRACE] tag, skip dedup.
+  // [P110/M-04] If we just exited a grace period, emit a single summary
+  // before the current alert so operators see the maintenance impact
+  // up-front. flushGraceEndSummary is a no-op when no counts are stored.
+  if (!inGrace) {
+    await flushGraceEndSummary()
+  }
+
+  // ① [API-H-03 + P110/M-04] Grace period:
+  //    - P0/critical bypasses the grace tag entirely (full-severity fan-out).
+  //    - Non-P0 fans out to ALL channels with [GRACE] tag — every channel
+  //      sees the same tagged alert, which closes the M-04 inconsistency
+  //      where only Telegram saw grace-tagged alerts and Email + Discord
+  //      either flooded at full severity or saw nothing.
+  //    Dedup is skipped during grace so post-grace alerts for the same
+  //    transition still fire normally.
   if (inGrace && !critical) {
     const payload: AlertPayload = {
       sourceId,
@@ -150,14 +264,31 @@ export async function emitTransitionAlert(
       reason,
       timestamp: new Date().toISOString(),
     }
+    const category = `${sourceId}:${from}->${to}`
+    console.log(`[ALERT] grace-tagged (all channels) ${category}`)
 
-    console.log(`[ALERT] grace-tagged (Telegram only) ${sourceId}: ${from} → ${to}`)
+    // Increment the per-category grace counter; the next post-grace
+    // alert flushes a summary built from these counts.
+    await incrementGraceCount(category)
 
-    // Send to Telegram only with grace flag — no buttons, tagged message
-    // Do NOT mark dedup — post-grace alert for same transition should still fire
-    await sendTelegramAlert(payload, { grace: true }).catch(err => {
-      console.error(`[ALERT:telegram] grace delivery failed for ${sourceId}: ${err instanceof Error ? err.message : err}`)
-    })
+    // Fan out to every channel with `{ grace: true }`. Each channel is
+    // responsible for prepending [GRACE] to its display format.
+    await Promise.allSettled(
+      CHANNELS.map((ch) =>
+        // We pass { grace: true } to every channel; the channel types
+        // accept the option. TypeScript-wise the unified call expression
+        // narrows ch.send to the most-specific overload, which all three
+        // channels now share (payload, options?).
+        (ch.send as (p: AlertPayload, o?: { grace?: boolean }) => Promise<void>)(
+          payload,
+          { grace: true },
+        ).catch((err) => {
+          console.error(
+            `[ALERT:${ch.name}] grace delivery failed for ${sourceId}: ${err instanceof Error ? err.message : err}`,
+          )
+        }),
+      ),
+    )
     return
   }
 
@@ -214,4 +345,8 @@ export const _internal = {
   DEDUP_TTL_SECONDS,
   DEDUP_TTL_P0_SECONDS,
   MAX_ALERTS_PER_WINDOW,
+  // [P110/M-04] grace-counts internals
+  GRACE_COUNTS_KEY,
+  readGraceCounts,
+  clearGraceCounts,
 } as const

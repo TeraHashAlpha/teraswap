@@ -23,7 +23,17 @@ function embedColour(state: string): number {
   }
 }
 
-export async function sendDiscordAlert(payload: AlertPayload): Promise<void> {
+/** [P110/M-04] Channel-level options mirroring the Telegram shape. */
+export interface DiscordAlertOptions {
+  /** When true, prepend [GRACE] to the message content and embed title
+   *  so a maintenance-window alert is visibly distinct in-channel. */
+  grace?: boolean
+}
+
+export async function sendDiscordAlert(
+  payload: AlertPayload,
+  options?: DiscordAlertOptions,
+): Promise<void> {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL
 
   if (!webhookUrl) {
@@ -36,14 +46,24 @@ export async function sendDiscordAlert(payload: AlertPayload): Promise<void> {
     return
   }
 
+  const isGrace = options?.grace === true
+  const gracePrefix = isGrace ? '[GRACE] ' : ''
+  // [P110/M-04] Top-level `content` shows above the embed in Discord —
+  // a one-liner so the on-call sees "this is during maintenance" without
+  // expanding the embed.
+  const content = isGrace
+    ? '[GRACE] Alert received during grace period — may resolve automatically.'
+    : undefined
+
   const res = await fetch(webhookUrl, {
     signal: AbortSignal.timeout(CHANNEL_FETCH_TIMEOUT_MS),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      ...(content ? { content } : {}),
       embeds: [
         {
-          title: `Source ${payload.to.toUpperCase()}: ${payload.sourceId}`,
+          title: `${gracePrefix}Source ${payload.to.toUpperCase()}: ${payload.sourceId}`,
           color: embedColour(payload.to),
           fields: [
             { name: 'Transition', value: `${payload.from} \u2192 ${payload.to}`, inline: true },
