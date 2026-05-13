@@ -210,6 +210,8 @@ async function fetchCurveQuote(
 
 async function fetchCurveSwap(
   src: string, dst: string, amount: string, from: string, slippage: number,
+  // [P101] Output destination; defaults to `from` when not provided.
+  recipient?: string,
 ): Promise<NormalizedQuote> {
   const netAmount = BigInt(amount)
 
@@ -269,7 +271,8 @@ async function fetchCurveSwap(
       netAmount,
       amountOutMin,
       pools,
-      from as Address,
+      // [P101] _receiver — the contract sends `dst` here. Defaults to sender.
+      (recipient ?? from) as Address,
     ],
   })
 
@@ -298,7 +301,10 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  return fetchCurveSwap(params.src, params.dst, params.amount, params.from, params.slippage)
+  return fetchCurveSwap(
+    params.src, params.dst, params.amount, params.from, params.slippage,
+    params.recipient,
+  )
 }
 
 const adapter: DEXAdapter = {

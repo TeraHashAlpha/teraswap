@@ -498,3 +498,115 @@ describe('POST /api/v1/swap — gasless fields [P97]', () => {
     expect((await res.json()).error).toMatch(/cannot route through FeeCollector/)
   })
 })
+
+// [P102] Recipient field — input validation, plumb-through to adapter,
+// echo on response, calldata-mismatch detection.
+describe('POST /api/v1/swap — recipient field [P102]', () => {
+  const RECIPIENT = '0xBeBcd07f2c69eF4DeC81B9eF45a9A92CcdAC23DC'
+  const ZERO = '0x0000000000000000000000000000000000000000'
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockIsSystemHalted.mockResolvedValue(false)
+    mockVerifyApiKey.mockResolvedValue(authSuccess())
+    mockUsesFeeCollector.mockReturnValue(true)
+    mockValidateRouterAddress.mockReturnValue({ valid: true })
+  })
+
+  it('400 when recipient is not a valid address', async () => {
+    const res = await POST(makeRequest(validBody({ recipient: 'not-an-address' })))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/recipient/)
+    // adapter was never called
+    expect(mockFetchSwapFromSource).not.toHaveBeenCalled()
+  })
+
+  it('400 when recipient is the zero address', async () => {
+    const res = await POST(makeRequest(validBody({ recipient: ZERO })))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/zero address/)
+  })
+
+  it('threads recipient through to fetchSwapFromSource', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+    await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    // fetchSwapFromSource has recipient as its 11th positional arg
+    const callArgs = mockFetchSwapFromSource.mock.calls[0]
+    expect(callArgs[10]).toBe(RECIPIENT)
+  })
+
+  it('threads sender as recipient when caller omits it (backwards compat)', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+    await POST(makeRequest(validBody()))
+    const callArgs = mockFetchSwapFromSource.mock.calls[0]
+    expect(callArgs[10]).toBe(SENDER)
+  })
+
+  it('echoes recipient + sender in the 200 response', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+    const res = await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.recipient.toLowerCase()).toBe(RECIPIENT.toLowerCase())
+    expect(body.sender.toLowerCase()).toBe(SENDER.toLowerCase())
+  })
+
+  it('response.recipient defaults to sender when recipient omitted', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+    const res = await POST(makeRequest(validBody()))
+    const body = await res.json()
+    expect(body.recipient.toLowerCase()).toBe(SENDER.toLowerCase())
+  })
+
+  it('400 when adapter calldata routes to a different recipient than requested', async () => {
+    // encode a Uniswap V3 exactInputSingle selector with a recipient that
+    // doesn't match what the caller asked for — proves the validator
+    // actually fires on a real selector with extractable recipient.
+    const ATTACKER = '0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead'
+    // selector 0x04e45aaf = exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
+    // We construct a calldata blob whose recipient slot is ATTACKER.
+    // For unit-test purposes, the simplest path is to mock the adapter
+    // returning a multicall-wrapped router calldata that decodes to a
+    // mismatched recipient. We re-use the multicall selector 0x5ae401dc
+    // which the validator decodes; the wrapped inner blob is exactInputSingle.
+    //
+    // Easier: use a Uniswap V2-style selector with a different `to`. The
+    // validator decodes those without a multicall wrapper.
+    //   swapExactETHForTokens(uint256,address[],address,uint256)  selector 0x7ff36ab5
+    // arg layout (after selector): amountOutMin, path[], to, deadline
+    const selector = '0x7ff36ab5'
+    // path = single element (USDC), to = ATTACKER, deadline = 1
+    // Encode args by hand:
+    const calldata =
+      selector +
+      // amountOutMin (uint256) = 1
+      '0000000000000000000000000000000000000000000000000000000000000001' +
+      // offset to path[] = 0x80 (4 * 32)
+      '0000000000000000000000000000000000000000000000000000000000000080' +
+      // to (address) — padded
+      ATTACKER.slice(2).toLowerCase().padStart(64, '0') +
+      // deadline = 1
+      '0000000000000000000000000000000000000000000000000000000000000001' +
+      // path[] length = 1
+      '0000000000000000000000000000000000000000000000000000000000000001' +
+      // path[0] = USDC
+      USDC.slice(2).toLowerCase().padStart(64, '0')
+
+    mockFetchSwapFromSource.mockResolvedValueOnce({
+      ...oneinchSwapData(),
+      tx: { to: ROUTER_1INCH, data: calldata, value: '0', gas: 180000 },
+    })
+    const res = await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/recipient/i)
+  })
+
+  it('proceeds when adapter calldata uses an unknown selector (FeeCollector backstop)', async () => {
+    // The 0x1234abcd fixture has an unknown selector — validator can't
+    // extract a recipient. We let the request through (FeeCollector's
+    // minimumOutput is the on-chain safety net).
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+    const res = await POST(makeRequest(validBody({ recipient: RECIPIENT })))
+    expect(res.status).toBe(200)
+  })
+})

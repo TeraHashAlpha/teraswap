@@ -30,7 +30,17 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
+  // [P101] 0x v2 permit2 swap doesn't expose a separate recipient field —
+  // `taker` is both signer and destination. The /v1/swap route already
+  // rejects this source (FEE_INCOMPATIBLE_SOURCES), so this branch is
+  // mostly defensive: log when an upstream caller threads recipient.
+  if (recipient && recipient !== from) {
+    console.warn(
+      `[0x] recipient (${recipient}) differs from sender (${from}) — `
+        + '0x v2 has no recipient parameter; output will route to sender.',
+    )
+  }
   const { base, key } = AGGREGATOR_APIS['0x']
   const qs = new URLSearchParams({
     sellToken: src,

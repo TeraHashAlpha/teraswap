@@ -244,6 +244,8 @@ export async function fetchSwapFromSource(
   dstDecimals: number = 18,
   quoteMeta?: QuoteMeta,
   chainId?: number,
+  /** [P101] Optional output destination. Defaults to `from`. */
+  recipient?: string,
 ): Promise<NormalizedQuote> {
   if (DISABLED_SOURCES[source]) throw new Error(`${source} is disabled: ${DISABLED_SOURCES[source]}`)
   const adapter = ADAPTER_REGISTRY.find(a => a.name === source)
@@ -255,6 +257,7 @@ export async function fetchSwapFromSource(
       srcDecimals, dstDecimals,
       quoteMeta,
       chainId,
+      recipient,
     })
   )
   if (!result) throw new Error(`${source}: no swap data returned`)

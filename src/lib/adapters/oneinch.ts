@@ -26,7 +26,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
   const { base, key } = AGGREGATOR_APIS['1inch']
   if (!key) throw new Error('1inch API key not configured')
   const qs = new URLSearchParams({
@@ -36,6 +36,12 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     disableEstimate: 'false',
     allowPartialFill: 'false',
   })
+  // [P101] 1inch's `destReceiver` overrides the default (sender) for the
+  // output token. We only set it when it differs from sender so we don't
+  // pin one more URL param on every existing swap.
+  if (recipient && recipient !== from) {
+    qs.set('destReceiver', recipient)
+  }
   const res = await fetch(`${base}/swap?${qs}`, {
     headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
   })

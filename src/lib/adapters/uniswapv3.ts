@@ -226,6 +226,8 @@ async function fetchUniswapV3Quote(
 async function fetchUniswapV3Swap(
   src: string, dst: string, amount: string, from: string, slippage: number,
   cachedFee?: number,
+  // [P101] Output destination — defaults to sender when not provided.
+  recipient?: string,
 ): Promise<NormalizedQuote> {
   const netAmount = BigInt(amount)
 
@@ -270,7 +272,10 @@ async function fetchUniswapV3Swap(
       tokenIn: sellToken,
       tokenOut: buyToken,
       fee: feeTier,
-      recipient: from as Address,
+      // [P101] SwapRouter02.recipient — defaults to sender. The router sends
+      // `tokenOut` to this address; downstream FeeCollector calldata wrapping
+      // (in /v1/swap) does NOT override this for non-CoW sources.
+      recipient: (recipient ?? from) as Address,
       amountIn: netAmount,
       amountOutMinimum: amountOutMin,
       sqrtPriceLimitX96: 0n,
@@ -319,6 +324,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   return fetchUniswapV3Swap(
     params.src, params.dst, params.amount, params.from, params.slippage,
     cachedFee,
+    params.recipient,
   )
 }
 

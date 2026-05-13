@@ -37,10 +37,11 @@ interface LogSwapParams {
    *  executedBuyAmount − quotedBuyAmount. Only populated on confirmed CoW
    *  swaps where the trades endpoint returned an executed amount. */
   mevSavingsActual?: string
-  /** [P96] Dollar value of the gas the user avoided by going gasless.
-   *  Sourced from analyzeGasless().gasSavingsUsd on the winning quote.
-   *  Always 0 for non-CoW swaps. */
-  gasSavingsUsd?: number
+  /** [P104 / 13A-L-02] Raw adapter gas USD estimate on the best non-CoW
+   *  quote for the same pair. The server uses this (clamped) to derive
+   *  gas_savings_usd — clients can no longer set the value directly.
+   *  Only meaningful for CoW swaps; ignored for non-CoW sources. */
+  bestNonCowGasUsd?: number
 }
 
 export function logSwapToSupabase(params: LogSwapParams): void {
@@ -69,7 +70,7 @@ export function logSwapToSupabase(params: LogSwapParams): void {
         priceDeviation: params.priceDeviation ?? 0,
         mevSavingsEstimate: params.mevSavingsEstimate,
         mevSavingsActual: params.mevSavingsActual,
-        gasSavingsUsd: params.gasSavingsUsd ?? 0,
+        bestNonCowGasUsd: params.bestNonCowGasUsd,
       }),
     }).catch((err) => {
       console.warn('[analytics] logSwap failed:', err)

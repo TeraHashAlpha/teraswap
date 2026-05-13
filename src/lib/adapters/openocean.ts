@@ -30,7 +30,17 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
+  // [P101] OpenOcean's /swap endpoint does NOT support a split sender/
+  // receiver — `account` is both signer and destination. Warn loudly when
+  // a caller requested a distinct recipient so /v1/swap can detect the
+  // mismatch downstream via the calldata recipient check.
+  if (recipient && recipient !== from) {
+    console.warn(
+      `[openocean] recipient (${recipient}) differs from sender (${from}) — `
+        + 'OpenOcean API has no recipient parameter; output will route to sender.',
+    )
+  }
   const { base } = AGGREGATOR_APIS.openocean
   const qs = new URLSearchParams({
     inTokenAddress: src,

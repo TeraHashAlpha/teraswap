@@ -102,12 +102,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const amount = sp.get('amount')
   const slippageRaw = sp.get('slippage')
   const chainIdRaw = sp.get('chainId')
+  // [P102] Optional output destination. The quote itself doesn't change,
+  // but we validate + echo so callers learn early whether their recipient
+  // is well-formed before pricing the trade.
+  const recipientRaw = sp.get('recipient')
 
   if (!tokenIn || !tokenOut || !amount) {
     return jsonError(400, 'Missing required params: tokenIn, tokenOut, amount.')
   }
   if (!isValidAddress(tokenIn) || !isValidAddress(tokenOut)) {
     return jsonError(400, 'tokenIn and tokenOut must be valid 0x-prefixed 20-byte addresses.')
+  }
+
+  let recipient: string | null = null
+  if (recipientRaw !== null && recipientRaw !== '') {
+    if (!isValidAddress(recipientRaw)) {
+      return jsonError(400, 'recipient must be a valid 0x-prefixed 20-byte address.')
+    }
+    recipient = recipientRaw
   }
   // [10-L-01] safeBigInt rejects anything that isn't a decimal-integer
   // string — covers undefined/'NaN'/'0x123'/'1.5' without throwing.
@@ -200,6 +212,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       mevProtected: bestIsMevProtected,
       slippage,
       chainId: CHAIN_ID,
+      // [P102] Echo recipient so callers can confirm the API understood
+      // their intent (and the address parsed). Null when omitted — never
+      // undefined.
+      recipient,
       ...(meta.crossQuoteDeviation != null
         ? { crossQuoteDeviation: meta.crossQuoteDeviation }
         : {}),

@@ -58,6 +58,7 @@ import {
   type AggregatorName,
 } from '@/lib/constants'
 import { analyzeGasless } from '@/lib/gasless-engine'
+import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 
 export const dynamic = 'force-dynamic'
 
@@ -139,6 +140,10 @@ interface SwapRequestBody {
   // `unknown` is intentional — the field is validated and narrowed immediately below
   // via KNOWN_SOURCES.has() before any use.
   source?: unknown
+  // [P102] Optional output destination — defaults to sender. When provided,
+  // it must be a valid non-zero address; the adapter routes output to it
+  // and the calldata-recipient check below compares against it (not sender).
+  recipient?: unknown
 }
 
 interface ParsedSwapRequest {
@@ -150,6 +155,8 @@ interface ParsedSwapRequest {
   sender: `0x${string}`
   /** Caller-pinned source, or null when we should auto-select via meta-quote. */
   source: AggregatorName | null
+  /** [P102] Output destination — null defers to `sender`. */
+  recipient: `0x${string}` | null
 }
 
 /**
@@ -159,13 +166,27 @@ interface ParsedSwapRequest {
  * time anyway, and a single message is easier to surface.
  */
 function parseBody(raw: SwapRequestBody): ParsedSwapRequest | NextResponse {
-  const { tokenIn, tokenOut, amount, slippage, sender, source } = raw
+  const { tokenIn, tokenOut, amount, slippage, sender, source, recipient } = raw
 
   if (typeof tokenIn !== 'string' || typeof tokenOut !== 'string' || typeof amount !== 'string' || typeof sender !== 'string') {
     return jsonError(400, 'Missing required fields: tokenIn, tokenOut, amount, sender.')
   }
   if (!isValidAddress(tokenIn) || !isValidAddress(tokenOut) || !isValidAddress(sender)) {
     return jsonError(400, 'tokenIn, tokenOut, and sender must be valid 0x-prefixed 20-byte addresses.')
+  }
+
+  // [P102] recipient is optional; reject anything malformed early so the
+  // caller fixes it once, not after burning a rate-limit token on the
+  // meta-quote.
+  let parsedRecipient: `0x${string}` | null = null
+  if (recipient !== undefined && recipient !== null && recipient !== '') {
+    if (typeof recipient !== 'string' || !isValidAddress(recipient)) {
+      return jsonError(400, 'recipient must be a valid 0x-prefixed 20-byte address.')
+    }
+    if (recipient.toLowerCase() === ZERO_ADDRESS.toLowerCase()) {
+      return jsonError(400, 'recipient must not be the zero address (output would be unrecoverable).')
+    }
+    parsedRecipient = recipient as `0x${string}`
   }
   // [10-L-01] safeBigInt rejects undefined/''/'NaN'/'0x123'/'1.5'/etc.
   // without throwing — defends against the BigInt SyntaxError class.
@@ -211,6 +232,7 @@ function parseBody(raw: SwapRequestBody): ParsedSwapRequest | NextResponse {
     slippage: slippagePct,
     sender: sender as `0x${string}`,
     source: pinned,
+    recipient: parsedRecipient,
   }
 }
 
@@ -419,6 +441,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const feeAmount = (parsed.amount * BigInt(FEE_BPS)) / 10_000n
   const netAmount = parsed.amount - feeAmount
 
+  // [P102] Expected recipient — what the adapter should encode into router
+  // calldata. Defaults to sender when not specified.
+  const expectedRecipient = parsed.recipient ?? parsed.sender
+
   let swapData: NormalizedQuote
   try {
     swapData = await fetchSwapFromSource(
@@ -428,6 +454,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       netAmount.toString(),
       parsed.sender,
       parsed.slippage,
+      undefined,            // srcDecimals — let adapter default
+      undefined,            // dstDecimals
+      undefined,            // quoteMeta
+      undefined,            // chainId — adapter defaults to CHAIN_ID
+      expectedRecipient,    // [P101/P102] thread through to the adapter
     )
   } catch (err) {
     // [11-M-02] err.message stays in the server log — never on the
@@ -448,6 +479,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // [11-M-02] Adapter name in the public message leaks architecture.
     console.error(`[v1/swap] adapter '${source}' did not return transaction data`)
     return jsonError(502, 'Upstream service error. Please retry.', auth.rateLimitHeaders)
+  }
+
+  // [P102] Validate the inner adapter calldata routes output to the
+  // expected recipient. Before P101 the comparison was always against
+  // sender (= taker = receiver). Now that recipient can diverge, the
+  // check compares against whichever address the caller asked the output
+  // to go to.
+  //
+  // Two failure modes from validateCallDataRecipient:
+  //  1. extracted != expected — we detected a real mismatch and block.
+  //  2. unknown selector / decode error — we can't tell. We log loudly
+  //     and let the request through; FeeCollector V2's on-chain
+  //     minimumOutput revert (H-04) is the authoritative safety net,
+  //     and it always checks the SENDER's balance delta. /api/swap
+  //     (in-app) is stricter because it has no such on-chain backstop.
+  const recipientCheck = validateCallDataRecipient(
+    swapData.tx.data as string,
+    expectedRecipient,
+  )
+  if (!recipientCheck.valid && recipientCheck.extracted) {
+    console.error(
+      `[v1/swap][R1] BLOCKED: adapter '${source}' calldata recipient mismatch — `
+        + `expected ${expectedRecipient}, got ${recipientCheck.extracted}: ${recipientCheck.reason}`,
+    )
+    return jsonError(
+      400,
+      'Swap calldata recipient does not match the requested recipient.',
+      auth.rateLimitHeaders,
+    )
+  }
+  if (!recipientCheck.valid) {
+    console.warn(
+      `[v1/swap][R1] adapter '${source}' calldata recipient could not be verified `
+        + `(${recipientCheck.reason}). Proceeding — FeeCollector minimumOutput is the safety net.`,
+    )
   }
 
   // 7. Wrap in FeeCollector V2 calldata.
@@ -488,6 +554,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       gasEstimate,
     },
     source,
+    // [P102] Echo back the effective recipient — sender when the caller
+    // didn't explicitly request a different one. Always present so
+    // consumers don't have to branch.
+    sender: parsed.sender,
+    recipient: expectedRecipient,
     toAmount: wrapped.quotedOutput.toString(),
     minimumOutput: wrapped.minimumOutput.toString(),
     mevProtected,
