@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
+import { useAccount } from 'wagmi'
 import ThemeToggle from './ThemeToggle'
 import WalletModal from './WalletModal'
 
@@ -23,6 +24,10 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
   const [walletOpen, setWalletOpen] = useState(false)
   const [mobileMenu, setMobileMenu] = useState(false)
   const toggleWallet = useCallback(() => setWalletOpen(prev => !prev), [])
+  // [P99] "My Analytics" link only appears when a wallet is connected —
+  // the dashboard is wallet-scoped so there's no point routing there
+  // anonymously.
+  const { isConnected } = useAccount()
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 80)
@@ -83,6 +88,14 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
           >
             Docs
           </Link>
+          {isConnected && (
+            <Link
+              href="/analytics"
+              className="text-[13px] font-medium text-cream-50 transition-colors hover:text-cream"
+            >
+              My Analytics
+            </Link>
+          )}
         </nav>
       )}
 
@@ -117,6 +130,15 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
             >
               Docs
             </Link>
+            {isConnected && (
+              <Link
+                href="/analytics"
+                onClick={() => setMobileMenu(false)}
+                className="text-left text-sm font-medium text-cream-65 transition-colors hover:text-cream"
+              >
+                My Analytics
+              </Link>
+            )}
           </nav>
         </div>
       )}
