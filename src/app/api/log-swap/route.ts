@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { getSupabase } from '@/lib/supabase'
+// [P114/M-03] POST is a pure insert → logger (INSERT-only) client.
+// PATCH updates existing rows → must stay on service-role since the
+// logger role has no UPDATE grant.
+import { getSupabase, getSupabaseLogger } from '@/lib/supabase'
 import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { computeTokenAmountUsd } from '@/lib/chainlink'
@@ -12,7 +15,11 @@ import { computeTokenAmountUsd } from '@/lib/chainlink'
  */
 export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabase()
+    // [P114/M-03] INSERT-only logger client. Falls back to service-role
+    // when SUPABASE_LOGGER_KEY is unset (with a one-time warn in
+    // supabase.ts), so this branch stays alive during the rollout
+    // window before the dashboard key is provisioned.
+    const supabase = getSupabaseLogger()
     if (!supabase) {
       console.warn('[log-swap] Supabase not configured — swap NOT logged. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars.')
       return NextResponse.json({ ok: false, skipped: true, reason: 'supabase_not_configured' })

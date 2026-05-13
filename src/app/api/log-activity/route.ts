@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getSupabase } from '@/lib/supabase'
+// [P114/M-03] Fire-and-forget batch insert → INSERT-only logger client.
+import { getSupabaseLogger } from '@/lib/supabase'
 
 // CORS — allow any origin (client-side tracker posts from the same domain,
 // but we keep * for local dev / preview deploys).
@@ -33,7 +34,7 @@ function cap(s: unknown, max = MAX_STR): string | null {
  * Body: { events: Array<WalletActivityEvent> }
  */
 export async function POST(req: Request) {
-  const supabase = getSupabase()
+  const supabase = getSupabaseLogger()
   if (!supabase) {
     return NextResponse.json({ ok: true }, { headers: CORS_HEADERS }) // silently succeed
   }

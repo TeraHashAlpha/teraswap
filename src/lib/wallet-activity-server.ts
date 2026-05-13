@@ -1,4 +1,7 @@
-import { getSupabase } from './supabase'
+// [P114/M-03] Insert-only logger client (instead of service-role) —
+// limits the blast radius of a leaked key from this fire-and-forget
+// path. See supabase/migrations/20260514_logger_role.sql.
+import { getSupabaseLogger } from './supabase'
 
 // ══════════════════════════════════════════════════════════
 //  SERVER-SIDE WALLET ACTIVITY TRACKER
@@ -31,7 +34,7 @@ interface WalletActionParams {
  * Called from API routes that already have wallet context.
  */
 export function trackWalletAction(wallet: string, params: WalletActionParams): void {
-  const sb = getSupabase()
+  const sb = getSupabaseLogger()
   if (!sb || !wallet) return
 
   Promise.resolve(
