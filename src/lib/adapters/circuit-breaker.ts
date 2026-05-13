@@ -3,6 +3,13 @@
 //
 // Separate from source-monitor.ts (telemetry/UI) — this is active flow control.
 // In-memory state: resets on Vercel cold start, rebuilds in ~3 failures (~90s).
+//
+// [P112/M-02] Cold-start pre-seed: on first use, the registry asks the
+// source-state-machine for every source's persisted health and force-opens
+// any breaker whose KV state is `disabled` or `degraded`. That collapses the
+// recovery window from ~90s (3 failures × ~30s) to ~0s for sources already
+// known to be unhealthy. KV failures degrade silently to the CLOSED default
+// — never blocking the hot path on a KV read.
 
 // ── Types & Config ──────────────────────────────────────────
 
@@ -86,6 +93,23 @@ export class CircuitBreaker {
     }
   }
 
+  /**
+   * [P112/M-02] Drive the breaker to OPEN without waiting for the failure
+   * threshold. Used by initFromKV() to align the in-memory state with a
+   * persistent "this source is unhealthy" signal from KV on cold start.
+   *
+   * Sets consecutiveFailures to the threshold so the diagnostic info
+   * surfaces the right count, and lastFailureAt to now so the normal
+   * cooldown timer applies — the next request after cooldownMs probes
+   * the upstream again via the HALF_OPEN transition.
+   */
+  forceOpen(reason: string): void {
+    this.state = 'OPEN'
+    this.consecutiveFailures = this.config.failureThreshold
+    this.lastFailureAt = Date.now()
+    console.warn(`[CB] ${this.name}: pre-seeded OPEN from KV (${reason})`)
+  }
+
   /** Current state */
   getState(): CircuitState {
     return this.state
@@ -128,6 +152,62 @@ export function getAllCircuitStates(): Array<ReturnType<CircuitBreaker['getInfo'
 /** Reset all circuit breakers (for testing) */
 export function resetAllCircuitBreakers(): void {
   breakers.clear()
+  // [P112/M-02] Also clear the lazy-init cache so tests can drive a
+  // fresh boot. Without this, the second test in a file would short-
+  // circuit on the cached promise from the first.
+  initPromise = null
+}
+
+// ── [P112/M-02] KV pre-seed ─────────────────────────────────
+
+/**
+ * Read every persisted source status from KV and pre-open any breaker
+ * whose state is `disabled` or `degraded`. Active sources are left to
+ * be created on first use (default CLOSED).
+ *
+ * Errors are swallowed with a console.warn — the hot path can never
+ * block on KV. The result is best-effort accuracy: when KV is healthy
+ * we eliminate the 3-failure warm-up; when it isn't, we fall back to
+ * the pre-P112 behaviour. Dynamic import of source-state-machine keeps
+ * the dependency graph one-way (state machine → breaker is fine; the
+ * breaker importing the state machine eagerly would create a cycle
+ * via monitoring-loop).
+ */
+export async function initFromKV(): Promise<void> {
+  try {
+    const { getAllStatuses } = await import('@/lib/source-state-machine')
+    const statuses = await getAllStatuses()
+    for (const status of statuses) {
+      if (status.state === 'active') continue
+      const cb = getCircuitBreaker(status.id)
+      cb.forceOpen(`kv state=${status.state}`)
+    }
+  } catch (err) {
+    console.warn(
+      '[CB] initFromKV failed; defaulting all breakers to CLOSED:',
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
+/**
+ * Cached promise for the cold-start init. Shared across all callers so
+ * concurrent requests on a fresh Lambda await the same KV round-trip
+ * instead of each firing their own. Reset by resetAllCircuitBreakers()
+ * for the test suite.
+ */
+let initPromise: Promise<void> | null = null
+
+/**
+ * Ensure pre-seed init has run at least once. Lazy + idempotent: the
+ * first caller drives the KV read; everyone else races to the same
+ * resolved promise.
+ */
+function ensureInitialized(): Promise<void> {
+  if (!initPromise) {
+    initPromise = initFromKV()
+  }
+  return initPromise
 }
 
 // ── Wrapper ─────────────────────────────────────────────────
@@ -136,12 +216,18 @@ export function resetAllCircuitBreakers(): void {
  * Wrap an adapter call with circuit breaker protection.
  * If circuit is OPEN, rejects immediately without calling the adapter.
  * Records success/failure to transition states.
+ *
+ * [P112/M-02] Awaits the lazy KV pre-seed before the OPEN check so the
+ * very first request after a cold start sees the persisted state. The
+ * pre-seed is a single KV read shared across all concurrent callers —
+ * adds one round-trip to the cold-start path, no overhead on warm.
  */
 export async function withCircuitBreaker<T>(
   name: string,
   fn: () => Promise<T>,
   config?: Partial<CircuitBreakerConfig>,
 ): Promise<T> {
+  await ensureInitialized()
   const cb = getCircuitBreaker(name, config)
 
   if (cb.isOpen()) {
