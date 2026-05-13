@@ -7,9 +7,15 @@
  * dashboard refreshes from the same browser. Rate-limited at 10 req/min
  * per wallet to keep the endpoint cheap.
  *
- * The Supabase RLS on `swaps` is the authority — anon callers only ever
- * see their own wallet's rows. The address validation here is
- * defence-in-depth + a clean 400 for malformed input.
+ * Access model [13B-L-02]: the wallet parameter is treated as a public
+ * key — anyone who knows a wallet address can query its swap analytics
+ * (consistent with on-chain data visibility). The Supabase client uses
+ * the service-role key and bypasses RLS; the `swaps` table has RLS
+ * enabled but no policies defined. Rate limiting is the primary
+ * abuse-prevention mechanism; the address validation here is
+ * defence-in-depth for clean input. If a future change adds personally
+ * identifiable data to `swaps`, this access model needs revisiting
+ * (likely via SIWE-signed requests).
  */
 
 import { NextResponse, type NextRequest } from 'next/server'
