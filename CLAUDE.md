@@ -81,6 +81,35 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 
 ---
 
+## Code Agent Feedback Convention
+
+When implementing a prompt, if you encounter any of the following, document it in a
+`FEEDBACK.md` file in the commit (root of repo):
+
+- **Edge case not covered by the prompt** — e.g. a function that also needs the fix but wasn't listed
+- **Assumption that turned out wrong** — e.g. an import path that changed, a deprecated API
+- **Security concern discovered during implementation** — e.g. an unvalidated input found while fixing a nearby one
+- **Test gap** — e.g. a code path with zero test coverage that's related to the change
+- **Performance concern** — e.g. a loop that's O(n²) on a growing dataset
+
+Format:
+
+```
+## Feedback — P{number} ({commit hash})
+
+### Edge case
+- {description}
+
+### Concern
+- {description}
+```
+
+The file is append-only — each prompt adds its section, never removes previous entries.
+If no feedback applies to a prompt, do NOT create/modify FEEDBACK.md (no empty sections).
+The Architect reviews FEEDBACK.md after each sprint and triages items into the backlog.
+
+---
+
 ## Current state (updated 2026-04-27)
 
 - **Sprint 9B:** 2/3 done — P66 (contract) + P67 (frontend) shipped. P68 (mainnet deploy) pending.

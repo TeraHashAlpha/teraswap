@@ -111,13 +111,14 @@ async function callRpc(rpcUrl: string, to: string, data: string): Promise<string
   }
 }
 
-// [F-03] Sanitize token name/symbol to prevent XSS via malicious ERC-20 contracts
-function sanitizeTokenField(raw: string, maxLen: number): string {
-  // Strip HTML tags completely
-  const noHtml = raw.replace(/<[^>]*>/g, '')
-  // Allow only printable ASCII characters, common currency symbols, spaces, dots, hyphens
-  const cleaned = noHtml.replace(/[^\x20-\x7E]/g, '').trim()
-  // Truncate to max length
+// [F-03 / CQL-03] Sanitize token name/symbol to prevent XSS via malicious ERC-20
+// contracts. Strip every `<` and `>` rather than relying on /<[^>]*>/g, which
+// fails on malformed tags (e.g. `<img src=x onerror=alert(1)` with no closing
+// bracket) and on encoded/nested constructs. No legitimate token name contains
+// angle brackets, so this is strictly stronger with zero false positives.
+export function sanitizeTokenField(raw: string, maxLen: number): string {
+  const noAngles = raw.replace(/[<>]/g, '')
+  const cleaned = noAngles.replace(/[^\x20-\x7E]/g, '').trim()
   return cleaned.slice(0, maxLen)
 }
 

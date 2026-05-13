@@ -31,7 +31,7 @@ async function main() {
   }
 
   console.log(`Setting webhook to: ${WEBHOOK_URL}`)
-  console.log(`Secret token: ${WEBHOOK_SECRET.slice(0, 4)}...${WEBHOOK_SECRET.slice(-4)}`)
+  console.log(`Secret token: [${WEBHOOK_SECRET.length} chars, set]`)
 
   const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
     method: 'POST',

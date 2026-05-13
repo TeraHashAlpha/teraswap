@@ -218,6 +218,10 @@ export function captureLiveTLS(
   timeoutMs = 8_000,
 ): Promise<{ issuerCN: string; subjectCN: string; san: string[]; fingerprint256: string } | null> {
   return new Promise((resolve) => {
+    // CodeQL: js/disabling-certificate-pinning — FALSE POSITIVE:
+    // Intentional. This TLS connection captures the server certificate fingerprint
+    // for pinning validation. rejectUnauthorized:false is required to inspect
+    // certificates from servers with untrusted/self-signed certs.
     const socket = tls.connect(443, hostname, { servername: hostname, rejectUnauthorized: false }, () => {
       try {
         const cert = socket.getPeerCertificate(true)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { isAddress } from 'viem'
 import { NATIVE_ETH } from '@/lib/constants'
 import { findTokenByAddress } from '@/lib/tokens'
 
@@ -94,8 +95,8 @@ export default function TokenAddressBadge({
         {isMd && <span className="text-[10px]">{copied ? 'Copied!' : 'Copy'}</span>}
       </button>
 
-      {/* Explorer link */}
-      {showExplorerLink && (
+      {/* Explorer link — only rendered for runtime-valid addresses (CQL-10) */}
+      {showExplorerLink && isAddress(address) && (
         <a
           href={`https://etherscan.io/token/${address}`}
           target="_blank"
