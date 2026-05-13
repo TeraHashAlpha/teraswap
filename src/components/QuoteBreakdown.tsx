@@ -187,14 +187,12 @@ export default function QuoteBreakdown({
         </div>
       )}
 
-      {/* [LP-04] MEV exposure advisory — only when best route is non-MEV-protected
-          AND the user has not enabled Force MEV Protection. Subtle, not blocking. */}
-      {mevExposedBest && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/90">
-          <span className="font-semibold">&#9888; This route is not MEV-protected.</span>{' '}
-          Enable <span className="font-semibold">Force MEV Protection</span> to route through CoW Protocol and prevent sandwich attacks.
-        </div>
-      )}
+      {/* [LP-04 / hotfix-ui] The MEV-exposure amber banner used to live
+          here. It read as an error and crowded the QuoteBreakdown card.
+          The advisory is now a subtle one-liner under the swap button
+          in SwapBox (`MevExposureHint`) — same signal, dismissible,
+          no scary visual. The `mevExposedBest` prop is preserved on
+          this component for callers, but the in-card banner is gone. */}
 
       {/* Main breakdown */}
       <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-3 text-sm">
