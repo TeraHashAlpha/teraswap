@@ -84,7 +84,7 @@ export interface NormalizedQuote {
   /** CoW Protocol: order UID returned after submission (intent-based) */
   cowOrderUid?: string
   /** CoW Protocol: order parameters for EIP-712 signing. Strictly typed via
-   *  CowOrderParams [10-L-02]; the previous Record<string, any> was the
+   *  CowOrderParams [10-L-02]; the previous untyped record was the
    *  weakest link in the adapter boundary and is what this finding addresses. */
   cowOrderParams?: CowOrderParams
   /** Extra metadata per source (e.g. Uniswap V3 fee tier info) */
@@ -113,10 +113,37 @@ export interface QuoteParams {
   dstDecimals?: number
 }
 
+// [11-L-03] Per-adapter quoteMeta interfaces — discriminated by `source`.
+//
+// Previously quoteMeta was an unconstrained record of any-typed fields, which
+// let adapters inject untyped data through the swap pipeline. The discriminator
+// forces consumers to narrow before reading adapter-specific fields, eliminating
+// an entire class of "what shape does this actually have" bugs at compile time.
+
+export interface CowQuoteMeta {
+  source: 'cow'
+  orderId?: string
+  quoteId?: string | number
+}
+
+export interface UniswapV3QuoteMeta {
+  source: 'uniswapv3'
+  uniswapV3Fee?: number
+}
+
+/** Fallback for adapters that don't have a dedicated meta type yet.
+ *  `unknown` (not `any`) forces type-checking at the use site. */
+export interface GenericQuoteMeta {
+  source: string
+  [key: string]: unknown
+}
+
+export type QuoteMeta = CowQuoteMeta | UniswapV3QuoteMeta | GenericQuoteMeta
+
 export interface SwapParams extends QuoteParams {
   from: string
   slippage: number
-  quoteMeta?: Record<string, any>
+  quoteMeta?: QuoteMeta
   chainId?: number
 }
 

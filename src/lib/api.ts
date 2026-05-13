@@ -18,10 +18,10 @@ import {
   friendlyError,
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
-import type { NormalizedQuote, MetaQuoteResult } from './adapters'
+import type { NormalizedQuote, MetaQuoteResult, QuoteMeta } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
-export type { NormalizedQuote, MetaQuoteResult, FeeTierCandidate, FeeTierDetection } from './adapters'
+export type { NormalizedQuote, MetaQuoteResult, FeeTierCandidate, FeeTierDetection, QuoteMeta, CowQuoteMeta, UniswapV3QuoteMeta, GenericQuoteMeta } from './adapters'
 export { submitCowOrder, pollCowOrderStatus, detectUniswapV3FeeTier } from './adapters'
 export { getAllCircuitStates }
 
@@ -242,7 +242,7 @@ export async function fetchSwapFromSource(
   slippage: number = DEFAULT_SLIPPAGE,
   srcDecimals: number = 18,
   dstDecimals: number = 18,
-  quoteMeta?: NormalizedQuote['meta'],
+  quoteMeta?: QuoteMeta,
   chainId?: number,
 ): Promise<NormalizedQuote> {
   if (DISABLED_SOURCES[source]) throw new Error(`${source} is disabled: ${DISABLED_SOURCES[source]}`)
@@ -253,7 +253,7 @@ export async function fetchSwapFromSource(
     adapter.fetchSwapData({
       src, dst, amount, from, slippage,
       srcDecimals, dstDecimals,
-      quoteMeta: quoteMeta as Record<string, any> | undefined,
+      quoteMeta,
       chainId,
     })
   )

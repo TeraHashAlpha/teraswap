@@ -8,7 +8,7 @@ import {
 } from 'wagmi'
 import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
-import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote } from '@/lib/api'
+import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
@@ -85,7 +85,7 @@ const SWAP_TIMEOUT_MS = 120_000      // 2 minutes hard timeout
 async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
-  quoteMeta?: any, chainId?: number,
+  quoteMeta?: QuoteMeta, chainId?: number,
 ): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
