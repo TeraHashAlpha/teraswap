@@ -326,4 +326,38 @@ describe('GET /api/v1/quote — happy path', () => {
     expect(body.gasless.gasSavingsUsd).toBeGreaterThan(0)
     expect(body.gasless.reason.length).toBeGreaterThan(0)
   })
+
+  // [P102] Recipient field — accepted, validated, echoed in meta.
+  it('echoes recipient in meta.recipient when provided', async () => {
+    mockFetchMetaQuote.mockResolvedValueOnce(metaQuoteFixture())
+    const recipient = '0x1111111111111111111111111111111111111111'
+    const res = await GET(makeRequest({
+      tokenIn: VALID_TOKEN_IN,
+      tokenOut: VALID_TOKEN_OUT,
+      amount: '1',
+      recipient,
+    }))
+    const body = await res.json()
+    expect(body.meta.recipient.toLowerCase()).toBe(recipient.toLowerCase())
+  })
+
+  it('meta.recipient is null when omitted', async () => {
+    mockFetchMetaQuote.mockResolvedValueOnce(metaQuoteFixture())
+    const res = await GET(makeRequest({ tokenIn: VALID_TOKEN_IN, tokenOut: VALID_TOKEN_OUT, amount: '1' }))
+    const body = await res.json()
+    expect(body.meta.recipient).toBeNull()
+  })
+
+  it('400 when recipient is not a valid address', async () => {
+    const res = await GET(makeRequest({
+      tokenIn: VALID_TOKEN_IN,
+      tokenOut: VALID_TOKEN_OUT,
+      amount: '1',
+      recipient: 'not-an-address',
+    }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/recipient/)
+    // meta-quote was never even invoked
+    expect(mockFetchMetaQuote).not.toHaveBeenCalled()
+  })
 })
