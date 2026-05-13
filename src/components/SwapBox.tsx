@@ -170,7 +170,7 @@ export default function SwapBox() {
     useApproval(tokenIn, amountIn, spender)
 
   const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
-    useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount)
+    useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, meta?.gasless?.gasSavingsUsd)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
     ? (() => {
@@ -616,8 +616,8 @@ export default function SwapBox() {
 
         {/* Quote Breakdown */}
         {meta && tokenIn && tokenOut && hasAmount && (
-          <div className="mb-4">
-            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} />
+          <div id="quote-breakdown" className="mb-4">
+            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} />
           </div>
         )}
         {/* Quote loading skeleton */}
@@ -745,6 +745,29 @@ export default function SwapBox() {
 
         {/* Swap Button */}
         <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+
+        {/* [P95] Subtle gasless nudge — shown below the swap button when a
+            non-CoW route is currently selected but the engine has flagged
+            gasless as the better deal. Clicking scrolls to the QuoteBreakdown
+            card so the user can act on the recommendation. */}
+        {meta?.gasless?.recommended && meta.best.source !== 'cowswap' && (
+          <button
+            type="button"
+            onClick={() => {
+              document.getElementById('quote-breakdown')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            }}
+            className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-1.5 text-[11px] text-purple-300 transition hover:border-purple-500/40 hover:bg-purple-500/10"
+            aria-label="Gasless route available — review the recommendation"
+          >
+            <span aria-hidden="true">&#128161;</span>
+            <span>
+              Gasless option available
+              {meta.gasless.gasSavingsUsd >= 0.5 && (
+                <> — save ~${meta.gasless.gasSavingsUsd.toFixed(2)}</>
+              )}
+            </span>
+          </button>
+        )}
 
         {/* Pre-swap simulation status */}
         {simulationPassed === true && (swapStatus === 'swapping' || swapStatus === 'success') && (

@@ -6,6 +6,8 @@ import { type MetaQuoteResult } from '@/lib/api'
 import { INPUT_DEBOUNCE_MS, QUOTE_REFRESH_MS } from '@/lib/constants'
 import type { Token } from '@/lib/tokens'
 import { logQuoteToSupabase } from '@/lib/analytics'
+import { analyzeGasless } from '@/lib/gasless-engine'
+import { useEthGasCost } from './useEthGasCost'
 
 /**
  * Fetch meta-quotes via the server-side API route.
@@ -57,6 +59,7 @@ export function useQuote(
   excludeSources?: string[],
 ): UseQuoteResult {
   const { address } = useAccount()
+  const { estimate: estimateGasCost } = useEthGasCost()
   const [meta, setMeta] = useState<MetaQuoteResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -86,7 +89,17 @@ export function useQuote(
         tokenOut.decimals,
         excludeSources,
       )
-      setMeta(result)
+
+      // [P94] Compute the gasless recommendation client-side so it uses the
+      // current ETH price + gas price (the server doesn't have either).
+      // The best non-CoW quote is what the user would otherwise execute,
+      // so its gas estimate sets the savings figure.
+      const bestNonCow = result.all.find((q) => q.source !== 'cowswap')
+      const refGas = bestNonCow ? estimateGasCost(bestNonCow.estimatedGas) : null
+      const refGasUsd = refGas?.usd ?? bestNonCow?.gasUsd ?? 0
+      const gasless = analyzeGasless(result.all, refGasUsd)
+
+      setMeta({ ...result, gasless })
       setCountdown(QUOTE_REFRESH_MS / 1000)
 
       // Log quote analytics (fire-and-forget)
@@ -105,7 +118,7 @@ export function useQuote(
       setLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenIn, tokenOut, debouncedAmount, address, excludeSources?.join(',')])
+  }, [tokenIn, tokenOut, debouncedAmount, address, excludeSources?.join(','), estimateGasCost])
 
   useEffect(() => {
     if (!enabled) {

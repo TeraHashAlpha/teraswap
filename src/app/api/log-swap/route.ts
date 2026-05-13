@@ -44,6 +44,9 @@ export async function POST(req: NextRequest) {
       // [LP-05] MEV-savings telemetry (CoW-routed swaps only)
       mevSavingsEstimate,
       mevSavingsActual,
+      // [P96] Gasless flag is derived server-side from `source` so we don't
+      // trust a client claim. gas_savings_usd is informational and clamped.
+      gasSavingsUsd,
     } = body
 
     if (!wallet || !source || !tokenIn || !tokenOut || !amountIn || !amountOut) {
@@ -116,6 +119,14 @@ export async function POST(req: NextRequest) {
       // Stored as raw output-token wei; USD conversion is a read-time concern.
       mev_savings_estimate: mevSavingsEstimate ?? null,
       mev_savings_actual: mevSavingsActual ?? null,
+      // [P96] Gasless tracking — derived from source (server is authoritative).
+      // gas_savings_usd is bounded to a sane range so a malicious client
+      // can't poison aggregate totals.
+      is_gasless: source === 'cowswap',
+      gas_savings_usd:
+        source === 'cowswap' && Number.isFinite(Number(gasSavingsUsd))
+          ? Math.max(0, Math.min(Number(gasSavingsUsd), 10_000))
+          : 0,
     })
 
     if (error) {
