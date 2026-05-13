@@ -47,6 +47,30 @@ export default function SwapBox() {
   const [spender, setSpender] = useState<`0x${string}` | undefined>()
   const [showCowWarning, setShowCowWarning] = useState(false)
   const [mevProtected, setMevProtected] = useState(false)
+  // [hotfix-ui] Dismissal flag for the MEV-exposure hint below the swap
+  // button. Persisted in localStorage so a user who's already decided
+  // they don't want MEV protection isn't pestered every session.
+  const MEV_HINT_DISMISSED_KEY = 'teraswap:mev-hint-dismissed'
+  const [mevHintDismissed, setMevHintDismissed] = useState(false)
+  useEffect(() => {
+    // localStorage read happens in a useEffect so SSR doesn't crash on
+    // the missing `window`. Default to "not dismissed" until we know.
+    try {
+      if (localStorage.getItem(MEV_HINT_DISMISSED_KEY) === '1') {
+        setMevHintDismissed(true)
+      }
+    } catch {
+      // Storage disabled / private mode — treat as not dismissed.
+    }
+  }, [])
+  const dismissMevHint = useCallback(() => {
+    setMevHintDismissed(true)
+    try {
+      localStorage.setItem(MEV_HINT_DISMISSED_KEY, '1')
+    } catch {
+      // Persisting failed — session-only dismissal is still useful.
+    }
+  }, [])
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
   const [exactOut, setExactOut] = useState(false)
   const [displayAmountOut, setDisplayAmountOut] = useState('')
@@ -797,6 +821,35 @@ export default function SwapBox() {
               )}
             </span>
           </button>
+        )}
+
+        {/* [hotfix-ui] MEV-exposure hint — replaces the old amber-banner
+            advisory that lived inside QuoteBreakdown. The signal is the
+            same (current best route isn't MEV-protected) but the visual
+            is now a single muted line of text: no warning icon, no
+            background box, no border. The "Enable" link flips the
+            existing Force MEV Protection toggle in one click; the "×"
+            persists the dismissal in localStorage so users who've
+            decided MEV protection isn't for them aren't pestered. */}
+        {mevExposedBest && !mevHintDismissed && (
+          <div className="mt-2 flex items-center justify-center gap-2 text-[12px] text-cream-35">
+            <span>CoW Protocol available for MEV protection.</span>
+            <button
+              type="button"
+              onClick={() => setMevProtected(true)}
+              className="font-medium text-cream-65 underline-offset-2 transition hover:text-cream hover:underline"
+            >
+              Enable
+            </button>
+            <button
+              type="button"
+              onClick={dismissMevHint}
+              className="text-cream-35 transition hover:text-cream-65"
+              aria-label="Dismiss MEV protection hint"
+            >
+              ×
+            </button>
+          </div>
         )}
 
         {/* Pre-swap simulation status */}
