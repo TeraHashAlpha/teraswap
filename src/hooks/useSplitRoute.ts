@@ -3,6 +3,7 @@ import { parseUnits, formatUnits } from 'viem'
 import type { MetaQuoteResult, NormalizedQuote } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import { fetchSplitQuotes, findBestSplit } from '@/lib/split-router'
+import { safeBigInt } from '@/lib/utils'
 import {
   type SplitQuoteResult,
   SPLIT_MIN_USD,
@@ -48,7 +49,9 @@ export function useSplitRoute(
   // Estimate trade USD value using Chainlink
   const executionPriceUsd = useMemo(() => {
     if (!meta?.best || !tokenIn || !tokenOut || !amountIn) return null
-    const outAmount = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals))
+    // [11-L-01] safeBigInt: malformed toAmount → fall back to 0 (price will compare as null/below-threshold).
+    const outBig = safeBigInt(meta.best.toAmount)
+    const outAmount = outBig !== null ? Number(formatUnits(outBig, tokenOut.decimals)) : 0
     const inAmount = Number(amountIn)
     if (inAmount <= 0) return null
     // If output token is a stablecoin, output amount ≈ USD

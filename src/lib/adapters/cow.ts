@@ -6,6 +6,7 @@ import {
   getCowApiBase,
 } from '@/lib/constants'
 import { clampSlippage } from './shared'
+import { safeBigInt } from '@/lib/utils'
 import type {
   DEXAdapter,
   NormalizedQuote,
@@ -40,7 +41,7 @@ const DECIMAL_UINT_RE = /^\d+$/
  */
 function parseCowOrderParams(
   raw: unknown,
-  ctx: { from: `0x${string}`; quoteId: unknown; signingScheme: CowSigningScheme; buyAmountOverride: string },
+  ctx: { from: `0x${string}`; quoteId: unknown; signingScheme: CowSigningScheme },
 ): CowOrderParams | null {
   if (typeof raw !== 'object' || raw === null) {
     console.warn('[CoW] orderParams validation failed: not an object')
@@ -56,6 +57,8 @@ function parseCowOrderParams(
   if (typeof r.sellToken !== 'string' || !ADDRESS_RE.test(r.sellToken)) return fail('sellToken', 'not a 0x-prefixed 20-byte address')
   if (typeof r.buyToken !== 'string' || !ADDRESS_RE.test(r.buyToken)) return fail('buyToken', 'not a 0x-prefixed 20-byte address')
   if (typeof r.sellAmount !== 'string' || !DECIMAL_UINT_RE.test(r.sellAmount)) return fail('sellAmount', 'not a decimal-integer string')
+  // [11-L-02] Validate buyAmount shape before the caller converts it via safeBigInt.
+  if (typeof r.buyAmount !== 'string' || !DECIMAL_UINT_RE.test(r.buyAmount)) return fail('buyAmount', 'not a decimal-integer string')
   if (typeof r.validTo !== 'number' || !Number.isInteger(r.validTo) || r.validTo <= 0) return fail('validTo', 'not a positive integer')
   if (typeof r.appData !== 'string' || r.appData.length === 0) return fail('appData', 'missing')
   if (typeof r.appDataHash !== 'string' || !HEX32_RE.test(r.appDataHash)) return fail('appDataHash', 'not a 32-byte hex')
@@ -79,7 +82,8 @@ function parseCowOrderParams(
     sellToken: r.sellToken as `0x${string}`,
     buyToken: r.buyToken as `0x${string}`,
     sellAmount: r.sellAmount,
-    buyAmount: ctx.buyAmountOverride,
+    // Validated above; caller overrides with the slippage-adjusted minBuyAmount.
+    buyAmount: r.buyAmount,
     validTo: r.validTo,
     appData: r.appData,
     appDataHash: r.appDataHash as `0x${string}`,
@@ -190,23 +194,27 @@ async function fetchCowSwapOrder(
   const quoteData = await quoteRes.json()
   const quote = quoteData.quote
 
-  const buyAmountBig = BigInt(quote.buyAmount)
-  const slippageFactor = BigInt(Math.round((1 - clampSlippage(slippage) / 100) * 10000))
-  const minBuyAmount = (buyAmountBig * slippageFactor / 10000n).toString()
-
-  // [10-L-02] Validate the upstream /quote payload at the boundary.
-  // If the CoW API returns an unexpected shape we throw a tagged Error
-  // here so the meta-quote engine falls through to the other adapters
-  // rather than producing a typed result that lies about its contents.
+  // [11-L-02] Validate CoW response BEFORE BigInt conversion. parseCowOrderParams
+  // checks shape, types, and ranges (including buyAmount being a decimal integer).
+  // [10-L-02] If CoW returns an unexpected shape we throw a tagged Error here so
+  // the meta-quote engine falls through to the other adapters rather than producing
+  // a typed result that lies about its contents.
   const cowOrderParams = parseCowOrderParams(quote, {
     from: from as `0x${string}`,
     quoteId: quoteData.id,
     signingScheme: 'eip712',
-    buyAmountOverride: minBuyAmount,
   })
   if (!cowOrderParams) {
     throw new Error('CoW: malformed /quote response — see console for the offending field')
   }
+
+  // [11-L-02] Convert + compute happen only after validation.
+  const buyAmountBig = safeBigInt(quote.buyAmount)
+  if (buyAmountBig === null) {
+    throw new Error('CoW: buyAmount is not a valid integer')
+  }
+  const slippageFactor = BigInt(Math.round((1 - clampSlippage(slippage) / 100) * 10000))
+  const minBuyAmount = (buyAmountBig * slippageFactor / 10000n).toString()
 
   return {
     source: 'cowswap',
@@ -214,7 +222,7 @@ async function fetchCowSwapOrder(
     estimatedGas: 0,
     gasUsd: 0,
     routes: ['CoW Protocol (MEV Protected)'],
-    cowOrderParams,
+    cowOrderParams: { ...cowOrderParams, buyAmount: minBuyAmount },
   }
 }
 

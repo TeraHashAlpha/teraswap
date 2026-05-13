@@ -29,6 +29,7 @@ import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { updateSwapStatus } from '@/lib/analytics'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
+import { safeBigInt } from '@/lib/utils'
 import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval, playError, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
@@ -121,13 +122,14 @@ export default function SwapBox() {
 
     const cowQuote = rawMeta.all.find(q => AGGREGATOR_META[q.source]?.mevProtected)
     if (cowQuote) {
-      const bestAmount = BigInt(rawMeta.best.toAmount)
-      const cowAmount = BigInt(cowQuote.toAmount)
-      if (bestAmount > 0n && cowAmount > 0n && cowAmount <= bestAmount) {
+      // [11-L-01] safeBigInt: malformed quote amount → skip MEV promotion (default behaviour).
+      const bestAmount = safeBigInt(rawMeta.best.toAmount)
+      const cowAmount = safeBigInt(cowQuote.toAmount)
+      if (bestAmount !== null && cowAmount !== null && bestAmount > 0n && cowAmount > 0n && cowAmount <= bestAmount) {
         // Shortfall in basis points relative to best. Use BigInt math to
         // avoid float precision issues on large token-decimals values.
         const shortfallBps = ((bestAmount - cowAmount) * 10_000n) / bestAmount
-        const thresholdBps = BigInt(Math.round(MEV_PREFERENCE_THRESHOLD * 10_000))
+        const thresholdBps = safeBigInt(Math.round(MEV_PREFERENCE_THRESHOLD * 10_000)) ?? 0n
         if (shortfallBps <= thresholdBps) {
           // Promote CoW into best; keep the rest in their original order.
           const others = rawMeta.all.filter(q => q.source !== cowQuote.source)
@@ -172,7 +174,10 @@ export default function SwapBox() {
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
     ? (() => {
-        const outAmount = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals))
+        // [11-L-01] safeBigInt: malformed toAmount → skip price computation.
+        const outBig = safeBigInt(meta.best.toAmount)
+        if (outBig === null) return null
+        const outAmount = Number(formatUnits(outBig, tokenOut.decimals))
         const inAmount = Number(amountIn)
         if (inAmount <= 0) return null
         if (['USDC', 'USDT', 'DAI'].includes(tokenOut.symbol)) return outAmount / inAmount
@@ -266,10 +271,16 @@ export default function SwapBox() {
         }
       }
 
-      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${formatDisplay(Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)), 4)} ${tokenOut.symbol}${savingsLine}`, txHash, duration: 10000 })
+      // [11-L-01] safeBigInt: malformed toAmount → fall back to "—" in toast / "0" in history.
+      const successOutBig = safeBigInt(meta.best.toAmount)
+      const successOutNum = successOutBig !== null
+        ? Number(formatUnits(successOutBig, tokenOut.decimals))
+        : null
+      const successOutDisplay = successOutNum !== null ? formatDisplay(successOutNum, 4) : '—'
+      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, duration: 10000 })
       swapToastId.current = null
 
-      const outAmount = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)).toFixed(4)
+      const outAmount = successOutNum !== null ? successOutNum.toFixed(4) : '0'
       addRecord({
         id: txHash,
         date: new Date().toLocaleDateString('en-GB'),
@@ -366,8 +377,12 @@ export default function SwapBox() {
   const hasSufficientBalance = !hasAmount || !balanceIn || !tokenIn || (() => {
     try { return parseUnits(amountIn, tokenIn.decimals) <= balanceIn.value } catch { return false }
   })()
+  // [11-L-01] safeBigInt: malformed toAmount → display "—" instead of crashing.
   const outputDisplay = meta?.best && tokenOut
-    ? formatDisplay(Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals)), 4)
+    ? (() => {
+        const v = safeBigInt(meta.best.toAmount)
+        return v !== null ? formatDisplay(Number(formatUnits(v, tokenOut.decimals)), 4) : '—'
+      })()
     : '0.0'
 
   // Format balance with separators
@@ -403,7 +418,10 @@ export default function SwapBox() {
     if (!exactOut || !displayAmountOut || !meta?.best || !tokenIn || !tokenOut) return
     const desiredOut = Number(displayAmountOut)
     if (isNaN(desiredOut) || desiredOut <= 0) return
-    const currentOut = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals))
+    // [11-L-01] safeBigInt: malformed toAmount → skip exact-out estimation.
+    const currentOutBig = safeBigInt(meta.best.toAmount)
+    if (currentOutBig === null) return
+    const currentOut = Number(formatUnits(currentOutBig, tokenOut.decimals))
     const currentIn = Number(amountIn)
     if (currentOut <= 0 || currentIn <= 0) return
     const ratio = currentIn / currentOut
@@ -757,8 +775,12 @@ export default function SwapBox() {
             </div>
             {/* Share button — "I just saved X% via TeraSwap" */}
             {meta && meta.all.length > 1 && tokenIn && tokenOut && (() => {
-              const bestOut = Number(formatUnits(BigInt(meta.best.toAmount), tokenOut.decimals))
-              const worstOut = Number(formatUnits(BigInt(meta.all[meta.all.length - 1].toAmount), tokenOut.decimals))
+              // [11-L-01] safeBigInt: malformed amounts → hide the share button rather than crash.
+              const bestBig = safeBigInt(meta.best.toAmount)
+              const worstBig = safeBigInt(meta.all[meta.all.length - 1].toAmount)
+              if (bestBig === null || worstBig === null) return null
+              const bestOut = Number(formatUnits(bestBig, tokenOut.decimals))
+              const worstOut = Number(formatUnits(worstBig, tokenOut.decimals))
               const savedPercent = worstOut > 0 ? ((bestOut - worstOut) / worstOut * 100) : 0
               const savedDisplay = savedPercent > 0.01 ? savedPercent.toFixed(2) : null
               const shareText = savedDisplay
@@ -832,7 +854,11 @@ export default function SwapBox() {
           tokenIn={tokenIn}
           tokenOut={tokenOut}
           amountInDisplay={displayAmountIn}
-          expectedOutput={meta?.best ? formatDisplay(formatUnits(BigInt(meta.best.toAmount), tokenOut?.decimals ?? 18)) : ''}
+          expectedOutput={meta?.best ? (() => {
+            // [11-L-01] safeBigInt: malformed toAmount → display "—" in preview.
+            const v = safeBigInt(meta.best.toAmount)
+            return v !== null ? formatDisplay(formatUnits(v, tokenOut?.decimals ?? 18)) : '—'
+          })() : ''}
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
           minimumOutput={pendingSwap.minimumOutput}
           onConfirm={confirmSwap}

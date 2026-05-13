@@ -309,9 +309,16 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
+  // [11-L-03] Narrow on the QuoteMeta discriminator before reading uniswapV3Fee.
+  // The `typeof` check is needed because GenericQuoteMeta's index signature
+  // returns `unknown` even after the source narrowing.
+  const meta = params.quoteMeta
+  const cachedFee = meta?.source === 'uniswapv3' && typeof meta.uniswapV3Fee === 'number'
+    ? meta.uniswapV3Fee
+    : undefined
   return fetchUniswapV3Swap(
     params.src, params.dst, params.amount, params.from, params.slippage,
-    params.quoteMeta?.uniswapV3Fee,
+    cachedFee,
   )
 }
 
