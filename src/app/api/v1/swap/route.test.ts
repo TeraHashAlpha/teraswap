@@ -444,3 +444,57 @@ describe('POST /api/v1/swap — auto source selection (source omitted)', () => {
     expect((await res.json()).error).toMatch(/Upstream service error/)
   })
 })
+
+// [P97] Gasless fields on v1/swap. CoW swaps go through /v1/quote +
+// off-chain order submission, not /v1/swap, so v1/swap responses are
+// always `gasless: false`. The `gaslessAlternative` field surfaces the
+// opt-in gasless path when a CoW quote is available for the same pair.
+describe('POST /api/v1/swap — gasless fields [P97]', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockIsSystemHalted.mockResolvedValue(false)
+    mockVerifyApiKey.mockResolvedValue(authSuccess())
+    mockUsesFeeCollector.mockReturnValue(true)
+    mockValidateRouterAddress.mockReturnValue({ valid: true })
+  })
+
+  it('gasless=false and gaslessAlternative.available=true when CoW quote exists for the pair', async () => {
+    mockFetchMetaQuote.mockResolvedValueOnce({
+      best: { source: '1inch', toAmount: '2950420000', estimatedGas: 150000, gasUsd: 5, routes: [] },
+      all: [
+        { source: '1inch', toAmount: '2950420000', estimatedGas: 150000, gasUsd: 5, routes: [] },
+        { source: 'cowswap', toAmount: '2948000000', estimatedGas: 0, gasUsd: 0, routes: [] },
+      ],
+      fetchedAt: Date.now(),
+    })
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+
+    const res = await POST(makeRequest({
+      tokenIn: WETH,
+      tokenOut: USDC,
+      amount: '1000000000000000000',
+      sender: SENDER,
+    }))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.gasless).toBe(false)
+    expect(body.gaslessAlternative).toBeDefined()
+    expect(body.gaslessAlternative.available).toBe(true)
+    expect(body.gaslessAlternative.gasSavingsUsd).toBeGreaterThan(0)
+  })
+
+  it('gaslessAlternative.available=false on a caller-pinned source (no meta-quote was run)', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(oneinchSwapData())
+    const res = await POST(makeRequest(validBody()))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.gasless).toBe(false)
+    expect(body.gaslessAlternative.available).toBe(false)
+  })
+
+  it('rejects source=cowswap with the existing fee-collector 400 (cannot return gasless=true on v1/swap)', async () => {
+    const res = await POST(makeRequest(validBody({ source: 'cowswap' })))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/cannot route through FeeCollector/)
+  })
+})

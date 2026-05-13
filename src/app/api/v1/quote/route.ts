@@ -13,7 +13,12 @@
  * but nothing else.
  *
  * Response shape is documented in the spec and frozen for v1:
- *   { best, quotes, meta: { timestamp, sourcesQueried, sourcesResponded, mevProtected } }
+ *   { best, quotes, gasless, meta: { timestamp, sourcesQueried, sourcesResponded, mevProtected } }
+ *
+ * [P97] The `gasless` object surfaces whether a CoW Protocol quote is
+ * available and whether it's the better deal once gas savings are taken
+ * into account. The field is always present (zero-valued when CoW didn't
+ * quote) so consumers don't have to branch on undefined.
  *
  * @internal — Next.js route handler. Public surface starts at the request boundary.
  */
@@ -25,6 +30,7 @@ import { isSystemHalted } from '@/lib/circuit-breaker'
 import { isValidAddress } from '@/lib/validation'
 import { safeBigInt } from '@/lib/utils'
 import { AGGREGATOR_META, CHAIN_ID } from '@/lib/constants'
+import { analyzeGasless } from '@/lib/gasless-engine'
 
 export const dynamic = 'force-dynamic'
 
@@ -164,12 +170,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const sourcesQueried = Math.max(sourcesResponded, 11)
   const bestIsMevProtected = AGGREGATOR_META[meta.best.source]?.mevProtected ?? false
 
+  // [P97] Gasless analysis. Server-side we don't have the live ETH price
+  // / gas price, so analyzeGasless falls back to the adapter-supplied
+  // gasUsd on the best non-CoW route — close enough for API consumers
+  // who use this for routing hints rather than exact P&L calc.
+  const bestNonCow = quotes.find((q) => q.source !== 'cowswap')
+  const referenceGasUsd = bestNonCow?.gasUsd ?? 0
+  const gaslessAnalysis = analyzeGasless(quotes, referenceGasUsd)
+
   // Slippage applies on the consumer side (this endpoint returns raw
   // quotes; the caller decides how to translate to minimumOutput).
   // We echo it back so the response is self-describing.
   const responseBody = {
     best: meta.best,
     quotes,
+    // [P97] Always present. When no CoW quote exists, `available` is false
+    // and the rest is zero-valued — never undefined.
+    gasless: {
+      available: gaslessAnalysis.available,
+      recommended: gaslessAnalysis.recommended,
+      gasSavingsUsd: Number(gaslessAnalysis.gasSavingsUsd.toFixed(2)),
+      priceDifferencePercent: gaslessAnalysis.priceDifferencePercent,
+      reason: gaslessAnalysis.reason,
+    },
     meta: {
       timestamp: new Date(meta.fetchedAt).toISOString(),
       sourcesQueried,

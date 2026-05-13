@@ -297,4 +297,33 @@ describe('GET /api/v1/quote — happy path', () => {
     const res = await GET(makeRequest({ tokenIn: VALID_TOKEN_IN, tokenOut: VALID_TOKEN_OUT, amount: '1' }))
     expect(res.status).toBe(502)
   })
+
+  // [P97] Gasless overlay — always present on the response so consumers
+  // don't have to branch on undefined.
+  it('gasless.available=false when no CoW quote is in the response', async () => {
+    mockFetchMetaQuote.mockResolvedValueOnce(metaQuoteFixture('1inch'))
+    const res = await GET(makeRequest({ tokenIn: VALID_TOKEN_IN, tokenOut: VALID_TOKEN_OUT, amount: '1' }))
+    const body = await res.json()
+    expect(body.gasless).toBeDefined()
+    expect(body.gasless.available).toBe(false)
+    expect(body.gasless.recommended).toBe(false)
+    expect(body.gasless.gasSavingsUsd).toBe(0)
+  })
+
+  it('gasless.recommended=true when CoW is competitive against the best non-CoW route', async () => {
+    mockFetchMetaQuote.mockResolvedValueOnce({
+      best: { source: '1inch', toAmount: '1000', estimatedGas: 150000, gasUsd: 5, routes: [] },
+      all: [
+        { source: '1inch', toAmount: '1000', estimatedGas: 150000, gasUsd: 5, routes: [] },
+        { source: 'cowswap', toAmount: '997', estimatedGas: 0, gasUsd: 0, routes: [] },
+      ],
+      fetchedAt: 1700000000_000,
+    })
+    const res = await GET(makeRequest({ tokenIn: VALID_TOKEN_IN, tokenOut: VALID_TOKEN_OUT, amount: '1' }))
+    const body = await res.json()
+    expect(body.gasless.available).toBe(true)
+    expect(body.gasless.recommended).toBe(true)
+    expect(body.gasless.gasSavingsUsd).toBeGreaterThan(0)
+    expect(body.gasless.reason.length).toBeGreaterThan(0)
+  })
 })

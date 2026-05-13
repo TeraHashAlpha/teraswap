@@ -19,6 +19,12 @@
  *     so we reject those two sources with a clear 400; auto-source
  *     selection skips them in the meta-quote pick.
  *
+ * [P97] `gaslessAlternative` is surfaced on the response when CoW Protocol
+ * has a quote for the same pair. CoW swaps themselves are intent-based and
+ * cannot use the FeeCollector tx-data flow, so this field is the only
+ * signal a v1/swap caller gets that they could be using a gasless route
+ * via /v1/quote → off-chain order submission.
+ *
  * The frontend's /api/swap stays unchanged — it has IP-rate-limited
  * no-auth shape for in-app use. v1 is per-key authenticated, CORS-open
  * for third-party consumers, and rate-limited on the tier the API key
@@ -35,6 +41,7 @@ import {
   usesFeeCollector,
   validateRouterAddress,
   type NormalizedQuote,
+  type MetaQuoteResult,
 } from '@/lib/api'
 import { verifyApiKey } from '@/lib/api-auth'
 import { isSystemHalted } from '@/lib/circuit-breaker'
@@ -50,6 +57,7 @@ import {
   NATIVE_ETH,
   type AggregatorName,
 } from '@/lib/constants'
+import { analyzeGasless } from '@/lib/gasless-engine'
 
 export const dynamic = 'force-dynamic'
 
@@ -217,7 +225,7 @@ async function autoSelectSource(
   tokenIn: string,
   tokenOut: string,
   amountWei: string,
-): Promise<{ source: AggregatorName; quotedOutput: bigint } | NextResponse> {
+): Promise<{ source: AggregatorName; quotedOutput: bigint; meta: MetaQuoteResult } | NextResponse> {
   let meta
   try {
     meta = await fetchMetaQuote(tokenIn, tokenOut, amountWei)
@@ -244,7 +252,28 @@ async function autoSelectSource(
     console.error('[v1/swap] autoSelectSource: candidate returned non-numeric toAmount')
     return jsonError(502, 'Upstream service error. Please retry.')
   }
-  return { source: candidate.source, quotedOutput }
+  return { source: candidate.source, quotedOutput, meta }
+}
+
+// [P97] Compute the gaslessAlternative payload from a meta-quote. Always
+// returns a payload (zero-valued when no CoW quote is present) so the
+// response shape stays stable for v1 consumers.
+function buildGaslessAlternative(meta: MetaQuoteResult | null): {
+  available: boolean
+  gasSavingsUsd: number
+  reason: string
+} {
+  if (!meta) {
+    return { available: false, gasSavingsUsd: 0, reason: 'CoW quote not available' }
+  }
+  const bestNonCow = meta.all.find((q) => q.source !== 'cowswap')
+  const referenceGasUsd = bestNonCow?.gasUsd ?? 0
+  const analysis = analyzeGasless(meta.all, referenceGasUsd)
+  return {
+    available: analysis.available,
+    gasSavingsUsd: Number(analysis.gasSavingsUsd.toFixed(2)),
+    reason: analysis.reason,
+  }
 }
 
 // ── FeeCollector calldata wrapping ────────────────────────
@@ -358,12 +387,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 4. Resolve the source — caller-pinned wins; otherwise pick best
   //    fee-collectable from a meta-quote.
   let source: AggregatorName
+  // [P97] Keep the meta-quote around when we already ran one; used to
+  // compute gaslessAlternative without a second adapter sweep.
+  let cachedMeta: MetaQuoteResult | null = null
   if (parsed.source) {
     source = parsed.source
   } else {
     const auto = await autoSelectSource(parsed.tokenIn, parsed.tokenOut, parsed.amountStr)
     if (auto instanceof NextResponse) return auto
     source = auto.source
+    cachedMeta = auto.meta
   }
 
   // 5. Sanity check: the selected source MUST route through FeeCollector.
@@ -441,6 +474,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const gasEstimate = swapData.tx.gas > 0 ? String(swapData.tx.gas) : '0'
   const mevProtected = AGGREGATOR_META[source]?.mevProtected ?? false
 
+  // [P97] gaslessAlternative — surface whether CoW could have handled this
+  // pair gas-free. For caller-pinned sources we don't have a meta-quote on
+  // hand, so the field reports `available: false` with a "not analyzed"
+  // reason rather than triggering a second adapter sweep on every request.
+  const gaslessAlternative = buildGaslessAlternative(cachedMeta)
+
   return NextResponse.json({
     tx: {
       to: wrapped.to,
@@ -452,6 +491,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     toAmount: wrapped.quotedOutput.toString(),
     minimumOutput: wrapped.minimumOutput.toString(),
     mevProtected,
+    // v1/swap never returns the CoW intent path, so a successful tx-data
+    // response is always gas-paid. The gaslessAlternative field surfaces
+    // the opt-in path the caller could take via /v1/quote.
+    gasless: false,
+    gaslessAlternative,
     fee: {
       bps: FEE_BPS,
       amount: feeAmount.toString(),
