@@ -63,14 +63,28 @@ const descriptor: Erc7730Descriptor = JSON.parse(
   readFileSync(DESCRIPTOR_PATH, 'utf-8'),
 )
 
-/** Build the canonical signature string `name(type1,type2,...)`. */
+/**
+ * Build the canonical Solidity signature `name(type1,type2,…)`.
+ * This is the form keccak256'd to produce the 4-byte function selector.
+ */
 function canonicalSig(fn: AbiFunction): string {
   const types = (fn.inputs ?? []).map((i) => i.type).join(',')
   return `${fn.name}(${types})`
 }
 
-function selectorOf(sig: string): `0x${string}` {
-  return keccak256(toBytes(sig)).slice(0, 10) as `0x${string}`
+/**
+ * Build the ERC-7730 v2 descriptor-key form `name(type1 param1,type2 param2,…)`.
+ * The registry's lint accepts the "type name" form alongside the bare-type
+ * form; we use the "type name" form in display.formats keys because it's
+ * what the registry's submitted descriptors converge on for readability.
+ */
+function descriptorKey(fn: AbiFunction): string {
+  const args = (fn.inputs ?? []).map((i) => `${i.type} ${i.name}`).join(',')
+  return `${fn.name}(${args})`
+}
+
+function selectorOf(canonicalSignature: string): `0x${string}` {
+  return keccak256(toBytes(canonicalSignature)).slice(0, 10) as `0x${string}`
 }
 
 describe('ERC-7730 FeeCollector V2 descriptor', () => {
@@ -90,12 +104,12 @@ describe('ERC-7730 FeeCollector V2 descriptor', () => {
     expect(names).toEqual(['swapETHWithFee', 'swapTokenWithFee'])
   })
 
-  it('every described function has a display format keyed by its canonical signature', () => {
+  it('every described function has a display format keyed by its "type name" signature', () => {
     for (const fn of abiFns) {
-      const sig = canonicalSig(fn)
+      const key = descriptorKey(fn)
       expect(
-        descriptor.display.formats[sig],
-        `missing display.formats["${sig}"]`,
+        descriptor.display.formats[key],
+        `missing display.formats["${key}"]`,
       ).toBeDefined()
     }
   })
@@ -118,23 +132,39 @@ describe('ERC-7730 FeeCollector V2 descriptor', () => {
     }
   })
 
-  // Pin the actual on-chain selectors. If anyone edits the descriptor and
-  // accidentally changes the function signature (e.g. drops a param,
-  // reorders types), these constants will break the test before drift
-  // ships to wallets.
-  const EXPECTED_SELECTORS: Record<string, `0x${string}`> = {
-    'swapTokenWithFee(address,uint256,address,bytes,address,uint256)': '0x7f7663d4',
-    'swapETHWithFee(address,bytes,address,uint256)': '0x7739563c',
-  }
+  // Pin the actual on-chain selectors. Each entry holds the
+  // ERC-7730-v2 display.formats key ("type name" form), the canonical
+  // Solidity signature (types-only — what kecccak256 hashes for the
+  // selector), and the 4-byte selector. If anyone edits the descriptor
+  // and changes a function shape, both the descriptor lookup and the
+  // selector check break the test before drift ships to wallets.
+  const EXPECTED_SELECTORS: Array<{
+    descriptorKey: string
+    canonicalSig: string
+    selector: `0x${string}`
+  }> = [
+    {
+      descriptorKey: 'swapTokenWithFee(address token,uint256 totalAmount,address router,bytes routerData,address tokenOut,uint256 minimumOutput)',
+      canonicalSig: 'swapTokenWithFee(address,uint256,address,bytes,address,uint256)',
+      selector: '0x7f7663d4',
+    },
+    {
+      descriptorKey: 'swapETHWithFee(address router,bytes routerData,address tokenOut,uint256 minimumOutput)',
+      canonicalSig: 'swapETHWithFee(address,bytes,address,uint256)',
+      selector: '0x7739563c',
+    },
+  ]
 
-  it.each(Object.entries(EXPECTED_SELECTORS))(
-    'descriptor signature %s has the pinned 4-byte selector %s',
-    (sig, expected) => {
-      // The signature is present in display.formats — confirms the
-      // descriptor still claims this exact function shape.
-      expect(descriptor.display.formats[sig]).toBeDefined()
-      // The computed selector matches the on-chain one.
-      expect(selectorOf(sig)).toBe(expected)
+  it.each(EXPECTED_SELECTORS)(
+    'descriptor key $descriptorKey resolves to canonical $canonicalSig with selector $selector',
+    ({ descriptorKey: key, canonicalSig: canonical, selector }) => {
+      // The display.formats key is present — confirms the descriptor
+      // still claims this exact function shape.
+      expect(descriptor.display.formats[key]).toBeDefined()
+      // The canonical-signature → selector mapping is what gets compiled
+      // into on-chain calldata; pinning both protects against silent
+      // edits to either form.
+      expect(selectorOf(canonical)).toBe(selector)
     },
   )
 
