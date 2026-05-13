@@ -169,8 +169,12 @@ export default function SwapBox() {
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } =
     useApproval(tokenIn, amountIn, spender)
 
+  // [P104] We pass the raw adapter gasUsd from the best non-CoW quote
+  // rather than the engine-computed gasSavingsUsd — the server clamps it
+  // (max $500) and computes the persisted gas_savings_usd from there.
+  const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
   const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
-    useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, meta?.gasless?.gasSavingsUsd)
+    useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
     ? (() => {

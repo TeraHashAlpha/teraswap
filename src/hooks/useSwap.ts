@@ -180,10 +180,10 @@ export function useSwap(
   slippage: number = DEFAULT_SLIPPAGE,
   /** Quote-phase toAmount for fee integrity validation */
   quoteToAmount?: string,
-  /** [P96] Estimated dollar value of gas avoided by going gasless. Only
-   *  meaningful for CoW swaps — passed through to logSwapToSupabase so
-   *  /api/stats can report aggregate savings. */
-  gaslessSavingsUsd?: number,
+  /** [P104 / 13A-L-02] Raw adapter gas USD on the best non-CoW quote for
+   *  the same pair. The server clamps + persists this as gas_savings_usd
+   *  on CoW swaps; we never trust a client-derived "savings" figure. */
+  bestNonCowGasUsd?: number,
 ): UseSwapResult {
   const { address } = useAccount()
   const chainId = useChainId()
@@ -708,9 +708,10 @@ export function useSwap(
         mevProtected: true,
         feeCollected: false,
         status: 'pending',
-        // [P96] All CoW swaps are gasless. Savings figure comes from the
-        // engine; fall back to 0 when we haven't computed one yet.
-        gasSavingsUsd: gaslessSavingsUsd ?? 0,
+        // [P104] Server derives gas_savings_usd from this advisory value
+        // (clamped to [0, 500]); clients can no longer set the persisted
+        // figure directly.
+        bestNonCowGasUsd,
       })
 
       // Step 3: Poll for order fulfillment

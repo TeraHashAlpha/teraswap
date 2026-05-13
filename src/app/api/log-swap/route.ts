@@ -44,9 +44,12 @@ export async function POST(req: NextRequest) {
       // [LP-05] MEV-savings telemetry (CoW-routed swaps only)
       mevSavingsEstimate,
       mevSavingsActual,
-      // [P96] Gasless flag is derived server-side from `source` so we don't
-      // trust a client claim. gas_savings_usd is informational and clamped.
-      gasSavingsUsd,
+      // [P104 / 13A-L-02] Raw adapter gas USD on the best non-CoW route,
+      // sent advisory by the client. The server derives gas_savings_usd
+      // from it (clamped to [0, 500]) so clients cannot inflate aggregate
+      // totals. The older `gasSavingsUsd` field is silently ignored —
+      // accepted for backwards compat but never persisted directly.
+      bestNonCowGasUsd,
     } = body
 
     if (!wallet || !source || !tokenIn || !tokenOut || !amountIn || !amountOut) {
@@ -119,13 +122,15 @@ export async function POST(req: NextRequest) {
       // Stored as raw output-token wei; USD conversion is a read-time concern.
       mev_savings_estimate: mevSavingsEstimate ?? null,
       mev_savings_actual: mevSavingsActual ?? null,
-      // [P96] Gasless tracking — derived from source (server is authoritative).
-      // gas_savings_usd is bounded to a sane range so a malicious client
-      // can't poison aggregate totals.
+      // [P96] Gasless flag — derived from source (server is authoritative).
       is_gasless: source === 'cowswap',
+      // [P104 / 13A-L-02] gas_savings_usd is derived from the advisory
+      // bestNonCowGasUsd and clamped to [0, 500]. No single Ethereum
+      // mainnet swap saves >$500 in gas — anything above that is either
+      // a client bug or an attempt to poison aggregates.
       gas_savings_usd:
-        source === 'cowswap' && Number.isFinite(Number(gasSavingsUsd))
-          ? Math.max(0, Math.min(Number(gasSavingsUsd), 10_000))
+        source === 'cowswap' && Number.isFinite(Number(bestNonCowGasUsd))
+          ? Math.max(0, Math.min(Number(bestNonCowGasUsd), 500))
           : 0,
     })
 
