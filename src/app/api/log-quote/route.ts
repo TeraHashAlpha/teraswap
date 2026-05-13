@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { getSupabase } from '@/lib/supabase'
+// [P114/M-03] log-quote is a pure-insert path → INSERT-only logger
+// client. A leaked key here can't read orders/api_keys or delete rows.
+import { getSupabaseLogger } from '@/lib/supabase'
 import { trackQuoteFailure } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 
@@ -11,7 +13,7 @@ import { trackWalletAction } from '@/lib/wallet-activity-server'
  */
 export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabase()
+    const supabase = getSupabaseLogger()
     if (!supabase) {
       return NextResponse.json({ ok: true, skipped: true })
     }

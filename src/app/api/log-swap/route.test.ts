@@ -22,8 +22,14 @@ const supabaseChain = {
   }),
 }
 
+// [P114/M-03] The POST handler reads via getSupabaseLogger now;
+// PATCH still uses getSupabase. Both resolve to the same chain in
+// tests because the mock can't distinguish — and we don't need it
+// to: the test exercises insert-shape clamping, not which role key
+// did the writing.
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => supabaseChain,
+  getSupabaseLogger: () => supabaseChain,
 }))
 
 // ── Stub side-effect deps ──────────────────────────────────

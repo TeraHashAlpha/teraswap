@@ -1,4 +1,7 @@
-import { getSupabase } from './supabase'
+// [P114/M-03] Fire-and-forget inserts run through getSupabaseLogger
+// (INSERT-only role) so a leaked key from this path can't read or
+// modify any other table.
+import { getSupabaseLogger } from './supabase'
 
 // ══════════════════════════════════════════════════════════
 //  SERVER-SIDE SECURITY EVENT TRACKER
@@ -38,7 +41,7 @@ function recordEvent(
     metadata?: Record<string, unknown>
   },
 ): void {
-  const sb = getSupabase()
+  const sb = getSupabaseLogger()
   if (!sb) return
 
   // Non-blocking — we don't await this. Wrapped in Promise.resolve()
