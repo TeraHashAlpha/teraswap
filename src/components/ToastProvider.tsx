@@ -18,6 +18,11 @@ export interface Toast {
   txHash?: string
   /** Custom action button */
   action?: { label: string; onClick: () => void }
+  /** [hotfix] Caller-supplied de-dupe key. When set, any existing toast
+   *  with the same key is dismissed before this one is shown — so a
+   *  spammy source (e.g. the quote-error poll) replaces instead of
+   *  stacking in the toast tray. Internal `id` stays auto-generated. */
+  dedupKey?: string
 }
 
 interface ToastContext {
@@ -53,7 +58,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const duration = t.duration ?? (t.type === 'error' ? 8000 : t.type === 'loading' ? 0 : 5000)
 
     setToasts(prev => {
-      const next = [...prev, { ...t, id, duration }]
+      // [hotfix] If the caller supplied a dedupKey, drop any earlier
+      // toast that shares it before appending this one. Also tear down
+      // its dismiss timer so it doesn't fire stale callbacks.
+      let base = prev
+      if (t.dedupKey) {
+        base = prev.filter(existing => {
+          if (existing.dedupKey !== t.dedupKey) return true
+          clearTimeout(timers.current[existing.id])
+          delete timers.current[existing.id]
+          return false
+        })
+      }
+      const next = [...base, { ...t, id, duration }]
       // Trim oldest if over limit
       return next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next
     })

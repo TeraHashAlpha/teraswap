@@ -224,6 +224,12 @@ export default function SwapBox() {
   const { estimate: gasEstimateFn } = useEthGasCost()
   const { toast, dismiss } = useToast()
   const swapToastId = useRef<string | null>(null)
+  // [hotfix] Track the last quote-error string we toasted. The
+  // useQuote → setError(null) → setError(msg) churn on every poll cycle
+  // would otherwise drive a new identical toast every 15 seconds; this
+  // ref short-circuits the duplicate before it reaches the toast layer
+  // (the dedupKey on the toast itself is the second line of defence).
+  const lastQuoteErrorRef = useRef<string | null>(null)
 
   // ── Particle turbo mode during active swap ──
   useEffect(() => {
@@ -370,11 +376,31 @@ export default function SwapBox() {
   }, [approvalError])
 
   // ── Toast: quote error (warning, less intrusive) ──
+  //
+  // [hotfix] Two layers of dedup so a 429 storm can't flood the tray:
+  //   1. lastQuoteErrorRef short-circuits identical strings before we
+  //      even hit the toast layer (the common case during rate-limit
+  //      backoff is the same "Rate limit exceeded…" message every poll).
+  //   2. dedupKey: 'quote-error' on the toast call asks the provider to
+  //      replace any prior toast carrying the same key, so a *changed*
+  //      error message still updates in place instead of stacking.
+  // When the error clears, we reset the ref so the next genuine error
+  // re-surfaces normally.
   useEffect(() => {
-    if (quoteError) {
-      toast({ type: 'warning', title: 'Quote unavailable', description: quoteError, duration: 6000 })
+    if (!quoteError) {
+      lastQuoteErrorRef.current = null
+      return
     }
-  }, [quoteError])
+    if (quoteError === lastQuoteErrorRef.current) return
+    lastQuoteErrorRef.current = quoteError
+    toast({
+      type: 'warning',
+      title: 'Quote unavailable',
+      description: quoteError,
+      duration: 6000,
+      dedupKey: 'quote-error',
+    })
+  }, [quoteError, toast])
 
   const hasAmount = !!amountIn && Number(amountIn) > 0
   // [BUGFIX] Wrap parseUnits in try/catch — malformed input (e.g. "1.2.3") would crash
