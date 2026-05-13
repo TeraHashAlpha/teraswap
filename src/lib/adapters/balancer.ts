@@ -32,7 +32,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
   const { base } = AGGREGATOR_APIS.balancer
   const res = await fetch(`${base}/order/1`, {
     method: 'POST',
@@ -43,7 +43,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
       orderKind: 'sell',
       amount: amount,
       sender: from,
-      receiver: from,
+      // [P101] Recipient defaults to sender when not provided.
+      receiver: recipient ?? from,
       gasPrice: '30000000000',
       slippagePercentage: String(clampSlippage(slippage) / 100),
     }),

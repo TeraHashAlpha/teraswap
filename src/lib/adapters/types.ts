@@ -161,6 +161,11 @@ export interface SwapParams extends QuoteParams {
   slippage: number
   quoteMeta?: QuoteMeta
   chainId?: number
+  /** [P101] Output destination. Defaults to `from` when omitted, preserving
+   *  all existing flows. Adapters whose upstream API doesn't support a
+   *  split sender/receiver fall back to `from` and log a warning. Only
+   *  threaded through by /api/v1/swap (not the internal /api/swap). */
+  recipient?: string
 }
 
 export interface DEXAdapter {

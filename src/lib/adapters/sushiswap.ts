@@ -32,14 +32,15 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
   const { base } = AGGREGATOR_APIS.sushiswap
   const qs = new URLSearchParams({
     tokenIn: src,
     tokenOut: dst,
     amount: amount,
     maxSlippage: String(clampSlippage(slippage) / 100),
-    to: from,
+    // [P101] `to` is the RouteProcessor's output destination — defaults to sender.
+    to: recipient ?? from,
     preferSushi: 'true',
   })
   const res = await fetch(`${base}?${qs}`, {

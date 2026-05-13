@@ -36,7 +36,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, srcDecimals = 18, dstDecimals = 18 } = params
+  const { src, dst, amount, from, slippage, recipient, srcDecimals = 18, dstDecimals = 18 } = params
   const { base } = AGGREGATOR_APIS.velora
 
   // Step 1: get price route
@@ -62,7 +62,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     slippage: Math.round(clampSlippage(slippage) * 100), // bps (integer)
     priceRoute: priceData.priceRoute,
     userAddress: from,
-    receiver: from,
+    // [P101] Recipient defaults to sender when not provided.
+    receiver: recipient ?? from,
     txOrigin: from,
     deadline: Math.floor(Date.now() / 1000) + 600,
   }

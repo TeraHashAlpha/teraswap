@@ -160,6 +160,11 @@ async function fetchCowSwapQuote(
 async function fetchCowSwapOrder(
   src: string, dst: string, amount: string, from: string, slippage: number,
   chainId: number = CHAIN_ID,
+  // [P101] Output destination — defaults to sender when not provided. CoW
+  // already supports a split sender/receiver natively (the order's
+  // `receiver` field), so threading through is just passing the value
+  // into the /quote request body.
+  recipient?: string,
 ): Promise<NormalizedQuote> {
   const base = getCowApiBase(chainId)
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
@@ -179,7 +184,10 @@ async function fetchCowSwapOrder(
       sellAmountBeforeFee: amount,
       kind: 'sell',
       from,
-      receiver: from,
+      // [P101] Receiver = address that gets the buyToken once the order is
+      // settled. Defaults to sender; parseCowOrderParams validates whatever
+      // the API echoes back.
+      receiver: recipient ?? from,
       appData,
       partiallyFillable: false,
       sellTokenBalance: 'erc20',
@@ -321,6 +329,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   return fetchCowSwapOrder(
     params.src, params.dst, params.amount, params.from, params.slippage,
     params.chainId,
+    params.recipient,
   )
 }
 

@@ -52,7 +52,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
   const { base } = AGGREGATOR_APIS.odos
 
   // Step 1: quote via v3
@@ -78,13 +78,20 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   const quoteData = await quoteRes.json()
 
   // Step 2: assemble tx
+  // [P101] Odos /assemble accepts an optional `receiver` field. When the
+  // caller supplied a recipient distinct from sender, route the output
+  // there; otherwise omit the field so Odos keeps its default (sender).
+  const assembleBody: Record<string, unknown> = {
+    userAddr: from,
+    pathId: quoteData.pathId,
+  }
+  if (recipient && recipient !== from) {
+    assembleBody.receiver = recipient
+  }
   const assembleRes = await fetch(`${base}/sor/assemble`, {
     method: 'POST',
     headers: odosHeaders(),
-    body: JSON.stringify({
-      userAddr: from,
-      pathId: quoteData.pathId,
-    }),
+    body: JSON.stringify(assembleBody),
   })
   if (!assembleRes.ok) {
     const errBody = await assembleRes.text().catch(() => '')

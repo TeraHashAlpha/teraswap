@@ -37,7 +37,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage } = params
+  const { src, dst, amount, from, slippage, recipient } = params
   const { base } = AGGREGATOR_APIS.kyberswap
 
   // Step 1: get route
@@ -72,7 +72,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     body: JSON.stringify({
       routeSummary,
       sender: from,
-      recipient: from,
+      // [P101] Recipient defaults to sender when not provided.
+      recipient: recipient ?? from,
       slippageTolerance: Math.round(clampSlippage(slippage) * 100),
       source: 'TeraSwap',
     }),
