@@ -29,6 +29,27 @@ describe('csvEscape', () => {
     expect(csvEscape('line1\nline2')).toBe('"line1\nline2"')
     expect(csvEscape('crlf\r\nok')).toBe('"crlf\r\nok"')
   })
+
+  // [13B-L-01] CSV formula-injection prefixes must be neutralised. The
+  // OWASP-recommended fix is to prepend a tab character so Excel/Sheets
+  // render the value as text instead of evaluating it as a formula.
+  it('prefixes a tab on cells starting with = (formula trigger)', () => {
+    const out = csvEscape('=CMD("calc")')
+    expect(out.startsWith('\t') || out.startsWith('"\t')).toBe(true)
+    expect(out).toContain('=CMD(')
+  })
+
+  it('prefixes a tab on cells starting with + (formula trigger)', () => {
+    expect(csvEscape('+APY')).toBe('\t+APY')
+  })
+
+  it('prefixes a tab on cells starting with - (formula trigger)', () => {
+    expect(csvEscape('-DROP')).toBe('\t-DROP')
+  })
+
+  it('leaves ordinary symbols unchanged (no false-positive sanitisation)', () => {
+    expect(csvEscape('USDC')).toBe('USDC')
+  })
 })
 
 describe('rowsToCsv', () => {
