@@ -22,6 +22,16 @@ interface AbiFunction {
   inputs?: Array<{ name: string; type: string }>
 }
 
+interface Erc7730Field {
+  path: string
+  label?: string
+  format?: string
+  /** [P108 v2] Per-field visibility — `"never"` replaces the v1
+   *  top-level `excluded` array. */
+  visible?: 'never'
+  params?: Record<string, unknown>
+}
+
 interface Erc7730Descriptor {
   context: {
     contract: {
@@ -34,8 +44,7 @@ interface Erc7730Descriptor {
       string,
       {
         intent: string
-        fields: unknown[]
-        excluded?: string[]
+        fields: Erc7730Field[]
       }
     >
   }
@@ -91,9 +100,21 @@ describe('ERC-7730 FeeCollector V2 descriptor', () => {
     }
   })
 
-  it('routerData is explicitly excluded on both formats', () => {
-    for (const format of Object.values(descriptor.display.formats)) {
-      expect(format.excluded).toContain('routerData')
+  // [P108] v2 schema replaces the top-level `excluded` array with a
+  // per-field `visible: "never"`. routerData is opaque adapter calldata
+  // — never something a user can verify on a hardware-wallet screen,
+  // so every format must include a routerData field marked hidden.
+  it('routerData is present and hidden (visible: "never") on both formats', () => {
+    for (const [sig, format] of Object.entries(descriptor.display.formats)) {
+      const routerDataField = format.fields.find((f) => f.path === 'routerData')
+      expect(
+        routerDataField,
+        `format ${sig} is missing a routerData field`,
+      ).toBeDefined()
+      expect(
+        routerDataField!.visible,
+        `routerData on ${sig} must be visible: "never"`,
+      ).toBe('never')
     }
   })
 

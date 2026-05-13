@@ -23,7 +23,14 @@ meta-aggregator (Ethereum mainnet).
 
 Admin functions are deliberately out of scope — only the two
 user-signing functions are described. `routerData` (encoded inner-DEX
-calldata) is `excluded` on both formats.
+calldata) is hidden from the wallet screen via `"visible": "never"` on
+its field entry in each format (ERC-7730 v2 per-field visibility, which
+replaced the v1 top-level `excluded` array).
+
+## Files
+
+- `registry/teraswap/calldata-TeraSwapFeeCollector.json` — descriptor
+- `registry/teraswap/tests/calldata-TeraSwapFeeCollector.tests.json` — test fixtures
 
 ## Verification
 
@@ -33,8 +40,8 @@ calldata) is `excluded` on both formats.
   every build and cross-references them with the frontend's
   `FEE_COLLECTOR_ABI`. The pinned constants are `0x7f7663d4` and
   `0x7739563c`.
-- JSON validates against
-  <https://eips.ethereum.org/assets/eip-7730/erc7730-v1.schema.json>.
+- Descriptor passes `erc7730 lint --skip-abi-validation` against the
+  ERC-7730 v2 schema.
 
 ## Why this matters to users
 
