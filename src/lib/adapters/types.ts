@@ -103,6 +103,22 @@ export interface MetaQuoteResult {
   crossQuoteDeviation?: number   // e.g. 0.05 = best is 5% above median
   /** True if best quote was flagged as suspicious vs the consensus */
   crossQuoteWarning?: boolean
+  /** [P94] Gasless recommendation overlay. Populated client-side after
+   *  quotes return so the engine can use the freshest gas/ETH price.
+   *  Server-side responses (e.g. v1/quote) populate it inline. */
+  gasless?: GaslessQuoteOverlay
+}
+
+/** [P94] Gasless recommendation overlay shipped with a MetaQuoteResult.
+ *  Mirrors GaslessRecommendation from src/lib/gasless-engine.ts — duplicated
+ *  here to avoid a cycle between the adapter types and the engine. */
+export interface GaslessQuoteOverlay {
+  available: boolean
+  recommended: boolean
+  reason: string
+  gasSavingsUsd: number
+  priceDifferencePercent: number
+  bestNonCowSource: string
 }
 
 export interface QuoteParams {
