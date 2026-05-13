@@ -30,6 +30,13 @@ import { API_KEY_TIERS, isApiKeyTier, type ApiKeyTier } from '@/lib/constants'
 
 export const dynamic = 'force-dynamic'
 
+// [11-L-05] Hard caps on admin-configurable per-key rate limits. An honest
+// typo (`rateLimitPerMin: 999999999`) used to silently mint an effectively
+// unlimited key; the caps force the value back to the tier default and
+// surface the override in a `warnings` array on the response.
+const MAX_RATE_LIMIT_PER_MIN = 10_000
+const MAX_RATE_LIMIT_PER_DAY = 1_000_000
+
 // ── Helpers ────────────────────────────────────────────────
 
 function isAuthed(req: NextRequest): boolean {
@@ -119,15 +126,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Allow admin to override per-key limits (special arrangements). When
-  // omitted, fall back to the tier defaults.
+  // omitted, OR when the value exceeds the hard cap, fall back to the
+  // tier defaults — [11-L-05] never error on an over-the-cap value, just
+  // surface a warning so an honest typo doesn't block key creation.
   const rateLimitPerMin =
-    typeof body.rateLimitPerMin === 'number' && Number.isInteger(body.rateLimitPerMin) && body.rateLimitPerMin > 0
+    typeof body.rateLimitPerMin === 'number' &&
+    Number.isInteger(body.rateLimitPerMin) &&
+    body.rateLimitPerMin > 0 &&
+    body.rateLimitPerMin <= MAX_RATE_LIMIT_PER_MIN
       ? body.rateLimitPerMin
       : limits.perMin
   const rateLimitPerDay =
-    typeof body.rateLimitPerDay === 'number' && Number.isInteger(body.rateLimitPerDay) && body.rateLimitPerDay > 0
+    typeof body.rateLimitPerDay === 'number' &&
+    Number.isInteger(body.rateLimitPerDay) &&
+    body.rateLimitPerDay > 0 &&
+    body.rateLimitPerDay <= MAX_RATE_LIMIT_PER_DAY
       ? body.rateLimitPerDay
       : limits.perDay
+
+  // Surface capped overrides on the response so the admin notices.
+  const warnings: string[] = []
+  if (typeof body.rateLimitPerMin === 'number' && body.rateLimitPerMin > MAX_RATE_LIMIT_PER_MIN) {
+    warnings.push(`rateLimitPerMin capped at ${MAX_RATE_LIMIT_PER_MIN}`)
+  }
+  if (typeof body.rateLimitPerDay === 'number' && body.rateLimitPerDay > MAX_RATE_LIMIT_PER_DAY) {
+    warnings.push(`rateLimitPerDay capped at ${MAX_RATE_LIMIT_PER_DAY}`)
+  }
 
   // Mint and hash. Plaintext leaves this function only via the response
   // body; the DB only ever sees the digest.
@@ -166,6 +190,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // digest from this point forward; lose this string and the key must
       // be revoked + re-issued.
       key: plaintext,
+      // [11-L-05] Empty when no overrides were capped — present when one was.
+      ...(warnings.length > 0 ? { warnings } : {}),
     }, { status: 201 })
   } catch (err) {
     console.error('[api-keys] POST threw:', err instanceof Error ? err.message : err)
