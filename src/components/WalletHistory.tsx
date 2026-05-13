@@ -155,13 +155,30 @@ export default function WalletHistory() {
           Swap History
           {total > 0 && <span className="ml-1.5 text-xs font-normal text-cream-35">({total})</span>}
         </h3>
-        <button
-          onClick={fetchHistory}
-          disabled={loading}
-          className="rounded-lg border border-cream-08 px-2.5 py-1 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream disabled:opacity-50"
-        >
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* [P100] Export CSV — disabled until we have at least one swap. */}
+          <a
+            href={address ? `/api/analytics/export?wallet=${address}&format=csv` : '#'}
+            aria-disabled={swaps.length === 0}
+            onClick={(e) => {
+              if (swaps.length === 0) e.preventDefault()
+            }}
+            className={`rounded-lg border border-cream-08 px-2.5 py-1 text-[11px] font-medium transition ${
+              swaps.length === 0
+                ? 'cursor-not-allowed text-cream-35 opacity-50'
+                : 'text-cream-50 hover:border-cream-35 hover:text-cream'
+            }`}
+          >
+            Export CSV
+          </a>
+          <button
+            onClick={fetchHistory}
+            disabled={loading}
+            className="rounded-lg border border-cream-08 px-2.5 py-1 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream disabled:opacity-50"
+          >
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Error */}
