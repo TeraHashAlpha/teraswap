@@ -1,5 +1,6 @@
 import { type NormalizedQuote, type MetaQuoteResult } from './api'
 import type { AggregatorName } from './constants'
+import { safeBigInt } from './utils'
 import {
   type SplitLeg,
   type SplitRoute,
@@ -29,8 +30,10 @@ export async function fetchSplitQuotes(
   totalAmount: string,
   singleQuotes: NormalizedQuote[],
 ): Promise<Map<AggregatorName, Map<number, NormalizedQuote>>> {
-  const total = BigInt(totalAmount)
+  // [11-L-01] safeBigInt: malformed totalAmount → return empty quote map (no splits).
+  const total = safeBigInt(totalAmount)
   const quoteMap = new Map<AggregatorName, Map<number, NormalizedQuote>>()
+  if (total === null) return quoteMap
 
   // Seed with 100% quotes from existing single-source results
   for (const q of singleQuotes) {
@@ -58,7 +61,10 @@ export async function fetchSplitQuotes(
   const fetchPromises: Promise<void>[] = []
 
   for (const pct of neededPercents) {
-    const subAmount = (total * BigInt(pct)) / 100n
+    // [11-L-01] safeBigInt: malformed pct → skip this percentage split.
+    const pctBig = safeBigInt(pct)
+    if (pctBig === null) continue
+    const subAmount = (total * pctBig) / 100n
     if (subAmount <= 0n) continue
 
     const p = fetchQuoteAtAmount(subAmount.toString()).then((quotes) => {
@@ -90,7 +96,8 @@ export function findBestSplit(
   const eligibleSources = Array.from(quoteMap.keys())
     .filter(s => SPLIT_ELIGIBLE_SOURCES.has(s))
 
-  const bestSingleOutput = BigInt(bestSingle.toAmount)
+  // [11-L-01] safeBigInt: malformed bestSingle.toAmount → treat as 0 (worst-case → no split beats single).
+  const bestSingleOutput = safeBigInt(bestSingle.toAmount) ?? 0n
   let bestRoute: SplitRoute = buildSingleRoute(bestSingle, totalAmount)
 
   // ── Try 2-way splits ──
@@ -116,7 +123,8 @@ export function findBestSplit(
             bestSingleOutput,
           )
 
-          if (BigInt(route.totalOutput) > BigInt(bestRoute.totalOutput)) {
+          // [11-L-01] safeBigInt: malformed totalOutput → treat as 0n so the route loses the comparison.
+          if ((safeBigInt(route.totalOutput) ?? 0n) > (safeBigInt(bestRoute.totalOutput) ?? 0n)) {
             bestRoute = route
           }
 
@@ -133,7 +141,7 @@ export function findBestSplit(
                 totalAmount,
                 bestSingleOutput,
               )
-              if (BigInt(routeR.totalOutput) > BigInt(bestRoute.totalOutput)) {
+              if ((safeBigInt(routeR.totalOutput) ?? 0n) > (safeBigInt(bestRoute.totalOutput) ?? 0n)) {
                 bestRoute = routeR
               }
             }
@@ -170,7 +178,7 @@ export function findBestSplit(
                 bestSingleOutput,
               )
 
-              if (BigInt(route.totalOutput) > BigInt(bestRoute.totalOutput)) {
+              if ((safeBigInt(route.totalOutput) ?? 0n) > (safeBigInt(bestRoute.totalOutput) ?? 0n)) {
                 bestRoute = route
               }
             }
@@ -236,7 +244,8 @@ function buildSplitRoute(
   let totalGasUsd = 0
 
   const legs: SplitLeg[] = parts.map(p => {
-    const outputBig = BigInt(p.quote.toAmount)
+    // [11-L-01] safeBigInt: malformed leg output → treat as 0n (worst case = empty route via improvementBps).
+    const outputBig = safeBigInt(p.quote.toAmount) ?? 0n
     totalOutput += outputBig
     totalGasUsd += p.quote.gasUsd
 
