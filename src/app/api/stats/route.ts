@@ -49,6 +49,35 @@ export async function GET() {
       }
     }
 
+    // [P96] Gasless adoption metrics.
+    // Use SQL aggregates so we don't pull every row back into Node just to
+    // count them. confirmed + pending-with-tx mirrors the totalSwaps filter
+    // above so the ratio is computed against the same denominator.
+    const completedFilter = 'status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)'
+    const { count: totalGaslessSwaps } = await supabase
+      .from('swaps')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_gasless', true)
+      .or(completedFilter)
+
+    const { data: gaslessSumRows } = await supabase
+      .from('swaps')
+      .select('gas_savings_usd')
+      .eq('is_gasless', true)
+      .or(completedFilter)
+
+    const totalGasSavedUsd = (gaslessSumRows ?? []).reduce(
+      (sum, r) => sum + Number(r.gas_savings_usd ?? 0),
+      0,
+    )
+
+    const denom = totalSwaps ?? 0
+    const gaslessRatio = denom > 0 ? (totalGaslessSwaps ?? 0) / denom : 0
+    const avgGasSavingsPerSwap =
+      totalGaslessSwaps && totalGaslessSwaps > 0
+        ? totalGasSavedUsd / totalGaslessSwaps
+        : 0
+
     return NextResponse.json({
       enabled: true,
       totalSwaps: totalSwaps ?? 0,
@@ -59,6 +88,14 @@ export async function GET() {
       topQuoteWinners: Object.entries(winCounts)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10),
+      // [P96] Gasless adoption block. Always present (zero-valued when no
+      // swaps have happened yet) so consumers don't need to branch.
+      gasless: {
+        totalGaslessSwaps: totalGaslessSwaps ?? 0,
+        totalGasSavedUsd: Number(totalGasSavedUsd.toFixed(2)),
+        gaslessRatio: Number(gaslessRatio.toFixed(4)),
+        avgGasSavingsPerSwap: Number(avgGasSavingsPerSwap.toFixed(2)),
+      },
     }, {
       headers: {
         'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',

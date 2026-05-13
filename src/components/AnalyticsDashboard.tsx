@@ -1,9 +1,18 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
 import { AGGREGATOR_META, ETHERSCAN_TX, type AggregatorName } from '@/lib/constants'
 import type { DashboardData, PeriodMetrics } from '@/lib/analytics-types'
+
+// [P96] Subset of /api/stats response we consume here. We only read the
+// gasless block; the rest of the public stats response is ignored.
+interface GaslessStats {
+  totalGaslessSwaps: number
+  totalGasSavedUsd: number
+  gaslessRatio: number
+  avgGasSavingsPerSwap: number
+}
 
 // ── Helpers ──
 
@@ -190,11 +199,27 @@ function DailyVolumeChart({ data }: { data: DashboardData['dailyVolume'] }) {
 export default function AnalyticsDashboard() {
   const { dashboard, loading } = useAnalytics()
   const [period, setPeriod] = useState<Period>('all')
+  const [gasless, setGasless] = useState<GaslessStats | null>(null)
 
   const metrics = useMemo(
     () => dashboard ? periodMetrics(dashboard, period) : null,
     [dashboard, period],
   )
+
+  // [P96] Pull gasless adoption metrics from /api/stats. Fire-and-forget;
+  // any failure leaves the section hidden rather than blocking the dash.
+  useEffect(() => {
+    let alive = true
+    fetch('/api/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data?.gasless) setGasless(data.gasless as GaslessStats)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
 
   if (loading && !dashboard) {
     return (
@@ -240,6 +265,36 @@ export default function AnalyticsDashboard() {
             label="Avg Trade"
             value={metrics.tradeCount > 0 ? formatUsd(metrics.totalVolume / metrics.tradeCount) : '$0'}
           />
+        </div>
+      )}
+
+      {/* [P96] Gasless adoption — shown once we have at least one gasless swap. */}
+      {gasless && gasless.totalGaslessSwaps > 0 && (
+        <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span aria-hidden="true" className="text-base text-purple-400">&#9889;</span>
+            <h3 className="text-xs font-semibold text-purple-300">Gasless Adoption</h3>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard
+              label="Gasless Swaps"
+              value={gasless.totalGaslessSwaps.toLocaleString()}
+              sub={`${(gasless.gaslessRatio * 100).toFixed(1)}% of all swaps`}
+            />
+            <StatCard
+              label="Total Gas Saved"
+              value={formatUsd(gasless.totalGasSavedUsd)}
+            />
+            <StatCard
+              label="Avg per Swap"
+              value={formatUsd(gasless.avgGasSavingsPerSwap)}
+            />
+            <StatCard
+              label="Adoption"
+              value={`${(gasless.gaslessRatio * 100).toFixed(0)}%`}
+              sub="of completed swaps"
+            />
+          </div>
         </div>
       )}
 
