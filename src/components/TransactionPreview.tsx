@@ -157,13 +157,29 @@ export default function TransactionPreview({
           {/* Source + Function */}
           <div className="flex items-center justify-between">
             <span className="text-xs text-cream-50">Source</span>
-            <span className="text-sm font-medium text-cream">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-cream">
               {preview.sourceDex}
-              <span className="ml-1.5 font-mono text-xs text-cream-50">
+              <span className="font-mono text-xs text-cream-50">
                 {preview.functionName !== 'unknown' ? preview.functionName + '()' : ''}
               </span>
+              {/* [P95] Gasless chip — only for CoW Protocol intent orders. */}
+              {source === 'cowswap' && (
+                <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-300">
+                  Gasless
+                </span>
+              )}
             </span>
           </div>
+
+          {/* [P95] CoW gas-fee line — solver pays gas; user pays nothing. */}
+          {source === 'cowswap' && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-cream-50">Gas fee</span>
+              <span className="text-sm font-medium text-purple-300">
+                $0.00 <span className="text-xs text-cream-50">(paid by solver)</span>
+              </span>
+            </div>
+          )}
 
           {/* Amounts */}
           <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-3">

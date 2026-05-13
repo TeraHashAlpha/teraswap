@@ -29,6 +29,9 @@ interface Props {
    *  enabled Force MEV Protection AND no competitive CoW quote was found.
    *  Triggers a small advisory inviting the user to enable the toggle. */
   mevExposedBest?: boolean
+  /** [P95] Switch the swap to the gasless (CoW) route. Invoked from the
+   *  "Use Gasless Route" CTA in the recommendation card. */
+  onUseGasless?: () => void
 }
 
 function sourceLabel(source: AggregatorName): string {
@@ -49,7 +52,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 
 export default function QuoteBreakdown({
   meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, approvalPlan, onEditSlippage, gasEstimate,
-  smartMevApplied = false, mevExposedBest = false,
+  smartMevApplied = false, mevExposedBest = false, onUseGasless,
 }: Props) {
   const best = meta.best
   // [10-L-01] Guard against malformed toAmount on the winning quote.
@@ -85,6 +88,15 @@ export default function QuoteBreakdown({
   const bestTime = estimatedTime(best.source)
   const bestIsDirect = AGGREGATOR_META[best.source]?.isDirect ?? false
 
+  // [P95] Gasless recommendation overlay (computed in useQuote via analyzeGasless).
+  // Three display states:
+  //   1. Best is already CoW + recommended → confirmation banner.
+  //   2. Recommended but a non-CoW source currently winning → prominent CTA card.
+  //   3. Available but not recommended → existing tiny "Gasless" badge handles it.
+  const gasless = meta.gasless
+  const showGaslessCard = !!gasless && gasless.recommended && !bestIsIntent
+  const showGaslessConfirm = !!gasless && gasless.recommended && bestIsIntent
+
   // [LP-05] Estimated MEV savings vs the non-CoW median (helper in
   // src/lib/mev-savings.ts; same calc is reused by SwapBox for analytics
   // logging on swap success so the displayed estimate matches what gets
@@ -113,6 +125,65 @@ export default function QuoteBreakdown({
       {priceCheck.oracleUnavailable && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300">
           <span className="font-semibold">&#9888; No Chainlink oracle</span> for {tokenIn.symbol} — the quoted price is <strong>not independently verified</strong>. Multi-source comparison is your only protection. Verify the rate manually before swapping.
+        </div>
+      )}
+
+      {/* [P95] Gasless recommendation card — surfaces when CoW is competitive
+          enough to be the better deal. Two layouts: a prominent CTA when a
+          non-CoW source is currently winning, a softer confirmation when CoW
+          is already selected. */}
+      {showGaslessCard && gasless && (
+        <div
+          className="rounded-xl border border-transparent bg-surface-tertiary p-3"
+          style={{
+            backgroundImage:
+              'linear-gradient(var(--surface-tertiary, #1a1a1a), var(--surface-tertiary, #1a1a1a)), linear-gradient(135deg, #8B5CF6, #3B82F6)',
+            backgroundOrigin: 'border-box',
+            backgroundClip: 'padding-box, border-box',
+            borderWidth: '1px',
+          }}
+          role="region"
+          aria-label="Gasless route recommendation"
+        >
+          <div className="flex items-start gap-2">
+            <span aria-hidden="true" className="mt-0.5 text-base text-purple-400">&#9889;</span>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-cream">Zero Gas Available</p>
+              <p className="mt-0.5 text-xs text-cream-65">
+                {gasless.gasSavingsUsd >= 0.5
+                  ? `Save ~$${gasless.gasSavingsUsd.toFixed(2)} in gas fees by using CoW Protocol.`
+                  : 'Use CoW Protocol for a fully gasless swap.'}
+                {' '}Your swap is fully MEV-protected.
+              </p>
+              {onUseGasless && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={onUseGasless}
+                    className="rounded-full bg-purple-500/90 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-purple-500"
+                    aria-label="Switch to the gasless CoW Protocol route"
+                  >
+                    Use Gasless Route
+                  </button>
+                  <span className="self-center text-[11px] text-cream-35">
+                    or keep current
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGaslessConfirm && gasless && (
+        <div
+          className="rounded-lg border border-purple-500/30 bg-purple-500/8 px-3 py-2 text-xs text-purple-300"
+          role="status"
+        >
+          <span className="font-semibold">&#10003; You&apos;re using the gasless route</span>
+          {gasless.gasSavingsUsd >= 0.5 && (
+            <span> — saving ~${gasless.gasSavingsUsd.toFixed(2)} in gas.</span>
+          )}
         </div>
       )}
 
