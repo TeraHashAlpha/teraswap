@@ -72,8 +72,6 @@ export default function SwapBox() {
     }
   }, [])
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
-  const [exactOut, setExactOut] = useState(false)
-  const [displayAmountOut, setDisplayAmountOut] = useState('')
 
   const handleSourceToggle = useCallback((source: string) => {
     setExcludedSources(prev => {
@@ -467,22 +465,6 @@ export default function SwapBox() {
     setDisplayAmountIn(formatWithSeparator(value))
   }
 
-  // Exact Out: when user types desired output, estimate required input from best quote ratio
-  useEffect(() => {
-    if (!exactOut || !displayAmountOut || !meta?.best || !tokenIn || !tokenOut) return
-    const desiredOut = Number(displayAmountOut)
-    if (isNaN(desiredOut) || desiredOut <= 0) return
-    // [11-L-01] safeBigInt: malformed toAmount → skip exact-out estimation.
-    const currentOutBig = safeBigInt(meta.best.toAmount)
-    if (currentOutBig === null) return
-    const currentOut = Number(formatUnits(currentOutBig, tokenOut.decimals))
-    const currentIn = Number(amountIn)
-    if (currentOut <= 0 || currentIn <= 0) return
-    const ratio = currentIn / currentOut
-    const estimatedIn = (desiredOut * ratio).toFixed(tokenIn.decimals > 6 ? 6 : tokenIn.decimals)
-    setDisplayAmountIn(formatWithSeparator(estimatedIn))
-  }, [exactOut, displayAmountOut, meta?.best?.toAmount]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Security: block swap when Chainlink deviation exceeds threshold ──
   // Block at BOTH warn (≥2%) and danger (≥3%) — button only re-enables when price
   // returns fully within parameters (deviation < PRICE_DEVIATION_WARN).
@@ -564,17 +546,11 @@ export default function SwapBox() {
         <div className="mb-1">
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[1.5px] text-cream-35">Sell</label>
           <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3 transition-colors focus-within:border-cream-35">
-            {exactOut && meta?.best ? (
-              <span className="min-w-0 flex-1 text-lg font-semibold text-cream-65 sm:text-2xl">
-                {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${displayAmountIn || '0'}`}
-              </span>
-            ) : (
-              <input
-                type="text" inputMode="decimal" placeholder="0.0" value={displayAmountIn}
-                onChange={(e) => handleAmountChange(e.target.value)}
-                className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
-              />
-            )}
+            <input
+              type="text" inputMode="decimal" placeholder="0.0" value={displayAmountIn}
+              onChange={(e) => handleAmountChange(e.target.value)}
+              className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
+            />
             <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); resetSwap() }} disabledAddress={tokenOut?.address} />
           </div>
           {tokenIn && (
@@ -603,27 +579,11 @@ export default function SwapBox() {
         <div className="mb-4 mt-1">
           <div className="mb-1 flex items-center justify-between">
             <label className="block text-[11px] font-semibold uppercase tracking-[1.5px] text-cream-35">Receive</label>
-            {/* Exact Out toggle */}
-            <button
-              onClick={() => { setExactOut(!exactOut); setDisplayAmountOut(''); resetSwap() }}
-              className={`rounded px-1.5 py-0.5 text-[9px] font-medium transition ${exactOut ? 'bg-cream-gold/20 text-cream-gold' : 'text-cream-35 hover:text-cream-50'}`}
-              title={exactOut ? 'You set the exact output amount' : 'Click to set exact output amount'}
-            >
-              {exactOut ? 'EXACT OUT' : 'EXACT IN'}
-            </button>
           </div>
           <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3">
-            {exactOut ? (
-              <input
-                type="text" inputMode="decimal" placeholder="0.0" value={displayAmountOut}
-                onChange={(e) => { setDisplayAmountOut(e.target.value.replace(/[^0-9.]/g, '')) }}
-                className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
-              />
-            ) : (
-              <span className="min-w-0 flex-1 text-2xl font-semibold text-cream-65">
-                {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${outputDisplay}`}
-              </span>
-            )}
+            <span className="min-w-0 flex-1 text-2xl font-semibold text-cream-65">
+              {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${outputDisplay}`}
+            </span>
             <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {meta && meta.all.length > 1 && (
@@ -754,15 +714,18 @@ export default function SwapBox() {
         )}
         {effectiveError && !isSplitActive && !priceGuardBlocked && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
         {approvalError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{approvalError}</div>}
-        {/* Price deviation — warn level (2-3%): swap paused until price converges */}
-        {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && (
+        {/* Price deviation — warn level (2-3%): swap paused until price converges.
+            Gated on `meta && hasAmount` so the banner only appears after a fresh
+            quote arrives — prevents the warning from flashing on token-select
+            (e.g. on stale/invalid oracle data before any quote is in). */}
+        {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && hasAmount && meta && !quoteLoading && (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
             <span className="font-semibold">&#9888; Swap paused:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
             Waiting for price to return within safe parameters. The button will re-enable automatically.
           </div>
         )}
-        {/* Price deviation — danger level (>3%): hard block */}
-        {priceBlocked && priceCheck.level === 'danger' && (
+        {/* Price deviation — danger level (>3%): hard block. Same fresh-quote gate. */}
+        {priceBlocked && priceCheck.level === 'danger' && hasAmount && meta && !quoteLoading && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
             This may indicate price manipulation or extreme low liquidity. Swap disabled for your protection.
