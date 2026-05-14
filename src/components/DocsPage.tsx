@@ -78,6 +78,22 @@ function Divider() {
   return <div className="my-8 h-px w-full" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(200,184,154,0.2) 50%, transparent 100%)' }} />
 }
 
+// Prominent banner placed above a section's body to flag preview / coming-soon
+// content. The body below should be wrapped in `<div className="opacity-50">`
+// so it visually reads as a preview rather than as available functionality.
+function ComingSoonBanner({ note }: { note?: string }) {
+  return (
+    <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3">
+      <span className="mt-0.5 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+        Coming Soon
+      </span>
+      <p className="text-[13px] leading-relaxed text-amber-200/90">
+        {note ?? 'This feature is not yet available — the section below is a preview of upcoming functionality.'}
+      </p>
+    </div>
+  )
+}
+
 function Tag({ children }: { children: React.ReactNode }) {
   return (
     <span className="inline-block rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wider"
@@ -580,32 +596,35 @@ export default function DocsPage() {
         {/* ═══ LIMIT ORDERS ═══ */}
         <AnimatedSection id="limit-orders">
           <SectionTitle icon="⊕" title="Limit Orders" />
-          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            Set your target price and let CoW Protocol solvers execute when the market reaches your level. Zero gas fees, MEV-protected, and partially fillable. Limit orders use <strong className="text-cream">2% default slippage</strong> and are ideal for precise entry and exit targets where you want solver competition to deliver the best possible fill price.
-          </p>
+          <ComingSoonBanner note="Limit Orders are not yet available — the section below previews the upcoming flow. Watch the roadmap for the launch date." />
+          <div className="opacity-50">
+            <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+              Set your target price and let CoW Protocol solvers execute when the market reaches your level. Zero gas fees, MEV-protected, and partially fillable. Limit orders use <strong className="text-cream">2% default slippage</strong> and are ideal for precise entry and exit targets where you want solver competition to deliver the best possible fill price.
+            </p>
 
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={stagger} className="space-y-4"
-          >
-            {[
-              { num: '01', title: 'Set Target Price', desc: 'Define exactly how many tokens you want to receive per unit sold. The market price is shown for reference, with percentage difference calculated in real-time.' },
-              { num: '02', title: 'Choose Expiry', desc: 'Orders can be valid from 1 hour to 90 days. After expiry, unfilled orders are automatically removed from the orderbook.' },
-              { num: '03', title: 'EIP-712 Signing', desc: 'Sign the order with your wallet — no on-chain transaction needed. Your tokens stay in your wallet until a solver fills the order.' },
-              { num: '04', title: 'Solver Competition', desc: 'Professional solvers on CoW Protocol compete to fill your order at the best possible rate, often providing price improvement beyond your limit price.' },
-              { num: '05', title: 'Partial Fills', desc: 'Enable partial fills to allow your order to be executed across multiple solver batches. This increases the chances of getting filled for larger orders.' },
-            ].map((step) => (
-              <motion.div key={step.num} variants={childFade}
-                className="flex gap-4 rounded-xl border p-5"
-                style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
-              >
-                <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
-                <div>
-                  <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
-                  <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
+              variants={stagger} className="space-y-4"
+            >
+              {[
+                { num: '01', title: 'Set Target Price', desc: 'Define exactly how many tokens you want to receive per unit sold. The market price is shown for reference, with percentage difference calculated in real-time.' },
+                { num: '02', title: 'Choose Expiry', desc: 'Orders can be valid from 1 hour to 90 days. After expiry, unfilled orders are automatically removed from the orderbook.' },
+                { num: '03', title: 'EIP-712 Signing', desc: 'Sign the order with your wallet — no on-chain transaction needed. Your tokens stay in your wallet until a solver fills the order.' },
+                { num: '04', title: 'Solver Competition', desc: 'Professional solvers on CoW Protocol compete to fill your order at the best possible rate, often providing price improvement beyond your limit price.' },
+                { num: '05', title: 'Partial Fills', desc: 'Enable partial fills to allow your order to be executed across multiple solver batches. This increases the chances of getting filled for larger orders.' },
+              ].map((step) => (
+                <motion.div key={step.num} variants={childFade}
+                  className="flex gap-4 rounded-xl border p-5"
+                  style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
+                >
+                  <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
+                  <div>
+                    <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
+                    <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
         </AnimatedSection>
 
         <Divider />
@@ -613,35 +632,38 @@ export default function DocsPage() {
         {/* ═══ STOP LOSS / TAKE PROFIT ═══ */}
         <AnimatedSection id="stop-loss">
           <SectionTitle icon="⛊" title="Stop Loss / Take Profit" />
-          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            Protect your positions or lock in gains automatically. Chainlink oracles monitor prices in real-time, and when your trigger is hit, a CoW Protocol limit order is auto-submitted for MEV-protected execution.
-          </p>
-          <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
-            <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses <strong className="text-cream-65">5% default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses <strong className="text-cream-65">2% slippage</strong> like limit orders.
-          </div>
+          <ComingSoonBanner note="Stop Loss / Take Profit is not yet available — the section below previews the upcoming flow. Watch the roadmap for the launch date." />
+          <div className="opacity-50">
+            <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
+              Protect your positions or lock in gains automatically. Chainlink oracles monitor prices in real-time, and when your trigger is hit, a CoW Protocol limit order is auto-submitted for MEV-protected execution.
+            </p>
+            <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
+              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses <strong className="text-cream-65">5% default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses <strong className="text-cream-65">2% slippage</strong> like limit orders.
+            </div>
 
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={stagger} className="space-y-4"
-          >
-            {[
-              { num: '01', title: 'Set Trigger Price (USD)', desc: 'Define your stop loss or take profit level in USD. For stop loss, the order triggers when price drops below your target. For take profit, it triggers when price rises above.' },
-              { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'Prices are polled every 5 seconds via Chainlink on-chain oracles — the industry standard for reliable, tamper-proof price feeds.' },
-              { num: '03', title: 'Automatic Execution', desc: 'When your trigger fires, a CoW Protocol limit order is automatically created and submitted. You sign once upfront — no manual action needed at trigger time.' },
-              { num: '04', title: 'MEV-Protected Fill', desc: 'The triggered order goes through CoW Protocol\'s solver competition, ensuring MEV-protected execution with zero gas fees.' },
-              { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
-            ].map((step) => (
-              <motion.div key={step.num} variants={childFade}
-                className="flex gap-4 rounded-xl border p-5"
-                style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
-              >
-                <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
-                <div>
-                  <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
-                  <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
+              variants={stagger} className="space-y-4"
+            >
+              {[
+                { num: '01', title: 'Set Trigger Price (USD)', desc: 'Define your stop loss or take profit level in USD. For stop loss, the order triggers when price drops below your target. For take profit, it triggers when price rises above.' },
+                { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'Prices are polled every 5 seconds via Chainlink on-chain oracles — the industry standard for reliable, tamper-proof price feeds.' },
+                { num: '03', title: 'Automatic Execution', desc: 'When your trigger fires, a CoW Protocol limit order is automatically created and submitted. You sign once upfront — no manual action needed at trigger time.' },
+                { num: '04', title: 'MEV-Protected Fill', desc: 'The triggered order goes through CoW Protocol\'s solver competition, ensuring MEV-protected execution with zero gas fees.' },
+                { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
+              ].map((step) => (
+                <motion.div key={step.num} variants={childFade}
+                  className="flex gap-4 rounded-xl border p-5"
+                  style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
+                >
+                  <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
+                  <div>
+                    <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
+                    <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
         </AnimatedSection>
 
         <Divider />
