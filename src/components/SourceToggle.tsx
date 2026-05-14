@@ -36,25 +36,34 @@ export default function SourceToggle({ excludedSources, onToggle }: SourceToggle
 
           {/* Dropdown */}
           <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-xl border border-cream-08 bg-surface p-2 shadow-2xl">
-            <div className="mb-2 flex items-center justify-between px-1">
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
               <span className="text-[11px] font-medium text-cream-50">Liquidity Sources</span>
-              <button
-                onClick={() => {
-                  // Toggle all on/off
-                  if (excludedSources.size === 0) {
-                    // Exclude all except first
-                    TOGGLEABLE_SOURCES.slice(1).forEach(s => {
-                      if (!excludedSources.has(s)) onToggle(s)
-                    })
-                  } else {
-                    // Enable all
-                    excludedSources.forEach(s => onToggle(s))
-                  }
-                }}
-                className="text-[10px] text-cream-gold hover:underline"
-              >
-                {excludedSources.size === 0 ? 'Deselect all' : 'Select all'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    // Toggle all on/off
+                    if (excludedSources.size === 0) {
+                      // Exclude all except first
+                      TOGGLEABLE_SOURCES.slice(1).forEach(s => {
+                        if (!excludedSources.has(s)) onToggle(s)
+                      })
+                    } else {
+                      // Enable all
+                      excludedSources.forEach(s => onToggle(s))
+                    }
+                  }}
+                  className="text-[10px] text-cream-gold hover:underline"
+                >
+                  {excludedSources.size === 0 ? 'Deselect all' : 'Select all'}
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
+                  aria-label="Close liquidity sources panel"
+                  className="flex h-5 w-5 items-center justify-center rounded text-cream-35 transition hover:bg-cream-08 hover:text-cream"
+                >
+                  <span className="text-[11px] leading-none">&#10005;</span>
+                </button>
+              </div>
             </div>
 
             <div className="max-h-64 overflow-y-auto">
