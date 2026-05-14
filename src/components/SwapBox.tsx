@@ -48,6 +48,10 @@ export default function SwapBox() {
   const [showCowWarning, setShowCowWarning] = useState(false)
   const [mevProtected, setMevProtected] = useState(false)
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
+  // Tracks whether priceCheck data is stale relative to the current sell amount.
+  // Set true when the amount changes; cleared once a fresh `meta` (quote) resolves.
+  // Used to suppress the price-deviation banner from flashing on stale data.
+  const [priceCheckStale, setPriceCheckStale] = useState(false)
 
   const handleSourceToggle = useCallback((source: string) => {
     setExcludedSources(prev => {
@@ -423,6 +427,7 @@ export default function SwapBox() {
     const clean = raw.replace(/\s/g, '')
     if (clean === '' || /^\d*\.?\d*$/.test(clean)) {
       setDisplayAmountIn(formatWithSeparator(clean))
+      setPriceCheckStale(true)
       if (swapStatus !== 'idle') resetSwap()
       if (splitSwapStatus !== 'idle') resetSplitSwap()
     }
@@ -432,6 +437,7 @@ export default function SwapBox() {
     setTokenIn(tokenOut)
     setTokenOut(tokenIn)
     setDisplayAmountIn('')
+    setPriceCheckStale(true)
     resetSwap()
     resetSplitSwap()
     setShowCowWarning(false)
@@ -439,7 +445,15 @@ export default function SwapBox() {
 
   function handleSetAmount(value: string) {
     setDisplayAmountIn(formatWithSeparator(value))
+    setPriceCheckStale(true)
   }
+
+  // Clear the stale flag whenever a fresh quote (`meta`) resolves — at that
+  // point `priceCheck` reflects the current sell amount and any deviation
+  // banner is safe to display.
+  useEffect(() => {
+    if (meta?.best?.toAmount) setPriceCheckStale(false)
+  }, [meta?.best?.toAmount])
 
   // ── Security: block swap when Chainlink deviation exceeds threshold ──
   // Block at BOTH warn (≥2%) and danger (≥3%) — button only re-enables when price
@@ -691,17 +705,17 @@ export default function SwapBox() {
         {effectiveError && !isSplitActive && !priceGuardBlocked && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
         {approvalError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{approvalError}</div>}
         {/* Price deviation — warn level (2-3%): swap paused until price converges.
-            Gated on `meta && hasAmount` so the banner only appears after a fresh
-            quote arrives — prevents the warning from flashing on token-select
-            (e.g. on stale/invalid oracle data before any quote is in). */}
-        {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && hasAmount && meta && !quoteLoading && (
+            Gated on `!priceCheckStale` so the banner only appears AFTER a fresh
+            quote resolves for the current sell amount — prevents the warning
+            from flashing on stale priceCheck data while typing. */}
+        {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
             <span className="font-semibold">&#9888; Swap paused:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
             Waiting for price to return within safe parameters. The button will re-enable automatically.
           </div>
         )}
-        {/* Price deviation — danger level (>3%): hard block. Same fresh-quote gate. */}
-        {priceBlocked && priceCheck.level === 'danger' && hasAmount && meta && !quoteLoading && (
+        {/* Price deviation — danger level (>3%): hard block. Same stale gate. */}
+        {priceBlocked && priceCheck.level === 'danger' && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
             This may indicate price manipulation or extreme low liquidity. Swap disabled for your protection.

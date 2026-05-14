@@ -57,18 +57,12 @@ html.light {
   --header-blur: rgba(245, 240, 232, 0.92);
 }
 
-html {
-  overflow-x: hidden;
-  overscroll-behavior: none;
-}
-
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
-  overscroll-behavior: none;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import LandingPage from '@/components/LandingPage'
 import Header from '@/components/Header'
@@ -20,12 +20,14 @@ import { playTouchMP3 } from '@/lib/sounds'
 // /docs, /privacy, and /terms each have their own Next.js route, so they
 // don't need to be part of the in-memory AppPage state machine.
 export type AppPage = 'landing' | 'swap'
-export type SwapMode = 'instant' | 'dca' | 'orders' | 'history' | 'analytics'
+export type SwapMode = 'instant' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
 
-const COMING_SOON_MODES = new Set<SwapMode>(['dca'])
+const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
 
 const COMING_SOON_META: Record<string, { icon: string; title: string; desc: string }> = {
   dca:  { icon: '⟳', title: 'Smart DCA Engine', desc: 'Automated dollar-cost averaging with price-aware buying windows. Coming to L2 soon.' },
+  limit: { icon: '⇅', title: 'Limit Orders', desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order. Coming to L2 soon.' },
+  sltp: { icon: '⛨', title: 'Stop Loss / Take Profit', desc: 'Automated position protection powered by Chainlink oracles. Coming to L2 soon.' },
 }
 
 function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void }) {
@@ -52,12 +54,6 @@ function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void 
 export default function Home() {
   const [page, setPage] = useState<AppPage>('landing')
   const [swapMode, setSwapMode] = useState<SwapMode>('instant')
-
-  // Reset scroll position on page transition — prevents scroll bleed from a
-  // long landing into the shorter swap UI (or vice versa).
-  useEffect(() => {
-    if (typeof window !== 'undefined') window.scrollTo(0, 0)
-  }, [page])
 
   const handleLaunchApp = useCallback(() => {
     setPage('swap')
@@ -92,28 +88,37 @@ export default function Home() {
             {([
               ['instant', 'Swap'],
               ['dca', 'DCA'],
+              ['limit', 'Limit'],
+              ['sltp', 'SL / TP'],
               ['orders', 'Orders'],
               ['history', 'History'],
               ['analytics', 'Analytics'],
-            ] as [SwapMode, string][]).map(([mode, label]) => (
-              <button
-                key={mode}
-                onClick={() => { playTouchMP3(); setSwapMode(mode) }}
-
-                className={`flex-1 whitespace-nowrap rounded-lg px-2 py-2 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
-                  swapMode === mode
-                    ? 'bg-cream-gold text-[#080B10]'
-                    : 'text-cream-50 hover:text-cream'
-                }`}
-              >
-                {label}
-                {COMING_SOON_MODES.has(mode) && (
-                  <span className="ml-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[8px] font-bold text-amber-300 sm:text-[9px]">
-                    Soon
-                  </span>
-                )}
-              </button>
-            ))}
+            ] as [SwapMode, string][]).map(([mode, label]) => {
+              const comingSoon = COMING_SOON_MODES.has(mode)
+              return (
+                <button
+                  key={mode}
+                  onClick={() => { if (comingSoon) return; playTouchMP3(); setSwapMode(mode) }}
+                  disabled={comingSoon}
+                  aria-disabled={comingSoon}
+                  title={comingSoon ? 'Coming soon' : undefined}
+                  className={`flex-1 whitespace-nowrap rounded-lg px-2 py-2 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
+                    comingSoon
+                      ? 'cursor-not-allowed text-cream-35 opacity-50'
+                      : swapMode === mode
+                        ? 'bg-cream-gold text-[#080B10]'
+                        : 'text-cream-50 hover:text-cream'
+                  }`}
+                >
+                  {label}
+                  {comingSoon && (
+                    <span className="ml-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[8px] font-bold text-amber-300 sm:text-[9px]">
+                      Soon
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
           {swapMode === 'instant' ? (
