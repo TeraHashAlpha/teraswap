@@ -151,7 +151,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="scan-line relative py-28 px-6">
+    <section id="performance" className="scan-line relative bg-surface py-28 px-6">
       <div className="mx-auto grid max-w-6xl items-center gap-8 sm:gap-12 lg:grid-cols-[55%_45%] lg:gap-16">
         {/* Copy */}
         <div>
@@ -420,7 +420,7 @@ function SevenLayerSection() {
   ]
 
   return (
-    <section id="seven-layer" className="relative py-28 px-6">
+    <section id="seven-layer" className="relative bg-surface py-28 px-6">
       <div className="mx-auto max-w-3xl">
         {/* Headline */}
         <div className="mb-12 text-center">
@@ -552,7 +552,7 @@ function DifferentiationSection() {
   ]
 
   return (
-    <section id="why-teraswap" className="relative py-28 px-6">
+    <section id="why-teraswap" className="relative bg-surface py-28 px-6">
       <div className="mx-auto max-w-5xl">
         <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
@@ -596,7 +596,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative py-28 px-6">
+    <section id="security" className="relative bg-surface py-28 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -709,7 +709,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative py-28 px-6 overflow-hidden">
+    <section id="experience" className="relative bg-surface py-28 px-6 overflow-hidden">
       {/* Background watermark — z-0 so it stays fully behind content */}
       <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
         <span
@@ -878,7 +878,7 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
 
 function FeaturesSection() {
   return (
-    <section id="features" className="relative py-28 px-6">
+    <section id="features" className="relative bg-surface py-28 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Headline */}
         <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -945,7 +945,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center px-6 text-center">
+    <section className="relative flex min-h-screen flex-col items-center justify-center bg-surface px-6 text-center">
       {/* Pulsing radial glow */}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div
