@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # ── npm — production + dev dependencies ────────────────
+  # Major bumps are excluded because they ship breaking changes; we
+  # review those manually. Dev dependency minor/patch updates are
+  # grouped into a single weekly PR to keep review noise low.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+
+  # ── GitHub Actions ────────────────────────────────────
+  # Keep CI action versions current — security-relevant because actions
+  # run with repository-level permissions.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci"
