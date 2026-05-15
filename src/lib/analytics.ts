@@ -42,6 +42,10 @@ interface LogSwapParams {
    *  gas_savings_usd — clients can no longer set the value directly.
    *  Only meaningful for CoW swaps; ignored for non-CoW sources. */
   bestNonCowGasUsd?: number
+  /** [P118 / Sprint 16B] Quoted output (meta.best.toAmount) in raw token
+   *  wei, BEFORE slippage tolerance is applied. Used for ADR-006 positive
+   *  slippage instrumentation: surplus = actual_output - expected_output. */
+  expectedOutput?: string
 }
 
 export function logSwapToSupabase(params: LogSwapParams): void {
@@ -71,6 +75,7 @@ export function logSwapToSupabase(params: LogSwapParams): void {
         mevSavingsEstimate: params.mevSavingsEstimate,
         mevSavingsActual: params.mevSavingsActual,
         bestNonCowGasUsd: params.bestNonCowGasUsd,
+        expectedOutput: params.expectedOutput,
       }),
     }).catch((err) => {
       console.warn('[analytics] logSwap failed:', err)

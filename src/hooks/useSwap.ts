@@ -712,6 +712,9 @@ export function useSwap(
         // (clamped to [0, 500]); clients can no longer set the persisted
         // figure directly.
         bestNonCowGasUsd,
+        // [P118] Quoted output before slippage — for CoW this is the signed
+        // buyAmount. Surplus on fulfillment = executedBuyAmount - buyAmount.
+        expectedOutput: orderParams.buyAmount,
       })
 
       // Step 3: Poll for order fulfillment
@@ -836,6 +839,13 @@ export function useSwap(
       mevProtected: AGGREGATOR_META[data.source]?.mevProtected ?? false,
       feeCollected: data.routeViaFeeCollector,
       status: 'pending',
+      // [P118] meta.best.toAmount, raw wei pre-slippage. The validator
+      // computes surplus = actual - expectedMinOutput, but for ADR-006
+      // we want surplus relative to the unmodified quote so we record
+      // this separately from amount_out (which already equals toAmount
+      // today but is semantically the "logged output" rather than the
+      // "quoted output").
+      expectedOutput: data.swapToAmount,
     })
 
     setStatus('swapping')

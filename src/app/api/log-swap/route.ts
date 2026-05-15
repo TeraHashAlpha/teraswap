@@ -44,6 +44,10 @@ export async function POST(req: NextRequest) {
       // [LP-05] MEV-savings telemetry (CoW-routed swaps only)
       mevSavingsEstimate,
       mevSavingsActual,
+      // [P118 / Sprint 16B] Quoted output amount in raw token wei, before
+      // slippage tolerance is applied. Persisted to swaps.expected_output
+      // for the ADR-006 surplus analysis. Accept as a numeric string or null.
+      expectedOutput,
       // [P104 / 13A-L-02] Raw adapter gas USD on the best non-CoW route,
       // sent advisory by the client. The server derives gas_savings_usd
       // from it (clamped to [0, 500]) so clients cannot inflate aggregate
@@ -122,6 +126,13 @@ export async function POST(req: NextRequest) {
       // Stored as raw output-token wei; USD conversion is a read-time concern.
       mev_savings_estimate: mevSavingsEstimate ?? null,
       mev_savings_actual: mevSavingsActual ?? null,
+      // [P118 / Sprint 16B] Quoted output (pre-slippage) for ADR-006 surplus
+      // analysis. Validated as numeric-string-or-null — any other shape is
+      // dropped to null rather than failing the insert.
+      expected_output:
+        typeof expectedOutput === 'string' && /^\d+$/.test(expectedOutput)
+          ? expectedOutput
+          : null,
       // [P96] Gasless flag — derived from source (server is authoritative).
       is_gasless: source === 'cowswap',
       // [P104 / 13A-L-02] gas_savings_usd is derived from the advisory
