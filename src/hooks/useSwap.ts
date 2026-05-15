@@ -726,16 +726,29 @@ export function useSwap(
         // for. Positive values indicate price improvement from solver
         // competition. We swallow parse errors silently — analytics is
         // best-effort, must never break the success path.
+        // [P117/Sprint 16B] Also persist the surplus to swaps.mev_savings_actual
+        // via the existing log-swap PATCH endpoint.
+        let cowSurplusForPatch: string | undefined
         if (result.executedBuyAmount) {
           try {
             const executed = BigInt(result.executedBuyAmount)
             const quoted = BigInt(orderParams.buyAmount)
             const surplus = executed - quoted
             setMevSurplusActualWei(surplus > 0n ? surplus : 0n)
+            cowSurplusForPatch = surplus > 0n ? surplus.toString() : undefined
           } catch {
             setMevSurplusActualWei(null)
           }
         }
+        updateSwapStatus(
+          result.txHash,
+          'confirmed',
+          undefined,
+          undefined,
+          address,
+          undefined,
+          cowSurplusForPatch,
+        )
 
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed', source: 'cowswap',

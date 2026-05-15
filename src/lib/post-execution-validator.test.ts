@@ -385,6 +385,60 @@ describe('validateExecution', () => {
     })
   })
 
+  // ── Sprint 16B / P117: surplus persistence ────────────
+
+  describe('surplusWei field (P117)', () => {
+    it('populates surplusWei with raw delta when actual exceeds expected', async () => {
+      // Expected 1_000_000, actual 1_050_000 → surplus 50_000
+      mockGetTransactionReceipt.mockResolvedValue({
+        status: 'success',
+        logs: [
+          makeTransferLog('0x' + '1'.repeat(40), RECIPIENT, 1050000n),
+        ],
+      })
+
+      const result = await validateExecution(baseParams())
+      expect(result.severity).toBe('ok')
+      expect(result.surplusWei).toBe('50000')
+    })
+
+    it('returns null surplusWei on shortfall (warning + critical)', async () => {
+      // Warning case: 1% shortfall
+      mockGetTransactionReceipt.mockResolvedValue({
+        status: 'success',
+        logs: [
+          makeTransferLog('0x' + '1'.repeat(40), RECIPIENT, 990000n),
+        ],
+      })
+      const warn = await validateExecution(baseParams())
+      expect(warn.severity).toBe('warning')
+      expect(warn.surplusWei).toBeNull()
+
+      // Critical case: 5% shortfall
+      mockGetTransactionReceipt.mockResolvedValue({
+        status: 'success',
+        logs: [
+          makeTransferLog('0x' + '1'.repeat(40), RECIPIENT, 950000n),
+        ],
+      })
+      const crit = await validateExecution(baseParams())
+      expect(crit.severity).toBe('critical')
+      expect(crit.surplusWei).toBeNull()
+    })
+
+    it('returns null surplusWei on exact-match (no positive surplus)', async () => {
+      mockGetTransactionReceipt.mockResolvedValue({
+        status: 'success',
+        logs: [
+          makeTransferLog('0x' + '1'.repeat(40), RECIPIENT, 1000000n),
+        ],
+      })
+      const result = await validateExecution(baseParams())
+      expect(result.severity).toBe('ok')
+      expect(result.surplusWei).toBeNull()
+    })
+  })
+
   // ── Never throws ──────────────────────────────────────
 
   describe('never throws', () => {

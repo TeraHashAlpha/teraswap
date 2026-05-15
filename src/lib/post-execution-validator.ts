@@ -36,6 +36,11 @@ export interface ExecutionValidation {
   expectedMinOutput: string
   /** Shortfall percentage (e.g. 0.015 = 1.5% below expected). 0 if ok, null if unknown */
   shortfallPercent: number | null
+  /** Positive slippage surplus = actual − expected, raw token units as string.
+   *  Non-null only when actual >= expected AND the surplus is strictly positive.
+   *  Null on exact-match, shortfall, reverted, and unknown cases.
+   *  Drives ADR-006 surplus instrumentation (Sprint 16B). */
+  surplusWei: string | null
   /** Human-readable summary */
   reason: string
   /** Token address that was checked */
@@ -141,7 +146,7 @@ export async function validateExecution(
   } = params
 
   const now = new Date().toISOString()
-  const baseResult: Omit<ExecutionValidation, 'severity' | 'reason' | 'actualOutput' | 'shortfallPercent' | 'extractionMethod'> = {
+  const baseResult: Omit<ExecutionValidation, 'severity' | 'reason' | 'actualOutput' | 'shortfallPercent' | 'extractionMethod' | 'surplusWei'> = {
     txHash,
     source,
     expectedMinOutput,
@@ -159,6 +164,7 @@ export async function validateExecution(
       severity: 'unknown',
       actualOutput: null,
       shortfallPercent: null,
+      surplusWei: null,
       extractionMethod: 'none',
       reason: `RPC client init failed: ${err instanceof Error ? err.message : String(err)}`,
     }
@@ -178,6 +184,7 @@ export async function validateExecution(
       severity: 'unknown',
       actualOutput: null,
       shortfallPercent: null,
+      surplusWei: null,
       extractionMethod: 'none',
       reason: `Failed to fetch receipt: ${err instanceof Error ? err.message : String(err)}`,
     }
@@ -191,6 +198,7 @@ export async function validateExecution(
       severity: 'unknown',
       actualOutput: null,
       shortfallPercent: null,
+      surplusWei: null,
       extractionMethod: 'none',
       reason: 'Transaction receipt not found (may not be mined yet)',
     }
@@ -205,6 +213,7 @@ export async function validateExecution(
       severity: 'critical',
       actualOutput: '0',
       shortfallPercent: 1, // 100% shortfall
+      surplusWei: null,
       extractionMethod: 'none',
       reason: 'Transaction reverted on-chain — zero output',
     }
@@ -248,6 +257,7 @@ export async function validateExecution(
       severity: 'unknown',
       actualOutput: null,
       shortfallPercent: null,
+      surplusWei: null,
       extractionMethod: 'none',
       reason: 'Could not extract output amount from receipt logs or balance query',
     }
@@ -266,6 +276,8 @@ export async function validateExecution(
       severity: 'ok',
       actualOutput: actual.toString(),
       shortfallPercent: 0,
+      // expected===0 means we have no quoted reference to compute surplus against
+      surplusWei: null,
       extractionMethod,
       reason: 'Expected output is 0 — any output is acceptable',
     }
@@ -283,6 +295,9 @@ export async function validateExecution(
       severity: 'ok',
       actualOutput: actual.toString(),
       shortfallPercent: 0,
+      // ADR-006: positive slippage instrumentation. Null on exact-match so
+      // downstream queries can distinguish "no surplus" from "0-wei surplus".
+      surplusWei: surplus > 0n ? surplus.toString() : null,
       extractionMethod,
       reason: surplusPct > 0.001
         ? `Output ${actualFmt} exceeds minimum by ${(surplusPct * 100).toFixed(2)}%`
@@ -305,6 +320,7 @@ export async function validateExecution(
       severity: 'warning',
       actualOutput: actual.toString(),
       shortfallPercent: shortfallPct,
+      surplusWei: null,
       extractionMethod,
       reason: `Output ${actualFmt} is ${(shortfallPct * 100).toFixed(2)}% below expected ${expectedFmt}`,
     }
@@ -318,6 +334,7 @@ export async function validateExecution(
     severity: 'critical',
     actualOutput: actual.toString(),
     shortfallPercent: shortfallPct,
+    surplusWei: null,
     extractionMethod,
     reason: `Output ${actualFmt} is ${(shortfallPct * 100).toFixed(2)}% below expected ${expectedFmt} — source may be returning bad quotes`,
   }

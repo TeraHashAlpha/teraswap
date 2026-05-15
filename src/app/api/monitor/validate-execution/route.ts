@@ -27,6 +27,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBearerToken } from '@/lib/auth'
 import { validateExecution, type ValidateExecutionParams, type ExecutionValidation } from '@/lib/post-execution-validator'
+import { getSupabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 15 // Receipt fetch + RPC calls
@@ -82,6 +83,27 @@ function validateBody(body: unknown): { valid: true; params: ValidateExecutionPa
   }
 }
 
+// ── Side-effect: persist surplus to Supabase ─────────────
+
+async function persistSurplus(txHash: string, surplusWei: string): Promise<void> {
+  const supabase = getSupabase()
+  if (!supabase) return
+  try {
+    const { error } = await supabase
+      .from('swaps')
+      .update({ mev_savings_actual: surplusWei })
+      .eq('tx_hash', txHash)
+    if (error) {
+      console.warn(`[VALIDATE-EXECUTION] surplus persist failed for ${txHash}: ${error.message}`)
+    }
+  } catch (err) {
+    console.warn(
+      `[VALIDATE-EXECUTION] surplus persist threw for ${txHash}:`,
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
 // ── Route handler ────────────────────────────────────────
 
 export async function POST(
@@ -120,6 +142,14 @@ export async function POST(
       console.error(`[VALIDATE-EXECUTION] CRITICAL: ${result.source} tx=${result.txHash} — ${result.reason}`)
     } else if (result.severity === 'warning') {
       console.warn(`[VALIDATE-EXECUTION] WARNING: ${result.source} tx=${result.txHash} — ${result.reason}`)
+    }
+
+    // [P117/Sprint 16B] Persist surplus to swaps.mev_savings_actual for ALL
+    // sources. The PATCH endpoint at /api/log-swap already accepts this field
+    // for the CoW path; we mirror the write here so non-CoW routes also get
+    // surplus recorded. Fire-and-forget — never delays or fails the response.
+    if (result.surplusWei) {
+      void persistSurplus(result.txHash, result.surplusWei)
     }
 
     return NextResponse.json(result, {
