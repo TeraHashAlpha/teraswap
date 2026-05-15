@@ -141,3 +141,28 @@ describe('POST /api/log-swap — gas_savings_usd clamp [P104]', () => {
     expect(lastRow().gas_savings_usd).toBe(0)
   })
 })
+
+describe('POST /api/log-swap — expected_output column [P118]', () => {
+  beforeEach(() => {
+    insertedRows.length = 0
+    vi.clearAllMocks()
+  })
+
+  it('persists expectedOutput as a numeric string and drops invalid shapes to null', async () => {
+    // Valid numeric string → stored verbatim
+    await POST(makeRequest(cowBody({ expectedOutput: '2950000000' })))
+    expect(lastRow().expected_output).toBe('2950000000')
+
+    // Missing → null (column is nullable)
+    await POST(makeRequest(cowBody()))
+    expect(lastRow().expected_output).toBeNull()
+
+    // Non-numeric string → coerced to null rather than crashing the insert
+    await POST(makeRequest(cowBody({ expectedOutput: 'not a number' })))
+    expect(lastRow().expected_output).toBeNull()
+
+    // Numeric type (not string) → coerced to null; we require string-of-digits
+    await POST(makeRequest(cowBody({ expectedOutput: 42 })))
+    expect(lastRow().expected_output).toBeNull()
+  })
+})

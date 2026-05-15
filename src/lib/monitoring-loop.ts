@@ -44,6 +44,7 @@ import {
   runOnChainScan,
   type OnChainScanResult,
 } from './on-chain-monitor'
+import { maybeSendWeeklyReport } from './surplus-report'
 
 // ── Heartbeat keys ──────────────────────────────────────
 
@@ -255,6 +256,11 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   } catch (err) {
     console.error('[MONITOR] Circuit breaker check failed:', err instanceof Error ? err.message : err)
   }
+
+  // ── P119 / Sprint 16B: weekly surplus report ──────────
+  // Fire-and-forget — fires once per ISO week on Sundays 00:xx UTC. Never
+  // blocks the tick; KV dedup prevents duplicates within the trigger hour.
+  void maybeSendWeeklyReport()
 
   // Write heartbeat to KV (dead-man's-switch)
   await writeHeartbeat(warmup)

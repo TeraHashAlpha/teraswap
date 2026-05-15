@@ -712,6 +712,9 @@ export function useSwap(
         // (clamped to [0, 500]); clients can no longer set the persisted
         // figure directly.
         bestNonCowGasUsd,
+        // [P118] Quoted output before slippage — for CoW this is the signed
+        // buyAmount. Surplus on fulfillment = executedBuyAmount - buyAmount.
+        expectedOutput: orderParams.buyAmount,
       })
 
       // Step 3: Poll for order fulfillment
@@ -726,16 +729,29 @@ export function useSwap(
         // for. Positive values indicate price improvement from solver
         // competition. We swallow parse errors silently — analytics is
         // best-effort, must never break the success path.
+        // [P117/Sprint 16B] Also persist the surplus to swaps.mev_savings_actual
+        // via the existing log-swap PATCH endpoint.
+        let cowSurplusForPatch: string | undefined
         if (result.executedBuyAmount) {
           try {
             const executed = BigInt(result.executedBuyAmount)
             const quoted = BigInt(orderParams.buyAmount)
             const surplus = executed - quoted
             setMevSurplusActualWei(surplus > 0n ? surplus : 0n)
+            cowSurplusForPatch = surplus > 0n ? surplus.toString() : undefined
           } catch {
             setMevSurplusActualWei(null)
           }
         }
+        updateSwapStatus(
+          result.txHash,
+          'confirmed',
+          undefined,
+          undefined,
+          address,
+          undefined,
+          cowSurplusForPatch,
+        )
 
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed', source: 'cowswap',
@@ -823,6 +839,13 @@ export function useSwap(
       mevProtected: AGGREGATOR_META[data.source]?.mevProtected ?? false,
       feeCollected: data.routeViaFeeCollector,
       status: 'pending',
+      // [P118] meta.best.toAmount, raw wei pre-slippage. The validator
+      // computes surplus = actual - expectedMinOutput, but for ADR-006
+      // we want surplus relative to the unmodified quote so we record
+      // this separately from amount_out (which already equals toAmount
+      // today but is semantically the "logged output" rather than the
+      // "quoted output").
+      expectedOutput: data.swapToAmount,
     })
 
     setStatus('swapping')
