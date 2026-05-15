@@ -26,3 +26,37 @@
   PATCH call. Not strictly in scope for P117 surplus instrumentation, but the
   spec required wiring `mevSavingsActual` into the PATCH for the CoW path, and
   this is the natural place.
+
+## Feedback — P121 (commit abe54f2)
+
+### Edge case
+- Spec said the guard "must run BEFORE: fetchSwapFromSource call, Any rate
+  limiting deduction (don't count invalid requests), Any logging to Supabase".
+  The existing route ran the rate-limit check before body parsing, so the
+  guard required reordering: circuit breaker → content-length → body parse
+  → required-fields → source allow-list → rate limit → address/slippage.
+  Confirmed via mock call counts in `route.test.ts` that an invalid source
+  no longer touches `checkRateLimit` or `fetchSwapFromSource`.
+
+### Test gap
+- No pre-existing test file existed for `src/app/api/swap/route.ts` — the
+  route had broad coverage from manual / integration testing but zero unit
+  tests. Added `route.test.ts` for the guard; the rest of the route (price
+  guard, R1 recipient check, SC-04 selector check) is still not unit-tested
+  and may warrant a follow-up sprint item.
+
+## Feedback — P122 (commit 34d190b)
+
+### Edge case
+- Six call sites all converted, but the previously-broken CoW PATCH from P117
+  used five consecutive `undefined` placeholders to reach `mevSavingsActual` —
+  the worst offender. The refactor also eliminated two `undefined, undefined`
+  pairs in the fallback-poll branches (between `txHash, status` and `wallet`).
+  Verified zero remaining via `git grep 'updateSwapStatus(' | grep 'undefined'`.
+
+### Concern
+- No test file directly exercises `updateSwapStatus`. The refactor is a pure
+  signature change with no behavioural difference (PATCH body construction is
+  unchanged), so the existing route + integration tests covering the PATCH
+  endpoint catch any regression. If we add unit tests for analytics helpers
+  in a future sprint, this is a good candidate to start with.
