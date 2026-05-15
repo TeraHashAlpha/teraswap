@@ -85,18 +85,28 @@ export function logSwapToSupabase(params: LogSwapParams): void {
   }
 }
 
-export function updateSwapStatus(
-  txHash: string,
-  status: 'confirmed' | 'failed',
-  gasUsed?: string,
-  gasPrice?: string,
-  wallet?: string,
-  /** [LP-05] Both fields are output-token wei strings; nullable in the row.
-   *  estimate is the pre-swap CoW-vs-non-CoW-median delta (computed at the
-   *  moment the swap was confirmed); actual is the realised solver surplus. */
-  mevSavingsEstimate?: string,
-  mevSavingsActual?: string,
-): void {
+/**
+ * [P122 / 16B-I-04] Options-object signature so callers don't need
+ * positional `undefined` placeholders to reach the trailing MEV-savings
+ * fields. PATCH body shape is unchanged.
+ */
+export interface UpdateSwapStatusParams {
+  txHash: string
+  status: 'confirmed' | 'failed'
+  gasUsed?: string
+  gasPrice?: string
+  wallet?: string
+  /** [LP-05] Pre-swap CoW-vs-non-CoW-median delta, output-token wei. */
+  mevSavingsEstimate?: string
+  /** [LP-05] Realised solver surplus, output-token wei. */
+  mevSavingsActual?: string
+}
+
+export function updateSwapStatus(params: UpdateSwapStatusParams): void {
+  const {
+    txHash, status, gasUsed, gasPrice, wallet,
+    mevSavingsEstimate, mevSavingsActual,
+  } = params
   try {
     fetch('/api/log-swap', {
       method: 'PATCH',

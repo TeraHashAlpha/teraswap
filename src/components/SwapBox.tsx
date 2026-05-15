@@ -306,15 +306,13 @@ export default function SwapBox() {
       // confirmed status, so this is additive — only sets the two new
       // numeric columns when we have data for them.
       if (address && (mevEstimate || realisedSurplusWei)) {
-        updateSwapStatus(
+        updateSwapStatus({
           txHash,
-          'confirmed',
-          undefined,
-          undefined,
-          address,
-          mevEstimate ? mevEstimate.amountWei.toString() : undefined,
-          realisedSurplusWei ? realisedSurplusWei.toString() : undefined,
-        )
+          status: 'confirmed',
+          wallet: address,
+          mevSavingsEstimate: mevEstimate ? mevEstimate.amountWei.toString() : undefined,
+          mevSavingsActual: realisedSurplusWei ? realisedSurplusWei.toString() : undefined,
+        })
       }
 
       // Analytics: server-side /api/log-swap handles tracking (Q2 — removed client-side analytics-tracker)
