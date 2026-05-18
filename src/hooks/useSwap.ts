@@ -743,15 +743,12 @@ export function useSwap(
             setMevSurplusActualWei(null)
           }
         }
-        updateSwapStatus(
-          result.txHash,
-          'confirmed',
-          undefined,
-          undefined,
-          address,
-          undefined,
-          cowSurplusForPatch,
-        )
+        updateSwapStatus({
+          txHash: result.txHash,
+          status: 'confirmed',
+          wallet: address,
+          mevSavingsActual: cowSurplusForPatch,
+        })
 
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed', source: 'cowswap',
@@ -875,7 +872,7 @@ export function useSwap(
   useEffect(() => {
     if (swapConfirmed) {
       setStatus('success')
-      if (swapHash) updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)
+      if (swapHash) updateSwapStatus({ txHash: swapHash, status: 'confirmed', wallet: address })
       if (address && swapHash) {
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed',
@@ -928,7 +925,7 @@ export function useSwap(
             // Fallback detected tx confirmation
             if (receipt.status === 'success') {
               setStatus('success')
-              updateSwapStatus(swapHash, 'confirmed', undefined, undefined, address)
+              updateSwapStatus({ txHash: swapHash, status: 'confirmed', wallet: address })
               if (address) {
                 trackWalletActivity(address, {
                   category: 'swap', action: 'swap_confirmed',
@@ -939,7 +936,7 @@ export function useSwap(
             } else {
               setStatus('error')
               setErrorMessage('Transaction reverted on-chain. Try increasing slippage.')
-              updateSwapStatus(swapHash, 'failed', undefined, undefined, address)
+              updateSwapStatus({ txHash: swapHash, status: 'failed', wallet: address })
               if (address) {
                 trackWalletActivity(address, {
                   category: 'swap', action: 'swap_failed',
@@ -994,7 +991,7 @@ export function useSwap(
       setStatus('error')
       const parsedErr = parseWagmiError(sendError)
       setErrorMessage(parsedErr)
-      if (swapHash) updateSwapStatus(swapHash, 'failed', undefined, undefined, address)
+      if (swapHash) updateSwapStatus({ txHash: swapHash, status: 'failed', wallet: address })
       if (address) {
         const isRejected = sendError.message.toLowerCase().includes('user rejected') ||
           sendError.message.toLowerCase().includes('user denied')

@@ -1,11 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchSwapFromSource } from '@/lib/api'
-import type { AggregatorName } from '@/lib/constants'
+import { AGGREGATOR_APIS, type AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
+
+// [P121] Source allow-list — built from the canonical AGGREGATOR_APIS map so
+// adding/removing a source in constants.ts automatically updates this guard.
+// Rejects unknown sources at the entry point before any upstream fetch,
+// rate-limit deduction, or Supabase write.
+const ALLOWED_SOURCES: Set<string> = new Set(Object.keys(AGGREGATOR_APIS))
 
 /**
  * Server-side proxy for swap calldata requests.
@@ -18,7 +24,7 @@ import { isSystemHalted } from '@/lib/circuit-breaker'
 const MAX_BODY_SIZE = 10_000 // 10KB
 
 export async function POST(req: NextRequest) {
-  // [H-03] Circuit breaker halt — short-circuit before rate limiting
+  // [H-03] Circuit breaker halt — short-circuit before any other work
   if (await isSystemHalted()) {
     return NextResponse.json(
       { error: 'System temporarily paused for safety. Please try again later.', halted: true },
@@ -29,28 +35,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // [Audit B-06] Rate limiting by IP — persistent via Vercel KV
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || req.headers.get('x-real-ip')
-    || 'unknown'
-  const rateCheck = await checkRateLimit(`swap:${ip}`, SWAP_RATE_LIMIT.limit, SWAP_RATE_LIMIT.windowMs)
-
-  if (!rateCheck.allowed) {
-    return NextResponse.json(
-      { error: 'Rate limit exceeded. Try again in 60 seconds.' },
-      {
-        status: 429,
-        headers: {
-          'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': String(rateCheck.resetAt),
-        },
-      },
-    )
-  }
-
   try {
-
-    // [Audit] Request size check
+    // [Audit] Request size check (header-only — cheap, no body read needed)
     const contentLength = parseInt(req.headers.get('content-length') || '0', 10)
     if (contentLength > MAX_BODY_SIZE) {
       return NextResponse.json(
@@ -77,6 +63,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'Missing required fields: source, src, dst, amount, from' },
         { status: 400 },
+      )
+    }
+
+    // [P121] Source allow-list guard — reject unknown sources before any
+    // rate-limit deduction, upstream call, or downstream side effect.
+    if (typeof source !== 'string' || !ALLOWED_SOURCES.has(source)) {
+      return NextResponse.json(
+        { error: 'Unknown aggregator source', code: 'INVALID_SOURCE' },
+        { status: 400 },
+      )
+    }
+
+    // [Audit B-06] Rate limiting by IP — persistent via Vercel KV.
+    // Runs AFTER the source guard so invalid requests don't burn budget.
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('x-real-ip')
+      || 'unknown'
+    const rateCheck = await checkRateLimit(`swap:${ip}`, SWAP_RATE_LIMIT.limit, SWAP_RATE_LIMIT.windowMs)
+
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Try again in 60 seconds.' },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(rateCheck.resetAt),
+          },
+        },
       )
     }
 
