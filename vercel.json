@@ -4,6 +4,7 @@
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
   "installCommand": "npm install --legacy-peer-deps",
+  "ignoreCommand": "if [[ \"$VERCEL_GIT_COMMIT_AUTHOR_LOGIN\" == \"dependabot[bot]\" ]]; then exit 0; fi; exit 1;",
   "headers": [
     {
       "source": "/(.*)",
