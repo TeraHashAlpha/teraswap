@@ -123,6 +123,42 @@ vi.mock('./api', () => ({
   fetchMetaQuote: vi.fn(),
 }))
 
+// ── [P124] Mocks added to fix 18 module-load failures ──────
+//
+// All four modules were imported by monitoring-loop.ts in sprints
+// after the test file was last touched. They each pull in
+// transitive surfaces that crash on module-load when run under
+// vitest's isolated environment:
+//
+//   - ./on-chain-monitor pulls createPublicClient from viem and
+//     ORDER_EXECUTOR_ADDRESS from ./order-engine/config (env-var read
+//     at module init). Primary cause of the 18 failures.
+//   - ./surplus-report pulls getSupabase + kv + real-fetch.
+//   - ./circuit-breaker runs real CB logic against the mocked KV and
+//     surfaces unexpected fields on the tick result.
+//   - @/lib/supabase calls createClient with undefined env vars.
+//
+// Default returns are no-op so the tick result shape stays exactly
+// what the existing tests assert (no extra optional fields appear
+// unless a test explicitly opts in via mockResolvedValueOnce).
+
+vi.mock('./on-chain-monitor', () => ({
+  shouldRunOnChainScan: vi.fn().mockResolvedValue(false),
+  runOnChainScan: vi.fn().mockResolvedValue(null),
+}))
+
+vi.mock('./surplus-report', () => ({
+  maybeSendWeeklyReport: vi.fn().mockResolvedValue(false),
+}))
+
+vi.mock('./circuit-breaker', () => ({
+  checkCircuitBreaker: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/supabase', () => ({
+  getSupabase: vi.fn().mockReturnValue(null),
+}))
+
 // ── Import after mocks ─────────────────────────────────
 
 import { runMonitoringTick } from './monitoring-loop'
