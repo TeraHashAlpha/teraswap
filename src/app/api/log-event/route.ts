@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { getAllowedOrigin } from '@/lib/cors'
 
-// CORS — allow any origin (client-side tracker posts from the same domain,
-// but we keep * for local dev / preview deploys).
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+// CORS — restricted to teraswap.app, Vercel previews, and localhost (EXT-L-01).
+function corsHeaders(request: Request) {
+  const origin = getAllowedOrigin(request) || 'https://teraswap.app'
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin',
+  }
 }
 
-export function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) })
 }
 
 // Allowed event types — anything else gets rejected
@@ -33,9 +37,10 @@ function cap(s: unknown, max = MAX_STR): string | null {
  * Body: { events: Array<UsageEvent> }
  */
 export async function POST(req: Request) {
+  const headers = corsHeaders(req)
   const supabase = getSupabase()
   if (!supabase) {
-    return NextResponse.json({ ok: true }, { headers: CORS_HEADERS }) // silently succeed
+    return NextResponse.json({ ok: true }, { headers }) // silently succeed
   }
 
   try {
@@ -43,7 +48,7 @@ export async function POST(req: Request) {
     const events: unknown[] = Array.isArray(body.events) ? body.events : (body.event_type ? [body] : [])
 
     if (events.length === 0) {
-      return NextResponse.json({ ok: true }, { headers: CORS_HEADERS })
+      return NextResponse.json({ ok: true }, { headers })
     }
 
     // Cap at 50 events per batch to prevent abuse
@@ -77,8 +82,8 @@ export async function POST(req: Request) {
       Promise.resolve(supabase.from('usage_events').insert(rows)).catch(() => {})
     }
 
-    return NextResponse.json({ ok: true, count: rows.length }, { headers: CORS_HEADERS })
+    return NextResponse.json({ ok: true, count: rows.length }, { headers })
   } catch {
-    return NextResponse.json({ ok: true }, { headers: CORS_HEADERS })
+    return NextResponse.json({ ok: true }, { headers })
   }
 }
