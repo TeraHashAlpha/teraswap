@@ -65,8 +65,8 @@ function captureTLS(hostname: string, timeoutMs = 10_000): Promise<TLSInfo | nul
           ? cert.subjectaltname.split(',').map((s: string) => s.trim().replace(/^DNS:/, ''))
           : []
         resolve({
-          issuerCN: cert.issuer?.CN || '',
-          subjectCN: cert.subject?.CN || '',
+          issuerCN: [cert.issuer?.CN].flat()[0] ?? '',
+          subjectCN: [cert.subject?.CN].flat()[0] ?? '',
           san: san.sort(),
           fingerprint256: cert.fingerprint256,
         })
