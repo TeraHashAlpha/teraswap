@@ -17,6 +17,9 @@ import { getSupabase, isSupabaseEnabled } from './supabase'
 // Dual-mode: Supabase (if configured) + localStorage (always, as cache)
 // localStorage serves as offline cache & fallback
 
+/** Max events to keep in localStorage (proactive cap — EXT-L-02) */
+const MAX_LOCAL_EVENTS = 2000
+
 function loadEvents(): TradeEvent[] {
   if (typeof window === 'undefined') return []
   try {
@@ -30,10 +33,15 @@ function loadEvents(): TradeEvent[] {
 
 function saveEvents(events: TradeEvent[]): void {
   if (typeof window === 'undefined') return
+  // Proactive cap — keep most recent events only (EXT-L-02)
+  const capped = events.length > MAX_LOCAL_EVENTS
+    ? events.slice(-MAX_LOCAL_EVENTS)
+    : events
   try {
-    localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(events))
+    localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(capped))
   } catch {
-    const trimmed = events.slice(-5000)
+    // Quota still exceeded — trim further
+    const trimmed = capped.slice(-500)
     try {
       localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(trimmed))
     } catch {
