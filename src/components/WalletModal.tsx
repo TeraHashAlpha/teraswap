@@ -109,15 +109,18 @@ export default function WalletModal({ open, onClose }: Props) {
 
   return (
     /* Backdrop */
-    <div className="fixed inset-0 z-[100] flex items-start justify-end pt-[72px] pr-4 md:pr-8">
-      {/* Overlay */}
-      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-start sm:justify-end sm:pt-[72px] sm:pr-4 md:pr-8">
+      {/* Overlay — bg-black/60 on mobile, lighter on desktop popover */}
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm sm:bg-black/40" />
 
       {/* Modal */}
       <div
         ref={modalRef}
-        className="relative z-10 w-[320px] animate-fade-slide-in overflow-hidden rounded-2xl border border-cream-15 bg-surface shadow-2xl shadow-black/40"
+        className="relative z-10 w-full animate-slide-up overflow-hidden rounded-t-2xl border border-cream-15 bg-surface shadow-2xl shadow-black/40 sm:w-[320px] sm:animate-fade-slide-in sm:rounded-2xl"
       >
+        {/* Drag pill — mobile bottom-sheet affordance */}
+        <div className="mx-auto mt-3 mb-1 h-1 w-10 rounded-full bg-cream-15 sm:hidden" />
+
         {/* ── Top gradient accent ── */}
         <div
           className="h-1"
