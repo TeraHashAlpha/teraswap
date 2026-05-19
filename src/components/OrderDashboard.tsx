@@ -368,9 +368,21 @@ function OrderCard({
             </a>
           )}
 
-          {/* DCA Execution Timeline */}
-          {isDCA && order.dcaTotal > 0 && (order.dcaExecuted ?? 0) > 0 && (
-            <ExecutionTimeline orderId={order.id} wallet={order.order.owner} />
+          {/* Execution Timeline — all order types (Limit/SL/TP/DCA) */}
+          {(order.status === 'filled'
+            || order.status === 'partially_filled'
+            || (order.dcaExecuted ?? 0) > 0
+            || !!order.txHash) && (
+            <ExecutionTimeline
+              orderId={order.id}
+              wallet={order.order.owner}
+              tokenInSymbol={order.tokenInSymbol}
+              tokenOutSymbol={order.tokenOutSymbol}
+              tokenInDecimals={order.tokenInDecimals}
+              tokenOutDecimals={order.tokenOutDecimals}
+              dcaTotal={order.dcaTotal}
+              dcaExecuted={order.dcaExecuted}
+            />
           )}
 
           {/* Action buttons */}
