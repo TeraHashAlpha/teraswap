@@ -169,7 +169,7 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
                     {account.displayName}
                   </span>
                 ) : (
-                  'CONNECT WALLET'
+                  <>CONNECT<span className="hidden sm:inline"> WALLET</span></>
                 )}
               </button>
             )

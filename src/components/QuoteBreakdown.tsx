@@ -253,7 +253,7 @@ export default function QuoteBreakdown({
         )}
 
         {/* Rate */}
-        <div className="mb-2 flex items-center justify-between text-cream-65">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 text-cream-65">
           <span
             className="text-cream-35"
             title={
@@ -267,7 +267,7 @@ export default function QuoteBreakdown({
             Rate {priceCheck.oracleUnavailable && <span className="text-amber-400">&#9888;</span>}
             {priceCheck.chainlinkPrice != null && !priceCheck.oracleUnavailable && <span className="text-success">&#10003;</span>}
           </span>
-          <span className="truncate text-cream-80 text-xs sm:text-sm">1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</span>
+          <span className="text-right text-xs text-cream-80 sm:truncate sm:text-sm">1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</span>
         </div>
 
         {/* [LP-05] Estimated MEV savings vs non-CoW median (CoW-only, positive only) */}
