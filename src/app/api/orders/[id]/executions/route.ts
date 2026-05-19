@@ -1,5 +1,11 @@
 /**
- * GET /api/orders/:id/executions — DCA execution history
+ * GET /api/orders/:id/executions — execution history for a single order.
+ *
+ * Returns both the `order_executions` rows (per-fill detail for DCA, or the
+ * single fill row for Limit/SL/TP) AND a slim subset of the parent order's
+ * metadata. Bundling the metadata avoids a second round-trip from
+ * ExecutionTimeline.tsx and lets it build a synthetic entry when a legacy
+ * order has been executed without `order_executions` rows.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -28,17 +34,22 @@ export async function GET(
   }
 
   const supabase = getSupabase()
-  if (!supabase) return NextResponse.json({ executions: [] })
+  if (!supabase) return NextResponse.json({ executions: [], order: null })
 
-  // Verify ownership
+  // Fetch order + ownership + display metadata in one query.
   const { data: order } = await supabase
     .from('orders')
-    .select('wallet')
+    .select(
+      'wallet, token_in_symbol, token_out_symbol, token_in_decimals, token_out_decimals, dca_total, dca_executed, tx_hash, amount_out, gas_used, executed_at, executed_price',
+    )
     .eq('id', id)
     .single()
 
   if (!order || order.wallet !== wallet.toLowerCase()) {
-    return NextResponse.json({ executions: [], error: 'Not authorized' }, { status: 403 })
+    return NextResponse.json(
+      { executions: [], order: null, error: 'Not authorized' },
+      { status: 403 },
+    )
   }
 
   const { data, error } = await supabase
@@ -47,6 +58,20 @@ export async function GET(
     .eq('order_id', id)
     .order('execution_number', { ascending: true })
 
-  if (error) return NextResponse.json({ executions: [], error: error.message })
-  return NextResponse.json({ executions: data ?? [] })
+  const orderMeta = {
+    token_in_symbol: order.token_in_symbol,
+    token_out_symbol: order.token_out_symbol,
+    token_in_decimals: order.token_in_decimals,
+    token_out_decimals: order.token_out_decimals,
+    dca_total: order.dca_total,
+    dca_executed: order.dca_executed,
+    tx_hash: order.tx_hash,
+    amount_out: order.amount_out,
+    gas_used: order.gas_used,
+    executed_at: order.executed_at,
+    executed_price: order.executed_price,
+  }
+
+  if (error) return NextResponse.json({ executions: [], order: orderMeta, error: error.message })
+  return NextResponse.json({ executions: data ?? [], order: orderMeta })
 }
