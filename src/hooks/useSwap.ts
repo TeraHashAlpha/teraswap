@@ -311,10 +311,13 @@ export function useSwap(
         )
       }
 
-      // [M-01] Fee integrity check: verify aggregator applied partner fee
-      // BLOCKING in production — if the aggregator returns suspicious output
-      // (significantly MORE than quoted), the fee may have been bypassed.
-      if (quoteToAmount) {
+      // [M-01] Fee integrity check — only for non-FeeCollector routes.
+      // When routeViaFeeCollector=true the on-chain contract enforces the
+      // 0.1% fee; the aggregator API never sees it. Comparing quote output
+      // (full amount) vs swap output (net amount) produces false positives
+      // because the API is called with 0.1% less input, and routing
+      // volatility on small amounts can exceed the 2% tolerance.
+      if (quoteToAmount && !routeViaFeeCollector) {
         const feeCheck = validateFeeIntegrity(quoteToAmount, swapData.toAmount, source)
         if (!feeCheck.valid) {
           console.error('[TeraSwap] Fee integrity BLOCKED:', feeCheck.reason)

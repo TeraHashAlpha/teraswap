@@ -19,6 +19,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { encodeAbiParameters } from 'viem'
 
 import { validateRouterAddress, validateFeeIntegrity } from '@/lib/api'
+import type { AggregatorName } from '@/lib/constants'
 import {
   isKnownSwapSelector,
   getSelector,
@@ -240,6 +241,78 @@ describe('A4 — validateFeeIntegrity', () => {
     // 1_000_000 + 20_000 (2%) = 1_020_000 — the boundary; ">" not ">="
     const result = validateFeeIntegrity('1000000', '1020000', '1inch')
     expect(result.valid).toBe(true)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════
+// A4b — Fee integrity call-site guard (mirrors useSwap.ts:314-329)
+// ───────────────────────────────────────────────────────────────
+// When the swap is routed through FeeCollector, the 0.1% fee is enforced
+// on-chain by the contract — the aggregator API never sees it and the
+// quote/swap output comparison produces false positives (routing
+// volatility on small amounts can exceed the 2% tolerance). The
+// production guard skips validateFeeIntegrity in that case.
+// ═══════════════════════════════════════════════════════════════
+
+function runFeeIntegrityCallSite(args: {
+  quoteToAmount: string | null
+  swapToAmount: string
+  source: AggregatorName
+  routeViaFeeCollector: boolean
+}): { ran: boolean; valid: boolean } {
+  if (args.quoteToAmount && !args.routeViaFeeCollector) {
+    const r = validateFeeIntegrity(args.quoteToAmount, args.swapToAmount, args.source)
+    return { ran: true, valid: r.valid }
+  }
+  return { ran: false, valid: true }
+}
+
+describe('A4b — fee integrity call-site guard', () => {
+  it('routeViaFeeCollector=true → SKIPS validateFeeIntegrity entirely', () => {
+    // Same inputs that would FAIL the check (10% higher output) but the
+    // FeeCollector guard short-circuits before validateFeeIntegrity runs.
+    const result = runFeeIntegrityCallSite({
+      quoteToAmount: '1000000',
+      swapToAmount: '1100000',
+      source: 'kyberswap',
+      routeViaFeeCollector: true,
+    })
+    expect(result.ran).toBe(false)
+    expect(result.valid).toBe(true)
+  })
+
+  it('routeViaFeeCollector=false → RUNS validateFeeIntegrity', () => {
+    const result = runFeeIntegrityCallSite({
+      quoteToAmount: '1000000',
+      swapToAmount: '990000',
+      source: '1inch',
+      routeViaFeeCollector: false,
+    })
+    expect(result.ran).toBe(true)
+    expect(result.valid).toBe(true)
+  })
+
+  it('routeViaFeeCollector=false with suspicious output → still fails', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = runFeeIntegrityCallSite({
+      quoteToAmount: '1000000',
+      swapToAmount: '1100000',
+      source: '1inch',
+      routeViaFeeCollector: false,
+    })
+    expect(result.ran).toBe(true)
+    expect(result.valid).toBe(false)
+    consoleSpy.mockRestore()
+  })
+
+  it('quoteToAmount=null → skipped regardless of routing', () => {
+    const result = runFeeIntegrityCallSite({
+      quoteToAmount: null,
+      swapToAmount: '1100000',
+      source: '1inch',
+      routeViaFeeCollector: false,
+    })
+    expect(result.ran).toBe(false)
   })
 })
 
