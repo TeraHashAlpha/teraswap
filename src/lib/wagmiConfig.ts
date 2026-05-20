@@ -12,14 +12,22 @@ const fallbackRpc2 = process.env.NEXT_PUBLIC_FALLBACK_RPC_2
 function buildMainnetTransport() {
   const transports = []
 
-  // Primary RPC (configured by user — fastest, highest limits)
-  if (primaryRpc) transports.push(http(primaryRpc, { timeout: 10_000 }))
+  // In browser: always use /api/rpc as primary (hides user IP, avoids CORS).
+  if (typeof window !== 'undefined') {
+    transports.push(http('/api/rpc', { timeout: 10_000 }))
+  } else if (primaryRpc) {
+    // Server-only: hit the configured RPC directly (no IP to protect).
+    transports.push(http(primaryRpc, { timeout: 10_000 }))
+  }
 
-  // Fallback RPCs (secondary providers)
-  if (fallbackRpc1) transports.push(http(fallbackRpc1, { timeout: 12_000 }))
-  if (fallbackRpc2) transports.push(http(fallbackRpc2, { timeout: 12_000 }))
+  // Fallback RPCs (secondary providers) — server-only; browser cannot
+  // reach these directly without CORS allowlisting.
+  if (typeof window === 'undefined') {
+    if (fallbackRpc1) transports.push(http(fallbackRpc1, { timeout: 12_000 }))
+    if (fallbackRpc2) transports.push(http(fallbackRpc2, { timeout: 12_000 }))
+  }
 
-  // Last resort: wagmi default public RPC
+  // Last resort: wagmi default public RPC (CORS-safe in browser)
   transports.push(http(undefined, { timeout: 15_000 }))
 
   // If only one transport, return it directly (no fallback wrapper needed)
