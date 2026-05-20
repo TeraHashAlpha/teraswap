@@ -27,6 +27,7 @@ import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { estimateMevSavings } from '@/lib/mev-savings'
+import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
@@ -109,71 +110,12 @@ export default function SwapBox() {
   const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown } =
     useQuote(tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, excludeArray)
 
-  // [LP-04] Smart MEV routing.
-  //
-  // Two paths:
-  //   1. Force toggle ON  → filter quote set down to mevProtected sources
-  //      only (existing behaviour, used as a manual override).
-  //   2. Force toggle OFF → if a mevProtected quote exists in the set and
-  //      is within MEV_PREFERENCE_THRESHOLD (0.3%) of the highest output,
-  //      promote it into best. Otherwise leave best untouched and flag the
-  //      route as MEV-exposed so the UI can surface a hint.
-  //
-  // Returns the meta object plus two derived flags consumed by QuoteBreakdown.
-  const { meta, smartMevApplied, mevExposedBest } = useMemo(() => {
-    if (!rawMeta) {
-      return { meta: null, smartMevApplied: false, mevExposedBest: false }
-    }
-
-    // Path 1: forced — strict MEV-only filter (unchanged behaviour).
-    if (mevProtected) {
-      const mevSources = rawMeta.all.filter(q => AGGREGATOR_META[q.source]?.mevProtected)
-      if (mevSources.length === 0) {
-        return { meta: null, smartMevApplied: false, mevExposedBest: false }
-      }
-      return {
-        meta: { ...rawMeta, best: mevSources[0], all: mevSources },
-        smartMevApplied: false, // user forced it; not a smart-routing event
-        mevExposedBest: false,
-      }
-    }
-
-    // Path 2: smart preference — promote CoW if it's within threshold of best.
-    const bestIsMevProtected = AGGREGATOR_META[rawMeta.best.source]?.mevProtected ?? false
-    if (bestIsMevProtected) {
-      // Best already happens to be MEV-protected. No promotion needed; no
-      // exposure warning needed.
-      return { meta: rawMeta, smartMevApplied: false, mevExposedBest: false }
-    }
-
-    const cowQuote = rawMeta.all.find(q => AGGREGATOR_META[q.source]?.mevProtected)
-    if (cowQuote) {
-      // [11-L-01] safeBigInt: malformed quote amount → skip MEV promotion (default behaviour).
-      const bestAmount = safeBigInt(rawMeta.best.toAmount)
-      const cowAmount = safeBigInt(cowQuote.toAmount)
-      if (bestAmount !== null && cowAmount !== null && bestAmount > 0n && cowAmount > 0n && cowAmount <= bestAmount) {
-        // Shortfall in basis points relative to best. Use BigInt math to
-        // avoid float precision issues on large token-decimals values.
-        const shortfallBps = ((bestAmount - cowAmount) * 10_000n) / bestAmount
-        const thresholdBps = safeBigInt(Math.round(MEV_PREFERENCE_THRESHOLD * 10_000)) ?? 0n
-        // Gate the promotion on the gasless engine's net-positive verdict —
-        // a 15 bps shortfall on a $2k swap (~$3) is only worth swallowing when
-        // CoW's gas savings (typically $5–$15) more than offset it.
-        if (shortfallBps <= thresholdBps && rawMeta.gasless?.recommended) {
-          // Promote CoW into best; keep the rest in their original order.
-          const others = rawMeta.all.filter(q => q.source !== cowQuote.source)
-          return {
-            meta: { ...rawMeta, best: cowQuote, all: [cowQuote, ...others] },
-            smartMevApplied: true,
-            mevExposedBest: false,
-          }
-        }
-      }
-    }
-
-    // Best stays as-is; non-MEV-protected → mark exposed for the UI hint.
-    return { meta: rawMeta, smartMevApplied: false, mevExposedBest: true }
-  }, [rawMeta, mevProtected])
+  // [LP-04 / P140] Smart MEV routing — logic extracted to
+  // src/lib/mev-preference.ts for direct unit testing.
+  const { meta, smartMevApplied, mevExposedBest } = useMemo(
+    () => selectBestWithMevPreference(rawMeta ?? null, mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
+    [rawMeta, mevProtected],
+  )
 
   // Play subtle sound when a new quote arrives
   // [BUGFIX] Use AbortController to cancel stale spender fetch on rapid source changes
