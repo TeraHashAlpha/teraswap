@@ -1,5 +1,5 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
-import { clampSlippage } from './shared'
+import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -16,7 +16,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`SushiSwap ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'SushiSwap')
 
   if (!data.assumedAmountOut) throw new Error('SushiSwap: no route')
 
@@ -47,7 +47,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`SushiSwap swap ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'SushiSwap')
   if (!data.assumedAmountOut) throw new Error('SushiSwap: no route')
 
   const rpArgs = data.routeProcessorArgs

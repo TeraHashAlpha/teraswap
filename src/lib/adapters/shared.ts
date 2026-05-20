@@ -14,6 +14,23 @@ export function clampSlippage(s: number): number {
   return Math.min(Math.max(s, 0.01), 15)
 }
 
+// ── Safe JSON parse ──────────────────────────────────────
+// Some DEX APIs return HTTP 200 with an HTML body (maintenance pages,
+// CDN error pages) for unsupported tokens or during incidents.
+// res.json() then throws "Unexpected token '<', \"<!DOCTYPE \"..." which
+// is opaque to users. Wrap each adapter parse so the surfaced error
+// names the source and the failure mode.
+export async function parseJsonOrThrow<T = unknown>(
+  res: Response,
+  source: string,
+): Promise<T> {
+  try {
+    return (await res.json()) as T
+  } catch {
+    throw new Error(`${source}: invalid response (non-JSON). API may be down.`)
+  }
+}
+
 // ── Timeout wrapper ──────────────────────────────────────
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([

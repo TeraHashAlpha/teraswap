@@ -1,4 +1,5 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
+import { parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -15,7 +16,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`OpenOcean ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'OpenOcean')
   if (data.code !== 200 || !data.data) throw new Error(data.message || 'OpenOcean: no quote')
 
   return {
@@ -54,7 +55,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`OpenOcean swap ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'OpenOcean')
   if (data.code !== 200 || !data.data) throw new Error(data.message || 'OpenOcean: no swap')
 
   return {

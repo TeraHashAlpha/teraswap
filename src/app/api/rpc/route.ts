@@ -8,9 +8,15 @@ import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
  * of hitting Alchemy/LlamaRPC directly.  This hides the user's IP
  * address from the RPC provider — they only see Vercel's server IP.
  *
- * Allowed methods (read-only): eth_call, eth_getTransactionReceipt,
- * eth_getBalance, eth_blockNumber, eth_chainId.
- * Write methods (eth_sendRawTransaction) are blocked — wallets handle those.
+ * Allowed methods are read-only (see ALLOWED_METHODS below). Write methods
+ * (eth_sendRawTransaction, eth_sendTransaction, eth_sign, personal_sign,
+ * eth_signTypedData*) are blocked — wallets handle those directly.
+ *
+ * Smoke test:
+ *   curl -X POST http://localhost:3000/api/rpc \
+ *     -H 'Content-Type: application/json' \
+ *     -d '{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}'
+ *   → expect HTTP 200 (not 403)
  */
 
 const ALLOWED_METHODS = new Set([
@@ -26,6 +32,10 @@ const ALLOWED_METHODS = new Set([
   'eth_maxPriorityFeePerGas',
   'eth_feeHistory',
   'eth_getLogs',
+  'eth_getBlockByNumber',
+  'eth_getBlockByHash',
+  'eth_getTransactionCount',
+  'net_version',
 ])
 
 const RPC_URL = process.env.RPC_URL

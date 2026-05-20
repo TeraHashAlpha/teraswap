@@ -1,5 +1,5 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
-import { clampSlippage } from './shared'
+import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -20,7 +20,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     },
   })
   if (!res.ok) throw new Error(`KyberSwap ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'KyberSwap')
   const route = data.data?.routeSummary
 
   if (!route) throw new Error('KyberSwap: no route found')
@@ -56,7 +56,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     },
   })
   if (!routeRes.ok) throw new Error(`KyberSwap route ${routeRes.status}`)
-  const routeData = await routeRes.json()
+  const routeData = await parseJsonOrThrow<any>(routeRes, 'KyberSwap')
   const routeSummary = routeData.data?.routeSummary
 
   if (!routeSummary) throw new Error('KyberSwap: no route')
@@ -79,7 +79,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     }),
   })
   if (!buildRes.ok) throw new Error(`KyberSwap build ${buildRes.status}`)
-  const buildData = await buildRes.json()
+  const buildData = await parseJsonOrThrow<any>(buildRes, 'KyberSwap')
   const txData = buildData.data
 
   return {
