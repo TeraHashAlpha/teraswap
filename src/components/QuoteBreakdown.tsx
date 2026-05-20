@@ -32,6 +32,10 @@ interface Props {
   /** [P95] Switch the swap to the gasless (CoW) route. Invoked from the
    *  "Use Gasless Route" CTA in the recommendation card. */
   onUseGasless?: () => void
+  /** [P147] Manual quote refresh. Rendered next to the countdown. */
+  onRefresh?: () => void
+  /** [P147] true while a refresh is on the wire — drives the spin state. */
+  refreshing?: boolean
 }
 
 function sourceLabel(source: AggregatorName): string {
@@ -53,6 +57,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 export default function QuoteBreakdown({
   meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, approvalPlan, onEditSlippage, gasEstimate,
   smartMevApplied = false, mevExposedBest = false, onUseGasless,
+  onRefresh, refreshing = false,
 }: Props) {
   const best = meta.best
   // [10-L-01] Guard against malformed toAmount on the winning quote.
@@ -211,9 +216,21 @@ export default function QuoteBreakdown({
               </span>
             )}
           </span>
-          <span className="flex items-center gap-1 text-xs text-cream-35">
+          <span className="flex items-center gap-1.5 text-xs text-cream-35">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cream-50" />
             {countdown}s
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+                aria-label="Refresh quote"
+                title="Refresh quote"
+                className="relative inline-flex h-5 w-5 items-center justify-center rounded text-[11px] leading-none text-cream-35 transition hover:text-cream disabled:cursor-not-allowed disabled:opacity-50 before:absolute before:-inset-3 before:content-['']"
+              >
+                <span className={refreshing ? 'inline-block animate-spin' : 'inline-block'}>⟳</span>
+              </button>
+            )}
           </span>
         </div>
 

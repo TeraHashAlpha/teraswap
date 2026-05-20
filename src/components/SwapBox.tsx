@@ -107,7 +107,7 @@ export default function SwapBox() {
   })
 
   const excludeArray = useMemo(() => excludedSources.size > 0 ? Array.from(excludedSources) : undefined, [excludedSources])
-  const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown } =
+  const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } =
     useQuote(tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, excludeArray)
 
   // [LP-04 / P140] Smart MEV routing — logic extracted to
@@ -600,7 +600,7 @@ export default function SwapBox() {
                   : '(MEV protected)'}
               </p>
             )}
-            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} />
+            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
           </div>
         )}
         {/* Quote loading skeleton */}

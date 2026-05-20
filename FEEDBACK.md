@@ -189,3 +189,33 @@
   Architect should consider whether to add a proper V6 struct decoder to
   `decodeXRecipient` (Group G, recipient-extracted) instead of trusting
   by design.
+
+## Feedback — P147 (commit pending)
+
+### Edge case
+- The prompt listed `src/components/SwapBox.tsx` as the file for the
+  refresh button placement ("next to the existing ● {countdown}s
+  text"), but that countdown indicator actually lives inside
+  `src/components/QuoteBreakdown.tsx` (line 214-217). SwapBox just
+  passes `countdown` through. To honour the prompt's placement spec I
+  threaded two new optional props (`onRefresh`, `refreshing`) into
+  `QuoteBreakdown` and rendered the button next to the existing pulse
+  dot. Both props are optional so other call sites of
+  `QuoteBreakdown` (if any) keep working unchanged.
+
+- `useQuote` already exposed `refetch: doFetch` (used by an existing
+  test, `useQuote.test.ts:209`, "in-flight guard: a second refetch()
+  while one is on the wire is a no-op"). I added `refresh` *alongside*
+  `refetch` rather than renaming, so existing tests/callers don't
+  break. Difference: `refresh` is in-flight-aware at the caller level
+  and snaps the visible countdown back to the current poll interval;
+  `refetch` is still the raw `doFetch` reference.
+
+### Concern
+- The refresh button uses a `before:` pseudo-element to enlarge the
+  hit area to 44×44px (per Sprint 24 touch-target guidance) while
+  keeping the visible icon at 20×20px. If the parent flex container
+  later sets `overflow: hidden` or otherwise clips the pseudo-element,
+  the mobile hit area would silently shrink to the visible size. Not
+  the case today (the row sets `flex items-center gap-1.5`, no
+  clipping), but worth noting if the surrounding layout changes.
