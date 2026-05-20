@@ -61,6 +61,37 @@
   endpoint catch any regression. If we add unit tests for analytics helpers
   in a future sprint, this is a good candidate to start with.
 
+## Feedback — P134 (commit 4b52342)
+
+### Edge case
+- Synthetic single-row fallback (no `order_executions` rows but order has
+  `tx_hash`) cannot populate `amount_in`. The orders table column subset I'm
+  fetching exposes `amount_out` for the executed amount, but the original
+  input amount lives in the on-chain order struct
+  (`order.amountIn` in the UI, sourced from the EIP-712 signed struct in the
+  `orders.order` jsonb column). Legacy orders therefore render as
+  "— → 1.5 ETH @ $X" on the row. Acceptable per the "graceful fallback for
+  missing fields" rule, but worth flagging — if the orders table adds an
+  `amount_in` mirror column (or we expose `order_struct->>'amountIn'`) we can
+  backfill this on the row.
+
+### Concern
+- `npm run lint` (`next lint`) is broken on this checkout because the repo
+  path contains a space ("dex-aggregator 2"). Next mis-parses the second
+  path segment as a directory arg and errors with
+  *"Invalid project directory provided, no such directory: …/lint"*. Verified
+  lint cleanliness via direct `npx eslint <changed files>` instead. Not
+  introduced by this prompt — affects CI parity if any job runs
+  `npm run lint` from a path with whitespace. Workaround:
+  `npx next lint -- --dir src` or call `npx eslint` directly.
+
+- `react-hooks/set-state-in-effect` warning on
+  `ExecutionTimeline.tsx:160` (`setLoading(true)` inside the `useEffect` that
+  triggers the fetch). The same pattern existed in the previous version of
+  the file and is preserved to keep this prompt scope-clean, but the new
+  React Compiler rules will keep flagging it. A follow-up refactor to fetch
+  via a reducer or `useSyncExternalStore` would silence it.
+
 ## Feedback — P135 (commit c91bf5b)
 
 ### Assumption that turned out wrong

@@ -170,6 +170,8 @@ import {
   getStatus,
 } from './source-state-machine'
 import { runHealthCheck } from './health-check'
+import { shouldRunOnChainScan, runOnChainScan } from './on-chain-monitor'
+import { checkCircuitBreaker } from './circuit-breaker'
 
 // ═══════════════════════════════════════════════════════════════
 
@@ -628,5 +630,189 @@ describe('[API-M-03] distributed tick lock', () => {
     )
     expect(warnLogs.length).toBe(1)
     consoleSpy.mockRestore()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════
+// [18-I-01] On-chain scan & circuit breaker integration within tick
+// Default mocks return no-op values (see L145-156). These tests use
+// mockResolvedValueOnce / mockRejectedValueOnce to override per-test so
+// the tick exercises the branches that pull the results into its return
+// object — and the error paths around them.
+// ═══════════════════════════════════════════════════════════════
+
+describe('on-chain scan & circuit breaker integration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false) // keep H5 out of the way
+  })
+
+  // ── T1 ── On-chain scan included when shouldRunOnChainScan is true
+  it('includes on-chain scan result in tick when shouldRunOnChainScan returns true', async () => {
+    vi.mocked(shouldRunOnChainScan).mockResolvedValueOnce(true)
+    vi.mocked(runOnChainScan).mockResolvedValueOnce({
+      fromBlock: 19000000,
+      toBlock: 19000100,
+      eventsFound: 2,
+      criticalCount: 0,
+      warningCount: 1,
+      infoCount: 1,
+    })
+
+    const result = await runMonitoringTick()
+
+    expect(result.onChainScan).toBeDefined()
+    expect(result.onChainScan!.fromBlock).toBe(19000000)
+    expect(result.onChainScan!.eventsFound).toBe(2)
+    expect(result.onChainScan!.warningCount).toBe(1)
+  })
+
+  // ── T2 ── On-chain scan skipped when default shouldRunOnChainScan = false
+  it('omits onChainScan key entirely when shouldRunOnChainScan is false (default)', async () => {
+    const result = await runMonitoringTick()
+
+    expect(result.onChainScan).toBeUndefined()
+    expect('onChainScan' in result).toBe(false)
+    expect(vi.mocked(runOnChainScan)).not.toHaveBeenCalled()
+  })
+
+  // ── T3 ── runOnChainScan returns null → no onChainScan key
+  it('omits onChainScan key when runOnChainScan returns null', async () => {
+    vi.mocked(shouldRunOnChainScan).mockResolvedValueOnce(true)
+    vi.mocked(runOnChainScan).mockResolvedValueOnce(null)
+
+    const result = await runMonitoringTick()
+
+    expect('onChainScan' in result).toBe(false)
+  })
+
+  // ── T4 ── shouldRunOnChainScan rejects → error swallowed
+  it('swallows shouldRunOnChainScan errors and completes the tick', async () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(shouldRunOnChainScan).mockRejectedValueOnce(new Error('viem RPC timeout'))
+
+    const result = await runMonitoringTick()
+
+    expect(result.timestamp).toBeDefined()
+    expect('onChainScan' in result).toBe(false)
+
+    const scanWarnings = consoleSpy.mock.calls.filter(
+      args => typeof args[0] === 'string' && args[0].includes('On-chain scan failed'),
+    )
+    expect(scanWarnings.length).toBe(1)
+    consoleSpy.mockRestore()
+  })
+
+  // ── T5 ── runOnChainScan rejects → error swallowed
+  it('swallows runOnChainScan errors and completes the tick', async () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(shouldRunOnChainScan).mockResolvedValueOnce(true)
+    vi.mocked(runOnChainScan).mockRejectedValueOnce(new Error('getLogs rate limited'))
+
+    const result = await runMonitoringTick()
+
+    expect(result.timestamp).toBeDefined()
+    expect('onChainScan' in result).toBe(false)
+
+    const scanWarnings = consoleSpy.mock.calls.filter(
+      args => typeof args[0] === 'string' && args[0].includes('On-chain scan failed'),
+    )
+    expect(scanWarnings.length).toBe(1)
+    consoleSpy.mockRestore()
+  })
+
+  // ── T6 ── Circuit breaker triggered → included in tick
+  it('includes circuit breaker result in tick when triggered', async () => {
+    vi.mocked(checkCircuitBreaker).mockResolvedValueOnce({
+      triggered: true,
+      disabledCount: 7,
+      totalSources: 11,
+      disabledSources: ['1inch', '0x', 'velora', 'odos', 'kyberswap', 'sushiswap', 'openocean'],
+      triggerReason: '7 of 11 sources disabled in 10-min window',
+    })
+
+    const result = await runMonitoringTick()
+
+    expect(result.circuitBreaker).toBeDefined()
+    expect(result.circuitBreaker!.triggered).toBe(true)
+    expect(result.circuitBreaker!.disabledCount).toBe(7)
+    expect(result.circuitBreaker!.disabledSources.length).toBe(7)
+  })
+
+  // ── T7 ── Circuit breaker default = undefined → no key
+  it('omits circuitBreaker key when checkCircuitBreaker returns undefined (default)', async () => {
+    const result = await runMonitoringTick()
+
+    expect('circuitBreaker' in result).toBe(false)
+  })
+
+  // ── T8 ── Circuit breaker non-triggered result still included
+  it('includes non-triggered circuit breaker result in tick', async () => {
+    vi.mocked(checkCircuitBreaker).mockResolvedValueOnce({
+      triggered: false,
+      disabledCount: 2,
+      totalSources: 11,
+      disabledSources: ['velora', 'sushiswap'],
+    })
+
+    const result = await runMonitoringTick()
+
+    expect(result.circuitBreaker).toBeDefined()
+    expect(result.circuitBreaker!.triggered).toBe(false)
+    expect(result.circuitBreaker!.disabledCount).toBe(2)
+  })
+
+  // ── T9 ── checkCircuitBreaker rejects → error swallowed
+  it('swallows checkCircuitBreaker errors and completes the tick', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(checkCircuitBreaker).mockRejectedValueOnce(new Error('KV read timeout'))
+
+    const result = await runMonitoringTick()
+
+    expect(result.timestamp).toBeDefined()
+    expect('circuitBreaker' in result).toBe(false)
+
+    const breakerErrors = consoleSpy.mock.calls.filter(
+      args => typeof args[0] === 'string' && args[0].includes('Circuit breaker check failed'),
+    )
+    expect(breakerErrors.length).toBe(1)
+    consoleSpy.mockRestore()
+  })
+
+  // ── T10 ── Both on-chain scan AND circuit breaker results in same tick
+  it('includes both onChainScan and circuitBreaker in the same tick result', async () => {
+    vi.mocked(shouldRunOnChainScan).mockResolvedValueOnce(true)
+    vi.mocked(runOnChainScan).mockResolvedValueOnce({
+      fromBlock: 19000000,
+      toBlock: 19000100,
+      eventsFound: 1,
+      criticalCount: 1,
+      warningCount: 0,
+      infoCount: 0,
+    })
+    vi.mocked(checkCircuitBreaker).mockResolvedValueOnce({
+      triggered: true,
+      disabledCount: 6,
+      totalSources: 11,
+      disabledSources: ['1inch', '0x', 'velora', 'odos', 'kyberswap', 'openocean'],
+      triggerReason: 'coordinated attack detected',
+    })
+
+    const result = await runMonitoringTick()
+
+    expect(result.onChainScan).toBeDefined()
+    expect(result.circuitBreaker).toBeDefined()
+    expect(result.onChainScan!.criticalCount).toBe(1)
+    expect(result.circuitBreaker!.triggered).toBe(true)
+
+    // Standard tick fields still present
+    expect(result.timestamp).toBeDefined()
+    expect(result.checksRun).toBe(1) // MONITORED_ENDPOINTS mock has 1 entry
+    expect(result.failures).toBe(0)
+    expect(Array.isArray(result.transitions)).toBe(true)
+    expect(Array.isArray(result.statuses)).toBe(true)
   })
 })
