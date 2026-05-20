@@ -13,7 +13,14 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
   const res = await fetch(`${base}/quote?${qs}`, {
     headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
   })
-  if (!res.ok) throw new Error(`1inch ${res.status}`)
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const errBody = await res.json()
+      detail = errBody?.description || errBody?.error || ''
+    } catch { /* non-JSON error body — ignore */ }
+    throw new Error(`1inch ${res.status}${detail ? `: ${detail}` : ''}`)
+  }
   const data = await parseJsonOrThrow<any>(res, '1inch')
 
   return {
@@ -45,7 +52,14 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   const res = await fetch(`${base}/swap?${qs}`, {
     headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
   })
-  if (!res.ok) throw new Error(`1inch swap ${res.status}`)
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const errBody = await res.json()
+      detail = errBody?.description || errBody?.error || ''
+    } catch { /* non-JSON error body — ignore */ }
+    throw new Error(`1inch swap ${res.status}${detail ? `: ${detail}` : ''}`)
+  }
   const data = await parseJsonOrThrow<any>(res, '1inch')
 
   return {

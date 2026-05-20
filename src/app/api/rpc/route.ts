@@ -5,12 +5,19 @@ import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
  * Privacy-preserving RPC proxy.
  *
  * All on-chain reads from the browser go through this endpoint instead
- * of hitting Alchemy/LlamaRPC directly.  This hides the user's IP
+ * of hitting Alchemy/LlamaRPC directly. This hides the user's IP
  * address from the RPC provider — they only see Vercel's server IP.
  *
- * Allowed methods are read-only (see ALLOWED_METHODS below). Write methods
- * (eth_sendRawTransaction, eth_sendTransaction, eth_sign, personal_sign,
- * eth_signTypedData*) are blocked — wallets handle those directly.
+ * Policy: blacklist (BLOCKED_METHODS). We allow every JSON-RPC method by
+ * default and explicitly reject only those that require the user's signing
+ * keys — eth_sendTransaction, eth_sendRawTransaction, eth_sign,
+ * eth_signTransaction, eth_signTypedData{,_v3,_v4}, personal_sign, and the
+ * wallet_* family. Wagmi/viem call a wide and growing set of read methods
+ * (eth_getBlockByNumber, eth_getStorageAt, eth_getProof, debug_*, trace_*,
+ * net_version, web3_clientVersion, ...) — a whitelist devolves into
+ * whack-a-mole. The proxy's job is to hide the user's IP and refuse to
+ * relay transactions, not to police read methods. Rate limiting and
+ * forwarding to the upstream RPC remain unchanged.
  *
  * Smoke test:
  *   curl -X POST http://localhost:3000/api/rpc \
@@ -19,23 +26,19 @@ import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
  *   → expect HTTP 200 (not 403)
  */
 
-const ALLOWED_METHODS = new Set([
-  'eth_call',
-  'eth_getTransactionReceipt',
-  'eth_getBalance',
-  'eth_blockNumber',
-  'eth_chainId',
-  'eth_getCode',
-  'eth_getTransactionByHash',
-  'eth_estimateGas',
-  'eth_gasPrice',
-  'eth_maxPriorityFeePerGas',
-  'eth_feeHistory',
-  'eth_getLogs',
-  'eth_getBlockByNumber',
-  'eth_getBlockByHash',
-  'eth_getTransactionCount',
-  'net_version',
+const BLOCKED_METHODS = new Set([
+  'eth_sendRawTransaction',
+  'eth_sendTransaction',
+  'eth_sign',
+  'eth_signTransaction',
+  'eth_signTypedData',
+  'eth_signTypedData_v3',
+  'eth_signTypedData_v4',
+  'personal_sign',
+  'wallet_addEthereumChain',
+  'wallet_switchEthereumChain',
+  'wallet_requestPermissions',
+  'wallet_watchAsset',
 ])
 
 const RPC_URL = process.env.RPC_URL
@@ -75,9 +78,9 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      if (!ALLOWED_METHODS.has(rpcReq.method)) {
+      if (BLOCKED_METHODS.has(rpcReq.method)) {
         return NextResponse.json(
-          { jsonrpc: '2.0', id: rpcReq.id, error: { code: -32601, message: `Method ${rpcReq.method} not allowed` } },
+          { jsonrpc: '2.0', id: rpcReq.id, error: { code: -32601, message: `Method ${rpcReq.method} not allowed via proxy` } },
           { status: 403 },
         )
       }
