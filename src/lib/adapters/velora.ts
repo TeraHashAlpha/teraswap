@@ -1,5 +1,5 @@
 import { AGGREGATOR_APIS, CHAIN_ID } from '@/lib/constants'
-import { clampSlippage } from './shared'
+import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -19,7 +19,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`Velora ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'Velora')
   const best = data.priceRoute
 
   return {
@@ -52,7 +52,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     headers: { Accept: 'application/json' },
   })
   if (!priceRes.ok) throw new Error(`Velora price ${priceRes.status}`)
-  const priceData = await priceRes.json()
+  const priceData = await parseJsonOrThrow<any>(priceRes, 'Velora')
 
   // Step 2: build tx
   const txBody = {
@@ -77,7 +77,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     try { const e = await txRes.json(); errMsg = e?.error || e?.message || errMsg } catch {}
     throw new Error(errMsg)
   }
-  const txData = await txRes.json()
+  const txData = await parseJsonOrThrow<any>(txRes, 'Velora')
 
   return {
     source: 'velora',

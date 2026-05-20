@@ -1,4 +1,5 @@
 import { AGGREGATOR_APIS, CHAIN_ID, DEFAULT_SLIPPAGE } from '@/lib/constants'
+import { parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 /**
@@ -40,7 +41,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     const errBody = await res.text().catch(() => '')
     throw new Error(`Odos ${res.status}${errBody ? `: ${errBody.slice(0, 100)}` : ''}`)
   }
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'Odos')
 
   return {
     source: 'odos',
@@ -75,7 +76,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     const errBody = await quoteRes.text().catch(() => '')
     throw new Error(`Odos quote ${quoteRes.status}${errBody ? `: ${errBody.slice(0, 100)}` : ''}`)
   }
-  const quoteData = await quoteRes.json()
+  const quoteData = await parseJsonOrThrow<any>(quoteRes, 'Odos')
 
   // Step 2: assemble tx
   // [P101] Odos /assemble accepts an optional `receiver` field. When the
@@ -97,7 +98,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     const errBody = await assembleRes.text().catch(() => '')
     throw new Error(`Odos assemble ${assembleRes.status}${errBody ? `: ${errBody.slice(0, 100)}` : ''}`)
   }
-  const assembleData = await assembleRes.json()
+  const assembleData = await parseJsonOrThrow<any>(assembleRes, 'Odos')
 
   return {
     source: 'odos',

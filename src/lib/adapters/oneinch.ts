@@ -1,5 +1,5 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
-import { clampSlippage } from './shared'
+import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -14,7 +14,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`1inch ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, '1inch')
 
   return {
     source: '1inch',
@@ -46,7 +46,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`1inch swap ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, '1inch')
 
   return {
     source: '1inch',

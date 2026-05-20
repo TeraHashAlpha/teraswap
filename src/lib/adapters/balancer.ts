@@ -1,5 +1,5 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
-import { clampSlippage } from './shared'
+import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -17,7 +17,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     }),
   })
   if (!res.ok) throw new Error(`Balancer ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'Balancer')
 
   if (!data.buyAmount && !data.returnAmount) throw new Error('Balancer: no route')
   const outAmount = data.buyAmount || data.returnAmount || '0'
@@ -50,7 +50,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     }),
   })
   if (!res.ok) throw new Error(`Balancer swap ${res.status}`)
-  const data = await res.json()
+  const data = await parseJsonOrThrow<any>(res, 'Balancer')
 
   if (!data.buyAmount && !data.returnAmount) throw new Error('Balancer: no route')
   const outAmount = data.buyAmount || data.returnAmount || '0'
