@@ -6,7 +6,7 @@ import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 // Sources shown in the toggle (exclude internal engine)
 const TOGGLEABLE_SOURCES: AggregatorName[] = [
   '1inch', '0x', 'velora', 'odos', 'kyberswap',
-  'cowswap', 'uniswap', 'openocean', 'sushiswap', 'balancer', 'curve',
+  'cowswap', 'uniswapv3', 'openocean', 'sushiswap', 'balancer', 'curve',
 ]
 
 interface SourceToggleProps {

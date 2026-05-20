@@ -69,6 +69,9 @@ interface UseQuoteResult {
   error: string | null
   countdown: number
   refetch: () => void
+  /** Manual quote refresh trigger. No-op if a fetch is already in flight.
+   *  Resets the countdown to the current poll interval (respects backoff). */
+  refresh: () => void
 }
 
 export function useQuote(
@@ -274,5 +277,17 @@ export function useQuote(
     }
   }, [doFetch, enabled])
 
-  return { meta, loading, error, countdown, refetch: doFetch }
+  // Manual refresh: invoke the latest doFetch via the ref (matches the
+  // timer's call site), and reset the countdown so the next visible tick
+  // reflects "just refreshed". No-op while a fetch is on the wire — the
+  // doFetch in-flight guard already swallows the call, but skipping the
+  // countdown reset here avoids snapping the timer back during a click
+  // that does nothing.
+  const refresh = useCallback(() => {
+    if (inFlightRef.current) return
+    doFetchRef.current?.()
+    setCountdown(Math.ceil(currentIntervalMsRef.current / 1000))
+  }, [])
+
+  return { meta, loading, error, countdown, refetch: doFetch, refresh }
 }

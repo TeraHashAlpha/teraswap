@@ -54,6 +54,7 @@ export const TRUSTED_ROUTER_SELECTORS = new Set([
   '0x3598d8ab', // ParaSwap megaSwap: proprietary encoding, router sends to msg.sender
   '0xa94e78ef', // ParaSwap multiSwap: proprietary encoding, router sends to msg.sender
   '0x46c67b6d', // ParaSwap simpleSwap: proprietary encoding, router sends to msg.sender
+  '0xe3ead59e', // ParaSwap Augustus V6 swapExactAmountIn: beneficiary defaults to msg.sender (our adapter never sets it)
 ])
 
 /**
@@ -99,6 +100,7 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   '0x3598d8ab', // ParaSwap megaSwap
   '0xa94e78ef', // ParaSwap multiSwap
   '0x46c67b6d', // ParaSwap simpleSwap
+  '0xe3ead59e', // ParaSwap Augustus V6 swapExactAmountIn
 ])
 
 // ---------------------------------------------------------------------------

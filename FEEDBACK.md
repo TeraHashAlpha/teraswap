@@ -148,3 +148,74 @@
   ambiguous. Mitigation: the selector match is stricter and would only
   fire for the exact `RouterNotWhitelisted()` / `SwapFailed()` / etc.
   signatures.
+
+## Feedback — P-velora-v6 (commit pending)
+
+### Edge case
+- The prompt scoped the change to `src/lib/swap-selectors.ts` (+ a
+  conditional check of `src/app/api/swap/route.ts`, which only imports
+  from the shared list — no change needed there). There are, however,
+  **two more parallel selector structures** that must stay in lock-step:
+
+  1. `src/lib/calldata-recipient.ts` — `VALIDATED_SELECTORS` /
+     `TRUSTED_ROUTER_SELECTORS`, used by the [R1] recipient validation.
+     Fail-closes on unknown selectors; a cross-file test
+     (`calldata-recipient.test.ts:255-265`) asserts bidirectional
+     equality with `KNOWN_SWAP_SELECTORS`.
+  2. `src/lib/calldata-decoder.ts` — `SELECTOR_INFO` (functionName /
+     dexLabel metadata for tx preview). A test
+     (`calldata-decoder.test.ts:289-292`) asserts every entry in
+     `VALIDATED_SELECTORS` has a `SELECTOR_INFO` entry.
+
+  Adding the V6 selector only to `swap-selectors.ts` would (a) break
+  both linked tests, (b) still block Velora swaps at the R1 gate.
+  Updated all three structures (+ the count assertion 19 → 20) to keep
+  tests green and actually unblock the swap path end-to-end.
+
+- The original `KNOWN_SWAP_SELECTORS` count comment said "18 total" but
+  the actual `Set` size was already 19 (the comment was stale). The
+  prompt instructed "18 → 19"; corrected to reflect the real new count
+  of 20.
+
+### Concern
+- Augustus V6 `swapExactAmountIn` has an explicit `beneficiary` field in
+  its calldata struct (unlike V5, which routes to msg.sender by encoded
+  convention). I placed V6 in `TRUSTED_ROUTER_SELECTORS` (implicit
+  msg.sender / trust-by-design) to match the V5 trust model and stay
+  within the prompt's "do not change validation logic" boundary. This
+  is safe today because the adapter never sets a non-default beneficiary
+  and ParaSwap's default is msg.sender — but a future ParaSwap response
+  with a non-zero beneficiary would bypass extraction-based [R1] checks.
+  Architect should consider whether to add a proper V6 struct decoder to
+  `decodeXRecipient` (Group G, recipient-extracted) instead of trusting
+  by design.
+
+## Feedback — P147 (commit pending)
+
+### Edge case
+- The prompt listed `src/components/SwapBox.tsx` as the file for the
+  refresh button placement ("next to the existing ● {countdown}s
+  text"), but that countdown indicator actually lives inside
+  `src/components/QuoteBreakdown.tsx` (line 214-217). SwapBox just
+  passes `countdown` through. To honour the prompt's placement spec I
+  threaded two new optional props (`onRefresh`, `refreshing`) into
+  `QuoteBreakdown` and rendered the button next to the existing pulse
+  dot. Both props are optional so other call sites of
+  `QuoteBreakdown` (if any) keep working unchanged.
+
+- `useQuote` already exposed `refetch: doFetch` (used by an existing
+  test, `useQuote.test.ts:209`, "in-flight guard: a second refetch()
+  while one is on the wire is a no-op"). I added `refresh` *alongside*
+  `refetch` rather than renaming, so existing tests/callers don't
+  break. Difference: `refresh` is in-flight-aware at the caller level
+  and snaps the visible countdown back to the current poll interval;
+  `refetch` is still the raw `doFetch` reference.
+
+### Concern
+- The refresh button uses a `before:` pseudo-element to enlarge the
+  hit area to 44×44px (per Sprint 24 touch-target guidance) while
+  keeping the visible icon at 20×20px. If the parent flex container
+  later sets `overflow: hidden` or otherwise clips the pseudo-element,
+  the mobile hit area would silently shrink to the visible size. Not
+  the case today (the row sets `flex items-center gap-1.5`, no
+  clipping), but worth noting if the surrounding layout changes.
