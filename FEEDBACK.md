@@ -148,3 +148,44 @@
   ambiguous. Mitigation: the selector match is stricter and would only
   fire for the exact `RouterNotWhitelisted()` / `SwapFailed()` / etc.
   signatures.
+
+## Feedback — P-velora-v6 (commit pending)
+
+### Edge case
+- The prompt scoped the change to `src/lib/swap-selectors.ts` (+ a
+  conditional check of `src/app/api/swap/route.ts`, which only imports
+  from the shared list — no change needed there). There are, however,
+  **two more parallel selector structures** that must stay in lock-step:
+
+  1. `src/lib/calldata-recipient.ts` — `VALIDATED_SELECTORS` /
+     `TRUSTED_ROUTER_SELECTORS`, used by the [R1] recipient validation.
+     Fail-closes on unknown selectors; a cross-file test
+     (`calldata-recipient.test.ts:255-265`) asserts bidirectional
+     equality with `KNOWN_SWAP_SELECTORS`.
+  2. `src/lib/calldata-decoder.ts` — `SELECTOR_INFO` (functionName /
+     dexLabel metadata for tx preview). A test
+     (`calldata-decoder.test.ts:289-292`) asserts every entry in
+     `VALIDATED_SELECTORS` has a `SELECTOR_INFO` entry.
+
+  Adding the V6 selector only to `swap-selectors.ts` would (a) break
+  both linked tests, (b) still block Velora swaps at the R1 gate.
+  Updated all three structures (+ the count assertion 19 → 20) to keep
+  tests green and actually unblock the swap path end-to-end.
+
+- The original `KNOWN_SWAP_SELECTORS` count comment said "18 total" but
+  the actual `Set` size was already 19 (the comment was stale). The
+  prompt instructed "18 → 19"; corrected to reflect the real new count
+  of 20.
+
+### Concern
+- Augustus V6 `swapExactAmountIn` has an explicit `beneficiary` field in
+  its calldata struct (unlike V5, which routes to msg.sender by encoded
+  convention). I placed V6 in `TRUSTED_ROUTER_SELECTORS` (implicit
+  msg.sender / trust-by-design) to match the V5 trust model and stay
+  within the prompt's "do not change validation logic" boundary. This
+  is safe today because the adapter never sets a non-default beneficiary
+  and ParaSwap's default is msg.sender — but a future ParaSwap response
+  with a non-zero beneficiary would bypass extraction-based [R1] checks.
+  Architect should consider whether to add a proper V6 struct decoder to
+  `decodeXRecipient` (Group G, recipient-extracted) instead of trusting
+  by design.

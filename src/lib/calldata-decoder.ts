@@ -48,10 +48,12 @@ export const SELECTOR_INFO: Record<string, { functionName: string; dexLabel: str
   // 0x
   '0xd9627aa4': { functionName: 'sellToUniswap', dexLabel: '0x' },
   '0x415565b0': { functionName: 'transformERC20', dexLabel: '0x' },
-  // ParaSwap
+  // ParaSwap (Augustus V5 — legacy)
   '0x3598d8ab': { functionName: 'megaSwap', dexLabel: 'ParaSwap' },
   '0xa94e78ef': { functionName: 'multiSwap', dexLabel: 'ParaSwap' },
   '0x46c67b6d': { functionName: 'simpleSwap', dexLabel: 'ParaSwap' },
+  // ParaSwap (Augustus V6)
+  '0xe3ead59e': { functionName: 'swapExactAmountIn', dexLabel: 'ParaSwap V6' },
   // Odos
   '0x83800a8e': { functionName: 'swap', dexLabel: 'Odos' },
   // KyberSwap

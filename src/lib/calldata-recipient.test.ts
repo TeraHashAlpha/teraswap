@@ -248,8 +248,8 @@ describe('calldata-recipient', () => {
   // ── VALIDATED_SELECTORS allowlist ──────────────────────
 
   describe('VALIDATED_SELECTORS allowlist', () => {
-    it('contains exactly 19 selectors (all known swap selectors)', () => {
-      expect(VALIDATED_SELECTORS.size).toBe(19)
+    it('contains exactly 20 selectors (all known swap selectors)', () => {
+      expect(VALIDATED_SELECTORS.size).toBe(20)
     })
 
     it('matches KNOWN_SWAP_SELECTORS from swap-selectors.ts', async () => {

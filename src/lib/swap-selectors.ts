@@ -10,15 +10,17 @@
  * Zero dependencies. No imports.
  */
 
-// ── Known swap function selectors (18 total) ────────────────
+// ── Known swap function selectors (20 total) ────────────────
 
 export const KNOWN_SWAP_SELECTORS: Set<string> = new Set([
   // 1inch
   '0x12aa3caf', '0xe449022e', '0x0502b1c5', '0x2e95b6c8',
   // 0x
   '0xd9627aa4', '0x415565b0',
-  // Paraswap
+  // Paraswap (Augustus V5 — legacy)
   '0x3598d8ab', '0xa94e78ef', '0x46c67b6d',
+  // Paraswap (Augustus V6 — swapExactAmountIn)
+  '0xe3ead59e',
   // Odos
   '0x83800a8e',
   // KyberSwap
