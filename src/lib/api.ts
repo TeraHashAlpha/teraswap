@@ -340,7 +340,8 @@ const ROUTER_WHITELIST: Set<string> = new Set([
   '0x111111125421ca6dc452d289314280a0f8842a65', // 1inch AggregationRouter v6
   '0x1111111254eeb25477b68fb85ed929f73a960582', // 1inch AggregationRouter v5 (legacy)
   '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x Exchange Proxy (mainnet)
-  '0xdef171fe48cf0115b1d80b88dc8eab59176fee57', // ParaSwap Augustus V6 (Velora)
+  '0xdef171fe48cf0115b1d80b88dc8eab59176fee57', // ParaSwap Augustus V5 (legacy)
+  '0x6a000f20005980200259b80c5102003040001068', // ParaSwap Augustus V6 (Velora)
   '0x216b4b4ba9f3e719726886d34a177484278bfcae', // ParaSwap Augustus V6.2
   '0x16c6521dff6bab339122a0fe25a9116693265353', // Curve CurveRouterNG (mainnet)
   ...(FEE_COLLECTOR_ADDRESS ? [FEE_COLLECTOR_ADDRESS.toLowerCase()] : []),
