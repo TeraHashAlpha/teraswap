@@ -21,7 +21,7 @@ import { toFunctionSelector } from 'viem'
 export const FEE_COLLECTOR_ERROR_SELECTORS = {
   RouterNotWhitelisted: toFunctionSelector('RouterNotWhitelisted()'),
   InsufficientOutput: toFunctionSelector('InsufficientOutput(uint256,uint256)'),
-  SwapFailed: toFunctionSelector('SwapFailed()'),
+  SwapFailed: toFunctionSelector('SwapFailed(bytes)'),
   ZeroAmount: toFunctionSelector('ZeroAmount()'),
 } as const
 
