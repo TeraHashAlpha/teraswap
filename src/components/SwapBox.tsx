@@ -156,7 +156,10 @@ export default function SwapBox() {
         // avoid float precision issues on large token-decimals values.
         const shortfallBps = ((bestAmount - cowAmount) * 10_000n) / bestAmount
         const thresholdBps = safeBigInt(Math.round(MEV_PREFERENCE_THRESHOLD * 10_000)) ?? 0n
-        if (shortfallBps <= thresholdBps) {
+        // Gate the promotion on the gasless engine's net-positive verdict —
+        // a 15 bps shortfall on a $2k swap (~$3) is only worth swallowing when
+        // CoW's gas savings (typically $5–$15) more than offset it.
+        if (shortfallBps <= thresholdBps && rawMeta.gasless?.recommended) {
           // Promote CoW into best; keep the rest in their original order.
           const others = rawMeta.all.filter(q => q.source !== cowQuote.source)
           return {
@@ -643,6 +646,14 @@ export default function SwapBox() {
         {/* Quote Breakdown */}
         {meta && tokenIn && tokenOut && hasAmount && (
           <div id="quote-breakdown" className="mb-4">
+            {smartMevApplied && (
+              <p className="mb-2 text-[11px] text-cream-50">
+                ✦ Smart-routed via CoW{' '}
+                {meta.gasless && meta.gasless.gasSavingsUsd >= 0.5
+                  ? `(gasless, ~$${meta.gasless.gasSavingsUsd.toFixed(2)} saved)`
+                  : '(MEV protected)'}
+              </p>
+            )}
             <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={priceCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} />
           </div>
         )}
