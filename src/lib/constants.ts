@@ -133,9 +133,17 @@ export const FEE_NATIVE_SOURCES: AggregatorName[] = []
 // Sources incompatible with FeeCollector proxy routing:
 // - 0x: Uses Permit2 pull model (not standard ERC-20 approve)
 // - cowswap: Intent-based (EIP-712 signing, no on-chain tx to intercept)
-// These sources are excluded from quotes when FeeCollector is active
-// to guarantee fee collection on every swap.
-export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = ['0x', 'cowswap']
+// - uniswapv3, odos: [TEMPORARY — revert after router timelock executes
+//   2026-05-22 ~10:42 UTC] SwapRouter02 (0x68b3465...) and Odos Router V3
+//   (0xCf5540f...) are not yet on the FeeCollector V2 whitelist; every
+//   swap through these sources via FeeCollector reverts with
+//   RouterNotWhitelisted. Timelock txs queued: 0x144a9b13... and
+//   0xfd581b22.... Once executed, drop these two entries so 0.1% fee
+//   collection resumes for Uniswap V3 and Odos.
+// These sources are excluded from FeeCollector wrapping; for the
+// permanent two (0x, cowswap) they're also excluded from quotes when
+// FeeCollector is active to guarantee fee collection on every swap.
+export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = ['0x', 'cowswap', 'uniswapv3', 'odos']
 
 // ── Disabled Sources ────────────────────────────────────
 // Sources temporarily disabled for security/operational reasons.

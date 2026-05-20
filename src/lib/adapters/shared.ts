@@ -62,9 +62,14 @@ export function isNativeEth(token: string): boolean {
   return token.toLowerCase() === NATIVE_ETH.toLowerCase()
 }
 
-/** RPC URL for on-chain calls */
+/** RPC URL for on-chain calls.
+ *  Browser: routes through /api/rpc proxy (avoids CORS + hides user IP).
+ *  Server: hits the configured RPC directly. */
 export function getRpcUrl(): string {
-  return process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+  if (typeof window === 'undefined') {
+    return process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+  }
+  return '/api/rpc'
 }
 
 /**

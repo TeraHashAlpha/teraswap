@@ -20,7 +20,8 @@ const DIRECT_RPC_URL = process.env.RPC_URL
 
 /**
  * Custom EIP-1193 transport that routes requests through /api/rpc.
- * Falls back to direct RPC if the proxy is unreachable.
+ * No direct-RPC fallback: from the browser that would hit CORS on
+ * providers like eth.merkle.io. Surface the proxy error instead.
  */
 function proxyTransport() {
   return custom({
@@ -32,15 +33,8 @@ function proxyTransport() {
       })
 
       if (!res.ok) {
-        // Fallback to direct RPC if proxy fails (e.g. rate limited)
-        const fallback = await fetch(DIRECT_RPC_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-        })
-        const fallbackData = await fallback.json()
-        if (fallbackData.error) throw new Error(fallbackData.error.message)
-        return fallbackData.result
+        const text = await res.text().catch(() => '')
+        throw new Error(`RPC proxy error (${res.status}): ${text.slice(0, 100)}`)
       }
 
       const data = await res.json()
