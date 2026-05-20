@@ -130,21 +130,48 @@ export const FEE_COLLECTOR_V1_ADDRESS = '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa5
 // All fee collection now goes through the FeeCollector smart contract.
 export const FEE_NATIVE_SOURCES: AggregatorName[] = []
 
-// Sources incompatible with FeeCollector proxy routing:
-// - 0x: Uses Permit2 pull model (not standard ERC-20 approve)
-// - cowswap: Intent-based (EIP-712 signing, no on-chain tx to intercept)
-// - uniswapv3, odos, kyberswap: [TEMPORARY — revert after router timelock
-//   executes 2026-05-22 ~10:42 UTC] SwapRouter02 (0x68b3465...),
-//   Odos Router V3 (0xCf5540f...) and KyberSwap MetaAggregationRouterV2
-//   (0x6131B5fae19EA4f9D964eAc0408E4408b66337b5) are not yet on the
-//   FeeCollector whitelist; every swap through these sources via
-//   FeeCollector reverts with RouterNotWhitelisted. Once the timelocked
-//   whitelist additions execute, drop these three entries so 0.1% fee
-//   collection resumes for Uniswap V3, Odos, and KyberSwap.
-// These sources are excluded from FeeCollector wrapping; for the
-// permanent two (0x, cowswap) they're also excluded from quotes when
-// FeeCollector is active to guarantee fee collection on every swap.
-export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = ['0x', 'cowswap', 'uniswapv3', 'odos', 'kyberswap']
+// Sources incompatible with FeeCollector proxy routing.
+//
+// PERMANENT — structural mismatch, never compatible with FeeCollector:
+//   - '0x'      Uses Permit2 pull model (not standard ERC-20 approve).
+//   - 'cowswap' Intent-based (EIP-712 signing, no on-chain tx to wrap).
+//
+// TEMPORARY — router not on FeeCollector V1's on-chain whitelist; every
+// swap through these via FeeCollector reverts with RouterNotWhitelisted.
+// Revert these entries after the queued router timelocks execute
+// ~2026-05-22 ~10:42 UTC and NEXT_PUBLIC_FEE_COLLECTOR switches to V2.
+// Confirmed-broken in production:
+//   - 'uniswapv3' SwapRouter02 (0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45)
+//   - 'odos'      Odos Router V3 (0xCf5540fFFCdC3d510B18bFcA6d2b9987b0772559)
+//   - 'kyberswap' MetaAggregationRouterV2 (0x6131B5fae19EA4f9D964eAc0408E4408b66337b5)
+//   - 'velora'    ParaSwap Augustus V6 (0x6A000F20005980200259B80c5102003040001068)
+//
+// TEMPORARY (precautionary) — these routers have not been individually
+// verified against V1's whitelist. We've already paid the revenue cost
+// on the four above, so the safer trade-off is to bypass FeeCollector
+// for all of them rather than discover the same RouterNotWhitelisted
+// failure source-by-source in production. Drop alongside the verified
+// four once V2 is live.
+//   - '1inch', 'openocean', 'sushiswap', 'balancer', 'curve'
+//
+// Side effect of the precautionary expansion: until V2 goes live, every
+// source is fee-incompatible, which makes /v1/swap (the programmatic
+// fee-collectable endpoint) refuse to pin or auto-select any source.
+// Tests in src/app/api/v1/swap/route.test.ts that rely on a
+// fee-collectable winner are skipped during the timelock window — see
+// the `it.skip` markers there, all tagged with the same revert date.
+//
+// FeeCollector-wrapping decisions: usesFeeCollector() returns false for
+// every entry in this list. Quotes are NOT filtered by this list; users
+// still see every source in the meta-quote response.
+export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = [
+  // Permanent
+  '0x', 'cowswap',
+  // Temporary — router timelock 2026-05-22
+  'uniswapv3', 'odos', 'kyberswap', 'velora',
+  // Temporary (precautionary) — revert with the four above
+  '1inch', 'openocean', 'sushiswap', 'balancer', 'curve',
+]
 
 // ── Disabled Sources ────────────────────────────────────
 // Sources temporarily disabled for security/operational reasons.
