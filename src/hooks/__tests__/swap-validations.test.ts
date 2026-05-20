@@ -19,6 +19,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { encodeAbiParameters } from 'viem'
 
 import { validateRouterAddress, validateFeeIntegrity } from '@/lib/api'
+import { FEE_NATIVE_SOURCES } from '@/lib/constants'
 import type { AggregatorName } from '@/lib/constants'
 import {
   isKnownSwapSelector,
@@ -245,74 +246,123 @@ describe('A4 — validateFeeIntegrity', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════
-// A4b — Fee integrity call-site guard (mirrors useSwap.ts:314-329)
+// A4b — Fee integrity call-site guard (mirrors useSwap.ts:314-345)
 // ───────────────────────────────────────────────────────────────
-// When the swap is routed through FeeCollector, the 0.1% fee is enforced
-// on-chain by the contract — the aggregator API never sees it and the
-// quote/swap output comparison produces false positives (routing
-// volatility on small amounts can exceed the 2% tolerance). The
-// production guard skips validateFeeIntegrity in that case.
+// [P156] The check is now gated on FEE_NATIVE_SOURCES — i.e. only sources
+// that apply the 0.1% fee inside their own API response. The previous
+// gate was !routeViaFeeCollector, which fired on every non-FeeCollector
+// swap and produced false positives once FEE_INCOMPATIBLE_SOURCES expanded
+// to cover all 11 sources (Sprint 25D). The check is unchanged for the
+// partner-fee model it was designed for — only the entry condition moved.
+//
+// Three fee modes the guard distinguishes:
+//   1. routeViaFeeCollector       → contract enforces fee on-chain; skip.
+//   2. source ∈ FEE_NATIVE_SOURCES → aggregator applies fee in API; check.
+//   3. source ∈ FEE_INCOMPATIBLE   → no fee at all; check is meaningless.
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Mirrors the production guard in useSwap.ts so a future drift between
+ * the two flags the test rather than the user. Tests inject the
+ * partner-fee membership explicitly because the production constant
+ * (`FEE_NATIVE_SOURCES`) is currently empty.
+ */
 function runFeeIntegrityCallSite(args: {
   quoteToAmount: string | null
   swapToAmount: string
   source: AggregatorName
-  routeViaFeeCollector: boolean
+  usesPartnerFee: boolean
 }): { ran: boolean; valid: boolean } {
-  if (args.quoteToAmount && !args.routeViaFeeCollector) {
+  if (args.quoteToAmount && args.usesPartnerFee) {
     const r = validateFeeIntegrity(args.quoteToAmount, args.swapToAmount, args.source)
     return { ran: true, valid: r.valid }
   }
   return { ran: false, valid: true }
 }
 
-describe('A4b — fee integrity call-site guard', () => {
-  it('routeViaFeeCollector=true → SKIPS validateFeeIntegrity entirely', () => {
+describe('A4b — fee integrity call-site guard [P156]', () => {
+  // ── Case 1: FeeCollector route (irrelevant — fee is on-chain) ──
+
+  it('FeeCollector route + non-partner source → SKIPS validateFeeIntegrity', () => {
     // Same inputs that would FAIL the check (10% higher output) but the
-    // FeeCollector guard short-circuits before validateFeeIntegrity runs.
+    // partner-fee guard short-circuits before validateFeeIntegrity runs.
+    // A FeeCollector-routed source is also never in FEE_NATIVE_SOURCES, so
+    // usesPartnerFee=false here regardless of the FeeCollector flag.
     const result = runFeeIntegrityCallSite({
       quoteToAmount: '1000000',
       swapToAmount: '1100000',
       source: 'kyberswap',
-      routeViaFeeCollector: true,
+      usesPartnerFee: false,
     })
     expect(result.ran).toBe(false)
     expect(result.valid).toBe(true)
   })
 
-  it('routeViaFeeCollector=false → RUNS validateFeeIntegrity', () => {
+  // ── Case 2: partner-fee source (the only case the check applies to) ──
+
+  it('source IS in FEE_NATIVE_SOURCES → RUNS validateFeeIntegrity', () => {
+    // Pretend a source is in the partner-fee list (in production this list
+    // is currently empty, so this case isn't reachable from the live code
+    // path — but the guard remains correct for future re-enablement).
     const result = runFeeIntegrityCallSite({
       quoteToAmount: '1000000',
-      swapToAmount: '990000',
+      swapToAmount: '990000', // ~1% lower → fee likely applied → valid
       source: '1inch',
-      routeViaFeeCollector: false,
+      usesPartnerFee: true,
     })
     expect(result.ran).toBe(true)
     expect(result.valid).toBe(true)
   })
 
-  it('routeViaFeeCollector=false with suspicious output → still fails', () => {
+  it('source IS in FEE_NATIVE_SOURCES with suspiciously high output → still fails', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const result = runFeeIntegrityCallSite({
       quoteToAmount: '1000000',
-      swapToAmount: '1100000',
+      swapToAmount: '1100000', // 10% higher → fee never applied → fails
       source: '1inch',
-      routeViaFeeCollector: false,
+      usesPartnerFee: true,
     })
     expect(result.ran).toBe(true)
     expect(result.valid).toBe(false)
     consoleSpy.mockRestore()
   })
 
-  it('quoteToAmount=null → skipped regardless of routing', () => {
+  // ── Case 3: fee-incompatible source (no fee — check is meaningless) ──
+
+  it('source NOT in FEE_NATIVE_SOURCES → SKIPS check (was the false-positive path)', () => {
+    // The exact shape that used to fire the false positive: an aggregator
+    // returning a slightly higher swap-output than the original quote due
+    // to routing volatility on small amounts. The previous guard ran the
+    // check here (case 3) and blocked the swap; the new guard skips.
+    const result = runFeeIntegrityCallSite({
+      quoteToAmount: '1000000',
+      swapToAmount: '1025000', // +2.5% — would have tripped the 2% tolerance
+      source: 'kyberswap',
+      usesPartnerFee: false,
+    })
+    expect(result.ran).toBe(false)
+    expect(result.valid).toBe(true)
+  })
+
+  // ── Boundary: missing quote anchor ──
+
+  it('quoteToAmount=null → skipped regardless of partner-fee membership', () => {
     const result = runFeeIntegrityCallSite({
       quoteToAmount: null,
       swapToAmount: '1100000',
       source: '1inch',
-      routeViaFeeCollector: false,
+      usesPartnerFee: true,
     })
     expect(result.ran).toBe(false)
+  })
+
+  // ── Constant invariant: FEE_NATIVE_SOURCES currently empty ──
+
+  it('FEE_NATIVE_SOURCES is empty today → every live swap skips the check', () => {
+    // Documents the current production reality: with no partner-fee sources
+    // configured, the guard at the call site is always false. The check
+    // re-arms automatically the moment a source is added to the constant.
+    expect(FEE_NATIVE_SOURCES).toEqual([])
   })
 })
 
