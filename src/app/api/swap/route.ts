@@ -57,6 +57,10 @@ export async function POST(req: NextRequest) {
       dstDecimals = 18,
       quoteMeta,
       chainId,
+      /** Optional output destination — when present, calldata must direct
+       *  tokens here instead of `from`. Required when `from` is the
+       *  FeeCollector contract but the user wallet receives tokens. */
+      recipient,
     } = body
 
     if (!source || !src || !dst || !amount || !from) {
@@ -103,6 +107,12 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
+    if (recipient != null && (typeof recipient !== 'string' || !ADDRESS_RE.test(recipient))) {
+      return NextResponse.json(
+        { error: 'Invalid recipient address format' },
+        { status: 400 },
+      )
+    }
 
     // [Audit / L-01] Validate slippage range — max 15% for mainnet safety
     const slippageNum = Number(slippage)
@@ -124,6 +134,7 @@ export async function POST(req: NextRequest) {
       dstDecimals,
       quoteMeta,
       chainId ? Number(chainId) : undefined,
+      recipient,
     )
 
     // [SC-04] Server-side defense-in-depth — mirrors frontend KNOWN_SWAP_SELECTORS
@@ -137,13 +148,17 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // [R1] Validate recipient in calldata matches the requesting wallet
-      if (from) {
-        const recipientCheck = validateCallDataRecipient(result.tx.data as string, from)
+      // [R1] Validate recipient in calldata matches the expected destination.
+      // When the request includes an explicit `recipient` (FeeCollector
+      // routing: `from` = FeeCollector contract, `recipient` = user wallet)
+      // the calldata must direct tokens to that recipient, not to `from`.
+      const expectedRecipient = recipient || from
+      if (expectedRecipient) {
+        const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient)
         if (!recipientCheck.valid) {
           console.error(
             `[R1] BLOCKED: Recipient mismatch in ${source} calldata.`,
-            `Expected: ${from}, Got: ${recipientCheck.extracted}`,
+            `Expected: ${expectedRecipient}, Got: ${recipientCheck.extracted}`,
             `Reason: ${recipientCheck.reason}`,
           )
           return NextResponse.json(

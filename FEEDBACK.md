@@ -60,3 +60,26 @@
   unchanged), so the existing route + integration tests covering the PATCH
   endpoint catch any regression. If we add unit tests for analytics helpers
   in a future sprint, this is a good candidate to start with.
+
+## Feedback — P139 (commit pending)
+
+### Edge case
+- Server-side R1 check in `src/app/api/swap/route.ts` was validating
+  calldata recipient against `from`. The prompt said "no change needed"
+  for R1, which is true for the client-side check (uses `address`), but
+  with this change `from` becomes `FEE_COLLECTOR_ADDRESS` when FeeCollector
+  routing is active — making the server R1 expect FC as the recipient,
+  which fails. Updated to validate against `recipient || from` so the
+  expected destination is the user wallet when present, falling back to
+  `from` for direct (non-FeeCollector) routes. This preserves the
+  security guarantee (calldata always validated against the intended
+  user destination) and matches what the adapter is told to encode.
+
+### Concern
+- `simulateSwapTx` matches custom errors by both decoded name and 4-byte
+  selector hex. The selector match is a defensive fallback for RPC
+  providers that don't auto-decode; if a future contract reuses the same
+  error names with different signatures, the name-string match could be
+  ambiguous. Mitigation: the selector match is stricter and would only
+  fire for the exact `RouterNotWhitelisted()` / `SwapFailed()` / etc.
+  signatures.
