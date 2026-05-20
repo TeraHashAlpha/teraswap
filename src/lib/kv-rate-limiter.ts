@@ -25,7 +25,14 @@ import { kv } from '@/lib/kv'
 
 export const SWAP_RATE_LIMIT = { limit: 20, windowMs: 60_000 }
 export const QUOTE_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
-export const RPC_RATE_LIMIT = { limit: 60, windowMs: 60_000 }
+// RPC proxy is read-only (the blacklist in src/app/api/rpc/route.ts blocks
+// every write/sign method). Injected wallet extensions (MetaMask, Rainbow,
+// ...) poll through this endpoint for block headers, balances, gas, and
+// token prices — typically 30–50 req/min on top of our own app traffic
+// (~10–20 req/min) and simulation eth_calls. 60/min starved legitimate
+// calls almost immediately; 300/min leaves headroom while still blunting
+// abuse. The fallback (degraded mode) is ceil(300/2) = 150/min.
+export const RPC_RATE_LIMIT = { limit: 300, windowMs: 60_000 }
 
 interface RateLimitResult {
   allowed: boolean
