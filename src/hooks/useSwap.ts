@@ -379,9 +379,18 @@ export function useSwap(
         const simValue = routeViaFeeCollector && isNativeIn
           ? rawAmountBn
           : BigInt(swapData.tx.value || '0')
-        const simGas = swapData.tx.gas > 0
-          ? BigInt(swapData.tx.gas) + (routeViaFeeCollector ? (isNativeIn ? 100_000n : 120_000n) : 0n)
-          : undefined
+        // Simulation only checks revert/success, not gas usage. The adapter's
+        // tx.gas is too low for eth_call: Uniswap V3's QuoterV2 returns the
+        // quotation gas (~40K), which excludes multicall overhead, WETH
+        // wrapping, and pool/token transfers (~200-250K total). Use a
+        // generous floor so the sim never OOGs and misreports a fake revert.
+        // Real-tx gas is set separately at send time (still swapData.tx.gas).
+        const SIM_GAS_FLOOR = 500_000n
+        const adapterGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : 0n
+        const fcOverhead = routeViaFeeCollector ? (isNativeIn ? 100_000n : 120_000n) : 0n
+        const simGas = adapterGas + fcOverhead < SIM_GAS_FLOOR
+          ? SIM_GAS_FLOOR
+          : adapterGas + fcOverhead
 
         setStatus('simulating' as SwapStatus)
         const sim = await simulateSwapTx({
