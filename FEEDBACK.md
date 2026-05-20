@@ -91,3 +91,38 @@
   the file and is preserved to keep this prompt scope-clean, but the new
   React Compiler rules will keep flagging it. A follow-up refactor to fetch
   via a reducer or `useSyncExternalStore` would silence it.
+
+## Feedback — P135 (commit c91bf5b)
+
+### Assumption that turned out wrong
+- Spec for the MEV toggle (SwapBox.tsx line 623) said "extend tappable area
+  with padding around the h-6 w-10 toggle track". Implementing literal
+  `p-2` on the button itself (even with `box-content` + `-m-2` to preserve
+  layout) expands the *painted* track because the background-color extends
+  to the padding-box — that's a visible desktop change since the toggle
+  uses an inline `backgroundColor` style. Switched to an invisible
+  `<span aria-hidden absolute -inset-2 sm:inset-0>` child that extends
+  the hit area only (events bubble back to the parent button via pointer
+  bubbling). Behaviourally equivalent to the spec; visually inert on
+  desktop. Architect should confirm this substitution.
+
+### Edge case
+- Global tap feedback (`button:active / a:active / [role="button"]:active
+  { transform: scale(0.97) }`) was applied without an `@media (hover: none)`
+  gate, matching the spec literally ("Global"). This means desktop mouse
+  clicks now also get the 3% scale dip. The existing file convention
+  (`-webkit-tap-highlight-color`, line 286-290) gates similar styling to
+  `@media (hover: none)`. If desktop mouse-click scale feels off, the
+  fix is to wrap the new selectors in the same media query.
+
+- `Footer.tsx` `py-2 sm:py-0` was applied to every link including the
+  icon-only X (Twitter) link, since the spec said "each link" and the
+  uniform treatment keeps tap rows aligned. The X link becomes a taller
+  row on mobile (icon + 8px top + 8px bottom). Acceptable, but the
+  architect may prefer the icon-only link to keep its original size.
+
+### Concern
+- 20 pre-existing eslint warnings in `SwapBox.tsx` (mostly
+  `react-hooks/set-state-in-effect` and `exhaustive-deps`) are unchanged
+  by this prompt. Verified via the `0 errors` line in the eslint summary
+  — none of my edits introduced new warnings.

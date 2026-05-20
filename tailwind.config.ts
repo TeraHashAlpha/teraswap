@@ -64,6 +64,7 @@ const config: Config = {
         'shimmer': 'shimmer 1.2s ease-in-out forwards',
         'pulse-glow': 'pulseGlow 3s ease-in-out infinite',
         'spin-slow': 'spin 20s linear infinite',
+        'slide-up': 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
       },
       keyframes: {
         glow: {
@@ -77,6 +78,10 @@ const config: Config = {
         pulseGlow: {
           '0%, 100%': { transform: 'scale(1)', opacity: '0.08' },
           '50%': { transform: 'scale(1.4)', opacity: '0.04' },
+        },
+        slideUp: {
+          '0%': { transform: 'translateY(100%)' },
+          '100%': { transform: 'translateY(0)' },
         },
       },
     },

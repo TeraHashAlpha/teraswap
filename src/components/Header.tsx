@@ -103,7 +103,7 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
       {showNav && (
         <button
           onClick={() => setMobileMenu(!mobileMenu)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-cream-15 text-cream-65 transition hover:text-cream md:hidden"
+          className="flex h-11 w-11 items-center justify-center rounded-lg border border-cream-15 text-cream-65 transition hover:text-cream md:hidden"
           aria-label="Menu"
         >
           {mobileMenu ? '✕' : '☰'}
@@ -169,7 +169,7 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
                     {account.displayName}
                   </span>
                 ) : (
-                  'CONNECT WALLET'
+                  <>CONNECT<span className="hidden sm:inline"> WALLET</span></>
                 )}
               </button>
             )

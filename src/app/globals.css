@@ -292,3 +292,38 @@ html.transitioning * {
 /* Hide scrollbar but keep scroll functionality */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── [P135] Mobile UX: tab-bar right-fade hint ──────────────
+   Applied only on narrow viewports so users see content is
+   clipped past the right edge and learn the tab bar scrolls. */
+@media (max-width: 639px) {
+  .tab-bar-fade {
+    -webkit-mask-image: linear-gradient(to right, black 85%, transparent);
+    mask-image: linear-gradient(to right, black 85%, transparent);
+  }
+}
+
+/* ── [P135] Safe-area extension for the in-app swap column ──
+   Pairs with the existing footer safe-area rule above. The swap
+   column doesn't sit inside <footer>, so it needs its own hook
+   to clear the iOS home-indicator strip. */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .swap-main {
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* ── [P135] Global tap feedback ──────────────────────────────
+   Briefly scales any pressed control by 3% to confirm the touch.
+   Opt out by adding `.no-tap-scale` to elements where the scale
+   would conflict with their own animation (e.g. spinning icons,
+   panel toggles whose transform is meaningful). */
+button:active,
+a:active,
+[role="button"]:active {
+  transform: scale(0.97);
+  transition: transform 0.1s ease;
+}
+.no-tap-scale:active {
+  transform: none;
+}

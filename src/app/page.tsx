@@ -77,14 +77,15 @@ export default function Home() {
           {footer}
         </main>
       ) : (
-        <main className="relative z-10 flex flex-1 animate-fade-slide-in flex-col items-center justify-start px-3 pb-8 pt-20 sm:px-4 sm:pt-24">
+        <main className="swap-main relative z-10 flex flex-1 animate-fade-slide-in flex-col items-center justify-start px-3 pb-8 pt-20 sm:px-4 sm:pt-24">
           {/* Notification permission banner — shows once */}
           <div className="mb-3 w-full max-w-[540px]">
             <NotificationBanner />
           </div>
 
-          {/* Swap / DCA mode toggle */}
-          <div className="no-scrollbar sticky top-0 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
+          {/* Swap / DCA mode toggle — scrolls horizontally on narrow viewports
+              with a right-side fade hint that more tabs exist beyond the edge. */}
+          <div className="no-scrollbar tab-bar-fade sticky top-0 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] snap-x snap-mandatory gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
             {([
               ['instant', 'Swap'],
               ['dca', 'DCA'],
@@ -102,7 +103,7 @@ export default function Home() {
                   disabled={comingSoon}
                   aria-disabled={comingSoon}
                   title={comingSoon ? 'Coming soon' : undefined}
-                  className={`flex-1 whitespace-nowrap rounded-lg px-2 py-2 text-[11px] font-semibold transition-all sm:px-0 sm:text-[13px] ${
+                  className={`flex-1 snap-start whitespace-nowrap rounded-lg px-2 py-3 text-[11px] font-semibold transition-all sm:px-0 sm:py-2 sm:text-[13px] ${
                     comingSoon
                       ? 'cursor-not-allowed text-cream-35 opacity-50'
                       : swapMode === mode
@@ -112,7 +113,7 @@ export default function Home() {
                 >
                   {label}
                   {comingSoon && (
-                    <span className="ml-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[8px] font-bold text-amber-300 sm:text-[9px]">
+                    <span className="ml-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[7px] font-bold text-amber-300 sm:text-[9px]">
                       Soon
                     </span>
                   )}
