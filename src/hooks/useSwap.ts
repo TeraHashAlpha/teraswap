@@ -10,6 +10,7 @@ import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
+import { parseSimulationError, buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -30,6 +31,7 @@ class PriceGuardError extends Error {
 // ── Pre-swap simulation (ASM equivalent) ─────────────────
 // Simulates the transaction via eth_call before sending.
 // Catches reverts, insufficient gas, and sandwich attacks.
+// [P140] Error parsing extracted to src/lib/simulation.ts for unit testing.
 async function simulateSwapTx(params: {
   to: `0x${string}`
   data: `0x${string}`
@@ -42,7 +44,7 @@ async function simulateSwapTx(params: {
 }): Promise<{ success: boolean; gasUsed?: bigint; error?: string }> {
   try {
     const client = getPrivateClient()
-    const result = await client.call({
+    await client.call({
       account: params.from,
       to: params.to,
       data: params.data,
@@ -52,22 +54,21 @@ async function simulateSwapTx(params: {
     // If eth_call returns data without reverting, the tx would succeed
     return { success: true, gasUsed: params.gas }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    // Parse common revert reasons
-    if (msg.includes('insufficient funds')) {
-      return { success: false, error: 'Insufficient ETH balance for this swap + gas.' }
-    }
-    if (msg.includes('STF') || msg.includes('TRANSFER_FROM_FAILED')) {
-      return { success: false, error: 'Token transfer would fail — check approval or balance.' }
-    }
-    if (msg.includes('Too little received') || msg.includes('INSUFFICIENT_OUTPUT')) {
-      return { success: false, error: 'Swap would fail due to slippage — price moved since quote. Try again.' }
-    }
-    if (msg.includes('execution reverted')) {
-      return { success: false, error: `Simulation reverted: swap would fail on-chain. Try a different route or amount.` }
+    const parsed = parseSimulationError(err)
+    if (!parsed.success && parsed.error) {
+      // Structured diagnostic — selector + tx shape only; never log full calldata.
+      console.error('[TeraSwap] Simulation failed:', {
+        source: params.source,
+        to: params.to,
+        value: params.value.toString(),
+        gasLimit: params.gas?.toString(),
+        errorMessage: parsed.error,
+        selector: params.data.slice(0, 10),
+      })
+      return { success: false, error: parsed.error }
     }
     // Non-critical simulation failures shouldn't block the swap
-    console.warn('[TeraSwap] Simulation inconclusive:', msg)
+    console.warn('[TeraSwap] Simulation inconclusive:', err instanceof Error ? err.message : String(err))
     return { success: true }
   }
 }
@@ -86,13 +87,17 @@ async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
   quoteMeta?: QuoteMeta, chainId?: number,
+  /** Output destination — defaults to `from` server-side. Used when the
+   *  caller is the FeeCollector contract but tokens must land in the
+   *  user's wallet. */
+  recipient?: string,
 ): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       source, src, dst, amount, from, slippage,
-      srcDecimals, dstDecimals, quoteMeta, chainId,
+      srcDecimals, dstDecimals, quoteMeta, chainId, recipient,
     }),
   })
   const data = await res.json()
@@ -248,15 +253,26 @@ export function useSwap(
         ? rawAmountBn - (rawAmountBn * BigInt(FEE_BPS) / 10000n)
         : rawAmountBn
 
+      // [P139/P140] Sender + recipient switch.
+      // When routing via FeeCollector the on-chain msg.sender hitting the
+      // DEX router is the FeeCollector contract, so the aggregator must
+      // build router calldata expecting FeeCollector as the funds source
+      // (which forceApprove()s the router for the net amount). The user
+      // wallet becomes the explicit recipient so output still lands there.
+      // Helper extracted to src/lib/simulation.ts for unit testing.
+      const apiArgs = buildFeeCollectorSwapArgs(routeViaFeeCollector, address, FEE_COLLECTOR_ADDRESS)
       const swapData = await fetchSwapViaApi(
         source,
         tokenIn.address,
         tokenOut.address,
         apiAmountBn.toString(),
-        address,
+        apiArgs.from,
         slippage,
         tokenIn.decimals,
         tokenOut.decimals,
+        undefined,
+        undefined,
+        apiArgs.recipient,
       )
 
       if (!swapData.tx) {

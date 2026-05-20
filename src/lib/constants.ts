@@ -209,10 +209,10 @@ export const QUOTE_TIMEOUT_MS = 10_000
 // When the user has NOT toggled "Force MEV Protection" on, the SwapBox
 // auto-routes through CoW Protocol (or any other mevProtected source)
 // if its quoted output is within this fraction of the highest non-CoW
-// output. 0.003 = 0.3% — small enough to not materially compromise
-// price, large enough to catch the common case where CoW is just
-// behind the public-mempool venues by a sliver.
-export const MEV_PREFERENCE_THRESHOLD = 0.003
+// output AND the gasless engine reports it as net-positive for the
+// user. 0.0015 = 15 bps — tight enough that the price shortfall is
+// always smaller than the gas savings CoW provides.
+export const MEV_PREFERENCE_THRESHOLD = 0.0015
 
 // ── [LP-08] Public API key tiers ─────────────────────────
 // Limits applied per-key via sliding-window KV rate limiting. Both
