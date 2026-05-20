@@ -61,6 +61,71 @@
   endpoint catch any regression. If we add unit tests for analytics helpers
   in a future sprint, this is a good candidate to start with.
 
+## Feedback — P134 (commit 4b52342)
+
+### Edge case
+- Synthetic single-row fallback (no `order_executions` rows but order has
+  `tx_hash`) cannot populate `amount_in`. The orders table column subset I'm
+  fetching exposes `amount_out` for the executed amount, but the original
+  input amount lives in the on-chain order struct
+  (`order.amountIn` in the UI, sourced from the EIP-712 signed struct in the
+  `orders.order` jsonb column). Legacy orders therefore render as
+  "— → 1.5 ETH @ $X" on the row. Acceptable per the "graceful fallback for
+  missing fields" rule, but worth flagging — if the orders table adds an
+  `amount_in` mirror column (or we expose `order_struct->>'amountIn'`) we can
+  backfill this on the row.
+
+### Concern
+- `npm run lint` (`next lint`) is broken on this checkout because the repo
+  path contains a space ("dex-aggregator 2"). Next mis-parses the second
+  path segment as a directory arg and errors with
+  *"Invalid project directory provided, no such directory: …/lint"*. Verified
+  lint cleanliness via direct `npx eslint <changed files>` instead. Not
+  introduced by this prompt — affects CI parity if any job runs
+  `npm run lint` from a path with whitespace. Workaround:
+  `npx next lint -- --dir src` or call `npx eslint` directly.
+
+- `react-hooks/set-state-in-effect` warning on
+  `ExecutionTimeline.tsx:160` (`setLoading(true)` inside the `useEffect` that
+  triggers the fetch). The same pattern existed in the previous version of
+  the file and is preserved to keep this prompt scope-clean, but the new
+  React Compiler rules will keep flagging it. A follow-up refactor to fetch
+  via a reducer or `useSyncExternalStore` would silence it.
+
+## Feedback — P135 (commit c91bf5b)
+
+### Assumption that turned out wrong
+- Spec for the MEV toggle (SwapBox.tsx line 623) said "extend tappable area
+  with padding around the h-6 w-10 toggle track". Implementing literal
+  `p-2` on the button itself (even with `box-content` + `-m-2` to preserve
+  layout) expands the *painted* track because the background-color extends
+  to the padding-box — that's a visible desktop change since the toggle
+  uses an inline `backgroundColor` style. Switched to an invisible
+  `<span aria-hidden absolute -inset-2 sm:inset-0>` child that extends
+  the hit area only (events bubble back to the parent button via pointer
+  bubbling). Behaviourally equivalent to the spec; visually inert on
+  desktop. Architect should confirm this substitution.
+
+### Edge case
+- Global tap feedback (`button:active / a:active / [role="button"]:active
+  { transform: scale(0.97) }`) was applied without an `@media (hover: none)`
+  gate, matching the spec literally ("Global"). This means desktop mouse
+  clicks now also get the 3% scale dip. The existing file convention
+  (`-webkit-tap-highlight-color`, line 286-290) gates similar styling to
+  `@media (hover: none)`. If desktop mouse-click scale feels off, the
+  fix is to wrap the new selectors in the same media query.
+
+- `Footer.tsx` `py-2 sm:py-0` was applied to every link including the
+  icon-only X (Twitter) link, since the spec said "each link" and the
+  uniform treatment keeps tap rows aligned. The X link becomes a taller
+  row on mobile (icon + 8px top + 8px bottom). Acceptable, but the
+  architect may prefer the icon-only link to keep its original size.
+
+### Concern
+- 20 pre-existing eslint warnings in `SwapBox.tsx` (mostly
+  `react-hooks/set-state-in-effect` and `exhaustive-deps`) are unchanged
+  by this prompt. Verified via the `0 errors` line in the eslint summary
+  — none of my edits introduced new warnings.
 ## Feedback — P139 (commit pending)
 
 ### Edge case

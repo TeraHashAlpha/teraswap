@@ -133,20 +133,23 @@ export default function TransactionPreview({
   }, [routeViaFeeCollector, minimumOutput, tokenOut])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Review transaction">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Review transaction">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
 
-      {/* Modal */}
-      <div className="relative w-full max-w-md rounded-2xl border border-cream-08 bg-surface-secondary shadow-2xl shadow-black/40">
+      {/* Modal — bottom-sheet on mobile, centred card on desktop */}
+      <div className="relative flex max-h-[85vh] w-full animate-slide-up flex-col overflow-hidden rounded-t-2xl border border-cream-08 bg-surface-secondary shadow-2xl shadow-black/40 sm:max-h-none sm:max-w-md sm:animate-fade-slide-in sm:rounded-2xl">
+        {/* Drag pill — mobile bottom-sheet affordance */}
+        <div className="mx-auto mt-3 mb-1 h-1 w-10 shrink-0 rounded-full bg-cream-15 sm:hidden" />
+
         {/* Header */}
-        <div className="border-b border-cream-08 px-5 py-4">
+        <div className="shrink-0 border-b border-cream-08 px-5 py-4">
           <h2 className="text-base font-display font-semibold text-cream">Review Transaction</h2>
           <p className="mt-0.5 text-xs text-cream-50">Verify the details before signing</p>
         </div>
 
-        {/* Body */}
-        <div className="space-y-3 px-5 py-4">
+        {/* Body — scrolls within sheet on mobile, natural flow on desktop */}
+        <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {/* Decode failure warning */}
           {decodeFailed && (
             <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -293,17 +296,17 @@ export default function TransactionPreview({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-cream-08 px-5 py-4">
+        {/* Footer — sticky bottom on mobile with safe-area inset, static on desktop */}
+        <div className="shrink-0 border-t border-cream-08 bg-surface-secondary px-5 py-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:pb-4">
           <button
             onClick={onConfirm}
-            className="w-full rounded-full border-2 border-cream-80 bg-transparent py-3 text-[14px] font-bold uppercase tracking-[1.5px] text-cream transition-all hover:bg-cream hover:text-black"
+            className="flex h-12 w-full items-center justify-center rounded-full border-2 border-cream-80 bg-transparent text-[14px] font-bold uppercase tracking-[1.5px] text-cream transition-all hover:bg-cream hover:text-black sm:h-auto sm:py-3"
           >
             Confirm &amp; Sign
           </button>
           <button
             onClick={onCancel}
-            className="mt-2 w-full py-2 text-center text-xs text-cream-35 transition hover:text-cream-50"
+            className="mt-2 flex h-12 w-full items-center justify-center text-center text-xs text-cream-35 transition hover:text-cream-50 sm:h-auto sm:py-2"
           >
             Cancel
           </button>

@@ -31,7 +31,7 @@ export default function ThemeToggle() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream-15 text-sm text-cream-65 transition-all hover:border-cream-50 hover:text-cream dark:border-cream-15 dark:text-cream-65 dark:hover:border-cream-50 dark:hover:text-cream light:border-gray-300 light:text-gray-500 light:hover:border-gray-500 light:hover:text-gray-800"
+        className="flex h-11 w-11 items-center justify-center rounded-lg border border-cream-15 text-sm text-cream-65 transition-all hover:border-cream-50 hover:text-cream dark:border-cream-15 dark:text-cream-65 dark:hover:border-cream-50 dark:hover:text-cream light:border-gray-300 light:text-gray-500 light:hover:border-gray-500 light:hover:text-gray-800 sm:h-8 sm:w-8"
         title={`Theme: ${current.label}`}
       >
         {current.icon}

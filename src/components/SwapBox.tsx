@@ -518,9 +518,9 @@ export default function SwapBox() {
                 <TokenAddressBadge address={tokenIn.address} size="sm" showExplorerLink={false} />
               )}
               {balanceIn && (
-                <div className="flex gap-2">
-                  <button onClick={() => handleSetAmount(formatUnits(balanceIn.value / 2n, balanceIn.decimals))} className="text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream">50%</button>
-                  <button onClick={() => handleSetAmount(formatUnits(balanceIn.value, balanceIn.decimals))} className="text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream">MAX</button>
+                <div className="-my-2 flex gap-2 sm:my-0">
+                  <button onClick={() => handleSetAmount(formatUnits(balanceIn.value / 2n, balanceIn.decimals))} className="inline-flex min-h-[44px] items-center px-1 text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream sm:min-h-0 sm:px-0">50%</button>
+                  <button onClick={() => handleSetAmount(formatUnits(balanceIn.value, balanceIn.decimals))} className="inline-flex min-h-[44px] items-center px-1 text-[11px] font-semibold uppercase text-cream-65 transition hover:text-cream sm:min-h-0 sm:px-0">MAX</button>
                 </div>
               )}
             </div>
@@ -571,6 +571,10 @@ export default function SwapBox() {
             style={{ backgroundColor: mevProtected ? '#C8B89A' : 'rgba(200,184,154,0.15)' }}
             aria-label="Toggle force MEV protection"
           >
+            {/* [P135] Invisible hit-area extender on mobile — pushes the
+                tap region out to ~44px on every side without changing the
+                painted track. Children events bubble back to the button. */}
+            <span aria-hidden="true" className="absolute -inset-2 sm:inset-0" />
             <span
               className="h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-200"
               style={{ marginLeft: mevProtected ? '20px' : '4px' }}
