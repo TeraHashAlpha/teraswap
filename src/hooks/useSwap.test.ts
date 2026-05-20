@@ -103,6 +103,21 @@ vi.mock('@/lib/wallet-activity-tracker', () => ({
   trackWalletActivity: vi.fn(),
 }))
 
+// [P156] The M-01 fee-integrity validator only runs when the source is in
+// FEE_NATIVE_SOURCES (partner-fee mode). The live constant is currently
+// empty, so without this mock the validator gate would skip the call and
+// the "blocks the swap when validateFeeIntegrity fails" test below would
+// never fire. We patch '1inch' into the list here so we can still verify
+// the validator wiring; the empty-array invariant itself is pinned by
+// src/hooks/__tests__/swap-validations.test.ts (A4b).
+vi.mock('@/lib/constants', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/constants')>('@/lib/constants')
+  return {
+    ...actual,
+    FEE_NATIVE_SOURCES: ['1inch'],
+  }
+})
+
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useSwap } from './useSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'

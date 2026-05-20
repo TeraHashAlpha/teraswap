@@ -9,7 +9,7 @@ import {
 import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
-import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, FEE_NATIVE_SOURCES, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { parseSimulationError, buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
@@ -311,13 +311,37 @@ export function useSwap(
         )
       }
 
-      // [M-01] Fee integrity check — only for non-FeeCollector routes.
-      // When routeViaFeeCollector=true the on-chain contract enforces the
-      // 0.1% fee; the aggregator API never sees it. Comparing quote output
-      // (full amount) vs swap output (net amount) produces false positives
-      // because the API is called with 0.1% less input, and routing
-      // volatility on small amounts can exceed the 2% tolerance.
-      if (quoteToAmount && !routeViaFeeCollector) {
+      // [M-01 → P156] Fee integrity check — only for partner-fee sources.
+      //
+      // There are three fee modes today and the check is only meaningful for
+      // one of them:
+      //
+      //   1. FeeCollector routing (routeViaFeeCollector=true)
+      //      Fee is enforced on-chain by the FeeCollector contract. The
+      //      aggregator API never sees it, so comparing quote-output (full
+      //      input) vs swap-output (net input) produces false positives.
+      //
+      //   2. Partner fee via API (source ∈ FEE_NATIVE_SOURCES)
+      //      The aggregator's own API applies the 0.1% fee on the response.
+      //      THIS is what the check was built for — it catches the case
+      //      where the partner-fee parameter was silently ignored upstream.
+      //
+      //   3. No fee at all (source ∈ FEE_INCOMPATIBLE_SOURCES)
+      //      Quote and swap both run on the full amount; comparing them is
+      //      meaningless and any difference is just routing volatility.
+      //
+      // The previous guard (!routeViaFeeCollector) conflated cases 2 and 3.
+      // Sprint 25D expanded FEE_INCOMPATIBLE_SOURCES to all 11 sources to
+      // work around the V1 router whitelist gap, which made case 3 the only
+      // path — and triggered the false-positive block on every swap.
+      //
+      // Gating on FEE_NATIVE_SOURCES restricts the check to case 2 only.
+      // FEE_NATIVE_SOURCES is currently empty (no source uses partner-fee
+      // mode), so the check is effectively inert; reintroducing a partner-
+      // fee integration later automatically re-arms the check via the
+      // constants list — no code change needed here.
+      const usesPartnerFee = FEE_NATIVE_SOURCES.includes(source)
+      if (quoteToAmount && usesPartnerFee) {
         const feeCheck = validateFeeIntegrity(quoteToAmount, swapData.toAmount, source)
         if (!feeCheck.valid) {
           console.error('[TeraSwap] Fee integrity BLOCKED:', feeCheck.reason)
