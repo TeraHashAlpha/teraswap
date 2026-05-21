@@ -214,7 +214,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="relative bg-surface py-20 px-6 sm:py-24">
+    <section id="performance" className="relative bg-surface/80 backdrop-blur-[1px] py-20 px-6 sm:py-24">
       <div className="mx-auto max-w-4xl">
         {/* Left-biased section head — replaces the centered split-grid template */}
         <SectionHeadline className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -443,7 +443,7 @@ function SevenLayerSection() {
   ]
 
   return (
-    <section id="seven-layer" className="relative bg-surface py-24 px-6 sm:py-28">
+    <section id="seven-layer" className="relative bg-surface/80 py-24 px-6 sm:py-28">
       <div className="mx-auto max-w-3xl">
         {/* Headline */}
         <div className="mb-12 text-center">
@@ -575,7 +575,7 @@ function DifferentiationSection() {
   ]
 
   return (
-    <section id="why-teraswap" className="relative bg-surface py-20 px-6 sm:py-24">
+    <section id="why-teraswap" className="relative bg-surface/80 py-20 px-6 sm:py-24">
       <div className="mx-auto max-w-5xl">
         <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
@@ -618,7 +618,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative bg-surface py-24 px-6">
+    <section id="security" className="relative bg-surface/80 py-24 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -731,7 +731,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-surface py-20 px-6 overflow-hidden sm:py-24">
+    <section id="experience" className="relative bg-surface/80 py-20 px-6 overflow-hidden sm:py-24">
       {/* Background watermark — z-0 so it stays fully behind content */}
       <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
         <span
@@ -906,7 +906,7 @@ function FeaturesSection() {
   const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
 
   return (
-    <section id="features" className="relative bg-surface py-24 px-6">
+    <section id="features" className="relative bg-surface/80 backdrop-blur-[1px] py-24 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Section head — left-biased instead of centered template */}
         <div className="mb-12 max-w-2xl">
@@ -976,7 +976,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative bg-surface px-6 py-32 text-center">
+    <section className="relative bg-surface/80 px-6 py-32 text-center">
       {/* Headline */}
       <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}
