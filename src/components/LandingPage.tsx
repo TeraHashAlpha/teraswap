@@ -1,5 +1,13 @@
 'use client'
 
+/* Hallmark · genre: atmospheric · macrostructure: Stat-Led
+ * hero: H4 Stat-Led — 3 anchor numbers above a single-line H1, left-biased 7/5 grid
+ * theme: project-locked (cream #F5F0E8 paper-inverted on surface #080B10 · gold #C8B89A accent — preserved per pre-flight)
+ * reveal: one orchestrated hero entrance (~220ms · ease-out-expo) · static elsewhere
+ * studied: no (URL studies of jup.ag/cow.fi/aave.com blocked by SPA shells — editorial DNA from SPRINT-27 spec used as input)
+ * pre-emit critique: P5 H4 E4 S5 R5 V4
+ */
+
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
 import Link from 'next/link'
@@ -72,75 +80,111 @@ function AnimatedCounter({ value, suffix = '', duration = 1500 }: { value: numbe
 // ══════════════════════════════════════════════════════════
 
 function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
-  const [showTrust, setShowTrust] = useState(false)
-
-  useEffect(() => {
-    const timer = setTimeout(() => setShowTrust(true), 2000)
-    return () => clearTimeout(timer)
-  }, [])
+  // Three anchor numbers pulled above the H1 (Stat-Led DNA).
+  // All values are verifiable from this codebase: 11 source adapters,
+  // 7 validation layers (see SevenLayerSection), 29 Chainlink feeds.
+  const ANCHOR_STATS: { v: number; label: string }[] = [
+    { v: 11, label: 'liquidity sources' },
+    { v: 7,  label: 'verification layers' },
+    { v: 29, label: 'Chainlink oracles' },
+  ]
 
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center px-4 pb-16 pt-28 text-center sm:px-6">
-      {/* Radial glow behind headline */}
-      <div className="pointer-events-none absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[800px] rounded-full bg-[radial-gradient(ellipse_at_center,rgba(200,184,154,0.06)_0%,transparent_70%)]" />
+    <section className="relative px-6 pt-28 pb-20 sm:px-10 sm:pt-32">
+      <div className="relative z-10 mx-auto grid max-w-6xl items-start gap-12 lg:grid-cols-[7fr_5fr] lg:gap-16">
+        {/* Left column — stats anchor, headline, CTA */}
+        <div className="text-left">
+          {/* Stat strip — orchestrated entrance, tabular numerals */}
+          <motion.dl
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22, ease: easeOutExpo }}
+            className="mb-8 grid grid-cols-3 gap-x-6 gap-y-1 sm:gap-x-10"
+          >
+            {ANCHOR_STATS.map((s) => (
+              <div key={s.label}>
+                <dd
+                  className="font-display text-[40px] sm:text-[52px] md:text-[60px] font-bold leading-none text-cream"
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  <AnimatedCounter value={s.v} />
+                </dd>
+                <dt className="mt-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
+                  {s.label}
+                </dt>
+              </div>
+            ))}
+          </motion.dl>
 
-      {/* H1 */}
-      <motion.h1
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7, ease: easeOutExpo }}
-        className="relative z-10 mb-8 font-display text-[28px] font-extrabold leading-[1.1] tracking-[-0.02em] text-cream sm:text-[44px] md:text-[64px] lg:text-[76px]"
-      >
-        The{' '}
-        <span className="text-shimmer">Gold Standard</span>
-        <br />
-        of DeFi Trading.
-      </motion.h1>
+          {/* Hairline under stats — quiet structural mark */}
+          <div className="mb-10 h-px w-24 bg-cream-15" />
 
-      {/* H2 */}
-      <motion.p
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.2, ease: easeOutExpo }}
-        className="relative z-10 mb-12 max-w-[640px] text-lg leading-relaxed text-cream-75"
-      >
-        Maximum liquidity. Absolute protection. TeraSwap connects multiple leading Ethereum liquidity
-        sources into one intelligent engine — always routing your trades through the best possible price,
-        with <span className="font-semibold">gasless approvals</span> and full immunity against{' '}
-        <span className="font-semibold">predatory bots</span>.{' '}
-        <span className="font-semibold">Institutional-grade precision</span>, built for Web3.
-      </motion.p>
+          {/* H1 — single line at ≤ 50 chars per Hallmark sizing brackets */}
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: easeOutExpo, delay: 0.08 }}
+            className="mb-5 font-display text-[36px] sm:text-[52px] md:text-[68px] font-extrabold leading-[1.05] tracking-[-0.02em] text-cream"
+          >
+            One swap. Eleven routes.{' '}
+            <span className="text-shimmer">Verified.</span>
+          </motion.h1>
 
-      {/* CTA Button */}
-      <motion.button
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5, delay: 0.4 }}
-        whileHover={{ scale: 1.03, boxShadow: '0 0 40px rgba(200,184,154,0.4)' }}
-        whileTap={{ scale: 0.96 }}
-        onClick={() => { playTouchMP3(); onLaunchApp() }}
-        style={{ background: 'linear-gradient(135deg, #C8B89A 0%, #E8D5B7 50%, #C8B89A 100%)' }}
-        className="group relative z-10 inline-flex h-14 items-center gap-1.5 rounded-full px-8 text-base font-semibold tracking-[0.04em] text-[#080B10]"
-      >
-        Launch App
-      </motion.button>
+          {/* Subhead — single line; long-form pitch moved to Performance section */}
+          <motion.p
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: easeOutExpo, delay: 0.14 }}
+            className="mb-10 max-w-xl text-[16px] sm:text-[18px] leading-relaxed text-cream-75"
+          >
+            TeraSwap compares eleven liquidity sources for every trade, verifies the price against
+            Chainlink oracles, and routes through MEV-protected execution.
+          </motion.p>
 
-      {/* Trust strip */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: showTrust ? 1 : 0 }}
-        transition={{ duration: 0.6 }}
-        className="relative z-10 mt-10 flex items-center gap-3 text-[12px] font-medium uppercase tracking-[0.1em]"
-        style={{ color: 'rgba(200,184,154,0.5)' }}
-      >
+          {/* CTA — flat fill, hairline focus ring, no gradient, no glow, no hover-scale */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.28, ease: easeOutExpo, delay: 0.2 }}
+            className="flex flex-wrap items-center gap-5"
+          >
+            <button
+              onClick={() => { playTouchMP3(); onLaunchApp() }}
+              style={{ background: '#C8B89A' }}
+              className="inline-flex h-12 items-center rounded-full px-7 text-[15px] font-semibold tracking-[0.02em] text-[#080B10] transition-colors duration-200 hover:bg-[#E8D5B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8B89A] focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            >
+              Launch app
+            </button>
+            <a
+              href="#performance"
+              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-cream-75 transition-colors duration-200 hover:text-cream focus-visible:outline-none focus-visible:underline"
+            >
+              See the routing engine <span aria-hidden>→</span>
+            </a>
+          </motion.div>
+        </div>
+
+        {/* Right column — constellation lifted into the hero */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4, ease: easeOutExpo, delay: 0.18 }}
+          className="relative"
+        >
+          <AdapterConstellation />
+        </motion.div>
+      </div>
+
+      {/* Trust strip — full-width hairline below the grid · WCAG AA contrast */}
+      <div className="relative z-10 mx-auto mt-16 flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
         <span>Non-custodial</span>
-        <span style={{ color: 'rgba(200,184,154,0.25)' }}>·</span>
+        <span aria-hidden className="text-cream-35">·</span>
         <span>Ethereum Mainnet</span>
-        <span style={{ color: 'rgba(200,184,154,0.25)' }}>·</span>
+        <span aria-hidden className="text-cream-35">·</span>
         <span>Powered by Chainlink</span>
-        <span style={{ color: 'rgba(200,184,154,0.25)' }}>·</span>
-        <span>IP Protected</span>
-      </motion.div>
+        <span aria-hidden className="text-cream-35">·</span>
+        <span>IP-protected</span>
+      </div>
     </section>
   )
 }
@@ -151,59 +195,19 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="scan-line relative bg-surface py-28 px-6">
-      <div className="mx-auto grid max-w-6xl items-center gap-8 sm:gap-12 lg:grid-cols-[55%_45%] lg:gap-16">
-        {/* Copy */}
-        <div>
-          <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-            <motion.span
-              initial="hidden" whileInView="visible" viewport={{ once: true }}
-              variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: easeOutExpo } } }}
-              className="block"
-            >
-              Limitless Liquidity.
-            </motion.span>
-            <motion.span
-              initial="hidden" whileInView="visible" viewport={{ once: true }}
-              variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, delay: 0.12, ease: easeOutExpo } } }}
-              className="block"
-            >
-              Relentless Execution.
-            </motion.span>
-          </SectionHeadline>
+    <section id="performance" className="relative bg-surface py-20 px-6 sm:py-24">
+      <div className="mx-auto max-w-4xl">
+        {/* Left-biased section head — replaces the centered split-grid template */}
+        <SectionHeadline className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+          Limitless Liquidity. Relentless Execution.
+        </SectionHeadline>
 
-          <motion.p
-            initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.3, duration: 0.5 } } }}
-            className="mb-8 max-w-xl text-[16px] leading-relaxed text-cream-75"
-          >
-            Stop searching for the best price. TeraSwap&apos;s proprietary meta-aggregation engine does it
-            for you in milliseconds. Our team engineered a system that simultaneously scans multiple top-tier
-            liquidity sources across the Ethereum ecosystem — identifying and executing the optimal route to
-            deliver the highest net output on every single swap. More tokens in your wallet, every time.
-          </motion.p>
-
-          {/* Stat callout */}
-          <motion.div
-            initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.5 } } }}
-            className="inline-flex items-center gap-3 rounded-xl border border-cream-08 bg-surface-secondary px-5 py-3"
-          >
-            <span className="font-mono text-2xl font-semibold" style={{ color: '#C8B89A' }}>
-              <AnimatedCounter value={1} suffix="ms" />
-            </span>
-            <span className="text-sm text-cream-50">Execution speed</span>
-          </motion.div>
-        </div>
-
-        {/* Visual — 11-source adapter constellation */}
-        <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true }}
-          variants={{ hidden: { opacity: 0, x: 40 }, visible: { opacity: 1, x: 0, transition: { duration: 0.7, delay: 0.2 } } }}
-          className="relative flex flex-col items-center"
-        >
-          <AdapterConstellation />
-        </motion.div>
+        <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
+          Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously
+          scans eleven liquidity sources across Ethereum — identifying and executing the optimal
+          route to deliver the highest net output on every single swap. Gas costs are folded into
+          the ranking, so the quote you see is the one your wallet actually feels.
+        </p>
       </div>
     </section>
   )
@@ -316,7 +320,7 @@ function AdapterConstellation() {
                   }}
                 />
                 <div className="mt-1.5 whitespace-nowrap text-center">
-                  <div className="text-[11px] font-medium text-cream-65 transition-all group-hover:text-cream">
+                  <div className="text-[11px] font-medium text-cream-75 transition-colors duration-200 group-hover:text-cream">
                     {adapter.name}
                   </div>
                   {/* Category — hidden by default, revealed on hover */}
@@ -420,7 +424,7 @@ function SevenLayerSection() {
   ]
 
   return (
-    <section id="seven-layer" className="relative bg-surface py-28 px-6">
+    <section id="seven-layer" className="relative bg-surface py-24 px-6 sm:py-28">
       <div className="mx-auto max-w-3xl">
         {/* Headline */}
         <div className="mb-12 text-center">
@@ -472,7 +476,7 @@ function SevenLayerSection() {
                       </span>
                     )}
                   </div>
-                  <p className="text-[14px] leading-relaxed text-cream-65">{l.desc}</p>
+                  <p className="text-[14px] leading-relaxed text-cream-75">{l.desc}</p>
                 </div>
               </motion.div>
 
@@ -488,7 +492,7 @@ function SevenLayerSection() {
         <motion.p
           initial="hidden" whileInView="visible" viewport={{ once: true }}
           variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.4, duration: 0.6 } } }}
-          className="mt-10 text-center text-[14px] italic text-cream-50"
+          className="mt-10 text-center text-[14px] italic text-cream-75"
         >
           &ldquo;No other aggregator verifies what you actually received after your trade settles on-chain.&rdquo;
         </motion.p>
@@ -552,7 +556,7 @@ function DifferentiationSection() {
   ]
 
   return (
-    <section id="why-teraswap" className="relative bg-surface py-28 px-6">
+    <section id="why-teraswap" className="relative bg-surface py-20 px-6 sm:py-24">
       <div className="mx-auto max-w-5xl">
         <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
@@ -567,15 +571,14 @@ function DifferentiationSection() {
             <motion.div
               key={c.title}
               variants={fadeInUpChild}
-              whileHover={{ y: -4, borderColor: 'rgba(200,184,154,0.4)' }}
               transition={{ duration: 0.2 }}
-              className="rounded-xl border border-cream-08 bg-surface-secondary p-6"
+              className="rounded-xl border border-cream-08 bg-surface-secondary p-6 transition-colors duration-200 hover:border-gold-40"
             >
               <div className="mb-4" style={{ color: '#C8B89A' }}>
                 {c.icon}
               </div>
               <h3 className="mb-2 text-lg font-semibold text-cream">{c.title}</h3>
-              <p className="text-[15px] leading-relaxed text-cream-65">{c.desc}</p>
+              <p className="text-[15px] leading-relaxed text-cream-75">{c.desc}</p>
             </motion.div>
           ))}
         </motion.div>
@@ -596,7 +599,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative bg-surface py-28 px-6">
+    <section id="security" className="relative bg-surface py-24 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -694,7 +697,7 @@ function SecuritySection() {
                   <>{stat.prefix}<AnimatedCounter value={stat.value} suffix={stat.suffix} /></>
                 )}
               </div>
-              <div className="text-xs font-medium text-cream-50">{stat.label}</div>
+              <div className="text-xs font-medium text-cream-75">{stat.label}</div>
             </motion.div>
           ))}
         </motion.div>
@@ -709,7 +712,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-surface py-28 px-6 overflow-hidden">
+    <section id="experience" className="relative bg-surface py-20 px-6 overflow-hidden sm:py-24">
       {/* Background watermark — z-0 so it stays fully behind content */}
       <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
         <span
@@ -877,63 +880,72 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
 ]
 
 function FeaturesSection() {
+  // Split: live features get full-card treatment; Coming-Soon features
+  // get a visually distinct, smaller "Roadmap" subsection so visitors can
+  // tell at a glance what ships today vs what's queued.
+  const liveFeatures = FEATURES.filter((f) => !('comingSoon' in f && f.comingSoon))
+  const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
+
   return (
-    <section id="features" className="relative bg-surface py-28 px-6">
+    <section id="features" className="relative bg-surface py-24 px-6">
       <div className="mx-auto max-w-5xl">
-        {/* Headline */}
-        <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-          Engineered for the Ethereum{' '}
-          <span className="relative inline-block">
-            Elite
-            <motion.span
-              initial={{ width: 0 }}
-              whileInView={{ width: '100%' }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.8, duration: 0.6, ease: 'easeOut' }}
-              className="absolute bottom-0 left-0 h-[2px]"
-              style={{ background: '#C8B89A' }}
-            />
-          </span>
-          .
-        </SectionHeadline>
+        {/* Section head — left-biased instead of centered template */}
+        <div className="mb-12 max-w-2xl">
+          <SectionHeadline className="mb-3 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+            Engineered for the Ethereum Elite.
+          </SectionHeadline>
+          <p className="text-[15px] leading-relaxed text-cream-75">
+            Every capability shipping today, plus what&apos;s next on the roadmap.
+          </p>
+        </div>
 
-        {/* Feature cards — 2x2 grid */}
-        <motion.div
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, amount: 0.2 }}
-          variants={staggerContainer}
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3"
-        >
-          {FEATURES.map((feature) => (
-            <motion.div
+        {/* Live features — full-weight cards */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">
+          {liveFeatures.map((feature) => (
+            <div
               key={feature.title}
-              variants={fadeInUpChild}
-              whileHover={{ y: -4, borderColor: 'rgba(200,184,154,0.4)' }}
-              transition={{ duration: 0.2 }}
-              className="group rounded-2xl border bg-surface-secondary p-8 transition-all"
-              style={{ borderColor: '#1E2530' }}
+              className="rounded-2xl border border-cream-08 bg-surface-secondary p-7 transition-colors duration-200 hover:border-gold-40"
             >
-              {/* Title */}
-              <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-cream">
+              <h3 className="mb-3 text-[17px] font-semibold text-cream">
                 {feature.title}
-                {'comingSoon' in feature && feature.comingSoon && (
-                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-                    Coming Soon
-                  </span>
-                )}
               </h3>
-
-              {/* Separator */}
-              <div className="mb-3 h-[1px] w-12" style={{ background: 'rgba(245,240,232,0.2)' }} />
-
-              {/* Description */}
-              <p className="text-[15px] leading-relaxed text-cream-65">
+              {/* Short gold mark instead of a long pale separator */}
+              <div className="mb-3 h-px w-8" style={{ background: '#C8B89A' }} />
+              <p className="text-[14px] leading-relaxed text-cream-75">
                 {feature.desc}
               </p>
-            </motion.div>
+            </div>
           ))}
-        </motion.div>
+        </div>
+
+        {/* Roadmap — visually demoted: tighter cards, no gold mark, smaller type, dim borders */}
+        {roadmapFeatures.length > 0 && (
+          <div className="mt-16 border-t border-cream-08 pt-12">
+            <div className="mb-6 flex items-baseline justify-between gap-4">
+              <h3 className="font-display text-[18px] sm:text-[22px] font-semibold text-cream-75">
+                Roadmap
+              </h3>
+              <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
+                Coming to L2
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {roadmapFeatures.map((feature) => (
+                <div
+                  key={feature.title}
+                  className="rounded-xl border border-cream-08 bg-surface-secondary/50 p-5"
+                >
+                  <h4 className="mb-2 text-[14px] font-semibold text-cream">
+                    {feature.title}
+                  </h4>
+                  <p className="text-[13px] leading-relaxed text-cream-75">
+                    {feature.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   )
@@ -945,63 +957,32 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center bg-surface px-6 text-center">
-      {/* Pulsing radial glow */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div
-          className="h-[500px] w-[500px] animate-pulse-glow rounded-full"
-          style={{ background: 'radial-gradient(ellipse at center, rgba(200,184,154,0.08) 0%, transparent 70%)' }}
-        />
-      </div>
-
+    <section className="relative bg-surface px-6 py-32 text-center">
       {/* Headline */}
-      <SectionHeadline className="relative z-10 mb-6 text-[40px] sm:text-[56px] leading-[1.1]">
+      <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}
-        <span className="text-shimmer">performance</span>
-        <br />
+        <span className="text-shimmer">performance</span>{' '}
         on the table.
       </SectionHeadline>
 
-      {/* Supporting copy */}
-      <motion.p
-        initial="hidden" whileInView="visible" viewport={{ once: true }}
-        variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { delay: 0.2, duration: 0.5 } } }}
-        className="relative z-10 mb-2 text-xl text-cream-80"
-      >
-        Join the traders who refuse to settle.
-      </motion.p>
-      <motion.p
-        initial="hidden" whileInView="visible" viewport={{ once: true }}
-        variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.35, duration: 0.5 } } }}
-        className="relative z-10 mb-10 max-w-[480px] text-base text-cream-65"
-      >
-        Experience the next evolution of decentralized trading — engineered to work harder than any
-        single exchange ever could.
-      </motion.p>
+      {/* Supporting copy — single paragraph, AA contrast */}
+      <p className="relative z-10 mx-auto mb-10 max-w-[520px] text-[16px] leading-relaxed text-cream-75">
+        Experience decentralized trading engineered to work harder than any single exchange ever could.
+      </p>
 
-      {/* CTA Button — Grand */}
-      <motion.button
-        initial={{ opacity: 0, scale: 0.95 }}
-        whileInView={{ opacity: 1, scale: 1 }}
-        viewport={{ once: true }}
-        transition={{ delay: 0.4, duration: 0.5 }}
-        whileHover={{ scale: 1.03, boxShadow: '0 0 60px rgba(200,184,154,0.4)' }}
-        whileTap={{ scale: 0.96 }}
+      {/* CTA — flat fill, no glow, no hover-scale */}
+      <button
         onClick={() => { playTouchMP3(); onLaunchApp() }}
-        style={{ background: 'linear-gradient(135deg, #C8B89A 0%, #E8D5B7 50%, #C8B89A 100%)' }}
-        className="relative z-10 inline-flex h-16 w-[220px] items-center justify-center rounded-full text-base font-semibold tracking-[0.04em] text-[#080B10]"
+        style={{ background: '#C8B89A' }}
+        className="relative z-10 inline-flex h-14 w-[220px] items-center justify-center rounded-full text-[15px] font-semibold tracking-[0.02em] text-[#080B10] transition-colors duration-200 hover:bg-[#E8D5B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8B89A] focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
       >
-        Launch App
-      </motion.button>
+        Launch app
+      </button>
 
-      {/* Trust bookend */}
-      <motion.div
-        initial="hidden" whileInView="visible" viewport={{ once: true }}
-        variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.6 } } }}
-        className="relative z-10 mt-6 text-[11px] font-medium uppercase tracking-[0.08em] text-cream-50"
-      >
-        Non-custodial · Ethereum Mainnet · Powered by Chainlink · IP Protected
-      </motion.div>
+      {/* Trust bookend — bumped to AA contrast */}
+      <div className="relative z-10 mt-6 text-[11px] font-medium uppercase tracking-[0.1em] text-cream-75">
+        Non-custodial · Ethereum Mainnet · Powered by Chainlink · IP-protected
+      </div>
     </section>
   )
 }
@@ -1026,7 +1007,7 @@ export default function LandingPage({ onLaunchApp }: Props) {
       <div className="flex justify-center pb-8">
         <Link
           href="/docs"
-          className="group flex items-center gap-2 rounded-full border px-5 py-2.5 text-[12px] font-medium tracking-wider text-cream-50 transition-all hover:text-cream"
+          className="group flex items-center gap-2 rounded-full border px-5 py-2.5 text-[12px] font-medium tracking-wider text-cream-75 transition-colors duration-200 hover:text-cream"
           style={{ borderColor: 'rgba(200,184,154,0.15)', background: 'rgba(200,184,154,0.03)' }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-50 group-hover:opacity-80 transition-opacity">

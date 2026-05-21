@@ -1,0 +1,16 @@
+[
+  {
+    "date": "2026-05-21",
+    "scope": "page",
+    "target": "src/components/LandingPage.tsx",
+    "genre": "atmospheric",
+    "macrostructure": "Stat-Led",
+    "hero_archetype": "H4 Stat-Led",
+    "theme": "project-locked",
+    "theme_notes": "Preserved existing brand palette per pre-flight: cream #F5F0E8 inverted on surface #080B10, gold #C8B89A accent. Did not rotate to a catalog theme.",
+    "studied": "no",
+    "study_status": "URL-mode blocked by SPA shells on jup.ag, cow.fi, aave.com — editorial DNA from docs/Prompts/SPRINT-27-LANDING-REDESIGN.md used as input instead",
+    "enrichment": "none (existing AdapterConstellation kept as right-column visual interest in hero)",
+    "brief": "TeraSwap landing redesign — remove AI-template fingerprint (centered hero, identical feature cards, dead space), bump WCAG AA contrast, separate Live vs Coming-Soon features, flatten gradient CTAs"
+  }
+]

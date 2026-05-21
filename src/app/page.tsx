@@ -63,8 +63,12 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Particle network — always visible behind content */}
-      <ParticleNetwork />
+      {/* Particle network — always visible behind content.
+          Wrapped at 35% opacity so it doesn't compete with the foreground
+          stats and headline (Sprint 27 redesign). */}
+      <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.35]" aria-hidden>
+        <ParticleNetwork />
+      </div>
 
       <Header
         onLogoClick={() => setPage('landing')}
