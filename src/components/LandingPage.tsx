@@ -432,6 +432,18 @@ function DiffVerifiedDocIcon() {
   )
 }
 
+// Shield + lock — for MEV protection. Visually distinct from
+// DiffShieldCheckIcon (shield + check) on the Oracle card.
+function DiffMEVShieldIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2 L20 6 V12 C20 16.5 16.5 20.5 12 22 C7.5 20.5 4 16.5 4 12 V6 Z" />
+      <rect x="9.5" y="11.5" width="5" height="4" rx="0.5" />
+      <path d="M10.5 11.5 V10 a1.5 1.5 0 0 1 3 0 V11.5" />
+    </svg>
+  )
+}
+
 function DifferentiationSection() {
   const CARDS: { icon: React.ReactNode; title: string; desc: string }[] = [
     {
@@ -445,9 +457,9 @@ function DifferentiationSection() {
       desc: 'Every quote is checked against Chainlink price feeds before execution. Deviations above 3% are blocked automatically — before your trade happens, not after.',
     },
     {
-      icon: <DiffVerifiedDocIcon />,
-      title: 'Post-Execution Proof',
-      desc: "After your trade settles on-chain, we verify the actual output against what was expected. If there's a shortfall above 2%, the source is auto-disabled.",
+      icon: <DiffMEVShieldIcon />,
+      title: 'Active MEV Protection',
+      desc: 'Intent-based execution powered by CoW Protocol batch auctions — solvers compete to give you the best outcome. Zero front-running, zero sandwich attacks.',
     },
   ]
 
@@ -468,12 +480,12 @@ function DifferentiationSection() {
               key={c.title}
               variants={fadeInUpChild}
               transition={{ duration: 0.2 }}
-              className="rounded-xl border border-cream-08 bg-surface-secondary p-6 transition-colors duration-200 hover:border-gold-40"
+              className="rounded-xl border border-cream-08 border-l-2 border-l-[#C8B89A] bg-surface-secondary p-8 transition-[border-color,box-shadow] duration-200 hover:border-gold-40 hover:shadow-[0_0_30px_rgba(200,184,154,0.1)]"
             >
               <div className="mb-4" style={{ color: '#C8B89A' }}>
                 {c.icon}
               </div>
-              <h3 className="mb-2 text-lg font-semibold text-cream">{c.title}</h3>
+              <h3 className="mb-2 text-xl font-semibold text-cream">{c.title}</h3>
               <p className="text-[15px] leading-relaxed text-cream-75">{c.desc}</p>
             </motion.div>
           ))}
@@ -756,10 +768,8 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
     title: '11 Liquidity Sources',
     desc: 'Simultaneous queries across 7 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
   },
-  {
-    title: 'Active MEV Protection',
-    desc: 'Intent-based execution powered by CoW Protocol batch auctions — solvers compete to give you the best outcome. Zero front-running, zero sandwich attacks.',
-  },
+  // "Active MEV Protection" lives on the DifferentiationSection hero card
+  // — removed here per Sprint 27B / Prompt 72 to avoid duplication.
   {
     title: 'Gas-Aware Routing',
     desc: 'Quotes ranked by net output minus estimated gas cost. The ranking metric that actually matters to your wallet — not just raw amounts.',
@@ -768,10 +778,8 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
     title: 'Statistical Outlier Detection',
     desc: 'True median-based filtering across all 11 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
   },
-  {
-    title: 'Multi-Oracle Price Protection',
-    desc: 'Chainlink on-chain oracles block deviations above 3%. DefiLlama server-side validation adds a second independent price check. Cross-quote consensus across all 11 sources catches outliers automatically.',
-  },
+  // "Multi-Oracle Price Protection" overlaps with the Oracle-Verified
+  // Execution hero card on DifferentiationSection — removed per P72.
   {
     title: 'Privacy-First Architecture',
     desc: 'All RPC reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external blockchain providers or DEX APIs.',
@@ -848,24 +856,27 @@ function FeaturesSection() {
           ))}
         </div>
 
-        {/* Roadmap — visually demoted: tighter cards, no gold mark, smaller type, dim borders */}
+        {/* Roadmap — visually demoted per P72: opacity-60, dashed border,
+            no hover state, with a per-card ribbon in the top-right corner
+            so each card is recognisable as queued work even at a glance. */}
         {roadmapFeatures.length > 0 && (
           <div className="mt-16 border-t border-cream-08 pt-12">
-            <div className="mb-6 flex items-baseline justify-between gap-4">
-              <h3 className="font-display text-[18px] sm:text-[22px] font-semibold text-cream-75">
-                Roadmap
-              </h3>
-              <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
-                Coming to L2
-              </span>
-            </div>
+            <h3 className="mb-6 font-display text-[18px] sm:text-[22px] font-semibold text-cream-75">
+              Roadmap
+            </h3>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {roadmapFeatures.map((feature) => (
                 <div
                   key={feature.title}
-                  className="rounded-xl border border-cream-08 bg-surface-secondary/50 p-5"
+                  className="relative rounded-xl border border-dashed border-cream-08 bg-surface-secondary/50 p-5 opacity-60"
                 >
-                  <h4 className="mb-2 text-[14px] font-semibold text-cream">
+                  {/* Top-right ribbon */}
+                  <span
+                    className="absolute right-3 top-3 rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-amber-300"
+                  >
+                    Coming Soon
+                  </span>
+                  <h4 className="mb-2 pr-24 text-[14px] font-semibold text-cream">
                     {feature.title}
                   </h4>
                   <p className="text-[13px] leading-relaxed text-cream-75">
