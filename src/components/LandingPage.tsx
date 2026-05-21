@@ -43,7 +43,7 @@ function SectionHeadline({ children, className = '' }: { children: React.ReactNo
     <motion.h2
       initial="hidden"
       whileInView="visible"
-      viewport={{ once: true, amount: 0.3 }}
+      viewport={{ once: true, amount: 0.1 }}
       variants={fadeInUp}
       className={`font-display font-bold text-cream ${className}`}
     >
@@ -99,9 +99,9 @@ function AnimatedCounter({
 function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   // Three anchor numbers pulled above the H1 (Stat-Led DNA).
   // Values per docs/Prompts/SPRINT-27B.md → Prompt 69.
-  // NOTE: "2 verification layers" departs from SevenLayerSection's 7
-  // (and Security stats line 595, value:7). The prompt is explicit on 2;
-  // an Architect-side reconciliation is queued.
+  // NOTE: "2 verification layers" departs from the SecuritySection stats
+  // bar ("7 Independent validation layers"). Prompts 69 and 71 are both
+  // explicit; an Architect-side reconciliation is queued.
   const ANCHOR_STATS: { v: number; label: string }[] = [
     { v: 11, label: 'LIQUIDITY SOURCES' },
     { v: 2,  label: 'VERIFICATION LAYERS' },
@@ -214,7 +214,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="relative bg-surface/80 backdrop-blur-[1px] py-20 px-6 sm:py-24">
+    <section id="performance" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
       <div className="mx-auto max-w-4xl">
         {/* Left-biased section head — replaces the centered split-grid template */}
         <SectionHeadline className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -362,7 +362,7 @@ function AdapterConstellation() {
               initial={{ opacity: 0, x: -12 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
-              transition={{ delay: 0.08 + i * 0.05, duration: 0.35 }}
+              transition={{ delay: i * 0.02, duration: 0.35 }}
               className="flex items-center justify-between gap-3 rounded-lg border border-cream-08 bg-surface-secondary px-3 py-2"
             >
               <div className="flex items-center gap-2.5">
@@ -381,7 +381,7 @@ function AdapterConstellation() {
             initial={{ opacity: 0, scale: 0.92 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            transition={{ delay: 0.08 + adapters.length * 0.05, duration: 0.45 }}
+            transition={{ delay: 0.2, duration: 0.45 }}
             className="mt-3 self-center rounded-full border px-5 py-2 text-sm font-semibold"
             style={{
               borderColor: 'rgba(200,184,154,0.4)',
@@ -394,129 +394,6 @@ function AdapterConstellation() {
         </div>
       </div>
     </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════
-//  SECTION 03a: 7-LAYER VERIFIED EXECUTION
-// ══════════════════════════════════════════════════════════
-
-function SevenLayerSection() {
-  const LAYERS: { n: number; name: string; desc: string; badge?: string }[] = [
-    {
-      n: 1,
-      name: 'Input Validation',
-      desc: 'Address format, amount bounds, balance check, constant-time authentication',
-    },
-    {
-      n: 2,
-      name: 'Circuit Breaker',
-      desc: 'Per-source state machine — 3 failures trigger cooldown, outlier filter removes 3x median quotes',
-    },
-    {
-      n: 3,
-      name: 'Quorum Consensus',
-      desc: 'Cross-source IQR deviation detection — 3+ correlated outliers trigger automatic kill-switch',
-    },
-    {
-      n: 4,
-      name: 'Chainlink Oracle Check',
-      desc: '29 token price feeds — warns at 2%+ deviation, blocks at 3%. Staleness check every hour',
-      badge: 'PRE-SWAP',
-    },
-    {
-      n: 5,
-      name: 'Server-Side Guards',
-      desc: '19-selector swap allowlist (fail-closed), calldata recipient verification, DefiLlama price guard (above $10k)',
-    },
-    {
-      n: 6,
-      name: 'Simulation + Clear Signing',
-      desc: 'eth_call simulation catches reverts before gas is spent. TransactionPreview decodes calldata for human review',
-    },
-    {
-      n: 7,
-      name: 'Post-Execution Validation',
-      desc: 'Transfer event logs verify actual output vs expected. Shortfall above 2% = P0 alert + source auto-disabled',
-      badge: 'POST-SWAP',
-    },
-  ]
-
-  return (
-    <section id="seven-layer" className="relative bg-surface/80 py-24 px-6 sm:py-28">
-      <div className="mx-auto max-w-3xl">
-        {/* Headline */}
-        <div className="mb-12 text-center">
-          <SectionHeadline className="mb-2 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-            Every Trade Is Verified
-          </SectionHeadline>
-          <motion.p
-            initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { delay: 0.15, duration: 0.5 } } }}
-            className="font-display text-[18px] sm:text-[22px] font-semibold"
-            style={{ color: '#C8B89A' }}
-          >
-            7-Layer Verified Execution
-          </motion.p>
-        </div>
-
-        {/* Vertical pipeline with constellation-line connectors between cards */}
-        <motion.ol
-          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
-          variants={staggerContainer}
-          className="relative"
-        >
-          {LAYERS.map((l, i) => (
-            <motion.li key={l.n} variants={fadeInUpChild} className="list-none">
-              <motion.div
-                whileHover={{ boxShadow: '0 0 40px rgba(200,184,154,0.08)' }}
-                transition={{ duration: 0.2 }}
-                className="group flex items-start gap-4 rounded-xl border border-cream-08 bg-surface-secondary p-5"
-                style={{ borderLeft: '2px solid #C8B89A' }}
-              >
-                {/* Layer number */}
-                <div
-                  className="shrink-0 font-mono text-xl font-bold"
-                  style={{ color: '#C8B89A', minWidth: '2.25rem' }}
-                >
-                  {String(l.n).padStart(2, '0')}
-                </div>
-
-                {/* Content */}
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <span className="text-[15px] font-semibold text-cream">{l.name}</span>
-                    {l.badge && (
-                      <span
-                        className="rounded-full px-2 py-0.5 text-[9px] font-bold tracking-[0.08em]"
-                        style={{ background: '#C8B89A', color: '#080B10' }}
-                      >
-                        {l.badge}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[14px] leading-relaxed text-cream-75">{l.desc}</p>
-                </div>
-              </motion.div>
-
-              {/* Constellation-line connector between cards */}
-              {i < LAYERS.length - 1 && (
-                <div className="my-2 ml-6 h-3 w-[1px] bg-cream-08" aria-hidden="true" />
-              )}
-            </motion.li>
-          ))}
-        </motion.ol>
-
-        {/* Bottom quote */}
-        <motion.p
-          initial="hidden" whileInView="visible" viewport={{ once: true }}
-          variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.4, duration: 0.6 } } }}
-          className="mt-10 text-center text-[14px] italic text-cream-75"
-        >
-          &ldquo;No other aggregator verifies what you actually received after your trade settles on-chain.&rdquo;
-        </motion.p>
-      </div>
-    </section>
   )
 }
 
@@ -575,14 +452,14 @@ function DifferentiationSection() {
   ]
 
   return (
-    <section id="why-teraswap" className="relative bg-surface/80 py-20 px-6 sm:py-24">
+    <section id="why-teraswap" className="relative bg-surface/80 py-16 px-6">
       <div className="mx-auto max-w-5xl">
         <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
         </SectionHeadline>
 
         <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.2 }}
+          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
           className="grid grid-cols-1 gap-6 md:grid-cols-3"
         >
@@ -618,7 +495,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative bg-surface/80 py-24 px-6">
+    <section id="security" className="relative bg-surface/80 py-16 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -647,13 +524,13 @@ function SecuritySection() {
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
               viewport={{ once: true }}
-              transition={{ delay: 0.8, duration: 0.5 }}
+              transition={{ delay: 0.2, duration: 0.5 }}
             />
             <motion.g
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
               viewport={{ once: true }}
-              transition={{ delay: 1 }}
+              transition={{ delay: 0.2 }}
             >
               <rect x="40" y="48" width="20" height="16" rx="2" fill="#C8B89A" opacity="0.3" />
               <path d="M44 48V42a6 6 0 0112 0v6" fill="none" stroke="#C8B89A" strokeWidth="1.5" />
@@ -699,9 +576,43 @@ function SecuritySection() {
           </p>
         </motion.div>
 
+        {/* Verification pipeline — two highlighted checkpoints from the
+            7-layer guard chain (formerly its own section, folded in here
+            per Sprint 27B / Prompt 71 to cut redundancy). */}
+        <ul className="mb-4 mt-2 list-none space-y-3 text-left">
+          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
+            <span
+              className="mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em]"
+              style={{ background: '#C8B89A', color: '#080B10' }}
+            >
+              PRE-SWAP
+            </span>
+            <div>
+              <div className="mb-0.5 text-[14px] font-semibold text-cream">Chainlink Oracle Check</div>
+              <p className="text-[13px] leading-relaxed text-cream-75">
+                29 token price feeds — warns at 2%+ deviation, blocks at 3%. Staleness check every hour.
+              </p>
+            </div>
+          </li>
+          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
+            <span
+              className="mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em]"
+              style={{ background: '#C8B89A', color: '#080B10' }}
+            >
+              POST-SWAP
+            </span>
+            <div>
+              <div className="mb-0.5 text-[14px] font-semibold text-cream">Post-Execution Validation</div>
+              <p className="text-[13px] leading-relaxed text-cream-75">
+                Transfer event logs verify actual output vs expected. Shortfall above 2% triggers a P0 alert and the source is auto-disabled.
+              </p>
+            </div>
+          </li>
+        </ul>
+
         {/* Stats bar */}
         <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.5 }}
+          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
           className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-3"
         >
@@ -731,7 +642,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-surface/80 py-20 px-6 overflow-hidden sm:py-24">
+    <section id="experience" className="relative bg-surface/80 py-16 px-6 overflow-hidden">
       {/* Background watermark — z-0 so it stays fully behind content */}
       <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
         <span
@@ -777,7 +688,7 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
           <motion.button
             initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.5 } } }}
+            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.2 } } }}
             whileHover={{ x: 4 }}
             onClick={onLaunchApp}
             className="inline-flex items-center gap-2 text-sm font-semibold transition-opacity hover:opacity-80"
@@ -906,7 +817,7 @@ function FeaturesSection() {
   const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
 
   return (
-    <section id="features" className="relative bg-surface/80 backdrop-blur-[1px] py-24 px-6">
+    <section id="features" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Section head — left-biased instead of centered template */}
         <div className="mb-12 max-w-2xl">
@@ -976,7 +887,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative bg-surface/80 px-6 py-32 text-center">
+    <section className="relative bg-surface/80 px-6 py-16 text-center">
       {/* Headline */}
       <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}
@@ -1015,7 +926,6 @@ export default function LandingPage({ onLaunchApp }: Props) {
     <div className="relative z-[1]">
       <HeroSection onLaunchApp={onLaunchApp} />
       <PerformanceSection />
-      <SevenLayerSection />
       <DifferentiationSection />
       <SecuritySection />
       <ExperienceSection onLaunchApp={onLaunchApp} />
