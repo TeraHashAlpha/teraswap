@@ -54,12 +54,29 @@ function SectionHeadline({ children, className = '' }: { children: React.ReactNo
 
 // ── Animated number counter ───────────────────────────────
 
-function AnimatedCounter({ value, suffix = '', duration = 1500 }: { value: number; suffix?: string; duration?: number }) {
-  const [count, setCount] = useState(0)
+function AnimatedCounter({
+  value,
+  suffix = '',
+  duration = 1500,
+  immediate = false,
+}: {
+  value: number
+  suffix?: string
+  duration?: number
+  /** Above-the-fold use: skip the useInView gate and render the final
+   *  value on mount (SSR-safe). Prevents the "0 ... 0 ... 0" flash that
+   *  IntersectionObserver causes for hero counters where the element is
+   *  visible before the observer has a chance to fire. Existing scroll-
+   *  triggered call sites (Performance, Security) keep the default. */
+  immediate?: boolean
+}) {
+  const [count, setCount] = useState(immediate ? value : 0)
   const ref = useRef(null)
   const inView = useInView(ref, { once: true })
 
   useEffect(() => {
+    // Hero stats: nothing to animate — initial state already holds value.
+    if (immediate) return
     if (!inView) return
     const start = Date.now()
     const tick = () => {
@@ -70,7 +87,7 @@ function AnimatedCounter({ value, suffix = '', duration = 1500 }: { value: numbe
       if (progress < 1) requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  }, [inView, value, duration])
+  }, [inView, value, duration, immediate])
 
   return <span ref={ref}>{count}{suffix}</span>
 }
@@ -81,12 +98,14 @@ function AnimatedCounter({ value, suffix = '', duration = 1500 }: { value: numbe
 
 function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   // Three anchor numbers pulled above the H1 (Stat-Led DNA).
-  // All values are verifiable from this codebase: 11 source adapters,
-  // 7 validation layers (see SevenLayerSection), 29 Chainlink feeds.
+  // Values per docs/Prompts/SPRINT-27B.md → Prompt 69.
+  // NOTE: "2 verification layers" departs from SevenLayerSection's 7
+  // (and Security stats line 595, value:7). The prompt is explicit on 2;
+  // an Architect-side reconciliation is queued.
   const ANCHOR_STATS: { v: number; label: string }[] = [
-    { v: 11, label: 'liquidity sources' },
-    { v: 7,  label: 'verification layers' },
-    { v: 29, label: 'Chainlink oracles' },
+    { v: 11, label: 'LIQUIDITY SOURCES' },
+    { v: 2,  label: 'VERIFICATION LAYERS' },
+    { v: 29, label: 'CHAINLINK ORACLES' },
   ]
 
   return (
@@ -107,7 +126,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
                   className="font-display text-[40px] sm:text-[52px] md:text-[60px] font-bold leading-none text-cream"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
-                  <AnimatedCounter value={s.v} />
+                  <AnimatedCounter value={s.v} immediate />
                 </dd>
                 <dt className="mt-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
                   {s.label}
