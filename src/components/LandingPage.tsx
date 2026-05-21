@@ -92,6 +92,67 @@ function AnimatedCounter({
   return <span ref={ref}>{count}{suffix}</span>
 }
 
+// ── SwapPreview ──────────────────────────────────────────
+// Static mock of the real SwapBox — 0.5 ETH → 994.68 USDC via Velora.
+// Lives in the hero's right column so first-time visitors see the
+// product immediately (Sprint 27B / Prompt 73). Clicking the Swap
+// button launches the live app via the passed onLaunchApp handler.
+// NOT functional — purely a marketing surface; no quotes, no
+// allowance, no real swap. If the mock data goes stale, edit here.
+function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
+  return (
+    <div className="mx-auto w-full max-w-sm md:max-w-[380px] lg:max-w-sm">
+      <div
+        className="rounded-2xl border border-cream-08 bg-surface-secondary p-5"
+        style={{ boxShadow: '0 0 60px rgba(200,184,154,0.04)' }}
+      >
+        <div className="mb-3 text-xs font-medium text-cream-75">Swap</div>
+        <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-2xl font-bold text-cream" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              0.5
+            </span>
+            <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
+              <span className="text-sm font-semibold text-cream">ETH</span>
+            </div>
+          </div>
+        </div>
+        <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-2xl font-bold text-cream-75" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              994.68
+            </span>
+            <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
+              <span className="text-sm font-semibold text-cream">USDC</span>
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-cream-75">
+          <div className="flex justify-between">
+            <span>Best via</span>
+            <span className="font-semibold" style={{ color: '#C8B89A' }}>Velora</span>
+          </div>
+          <div className="mt-1 flex justify-between">
+            <span>Platform fee</span>
+            <span>0.1%</span>
+          </div>
+        </div>
+        <button
+          onClick={() => { playTouchMP3(); onLaunchApp() }}
+          style={{ background: '#C8B89A' }}
+          className="mt-3 flex h-12 w-full items-center justify-center rounded-xl text-sm font-semibold text-[#080B10] transition-colors duration-200 hover:bg-[#E8D5B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8B89A] focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        >
+          Swap →
+        </button>
+      </div>
+      {/* Subtle affordance — this is a preview, the real swap is one click away */}
+      <p className="mt-3 text-center text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
+        Try it live →
+      </p>
+    </div>
+  )
+}
+
 // ══════════════════════════════════════════════════════════
 //  SECTION 01: HERO
 // ══════════════════════════════════════════════════════════
@@ -183,14 +244,15 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
           </motion.div>
         </div>
 
-        {/* Right column — constellation lifted into the hero */}
+        {/* Right column — live product preview (P73). On mobile the
+            wrapper centres the card; on lg+ it sits next to the headline. */}
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.4, ease: easeOutExpo, delay: 0.18 }}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: easeOutExpo, delay: 0.2 }}
           className="relative"
         >
-          <AdapterConstellation />
+          <SwapPreview onLaunchApp={onLaunchApp} />
         </motion.div>
       </div>
 
@@ -215,18 +277,27 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 function PerformanceSection() {
   return (
     <section id="performance" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
-      <div className="mx-auto max-w-4xl">
-        {/* Left-biased section head — replaces the centered split-grid template */}
-        <SectionHeadline className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-          Limitless Liquidity. Relentless Execution.
-        </SectionHeadline>
+      <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
+        {/* Left — copy */}
+        <div>
+          <SectionHeadline className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+            Limitless Liquidity. Relentless Execution.
+          </SectionHeadline>
 
-        <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
-          Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously
-          scans eleven liquidity sources across Ethereum — identifying and executing the optimal
-          route to deliver the highest net output on every single swap. Gas costs are folded into
-          the ranking, so the quote you see is the one your wallet actually feels.
-        </p>
+          <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
+            Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously
+            scans eleven liquidity sources across Ethereum — identifying and executing the optimal
+            route to deliver the highest net output on every single swap. Gas costs are folded into
+            the ranking, so the quote you see is the one your wallet actually feels.
+          </p>
+        </div>
+
+        {/* Right — adapter constellation. Lived in the hero during Sprint 27;
+            P73 reclaims the hero's right column for the SwapPreview, so the
+            constellation comes home to the section it originally illustrated. */}
+        <div className="relative">
+          <AdapterConstellation />
+        </div>
       </div>
     </section>
   )
@@ -665,95 +736,48 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         </span>
       </div>
 
-      <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-8 sm:gap-12 lg:grid-cols-2 lg:gap-16">
-        {/* Copy */}
-        <div>
-          <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-            <motion.span
-              initial="hidden" whileInView="visible" viewport={{ once: true }}
-              variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.3 } } }}
-              className="block"
-            >
-              Zero Friction.
-            </motion.span>
-            <motion.span
-              initial="hidden" whileInView="visible" viewport={{ once: true }}
-              variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, delay: 0.15 } } }}
-              className="block"
-            >
-              Design That Thinks With You.
-            </motion.span>
-          </SectionHeadline>
-
-          <motion.p
+      {/* Single-column text section after P73 — the widget moved to the
+          hero, so this section keeps only the Permit2 narrative + CTA. */}
+      <div className="relative z-10 mx-auto max-w-3xl">
+        <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+          <motion.span
             initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.3, duration: 0.5 } } }}
-            className="mb-8 max-w-xl text-[16px] leading-relaxed text-cream-75"
+            variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.3 } } }}
+            className="block"
           >
-            Forget high gas fees and slow approval flows. Our{' '}
-            <span className="font-mono" style={{ color: '#C8B89A' }}>Permit2</span> technology delivers{' '}
-            <span className="font-mono" style={{ color: '#C8B89A' }}>100%</span> gasless
-            token approvals — sign off-chain and let the system handle everything else. All wrapped in a
-            precision-crafted cream-on-black interface with a dynamic animated particle environment that
-            responds to your every move. Because visual clarity is the first step toward financial clarity.
-          </motion.p>
-
-          <motion.button
+            Zero Friction.
+          </motion.span>
+          <motion.span
             initial="hidden" whileInView="visible" viewport={{ once: true }}
-            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.2 } } }}
-            whileHover={{ x: 4 }}
-            onClick={onLaunchApp}
-            className="inline-flex items-center gap-2 text-sm font-semibold transition-opacity hover:opacity-80"
-            style={{ color: '#C8B89A' }}
+            variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, delay: 0.15 } } }}
+            className="block"
           >
-            Launch the full app <span>→</span>
-          </motion.button>
-        </div>
+            Design That Thinks With You.
+          </motion.span>
+        </SectionHeadline>
 
-        {/* Widget preview teaser */}
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ delay: 0.3, duration: 0.7 }}
-          className="relative mx-auto w-full max-w-sm"
+        <motion.p
+          initial="hidden" whileInView="visible" viewport={{ once: true }}
+          variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.2, duration: 0.5 } } }}
+          className="mb-8 max-w-2xl text-[16px] leading-relaxed text-cream-75"
         >
-          <div className="rounded-2xl border border-cream-08 bg-surface-secondary p-5" style={{ boxShadow: '0 0 60px rgba(200,184,154,0.04)' }}>
-            <div className="mb-3 text-xs font-medium text-cream-50">Swap</div>
-            <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-2xl font-bold text-cream">0.5</span>
-                <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
-                  <span className="text-sm font-semibold text-cream">ETH</span>
-                </div>
-              </div>
-            </div>
-            <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-2xl font-bold text-cream-50">994.68</span>
-                <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
-                  <span className="text-sm font-semibold text-cream">USDC</span>
-                </div>
-              </div>
-            </div>
-            <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-cream-50">
-              <div className="flex justify-between">
-                <span>Best via</span>
-                <span className="font-semibold" style={{ color: '#C8B89A' }}>Velora</span>
-              </div>
-              <div className="flex justify-between mt-1">
-                <span>Platform fee</span>
-                <span>0.1%</span>
-              </div>
-            </div>
-            <div
-              className="mt-3 h-12 rounded-xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #C8B89A 0%, #E8D5B7 50%, #C8B89A 100%)' }}
-            >
-              <span className="text-sm font-semibold text-[#080B10]">Swap</span>
-            </div>
-          </div>
-        </motion.div>
+          Forget high gas fees and slow approval flows. Our{' '}
+          <span className="font-mono" style={{ color: '#C8B89A' }}>Permit2</span> technology delivers{' '}
+          <span className="font-mono" style={{ color: '#C8B89A' }}>100%</span> gasless
+          token approvals — sign off-chain and let the system handle everything else. All wrapped in a
+          precision-crafted cream-on-black interface with a dynamic animated particle environment that
+          responds to your every move. Because visual clarity is the first step toward financial clarity.
+        </motion.p>
+
+        <motion.button
+          initial="hidden" whileInView="visible" viewport={{ once: true }}
+          variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.2 } } }}
+          onClick={onLaunchApp}
+          className="inline-flex items-center gap-2 text-sm font-semibold transition-opacity duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:underline"
+          style={{ color: '#C8B89A' }}
+        >
+          Launch the full app <span aria-hidden>→</span>
+        </motion.button>
       </div>
     </section>
   )
