@@ -625,7 +625,7 @@ function SecuritySection() {
   const stats: { value: number; suffix: string; label: string; prefix?: string; isText?: boolean; textValue?: string }[] = [
     { value: 7, suffix: '', label: 'Independent validation layers' },
     { value: 29, suffix: '', label: 'Chainlink oracle price feeds' },
-    { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓' },
+    { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓ Verified' },
   ]
 
   return (
@@ -716,7 +716,7 @@ function SecuritySection() {
         <ul className="mb-4 mt-2 list-none space-y-3 text-left">
           <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
             <span
-              className="mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em]"
+              className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
               style={{ background: '#C8B89A', color: '#080B10' }}
             >
               PRE-SWAP
@@ -730,7 +730,7 @@ function SecuritySection() {
           </li>
           <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
             <span
-              className="mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em]"
+              className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
               style={{ background: '#C8B89A', color: '#080B10' }}
             >
               POST-SWAP
@@ -777,18 +777,11 @@ function SecuritySection() {
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
     <section id="experience" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6 overflow-hidden">
-      {/* Background watermark — z-0 so it stays fully behind content */}
-      <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
-        <span
-          className="font-display text-[48px] sm:text-[100px] md:text-[120px] font-bold select-none whitespace-nowrap"
-          style={{ color: 'rgba(200,184,154,0.03)' }}
-        >
-          cream-on-black
-        </span>
-      </div>
-
       {/* Single-column text section after P73 — the widget moved to the
-          hero, so this section keeps only the Permit2 narrative + CTA. */}
+          hero, so this section keeps only the Permit2 narrative + CTA.
+          The Hallmark "cream-on-black" template watermark that used to
+          sit behind this section was removed in P76 — it was a design-
+          token label, not marketing content. */}
       <div className="relative z-10 mx-auto max-w-3xl">
         <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           <motion.span
