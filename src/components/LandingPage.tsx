@@ -276,7 +276,9 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="relative bg-[rgba(8,11,16,0.82)] backdrop-blur-[1px] py-16 px-6">
+    <section id="performance" className="relative bg-[rgba(8,11,16,0.55)] backdrop-blur-[1px] py-16 px-6">
+      {/* Gradient transition from hero (transparent) to section bg (P78) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-transparent to-[rgba(8,11,16,0.55)]" />
       <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
         {/* Left — copy */}
         <div>
@@ -567,7 +569,7 @@ function DifferentiationSection() {
   }
 
   return (
-    <section id="why-teraswap" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6">
+    <section id="why-teraswap" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Left-aligned headline (was centered) */}
         <SectionHeadline className="mb-12 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -629,7 +631,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6">
+    <section id="security" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -776,7 +778,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6 overflow-hidden">
+    <section id="experience" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6 overflow-hidden">
       {/* Single-column text section after P73 — the widget moved to the
           hero, so this section keeps only the Permit2 narrative + CTA.
           The Hallmark "cream-on-black" template watermark that used to
@@ -1005,7 +1007,7 @@ function FeaturesSection() {
   const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
 
   return (
-    <section id="features" className="relative bg-[rgba(8,11,16,0.82)] backdrop-blur-[1px] py-16 px-6">
+    <section id="features" className="relative bg-[rgba(8,11,16,0.55)] backdrop-blur-[1px] py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Section head — left-biased instead of centered template */}
         <div className="mb-12 max-w-2xl">
@@ -1085,7 +1087,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative bg-[rgba(8,11,16,0.82)] px-6 py-16 text-center">
+    <section className="relative bg-[rgba(8,11,16,0.55)] px-6 py-16 text-center">
       {/* Headline */}
       <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}

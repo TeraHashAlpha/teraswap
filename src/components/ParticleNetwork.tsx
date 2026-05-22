@@ -24,9 +24,9 @@ const MOUSE_REPEL = 180
 
 // ── Cursor proximity settings ──
 const CURSOR_GLOW_RADIUS = 350
-const BASE_LINE_OPACITY = 0.13
+const BASE_LINE_OPACITY = 0.18
 const MAX_LINE_OPACITY = 0.55
-const BASE_DOT_ALPHA_MULT = 1.1
+const BASE_DOT_ALPHA_MULT = 1.3
 const MAX_DOT_ALPHA_MULT = 1.8
 
 // ── Warp mode settings (active while scrolling — "travelling through space") ──
