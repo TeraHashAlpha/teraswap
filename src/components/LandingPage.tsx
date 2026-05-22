@@ -472,92 +472,143 @@ function AdapterConstellation() {
 //  SECTION 03b: WHAT MAKES TERASWAP DIFFERENT
 // ══════════════════════════════════════════════════════════
 
-function DiffNodesIcon() {
+// Hero-scale differentiator icons (96px). Gold stroke, no fill,
+// 1.5px line weight — consistent visual voice across the three blocks.
+
+// Central hub with 8 radiating lines + 8 outer dots. A simplified
+// version of the AdapterConstellation that lives in PerformanceSection.
+function DiffHubIcon() {
+  const angles = [0, 45, 90, 135, 180, 225, 270, 315]
+  const RADIUS = 9
   return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="4" cy="12" r="2" />
-      <circle cx="20" cy="5" r="2" />
-      <circle cx="20" cy="19" r="2" />
-      <line x1="5.7" y1="11.2" x2="18.3" y2="5.8" />
-      <line x1="5.7" y1="12.8" x2="18.3" y2="18.2" />
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      {angles.map((deg) => {
+        const r = (deg * Math.PI) / 180
+        const x = 12 + RADIUS * Math.cos(r)
+        const y = 12 + RADIUS * Math.sin(r)
+        return (
+          <g key={deg}>
+            <line x1="12" y1="12" x2={x.toFixed(2)} y2={y.toFixed(2)} />
+            <circle cx={x.toFixed(2)} cy={y.toFixed(2)} r="1.1" fill="currentColor" />
+          </g>
+        )
+      })}
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" />
     </svg>
   )
 }
 
-function DiffShieldCheckIcon() {
+// Shield + checkmark + tiny "ORACLE" wordmark hex — Oracle-Verified.
+function DiffOracleShieldIcon() {
   return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 2 L20 6 V12 C20 16.5 16.5 20.5 12 22 C7.5 20.5 4 16.5 4 12 V6 Z" />
-      <polyline points="8.5 12 11 14.5 15.5 10" />
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <path d="M12 2 L20 5.5 V12 C20 16.6 16.6 20.4 12 22 C7.4 20.4 4 16.6 4 12 V5.5 Z" />
+      <polyline points="8 12.5 11 15.5 16 9.5" />
+      {/* Chainlink-style hex glyph below the check, small */}
+      <path d="M12 17 L13.2 17.7 V19 L12 19.7 L10.8 19 V17.7 Z" />
     </svg>
   )
 }
 
-function DiffVerifiedDocIcon() {
+// Shield with crossed-out bot — Active MEV Protection.
+function DiffMEVBotIcon() {
   return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M14 2 H6 a2 2 0 0 0 -2 2 v16 a2 2 0 0 0 2 2 h12 a2 2 0 0 0 2 -2 V8 z" />
-      <polyline points="14 2 14 8 20 8" />
-      <polyline points="8 14 11 17 16 12" />
-    </svg>
-  )
-}
-
-// Shield + lock — for MEV protection. Visually distinct from
-// DiffShieldCheckIcon (shield + check) on the Oracle card.
-function DiffMEVShieldIcon() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 2 L20 6 V12 C20 16.5 16.5 20.5 12 22 C7.5 20.5 4 16.5 4 12 V6 Z" />
-      <rect x="9.5" y="11.5" width="5" height="4" rx="0.5" />
-      <path d="M10.5 11.5 V10 a1.5 1.5 0 0 1 3 0 V11.5" />
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <path d="M12 2 L20 5.5 V12 C20 16.6 16.6 20.4 12 22 C7.4 20.4 4 16.6 4 12 V5.5 Z" />
+      {/* Bot silhouette inside the shield: antenna + head + two eye dots */}
+      <line x1="12" y1="7.5" x2="12" y2="9" />
+      <rect x="9" y="9" width="6" height="5" rx="0.6" />
+      <circle cx="10.5" cy="11" r="0.5" fill="currentColor" />
+      <circle cx="13.5" cy="11" r="0.5" fill="currentColor" />
+      {/* Diagonal strike-through across the bot */}
+      <line x1="8" y1="15.5" x2="16" y2="7.5" />
     </svg>
   )
 }
 
 function DifferentiationSection() {
-  const CARDS: { icon: React.ReactNode; title: string; desc: string }[] = [
+  const BLOCKS: { num: string; icon: React.ReactNode; title: string; desc: string }[] = [
     {
-      icon: <DiffNodesIcon />,
+      num: '01',
+      icon: <DiffHubIcon />,
       title: 'Meta-Aggregator',
       desc: "We don't pick one routing model. TeraSwap compares intent-based solvers against traditional DEX routing — you get whichever gives the better price.",
     },
     {
-      icon: <DiffShieldCheckIcon />,
+      num: '02',
+      icon: <DiffOracleShieldIcon />,
       title: 'Oracle-Verified Execution',
       desc: 'Every quote is checked against Chainlink price feeds before execution. Deviations above 3% are blocked automatically — before your trade happens, not after.',
     },
     {
-      icon: <DiffMEVShieldIcon />,
+      num: '03',
+      icon: <DiffMEVBotIcon />,
       title: 'Active MEV Protection',
       desc: 'Intent-based execution powered by CoW Protocol batch auctions — solvers compete to give you the best outcome. Zero front-running, zero sandwich attacks.',
     },
   ]
 
+  // Tight motion variant for the per-block reveal — total time <300ms.
+  const blockReveal = {
+    hidden: { opacity: 0, y: 14 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease: easeOutExpo } },
+  }
+
   return (
     <section id="why-teraswap" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6">
       <div className="mx-auto max-w-5xl">
-        <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+        {/* Left-aligned headline (was centered) */}
+        <SectionHeadline className="mb-12 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
         </SectionHeadline>
 
         <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
-          className="grid grid-cols-1 gap-6 md:grid-cols-3"
+          className="divide-y divide-cream-08"
         >
-          {CARDS.map((c) => (
+          {BLOCKS.map((b, i) => (
             <motion.div
-              key={c.title}
-              variants={fadeInUpChild}
-              transition={{ duration: 0.2 }}
-              className="rounded-xl border border-cream-08 border-l-2 border-l-[#C8B89A] bg-surface-secondary p-8 transition-[border-color,box-shadow] duration-200 hover:border-gold-40 hover:shadow-[0_0_30px_rgba(200,184,154,0.1)]"
+              key={b.title}
+              variants={blockReveal}
+              className={`flex flex-col gap-8 py-10 md:flex-row md:items-center md:gap-14 ${
+                i % 2 === 1 ? 'md:flex-row-reverse' : ''
+              }`}
             >
-              <div className="mb-4" style={{ color: '#C8B89A' }}>
-                {c.icon}
+              {/* Icon side — gold stroke, ~96px */}
+              <div
+                className="flex shrink-0 items-center justify-center md:w-1/3"
+                style={{ color: '#C8B89A' }}
+              >
+                {b.icon}
               </div>
-              <h3 className="mb-2 text-xl font-semibold text-cream">{c.title}</h3>
-              <p className="text-[15px] leading-relaxed text-cream-75">{c.desc}</p>
+
+              {/* Text side */}
+              <div className="flex-1">
+                <span className="mb-3 block font-mono text-sm tracking-widest text-cream-gold">
+                  {b.num}
+                </span>
+                <h3 className="mb-3 text-2xl font-bold text-cream sm:text-3xl">
+                  {b.title}
+                </h3>
+                <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
+                  {b.desc}
+                </p>
+              </div>
             </motion.div>
           ))}
         </motion.div>
