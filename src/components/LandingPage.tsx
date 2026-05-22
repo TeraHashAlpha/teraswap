@@ -276,7 +276,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
+    <section id="performance" className="relative bg-[rgba(8,11,16,0.82)] backdrop-blur-[1px] py-16 px-6">
       <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
         {/* Left — copy */}
         <div>
@@ -535,7 +535,7 @@ function DifferentiationSection() {
   ]
 
   return (
-    <section id="why-teraswap" className="relative bg-surface/80 py-16 px-6">
+    <section id="why-teraswap" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6">
       <div className="mx-auto max-w-5xl">
         <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
@@ -578,7 +578,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative bg-surface/80 py-16 px-6">
+    <section id="security" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -725,7 +725,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-surface/80 py-16 px-6 overflow-hidden">
+    <section id="experience" className="relative bg-[rgba(8,11,16,0.82)] py-16 px-6 overflow-hidden">
       {/* Background watermark — z-0 so it stays fully behind content */}
       <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
         <span
@@ -849,7 +849,7 @@ function FeaturesSection() {
   const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
 
   return (
-    <section id="features" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
+    <section id="features" className="relative bg-[rgba(8,11,16,0.82)] backdrop-blur-[1px] py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Section head — left-biased instead of centered template */}
         <div className="mb-12 max-w-2xl">
@@ -922,7 +922,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative bg-surface/80 px-6 py-16 text-center">
+    <section className="relative bg-[rgba(8,11,16,0.82)] px-6 py-16 text-center">
       {/* Headline */}
       <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}
