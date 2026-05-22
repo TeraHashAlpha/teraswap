@@ -831,26 +831,134 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 //  SECTION 05: FEATURES
 // ══════════════════════════════════════════════════════════
 
-const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
+// Feature icons — 24×24 viewBox, gold (#C8B89A) stroke at 1.5px, no fill.
+// One icon per live feature; Roadmap entries stay icon-less.
+const featIconProps = {
+  width: 28,
+  height: 28,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+}
+
+function FeatNetworkIcon() {
+  return (
+    <svg {...featIconProps}>
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="18" cy="6" r="2.4" />
+      <circle cx="12" cy="18" r="2.4" />
+      <line x1="8" y1="7" x2="16" y2="7" />
+      <line x1="7" y1="8" x2="11" y2="16" />
+      <line x1="17" y1="8" x2="13" y2="16" />
+    </svg>
+  )
+}
+
+function FeatGasIcon() {
+  return (
+    <svg {...featIconProps}>
+      <rect x="3.5" y="6" width="9" height="14" rx="1" />
+      <line x1="3.5" y1="10" x2="12.5" y2="10" />
+      <path d="M12.5 9 L16 9 V14 a1 1 0 0 0 1 1 H18 V19 a1.5 1.5 0 0 1 -1.5 1.5" />
+      <line x1="20" y1="6" x2="20" y2="13" />
+    </svg>
+  )
+}
+
+function FeatChartAlertIcon() {
+  return (
+    <svg {...featIconProps}>
+      <polyline points="3 17 8 12 12 15 18 8" />
+      <line x1="20" y1="4" x2="20" y2="9" />
+      <circle cx="20" cy="11" r="0.7" fill="currentColor" />
+    </svg>
+  )
+}
+
+function FeatLockIcon() {
+  return (
+    <svg {...featIconProps}>
+      <rect x="5" y="11" width="14" height="10" rx="1.5" />
+      <path d="M8 11 V7.5 a4 4 0 0 1 8 0 V11" />
+    </svg>
+  )
+}
+
+function FeatSplitIcon() {
+  return (
+    <svg {...featIconProps}>
+      <line x1="3" y1="12" x2="10" y2="12" />
+      <line x1="10" y1="12" x2="20" y2="6" />
+      <line x1="10" y1="12" x2="20" y2="18" />
+      <circle cx="10" cy="12" r="1.2" fill="currentColor" />
+    </svg>
+  )
+}
+
+function FeatBarChartIcon() {
+  return (
+    <svg {...featIconProps}>
+      <line x1="3" y1="20.5" x2="21" y2="20.5" />
+      <rect x="6" y="13" width="3" height="7" />
+      <rect x="11" y="9" width="3" height="11" />
+      <rect x="16" y="6" width="3" height="14" />
+    </svg>
+  )
+}
+
+function FeatPenIcon() {
+  return (
+    <svg {...featIconProps}>
+      <path d="M14 4 L20 10 L10 20 L4 20 L4 14 Z" />
+      <line x1="16" y1="6" x2="18" y2="8" />
+    </svg>
+  )
+}
+
+function FeatKeyIcon() {
+  return (
+    <svg {...featIconProps}>
+      <circle cx="8" cy="12" r="4" />
+      <line x1="12" y1="12" x2="21" y2="12" />
+      <line x1="17" y1="12" x2="17" y2="15" />
+      <line x1="20" y1="12" x2="20" y2="15" />
+    </svg>
+  )
+}
+
+const FEATURES: {
+  title: string
+  desc: string
+  icon?: React.ReactNode
+  comingSoon?: boolean
+}[] = [
   {
     title: '11 Liquidity Sources',
     desc: 'Simultaneous queries across 7 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
+    icon: <FeatNetworkIcon />,
   },
   // "Active MEV Protection" lives on the DifferentiationSection hero card
   // — removed here per Sprint 27B / Prompt 72 to avoid duplication.
   {
     title: 'Gas-Aware Routing',
     desc: 'Quotes ranked by net output minus estimated gas cost. The ranking metric that actually matters to your wallet — not just raw amounts.',
+    icon: <FeatGasIcon />,
   },
   {
     title: 'Statistical Outlier Detection',
     desc: 'True median-based filtering across all 11 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
+    icon: <FeatChartAlertIcon />,
   },
   // "Multi-Oracle Price Protection" overlaps with the Oracle-Verified
   // Execution hero card on DifferentiationSection — removed per P72.
   {
     title: 'Privacy-First Architecture',
     desc: 'All RPC reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external blockchain providers or DEX APIs.',
+    icon: <FeatLockIcon />,
   },
   {
     title: 'Smart DCA Engine',
@@ -870,18 +978,22 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
   {
     title: 'Split Routing',
     desc: 'Large trades auto-split across multiple DEXes to minimize price impact. The optimizer tests dozens of 2-way and 3-way split configurations.',
+    icon: <FeatSplitIcon />,
   },
   {
     title: 'Analytics Dashboard',
     desc: 'Real-time protocol performance: volume trends, aggregator win-rates, popular pairs, and activity feed — built-in transparency for every user.',
+    icon: <FeatBarChartIcon />,
   },
   {
     title: 'Gasless Approvals',
     desc: 'Permit2 and EIP-2612 off-chain signing keeps your ETH in your wallet where it belongs. No approval gas fees, ever.',
+    icon: <FeatPenIcon />,
   },
   {
     title: 'Active Approvals Manager',
     desc: 'Full visibility into token approvals made through TeraSwap. Revoke any residual allowance in one click — security you control.',
+    icon: <FeatKeyIcon />,
   },
 ]
 
@@ -905,18 +1017,25 @@ function FeaturesSection() {
           </p>
         </div>
 
-        {/* Live features — full-weight cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">
+        {/* Live features — full-weight cards with hover lift + gold border */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           {liveFeatures.map((feature) => (
             <div
               key={feature.title}
-              className="rounded-2xl border border-cream-08 bg-surface-secondary p-7 transition-colors duration-200 hover:border-gold-40"
+              className="group rounded-2xl border border-cream-08 bg-surface-secondary p-5 transition-[background-color,border-color,transform] duration-200 hover:-translate-y-1 hover:border-[#C8B89A] hover:bg-surface-tertiary sm:p-6"
             >
-              <h3 className="mb-3 text-[17px] font-semibold text-cream">
+              {/* Icon — gold stroke, scales up on hover */}
+              {feature.icon && (
+                <div
+                  className="mb-4 inline-flex transition-transform duration-200 group-hover:scale-110"
+                  style={{ color: '#C8B89A' }}
+                >
+                  {feature.icon}
+                </div>
+              )}
+              <h3 className="mb-2 text-[17px] font-semibold text-cream">
                 {feature.title}
               </h3>
-              {/* Short gold mark instead of a long pale separator */}
-              <div className="mb-3 h-px w-8" style={{ background: '#C8B89A' }} />
               <p className="text-[14px] leading-relaxed text-cream-75">
                 {feature.desc}
               </p>
