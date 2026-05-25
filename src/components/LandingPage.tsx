@@ -38,6 +38,12 @@ const fadeInUpChild = {
 
 // ── Reusable section headline with scroll animation ───────
 
+// [P84] Text-shadow is the primary readability mechanism over particles.
+// A 30px dark halo provides ~200 luminance units of contrast — actual
+// WCAG AA protection, unlike sub-perceptual background overlays.
+const HEADLINE_TEXT_SHADOW = '0 0 30px rgba(8,11,16,0.9), 0 0 60px rgba(8,11,16,0.6)'
+const BODY_TEXT_SHADOW = '0 0 20px rgba(8,11,16,0.8), 0 0 40px rgba(8,11,16,0.5)'
+
 function SectionHeadline({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <motion.h2
@@ -46,6 +52,7 @@ function SectionHeadline({ children, className = '' }: { children: React.ReactNo
       viewport={{ once: true, amount: 0.1 }}
       variants={fadeInUp}
       className={`font-display font-bold text-cream ${className}`}
+      style={{ textShadow: HEADLINE_TEXT_SHADOW }}
     >
       {children}
     </motion.h2>
@@ -205,6 +212,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.28, ease: easeOutExpo, delay: 0.08 }}
             className="mb-5 font-display text-[36px] sm:text-[52px] md:text-[68px] font-extrabold leading-[1.05] tracking-[-0.02em] text-cream"
+            style={{ textShadow: HEADLINE_TEXT_SHADOW }}
           >
             One swap. Eleven routes.{' '}
             <span className="text-shimmer">Verified.</span>
@@ -216,6 +224,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.28, ease: easeOutExpo, delay: 0.14 }}
             className="mb-10 max-w-xl text-[16px] sm:text-[18px] leading-relaxed text-cream-75"
+            style={{ textShadow: BODY_TEXT_SHADOW }}
           >
             TeraSwap compares eleven liquidity sources for every trade, verifies the price against
             Chainlink oracles, and routes through MEV-protected execution.
@@ -276,9 +285,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="relative bg-[rgba(8,11,16,0.55)] backdrop-blur-[1px] py-16 px-6">
-      {/* Gradient transition from hero (transparent) to section bg (P78) */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-transparent to-[rgba(8,11,16,0.55)]" />
+    <section id="performance" className="relative py-16 px-6">
       <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
         {/* Left — copy */}
         <div>
@@ -286,7 +293,10 @@ function PerformanceSection() {
             Limitless Liquidity. Relentless Execution.
           </SectionHeadline>
 
-          <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
+          <p
+            className="max-w-2xl text-[16px] leading-relaxed text-cream-75"
+            style={{ textShadow: BODY_TEXT_SHADOW }}
+          >
             Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously
             scans eleven liquidity sources across Ethereum — identifying and executing the optimal
             route to deliver the highest net output on every single swap. Gas costs are folded into
@@ -569,7 +579,7 @@ function DifferentiationSection() {
   }
 
   return (
-    <section id="why-teraswap" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6">
+    <section id="why-teraswap" className="relative py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Left-aligned headline (was centered) */}
         <SectionHeadline className="mb-12 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
@@ -607,7 +617,10 @@ function DifferentiationSection() {
                 <h3 className="mb-3 text-2xl font-bold text-cream sm:text-3xl">
                   {b.title}
                 </h3>
-                <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
+                <p
+                  className="max-w-2xl text-[16px] leading-relaxed text-cream-75"
+                  style={{ textShadow: BODY_TEXT_SHADOW }}
+                >
                   {b.desc}
                 </p>
               </div>
@@ -631,7 +644,7 @@ function SecuritySection() {
   ]
 
   return (
-    <section id="security" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6">
+    <section id="security" className="relative py-16 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -692,6 +705,7 @@ function SecuritySection() {
           initial="hidden" whileInView="visible" viewport={{ once: true }}
           variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.3, duration: 0.5 } } }}
           className="mb-6 text-[16px] leading-relaxed text-cream-75"
+          style={{ textShadow: BODY_TEXT_SHADOW }}
         >
           <p>
             MEV bots never sleep — but neither does our protection. Through our native integration with
@@ -716,7 +730,7 @@ function SecuritySection() {
             7-layer guard chain (formerly its own section, folded in here
             per Sprint 27B / Prompt 71 to cut redundancy). */}
         <ul className="mb-4 mt-2 list-none space-y-3 text-left">
-          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
+          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 backdrop-blur-sm p-4">
             <span
               className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
               style={{ background: '#C8B89A', color: '#080B10' }}
@@ -730,7 +744,7 @@ function SecuritySection() {
               </p>
             </div>
           </li>
-          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
+          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 backdrop-blur-sm p-4">
             <span
               className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
               style={{ background: '#C8B89A', color: '#080B10' }}
@@ -756,7 +770,7 @@ function SecuritySection() {
             <motion.div
               key={i}
               variants={fadeInUpChild}
-              className="rounded-xl border border-cream-08 bg-surface-secondary p-5 text-center"
+              className="rounded-xl border border-cream-08 bg-surface-secondary backdrop-blur-md p-5 text-center"
             >
               <div className="mb-1 font-mono text-3xl font-bold text-cream">
                 {stat.isText ? stat.textValue : (
@@ -778,7 +792,7 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6 overflow-hidden">
+    <section id="experience" className="relative py-16 px-6 overflow-hidden">
       {/* Single-column text section after P73 — the widget moved to the
           hero, so this section keeps only the Permit2 narrative + CTA.
           The Hallmark "cream-on-black" template watermark that used to
@@ -806,6 +820,7 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
           initial="hidden" whileInView="visible" viewport={{ once: true }}
           variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.2, duration: 0.5 } } }}
           className="mb-8 max-w-2xl text-[16px] leading-relaxed text-cream-75"
+          style={{ textShadow: BODY_TEXT_SHADOW }}
         >
           Forget high gas fees and slow approval flows. Our{' '}
           <span className="font-mono" style={{ color: '#C8B89A' }}>Permit2</span> technology delivers{' '}
@@ -1007,24 +1022,31 @@ function FeaturesSection() {
   const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
 
   return (
-    <section id="features" className="relative bg-[rgba(8,11,16,0.55)] backdrop-blur-[1px] py-16 px-6">
+    <section id="features" className="relative py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Section head — left-biased instead of centered template */}
         <div className="mb-12 max-w-2xl">
           <SectionHeadline className="mb-3 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
             Engineered for the Ethereum Elite.
           </SectionHeadline>
-          <p className="text-[15px] leading-relaxed text-cream-75">
+          <p
+            className="text-[15px] leading-relaxed text-cream-75"
+            style={{ textShadow: BODY_TEXT_SHADOW }}
+          >
             Every capability shipping today, plus what&apos;s next on the roadmap.
           </p>
         </div>
 
-        {/* Live features — full-weight cards with hover lift + gold border */}
+        {/* Live features — full-weight cards with hover lift + gold border.
+            [P84] surface.secondary is hex (#0F1318) in tailwind.config — the
+            Tailwind /80 slash-opacity modifier doesn't reliably apply on hex
+            tokens here (Sprint 27C P74 bug), so we use an explicit rgba()
+            value to guarantee the glass effect renders. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           {liveFeatures.map((feature) => (
             <div
               key={feature.title}
-              className="group rounded-2xl border border-cream-08 bg-surface-secondary p-5 transition-[background-color,border-color,transform] duration-200 hover:-translate-y-1 hover:border-[#C8B89A] hover:bg-surface-tertiary sm:p-6"
+              className="group rounded-2xl border border-cream-08 bg-[rgba(15,19,24,0.8)] backdrop-blur-md p-5 transition-[background-color,border-color,transform] duration-200 hover:-translate-y-1 hover:border-[#C8B89A] hover:bg-surface-tertiary sm:p-6"
             >
               {/* Icon — gold stroke, scales up on hover */}
               {feature.icon && (
@@ -1057,7 +1079,7 @@ function FeaturesSection() {
               {roadmapFeatures.map((feature) => (
                 <div
                   key={feature.title}
-                  className="relative rounded-xl border border-dashed border-cream-08 bg-surface-secondary/50 p-5 opacity-60"
+                  className="relative rounded-xl border border-dashed border-cream-08 bg-surface-secondary/50 backdrop-blur-sm p-5 opacity-60"
                 >
                   {/* Top-right ribbon */}
                   <span
@@ -1087,7 +1109,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative bg-[rgba(8,11,16,0.55)] px-6 py-16 text-center">
+    <section className="relative px-6 py-16 text-center">
       {/* Headline */}
       <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}
@@ -1096,7 +1118,10 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
       </SectionHeadline>
 
       {/* Supporting copy — single paragraph, AA contrast */}
-      <p className="relative z-10 mx-auto mb-10 max-w-[520px] text-[16px] leading-relaxed text-cream-75">
+      <p
+        className="relative z-10 mx-auto mb-10 max-w-[520px] text-[16px] leading-relaxed text-cream-75"
+        style={{ textShadow: BODY_TEXT_SHADOW }}
+      >
         Experience decentralized trading engineered to work harder than any single exchange ever could.
       </p>
 
@@ -1124,6 +1149,16 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
 export default function LandingPage({ onLaunchApp }: Props) {
   return (
     <div className="relative z-[1]">
+      {/* [P84] Vignette — radial darken at edges, transparent in the centre
+          so the particle canvas remains visible behind copy. Pointer-events-
+          none so it never blocks interaction. Sits between the particle
+          canvas (z-0) and content (z-10+) via the parent's z-[1] stack. */}
+      <div
+        className="pointer-events-none fixed inset-0 z-[1]"
+        style={{
+          background: 'radial-gradient(ellipse at center, transparent 40%, rgba(8,11,16,0.4) 100%)',
+        }}
+      />
       <HeroSection onLaunchApp={onLaunchApp} />
       <PerformanceSection />
       <DifferentiationSection />
