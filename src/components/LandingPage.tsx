@@ -17,6 +17,18 @@ interface Props {
   onLaunchApp: () => void
 }
 
+// ── Environment flags ─────────────────────────────────────
+// [P87] SSR-safe checks — both `window` and `matchMedia` references are
+// gated. These are module-level constants captured at first import; they
+// don't react to a viewport resize between mount and the next reveal,
+// which is acceptable for one-shot headline animations.
+const IS_MOBILE_VIEWPORT =
+  typeof window !== 'undefined' && window.innerWidth < 768
+const PREFERS_REDUCED =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
 // ── Animation variants ────────────────────────────────────
 
 const easeOutExpo = [0.16, 1, 0.3, 1] as [number, number, number, number]
@@ -44,18 +56,111 @@ const fadeInUpChild = {
 const HEADLINE_TEXT_SHADOW = '0 0 30px rgba(8,11,16,0.9), 0 0 60px rgba(8,11,16,0.6)'
 const BODY_TEXT_SHADOW = '0 0 20px rgba(8,11,16,0.8), 0 0 40px rgba(8,11,16,0.5)'
 
-function SectionHeadline({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function SectionHeadline({
+  children,
+  className = '',
+  // [P87] When SplitText is the child, the inner per-character whileInView
+  // would fight the outer fadeInUp. Pass noReveal to render a plain h2
+  // and let SplitText drive the entrance animation alone.
+  noReveal = false,
+}: {
+  children: React.ReactNode
+  className?: string
+  noReveal?: boolean
+}) {
+  const cls = `font-display font-bold text-cream ${className}`
+  const style = { textShadow: HEADLINE_TEXT_SHADOW }
+  if (noReveal) {
+    return (
+      <h2 className={cls} style={style}>
+        {children}
+      </h2>
+    )
+  }
   return (
     <motion.h2
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, amount: 0.1 }}
       variants={fadeInUp}
-      className={`font-display font-bold text-cream ${className}`}
-      style={{ textShadow: HEADLINE_TEXT_SHADOW }}
+      className={cls}
+      style={style}
     >
       {children}
     </motion.h2>
+  )
+}
+
+// [P87] Headline wrapper that splits text into characters and animates
+// each one via Framer Motion stagger. The blur filter (2px → 0) is
+// desktop-only — on mobile or under prefers-reduced-motion we use
+// opacity + y only, which avoids per-character compositing layers
+// (architect note R2). aria-label preserves the full string for screen
+// readers; the per-character spans are aria-hidden.
+function SplitText({
+  children,
+  className = '',
+  style,
+}: {
+  children: string
+  className?: string
+  style?: React.CSSProperties
+}) {
+  const useBlur = !PREFERS_REDUCED && !IS_MOBILE_VIEWPORT
+  const words = children.split(' ')
+
+  // When reduced motion is on, render the text statically — no stagger,
+  // no transform, no filter. Screen readers + reduced-motion users get
+  // the same result instantly.
+  if (PREFERS_REDUCED) {
+    return (
+      <span className={className} style={style} aria-label={children}>
+        {children}
+      </span>
+    )
+  }
+
+  return (
+    <motion.span
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, amount: 0.3 }}
+      variants={{
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.03 } },
+      }}
+      className={className}
+      style={style}
+      aria-label={children}
+    >
+      {words.map((word, wi) => (
+        <span key={wi} className="inline-block whitespace-nowrap">
+          {word.split('').map((char, ci) => (
+            <motion.span
+              key={`${wi}-${ci}`}
+              className="inline-block"
+              variants={{
+                hidden: {
+                  opacity: 0,
+                  y: 20,
+                  ...(useBlur ? { filter: 'blur(2px)' } : {}),
+                },
+                visible: {
+                  opacity: 1,
+                  y: 0,
+                  ...(useBlur ? { filter: 'blur(0px)' } : {}),
+                  transition: { duration: 0.4, ease: easeOutExpo },
+                },
+              }}
+              aria-hidden="true"
+            >
+              {char}
+            </motion.span>
+          ))}
+          {wi < words.length - 1 && <span className="inline-block">&nbsp;</span>}
+        </span>
+      ))}
+    </motion.span>
   )
 }
 
@@ -206,17 +311,17 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
           {/* Hairline under stats — quiet structural mark */}
           <div className="mb-10 h-px w-24 bg-cream-15" />
 
-          {/* H1 — single line at ≤ 50 chars per Hallmark sizing brackets */}
-          <motion.h1
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, ease: easeOutExpo, delay: 0.08 }}
+          {/* H1 — single line at ≤ 50 chars per Hallmark sizing brackets.
+              [P87] SplitText drives the main reveal per character; the
+              h1 itself is static so the two whileInView triggers don't
+              fight. The "Verified." shimmer span stays whole. */}
+          <h1
             className="mb-5 font-display text-[36px] sm:text-[52px] md:text-[68px] font-extrabold leading-[1.05] tracking-[-0.02em] text-cream"
             style={{ textShadow: HEADLINE_TEXT_SHADOW }}
           >
-            One swap. Eleven routes.{' '}
+            <SplitText>One swap. Eleven routes.</SplitText>{' '}
             <span className="text-shimmer">Verified.</span>
-          </motion.h1>
+          </h1>
 
           {/* Subhead — single line; long-form pitch moved to Performance section */}
           <motion.p
@@ -289,8 +394,8 @@ function PerformanceSection() {
       <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
         {/* Left — copy */}
         <div>
-          <SectionHeadline className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-            Limitless Liquidity. Relentless Execution.
+          <SectionHeadline noReveal className="mb-6 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+            <SplitText>Limitless Liquidity. Relentless Execution.</SplitText>
           </SectionHeadline>
 
           <p
@@ -582,8 +687,8 @@ function DifferentiationSection() {
     <section id="why-teraswap" className="relative py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Left-aligned headline (was centered) */}
-        <SectionHeadline className="mb-12 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-          What Makes TeraSwap Different
+        <SectionHeadline noReveal className="mb-12 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+          <SplitText>What Makes TeraSwap Different</SplitText>
         </SectionHeadline>
 
         <motion.div
@@ -688,8 +793,8 @@ function SecuritySection() {
         </motion.div>
 
         {/* Headlines */}
-        <SectionHeadline className="mb-2 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-          Institutional-Grade Security.
+        <SectionHeadline noReveal className="mb-2 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+          <SplitText>Institutional-Grade Security.</SplitText>
         </SectionHeadline>
         <motion.h3
           initial="hidden" whileInView="visible" viewport={{ once: true }}
@@ -1111,10 +1216,10 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
     <section className="relative px-6 py-16 text-center">
       {/* Headline */}
-      <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
-        Don&apos;t leave{' '}
+      <SectionHeadline noReveal className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
+        <SplitText>Don&apos;t leave</SplitText>{' '}
         <span className="text-shimmer">performance</span>{' '}
-        on the table.
+        <SplitText>on the table.</SplitText>
       </SectionHeadline>
 
       {/* Supporting copy — single paragraph, AA contrast */}
