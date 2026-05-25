@@ -219,3 +219,14 @@
   the mobile hit area would silently shrink to the visible size. Not
   the case today (the row sets `flex items-center gap-1.5`, no
   clipping), but worth noting if the surrounding layout changes.
+
+## Feedback — P81 (commit f317743)
+
+### Assumption that turned out wrong
+- Sprint 9C architect note 6 said `subscribeToOrders` should be
+  stubbed as `{ unsubscribe: vi.fn() }`. The actual signature
+  (src/lib/order-engine/supabase.ts:205-230) returns a plain
+  unsubscribe function `() => void`. The hook uses it as the
+  `useEffect` cleanup (`return unsub`), so wrapping it in an object
+  would trigger React's "destroy is not a function" error and crash
+  unmount. Test mock now returns `vi.fn()` (a plain function).
