@@ -20,21 +20,21 @@ const PREFERS_REDUCED_MOTION = IS_BROWSER && window.matchMedia('(prefers-reduced
 const PARTICLE_COUNT = PREFERS_REDUCED_MOTION ? 20 : IS_MOBILE ? 55 : 110
 const MAX_DIST = 160
 const MOUSE_DIST = 200
-const MOUSE_REPEL = 120
+const MOUSE_REPEL = 180
 
 // ── Cursor proximity settings ──
-const CURSOR_GLOW_RADIUS = 250
-const BASE_LINE_OPACITY = 0.13
-const MAX_LINE_OPACITY = 0.35
-const BASE_DOT_ALPHA_MULT = 1.1
-const MAX_DOT_ALPHA_MULT = 1.4
+const CURSOR_GLOW_RADIUS = 350
+const BASE_LINE_OPACITY = 0.18
+const MAX_LINE_OPACITY = 0.55
+const BASE_DOT_ALPHA_MULT = 1.3
+const MAX_DOT_ALPHA_MULT = 1.8
 
 // ── Warp mode settings (active while scrolling — "travelling through space") ──
-const WARP_FORCE = 0.014            // outward centrifugal force from viewport center
+const WARP_FORCE = 0.025            // outward centrifugal force from viewport center
 const WARP_SPEED_LIMIT = 16         // max particle speed during full warp
-const WARP_TRAIL_MAX = 13           // max trail length (particle radii)
-const WARP_LERP_IN = 0.14           // how fast warp kicks in on scroll
-const WARP_LERP_OUT = 0.02          // how slowly it calms back down
+const WARP_TRAIL_MAX = 18           // max trail length (particle radii)
+const WARP_LERP_IN = 0.22           // how fast warp kicks in on scroll
+const WARP_LERP_OUT = 0.04          // how slowly it calms back down
 
 // ── Turbo mode settings (active during swap transactions) ──
 const TURBO_SPEED_MULT = 12         // velocity multiplier during turbo (was 4.5)

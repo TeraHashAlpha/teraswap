@@ -276,7 +276,9 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function PerformanceSection() {
   return (
-    <section id="performance" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
+    <section id="performance" className="relative bg-[rgba(8,11,16,0.55)] backdrop-blur-[1px] py-16 px-6">
+      {/* Gradient transition from hero (transparent) to section bg (P78) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-transparent to-[rgba(8,11,16,0.55)]" />
       <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
         {/* Left — copy */}
         <div>
@@ -472,92 +474,143 @@ function AdapterConstellation() {
 //  SECTION 03b: WHAT MAKES TERASWAP DIFFERENT
 // ══════════════════════════════════════════════════════════
 
-function DiffNodesIcon() {
+// Hero-scale differentiator icons (96px). Gold stroke, no fill,
+// 1.5px line weight — consistent visual voice across the three blocks.
+
+// Central hub with 8 radiating lines + 8 outer dots. A simplified
+// version of the AdapterConstellation that lives in PerformanceSection.
+function DiffHubIcon() {
+  const angles = [0, 45, 90, 135, 180, 225, 270, 315]
+  const RADIUS = 9
   return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="4" cy="12" r="2" />
-      <circle cx="20" cy="5" r="2" />
-      <circle cx="20" cy="19" r="2" />
-      <line x1="5.7" y1="11.2" x2="18.3" y2="5.8" />
-      <line x1="5.7" y1="12.8" x2="18.3" y2="18.2" />
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      {angles.map((deg) => {
+        const r = (deg * Math.PI) / 180
+        const x = 12 + RADIUS * Math.cos(r)
+        const y = 12 + RADIUS * Math.sin(r)
+        return (
+          <g key={deg}>
+            <line x1="12" y1="12" x2={x.toFixed(2)} y2={y.toFixed(2)} />
+            <circle cx={x.toFixed(2)} cy={y.toFixed(2)} r="1.1" fill="currentColor" />
+          </g>
+        )
+      })}
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" />
     </svg>
   )
 }
 
-function DiffShieldCheckIcon() {
+// Shield + checkmark + tiny "ORACLE" wordmark hex — Oracle-Verified.
+function DiffOracleShieldIcon() {
   return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 2 L20 6 V12 C20 16.5 16.5 20.5 12 22 C7.5 20.5 4 16.5 4 12 V6 Z" />
-      <polyline points="8.5 12 11 14.5 15.5 10" />
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <path d="M12 2 L20 5.5 V12 C20 16.6 16.6 20.4 12 22 C7.4 20.4 4 16.6 4 12 V5.5 Z" />
+      <polyline points="8 12.5 11 15.5 16 9.5" />
+      {/* Chainlink-style hex glyph below the check, small */}
+      <path d="M12 17 L13.2 17.7 V19 L12 19.7 L10.8 19 V17.7 Z" />
     </svg>
   )
 }
 
-function DiffVerifiedDocIcon() {
+// Shield with crossed-out bot — Active MEV Protection.
+function DiffMEVBotIcon() {
   return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M14 2 H6 a2 2 0 0 0 -2 2 v16 a2 2 0 0 0 2 2 h12 a2 2 0 0 0 2 -2 V8 z" />
-      <polyline points="14 2 14 8 20 8" />
-      <polyline points="8 14 11 17 16 12" />
-    </svg>
-  )
-}
-
-// Shield + lock — for MEV protection. Visually distinct from
-// DiffShieldCheckIcon (shield + check) on the Oracle card.
-function DiffMEVShieldIcon() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 2 L20 6 V12 C20 16.5 16.5 20.5 12 22 C7.5 20.5 4 16.5 4 12 V6 Z" />
-      <rect x="9.5" y="11.5" width="5" height="4" rx="0.5" />
-      <path d="M10.5 11.5 V10 a1.5 1.5 0 0 1 3 0 V11.5" />
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <path d="M12 2 L20 5.5 V12 C20 16.6 16.6 20.4 12 22 C7.4 20.4 4 16.6 4 12 V5.5 Z" />
+      {/* Bot silhouette inside the shield: antenna + head + two eye dots */}
+      <line x1="12" y1="7.5" x2="12" y2="9" />
+      <rect x="9" y="9" width="6" height="5" rx="0.6" />
+      <circle cx="10.5" cy="11" r="0.5" fill="currentColor" />
+      <circle cx="13.5" cy="11" r="0.5" fill="currentColor" />
+      {/* Diagonal strike-through across the bot */}
+      <line x1="8" y1="15.5" x2="16" y2="7.5" />
     </svg>
   )
 }
 
 function DifferentiationSection() {
-  const CARDS: { icon: React.ReactNode; title: string; desc: string }[] = [
+  const BLOCKS: { num: string; icon: React.ReactNode; title: string; desc: string }[] = [
     {
-      icon: <DiffNodesIcon />,
+      num: '01',
+      icon: <DiffHubIcon />,
       title: 'Meta-Aggregator',
       desc: "We don't pick one routing model. TeraSwap compares intent-based solvers against traditional DEX routing — you get whichever gives the better price.",
     },
     {
-      icon: <DiffShieldCheckIcon />,
+      num: '02',
+      icon: <DiffOracleShieldIcon />,
       title: 'Oracle-Verified Execution',
       desc: 'Every quote is checked against Chainlink price feeds before execution. Deviations above 3% are blocked automatically — before your trade happens, not after.',
     },
     {
-      icon: <DiffMEVShieldIcon />,
+      num: '03',
+      icon: <DiffMEVBotIcon />,
       title: 'Active MEV Protection',
       desc: 'Intent-based execution powered by CoW Protocol batch auctions — solvers compete to give you the best outcome. Zero front-running, zero sandwich attacks.',
     },
   ]
 
+  // Tight motion variant for the per-block reveal — total time <300ms.
+  const blockReveal = {
+    hidden: { opacity: 0, y: 14 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease: easeOutExpo } },
+  }
+
   return (
-    <section id="why-teraswap" className="relative bg-surface/80 py-16 px-6">
+    <section id="why-teraswap" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6">
       <div className="mx-auto max-w-5xl">
-        <SectionHeadline className="mb-16 text-center text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
+        {/* Left-aligned headline (was centered) */}
+        <SectionHeadline className="mb-12 max-w-2xl text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           What Makes TeraSwap Different
         </SectionHeadline>
 
         <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
-          className="grid grid-cols-1 gap-6 md:grid-cols-3"
+          className="divide-y divide-cream-08"
         >
-          {CARDS.map((c) => (
+          {BLOCKS.map((b, i) => (
             <motion.div
-              key={c.title}
-              variants={fadeInUpChild}
-              transition={{ duration: 0.2 }}
-              className="rounded-xl border border-cream-08 border-l-2 border-l-[#C8B89A] bg-surface-secondary p-8 transition-[border-color,box-shadow] duration-200 hover:border-gold-40 hover:shadow-[0_0_30px_rgba(200,184,154,0.1)]"
+              key={b.title}
+              variants={blockReveal}
+              className={`flex flex-col gap-8 py-10 md:flex-row md:items-center md:gap-14 ${
+                i % 2 === 1 ? 'md:flex-row-reverse' : ''
+              }`}
             >
-              <div className="mb-4" style={{ color: '#C8B89A' }}>
-                {c.icon}
+              {/* Icon side — gold stroke, ~96px */}
+              <div
+                className="flex shrink-0 items-center justify-center md:w-1/3"
+                style={{ color: '#C8B89A' }}
+              >
+                {b.icon}
               </div>
-              <h3 className="mb-2 text-xl font-semibold text-cream">{c.title}</h3>
-              <p className="text-[15px] leading-relaxed text-cream-75">{c.desc}</p>
+
+              {/* Text side */}
+              <div className="flex-1">
+                <span className="mb-3 block font-mono text-sm tracking-widest text-cream-gold">
+                  {b.num}
+                </span>
+                <h3 className="mb-3 text-2xl font-bold text-cream sm:text-3xl">
+                  {b.title}
+                </h3>
+                <p className="max-w-2xl text-[16px] leading-relaxed text-cream-75">
+                  {b.desc}
+                </p>
+              </div>
             </motion.div>
           ))}
         </motion.div>
@@ -574,11 +627,11 @@ function SecuritySection() {
   const stats: { value: number; suffix: string; label: string; prefix?: string; isText?: boolean; textValue?: string }[] = [
     { value: 7, suffix: '', label: 'Independent validation layers' },
     { value: 29, suffix: '', label: 'Chainlink oracle price feeds' },
-    { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓' },
+    { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓ Verified' },
   ]
 
   return (
-    <section id="security" className="relative bg-surface/80 py-16 px-6">
+    <section id="security" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6">
       <div className="mx-auto max-w-3xl text-center">
         {/* Shield animation (SVG) */}
         <motion.div
@@ -665,7 +718,7 @@ function SecuritySection() {
         <ul className="mb-4 mt-2 list-none space-y-3 text-left">
           <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
             <span
-              className="mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em]"
+              className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
               style={{ background: '#C8B89A', color: '#080B10' }}
             >
               PRE-SWAP
@@ -679,7 +732,7 @@ function SecuritySection() {
           </li>
           <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 p-4">
             <span
-              className="mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em]"
+              className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
               style={{ background: '#C8B89A', color: '#080B10' }}
             >
               POST-SWAP
@@ -725,19 +778,12 @@ function SecuritySection() {
 
 function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className="relative bg-surface/80 py-16 px-6 overflow-hidden">
-      {/* Background watermark — z-0 so it stays fully behind content */}
-      <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
-        <span
-          className="font-display text-[48px] sm:text-[100px] md:text-[120px] font-bold select-none whitespace-nowrap"
-          style={{ color: 'rgba(200,184,154,0.03)' }}
-        >
-          cream-on-black
-        </span>
-      </div>
-
+    <section id="experience" className="relative bg-[rgba(8,11,16,0.55)] py-16 px-6 overflow-hidden">
       {/* Single-column text section after P73 — the widget moved to the
-          hero, so this section keeps only the Permit2 narrative + CTA. */}
+          hero, so this section keeps only the Permit2 narrative + CTA.
+          The Hallmark "cream-on-black" template watermark that used to
+          sit behind this section was removed in P76 — it was a design-
+          token label, not marketing content. */}
       <div className="relative z-10 mx-auto max-w-3xl">
         <SectionHeadline className="mb-6 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
           <motion.span
@@ -787,26 +833,134 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 //  SECTION 05: FEATURES
 // ══════════════════════════════════════════════════════════
 
-const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
+// Feature icons — 24×24 viewBox, gold (#C8B89A) stroke at 1.5px, no fill.
+// One icon per live feature; Roadmap entries stay icon-less.
+const featIconProps = {
+  width: 28,
+  height: 28,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+}
+
+function FeatNetworkIcon() {
+  return (
+    <svg {...featIconProps}>
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="18" cy="6" r="2.4" />
+      <circle cx="12" cy="18" r="2.4" />
+      <line x1="8" y1="7" x2="16" y2="7" />
+      <line x1="7" y1="8" x2="11" y2="16" />
+      <line x1="17" y1="8" x2="13" y2="16" />
+    </svg>
+  )
+}
+
+function FeatGasIcon() {
+  return (
+    <svg {...featIconProps}>
+      <rect x="3.5" y="6" width="9" height="14" rx="1" />
+      <line x1="3.5" y1="10" x2="12.5" y2="10" />
+      <path d="M12.5 9 L16 9 V14 a1 1 0 0 0 1 1 H18 V19 a1.5 1.5 0 0 1 -1.5 1.5" />
+      <line x1="20" y1="6" x2="20" y2="13" />
+    </svg>
+  )
+}
+
+function FeatChartAlertIcon() {
+  return (
+    <svg {...featIconProps}>
+      <polyline points="3 17 8 12 12 15 18 8" />
+      <line x1="20" y1="4" x2="20" y2="9" />
+      <circle cx="20" cy="11" r="0.7" fill="currentColor" />
+    </svg>
+  )
+}
+
+function FeatLockIcon() {
+  return (
+    <svg {...featIconProps}>
+      <rect x="5" y="11" width="14" height="10" rx="1.5" />
+      <path d="M8 11 V7.5 a4 4 0 0 1 8 0 V11" />
+    </svg>
+  )
+}
+
+function FeatSplitIcon() {
+  return (
+    <svg {...featIconProps}>
+      <line x1="3" y1="12" x2="10" y2="12" />
+      <line x1="10" y1="12" x2="20" y2="6" />
+      <line x1="10" y1="12" x2="20" y2="18" />
+      <circle cx="10" cy="12" r="1.2" fill="currentColor" />
+    </svg>
+  )
+}
+
+function FeatBarChartIcon() {
+  return (
+    <svg {...featIconProps}>
+      <line x1="3" y1="20.5" x2="21" y2="20.5" />
+      <rect x="6" y="13" width="3" height="7" />
+      <rect x="11" y="9" width="3" height="11" />
+      <rect x="16" y="6" width="3" height="14" />
+    </svg>
+  )
+}
+
+function FeatPenIcon() {
+  return (
+    <svg {...featIconProps}>
+      <path d="M14 4 L20 10 L10 20 L4 20 L4 14 Z" />
+      <line x1="16" y1="6" x2="18" y2="8" />
+    </svg>
+  )
+}
+
+function FeatKeyIcon() {
+  return (
+    <svg {...featIconProps}>
+      <circle cx="8" cy="12" r="4" />
+      <line x1="12" y1="12" x2="21" y2="12" />
+      <line x1="17" y1="12" x2="17" y2="15" />
+      <line x1="20" y1="12" x2="20" y2="15" />
+    </svg>
+  )
+}
+
+const FEATURES: {
+  title: string
+  desc: string
+  icon?: React.ReactNode
+  comingSoon?: boolean
+}[] = [
   {
     title: '11 Liquidity Sources',
     desc: 'Simultaneous queries across 7 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
+    icon: <FeatNetworkIcon />,
   },
   // "Active MEV Protection" lives on the DifferentiationSection hero card
   // — removed here per Sprint 27B / Prompt 72 to avoid duplication.
   {
     title: 'Gas-Aware Routing',
     desc: 'Quotes ranked by net output minus estimated gas cost. The ranking metric that actually matters to your wallet — not just raw amounts.',
+    icon: <FeatGasIcon />,
   },
   {
     title: 'Statistical Outlier Detection',
     desc: 'True median-based filtering across all 11 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
+    icon: <FeatChartAlertIcon />,
   },
   // "Multi-Oracle Price Protection" overlaps with the Oracle-Verified
   // Execution hero card on DifferentiationSection — removed per P72.
   {
     title: 'Privacy-First Architecture',
     desc: 'All RPC reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external blockchain providers or DEX APIs.',
+    icon: <FeatLockIcon />,
   },
   {
     title: 'Smart DCA Engine',
@@ -826,18 +980,22 @@ const FEATURES: { title: string; desc: string; comingSoon?: boolean }[] = [
   {
     title: 'Split Routing',
     desc: 'Large trades auto-split across multiple DEXes to minimize price impact. The optimizer tests dozens of 2-way and 3-way split configurations.',
+    icon: <FeatSplitIcon />,
   },
   {
     title: 'Analytics Dashboard',
     desc: 'Real-time protocol performance: volume trends, aggregator win-rates, popular pairs, and activity feed — built-in transparency for every user.',
+    icon: <FeatBarChartIcon />,
   },
   {
     title: 'Gasless Approvals',
     desc: 'Permit2 and EIP-2612 off-chain signing keeps your ETH in your wallet where it belongs. No approval gas fees, ever.',
+    icon: <FeatPenIcon />,
   },
   {
     title: 'Active Approvals Manager',
     desc: 'Full visibility into token approvals made through TeraSwap. Revoke any residual allowance in one click — security you control.',
+    icon: <FeatKeyIcon />,
   },
 ]
 
@@ -849,7 +1007,7 @@ function FeaturesSection() {
   const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
 
   return (
-    <section id="features" className="relative bg-surface/80 backdrop-blur-[1px] py-16 px-6">
+    <section id="features" className="relative bg-[rgba(8,11,16,0.55)] backdrop-blur-[1px] py-16 px-6">
       <div className="mx-auto max-w-5xl">
         {/* Section head — left-biased instead of centered template */}
         <div className="mb-12 max-w-2xl">
@@ -861,18 +1019,25 @@ function FeaturesSection() {
           </p>
         </div>
 
-        {/* Live features — full-weight cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">
+        {/* Live features — full-weight cards with hover lift + gold border */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           {liveFeatures.map((feature) => (
             <div
               key={feature.title}
-              className="rounded-2xl border border-cream-08 bg-surface-secondary p-7 transition-colors duration-200 hover:border-gold-40"
+              className="group rounded-2xl border border-cream-08 bg-surface-secondary p-5 transition-[background-color,border-color,transform] duration-200 hover:-translate-y-1 hover:border-[#C8B89A] hover:bg-surface-tertiary sm:p-6"
             >
-              <h3 className="mb-3 text-[17px] font-semibold text-cream">
+              {/* Icon — gold stroke, scales up on hover */}
+              {feature.icon && (
+                <div
+                  className="mb-4 inline-flex transition-transform duration-200 group-hover:scale-110"
+                  style={{ color: '#C8B89A' }}
+                >
+                  {feature.icon}
+                </div>
+              )}
+              <h3 className="mb-2 text-[17px] font-semibold text-cream">
                 {feature.title}
               </h3>
-              {/* Short gold mark instead of a long pale separator */}
-              <div className="mb-3 h-px w-8" style={{ background: '#C8B89A' }} />
               <p className="text-[14px] leading-relaxed text-cream-75">
                 {feature.desc}
               </p>
@@ -922,7 +1087,7 @@ function FeaturesSection() {
 
 function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className="relative bg-surface/80 px-6 py-16 text-center">
+    <section className="relative bg-[rgba(8,11,16,0.55)] px-6 py-16 text-center">
       {/* Headline */}
       <SectionHeadline className="relative z-10 mx-auto mb-5 max-w-3xl text-[36px] sm:text-[52px] leading-[1.1]">
         Don&apos;t leave{' '}
