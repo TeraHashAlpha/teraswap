@@ -67,6 +67,10 @@ export default function ParticleNetwork() {
   const turboRef = useRef(0) // 0 = calm, 1 = full turbo (lerped)
   const warpRef  = useRef(0) // 0 = calm, 1 = full warp (lerped from scroll)
   const warpTargetRef = useRef(0) // driven by scroll events
+  // [P85] Normalised scroll progress 0 (top of page) → 1 (bottom).
+  // Refreshed in onScroll; consumed by draw() to modulate network density,
+  // brightness, line width, and a subtle gravitational pull downward.
+  const scrollProgressRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -120,9 +124,15 @@ export default function ParticleNetwork() {
       const w = warpRef.current // 0-1 warp intensity
 
       // ── Interpolated settings ──
-      const maxDist = MAX_DIST + (TURBO_MAX_DIST - MAX_DIST) * t
-      const baseLineOp = BASE_LINE_OPACITY + (TURBO_LINE_OPACITY - BASE_LINE_OPACITY) * t
-      const baseDotMult = BASE_DOT_ALPHA_MULT + (TURBO_DOT_ALPHA_MULT - BASE_DOT_ALPHA_MULT) * t
+      // [P85] Scroll progress modulates base parameters before turbo/warp
+      // interpolation. When turbo or warp is fully engaged they still
+      // dominate via the standard *t / *w blend.
+      const sp = scrollProgressRef.current
+      const scrollMaxDist = MAX_DIST + sp * 60 // 160 (top) → 220 (bottom)
+      const maxDist = scrollMaxDist + (TURBO_MAX_DIST - scrollMaxDist) * t
+      const scrollBrightBoost = sp * 0.15
+      const baseLineOp = (BASE_LINE_OPACITY + scrollBrightBoost) + (TURBO_LINE_OPACITY - (BASE_LINE_OPACITY + scrollBrightBoost)) * t
+      const baseDotMult = (BASE_DOT_ALPHA_MULT + sp * 0.3) + (TURBO_DOT_ALPHA_MULT - (BASE_DOT_ALPHA_MULT + sp * 0.3)) * t
       const speedLimit = 0.8 + (0.8 * TURBO_SPEED_MULT - 0.8) * t + WARP_SPEED_LIMIT * w
 
       // Draw connections between particles — brightness depends on cursor proximity + turbo
@@ -147,7 +157,7 @@ export default function ParticleNetwork() {
             ctx!.moveTo(particles[i].x, particles[i].y)
             ctx!.lineTo(particles[j].x, particles[j].y)
             ctx!.strokeStyle = `rgba(${colorRef.current}, ${opacity})`
-            ctx!.lineWidth = 0.5 + cursorFactor * 0.5 + t * 1.2
+            ctx!.lineWidth = (0.5 + sp * 0.3) + cursorFactor * 0.5 + t * 1.2
             ctx!.stroke()
           }
         }
@@ -232,6 +242,13 @@ export default function ParticleNetwork() {
           }
         }
 
+        // [P85] Subtle gravitational drift downward as the user scrolls.
+        // Only applies when calm (no turbo, no warp) so the effect is felt
+        // during normal reading, not during dramatic motion.
+        if (sp > 0.1 && w < 0.1 && t < 0.1) {
+          p.vy += sp * 0.003
+        }
+
         // ── Warp: push particles outward from viewport centre ──
         if (w > 0.01) {
           const cx = W / 2, cy = H / 2
@@ -297,6 +314,11 @@ export default function ParticleNetwork() {
       warpTargetRef.current = 1
       clearTimeout(scrollTimer)
       scrollTimer = setTimeout(() => { warpTargetRef.current = 0 }, 160)
+
+      // [P85] Normalised scroll progress (0 → 1). maxScroll is 0 on pages
+      // shorter than the viewport — keep the ref at 0 in that case.
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight
+      scrollProgressRef.current = maxScroll > 0 ? window.scrollY / maxScroll : 0
     }
 
     window.addEventListener('resize', resize)
