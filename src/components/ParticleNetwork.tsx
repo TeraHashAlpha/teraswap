@@ -51,6 +51,30 @@ function getParticleColor(): string {
   return getComputedStyle(document.documentElement).getPropertyValue('--particle-color').trim() || '232, 220, 196'
 }
 
+// [P86] Flow lines — ambient gold energy streams drawn over the particle
+// network. Anchor points are normalised (0–1) and multiplied by the
+// canvas W/H at draw time. The canvas is position:fixed inset:0 so 0–1
+// always maps to the visible viewport regardless of scroll position.
+// Module-level so the array isn't reallocated per frame.
+const FLOW_LINES: { points: number[][]; width: number; speed: number }[] = [
+  // Line 1: top-left → center-right, gentle S-curve
+  { points: [[0.05, 0.3], [0.3, 0.15], [0.6, 0.4], [0.95, 0.25]], width: 1.2, speed: 0.0008 },
+  // Line 2: left-center → bottom-right
+  { points: [[0.0, 0.55], [0.25, 0.65], [0.55, 0.45], [0.85, 0.7]], width: 0.8, speed: 0.0012 },
+  // Line 3: top-right → bottom-left, crossing the others
+  { points: [[0.9, 0.1], [0.7, 0.35], [0.35, 0.55], [0.1, 0.85]], width: 1.0, speed: 0.001 },
+]
+
+/** Linear interpolation along a polyline at parameter t (0 → 1). */
+function interpolateCurve(pts: number[][], t: number): [number, number] {
+  const totalSegments = pts.length - 1
+  const segment = Math.min(Math.floor(t * totalSegments), totalSegments - 1)
+  const localT = (t * totalSegments) - segment
+  const x = pts[segment][0] + (pts[segment + 1][0] - pts[segment][0]) * localT
+  const y = pts[segment][1] + (pts[segment + 1][1] - pts[segment][1]) * localT
+  return [x, y]
+}
+
 // ── Global turbo state (set via custom events from SwapBox) ──
 let globalTurbo = false
 export function setParticleTurbo(active: boolean) {
@@ -223,6 +247,58 @@ export default function ParticleNetwork() {
             g.addColorStop(0, `rgba(${colorRef.current}, ${dotAlpha * (0.3 + t * 0.2)})`)
             g.addColorStop(1, `rgba(${colorRef.current}, 0)`)
             ctx!.fillStyle = g
+            ctx!.fill()
+          }
+        }
+      }
+
+      // [P86] Flow lines — three ambient gold streams with a traveling
+      // pulse dot per stream. Skipped entirely under prefers-reduced-motion
+      // and faded during warp/turbo (1 - max(w, t)). Glow uses concentric
+      // circles instead of ctx.shadowBlur (no compositing layer cost).
+      if (!PREFERS_REDUCED_MOTION) {
+        const flowFade = 1 - Math.max(w, t)
+        if (flowFade > 0.1) {
+          const flowTime = Date.now()
+          const goldColor = '200, 184, 154' // #C8B89A in RGB
+          for (const flow of FLOW_LINES) {
+            const pts = flow.points.map(([px, py]) => [px * W, py * H])
+
+            // Static curve — quadratic-smoothed polyline between anchor points
+            ctx!.beginPath()
+            ctx!.moveTo(pts[0][0], pts[0][1])
+            for (let i = 1; i < pts.length - 1; i++) {
+              const xc = (pts[i][0] + pts[i + 1][0]) / 2
+              const yc = (pts[i][1] + pts[i + 1][1]) / 2
+              ctx!.quadraticCurveTo(pts[i][0], pts[i][1], xc, yc)
+            }
+            ctx!.quadraticCurveTo(
+              pts[pts.length - 2][0], pts[pts.length - 2][1],
+              pts[pts.length - 1][0], pts[pts.length - 1][1],
+            )
+            ctx!.strokeStyle = `rgba(${goldColor}, ${(0.04 + sp * 0.03) * flowFade})`
+            ctx!.lineWidth = flow.width
+            ctx!.stroke()
+
+            // Traveling pulse dot — three concentric circles (cheap "glow")
+            const progress = (flowTime * flow.speed) % 1
+            const pos = interpolateCurve(pts, progress)
+            const pulseAlpha = (0.5 + sp * 0.3) * flowFade
+
+            // Outer halo (6px, 15% of pulseAlpha)
+            ctx!.beginPath()
+            ctx!.arc(pos[0], pos[1], 6 + sp * 2, 0, Math.PI * 2)
+            ctx!.fillStyle = `rgba(${goldColor}, ${pulseAlpha * 0.15})`
+            ctx!.fill()
+            // Mid glow (4px, 30%)
+            ctx!.beginPath()
+            ctx!.arc(pos[0], pos[1], 4 + sp * 1.2, 0, Math.PI * 2)
+            ctx!.fillStyle = `rgba(${goldColor}, ${pulseAlpha * 0.3})`
+            ctx!.fill()
+            // Core dot (2px, 60%)
+            ctx!.beginPath()
+            ctx!.arc(pos[0], pos[1], 2 + sp * 0.5, 0, Math.PI * 2)
+            ctx!.fillStyle = `rgba(${goldColor}, ${pulseAlpha * 0.6})`
             ctx!.fill()
           }
         }
