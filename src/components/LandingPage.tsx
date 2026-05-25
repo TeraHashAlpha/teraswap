@@ -282,7 +282,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   ]
 
   return (
-    <section className="relative px-6 pt-28 pb-20 sm:px-10 sm:pt-32">
+    <section id="hero" className="relative px-6 pt-28 pb-20 sm:px-10 sm:pt-32">
       <div className="relative z-10 mx-auto grid max-w-6xl items-start gap-12 lg:grid-cols-[7fr_5fr] lg:gap-16">
         {/* Left column — stats anchor, headline, CTA */}
         <div className="text-left">

@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import LandingPage from '@/components/LandingPage'
+import ScrollSpy from '@/components/ScrollSpy'
 import Header from '@/components/Header'
 import SwapBox from '@/components/SwapBox'
 import SwapHistory from '@/components/SwapHistory'
@@ -77,6 +78,9 @@ export default function Home() {
 
       {page === 'landing' ? (
         <main className="relative z-10 flex flex-1 flex-col">
+          {/* [P88] Desktop-only dot navigation. Hidden below lg breakpoint;
+              IntersectionObserver tracks the topmost intersecting section. */}
+          <ScrollSpy />
           <LandingPage onLaunchApp={handleLaunchApp} />
           {footer}
         </main>
