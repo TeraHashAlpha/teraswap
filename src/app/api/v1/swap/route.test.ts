@@ -108,14 +108,11 @@ function validBody(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// ── Temporary skip alias ─────────────────────────────────
-// While the FeeCollector V1 router whitelist is incomplete, every source
-// is listed in FEE_INCOMPATIBLE_SOURCES (see src/lib/constants.ts), so
-// /v1/swap refuses to pin or auto-select any source — every happy-path
-// scenario below returns 400. Tests that require a fee-collectable
-// winner use `itFeeCollectable` and are skipped during this window.
-// REVERT 2026-05-22 (router timelocks): change `it.skip` to `it` below.
-const itFeeCollectable = it.skip
+// FeeCollector V2 is live with all routers whitelisted. All fee-collectable
+// sources route through FeeCollector. Tests below use `itFeeCollectable`
+// as an alias for `it` — kept as a semantic marker for tests that depend
+// on FeeCollector routing being active.
+const itFeeCollectable = it
 
 // ── Tests ────────────────────────────────────────────────
 
