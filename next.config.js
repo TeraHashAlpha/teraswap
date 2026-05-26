@@ -85,6 +85,34 @@ const nextConfig = {
       },
     ]
   },
+
+  // [P92] Webpack chunk splitting for viem/wagmi/rainbowkit.
+  // NOTE: Next.js 16 defaults to Turbopack for `next build`, which silently
+  // ignores this webpack() callback. Kept here for two reasons: (a) it
+  // documents the intended chunk strategy, (b) it activates automatically
+  // if/when the project falls back to webpack (e.g. `next build --no-turbopack`
+  // or future migrations). See FEEDBACK.md for measured savings.
+  webpack(config) {
+    config.optimization.splitChunks = {
+      ...config.optimization.splitChunks,
+      cacheGroups: {
+        ...config.optimization.splitChunks?.cacheGroups,
+        viem: {
+          test: /[\\/]node_modules[\\/]viem[\\/]/,
+          name: 'viem',
+          chunks: 'all',
+          priority: 30,
+        },
+        wagmi: {
+          test: /[\\/]node_modules[\\/](@wagmi|wagmi|@rainbow-me)[\\/]/,
+          name: 'wagmi',
+          chunks: 'all',
+          priority: 25,
+        },
+      },
+    }
+    return config
+  },
 }
 
 module.exports = withSentryConfig(nextConfig, {
