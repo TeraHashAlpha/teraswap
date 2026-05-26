@@ -229,9 +229,14 @@ export function captureLiveTLS(
         const san = cert.subjectaltname
           ? cert.subjectaltname.split(',').map((s: string) => s.trim().replace(/^DNS:/, ''))
           : []
+        // @types/node 20.19 widened cert.issuer.CN / cert.subject.CN to
+        // `string | string[]` (X.509 DNs can carry multiple CN values).
+        // We only consume the first/only CN, so coerce defensively.
+        const issuerCN = cert.issuer?.CN
+        const subjectCN = cert.subject?.CN
         resolve({
-          issuerCN: cert.issuer?.CN || '',
-          subjectCN: cert.subject?.CN || '',
+          issuerCN: Array.isArray(issuerCN) ? (issuerCN[0] ?? '') : (issuerCN || ''),
+          subjectCN: Array.isArray(subjectCN) ? (subjectCN[0] ?? '') : (subjectCN || ''),
           san: san.sort(),
           fingerprint256: cert.fingerprint256,
         })

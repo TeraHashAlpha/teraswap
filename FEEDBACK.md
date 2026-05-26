@@ -284,3 +284,37 @@
 - Recommend deferring meaningful viem/wagmi chunk-split work to a sprint
   scoped against the underlying Turbopack-vs-webpack tradeoff, after the
   pre-existing `_internal` and `@metamask/sdk` issues are addressed.
+
+## Feedback — P167 (merge Dependabot PRs)
+
+### Edge case
+- 5 of 5 Dependabot branches merged:
+  - zustand 4.5.0 → 4.5.7
+  - @capacitor/android 8.2.0 → 8.3.4
+  - @capacitor/status-bar 8.0.1 → 8.0.2
+  - @sentry/nextjs 10.43.0 → 10.53.1
+  - dev-dependencies group (7 updates)
+- Each merge needed `git checkout --theirs package-lock.json && npm install`
+  to regenerate the lockfile cleanly after the 3-way merge (the dependabot
+  lockfile diffs were stale against new main since Sprint 26+29).
+
+### Assumption that turned out wrong
+- The dev-dependencies bump pulled @types/node from 20.14 → 20.19, which
+  widens `cert.issuer.CN` and `cert.subject.CN` from `string` to
+  `string | string[]` (multiple CN values in an X.509 DN). This surfaced
+  two TS errors in `src/lib/fingerprint-validator.ts` at lines 233-234.
+  Tests still passed (vitest doesn't fail on tsc errors), but the sprint
+  goal mandates `npx tsc --noEmit` pass. Fixed inline with a defensive
+  array coercion (take the first CN when the field is an array, preserve
+  the existing single-string behaviour). Two-line change, colocated with
+  the type-tightening source so future readers understand the reason.
+
+### Concern
+- `npm audit` after all 5 merges: **22 moderate severity vulnerabilities**
+  (unchanged from pre-sprint baseline). All advisories are transitive via
+  the `@reown/appkit` dependency chain (rainbowkit's wallet adapter
+  layer) — none of the direct deps Dependabot bumped here are
+  contributing. Resolving them requires a rainbowkit major bump (not in
+  scope; Dependabot has separate PRs queued for `framer-motion` and
+  rainbowkit-adjacent packages in `/main/` subfolder branches). Sprint
+  30 was housekeeping for the top-level PRs only.
