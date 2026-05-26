@@ -230,3 +230,57 @@
   `useEffect` cleanup (`return unsub`), so wrapping it in an object
   would trigger React's "destroy is not a function" error and crash
   unmount. Test mock now returns `vi.fn()` (a plain function).
+
+## Feedback — P92 (commit pending)
+
+### Assumption that turned out wrong
+- Sprint 29 P92 instructs adding `webpack(config) { … splitChunks.cacheGroups … }`
+  in `next.config.js`, with the expected output of "viem and wagmi in dedicated
+  named chunks instead of mixed into the main bundle." This assumes the webpack
+  bundler. **Next.js 16 (this repo on 16.2.6) defaults `next build` to
+  Turbopack**, which silently ignores the `webpack()` callback. Verified by
+  building before and after the cacheGroups addition under default `npm run
+  build`: total `.next/static/chunks` size is **identical (6588 KB)** and chunk
+  count is identical (192 files). **Net savings under Turbopack: 0 KB.**
+
+- Attempted `next build --webpack` to measure the savings the spec expects.
+  The webpack build fails on this checkout for reasons unrelated to P92:
+  1. `src/app/api/admin/kill-switch/route.ts` exports an `_internal` field that
+     webpack-mode TypeScript route validation rejects ("not a valid Route
+     export field"). Turbopack is more permissive and lets this through.
+  2. `@metamask/sdk` (pulled transitively via wagmi connectors → rainbowkit)
+     can't resolve `@react-native-async-storage/async-storage` under webpack
+     module-resolution — only a warning under webpack, but indicative that
+     this codepath was never validated against webpack.
+  Until those are addressed, `--webpack` is not a viable production path here,
+  so we can't measure the cacheGroups savings empirically.
+
+### Concern
+- The cacheGroups config is left in `next.config.js` as documentation /
+  forward-compat, but it currently contributes 0 KB of savings. **Below the
+  20 KB gzip threshold the architect set — per Sprint 29 note 5 this would
+  normally warrant a revert.** Recommending we keep it for these reasons:
+  (a) zero runtime cost (no-op under Turbopack), (b) preserves architect
+  intent if/when the project migrates back to webpack, (c) the alternative
+  fix — exposing chunk splitting via Turbopack — is not configurable in
+  Next.js 16 yet (`experimental.turbopack` does not surface a splitChunks
+  equivalent as of 16.2.6).
+
+- Viem import audit (per P92 requirement 2): every `from 'viem'` site uses
+  named imports of small utilities (`formatUnits`, `parseUnits`, `erc20Abi`,
+  `isAddress`, `encodeFunctionData`, `decodeFunctionResult`,
+  `recoverTypedDataAddress`, `zeroHash`, `keccak256`, `toBytes`,
+  `createPublicClient`, `http`, `custom`, `parseAbi`, `toFunctionSelector`,
+  `encodeAbiParameters`, `decodeAbiParameters`, `getAddress`, plus types).
+  Only `viem/chains` is sub-path imported, and only as `{ mainnet }`. **No
+  heavy sub-modules (`viem/ens`, `viem/accounts`) are pulled in.** Tree-
+  shaking should already be near-optimal — there is no narrower import
+  surface to switch to without changing runtime behaviour. The 600 KB
+  reported by the diagnosis is then a Turbopack chunk-grouping artifact,
+  not unused viem code; resolving it would require either Turbopack to
+  honour custom split groups or a wholesale migration of these utilities
+  to a lighter alternative (out of scope for this sprint).
+
+- Recommend deferring meaningful viem/wagmi chunk-split work to a sprint
+  scoped against the underlying Turbopack-vs-webpack tradeoff, after the
+  pre-existing `_internal` and `@metamask/sdk` issues are addressed.
