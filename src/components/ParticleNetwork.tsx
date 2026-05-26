@@ -51,6 +51,30 @@ function getParticleColor(): string {
   return getComputedStyle(document.documentElement).getPropertyValue('--particle-color').trim() || '232, 220, 196'
 }
 
+// [P86] Flow lines — ambient gold energy streams drawn over the particle
+// network. Anchor points are normalised (0–1) and multiplied by the
+// canvas W/H at draw time. The canvas is position:fixed inset:0 so 0–1
+// always maps to the visible viewport regardless of scroll position.
+// Module-level so the array isn't reallocated per frame.
+const FLOW_LINES: { points: number[][]; width: number; speed: number }[] = [
+  // Line 1: top-left → center-right, gentle S-curve
+  { points: [[0.05, 0.3], [0.3, 0.15], [0.6, 0.4], [0.95, 0.25]], width: 1.2, speed: 0.0008 },
+  // Line 2: left-center → bottom-right
+  { points: [[0.0, 0.55], [0.25, 0.65], [0.55, 0.45], [0.85, 0.7]], width: 0.8, speed: 0.0012 },
+  // Line 3: top-right → bottom-left, crossing the others
+  { points: [[0.9, 0.1], [0.7, 0.35], [0.35, 0.55], [0.1, 0.85]], width: 1.0, speed: 0.001 },
+]
+
+/** Linear interpolation along a polyline at parameter t (0 → 1). */
+function interpolateCurve(pts: number[][], t: number): [number, number] {
+  const totalSegments = pts.length - 1
+  const segment = Math.min(Math.floor(t * totalSegments), totalSegments - 1)
+  const localT = (t * totalSegments) - segment
+  const x = pts[segment][0] + (pts[segment + 1][0] - pts[segment][0]) * localT
+  const y = pts[segment][1] + (pts[segment + 1][1] - pts[segment][1]) * localT
+  return [x, y]
+}
+
 // ── Global turbo state (set via custom events from SwapBox) ──
 let globalTurbo = false
 export function setParticleTurbo(active: boolean) {
@@ -67,6 +91,10 @@ export default function ParticleNetwork() {
   const turboRef = useRef(0) // 0 = calm, 1 = full turbo (lerped)
   const warpRef  = useRef(0) // 0 = calm, 1 = full warp (lerped from scroll)
   const warpTargetRef = useRef(0) // driven by scroll events
+  // [P85] Normalised scroll progress 0 (top of page) → 1 (bottom).
+  // Refreshed in onScroll; consumed by draw() to modulate network density,
+  // brightness, line width, and a subtle gravitational pull downward.
+  const scrollProgressRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -120,9 +148,15 @@ export default function ParticleNetwork() {
       const w = warpRef.current // 0-1 warp intensity
 
       // ── Interpolated settings ──
-      const maxDist = MAX_DIST + (TURBO_MAX_DIST - MAX_DIST) * t
-      const baseLineOp = BASE_LINE_OPACITY + (TURBO_LINE_OPACITY - BASE_LINE_OPACITY) * t
-      const baseDotMult = BASE_DOT_ALPHA_MULT + (TURBO_DOT_ALPHA_MULT - BASE_DOT_ALPHA_MULT) * t
+      // [P85] Scroll progress modulates base parameters before turbo/warp
+      // interpolation. When turbo or warp is fully engaged they still
+      // dominate via the standard *t / *w blend.
+      const sp = scrollProgressRef.current
+      const scrollMaxDist = MAX_DIST + sp * 60 // 160 (top) → 220 (bottom)
+      const maxDist = scrollMaxDist + (TURBO_MAX_DIST - scrollMaxDist) * t
+      const scrollBrightBoost = sp * 0.15
+      const baseLineOp = (BASE_LINE_OPACITY + scrollBrightBoost) + (TURBO_LINE_OPACITY - (BASE_LINE_OPACITY + scrollBrightBoost)) * t
+      const baseDotMult = (BASE_DOT_ALPHA_MULT + sp * 0.3) + (TURBO_DOT_ALPHA_MULT - (BASE_DOT_ALPHA_MULT + sp * 0.3)) * t
       const speedLimit = 0.8 + (0.8 * TURBO_SPEED_MULT - 0.8) * t + WARP_SPEED_LIMIT * w
 
       // Draw connections between particles — brightness depends on cursor proximity + turbo
@@ -147,7 +181,7 @@ export default function ParticleNetwork() {
             ctx!.moveTo(particles[i].x, particles[i].y)
             ctx!.lineTo(particles[j].x, particles[j].y)
             ctx!.strokeStyle = `rgba(${colorRef.current}, ${opacity})`
-            ctx!.lineWidth = 0.5 + cursorFactor * 0.5 + t * 1.2
+            ctx!.lineWidth = (0.5 + sp * 0.3) + cursorFactor * 0.5 + t * 1.2
             ctx!.stroke()
           }
         }
@@ -218,6 +252,58 @@ export default function ParticleNetwork() {
         }
       }
 
+      // [P86] Flow lines — three ambient gold streams with a traveling
+      // pulse dot per stream. Skipped entirely under prefers-reduced-motion
+      // and faded during warp/turbo (1 - max(w, t)). Glow uses concentric
+      // circles instead of ctx.shadowBlur (no compositing layer cost).
+      if (!PREFERS_REDUCED_MOTION) {
+        const flowFade = 1 - Math.max(w, t)
+        if (flowFade > 0.1) {
+          const flowTime = Date.now()
+          const goldColor = '200, 184, 154' // #C8B89A in RGB
+          for (const flow of FLOW_LINES) {
+            const pts = flow.points.map(([px, py]) => [px * W, py * H])
+
+            // Static curve — quadratic-smoothed polyline between anchor points
+            ctx!.beginPath()
+            ctx!.moveTo(pts[0][0], pts[0][1])
+            for (let i = 1; i < pts.length - 1; i++) {
+              const xc = (pts[i][0] + pts[i + 1][0]) / 2
+              const yc = (pts[i][1] + pts[i + 1][1]) / 2
+              ctx!.quadraticCurveTo(pts[i][0], pts[i][1], xc, yc)
+            }
+            ctx!.quadraticCurveTo(
+              pts[pts.length - 2][0], pts[pts.length - 2][1],
+              pts[pts.length - 1][0], pts[pts.length - 1][1],
+            )
+            ctx!.strokeStyle = `rgba(${goldColor}, ${(0.04 + sp * 0.03) * flowFade})`
+            ctx!.lineWidth = flow.width
+            ctx!.stroke()
+
+            // Traveling pulse dot — three concentric circles (cheap "glow")
+            const progress = (flowTime * flow.speed) % 1
+            const pos = interpolateCurve(pts, progress)
+            const pulseAlpha = (0.5 + sp * 0.3) * flowFade
+
+            // Outer halo (6px, 15% of pulseAlpha)
+            ctx!.beginPath()
+            ctx!.arc(pos[0], pos[1], 6 + sp * 2, 0, Math.PI * 2)
+            ctx!.fillStyle = `rgba(${goldColor}, ${pulseAlpha * 0.15})`
+            ctx!.fill()
+            // Mid glow (4px, 30%)
+            ctx!.beginPath()
+            ctx!.arc(pos[0], pos[1], 4 + sp * 1.2, 0, Math.PI * 2)
+            ctx!.fillStyle = `rgba(${goldColor}, ${pulseAlpha * 0.3})`
+            ctx!.fill()
+            // Core dot (2px, 60%)
+            ctx!.beginPath()
+            ctx!.arc(pos[0], pos[1], 2 + sp * 0.5, 0, Math.PI * 2)
+            ctx!.fillStyle = `rgba(${goldColor}, ${pulseAlpha * 0.6})`
+            ctx!.fill()
+          }
+        }
+      }
+
       // Update positions
       for (const p of particles) {
         // During turbo: aggressive random jitter — particles dart around chaotically
@@ -230,6 +316,13 @@ export default function ParticleNetwork() {
             p.vx += (Math.random() - 0.5) * turboForce * 3
             p.vy += (Math.random() - 0.5) * turboForce * 3
           }
+        }
+
+        // [P85] Subtle gravitational drift downward as the user scrolls.
+        // Only applies when calm (no turbo, no warp) so the effect is felt
+        // during normal reading, not during dramatic motion.
+        if (sp > 0.1 && w < 0.1 && t < 0.1) {
+          p.vy += sp * 0.003
         }
 
         // ── Warp: push particles outward from viewport centre ──
@@ -297,6 +390,11 @@ export default function ParticleNetwork() {
       warpTargetRef.current = 1
       clearTimeout(scrollTimer)
       scrollTimer = setTimeout(() => { warpTargetRef.current = 0 }, 160)
+
+      // [P85] Normalised scroll progress (0 → 1). maxScroll is 0 on pages
+      // shorter than the viewport — keep the ref at 0 in that case.
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight
+      scrollProgressRef.current = maxScroll > 0 ? window.scrollY / maxScroll : 0
     }
 
     window.addEventListener('resize', resize)
