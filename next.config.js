@@ -27,12 +27,12 @@ const nextConfig = {
               // worker-src 'self' required for service worker registration
               `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}`,
               "worker-src 'self'",
-              // Styles: self + inline (Tailwind/Next.js) + Google Fonts CSS
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+              // Styles: self + inline (Tailwind/Next.js)
+              "style-src 'self' 'unsafe-inline'",
               // Images: self + token icon CDNs + data URIs
               "img-src 'self' data: https://tokens.1inch.io https://assets.coingecko.com https://raw.githubusercontent.com",
-              // Fonts: self + Google Fonts + Fontshare CDN
-              "font-src 'self' data: https://fonts.gstatic.com https://cdn.fontshare.com",
+              // Fonts: self (Inter/JetBrains Mono via next/font) + Fontshare CDN (Clash Display)
+              "font-src 'self' data: https://cdn.fontshare.com",
               // Connect: aggregator APIs + RPC + WalletConnect + CoW + Etherscan
               "connect-src 'self' https://api.1inch.dev https://api.0x.org https://api.paraswap.io https://api.odos.xyz https://aggregator-api.kyberswap.com https://api.cow.fi https://open-api.openocean.finance https://api.sushi.com https://api-v3.balancer.fi https://eth.llamarpc.com https://*.infura.io https://*.alchemy.com wss://*.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://explorer-api.walletconnect.com https://rpc.walletconnect.com https://relay.walletconnect.com https://api.etherscan.io https://api.web3modal.org https://api.web3modal.com https://*.supabase.co wss://*.supabase.co https://rpc.ankr.com https://ethereum-rpc.publicnode.com https://eth.merkle.io https://*.ingest.sentry.io",
               // Media: self (local sound files in /public/sounds/)
