@@ -33,13 +33,35 @@ export const dynamic = 'force-dynamic'
 const RATE_LIMIT_WINDOW_MS = 60_000 // 1 minute
 const RATE_LIMIT_MAX = 10
 
+// [SEC-03] Hard cap prevents unbounded growth under sustained probing.
+// Even though this endpoint is auth-gated, a compromised admin credential
+// (or buggy client) could otherwise grow the map without bound until
+// process restart. 1000 entries is far above any legitimate use.
+const MAX_MAP_SIZE = 1000
+
 const rateLimitMap = new Map<string, { count: number; windowStart: number }>()
+
+function evictOldestEntry(): void {
+  let oldestKey = ''
+  let oldestTime = Infinity
+  for (const [key, val] of rateLimitMap) {
+    if (val.windowStart < oldestTime) {
+      oldestTime = val.windowStart
+      oldestKey = key
+    }
+  }
+  if (oldestKey) rateLimitMap.delete(oldestKey)
+}
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now()
   const entry = rateLimitMap.get(ip)
 
   if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    // [SEC-03] Evict the oldest entry before inserting a new one when at cap.
+    if (!entry && rateLimitMap.size >= MAX_MAP_SIZE) {
+      evictOldestEntry()
+    }
     rateLimitMap.set(ip, { count: 1, windowStart: now })
     return false
   }
