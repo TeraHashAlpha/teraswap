@@ -579,7 +579,12 @@ async function logButtonAction(
 ): Promise<void> {
   try {
     const timestamp = new Date().toISOString()
-    await kv.set(`${ACTION_AUDIT_PREFIX}${timestamp}`, {
+    // [SEC-02] Append a random 8-char UUID slice so two callbacks in the
+    // same millisecond on different Vercel instances cannot collide on
+    // the audit key — the previous bare-ISO key let one row overwrite
+    // the other under autoscale, defeating forensic replay.
+    const suffix = globalThis.crypto.randomUUID().slice(0, 8)
+    await kv.set(`${ACTION_AUDIT_PREFIX}${timestamp}:${suffix}`, {
       action,
       sourceId,
       userId,
