@@ -238,4 +238,225 @@ describe('usePortfolio', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.lastUpdated).toBeInstanceOf(Date)
   })
+
+  // ── [P182] Alchemy discovery path ────────────────────────
+  //
+  // These tests flip the discovery endpoint to a 200 OK response. When
+  // discovery is "available", the hook should:
+  //   - source held tokens from /api/portfolio/tokens
+  //   - keep DEFAULT_TOKENS metadata for curated addresses (better logos)
+  //   - assign category 'Other' to non-default discoveries
+  //   - NOT fire the wagmi multicall (the existing wagmi mocks must not be
+  //     consulted in a way that produces results)
+
+  const UNK = '0xDeadBeefDeadBeefDeadBeefDeadBeefDeadBeef'
+
+  function discoveryAvailable(tokens: Array<{
+    address: string
+    symbol: string
+    name: string
+    decimals: number
+    logoURI: string | null
+    balance: string
+    isDefault: boolean
+  }>, prices: Record<string, number>) {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/portfolio/tokens')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ tokens }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ prices }) })
+    })
+  }
+
+  it('Alchemy available: discovered tokens appear in output', async () => {
+    discoveryAvailable(
+      [
+        {
+          address: USDC,
+          symbol: 'USDC',
+          name: 'USD Coin',
+          decimals: 6,
+          logoURI: 'usdc.png',
+          balance: String(2000n * 10n ** 6n),
+          isDefault: true,
+        },
+        {
+          address: UNK.toLowerCase(),
+          symbol: 'UNK',
+          name: 'Unknown Coin',
+          decimals: 18,
+          logoURI: null,
+          balance: String(10n * 10n ** 18n),
+          isDefault: false,
+        },
+      ],
+      { [USDC]: 1, [UNK.toLowerCase()]: 0.5 },
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
+    const symbols = result.current.tokens.map((t) => t.token.symbol)
+    expect(symbols).toContain('USDC')
+    expect(symbols).toContain('UNK')
+  })
+
+  it('Alchemy available: DEFAULT tokens use curated metadata, not Alchemy metadata', async () => {
+    discoveryAvailable(
+      [
+        {
+          address: USDC,
+          // Deliberately wrong metadata to prove curated overrides win.
+          symbol: 'WRONG_USDC',
+          name: 'Wrong Name',
+          decimals: 99,
+          logoURI: 'fake.png',
+          balance: String(2000n * 10n ** 6n),
+          isDefault: true,
+        },
+      ],
+      { [USDC]: 1 },
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    const usdc = result.current.tokens.find((t) => t.token.address.toLowerCase() === USDC)!
+    // The curated DEFAULT_TOKENS entry — mocked above as { symbol: 'USDC',
+    // decimals: 6 } — must win over what Alchemy returned.
+    expect(usdc.token.symbol).toBe('USDC')
+    expect(usdc.token.decimals).toBe(6)
+  })
+
+  it("Alchemy available: non-default tokens are assigned category 'Other'", async () => {
+    discoveryAvailable(
+      [
+        {
+          address: UNK.toLowerCase(),
+          symbol: 'UNK',
+          name: 'Unk',
+          decimals: 18,
+          logoURI: null,
+          balance: String(1n * 10n ** 18n),
+          isDefault: false,
+        },
+      ],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
+    expect(unk.token.category).toBe('Other')
+  })
+
+  it('Alchemy 503: falls back to the multicall path (Sprint 31 behaviour)', async () => {
+    // Default beforeEach mock already returns 503 for /tokens. We assert
+    // that the multicall fixture (2 ETH + 1M USDC) is what surfaces.
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
+    const eth = result.current.tokens.find((t) => t.token.symbol === 'ETH')
+    const usdc = result.current.tokens.find((t) => t.token.symbol === 'USDC')
+    expect(eth).toBeDefined()
+    expect(usdc).toBeDefined()
+  })
+
+  it('Alchemy available: wagmi mocks are not consulted', async () => {
+    discoveryAvailable(
+      [
+        {
+          address: USDC,
+          symbol: 'USDC',
+          name: 'USD Coin',
+          decimals: 6,
+          logoURI: 'usdc.png',
+          balance: String(1n * 10n ** 6n),
+          isDefault: true,
+        },
+      ],
+      { [USDC]: 1 },
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
+    // The fallback path would emit ETH (2 ETH balance from the wagmi
+    // mock fixture) AND a USDC entry from multicall. The Alchemy path
+    // emits only what we explicitly returned — exactly USDC, no ETH.
+    expect(result.current.tokens).toHaveLength(1)
+    expect(result.current.tokens[0].token.symbol).toBe('USDC')
+  })
+
+  it('Alchemy available: discovered token addresses are included in the price fetch', async () => {
+    discoveryAvailable(
+      [
+        {
+          address: UNK.toLowerCase(),
+          symbol: 'UNK',
+          name: 'Unk',
+          decimals: 18,
+          logoURI: null,
+          balance: String(1n * 10n ** 18n),
+          isDefault: false,
+        },
+      ],
+      { [UNK.toLowerCase()]: 3 },
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
+    // The non-default discovered address must have been passed to the
+    // prices endpoint. Look through the fetch call log for a /prices URL
+    // containing the address.
+    const pricesCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+      const u = args[0]
+      return typeof u === 'string' && u.startsWith('/api/portfolio/prices')
+    })
+    expect(pricesCalls.length).toBeGreaterThan(0)
+    const firstUrl = pricesCalls[0][0] as string
+    expect(firstUrl).toContain(UNK.toLowerCase())
+  })
+
+  it('Alchemy available: balance string is parsed to bigint correctly', async () => {
+    const expectedBalance = 12_345_678_900_000_000n
+    discoveryAvailable(
+      [
+        {
+          address: UNK.toLowerCase(),
+          symbol: 'UNK',
+          name: 'Unk',
+          decimals: 18,
+          logoURI: null,
+          balance: String(expectedBalance),
+          isDefault: false,
+        },
+      ],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
+    expect(unk.balance).toBe(expectedBalance)
+  })
+
+  it('Alchemy available: >100 tokens triggers multiple batched price fetches', async () => {
+    const many = []
+    for (let i = 0; i < 150; i++) {
+      const hex = (i + 1).toString(16).padStart(40, '0')
+      many.push({
+        address: `0x${hex}`,
+        symbol: `T${i}`,
+        name: `Token ${i}`,
+        decimals: 18,
+        logoURI: null,
+        balance: String(1n * 10n ** 18n),
+        isDefault: false,
+      })
+    }
+    discoveryAvailable(many, {})
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
+    const pricesCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+      const u = args[0]
+      return typeof u === 'string' && u.startsWith('/api/portfolio/prices')
+    })
+    // 150 addresses / 100 per batch = 2 batches.
+    expect(pricesCalls.length).toBe(2)
+  })
 })
+

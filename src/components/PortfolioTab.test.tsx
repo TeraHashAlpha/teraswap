@@ -214,4 +214,76 @@ describe('PortfolioTab', () => {
     expect(screen.getByText(/^STABLECOIN$/i)).toBeTruthy()
     expect(screen.getByText(/^DEFI$/i)).toBeTruthy()
   })
+
+  // ── [P182] Discovered tokens UI ───────────────────────
+  //
+  // A "discovered" token in this sense is a PortfolioToken whose address
+  // is NOT in the production DEFAULT_TOKENS list. The component splits
+  // on that — Set lookup against DEFAULT_TOKENS.address. We use a clearly
+  // bogus address (no risk of accidental DEFAULT_TOKENS collision) and
+  // assert the section's visual + behavioural contract.
+
+  const DISCOVERED_ADDR = '0xDeadBeefDeadBeefDeadBeefDeadBeefDeadBeef' as `0x${string}`
+  const discovered = entry({
+    symbol: 'UNK',
+    name: 'Unknown Token',
+    address: DISCOVERED_ADDR,
+    category: 'Other',
+    balance: 1n * 10n ** 18n,
+    balanceFormatted: '1',
+    priceUsd: 0.5,
+    valueUsd: 0.5,
+  })
+
+  it('renders the "Discovered in Wallet" section header when a non-default token is present', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, discovered],
+      totalValueUsd: 6000.5,
+    })
+    render(<PortfolioTab />)
+    expect(screen.getByText(/Discovered in Wallet/i)).toBeTruthy()
+  })
+
+  it('renders the truncated 0x… address only for discovered tokens', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, discovered],
+      totalValueUsd: 6000.5,
+    })
+    render(<PortfolioTab />)
+    // 0xDeadBe…BeEf — first 6 + last 4 chars per shortenAddress().
+    expect(
+      screen.getByText(`${DISCOVERED_ADDR.slice(0, 6)}…${DISCOVERED_ADDR.slice(-4)}`),
+    ).toBeTruthy()
+  })
+
+  it('renders an "Add" button (not "Swap") for discovered tokens', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, discovered],
+      totalValueUsd: 6000.5,
+    })
+    render(<PortfolioTab onSwapToken={vi.fn()} />)
+    // The Swap button exists for ETH but not for UNK.
+    expect(screen.getByRole('button', { name: /Swap ETH/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Add UNK to tokens/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Swap UNK$/ })).toBeNull()
+  })
+
+  it('does NOT render the "Discovered" section when every token is in DEFAULT_TOKENS', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, USDC],
+      totalValueUsd: 7500,
+    })
+    render(<PortfolioTab />)
+    expect(screen.queryByText(/Discovered in Wallet/i)).toBeNull()
+  })
+
+  it('does NOT render the "Discovered" section when the hook returns no tokens (fallback mode)', () => {
+    // Fallback (no Alchemy) emits only DEFAULT_TOKENS multicall results.
+    // A connected wallet with no balances has tokens.length === 0 — the
+    // empty-state message is shown and no Discovered section appears.
+    portfolioState = makePortfolio({ tokens: [], totalValueUsd: null })
+    render(<PortfolioTab />)
+    expect(screen.queryByText(/Discovered in Wallet/i)).toBeNull()
+    expect(screen.getByText(/No tokens found in this wallet/i)).toBeTruthy()
+  })
 })
