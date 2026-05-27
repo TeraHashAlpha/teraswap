@@ -50,9 +50,7 @@ interface BaselineFile {
 
 function captureTLS(hostname: string, timeoutMs = 10_000): Promise<TLSInfo | null> {
   return new Promise((resolve) => {
-    // CodeQL: js/disabling-certificate-pinning — FALSE POSITIVE:
-    // Same pattern as fingerprint-validator. Captures TLS fingerprints for baseline.
-    // Dev-only script, not production code.
+    // codeql[js/disabling-certificate-validation] Dev-only baseline script: same pattern as fingerprint-validator — accepting untrusted certs at the socket layer is required to capture the fingerprint for pinning. Never used in production code.
     const socket = tls.connect(443, hostname, { servername: hostname, rejectUnauthorized: false }, () => {
       try {
         const cert = socket.getPeerCertificate(true)
