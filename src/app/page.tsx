@@ -12,6 +12,8 @@ import dynamic from 'next/dynamic'
 const AnalyticsDashboard = dynamic(() => import('@/components/AnalyticsDashboard'), { ssr: false })
 const OrderDashboard = dynamic(() => import('@/components/OrderDashboard'), { ssr: false })
 const WalletHistory = dynamic(() => import('@/components/WalletHistory'), { ssr: false })
+// [P167] Portfolio tab is wallet-dependent — never server-render.
+const PortfolioTab = dynamic(() => import('@/components/PortfolioTab'), { ssr: false })
 import Footer from '@/components/Footer'
 import SwapErrorBoundary from '@/components/SwapErrorBoundary'
 import HelpButton from '@/components/HelpButton'
@@ -21,7 +23,7 @@ import { playTouchMP3 } from '@/lib/sounds'
 // /docs, /privacy, and /terms each have their own Next.js route, so they
 // don't need to be part of the in-memory AppPage state machine.
 export type AppPage = 'landing' | 'swap'
-export type SwapMode = 'instant' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
+export type SwapMode = 'instant' | 'portfolio' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
 
 const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
 
@@ -96,6 +98,7 @@ export default function Home() {
           <div className="no-scrollbar tab-bar-fade sticky top-0 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] snap-x snap-mandatory gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
             {([
               ['instant', 'Swap'],
+              ['portfolio', 'Portfolio'],
               ['dca', 'DCA'],
               ['limit', 'Limit'],
               ['sltp', 'SL / TP'],
@@ -139,6 +142,13 @@ export default function Home() {
                 <SwapHistory />
               </div>
             </>
+          ) : swapMode === 'portfolio' ? (
+            <div className="w-full max-w-[540px]">
+              {/* [P167] Pre-selecting the token inside SwapBox would require a
+                  cross-component store refactor; per sprint spec we just
+                  switch tabs and let the user pick. */}
+              <PortfolioTab onSwapToken={() => setSwapMode('instant')} />
+            </div>
           ) : COMING_SOON_MODES.has(swapMode) ? (
             <div className="w-full max-w-[460px]">
               <ComingSoonPanel mode={swapMode} onSwap={() => setSwapMode('instant')} />
