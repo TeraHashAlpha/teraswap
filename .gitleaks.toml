@@ -1,0 +1,14 @@
+# [INF-03] Gitleaks configuration for TeraSwap.
+# Extends the default ruleset (100+ secret patterns) with a project-
+# specific allowlist of paths that legitimately contain "secret-looking"
+# tokens we do not want to flag on every PR.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "TeraSwap false-positive allowlist"
+paths = [
+  '''\.env\.example''',
+  '''contracts/order-engine/''',
+]
