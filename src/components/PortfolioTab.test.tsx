@@ -1,0 +1,217 @@
+// @vitest-environment jsdom
+/**
+ * [P168] PortfolioTab — render branches.
+ *
+ * We mock usePortfolio outright (cleanest seam: the hook itself is
+ * covered by its own test file). That lets each render branch be
+ * exercised by mutating one variable per test, no wagmi plumbing
+ * required.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import type { Token } from '@/lib/tokens'
+import type { PortfolioData, PortfolioToken } from '@/hooks/usePortfolio'
+
+// ─── Wagmi mocks ─────────────────────────────────────────
+
+let isConnected = true
+vi.mock('wagmi', () => ({
+  useAccount: vi.fn(() => ({
+    address: isConnected ? '0x1111111111111111111111111111111111111111' : undefined,
+    isConnected,
+    chain: { id: 1, name: 'mainnet' },
+  })),
+}))
+
+// ─── usePortfolio mock ───────────────────────────────────
+
+const refreshSpy = vi.fn()
+let portfolioState: PortfolioData = makePortfolio({ tokens: [] })
+
+vi.mock('@/hooks/usePortfolio', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/usePortfolio')>(
+    '@/hooks/usePortfolio',
+  )
+  return {
+    ...actual,
+    usePortfolio: () => portfolioState,
+  }
+})
+
+// ─── Module under test ───────────────────────────────────
+
+import PortfolioTab from './PortfolioTab'
+
+// ─── Fixtures / helpers ──────────────────────────────────
+
+function token(opts: Partial<Token> & Pick<Token, 'symbol' | 'address'>): Token {
+  return {
+    name: opts.symbol,
+    decimals: 18,
+    logoURI: `${opts.symbol.toLowerCase()}.png`,
+    category: 'Other',
+    ...opts,
+  } as Token
+}
+
+function entry(opts: {
+  symbol: string
+  name: string
+  address: `0x${string}`
+  category?: Token['category']
+  decimals?: number
+  balance: bigint
+  balanceFormatted: string
+  priceUsd: number | null
+  valueUsd: number | null
+}): PortfolioToken {
+  return {
+    token: {
+      address: opts.address,
+      symbol: opts.symbol,
+      name: opts.name,
+      decimals: opts.decimals ?? 18,
+      logoURI: `${opts.symbol.toLowerCase()}.png`,
+      category: opts.category ?? 'Other',
+    },
+    balance: opts.balance,
+    balanceFormatted: opts.balanceFormatted,
+    priceUsd: opts.priceUsd,
+    valueUsd: opts.valueUsd,
+  }
+}
+
+function makePortfolio(over: Partial<PortfolioData>): PortfolioData {
+  return {
+    tokens: [],
+    totalValueUsd: null,
+    isLoading: false,
+    isError: false,
+    lastUpdated: new Date(),
+    refresh: refreshSpy,
+    ...over,
+  }
+}
+
+const ETH = entry({
+  symbol: 'ETH',
+  name: 'Ether',
+  address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+  category: 'Native',
+  balance: 2n * 10n ** 18n,
+  balanceFormatted: '2',
+  priceUsd: 3000,
+  valueUsd: 6000,
+})
+const USDC = entry({
+  symbol: 'USDC',
+  name: 'USD Coin',
+  address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+  category: 'Stablecoin',
+  decimals: 6,
+  balance: 1500_000000n,
+  balanceFormatted: '1.5K',
+  priceUsd: 1,
+  valueUsd: 1500,
+})
+const UNI = entry({
+  symbol: 'UNI',
+  name: 'Uniswap',
+  address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
+  category: 'DeFi',
+  balance: 100n * 10n ** 18n,
+  balanceFormatted: '100',
+  priceUsd: null,
+  valueUsd: null,
+})
+
+beforeEach(() => {
+  isConnected = true
+  refreshSpy.mockReset()
+  portfolioState = makePortfolio({ tokens: [] })
+})
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
+
+describe('PortfolioTab', () => {
+  it('renders the connect-wallet empty state when not connected', () => {
+    isConnected = false
+    render(<PortfolioTab />)
+    expect(
+      screen.getByText(/Connect your wallet to view your portfolio/i),
+    ).toBeTruthy()
+  })
+
+  it('renders the token list with formatted balances when connected', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, USDC],
+      totalValueUsd: 7500,
+    })
+    render(<PortfolioTab />)
+    expect(screen.getByText('ETH')).toBeTruthy()
+    expect(screen.getByText('USDC')).toBeTruthy()
+    // Total formatted as currency
+    expect(screen.getByText('$7,500.00')).toBeTruthy()
+    expect(screen.getByText('$6,000.00')).toBeTruthy()
+    expect(screen.getByText('$1,500.00')).toBeTruthy()
+  })
+
+  it('renders skeleton placeholders while loading and no tokens yet', () => {
+    portfolioState = makePortfolio({
+      tokens: [],
+      isLoading: true,
+      lastUpdated: null,
+    })
+    const { container } = render(<PortfolioTab />)
+    const skeletons = container.querySelectorAll('.animate-pulse')
+    expect(skeletons.length).toBe(4)
+  })
+
+  it('renders the error banner with a working retry button', () => {
+    portfolioState = makePortfolio({
+      tokens: [],
+      isError: true,
+    })
+    render(<PortfolioTab />)
+    expect(screen.getByText(/Failed to load portfolio/i)).toBeTruthy()
+    const retry = screen.getByRole('button', { name: /try again/i })
+    fireEvent.click(retry)
+    expect(refreshSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onSwapToken with the row token when its Swap button is clicked', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, USDC],
+      totalValueUsd: 7500,
+    })
+    const onSwapToken = vi.fn()
+    render(<PortfolioTab onSwapToken={onSwapToken} />)
+    fireEvent.click(screen.getByRole('button', { name: /Swap ETH/ }))
+    expect(onSwapToken).toHaveBeenCalledTimes(1)
+    expect(onSwapToken.mock.calls[0][0].symbol).toBe('ETH')
+  })
+
+  it('renders an em-dash for tokens with no USD price', () => {
+    portfolioState = makePortfolio({
+      tokens: [UNI],
+      totalValueUsd: null,
+    })
+    render(<PortfolioTab />)
+    // The row's value column shows "—" and the header total likewise.
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('groups tokens by category with a section header for each', () => {
+    portfolioState = makePortfolio({
+      tokens: [ETH, USDC, UNI],
+      totalValueUsd: 7500,
+    })
+    render(<PortfolioTab />)
+    expect(screen.getByText(/^NATIVE$/i)).toBeTruthy()
+    expect(screen.getByText(/^STABLECOIN$/i)).toBeTruthy()
+    expect(screen.getByText(/^DEFI$/i)).toBeTruthy()
+  })
+})
