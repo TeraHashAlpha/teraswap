@@ -111,13 +111,28 @@ beforeEach(() => {
     isLoading: false,
     isError: false,
   }
-  fetchMock.mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      prices: { [NATIVE_ETH]: 3000, [USDC]: 1 },
-    }),
+  // URL-aware mock. The hook now hits two endpoints: discovery first
+  // (/api/portfolio/tokens) and prices second (/api/portfolio/prices).
+  // The base mock returns 503 for discovery so the existing test cases
+  // exercise the multicall fallback path (Sprint 31 behaviour). Tests
+  // that want to exercise the Alchemy path override the discovery
+  // response per-case.
+  fetchMock.mockImplementation((url: string) => {
+    if (typeof url === 'string' && url.startsWith('/api/portfolio/tokens')) {
+      return Promise.resolve({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: 'unavailable' }),
+      })
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({
+        prices: { [NATIVE_ETH]: 3000, [USDC]: 1 },
+      }),
+    })
   })
-  // Replace the global fetch used by usePortfolio for /api/portfolio/prices.
+  // Replace the global fetch used by usePortfolio.
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -160,9 +175,14 @@ describe('usePortfolio', () => {
 
   it('sorts known USD value descending; tokens without a price drop to the bottom', async () => {
     // Give USDC a price but not ETH, so ETH falls to the bottom by symbol.
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ prices: { [USDC]: 1 } }),
+    fetchMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/portfolio/tokens')) {
+        return Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ prices: { [USDC]: 1 } }),
+      })
     })
     const { result } = renderHook(() => usePortfolio())
     await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
@@ -176,7 +196,12 @@ describe('usePortfolio', () => {
   })
 
   it('handles DefiLlama API failure gracefully (all prices null)', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+    fetchMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/portfolio/tokens')) {
+        return Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
+      }
+      return Promise.resolve({ ok: false, status: 500, json: async () => ({}) })
+    })
     const { result } = renderHook(() => usePortfolio())
     await waitFor(() => expect(result.current.isError).toBe(true))
     // Tokens still come back because balances are independent of pricing.
@@ -190,9 +215,14 @@ describe('usePortfolio', () => {
 
   it('sums only non-null valueUsd into totalValueUsd', async () => {
     // ETH priced, USDC not priced — total should be 2 × 3000 only.
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ prices: { [NATIVE_ETH]: 3000 } }),
+    fetchMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/portfolio/tokens')) {
+        return Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ prices: { [NATIVE_ETH]: 3000 } }),
+      })
     })
     const { result } = renderHook(() => usePortfolio())
     await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
