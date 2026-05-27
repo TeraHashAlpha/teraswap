@@ -94,6 +94,7 @@ async function persistSurplus(txHash: string, surplusWei: string): Promise<void>
       .update({ mev_savings_actual: surplusWei })
       .eq('tx_hash', txHash)
     if (error) {
+      // codeql[js/log-injection] Server-side log only (Vercel Function logs). txHash is a 0x-prefixed hex string validated by isValidTxHash() before reaching this code path; error.message is a Supabase client error description. Neither is rendered to a browser or downstream system that could interpret line breaks as a forged log entry.
       console.warn(`[VALIDATE-EXECUTION] surplus persist failed for ${txHash}: ${error.message}`)
     }
   } catch (err) {
@@ -141,6 +142,7 @@ export async function POST(
     if (result.severity === 'critical') {
       console.error(`[VALIDATE-EXECUTION] CRITICAL: ${result.source} tx=${result.txHash} — ${result.reason}`)
     } else if (result.severity === 'warning') {
+      // codeql[js/log-injection] Server-side log only. result.source is a known aggregator id from a closed-set enum (AggregatorName), result.txHash was validated at the request boundary, result.reason is an internal validator message — none are rendered to a browser or interpreted as commands downstream.
       console.warn(`[VALIDATE-EXECUTION] WARNING: ${result.source} tx=${result.txHash} — ${result.reason}`)
     }
 

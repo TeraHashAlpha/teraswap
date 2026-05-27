@@ -362,6 +362,7 @@ describe('[I-02] single alert path', () => {
     // There should be NO direct fetch calls to Telegram API.
     // All Telegram alerts go through emitTransitionAlert → alert-channels/telegram
     // which is mocked here.
+    // codeql[js/incomplete-url-substring-sanitization] Test assertion, not URL sanitization. We're filtering test-mock fetch call arguments to assert that no call hit the Telegram API; a false-positive substring match here would only over-count, not break the assertion's `length === 0` direction.
     const telegramCalls = fetchSpy.mock.calls.filter(
       (args) => typeof args[0] === 'string' && args[0].includes('api.telegram.org'),
     )

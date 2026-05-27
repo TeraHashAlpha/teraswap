@@ -90,10 +90,7 @@ const DAY_WINDOW_MS = 24 * 60 * 60 * 1000
  * (the timing leak would only reveal a hash, not the plaintext).
  */
 export function hashApiKey(plaintext: string): string {
-  // CodeQL: js/insufficient-key-size — ACCEPTED RISK:
-  // API keys are 256-bit random strings (high entropy). SHA-256 is industry
-  // standard for API key hashing (not passwords). bcrypt/scrypt are unnecessary
-  // and would add latency to every API call. See: Stripe, GitHub, AWS patterns.
+  // codeql[js/insufficient-key-size] SHA-256 is appropriate for hashing high-entropy 256-bit API keys (not passwords). Industry standard — Stripe, GitHub, AWS use the same pattern. bcrypt / scrypt are work-factor hashes designed for low-entropy passwords and would add latency to every API call with no security gain here.
   return createHash('sha256').update(plaintext).digest('hex')
 }
 

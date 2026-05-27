@@ -169,6 +169,7 @@ export async function POST(req: NextRequest) {
         if (recipientCheck.extracted) {
           console.log(`[R1] Recipient validated: ${recipientCheck.extracted.slice(0, 10)}... (${source})`)
         } else if (!recipientCheck.implicitRecipient) {
+          // codeql[js/log-injection] Server-side log only. `source` is checked against the AGGREGATOR_APIS allowlist earlier in this handler; an attacker can only pass one of the closed-set source ids, so newline injection is structurally impossible.
           console.warn(`[R1] Could not extract recipient for ${source} (selector unsupported)`)
         }
       }
