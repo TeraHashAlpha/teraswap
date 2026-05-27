@@ -338,11 +338,18 @@ function decodeMulticallRecipient(
   depth: number,
 ): RecipientCheckResult {
   if (depth > 0) {
+    // [SEC-04] Fail-closed: a nested multicall would let an adapter wrap
+    // swap(...) inside multicall(multicall(swap(...))) so the inner
+    // recipient is never validated. The router whitelist already blocks
+    // unknown adapters, but the validator itself must not fail-open.
+    console.warn(
+      `[SEC-04] Nested multicall rejected at depth ${depth}; selector=${selector}`,
+    )
     return {
-      valid: true,
+      valid: false,
       extracted: null,
       implicitRecipient: false,
-      reason: 'Nested multicall — skipping recursive decode',
+      reason: 'Nested multicall rejected — depth > 0 (fail-closed)',
     }
   }
 

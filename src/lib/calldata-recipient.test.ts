@@ -245,6 +245,68 @@ describe('calldata-recipient', () => {
     })
   })
 
+  // ── [SEC-04] Nested multicall — fail-closed ───────────
+
+  describe('[SEC-04] nested multicall — fail-closed', () => {
+    // Build a single multicall(bytes[]) wrapper around an arbitrary inner
+    // calldata blob. selector=0xac9650d8 matches MULTICALL_SELECTORS in
+    // calldata-recipient.ts so the validator follows the recursion path.
+    function buildMulticall(innerCalldataHexNo0x: string): string {
+      const encoded = encodeAbiParameters(
+        [{ name: 'data', type: 'bytes[]' }],
+        [[`0x${innerCalldataHexNo0x}` as Hex]],
+      )
+      return '0xac9650d8' + encoded.slice(2)
+    }
+
+    it('depth-0 multicall wrapping a known swap still validates normally', () => {
+      // Sanity: the depth-0 case must continue to work — only depth > 0
+      // is being made stricter.
+      const innerSwap = buildV3ExactInputSingle(USER_ADDRESS).slice(2)
+      const calldata = buildMulticall(innerSwap)
+
+      const result = validateCallDataRecipient(calldata, USER_ADDRESS)
+      expect(result.valid).toBe(true)
+      expect(result.extracted?.toLowerCase()).toBe(USER_ADDRESS.toLowerCase())
+    })
+
+    it('nested multicall(multicall(swap)) is rejected (fail-closed)', () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const innerSwap = buildV3ExactInputSingle(USER_ADDRESS).slice(2)
+      const innerMulticall = buildMulticall(innerSwap).slice(2)
+      const outer = buildMulticall(innerMulticall)
+
+      const result = validateCallDataRecipient(outer, USER_ADDRESS)
+
+      expect(result.valid).toBe(false)
+      expect(result.reason).toContain('Nested multicall rejected')
+      expect(result.reason).toContain('depth > 0')
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[SEC-04] Nested multicall rejected at depth'),
+      )
+
+      consoleSpy.mockRestore()
+    })
+
+    it('nested multicall is rejected even when the inner recipient would have matched', () => {
+      // Defence-in-depth check: a malicious adapter could craft an inner
+      // swap with the *correct* recipient to satisfy a naive validator
+      // that gave up on nesting. The fail-closed path means the result is
+      // valid: false regardless of inner contents.
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const innerSwap = buildV3ExactInputSingle(USER_ADDRESS).slice(2)
+      const innerMulticall = buildMulticall(innerSwap).slice(2)
+      const outer = buildMulticall(innerMulticall)
+
+      const result = validateCallDataRecipient(outer, USER_ADDRESS)
+      expect(result.valid).toBe(false)
+
+      consoleSpy.mockRestore()
+    })
+  })
+
   // ── VALIDATED_SELECTORS allowlist ──────────────────────
 
   describe('VALIDATED_SELECTORS allowlist', () => {
