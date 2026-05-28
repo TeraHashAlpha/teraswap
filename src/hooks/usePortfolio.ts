@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useBalance, useReadContracts } from 'wagmi'
 import { formatUnits, erc20Abi } from 'viem'
-import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
+import { DEFAULT_TOKENS, isNativeETH, type Token, type TokenCategory } from '@/lib/tokens'
 import { CHAIN_ID } from '@/lib/constants'
 
 // ── Public surface ────────────────────────────────────────
@@ -26,11 +26,23 @@ export interface PortfolioData {
 }
 
 const PRICES_REFRESH_MS = 60_000
+const DISCOVERY_REFRESH_MS = 60_000
+const PRICES_BATCH_SIZE = 100 // Mirrors the cap in /api/portfolio/prices
+
+// Shape returned by /api/portfolio/tokens — kept local to avoid pulling
+// in the route module just for a type.
+interface DiscoveredToken {
+  address: string
+  symbol: string
+  name: string
+  decimals: number
+  logoURI: string | null
+  balance: string
+  isDefault: boolean
+}
 
 // ── Internal helpers ─────────────────────────────────────
 
-// Mirrors the formatBalance() in TokenSelector.tsx. Kept local on purpose:
-// TokenSelector.tsx is explicitly out of scope for this sprint.
 function formatBalance(value: bigint, decimals: number): string {
   if (value === 0n) return '0'
   const full = formatUnits(value, decimals)
@@ -42,28 +54,39 @@ function formatBalance(value: bigint, decimals: number): string {
   return '<0.0001'
 }
 
+const DEFAULT_BY_ADDRESS = (() => {
+  const m = new Map<string, Token>()
+  for (const t of DEFAULT_TOKENS) m.set(t.address.toLowerCase(), t)
+  return m
+})()
+
+function logo1inch(address: string): string {
+  return `https://tokens.1inch.io/${address.toLowerCase()}.png`
+}
+
 interface RawBalance {
   raw: bigint
   formatted: string
 }
 
-/**
- * Private hook that mirrors TokenSelector.useTokenBalances() so we don't
- * have to touch that file. Reads native ETH plus every ERC-20 in
- * DEFAULT_TOKENS via multicall, returns a Map keyed by lower-case address.
- */
-function useTokenBalances(): {
+// ── Fallback hook: DEFAULT_TOKENS multicall ──────────────
+//
+// Kept as the safety net for environments where ALCHEMY_API_KEY is
+// unset. When discovery is available, we explicitly disable the wagmi
+// hooks so RPC quota isn't wasted on a 80-call multicall we won't read.
+
+function useTokenBalances(enabled: boolean): {
   balances: Map<string, RawBalance>
   isLoading: boolean
   isError: boolean
 } {
   const { address, isConnected, chain } = useAccount()
   const isCorrectChain = chain?.id === CHAIN_ID
-  const enabled = isConnected && isCorrectChain && !!address
+  const wagmiEnabled = enabled && isConnected && isCorrectChain && !!address
 
   const { data: ethBalance, isLoading: ethLoading, isError: ethError } = useBalance({
     address,
-    query: { enabled, refetchInterval: 30_000 },
+    query: { enabled: wagmiEnabled, refetchInterval: 30_000 },
   })
 
   const erc20Tokens = useMemo(
@@ -87,9 +110,9 @@ function useTokenBalances(): {
     isLoading: erc20Loading,
     isError: erc20Error,
   } = useReadContracts({
-    contracts: enabled ? contracts : [],
+    contracts: wagmiEnabled ? contracts : [],
     query: {
-      enabled,
+      enabled: wagmiEnabled,
       refetchInterval: 30_000,
     },
   })
@@ -123,52 +146,227 @@ function useTokenBalances(): {
 
   return {
     balances,
-    isLoading: enabled && (ethLoading || erc20Loading),
+    isLoading: wagmiEnabled && (ethLoading || erc20Loading),
     isError: ethError || erc20Error,
   }
 }
 
+// ── Primary path: Alchemy token discovery ────────────────
+//
+// Fetches /api/portfolio/tokens which wraps Alchemy's
+// alchemy_getTokenBalances. A 503 response means ALCHEMY_API_KEY is
+// unset on the server — we surface isAvailable=false so usePortfolio()
+// can switch to the multicall fallback for this render.
+
+function useDiscoveredTokens(address: string | undefined): {
+  tokens: DiscoveredToken[]
+  isLoading: boolean
+  isError: boolean
+  isAvailable: boolean
+  refreshCounter: number
+  bump: () => void
+} {
+  const [tokens, setTokens] = useState<DiscoveredToken[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isError, setIsError] = useState(false)
+  const [isAvailable, setIsAvailable] = useState(true)
+  const [refreshCounter, setRefreshCounter] = useState(0)
+  const fetchIdRef = useRef(0)
+
+  const bump = () => setRefreshCounter((n) => n + 1)
+
+  useEffect(() => {
+    if (!address) {
+      setTokens([])
+      setIsAvailable(true)
+      setIsLoading(false)
+      setIsError(false)
+      return
+    }
+
+    let cancelled = false
+    const myFetchId = ++fetchIdRef.current
+
+    const fetchDiscovery = async () => {
+      setIsLoading(true)
+      try {
+        const res = await fetch(`/api/portfolio/tokens?address=${encodeURIComponent(address)}`)
+        if (cancelled || fetchIdRef.current !== myFetchId) return
+        if (res.status === 503) {
+          // Discovery not configured server-side — falls through to the
+          // multicall path in usePortfolio.
+          setIsAvailable(false)
+          setTokens([])
+          setIsError(false)
+          return
+        }
+        if (!res.ok) {
+          setIsError(true)
+          setIsAvailable(true)
+          return
+        }
+        const data = (await res.json()) as { tokens?: DiscoveredToken[] }
+        setTokens(data.tokens ?? [])
+        setIsAvailable(true)
+        setIsError(false)
+      } catch {
+        if (!cancelled && fetchIdRef.current === myFetchId) {
+          setIsError(true)
+        }
+      } finally {
+        if (!cancelled && fetchIdRef.current === myFetchId) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    fetchDiscovery()
+    const interval = setInterval(fetchDiscovery, DISCOVERY_REFRESH_MS)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [address, refreshCounter])
+
+  return { tokens, isLoading, isError, isAvailable, refreshCounter, bump }
+}
+
+// Build a price-fetch URL from an arbitrary slice of token addresses.
+// Used both by the Alchemy path (potentially >100 addresses) and by the
+// fallback path. The /api/portfolio/prices route caps at 100 addresses
+// per call, so we chunk; results merge into one record.
+async function fetchPricesBatched(
+  addresses: string[],
+): Promise<Record<string, number>> {
+  if (addresses.length === 0) return {}
+  const out: Record<string, number> = {}
+  for (let i = 0; i < addresses.length; i += PRICES_BATCH_SIZE) {
+    const batch = addresses.slice(i, i + PRICES_BATCH_SIZE)
+    const res = await fetch(
+      `/api/portfolio/prices?tokens=${encodeURIComponent(batch.join(','))}`,
+    )
+    if (!res.ok) {
+      // Surface the first batch failure as an exception so the caller
+      // marks isError=true. Partial results from earlier batches are
+      // discarded — we'd rather render nothing than half-priced data.
+      throw new Error(`prices batch failed: ${res.status}`)
+    }
+    const data = (await res.json()) as { prices?: Record<string, number> }
+    Object.assign(out, data.prices ?? {})
+  }
+  return out
+}
+
+// ── Main hook ────────────────────────────────────────────
+
 /**
- * usePortfolio — combines on-chain balances with USD prices fetched from
- * /api/portfolio/prices (DefiLlama under the hood, kept server-side).
+ * usePortfolio — combines on-chain balances with USD prices.
  *
- * Refreshes prices on mount and every 60s. Zero-balance tokens are
- * filtered out of the returned `tokens` array. Tokens with a balance but
- * no DefiLlama price report `priceUsd: null` (not zero).
+ * Primary path: Alchemy discovery (server-side /api/portfolio/tokens),
+ * which returns every ERC-20 the wallet holds with curated metadata
+ * for DEFAULT_TOKENS and Alchemy-resolved metadata for everything else.
+ *
+ * Fallback path: DEFAULT_TOKENS multicall. Triggered when discovery
+ * returns 503 (no ALCHEMY_API_KEY configured). Identical to the
+ * original Sprint 31 behaviour.
+ *
+ * Zero-balance tokens are filtered upstream by the discovery route or
+ * by the multicall result-filter. Prices come from /api/portfolio/prices,
+ * batched at 100 addresses per request.
  */
 export function usePortfolio(): PortfolioData {
-  const { balances, isLoading: balancesLoading, isError: balancesError } = useTokenBalances()
+  const { address } = useAccount()
 
+  const discovery = useDiscoveredTokens(address)
+  const useAlchemyPath = discovery.isAvailable
+
+  // The wagmi multicall hooks must NOT fire when Alchemy is doing its
+  // job — they'd burn a 79-call multicall every 30s that we'd throw away.
+  const {
+    balances: multicallBalances,
+    isLoading: multicallLoading,
+    isError: multicallError,
+  } = useTokenBalances(!useAlchemyPath)
+
+  // ── Step 1: assemble the held-token set + balances ────
+  //
+  // Each path produces the same "raw shape" for the next step:
+  //   Array<{ token: Token, balance: bigint, balanceFormatted: string }>
+  //
+  // Alchemy path: derive Token from DEFAULT_TOKENS when possible
+  // (curated logos), otherwise from the Alchemy metadata. Balance is
+  // already parsed as a decimal string by the API.
+  //
+  // Fallback path: walk DEFAULT_TOKENS, look up each by lowercase
+  // address in the multicall map, keep the ones with non-zero balance.
+
+  interface HeldEntry {
+    token: Token
+    balance: bigint
+    balanceFormatted: string
+  }
+
+  const heldEntries = useMemo<HeldEntry[]>(() => {
+    if (useAlchemyPath) {
+      const out: HeldEntry[] = []
+      for (const d of discovery.tokens) {
+        let raw: bigint
+        try {
+          raw = BigInt(d.balance)
+        } catch {
+          continue
+        }
+        if (raw <= 0n) continue
+        const lower = d.address.toLowerCase()
+        const curated = DEFAULT_BY_ADDRESS.get(lower)
+        const token: Token = curated ?? {
+          address: d.address as `0x${string}`,
+          symbol: d.symbol,
+          name: d.name,
+          decimals: d.decimals,
+          logoURI: d.logoURI || logo1inch(d.address),
+          category: 'Other' as TokenCategory,
+        }
+        out.push({
+          token,
+          balance: raw,
+          balanceFormatted: formatBalance(raw, token.decimals),
+        })
+      }
+      return out
+    }
+    // Fallback: walk DEFAULT_TOKENS and pick up non-zero entries.
+    const out: HeldEntry[] = []
+    for (const token of DEFAULT_TOKENS) {
+      const bal = multicallBalances.get(token.address.toLowerCase())
+      if (bal && bal.raw > 0n) {
+        out.push({ token, balance: bal.raw, balanceFormatted: bal.formatted })
+      }
+    }
+    return out
+  }, [useAlchemyPath, discovery.tokens, multicallBalances])
+
+  // ── Step 2: fetch USD prices ───────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({})
   const [pricesLoading, setPricesLoading] = useState(false)
   const [pricesError, setPricesError] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
-  // Tokens with non-zero balance — the input set for the price fetch.
-  const heldTokens = useMemo(
-    () => DEFAULT_TOKENS.filter((t) => {
-      const b = balances.get(t.address.toLowerCase())
-      return b && b.raw > 0n
-    }),
-    [balances],
-  )
-
-  // Stable key so the effect doesn't refetch on identity-only changes.
   const heldAddressesKey = useMemo(
-    () => heldTokens.map((t) => t.address.toLowerCase()).sort().join(','),
-    [heldTokens],
+    () => heldEntries.map((e) => e.token.address.toLowerCase()).sort().join(','),
+    [heldEntries],
   )
 
-  // Bumped by `refresh()` to force an immediate re-fetch.
   const [refreshCounter, setRefreshCounter] = useState(0)
-  const refresh = () => setRefreshCounter((n) => n + 1)
-
-  // Track the in-flight request so a stale resolution can't overwrite a
-  // newer one (e.g. a manual refresh while the interval fetch is pending).
+  const refresh = () => {
+    setRefreshCounter((n) => n + 1)
+    discovery.bump()
+  }
   const fetchIdRef = useRef(0)
 
   useEffect(() => {
-    if (heldTokens.length === 0) {
+    if (heldEntries.length === 0) {
       setPrices({})
       setPricesError(false)
       setPricesLoading(false)
@@ -181,18 +379,10 @@ export function usePortfolio(): PortfolioData {
     const fetchPrices = async () => {
       setPricesLoading(true)
       try {
-        const url = `/api/portfolio/prices?tokens=${encodeURIComponent(heldAddressesKey)}`
-        const res = await fetch(url)
-        if (!res.ok) {
-          if (!cancelled && fetchIdRef.current === myFetchId) {
-            setPricesError(true)
-            setPricesLoading(false)
-          }
-          return
-        }
-        const data = (await res.json()) as { prices?: Record<string, number> }
+        const addresses = heldAddressesKey ? heldAddressesKey.split(',') : []
+        const merged = await fetchPricesBatched(addresses)
         if (cancelled || fetchIdRef.current !== myFetchId) return
-        setPrices(data.prices ?? {})
+        setPrices(merged)
         setPricesError(false)
         setLastUpdated(new Date())
       } catch {
@@ -209,28 +399,23 @@ export function usePortfolio(): PortfolioData {
       cancelled = true
       clearInterval(interval)
     }
-  }, [heldAddressesKey, heldTokens.length, refreshCounter])
+  }, [heldAddressesKey, heldEntries.length, refreshCounter])
 
+  // ── Step 3: enrich + sort ──────────────────────────────
   const tokens = useMemo<PortfolioToken[]>(() => {
-    const enriched: PortfolioToken[] = heldTokens.map((token) => {
-      const bal = balances.get(token.address.toLowerCase())
-      const raw = bal?.raw ?? 0n
-      const priceUsd = prices[token.address.toLowerCase()] ?? null
-      // human-readable amount × price. Computed with floats — these values
-      // are for display only, never for on-chain math.
-      const amount = parseFloat(formatUnits(raw, token.decimals))
+    const enriched: PortfolioToken[] = heldEntries.map((entry) => {
+      const priceUsd = prices[entry.token.address.toLowerCase()] ?? null
+      const amount = parseFloat(formatUnits(entry.balance, entry.token.decimals))
       const valueUsd = priceUsd !== null ? amount * priceUsd : null
       return {
-        token,
-        balance: raw,
-        balanceFormatted: bal?.formatted ?? '0',
+        token: entry.token,
+        balance: entry.balance,
+        balanceFormatted: entry.balanceFormatted,
         priceUsd,
         valueUsd,
       }
     })
 
-    // Sort: known USD values (descending) first, then unknown-price tokens
-    // sorted by symbol for a stable visual ordering.
     enriched.sort((a, b) => {
       if (a.valueUsd !== null && b.valueUsd !== null) return b.valueUsd - a.valueUsd
       if (a.valueUsd !== null) return -1
@@ -239,7 +424,7 @@ export function usePortfolio(): PortfolioData {
     })
 
     return enriched
-  }, [heldTokens, balances, prices])
+  }, [heldEntries, prices])
 
   const totalValueUsd = useMemo(() => {
     const known = tokens.filter((t) => t.valueUsd !== null)
@@ -250,8 +435,12 @@ export function usePortfolio(): PortfolioData {
   return {
     tokens,
     totalValueUsd,
-    isLoading: balancesLoading || pricesLoading,
-    isError: balancesError || pricesError,
+    isLoading:
+      pricesLoading ||
+      (useAlchemyPath ? discovery.isLoading : multicallLoading),
+    isError:
+      pricesError ||
+      (useAlchemyPath ? discovery.isError : multicallError),
     lastUpdated,
     refresh,
   }

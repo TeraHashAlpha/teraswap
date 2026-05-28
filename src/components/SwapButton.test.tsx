@@ -23,6 +23,7 @@ vi.mock('wagmi', () => ({
     isConnected: mockIsConnected,
     chain: mockChainId === undefined ? undefined : { id: mockChainId, name: 'mock' },
   })),
+  useChains: vi.fn(() => [{ id: 1, name: 'Ethereum' }]),
   useSwitchChain: vi.fn(() => ({ switchChain: mockSwitchChain })),
 }))
 

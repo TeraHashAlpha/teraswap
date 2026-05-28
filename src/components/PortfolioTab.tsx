@@ -2,8 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
-import { CATEGORY_DISPLAY_ORDER, type Token, type TokenCategory } from '@/lib/tokens'
+import {
+  CATEGORY_DISPLAY_ORDER,
+  DEFAULT_TOKENS,
+  type Token,
+  type TokenCategory,
+} from '@/lib/tokens'
 import { usePortfolio, type PortfolioToken } from '@/hooks/usePortfolio'
+import { useTokenImport } from '@/hooks/useTokenImport'
 
 interface PortfolioTabProps {
   onSwapToken?: (token: Token) => void
@@ -15,6 +21,22 @@ const usdFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
+
+// Lower-cased set of DEFAULT_TOKENS addresses. A discovered token whose
+// address is NOT in this set is rendered in the "Discovered in Wallet"
+// section with the dashed-border treatment and the Add-to-Tokens CTA.
+const DEFAULT_TOKEN_ADDRESSES = new Set<string>(
+  DEFAULT_TOKENS.map((t) => t.address.toLowerCase()),
+)
+
+function isDefaultToken(token: Token): boolean {
+  return DEFAULT_TOKEN_ADDRESSES.has(token.address.toLowerCase())
+}
+
+function shortenAddress(addr: string): string {
+  if (!addr || addr.length < 10) return addr
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
 
 function formatLastUpdated(date: Date | null, now: number): string {
   if (!date) return ''
@@ -59,6 +81,8 @@ function TokenAvatar({ token }: { token: Token }) {
   )
 }
 
+// ── Standard (curated) row ───────────────────────────────
+
 function PortfolioRow({
   entry,
   onSwapToken,
@@ -97,6 +121,76 @@ function PortfolioRow({
   )
 }
 
+// ── Discovered row (Alchemy non-DEFAULT_TOKENS) ──────────
+
+function DiscoveredRow({
+  entry,
+  imported,
+  onAdd,
+  onSwapToken,
+}: {
+  entry: PortfolioToken
+  imported: boolean
+  onAdd: (token: Token) => void
+  onSwapToken?: (token: Token) => void
+}) {
+  const { token, balanceFormatted, valueUsd } = entry
+  // After import the row visually rejoins the curated set (solid border,
+  // Swap button). Pre-import: dashed border, address shown, Add CTA.
+  return (
+    <div
+      className={`flex items-center justify-between rounded-xl bg-surface-tertiary px-3 py-2.5 transition ${
+        imported
+          ? 'border border-cream-08 hover:border-cream-15'
+          : 'border border-dashed border-cream-08 hover:border-cream-15'
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <TokenAvatar token={token} />
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-cream">{token.symbol}</div>
+          <div className="truncate text-[11px] text-cream-50">{token.name}</div>
+          {!imported && (
+            <div
+              className="mt-0.5 font-mono text-[10px] text-cream-35"
+              title={token.address}
+            >
+              {shortenAddress(token.address)}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="text-right">
+          <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
+          <div className="text-[11px] text-cream-50 tabular-nums">
+            {valueUsd !== null ? usdFormatter.format(valueUsd) : '—'}
+          </div>
+        </div>
+        {imported ? (
+          onSwapToken && (
+            <button
+              onClick={() => onSwapToken(token)}
+              className="rounded-lg border border-cream-08 px-2.5 py-1 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream"
+              aria-label={`Swap ${token.symbol}`}
+            >
+              Swap
+            </button>
+          )
+        ) : (
+          <button
+            onClick={() => onAdd(token)}
+            className="rounded-lg border border-cream-gold/40 bg-cream-gold/10 px-2.5 py-1 text-[11px] font-medium text-cream-gold transition hover:bg-cream-gold/20"
+            aria-label={`Add ${token.symbol} to tokens`}
+          >
+            Add
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function RefreshIcon({ spinning }: { spinning?: boolean }) {
   return (
     <svg
@@ -121,6 +215,26 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
 export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
   const { isConnected } = useAccount()
   const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh } = usePortfolio()
+  const { importToken } = useTokenImport()
+
+  // Tracks tokens the user has imported this session. addCustomToken in
+  // lib/tokens mutates a module-level array but TokenSelector reads it
+  // only on render; for our purposes the per-component set is enough
+  // and avoids the implicit dependency on tokens.ts internals.
+  const [importedAddrs, setImportedAddrs] = useState<Set<string>>(new Set())
+
+  const handleAdd = async (token: Token) => {
+    const lower = token.address.toLowerCase()
+    if (importedAddrs.has(lower)) return
+    const result = await importToken(token.address)
+    if (result) {
+      setImportedAddrs((prev) => {
+        const next = new Set(prev)
+        next.add(lower)
+        return next
+      })
+    }
+  }
 
   // Tick once per second so the "X seconds ago" string updates without
   // depending on lastUpdated identity. Pauses when there's no timestamp.
@@ -131,19 +245,27 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
     return () => clearInterval(id)
   }, [lastUpdated])
 
-  // Group sorted tokens by category, preserving USD-value order inside
-  // each group. The outer order follows CATEGORY_DISPLAY_ORDER so the
-  // visual layout is stable across refreshes.
-  const grouped = useMemo(() => {
+  // Split tokens into the curated set (rendered in CATEGORY_DISPLAY_ORDER
+  // buckets) and the discovered-non-default set (rendered last under
+  // "Discovered in Wallet").
+  const { grouped, discovered } = useMemo(() => {
     const buckets = new Map<TokenCategory, PortfolioToken[]>()
+    const discoveredList: PortfolioToken[] = []
     for (const entry of tokens) {
-      const list = buckets.get(entry.token.category) ?? []
-      list.push(entry)
-      buckets.set(entry.token.category, list)
+      if (isDefaultToken(entry.token)) {
+        const list = buckets.get(entry.token.category) ?? []
+        list.push(entry)
+        buckets.set(entry.token.category, list)
+      } else {
+        discoveredList.push(entry)
+      }
     }
-    return Array.from(buckets.entries()).sort(
-      ([a], [b]) => categoryIndex(a) - categoryIndex(b),
-    )
+    return {
+      grouped: Array.from(buckets.entries()).sort(
+        ([a], [b]) => categoryIndex(a) - categoryIndex(b),
+      ),
+      discovered: discoveredList,
+    }
   }, [tokens])
 
   if (!isConnected) {
@@ -213,8 +335,8 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
         </div>
       )}
 
-      {/* Token list — grouped by category */}
-      {tokens.length > 0 && (
+      {/* Curated token list — grouped by category */}
+      {grouped.length > 0 && (
         <div className="space-y-4">
           {grouped.map(([category, entries]) => (
             <div key={category} className="space-y-1.5">
@@ -229,6 +351,24 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
                 />
               ))}
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* Discovered (Alchemy-only) — appended at the very end */}
+      {discovered.length > 0 && (
+        <div className="space-y-1.5 pt-2">
+          <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream-35">
+            Discovered in Wallet
+          </div>
+          {discovered.map((entry) => (
+            <DiscoveredRow
+              key={entry.token.address}
+              entry={entry}
+              imported={importedAddrs.has(entry.token.address.toLowerCase())}
+              onAdd={handleAdd}
+              onSwapToken={onSwapToken}
+            />
           ))}
         </div>
       )}
