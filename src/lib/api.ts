@@ -12,6 +12,7 @@ import {
   type AggregatorName,
 } from './constants'
 import { globalLimiter } from './rate-limiter'
+import { getQuote as getCachedQuote, setQuote as setCachedQuote, quoteCacheKey } from './quote-cache'
 import {
   ADAPTER_REGISTRY,
   withTimeout,
@@ -41,7 +42,13 @@ export async function fetchMetaQuote(
   dstDecimals: number = 18,
   excludeSources?: string[],
 ): Promise<MetaQuoteResult> {
-  // Rate limit: max 30 global requests/min
+  // [P188] Server-side cache — check BEFORE the rate limiter so a
+  // cache hit never costs a token in the outbound budget.
+  const cacheKey = quoteCacheKey({ src, dst, amount, srcDecimals, dstDecimals, excludeSources })
+  const cached = getCachedQuote(cacheKey)
+  if (cached) return cached
+
+  // Rate limit: max 120 global requests/min (P187)
   if (!globalLimiter.allow('meta_quote')) {
     throw new Error('Rate limited — too many requests. Please wait a moment.')
   }
@@ -177,22 +184,26 @@ export async function fetchMetaQuote(
       }
 
       if (filtered.length > 0) {
-        return {
+        const result: MetaQuoteResult = {
           best: filtered[0],
           all: filtered,
           fetchedAt: Date.now(),
           crossQuoteDeviation,
           crossQuoteWarning,
         }
+        setCachedQuote(cacheKey, result)
+        return result
       }
     }
   }
 
-  return {
+  const result: MetaQuoteResult = {
     best: quotes[0],
     all: quotes,
     fetchedAt: Date.now(),
   }
+  setCachedQuote(cacheKey, result)
+  return result
 }
 
 // ══════════════════════════════════════════════════════════

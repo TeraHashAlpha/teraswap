@@ -17,7 +17,9 @@ Location: `docs/ADR/`
 | [ADR-003](docs/ADR/ADR-003-cloudflare-worker-scheduler.md) | Cloudflare Worker as monitoring scheduler | Accepted (2026-04-15) | Use a Cloudflare Worker `* * * * *` to POST to Vercel `/api/monitor/tick`. Rejects Vercel Pro Cron ($20/mo) and Vercel Hobby Cron (daily-only). $0/mo. |
 | [ADR-004](docs/ADR/ADR-004-upstash-kv-over-redis-cloud.md) | Upstash KV (via Vercel) over Redis Cloud | Accepted (2026-04-15) | Use Upstash for both rate-limiter and monitoring state — `@vercel/kv` is HTTP REST and incompatible with Redis Cloud's TCP. Closes incident 2026-04-14-002. |
 | [ADR-005](docs/ADR/ADR-005-state-persistence-vercel-kv.md) | Source state persistence via Vercel KV with per-tick cache | Accepted (2026-04-15) | Replace in-memory `Map` with Vercel KV; add `beginTick()` per-request cache. Closes C-01 (incident 2026-04-15-002). |
-| ADR-008 | Wagmi v3 Migration | Proposed | Defer until RainbowKit v3 compat |
+| [ADR-006](docs/ADR/ADR-006-positive-slippage-sharing.md) | Positive Slippage Sharing on Non-CoW Routes | Proposed (2026-05-12) | Share positive slippage (mev_savings_actual) with users on non-CoW routes; depends on FeeCollector V2 + H-04 minimumOutput (P66–P68). |
+| [ADR-007](docs/ADR/ADR-007-morpho-vault-curator.md) | TeraSwap as Morpho Vault Curator | Proposed (2026-05-18) | Phase 4 protocol play — curate Morpho vaults using surplus data from ADR-006. Depends on P68 deploy + multi-chain. |
+| [ADR-008](docs/ADR/ADR-008-wagmi-v3-migration.md) | Wagmi v3 Migration | Proposed | Defer until RainbowKit v3 compat |
 
 New ADRs go in `docs/ADR/` with filename `ADR-NNN-short-slug.md`. Update the table above.
 
