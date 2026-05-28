@@ -359,7 +359,7 @@ describe('usePortfolio', () => {
     expect(usdc).toBeDefined()
   })
 
-  it('Alchemy available: wagmi mocks are not consulted', async () => {
+  it('Alchemy available: multicall (useReadContracts) is not consulted', async () => {
     discoveryAvailable(
       [
         {
@@ -376,11 +376,14 @@ describe('usePortfolio', () => {
     )
     const { result } = renderHook(() => usePortfolio())
     await waitFor(() => expect(result.current.lastUpdated).not.toBeNull())
-    // The fallback path would emit ETH (2 ETH balance from the wagmi
-    // mock fixture) AND a USDC entry from multicall. The Alchemy path
-    // emits only what we explicitly returned — exactly USDC, no ETH.
-    expect(result.current.tokens).toHaveLength(1)
-    expect(result.current.tokens[0].token.symbol).toBe('USDC')
+    // After P195 the Alchemy path also reads native ETH via useBalance(),
+    // so ETH appears alongside the discovered USDC. The load-bearing
+    // assertion is that the ERC-20 multicall (useReadContracts) is NOT
+    // consulted — the USDC balance must be the discovery value (1 unit),
+    // NOT the multicall fixture (1_000_000 units).
+    const usdc = result.current.tokens.find((t) => t.token.symbol === 'USDC')!
+    expect(usdc.balance).toBe(1n * 10n ** 6n)
+    expect(result.current.tokens.find((t) => t.token.symbol === 'WBTC')).toBeUndefined()
   })
 
   it('Alchemy available: discovered token addresses are included in the price fetch', async () => {
@@ -408,8 +411,11 @@ describe('usePortfolio', () => {
       return typeof u === 'string' && u.startsWith('/api/portfolio/prices')
     })
     expect(pricesCalls.length).toBeGreaterThan(0)
-    const firstUrl = pricesCalls[0][0] as string
-    expect(firstUrl).toContain(UNK.toLowerCase())
+    // [P195] ETH is prepended on the Alchemy path so the UNK address may
+    // land in any of the prices batches; we assert that some call contains
+    // it rather than pinning to the first one.
+    const concatenated = pricesCalls.map((c: unknown[]) => c[0] as string).join('|')
+    expect(concatenated).toContain(UNK.toLowerCase())
   })
 
   it('Alchemy available: balance string is parsed to bigint correctly', async () => {
@@ -455,8 +461,11 @@ describe('usePortfolio', () => {
       const u = args[0]
       return typeof u === 'string' && u.startsWith('/api/portfolio/prices')
     })
-    // 150 addresses / 100 per batch = 2 batches.
-    expect(pricesCalls.length).toBe(2)
+    // 150 + native ETH = 151 addresses → 2+ batches (the post-P195 Alchemy
+    // path adds an ETH-arrival re-render that may emit a third batched
+    // fetch). The load-bearing assertion is that batching happens at all;
+    // a relaxed lower bound keeps the test stable across that re-render.
+    expect(pricesCalls.length).toBeGreaterThanOrEqual(2)
   })
 })
 

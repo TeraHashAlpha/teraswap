@@ -322,6 +322,17 @@ export function usePortfolio(): PortfolioData {
     isError: multicallError,
   } = useTokenBalances(!useAlchemyPath)
 
+  // [P195] Native ETH balance for the Alchemy path. alchemy_getTokenBalances
+  // only returns ERC-20 entries, so without this useBalance() the user's ETH
+  // balance is invisible when discovery is active. Enabled ONLY when the
+  // Alchemy path is selected; the multicall path already covers ETH via
+  // useTokenBalances() — keeping both gated avoids double-counting and
+  // wasted RPC.
+  const { data: nativeEthBalance } = useBalance({
+    address,
+    query: { enabled: useAlchemyPath && !!address, refetchInterval: 30_000 },
+  })
+
   // ── Step 1: assemble the held-token set + balances ────
   //
   // Each path produces the same "raw shape" for the next step:
@@ -343,6 +354,18 @@ export function usePortfolio(): PortfolioData {
   const heldEntries = useMemo<HeldEntry[]>(() => {
     if (useAlchemyPath) {
       const out: HeldEntry[] = []
+      // [P195] Prepend native ETH so it shows at the top of the list;
+      // alchemy_getTokenBalances never returns it.
+      if (nativeEthBalance && nativeEthBalance.value > 0n) {
+        const ethToken = DEFAULT_TOKENS.find(isNativeETH)
+        if (ethToken) {
+          out.push({
+            token: ethToken,
+            balance: nativeEthBalance.value,
+            balanceFormatted: formatBalance(nativeEthBalance.value, 18),
+          })
+        }
+      }
       for (const d of discovery.tokens) {
         let raw: bigint
         try {
@@ -378,7 +401,7 @@ export function usePortfolio(): PortfolioData {
       }
     }
     return out
-  }, [useAlchemyPath, discovery.tokens, multicallBalances])
+  }, [useAlchemyPath, discovery.tokens, multicallBalances, nativeEthBalance])
 
   // ── Step 2: fetch USD prices ───────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({})
