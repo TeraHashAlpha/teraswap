@@ -14,6 +14,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { encodeAbiParameters, type Hex } from 'viem'
 import { validateCallDataRecipient, VALIDATED_SELECTORS } from './calldata-recipient'
+import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -304,6 +305,40 @@ describe('calldata-recipient', () => {
       expect(result.valid).toBe(false)
 
       consoleSpy.mockRestore()
+    })
+  })
+
+  // ── [FULL-M-01] routeViaFeeCollector gating ────────────
+
+  describe('[FULL-M-01] FeeCollector recipient gating by route type', () => {
+    it('rejects FeeCollector recipient on direct route', () => {
+      // Calldata that would deliver output to the FeeCollector contract.
+      const calldata = buildV3ExactInputSingle(FEE_COLLECTOR_ADDRESS)
+      // Direct route (routeViaFeeCollector=false): the FeeCollector must NOT
+      // be an accepted recipient — only the user's wallet.
+      const result = validateCallDataRecipient(calldata, USER_ADDRESS, false)
+
+      expect(result.valid).toBe(false)
+      expect(result.extracted?.toLowerCase()).toBe(FEE_COLLECTOR_ADDRESS.toLowerCase())
+      expect(result.reason).toContain('does not match')
+    })
+
+    it('accepts FeeCollector recipient on fee-routed swap', () => {
+      const calldata = buildV3ExactInputSingle(FEE_COLLECTOR_ADDRESS)
+      // Fee-routed swap (routeViaFeeCollector=true): the FeeCollector is a
+      // legitimate recipient because it forwards output to the user.
+      const result = validateCallDataRecipient(calldata, USER_ADDRESS, true)
+
+      expect(result.valid).toBe(true)
+      expect(result.extracted?.toLowerCase()).toBe(FEE_COLLECTOR_ADDRESS.toLowerCase())
+    })
+
+    it('still accepts the user wallet on a direct route', () => {
+      // Sanity: tightening the FeeCollector path must not break the normal
+      // direct-route case where output goes straight to the user.
+      const calldata = buildV3ExactInputSingle(USER_ADDRESS)
+      const result = validateCallDataRecipient(calldata, USER_ADDRESS, false)
+      expect(result.valid).toBe(true)
     })
   })
 

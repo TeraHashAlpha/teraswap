@@ -33,8 +33,12 @@ vi.mock('@/lib/kv-rate-limiter', () => ({
 }))
 
 const mockFetchSwapFromSource = vi.fn()
+// [FULL-M-01] The route now derives routeViaFeeCollector from usesFeeCollector(source)
+// to decide whether the FeeCollector is an acceptable calldata recipient.
+const mockUsesFeeCollector = vi.fn().mockReturnValue(true)
 vi.mock('@/lib/api', () => ({
   fetchSwapFromSource: (...args: unknown[]) => mockFetchSwapFromSource(...args),
+  usesFeeCollector: (...args: unknown[]) => mockUsesFeeCollector(...args),
 }))
 
 const mockIsKnownSwapSelector = vi.fn().mockReturnValue(true)

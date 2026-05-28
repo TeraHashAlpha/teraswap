@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { fetchSwapFromSource } from '@/lib/api'
+import { fetchSwapFromSource, usesFeeCollector } from '@/lib/api'
 import { AGGREGATOR_APIS, type AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
@@ -154,7 +154,10 @@ export async function POST(req: NextRequest) {
       // the calldata must direct tokens to that recipient, not to `from`.
       const expectedRecipient = recipient || from
       if (expectedRecipient) {
-        const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient)
+        // [FULL-M-01] Only fee-routed sources may legitimately deliver output
+        // to the FeeCollector. Direct sources (0x, CoW) must reject it.
+        const routeViaFeeCollector = usesFeeCollector(source as AggregatorName)
+        const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient, routeViaFeeCollector)
         if (!recipientCheck.valid) {
           console.error(
             `[R1] BLOCKED: Recipient mismatch in ${source} calldata.`,
