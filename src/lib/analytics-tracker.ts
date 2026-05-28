@@ -12,18 +12,44 @@ import {
   ANALYTICS_STORAGE_KEY,
 } from './analytics-types'
 import { getSupabase, isSupabaseEnabled } from './supabase'
+import {
+  initSecureStorage,
+  isSecureStorageReady,
+  secureGet,
+  secureSet,
+  secureRemove,
+} from './secure-storage'
 
 // ── Persistence ──────────────────────────────────────────────
-// Dual-mode: Supabase (if configured) + localStorage (always, as cache)
-// localStorage serves as offline cache & fallback
+// Dual-mode: Supabase (if configured) + localStorage (always, as cache).
+//
+// [P200] The localStorage cache is now encrypted at rest (AES-256-GCM,
+// wallet-derived key) under the v2 key. SecureStorage is async, but this
+// module exposes a synchronous API (trackTrade/computeDashboard/…), so we
+// keep an in-memory mirror (`memoryCache`) that sync callers read/write
+// immediately, and hydrate it lazily from the encrypted store. The legacy v1
+// key held plaintext JSON and is migrated + removed on first hydration.
 
 /** Max events to keep in localStorage (proactive cap — EXT-L-02) */
 const MAX_LOCAL_EVENTS = 2000
 
-function loadEvents(): TradeEvent[] {
+/** Legacy plaintext key (v1) — read once for migration, then removed. */
+const LEGACY_ANALYTICS_KEY = ANALYTICS_STORAGE_KEY
+/** Encrypted key (v2). */
+const ANALYTICS_STORAGE_KEY_V2 = `${ANALYTICS_STORAGE_KEY}_v2`
+
+// In-memory mirror of the encrypted store, shared by the sync API.
+let memoryCache: TradeEvent[] = []
+// True once the cache has been reconciled with the encrypted store.
+let hydrated = false
+// De-dupes concurrent hydration attempts.
+let hydrationPromise: Promise<void> | null = null
+
+/** Read the legacy v1 (plaintext) events for one-time migration. */
+function readLegacyEvents(): TradeEvent[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = localStorage.getItem(ANALYTICS_STORAGE_KEY)
+    const raw = localStorage.getItem(LEGACY_ANALYTICS_KEY)
     if (!raw) return []
     return JSON.parse(raw) as TradeEvent[]
   } catch {
@@ -31,23 +57,61 @@ function loadEvents(): TradeEvent[] {
   }
 }
 
+/**
+ * Reconcile `memoryCache` with the encrypted v2 store, migrating any legacy
+ * v1 plaintext data once. Idempotent and concurrency-safe. No-op until
+ * SecureStorage is initialised (a wallet must be connected) — hydration is
+ * retried on the next call. Events added optimistically before hydration are
+ * preserved (merged by id).
+ */
+export async function ensureAnalyticsHydrated(): Promise<void> {
+  if (hydrated) return
+  if (typeof window === 'undefined') { hydrated = true; return }
+  // Without a wallet-derived key we cannot decrypt — defer until one exists.
+  if (!isSecureStorageReady()) return
+  if (hydrationPromise) return hydrationPromise
+
+  hydrationPromise = (async () => {
+    let loaded = await secureGet<TradeEvent[]>(ANALYTICS_STORAGE_KEY_V2)
+
+    if (loaded === null) {
+      // One-time migration from legacy plaintext v1.
+      const legacy = readLegacyEvents()
+      if (legacy.length > 0) {
+        loaded = legacy
+        await secureSet(ANALYTICS_STORAGE_KEY_V2, legacy)
+        try { localStorage.removeItem(LEGACY_ANALYTICS_KEY) } catch { /* ignore */ }
+      }
+    }
+
+    // Merge persisted events with any added optimistically (dedupe by id).
+    const byId = new Map<string, TradeEvent>()
+    for (const e of loaded ?? []) byId.set(e.id, e)
+    for (const e of memoryCache) byId.set(e.id, e)
+    memoryCache = Array.from(byId.values())
+    hydrated = true
+  })().finally(() => { hydrationPromise = null })
+
+  return hydrationPromise
+}
+
+/** Synchronous in-memory view. Kicks off hydration for subsequent reads. */
+function loadEvents(): TradeEvent[] {
+  void ensureAnalyticsHydrated()
+  return memoryCache
+}
+
 function saveEvents(events: TradeEvent[]): void {
-  if (typeof window === 'undefined') return
   // Proactive cap — keep most recent events only (EXT-L-02)
   const capped = events.length > MAX_LOCAL_EVENTS
     ? events.slice(-MAX_LOCAL_EVENTS)
     : events
-  try {
-    localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(capped))
-  } catch {
-    // Quota still exceeded — trim further
-    const trimmed = capped.slice(-500)
-    try {
-      localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(trimmed))
-    } catch {
-      // give up
-    }
-  }
+  memoryCache = capped
+  if (typeof window === 'undefined') return
+  // Fire-and-forget encrypted write. SecureStorage swallows quota/serialise
+  // errors internally (never throws), so the in-memory cache stays the
+  // source of truth for the session.
+  void secureSet(ANALYTICS_STORAGE_KEY_V2, capped)
 }
 
 // ── Supabase helpers ─────────────────────────────────────────
@@ -117,8 +181,13 @@ export async function syncFromSupabase(): Promise<TradeEvent[] | null> {
       .limit(10000)
     if (error || !data) return null
     const events = data.map(fromSnakeCase)
-    // Update localStorage cache
+    // Server data is authoritative — replace the cache and mark hydrated so a
+    // later lazy hydration doesn't re-merge stale legacy data.
     saveEvents(events)
+    hydrated = true
+    if (typeof window !== 'undefined') {
+      try { localStorage.removeItem(LEGACY_ANALYTICS_KEY) } catch { /* ignore */ }
+    }
     return events
   } catch {
     return null
@@ -171,11 +240,21 @@ export function trackTrade(params: TrackTradeParams): TradeEvent {
     chainId: CHAIN_ID,
   }
 
-  const events = loadEvents()
-  events.push(event)
-  saveEvents(events)
+  // Ensure this wallet's encryption key is derivable (idempotent no-op when
+  // the same wallet is already initialised, e.g. by the order hooks).
+  initSecureStorage(params.wallet)
 
-  // Async push to Supabase (fire & forget — localStorage is source of truth during session)
+  // Optimistic in-memory append — visible to sync readers immediately.
+  memoryCache = [...memoryCache, event]
+
+  // Persist: hydrate first (merges any prior persisted events into the cache),
+  // then encrypt the full set. Fire-and-forget — SecureStorage never throws.
+  void (async () => {
+    await ensureAnalyticsHydrated()
+    saveEvents(memoryCache)
+  })()
+
+  // Async push to Supabase (authoritative server store; fire & forget).
   supabaseInsert(event)
 
   return event
@@ -367,8 +446,11 @@ export function getEventCount(): number {
   return loadEvents().length
 }
 
-/** Clear all analytics data */
+/** Clear all analytics data (in-memory cache + encrypted v2 + legacy v1). */
 export function clearAnalytics(): void {
+  memoryCache = []
+  hydrated = true // cleared state is authoritative; no re-hydrate needed
   if (typeof window === 'undefined') return
-  localStorage.removeItem(ANALYTICS_STORAGE_KEY)
+  secureRemove(ANALYTICS_STORAGE_KEY_V2)
+  try { localStorage.removeItem(LEGACY_ANALYTICS_KEY) } catch { /* ignore */ }
 }
