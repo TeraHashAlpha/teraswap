@@ -411,3 +411,43 @@
   (odometer stagger index). Refactored to a pre-pass that computes each
   digit's column index before render, so no variable is reassigned during the
   render map. No functional/DOM change; snapshot unchanged.
+
+## Feedback — P195 (commit 553b86f)
+
+### Assumption that turned out wrong
+- The prompt's literal ternary uses `outputDisplay` as the "a quote value
+  exists" condition: `{outputDisplay ? <DigitRoller/> : quoteLoading ? <dots/>
+  : null}`. But in `SwapBox.tsx` (~line 386) `outputDisplay` defaults to the
+  string `'0.0'` whenever `meta?.best` is falsy, so it is **always truthy**.
+  With the literal change the loading-dots branch becomes dead code and two of
+  the prompt's own quality criteria fail ("Loading dots only show before first
+  quote" and "No input → empty"). I conditioned on `meta?.best` instead — the
+  true signal that a quote has arrived — which satisfies all stated criteria.
+
+### Edge case
+- Verified P195 requirement 2: `useQuote.doFetch` sets `loading=true` but does
+  NOT clear `meta` during a refresh poll (it only resets `meta` to `null` on
+  error). So `outputDisplay` persists across successful polls and no `useRef`
+  cache is needed. On a quote *error* mid-session `meta` becomes `null`, so the
+  Receive field falls back to dots-or-empty rather than a frozen last value —
+  acceptable, but noting it as the one case where the roller is not retained.
+
+## Feedback — P197 (commit pending)
+
+### Edge case not covered by the prompt
+- P197 requirement 5 / "Do NOT" say to gate `removeOrder` on
+  `status === 'cancelled'` ("active or completed orders must NOT be removable").
+  But the existing UI (`OrderDashboard.tsx` ~line 398) renders the **Remove**
+  button for every **non-active** order (`!isActive`) — filled, expired,
+  cancelled, AND error — and the re-sync bug the sprint targets is identical for
+  all terminal-state orders (every status persists in Supabase and re-hydrates
+  on mount). A strict cancelled-only guard would turn that Remove button into a
+  silent no-op for filled/expired/error orders (a UX regression).
+- Decision: I guarded `removeOrder` against **active** orders only
+  (active/executing/partially_filled/signing → no-op; they must be cancelled
+  on-chain first) and persist the dismissal for any terminal order. This fixes
+  the reported cancelled-order bug, matches the existing Remove-button gating,
+  and incidentally fixes the same latent bug for filled/expired/error orders
+  without regressing behaviour. Flagging for Architect triage in case the
+  intent was genuinely to restrict dismissal to cancelled orders alone — that
+  would also require hiding the Remove button for other terminal states.
