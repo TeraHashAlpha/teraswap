@@ -31,6 +31,19 @@ export const ORDER_EXECUTOR_DOMAIN = {
   verifyingContract: ORDER_EXECUTOR_ADDRESS,
 }
 
+// ── EIP-712 cancel-order types [FULL-H-01] ───────────────
+// The PATCH /api/orders/[id] cancel endpoint requires a cryptographic
+// proof of ownership. The frontend signs this typed-data message and the
+// server recovers the signer via recoverTypedDataAddress, comparing it to
+// the order owner. Re-uses getOrderExecutorDomain(chainId) — same contract,
+// same chain binding as order creation.
+export const CANCEL_ORDER_TYPES = {
+  CancelOrder: [
+    { name: 'id', type: 'string' },     // Supabase order UUID
+    { name: 'action', type: 'string' }, // Always "cancel" — prevents type collision
+  ],
+} as const
+
 // ── Default whitelisted routers ──────────────────────────
 // These are the DEX routers that are whitelisted in the contract.
 // Users must select one when creating an order.

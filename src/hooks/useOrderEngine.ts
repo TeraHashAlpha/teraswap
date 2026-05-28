@@ -20,6 +20,8 @@ import {
   ORDER_EXECUTOR_ABI,
   ORDER_EXECUTOR_ADDRESS,
   ORDER_EIP712_TYPES,
+  CANCEL_ORDER_TYPES,
+  getOrderExecutorDomain,
   OrderType,
   PriceCondition,
   ORDER_POLL_INTERVAL_MS,
@@ -495,8 +497,21 @@ export function useOrderEngine() {
         args: [orderStruct],
       })
 
-      // Cancel in Supabase (uses the stored order_hash, which may be UUID or bytes32)
-      await cancelOrderInSupabase(address, order.orderHash)
+      // Cancel in Supabase (uses the stored order_hash, which may be UUID or bytes32).
+      // [FULL-H-01] The PATCH endpoint now requires an EIP-712 CancelOrder
+      // signature. We sign over the resolved Supabase row id so the server can
+      // recover the signer and confirm ownership. A declined signature is
+      // swallowed by cancelOrderInSupabase (returns false) — the on-chain
+      // cancel above is authoritative, so the order is still cancelled.
+      await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
+        const signature = await signTypedDataAsync({
+          domain: getOrderExecutorDomain(chainId),
+          types: CANCEL_ORDER_TYPES,
+          primaryType: 'CancelOrder',
+          message: { id: rowId, action: 'cancel' },
+        })
+        return { signature, chainId }
+      })
 
       setOrders(prev => prev.map(o =>
         o.id === orderId
@@ -508,7 +523,7 @@ export function useOrderEngine() {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel failed'
       setLatestEvent({ type: 'order_error', orderId, error: errorMsg })
     }
-  }, [address, orders, writeContractAsync])
+  }, [address, orders, writeContractAsync, chainId, signTypedDataAsync])
 
   // ── Cancel ALL active orders in one tx (nonce invalidation) ──
   const cancelAllOrders = useCallback(async () => {

@@ -264,9 +264,12 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
       await result.current.cancelOrder(orderId)
     })
     expect(mockWriteContractAsync).toHaveBeenCalled()
+    // [FULL-H-01] cancelOrder now passes an EIP-712 signing callback as the
+    // third argument so the PATCH endpoint can verify order ownership.
     expect(mockCancelOrderInSupabase).toHaveBeenCalledWith(
       ADDRESS,
       expect.any(String),
+      expect.any(Function),
     )
     expect(result.current.orders[0].status).toBe('cancelled')
   })
