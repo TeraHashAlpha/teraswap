@@ -318,3 +318,38 @@
   scope; Dependabot has separate PRs queued for `framer-motion` and
   rainbowkit-adjacent packages in `/main/` subfolder branches). Sprint
   30 was housekeeping for the top-level PRs only.
+
+## Feedback — P183 (no commit)
+
+### Assumption that turned out wrong
+- Prompt specified `npm install typescript@~5.9 --save-dev` to upgrade
+  TypeScript to the latest 5.9.x. Working tree was already at 5.9.3 on
+  `main` (Dependabot P167 bumped it earlier). `npm install` reported "up
+  to date" — no diff produced, so no P183 commit was created. Verification
+  ran successfully against the existing 5.9.3 install (typecheck clean,
+  build succeeded, 1108 vitest tests passed). Sprint 35 proceeds with
+  3 commits (P184–P186) instead of the planned 4.
+
+### Edge case
+- The initial typecheck failed against a stale `.next/types/validator.ts`
+  referencing `src/app/api/portfolio/tokens/route.js` — a path from a
+  prior dev session on a different branch (the actual file is
+  `route.ts`). Resolved by clearing `.next/` (regenerable build cache,
+  gitignored) before retypecheck. Unrelated to the TS bump itself.
+
+## Feedback — P185 (no commit)
+
+### Assumption that turned out wrong
+- Prompt specified replacing `useSwitchChain().chains` with a separate
+  `useChains()` import in `src/components/SwapButton.tsx`. SwapButton
+  does not destructure `.chains` from `useSwitchChain()` — only
+  `{ switchChain }` (line 34). A repo-wide grep for `useSwitchChain`
+  confirmed two hits only (component + its test mock), neither reads
+  `chains`. There is nothing to replace, so no P185 commit was created.
+  Sprint 35 therefore lands as 2 commits (P184 + P186) instead of 4.
+
+### Edge case
+- If the v3 migration sprint needs `useChains()` later (e.g. to enumerate
+  configured chains in a network selector UI), it can be added then; the
+  peer-dep preinstall in P184 already covers connector readiness, which
+  is the load-bearing part of the prep work.
