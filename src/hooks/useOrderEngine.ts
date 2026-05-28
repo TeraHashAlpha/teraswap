@@ -141,6 +141,34 @@ function saveOrders(orders: AutonomousOrder[]) {
   try { localStorage.removeItem('teraswap_orders_v2') } catch {}
 }
 
+// ── Dismissed orders (UI-only soft-delete) ───────────────
+// Cancelled/terminal orders stay in Supabase for the audit trail, so a
+// page refresh re-syncs them from the server and they reappear. Persisting
+// the IDs the user has explicitly dismissed keeps them hidden across
+// reloads. No Supabase row is ever deleted.
+const DISMISSED_ORDERS_KEY = 'teraswap_dismissed_orders'
+
+function getDismissedOrderIds(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const stored = localStorage.getItem(DISMISSED_ORDERS_KEY)
+    return stored ? JSON.parse(stored) : []
+  } catch {
+    return []
+  }
+}
+
+function dismissOrder(orderId: string): void {
+  if (typeof window === 'undefined') return
+  const ids = getDismissedOrderIds()
+  if (!ids.includes(orderId)) {
+    ids.push(orderId)
+    try {
+      localStorage.setItem(DISMISSED_ORDERS_KEY, JSON.stringify(ids))
+    } catch { /* quota exceeded */ }
+  }
+}
+
 // ── Convert Supabase row → UI order ──────────────────────
 
 /** Map DB status strings to UI status strings.
@@ -165,9 +193,9 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     signature: row.signature,
     status: mapDbStatus(row.status as string),
     orderType: typeMap[row.order_type] ?? OrderType.LIMIT,
-    tokenInSymbol: '', // Will be enriched by UI
+    tokenInSymbol: row.token_in_symbol || '',
     tokenInDecimals: 18,
-    tokenOutSymbol: '',
+    tokenOutSymbol: row.token_out_symbol || '',
     tokenOutDecimals: 18,
     dcaExecuted: row.dca_executed,
     dcaTotal: row.dca_total ?? 0,
@@ -226,7 +254,8 @@ export function useOrderEngine() {
     // Then refresh from Supabase
     fetchUserOrders(address).then(rows => {
       if (rows.length > 0) {
-        const remote = rows.map(rowToOrder)
+        const dismissed = getDismissedOrderIds()
+        const remote = rows.map(rowToOrder).filter(o => !dismissed.includes(o.id))
         setOrders(remote)
         saveOrders(remote)
       }
@@ -551,6 +580,17 @@ export function useOrderEngine() {
   // ── Remove order from local list ───────────────────────
   const removeOrder = useCallback((orderId: string) => {
     setOrders(prev => {
+      const target = prev.find(o => o.id === orderId)
+      if (!target) return prev
+      // Active orders must be cancelled on-chain, not dismissed.
+      const isActive = target.status === 'active'
+        || target.status === 'executing'
+        || target.status === 'partially_filled'
+        || target.status === 'signing'
+      if (isActive) return prev
+      // Persist the dismissal so a Supabase re-sync on reload doesn't
+      // resurrect the order (the row stays in the DB for the audit trail).
+      dismissOrder(orderId)
       const updated = prev.filter(o => o.id !== orderId)
       saveOrders(updated)
       return updated
