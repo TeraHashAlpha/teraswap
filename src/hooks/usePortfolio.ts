@@ -29,6 +29,15 @@ const PRICES_REFRESH_MS = 60_000
 const DISCOVERY_REFRESH_MS = 60_000
 const PRICES_BATCH_SIZE = 100 // Mirrors the cap in /api/portfolio/prices
 
+/**
+ * [P193] After this many consecutive non-503 discovery failures
+ * (502 Bad Gateway, 500, 429, network errors, ...), `useDiscoveredTokens`
+ * flips `isAvailable` to false so usePortfolio() falls back to the
+ * multicall path. Any subsequent successful response resets the counter
+ * and re-enables the Alchemy path on the next tick.
+ */
+export const MAX_DISCOVERY_FAILURES = 2
+
 // Shape returned by /api/portfolio/tokens — kept local to avoid pulling
 // in the route module just for a type.
 interface DiscoveredToken {
@@ -172,6 +181,7 @@ function useDiscoveredTokens(address: string | undefined): {
   const [isAvailable, setIsAvailable] = useState(true)
   const [refreshCounter, setRefreshCounter] = useState(0)
   const fetchIdRef = useRef(0)
+  const failCountRef = useRef(0)
 
   const bump = () => setRefreshCounter((n) => n + 1)
 
@@ -195,23 +205,46 @@ function useDiscoveredTokens(address: string | undefined): {
         if (res.status === 503) {
           // Discovery not configured server-side — falls through to the
           // multicall path in usePortfolio.
+          failCountRef.current = 0
           setIsAvailable(false)
           setTokens([])
           setIsError(false)
           return
         }
         if (!res.ok) {
-          setIsError(true)
-          setIsAvailable(true)
+          failCountRef.current += 1
+          if (failCountRef.current >= MAX_DISCOVERY_FAILURES) {
+            console.warn(
+              '[useDiscoveredTokens] Discovery failed %d times consecutively, falling back to multicall',
+              failCountRef.current,
+            )
+            setIsAvailable(false)
+            setIsError(false)
+          } else {
+            setIsError(true)
+            setIsAvailable(true)
+          }
           return
         }
         const data = (await res.json()) as { tokens?: DiscoveredToken[] }
+        failCountRef.current = 0
         setTokens(data.tokens ?? [])
         setIsAvailable(true)
         setIsError(false)
       } catch {
         if (!cancelled && fetchIdRef.current === myFetchId) {
-          setIsError(true)
+          failCountRef.current += 1
+          if (failCountRef.current >= MAX_DISCOVERY_FAILURES) {
+            console.warn(
+              '[useDiscoveredTokens] Discovery failed %d times consecutively, falling back to multicall',
+              failCountRef.current,
+            )
+            setIsAvailable(false)
+            setIsError(false)
+          } else {
+            setIsError(true)
+            setIsAvailable(true)
+          }
         }
       } finally {
         if (!cancelled && fetchIdRef.current === myFetchId) {
@@ -289,6 +322,17 @@ export function usePortfolio(): PortfolioData {
     isError: multicallError,
   } = useTokenBalances(!useAlchemyPath)
 
+  // [P195] Native ETH balance for the Alchemy path. alchemy_getTokenBalances
+  // only returns ERC-20 entries, so without this useBalance() the user's ETH
+  // balance is invisible when discovery is active. Enabled ONLY when the
+  // Alchemy path is selected; the multicall path already covers ETH via
+  // useTokenBalances() — keeping both gated avoids double-counting and
+  // wasted RPC.
+  const { data: nativeEthBalance } = useBalance({
+    address,
+    query: { enabled: useAlchemyPath && !!address, refetchInterval: 30_000 },
+  })
+
   // ── Step 1: assemble the held-token set + balances ────
   //
   // Each path produces the same "raw shape" for the next step:
@@ -310,6 +354,18 @@ export function usePortfolio(): PortfolioData {
   const heldEntries = useMemo<HeldEntry[]>(() => {
     if (useAlchemyPath) {
       const out: HeldEntry[] = []
+      // [P195] Prepend native ETH so it shows at the top of the list;
+      // alchemy_getTokenBalances never returns it.
+      if (nativeEthBalance && nativeEthBalance.value > 0n) {
+        const ethToken = DEFAULT_TOKENS.find(isNativeETH)
+        if (ethToken) {
+          out.push({
+            token: ethToken,
+            balance: nativeEthBalance.value,
+            balanceFormatted: formatBalance(nativeEthBalance.value, 18),
+          })
+        }
+      }
       for (const d of discovery.tokens) {
         let raw: bigint
         try {
@@ -345,7 +401,7 @@ export function usePortfolio(): PortfolioData {
       }
     }
     return out
-  }, [useAlchemyPath, discovery.tokens, multicallBalances])
+  }, [useAlchemyPath, discovery.tokens, multicallBalances, nativeEthBalance])
 
   // ── Step 2: fetch USD prices ───────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({})
