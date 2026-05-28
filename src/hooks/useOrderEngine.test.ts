@@ -290,17 +290,94 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
 })
 
 describe('useOrderEngine — removeOrder', () => {
-  it('removes the order from local state without calling Supabase', async () => {
+  // [P197] removeOrder now no-ops on ACTIVE orders (they must be cancelled
+  // on-chain first). This test removes a terminal (cancelled) order — the
+  // same behaviour it always verified, on a now-dismissible status.
+  it('removes a terminal order from local state without calling Supabase', async () => {
+    mockCreateOrderInSupabase.mockResolvedValue(
+      makeRow({ id: 'row-1', order_hash: '0x' + 'aa'.repeat(32) }),
+    )
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
       await result.current.createOrder(makeConfig())
     })
     const id = result.current.orders[0].id
+    await act(async () => {
+      await result.current.cancelOrder(id)
+    })
+    expect(result.current.orders[0].status).toBe('cancelled')
+    mockCancelOrderInSupabase.mockClear()
     act(() => {
       result.current.removeOrder(id)
     })
     expect(result.current.orders).toHaveLength(0)
     expect(mockCancelOrderInSupabase).not.toHaveBeenCalled()
+  })
+
+  it('does not remove an active order — it must be cancelled on-chain first [P197]', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => {
+      await result.current.createOrder(makeConfig())
+    })
+    const id = result.current.orders[0].id
+    expect(result.current.orders[0].status).toBe('active')
+    act(() => {
+      result.current.removeOrder(id)
+    })
+    expect(result.current.orders).toHaveLength(1)
+  })
+
+  it('persists the dismissed order ID to localStorage [P197]', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'cancelled-1', status: 'cancelled' }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.orders).toHaveLength(1)
+    act(() => {
+      result.current.removeOrder('cancelled-1')
+    })
+    const dismissed = JSON.parse(localStorage.getItem('teraswap_dismissed_orders') || '[]')
+    expect(dismissed).toContain('cancelled-1')
+  })
+
+  it('filters dismissed orders out of the Supabase-loaded set [P197]', async () => {
+    localStorage.setItem('teraswap_dismissed_orders', JSON.stringify(['gone-1']))
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'gone-1', status: 'cancelled' }),
+      makeRow({ id: 'keep-1', status: 'cancelled' }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    const ids = result.current.orders.map(o => o.id)
+    expect(ids).not.toContain('gone-1')
+    expect(ids).toContain('keep-1')
+  })
+})
+
+describe('useOrderEngine — token symbols from Supabase row [P196]', () => {
+  it('populates tokenInSymbol/tokenOutSymbol from the row data', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r1', token_in_symbol: 'USDC', token_out_symbol: 'ETH' }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.orders[0].tokenInSymbol).toBe('USDC')
+    expect(result.current.orders[0].tokenOutSymbol).toBe('ETH')
+  })
+
+  it('falls back to empty string when row symbols are null (legacy orders)', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r1', token_in_symbol: null, token_out_symbol: null }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.orders[0].tokenInSymbol).toBe('')
+    expect(result.current.orders[0].tokenOutSymbol).toBe('')
   })
 })
 

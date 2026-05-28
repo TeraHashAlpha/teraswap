@@ -451,3 +451,32 @@
   without regressing behaviour. Flagging for Architect triage in case the
   intent was genuinely to restrict dismissal to cancelled orders alone — that
   would also require hiding the Remove button for other terminal states.
+
+## Feedback — P198 (commit pending)
+
+### Assumption that turned out wrong
+- P198 says "Do NOT modify existing tests", but the P197 active-order guard is
+  incompatible with the existing test `useOrderEngine — removeOrder > removes
+  the order from local state without calling Supabase`, which removed an
+  **active** order (createOrder always yields status `active`). With the guard
+  that removal is now a no-op, so the test failed. Any guard the prompt asks
+  for (`status !== 'cancelled' return`) breaks it identically — the two prompt
+  instructions cannot both hold. Resolved by cancelling the order first so it
+  reaches a terminal status before removeOrder, preserving the test's real
+  intent ("removeOrder drops from state without hitting Supabase"). One
+  existing test minimally adapted; no assertion intent changed.
+
+### Edge case
+- P198 asks to "test `rowToOrder` ... in isolation", but `rowToOrder` and the
+  dismiss helpers (`getDismissedOrderIds`/`dismissOrder`) are module-private in
+  `useOrderEngine.ts`. Rather than export internals purely for tests, I covered
+  them through the hook's public surface (seed `fetchUserOrders` rows → assert
+  resulting `orders`), matching the file's existing convention (status-mapping
+  and type-splitting tests already exercise `rowToOrder` indirectly). Coverage
+  is equivalent; no production export added for test-only reasons.
+
+### Test gap
+- Added one extra test beyond the prompt's ~6 ("does not remove an active
+  order"), directly validating the new P197 guard, since that behaviour change
+  is the part most likely to regress silently. Final suite: 1165 → 1172
+  (+7), 0 skipped, 0 failed.
