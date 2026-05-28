@@ -165,9 +165,9 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     signature: row.signature,
     status: mapDbStatus(row.status as string),
     orderType: typeMap[row.order_type] ?? OrderType.LIMIT,
-    tokenInSymbol: '', // Will be enriched by UI
+    tokenInSymbol: row.token_in_symbol || '',
     tokenInDecimals: 18,
-    tokenOutSymbol: '',
+    tokenOutSymbol: row.token_out_symbol || '',
     tokenOutDecimals: 18,
     dcaExecuted: row.dca_executed,
     dcaTotal: row.dca_total ?? 0,
