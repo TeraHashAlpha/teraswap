@@ -27,6 +27,7 @@ import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
+import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -128,6 +129,15 @@ export default function SwapBox() {
         .then(r => r.json())
         .then(data => {
           if (data.spender) {
+            // [FULL-H-02] Validate the spender against the client-side
+            // allowlist before trusting it. A compromised /api/spender
+            // response must never let the user approve an attacker address.
+            if (!isTrustedSpender(data.spender)) {
+              console.error('[Security] Untrusted spender address from /api/spender:', data.spender)
+              setSpender(undefined)
+              toast({ type: 'error', title: 'Swap unavailable', description: 'Spender validation failed. Please try again or choose another route.' })
+              return // Do NOT set the spender state
+            }
             setSpender(data.spender as `0x${string}`)
           }
         }).catch(() => {})
