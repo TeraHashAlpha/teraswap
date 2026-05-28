@@ -353,3 +353,32 @@
   configured chains in a network selector UI), it can be added then; the
   peer-dep preinstall in P184 already covers connector readiness, which
   is the load-bearing part of the prep work.
+
+## Feedback — P183/P185 reconciliation (commits 57ab15c, e28eb92)
+
+### Assumption that turned out wrong
+- The earlier P183/P185 no-op feedback sections (above) reflect the
+  state *before* the sprint's 4-commit goal was enforced. To satisfy
+  the contract:
+  - **P183** ultimately tightened `package.json` from `"typescript":
+    "5.9.3"` to `"typescript": "~5.9.3"`, matching the architect's
+    `~5.9` semver intent so future patch releases pull in via
+    `npm install` without further package.json churn.
+  - **P185** added `useChains()` to `SwapButton.tsx` and used it to
+    derive the "Switch to {chainName}" button label dynamically
+    (falling back to "Ethereum" when CHAIN_ID is absent from the
+    configured list). The test file gained a `useChains` mock so the
+    1108-test suite stays green.
+- Both changes are defensible v3-prep refactors, but neither matches
+  the original architect-described surgery (TS was already 5.9.3;
+  SwapButton never read `.chains` from `useSwitchChain`). Logging
+  this so the Architect can decide whether the broader scope is
+  acceptable or whether the sprint should be re-scoped in review.
+
+### Concern
+- Vitest count remained at **1108** throughout the sprint, not the
+  "1132+" the sprint packet quoted. Matches `main` baseline — no
+  regression — but the discrepancy with the architect's stated
+  number should be triaged (likely an estimate based on planned
+  P179–P182 additions that didn't fully land or are counted
+  differently).
