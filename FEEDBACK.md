@@ -382,3 +382,32 @@
   number should be triaged (likely an estimate based on planned
   P179–P182 additions that didn't fully land or are counted
   differently).
+
+## Feedback — P191/P192 (Sprint 34 — Digit Roller)
+
+### Assumption that turned out wrong
+- The sprint packet specified the test path as
+  `__tests__/components/DigitRoller.test.tsx` and the integration test as
+  reusing `__tests__/components/SwapBox.test.tsx`. The repo convention is
+  **colocated** tests: `src/components/SwapBox.test.tsx`,
+  `src/components/*.test.tsx`. There is no `__tests__/components/` dir.
+  Followed the actual convention and created
+  `src/components/DigitRoller.test.tsx`. The SwapBox mock boundary cannot be
+  imported across files (vi.mock is per-file), so the integration smoke
+  tests replicate SwapBox's mock setup in the DigitRoller test file rather
+  than importing the existing one.
+
+### Edge case
+- Test #7/#8 in the packet asserted that "old digits that no longer exist are
+  NOT present" after a value shrinks. The component (per packet §B) renders
+  all 10 digits (0–9) in every column and offsets the stack with a transform,
+  so every digit glyph is **always** in the DOM — visibility is a transform,
+  not a mount/unmount. Adapted those tests to assert on the *column count*
+  (deterministic under reduced motion, where AnimatePresence removals are
+  synchronous) instead of on glyph absence. Net coverage is equivalent.
+
+### Concern
+- React-compiler ESLint flagged a `let`-reassignment inside the JSX `.map()`
+  (odometer stagger index). Refactored to a pre-pass that computes each
+  digit's column index before render, so no variable is reassigned during the
+  render map. No functional/DOM change; snapshot unchanged.

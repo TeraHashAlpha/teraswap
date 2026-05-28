@@ -1,0 +1,483 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DigitRoller — constants & snapshot > matches the structural snapshot 1`] = `
+<span
+  class="tabular-nums "
+>
+  <span>
+    ~
+  </span>
+  <span
+    class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
+    data-testid="digit-column"
+    style="height: 32px; opacity: 1; transform: none;"
+  >
+    <span
+      aria-hidden="true"
+      class="invisible"
+    >
+      0
+    </span>
+    <span
+      class="absolute inset-x-0 top-0 block"
+      style="transform: translateY(-32px);"
+    >
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        0
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        1
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        2
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        3
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        4
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        5
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        6
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        7
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        8
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        9
+      </span>
+    </span>
+  </span>
+  <span
+    data-testid="digit-separator"
+  >
+     
+  </span>
+  <span
+    class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
+    data-testid="digit-column"
+    style="height: 32px; opacity: 1; transform: none;"
+  >
+    <span
+      aria-hidden="true"
+      class="invisible"
+    >
+      0
+    </span>
+    <span
+      class="absolute inset-x-0 top-0 block"
+      style="transform: translateY(-64px);"
+    >
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        0
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        1
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        2
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        3
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        4
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        5
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        6
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        7
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        8
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        9
+      </span>
+    </span>
+  </span>
+  <span
+    class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
+    data-testid="digit-column"
+    style="height: 32px; opacity: 1; transform: none;"
+  >
+    <span
+      aria-hidden="true"
+      class="invisible"
+    >
+      0
+    </span>
+    <span
+      class="absolute inset-x-0 top-0 block"
+      style="transform: translateY(-96px);"
+    >
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        0
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        1
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        2
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        3
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        4
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        5
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        6
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        7
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        8
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        9
+      </span>
+    </span>
+  </span>
+  <span
+    class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
+    data-testid="digit-column"
+    style="height: 32px; opacity: 1; transform: none;"
+  >
+    <span
+      aria-hidden="true"
+      class="invisible"
+    >
+      0
+    </span>
+    <span
+      class="absolute inset-x-0 top-0 block"
+      style="transform: translateY(-128px);"
+    >
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        0
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        1
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        2
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        3
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        4
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        5
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        6
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        7
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        8
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        9
+      </span>
+    </span>
+  </span>
+  <span
+    data-testid="digit-separator"
+  >
+    .
+  </span>
+  <span
+    class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
+    data-testid="digit-column"
+    style="height: 32px; opacity: 1; transform: none;"
+  >
+    <span
+      aria-hidden="true"
+      class="invisible"
+    >
+      0
+    </span>
+    <span
+      class="absolute inset-x-0 top-0 block"
+      style="transform: translateY(-160px);"
+    >
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        0
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        1
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        2
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        3
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        4
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        5
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        6
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        7
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        8
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        9
+      </span>
+    </span>
+  </span>
+  <span
+    class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
+    data-testid="digit-column"
+    style="height: 32px; opacity: 1; transform: none;"
+  >
+    <span
+      aria-hidden="true"
+      class="invisible"
+    >
+      0
+    </span>
+    <span
+      class="absolute inset-x-0 top-0 block"
+      style="transform: translateY(-192px);"
+    >
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        0
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        1
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        2
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        3
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        4
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        5
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        6
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        7
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        8
+      </span>
+      <span
+        class="flex items-center justify-center"
+        style="height: 32px;"
+      >
+        9
+      </span>
+    </span>
+  </span>
+</span>
+`;
