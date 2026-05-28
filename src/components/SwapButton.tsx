@@ -1,6 +1,6 @@
 'use client'
 
-import { useAccount, useSwitchChain } from 'wagmi'
+import { useAccount, useChains, useSwitchChain } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { CHAIN_ID } from '@/lib/constants'
 import { playTouchMP3 } from '@/lib/sounds'
@@ -32,6 +32,8 @@ export default function SwapButton({
   const { isConnected, chain } = useAccount()
   const { openConnectModal } = useConnectModal()
   const { switchChain } = useSwitchChain()
+  const configuredChains = useChains()
+  const targetChainName = configuredChains.find((c) => c.id === CHAIN_ID)?.name ?? 'Ethereum'
   const isCorrectChain = chain?.id === CHAIN_ID
 
   type BtnConfig = { text: string; disabled: boolean; onClick: () => void; variant: string }
@@ -40,7 +42,7 @@ export default function SwapButton({
     if (!isConnected)
       return { text: 'Connect Wallet', disabled: false, onClick: () => openConnectModal?.(), variant: 'primary' }
     if (!isCorrectChain)
-      return { text: 'Switch to Ethereum', disabled: false, onClick: () => switchChain({ chainId: CHAIN_ID }), variant: 'warning' }
+      return { text: `Switch to ${targetChainName}`, disabled: false, onClick: () => switchChain({ chainId: CHAIN_ID }), variant: 'warning' }
     if (!hasAmount)
       return { text: 'Enter amount', disabled: true, onClick: () => {}, variant: 'disabled' }
     if (!hasSufficientBalance)
