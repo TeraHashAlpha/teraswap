@@ -15,6 +15,7 @@ import { useSwap, type SwapStatus } from '@/hooks/useSwap'
 import { useApproval } from '@/hooks/useApproval'
 import Permit2EducationModal from '@/components/Permit2EducationModal'
 import TokenAddressBadge from '@/components/TokenAddressBadge'
+import DigitRoller from '@/components/DigitRoller'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
@@ -539,7 +540,7 @@ export default function SwapBox() {
           </div>
           <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3">
             <span className="min-w-0 flex-1 text-2xl font-semibold text-cream-65">
-              {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : `~${outputDisplay}`}
+              {quoteLoading ? <span className="inline-block animate-pulse text-cream-35">...</span> : <DigitRoller value={outputDisplay} prefix="~" />}
             </span>
             <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
