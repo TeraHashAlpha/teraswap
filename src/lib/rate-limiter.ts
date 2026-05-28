@@ -63,11 +63,11 @@ export function createRateLimiter({ maxRequests, windowMs }: RateLimiterConfig):
 
 // ── Pre-configured limiters for TeraSwap ─────────────────
 
-/** Per-aggregator: max 3 quote requests per 10 seconds */
-export const quoteLimiter = createRateLimiter({ maxRequests: 3, windowMs: 10_000 })
+/** Per-aggregator: max 6 quote requests per 10 seconds (raised from 3/10s in P187 — paired with a 3s server-side cache, gives smoother UX without overloading upstream APIs) */
+export const quoteLimiter = createRateLimiter({ maxRequests: 6, windowMs: 10_000 })
 
-/** Global API: max 30 requests per minute */
-export const globalLimiter = createRateLimiter({ maxRequests: 30, windowMs: 60_000 })
+/** Global API: max 120 requests per minute (raised from 30/60s in P187 — covers the higher per-source allowance across all 11 aggregators) */
+export const globalLimiter = createRateLimiter({ maxRequests: 120, windowMs: 60_000 })
 
 /** Price feed: max 10 requests per 30 seconds */
 export const priceLimiter = createRateLimiter({ maxRequests: 10, windowMs: 30_000 })
