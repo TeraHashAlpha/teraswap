@@ -23,14 +23,6 @@ export function getOrderExecutorDomain(chainId: number) {
   }
 }
 
-/** @deprecated Use getOrderExecutorDomain(chainId) instead */
-export const ORDER_EXECUTOR_DOMAIN = {
-  name: 'TeraSwapOrderExecutor',
-  version: '2',
-  chainId: 1,
-  verifyingContract: ORDER_EXECUTOR_ADDRESS,
-}
-
 // ── EIP-712 cancel-order types [FULL-H-01] ───────────────
 // The PATCH /api/orders/[id] cancel endpoint requires a cryptographic
 // proof of ownership. The frontend signs this typed-data message and the

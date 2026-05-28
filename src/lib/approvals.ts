@@ -48,13 +48,6 @@ export function getPermit2Domain(chainId: number) {
   }
 }
 
-/** @deprecated Use getPermit2Domain(chainId) instead */
-export const PERMIT2_DOMAIN = {
-  name: 'Permit2',
-  chainId: 1,
-  verifyingContract: PERMIT2_ADDRESS,
-}
-
 export const PERMIT_SINGLE_TYPES = {
   PermitSingle: [
     { name: 'details', type: 'PermitDetails' },
