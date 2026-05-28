@@ -77,6 +77,26 @@ describe('DigitRoller — rendering', () => {
   })
 })
 
+describe('DigitRoller — accessibility [34-L-01]', () => {
+  it('exposes the formatted value via aria-label so screen readers announce the number, not all 10 digits per column', () => {
+    const { container } = render(<DigitRoller value="1 975.6553" prefix="~" />)
+    const wrapper = container.querySelector('.tabular-nums')
+
+    // The accessible name is the prefix + formatted value — not the
+    // 0–9 stack inside every DigitColumn.
+    const label = wrapper?.getAttribute('aria-label')
+    expect(label).toContain('1 975.6553')
+    expect(label).toBe('~1 975.6553')
+    expect(wrapper).toHaveAttribute('role', 'text')
+
+    // Each digit roller is removed from the a11y tree; the parent label
+    // already carries the value, so columns must not be read out.
+    for (const col of screen.getAllByTestId('digit-column')) {
+      expect(col).toHaveAttribute('aria-hidden', 'true')
+    }
+  })
+})
+
 describe('DigitRoller — value transitions', () => {
   it('shrinks the column count when the value gets shorter', () => {
     // Reduced motion makes AnimatePresence removals synchronous.
