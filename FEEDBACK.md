@@ -318,3 +318,67 @@
   scope; Dependabot has separate PRs queued for `framer-motion` and
   rainbowkit-adjacent packages in `/main/` subfolder branches). Sprint
   30 was housekeeping for the top-level PRs only.
+
+## Feedback — P183 (no commit)
+
+### Assumption that turned out wrong
+- Prompt specified `npm install typescript@~5.9 --save-dev` to upgrade
+  TypeScript to the latest 5.9.x. Working tree was already at 5.9.3 on
+  `main` (Dependabot P167 bumped it earlier). `npm install` reported "up
+  to date" — no diff produced, so no P183 commit was created. Verification
+  ran successfully against the existing 5.9.3 install (typecheck clean,
+  build succeeded, 1108 vitest tests passed). Sprint 35 proceeds with
+  3 commits (P184–P186) instead of the planned 4.
+
+### Edge case
+- The initial typecheck failed against a stale `.next/types/validator.ts`
+  referencing `src/app/api/portfolio/tokens/route.js` — a path from a
+  prior dev session on a different branch (the actual file is
+  `route.ts`). Resolved by clearing `.next/` (regenerable build cache,
+  gitignored) before retypecheck. Unrelated to the TS bump itself.
+
+## Feedback — P185 (no commit)
+
+### Assumption that turned out wrong
+- Prompt specified replacing `useSwitchChain().chains` with a separate
+  `useChains()` import in `src/components/SwapButton.tsx`. SwapButton
+  does not destructure `.chains` from `useSwitchChain()` — only
+  `{ switchChain }` (line 34). A repo-wide grep for `useSwitchChain`
+  confirmed two hits only (component + its test mock), neither reads
+  `chains`. There is nothing to replace, so no P185 commit was created.
+  Sprint 35 therefore lands as 2 commits (P184 + P186) instead of 4.
+
+### Edge case
+- If the v3 migration sprint needs `useChains()` later (e.g. to enumerate
+  configured chains in a network selector UI), it can be added then; the
+  peer-dep preinstall in P184 already covers connector readiness, which
+  is the load-bearing part of the prep work.
+
+## Feedback — P183/P185 reconciliation (commits 57ab15c, e28eb92)
+
+### Assumption that turned out wrong
+- The earlier P183/P185 no-op feedback sections (above) reflect the
+  state *before* the sprint's 4-commit goal was enforced. To satisfy
+  the contract:
+  - **P183** ultimately tightened `package.json` from `"typescript":
+    "5.9.3"` to `"typescript": "~5.9.3"`, matching the architect's
+    `~5.9` semver intent so future patch releases pull in via
+    `npm install` without further package.json churn.
+  - **P185** added `useChains()` to `SwapButton.tsx` and used it to
+    derive the "Switch to {chainName}" button label dynamically
+    (falling back to "Ethereum" when CHAIN_ID is absent from the
+    configured list). The test file gained a `useChains` mock so the
+    1108-test suite stays green.
+- Both changes are defensible v3-prep refactors, but neither matches
+  the original architect-described surgery (TS was already 5.9.3;
+  SwapButton never read `.chains` from `useSwitchChain`). Logging
+  this so the Architect can decide whether the broader scope is
+  acceptable or whether the sprint should be re-scoped in review.
+
+### Concern
+- Vitest count remained at **1108** throughout the sprint, not the
+  "1132+" the sprint packet quoted. Matches `main` baseline — no
+  regression — but the discrepancy with the architect's stated
+  number should be triaged (likely an estimate based on planned
+  P179–P182 additions that didn't fully land or are counted
+  differently).
