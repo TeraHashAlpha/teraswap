@@ -53,7 +53,7 @@ vi.mock('@/lib/order-engine', async () => {
   }
 })
 
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { useOrderEngine } from './useOrderEngine'
 import {
   OrderType,
@@ -424,33 +424,49 @@ describe('useOrderEngine — derived filters', () => {
   })
 })
 
-describe('useOrderEngine — persistence (obfuscated localStorage)', () => {
-  it('writes an obfuscated (non-plain-JSON) string to teraswap_orders_v3', async () => {
+describe('useOrderEngine — persistence (encrypted localStorage [P200])', () => {
+  it('writes an encrypted (non-plain-JSON) payload to teraswap_orders_v4', async () => {
+    // Encryption is real-async (AES-GCM); fake timers can't flush the crypto
+    // promise chain, so this test runs on real timers + waitFor.
+    vi.useRealTimers()
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
       await result.current.createOrder(makeConfig())
     })
-    const raw = localStorage.getItem('teraswap_orders_v3')
-    expect(raw).not.toBeNull()
-    // It must not look like plain JSON — obfuscate() + base64 wraps it.
-    expect(raw!.startsWith('[')).toBe(false)
-    expect(raw!.startsWith('{')).toBe(false)
+    // The save effect encrypts + persists asynchronously.
+    await waitFor(() => {
+      expect(localStorage.getItem('teraswap_orders_v4')).not.toBeNull()
+    })
+    const parsed = JSON.parse(localStorage.getItem('teraswap_orders_v4')!)
+    // AES-GCM EncryptedPayload shape { v, iv, ct } — never a plain order array.
+    expect(Array.isArray(parsed)).toBe(false)
+    expect(parsed.v).toBe(1)
+    expect(typeof parsed.iv).toBe('string')
+    expect(typeof parsed.ct).toBe('string')
+    // The legacy v3 key is never written by the encrypted path.
+    expect(localStorage.getItem('teraswap_orders_v3')).toBeNull()
   })
 
   it('survives unmount + remount via localStorage (Supabase yields no rows)', async () => {
+    vi.useRealTimers()
     const first = renderHook(() => useOrderEngine())
     await act(async () => {
       await first.result.current.createOrder(makeConfig())
     })
     const firstOrders = first.result.current.orders
     expect(firstOrders).toHaveLength(1)
+    // Wait for the encrypted write to land before tearing the hook down.
+    await waitFor(() => {
+      expect(localStorage.getItem('teraswap_orders_v4')).not.toBeNull()
+    })
     first.unmount()
 
-    // Second mount: Supabase returns no rows → localStorage fallback.
+    // Second mount: Supabase returns no rows → encrypted localStorage fallback.
     mockFetchUserOrders.mockResolvedValue([])
     const second = renderHook(() => useOrderEngine())
-    await act(async () => { await Promise.resolve() })
-    expect(second.result.current.orders).toHaveLength(1)
+    await waitFor(() => {
+      expect(second.result.current.orders).toHaveLength(1)
+    })
     expect(second.result.current.orders[0].orderHash).toBe(firstOrders[0].orderHash)
   })
 
