@@ -124,16 +124,22 @@ export function useConditionalOrder() {
     (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
   ).length
   useEffect(() => {
-    // [BUGFIX] Read from ref for fresh data
-    const submittedOrders = ordersRef.current.filter(o =>
-      (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
-    )
-    if (submittedOrders.length === 0) {
+    // [P212/FULL-M-05] Gate the interval on submittedCount, but read the order
+    // list FRESH from the ref INSIDE the callback. The old code closed over a
+    // snapshot captured at effect setup, so an order that transitioned to
+    // 'submitted' without changing the total count (one fills as another
+    // submits) was never polled. useLimitOrder.pollAll is the reference pattern.
+    if (submittedCount === 0) {
       if (orderPollRef.current) { clearInterval(orderPollRef.current); orderPollRef.current = null }
       return
     }
 
     async function pollOrders() {
+      // Re-read fresh on every tick — never use a stale setup-time snapshot.
+      const submittedOrders = ordersRef.current.filter(o =>
+        (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
+      )
+      if (submittedOrders.length === 0) return
       for (const order of submittedOrders) {
         if (!order.orderUid) continue
         try {
