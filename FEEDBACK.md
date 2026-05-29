@@ -628,3 +628,21 @@ All P203/P204 findings came back **info/low** — no medium or high.
   only models SL/TP (`ConditionalOrderConfig.type` = 'stop_loss'|'take_profit');
   DCA lives in `useOrderEngine`. The guard validates only the two trigger types,
   so any non-trigger type (incl. a DCA-typed config) skips naturally.
+
+## Feedback — Sprint 42 / P215 review (this commit)
+
+### Test gap (found by adversarial self-review; rescoped honestly)
+- The original `[P212] poll reads fresh ordersRef` test was FALSE-GREEN: adding a
+  second submitted order changed submittedCount (1→2), which re-runs the gating
+  effect and re-creates the interval — so even the buggy setup-time-snapshot code
+  would have passed. The exact FULL-M-05 scenario (a new order entering the
+  submitted set while submittedCount stays constant, so the effect never re-runs)
+  CANNOT be reproduced through the public hook API: every path that adds to the
+  submitted set also changes submittedCount. Isolating it would require reaching
+  into the private `ordersRef`. **Resolution:** rescoped the test to its honest,
+  observable contract (the poll covers the live submitted set each tick) with an
+  explicit scope note; the fresh in-callback read itself is verified by code
+  inspection + the adversarial review. The P212 fix is confirmed correct; only the
+  test's claim was over-stated. **Architect:** if a regression guard for the exact
+  stale-closure is required, the hook needs a testing seam (e.g. exposing the poll
+  filter as a pure helper) — out of scope for an L2-inactive hook this sprint.

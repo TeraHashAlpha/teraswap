@@ -363,36 +363,37 @@ describe('useConditionalOrder — [P214] trigger direction validation', () => {
   })
 })
 
-describe('useConditionalOrder — [P212] submitted-order poll reads fresh ordersRef', () => {
-  it('polls a newly-submitted order on a later tick (fresh ref read, not a setup snapshot)', async () => {
+describe('useConditionalOrder — [P212] submitted-order poll', () => {
+  // HONEST SCOPE NOTE: the exact FULL-M-05 bug — a new order entering the
+  // submitted set while the *total* submittedCount stays constant, so the
+  // gating effect never re-runs and a setup-time snapshot goes stale — cannot
+  // be reproduced through the public hook API. Every path that adds an order to
+  // the submitted set also changes submittedCount, which re-creates the interval
+  // (and a re-created interval captures fresh state even in the buggy version).
+  // Isolating it would require reaching into the private ordersRef. This test
+  // therefore verifies the observable contract of the fix — the poll covers the
+  // *live* submitted set on each tick — and does NOT claim to prove the stale
+  // closure in isolation; the fresh in-callback read is verified by inspection
+  // (useConditionalOrder.ts) and the Sprint 42 adversarial review. See FEEDBACK.md.
+  it('polls every order currently in the submitted set on each tick', async () => {
     mockIsTriggerMet.mockReturnValue(true)
     mockSubmitLimitOrder.mockResolvedValueOnce('uid-A').mockResolvedValueOnce('uid-B')
     const { result } = renderHook(() => useConditionalOrder())
 
-    // First order → triggers → submitted (uid-A); the order-poll interval starts.
     await act(async () => {
       await result.current.createOrder(makeConfig({ triggerPrice: 2900 }))
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(PRICE_POLL_INTERVAL_MS)
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-    expect(result.current.orders.some(o => o.status === 'submitted')).toBe(true)
-
-    // Second order created + triggered AFTER the interval was established.
-    await act(async () => {
       await result.current.createOrder(makeConfig({ triggerPrice: 2800 }))
     })
+    // Price poll triggers both monitoring orders → both submitted (uid-A, uid-B).
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PRICE_POLL_INTERVAL_MS)
       await Promise.resolve()
       await Promise.resolve()
     })
+    expect(result.current.orders.filter(o => o.status === 'submitted')).toHaveLength(2)
 
-    // The poll callback re-reads ordersRef.current each tick, so the order-status
-    // poll covers BOTH submitted orders — including uid-B, which became
-    // submitted after the interval first started.
+    // The order-status poll reads ordersRef.current.filter(...) inside the
+    // callback, so a single tick covers every currently-submitted order.
     mockFetchLimitOrderStatus.mockClear()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(ORDER_POLL_INTERVAL_MS)
