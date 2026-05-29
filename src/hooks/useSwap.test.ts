@@ -119,6 +119,7 @@ vi.mock('@/lib/constants', async () => {
 })
 
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { useAccount } from 'wagmi'
 import { useSwap } from './useSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 
@@ -312,5 +313,67 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
     })
     expect(result.current.status).toBe('idle')
     expect(result.current.errorMessage).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
+  const WALLET_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const WALLET_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  const DEFAULT_ADDR = '0x1111111111111111111111111111111111111111'
+
+  // Restore the shared useAccount mock so a switched/disconnected address
+  // doesn't leak into later suites (a leaked undefined address would make
+  // executeStandardSwap early-return and break other tests).
+  afterEach(() => {
+    vi.mocked(useAccount).mockReturnValue({ address: DEFAULT_ADDR } as unknown as ReturnType<typeof useAccount>)
+  })
+
+  /** Drive the hook to a 'confirming' state with a non-null pendingSwap. */
+  async function driveToConfirming(result: { current: ReturnType<typeof useSwap> }) {
+    mockSwapFetch(swapResponse())
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    expect(result.current.status).toBe('confirming')
+    expect(result.current.pendingSwap).not.toBeNull()
+  }
+
+  it('clears pendingSwap and returns to idle when the account switches', async () => {
+    vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await driveToConfirming(result)
+
+    // Switch to a different wallet — stale pendingSwap must NOT survive.
+    vi.mocked(useAccount).mockReturnValue({ address: WALLET_B } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    expect(result.current.status).toBe('idle')
+    expect(result.current.pendingSwap).toBeNull()
+  })
+
+  it('clears swap state on disconnect', async () => {
+    vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await driveToConfirming(result)
+
+    vi.mocked(useAccount).mockReturnValue({ address: undefined } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    expect(result.current.status).toBe('idle')
+    expect(result.current.pendingSwap).toBeNull()
+  })
+
+  it('does NOT reset on initial connect (undefined → address)', async () => {
+    // prevAddressRef starts undefined; connecting must not wipe a fresh state.
+    vi.mocked(useAccount).mockReturnValue({ address: undefined } as unknown as ReturnType<typeof useAccount>)
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+
+    vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    // No pendingSwap was set, and connecting should leave us idle (not error).
+    expect(result.current.status).toBe('idle')
+    expect(result.current.pendingSwap).toBeNull()
   })
 })
