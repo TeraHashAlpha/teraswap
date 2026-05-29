@@ -668,6 +668,7 @@ export default function SwapBox() {
                   <span className="text-cream-35">
                     {leg.status === 'pending' ? 'Waiting' :
                      leg.status === 'fetching' ? 'Getting route...' :
+                     leg.status === 'simulating' ? 'Simulating...' :
                      leg.status === 'signing' ? 'Confirm in wallet' :
                      leg.status === 'confirming' ? 'Confirming...' :
                      leg.status === 'success' ? '✓ Done' :
