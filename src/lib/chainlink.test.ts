@@ -14,8 +14,18 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, fetchHistoricalPrice, chainlinkAggregatorAbi } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, chainlinkAggregatorAbi } from './chainlink'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
+
+// [P220] Control the L2 sequencer gate. Defaults to "up" so the existing
+// chainId=1 tests (which never call it) and Base tests are unaffected unless a
+// case opts into "down".
+const mockIsSequencerUp = vi.fn<() => Promise<boolean>>(async () => true)
+vi.mock('@/lib/chains/sequencer-check', () => ({
+  isSequencerUp: () => mockIsSequencerUp(),
+  SEQUENCER_GRACE_PERIOD_SEC: 3600,
+  _clearSequencerCache: () => {},
+}))
 
 // Derive the call selectors from the ABI rather than hardcoding them.
 const DECIMALS_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'decimals' }).slice(0, 10)
@@ -239,5 +249,29 @@ describe('chainlink — fetchHistoricalPrice round completeness [P211/FULL-M-03]
     const past = nowSec() - 86_400n
     mockHistoricalRpc({ roundId: 50n, answer: 0n, startedAt: past, updatedAt: past, answeredInRound: 50n })
     expect(await fetchHistoricalPrice(NATIVE_ETH, 86_400)).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [P218/P220] Multi-chain feed resolution + L2 sequencer gate.
+// ─────────────────────────────────────────────────────────────
+describe('chainlink — multi-chain [P218]', () => {
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+  const BASE_ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+  const MAINNET_ETH_USD = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+
+  it('getChainlinkFeed resolves the Base ETH/USD feed for chainId 8453', () => {
+    expect(getChainlinkFeed(BASE_WETH, 8453)).toBe(BASE_ETH_USD)
+    // native ETH on Base maps to Base WETH → same feed
+    expect(getChainlinkFeed(NATIVE_ETH, 8453)).toBe(BASE_ETH_USD)
+    // mainnet still resolves the mainnet ETH/USD feed (unchanged)
+    expect(getChainlinkFeed(NATIVE_ETH, 1)).toBe(MAINNET_ETH_USD)
+  })
+
+  it('oracle read returns null when the L2 sequencer is down', async () => {
+    mockIsSequencerUp.mockResolvedValueOnce(false)
+    // Base feed resolves, but the sequencer gate short-circuits to null before
+    // any price RPC is made.
+    expect(await fetchChainlinkPriceRaw(BASE_WETH, 8453)).toBeNull()
   })
 })
