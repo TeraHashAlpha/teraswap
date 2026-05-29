@@ -310,6 +310,100 @@ describe('useConditionalOrder — cancel + remove', () => {
   })
 })
 
+describe('useConditionalOrder — [P214] trigger direction validation', () => {
+  it('rejects an ABOVE trigger when the current price is already above it', async () => {
+    mockGetTokenPriceUSD.mockResolvedValue(2000)
+    const { result } = renderHook(() => useConditionalOrder())
+    await expect(
+      result.current.createOrder(
+        makeConfig({ type: 'take_profit', triggerDirection: 'above', triggerPrice: 1900 }),
+      ),
+    ).rejects.toThrow(/must be above the current price/i)
+    expect(result.current.orders).toHaveLength(0)
+  })
+
+  it('rejects a BELOW trigger when the current price is already below it', async () => {
+    mockGetTokenPriceUSD.mockResolvedValue(1800)
+    const { result } = renderHook(() => useConditionalOrder())
+    await expect(
+      result.current.createOrder(
+        makeConfig({ type: 'stop_loss', triggerDirection: 'below', triggerPrice: 1900 }),
+      ),
+    ).rejects.toThrow(/must be below the current price/i)
+    expect(result.current.orders).toHaveLength(0)
+  })
+
+  it('allows a valid trigger configuration (ABOVE above current price)', async () => {
+    mockGetTokenPriceUSD.mockResolvedValue(2000)
+    const { result } = renderHook(() => useConditionalOrder())
+    await act(async () => {
+      await result.current.createOrder(
+        makeConfig({ type: 'take_profit', triggerDirection: 'above', triggerPrice: 2100 }),
+      )
+    })
+    expect(result.current.orders).toHaveLength(1)
+    expect(result.current.orders[0].status).toBe('monitoring')
+  })
+
+  it('skips trigger validation for DCA orders', async () => {
+    // Current 2000 with an ABOVE/1900 trigger would normally reject, but a DCA
+    // order has no meaningful trigger price and must be accepted regardless.
+    mockGetTokenPriceUSD.mockResolvedValue(2000)
+    const { result } = renderHook(() => useConditionalOrder())
+    await act(async () => {
+      await result.current.createOrder(
+        makeConfig({
+          type: 'DCA' as unknown as ConditionalOrderConfig['type'],
+          triggerDirection: 'above',
+          triggerPrice: 1900,
+        }),
+      )
+    })
+    expect(result.current.orders).toHaveLength(1)
+  })
+})
+
+describe('useConditionalOrder — [P212] submitted-order poll reads fresh ordersRef', () => {
+  it('polls a newly-submitted order on a later tick (fresh ref read, not a setup snapshot)', async () => {
+    mockIsTriggerMet.mockReturnValue(true)
+    mockSubmitLimitOrder.mockResolvedValueOnce('uid-A').mockResolvedValueOnce('uid-B')
+    const { result } = renderHook(() => useConditionalOrder())
+
+    // First order → triggers → submitted (uid-A); the order-poll interval starts.
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ triggerPrice: 2900 }))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PRICE_POLL_INTERVAL_MS)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.orders.some(o => o.status === 'submitted')).toBe(true)
+
+    // Second order created + triggered AFTER the interval was established.
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ triggerPrice: 2800 }))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PRICE_POLL_INTERVAL_MS)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // The poll callback re-reads ordersRef.current each tick, so the order-status
+    // poll covers BOTH submitted orders — including uid-B, which became
+    // submitted after the interval first started.
+    mockFetchLimitOrderStatus.mockClear()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ORDER_POLL_INTERVAL_MS)
+      await Promise.resolve()
+    })
+    const polledUids = mockFetchLimitOrderStatus.mock.calls.map(c => c[0])
+    expect(polledUids).toContain('uid-A')
+    expect(polledUids).toContain('uid-B')
+  })
+})
+
 describe('useConditionalOrder — persistence', () => {
   it('reloading the hook restores monitoring orders from localStorage', async () => {
     const first = renderHook(() => useConditionalOrder())

@@ -253,6 +253,67 @@ describe('useOrderEngine — createOrder', () => {
   })
 })
 
+describe('useOrderEngine — [P213] nonce collision prevention', () => {
+  it('gives sequential creates incrementing nonces (on-chain 5n, then local 6n)', async () => {
+    // currentNonce is mocked at 5n; wagmi doesn't re-fetch between the two
+    // rapid creates, so without local tracking both would sign nonce 5n.
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+
+    const n1 = (mockSignTypedDataAsync.mock.calls[0][0] as { message: { nonce: bigint } }).message.nonce
+    const n2 = (mockSignTypedDataAsync.mock.calls[1][0] as { message: { nonce: bigint } }).message.nonce
+    expect(n1).toBe(5n)
+    expect(n2).toBe(6n)
+  })
+
+  it('rejects concurrent create attempts with an "in progress" error', async () => {
+    // Hold the first signature open so the first create stays in-flight.
+    let release: (s: string) => void = () => {}
+    mockSignTypedDataAsync.mockReturnValueOnce(new Promise<string>(r => { release = r }))
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+
+    await act(async () => {
+      const p1 = result.current.createOrder(makeConfig()) // suspends at await sign
+      await Promise.resolve() // let it reach the await + set the mutex
+      await expect(result.current.createOrder(makeConfig())).rejects.toThrow(/in progress/i)
+      release(FAKE_SIG) // let the first create finish
+      await p1
+    })
+  })
+
+  it('resets local nonce tracking on account switch', async () => {
+    const wagmi = await import('wagmi')
+    // Account A: on-chain nonce 5 (beforeEach default) → first create signs 5n,
+    // local high-water mark becomes 5.
+    const { result, rerender } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+
+    // Switch to account B whose on-chain nonce is LOWER (2). If the local mark
+    // were not reset, getNextNonce would return max(local+1=6, 2)=6; after the
+    // reset it returns the fresh on-chain 2.
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({
+      address: '0x2222222222222222222222222222222222222222',
+    })
+    mockReadContractImpl.mockImplementation(({ functionName }) => {
+      if (functionName === 'nonces') return { data: 2n, isLoading: false, refetch: mockRefetchNonce }
+      if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
+      return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
+    })
+    await act(async () => { rerender() })
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+
+    const lastSign = mockSignTypedDataAsync.mock.calls.at(-1)![0] as { message: { nonce: bigint } }
+    expect(lastSign.message.nonce).toBe(2n)
+
+    // Restore account A so later suites aren't affected.
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: ADDRESS })
+  })
+})
+
 describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
   it('cancelOrder writes on-chain and updates Supabase', async () => {
     mockCreateOrderInSupabase.mockResolvedValue(
