@@ -260,6 +260,51 @@ describe('SwapBox — wallet disconnected', () => {
   })
 })
 
+describe('SwapBox — DigitRoller visibility [P195]', () => {
+  it('shows the DigitRoller when a quote value exists even during a refresh poll', async () => {
+    // meta.best present AND loading:true → a 15s refresh poll is in flight
+    // while the previous quote is still displayed. The roller must stay up.
+    useQuoteMock.mockReturnValue({
+      meta: {
+        best: { source: '1inch', toAmount: '3000000000', estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } },
+        all: [],
+        fetchedAt: Date.now(),
+      },
+      loading: true,
+      error: null,
+      countdown: 5,
+      refetch: vi.fn(),
+      refresh: vi.fn(),
+    })
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '1' } })
+    })
+    // DigitRoller renders one column per digit — present despite loading:true.
+    expect(screen.getAllByTestId('digit-column').length).toBeGreaterThan(0)
+  })
+
+  it('shows loading dots and no DigitRoller before the first quote arrives', async () => {
+    // Initial load: amount entered, quote in flight, no quote received yet.
+    useQuoteMock.mockReturnValue({
+      meta: null,
+      loading: true,
+      error: null,
+      countdown: 0,
+      refetch: vi.fn(),
+      refresh: vi.fn(),
+    })
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '1' } })
+    })
+    expect(screen.queryAllByTestId('digit-column')).toHaveLength(0)
+    expect(screen.getByText('...')).toBeInTheDocument()
+  })
+})
+
 describe('SwapBox — split route indicator', () => {
   it('renders the split-route visualiser when splitRecommended is true and split is active', async () => {
     useSplitRouteMock.mockReturnValue({

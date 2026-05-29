@@ -138,14 +138,16 @@ describe('useLimitOrder — initial state', () => {
 })
 
 describe('useLimitOrder — localStorage load', () => {
-  it('hydrates orders from localStorage on mount', async () => {
+  it('hydrates orders from localStorage on mount (migrating v1 → encrypted v2)', async () => {
     localStorage.setItem(LIMIT_STORAGE_KEY, JSON.stringify([
       makeStoredOrder('a'),
       makeStoredOrder('b'),
     ]))
+    // Legacy → encrypted migration runs through real-async AES-GCM, so this
+    // test uses real timers + waitFor rather than fake-timer microtask flushes.
+    vi.useRealTimers()
     const { result } = renderHook(() => useLimitOrder())
-    await act(async () => { await Promise.resolve() })
-    expect(result.current.orders).toHaveLength(2)
+    await waitFor(() => expect(result.current.orders).toHaveLength(2))
   })
 
   it('returns an empty list when localStorage contents are invalid JSON', () => {
@@ -335,17 +337,20 @@ describe('useLimitOrder — cancel + remove', () => {
 
 describe('useLimitOrder — persistence', () => {
   it('reloading the hook (unmount + remount) restores orders from localStorage', async () => {
+    vi.useRealTimers()
     const first = renderHook(() => useLimitOrder())
     await act(async () => {
       await first.result.current.createOrder(makeConfig())
     })
     expect(first.result.current.orders).toHaveLength(1)
+    // Wait for the encrypted write (AES-GCM, real-async) before unmounting.
+    await waitFor(() => {
+      expect(localStorage.getItem(`${LIMIT_STORAGE_KEY}:v2`)).not.toBeNull()
+    })
     first.unmount()
 
     const second = renderHook(() => useLimitOrder())
-    // Mount effect runs synchronously after first render.
-    await act(async () => { await Promise.resolve() })
-    expect(second.result.current.orders).toHaveLength(1)
+    await waitFor(() => expect(second.result.current.orders).toHaveLength(1))
     expect(second.result.current.orders[0].orderUid).toBe(FAKE_UID)
   })
 })
