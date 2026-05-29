@@ -1,15 +1,20 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
+import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount } = params
-  const { base, key } = AGGREGATOR_APIS['0x']
+  const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
+  const { key } = AGGREGATOR_APIS['0x']
+  const base = getAdapterApiUrl('0x', chainId)
   const qs = new URLSearchParams({
     sellToken: src,
     buyToken: dst,
     sellAmount: amount,
   })
+  // [P217] 0x v2 defaults to mainnet when chainId is omitted; only attach it
+  // for non-mainnet chains so the mainnet request stays byte-identical.
+  if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
   const res = await fetch(`${base}/swap/permit2/quote?${qs}`, {
     headers: {
       '0x-api-key': key,
@@ -30,7 +35,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient } = params
+  const { src, dst, amount, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
   // [P101] 0x v2 permit2 swap doesn't expose a separate recipient field —
   // `taker` is both signer and destination. The /v1/swap route already
   // rejects this source (FEE_INCOMPATIBLE_SOURCES), so this branch is
@@ -41,7 +46,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
         + '0x v2 has no recipient parameter; output will route to sender.',
     )
   }
-  const { base, key } = AGGREGATOR_APIS['0x']
+  const { key } = AGGREGATOR_APIS['0x']
+  const base = getAdapterApiUrl('0x', chainId)
   const qs = new URLSearchParams({
     sellToken: src,
     buyToken: dst,
@@ -49,6 +55,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     taker: from,
     slippageBps: Math.round(clampSlippage(slippage) * 100).toString(),
   })
+  // [P217] Attach chainId only for non-mainnet chains (see fetchQuote).
+  if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
   const res = await fetch(`${base}/swap/permit2/quote?${qs}`, {
     headers: {
       '0x-api-key': key,

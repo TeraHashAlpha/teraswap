@@ -1,10 +1,10 @@
-import { AGGREGATOR_APIS } from '@/lib/constants'
+import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount } = params
-  const { base } = AGGREGATOR_APIS.sushiswap
+  const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('sushiswap', chainId)
   const qs = new URLSearchParams({
     tokenIn: src,
     tokenOut: dst,
@@ -32,8 +32,8 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient } = params
-  const { base } = AGGREGATOR_APIS.sushiswap
+  const { src, dst, amount, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('sushiswap', chainId)
   const qs = new URLSearchParams({
     tokenIn: src,
     tokenOut: dst,

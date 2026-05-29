@@ -14,3 +14,4 @@ export {
   getChainConfig,
   getSupportedChainIds,
 } from './registry'
+export { getAdapterApiUrl } from './adapter-urls'

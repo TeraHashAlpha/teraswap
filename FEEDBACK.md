@@ -670,3 +670,27 @@ All P203/P204 findings came back **info/low** — no medium or high.
   unchanged. P216 therefore touches only the 3 new files, not constants.ts.
   **Architect:** if you want the registry to be the literal source of truth later,
   that's a follow-up refactor once Base is live and the identical-mainnet risk is moot.
+
+## Feedback — Sprint 43 / P217 (this commit)
+
+### Assumptions that turned out wrong
+- Spec step 4 says "fetchMetaQuote and fetchSwapData already accept chainId via
+  QuoteParams.chainId." Not true: QuoteParams had NO chainId (only SwapParams did),
+  and fetchMetaQuote took no chainId arg. Added chainId? to QuoteParams and a
+  chainId? param to fetchMetaQuote, threaded into each adapter.fetchQuote call.
+  All default to DEFAULT_CHAIN_ID (1) → mainnet unchanged.
+- Spec categorizes Balancer as a "chainId param" adapter, but the code encodes the
+  chain in the PATH (`/order/1`). Parameterized as `/order/${chainId}` instead.
+
+### Decisions (for the CRITICAL "mainnet identical" constraint)
+- **0x**: currently sends NO chainId and works on mainnet (0x v2 defaults to ETH).
+  To keep the mainnet request byte-identical, the chainId query param is attached
+  ONLY when chainId !== 1. Base gets `chainId=8453`; mainnet is unchanged.
+- **Quote cache key**: made chain-aware (added chainId to KeyInput) but the suffix
+  is appended ONLY for non-mainnet chains, so the chainId=1 key is byte-identical
+  and existing mainnet cache hits are unaffected. Prevents Base/mainnet collision.
+- **getAdapterApiUrl is now the URL source of truth** for the 8 API adapters; for
+  chainId=1 every URL exactly matches the legacy AGGREGATOR_APIS[source].base.
+  AGGREGATOR_APIS[source].base is now redundant for those 8 (still used for `.key`
+  on 1inch/0x) — left in place per the Do-NOT (don't remove constants). A future
+  cleanup could derive one from the other.

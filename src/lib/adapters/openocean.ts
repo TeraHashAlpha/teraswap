@@ -1,10 +1,10 @@
-import { AGGREGATOR_APIS } from '@/lib/constants'
+import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount } = params
-  const { base } = AGGREGATOR_APIS.openocean
+  const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('openocean', chainId)
   const qs = new URLSearchParams({
     inTokenAddress: src,
     outTokenAddress: dst,
@@ -31,7 +31,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient } = params
+  const { src, dst, amount, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
   // [P101] OpenOcean's /swap endpoint does NOT support a split sender/
   // receiver — `account` is both signer and destination. Warn loudly when
   // a caller requested a distinct recipient so /v1/swap can detect the
@@ -42,7 +42,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
         + 'OpenOcean API has no recipient parameter; output will route to sender.',
     )
   }
-  const { base } = AGGREGATOR_APIS.openocean
+  const base = getAdapterApiUrl('openocean', chainId)
   const qs = new URLSearchParams({
     inTokenAddress: src,
     outTokenAddress: dst,
