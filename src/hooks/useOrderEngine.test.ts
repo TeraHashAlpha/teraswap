@@ -15,7 +15,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
 
-const mockReadContractImpl = vi.fn<(opts: { functionName: string }) => { data: unknown; isLoading: boolean }>()
+// [P213] useReadContract now also destructures refetch from the nonces read,
+// so the mock return must expose it (otherwise refetchNonce() throws).
+const mockRefetchNonce = vi.fn<() => Promise<unknown>>()
+const mockReadContractImpl = vi.fn<(opts: { functionName: string }) => { data: unknown; isLoading: boolean; refetch: () => Promise<unknown> }>()
 
 const mockCreateOrderInSupabase = vi.fn()
 const mockFetchUserOrders = vi.fn()
@@ -124,10 +127,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
+  mockRefetchNonce.mockResolvedValue({ data: 5n })
   mockReadContractImpl.mockImplementation(({ functionName }) => {
-    if (functionName === 'nonces') return { data: 5n, isLoading: false }
-    if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false }
-    return { data: undefined, isLoading: false }
+    if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
+    return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
   })
   mockFetchUserOrders.mockResolvedValue([])
   mockFetchActiveOrders.mockResolvedValue([])
@@ -186,9 +190,9 @@ describe('useOrderEngine — createOrder', () => {
 
   it('uses the contract nonce (not a hardcoded one)', async () => {
     mockReadContractImpl.mockImplementation(({ functionName }) => {
-      if (functionName === 'nonces') return { data: 42n, isLoading: false }
-      if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false }
-      return { data: undefined, isLoading: false }
+      if (functionName === 'nonces') return { data: 42n, isLoading: false, refetch: mockRefetchNonce }
+      if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
+      return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
     })
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {

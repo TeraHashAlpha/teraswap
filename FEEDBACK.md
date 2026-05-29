@@ -584,3 +584,33 @@ All P203/P204 findings came back **info/low** — no medium or high.
   test. Added `'flags a leg whose simulation is inconclusive (simulated:false) but
   still broadcasts it'` to `useSplitSwap.test.ts` (1203 → 1204). Confirms fail-open
   (not fail-closed) for legs and that the flag lands only on the inconclusive leg.
+
+## Feedback — Sprint 42 / P211 (70a02f8)
+
+### Assumption that turned out wrong (branch base)
+- SPRINT-42.md says branch "from `main`" with "Sprint 41 merged" as prerequisite,
+  but Sprint 41 (`fix/sprint-41-mainnet-cleanup`) is NOT merged to `main` in this
+  tree (same situation as Sprint 41 vs Sprint 40). The 1204 baseline lives only on
+  the Sprint 41 branch. Cut `fix/sprint-42-order-engine-cleanup` from the Sprint 41
+  HEAD so the baseline holds. **Action:** merge Sprint 40 → 41 → 42 in order, or
+  rebase each onto `main` post-merge.
+
+### Decision (shared validator vs swap-path Do-NOT)
+- P211 req 4 asks to extract `validateRoundData` and use it in "all three paths".
+  The Do-NOT forbids changing the swap path (`fetchChainlinkPriceRaw`). Those
+  conflict: `validateRoundData` adds a `startedAt <= 0` gate the swap path never
+  had, so applying it there WOULD change behaviour. Resolved by honoring the
+  Do-NOT: `validateRoundData` is used by the two order-engine paths (live +
+  historical); the swap path keeps its inline gates unchanged. The
+  "divergent rigor" observation is addressed for the new paths; unifying the swap
+  path too would require lifting the Do-NOT (it's behaviour-equivalent in practice
+  since latestRoundData always returns startedAt > 0).
+
+## Feedback — Sprint 42 / P213 (in this commit)
+
+### Edge case not covered by the prompt
+- `useReadContract` in `useOrderEngine` now destructures `refetch` and calls it
+  after a successful create. The existing `useOrderEngine.test.ts` wagmi mock
+  returned `{ data, isLoading }` with no `refetch`, so `refetchNonce()` would
+  throw. Updated the mock (beforeEach + the one per-test override) to expose
+  `refetch` — a mandatory infra fix for a behaviour change, not new P215 coverage.
