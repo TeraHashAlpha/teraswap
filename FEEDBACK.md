@@ -412,6 +412,144 @@
   digit's column index before render, so no variable is reassigned during the
   render map. No functional/DOM change; snapshot unchanged.
 
+## Feedback — P202 (c796bff) — Sprint 40
+
+### Assumption that turned out wrong
+- The spec's frontend example signs `message: { id: orderId, action: 'cancel' }` where
+  `orderId` is the argument to `cancelOrder(orderId)`. In `useOrderEngine` that argument is the
+  **client-side** UUID (`crypto.randomUUID()`), which does NOT equal the Supabase row id for
+  freshly-created in-session orders. The server verifies the signature over `params.id` (the URL
+  path = Supabase row id). Signing the client UUID would fail verification. Resolved by signing
+  over the **resolved Supabase row id** via a `sign(rowId)` callback passed into
+  `cancelOrderInSupabase` (the row id is only known after the by-hash lookup there).
+
+### Edge case
+- `useLimitOrder.cancelOrder` and `useConditionalOrder.cancelOrder` are purely local (mark local
+  state only — no PATCH to `/api/orders/[id]`). Per the prompt ("if they delegate / don't call the
+  API, no change needed") these were checked and intentionally left unchanged.
+- `cancelAllOrders` still calls `cancelOrderInSupabase(wallet, hash)` with **no** sign callback,
+  so the now-authenticated PATCH returns 400 and the Supabase mirror update is dropped (swallowed
+  by the existing `.catch`). Acceptable: the on-chain `invalidateNonces` tx is the authoritative
+  cancel for "cancel all" and local state is updated optimistically; signing each order would mean
+  N wallet prompts, defeating the one-tx UX. (Conditional orders are deferred to L2, so this path
+  is dormant on mainnet.)
+
+### Test gap
+- `PATCH /api/orders/[id]` has no direct route unit test: in the test env `getSupabase()` returns
+  null → the handler returns 503 before the signature check, so a route test would need to mock
+  `@supabase/supabase-js`. The verification logic mirrors the already-tested create flow. The
+  existing `useOrderEngine.test.ts` cancel assertion was updated for the new 3-arg call shape.
+
+## Feedback — P203 (370f148) — Sprint 40
+
+### Assumption that turned out wrong
+- The spec pseudocode builds the trusted set from `WHITELISTED_ROUTERS`. In this codebase that
+  export (`order-engine/config.ts`) holds only **4** order-executor routers and would miss most
+  swap spenders (KyberSwap, SushiSwap, Balancer, Curve, OpenOcean, Odos), breaking those approval
+  flows. The actual swap-spender source of truth is `ROUTER_WHITELIST` in `api.ts` (the same set
+  `validateRouterAddress` uses), which already contains every address `fetchApproveSpender()` can
+  return. The allowlist is built from `ROUTER_WHITELIST` + FeeCollector V1/V2 + Permit2 + CoW
+  relayer instead; a test asserts every `fetchApproveSpender()` result is trusted.
+
+### Edge case
+- `TRUSTED_SPENDER_ADDRESSES` lives in a new `src/lib/trusted-addresses.ts` (not `constants.ts`)
+  because `constants.ts` cannot import `ROUTER_WHITELIST` from `api.ts` without a circular import
+  (`api.ts` → `constants.ts`). The spec explicitly allows the new-file option.
+
+## Feedback — P204 (6d9592c) — Sprint 40
+
+### Edge case
+- `src/app/api/v1/swap/route.ts` (public API v1 swap route) also calls
+  `validateCallDataRecipient` but was NOT in the prompt's "Files affected". It now uses the new
+  default `routeViaFeeCollector = true` (backwards-compatible). If the v1 API does not route via
+  the FeeCollector it should pass `false`. **Flagging for Architect triage** — left on default to
+  stay within prompt scope.
+
+### Test gap (addressed)
+- `swap/route.test.ts` mocked `@/lib/api` with only `fetchSwapFromSource`; the route now also
+  imports `usesFeeCollector`. Added it to the mock (default `true`) so the 5 affected route tests
+  pass.
+
+## Feedback — P205 (25a8e57) — Sprint 40
+
+### Assumption that turned out wrong
+- Spec test #6 ("returns null on RPC failure") does not match the implementation:
+  `fetchChainlinkPriceRaw` does **not** wrap `rpcCall` in try/catch — it **propagates** RPC errors.
+  Fail-closed is enforced by callers (`computeTokenAmountUsd` uses `.catch(() => null)`). The test
+  asserts both halves (rejects + caller pattern → null).
+- Spec test #3 name ("returns blocked=true at exact -8% boundary") contradicts its own
+  "(strictly less than -0.08)". The code is `deviation < BLOCK_THRESHOLD` (strict), so exactly -8%
+  is NOT blocked. The test verifies the strict boundary (exact -8% allowed, just-beyond blocked).
+
+### Concern (dead code)
+- `validateSwapPrice`'s dedicated low-confidence branch (`defillama.ts` ~220-236) is effectively
+  unreachable: `fetchDefiLlamaPrice` already returns `null` for `confidence < 0.5`, so
+  `validateSwapPrice` never receives a low-confidence price object and always hits the
+  missing-oracle branch instead (same fail-open/closed outcome, which the tests cover). The branch
+  could be removed in a future cleanup.
+
+### Concern (testability)
+- `BLOCK_THRESHOLD` (-0.08) is a function-local const, not exported. Since P205 is tests-only the
+  value is mirrored in the test with a reference comment rather than modifying `defillama.ts`.
+  Suggest hoisting+exporting it for testability.
+
+## Feedback — P206 (dcad548) — Sprint 40
+
+### Edge case
+- The CoW "infinite allowance" warning was fully removed (state + JSX + the `handleInvert` reset),
+  not merely disabled, because CoW approvals are now exact and fully consumed by the solver — there
+  is no residual allowance, nothing to revoke, and no warning to show. No test asserted the warning
+  UI, so removal is safe.
+
+## Feedback — Sprint 40 adversarial review outcomes (commit 094afcd)
+
+A multi-agent adversarial review of all 5 commits was run after implementation. Outcomes:
+
+### Fixed
+- **HIGH (P202 regression) — `cancelAllOrders` left Supabase rows 'active'.** Because P202 made the
+  PATCH endpoint require a signature, `cancelAllOrders` (which called `cancelOrderInSupabase`
+  without a sign callback) silently got 400s, so its Supabase mirror updates stopped working while
+  the on-chain `invalidateNonces` + local UI still showed 'cancelled' (DB/chain divergence; orders
+  reappear as active on reload). This relied on the very unsigned path P202 closed. **Fixed**: it
+  now signs an EIP-712 CancelOrder per active order (one signature each; declined sigs swallowed —
+  on-chain invalidation is authoritative). A bulk "cancel all" signature would need a dedicated
+  endpoint/typed-data design (suggested future work).
+- **LOW (P205 flake) — exact-staleness-boundary test had a ~1s clock race.** The test captured
+  `Date.now()` once and the source re-read it later; a second-tick flipped age 3600→3601. **Fixed**
+  by pinning `Date.now()` in that test.
+
+### Acknowledged, not changed
+- **LOW (P202) — cancel signature uses `body.chainId` and has no nonce/expiry (replayable).** The
+  P202 spec explicitly mandates extracting `chainId` from the request body and using
+  `getOrderExecutorDomain(chainId)`, so this is spec-compliant. The verifier confirmed the impact
+  is bounded-harmless: recovery must equal the order's own wallet, `cancelled` is terminal, and a
+  replay is an idempotent re-cancel of the signer's own order (or a 409 no-op) — no cross-user
+  impact, no fund loss, and only mainnet (chainId 1) exists. Flagged for the Architect: deriving
+  `chainId` server-side (as the create route does) + a nonce/expiry field would harden it.
+
+### Refuted (correctly) by the verifier
+- A finding claiming the comment "order IDs are listable via GET" is inaccurate was refuted — GET
+  is unauthenticated (only requires a public wallet param), so IDs **are** enumerable and the
+  comment is accurate. No change.
+
+### P203 / P204 re-review (second pass; first-pass reviewers errored without structured output)
+All P203/P204 findings came back **info/low** — no medium or high.
+
+- **LOW (P204) — the FULL-M-04 account-switch reset had no test.** **Fixed**: added 3 tests to
+  `useSwap.test.ts` (resets on switch, resets on disconnect, does NOT reset on initial connect),
+  driving the hook to a `confirming` pendingSwap state first.
+- **INFO (P204) — reset fires on `!address`, so a transient wagmi address flicker could clear
+  in-flight CoW UI state.** The disconnect reset is **explicitly mandated by the P204 spec**
+  (Part B point 2). Acknowledged trade-off (M-04 safety vs flicker robustness); could be hardened
+  later by gating on `useAccount().status !== 'reconnecting'`. Left spec-compliant.
+- **INFO (P203) ×3** — all pre-existing or by-design, no security impact, left unchanged:
+  1. Stale spender retained if a new source's `/api/spender` returns no `spender` (pre-existing;
+     `useApproval` independently re-validates via `isTrustedSpender` before signing, so worst case
+     is a failed approval, never an attacker address).
+  2. `/api/spender` doesn't validate `source` against `AGGREGATOR_APIS` keys (pre-existing; all
+     return paths are hardcoded trusted constants, so no attacker address can be injected).
+  3. `TRUSTED_SPENDER_ADDRESSES` is a superset of the reachable spender set (by design — built from
+     `ROUTER_WHITELIST` per the documented coupling; the test asserts only the subset direction).
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong

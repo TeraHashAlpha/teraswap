@@ -115,15 +115,25 @@ function stripSelector(calldata: string): Hex {
   return `0x${calldata.slice(10)}` as Hex
 }
 
-function isValidRecipient(extracted: string, expected: string): boolean {
+function isValidRecipient(
+  extracted: string,
+  expected: string,
+  // [FULL-M-01] Only fee-routed swaps may legitimately deliver to the
+  // FeeCollector. On direct (non-fee) routes the FeeCollector must be
+  // rejected so a compromised aggregator response can't redirect output
+  // there. Default true preserves backwards-compatible behaviour.
+  routeViaFeeCollector: boolean = true,
+): boolean {
   const validAddresses = [expected.toLowerCase()]
-  if (FEE_COLLECTOR_ADDRESS) {
-    validAddresses.push(FEE_COLLECTOR_ADDRESS.toLowerCase())
+  if (routeViaFeeCollector) {
+    if (FEE_COLLECTOR_ADDRESS) {
+      validAddresses.push(FEE_COLLECTOR_ADDRESS.toLowerCase())
+    }
+    // V1 is frozen but still a legitimate recipient on historical V1-targeted
+    // calldata (e.g. retried order-engine submissions). Allowing it here means
+    // we never spuriously fail a recipient check on inherited V1 swap data.
+    validAddresses.push(FEE_COLLECTOR_V1_ADDRESS.toLowerCase())
   }
-  // V1 is frozen but still a legitimate recipient on historical V1-targeted
-  // calldata (e.g. retried order-engine submissions). Allowing it here means
-  // we never spuriously fail a recipient check on inherited V1 swap data.
-  validAddresses.push(FEE_COLLECTOR_V1_ADDRESS.toLowerCase())
   return validAddresses.includes(extracted.toLowerCase())
 }
 
@@ -336,6 +346,7 @@ function decodeMulticallRecipient(
   data: Hex,
   expectedAddress: string,
   depth: number,
+  routeViaFeeCollector: boolean,
 ): RecipientCheckResult {
   if (depth > 0) {
     // [SEC-04] Fail-closed: a nested multicall would let an adapter wrap
@@ -394,7 +405,7 @@ function decodeMulticallRecipient(
 
   // Recursively validate the first inner call only
   const firstCall = innerCalls[0] as string
-  return validateCallDataRecipientInner(firstCall, expectedAddress, depth + 1)
+  return validateCallDataRecipientInner(firstCall, expectedAddress, depth + 1, routeViaFeeCollector)
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +416,7 @@ function validateCallDataRecipientInner(
   calldata: string,
   expectedAddress: string,
   depth: number,
+  routeViaFeeCollector: boolean,
 ): RecipientCheckResult {
   try {
     if (!calldata || calldata.length < 10) {
@@ -434,10 +446,10 @@ function validateCallDataRecipientInner(
     if (V2_SELECTORS.includes(selector)) {
       const recipient = decodeV2Recipient(selector, data)
       return {
-        valid: isValidRecipient(recipient, expectedAddress),
+        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector),
         extracted: recipient,
         implicitRecipient: false,
-        ...(!isValidRecipient(recipient, expectedAddress) && {
+        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector) && {
           reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
         }),
       }
@@ -448,10 +460,10 @@ function validateCallDataRecipientInner(
     if (V3_SELECTORS.includes(selector)) {
       const recipient = decodeV3Recipient(selector, data)
       return {
-        valid: isValidRecipient(recipient, expectedAddress),
+        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector),
         extracted: recipient,
         implicitRecipient: false,
-        ...(!isValidRecipient(recipient, expectedAddress) && {
+        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector) && {
           reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
         }),
       }
@@ -462,10 +474,10 @@ function validateCallDataRecipientInner(
     if (ONEINCH_SELECTORS.includes(selector)) {
       const recipient = decode1inchRecipient(selector, data)
       return {
-        valid: isValidRecipient(recipient, expectedAddress),
+        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector),
         extracted: recipient,
         implicitRecipient: false,
-        ...(!isValidRecipient(recipient, expectedAddress) && {
+        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector) && {
           reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
         }),
       }
@@ -474,7 +486,7 @@ function validateCallDataRecipientInner(
     // Group E — Multicall wrappers
     const MULTICALL_SELECTORS = ['0xac9650d8', '0x5ae401dc']
     if (MULTICALL_SELECTORS.includes(selector)) {
-      return decodeMulticallRecipient(selector, data, expectedAddress, depth)
+      return decodeMulticallRecipient(selector, data, expectedAddress, depth, routeViaFeeCollector)
     }
 
     // [API-M-02] Unknown selector — fail closed
@@ -506,6 +518,10 @@ function validateCallDataRecipientInner(
 export function validateCallDataRecipient(
   calldata: string,
   expectedAddress: string,
+  // [FULL-M-01] Default true preserves existing behaviour for callers that
+  // haven't been updated; direct-route callers pass false to reject the
+  // FeeCollector as a valid recipient.
+  routeViaFeeCollector: boolean = true,
 ): RecipientCheckResult {
-  return validateCallDataRecipientInner(calldata, expectedAddress, 0)
+  return validateCallDataRecipientInner(calldata, expectedAddress, 0, routeViaFeeCollector)
 }

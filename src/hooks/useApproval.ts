@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useSignTypedData } from 'wagmi'
 import { erc20Abi, parseUnits } from 'viem'
 import { PERMIT2_ADDRESS } from '@/lib/constants'
-import { permit2Abi, eip2612DetectionAbi, planApproval, PERMIT2_DOMAIN, PERMIT_SINGLE_TYPES, type ApprovalMethod, type ApprovalPlan } from '@/lib/approvals'
+import { permit2Abi, eip2612DetectionAbi, planApproval, PERMIT_SINGLE_TYPES, type ApprovalMethod, type ApprovalPlan } from '@/lib/approvals'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { isPermit2Educated } from '@/components/Permit2EducationModal'
+import { isTrustedSpender } from '@/lib/trusted-addresses'
 
 export type ApprovalStatus = 'idle' | 'checking' | 'approving_permit2' | 'awaiting_permit2_education' | 'signing' | 'ready' | 'error'
 
@@ -185,6 +186,13 @@ export function useApproval(
       }
 
       if (plan.method === 'exact' && plan.needsOnChainApprove && spenderAddress) {
+        // [FULL-H-02] Defense-in-depth: reject approval to an untrusted
+        // spender even if SwapBox's validation was bypassed. The user must
+        // never sign approve() for an address outside the known allowlist.
+        if (!isTrustedSpender(spenderAddress)) {
+          console.error('[Security] Blocked approval to untrusted spender:', spenderAddress)
+          throw new Error('Approval blocked: untrusted spender address')
+        }
         // Exact approve: ONLY the amount needed, never more
         setStatus('approving_permit2') // reuse status
         writeExactApprove({

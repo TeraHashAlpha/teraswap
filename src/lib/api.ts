@@ -337,8 +337,11 @@ export async function fetchApproveSpender(source: AggregatorName): Promise<`0x${
 //  SECURITY: Router Address Whitelist
 // ══════════════════════════════════════════════════════════
 
-/** Whitelisted router addresses (lowercase). Only these can receive swap transactions. */
-const ROUTER_WHITELIST: Set<string> = new Set([
+/** Whitelisted router addresses (lowercase). Only these can receive swap transactions.
+ *  [FULL-H-02] Also the source of truth for the client-side spender allowlist
+ *  (src/lib/trusted-addresses.ts) — these are exactly the addresses a swap may
+ *  legitimately approve as an ERC-20 spender. */
+export const ROUTER_WHITELIST: Set<string> = new Set([
   PERMIT2_ADDRESS.toLowerCase(),
   COW_VAULT_RELAYER.toLowerCase(),
   COW_SETTLEMENT.toLowerCase(),

@@ -162,10 +162,22 @@ export async function fetchActiveOrders(wallet: string): Promise<OrderRow[]> {
   }
 }
 
+// [FULL-H-01] Authentication produced by the caller (a wallet EIP-712
+// signature over the CancelOrder message). Resolved lazily against the
+// Supabase row id, which is only known after the hash lookup below.
+export interface CancelAuth {
+  signature: string
+  chainId: number
+}
+
 // ── Cancel order in Supabase (via API route) ─────────────
 export async function cancelOrderInSupabase(
   wallet: string,
   orderHash: string,
+  // [FULL-H-01] Sign the CancelOrder message for the resolved Supabase row
+  // id. The endpoint now rejects unsigned cancels, so callers that want the
+  // Supabase row marked cancelled MUST provide this.
+  sign?: (orderId: string) => Promise<CancelAuth>,
 ): Promise<boolean> {
   try {
     // Find the order by hash first, then cancel via [id] route
@@ -173,10 +185,17 @@ export async function cancelOrderInSupabase(
     const order = orders.find(o => o.order_hash === orderHash && o.status === 'active')
     if (!order) return false
 
+    const body: Record<string, unknown> = { wallet }
+    if (sign) {
+      const auth = await sign(order.id)
+      body.signature = auth.signature
+      body.chainId = auth.chainId
+    }
+
     const res = await fetch(`/api/orders/${order.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wallet }),
+      body: JSON.stringify(body),
     })
     return res.ok
   } catch {

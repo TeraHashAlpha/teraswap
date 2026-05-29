@@ -193,9 +193,10 @@ export function useSplitSwap(
         if (!KNOWN_SWAP_SELECTORS.has(selector)) {
           throw new Error(`Unknown swap selector ${selector} in split leg. Blocked for safety.`)
         }
-        // [R1] Validate recipient in calldata matches connected wallet
+        // [R1] Validate recipient in calldata matches connected wallet.
+        // [FULL-M-01] Direct legs reject the FeeCollector as a recipient.
         if (address) {
-          const recipientCheck = validateCallDataRecipient(calldataHex, address)
+          const recipientCheck = validateCallDataRecipient(calldataHex, address, routeViaFeeCollector)
           if (!recipientCheck.valid) {
             throw new Error(`Split leg recipient mismatch: tokens would go to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet.`)
           }

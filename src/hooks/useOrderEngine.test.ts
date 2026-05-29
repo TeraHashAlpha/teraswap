@@ -264,9 +264,12 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
       await result.current.cancelOrder(orderId)
     })
     expect(mockWriteContractAsync).toHaveBeenCalled()
+    // [FULL-H-01] cancelOrder now passes an EIP-712 signing callback as the
+    // third argument so the PATCH endpoint can verify order ownership.
     expect(mockCancelOrderInSupabase).toHaveBeenCalledWith(
       ADDRESS,
       expect.any(String),
+      expect.any(Function),
     )
     expect(result.current.orders[0].status).toBe('cancelled')
   })
@@ -286,6 +289,14 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
     const writeCall = mockWriteContractAsync.mock.calls[0][0] as { functionName: string }
     expect(writeCall.functionName).toBe('invalidateNonces')
     expect(result.current.orders.every(o => o.status === 'cancelled')).toBe(true)
+    // [FULL-H-01] Each per-order Supabase cancel must carry an EIP-712 signing
+    // callback now that the PATCH endpoint requires a signature — otherwise the
+    // rows stay 'active' in Supabase (DB/chain divergence).
+    expect(mockCancelOrderInSupabase).toHaveBeenCalledWith(
+      ADDRESS,
+      expect.any(String),
+      expect.any(Function),
+    )
   })
 })
 

@@ -27,6 +27,7 @@ import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
+import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -47,7 +48,6 @@ export default function SwapBox() {
   const [isAutoSlippage, setIsAutoSlippage] = useState(true)
   const [showSlippage, setShowSlippage] = useState(false)
   const [spender, setSpender] = useState<`0x${string}` | undefined>()
-  const [showCowWarning, setShowCowWarning] = useState(false)
   const [mevProtected, setMevProtected] = useState(false)
   // [hotfix-ui] Dismissal flag for the MEV-exposure hint below the swap
   // button. Persisted in localStorage so a user who's already decided
@@ -128,6 +128,15 @@ export default function SwapBox() {
         .then(r => r.json())
         .then(data => {
           if (data.spender) {
+            // [FULL-H-02] Validate the spender against the client-side
+            // allowlist before trusting it. A compromised /api/spender
+            // response must never let the user approve an attacker address.
+            if (!isTrustedSpender(data.spender)) {
+              console.error('[Security] Untrusted spender address from /api/spender:', data.spender)
+              setSpender(undefined)
+              toast({ type: 'error', title: 'Swap unavailable', description: 'Spender validation failed. Please try again or choose another route.' })
+              return // Do NOT set the spender state
+            }
             setSpender(data.spender as `0x${string}`)
           }
         }).catch(() => {})
@@ -294,18 +303,20 @@ export default function SwapBox() {
       const isCow = source === 'cowswap'
 
       if (isCow && tokenIn && !isNativeETH(tokenIn)) {
-        // CoW Protocol: VaultRelayer keeps infinite allowance
+        // [FULL-L-04] CoW approvals are exact: useApproval forces an exact
+        // approve to the VaultRelayer and the solver pulls exactly the sell
+        // amount, leaving no residual allowance. Record it accurately and do
+        // NOT show the old (misleading) "infinite allowance" revoke warning.
         addApproval({
           tokenAddress: tokenIn.address,
           tokenSymbol: tokenIn.symbol,
           spenderAddress: COW_VAULT_RELAYER,
           spenderLabel: 'CoW VaultRelayer',
           source: 'cowswap',
-          method: 'infinite',
+          method: 'exact',
           timestamp: Date.now(),
-          needsRevoke: true,
+          needsRevoke: false,
         })
-        setShowCowWarning(true)
       }
     }
   }, [swapStatus, txHash])
@@ -408,7 +419,6 @@ export default function SwapBox() {
     setPriceCheckStale(true)
     resetSwap()
     resetSplitSwap()
-    setShowCowWarning(false)
   }
 
   function handleSetAmount(value: string) {
@@ -845,29 +855,6 @@ export default function SwapBox() {
                 </button>
               )
             })()}
-          </div>
-        )}
-
-        {/* CoW Protocol — Approval Revoke Warning */}
-        {showCowWarning && swapStatus === 'success' && (
-          <div className="mt-3 rounded-lg border border-warning/25 bg-warning/8 px-3 py-2.5">
-            <div className="flex items-start gap-2">
-              <span className="mt-0.5 text-warning text-sm">&#9888;</span>
-              <div className="text-xs leading-relaxed text-cream-65">
-                <span className="font-semibold text-warning">CoW Protocol leaves an infinite allowance</span> on the VaultRelayer contract.
-                While CoW Protocol is audited and battle-tested, revoking the approval after your swap removes any residual access to your {tokenIn?.symbol} tokens.
-                <span className="mt-1 block text-[10px] text-cream-35">
-                  You can revoke below in &ldquo;Active Approvals&rdquo; or later via{' '}
-                  <a href="https://revoke.cash" target="_blank" rel="noopener noreferrer" className="underline transition hover:text-cream">revoke.cash</a>.
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowCowWarning(false)}
-              className="mt-2 w-full rounded-lg border border-cream-08 py-1 text-[10px] font-semibold text-cream-35 transition hover:text-cream"
-            >
-              Dismiss
-            </button>
           </div>
         )}
 

@@ -209,6 +209,25 @@ export function useSwap(
     return () => { mountedRef.current = false }
   }, [])
 
+  // [FULL-M-04] Reset swap state on account switch or disconnect — prevents a
+  // stale pendingSwap bound to wallet A from being confirmed under wallet B.
+  // Uses a ref comparison so it only fires on an actual address change, never
+  // on every render.
+  const prevAddressRef = useRef(address)
+  useEffect(() => {
+    const prev = prevAddressRef.current
+    const switched = prev && address && prev !== address
+    const disconnected = !address
+    if (switched || disconnected) {
+      setPendingSwap(null)
+      setStatus('idle')
+      setErrorMessage(null)
+      setCowOrderUid(null)
+      setTxHashState(undefined)
+    }
+    prevAddressRef.current = address
+  }, [address])
+
   const {
     sendTransaction,
     data: swapHash,
@@ -302,8 +321,10 @@ export function useSwap(
         throw new Error(`Unrecognized swap function selector (${selector}). Contact support if this persists.`)
       }
 
-      // [R1] Validate recipient in calldata matches connected wallet
-      const recipientCheck = validateCallDataRecipient(swapData.tx.data as string, address)
+      // [R1] Validate recipient in calldata matches connected wallet.
+      // [FULL-M-01] On direct routes the FeeCollector is NOT an acceptable
+      // recipient — only fee-routed swaps may deliver to it.
+      const recipientCheck = validateCallDataRecipient(swapData.tx.data as string, address, routeViaFeeCollector)
       if (!recipientCheck.valid) {
         console.error('[R1] Recipient mismatch:', recipientCheck)
         throw new Error(
