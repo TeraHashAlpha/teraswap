@@ -694,3 +694,28 @@ All P203/P204 findings came back **info/low** — no medium or high.
   AGGREGATOR_APIS[source].base is now redundant for those 8 (still used for `.key`
   on 1inch/0x) — left in place per the Do-NOT (don't remove constants). A future
   cleanup could derive one from the other.
+
+## Feedback — Sprint 43 / P218 (this commit)
+
+### Conservative Base feed population (per the Do-NOT)
+- Only the verified Base ETH/USD feed (0x71041…, spec-provided) is added to
+  CHAINLINK_FEEDS_BY_CHAIN[8453]. The Do-NOT prefers no-feed (→ DefiLlama/fail-safe)
+  over a wrong feed, and I couldn't independently verify the other Base proxies
+  (USDC/USD, DAI/USD, cbETH/USD) to mainnet-grade confidence. **Architect:** verify
+  the remaining Base feeds against data.chain.link and add them in a follow-up.
+
+### Sequencer-check client wiring (dormant until Base activates)
+- isSequencerUp is fully implemented + integrated into all three oracle reads
+  (fetchChainlinkPriceRaw, fetchHistoricalPrice via it, price-monitor.getChainlinkPriceUSD),
+  gated on chainId !== 1 so mainnet is untouched. The viem client passed in is the
+  current default (getPrivateClient/getClient — mainnet). For a real Base read the
+  client must target a Base RPC; that per-chain client resolution is a follow-up for
+  when Base goes live (no Base RPC / FeeCollector yet, so this path is dormant). The
+  function itself is correct and unit-tested against a mocked client.
+
+### Decision (constants.ts not modified — approach B, consistent with P216)
+- Spec asks constants.ts to re-export CHAINLINK_FEEDS from the new registry. Instead
+  chainlink-feeds.ts REFERENCES constants.CHAINLINK_FEEDS for chain 1 (guaranteeing
+  identical mainnet feeds, no circular import). constants.ts is unchanged; backward
+  compat holds trivially. getChainlinkFeed moved to chainlink-feeds.ts and is
+  re-exported from chainlink.ts so existing imports keep working.

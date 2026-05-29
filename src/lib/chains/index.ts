@@ -15,3 +15,5 @@ export {
   getSupportedChainIds,
 } from './registry'
 export { getAdapterApiUrl } from './adapter-urls'
+export { CHAINLINK_FEEDS_BY_CHAIN, getChainlinkFeed } from './chainlink-feeds'
+export { isSequencerUp, SEQUENCER_GRACE_PERIOD_SEC } from './sequencer-check'

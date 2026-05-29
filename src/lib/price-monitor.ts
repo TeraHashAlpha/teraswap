@@ -8,8 +8,11 @@
  */
 
 import { parseAbi, erc20Abi } from 'viem'
-import { CHAINLINK_ETH_USD, CHAINLINK_FEEDS, NATIVE_ETH, WETH_ADDRESS, CHAINLINK_MAX_STALENESS_SEC } from './constants'
+import { NATIVE_ETH, WETH_ADDRESS, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 import { validateRoundData } from './chainlink'
+import { getChainlinkFeed } from './chains/chainlink-feeds'
+import { isSequencerUp } from './chains/sequencer-check'
+import { DEFAULT_CHAIN_ID } from './chains/registry'
 import { fetchCurrentPrice } from './limit-order-api'
 import { getPrivateClient } from './rpc'
 
@@ -48,19 +51,22 @@ async function getFeedDecimals(feedAddress: `0x${string}`): Promise<number> {
 // ── Read Chainlink price for a token address ───────────────
 export async function getChainlinkPriceUSD(
   tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<number | null> {
-  const addr = tokenAddress.toLowerCase()
-
-  // ETH/WETH → use ETH/USD feed
-  const isEth =
-    addr === NATIVE_ETH.toLowerCase() ||
-    addr === WETH_ADDRESS.toLowerCase()
-
-  const feedAddress = isEth
-    ? CHAINLINK_ETH_USD
-    : CHAINLINK_FEEDS[addr]
-
+  // [P218] Chain-aware feed lookup. For chainId 1 this resolves exactly as the
+  // old inline logic (ETH/WETH → ETH/USD, else CHAINLINK_FEEDS[addr]).
+  const feedAddress = getChainlinkFeed(tokenAddress, chainId)
   if (!feedAddress) return null
+
+  // [P218] L2 sequencer-uptime gate — mainnet (DEFAULT_CHAIN_ID) has no
+  // sequencer feed and skips this, so the mainnet path is unchanged.
+  if (chainId !== DEFAULT_CHAIN_ID) {
+    const seqUp = await isSequencerUp(chainId, getClient())
+    if (!seqUp) {
+      console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
+      return null
+    }
+  }
 
   try {
     // [P211/FULL-H-04] Destructure ALL round fields and apply the same
