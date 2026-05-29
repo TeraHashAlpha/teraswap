@@ -6,6 +6,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount } from 'wagmi'
 import ThemeToggle from './ThemeToggle'
 import WalletModal from './WalletModal'
+import ChainSelector from './ChainSelector'
 
 interface Props {
   onLogoClick?: () => void
@@ -148,11 +149,8 @@ export default function Header({ onLogoClick, showNav = false }: Props) {
         {/* Theme toggle */}
         <ThemeToggle />
 
-        {/* Ethereum network indicator */}
-        <div className="hidden items-center gap-1.5 rounded-full border border-cream-15 px-3 py-1.5 text-xs font-medium text-cream-65 sm:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse-slow" />
-          Ethereum
-        </div>
+        {/* [P219] Network selector (replaces the static Ethereum indicator) */}
+        <ChainSelector />
 
         {/* Connect wallet */}
         <ConnectButton.Custom>

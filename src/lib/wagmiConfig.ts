@@ -1,5 +1,5 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit'
-import { mainnet } from 'wagmi/chains'
+import { mainnet, base } from 'wagmi/chains'
 import { http, fallback } from 'wagmi'
 
 // ── RPC Configuration with Fallback ──────────────────────
@@ -45,16 +45,19 @@ if (!walletConnectProjectId && typeof window !== 'undefined') {
   )
 }
 
-// [H-01] PRODUCTION: Only mainnet — Sepolia removed for mainnet deployment.
-// For testnet development, add sepolia back temporarily:
-//   import { sepolia } from 'wagmi/chains'
-//   chains: [mainnet, sepolia]
+// [P219] Multi-chain: mainnet stays the default (first in the array, so wallets
+// connect to it by default). Base is added so users can switch, but swaps stay
+// gated behind "Coming Soon" until a Base FeeCollector is deployed (ChainSelector).
+// Base uses the public RPC for now (NEXT_PUBLIC_BASE_RPC_URL overrides).
 export const config = getDefaultConfig({
   appName: 'TeraSwap',
   projectId: walletConnectProjectId,
-  chains: [mainnet],
+  chains: [mainnet, base],
   transports: {
     [mainnet.id]: buildMainnetTransport(),
+    [base.id]: fallback([
+      http(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', { timeout: 10_000 }),
+    ]),
   },
   ssr: true,
 })

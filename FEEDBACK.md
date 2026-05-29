@@ -719,3 +719,32 @@ All P203/P204 findings came back **info/low** — no medium or high.
   identical mainnet feeds, no circular import). constants.ts is unchanged; backward
   compat holds trivially. getChainlinkFeed moved to chainlink-feeds.ts and is
   re-exported from chainlink.ts so existing imports keep working.
+
+## Feedback — Sprint 43 / P219 (this commit)
+
+### Deferred to the Base-activation sprint (with reasons) — token catalog + quote threading
+- **Per-chain token catalog / TokenSelector filtering (NOT done):** src/lib/tokens.ts
+  holds a rich MAINNET catalog (addresses, categories, logos); there is no Base
+  catalog. TokenSelector's `isCorrectChain = chain?.id === CHAIN_ID` gate is in fact
+  CORRECT to leave as-is — the DEFAULT_TOKENS are mainnet addresses, so fetching
+  their balances on Base would be wrong. Building a Base token catalog is a real
+  data task and Base swaps are "Coming Soon" (disabled), so per-chain token
+  filtering + the SwapBox token-reset-to-chain-defaults are deferred. Left
+  TokenSelector untouched to avoid a wrong/risky change to the mainnet path.
+- **useQuote → /api/quote → fetchMetaQuote chainId threading (partial):** useQuote
+  now reads useActiveChainId and includes it in the doFetch deps, so switching
+  chains supersedes the in-flight quote (AbortController) and refetches. It does
+  NOT yet append chainId to the /api/quote request — that needs the API route +
+  fetchMetaQuote call wired (fetchMetaQuote already ACCEPTS chainId from P217).
+  Deferred because Base quotes aren't active and the route isn't in P219's scope;
+  it's a ~1-line change when Base activates. On mainnet chainId is constant (1), so
+  the added dep never triggers an extra fetch → behaviour unchanged.
+
+### Done
+- wagmiConfig: Base added to chains + transport (mainnet stays default/first).
+- useActiveChainId hook (defaults to mainnet).
+- ChainSelector component (registry-driven; Base flagged "Soon" while
+  feeCollector === null; switchable).
+- Header: ChainSelector replaces the static "Ethereum" pill.
+- useSwap: swap-state reset on chain switch (mirrors the FULL-M-04 account-switch
+  reset; ref-gated so mainnet never fires it).
