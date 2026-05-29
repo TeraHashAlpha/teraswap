@@ -108,6 +108,10 @@ describe('chainlink — fetchChainlinkPriceRaw [TEST-H-01]', () => {
   })
 
   it('accepts data exactly at the staleness boundary', async () => {
+    // Pin the clock so the test's capture and the source's Date.now() read the
+    // same instant — otherwise a 1-second tick between them flips age from 3600
+    // to 3601 and flakes. Restored by the afterEach vi.restoreAllMocks().
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
     // age === CHAINLINK_MAX_STALENESS_SEC is NOT > max, so it must pass.
     const boundary = nowSec() - BigInt(CHAINLINK_MAX_STALENESS_SEC)
     mockChainlinkRpc({

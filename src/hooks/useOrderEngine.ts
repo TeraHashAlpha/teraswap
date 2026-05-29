@@ -541,13 +541,27 @@ export function useOrderEngine() {
         args: [newNonce],
       })
 
-      // Mark all active orders as cancelled in Supabase + local state
+      // Mark all active orders as cancelled in Supabase + local state.
+      // [FULL-H-01] The PATCH endpoint now requires an EIP-712 CancelOrder
+      // signature, so each per-order Supabase sync must be signed too — without
+      // this the rows would stay 'active' in Supabase while the chain + local
+      // UI show 'cancelled' (DB/chain divergence). One signature per active
+      // order; declined signatures are swallowed (on-chain invalidateNonces is
+      // authoritative regardless).
       const active = orders.filter(o =>
         o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled'
       )
 
       for (const order of active) {
-        await cancelOrderInSupabase(address, order.orderHash).catch(() => {})
+        await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
+          const signature = await signTypedDataAsync({
+            domain: getOrderExecutorDomain(chainId),
+            types: CANCEL_ORDER_TYPES,
+            primaryType: 'CancelOrder',
+            message: { id: rowId, action: 'cancel' },
+          })
+          return { signature, chainId }
+        }).catch(() => {})
       }
 
       setOrders(prev => prev.map(o =>
@@ -561,7 +575,7 @@ export function useOrderEngine() {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel all failed'
       setLatestEvent({ type: 'order_error', orderId: 'all', error: errorMsg })
     }
-  }, [address, orders, writeContractAsync, currentNonce, currentInvalidatedNonce])
+  }, [address, orders, writeContractAsync, currentNonce, currentInvalidatedNonce, chainId, signTypedDataAsync])
 
   // ── Remove order from local list ───────────────────────
   const removeOrder = useCallback((orderId: string) => {

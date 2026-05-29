@@ -289,6 +289,14 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
     const writeCall = mockWriteContractAsync.mock.calls[0][0] as { functionName: string }
     expect(writeCall.functionName).toBe('invalidateNonces')
     expect(result.current.orders.every(o => o.status === 'cancelled')).toBe(true)
+    // [FULL-H-01] Each per-order Supabase cancel must carry an EIP-712 signing
+    // callback now that the PATCH endpoint requires a signature — otherwise the
+    // rows stay 'active' in Supabase (DB/chain divergence).
+    expect(mockCancelOrderInSupabase).toHaveBeenCalledWith(
+      ADDRESS,
+      expect.any(String),
+      expect.any(Function),
+    )
   })
 })
 
