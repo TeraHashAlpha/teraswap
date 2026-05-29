@@ -584,3 +584,71 @@ All P203/P204 findings came back **info/low** — no medium or high.
   test. Added `'flags a leg whose simulation is inconclusive (simulated:false) but
   still broadcasts it'` to `useSplitSwap.test.ts` (1203 → 1204). Confirms fail-open
   (not fail-closed) for legs and that the flag lands only on the inconclusive leg.
+## Feedback — P195 (commit 553b86f)
+
+### Assumption that turned out wrong
+- The prompt's literal ternary uses `outputDisplay` as the "a quote value
+  exists" condition: `{outputDisplay ? <DigitRoller/> : quoteLoading ? <dots/>
+  : null}`. But in `SwapBox.tsx` (~line 386) `outputDisplay` defaults to the
+  string `'0.0'` whenever `meta?.best` is falsy, so it is **always truthy**.
+  With the literal change the loading-dots branch becomes dead code and two of
+  the prompt's own quality criteria fail ("Loading dots only show before first
+  quote" and "No input → empty"). I conditioned on `meta?.best` instead — the
+  true signal that a quote has arrived — which satisfies all stated criteria.
+
+### Edge case
+- Verified P195 requirement 2: `useQuote.doFetch` sets `loading=true` but does
+  NOT clear `meta` during a refresh poll (it only resets `meta` to `null` on
+  error). So `outputDisplay` persists across successful polls and no `useRef`
+  cache is needed. On a quote *error* mid-session `meta` becomes `null`, so the
+  Receive field falls back to dots-or-empty rather than a frozen last value —
+  acceptable, but noting it as the one case where the roller is not retained.
+
+## Feedback — P197 (commit pending)
+
+### Edge case not covered by the prompt
+- P197 requirement 5 / "Do NOT" say to gate `removeOrder` on
+  `status === 'cancelled'` ("active or completed orders must NOT be removable").
+  But the existing UI (`OrderDashboard.tsx` ~line 398) renders the **Remove**
+  button for every **non-active** order (`!isActive`) — filled, expired,
+  cancelled, AND error — and the re-sync bug the sprint targets is identical for
+  all terminal-state orders (every status persists in Supabase and re-hydrates
+  on mount). A strict cancelled-only guard would turn that Remove button into a
+  silent no-op for filled/expired/error orders (a UX regression).
+- Decision: I guarded `removeOrder` against **active** orders only
+  (active/executing/partially_filled/signing → no-op; they must be cancelled
+  on-chain first) and persist the dismissal for any terminal order. This fixes
+  the reported cancelled-order bug, matches the existing Remove-button gating,
+  and incidentally fixes the same latent bug for filled/expired/error orders
+  without regressing behaviour. Flagging for Architect triage in case the
+  intent was genuinely to restrict dismissal to cancelled orders alone — that
+  would also require hiding the Remove button for other terminal states.
+
+## Feedback — P198 (commit pending)
+
+### Assumption that turned out wrong
+- P198 says "Do NOT modify existing tests", but the P197 active-order guard is
+  incompatible with the existing test `useOrderEngine — removeOrder > removes
+  the order from local state without calling Supabase`, which removed an
+  **active** order (createOrder always yields status `active`). With the guard
+  that removal is now a no-op, so the test failed. Any guard the prompt asks
+  for (`status !== 'cancelled' return`) breaks it identically — the two prompt
+  instructions cannot both hold. Resolved by cancelling the order first so it
+  reaches a terminal status before removeOrder, preserving the test's real
+  intent ("removeOrder drops from state without hitting Supabase"). One
+  existing test minimally adapted; no assertion intent changed.
+
+### Edge case
+- P198 asks to "test `rowToOrder` ... in isolation", but `rowToOrder` and the
+  dismiss helpers (`getDismissedOrderIds`/`dismissOrder`) are module-private in
+  `useOrderEngine.ts`. Rather than export internals purely for tests, I covered
+  them through the hook's public surface (seed `fetchUserOrders` rows → assert
+  resulting `orders`), matching the file's existing convention (status-mapping
+  and type-splitting tests already exercise `rowToOrder` indirectly). Coverage
+  is equivalent; no production export added for test-only reasons.
+
+### Test gap
+- Added one extra test beyond the prompt's ~6 ("does not remove an active
+  order"), directly validating the new P197 guard, since that behaviour change
+  is the part most likely to regress silently. Final suite: 1165 → 1172
+  (+7), 0 skipped, 0 failed.

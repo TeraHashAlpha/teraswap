@@ -39,6 +39,7 @@ import type {
   OrderEngineEvent,
   OrderRow,
 } from '@/lib/order-engine'
+import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
 
 // ── Order hash computation (matches contract's getOrderHash) ──
 const ORDER_TYPEHASH = keccak256(toBytes(
@@ -87,26 +88,22 @@ function computeOrderHash(order: OnChainOrder): `0x${string}` {
 }
 
 // ── Storage key ──────────────────────────────────────────
-const STORAGE_KEY = 'teraswap_orders_v3'
+// [P200] Orders are encrypted at rest via SecureStorage (AES-256-GCM, key
+// derived from the connected wallet). The v4 key marks the encrypted format;
+// v3 used weak XOR obfuscation and is migrated + removed on first load.
+const STORAGE_KEY = 'teraswap_orders_v4'
 
-// [N-04/F-02] Obfuscate sensitive data in localStorage (signatures, order hashes)
-// Uses a simple XOR-based encoding to prevent trivial scraping by browser extensions.
-// Not cryptographic — defense-in-depth layer. True encryption needs a user-derived key.
-const OBFUSCATION_KEY = 'TeraSwap_2026_v3'
+// Legacy v3 key + XOR constant — retained ONLY to migrate existing
+// plaintext/obfuscated data into the encrypted store, then deleted. No new
+// write ever takes this path (the encoder was removed in P200).
+const LEGACY_XOR_KEY = 'teraswap_orders_v3'
+const LEGACY_OBFUSCATION_KEY = 'TeraSwap_2026_v3'
 
-function obfuscate(data: string): string {
-  const key = OBFUSCATION_KEY
-  let result = ''
-  for (let i = 0; i < data.length; i++) {
-    result += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length))
-  }
-  return btoa(result) // base64 to keep it safe in localStorage
-}
-
-function deobfuscate(encoded: string): string {
+/** Decode-only XOR (mirror of the removed `obfuscate`) for v3 → v4 migration. */
+function legacyDeobfuscate(encoded: string): string {
   try {
     const data = atob(encoded)
-    const key = OBFUSCATION_KEY
+    const key = LEGACY_OBFUSCATION_KEY
     let result = ''
     for (let i = 0; i < data.length; i++) {
       result += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length))
@@ -115,32 +112,82 @@ function deobfuscate(encoded: string): string {
   } catch { return '' }
 }
 
-function loadOrders(): AutonomousOrder[] {
+/** Read the legacy v3 payload: try XOR-decode first, then plain JSON. */
+function readLegacyOrders(): AutonomousOrder[] {
   if (typeof window === 'undefined') return []
+  let raw: string | null = null
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    // Try deobfuscated first (new format), fall back to plain JSON (migration)
-    try {
-      const decoded = deobfuscate(raw)
-      return JSON.parse(decoded)
-    } catch {
-      // Fallback: old unencrypted format
-      return JSON.parse(raw)
-    }
+    raw = localStorage.getItem(LEGACY_XOR_KEY)
   } catch { return [] }
+  if (!raw) return []
+  try {
+    return JSON.parse(legacyDeobfuscate(raw))
+  } catch {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return []
+    }
+  }
 }
 
-function saveOrders(orders: AutonomousOrder[]) {
+/**
+ * Load orders from the encrypted v4 store, transparently migrating any legacy
+ * v3 data on first run. Async because AES-GCM decryption is async.
+ */
+async function loadOrders(): Promise<AutonomousOrder[]> {
+  if (typeof window === 'undefined') return []
+  const encrypted = await secureGet<AutonomousOrder[]>(STORAGE_KEY)
+  if (encrypted && encrypted.length > 0) return encrypted
+
+  // No encrypted data yet — attempt a one-time migration from legacy v3.
+  const legacy = readLegacyOrders()
+  if (legacy.length > 0) {
+    await saveOrders(legacy)
+    try { localStorage.removeItem(LEGACY_XOR_KEY) } catch { /* ignore */ }
+    return legacy
+  }
+  // Either genuinely empty, or v4 held an empty array.
+  return encrypted ?? []
+}
+
+/** Encrypt + persist the order list under the v4 key. */
+async function saveOrders(orders: AutonomousOrder[]): Promise<void> {
   if (typeof window === 'undefined') return
+  // Pre-serialise BigInt → string; SecureStorage's internal JSON.stringify
+  // cannot handle BigInt on its own.
+  const serialisable = JSON.parse(
+    JSON.stringify(orders, (_, v) => (typeof v === 'bigint' ? v.toString() : v)),
+  )
+  await secureSet(STORAGE_KEY, serialisable)
+}
+
+// ── Dismissed orders (UI-only soft-delete) ───────────────
+// Cancelled/terminal orders stay in Supabase for the audit trail, so a
+// page refresh re-syncs them from the server and they reappear. Persisting
+// the IDs the user has explicitly dismissed keeps them hidden across
+// reloads. No Supabase row is ever deleted.
+const DISMISSED_ORDERS_KEY = 'teraswap_dismissed_orders'
+
+function getDismissedOrderIds(): string[] {
+  if (typeof window === 'undefined') return []
   try {
-    const json = JSON.stringify(orders, (_, v) =>
-      typeof v === 'bigint' ? v.toString() : v
-    )
-    localStorage.setItem(STORAGE_KEY, obfuscate(json))
-  } catch { /* quota exceeded */ }
-  // Clean up old unencrypted key
-  try { localStorage.removeItem('teraswap_orders_v2') } catch {}
+    const stored = localStorage.getItem(DISMISSED_ORDERS_KEY)
+    return stored ? JSON.parse(stored) : []
+  } catch {
+    return []
+  }
+}
+
+function dismissOrder(orderId: string): void {
+  if (typeof window === 'undefined') return
+  const ids = getDismissedOrderIds()
+  if (!ids.includes(orderId)) {
+    ids.push(orderId)
+    try {
+      localStorage.setItem(DISMISSED_ORDERS_KEY, JSON.stringify(ids))
+    } catch { /* quota exceeded */ }
+  }
 }
 
 // ── Convert Supabase row → UI order ──────────────────────
@@ -167,9 +214,9 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     signature: row.signature,
     status: mapDbStatus(row.status as string),
     orderType: typeMap[row.order_type] ?? OrderType.LIMIT,
-    tokenInSymbol: '', // Will be enriched by UI
+    tokenInSymbol: row.token_in_symbol || '',
     tokenInDecimals: 18,
-    tokenOutSymbol: '',
+    tokenOutSymbol: row.token_out_symbol || '',
     tokenOutDecimals: 18,
     dcaExecuted: row.dca_executed,
     dcaTotal: row.dca_total ?? 0,
@@ -194,6 +241,9 @@ export function useOrderEngine() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // [P200] Guard: don't persist the initial empty array before the async load
+  // resolves — otherwise the save effect would clobber the encrypted store.
+  const hasLoadedRef = useRef(false)
 
   // ── Read current nonce + invalidated nonce from contract ──
   const { data: currentNonce } = useReadContract({
@@ -211,35 +261,66 @@ export function useOrderEngine() {
     query: { enabled: !!address },
   })
 
-  // ── Load orders on mount ───────────────────────────────
+  // ── Load orders on mount / wallet change ───────────────
   useEffect(() => {
+    // Reset the persist guard so the new wallet's load can't be pre-empted by
+    // a stale save, and so a disconnected → connected transition reloads.
+    hasLoadedRef.current = false
+
     if (!address) {
       setOrders([])
       setIsLoading(false)
       return
     }
 
-    // Load from localStorage immediately
-    const local = loadOrders().filter(o =>
-      o.order?.owner?.toLowerCase() === address.toLowerCase()
-    )
-    setOrders(local)
+    // Derive this wallet's AES-GCM key before any secure read/write.
+    initSecureStorage(address)
 
-    // Then refresh from Supabase
-    fetchUserOrders(address).then(rows => {
-      if (rows.length > 0) {
-        const remote = rows.map(rowToOrder)
-        setOrders(remote)
-        saveOrders(remote)
+    let cancelled = false
+
+    void (async () => {
+      // 1. Local (encrypted) cache — decrypt + filter to this wallet.
+      const local = (await loadOrders()).filter(o =>
+        o.order?.owner?.toLowerCase() === address.toLowerCase(),
+      )
+      if (cancelled) return
+
+      // Merge-guard: if another effect (e.g. a realtime event) already
+      // populated state during the await, append local-only orders instead of
+      // clobbering it.
+      setOrders(prev => {
+        if (prev.length === 0) return local
+        const seen = new Set(prev.map(o => o.id))
+        return [...prev, ...local.filter(o => !seen.has(o.id))]
+      })
+      // Loading is done — allow the save effect to persist subsequent changes.
+      hasLoadedRef.current = true
+
+      // 2. Refresh from Supabase (authoritative source).
+      try {
+        const rows = await fetchUserOrders(address)
+        if (cancelled) return
+        if (rows.length > 0) {
+          const dismissed = getDismissedOrderIds()
+          const remote = rows.map(rowToOrder).filter(o => !dismissed.includes(o.id))
+          setOrders(remote)
+        }
+      } catch {
+        /* keep the local cache on network error */
+      } finally {
+        if (!cancelled) setIsLoading(false)
       }
-      setIsLoading(false)
-    }).catch(() => setIsLoading(false))
+    })()
+
+    return () => { cancelled = true }
   }, [address])
 
   // ── Save on change (including clearing when empty) ─────
   useEffect(() => {
-    // [BUGFIX] Also persist when orders array is empty — prevents stale data in localStorage
-    saveOrders(orders)
+    // [P200] Skip until the async load has populated state — otherwise the
+    // initial empty array would overwrite the encrypted store.
+    if (!hasLoadedRef.current) return
+    void saveOrders(orders)
   }, [orders])
 
   // ── Poll active orders ─────────────────────────────────
@@ -580,8 +661,19 @@ export function useOrderEngine() {
   // ── Remove order from local list ───────────────────────
   const removeOrder = useCallback((orderId: string) => {
     setOrders(prev => {
+      const target = prev.find(o => o.id === orderId)
+      if (!target) return prev
+      // Active orders must be cancelled on-chain, not dismissed.
+      const isActive = target.status === 'active'
+        || target.status === 'executing'
+        || target.status === 'partially_filled'
+        || target.status === 'signing'
+      if (isActive) return prev
+      // Persist the dismissal so a Supabase re-sync on reload doesn't
+      // resurrect the order (the row stays in the DB for the audit trail).
+      dismissOrder(orderId)
       const updated = prev.filter(o => o.id !== orderId)
-      saveOrders(updated)
+      void saveOrders(updated)
       return updated
     })
   }, [])

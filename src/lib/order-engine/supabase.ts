@@ -35,6 +35,8 @@ export interface OrderRow {
   status: AutonomousOrderStatus
   token_in: string
   token_out: string
+  token_in_symbol: string | null
+  token_out_symbol: string | null
   amount_in: string
   min_amount_out: string
   target_price: string
