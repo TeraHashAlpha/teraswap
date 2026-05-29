@@ -38,6 +38,10 @@ async function fetchQuoteViaApi(
   srcDecimals: number,
   dstDecimals: number,
   excludeSources?: string[],
+  // [P208 / FULL-L-01] Lets the caller abort a superseded request when the
+  // token pair or amount changes mid-flight. AbortError is swallowed by the
+  // caller — it means a newer request already took over.
+  signal?: AbortSignal,
 ): Promise<MetaQuoteResult> {
   const params = new URLSearchParams({
     src,
@@ -50,7 +54,7 @@ async function fetchQuoteViaApi(
     params.set('exclude', excludeSources.join(','))
   }
 
-  const res = await fetch(`/api/quote?${params}`)
+  const res = await fetch(`/api/quote?${params}`, signal ? { signal } : undefined)
   const data = await res.json()
 
   if (!res.ok) {
@@ -107,10 +111,12 @@ export function useQuote(
     estimateGasCostRef.current = estimateGasCost
   }, [estimateGasCost])
 
-  // [hotfix] In-flight guard: even if a future regression re-introduces
-  // effect churn, only one network request can be on the wire at a
-  // time. Belt-and-suspenders alongside the stable doFetch above.
-  const inFlightRef = useRef(false)
+  // [P208 / FULL-L-01] AbortController for the in-flight quote request.
+  // Replaces the old boolean drop-guard: instead of skipping a new fetch
+  // while one is on the wire, we abort the stale request and immediately
+  // supersede it. This removes the up-to-one-poll delay after a token/amount
+  // change and prevents a late resolve from painting old-pair data.
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // [hotfix] Exponential backoff state for rate-limit responses.
   // `currentIntervalMsRef` holds the effective poll interval: starts at
@@ -150,8 +156,15 @@ export function useQuote(
       return
     }
 
-    if (inFlightRef.current) return
-    inFlightRef.current = true
+    // [P208] Abort any in-flight request and supersede it with this one.
+    // The aborted request's fetch rejects with AbortError, which we swallow
+    // in the catch below so it never touches error/meta state.
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    const { signal } = controller
 
     setLoading(true)
     // [hotfix] Only clear the error when we're NOT in a rate-limit
@@ -172,6 +185,7 @@ export function useQuote(
         tokenIn.decimals,
         tokenOut.decimals,
         excludeSources,
+        signal,
       )
 
       // [P94] Compute the gasless recommendation client-side so it uses the
@@ -207,6 +221,12 @@ export function useQuote(
         wallet: address,
       })
     } catch (err) {
+      // [P208] A superseded request — do nothing. A newer fetch is already
+      // in flight and owns the error/meta/loading state. Crucially this must
+      // NOT trigger backoff: an abort is not a rate limit.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
       // [hotfix] Treat HTTP 429 distinctly: enter (or extend) backoff
       // up to MAX_BACKOFF_MS, double the polling interval, and rearm
       // the timer. Other errors keep the normal cadence — backoff is
@@ -231,8 +251,12 @@ export function useQuote(
       setError(err instanceof Error ? err.message : 'Failed to fetch quotes')
       setMeta(null)
     } finally {
-      setLoading(false)
-      inFlightRef.current = false
+      // [P208] Only the request that's still current clears the spinner. If
+      // this request was superseded (signal aborted), the newer one owns the
+      // loading flag — clearing it here would flip the spinner off mid-fetch.
+      if (!signal.aborted) {
+        setLoading(false)
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenIn, tokenOut, debouncedAmount, address, excludeKey, rearmPollTimer])
@@ -274,17 +298,20 @@ export function useQuote(
         clearInterval(countdownRef.current)
         countdownRef.current = null
       }
+      // [P208] Cancel any pending request so an unmount (or enabled flip)
+      // can't resolve into a state update on a torn-down hook.
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
     }
   }, [doFetch, enabled])
 
   // Manual refresh: invoke the latest doFetch via the ref (matches the
   // timer's call site), and reset the countdown so the next visible tick
-  // reflects "just refreshed". No-op while a fetch is on the wire — the
-  // doFetch in-flight guard already swallows the call, but skipping the
-  // countdown reset here avoids snapping the timer back during a click
-  // that does nothing.
+  // reflects "just refreshed". [P208] doFetch now aborts any in-flight
+  // request and supersedes it, so a click always issues a fresh quote
+  // rather than being dropped while one is on the wire.
   const refresh = useCallback(() => {
-    if (inFlightRef.current) return
     doFetchRef.current?.()
     setCountdown(Math.ceil(currentIntervalMsRef.current / 1000))
   }, [])

@@ -550,3 +550,25 @@ All P203/P204 findings came back **info/low** — no medium or high.
      return paths are hardcoded trusted constants, so no attacker address can be injected).
   3. `TRUSTED_SPENDER_ADDRESSES` is a superset of the reachable spender set (by design — built from
      `ROUTER_WHITELIST` per the documented coupling; the test asserts only the subset direction).
+
+## Feedback — Sprint 41 / P207 (4a562c2)
+
+### Assumption that turned out wrong
+- SPRINT-41.md says the branch is cut "from `main`" with "Sprint 40 merged" as a
+  prerequisite. In this working tree Sprint 40 (`fix/sprint-40-security`, 7 commits incl.
+  P202–P206 + reviews) is **NOT** merged into `main` (`main` is at `ca24afb`, PR #104).
+  Branching literally from `main` would have dropped all Sprint 40 work and made the
+  1195-test baseline unreachable (FULL-M-04 reset, cancel-auth, spender allowlist, oracle
+  tests all live only on the Sprint 40 branch). Cut `fix/sprint-41-mainnet-cleanup` from the
+  Sprint 40 HEAD instead so the prerequisite holds. **Action for Architect:** merge Sprint 40
+  before Sprint 41, or this branch must be rebased onto `main` post-merge.
+
+## Feedback — Sprint 41 / P208 (in this commit)
+
+### Edge case not covered by the prompt
+- The existing test `useQuote.test.ts › 'in-flight guard: a second refetch() while one is on
+  the wire is a no-op'` pinned the exact behaviour P208 removes (the `inFlightRef` boolean
+  drop-guard). It could not survive the AbortController change, so it was rewritten in this
+  commit (not deferred to P210) to assert the new supersede semantics — a refetch aborts the
+  prior request's signal and issues a fresh one. The P210 prompt adds *new* AbortController
+  tests; this was a mandatory update to an *existing* test broken by the behaviour change.

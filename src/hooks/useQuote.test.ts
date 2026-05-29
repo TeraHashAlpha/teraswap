@@ -206,10 +206,11 @@ describe('useQuote — HF-L-01 stability', () => {
     expect(fetchSpy.mock.calls.length).toBe(firstCallCount)
   })
 
-  it('in-flight guard: a second refetch() while one is on the wire is a no-op', async () => {
-    // Hold the first fetch open so the guard is exercised.
-    let resolveFirst: (r: Response) => void = () => {}
-    const pending = new Promise<Response>((r) => (resolveFirst = r))
+  it('[P208] supersedes an in-flight request: refetch() aborts the prior fetch and issues a new one', async () => {
+    // Hold the first fetch open so the supersede is observable. The boolean
+    // drop-guard used to make a concurrent refetch a no-op; the
+    // AbortController model aborts the stale request and starts a fresh one.
+    const pending = new Promise<Response>(() => {}) // never resolves
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockReturnValueOnce(pending)
@@ -224,19 +225,18 @@ describe('useQuote — HF-L-01 stability', () => {
     await Promise.resolve()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
 
-    // Concurrent refetch while the first is pending — must NOT issue a
-    // second request.
-    await act(async () => {
-      result.current.refetch()
-      result.current.refetch()
-      result.current.refetch()
-    })
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    // The first request carries an AbortSignal that is not yet aborted.
+    const firstSignal = (fetchSpy.mock.calls[0][1] as RequestInit | undefined)?.signal
+    expect(firstSignal).toBeDefined()
+    expect(firstSignal?.aborted).toBe(false)
 
-    // Resolve the original; subsequent refetches once it settles are
-    // free to issue new requests.
-    resolveFirst(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
-    await waitFor(() => expect(result.current.meta).not.toBeNull())
+    // A manual refetch aborts the stale request and issues a fresh one.
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(firstSignal?.aborted).toBe(true)
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+    expect(result.current.meta).not.toBeNull()
   })
 })
 
