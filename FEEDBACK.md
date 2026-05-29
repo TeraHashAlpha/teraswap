@@ -646,3 +646,27 @@ All P203/P204 findings came back **info/low** — no medium or high.
   test's claim was over-stated. **Architect:** if a regression guard for the exact
   stale-closure is required, the hook needs a testing seam (e.g. exposing the poll
   filter as a pure helper) — out of scope for an L2-inactive hook this sprint.
+
+## Feedback — Sprint 43 / P216 (this commit)
+
+### Assumption that turned out wrong (branch base)
+- SPRINT-43.md says branch "from main" with "Sprint 42 merged" as prerequisite,
+  but Sprint 42 isn't merged (same stacking as 40→41→42). Cut
+  feat/sprint-43-multi-chain-foundation from the Sprint 42 HEAD to preserve the
+  1219 baseline. **Action:** merge 40→41→42→43 in order, or rebase post-merge.
+
+### Decision (registry references constants, NOT the reverse) — for the CRITICAL "mainnet identical" constraint
+- The spec asks to MOVE FEE_COLLECTOR_ADDRESS / PERMIT2_ADDRESS / COW_VAULT_RELAYER /
+  etc. into the registry and re-export them from constants.ts. I inverted this: the
+  mainnet ChainConfig REFERENCES the existing constants, and constants.ts is left
+  UNTOUCHED. Rationale: (1) FEE_COLLECTOR_ADDRESS is env-var-derived
+  (process.env.NEXT_PUBLIC_FEE_COLLECTOR || default) — relocating that read risks a
+  subtle behavioural change; (2) re-exporting `X = getChainConfig(1).contracts.X`
+  widens `as const` literal types to `0x${string}` and creates a constants→registry
+  import while registry→constants already exists (cycle risk). Referencing instead
+  GUARANTEES getChainConfig(1).contracts.* === the live constants and keeps mainnet
+  byte-identical. Backward-compat criterion ("existing code using CHAIN_ID/
+  FEE_COLLECTOR_ADDRESS continues to work") holds trivially since constants.ts is
+  unchanged. P216 therefore touches only the 3 new files, not constants.ts.
+  **Architect:** if you want the registry to be the literal source of truth later,
+  that's a follow-up refactor once Base is live and the identical-mainnet risk is moot.
