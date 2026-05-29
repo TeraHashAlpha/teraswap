@@ -116,6 +116,11 @@ interface UseSwapResult {
   priceGuardDeviation: number | null
   /** Pre-swap simulation result: true = passed, false = would revert, null = not yet simulated */
   simulationPassed: boolean | null
+  /** [P209 / FULL-L-05] True when the simulation was inconclusive (RPC
+   *  hiccup / un-parseable error) and the swap proceeded without a
+   *  client-side revert guard. UI surfaces a non-blocking "simulation
+   *  unavailable" warning; the on-chain minimumOutput still protects funds. */
+  simulationSkipped: boolean
   /** Prepared tx data waiting for user confirmation (non-null when status === 'confirming') */
   pendingSwap: PendingSwapData | null
   /** [LP-05] CoW-only: actual output-token surplus over the user's expected
@@ -155,6 +160,7 @@ export function useSwap(
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
+  const [simulationSkipped, setSimulationSkipped] = useState(false) // [P209] inconclusive sim → fail-open warning
   const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
   const [mevSurplusActualWei, setMevSurplusActualWei] = useState<bigint | null>(null)
 
@@ -206,6 +212,7 @@ export function useSwap(
     if (!tokenIn || !tokenOut || !address || !amountIn) return
 
     setErrorMessage(null)
+    setSimulationSkipped(false) // [P209] reset fail-open warning on each new swap
     setStatus('fetching_swap')
     const swapStartTime = Date.now()
 
@@ -386,6 +393,14 @@ export function useSwap(
         const sim = await simulateSwapTx(simTx)
         setSimulationPassed(sim.success)
 
+        // [P209] Inconclusive simulation (RPC hiccup / un-parseable error):
+        // the swap proceeds but we flag it so SwapBox can warn the user. NOT
+        // fail-closed — the on-chain minimumOutput is the real protection.
+        if (sim.success && sim.simulated === false) {
+          console.warn('[TeraSwap] Proceeding without simulation confirmation')
+          setSimulationSkipped(true)
+        }
+
         if (!sim.success) {
           trackWalletActivity(address, {
             category: 'swap', action: 'swap_simulation_failed', source,
@@ -537,6 +552,7 @@ export function useSwap(
     if (!tokenIn || !tokenOut || !address || !amountIn) return
 
     setErrorMessage(null)
+    setSimulationSkipped(false) // [P209] CoW doesn't simulate, but clear any prior warning
     setStatus('fetching_swap')
     const cowStartTime = Date.now()
 
@@ -1025,12 +1041,13 @@ export function useSwap(
     setPriceGuardBlocked(false)
     setPriceGuardDeviation(null)
     setSimulationPassed(null)
+    setSimulationSkipped(false)
     setPendingSwap(null)
     setMevSurplusActualWei(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
 }
 
 function parseWagmiError(error: Error): string {

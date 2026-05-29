@@ -40,6 +40,10 @@ export interface LegStatus {
   status: 'pending' | 'fetching' | 'simulating' | 'signing' | 'confirming' | 'success' | 'error'
   txHash?: `0x${string}`
   error?: string
+  /** [P209 / FULL-L-05] false when this leg's pre-flight simulation was
+   *  inconclusive (RPC hiccup) and it proceeded without a client-side revert
+   *  guard. The on-chain minimumOutput still protects the fill. */
+  simulated?: boolean
 }
 
 interface UseSplitSwapResult {
@@ -232,6 +236,11 @@ export function useSplitSwap(
           updateLeg(i, { status: 'error', error: sim.error || 'Simulation failed — leg would revert' })
           errorCount++
           continue // Skip this leg, try the next one
+        }
+        // [P209] Inconclusive sim — proceed, but flag the leg so the UI can
+        // signal it ran without a client-side revert guard.
+        if (sim.simulated === false) {
+          updateLeg(i, { simulated: false })
         }
 
         // Step 2: Send transaction

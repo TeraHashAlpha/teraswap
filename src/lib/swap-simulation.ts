@@ -30,6 +30,11 @@ export interface SimulationResult {
   success: boolean
   gasUsed?: bigint
   error?: string
+  /** [P209 / FULL-L-05] false when the simulation was inconclusive (RPC
+   *  hiccup, un-parseable error) and we fell open. The swap still proceeds —
+   *  the on-chain minimumOutput is the real guard — but the UI surfaces a
+   *  "simulation unavailable" warning so the fail-open isn't silent. */
+  simulated?: boolean
 }
 
 /** Final tx shape handed to `simulateSwapTx`. */
@@ -121,7 +126,7 @@ export async function simulateSwapTx(params: SimulationTx): Promise<SimulationRe
       gas: params.gas,
     })
     // If eth_call returns data without reverting, the tx would succeed.
-    return { success: true, gasUsed: params.gas }
+    return { success: true, gasUsed: params.gas, simulated: true }
   } catch (err) {
     const parsed = parseSimulationError(err)
     if (!parsed.success && parsed.error) {
@@ -134,10 +139,13 @@ export async function simulateSwapTx(params: SimulationTx): Promise<SimulationRe
         errorMessage: parsed.error,
         selector: params.data.slice(0, 10),
       })
-      return { success: false, error: parsed.error }
+      // Conclusive revert — we know the tx would fail on-chain.
+      return { success: false, error: parsed.error, simulated: true }
     }
-    // Non-critical simulation failures shouldn't block the swap.
+    // [P209] Non-critical / un-parseable failure — proceed but flag as
+    // unsimulated so the UI can warn. We do NOT fail closed: the on-chain
+    // minimumOutput remains the real protection against a bad fill.
     console.warn('[TeraSwap] Simulation inconclusive:', err instanceof Error ? err.message : String(err))
-    return { success: true }
+    return { success: true, simulated: false }
   }
 }
