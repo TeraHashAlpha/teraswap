@@ -82,6 +82,20 @@ vi.mock('@/lib/swap-selectors', async () => {
   return actual
 })
 
+// [P210] Stub the per-leg pre-swap simulation (P207). buildSimulationTx is
+// left real (pure calldata construction); only simulateSwapTx — the eth_call
+// — is controlled so we can assert simulate→broadcast vs simulate→skip.
+const mockSimulateSwapTx = vi.fn<(...a: unknown[]) => Promise<{ success: boolean; error?: string; simulated?: boolean }>>(
+  async () => ({ success: true, simulated: true }),
+)
+vi.mock('@/lib/swap-simulation', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/swap-simulation')>('@/lib/swap-simulation')
+  return {
+    ...actual,
+    simulateSwapTx: (...args: unknown[]) => mockSimulateSwapTx(...args),
+  }
+})
+
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useSplitSwap } from './useSplitSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
@@ -187,6 +201,7 @@ beforeEach(() => {
   })
   mockSendTransactionAsync.mockResolvedValue('0xabc' + '0'.repeat(61) as `0x${string}`)
   mockGetTransactionReceipt.mockResolvedValue({ status: 'success' })
+  mockSimulateSwapTx.mockResolvedValue({ success: true, simulated: true })
 })
 
 afterEach(() => {
@@ -434,6 +449,78 @@ describe('useSplitSwap — partial / mixed outcomes', () => {
     })
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/reverted/i)
+  })
+})
+
+describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
+  it('simulates each leg before broadcast', async () => {
+    mockSwapFetch(() => makeQuote())
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    // One simulation + one broadcast per leg.
+    expect(mockSimulateSwapTx).toHaveBeenCalledTimes(2)
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
+    // Simulation runs BEFORE the wallet prompt for the first leg.
+    expect(mockSimulateSwapTx.mock.invocationCallOrder[0])
+      .toBeLessThan(mockSendTransactionAsync.mock.invocationCallOrder[0])
+  })
+
+  it('skips leg on simulation failure', async () => {
+    mockSwapFetch(() => makeQuote())
+    // Leg 1 simulation reverts, leg 2 passes.
+    mockSimulateSwapTx
+      .mockResolvedValueOnce({ success: false, error: 'Swap output below minimum — leg would revert' })
+      .mockResolvedValue({ success: true, simulated: true })
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('partial'))
+    // Leg 1 was skipped before broadcast; leg 2 proceeded.
+    expect(result.current.legs[0].status).toBe('error')
+    expect(result.current.legs[0].error).toMatch(/revert/i)
+    expect(result.current.legs[1].status).toBe('success')
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts all legs if all simulations fail', async () => {
+    mockSwapFetch(() => makeQuote())
+    mockSimulateSwapTx.mockResolvedValue({ success: false, error: 'Simulation reverted' })
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('error'))
+    expect(result.current.legs.every(l => l.status === 'error')).toBe(true)
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  // [P209 / P210 review] Fail-open: an inconclusive sim (simulated:false) must
+  // NOT skip the leg — it broadcasts and is flagged. Mirrors the single-swap
+  // simulationSkipped test in useSwap.test.ts.
+  it('flags a leg whose simulation is inconclusive (simulated:false) but still broadcasts it', async () => {
+    mockSwapFetch(() => makeQuote())
+    mockSimulateSwapTx
+      .mockResolvedValueOnce({ success: true, simulated: false }) // leg 1: RPC hiccup, fail-open
+      .mockResolvedValue({ success: true, simulated: true })       // leg 2: conclusive pass
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    // Fail-open, not fail-closed: both legs broadcast.
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
+    // The inconclusive leg is flagged; the conclusive one is not.
+    expect(result.current.legs[0].simulated).toBe(false)
+    expect(result.current.legs[0].status).toBe('success')
+    expect(result.current.legs[1].simulated).not.toBe(false)
   })
 })
 

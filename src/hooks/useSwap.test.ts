@@ -94,6 +94,20 @@ vi.mock('@/lib/swap-selectors', async () => {
   return actual
 })
 
+// [P210] Control the pre-swap simulation result (P207/P209). buildSimulationTx
+// stays real (pure calldata construction); only the eth_call (simulateSwapTx)
+// is stubbed so we can exercise the fail-open `simulated:false` branch.
+const mockSimulateSwapTx = vi.fn<(...a: unknown[]) => Promise<{ success: boolean; error?: string; simulated?: boolean }>>(
+  async () => ({ success: true, simulated: true }),
+)
+vi.mock('@/lib/swap-simulation', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/swap-simulation')>('@/lib/swap-simulation')
+  return {
+    ...actual,
+    simulateSwapTx: (...args: unknown[]) => mockSimulateSwapTx(...args),
+  }
+})
+
 vi.mock('@/lib/analytics', () => ({
   logSwapToSupabase: vi.fn(),
   updateSwapStatus: vi.fn(),
@@ -186,6 +200,7 @@ beforeEach(() => {
     extracted: '0x1111111111111111111111111111111111111111',
     implicitRecipient: false,
   })
+  mockSimulateSwapTx.mockResolvedValue({ success: true, simulated: true })
 })
 
 afterEach(() => {
@@ -375,5 +390,40 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
     // No pendingSwap was set, and connecting should leave us idle (not error).
     expect(result.current.status).toBe('idle')
     expect(result.current.pendingSwap).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [P209] simulation fail-open warning', () => {
+  it('sets simulationSkipped when the simulation is inconclusive', async () => {
+    mockSwapFetch(swapResponse())
+    // Inconclusive sim: proceeds (success) but unsimulated.
+    mockSimulateSwapTx.mockResolvedValueOnce({ success: true, simulated: false })
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    // Swap still proceeds to the confirmation step (not fail-closed)…
+    expect(result.current.status).toBe('confirming')
+    // …but the fail-open is surfaced.
+    expect(result.current.simulationSkipped).toBe(true)
+  })
+
+  it('clears simulationSkipped on a new swap', async () => {
+    mockSwapFetch(swapResponse())
+    // First swap: inconclusive → flag set.
+    mockSimulateSwapTx.mockResolvedValueOnce({ success: true, simulated: false })
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    expect(result.current.simulationSkipped).toBe(true)
+
+    // Second swap: conclusive → flag cleared at swap start, stays false.
+    mockSimulateSwapTx.mockResolvedValue({ success: true, simulated: true })
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    expect(result.current.simulationSkipped).toBe(false)
   })
 })

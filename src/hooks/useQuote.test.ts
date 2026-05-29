@@ -206,10 +206,11 @@ describe('useQuote — HF-L-01 stability', () => {
     expect(fetchSpy.mock.calls.length).toBe(firstCallCount)
   })
 
-  it('in-flight guard: a second refetch() while one is on the wire is a no-op', async () => {
-    // Hold the first fetch open so the guard is exercised.
-    let resolveFirst: (r: Response) => void = () => {}
-    const pending = new Promise<Response>((r) => (resolveFirst = r))
+  it('[P208] supersedes an in-flight request: refetch() aborts the prior fetch and issues a new one', async () => {
+    // Hold the first fetch open so the supersede is observable. The boolean
+    // drop-guard used to make a concurrent refetch a no-op; the
+    // AbortController model aborts the stale request and starts a fresh one.
+    const pending = new Promise<Response>(() => {}) // never resolves
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockReturnValueOnce(pending)
@@ -224,19 +225,18 @@ describe('useQuote — HF-L-01 stability', () => {
     await Promise.resolve()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
 
-    // Concurrent refetch while the first is pending — must NOT issue a
-    // second request.
-    await act(async () => {
-      result.current.refetch()
-      result.current.refetch()
-      result.current.refetch()
-    })
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    // The first request carries an AbortSignal that is not yet aborted.
+    const firstSignal = (fetchSpy.mock.calls[0][1] as RequestInit | undefined)?.signal
+    expect(firstSignal).toBeDefined()
+    expect(firstSignal?.aborted).toBe(false)
 
-    // Resolve the original; subsequent refetches once it settles are
-    // free to issue new requests.
-    resolveFirst(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
-    await waitFor(() => expect(result.current.meta).not.toBeNull())
+    // A manual refetch aborts the stale request and issues a fresh one.
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(firstSignal?.aborted).toBe(true)
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+    expect(result.current.meta).not.toBeNull()
   })
 })
 
@@ -303,5 +303,73 @@ describe('useQuote — HF-L-01 exponential backoff on 429', () => {
       await result.current.refetch()
     })
     await waitFor(() => expect(result.current.error).toBeNull())
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// P208 / FULL-L-01 — AbortController supersede semantics
+// ─────────────────────────────────────────────────────────────
+describe('useQuote — [P208] AbortController', () => {
+  it('aborts the in-flight request when the token pair changes', async () => {
+    const pending = new Promise<Response>(() => {}) // first request never resolves
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+
+    const { rerender } = renderHook(
+      ({ tin, tout }: { tin: Token; tout: Token }) =>
+        useQuote(tin, tout, '1', true, undefined),
+      { initialProps: { tin: TOKEN_IN, tout: TOKEN_OUT } },
+    )
+    await Promise.resolve()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const firstSignal = (fetchSpy.mock.calls[0][1] as RequestInit | undefined)?.signal
+    expect(firstSignal?.aborted).toBe(false)
+
+    // Swap the pair → doFetch identity changes → polling effect re-runs →
+    // the stale request is aborted and a fresh one issued.
+    await act(async () => {
+      rerender({ tin: TOKEN_OUT, tout: TOKEN_IN })
+      await flush()
+    })
+    expect(firstSignal?.aborted).toBe(true)
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('ignores AbortError silently — no error state, no meta clear', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'))
+
+    const { result } = renderHook(() =>
+      useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined),
+    )
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    // A subsequent fetch rejecting with AbortError must not clobber state.
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+    expect(result.current.error).toBeNull()
+    expect(result.current.meta).not.toBeNull() // prior pair's quote retained
+  })
+
+  it('cleans up on unmount — aborts the pending request', async () => {
+    const pending = new Promise<Response>(() => {}) // never resolves
+    const fetchSpy = vi.spyOn(global, 'fetch').mockReturnValue(pending)
+
+    const { unmount } = renderHook(() =>
+      useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined),
+    )
+    await Promise.resolve()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const signal = (fetchSpy.mock.calls[0][1] as RequestInit | undefined)?.signal
+    expect(signal?.aborted).toBe(false)
+
+    unmount()
+    expect(signal?.aborted).toBe(true)
   })
 })

@@ -154,7 +154,7 @@ export default function SwapBox() {
   // rather than the engine-computed gasSavingsUsd — the server clamps it
   // (max $500) and computes the persisted gas_savings_usd from there.
   const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
-  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
@@ -672,6 +672,7 @@ export default function SwapBox() {
                   <span className="text-cream-35">
                     {leg.status === 'pending' ? 'Waiting' :
                      leg.status === 'fetching' ? 'Getting route...' :
+                     leg.status === 'simulating' ? 'Simulating...' :
                      leg.status === 'signing' ? 'Confirm in wallet' :
                      leg.status === 'confirming' ? 'Confirming...' :
                      leg.status === 'success' ? '✓ Done' :
@@ -808,6 +809,15 @@ export default function SwapBox() {
         {simulationPassed === false && swapStatus === 'error' && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-danger/80">
             <span>&#10007;</span> Pre-swap simulation caught a revert — no gas was spent
+          </div>
+        )}
+        {/* [P209 / FULL-L-05] Fail-open warning — the simulation was
+            inconclusive (RPC hiccup / un-parseable error) so the only
+            client-side revert guard was unavailable. Non-blocking: the
+            on-chain minimumOutput still protects the fill. */}
+        {simulationSkipped && (
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-warning/90">
+            <span aria-hidden="true">&#9888;</span> Simulation unavailable — proceed with caution
           </div>
         )}
 

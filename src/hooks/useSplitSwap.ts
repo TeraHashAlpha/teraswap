@@ -23,6 +23,7 @@ import { safeBigInt } from '@/lib/utils'
 import type { SplitRoute, SplitLeg } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
+import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 
 // ── Types ──
 
@@ -36,9 +37,13 @@ export type SplitSwapStatus =
 export interface LegStatus {
   source: AggregatorName
   percent: number
-  status: 'pending' | 'fetching' | 'signing' | 'confirming' | 'success' | 'error'
+  status: 'pending' | 'fetching' | 'simulating' | 'signing' | 'confirming' | 'success' | 'error'
   txHash?: `0x${string}`
   error?: string
+  /** [P209 / FULL-L-05] false when this leg's pre-flight simulation was
+   *  inconclusive (RPC hiccup) and it proceeded without a client-side revert
+   *  guard. The on-chain minimumOutput still protects the fill. */
+  simulated?: boolean
 }
 
 interface UseSplitSwapResult {
@@ -207,6 +212,35 @@ export function useSplitSwap(
           if (!feeCheck.valid) {
             throw new Error('Fee integrity failed on split leg — output unexpectedly high.')
           }
+        }
+
+        // [P207] Pre-leg simulation — eth_call the exact transaction before
+        // the wallet prompt, mirroring the single-swap path. Catches reverts
+        // (stale routing, FeeCollector InsufficientOutput) before broadcast so
+        // no gas is wasted. A failed leg is SKIPPED (continue), not aborted:
+        // other legs may still route through healthy liquidity.
+        updateLeg(i, { status: 'simulating' })
+        const simTx = buildSimulationTx({
+          swapData,
+          routeViaFeeCollector,
+          isNativeIn: isNativeETH(tokenIn),
+          tokenIn,
+          tokenOut,
+          rawAmount: legAmount,
+          slippage,
+          fromAddress: address,
+          source,
+        })
+        const sim = await simulateSwapTx(simTx)
+        if (!sim.success) {
+          updateLeg(i, { status: 'error', error: sim.error || 'Simulation failed — leg would revert' })
+          errorCount++
+          continue // Skip this leg, try the next one
+        }
+        // [P209] Inconclusive sim — proceed, but flag the leg so the UI can
+        // signal it ran without a client-side revert guard.
+        if (sim.simulated === false) {
+          updateLeg(i, { simulated: false })
         }
 
         // Step 2: Send transaction

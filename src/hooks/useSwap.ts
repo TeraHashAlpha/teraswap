@@ -10,7 +10,8 @@ import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, FEE_NATIVE_SOURCES, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
-import { parseSimulationError, buildFeeCollectorSwapArgs } from '@/lib/simulation'
+import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
+import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -25,51 +26,6 @@ class PriceGuardError extends Error {
     super(message)
     this.name = 'PriceGuardError'
     this.deviation = deviation
-  }
-}
-
-// ── Pre-swap simulation (ASM equivalent) ─────────────────
-// Simulates the transaction via eth_call before sending.
-// Catches reverts, insufficient gas, and sandwich attacks.
-// [P140] Error parsing extracted to src/lib/simulation.ts for unit testing.
-async function simulateSwapTx(params: {
-  to: `0x${string}`
-  data: `0x${string}`
-  value: bigint
-  gas?: bigint
-  from: `0x${string}`
-  expectedOutput: string
-  tokenOut: Token
-  source: string
-}): Promise<{ success: boolean; gasUsed?: bigint; error?: string }> {
-  try {
-    const client = getPrivateClient()
-    await client.call({
-      account: params.from,
-      to: params.to,
-      data: params.data,
-      value: params.value,
-      gas: params.gas,
-    })
-    // If eth_call returns data without reverting, the tx would succeed
-    return { success: true, gasUsed: params.gas }
-  } catch (err) {
-    const parsed = parseSimulationError(err)
-    if (!parsed.success && parsed.error) {
-      // Structured diagnostic — selector + tx shape only; never log full calldata.
-      console.error('[TeraSwap] Simulation failed:', {
-        source: params.source,
-        to: params.to,
-        value: params.value.toString(),
-        gasLimit: params.gas?.toString(),
-        errorMessage: parsed.error,
-        selector: params.data.slice(0, 10),
-      })
-      return { success: false, error: parsed.error }
-    }
-    // Non-critical simulation failures shouldn't block the swap
-    console.warn('[TeraSwap] Simulation inconclusive:', err instanceof Error ? err.message : String(err))
-    return { success: true }
   }
 }
 
@@ -160,6 +116,11 @@ interface UseSwapResult {
   priceGuardDeviation: number | null
   /** Pre-swap simulation result: true = passed, false = would revert, null = not yet simulated */
   simulationPassed: boolean | null
+  /** [P209 / FULL-L-05] True when the simulation was inconclusive (RPC
+   *  hiccup / un-parseable error) and the swap proceeded without a
+   *  client-side revert guard. UI surfaces a non-blocking "simulation
+   *  unavailable" warning; the on-chain minimumOutput still protects funds. */
+  simulationSkipped: boolean
   /** Prepared tx data waiting for user confirmation (non-null when status === 'confirming') */
   pendingSwap: PendingSwapData | null
   /** [LP-05] CoW-only: actual output-token surplus over the user's expected
@@ -199,6 +160,7 @@ export function useSwap(
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
+  const [simulationSkipped, setSimulationSkipped] = useState(false) // [P209] inconclusive sim → fail-open warning
   const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
   const [mevSurplusActualWei, setMevSurplusActualWei] = useState<bigint | null>(null)
 
@@ -250,6 +212,7 @@ export function useSwap(
     if (!tokenIn || !tokenOut || !address || !amountIn) return
 
     setErrorMessage(null)
+    setSimulationSkipped(false) // [P209] reset fail-open warning on each new swap
     setStatus('fetching_swap')
     const swapStartTime = Date.now()
 
@@ -411,47 +374,32 @@ export function useSwap(
       // ── Pre-swap simulation (Active Simulation Mechanism) ──
       // Simulates the final transaction via eth_call before wallet prompt.
       // Catches reverts early → saves gas on failed txs.
+      // [P207] Tx construction + classification shared with the split-swap
+      // path via src/lib/swap-simulation.ts (buildSimulationTx + simulateSwapTx).
       {
-        const simTo = routeViaFeeCollector
-          ? (FEE_COLLECTOR_ADDRESS as `0x${string}`)
-          : (swapData.tx.to as `0x${string}`)
-        const simData = routeViaFeeCollector
-          ? encodeFunctionData({
-              abi: FEE_COLLECTOR_ABI,
-              functionName: isNativeIn ? 'swapETHWithFee' : 'swapTokenWithFee',
-              args: isNativeIn
-                ? [swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`, tokenOutForFc, minimumOutput]
-                : [tokenIn!.address as `0x${string}`, rawAmountBn, swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`, tokenOutForFc, minimumOutput],
-            })
-          : (swapData.tx.data as `0x${string}`)
-        const simValue = routeViaFeeCollector && isNativeIn
-          ? rawAmountBn
-          : BigInt(swapData.tx.value || '0')
-        // Simulation only checks revert/success, not gas usage. The adapter's
-        // tx.gas is too low for eth_call: Uniswap V3's QuoterV2 returns the
-        // quotation gas (~40K), which excludes multicall overhead, WETH
-        // wrapping, and pool/token transfers (~200-250K total). Use a
-        // generous floor so the sim never OOGs and misreports a fake revert.
-        // Real-tx gas is set separately at send time (still swapData.tx.gas).
-        const SIM_GAS_FLOOR = 500_000n
-        const adapterGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) : 0n
-        const fcOverhead = routeViaFeeCollector ? (isNativeIn ? 100_000n : 120_000n) : 0n
-        const simGas = adapterGas + fcOverhead < SIM_GAS_FLOOR
-          ? SIM_GAS_FLOOR
-          : adapterGas + fcOverhead
-
-        setStatus('simulating' as SwapStatus)
-        const sim = await simulateSwapTx({
-          to: simTo,
-          data: simData,
-          value: simValue,
-          gas: simGas,
-          from: address,
-          expectedOutput: swapData.toAmount,
+        const simTx = buildSimulationTx({
+          swapData,
+          routeViaFeeCollector,
+          isNativeIn: !!isNativeIn,
+          tokenIn: tokenIn!,
           tokenOut: tokenOut!,
+          rawAmount: rawAmountBn,
+          slippage,
+          fromAddress: address,
           source,
         })
+
+        setStatus('simulating' as SwapStatus)
+        const sim = await simulateSwapTx(simTx)
         setSimulationPassed(sim.success)
+
+        // [P209] Inconclusive simulation (RPC hiccup / un-parseable error):
+        // the swap proceeds but we flag it so SwapBox can warn the user. NOT
+        // fail-closed — the on-chain minimumOutput is the real protection.
+        if (sim.success && sim.simulated === false) {
+          console.warn('[TeraSwap] Proceeding without simulation confirmation')
+          setSimulationSkipped(true)
+        }
 
         if (!sim.success) {
           trackWalletActivity(address, {
@@ -604,6 +552,7 @@ export function useSwap(
     if (!tokenIn || !tokenOut || !address || !amountIn) return
 
     setErrorMessage(null)
+    setSimulationSkipped(false) // [P209] CoW doesn't simulate, but clear any prior warning
     setStatus('fetching_swap')
     const cowStartTime = Date.now()
 
@@ -1092,12 +1041,13 @@ export function useSwap(
     setPriceGuardBlocked(false)
     setPriceGuardDeviation(null)
     setSimulationPassed(null)
+    setSimulationSkipped(false)
     setPendingSwap(null)
     setMevSurplusActualWei(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
 }
 
 function parseWagmiError(error: Error): string {
