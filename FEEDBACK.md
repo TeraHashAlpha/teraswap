@@ -572,3 +572,15 @@ All P203/P204 findings came back **info/low** — no medium or high.
   commit (not deferred to P210) to assert the new supersede semantics — a refetch aborts the
   prior request's signal and issues a fresh one. The P210 prompt adds *new* AbortController
   tests; this was a mandatory update to an *existing* test broken by the behaviour change.
+
+## Feedback — Sprint 41 / P210 review (this commit)
+
+### Test gap (found by adversarial self-review; remediated)
+- P209 req 5 mandates that a split-swap leg with an inconclusive simulation
+  (`simulated: false`) PROCEEDS to broadcast and is flagged in leg status. The
+  implementation does this (`useSplitSwap.ts` — `updateLeg(i, { simulated: false })`
+  then broadcast), and the single-swap equivalent is tested
+  (`useSwap.test.ts › 'sets simulationSkipped …'`), but the split-swap path had no
+  test. Added `'flags a leg whose simulation is inconclusive (simulated:false) but
+  still broadcasts it'` to `useSplitSwap.test.ts` (1203 → 1204). Confirms fail-open
+  (not fail-closed) for legs and that the flag lands only on the inconclusive leg.

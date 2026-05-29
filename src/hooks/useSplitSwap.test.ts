@@ -500,6 +500,28 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
     expect(result.current.legs.every(l => l.status === 'error')).toBe(true)
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
   })
+
+  // [P209 / P210 review] Fail-open: an inconclusive sim (simulated:false) must
+  // NOT skip the leg — it broadcasts and is flagged. Mirrors the single-swap
+  // simulationSkipped test in useSwap.test.ts.
+  it('flags a leg whose simulation is inconclusive (simulated:false) but still broadcasts it', async () => {
+    mockSwapFetch(() => makeQuote())
+    mockSimulateSwapTx
+      .mockResolvedValueOnce({ success: true, simulated: false }) // leg 1: RPC hiccup, fail-open
+      .mockResolvedValue({ success: true, simulated: true })       // leg 2: conclusive pass
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    // Fail-open, not fail-closed: both legs broadcast.
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
+    // The inconclusive leg is flagged; the conclusive one is not.
+    expect(result.current.legs[0].simulated).toBe(false)
+    expect(result.current.legs[0].status).toBe('success')
+    expect(result.current.legs[1].simulated).not.toBe(false)
+  })
 })
 
 describe('useSplitSwap — reset()', () => {
