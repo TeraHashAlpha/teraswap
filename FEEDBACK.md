@@ -748,3 +748,25 @@ All P203/P204 findings came back **info/low** — no medium or high.
 - Header: ChainSelector replaces the static "Ethereum" pill.
 - useSwap: swap-state reset on chain switch (mirrors the FULL-M-04 account-switch
   reset; ref-gated so mainnet never fires it).
+
+## Feedback — Sprint 43 / P219 review (this commit)
+
+### Confirmed gap (adversarial review) + the deferred quote-threading — both resolved
+- **Swap path (confirmed CRITICAL by review):** useSwap's STANDARD swap path passed
+  chainId=undefined to fetchSwapViaApi while the CoW path passed chainId — an
+  asymmetry that left standard swaps not chain-aware. Not a mainnet regression
+  (undefined→1→identical) and Base swaps are gated, but a real inconsistency.
+  Fixed: the standard path now passes `chainId` (the /api/swap route already
+  forwarded it — one-line wire-up).
+- **Quote path (was documented as deferred in P219):** completed it for symmetry.
+  fetchQuoteViaApi now takes chainId and appends `?chainId=` ONLY for non-mainnet
+  chains; /api/quote (GET + POST) reads it and passes it to fetchMetaQuote (which
+  has accepted chainId since P217). useQuote passes useActiveChainId.
+- **Mainnet byte-identical preserved:** on mainnet, useSwap sends chainId=1 (route
+  treats 1 === default → identical adapter URL/calldata; 0x conditional param not
+  added) and useQuote omits the chainId query entirely (request unchanged, cache
+  key unchanged). 1233 tests still green.
+- **Net effect:** the multi-chain quote AND swap paths are now chain-aware
+  end-to-end. The only remaining deferral is the per-chain TOKEN CATALOG
+  (TokenSelector / token addresses), which still needs the Base catalog built
+  before Base swaps can be enabled — tracked for the Base-activation sprint.

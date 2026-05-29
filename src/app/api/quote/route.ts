@@ -50,6 +50,9 @@ export async function GET(req: NextRequest) {
   const srcDecimals = Number(searchParams.get('srcDecimals') ?? '18')
   const dstDecimals = Number(searchParams.get('dstDecimals') ?? '18')
   const excludeParam = searchParams.get('exclude') // comma-separated source names to exclude
+  // [P219 review] Optional target chain. Absent → fetchMetaQuote defaults to
+  // mainnet, so existing (chainId-less) callers are unaffected.
+  const chainIdParam = searchParams.get('chainId')
 
   if (!src || !dst || !amount) {
     return NextResponse.json(
@@ -65,7 +68,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const excludeSources = excludeParam ? excludeParam.split(',').map(s => s.trim()) : undefined
-    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources)
+    const chainId = chainIdParam ? Number(chainIdParam) : undefined
+    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId)
 
     // Serialize BigInt-safe (toAmount is already a string in NormalizedQuote)
     return NextResponse.json(result, {
@@ -102,7 +106,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json()
-    const { src, dst, amount, srcDecimals = 18, dstDecimals = 18 } = body
+    const { src, dst, amount, srcDecimals = 18, dstDecimals = 18, chainId } = body
 
     if (!src || !dst || !amount) {
       return NextResponse.json(
@@ -116,7 +120,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid token address format' }, { status: 400 })
     }
 
-    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals)
+    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, undefined, chainId)
 
     return NextResponse.json(result, {
       headers: {

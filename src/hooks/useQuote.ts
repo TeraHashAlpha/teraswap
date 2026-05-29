@@ -39,6 +39,9 @@ async function fetchQuoteViaApi(
   srcDecimals: number,
   dstDecimals: number,
   excludeSources?: string[],
+  // [P219 review] Target chain — appended to the query only for non-mainnet
+  // chains so the mainnet request is byte-identical to the pre-multi-chain one.
+  chainId?: number,
   // [P208 / FULL-L-01] Lets the caller abort a superseded request when the
   // token pair or amount changes mid-flight. AbortError is swallowed by the
   // caller — it means a newer request already took over.
@@ -53,6 +56,9 @@ async function fetchQuoteViaApi(
   })
   if (excludeSources && excludeSources.length > 0) {
     params.set('exclude', excludeSources.join(','))
+  }
+  if (chainId && chainId !== 1) {
+    params.set('chainId', String(chainId))
   }
 
   const res = await fetch(`/api/quote?${params}`, signal ? { signal } : undefined)
@@ -191,6 +197,7 @@ export function useQuote(
         tokenIn.decimals,
         tokenOut.decimals,
         excludeSources,
+        activeChainId,
         signal,
       )
 

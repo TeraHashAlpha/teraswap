@@ -271,7 +271,7 @@ export function useSwap(
         tokenIn.decimals,
         tokenOut.decimals,
         undefined,
-        undefined,
+        chainId, // [P219 review] thread active chain (CoW path already did this).
         apiArgs.recipient,
       )
 
