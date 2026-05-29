@@ -8,7 +8,8 @@
  */
 
 import { parseAbi, erc20Abi } from 'viem'
-import { CHAINLINK_ETH_USD, CHAINLINK_FEEDS, NATIVE_ETH, WETH_ADDRESS } from './constants'
+import { CHAINLINK_ETH_USD, CHAINLINK_FEEDS, NATIVE_ETH, WETH_ADDRESS, CHAINLINK_MAX_STALENESS_SEC } from './constants'
+import { validateRoundData } from './chainlink'
 import { fetchCurrentPrice } from './limit-order-api'
 import { getPrivateClient } from './rpc'
 
@@ -62,11 +63,22 @@ export async function getChainlinkPriceUSD(
   if (!feedAddress) return null
 
   try {
-    const [, answer] = await getClient().readContract({
+    // [P211/FULL-H-04] Destructure ALL round fields and apply the same
+    // staleness/validity gates as the swap path (chainlink.ts). A stale or
+    // frozen round must NOT be treated as a live price for SL/TP/DCA triggers.
+    const [roundId, answer, startedAt, updatedAt, answeredInRound] = await getClient().readContract({
       address: feedAddress,
       abi: aggregatorAbi,
       functionName: 'latestRoundData',
     })
+
+    if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, CHAINLINK_MAX_STALENESS_SEC)) {
+      const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
+      console.warn(
+        `[TeraSwap] Chainlink price stale/invalid for ${tokenAddress}: round=${roundId}, answeredInRound=${answeredInRound}, age=${ageSeconds}s`,
+      )
+      return null
+    }
 
     const decimals = await getFeedDecimals(feedAddress)
     return Number(answer) / (10 ** decimals)
@@ -127,10 +139,16 @@ export async function getTokenPriceUSD(tokenAddress: string): Promise<number> {
 
 // ── Check if trigger condition is met ───────────────────────
 export function isTriggerMet(
-  currentPrice: number,
+  currentPrice: number | null,
   triggerPrice: number,
   direction: 'above' | 'below',
 ): boolean {
+  // [P211/FULL-H-04] Oracle unavailable (null) or invalid (<= 0) → never fire.
+  // Firing on stale/missing data could execute a SL/TP at the wrong price.
+  if (currentPrice === null) {
+    console.warn('[TeraSwap] Skipping trigger check — oracle unavailable')
+    return false
+  }
   if (currentPrice <= 0) return false
   if (direction === 'below') return currentPrice <= triggerPrice
   if (direction === 'above') return currentPrice >= triggerPrice

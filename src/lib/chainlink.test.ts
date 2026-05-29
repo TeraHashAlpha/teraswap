@@ -14,12 +14,13 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, chainlinkAggregatorAbi } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, chainlinkAggregatorAbi } from './chainlink'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
 // Derive the call selectors from the ABI rather than hardcoding them.
 const DECIMALS_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'decimals' }).slice(0, 10)
 const LATEST_ROUND_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'latestRoundData' }).slice(0, 10)
+const GET_ROUND_DATA_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'getRoundData', args: [1n] }).slice(0, 10)
 
 interface RoundConfig {
   decimals: number
@@ -180,5 +181,63 @@ describe('chainlink — fetchChainlinkPriceRaw [TEST-H-01]', () => {
     })
     const result = await fetchChainlinkPriceRaw(NATIVE_ETH)
     expect(result!.price).toBeCloseTo(1.23, 2)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [P211/P215/FULL-M-03] fetchHistoricalPrice round-completeness gates.
+// The binary search must never use an incomplete/invalid round as a data
+// point. A valid fresh latest round lets fetchChainlinkPriceRaw succeed; every
+// getRoundData below is invalid, so the search finds no usable point → null.
+// ─────────────────────────────────────────────────────────────
+function mockHistoricalRpc(getRound: {
+  roundId: bigint
+  answer: bigint
+  startedAt: bigint
+  updatedAt: bigint
+  answeredInRound: bigint
+}) {
+  const now = nowSec()
+  const fetchMock = vi.fn(async (_url: unknown, init: { body?: string }) => {
+    const body = JSON.parse(init.body as string)
+    const data: string = body.params[0].data
+    const selector = data.slice(0, 10).toLowerCase()
+
+    let result: `0x${string}`
+    if (selector === DECIMALS_SELECTOR) {
+      result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: 8 })
+    } else if (selector === LATEST_ROUND_SELECTOR) {
+      // Valid, fresh latest round → fetchChainlinkPriceRaw (called first) succeeds.
+      result = encodeFunctionResult({
+        abi: chainlinkAggregatorAbi,
+        functionName: 'latestRoundData',
+        result: [100n, 300_000_000_000n, now, now, 100n],
+      })
+    } else if (selector === GET_ROUND_DATA_SELECTOR) {
+      result = encodeFunctionResult({
+        abi: chainlinkAggregatorAbi,
+        functionName: 'getRoundData',
+        result: [getRound.roundId, getRound.answer, getRound.startedAt, getRound.updatedAt, getRound.answeredInRound],
+      })
+    } else {
+      throw new Error(`Unexpected selector ${selector}`)
+    }
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result }) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+describe('chainlink — fetchHistoricalPrice round completeness [P211/FULL-M-03]', () => {
+  it('skips incomplete rounds (answeredInRound < roundId)', async () => {
+    const past = nowSec() - 86_400n
+    mockHistoricalRpc({ roundId: 50n, answer: 300_000_000_000n, startedAt: past, updatedAt: past, answeredInRound: 49n })
+    expect(await fetchHistoricalPrice(NATIVE_ETH, 86_400)).toBeNull()
+  })
+
+  it('skips rounds with a zero answer', async () => {
+    const past = nowSec() - 86_400n
+    mockHistoricalRpc({ roundId: 50n, answer: 0n, startedAt: past, updatedAt: past, answeredInRound: 50n })
+    expect(await fetchHistoricalPrice(NATIVE_ETH, 86_400)).toBeNull()
   })
 })

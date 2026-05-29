@@ -111,6 +111,39 @@ export function evaluateDeviation(
   return { chainlinkPrice, executionPrice, deviation, level: 'none', message: null, oracleUnavailable: false }
 }
 
+/**
+ * [P211/FULL-H-04/M-03] Shared Chainlink round-data validity gate.
+ *
+ * Mirrors the inline guards in `fetchChainlinkPriceRaw` (the swap path) so the
+ * order-engine oracle reads — the price-monitor live read and the historical
+ * read — apply the same rigor. Returns `false` for any incomplete, invalid, or
+ * stale round.
+ *
+ *   - `answer <= 0`              → invalid / negative price
+ *   - `answeredInRound < roundId`→ answer carried over from an earlier round (stale)
+ *   - `startedAt <= 0`           → round never started (incomplete)
+ *   - `age > maxStalenessSec`    → data too old. Only applied when `maxStalenessSec`
+ *                                  is provided; omit it for historical rounds, which
+ *                                  are in the past by design.
+ */
+export function validateRoundData(
+  roundId: bigint,
+  answer: bigint,
+  startedAt: bigint,
+  updatedAt: bigint,
+  answeredInRound: bigint,
+  maxStalenessSec?: number,
+): boolean {
+  if (answer <= 0n) return false
+  if (answeredInRound < roundId) return false
+  if (startedAt <= 0n) return false
+  if (maxStalenessSec !== undefined) {
+    const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
+    if (ageSeconds > maxStalenessSec) return false
+  }
+  return true
+}
+
 // ══════════════════════════════════════════════════════════
 //  RAW RPC PRICE FETCHES (for DCA engine — no React hooks)
 // ══════════════════════════════════════════════════════════
@@ -244,13 +277,23 @@ export async function fetchHistoricalPrice(
           args: [fullRoundId],
         })
         const rdResult = await rpcCall(feed, rdData)
-        const [, answer, , updatedAt] = decodeFunctionResult({
+        const [rRoundId, answer, startedAt, updatedAt, answeredInRound] = decodeFunctionResult({
           abi: chainlinkAggregatorAbi,
           functionName: 'getRoundData',
           data: rdResult as `0x${string}`,
         }) as [bigint, bigint, bigint, bigint, bigint]
 
         calls++
+
+        // [P211/FULL-M-03] Skip incomplete/invalid rounds — never use them as a
+        // price data point. Staleness is intentionally NOT checked here:
+        // historical rounds are in the past by design. Treat an invalid round
+        // like a missing one (shrink the upper bound and keep searching).
+        if (!validateRoundData(rRoundId, answer, startedAt, updatedAt, answeredInRound)) {
+          high = mid - 1n
+          continue
+        }
+
         const ts = Number(updatedAt)
         const diff = Math.abs(ts - targetTimestamp)
 

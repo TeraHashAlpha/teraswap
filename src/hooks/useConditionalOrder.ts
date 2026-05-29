@@ -177,16 +177,22 @@ export function useConditionalOrder() {
     (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
   ).length
   useEffect(() => {
-    // [BUGFIX] Read from ref for fresh data
-    const submittedOrders = ordersRef.current.filter(o =>
-      (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
-    )
-    if (submittedOrders.length === 0) {
+    // [P212/FULL-M-05] Gate the interval on submittedCount, but read the order
+    // list FRESH from the ref INSIDE the callback. The old code closed over a
+    // snapshot captured at effect setup, so an order that transitioned to
+    // 'submitted' without changing the total count (one fills as another
+    // submits) was never polled. useLimitOrder.pollAll is the reference pattern.
+    if (submittedCount === 0) {
       if (orderPollRef.current) { clearInterval(orderPollRef.current); orderPollRef.current = null }
       return
     }
 
     async function pollOrders() {
+      // Re-read fresh on every tick — never use a stale setup-time snapshot.
+      const submittedOrders = ordersRef.current.filter(o =>
+        (o.status === 'submitted' || o.status === 'partiallyFilled') && o.orderUid
+      )
+      if (submittedOrders.length === 0) return
       for (const order of submittedOrders) {
         if (!order.orderUid) continue
         try {
@@ -328,6 +334,31 @@ export function useConditionalOrder() {
 
     // Get initial price
     const currentPrice = await getTokenPriceUSD(config.tokenIn.address)
+
+    // [P214/FULL-M-07] Reject a trigger that's already satisfied at creation —
+    // otherwise it fires on the very first poll tick (~5s) instead of waiting
+    // for a real price move. Only trigger-based orders (SL/TP) are validated;
+    // schedule-based DCA orders have no meaningful trigger price and skip this.
+    const isTriggerOrder = config.type === 'stop_loss' || config.type === 'take_profit'
+    if (isTriggerOrder) {
+      if (currentPrice > 0) {
+        if (config.triggerDirection === 'above' && currentPrice >= config.triggerPrice) {
+          throw new Error(
+            `Trigger price ($${config.triggerPrice}) must be above the current price ($${currentPrice}) for an ABOVE (take-profit) order.`,
+          )
+        }
+        if (config.triggerDirection === 'below' && currentPrice <= config.triggerPrice) {
+          throw new Error(
+            `Trigger price ($${config.triggerPrice}) must be below the current price ($${currentPrice}) for a BELOW (stop-loss) order.`,
+          )
+        }
+      } else {
+        // getTokenPriceUSD returns 0 when both the (P211 staleness-guarded)
+        // Chainlink read and the CoW fallback are unavailable. Don't block —
+        // the user accepted the trigger values; warn and proceed.
+        console.warn('[TeraSwap] Cannot validate trigger — oracle unavailable. Proceeding with user-provided values.')
+      }
+    }
 
     const newOrder: ConditionalOrder = {
       id: orderId,

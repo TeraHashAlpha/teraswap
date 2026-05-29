@@ -245,8 +245,16 @@ export function useOrderEngine() {
   // resolves — otherwise the save effect would clobber the encrypted store.
   const hasLoadedRef = useRef(false)
 
+  // [P213/FULL-M-06] Local session nonce tracking. Two orders created before
+  // wagmi re-fetches `nonces(user)` would otherwise read the same on-chain
+  // value and produce a colliding nonce (the second order unexecutable).
+  // `localNonceRef` remembers the highest nonce issued this session;
+  // `creatingRef` is a mutex that serialises createOrder calls.
+  const localNonceRef = useRef<bigint | null>(null)
+  const creatingRef = useRef(false)
+
   // ── Read current nonce + invalidated nonce from contract ──
-  const { data: currentNonce } = useReadContract({
+  const { data: currentNonce, refetch: refetchNonce } = useReadContract({
     address: ORDER_EXECUTOR_ADDRESS,
     abi: ORDER_EXECUTOR_ABI,
     functionName: 'nonces',
@@ -323,6 +331,27 @@ export function useOrderEngine() {
     void saveOrders(orders)
   }, [orders])
 
+  // ── [P213/FULL-M-06] Reset session nonce tracking on account change ──
+  // A new (or disconnected) wallet starts fresh from its own on-chain nonce —
+  // never carry over the previous account's local high-water mark.
+  useEffect(() => {
+    localNonceRef.current = null
+  }, [address])
+
+  // [P213/FULL-M-06] Next nonce for an order: max(on-chain, local+1). Defers to
+  // the on-chain value when it's higher (another session/device advanced it),
+  // otherwise increments the local high-water mark so rapid sequential creates
+  // never collide before wagmi re-fetches.
+  const getNextNonce = useCallback((): bigint => {
+    const onChainNonce = currentNonce !== undefined ? BigInt(currentNonce.toString()) : 0n
+    const localNonce = localNonceRef.current
+    const next = localNonce !== null
+      ? (localNonce + 1n > onChainNonce ? localNonce + 1n : onChainNonce)
+      : onChainNonce
+    localNonceRef.current = next
+    return next
+  }, [currentNonce])
+
   // ── Poll active orders ─────────────────────────────────
   // [BUGFIX] Compute count outside useEffect to avoid inline .filter() in deps
   const activeCount = orders.filter(o =>
@@ -386,10 +415,19 @@ export function useOrderEngine() {
   const createOrder = useCallback(async (config: CreateOrderConfig) => {
     if (!address) throw new Error('Wallet not connected')
 
+    // [P213/FULL-M-06] Serialise creates — two concurrent calls would read the
+    // same nonce before refetch and collide.
+    if (creatingRef.current) {
+      throw new Error('Order creation in progress — please wait')
+    }
+    creatingRef.current = true
+
     setIsSubmitting(true)
     const orderId = crypto.randomUUID()
 
-    const nonce = currentNonce !== undefined ? BigInt(currentNonce.toString()) : 0n
+    // [P213/FULL-M-06] Session-tracked nonce (max of on-chain and local+1)
+    // instead of the raw wagmi read, so rapid sequential creates don't collide.
+    const nonce = getNextNonce()
     const expiry = BigInt(Math.floor(Date.now() / 1000) + config.expirySeconds)
 
     // Build on-chain order struct
@@ -518,6 +556,10 @@ export function useOrderEngine() {
 
       const orderHash = row?.order_hash ?? computedHash
 
+      // [P213/FULL-M-06] Sync the on-chain nonce now that this order consumed
+      // one, so the next on-chain comparison reflects the advance.
+      refetchNonce().catch(() => {})
+
       setOrders(prev => prev.map(o =>
         o.id === orderId
           ? { ...o, orderHash, signature, status: 'active' as AutonomousOrderStatus }
@@ -540,8 +582,9 @@ export function useOrderEngine() {
       setLatestEvent({ type: 'order_error', orderId, error: errorMsg })
     } finally {
       setIsSubmitting(false)
+      creatingRef.current = false // [P213] release the create mutex
     }
-  }, [address, chainId, signTypedDataAsync, currentNonce])
+  }, [address, chainId, signTypedDataAsync, getNextNonce, refetchNonce])
 
   // ── Cancel order (on-chain + Supabase) ─────────────────
   const cancelOrder = useCallback(async (orderId: string) => {

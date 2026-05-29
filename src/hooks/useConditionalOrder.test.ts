@@ -315,6 +315,101 @@ describe('useConditionalOrder — cancel + remove', () => {
   })
 })
 
+describe('useConditionalOrder — [P214] trigger direction validation', () => {
+  it('rejects an ABOVE trigger when the current price is already above it', async () => {
+    mockGetTokenPriceUSD.mockResolvedValue(2000)
+    const { result } = renderHook(() => useConditionalOrder())
+    await expect(
+      result.current.createOrder(
+        makeConfig({ type: 'take_profit', triggerDirection: 'above', triggerPrice: 1900 }),
+      ),
+    ).rejects.toThrow(/must be above the current price/i)
+    expect(result.current.orders).toHaveLength(0)
+  })
+
+  it('rejects a BELOW trigger when the current price is already below it', async () => {
+    mockGetTokenPriceUSD.mockResolvedValue(1800)
+    const { result } = renderHook(() => useConditionalOrder())
+    await expect(
+      result.current.createOrder(
+        makeConfig({ type: 'stop_loss', triggerDirection: 'below', triggerPrice: 1900 }),
+      ),
+    ).rejects.toThrow(/must be below the current price/i)
+    expect(result.current.orders).toHaveLength(0)
+  })
+
+  it('allows a valid trigger configuration (ABOVE above current price)', async () => {
+    mockGetTokenPriceUSD.mockResolvedValue(2000)
+    const { result } = renderHook(() => useConditionalOrder())
+    await act(async () => {
+      await result.current.createOrder(
+        makeConfig({ type: 'take_profit', triggerDirection: 'above', triggerPrice: 2100 }),
+      )
+    })
+    expect(result.current.orders).toHaveLength(1)
+    expect(result.current.orders[0].status).toBe('monitoring')
+  })
+
+  it('skips trigger validation for DCA orders', async () => {
+    // Current 2000 with an ABOVE/1900 trigger would normally reject, but a DCA
+    // order has no meaningful trigger price and must be accepted regardless.
+    mockGetTokenPriceUSD.mockResolvedValue(2000)
+    const { result } = renderHook(() => useConditionalOrder())
+    await act(async () => {
+      await result.current.createOrder(
+        makeConfig({
+          type: 'DCA' as unknown as ConditionalOrderConfig['type'],
+          triggerDirection: 'above',
+          triggerPrice: 1900,
+        }),
+      )
+    })
+    expect(result.current.orders).toHaveLength(1)
+  })
+})
+
+describe('useConditionalOrder — [P212] submitted-order poll', () => {
+  // HONEST SCOPE NOTE: the exact FULL-M-05 bug — a new order entering the
+  // submitted set while the *total* submittedCount stays constant, so the
+  // gating effect never re-runs and a setup-time snapshot goes stale — cannot
+  // be reproduced through the public hook API. Every path that adds an order to
+  // the submitted set also changes submittedCount, which re-creates the interval
+  // (and a re-created interval captures fresh state even in the buggy version).
+  // Isolating it would require reaching into the private ordersRef. This test
+  // therefore verifies the observable contract of the fix — the poll covers the
+  // *live* submitted set on each tick — and does NOT claim to prove the stale
+  // closure in isolation; the fresh in-callback read is verified by inspection
+  // (useConditionalOrder.ts) and the Sprint 42 adversarial review. See FEEDBACK.md.
+  it('polls every order currently in the submitted set on each tick', async () => {
+    mockIsTriggerMet.mockReturnValue(true)
+    mockSubmitLimitOrder.mockResolvedValueOnce('uid-A').mockResolvedValueOnce('uid-B')
+    const { result } = renderHook(() => useConditionalOrder())
+
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ triggerPrice: 2900 }))
+      await result.current.createOrder(makeConfig({ triggerPrice: 2800 }))
+    })
+    // Price poll triggers both monitoring orders → both submitted (uid-A, uid-B).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PRICE_POLL_INTERVAL_MS)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.orders.filter(o => o.status === 'submitted')).toHaveLength(2)
+
+    // The order-status poll reads ordersRef.current.filter(...) inside the
+    // callback, so a single tick covers every currently-submitted order.
+    mockFetchLimitOrderStatus.mockClear()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ORDER_POLL_INTERVAL_MS)
+      await Promise.resolve()
+    })
+    const polledUids = mockFetchLimitOrderStatus.mock.calls.map(c => c[0])
+    expect(polledUids).toContain('uid-A')
+    expect(polledUids).toContain('uid-B')
+  })
+})
+
 describe('useConditionalOrder — persistence', () => {
   it('reloading the hook restores monitoring orders from localStorage', async () => {
     vi.useRealTimers()
