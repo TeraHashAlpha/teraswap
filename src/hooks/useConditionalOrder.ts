@@ -282,6 +282,31 @@ export function useConditionalOrder() {
     // Get initial price
     const currentPrice = await getTokenPriceUSD(config.tokenIn.address)
 
+    // [P214/FULL-M-07] Reject a trigger that's already satisfied at creation —
+    // otherwise it fires on the very first poll tick (~5s) instead of waiting
+    // for a real price move. Only trigger-based orders (SL/TP) are validated;
+    // schedule-based DCA orders have no meaningful trigger price and skip this.
+    const isTriggerOrder = config.type === 'stop_loss' || config.type === 'take_profit'
+    if (isTriggerOrder) {
+      if (currentPrice > 0) {
+        if (config.triggerDirection === 'above' && currentPrice >= config.triggerPrice) {
+          throw new Error(
+            `Trigger price ($${config.triggerPrice}) must be above the current price ($${currentPrice}) for an ABOVE (take-profit) order.`,
+          )
+        }
+        if (config.triggerDirection === 'below' && currentPrice <= config.triggerPrice) {
+          throw new Error(
+            `Trigger price ($${config.triggerPrice}) must be below the current price ($${currentPrice}) for a BELOW (stop-loss) order.`,
+          )
+        }
+      } else {
+        // getTokenPriceUSD returns 0 when both the (P211 staleness-guarded)
+        // Chainlink read and the CoW fallback are unavailable. Don't block —
+        // the user accepted the trigger values; warn and proceed.
+        console.warn('[TeraSwap] Cannot validate trigger — oracle unavailable. Proceeding with user-provided values.')
+      }
+    }
+
     const newOrder: ConditionalOrder = {
       id: orderId,
       config,

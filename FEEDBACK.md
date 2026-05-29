@@ -614,3 +614,17 @@ All P203/P204 findings came back **info/low** — no medium or high.
   returned `{ data, isLoading }` with no `refetch`, so `refetchNonce()` would
   throw. Updated the mock (beforeEach + the one per-test override) to expose
   `refetch` — a mandatory infra fix for a behaviour change, not new P215 coverage.
+
+## Feedback — Sprint 42 / P214 (in this commit)
+
+### Assumption clarified (price source + DCA type)
+- P214 req 1 suggests fetching via `getChainlinkPriceUSD` (which returns null on
+  stale/no feed). `createOrder` already fetches `currentPrice` via
+  `getTokenPriceUSD` (Chainlink first, CoW fallback, returns 0 on total failure).
+  Reused that value rather than adding a second fetch: it's the best-available
+  market price, and `currentPrice <= 0` is the "oracle unavailable → warn +
+  proceed" signal (equivalent to the spec's `null` check).
+- P214 req 5 says skip validation for `orderType === 'DCA'`. `useConditionalOrder`
+  only models SL/TP (`ConditionalOrderConfig.type` = 'stop_loss'|'take_profit');
+  DCA lives in `useOrderEngine`. The guard validates only the two trigger types,
+  so any non-trigger type (incl. a DCA-typed config) skips naturally.
