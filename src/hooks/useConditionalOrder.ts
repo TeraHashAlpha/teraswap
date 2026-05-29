@@ -28,21 +28,47 @@ import {
   PRICE_POLL_INTERVAL_MS,
   ORDER_POLL_INTERVAL_MS,
 } from '@/lib/conditional-order-types'
+import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
 
 // ── Persistence ─────────────────────────────────────────────
-function loadOrders(): ConditionalOrder[] {
+// [P200] Conditional orders are encrypted at rest via SecureStorage
+// (AES-256-GCM, wallet-derived key). The v2 key marks the encrypted format;
+// the legacy v1 key held plaintext JSON and is migrated + removed on first load.
+const CONDITIONAL_STORAGE_KEY_V2 = `${CONDITIONAL_STORAGE_KEY}:v2`
+
+/** Read the legacy v1 (plaintext) payload for one-time migration. */
+function readLegacyOrders(): ConditionalOrder[] {
   if (typeof window === 'undefined') return []
   try {
     const raw = localStorage.getItem(CONDITIONAL_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
+    return raw ? (JSON.parse(raw) as ConditionalOrder[]) : []
+  } catch {
+    return []
+  }
 }
 
-function saveOrders(orders: ConditionalOrder[]) {
+/**
+ * Load orders from the encrypted v2 store, transparently migrating any legacy
+ * v1 plaintext data on first run. Async because AES-GCM decryption is async.
+ */
+async function loadOrders(): Promise<ConditionalOrder[]> {
+  if (typeof window === 'undefined') return []
+  const encrypted = await secureGet<ConditionalOrder[]>(CONDITIONAL_STORAGE_KEY_V2)
+  if (encrypted && encrypted.length > 0) return encrypted
+
+  const legacy = readLegacyOrders()
+  if (legacy.length > 0) {
+    await saveOrders(legacy)
+    try { localStorage.removeItem(CONDITIONAL_STORAGE_KEY) } catch { /* ignore */ }
+    return legacy
+  }
+  return encrypted ?? []
+}
+
+/** Encrypt + persist the order list under the v2 key. */
+async function saveOrders(orders: ConditionalOrder[]): Promise<void> {
   if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(CONDITIONAL_STORAGE_KEY, JSON.stringify(orders))
-  } catch { /* silent */ }
+  await secureSet(CONDITIONAL_STORAGE_KEY_V2, orders)
 }
 
 // ── Hook ────────────────────────────────────────────────────
@@ -59,16 +85,43 @@ export function useConditionalOrder() {
   // [BUGFIX] Use ref to always access latest orders in callbacks (avoids stale closures)
   const ordersRef = useRef<ConditionalOrder[]>(orders)
   ordersRef.current = orders
+  // [P200] Guard: don't persist the initial empty array before the async load
+  // resolves — otherwise the save effect would clobber the encrypted store.
+  const hasLoadedRef = useRef(false)
 
-  // Load on mount
+  // Load (decrypt) on mount / wallet change
   useEffect(() => {
-    setOrders(loadOrders())
-  }, [])
+    hasLoadedRef.current = false
 
-  // Save on change (including clearing when empty)
+    if (!address) {
+      setOrders([])
+      return
+    }
+
+    // Derive this wallet's AES-GCM key before any secure read/write.
+    initSecureStorage(address)
+
+    let cancelled = false
+    void (async () => {
+      const local = await loadOrders()
+      if (cancelled) return
+      setOrders(prev => {
+        if (prev.length === 0) return local
+        const seen = new Set(prev.map(o => o.id))
+        return [...prev, ...local.filter(o => !seen.has(o.id))]
+      })
+      hasLoadedRef.current = true
+    })()
+
+    return () => { cancelled = true }
+  }, [address])
+
+  // Save (encrypt) on change (including clearing when empty)
   useEffect(() => {
-    // [BUGFIX] Also persist when orders array is empty — prevents stale data in localStorage
-    saveOrders(orders)
+    // [P200] Skip until the async load has populated state — otherwise the
+    // initial empty array would overwrite the encrypted store.
+    if (!hasLoadedRef.current) return
+    void saveOrders(orders)
   }, [orders])
 
   // ── Price monitoring for 'monitoring' orders ──────────────
@@ -309,7 +362,7 @@ export function useConditionalOrder() {
   const removeOrder = useCallback((orderId: string) => {
     setOrders(prev => {
       const updated = prev.filter(o => o.id !== orderId)
-      saveOrders(updated)
+      void saveOrders(updated)
       return updated
     })
   }, [])
