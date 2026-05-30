@@ -11,7 +11,8 @@
 import { encodeFunctionData } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
 import { parseSimulationError } from '@/lib/simulation'
-import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI } from '@/lib/constants'
+import { FEE_COLLECTOR_ABI } from '@/lib/constants'
+import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { safeBigInt } from '@/lib/utils'
 import type { NormalizedQuote } from '@/lib/api'
@@ -93,10 +94,16 @@ export function buildSimulationTx(params: SimulationParams): SimulationTx {
     ? ZERO_ADDRESS
     : (tokenOut.address as `0x${string}`)
 
+  // [P225] Resolve the FeeCollector per chain (mainnet === FEE_COLLECTOR_ADDRESS).
+  const feeCollectorAddress = getChainConfig(chainId ?? DEFAULT_CHAIN_ID).contracts.feeCollector
+  if (routeViaFeeCollector && !feeCollectorAddress) {
+    throw new Error(`No FeeCollector deployed on chain ${chainId ?? DEFAULT_CHAIN_ID} — cannot simulate a fee-routed swap.`)
+  }
+
   const router = tx.to
   const routerData = tx.data
 
-  const to = routeViaFeeCollector ? (FEE_COLLECTOR_ADDRESS as `0x${string}`) : router
+  const to = routeViaFeeCollector ? feeCollectorAddress! : router
   const data = routeViaFeeCollector
     ? encodeFunctionData({
         abi: FEE_COLLECTOR_ABI,

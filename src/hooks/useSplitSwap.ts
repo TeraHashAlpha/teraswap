@@ -12,7 +12,6 @@ import {
 } from '@/lib/api'
 import {
   DEFAULT_SLIPPAGE,
-  FEE_COLLECTOR_ADDRESS,
   FEE_COLLECTOR_ABI,
   FEE_BPS,
   type AggregatorName,
@@ -24,6 +23,7 @@ import type { SplitRoute, SplitLeg } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
+import { getChainConfig } from '@/lib/chains'
 
 // ── Types ──
 
@@ -203,7 +203,7 @@ export function useSplitSwap(
         // [R1] Validate recipient in calldata matches connected wallet.
         // [FULL-M-01] Direct legs reject the FeeCollector as a recipient.
         if (address) {
-          const recipientCheck = validateCallDataRecipient(calldataHex, address, routeViaFeeCollector)
+          const recipientCheck = validateCallDataRecipient(calldataHex, address, routeViaFeeCollector, chainId)
           if (!recipientCheck.valid) {
             throw new Error(`Split leg recipient mismatch: tokens would go to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet.`)
           }
@@ -268,6 +268,13 @@ export function useSplitSwap(
           : (tokenOut.address as `0x${string}`)
 
         if (routeViaFeeCollector) {
+          // [P225] Resolve the FeeCollector for the active chain (mainnet ===
+          // FEE_COLLECTOR_ADDRESS). Guard null defensively — never encode a
+          // call to the zero address.
+          const feeCollectorAddress = getChainConfig(chainId).contracts.feeCollector
+          if (!feeCollectorAddress) {
+            throw new Error(`Swaps via FeeCollector aren't available on chain ${chainId} yet.`)
+          }
           // Route through FeeCollector
           if (isNativeETH(tokenIn)) {
             const feeCollectorData = encodeFunctionData({
@@ -281,7 +288,7 @@ export function useSplitSwap(
               ],
             })
             txHash = await sendTransactionAsync({
-              to: FEE_COLLECTOR_ADDRESS as `0x${string}`,
+              to: feeCollectorAddress,
               data: feeCollectorData,
               value: legAmount,
               gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined,
@@ -300,7 +307,7 @@ export function useSplitSwap(
               ],
             })
             txHash = await sendTransactionAsync({
-              to: FEE_COLLECTOR_ADDRESS as `0x${string}`,
+              to: feeCollectorAddress,
               data: feeCollectorData,
               value: 0n,
               gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined,

@@ -872,3 +872,24 @@ These are still mainnet-pinned and MUST be made per-chain before Base's feeColle
 The activation guard (isChainActive) keeps Base gated until these are done, so nothing is
 broken today. fetchApproveSpender and v1-swap's usesFeeCollector were intentionally left at the
 mainnet default (separate surfaces; mainnet-identical).
+
+## Feedback — Sprint 45 / P225 (this commit)
+
+### Branch base: same stacking (cut from Sprint 44 HEAD, baseline 1244).
+
+### FeeCollector address resolved per-chain in the swap calldata path
+- useSwap, useSplitSwap, buildSimulationTx now resolve the FeeCollector via
+  getChainConfig(chainId).contracts.feeCollector (mainnet === FEE_COLLECTOR_ADDRESS
+  → byte-identical). A null FeeCollector with routeViaFeeCollector throws a clear
+  error rather than encoding a call to 0x0 (the activation guard should prevent it).
+- calldata-recipient.ts validateCallDataRecipient/isValidRecipient are now
+  chain-aware (chainId threaded through Inner/decodeMulticallRecipient/recursion);
+  chain 1 keeps the exact FEE_COLLECTOR_ADDRESS + V1 valid set. Callers (useSwap,
+  useSplitSwap, /api/swap) pass chainId; /api/v1/swap stays mainnet-default.
+
+### Test fix required by the new guard (included here)
+- Sprint 44's "[P221] forwards chainId" split test ran a FeeCollector-routed leg on
+  Base (8453); P225's guard now (correctly) throws because Base's FeeCollector is
+  null, so the leg errored and the test's useChainId(8453) override leaked. Switched
+  the test to a DIRECT (non-FeeCollector) leg and wrapped the mock restore in
+  try/finally so it can't leak. The chainId-forwarding assertion is unchanged.

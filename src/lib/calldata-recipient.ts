@@ -14,6 +14,7 @@
 
 import { decodeAbiParameters, type Hex } from 'viem'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
+import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,16 +124,30 @@ function isValidRecipient(
   // rejected so a compromised aggregator response can't redirect output
   // there. Default true preserves backwards-compatible behaviour.
   routeViaFeeCollector: boolean = true,
+  // [P225] Resolve the valid FeeCollector per chain. Default mainnet.
+  chainId: number = DEFAULT_CHAIN_ID,
 ): boolean {
   const validAddresses = [expected.toLowerCase()]
   if (routeViaFeeCollector) {
-    if (FEE_COLLECTOR_ADDRESS) {
-      validAddresses.push(FEE_COLLECTOR_ADDRESS.toLowerCase())
+    if (chainId === DEFAULT_CHAIN_ID) {
+      // ── Mainnet — unchanged ──
+      if (FEE_COLLECTOR_ADDRESS) {
+        validAddresses.push(FEE_COLLECTOR_ADDRESS.toLowerCase())
+      }
+      // V1 is frozen but still a legitimate recipient on historical V1-targeted
+      // calldata (e.g. retried order-engine submissions). Allowing it here means
+      // we never spuriously fail a recipient check on inherited V1 swap data.
+      validAddresses.push(FEE_COLLECTOR_V1_ADDRESS.toLowerCase())
+    } else {
+      // ── Other chains — resolve from the registry ──
+      try {
+        const cfg = getChainConfig(chainId)
+        if (cfg.contracts.feeCollector) validAddresses.push(cfg.contracts.feeCollector.toLowerCase())
+        if (cfg.contracts.feeCollectorV1) validAddresses.push(cfg.contracts.feeCollectorV1.toLowerCase())
+      } catch {
+        /* unsupported chain — only `expected` is a valid recipient */
+      }
     }
-    // V1 is frozen but still a legitimate recipient on historical V1-targeted
-    // calldata (e.g. retried order-engine submissions). Allowing it here means
-    // we never spuriously fail a recipient check on inherited V1 swap data.
-    validAddresses.push(FEE_COLLECTOR_V1_ADDRESS.toLowerCase())
   }
   return validAddresses.includes(extracted.toLowerCase())
 }
@@ -347,6 +362,7 @@ function decodeMulticallRecipient(
   expectedAddress: string,
   depth: number,
   routeViaFeeCollector: boolean,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): RecipientCheckResult {
   if (depth > 0) {
     // [SEC-04] Fail-closed: a nested multicall would let an adapter wrap
@@ -405,7 +421,7 @@ function decodeMulticallRecipient(
 
   // Recursively validate the first inner call only
   const firstCall = innerCalls[0] as string
-  return validateCallDataRecipientInner(firstCall, expectedAddress, depth + 1, routeViaFeeCollector)
+  return validateCallDataRecipientInner(firstCall, expectedAddress, depth + 1, routeViaFeeCollector, chainId)
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +433,7 @@ function validateCallDataRecipientInner(
   expectedAddress: string,
   depth: number,
   routeViaFeeCollector: boolean,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): RecipientCheckResult {
   try {
     if (!calldata || calldata.length < 10) {
@@ -446,10 +463,10 @@ function validateCallDataRecipientInner(
     if (V2_SELECTORS.includes(selector)) {
       const recipient = decodeV2Recipient(selector, data)
       return {
-        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector),
+        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId),
         extracted: recipient,
         implicitRecipient: false,
-        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector) && {
+        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId) && {
           reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
         }),
       }
@@ -460,10 +477,10 @@ function validateCallDataRecipientInner(
     if (V3_SELECTORS.includes(selector)) {
       const recipient = decodeV3Recipient(selector, data)
       return {
-        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector),
+        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId),
         extracted: recipient,
         implicitRecipient: false,
-        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector) && {
+        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId) && {
           reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
         }),
       }
@@ -474,10 +491,10 @@ function validateCallDataRecipientInner(
     if (ONEINCH_SELECTORS.includes(selector)) {
       const recipient = decode1inchRecipient(selector, data)
       return {
-        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector),
+        valid: isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId),
         extracted: recipient,
         implicitRecipient: false,
-        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector) && {
+        ...(!isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId) && {
           reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
         }),
       }
@@ -486,7 +503,7 @@ function validateCallDataRecipientInner(
     // Group E — Multicall wrappers
     const MULTICALL_SELECTORS = ['0xac9650d8', '0x5ae401dc']
     if (MULTICALL_SELECTORS.includes(selector)) {
-      return decodeMulticallRecipient(selector, data, expectedAddress, depth, routeViaFeeCollector)
+      return decodeMulticallRecipient(selector, data, expectedAddress, depth, routeViaFeeCollector, chainId)
     }
 
     // [API-M-02] Unknown selector — fail closed
@@ -522,6 +539,8 @@ export function validateCallDataRecipient(
   // haven't been updated; direct-route callers pass false to reject the
   // FeeCollector as a valid recipient.
   routeViaFeeCollector: boolean = true,
+  // [P225] Target chain — resolves the per-chain FeeCollector in the valid set. Default mainnet.
+  chainId: number = DEFAULT_CHAIN_ID,
 ): RecipientCheckResult {
-  return validateCallDataRecipientInner(calldata, expectedAddress, 0, routeViaFeeCollector)
+  return validateCallDataRecipientInner(calldata, expectedAddress, 0, routeViaFeeCollector, chainId)
 }

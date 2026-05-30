@@ -528,28 +528,33 @@ describe('useSplitSwap — [P221] chainId threading', () => {
   it('forwards the active chainId to each per-leg swap API call', async () => {
     const wagmi = await import('wagmi')
     ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
-
-    const bodies: Array<Record<string, unknown>> = []
-    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
-      bodies.push(JSON.parse((init?.body as string) ?? '{}'))
-      return new Response(JSON.stringify(makeQuote()), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
+    // [P225] Use a DIRECT (non-FeeCollector) leg: Base has no FeeCollector
+    // deployed yet, so a fee-routed leg would (correctly) throw. We only assert
+    // that chainId reaches the per-leg API body — which happens before routing.
+    mockUsesFeeCollector.mockReturnValue(false)
+    try {
+      const bodies: Array<Record<string, unknown>> = []
+      vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
+        bodies.push(JSON.parse((init?.body as string) ?? '{}'))
+        return new Response(JSON.stringify(makeQuote()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
       })
-    })
 
-    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
-    const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
-    await waitFor(() => expect(result.current.status).toBe('success'))
+      const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+      const route = makeSplitRoute(makeLeg('1inch', 100))
+      await act(async () => {
+        await result.current.execute(route)
+      })
+      await waitFor(() => expect(result.current.status).toBe('success'))
 
-    expect(bodies.length).toBeGreaterThan(0)
-    expect(bodies[0]).toHaveProperty('chainId', 8453)
-
-    // Restore so later suites see the default chain.
-    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
+      expect(bodies.length).toBeGreaterThan(0)
+      expect(bodies[0]).toHaveProperty('chainId', 8453)
+    } finally {
+      // Always restore so later suites see the default chain (even if asserts throw).
+      ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
+    }
   })
 })
 
