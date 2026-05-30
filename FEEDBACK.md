@@ -832,3 +832,19 @@ bootstrap:
   untouched and everything still resolves (constants must not import routers.ts to
   avoid a cycle). validateRouterAddress callers (useSwap/useSplitSwap) now pass
   chainId; v1-swap left at the mainnet default (separate public API surface).
+
+## Feedback — Sprint 44 / P223 (this commit)
+
+### Notes / minor deviations
+- getFeeIncompatibleSources(chainId) lives in src/lib/chains/activation.ts (chain
+  logic) rather than constants.ts (spec's Files-affected), referencing the
+  canonical FEE_INCOMPATIBLE_SOURCES for chain 1. It is NOT yet wired into
+  api.ts's usesFeeCollector() — that wiring is part of Base activation, and is
+  moot today because Base's FeeCollector is null (usesFeeCollector already returns
+  false on Base via isFeeCollectorActive). constants.ts left untouched.
+- useQuote already effectively skipped non-mainnet quotes via SwapBox's
+  `enabled = isConnected && isCorrectChain` gate (isCorrectChain is mainnet-only).
+  The new isChainActive(chainId) gate in doFetch is the explicit, intended guard
+  (belt-and-suspenders + correct once Base activates). Mainnet is active → never skips.
+- SwapBox: "Coming Soon on {chainName}" banner + disabled swap button when
+  !isChainActive; token selector + amount stay usable. Mainnet (active) unchanged.
