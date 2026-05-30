@@ -524,6 +524,35 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
   })
 })
 
+describe('useSplitSwap — [P221] chainId threading', () => {
+  it('forwards the active chainId to each per-leg swap API call', async () => {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
+
+    const bodies: Array<Record<string, unknown>> = []
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
+      bodies.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response(JSON.stringify(makeQuote()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+
+    expect(bodies.length).toBeGreaterThan(0)
+    expect(bodies[0]).toHaveProperty('chainId', 8453)
+
+    // Restore so later suites see the default chain.
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
+  })
+})
+
 describe('useSplitSwap — reset()', () => {
   it('returns to idle and clears legs after an error', async () => {
     mockSwapFetch(() => makeQuote({ data: '0x' }))
