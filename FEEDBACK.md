@@ -646,6 +646,130 @@ All P203/P204 findings came back **info/low** — no medium or high.
   test's claim was over-stated. **Architect:** if a regression guard for the exact
   stale-closure is required, the hook needs a testing seam (e.g. exposing the poll
   filter as a pure helper) — out of scope for an L2-inactive hook this sprint.
+
+## Feedback — Sprint 43 / P216 (this commit)
+
+### Assumption that turned out wrong (branch base)
+- SPRINT-43.md says branch "from main" with "Sprint 42 merged" as prerequisite,
+  but Sprint 42 isn't merged (same stacking as 40→41→42). Cut
+  feat/sprint-43-multi-chain-foundation from the Sprint 42 HEAD to preserve the
+  1219 baseline. **Action:** merge 40→41→42→43 in order, or rebase post-merge.
+
+### Decision (registry references constants, NOT the reverse) — for the CRITICAL "mainnet identical" constraint
+- The spec asks to MOVE FEE_COLLECTOR_ADDRESS / PERMIT2_ADDRESS / COW_VAULT_RELAYER /
+  etc. into the registry and re-export them from constants.ts. I inverted this: the
+  mainnet ChainConfig REFERENCES the existing constants, and constants.ts is left
+  UNTOUCHED. Rationale: (1) FEE_COLLECTOR_ADDRESS is env-var-derived
+  (process.env.NEXT_PUBLIC_FEE_COLLECTOR || default) — relocating that read risks a
+  subtle behavioural change; (2) re-exporting `X = getChainConfig(1).contracts.X`
+  widens `as const` literal types to `0x${string}` and creates a constants→registry
+  import while registry→constants already exists (cycle risk). Referencing instead
+  GUARANTEES getChainConfig(1).contracts.* === the live constants and keeps mainnet
+  byte-identical. Backward-compat criterion ("existing code using CHAIN_ID/
+  FEE_COLLECTOR_ADDRESS continues to work") holds trivially since constants.ts is
+  unchanged. P216 therefore touches only the 3 new files, not constants.ts.
+  **Architect:** if you want the registry to be the literal source of truth later,
+  that's a follow-up refactor once Base is live and the identical-mainnet risk is moot.
+
+## Feedback — Sprint 43 / P217 (this commit)
+
+### Assumptions that turned out wrong
+- Spec step 4 says "fetchMetaQuote and fetchSwapData already accept chainId via
+  QuoteParams.chainId." Not true: QuoteParams had NO chainId (only SwapParams did),
+  and fetchMetaQuote took no chainId arg. Added chainId? to QuoteParams and a
+  chainId? param to fetchMetaQuote, threaded into each adapter.fetchQuote call.
+  All default to DEFAULT_CHAIN_ID (1) → mainnet unchanged.
+- Spec categorizes Balancer as a "chainId param" adapter, but the code encodes the
+  chain in the PATH (`/order/1`). Parameterized as `/order/${chainId}` instead.
+
+### Decisions (for the CRITICAL "mainnet identical" constraint)
+- **0x**: currently sends NO chainId and works on mainnet (0x v2 defaults to ETH).
+  To keep the mainnet request byte-identical, the chainId query param is attached
+  ONLY when chainId !== 1. Base gets `chainId=8453`; mainnet is unchanged.
+- **Quote cache key**: made chain-aware (added chainId to KeyInput) but the suffix
+  is appended ONLY for non-mainnet chains, so the chainId=1 key is byte-identical
+  and existing mainnet cache hits are unaffected. Prevents Base/mainnet collision.
+- **getAdapterApiUrl is now the URL source of truth** for the 8 API adapters; for
+  chainId=1 every URL exactly matches the legacy AGGREGATOR_APIS[source].base.
+  AGGREGATOR_APIS[source].base is now redundant for those 8 (still used for `.key`
+  on 1inch/0x) — left in place per the Do-NOT (don't remove constants). A future
+  cleanup could derive one from the other.
+
+## Feedback — Sprint 43 / P218 (this commit)
+
+### Conservative Base feed population (per the Do-NOT)
+- Only the verified Base ETH/USD feed (0x71041…, spec-provided) is added to
+  CHAINLINK_FEEDS_BY_CHAIN[8453]. The Do-NOT prefers no-feed (→ DefiLlama/fail-safe)
+  over a wrong feed, and I couldn't independently verify the other Base proxies
+  (USDC/USD, DAI/USD, cbETH/USD) to mainnet-grade confidence. **Architect:** verify
+  the remaining Base feeds against data.chain.link and add them in a follow-up.
+
+### Sequencer-check client wiring (dormant until Base activates)
+- isSequencerUp is fully implemented + integrated into all three oracle reads
+  (fetchChainlinkPriceRaw, fetchHistoricalPrice via it, price-monitor.getChainlinkPriceUSD),
+  gated on chainId !== 1 so mainnet is untouched. The viem client passed in is the
+  current default (getPrivateClient/getClient — mainnet). For a real Base read the
+  client must target a Base RPC; that per-chain client resolution is a follow-up for
+  when Base goes live (no Base RPC / FeeCollector yet, so this path is dormant). The
+  function itself is correct and unit-tested against a mocked client.
+
+### Decision (constants.ts not modified — approach B, consistent with P216)
+- Spec asks constants.ts to re-export CHAINLINK_FEEDS from the new registry. Instead
+  chainlink-feeds.ts REFERENCES constants.CHAINLINK_FEEDS for chain 1 (guaranteeing
+  identical mainnet feeds, no circular import). constants.ts is unchanged; backward
+  compat holds trivially. getChainlinkFeed moved to chainlink-feeds.ts and is
+  re-exported from chainlink.ts so existing imports keep working.
+
+## Feedback — Sprint 43 / P219 (this commit)
+
+### Deferred to the Base-activation sprint (with reasons) — token catalog + quote threading
+- **Per-chain token catalog / TokenSelector filtering (NOT done):** src/lib/tokens.ts
+  holds a rich MAINNET catalog (addresses, categories, logos); there is no Base
+  catalog. TokenSelector's `isCorrectChain = chain?.id === CHAIN_ID` gate is in fact
+  CORRECT to leave as-is — the DEFAULT_TOKENS are mainnet addresses, so fetching
+  their balances on Base would be wrong. Building a Base token catalog is a real
+  data task and Base swaps are "Coming Soon" (disabled), so per-chain token
+  filtering + the SwapBox token-reset-to-chain-defaults are deferred. Left
+  TokenSelector untouched to avoid a wrong/risky change to the mainnet path.
+- **useQuote → /api/quote → fetchMetaQuote chainId threading (partial):** useQuote
+  now reads useActiveChainId and includes it in the doFetch deps, so switching
+  chains supersedes the in-flight quote (AbortController) and refetches. It does
+  NOT yet append chainId to the /api/quote request — that needs the API route +
+  fetchMetaQuote call wired (fetchMetaQuote already ACCEPTS chainId from P217).
+  Deferred because Base quotes aren't active and the route isn't in P219's scope;
+  it's a ~1-line change when Base activates. On mainnet chainId is constant (1), so
+  the added dep never triggers an extra fetch → behaviour unchanged.
+
+### Done
+- wagmiConfig: Base added to chains + transport (mainnet stays default/first).
+- useActiveChainId hook (defaults to mainnet).
+- ChainSelector component (registry-driven; Base flagged "Soon" while
+  feeCollector === null; switchable).
+- Header: ChainSelector replaces the static "Ethereum" pill.
+- useSwap: swap-state reset on chain switch (mirrors the FULL-M-04 account-switch
+  reset; ref-gated so mainnet never fires it).
+
+## Feedback — Sprint 43 / P219 review (this commit)
+
+### Confirmed gap (adversarial review) + the deferred quote-threading — both resolved
+- **Swap path (confirmed CRITICAL by review):** useSwap's STANDARD swap path passed
+  chainId=undefined to fetchSwapViaApi while the CoW path passed chainId — an
+  asymmetry that left standard swaps not chain-aware. Not a mainnet regression
+  (undefined→1→identical) and Base swaps are gated, but a real inconsistency.
+  Fixed: the standard path now passes `chainId` (the /api/swap route already
+  forwarded it — one-line wire-up).
+- **Quote path (was documented as deferred in P219):** completed it for symmetry.
+  fetchQuoteViaApi now takes chainId and appends `?chainId=` ONLY for non-mainnet
+  chains; /api/quote (GET + POST) reads it and passes it to fetchMetaQuote (which
+  has accepted chainId since P217). useQuote passes useActiveChainId.
+- **Mainnet byte-identical preserved:** on mainnet, useSwap sends chainId=1 (route
+  treats 1 === default → identical adapter URL/calldata; 0x conditional param not
+  added) and useQuote omits the chainId query entirely (request unchanged, cache
+  key unchanged). 1233 tests still green.
+- **Net effect:** the multi-chain quote AND swap paths are now chain-aware
+  end-to-end. The only remaining deferral is the per-chain TOKEN CATALOG
+  (TokenSelector / token addresses), which still needs the Base catalog built
+  before Base swaps can be enabled — tracked for the Base-activation sprint.
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong

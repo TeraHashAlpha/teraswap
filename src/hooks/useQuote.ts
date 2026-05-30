@@ -8,6 +8,7 @@ import type { Token } from '@/lib/tokens'
 import { logQuoteToSupabase } from '@/lib/analytics'
 import { analyzeGasless } from '@/lib/gasless-engine'
 import { useEthGasCost } from './useEthGasCost'
+import { useActiveChainId } from './useChainId'
 
 /**
  * Typed error carrying the /api/quote HTTP status. Lets the hook
@@ -38,6 +39,9 @@ async function fetchQuoteViaApi(
   srcDecimals: number,
   dstDecimals: number,
   excludeSources?: string[],
+  // [P219 review] Target chain — appended to the query only for non-mainnet
+  // chains so the mainnet request is byte-identical to the pre-multi-chain one.
+  chainId?: number,
   // [P208 / FULL-L-01] Lets the caller abort a superseded request when the
   // token pair or amount changes mid-flight. AbortError is swallowed by the
   // caller — it means a newer request already took over.
@@ -52,6 +56,9 @@ async function fetchQuoteViaApi(
   })
   if (excludeSources && excludeSources.length > 0) {
     params.set('exclude', excludeSources.join(','))
+  }
+  if (chainId && chainId !== 1) {
+    params.set('chainId', String(chainId))
   }
 
   const res = await fetch(`/api/quote?${params}`, signal ? { signal } : undefined)
@@ -86,6 +93,11 @@ export function useQuote(
   excludeSources?: string[],
 ): UseQuoteResult {
   const { address } = useAccount()
+  // [P219] Active chain — switching chains supersedes the current quote (the
+  // AbortController in doFetch cancels the stale in-flight request). On mainnet
+  // this never changes, so quote behaviour is unchanged. End-to-end chainId →
+  // /api/quote threading is deferred to the Base-activation sprint (see FEEDBACK).
+  const activeChainId = useActiveChainId()
   const { estimate: estimateGasCost } = useEthGasCost()
   const [meta, setMeta] = useState<MetaQuoteResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -185,6 +197,7 @@ export function useQuote(
         tokenIn.decimals,
         tokenOut.decimals,
         excludeSources,
+        activeChainId,
         signal,
       )
 
@@ -259,7 +272,7 @@ export function useQuote(
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenIn, tokenOut, debouncedAmount, address, excludeKey, rearmPollTimer])
+  }, [tokenIn, tokenOut, debouncedAmount, address, excludeKey, rearmPollTimer, activeChainId])
 
   // [hotfix] doFetchRef anchors the latest doFetch for the
   // setInterval callback in rearmPollTimer — without it the timer

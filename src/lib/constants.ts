@@ -69,6 +69,7 @@ export type AggregatorName = keyof typeof AGGREGATOR_APIS
 const COW_API_URLS: Record<number, string> = {
   1: 'https://api.cow.fi/mainnet/api/v1',
   100: 'https://api.cow.fi/xdai/api/v1',
+  8453: 'https://api.cow.fi/base/api/v1', // [P217] Base L2
 }
 export function getCowApiBase(chainId: number): string {
   return COW_API_URLS[chainId] || COW_API_URLS[1]

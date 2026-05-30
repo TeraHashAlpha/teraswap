@@ -322,7 +322,9 @@ export async function pollCowOrderStatus(
 
 // Adapter: fetchQuote uses fetchCowSwapQuote, fetchSwapData uses fetchCowSwapOrder
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  return fetchCowSwapQuote(params.src, params.dst, params.amount)
+  // [P217] Thread chainId so Base quotes hit the Base CoW orderbook.
+  // Undefined → fetchCowSwapQuote defaults to CHAIN_ID (mainnet), unchanged.
+  return fetchCowSwapQuote(params.src, params.dst, params.amount, params.chainId)
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {

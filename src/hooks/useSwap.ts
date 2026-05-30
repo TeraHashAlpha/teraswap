@@ -190,6 +190,24 @@ export function useSwap(
     prevAddressRef.current = address
   }, [address])
 
+  // [P219] Reset swap state on chain switch — a pendingSwap (router calldata,
+  // FeeCollector address, minimumOutput) built for chain A must never carry
+  // over to chain B. Ref comparison fires only on an actual chain change, so
+  // staying on mainnet leaves all existing behaviour untouched.
+  const prevChainIdRef = useRef(chainId)
+  useEffect(() => {
+    if (prevChainIdRef.current !== chainId) {
+      setPendingSwap(null)
+      setStatus('idle')
+      setErrorMessage(null)
+      setCowOrderUid(null)
+      setTxHashState(undefined)
+      setSimulationPassed(null)
+      setSimulationSkipped(false)
+    }
+    prevChainIdRef.current = chainId
+  }, [chainId])
+
   const {
     sendTransaction,
     data: swapHash,
@@ -253,7 +271,7 @@ export function useSwap(
         tokenIn.decimals,
         tokenOut.decimals,
         undefined,
-        undefined,
+        chainId, // [P219 review] thread active chain (CoW path already did this).
         apiArgs.recipient,
       )
 

@@ -1,4 +1,5 @@
-import { AGGREGATOR_APIS, CHAIN_ID, DEFAULT_SLIPPAGE } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE } from '@/lib/constants'
+import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
@@ -20,13 +21,13 @@ function odosHeaders(): Record<string, string> {
 }
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount } = params
-  const { base } = AGGREGATOR_APIS.odos
+  const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('odos', chainId)
   const res = await fetch(`${base}/sor/quote/v3`, {
     method: 'POST',
     headers: odosHeaders(),
     body: JSON.stringify({
-      chainId: CHAIN_ID,
+      chainId,
       inputTokens: [{ tokenAddress: src, amount }],
       outputTokens: [{ tokenAddress: dst, proportion: 1 }],
       userAddr: '0x0000000000000000000000000000000000000000',
@@ -53,15 +54,15 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient } = params
-  const { base } = AGGREGATOR_APIS.odos
+  const { src, dst, amount, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('odos', chainId)
 
   // Step 1: quote via v3
   const quoteRes = await fetch(`${base}/sor/quote/v3`, {
     method: 'POST',
     headers: odosHeaders(),
     body: JSON.stringify({
-      chainId: CHAIN_ID,
+      chainId,
       inputTokens: [{ tokenAddress: src, amount }],
       outputTokens: [{ tokenAddress: dst, proportion: 1 }],
       userAddr: from,

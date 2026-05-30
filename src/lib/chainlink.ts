@@ -1,13 +1,17 @@
 import { encodeFunctionData, decodeFunctionResult } from 'viem'
 import {
-  CHAINLINK_ETH_USD,
-  CHAINLINK_FEEDS,
-  NATIVE_ETH,
-  WETH_ADDRESS,
   PRICE_DEVIATION_WARN,
   PRICE_DEVIATION_BLOCK,
   CHAINLINK_MAX_STALENESS_SEC,
 } from './constants'
+import { getChainlinkFeed } from './chains/chainlink-feeds'
+import { isSequencerUp } from './chains/sequencer-check'
+import { DEFAULT_CHAIN_ID } from './chains/registry'
+import { getPrivateClient } from './rpc'
+
+// [P218] getChainlinkFeed moved to the per-chain registry; re-export so
+// existing `import { getChainlinkFeed } from '@/lib/chainlink'` keeps working.
+export { getChainlinkFeed } from './chains/chainlink-feeds'
 
 // ── Chainlink AggregatorV3 ABI (minimal) ─────────────────
 export const chainlinkAggregatorAbi = [
@@ -59,19 +63,6 @@ export interface PriceCheck {
 }
 
 // ── Helpers ──────────────────────────────────────────────
-
-/**
- * Get Chainlink feed address for a token.
- * ETH/WETH → ETH/USD feed.
- * Returns null if no feed exists.
- */
-export function getChainlinkFeed(tokenAddress: string): `0x${string}` | null {
-  const addr = tokenAddress.toLowerCase()
-  if (addr === NATIVE_ETH.toLowerCase() || addr === WETH_ADDRESS.toLowerCase()) {
-    return CHAINLINK_ETH_USD
-  }
-  return CHAINLINK_FEEDS[addr] ?? null
-}
 
 /**
  * Evaluate price deviation between Chainlink oracle and swap execution price.
@@ -177,9 +168,21 @@ async function rpcCall(to: string, data: string): Promise<string> {
  */
 export async function fetchChainlinkPriceRaw(
   tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
-  const feed = getChainlinkFeed(tokenAddress)
+  const feed = getChainlinkFeed(tokenAddress, chainId)
   if (!feed) return null
+
+  // [P218] L2 sequencer-uptime gate — never price on a down/recovering
+  // sequencer. Mainnet (DEFAULT_CHAIN_ID) has no sequencer feed and skips this,
+  // so the mainnet path is unchanged.
+  if (chainId !== DEFAULT_CHAIN_ID) {
+    const seqUp = await isSequencerUp(chainId, getPrivateClient())
+    if (!seqUp) {
+      console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
+      return null
+    }
+  }
 
   // Fetch decimals
   const decData = encodeFunctionData({
@@ -227,13 +230,14 @@ export async function fetchChainlinkPriceRaw(
 export async function fetchHistoricalPrice(
   tokenAddress: string,
   targetAgeSeconds: number = 86400, // default 24h
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<{ price: number; timestamp: number } | null> {
-  const feed = getChainlinkFeed(tokenAddress)
+  const feed = getChainlinkFeed(tokenAddress, chainId)
   if (!feed) return null
 
   try {
-    // Get current round info
-    const current = await fetchChainlinkPriceRaw(tokenAddress)
+    // Get current round info (also runs the L2 sequencer gate via fetchChainlinkPriceRaw)
+    const current = await fetchChainlinkPriceRaw(tokenAddress, chainId)
     if (!current) return null
 
     const targetTimestamp = current.updatedAt - targetAgeSeconds

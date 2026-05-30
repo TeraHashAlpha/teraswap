@@ -41,10 +41,13 @@ export async function fetchMetaQuote(
   srcDecimals: number = 18,
   dstDecimals: number = 18,
   excludeSources?: string[],
+  /** [P217] Target chain. Omitted → mainnet (DEFAULT_CHAIN_ID), so existing
+   *  callers (which don't pass it) keep mainnet behaviour exactly. */
+  chainId?: number,
 ): Promise<MetaQuoteResult> {
   // [P188] Server-side cache — check BEFORE the rate limiter so a
   // cache hit never costs a token in the outbound budget.
-  const cacheKey = quoteCacheKey({ src, dst, amount, srcDecimals, dstDecimals, excludeSources })
+  const cacheKey = quoteCacheKey({ src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId })
   const cached = getCachedQuote(cacheKey)
   if (cached) return cached
 
@@ -64,7 +67,7 @@ export async function fetchMetaQuote(
     })
     .map(a => ({
       name: a.name,
-      fetch: () => a.fetchQuote({ src, dst, amount, srcDecimals, dstDecimals }) as Promise<NormalizedQuote>,
+      fetch: () => a.fetchQuote({ src, dst, amount, srcDecimals, dstDecimals, chainId }) as Promise<NormalizedQuote>,
     }))
 
   // [CB-01] Skip sources with OPEN circuit breaker

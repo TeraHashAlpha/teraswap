@@ -1,10 +1,10 @@
-import { AGGREGATOR_APIS, CHAIN_ID } from '@/lib/constants'
+import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, srcDecimals = 18, dstDecimals = 18 } = params
-  const { base } = AGGREGATOR_APIS.velora
+  const { src, dst, amount, srcDecimals = 18, dstDecimals = 18, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('velora', chainId)
   const qs = new URLSearchParams({
     srcToken: src,
     destToken: dst,
@@ -12,7 +12,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     srcDecimals: srcDecimals.toString(),
     destDecimals: dstDecimals.toString(),
     side: 'SELL',
-    network: CHAIN_ID.toString(),
+    network: chainId.toString(),
     version: '6.2',
   })
   const res = await fetch(`${base}/prices?${qs}`, {
@@ -36,8 +36,8 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient, srcDecimals = 18, dstDecimals = 18 } = params
-  const { base } = AGGREGATOR_APIS.velora
+  const { src, dst, amount, from, slippage, recipient, srcDecimals = 18, dstDecimals = 18, chainId = DEFAULT_CHAIN_ID } = params
+  const base = getAdapterApiUrl('velora', chainId)
 
   // Step 1: get price route
   const priceParams = new URLSearchParams({
@@ -45,7 +45,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     srcDecimals: srcDecimals.toString(),
     destDecimals: dstDecimals.toString(),
     side: 'SELL',
-    network: CHAIN_ID.toString(),
+    network: chainId.toString(),
     version: '6.2',
   })
   const priceRes = await fetch(`${base}/prices?${priceParams}`, {
@@ -67,7 +67,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     txOrigin: from,
     deadline: Math.floor(Date.now() / 1000) + 600,
   }
-  const txRes = await fetch(`${base}/transactions/${CHAIN_ID}?ignoreChecks=true&ignoreGasEstimate=true&onlyParams=false`, {
+  const txRes = await fetch(`${base}/transactions/${chainId}?ignoreChecks=true&ignoreGasEstimate=true&onlyParams=false`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(txBody),

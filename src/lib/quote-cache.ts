@@ -32,6 +32,8 @@ interface KeyInput {
   srcDecimals: number
   dstDecimals: number
   excludeSources?: string[]
+  /** [P217] Target chain — keeps Base quotes from colliding with mainnet. */
+  chainId?: number
 }
 
 export function quoteCacheKey({
@@ -41,11 +43,16 @@ export function quoteCacheKey({
   srcDecimals,
   dstDecimals,
   excludeSources,
+  chainId,
 }: KeyInput): string {
   const exclude = excludeSources && excludeSources.length > 0
     ? [...excludeSources].map((s) => s.toLowerCase()).sort().join(',')
     : ''
-  return `${src.toLowerCase()}|${dst.toLowerCase()}|${amount}|${srcDecimals}|${dstDecimals}|${exclude}`
+  // [P217] Append the chain only for non-mainnet chains, so the chainId=1
+  // (default) key is byte-identical to the pre-multi-chain key and existing
+  // mainnet cache entries/hits are unaffected.
+  const chainSuffix = chainId && chainId !== 1 ? `|${chainId}` : ''
+  return `${src.toLowerCase()}|${dst.toLowerCase()}|${amount}|${srcDecimals}|${dstDecimals}|${exclude}${chainSuffix}`
 }
 
 export function getQuote(key: string): MetaQuoteResult | undefined {

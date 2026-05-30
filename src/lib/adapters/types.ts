@@ -127,6 +127,9 @@ export interface QuoteParams {
   amount: string
   srcDecimals?: number
   dstDecimals?: number
+  /** [P217] Target chain. Defaults to DEFAULT_CHAIN_ID (1, mainnet) when omitted,
+   *  preserving all existing single-chain behaviour. */
+  chainId?: number
 }
 
 // [11-L-03] Per-adapter quoteMeta interfaces — discriminated by `source`.
