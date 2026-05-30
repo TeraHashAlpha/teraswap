@@ -185,7 +185,7 @@ export function useSplitSwap(
         if (!swapData.tx) throw new Error('No transaction data returned')
 
         // Validate router
-        const routerCheck = validateRouterAddress(swapData.tx.to, source)
+        const routerCheck = validateRouterAddress(swapData.tx.to, source, chainId)
         if (!routerCheck.valid) throw new Error(routerCheck.reason || 'Router not whitelisted')
 
         // FE-HIGH-01: Calldata validations (mirrors useSwap.ts safety checks)

@@ -280,7 +280,7 @@ export function useSwap(
       }
 
       // Security: validate swap target is a known router (SushiSwap RouteProcessor2 lesson)
-      const routerCheck = validateRouterAddress(swapData.tx.to, source)
+      const routerCheck = validateRouterAddress(swapData.tx.to, source, chainId)
       if (!routerCheck.valid) {
         throw new Error(routerCheck.reason || 'Swap target address not whitelisted')
       }

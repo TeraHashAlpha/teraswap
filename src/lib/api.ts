@@ -19,6 +19,8 @@ import {
   friendlyError,
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
+import { isWhitelistedRouter } from './chains/routers'
+import { DEFAULT_CHAIN_ID } from './chains/registry'
 import type { NormalizedQuote, MetaQuoteResult, QuoteMeta } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
@@ -370,10 +372,16 @@ export const ROUTER_WHITELIST: Set<string> = new Set([
 export function validateRouterAddress(
   txTo: string,
   source: AggregatorName,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): { valid: boolean; reason?: string } {
   const normalized = txTo.toLowerCase()
 
-  if (ROUTER_WHITELIST.has(normalized)) {
+  // [P222] Mainnet uses the existing ROUTER_WHITELIST set verbatim (byte-
+  // identical behaviour). Other chains delegate to the per-chain whitelist.
+  const whitelisted = chainId === DEFAULT_CHAIN_ID
+    ? ROUTER_WHITELIST.has(normalized)
+    : isWhitelistedRouter(normalized, chainId)
+  if (whitelisted) {
     return { valid: true }
   }
 

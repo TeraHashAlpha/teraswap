@@ -28,6 +28,7 @@ import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
+import { useActiveChainId } from '@/hooks/useChainId'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -118,6 +119,9 @@ export default function SwapBox() {
     [rawMeta, mevProtected],
   )
 
+  // [P222] Active chain — feeds the chain-aware spender allowlist below.
+  const activeChainId = useActiveChainId()
+
   // Play subtle sound when a new quote arrives
   // [BUGFIX] Use AbortController to cancel stale spender fetch on rapid source changes
   useEffect(() => {
@@ -131,7 +135,7 @@ export default function SwapBox() {
             // [FULL-H-02] Validate the spender against the client-side
             // allowlist before trusting it. A compromised /api/spender
             // response must never let the user approve an attacker address.
-            if (!isTrustedSpender(data.spender)) {
+            if (!isTrustedSpender(data.spender, activeChainId)) {
               console.error('[Security] Untrusted spender address from /api/spender:', data.spender)
               setSpender(undefined)
               toast({ type: 'error', title: 'Swap unavailable', description: 'Spender validation failed. Please try again or choose another route.' })
@@ -145,7 +149,7 @@ export default function SwapBox() {
       // [BUGFIX] Clear spender when MEV filter nullifies meta
       setSpender(undefined)
     }
-  }, [meta?.best.source])
+  }, [meta?.best.source, activeChainId])
 
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } =
     useApproval(tokenIn, amountIn, spender)

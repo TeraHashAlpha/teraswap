@@ -793,3 +793,42 @@ All P203/P204 findings came back **info/low** — no medium or high.
   getChainTokenList(chainId). Popular chips keep the exact POPULAR_SYMBOLS order
   on mainnet. Base balances stay unfetched (the CHAIN_ID gate in useTokenBalances
   is correctly left mainnet-only — DEFAULT_TOKENS are mainnet addresses).
+
+## Feedback — Sprint 44 / P222 (this commit)
+
+### Base router addresses — researched + verified (all HIGH confidence)
+A parallel research workflow verified each Base (8453) router against Basescan +
+official sources. Caveats worth the Architect's attention before FeeCollector
+bootstrap:
+- **0x**: Base uses the v2 stack, NOT the mainnet Exchange Proxy. Whitelisted the
+  AllowanceHolder (0x0000000000001fF3684f28c67538d4D072C22734). 0x's Settler is a
+  runtime-resolved address and must NOT be hardcoded — confirm `allowanceTarget`
+  per-quote at integration time.
+- **Odos**: mainnet entry is Router V2 (0xCf55…), so the version-matched Base
+  router is Odos V2 (0x19cEeAd7…). If we migrate to Odos V3 the Base spender
+  changes to 0x0D05a7D3… (same address cross-chain).
+- **SushiSwap**: Base v7 API targets RedSnwapper (0xAC4c6e21…), not a
+  RouteProcessor. Note: the mainnet whitelist still pins the older RouteProcessor4
+  (0x46B3…) — Sushi's v7 entrypoint has moved; consider updating mainnet too.
+- **Velora/ParaSwap** Augustus V6.2 and **1inch** V6, **KyberSwap**, **OpenOcean**,
+  **Balancer** Vault, **CoW** VaultRelayer are the SAME canonical address on Base
+  and mainnet. **Uniswap** SwapRouter02 and **Curve** RouterNG v1.1 are
+  Base-specific. RECOMMENDATION: validate tx.to dynamically against the per-chain
+  whitelist (already done) rather than trusting these indefinitely.
+
+### Decision (mainnet whitelist untouched — for the CRITICAL constraint)
+- api.ts's ROUTER_WHITELIST and trusted-addresses.ts's TRUSTED_SPENDER_ADDRESSES
+  are LEFT UNCHANGED. validateRouterAddress / isTrustedSpender use them verbatim
+  for chainId 1 and delegate to the new src/lib/chains/routers.ts only for
+  non-mainnet — so mainnet validation is byte-identical. routers.ts is
+  self-contained (imports constants + registry, never api.ts) → no circular import.
+  getRouterWhitelist(1) mirrors ROUTER_WHITELIST exactly (pinned by a P224 test).
+
+### Spec deviations (minor)
+- Spec listed `calldata-recipient.ts` for validateRouterAddress, but that function
+  lives in api.ts (calldata-recipient.ts only has validateCallDataRecipient, which
+  validates the user recipient and is chain-independent). Made api.ts chain-aware.
+- Spec listed constants.ts backward-compat re-exports; none needed — constants is
+  untouched and everything still resolves (constants must not import routers.ts to
+  avoid a cycle). validateRouterAddress callers (useSwap/useSplitSwap) now pass
+  chainId; v1-swap left at the mainnet default (separate public API surface).
