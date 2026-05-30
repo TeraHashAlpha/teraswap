@@ -2,12 +2,15 @@
 
 exports[`DigitRoller — constants & snapshot > matches the structural snapshot 1`] = `
 <span
+  aria-label="~1 234.56"
   class="tabular-nums "
+  role="text"
 >
   <span>
     ~
   </span>
   <span
+    aria-hidden="true"
     class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
     data-testid="digit-column"
     style="height: 32px; opacity: 1; transform: none;"
@@ -90,6 +93,7 @@ exports[`DigitRoller — constants & snapshot > matches the structural snapshot 
      
   </span>
   <span
+    aria-hidden="true"
     class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
     data-testid="digit-column"
     style="height: 32px; opacity: 1; transform: none;"
@@ -167,6 +171,7 @@ exports[`DigitRoller — constants & snapshot > matches the structural snapshot 
     </span>
   </span>
   <span
+    aria-hidden="true"
     class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
     data-testid="digit-column"
     style="height: 32px; opacity: 1; transform: none;"
@@ -244,6 +249,7 @@ exports[`DigitRoller — constants & snapshot > matches the structural snapshot 
     </span>
   </span>
   <span
+    aria-hidden="true"
     class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
     data-testid="digit-column"
     style="height: 32px; opacity: 1; transform: none;"
@@ -326,6 +332,7 @@ exports[`DigitRoller — constants & snapshot > matches the structural snapshot 
     .
   </span>
   <span
+    aria-hidden="true"
     class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
     data-testid="digit-column"
     style="height: 32px; opacity: 1; transform: none;"
@@ -403,6 +410,7 @@ exports[`DigitRoller — constants & snapshot > matches the structural snapshot 
     </span>
   </span>
   <span
+    aria-hidden="true"
     class="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
     data-testid="digit-column"
     style="height: 32px; opacity: 1; transform: none;"
