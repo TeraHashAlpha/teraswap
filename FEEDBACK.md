@@ -908,3 +908,21 @@ mainnet default (separate surfaces; mainnet-identical).
   simulateSwapTx on mainnet is byte-identical and intentionally per-call (matches
   the prior getPrivateClient behaviour, NOT cached). Non-mainnet clients ARE cached
   per chainId. simulateSwapTx now targets getPublicClientForChain(params.chainId).
+
+## Feedback — Sprint 45 / P227 review (this commit)
+
+### Confirmed gap (adversarial review): useSwap's buildSimulationTx omitted chainId
+- All 6 "confirmed" findings were the SAME issue: useSwap's single-swap
+  buildSimulationTx call didn't pass chainId, while useSplitSwap's did (since P221).
+  P225/P226 made buildSimulationTx + simulateSwapTx chain-aware, but useSwap never
+  fed them chainId. NOT a mainnet regression (chainId=1 ≡ DEFAULT_CHAIN_ID default,
+  so mainnet is byte-identical and all tests stayed green), but on Base the
+  SIMULATION would target the mainnet FeeCollector + mainnet RPC while the
+  broadcast tx correctly targets Base — a sim/broadcast mismatch that would break
+  Base pre-flight once activated. Fixed (one line; both sim callers now thread
+  chainId). The other surfaces (pendingTxTo, allowance, recipient validation,
+  fetchApproveSpender, client) were already correct.
+- The 6 refuted findings were correctly dismissed (calldata-recipient V1 on Base,
+  empty-RPC guard, hypothetical VIEM_CHAINS drift, two false-green-test claims,
+  test-count). With this fix, all three Sprint-44 mainnet-pinned items are fully
+  wired and chain-threaded end-to-end.

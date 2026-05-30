@@ -415,6 +415,7 @@ export function useSwap(
           slippage,
           fromAddress: address,
           source,
+          chainId, // [P227 review] thread active chain so the sim targets the right FeeCollector + RPC (matches useSplitSwap)
         })
 
         setStatus('simulating' as SwapStatus)
