@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
       if (expectedRecipient) {
         // [FULL-M-01] Only fee-routed sources may legitimately deliver output
         // to the FeeCollector. Direct sources (0x, CoW) must reject it.
-        const routeViaFeeCollector = usesFeeCollector(source as AggregatorName)
+        const routeViaFeeCollector = usesFeeCollector(source as AggregatorName, chainId ? Number(chainId) : undefined)
         const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient, routeViaFeeCollector)
         if (!recipientCheck.valid) {
           console.error(

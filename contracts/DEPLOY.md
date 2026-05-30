@@ -86,3 +86,22 @@ Plus Permit2 `0x000000000022D473030F116dDEE9F6B43aC78BA3` (same on all chains).
 - `feeRecipient()` matches the expected address
 - `admin()` matches the expected admin wallet
 - `FEE_BPS()` returns `10` (0.1%)
+
+### ⚠️ Pre-activation code wiring (MUST complete before step 8)
+
+Setting `contracts.feeCollector` for Base flips `isChainActive(8453)` to true and
+enables Base swaps. Before doing that, the following are still MAINNET-PINNED and
+must be made per-chain, or Base swaps will route to the wrong (mainnet) contracts:
+
+1. The **FeeCollector address** used to build swap calldata in `useSwap.ts`,
+   `useSplitSwap.ts`, and `buildSimulationTx` (`swap-simulation.ts`) — currently
+   the `FEE_COLLECTOR_ADDRESS` constant. Resolve via
+   `getChainConfig(chainId).contracts.feeCollector`.
+2. **`fetchApproveSpender`** (`api.ts`) — returns hardcoded MAINNET per-source
+   spender addresses. Resolve via `ROUTER_WHITELIST_BY_CHAIN[chainId]` (routers.ts).
+3. The **simulation RPC client** (`simulateSwapTx`) — always `getPrivateClient()`
+   (mainnet). Use a per-chain client for the active chain.
+
+`usesFeeCollector` / `isFeeCollectorActive` / `validateRouterAddress` /
+`isTrustedSpender` are ALREADY chain-aware (Sprint 44). Items 1–3 are the
+remaining wiring tracked for the Base-activation sprint.

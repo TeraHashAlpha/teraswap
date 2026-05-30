@@ -848,3 +848,27 @@ bootstrap:
   (belt-and-suspenders + correct once Base activates). Mainnet is active → never skips.
 - SwapBox: "Coming Soon on {chainName}" banner + disabled swap button when
   !isChainActive; token selector + amount stay usable. Mainnet (active) unchanged.
+
+## Feedback — Sprint 44 / P224 review (this commit)
+
+### Confirmed findings from the adversarial review (both fixed)
+- **MEDIUM — SwapBox blockReason mismatch:** passing `priceBlocked={anyBlocked || !chainActive}`
+  with `blockReason=undefined` was a fragile mismatch (masked today by SwapButton's
+  earlier !isCorrectChain + !hasQuote branches). Reverted to `priceBlocked={anyBlocked}` —
+  on a coming-soon chain the button already shows "Switch to Ethereum" and the banner +
+  handler guard cover the rest. No observable change; mismatch removed.
+- **HIGH — usesFeeCollector not chain-aware:** made `usesFeeCollector(source, chainId)` and
+  `isFeeCollectorActive(chainId)` chain-aware (wiring the P223 getFeeIncompatibleSources that
+  was otherwise unused). chainId 1 is byte-identical to the prior logic. Threaded chainId from
+  useSwap / useSplitSwap / /api/swap. NOT a bug today (Base gated), but it was a foot-gun for
+  Base activation.
+
+### REMAINING pre-activation wiring (documented in DEPLOY.md, for the Base-activation sprint)
+These are still mainnet-pinned and MUST be made per-chain before Base's feeCollector is set:
+1. FeeCollector ADDRESS in swap calldata (useSwap/useSplitSwap/buildSimulationTx) — use
+   getChainConfig(chainId).contracts.feeCollector.
+2. fetchApproveSpender's per-source spender addresses — use ROUTER_WHITELIST_BY_CHAIN[chainId].
+3. simulateSwapTx's RPC client — use a per-chain client (getPrivateClient is mainnet).
+The activation guard (isChainActive) keeps Base gated until these are done, so nothing is
+broken today. fetchApproveSpender and v1-swap's usesFeeCollector were intentionally left at the
+mainnet default (separate surfaces; mainnet-identical).

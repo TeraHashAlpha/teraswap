@@ -165,7 +165,7 @@ export function useSplitSwap(
         // Step 1: Fetch calldata
         updateLeg(i, { status: 'fetching' })
 
-        const routeViaFeeCollector = usesFeeCollector(source)
+        const routeViaFeeCollector = usesFeeCollector(source, chainId)
         const apiAmount = routeViaFeeCollector
           ? legAmount - (legAmount * BigInt(FEE_BPS) / 10000n)
           : legAmount

@@ -766,7 +766,12 @@ export default function SwapBox() {
           </div>
         )}
 
-        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked || !chainActive} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+        {/* [P224 review] priceBlocked stays = anyBlocked (no `|| !chainActive`):
+            on a coming-soon chain the button's own !isCorrectChain branch shows
+            "Switch to Ethereum", and the banner + handler guard cover the rest —
+            so mixing !chainActive into priceBlocked only created a blockReason
+            mismatch with no observable effect. */}
+        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* [P95] Subtle gasless nudge — shown below the swap button when a
             non-CoW route is currently selected but the engine has flagged
