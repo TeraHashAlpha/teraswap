@@ -19,7 +19,7 @@ import {
   friendlyError,
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
-import { isWhitelistedRouter } from './chains/routers'
+import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { getFeeIncompatibleSources } from './chains/activation'
 import type { NormalizedQuote, MetaQuoteResult, QuoteMeta } from './adapters'
@@ -322,13 +322,27 @@ export function usesFeeCollector(source: AggregatorName, chainId: number = DEFAU
 // ══════════════════════════════════════════════════════════
 
 /**
- * Fetch approved spender address for a given source.
+ * Fetch the approved spender address for a given source on a given chain.
+ * [P226] Chain-aware. Mainnet (chainId 1) is byte-identical to the prior
+ * behaviour; other chains resolve from ROUTER_WHITELIST_BY_CHAIN.
  */
-export async function fetchApproveSpender(source: AggregatorName): Promise<`0x${string}`> {
-  if (usesFeeCollector(source)) {
-    return FEE_COLLECTOR_ADDRESS
+export async function fetchApproveSpender(source: AggregatorName, chainId: number = DEFAULT_CHAIN_ID): Promise<`0x${string}`> {
+  // FeeCollector-routed sources approve the chain's FeeCollector.
+  if (usesFeeCollector(source, chainId)) {
+    const fc = getChainConfig(chainId).contracts.feeCollector
+    if (fc) return fc
+    // FeeCollector expected but not deployed — fall through to the per-source
+    // spender so we never return null/zero.
   }
 
+  if (chainId !== DEFAULT_CHAIN_ID) {
+    // ── Non-mainnet — resolve from the per-chain router whitelist ──
+    const spender = ROUTER_WHITELIST_BY_CHAIN[chainId]?.[source]
+    if (!spender) throw new Error(`No spender configured for ${source} on chain ${chainId}`)
+    return spender
+  }
+
+  // ── Mainnet — unchanged per-source spenders ──
   switch (source) {
     case '1inch':
       return '0x111111125421cA6dc452d289314280a0f8842A65' as `0x${string}`

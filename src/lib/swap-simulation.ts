@@ -9,10 +9,10 @@
  * change to the simulation contract only has to happen in one place.
  */
 import { encodeFunctionData } from 'viem'
-import { getPrivateClient } from '@/lib/rpc'
 import { parseSimulationError } from '@/lib/simulation'
 import { FEE_COLLECTOR_ABI } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { getPublicClientForChain } from '@/lib/chains/clients'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { safeBigInt } from '@/lib/utils'
 import type { NormalizedQuote } from '@/lib/api'
@@ -129,7 +129,9 @@ export function buildSimulationTx(params: SimulationParams): SimulationTx {
  */
 export async function simulateSwapTx(params: SimulationTx): Promise<SimulationResult> {
   try {
-    const client = getPrivateClient()
+    // [P226] eth_call against the ACTIVE chain's client (mainnet === the
+    // privacy-preserving getPrivateClient via getPublicClientForChain).
+    const client = getPublicClientForChain(params.chainId ?? DEFAULT_CHAIN_ID)
     await client.call({
       account: params.from,
       to: params.to,

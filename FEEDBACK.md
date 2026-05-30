@@ -893,3 +893,18 @@ mainnet default (separate surfaces; mainnet-identical).
   null, so the leg errored and the test's useChainId(8453) override leaked. Switched
   the test to a DIRECT (non-FeeCollector) leg and wrapped the mock restore in
   try/finally so it can't leak. The chainId-forwarding assertion is unchanged.
+
+## Feedback — Sprint 45 / P226 (this commit)
+
+### Per-chain spender + simulation client
+- fetchApproveSpender(source, chainId) is chain-aware: chainId 1 keeps the exact
+  prior logic (FeeCollector for fee-routed sources via getChainConfig(1) ===
+  FEE_COLLECTOR_ADDRESS; the per-source switch for 0x/cowswap) — byte-identical.
+  Other chains resolve from ROUTER_WHITELIST_BY_CHAIN[chainId]. /api/spender reads
+  chainId (mainnet default); SwapBox appends &chainId only for non-mainnet so the
+  mainnet request is byte-identical.
+- src/lib/chains/clients.ts getPublicClientForChain(chainId): for chainId 1 it
+  returns getPrivateClient() (the existing privacy-preserving /api/rpc client) — so
+  simulateSwapTx on mainnet is byte-identical and intentionally per-call (matches
+  the prior getPrivateClient behaviour, NOT cached). Non-mainnet clients ARE cached
+  per chainId. simulateSwapTx now targets getPublicClientForChain(params.chainId).
