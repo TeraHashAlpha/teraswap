@@ -12,6 +12,7 @@ import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCo
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, FEE_NATIVE_SOURCES, WETH_ADDRESS, type AggregatorName } from '@/lib/constants'
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
+import { getChainConfig } from '@/lib/chains'
 import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -245,6 +246,15 @@ export function useSwap(
       const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
       const routeViaFeeCollector = usesFeeCollector(source, chainId)
 
+      // [P225] Resolve the FeeCollector address for the ACTIVE chain (mainnet
+      // === FEE_COLLECTOR_ADDRESS). Guard the null case defensively — the
+      // activation guard should keep us off an unconfigured chain, but never
+      // encode a call to the zero address.
+      const feeCollectorAddress = getChainConfig(chainId).contracts.feeCollector
+      if (routeViaFeeCollector && !feeCollectorAddress) {
+        throw new Error(`Swaps via FeeCollector aren't available on chain ${chainId} yet.`)
+      }
+
       // For FeeCollector routing: the contract deducts 0.1% fee first,
       // then forwards the NET amount to the DEX router. So we must build
       // the router calldata for the net amount, not the full amount.
@@ -260,7 +270,7 @@ export function useSwap(
       // (which forceApprove()s the router for the net amount). The user
       // wallet becomes the explicit recipient so output still lands there.
       // Helper extracted to src/lib/simulation.ts for unit testing.
-      const apiArgs = buildFeeCollectorSwapArgs(routeViaFeeCollector, address, FEE_COLLECTOR_ADDRESS)
+      const apiArgs = buildFeeCollectorSwapArgs(routeViaFeeCollector, address, feeCollectorAddress ?? FEE_COLLECTOR_ADDRESS)
       const swapData = await fetchSwapViaApi(
         source,
         tokenIn.address,
@@ -305,7 +315,7 @@ export function useSwap(
       // [R1] Validate recipient in calldata matches connected wallet.
       // [FULL-M-01] On direct routes the FeeCollector is NOT an acceptable
       // recipient — only fee-routed swaps may deliver to it.
-      const recipientCheck = validateCallDataRecipient(swapData.tx.data as string, address, routeViaFeeCollector)
+      const recipientCheck = validateCallDataRecipient(swapData.tx.data as string, address, routeViaFeeCollector, chainId)
       if (!recipientCheck.valid) {
         console.error('[R1] Recipient mismatch:', recipientCheck)
         throw new Error(
@@ -405,6 +415,7 @@ export function useSwap(
           slippage,
           fromAddress: address,
           source,
+          chainId, // [P227 review] thread active chain so the sim targets the right FeeCollector + RPC (matches useSplitSwap)
         })
 
         setStatus('simulating' as SwapStatus)
@@ -448,7 +459,7 @@ export function useSwap(
             functionName: 'swapETHWithFee',
             args: [router, routerData, tokenOutForFc, minimumOutput],
           })
-          pendingTxTo = FEE_COLLECTOR_ADDRESS
+          pendingTxTo = feeCollectorAddress! // [P225] guarded non-null above
           pendingTxData = feeCollectorCalldata
           pendingTxValue = rawAmountBn
           pendingTxGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined
@@ -462,7 +473,7 @@ export function useSwap(
                 address: tokenIn!.address as `0x${string}`,
                 abi: erc20Abi,
                 functionName: 'allowance',
-                args: [address, FEE_COLLECTOR_ADDRESS],
+                args: [address, feeCollectorAddress!],
               })
               if (allowance < rawAmountBn) {
                 throw new Error(
@@ -488,7 +499,7 @@ export function useSwap(
               minimumOutput,
             ],
           })
-          pendingTxTo = FEE_COLLECTOR_ADDRESS
+          pendingTxTo = feeCollectorAddress! // [P225] guarded non-null above
           pendingTxData = feeCollectorCalldata
           pendingTxValue = 0n
           pendingTxGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined

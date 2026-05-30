@@ -872,6 +872,60 @@ These are still mainnet-pinned and MUST be made per-chain before Base's feeColle
 The activation guard (isChainActive) keeps Base gated until these are done, so nothing is
 broken today. fetchApproveSpender and v1-swap's usesFeeCollector were intentionally left at the
 mainnet default (separate surfaces; mainnet-identical).
+
+## Feedback — Sprint 45 / P225 (this commit)
+
+### Branch base: same stacking (cut from Sprint 44 HEAD, baseline 1244).
+
+### FeeCollector address resolved per-chain in the swap calldata path
+- useSwap, useSplitSwap, buildSimulationTx now resolve the FeeCollector via
+  getChainConfig(chainId).contracts.feeCollector (mainnet === FEE_COLLECTOR_ADDRESS
+  → byte-identical). A null FeeCollector with routeViaFeeCollector throws a clear
+  error rather than encoding a call to 0x0 (the activation guard should prevent it).
+- calldata-recipient.ts validateCallDataRecipient/isValidRecipient are now
+  chain-aware (chainId threaded through Inner/decodeMulticallRecipient/recursion);
+  chain 1 keeps the exact FEE_COLLECTOR_ADDRESS + V1 valid set. Callers (useSwap,
+  useSplitSwap, /api/swap) pass chainId; /api/v1/swap stays mainnet-default.
+
+### Test fix required by the new guard (included here)
+- Sprint 44's "[P221] forwards chainId" split test ran a FeeCollector-routed leg on
+  Base (8453); P225's guard now (correctly) throws because Base's FeeCollector is
+  null, so the leg errored and the test's useChainId(8453) override leaked. Switched
+  the test to a DIRECT (non-FeeCollector) leg and wrapped the mock restore in
+  try/finally so it can't leak. The chainId-forwarding assertion is unchanged.
+
+## Feedback — Sprint 45 / P226 (this commit)
+
+### Per-chain spender + simulation client
+- fetchApproveSpender(source, chainId) is chain-aware: chainId 1 keeps the exact
+  prior logic (FeeCollector for fee-routed sources via getChainConfig(1) ===
+  FEE_COLLECTOR_ADDRESS; the per-source switch for 0x/cowswap) — byte-identical.
+  Other chains resolve from ROUTER_WHITELIST_BY_CHAIN[chainId]. /api/spender reads
+  chainId (mainnet default); SwapBox appends &chainId only for non-mainnet so the
+  mainnet request is byte-identical.
+- src/lib/chains/clients.ts getPublicClientForChain(chainId): for chainId 1 it
+  returns getPrivateClient() (the existing privacy-preserving /api/rpc client) — so
+  simulateSwapTx on mainnet is byte-identical and intentionally per-call (matches
+  the prior getPrivateClient behaviour, NOT cached). Non-mainnet clients ARE cached
+  per chainId. simulateSwapTx now targets getPublicClientForChain(params.chainId).
+
+## Feedback — Sprint 45 / P227 review (this commit)
+
+### Confirmed gap (adversarial review): useSwap's buildSimulationTx omitted chainId
+- All 6 "confirmed" findings were the SAME issue: useSwap's single-swap
+  buildSimulationTx call didn't pass chainId, while useSplitSwap's did (since P221).
+  P225/P226 made buildSimulationTx + simulateSwapTx chain-aware, but useSwap never
+  fed them chainId. NOT a mainnet regression (chainId=1 ≡ DEFAULT_CHAIN_ID default,
+  so mainnet is byte-identical and all tests stayed green), but on Base the
+  SIMULATION would target the mainnet FeeCollector + mainnet RPC while the
+  broadcast tx correctly targets Base — a sim/broadcast mismatch that would break
+  Base pre-flight once activated. Fixed (one line; both sim callers now thread
+  chainId). The other surfaces (pendingTxTo, allowance, recipient validation,
+  fetchApproveSpender, client) were already correct.
+- The 6 refuted findings were correctly dismissed (calldata-recipient V1 on Base,
+  empty-RPC guard, hypothetical VIEM_CHAINS drift, two false-green-test claims,
+  test-count). With this fix, all three Sprint-44 mainnet-pinned items are fully
+  wired and chain-threaded end-to-end.
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong

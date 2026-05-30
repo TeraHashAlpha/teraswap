@@ -9,6 +9,8 @@ import type { AggregatorName } from '@/lib/constants'
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const source = searchParams.get('source') as AggregatorName | null
+  // [P226] Optional chain — absent → mainnet (fetchApproveSpender default).
+  const chainIdParam = searchParams.get('chainId')
 
   if (!source) {
     return NextResponse.json(
@@ -18,7 +20,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const spender = await fetchApproveSpender(source)
+    const spender = await fetchApproveSpender(source, chainIdParam ? Number(chainIdParam) : undefined)
     return NextResponse.json({ spender })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'

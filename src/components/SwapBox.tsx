@@ -136,7 +136,7 @@ export default function SwapBox() {
     if (meta?.best.source) {
       playQuoteReceived()
       const controller = new AbortController()
-      fetch(`/api/spender?source=${meta.best.source}`, { signal: controller.signal })
+      fetch(`/api/spender?source=${meta.best.source}${activeChainId !== 1 ? `&chainId=${activeChainId}` : ''}`, { signal: controller.signal })
         .then(r => r.json())
         .then(data => {
           if (data.spender) {

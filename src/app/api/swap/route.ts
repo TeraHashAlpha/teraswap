@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
         // [FULL-M-01] Only fee-routed sources may legitimately deliver output
         // to the FeeCollector. Direct sources (0x, CoW) must reject it.
         const routeViaFeeCollector = usesFeeCollector(source as AggregatorName, chainId ? Number(chainId) : undefined)
-        const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient, routeViaFeeCollector)
+        const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient, routeViaFeeCollector, chainId ? Number(chainId) : undefined)
         if (!recipientCheck.valid) {
           console.error(
             `[R1] BLOCKED: Recipient mismatch in ${source} calldata.`,
