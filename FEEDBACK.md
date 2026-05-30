@@ -770,3 +770,26 @@ All P203/P204 findings came back **info/low** — no medium or high.
   end-to-end. The only remaining deferral is the per-chain TOKEN CATALOG
   (TokenSelector / token addresses), which still needs the Base catalog built
   before Base swaps can be enabled — tracked for the Base-activation sprint.
+
+## Feedback — Sprint 44 / P221 (this commit)
+
+### Branch base
+- Same stacking as before: Sprint 43 isn't merged to main, so
+  feat/sprint-44-base-swap-prep is cut from the Sprint 43 HEAD (baseline 1233).
+  Merge 40→41→42→43→44 in order, or rebase post-merge.
+
+### Notes
+- useSplitSwap now threads `chainId` (useChainId) to fetchSwapViaApi, the
+  /api/swap body, and buildSimulationTx (closes 43-I-01). chainId added to the
+  execute() dep array (it was already used by logSwapToSupabase but missing from
+  deps — pre-existing, fixed). Mainnet: chainId=1 ≡ default → byte-identical.
+- swap-simulation.ts: SimulationParams/SimulationTx gained an optional `chainId`
+  (threaded). The FeeCollector address + RPC client in buildSimulationTx/
+  simulateSwapTx remain mainnet-pinned — per-chain FeeCollector resolution +
+  a per-chain RPC client are part of Base activation (Base FeeCollector is null
+  and Base swaps are gated, so this path is dormant). Mainnet unchanged.
+- TokenSelector is chain-aware via a memoised `catalog`: mainnet === DEFAULT_TOKENS
+  (full categorised list + balances, byte-identical); other chains browse
+  getChainTokenList(chainId). Popular chips keep the exact POPULAR_SYMBOLS order
+  on mainnet. Base balances stay unfetched (the CHAIN_ID gate in useTokenBalances
+  is correctly left mainnet-only — DEFAULT_TOKENS are mainnet addresses).

@@ -61,11 +61,12 @@ interface UseSplitSwapResult {
 async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
+  chainId?: number, // [P221/43-I-01] target chain — undefined → mainnet (identical)
 ): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, src, dst, amount, from, slippage, srcDecimals, dstDecimals }),
+    body: JSON.stringify({ source, src, dst, amount, from, slippage, srcDecimals, dstDecimals, chainId }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || `Swap API error ${res.status}`)
@@ -178,6 +179,7 @@ export function useSplitSwap(
           slippage,
           tokenIn.decimals,
           tokenOut.decimals,
+          chainId, // [P221/43-I-01] thread active chain to the adapter
         )
 
         if (!swapData.tx) throw new Error('No transaction data returned')
@@ -230,6 +232,7 @@ export function useSplitSwap(
           slippage,
           fromAddress: address,
           source,
+          chainId, // [P221/43-I-01] thread active chain into the simulation
         })
         const sim = await simulateSwapTx(simTx)
         if (!sim.success) {
@@ -363,7 +366,7 @@ export function useSplitSwap(
       setStatus('error')
       if (!errorMessage) setErrorMessage('Split swap failed.')
     }
-  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransactionAsync, updateLeg])
+  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransactionAsync, updateLeg, chainId])
 
   return {
     status,
