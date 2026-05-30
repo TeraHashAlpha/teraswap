@@ -69,6 +69,9 @@ const DigitColumn = memo(function DigitColumn({
   return (
     <motion.span
       data-testid="digit-column"
+      // [34-L-01] Hidden from the a11y tree: the wrapper's aria-label already
+      // exposes the full value, so the 0–9 stack must not be read per column.
+      aria-hidden="true"
       className="relative inline-block w-[1ch] overflow-y-clip text-center align-baseline"
       style={{ height: lineHeight }}
       {...enterExit}
@@ -155,7 +158,15 @@ function DigitRoller({ value, prefix, className }: DigitRollerProps) {
   }
 
   return (
-    <span ref={containerRef} className={`tabular-nums ${className ?? ''}`}>
+    <span
+      ref={containerRef}
+      className={`tabular-nums ${className ?? ''}`}
+      // [34-L-01] Expose the whole formatted value as a single accessible
+      // string. Without this, screen readers walk into each DigitColumn and
+      // read the full 0–9 stack, announcing ten digits per position.
+      aria-label={`${prefix || ''}${value}`}
+      role="text"
+    >
       {prefix && <span>{prefix}</span>}
       <AnimatePresence initial={false}>
         {chars.map((ch, i) => {

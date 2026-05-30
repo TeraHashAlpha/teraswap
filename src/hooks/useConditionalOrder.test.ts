@@ -37,7 +37,7 @@ vi.mock('@/lib/price-monitor', () => ({
   isTriggerMet: (...args: unknown[]) => mockIsTriggerMet(...args),
 }))
 
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { useConditionalOrder } from './useConditionalOrder'
 import type { ConditionalOrderConfig } from '@/lib/conditional-order-types'
 import {
@@ -141,7 +141,9 @@ describe('useConditionalOrder — initial state', () => {
 })
 
 describe('useConditionalOrder — createOrder', () => {
-  it('records a monitoring order and persists to localStorage', async () => {
+  it('records a monitoring order and persists to encrypted localStorage', async () => {
+    // Persistence is real-async AES-GCM — run on real timers + waitFor.
+    vi.useRealTimers()
     const { result } = renderHook(() => useConditionalOrder())
     await act(async () => {
       await result.current.createOrder(makeConfig())
@@ -149,8 +151,11 @@ describe('useConditionalOrder — createOrder', () => {
     expect(result.current.orders).toHaveLength(1)
     expect(result.current.orders[0].status).toBe('monitoring')
 
-    const stored = JSON.parse(localStorage.getItem(CONDITIONAL_STORAGE_KEY) || '[]')
-    expect(stored).toHaveLength(1)
+    // Data lands under the encrypted v2 key; the legacy v1 key stays empty.
+    await waitFor(() => {
+      expect(localStorage.getItem(`${CONDITIONAL_STORAGE_KEY}:v2`)).not.toBeNull()
+    })
+    expect(localStorage.getItem(CONDITIONAL_STORAGE_KEY)).toBeNull()
   })
 
   it('throws when wallet is disconnected', async () => {
@@ -407,16 +412,20 @@ describe('useConditionalOrder — [P212] submitted-order poll', () => {
 
 describe('useConditionalOrder — persistence', () => {
   it('reloading the hook restores monitoring orders from localStorage', async () => {
+    vi.useRealTimers()
     const first = renderHook(() => useConditionalOrder())
     await act(async () => {
       await first.result.current.createOrder(makeConfig())
     })
     expect(first.result.current.orders).toHaveLength(1)
+    // Wait for the encrypted write before tearing down.
+    await waitFor(() => {
+      expect(localStorage.getItem(`${CONDITIONAL_STORAGE_KEY}:v2`)).not.toBeNull()
+    })
     first.unmount()
 
     const second = renderHook(() => useConditionalOrder())
-    await act(async () => { await Promise.resolve() })
-    expect(second.result.current.orders).toHaveLength(1)
+    await waitFor(() => expect(second.result.current.orders).toHaveLength(1))
     expect(second.result.current.orders[0].status).toBe('monitoring')
   })
 })
