@@ -20,21 +20,47 @@ import type {
   LimitOrderStatus,
 } from '@/lib/limit-order-types'
 import { LIMIT_STORAGE_KEY, LIMIT_POLL_INTERVAL_MS } from '@/lib/limit-order-types'
+import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
 
 // ── Persistence helpers ──────────────────────────────────────
-function loadOrders(): LimitOrder[] {
+// [P200] Limit orders are encrypted at rest via SecureStorage (AES-256-GCM,
+// wallet-derived key). The v2 key marks the encrypted format; the legacy v1
+// key held plaintext JSON and is migrated + removed on first load.
+const LIMIT_STORAGE_KEY_V2 = `${LIMIT_STORAGE_KEY}:v2`
+
+/** Read the legacy v1 (plaintext) payload for one-time migration. */
+function readLegacyOrders(): LimitOrder[] {
   if (typeof window === 'undefined') return []
   try {
     const raw = localStorage.getItem(LIMIT_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
+    return raw ? (JSON.parse(raw) as LimitOrder[]) : []
+  } catch {
+    return []
+  }
 }
 
-function saveOrders(orders: LimitOrder[]) {
+/**
+ * Load orders from the encrypted v2 store, transparently migrating any legacy
+ * v1 plaintext data on first run. Async because AES-GCM decryption is async.
+ */
+async function loadOrders(): Promise<LimitOrder[]> {
+  if (typeof window === 'undefined') return []
+  const encrypted = await secureGet<LimitOrder[]>(LIMIT_STORAGE_KEY_V2)
+  if (encrypted && encrypted.length > 0) return encrypted
+
+  const legacy = readLegacyOrders()
+  if (legacy.length > 0) {
+    await saveOrders(legacy)
+    try { localStorage.removeItem(LIMIT_STORAGE_KEY) } catch { /* ignore */ }
+    return legacy
+  }
+  return encrypted ?? []
+}
+
+/** Encrypt + persist the order list under the v2 key. */
+async function saveOrders(orders: LimitOrder[]): Promise<void> {
   if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(LIMIT_STORAGE_KEY, JSON.stringify(orders))
-  } catch { /* quota exceeded — silent */ }
+  await secureSet(LIMIT_STORAGE_KEY_V2, orders)
 }
 
 // ── Hook ─────────────────────────────────────────────────────
@@ -50,16 +76,43 @@ export function useLimitOrder() {
   // [BUGFIX] Use ref to always access latest orders in callbacks (avoids stale closures)
   const ordersRef = useRef<LimitOrder[]>(orders)
   ordersRef.current = orders
+  // [P200] Guard: don't persist the initial empty array before the async load
+  // resolves — otherwise the save effect would clobber the encrypted store.
+  const hasLoadedRef = useRef(false)
 
-  // Load from localStorage on mount
+  // Load (decrypt) from localStorage on mount / wallet change
   useEffect(() => {
-    setOrders(loadOrders())
-  }, [])
+    hasLoadedRef.current = false
 
-  // Save whenever orders change (including clearing when empty)
+    if (!address) {
+      setOrders([])
+      return
+    }
+
+    // Derive this wallet's AES-GCM key before any secure read/write.
+    initSecureStorage(address)
+
+    let cancelled = false
+    void (async () => {
+      const local = await loadOrders()
+      if (cancelled) return
+      setOrders(prev => {
+        if (prev.length === 0) return local
+        const seen = new Set(prev.map(o => o.id))
+        return [...prev, ...local.filter(o => !seen.has(o.id))]
+      })
+      hasLoadedRef.current = true
+    })()
+
+    return () => { cancelled = true }
+  }, [address])
+
+  // Save (encrypt) whenever orders change (including clearing when empty)
   useEffect(() => {
-    // [BUGFIX] Also persist when orders array is empty — prevents stale data in localStorage
-    saveOrders(orders)
+    // [P200] Skip until the async load has populated state — otherwise the
+    // initial empty array would overwrite the encrypted store.
+    if (!hasLoadedRef.current) return
+    void saveOrders(orders)
   }, [orders])
 
   // ── Poll open orders for status changes ────────────────────
@@ -238,7 +291,7 @@ export function useLimitOrder() {
   const removeOrder = useCallback((orderId: string) => {
     setOrders(prev => {
       const updated = prev.filter(o => o.id !== orderId)
-      saveOrders(updated)
+      void saveOrders(updated)
       return updated
     })
   }, [])
