@@ -28,6 +28,8 @@ import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
+import { useActiveChainId } from '@/hooks/useChainId'
+import { isChainActive, getChainConfig } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -118,6 +120,16 @@ export default function SwapBox() {
     [rawMeta, mevProtected],
   )
 
+  // [P222] Active chain — feeds the chain-aware spender allowlist below.
+  const activeChainId = useActiveChainId()
+  // [P223] Swap activation guard. A chain is "coming soon" until its
+  // FeeCollector is deployed (config.contracts.feeCollector !== null). Mainnet
+  // is active, so chainActive is always true there and nothing below changes.
+  const chainActive = isChainActive(activeChainId)
+  const chainName = (() => {
+    try { return getChainConfig(activeChainId).name } catch { return 'this network' }
+  })()
+
   // Play subtle sound when a new quote arrives
   // [BUGFIX] Use AbortController to cancel stale spender fetch on rapid source changes
   useEffect(() => {
@@ -131,7 +143,7 @@ export default function SwapBox() {
             // [FULL-H-02] Validate the spender against the client-side
             // allowlist before trusting it. A compromised /api/spender
             // response must never let the user approve an attacker address.
-            if (!isTrustedSpender(data.spender)) {
+            if (!isTrustedSpender(data.spender, activeChainId)) {
               console.error('[Security] Untrusted spender address from /api/spender:', data.spender)
               setSpender(undefined)
               toast({ type: 'error', title: 'Swap unavailable', description: 'Spender validation failed. Please try again or choose another route.' })
@@ -145,7 +157,7 @@ export default function SwapBox() {
       // [BUGFIX] Clear spender when MEV filter nullifies meta
       setSpender(undefined)
     }
-  }, [meta?.best.source])
+  }, [meta?.best.source, activeChainId])
 
   const { plan: approvalPlan, status: approvalStatus, error: approvalError, approve, isReady: approvalReady, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } =
     useApproval(tokenIn, amountIn, spender)
@@ -457,6 +469,7 @@ export default function SwapBox() {
   const anyBlocked = priceBlocked || oracleBlocked
 
   const handleApproveAndSwap = useCallback(async () => {
+    if (!chainActive) return // [P223] swaps disabled on coming-soon chains
     if (anyBlocked) {
       // [Wallet Activity] Track security block
       if (address) {
@@ -481,9 +494,10 @@ export default function SwapBox() {
     } else if (meta?.best.source) {
       executeSwap(meta.best.source)
     }
-  }, [approvalReady, approve, meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap])
+  }, [approvalReady, approve, meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
 
   const handleSwap = useCallback(() => {
+    if (!chainActive) return // [P223] swaps disabled on coming-soon chains
     if (anyBlocked) {
       if (address) {
         trackWalletActivity(address, {
@@ -505,7 +519,7 @@ export default function SwapBox() {
     } else if (meta?.best.source) {
       executeSwap(meta.best.source)
     }
-  }, [meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap])
+  }, [meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
 
   return (
     <>
@@ -746,6 +760,21 @@ export default function SwapBox() {
         )}
 
         {/* Swap Button */}
+        {/* [P223] Coming-soon banner — shown when the active chain has no
+            deployed FeeCollector. Token selector + amount stay usable for
+            browsing; quotes are skipped and the swap button is disabled. */}
+        {!chainActive && (
+          <div className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300">
+            <span className="font-semibold">&#128640; Coming Soon on {chainName}.</span>{' '}
+            Swaps aren&apos;t live on this network yet — switch to Ethereum to trade. You can still browse tokens here.
+          </div>
+        )}
+
+        {/* [P224 review] priceBlocked stays = anyBlocked (no `|| !chainActive`):
+            on a coming-soon chain the button's own !isCorrectChain branch shows
+            "Switch to Ethereum", and the banner + handler guard cover the rest —
+            so mixing !chainActive into priceBlocked only created a blockReason
+            mismatch with no observable effect. */}
         <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* [P95] Subtle gasless nudge — shown below the swap button when a

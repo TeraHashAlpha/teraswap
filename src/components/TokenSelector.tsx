@@ -8,6 +8,9 @@ import { DEFAULT_TOKENS, getAllTokens, isNativeETH, CATEGORY_DISPLAY_ORDER, type
 import TokenAddressBadge from './TokenAddressBadge'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { CHAIN_ID } from '@/lib/constants'
+import { useActiveChainId } from '@/hooks/useChainId'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getChainTokenList, getPopularTokens } from '@/lib/chains/tokens'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
@@ -109,6 +112,15 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
   const inputRef = useRef<HTMLInputElement>(null)
   const { importToken, importing, error: importError } = useTokenImport()
   const balanceMap = useTokenBalances()
+  // [P221] Per-chain token catalog. Mainnet keeps the full DEFAULT_TOKENS list
+  // (categories + balances) exactly as before; other chains browse their own
+  // catalog. Memoised so the dependent lists below stay referentially stable.
+  const activeChainId = useActiveChainId()
+  const isMainnet = activeChainId === DEFAULT_CHAIN_ID
+  const catalog = useMemo(
+    () => (isMainnet ? DEFAULT_TOKENS : getChainTokenList(activeChainId)),
+    [isMainnet, activeChainId],
+  )
 
   // Focus input when modal opens
   useEffect(() => {
@@ -122,7 +134,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
   const isAddressSearch = /^0x[a-fA-F0-9]{40}$/.test(search.trim())
 
   const filtered = useMemo(() => {
-    const all = getAllTokens()
+    const all = isMainnet ? getAllTokens() : catalog
     return all.filter(
       (t) =>
         t.address.toLowerCase() !== disabledAddress?.toLowerCase() &&
@@ -130,12 +142,12 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
           t.name.toLowerCase().includes(q) ||
           t.address.toLowerCase().includes(q)),
     )
-  }, [search, disabledAddress])
+  }, [search, disabledAddress, isMainnet, catalog])
 
   // Tokens with balance — sorted highest first, shown above categories
   const tokensWithBalance = useMemo(() => {
     const disabled = disabledAddress?.toLowerCase()
-    return DEFAULT_TOKENS
+    return catalog
       .filter((t) => {
         const addr = t.address.toLowerCase()
         return addr !== disabled && balanceMap.has(addr)
@@ -149,7 +161,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
         if (balA > balB) return -1
         return 0
       })
-  }, [disabledAddress, balanceMap])
+  }, [disabledAddress, balanceMap, catalog])
 
   // Build category groups (only when not searching), excluding tokens already shown in "Your tokens"
   const groups = useMemo(() => {
@@ -157,7 +169,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     const disabled = disabledAddress?.toLowerCase()
     const balanceAddrs = new Set(tokensWithBalance.map((t) => t.address.toLowerCase()))
     const categoryMap = new Map<string, Token[]>()
-    for (const token of DEFAULT_TOKENS) {
+    for (const token of catalog) {
       const addr = token.address.toLowerCase()
       if (addr === disabled || balanceAddrs.has(addr)) continue
       const cat = token.category || 'Other'
@@ -167,16 +179,23 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     return CATEGORY_DISPLAY_ORDER
       .filter((cat) => categoryMap.has(cat))
       .map((cat) => ({ label: cat, tokens: categoryMap.get(cat)! }))
-  }, [disabledAddress, isSearching, tokensWithBalance])
+  }, [disabledAddress, isSearching, tokensWithBalance, catalog])
 
   const popularTokens = useMemo(() => {
     const disabled = disabledAddress?.toLowerCase()
+    if (!isMainnet) {
+      // [P221] Non-mainnet: the chain catalog's popular tokens.
+      const popularAddrs = new Set(getPopularTokens(activeChainId).map((t) => t.address.toLowerCase()))
+      return catalog.filter(
+        (t) => popularAddrs.has(t.address.toLowerCase()) && t.address.toLowerCase() !== disabled,
+      )
+    }
     return POPULAR_SYMBOLS.map((sym) =>
       DEFAULT_TOKENS.find(
         (t) => t.symbol === sym && t.address.toLowerCase() !== disabled,
       ),
     ).filter(Boolean) as Token[]
-  }, [disabledAddress])
+  }, [disabledAddress, isMainnet, activeChainId, catalog])
 
   function handleSelect(token: Token) {
     onSelect(token)

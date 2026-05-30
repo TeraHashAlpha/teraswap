@@ -7,6 +7,7 @@ import { isNativeETH, type Token } from '@/lib/tokens'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { isPermit2Educated } from '@/components/Permit2EducationModal'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
+import { useActiveChainId } from './useChainId'
 
 export type ApprovalStatus = 'idle' | 'checking' | 'approving_permit2' | 'awaiting_permit2_education' | 'signing' | 'ready' | 'error'
 
@@ -32,6 +33,7 @@ export function useApproval(
   spenderAddress: `0x${string}` | undefined,
 ): UseApprovalResult {
   const { address } = useAccount()
+  const chainId = useActiveChainId() // [P222] chain-aware spender allowlist
   const [plan, setPlan] = useState<ApprovalPlan | null>(null)
   const [status, setStatus] = useState<ApprovalStatus>('idle')
   const [approvalError, setApprovalError] = useState<string | null>(null)
@@ -189,7 +191,7 @@ export function useApproval(
         // [FULL-H-02] Defense-in-depth: reject approval to an untrusted
         // spender even if SwapBox's validation was bypassed. The user must
         // never sign approve() for an address outside the known allowlist.
-        if (!isTrustedSpender(spenderAddress)) {
+        if (!isTrustedSpender(spenderAddress, chainId)) {
           console.error('[Security] Blocked approval to untrusted spender:', spenderAddress)
           throw new Error('Approval blocked: untrusted spender address')
         }
@@ -210,7 +212,7 @@ export function useApproval(
       setStatus('error')
       setApprovalError(err instanceof Error ? err.message : 'Approval error')
     }
-  }, [plan, tokenIn, address, rawAmount, hasPermit2Allowance, spenderAddress])
+  }, [plan, tokenIn, address, rawAmount, hasPermit2Allowance, spenderAddress, chainId])
 
   // ── React to approve confirmations ──
   useEffect(() => {

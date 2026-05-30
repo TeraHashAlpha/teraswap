@@ -19,6 +19,9 @@ import {
   friendlyError,
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
+import { isWhitelistedRouter } from './chains/routers'
+import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
+import { getFeeIncompatibleSources } from './chains/activation'
 import type { NormalizedQuote, MetaQuoteResult, QuoteMeta } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
@@ -283,17 +286,35 @@ export async function fetchSwapFromSource(
 // ══════════════════════════════════════════════════════════
 
 /**
- * Check if FeeCollector proxy is deployed and configured.
+ * Check if a FeeCollector is deployed/configured for `chainId`.
+ * [P224 review] Mainnet keeps its exact prior check (byte-identical); other
+ * chains read the per-chain registry (feeCollector !== null).
  */
-export function isFeeCollectorActive(): boolean {
-  return !!FEE_COLLECTOR_ADDRESS && FEE_COLLECTOR_ADDRESS.length === 42
+export function isFeeCollectorActive(chainId: number = DEFAULT_CHAIN_ID): boolean {
+  if (chainId === DEFAULT_CHAIN_ID) {
+    return !!FEE_COLLECTOR_ADDRESS && FEE_COLLECTOR_ADDRESS.length === 42
+  }
+  try {
+    return getChainConfig(chainId).contracts.feeCollector !== null
+  } catch {
+    return false
+  }
 }
 
 /**
- * Check if a source uses the FeeCollector proxy for fee collection.
+ * Check if a source uses the FeeCollector proxy for fee collection on `chainId`.
+ * [P224 review] Now chain-aware: uses the per-chain fee-incompatible set. For
+ * chainId 1 this is identical to the prior `isFeeCollectorActive() &&
+ * !FEE_INCOMPATIBLE_SOURCES.includes(source)`.
+ *
+ * NOTE: the FeeCollector *address* used to build swap calldata (useSwap /
+ * useSplitSwap / buildSimulationTx) and fetchApproveSpender's per-source
+ * addresses are still mainnet-pinned — those must be made per-chain before Base
+ * swaps go live (see FEEDBACK.md / DEPLOY.md). The activation guard keeps Base
+ * gated until then.
  */
-export function usesFeeCollector(source: AggregatorName): boolean {
-  return isFeeCollectorActive() && !FEE_INCOMPATIBLE_SOURCES.includes(source)
+export function usesFeeCollector(source: AggregatorName, chainId: number = DEFAULT_CHAIN_ID): boolean {
+  return isFeeCollectorActive(chainId) && !getFeeIncompatibleSources(chainId).includes(source)
 }
 
 // ══════════════════════════════════════════════════════════
@@ -370,10 +391,16 @@ export const ROUTER_WHITELIST: Set<string> = new Set([
 export function validateRouterAddress(
   txTo: string,
   source: AggregatorName,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): { valid: boolean; reason?: string } {
   const normalized = txTo.toLowerCase()
 
-  if (ROUTER_WHITELIST.has(normalized)) {
+  // [P222] Mainnet uses the existing ROUTER_WHITELIST set verbatim (byte-
+  // identical behaviour). Other chains delegate to the per-chain whitelist.
+  const whitelisted = chainId === DEFAULT_CHAIN_ID
+    ? ROUTER_WHITELIST.has(normalized)
+    : isWhitelistedRouter(normalized, chainId)
+  if (whitelisted) {
     return { valid: true }
   }
 

@@ -770,6 +770,108 @@ All P203/P204 findings came back **info/low** — no medium or high.
   end-to-end. The only remaining deferral is the per-chain TOKEN CATALOG
   (TokenSelector / token addresses), which still needs the Base catalog built
   before Base swaps can be enabled — tracked for the Base-activation sprint.
+
+## Feedback — Sprint 44 / P221 (this commit)
+
+### Branch base
+- Same stacking as before: Sprint 43 isn't merged to main, so
+  feat/sprint-44-base-swap-prep is cut from the Sprint 43 HEAD (baseline 1233).
+  Merge 40→41→42→43→44 in order, or rebase post-merge.
+
+### Notes
+- useSplitSwap now threads `chainId` (useChainId) to fetchSwapViaApi, the
+  /api/swap body, and buildSimulationTx (closes 43-I-01). chainId added to the
+  execute() dep array (it was already used by logSwapToSupabase but missing from
+  deps — pre-existing, fixed). Mainnet: chainId=1 ≡ default → byte-identical.
+- swap-simulation.ts: SimulationParams/SimulationTx gained an optional `chainId`
+  (threaded). The FeeCollector address + RPC client in buildSimulationTx/
+  simulateSwapTx remain mainnet-pinned — per-chain FeeCollector resolution +
+  a per-chain RPC client are part of Base activation (Base FeeCollector is null
+  and Base swaps are gated, so this path is dormant). Mainnet unchanged.
+- TokenSelector is chain-aware via a memoised `catalog`: mainnet === DEFAULT_TOKENS
+  (full categorised list + balances, byte-identical); other chains browse
+  getChainTokenList(chainId). Popular chips keep the exact POPULAR_SYMBOLS order
+  on mainnet. Base balances stay unfetched (the CHAIN_ID gate in useTokenBalances
+  is correctly left mainnet-only — DEFAULT_TOKENS are mainnet addresses).
+
+## Feedback — Sprint 44 / P222 (this commit)
+
+### Base router addresses — researched + verified (all HIGH confidence)
+A parallel research workflow verified each Base (8453) router against Basescan +
+official sources. Caveats worth the Architect's attention before FeeCollector
+bootstrap:
+- **0x**: Base uses the v2 stack, NOT the mainnet Exchange Proxy. Whitelisted the
+  AllowanceHolder (0x0000000000001fF3684f28c67538d4D072C22734). 0x's Settler is a
+  runtime-resolved address and must NOT be hardcoded — confirm `allowanceTarget`
+  per-quote at integration time.
+- **Odos**: mainnet entry is Router V2 (0xCf55…), so the version-matched Base
+  router is Odos V2 (0x19cEeAd7…). If we migrate to Odos V3 the Base spender
+  changes to 0x0D05a7D3… (same address cross-chain).
+- **SushiSwap**: Base v7 API targets RedSnwapper (0xAC4c6e21…), not a
+  RouteProcessor. Note: the mainnet whitelist still pins the older RouteProcessor4
+  (0x46B3…) — Sushi's v7 entrypoint has moved; consider updating mainnet too.
+- **Velora/ParaSwap** Augustus V6.2 and **1inch** V6, **KyberSwap**, **OpenOcean**,
+  **Balancer** Vault, **CoW** VaultRelayer are the SAME canonical address on Base
+  and mainnet. **Uniswap** SwapRouter02 and **Curve** RouterNG v1.1 are
+  Base-specific. RECOMMENDATION: validate tx.to dynamically against the per-chain
+  whitelist (already done) rather than trusting these indefinitely.
+
+### Decision (mainnet whitelist untouched — for the CRITICAL constraint)
+- api.ts's ROUTER_WHITELIST and trusted-addresses.ts's TRUSTED_SPENDER_ADDRESSES
+  are LEFT UNCHANGED. validateRouterAddress / isTrustedSpender use them verbatim
+  for chainId 1 and delegate to the new src/lib/chains/routers.ts only for
+  non-mainnet — so mainnet validation is byte-identical. routers.ts is
+  self-contained (imports constants + registry, never api.ts) → no circular import.
+  getRouterWhitelist(1) mirrors ROUTER_WHITELIST exactly (pinned by a P224 test).
+
+### Spec deviations (minor)
+- Spec listed `calldata-recipient.ts` for validateRouterAddress, but that function
+  lives in api.ts (calldata-recipient.ts only has validateCallDataRecipient, which
+  validates the user recipient and is chain-independent). Made api.ts chain-aware.
+- Spec listed constants.ts backward-compat re-exports; none needed — constants is
+  untouched and everything still resolves (constants must not import routers.ts to
+  avoid a cycle). validateRouterAddress callers (useSwap/useSplitSwap) now pass
+  chainId; v1-swap left at the mainnet default (separate public API surface).
+
+## Feedback — Sprint 44 / P223 (this commit)
+
+### Notes / minor deviations
+- getFeeIncompatibleSources(chainId) lives in src/lib/chains/activation.ts (chain
+  logic) rather than constants.ts (spec's Files-affected), referencing the
+  canonical FEE_INCOMPATIBLE_SOURCES for chain 1. It is NOT yet wired into
+  api.ts's usesFeeCollector() — that wiring is part of Base activation, and is
+  moot today because Base's FeeCollector is null (usesFeeCollector already returns
+  false on Base via isFeeCollectorActive). constants.ts left untouched.
+- useQuote already effectively skipped non-mainnet quotes via SwapBox's
+  `enabled = isConnected && isCorrectChain` gate (isCorrectChain is mainnet-only).
+  The new isChainActive(chainId) gate in doFetch is the explicit, intended guard
+  (belt-and-suspenders + correct once Base activates). Mainnet is active → never skips.
+- SwapBox: "Coming Soon on {chainName}" banner + disabled swap button when
+  !isChainActive; token selector + amount stay usable. Mainnet (active) unchanged.
+
+## Feedback — Sprint 44 / P224 review (this commit)
+
+### Confirmed findings from the adversarial review (both fixed)
+- **MEDIUM — SwapBox blockReason mismatch:** passing `priceBlocked={anyBlocked || !chainActive}`
+  with `blockReason=undefined` was a fragile mismatch (masked today by SwapButton's
+  earlier !isCorrectChain + !hasQuote branches). Reverted to `priceBlocked={anyBlocked}` —
+  on a coming-soon chain the button already shows "Switch to Ethereum" and the banner +
+  handler guard cover the rest. No observable change; mismatch removed.
+- **HIGH — usesFeeCollector not chain-aware:** made `usesFeeCollector(source, chainId)` and
+  `isFeeCollectorActive(chainId)` chain-aware (wiring the P223 getFeeIncompatibleSources that
+  was otherwise unused). chainId 1 is byte-identical to the prior logic. Threaded chainId from
+  useSwap / useSplitSwap / /api/swap. NOT a bug today (Base gated), but it was a foot-gun for
+  Base activation.
+
+### REMAINING pre-activation wiring (documented in DEPLOY.md, for the Base-activation sprint)
+These are still mainnet-pinned and MUST be made per-chain before Base's feeCollector is set:
+1. FeeCollector ADDRESS in swap calldata (useSwap/useSplitSwap/buildSimulationTx) — use
+   getChainConfig(chainId).contracts.feeCollector.
+2. fetchApproveSpender's per-source spender addresses — use ROUTER_WHITELIST_BY_CHAIN[chainId].
+3. simulateSwapTx's RPC client — use a per-chain client (getPrivateClient is mainnet).
+The activation guard (isChainActive) keeps Base gated until these are done, so nothing is
+broken today. fetchApproveSpender and v1-swap's usesFeeCollector were intentionally left at the
+mainnet default (separate surfaces; mainnet-identical).
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong

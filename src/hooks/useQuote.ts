@@ -9,6 +9,7 @@ import { logQuoteToSupabase } from '@/lib/analytics'
 import { analyzeGasless } from '@/lib/gasless-engine'
 import { useEthGasCost } from './useEthGasCost'
 import { useActiveChainId } from './useChainId'
+import { isChainActive } from '@/lib/chains'
 
 /**
  * Typed error carrying the /api/quote HTTP status. Lets the hook
@@ -164,6 +165,13 @@ export function useQuote(
 
   const doFetch = useCallback(async () => {
     if (!tokenIn || !tokenOut || !debouncedAmount || Number(debouncedAmount) <= 0) {
+      setMeta(null)
+      return
+    }
+
+    // [P223] No quotes on a "coming-soon" chain (FeeCollector not deployed) —
+    // don't waste API calls. Mainnet is active, so this never skips on mainnet.
+    if (!isChainActive(activeChainId)) {
       setMeta(null)
       return
     }

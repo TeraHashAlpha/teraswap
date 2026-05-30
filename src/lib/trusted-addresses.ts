@@ -17,6 +17,8 @@
  * permit-based approvals (the 0x source approves Permit2).
  */
 import { ROUTER_WHITELIST } from '@/lib/api'
+import { getRouterWhitelist } from '@/lib/chains/routers'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import {
   FEE_COLLECTOR_ADDRESS,
   FEE_COLLECTOR_V1_ADDRESS,
@@ -38,7 +40,17 @@ export const TRUSTED_SPENDER_ADDRESSES: ReadonlySet<string> = new Set<string>(
     .map((a) => a.toLowerCase()),
 )
 
-/** True when `address` is a known, trusted ERC-20 approval spender. */
-export function isTrustedSpender(address: string): boolean {
-  return TRUSTED_SPENDER_ADDRESSES.has(address.toLowerCase())
+/**
+ * True when `address` is a known, trusted ERC-20 approval spender on `chainId`.
+ * [P222] Mainnet uses the existing TRUSTED_SPENDER_ADDRESSES set verbatim
+ * (byte-identical). Other chains derive their trusted spenders from the
+ * per-chain router whitelist (which already includes that chain's Permit2,
+ * CoW VaultRelayer, and FeeCollector).
+ */
+export function isTrustedSpender(address: string, chainId: number = DEFAULT_CHAIN_ID): boolean {
+  const lower = address.toLowerCase()
+  if (chainId === DEFAULT_CHAIN_ID) {
+    return TRUSTED_SPENDER_ADDRESSES.has(lower)
+  }
+  return getRouterWhitelist(chainId).includes(lower)
 }

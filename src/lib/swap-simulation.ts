@@ -47,6 +47,9 @@ export interface SimulationTx {
   expectedOutput: string
   tokenOut: Token
   source: string
+  /** [P221] Target chain. Threaded for future per-chain RPC-client selection;
+   *  defaults to mainnet behaviour (getPrivateClient) until Base activates. */
+  chainId?: number
 }
 
 export interface SimulationParams {
@@ -60,6 +63,8 @@ export interface SimulationParams {
   slippage: number
   fromAddress: `0x${string}`
   source: string
+  /** [P221] Target chain (default mainnet). */
+  chainId?: number
 }
 
 /**
@@ -70,7 +75,7 @@ export interface SimulationParams {
  *   - Direct routing forwards the adapter calldata unchanged.
  */
 export function buildSimulationTx(params: SimulationParams): SimulationTx {
-  const { swapData, routeViaFeeCollector, isNativeIn, tokenIn, tokenOut, rawAmount, slippage, fromAddress, source } = params
+  const { swapData, routeViaFeeCollector, isNativeIn, tokenIn, tokenOut, rawAmount, slippage, fromAddress, source, chainId } = params
   // Callers guard `if (!swapData.tx) throw` before reaching simulation.
   const tx = swapData.tx!
 
@@ -107,7 +112,7 @@ export function buildSimulationTx(params: SimulationParams): SimulationTx {
   const fcOverhead = routeViaFeeCollector ? (isNativeIn ? 100_000n : 120_000n) : 0n
   const gas = adapterGas + fcOverhead < SIM_GAS_FLOOR ? SIM_GAS_FLOOR : adapterGas + fcOverhead
 
-  return { to, data, value, gas, from: fromAddress, expectedOutput: swapData.toAmount, tokenOut, source }
+  return { to, data, value, gas, from: fromAddress, expectedOutput: swapData.toAmount, tokenOut, source, chainId }
 }
 
 /**

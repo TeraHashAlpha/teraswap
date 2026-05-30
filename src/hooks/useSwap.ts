@@ -243,7 +243,7 @@ export function useSwap(
 
     try {
       const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
-      const routeViaFeeCollector = usesFeeCollector(source)
+      const routeViaFeeCollector = usesFeeCollector(source, chainId)
 
       // For FeeCollector routing: the contract deducts 0.1% fee first,
       // then forwards the NET amount to the DEX router. So we must build
@@ -280,7 +280,7 @@ export function useSwap(
       }
 
       // Security: validate swap target is a known router (SushiSwap RouteProcessor2 lesson)
-      const routerCheck = validateRouterAddress(swapData.tx.to, source)
+      const routerCheck = validateRouterAddress(swapData.tx.to, source, chainId)
       if (!routerCheck.valid) {
         throw new Error(routerCheck.reason || 'Swap target address not whitelisted')
       }
