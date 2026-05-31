@@ -9,6 +9,8 @@ import {
   COW_SETTLEMENT,
   ODOS_ROUTER_V3,
   UNISWAP_SWAP_ROUTER_02,
+  BEBOP_JAM_SETTLEMENT,
+  BEBOP_BALANCE_MANAGER,
   type AggregatorName,
 } from './constants'
 import { globalLimiter } from './rate-limiter'
@@ -22,12 +24,22 @@ import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './ad
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { getFeeIncompatibleSources } from './chains/activation'
-import type { NormalizedQuote, MetaQuoteResult, QuoteMeta } from './adapters'
+import type { NormalizedQuote, MetaQuoteResult, QuoteMeta, QuoteParams, DEXAdapter } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
 export type { NormalizedQuote, MetaQuoteResult, FeeTierCandidate, FeeTierDetection, QuoteMeta, CowQuoteMeta, UniswapV3QuoteMeta, GenericQuoteMeta } from './adapters'
 export { submitCowOrder, pollCowOrderStatus, detectUniswapV3FeeTier } from './adapters'
 export { getAllCircuitStates }
+
+// [SPRINT-9D] Friendly per-source labels for the "no valid quotes" error,
+// keyed by AggregatorName so attribution survives reordering and source counts.
+// Partial: only the quote sources need a label; anything else falls back to the
+// raw source name.
+const SOURCE_ERROR_LABELS: Partial<Record<AggregatorName, string>> = {
+  '1inch': '1inch', '0x': '0x', velora: 'Velora', odos: 'Odos', kyberswap: 'KyberSwap',
+  cowswap: 'CoW', uniswapv3: 'Uniswap V3', openocean: 'OpenOcean', sushiswap: 'SushiSwap',
+  balancer: 'Balancer', curve: 'Curve', bebop: 'Bebop',
+}
 
 // ══════════════════════════════════════════════════════════
 //  META-AGGREGATOR ORCHESTRATOR
@@ -122,13 +134,18 @@ export async function fetchMetaQuote(
     })
 
   if (quotes.length === 0) {
-    // Build a helpful error from the individual failures
+    // Build a helpful error from the individual failures. [SPRINT-9D] Attribute
+    // each error to its ACTUAL source via sourceNames[i] (results[i] ↔
+    // activeSources[i] ↔ sourceNames[i]). The previous hardcoded positional
+    // array indexed the FILTERED-rejected list, so it misattributed errors once
+    // any source was excluded/circuit-open, and had no slot for the 12th source.
     const errors = results
-      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-      .map((r, i) => {
-        const sources = ['1inch', '0x', 'Velora', 'Odos', 'KyberSwap', 'CoW', 'Uniswap V3', 'OpenOcean', 'SushiSwap', 'Balancer', 'Curve']
-        return friendlyError(sources[i] ?? 'Unknown', r.reason)
-      })
+      .map((r, i): string | null =>
+        r.status === 'rejected'
+          ? friendlyError(SOURCE_ERROR_LABELS[sourceNames[i]] ?? sourceNames[i] ?? 'Unknown', r.reason)
+          : null,
+      )
+      .filter((e): e is string => e !== null)
     const allTimeout = errors.every(e => e.includes('timed out'))
     const allNetwork = errors.every(e => e.includes('Network error'))
     if (allTimeout) throw new Error('All sources timed out. Check your connection and try again.')
@@ -210,6 +227,158 @@ export async function fetchMetaQuote(
   }
   setCachedQuote(cacheKey, result)
   return result
+}
+
+// ══════════════════════════════════════════════════════════
+//  READ-ONLY PER-SOURCE QUOTE DIAGNOSTIC  [debug=sources]
+// ══════════════════════════════════════════════════════════
+//
+// Admin-only ground truth for "which sources actually answer on chain X".
+// It mirrors fetchMetaQuote's per-source execution — SAME adapter call, SAME
+// chainId threading, SAME QUOTE_TIMEOUT_MS — but is deliberately READ-ONLY:
+//   • It does NOT route through withCircuitBreaker (which records success/
+//     failure and could flip a production breaker toward OPEN).
+//   • It reads breaker state via the pure getInfo() snapshot, never isOpen()
+//     (which transitions OPEN→HALF_OPEN as a side effect).
+// It surfaces the RAW adapter error (not friendlyError, which drops the HTTP
+// status) so missing-key (early throw) vs 401/403 vs no-route vs Timeout are
+// all distinguishable.
+
+/** One source's quote outcome. `error`/`toAmount` are mutually informative. */
+export interface SourceDiagnostic {
+  source: string
+  status: 'ok' | 'error'
+  toAmount?: string
+  error?: string
+  latencyMs: number
+}
+
+export interface QuoteSourcesDiagnostics {
+  chainId: number
+  sources: SourceDiagnostic[]
+  env: {
+    ONEINCH_API_KEY: boolean
+    ZEROX_API_KEY: boolean
+    ODOS_API_KEY: boolean
+    NEXT_PUBLIC_BASE_RPC_URL: boolean
+    /** `getChainConfig(chainId).rpc.primary` is a non-empty string. */
+    rpcPrimaryConfigured: boolean
+    /** Primary RPC answered eth_chainId within the probe window. null = not probed. */
+    rpcReachable: boolean | null
+  }
+}
+
+/** Cap the raw upstream error surfaced so a verbose body can't bloat the payload. */
+const DIAG_ERROR_MAX = 200
+const RPC_PROBE_TIMEOUT_MS = 3_000
+
+function rawDiagError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.length > DIAG_ERROR_MAX ? `${msg.slice(0, DIAG_ERROR_MAX)}…` : msg
+}
+
+/** Read-only probe of a single adapter. Never mutates circuit-breaker state. */
+async function probeSource(adapter: DEXAdapter, params: QuoteParams): Promise<SourceDiagnostic> {
+  const source = adapter.name
+  // Config-disabled → report without executing (reflects production's skip).
+  if (DISABLED_SOURCES[source]) {
+    return { source, status: 'error', error: `disabled: ${DISABLED_SOURCES[source]}`, latencyMs: 0 }
+  }
+  // Read-only breaker check: getInfo() and getState() are pure; only isOpen()
+  // mutates (it transitions OPEN→HALF_OPEN once cooldown elapses), so never use it here.
+  const cb = getCircuitBreaker(source).getInfo()
+  if (cb.state === 'OPEN' && cb.cooldownRemaining > 0) {
+    return {
+      source,
+      status: 'error',
+      error: `circuit breaker OPEN — skipped in production (cooldown ${cb.cooldownRemaining}ms)`,
+      latencyMs: 0,
+    }
+  }
+  const t0 = Date.now()
+  try {
+    // SAME call + SAME timeout as fetchMetaQuote, minus the state-mutating wrapper.
+    const q = await withTimeout(adapter.fetchQuote(params), QUOTE_TIMEOUT_MS)
+    const latencyMs = Date.now() - t0
+    let positive = false
+    try {
+      positive = !!q && !!q.toAmount && BigInt(q.toAmount) > 0n
+    } catch { /* non-numeric toAmount → treat as no usable quote */ }
+    if (positive) {
+      return { source, status: 'ok', toAmount: q!.toAmount, latencyMs }
+    }
+    return {
+      source,
+      status: 'error',
+      error: q ? `no usable quote (toAmount=${q.toAmount ?? 'undefined'})` : 'null quote (no route)',
+      toAmount: q?.toAmount,
+      latencyMs,
+    }
+  } catch (err) {
+    return { source, status: 'error', error: rawDiagError(err), latencyMs: Date.now() - t0 }
+  }
+}
+
+/** Lightweight reachability probe (eth_chainId). Returns false on any failure.
+ *  The URL is NEVER logged or returned — it can embed a provider key. */
+async function probeRpcReachable(url: string): Promise<boolean> {
+  try {
+    const res = await withTimeout(
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      }),
+      RPC_PROBE_TIMEOUT_MS,
+    )
+    if (!res.ok) return false
+    const data = await res.json().catch(() => null)
+    return !!(data && (data.result !== undefined || data.id !== undefined))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Run the read-only per-source diagnostic for `chainId`. Reports each source's
+ * outcome (ok / raw error / latency / toAmount), env-var presence as booleans,
+ * and the target chain's registry RPC status. Emits ONE presence log line —
+ * booleans only, never a secret value.
+ */
+export async function diagnoseQuoteSources(
+  src: string,
+  dst: string,
+  amount: string,
+  srcDecimals: number,
+  dstDecimals: number,
+  chainId: number,
+): Promise<QuoteSourcesDiagnostics> {
+  const params: QuoteParams = { src, dst, amount, srcDecimals, dstDecimals, chainId }
+
+  // Per-source probes run concurrently, mirroring fetchMetaQuote's fan-out.
+  const sources = await Promise.all(ADAPTER_REGISTRY.map((a) => probeSource(a, params)))
+
+  // Registry RPC status for the target chain. Resolve primary defensively.
+  let rpcPrimary = ''
+  try {
+    rpcPrimary = getChainConfig(chainId).rpc.primary ?? ''
+  } catch { /* unsupported chain → leave empty */ }
+  const rpcPrimaryConfigured = rpcPrimary.trim().length > 0
+  const rpcReachable = rpcPrimaryConfigured ? await probeRpcReachable(rpcPrimary) : null
+
+  const env = {
+    ONEINCH_API_KEY: !!process.env.ONEINCH_API_KEY,
+    ZEROX_API_KEY: !!process.env.ZEROX_API_KEY,
+    ODOS_API_KEY: !!process.env.ODOS_API_KEY,
+    NEXT_PUBLIC_BASE_RPC_URL: !!process.env.NEXT_PUBLIC_BASE_RPC_URL,
+    rpcPrimaryConfigured,
+    rpcReachable,
+  }
+
+  // [req 4] One-line presence log — booleans ONLY, the secret values never leave.
+  console.info('[quote-diagnostic] env presence', { chainId, ...env })
+
+  return { chainId, sources, env }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -335,6 +504,10 @@ export async function fetchApproveSpender(source: AggregatorName, chainId: numbe
     // spender so we never return null/zero.
   }
 
+  // [ADR-010] Bebop approves the JAM Balance Manager (approvalTarget) — NOT the
+  // settlement (tx.to) and NOT the FeeCollector. Same address on chains 1 + 8453.
+  if (source === 'bebop') return BEBOP_BALANCE_MANAGER
+
   if (chainId !== DEFAULT_CHAIN_ID) {
     // ── Non-mainnet — resolve from the per-chain router whitelist ──
     const spender = ROUTER_WHITELIST_BY_CHAIN[chainId]?.[source]
@@ -396,6 +569,8 @@ export const ROUTER_WHITELIST: Set<string> = new Set([
   '0x6a000f20005980200259b80c5102003040001068', // ParaSwap Augustus V6 (Velora)
   '0x216b4b4ba9f3e719726886d34a177484278bfcae', // ParaSwap Augustus V6.2
   '0x16c6521dff6bab339122a0fe25a9116693265353', // Curve CurveRouterNG (mainnet)
+  BEBOP_JAM_SETTLEMENT.toLowerCase(),           // [ADR-010] Bebop JamSettlement (tx.to)
+  BEBOP_BALANCE_MANAGER.toLowerCase(),          // [ADR-010] Bebop Balance Manager (approvalTarget)
   ...(FEE_COLLECTOR_ADDRESS ? [FEE_COLLECTOR_ADDRESS.toLowerCase()] : []),
 ])
 

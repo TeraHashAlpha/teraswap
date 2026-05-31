@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { fetchMetaQuote } from '@/lib/api'
+import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
+import { verifyBearerToken } from '@/lib/auth'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
 /**
  * Shared 503 response for when the circuit breaker has halted routing.
@@ -64,6 +66,39 @@ export async function GET(req: NextRequest) {
   // Q8: Validate address format
   if (!isValidAddress(src) || !isValidAddress(dst)) {
     return NextResponse.json({ error: 'Invalid token address format' }, { status: 400 })
+  }
+
+  // [diag] Admin-gated read-only per-source diagnostic. When `debug=sources` is
+  // ABSENT the normal quote path below runs byte-identically — this branch is the
+  // only behavioural change. Gated behind DEBUG_QUOTE_TOKEN (verifyBearerToken
+  // fails closed when the env var is unset). Never alters quote/swap behaviour.
+  if (searchParams.get('debug') === 'sources') {
+    if (!verifyBearerToken(req.headers.get('authorization'), process.env.DEBUG_QUOTE_TOKEN ?? '')) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+    }
+    const diagChainId = chainIdParam ? Number(chainIdParam) : DEFAULT_CHAIN_ID
+    const diag = await diagnoseQuoteSources(src, dst, amount, srcDecimals, dstDecimals, diagChainId)
+    // Time the REAL fetchMetaQuote on the same chain so a pipeline-level
+    // failure/timeout is distinguishable from the per-source results above.
+    const pipelineStart = Date.now()
+    let pipeline: {
+      totalMs: number
+      status: 'ok' | 'error'
+      quoteCount?: number
+      bestSource?: string
+      error?: string
+    }
+    try {
+      const r = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, undefined, diagChainId)
+      pipeline = { totalMs: Date.now() - pipelineStart, status: 'ok', quoteCount: r.all.length, bestSource: r.best.source }
+    } catch (e) {
+      pipeline = {
+        totalMs: Date.now() - pipelineStart,
+        status: 'error',
+        error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+      }
+    }
+    return NextResponse.json({ ...diag, pipeline }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   }
 
   try {

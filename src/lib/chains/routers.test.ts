@@ -8,8 +8,8 @@ import { ROUTER_WHITELIST } from '@/lib/api'
 describe('chains/routers [P222]', () => {
   it('the Base whitelist contains at least 5 routers', () => {
     expect(getRouterWhitelist(8453).length).toBeGreaterThanOrEqual(5)
-    // All 11 adapters have a Base primary router researched.
-    expect(Object.keys(ROUTER_WHITELIST_BY_CHAIN[8453]).length).toBe(11)
+    // 11 AMM/aggregator adapters + Bebop JAM settlement = 12 Base primary routers. [ADR-010]
+    expect(Object.keys(ROUTER_WHITELIST_BY_CHAIN[8453]).length).toBe(12)
   })
 
   it('the mainnet whitelist matches the existing ROUTER_WHITELIST in api.ts', () => {

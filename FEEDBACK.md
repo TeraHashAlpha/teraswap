@@ -1059,3 +1059,129 @@ mainnet default (separate surfaces; mainnet-identical).
   `wagmiConfig.ts` already registers `base`. So the only symptom-causing gates
   were SwapBox.tsx (quotes/balance) and SwapButton.tsx (the "Switch to Ethereum"
   CTA) — both fixed here to use isChainActive (supported AND active).
+
+## Feedback — quote source diagnostic (debug=sources) (this commit)
+
+### Security concern discovered during implementation (ROOT-CAUSE candidate)
+- While wiring the diagnostic I found WHY only Uniswap V3 likely shows on Base:
+  the on-chain adapters `uniswapv3` and `curve` resolve their RPC via
+  `getRpcUrl()` (src/lib/adapters/shared.ts), which is NOT chain-aware — it
+  always returns `process.env.RPC_URL || NEXT_PUBLIC_RPC_URL || https://eth.llamarpc.com`
+  (MAINNET, hardcoded non-empty fallback). On Base they therefore query MAINNET
+  Uniswap/Curve contracts and can return a (mainnet) quote even when chainId=8453,
+  while the HTTP adapters correctly hit Base endpoints (which may 401 on missing
+  keys or lack Base support). Strong candidate for "meta-quote returns only
+  Uniswap V3 on Base." NOT fixed here (diagnostic-only task) — recommend a
+  follow-up: make getRpcUrl()/the on-chain adapters chain-aware (use
+  getChainConfig(chainId).rpc).
+
+### Confirmation requested (on-chain adapters cannot block on empty registry RPC)
+- Confirmed. uniswapv3/curve never read the registry's Base `rpc.primary`; they
+  use the mainnet `getRpcUrl()` (non-empty hardcoded fallback). They are also
+  bounded by `withTimeout(QUOTE_TIMEOUT_MS=10s)` in both production and the
+  diagnostic. So an empty `NEXT_PUBLIC_BASE_RPC_URL` cannot make them hang.
+
+### Design notes
+- The per-source probe is strictly READ-ONLY: it runs the SAME adapter call +
+  chainId threading + `withTimeout(QUOTE_TIMEOUT_MS)` as fetchMetaQuote, but does
+  NOT route through `withCircuitBreaker` (which calls onSuccess/onFailure) and
+  reads breaker state via the pure `getInfo()` (never `isOpen()`, which
+  transitions OPEN→HALF_OPEN). An adversarial multi-agent review flagged that
+  this read-only invariant was untested; added two tests (OPEN-skip path + "a
+  failing source does not increment the breaker").
+- The pipeline-timing block (the user's follow-up: "time the full fetchMetaQuote
+  on chainId=8453") intentionally calls the REAL fetchMetaQuote, so it DOES carry
+  production side effects (circuit-breaker recording, source-monitor pings) and
+  goes through the in-memory QUOTE quote-cache — a recent identical
+  (src,dst,amount,chainId) quote yields a cache-HIT timing (~0ms). Vary the
+  amount to force a cold pipeline measurement. The per-source probe is
+  cache-independent and is the authoritative per-source signal.
+
+### Edge case / limitation
+- Read-only breaker reads use `getInfo()` without the lazy KV pre-seed
+  (`ensureInitialized()` is module-private and only runs via withCircuitBreaker).
+  On a truly cold Lambda where the diagnostic is the very first request, a
+  KV-`degraded` source may show CLOSED rather than its pre-seeded OPEN. Warm
+  Lambdas (after any real quote) reflect KV correctly.
+- `NEXT_PUBLIC_BASE_RPC_URL` can embed a provider key in its path, so the RPC URL
+  is NEVER logged or returned — only the `rpcPrimaryConfigured` / `rpcReachable`
+  booleans escape. Raw adapter error strings ARE surfaced (status + body detail)
+  per requirement 3; these include HTTP status + the adapter's parsed error
+  detail, not the request's API key.
+- `DISABLED_SOURCES` is currently empty `{}` — no source is config-disabled, so
+  the "only Uniswap V3" symptom is not a disable-config issue (see root-cause).
+- New env var `DEBUG_QUOTE_TOKEN` documented in `.env.example`; unset → debug
+  branch fails closed (401), normal quoting unaffected (byte-identical).
+
+## Feedback — SPRINT-9C: chain-aware on-chain adapters (this commit)
+
+### Root cause fixed
+- `getRpcUrl()` was not chain-aware (always mainnet), so `uniswapv3`/`curve` eth_call'd
+  MAINNET contracts even for `chainId=8453`, returning a mainnet-priced quote on Base
+  ("only Uniswap shows on Base"). Added `getRpcUrlForChain(chainId)` (chainId 1 → `getRpcUrl()`
+  verbatim; else `getChainConfig(chainId).rpc.primary || fallback`) + a per-chain Uniswap V3
+  registry, and threaded `chainId` through both adapters. `curve` is mainnet-only in code, so it
+  now returns `null` + zero RPC off-mainnet (Base Curve pools deferred — TODO in curve.ts).
+
+### Verification (Base addresses)
+- QuoterV2 / Factory / SwapRouter02 verified char-by-char on BOTH Basescan name tags AND
+  developers.uniswap.org base-deployments (May 2026). Router was already Basescan-verified in
+  `chains/routers.ts`. Mainnet chainId-1 entry references the canonical constants
+  (`UNISWAP_QUOTER_V2` / `UNISWAP_SWAP_ROUTER_02`) so mainnet stays byte-identical.
+
+### Design notes / deliberate decisions
+- `getRpcUrlForChain` uses `primary || fallbacks[0]` (not primary-only). This is a small
+  enhancement over the literal spec wording so Base still resolves to its registry fallback
+  (`https://mainnet.base.org`, a BASE RPC) when `NEXT_PUBLIC_BASE_RPC_URL` is unset — and it
+  NEVER returns the Ethereum mainnet RPC for a non-mainnet chain. Mirrors `getPublicClientForChain`'s
+  `primary || viem-default` intent.
+- Uniswap V3 `factory` is included in the registry per spec but is reference-only — the adapter
+  quotes via QuoterV2 directly (no Factory call today). Kept for self-documentation / future TWAP/pool work.
+
+### Edge case / minor follow-up (not fixed — out of scope)
+- `feeTierCacheKey()` in `shared.ts` keys the in-memory Uniswap fee-tier cache by the mainnet
+  `CHAIN_ID` constant, so the same pair on different chains shares a cache slot. This is HARMLESS
+  today: both the quote and swap paths ALWAYS re-run `detectUniswapV3FeeTier` (which now resolves
+  the correct per-chain Quoter), so the cached tier is advisory and re-validated per chain — never
+  used to skip a chain-correct detection. Recommend chain-keying the cache in a later cleanup.
+- Empty Base RPC primary → `getRpcUrlForChain(8453)` returns the registry fallback; if BOTH primary
+  and fallback were empty it returns `''` and the adapter fails fast for that source (still no
+  mainnet call). The diagnostic (`debug=sources`) surfaces this.
+
+## Feedback — SPRINT-9D / P228: Bebop as the 12th source (this commit)
+
+### Security (fail-closed) — implemented per ADR-010
+- The adapter uses the quote response's settlement/approvalTarget but validates
+  them against our STATIC per-chain whitelist: fetchSwapData returns a tx only if
+  `tx.to === settlementAddress` AND both settlement + approvalTarget ∈
+  `getRouterWhitelist(chainId)`, else it throws. Whitelisted on chains 1 + 8453
+  via routers.ts (ROUTER_WHITELIST_BY_CHAIN.bebop = settlement + BEBOP_SPENDERS_BY_CHAIN
+  = settlement+BalanceManager) and api.ts ROUTER_WHITELIST (kept == MAINNET_FULL,
+  test-pinned). fetchApproveSpender('bebop') → Balance Manager (approvalTarget),
+  never the settlement or FeeCollector. 5-agent adversarial review: 0 findings.
+
+### Assumption to validate (per spec) — placeholder taker for price-only quotes
+- Bebop requires `taker_address`. fetchQuote (price, no wallet) sends a non-zero
+  placeholder EOA (0x1111…1111); fetchSwapData uses the real `from`. If Bebop
+  rejects the placeholder for indicative quotes, `bebop` would only appear once a
+  wallet is connected (the source still works for swaps). Verify against the live
+  API with a real BEBOP_API_KEY; swap to a known-good taker if rejected.
+
+### Design decision — gross quote, fee at swap (fair ranking)
+- fetchQuote does NOT send `fee`/`fee_recipient` (GROSS output), so Bebop ranks
+  apples-to-apples against the other sources (which quote gross and take the 0.1%
+  at execution). The partner fee (FEE_BPS + FEE_RECIPIENT) is applied on
+  fetchSwapData only. validateFeeIntegrity needs no change (swap ≈ quote within tol).
+
+### Fixed pre-existing bug (tech-debt called out in ADR-010)
+- api.ts built the "no valid quotes" error from a hardcoded positional label array
+  indexed by the FILTERED-rejected list — so it misattributed errors whenever any
+  source was excluded/circuit-open, and had no slot for a 12th source. Rewrote to
+  attribute by the real source via `sourceNames[i]` + a `SOURCE_ERROR_LABELS`
+  map (existing labels preserved, Bebop added). Now order/count-proof.
+
+### Note — Base FeeCollector override
+- `FEE_INCOMPATIBLE_BY_CHAIN[8453]` was hardcoded `['0x','cowswap']` (not derived
+  from FEE_INCOMPATIBLE_SOURCES), so adding 'bebop' to the constant alone would
+  NOT cover Base. Added 'bebop' to the 8453 override too, so Bebop is never routed
+  through the Base FeeCollector once it is deployed.

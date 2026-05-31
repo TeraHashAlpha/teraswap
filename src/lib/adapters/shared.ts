@@ -4,6 +4,7 @@ import {
   WETH_ADDRESS,
   NATIVE_ETH,
 } from '@/lib/constants'
+import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import type { Address } from 'viem'
 
 // ── Slippage safety clamp ────────────────────────────────
@@ -87,6 +88,21 @@ export function getRpcUrl(): string {
     return process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
   }
   return '/api/rpc'
+}
+
+/**
+ * [SPRINT-9C] Chain-aware RPC resolver for the on-chain adapters (uniswapv3,
+ * curve). `chainId === DEFAULT_CHAIN_ID` (1) → `getRpcUrl()` verbatim, preserving
+ * the /api/rpc privacy proxy in the browser so the mainnet path stays
+ * byte-identical. Any other chain resolves the chain's configured RPC (primary,
+ * then the registry fallback) and NEVER returns the mainnet RPC — an off-mainnet
+ * adapter must never silently eth_call mainnet. Throws on an unsupported chain
+ * (callers gate on per-chain contract availability before reaching this).
+ */
+export function getRpcUrlForChain(chainId: number = DEFAULT_CHAIN_ID): string {
+  if (chainId === DEFAULT_CHAIN_ID) return getRpcUrl()
+  const { rpc } = getChainConfig(chainId)
+  return rpc.primary || rpc.fallbacks?.[0] || ''
 }
 
 /**

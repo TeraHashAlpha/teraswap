@@ -1,14 +1,12 @@
 import { encodeFunctionData, decodeFunctionResult, type Address } from 'viem'
-import {
-  UNISWAP_FEE_TIERS,
-  UNISWAP_QUOTER_V2,
-  UNISWAP_SWAP_ROUTER_02,
-} from '@/lib/constants'
+import { UNISWAP_FEE_TIERS } from '@/lib/constants'
+import { getUniswapV3Contracts } from '@/lib/chains/uniswap-v3'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import {
   clampSlippage,
   toWeth,
   isNativeEth,
-  getRpcUrl,
+  getRpcUrlForChain,
   getCachedFeeTier,
   setCachedFeeTier,
   invalidateCachedFeeTier,
@@ -101,9 +99,16 @@ export async function detectUniswapV3FeeTier(params: {
   tokenOut: string
   amountIn: bigint
   sqrtPriceLimitX96?: bigint
+  // [SPRINT-9C] Target chain. Omitted → mainnet (DEFAULT_CHAIN_ID), so existing
+  // mainnet behaviour is byte-identical.
+  chainId?: number
 }): Promise<FeeTierDetection> {
-  const { tokenIn, tokenOut, amountIn, sqrtPriceLimitX96 = 0n } = params
-  const rpcUrl = getRpcUrl()
+  const { tokenIn, tokenOut, amountIn, sqrtPriceLimitX96 = 0n, chainId = DEFAULT_CHAIN_ID } = params
+  // [SPRINT-9C] Resolve the Quoter + RPC for the REQUESTED chain. Never fall back
+  // to mainnet off-mainnet: if V3 isn't configured for this chain, return no pool.
+  const contracts = getUniswapV3Contracts(chainId)
+  if (!contracts) throw new Error(`Uniswap V3: not deployed on chain ${chainId}`)
+  const rpcUrl = getRpcUrlForChain(chainId)
   const sellToken = toWeth(tokenIn)
   const buyToken = toWeth(tokenOut)
 
@@ -129,7 +134,7 @@ export async function detectUniswapV3FeeTier(params: {
           id: fee,
           method: 'eth_call',
           params: [
-            { to: UNISWAP_QUOTER_V2, data: callData },
+            { to: contracts.quoterV2, data: callData },
             'latest',
           ],
         }),
@@ -195,6 +200,7 @@ export async function detectUniswapV3FeeTier(params: {
 
 async function fetchUniswapV3Quote(
   src: string, dst: string, amount: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<NormalizedQuote> {
   const netAmount = BigInt(amount)
 
@@ -202,6 +208,7 @@ async function fetchUniswapV3Quote(
     tokenIn: src,
     tokenOut: dst,
     amountIn: netAmount,
+    chainId,
   })
 
   const best = detection.candidates.find(c => c.fee === detection.bestFee && c.ok)!
@@ -228,8 +235,14 @@ async function fetchUniswapV3Swap(
   cachedFee?: number,
   // [P101] Output destination — defaults to sender when not provided.
   recipient?: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<NormalizedQuote> {
   const netAmount = BigInt(amount)
+
+  // [SPRINT-9C] Resolve the per-chain SwapRouter02 for the tx target. No V3 on
+  // this chain → no swap (mirrors the quote-path guard).
+  const contracts = getUniswapV3Contracts(chainId)
+  if (!contracts) throw new Error(`Uniswap V3: not deployed on chain ${chainId}`)
 
   let feeTier = cachedFee ?? getCachedFeeTier(src, dst)
   let amountOut: bigint
@@ -238,7 +251,7 @@ async function fetchUniswapV3Swap(
   if (feeTier != null) {
     try {
       const detection = await detectUniswapV3FeeTier({
-        tokenIn: src, tokenOut: dst, amountIn: netAmount,
+        tokenIn: src, tokenOut: dst, amountIn: netAmount, chainId,
       })
       const best = detection.candidates.find(c => c.fee === detection.bestFee && c.ok)!
       feeTier = detection.bestFee
@@ -250,7 +263,7 @@ async function fetchUniswapV3Swap(
     }
   } else {
     const detection = await detectUniswapV3FeeTier({
-      tokenIn: src, tokenOut: dst, amountIn: netAmount,
+      tokenIn: src, tokenOut: dst, amountIn: netAmount, chainId,
     })
     const best = detection.candidates.find(c => c.fee === detection.bestFee && c.ok)!
     feeTier = detection.bestFee
@@ -299,7 +312,7 @@ async function fetchUniswapV3Swap(
     routes: [`Uniswap V3 Direct (${feeLabel} pool)`],
     meta: { uniswapV3Fee: feeTier },
     tx: {
-      to: UNISWAP_SWAP_ROUTER_02 as `0x${string}`,
+      to: contracts.swapRouter02,
       data: multicallData,
       value: isNativeIn ? netAmount.toString() : '0',
       gas: gasEstimate + 50_000,
@@ -310,7 +323,7 @@ async function fetchUniswapV3Swap(
 // ── Adapter interface ───────────────────────────────────
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  return fetchUniswapV3Quote(params.src, params.dst, params.amount)
+  return fetchUniswapV3Quote(params.src, params.dst, params.amount, params.chainId ?? DEFAULT_CHAIN_ID)
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
@@ -325,6 +338,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     params.src, params.dst, params.amount, params.from, params.slippage,
     cachedFee,
     params.recipient,
+    params.chainId ?? DEFAULT_CHAIN_ID,
   )
 }
 

@@ -18,6 +18,8 @@ import {
   ODOS_ROUTER_V3,
   UNISWAP_SWAP_ROUTER_02,
   FEE_COLLECTOR_ADDRESS,
+  BEBOP_JAM_SETTLEMENT,
+  BEBOP_BALANCE_MANAGER,
 } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 
@@ -40,6 +42,7 @@ export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${strin
     balancer: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',   // Vault V2
     uniswapv3: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',  // SwapRouter02
     curve: '0x16C6521Dff6baB339122a0FE25a9116693265353',      // CurveRouterNG
+    bebop: BEBOP_JAM_SETTLEMENT,                                // [ADR-010] JamSettlement (tx.to)
   },
   // ── Base (8453) — verified on Basescan / official sources, May 2026 ──
   8453: {
@@ -65,7 +68,18 @@ export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${strin
     uniswapv3: '0x2626664c2603336E57B271c5C0b26F421741e481',
     // Curve CurveRouterNG v1.1 on Base (curve-router-ng README; Basescan: "Curve.fi: Router")
     curve: '0x4f37A9d177470499A2dD084621020b023fcffc1F',
+    // [ADR-010] Bebop JamSettlement (tx.to) — same address on every EVM chain.
+    bebop: BEBOP_JAM_SETTLEMENT,
   },
+}
+
+// [ADR-010] Bebop JAM trusted spenders for the chains where Bebop is enabled
+// (1 + 8453). Same addresses on both. The settlement is the swap target (tx.to);
+// the Balance Manager is the ERC-20 approval spender (approvalTarget). Both must
+// be in the whitelist so the adapter's fail-closed gate accepts a genuine quote.
+const BEBOP_SPENDERS_BY_CHAIN: Record<number, string[]> = {
+  1: [BEBOP_JAM_SETTLEMENT.toLowerCase(), BEBOP_BALANCE_MANAGER.toLowerCase()],
+  8453: [BEBOP_JAM_SETTLEMENT.toLowerCase(), BEBOP_BALANCE_MANAGER.toLowerCase()],
 }
 
 /**
@@ -110,9 +124,11 @@ function sharedSpenders(chainId: number): string[] {
 
 /** The whitelisted router/spender addresses (lowercase) for a chain. */
 export function getRouterWhitelist(chainId: number = DEFAULT_CHAIN_ID): string[] {
-  if (chainId === 1) return [...MAINNET_FULL]
+  // [ADR-010] Bebop's settlement + Balance Manager, whitelisted on 1 + 8453.
+  const bebop = BEBOP_SPENDERS_BY_CHAIN[chainId] ?? []
+  if (chainId === 1) return Array.from(new Set([...MAINNET_FULL, ...bebop]))
   const primaries = Object.values(ROUTER_WHITELIST_BY_CHAIN[chainId] ?? {}).map((a) => a.toLowerCase())
-  return Array.from(new Set([...primaries, ...sharedSpenders(chainId)]))
+  return Array.from(new Set([...primaries, ...sharedSpenders(chainId), ...bebop]))
 }
 
 /** True when `address` is a whitelisted router/spender on `chainId`. */

@@ -1,5 +1,6 @@
 import { encodeFunctionData, decodeFunctionResult, type Address } from 'viem'
 import { clampSlippage, isNativeEth, getRpcUrl } from './shared'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 // CurveRouterNG on Ethereum mainnet
@@ -296,11 +297,19 @@ async function fetchCurveSwap(
 
 // ── Adapter interface ───────────────────────────────────
 
+// [SPRINT-9C] The pools + CurveRouterNG above are MAINNET-ONLY (mainnet addresses
+// hardcoded). Off mainnet, skip cleanly (return null) and issue ZERO RPC calls —
+// never quote a mainnet Curve pool over a mainnet RPC for an L2 request (that was
+// the "mainnet-priced quote on Base" class of bug this sprint fixes).
+// TODO(future sprint): add Base Curve pools + CurveRouterNG (Basescan: "Curve.fi:
+// Router" 0x4f37A9d177470499A2dD084621020b023fcffc1F) to support curve on Base.
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
+  if ((params.chainId ?? DEFAULT_CHAIN_ID) !== DEFAULT_CHAIN_ID) return null
   return fetchCurveQuote(params.src, params.dst, params.amount)
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
+  if ((params.chainId ?? DEFAULT_CHAIN_ID) !== DEFAULT_CHAIN_ID) return null
   return fetchCurveSwap(
     params.src, params.dst, params.amount, params.from, params.slippage,
     params.recipient,
