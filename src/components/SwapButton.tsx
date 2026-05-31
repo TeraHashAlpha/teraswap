@@ -3,6 +3,7 @@
 import { useAccount, useChains, useSwitchChain } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { CHAIN_ID } from '@/lib/constants'
+import { isChainActive } from '@/lib/chains'
 import { playTouchMP3 } from '@/lib/sounds'
 import type { SwapStatus } from '@/hooks/useSwap'
 import type { ApprovalStatus } from '@/hooks/useApproval'
@@ -34,7 +35,10 @@ export default function SwapButton({
   const { switchChain } = useSwitchChain()
   const configuredChains = useChains()
   const targetChainName = configuredChains.find((c) => c.id === CHAIN_ID)?.name ?? 'Ethereum'
-  const isCorrectChain = chain?.id === CHAIN_ID
+  // [Sprint 45] Accept any SUPPORTED + ACTIVE chain (FeeCollector deployed), not
+  // just mainnet. On an inactive/unsupported chain this stays false and the
+  // button still prompts a switch to Ethereum (the safe default target below).
+  const isCorrectChain = !!chain && isChainActive(chain.id)
 
   type BtnConfig = { text: string; disabled: boolean; onClick: () => void; variant: string }
 

@@ -18,6 +18,11 @@ let mockChainId: number | undefined = 1
 const mockOpenConnectModal = vi.fn()
 const mockSwitchChain = vi.fn()
 
+// [Sprint 45] Controllable activation set so the "correct chain" check (now
+// isChainActive-based, not chainId===1) can be exercised for mainnet, an
+// inactive/unsupported chain, and an ACTIVE non-mainnet chain (Base).
+let mockActiveChainIds = new Set<number>([1])
+
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({
     isConnected: mockIsConnected,
@@ -25,6 +30,10 @@ vi.mock('wagmi', () => ({
   })),
   useChains: vi.fn(() => [{ id: 1, name: 'Ethereum' }]),
   useSwitchChain: vi.fn(() => ({ switchChain: mockSwitchChain })),
+}))
+
+vi.mock('@/lib/chains', () => ({
+  isChainActive: (id: number) => mockActiveChainIds.has(id),
 }))
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -64,6 +73,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockIsConnected = true
   mockChainId = 1
+  mockActiveChainIds = new Set<number>([1])
 })
 
 describe('SwapButton', () => {
@@ -95,6 +105,24 @@ describe('SwapButton', () => {
     render(<SwapButton {...baseProps} />)
     fireEvent.click(screen.getByRole('button'))
     expect(mockSwitchChain).toHaveBeenCalledWith({ chainId: 1 })
+  })
+
+  it('[Sprint 45] does NOT prompt a switch on an active non-mainnet chain (Base)', () => {
+    mockChainId = 8453 // Base
+    mockActiveChainIds = new Set<number>([1, 8453]) // Base activated (FeeCollector live)
+    render(<SwapButton {...baseProps} />)
+    const btn = screen.getByRole('button')
+    // With Base active, the chain check passes → button reaches the ready "Swap"
+    // state instead of "Switch to Ethereum".
+    expect(btn).not.toHaveTextContent(/switch to/i)
+    expect(btn).toHaveTextContent(/^swap$/i)
+  })
+
+  it('[Sprint 45] still prompts a switch on a supported-but-coming-soon chain (Base inactive)', () => {
+    mockChainId = 8453 // Base
+    mockActiveChainIds = new Set<number>([1]) // Base NOT yet activated
+    render(<SwapButton {...baseProps} />)
+    expect(screen.getByRole('button')).toHaveTextContent(/switch to ethereum/i)
   })
 
   it('shows "Enter amount" disabled when hasAmount=false', () => {
