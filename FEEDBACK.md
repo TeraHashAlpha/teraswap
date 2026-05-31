@@ -1059,3 +1059,56 @@ mainnet default (separate surfaces; mainnet-identical).
   `wagmiConfig.ts` already registers `base`. So the only symptom-causing gates
   were SwapBox.tsx (quotes/balance) and SwapButton.tsx (the "Switch to Ethereum"
   CTA) — both fixed here to use isChainActive (supported AND active).
+
+## Feedback — quote source diagnostic (debug=sources) (this commit)
+
+### Security concern discovered during implementation (ROOT-CAUSE candidate)
+- While wiring the diagnostic I found WHY only Uniswap V3 likely shows on Base:
+  the on-chain adapters `uniswapv3` and `curve` resolve their RPC via
+  `getRpcUrl()` (src/lib/adapters/shared.ts), which is NOT chain-aware — it
+  always returns `process.env.RPC_URL || NEXT_PUBLIC_RPC_URL || https://eth.llamarpc.com`
+  (MAINNET, hardcoded non-empty fallback). On Base they therefore query MAINNET
+  Uniswap/Curve contracts and can return a (mainnet) quote even when chainId=8453,
+  while the HTTP adapters correctly hit Base endpoints (which may 401 on missing
+  keys or lack Base support). Strong candidate for "meta-quote returns only
+  Uniswap V3 on Base." NOT fixed here (diagnostic-only task) — recommend a
+  follow-up: make getRpcUrl()/the on-chain adapters chain-aware (use
+  getChainConfig(chainId).rpc).
+
+### Confirmation requested (on-chain adapters cannot block on empty registry RPC)
+- Confirmed. uniswapv3/curve never read the registry's Base `rpc.primary`; they
+  use the mainnet `getRpcUrl()` (non-empty hardcoded fallback). They are also
+  bounded by `withTimeout(QUOTE_TIMEOUT_MS=10s)` in both production and the
+  diagnostic. So an empty `NEXT_PUBLIC_BASE_RPC_URL` cannot make them hang.
+
+### Design notes
+- The per-source probe is strictly READ-ONLY: it runs the SAME adapter call +
+  chainId threading + `withTimeout(QUOTE_TIMEOUT_MS)` as fetchMetaQuote, but does
+  NOT route through `withCircuitBreaker` (which calls onSuccess/onFailure) and
+  reads breaker state via the pure `getInfo()` (never `isOpen()`, which
+  transitions OPEN→HALF_OPEN). An adversarial multi-agent review flagged that
+  this read-only invariant was untested; added two tests (OPEN-skip path + "a
+  failing source does not increment the breaker").
+- The pipeline-timing block (the user's follow-up: "time the full fetchMetaQuote
+  on chainId=8453") intentionally calls the REAL fetchMetaQuote, so it DOES carry
+  production side effects (circuit-breaker recording, source-monitor pings) and
+  goes through the in-memory QUOTE quote-cache — a recent identical
+  (src,dst,amount,chainId) quote yields a cache-HIT timing (~0ms). Vary the
+  amount to force a cold pipeline measurement. The per-source probe is
+  cache-independent and is the authoritative per-source signal.
+
+### Edge case / limitation
+- Read-only breaker reads use `getInfo()` without the lazy KV pre-seed
+  (`ensureInitialized()` is module-private and only runs via withCircuitBreaker).
+  On a truly cold Lambda where the diagnostic is the very first request, a
+  KV-`degraded` source may show CLOSED rather than its pre-seeded OPEN. Warm
+  Lambdas (after any real quote) reflect KV correctly.
+- `NEXT_PUBLIC_BASE_RPC_URL` can embed a provider key in its path, so the RPC URL
+  is NEVER logged or returned — only the `rpcPrimaryConfigured` / `rpcReachable`
+  booleans escape. Raw adapter error strings ARE surfaced (status + body detail)
+  per requirement 3; these include HTTP status + the adapter's parsed error
+  detail, not the request's API key.
+- `DISABLED_SOURCES` is currently empty `{}` — no source is config-disabled, so
+  the "only Uniswap V3" symptom is not a disable-config issue (see root-cause).
+- New env var `DEBUG_QUOTE_TOKEN` documented in `.env.example`; unset → debug
+  branch fails closed (401), normal quoting unaffected (byte-identical).
