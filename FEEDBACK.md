@@ -1147,3 +1147,41 @@ mainnet default (separate surfaces; mainnet-identical).
 - Empty Base RPC primary → `getRpcUrlForChain(8453)` returns the registry fallback; if BOTH primary
   and fallback were empty it returns `''` and the adapter fails fast for that source (still no
   mainnet call). The diagnostic (`debug=sources`) surfaces this.
+
+## Feedback — SPRINT-9D / P228: Bebop as the 12th source (this commit)
+
+### Security (fail-closed) — implemented per ADR-010
+- The adapter uses the quote response's settlement/approvalTarget but validates
+  them against our STATIC per-chain whitelist: fetchSwapData returns a tx only if
+  `tx.to === settlementAddress` AND both settlement + approvalTarget ∈
+  `getRouterWhitelist(chainId)`, else it throws. Whitelisted on chains 1 + 8453
+  via routers.ts (ROUTER_WHITELIST_BY_CHAIN.bebop = settlement + BEBOP_SPENDERS_BY_CHAIN
+  = settlement+BalanceManager) and api.ts ROUTER_WHITELIST (kept == MAINNET_FULL,
+  test-pinned). fetchApproveSpender('bebop') → Balance Manager (approvalTarget),
+  never the settlement or FeeCollector. 5-agent adversarial review: 0 findings.
+
+### Assumption to validate (per spec) — placeholder taker for price-only quotes
+- Bebop requires `taker_address`. fetchQuote (price, no wallet) sends a non-zero
+  placeholder EOA (0x1111…1111); fetchSwapData uses the real `from`. If Bebop
+  rejects the placeholder for indicative quotes, `bebop` would only appear once a
+  wallet is connected (the source still works for swaps). Verify against the live
+  API with a real BEBOP_API_KEY; swap to a known-good taker if rejected.
+
+### Design decision — gross quote, fee at swap (fair ranking)
+- fetchQuote does NOT send `fee`/`fee_recipient` (GROSS output), so Bebop ranks
+  apples-to-apples against the other sources (which quote gross and take the 0.1%
+  at execution). The partner fee (FEE_BPS + FEE_RECIPIENT) is applied on
+  fetchSwapData only. validateFeeIntegrity needs no change (swap ≈ quote within tol).
+
+### Fixed pre-existing bug (tech-debt called out in ADR-010)
+- api.ts built the "no valid quotes" error from a hardcoded positional label array
+  indexed by the FILTERED-rejected list — so it misattributed errors whenever any
+  source was excluded/circuit-open, and had no slot for a 12th source. Rewrote to
+  attribute by the real source via `sourceNames[i]` + a `SOURCE_ERROR_LABELS`
+  map (existing labels preserved, Bebop added). Now order/count-proof.
+
+### Note — Base FeeCollector override
+- `FEE_INCOMPATIBLE_BY_CHAIN[8453]` was hardcoded `['0x','cowswap']` (not derived
+  from FEE_INCOMPATIBLE_SOURCES), so adding 'bebop' to the constant alone would
+  NOT cover Base. Added 'bebop' to the 8453 override too, so Bebop is never routed
+  through the Base FeeCollector once it is deployed.

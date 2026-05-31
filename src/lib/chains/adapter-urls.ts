@@ -39,6 +39,10 @@ export function getAdapterApiUrl(source: AggregatorName, chainId: number = DEFAU
       return 'https://api.odos.xyz'
     case 'balancer':
       return 'https://api-v3.balancer.fi'
+    // [ADR-010] Bebop — host only; the adapter builds /jam/{slug}/v2/quote from
+    // getChainConfig(chainId).slug (ethereum/base).
+    case 'bebop':
+      return 'https://api.bebop.xyz'
     // ── on-chain sources (uniswap/curve/order-engine) have no API base ──
     default:
       return AGGREGATOR_APIS[source]?.base ?? ''

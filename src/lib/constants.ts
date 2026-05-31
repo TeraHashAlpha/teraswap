@@ -54,6 +54,14 @@ export const AGGREGATOR_APIS = {
     base: '', // on-chain — uses RateProvider + CurveRouterNG contracts
     key: '',
   },
+  bebop: {
+    // [ADR-010] Bebop Aggregation API (JAM). The adapter appends
+    // /jam/{slug}/v2/quote using getChainConfig(chainId).slug.
+    base: 'https://api.bebop.xyz',
+    // Server-only — NEVER NEXT_PUBLIC_ (rule #7). Without a key Bebop returns
+    // widened demo-mode quotes (dev only).
+    get key() { return process.env.BEBOP_API_KEY || '' },
+  },
   teraswap_order_engine: {
     base: '', // autonomous — self-hosted executor + Chainlink execution
     key: '',
@@ -96,8 +104,20 @@ export const AGGREGATOR_META: Record<AggregatorName, {
   sushiswap: { label: 'SushiSwap', mevProtected: false, intentBased: false, isDirect: false },
   balancer: { label: 'Balancer', mevProtected: false, intentBased: false, isDirect: false },
   curve: { label: 'Curve Finance', mevProtected: false, intentBased: false, isDirect: true },
+  bebop: { label: 'Bebop', mevProtected: false, intentBased: false, isDirect: false },
   teraswap_order_engine: { label: 'TeraSwap Order Engine', mevProtected: true, intentBased: false, isDirect: false },
 }
+
+// [ADR-010] Bebop partner identifier — server-only (query `source={BEBOP_SOURCE}`,
+// paired with the `source-auth: {BEBOP_API_KEY}` header). NEVER NEXT_PUBLIC_.
+export const BEBOP_SOURCE = process.env.BEBOP_SOURCE || ''
+
+// [ADR-010] Bebop JAM contracts — identical on every supported EVM chain except
+// zkSync, so the SAME on Ethereum (1) and Base (8453). The adapter validates the
+// quote's response addresses against the per-chain router whitelist (fail-closed);
+// these are the only Bebop addresses we ever route to / approve.
+export const BEBOP_JAM_SETTLEMENT = '0xbeb0b0623f66bE8cE162EbDfA2ec543A522F4ea6' as `0x${string}` // tx.to
+export const BEBOP_BALANCE_MANAGER = '0xC5a350853E4e36b73EB0C24aaA4b8816C9A3579a' as `0x${string}` // approvalTarget
 
 // ── Fee ──────────────────────────────────────────────────
 export const FEE_PERCENT = Number(process.env.NEXT_PUBLIC_FEE_PERCENT ?? '0.1')
@@ -136,9 +156,11 @@ export const FEE_NATIVE_SOURCES: AggregatorName[] = []
 // structural mismatches in their swap architecture:
 //   - '0x'      Uses Permit2 pull model (not standard ERC-20 approve).
 //   - 'cowswap' Intent-based (EIP-712 signing, no on-chain tx to wrap).
+//   - 'bebop'   [ADR-010] Bebop builds the tx for its own JAM settlement; our
+//               fee is taken via Bebop partner-fee params, not the FeeCollector.
 // All other sources route through FeeCollector V2 for 0.1% fee collection.
 export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = [
-  '0x', 'cowswap',
+  '0x', 'cowswap', 'bebop',
 ]
 
 // ── Disabled Sources ────────────────────────────────────

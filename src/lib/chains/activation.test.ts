@@ -21,7 +21,8 @@ describe('chains/activation [P223]', () => {
 
   it('an unsupported chain is inactive; fee-incompatible sources fall back to mainnet', () => {
     expect(isChainActive(99999)).toBe(false)
-    expect(getFeeIncompatibleSources(1)).toEqual(['0x', 'cowswap'])
-    expect(getFeeIncompatibleSources(8453)).toEqual(['0x', 'cowswap'])
+    // [ADR-010] Bebop is fee-incompatible on both chains (JAM partner-fee, not FeeCollector).
+    expect(getFeeIncompatibleSources(1)).toEqual(['0x', 'cowswap', 'bebop'])
+    expect(getFeeIncompatibleSources(8453)).toEqual(['0x', 'cowswap', 'bebop'])
   })
 })

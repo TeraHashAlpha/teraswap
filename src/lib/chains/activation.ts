@@ -38,10 +38,11 @@ export function getChainStatus(chainId: number): ChainStatus {
  */
 const FEE_INCOMPATIBLE_BY_CHAIN: Record<number, readonly string[]> = {
   1: FEE_INCOMPATIBLE_SOURCES,
-  // Base (8453): 0x v2 (Permit2 pull model) + CoW (intent-based) are still
-  // structurally FeeCollector-incompatible, same as mainnet. Revisit at Base
-  // activation if Base routing differs.
-  8453: ['0x', 'cowswap'],
+  // Base (8453): 0x v2 (Permit2 pull model) + CoW (intent-based) + Bebop (JAM
+  // builds its own settlement tx; fee via partner params) are structurally
+  // FeeCollector-incompatible, same as mainnet. [ADR-010] keeps 'bebop' here so
+  // it is never routed through the Base FeeCollector once that is deployed.
+  8453: ['0x', 'cowswap', 'bebop'],
 }
 
 export function getFeeIncompatibleSources(chainId: number): string[] {

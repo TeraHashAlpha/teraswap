@@ -9,6 +9,8 @@ import {
   COW_SETTLEMENT,
   ODOS_ROUTER_V3,
   UNISWAP_SWAP_ROUTER_02,
+  BEBOP_JAM_SETTLEMENT,
+  BEBOP_BALANCE_MANAGER,
   type AggregatorName,
 } from './constants'
 import { globalLimiter } from './rate-limiter'
@@ -28,6 +30,16 @@ import type { NormalizedQuote, MetaQuoteResult, QuoteMeta, QuoteParams, DEXAdapt
 export type { NormalizedQuote, MetaQuoteResult, FeeTierCandidate, FeeTierDetection, QuoteMeta, CowQuoteMeta, UniswapV3QuoteMeta, GenericQuoteMeta } from './adapters'
 export { submitCowOrder, pollCowOrderStatus, detectUniswapV3FeeTier } from './adapters'
 export { getAllCircuitStates }
+
+// [SPRINT-9D] Friendly per-source labels for the "no valid quotes" error,
+// keyed by AggregatorName so attribution survives reordering and source counts.
+// Partial: only the quote sources need a label; anything else falls back to the
+// raw source name.
+const SOURCE_ERROR_LABELS: Partial<Record<AggregatorName, string>> = {
+  '1inch': '1inch', '0x': '0x', velora: 'Velora', odos: 'Odos', kyberswap: 'KyberSwap',
+  cowswap: 'CoW', uniswapv3: 'Uniswap V3', openocean: 'OpenOcean', sushiswap: 'SushiSwap',
+  balancer: 'Balancer', curve: 'Curve', bebop: 'Bebop',
+}
 
 // ══════════════════════════════════════════════════════════
 //  META-AGGREGATOR ORCHESTRATOR
@@ -122,13 +134,18 @@ export async function fetchMetaQuote(
     })
 
   if (quotes.length === 0) {
-    // Build a helpful error from the individual failures
+    // Build a helpful error from the individual failures. [SPRINT-9D] Attribute
+    // each error to its ACTUAL source via sourceNames[i] (results[i] ↔
+    // activeSources[i] ↔ sourceNames[i]). The previous hardcoded positional
+    // array indexed the FILTERED-rejected list, so it misattributed errors once
+    // any source was excluded/circuit-open, and had no slot for the 12th source.
     const errors = results
-      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-      .map((r, i) => {
-        const sources = ['1inch', '0x', 'Velora', 'Odos', 'KyberSwap', 'CoW', 'Uniswap V3', 'OpenOcean', 'SushiSwap', 'Balancer', 'Curve']
-        return friendlyError(sources[i] ?? 'Unknown', r.reason)
-      })
+      .map((r, i): string | null =>
+        r.status === 'rejected'
+          ? friendlyError(SOURCE_ERROR_LABELS[sourceNames[i]] ?? sourceNames[i] ?? 'Unknown', r.reason)
+          : null,
+      )
+      .filter((e): e is string => e !== null)
     const allTimeout = errors.every(e => e.includes('timed out'))
     const allNetwork = errors.every(e => e.includes('Network error'))
     if (allTimeout) throw new Error('All sources timed out. Check your connection and try again.')
@@ -487,6 +504,10 @@ export async function fetchApproveSpender(source: AggregatorName, chainId: numbe
     // spender so we never return null/zero.
   }
 
+  // [ADR-010] Bebop approves the JAM Balance Manager (approvalTarget) — NOT the
+  // settlement (tx.to) and NOT the FeeCollector. Same address on chains 1 + 8453.
+  if (source === 'bebop') return BEBOP_BALANCE_MANAGER
+
   if (chainId !== DEFAULT_CHAIN_ID) {
     // ── Non-mainnet — resolve from the per-chain router whitelist ──
     const spender = ROUTER_WHITELIST_BY_CHAIN[chainId]?.[source]
@@ -548,6 +569,8 @@ export const ROUTER_WHITELIST: Set<string> = new Set([
   '0x6a000f20005980200259b80c5102003040001068', // ParaSwap Augustus V6 (Velora)
   '0x216b4b4ba9f3e719726886d34a177484278bfcae', // ParaSwap Augustus V6.2
   '0x16c6521dff6bab339122a0fe25a9116693265353', // Curve CurveRouterNG (mainnet)
+  BEBOP_JAM_SETTLEMENT.toLowerCase(),           // [ADR-010] Bebop JamSettlement (tx.to)
+  BEBOP_BALANCE_MANAGER.toLowerCase(),          // [ADR-010] Bebop Balance Manager (approvalTarget)
   ...(FEE_COLLECTOR_ADDRESS ? [FEE_COLLECTOR_ADDRESS.toLowerCase()] : []),
 ])
 
