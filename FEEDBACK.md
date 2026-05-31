@@ -1185,3 +1185,52 @@ mainnet default (separate surfaces; mainnet-identical).
   from FEE_INCOMPATIBLE_SOURCES), so adding 'bebop' to the constant alone would
   NOT cover Base. Added 'bebop' to the 8453 override too, so Bebop is never routed
   through the Base FeeCollector once it is deployed.
+
+## Feedback — INC-2026-05-31-001: /api/quote 502 hotfix (this commit)
+
+### Root cause (confirmed by elimination)
+- The route's try/catch wrapped ONLY `fetchMetaQuote`. `isSystemHalted()`,
+  `checkRateLimit()` (both Upstash), request parsing, and the entire
+  `debug=sources` branch ran OUTSIDE it. ANY throw there escapes the handler →
+  Vercel serves an HTML 502 → the browser throws "Unexpected token '<'". The one
+  hard fact in the incident — "the throw escapes the route try/catch" — points
+  exactly here (only the pre-try halt/rate-limit I/O ran per the Vercel log).
+
+### Merge-specific hypotheses RULED OUT (the incident's prime suspects)
+- **Circular import:** `madge --circular` WITH the tsconfig path-alias resolved
+  (the un-aliased run silently skips `@/lib/*` edges) shows NO cycle in the quote
+  path (api/adapters/chains/constants). The 4 cycles found are pre-existing in the
+  alert subsystem. `constants.ts` is a true leaf (zero imports).
+- **sourceNames refactor / prologue / undefined ADAPTER_REGISTRY:** the real GET
+  handler + real `fetchMetaQuote` returns JSON on BOTH chains — `next build &&
+  next start` gave HTTP 200 on chain 1 (incl. a live `bebop` quote) and a clean
+  JSON-502 on chain 8453; the integration test (all 12 sources mocked to fail)
+  returns a JSON error, not a throw. So the 9C/9D code paths are sound.
+- The exact production trigger (a transient throw in the Upstash halt/rate-limit
+  path) was not reproducible locally without prod KV creds — but it does not need
+  to be: the fix removes the ENTIRE escape class regardless of where the throw
+  originates.
+
+### Fix
+- `GET`/`POST` are now thin wrappers around `handleQuoteGet`/`handleQuotePost`
+  with an outer `try/catch` → `jsonServerError` (JSON 500). `/api/quote` can never
+  return HTML/502 again. The inner `fetchMetaQuote` 502 + all 9C/9D behaviour is
+  unchanged (no fee/whitelist/chain-aware logic touched).
+
+### Tests (the gap that let it ship)
+- `route.integration.test.ts` invokes the REAL handler end-to-end (adapters/KV/
+  state mocked): JSON on chains 1 + 8453, AND JSON-500 (not an escaped throw) when
+  `checkRateLimit`/`isSystemHalted` throw, for both GET and POST. 1307→1312 tests.
+
+### CI guard
+- `scripts/check-circular.mjs` (madge via `npx`, no new dependency) fails on any
+  NEW cycle under `src/lib`; the 4 pre-existing alert-subsystem cycles are
+  baselined. Wired into the `typecheck` CI job (`npm run check:circular`).
+- Tech-debt: the baselined `source-state-machine ↔ alert-wrapper` cycle IS
+  reachable from the quote path (circuit-breaker's lazy KV init dynamic-imports
+  source-state-machine). Worth paying down so it can be removed from the baseline.
+
+### Process follow-up (per the incident)
+- Verified on the LOCAL production bundle. The Vercel **Preview** `/api/quote`
+  200-check on chains 1 + 8453 remains the hard gate BEFORE re-promoting to prod
+  (incident reactivation criteria) — that requires a deploy and is the human step.

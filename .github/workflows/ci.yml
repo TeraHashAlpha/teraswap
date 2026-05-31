@@ -58,6 +58,10 @@ jobs:
           cache: "npm"
       - run: npm ci --ignore-scripts=false
       - run: npm run typecheck
+      # [INC-2026-05-31-001] Fail on any NEW circular import — a cycle can yield
+      # undefined exports in the Next prod bundle that unit tests don't catch.
+      - name: Circular-import guard
+        run: npm run check:circular
 
   audit:
     runs-on: ubuntu-latest
