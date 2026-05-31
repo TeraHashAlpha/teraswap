@@ -926,6 +926,7 @@ mainnet default (separate surfaces; mainnet-identical).
   empty-RPC guard, hypothetical VIEM_CHAINS drift, two false-green-test claims,
   test-count). With this fix, all three Sprint-44 mainnet-pinned items are fully
   wired and chain-threaded end-to-end.
+<<<<<<< HEAD
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong
@@ -994,3 +995,39 @@ mainnet default (separate surfaces; mainnet-identical).
   order"), directly validating the new P197 guard, since that behaviour change
   is the part most likely to regress silently. Final suite: 1165 → 1172
   (+7), 0 skipped, 0 failed.
+=======
+
+## Feedback — Sprint 45 / Base activation goal (this commit)
+
+### Assumption that turned out wrong (SECURITY — fund flow)
+- The activation goal specified hardcoding `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130`
+  as the Base FeeCollector fallback default. That address is NOT a Base FeeCollector —
+  across this repo it is the Sepolia `TeraSwapOrderExecutor` (ROADMAP.md:18,
+  contracts/order-engine/DEPLOYMENT-CHECKLIST.md, docs/Runbooks/executor-compromise.md,
+  skills/tx-analyzer/, src/lib/order-engine/config.ts). It is a different contract
+  type (OrderExecutor, not FeeCollector) on a different network (Sepolia testnet,
+  not Base mainnet). Almost certainly a copy-paste of the most-referenced address
+  in the repo. Hardcoding it as a fallback would, whenever NEXT_PUBLIC_BASE_FEE_COLLECTOR
+  is unset (currently the case in every env file), activate Base swaps routing the
+  0.1% fee + swap calldata to that address on Base mainnet — reverts at best, funds
+  to an unrelated/non-existent contract at worst. Trips CLAUDE.md Rule 2 & Rule 9.
+
+### Resolution
+- Flagged to TeraHash; chose env-only activation with a `null` fallback (no hardcoded
+  address). registry.ts now sets `feeCollector = process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR
+  || null`. Base stays "Coming Soon" until the env var holds the REAL deployed Base
+  mainnet FeeCollector address (per docs/Runbooks/BASE-ACTIVATION.md §C.6, set post-deploy).
+
+### Edge case
+- Used `|| null`, NOT `?? null`. The `.env.example` ships `NEXT_PUBLIC_BASE_FEE_COLLECTOR=`
+  (empty string). With `??`, an empty string passes through as `''`, which is `!== null`,
+  so `isChainActive(8453)` would return true and activate Base with a BLANK FeeCollector
+  address. `|| null` treats empty/undefined alike as "not set". Covered by a new test.
+
+### Sequencing note (not blocking, for Architect awareness)
+- Per BASE-ACTIVATION.md this registry flip is Phase C, gated behind Phase A (testnet
+  validated) AND Phase B (Sprint 45 APPROVED 0C/0H). This commit is the safe,
+  no-op-until-env-set wiring; real go-live still requires the actual Base mainnet
+  FeeCollector deploy + Sprint 45 audit pass + setting NEXT_PUBLIC_BASE_FEE_COLLECTOR
+  in the Vercel production env.
+>>>>>>> 3667a50 (feat(base): wire Base FeeCollector to NEXT_PUBLIC_BASE_FEE_COLLECTOR env (null fallback))

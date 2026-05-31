@@ -1,7 +1,7 @@
 /**
  * [P220] ChainConfig registry resolution (P216).
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { getChainConfig, getSupportedChainIds, DEFAULT_CHAIN_ID } from './registry'
 
 describe('chains/registry [P216]', () => {
@@ -17,12 +17,13 @@ describe('chains/registry [P216]', () => {
     expect(c.sequencerUptimeFeed).toBeUndefined()
   })
 
-  it('returns the Base config for chainId 8453 with feeCollector null', () => {
+  it('returns the Base config for chainId 8453 with feeCollector null when the env var is unset', () => {
     const c = getChainConfig(8453)
     expect(c.chainId).toBe(8453)
     expect(c.slug).toBe('base')
     expect(c.gasModel).toBe('op-stack')
-    expect(c.contracts.feeCollector).toBeNull() // not deployed yet
+    // [Sprint 45] env-driven: null (→ "Coming Soon") until NEXT_PUBLIC_BASE_FEE_COLLECTOR is set.
+    expect(c.contracts.feeCollector).toBeNull()
     expect(c.sequencerUptimeFeed).toBe('0xBCF85224fc0756B9Fa45aA7892530B47e10b6433')
     expect(c.nativeCurrency.wrappedAddress).toBe('0x4200000000000000000000000000000000000006')
   })
@@ -36,5 +37,29 @@ describe('chains/registry [P216]', () => {
     expect(ids).toContain(1)
     expect(ids).toContain(8453)
     expect(DEFAULT_CHAIN_ID).toBe(1)
+  })
+})
+
+describe('chains/registry — Base env-driven FeeCollector [Sprint 45]', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('resolves Base feeCollector from NEXT_PUBLIC_BASE_FEE_COLLECTOR when set', async () => {
+    // The registry reads the env var at module-load time, so re-import fresh.
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_BASE_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(8453).contracts.feeCollector).toBe(
+      '0x000000000000000000000000000000000000dEaD',
+    )
+  })
+
+  it('falls back to null (not any hardcoded address) when the env var is unset', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_BASE_FEE_COLLECTOR', '')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(8453).contracts.feeCollector).toBeNull()
   })
 })
