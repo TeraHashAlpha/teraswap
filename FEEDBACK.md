@@ -1031,3 +1031,31 @@ mainnet default (separate surfaces; mainnet-identical).
   FeeCollector deploy + Sprint 45 audit pass + setting NEXT_PUBLIC_BASE_FEE_COLLECTOR
   in the Vercel production env.
 >>>>>>> 3667a50 (feat(base): wire Base FeeCollector to NEXT_PUBLIC_BASE_FEE_COLLECTOR env (null fallback))
+
+## Feedback — Sprint 45 / fix(base): accept any active chain (this commit)
+
+### Edge case (related instances deliberately NOT changed — need separate work)
+- The same `isCorrectChain = chain?.id === CHAIN_ID` pattern also exists in
+  `TokenSelector.tsx:28` (useTokenBalances) and `usePortfolio.ts:93`. Both were
+  left UNCHANGED on purpose:
+  - **TokenSelector.useTokenBalances** builds its ERC-20 multicall from
+    `DEFAULT_TOKENS` (mainnet addresses) and keys the balanceMap by those
+    addresses, while the *displayed* catalog is already per-chain
+    (getChainTokenList). Flipping its gate to isChainActive would fire mainnet
+    token-address multicalls against the Base RPC and STILL show no Base ERC-20
+    balances (key mismatch). The correct fix is to make useTokenBalances consume
+    the per-chain catalog — that is "other logic" and out of scope for this
+    symptom-focused fix. Leaving the gate mainnet-only is the safer state today.
+  - **usePortfolio** powers the PersonalDashboard, not the swap box flow, and is
+    likewise DEFAULT_TOKENS-based. Out of the "swap flow" scope of this goal.
+  Recommend a follow-up sprint: per-chain token-balance resolution for the token
+  selector + portfolio.
+
+### Note (already-correct paths verified, no change needed)
+- `useQuote.ts` already gates quote fetching on `isChainActive(activeChainId)`
+  (line ~174); its `chainId !== 1` at line ~61 only appends the chainId query
+  param for non-mainnet (keeps the mainnet request byte-identical) and is not a
+  block. `useSwap.ts` resolves the FeeCollector via `getChainConfig(chainId)`.
+  `wagmiConfig.ts` already registers `base`. So the only symptom-causing gates
+  were SwapBox.tsx (quotes/balance) and SwapButton.tsx (the "Switch to Ethereum"
+  CTA) — both fixed here to use isChainActive (supported AND active).

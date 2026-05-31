@@ -26,7 +26,7 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { CHAIN_ID, DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig } from '@/lib/chains'
@@ -101,7 +101,12 @@ export default function SwapBox() {
   const amountIn = stripSeparator(displayAmountIn)
 
   const { address, isConnected, chain } = useAccount()
-  const isCorrectChain = chain?.id === CHAIN_ID
+  // [Sprint 45] "Correct chain" = the wallet is on a SUPPORTED + ACTIVE chain
+  // (one whose FeeCollector is deployed), not strictly mainnet. This lets Base —
+  // and any future activated L2 — drive quotes/balances instead of forcing
+  // "Switch to Ethereum". On a coming-soon chain isChainActive is false, so the
+  // existing coming-soon UX (banner + disabled swap) is preserved unchanged.
+  const isCorrectChain = !!chain && isChainActive(chain.id)
 
   const { data: balanceIn } = useBalance({
     address,
