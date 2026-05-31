@@ -1112,3 +1112,38 @@ mainnet default (separate surfaces; mainnet-identical).
   the "only Uniswap V3" symptom is not a disable-config issue (see root-cause).
 - New env var `DEBUG_QUOTE_TOKEN` documented in `.env.example`; unset → debug
   branch fails closed (401), normal quoting unaffected (byte-identical).
+
+## Feedback — SPRINT-9C: chain-aware on-chain adapters (this commit)
+
+### Root cause fixed
+- `getRpcUrl()` was not chain-aware (always mainnet), so `uniswapv3`/`curve` eth_call'd
+  MAINNET contracts even for `chainId=8453`, returning a mainnet-priced quote on Base
+  ("only Uniswap shows on Base"). Added `getRpcUrlForChain(chainId)` (chainId 1 → `getRpcUrl()`
+  verbatim; else `getChainConfig(chainId).rpc.primary || fallback`) + a per-chain Uniswap V3
+  registry, and threaded `chainId` through both adapters. `curve` is mainnet-only in code, so it
+  now returns `null` + zero RPC off-mainnet (Base Curve pools deferred — TODO in curve.ts).
+
+### Verification (Base addresses)
+- QuoterV2 / Factory / SwapRouter02 verified char-by-char on BOTH Basescan name tags AND
+  developers.uniswap.org base-deployments (May 2026). Router was already Basescan-verified in
+  `chains/routers.ts`. Mainnet chainId-1 entry references the canonical constants
+  (`UNISWAP_QUOTER_V2` / `UNISWAP_SWAP_ROUTER_02`) so mainnet stays byte-identical.
+
+### Design notes / deliberate decisions
+- `getRpcUrlForChain` uses `primary || fallbacks[0]` (not primary-only). This is a small
+  enhancement over the literal spec wording so Base still resolves to its registry fallback
+  (`https://mainnet.base.org`, a BASE RPC) when `NEXT_PUBLIC_BASE_RPC_URL` is unset — and it
+  NEVER returns the Ethereum mainnet RPC for a non-mainnet chain. Mirrors `getPublicClientForChain`'s
+  `primary || viem-default` intent.
+- Uniswap V3 `factory` is included in the registry per spec but is reference-only — the adapter
+  quotes via QuoterV2 directly (no Factory call today). Kept for self-documentation / future TWAP/pool work.
+
+### Edge case / minor follow-up (not fixed — out of scope)
+- `feeTierCacheKey()` in `shared.ts` keys the in-memory Uniswap fee-tier cache by the mainnet
+  `CHAIN_ID` constant, so the same pair on different chains shares a cache slot. This is HARMLESS
+  today: both the quote and swap paths ALWAYS re-run `detectUniswapV3FeeTier` (which now resolves
+  the correct per-chain Quoter), so the cached tier is advisory and re-validated per chain — never
+  used to skip a chain-correct detection. Recommend chain-keying the cache in a later cleanup.
+- Empty Base RPC primary → `getRpcUrlForChain(8453)` returns the registry fallback; if BOTH primary
+  and fallback were empty it returns `''` and the adapter fails fast for that source (still no
+  mainnet call). The diagnostic (`debug=sources`) surfaces this.
