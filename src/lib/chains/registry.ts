@@ -64,7 +64,18 @@ const BASE: ChainConfig = {
     wrappedAddress: '0x4200000000000000000000000000000000000006',
   },
   contracts: {
-    feeCollector: null, // not deployed yet — swaps show "Coming Soon"
+    // [Sprint 45] Env-driven activation. Base goes live for swaps only once
+    // NEXT_PUBLIC_BASE_FEE_COLLECTOR holds the REAL deployed Base FeeCollector
+    // address; until then this is null → isChainActive(8453) === false → the UI
+    // shows "Coming Soon". Deliberately NO hardcoded fallback: a wrong default
+    // would route Base swap fees to a contract that is not the FeeCollector.
+    // `|| null` (not `??`) so an empty env value ("NEXT_PUBLIC_BASE_FEE_COLLECTOR="
+    // in .env*) is treated as unset rather than falsely activating Base with a
+    // blank address. Set the env var only after the Base mainnet deploy +
+    // post-deploy checklist (docs/Runbooks/BASE-ACTIVATION.md §C).
+    feeCollector: (process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR || null) as
+      | `0x${string}`
+      | null,
     permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3', // same CREATE2 address as mainnet
     cowVaultRelayer: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
   },
