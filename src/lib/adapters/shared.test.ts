@@ -6,6 +6,26 @@
  * chain's configured RPC and must NEVER return the mainnet RPC.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { toWeth } from './shared'
+import { NATIVE_ETH, WETH_ADDRESS } from '@/lib/constants'
+
+const BASE_WETH = '0x4200000000000000000000000000000000000006'
+
+describe('toWeth — chain-aware wrapped-native [SPRINT-9E]', () => {
+  it('mainnet (default / chainId 1) maps native ETH → mainnet WETH (byte-identical)', () => {
+    expect(toWeth(NATIVE_ETH).toLowerCase()).toBe(WETH_ADDRESS.toLowerCase())
+    expect(toWeth(NATIVE_ETH, 1).toLowerCase()).toBe(WETH_ADDRESS.toLowerCase())
+  })
+  it('Base (8453) maps native ETH → BASE WETH, not the mainnet WETH', () => {
+    expect(toWeth(NATIVE_ETH, 8453).toLowerCase()).toBe(BASE_WETH.toLowerCase())
+    expect(toWeth(NATIVE_ETH, 8453).toLowerCase()).not.toBe(WETH_ADDRESS.toLowerCase())
+  })
+  it('a non-native token passes through unchanged on any chain', () => {
+    const usdc = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+    expect(toWeth(usdc, 8453)).toBe(usdc)
+    expect(toWeth(usdc, 1)).toBe(usdc)
+  })
+})
 
 const ENV = ['RPC_URL', 'NEXT_PUBLIC_RPC_URL', 'NEXT_PUBLIC_BASE_RPC_URL'] as const
 const saved: Record<string, string | undefined> = {}
