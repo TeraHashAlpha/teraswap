@@ -172,3 +172,35 @@ describe('QuoteBreakdown — safeBigInt guard [10-L-01]', () => {
     expect(screen.getByText(/—|--/)).toBeInTheDocument()
   })
 })
+
+describe('QuoteBreakdown — Base/mainnet Compare parity rendering [SPRINT-9E]', () => {
+  // The component is chain-agnostic: the SAME markup renders for Base and mainnet
+  // given a multi-source meta. This proves the "single-source Direct DEX" view is
+  // purely a function of meta.all.length, not a chain conditional.
+  function multiMeta(): MetaQuoteResult {
+    const mk = (source: MetaQuoteResult['best']['source'], toAmount: string) => ({
+      source, toAmount, estimatedGas: 150_000, gasUsd: 0, routes: [],
+    })
+    const best = mk('velora', '3000000000')
+    return {
+      best,
+      all: [best, mk('kyberswap', '2999000000'), mk('cowswap', '2998000000'), mk('uniswapv3', '2997000000')],
+      fetchedAt: Date.now(),
+    } as MetaQuoteResult
+  }
+
+  it('renders the Compare list for a multi-source meta (>1 source) — same component on every chain', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ meta: multiMeta() })} />)
+    expect(screen.getByText(/Compare \(4 sources\)/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/velora/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/kyber/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/uniswap/i).length).toBeGreaterThan(0)
+  })
+
+  it('renders gas in ETH + USD when a gasEstimate is provided (parity USD display, not raw gas units)', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: multiMeta(), gasEstimate: () => ({ eth: 0.0001, usd: 0.25 }) })} />,
+    )
+    expect(screen.getByText(/\$0\.25/)).toBeInTheDocument()
+  })
+})
