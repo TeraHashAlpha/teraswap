@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint src --ext .ts,.tsx,.js,.jsx",
     "typecheck": "tsc --noEmit",
+    "check:circular": "node scripts/check-circular.mjs",
     "fork": "./scripts/fork-test.sh",
     "deal": "./scripts/deal-tokens.sh",
     "check:fee": "./scripts/check-fee.sh",

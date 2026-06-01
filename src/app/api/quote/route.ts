@@ -21,13 +21,36 @@ function haltResponse(): NextResponse {
 }
 
 /**
+ * [INC-2026-05-31-001] Last-resort error envelope. ANY uncaught throw in a
+ * handler — the halt check, rate-limit (Upstash), request parsing, or the
+ * debug branch, all of which run OUTSIDE the inner fetchMetaQuote try/catch —
+ * is converted to a JSON 500. /api/quote must NEVER return an HTML 502 again
+ * (the browser can't JSON-parse it → "Unexpected token '<'").
+ */
+function jsonServerError(err: unknown): NextResponse {
+  const message = err instanceof Error ? err.message : 'Unknown error'
+  return NextResponse.json({ error: message }, { status: 500 })
+}
+
+/**
  * Server-side proxy for meta-quote requests.
  *
  * Running quotes server-side avoids browser CORS restrictions that
  * block direct calls to 1inch, Odos, 0x, Balancer and other DEX APIs.
  * KyberSwap and ParaSwap happen to allow browser CORS, but most do not.
+ *
+ * [INC-2026-05-31-001] GET/POST are thin wrappers that catch EVERYTHING so a
+ * throw can never escape the handler; the real logic lives in the *Handler fns.
  */
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  try {
+    return await handleQuoteGet(req)
+  } catch (err) {
+    return jsonServerError(err)
+  }
+}
+
+async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
   // [H-03] Circuit breaker halt — short-circuit before rate limiting
   if (await isSystemHalted()) return haltResponse()
 
@@ -121,7 +144,15 @@ export async function GET(req: NextRequest) {
 }
 
 // Also support POST for larger payloads (future-proofing)
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    return await handleQuotePost(req)
+  } catch (err) {
+    return jsonServerError(err)
+  }
+}
+
+async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
   // [H-03] Circuit breaker halt — short-circuit before rate limiting
   if (await isSystemHalted()) return haltResponse()
 
