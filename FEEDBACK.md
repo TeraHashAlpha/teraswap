@@ -1371,3 +1371,49 @@ to read the NEXT_PUBLIC_ var would violate the server-only-keys constraint.
 
 Note: `NEXT_PUBLIC_BASE_FEE_COLLECTOR` IS set in Vercel, so Base is activated
 (isChainActive(8453)=true) — consistent with the Base swap UI showing quotes.
+
+## Feedback — SPRINT-9E: platform-fee USD missing on Base (fixed) + Base swap-sim reverts (concern)
+
+### Edge case — fee USD was a SECOND chain-aware-feed bug (now fixed)
+Phase 4 made the **gas** USD chain-aware (`useEthGasCost`, 116e562), but the
+**platform-fee** USD in `QuoteBreakdown` (L387-389) reads a *different* source:
+`priceCheck.chainlinkPrice` from `useChainlinkPrice`. That hook was still
+mainnet-pinned — `getChainlinkFeed(tokenAddress)` (no chainId → mainnet feed) and
+`useReadContract` (no `chainId` → reads that mainnet feed address on the Base
+chain → no contract → `roundData` undefined → `chainlinkPrice` null → no "($)"
+next to the fee). User-reported on a Base ETH→USDC quote ("put the platform fee
+with ($) info too, like in mainnet").
+FIX: threaded `useActiveChainId()` through `useChainlinkPrice` (feed lookup +
+both reads), mirroring `useEthGasCost`. Base ETH→USDC now shows the fee in
+ETH + USD; mainnet byte-identical (chainId 1 → same feed, same read). +2 tests,
+full suite 1329 green. No QuoteBreakdown change needed — the JSX already renders
+the USD once `chainlinkPrice` is non-null.
+Note: a Base USDC/USD feed is intentionally NOT yet in
+`CHAINLINK_FEEDS_BY_CHAIN[8453]`, so USDC→ETH on Base still shows no fee-USD (and
+oracle-unavailable warning) — correct: we don't fabricate a price for an
+unverified feed. Add the verified Base USDC/USD feed later to close that gap.
+
+### Concern (NOT code — for Architect / Base deploy ops): pre-swap simulation reverts on Base
+User hit "Simulation reverted: swap would fail on-chain" on Base for **Bebop**
+(and one **KyberSwap** screenshot), asking "is this normal because preview?".
+- It is NOT a preview artifact. The pre-swap sim runs `eth_call` against the REAL
+  Base chain via `getPublicClientForChain(8453)` — identical on preview and prod.
+  The guard worked as designed: "no gas was spent" (it blocked a doomed tx).
+- **Bebop**: FEE-INCOMPATIBLE → routes DIRECT to its JAM settlement (not via
+  FeeCollector). Bebop JAM is RFQ — the returned `tx.data` is a maker-signed quote
+  with a tight validity window. Such self-execution calldata frequently fails a
+  plain `eth_call` pre-swap sim (maker-side signature/balance/expiry state differs
+  under simulation), while AMM routes (Uniswap V3 / Aerodrome-Velora) pass. So
+  Bebop reverting in the sim while others pass is expected, not a build bug.
+  RECOMMENDATION: treat Bebop as a quote/Compare source only, OR add a dedicated
+  RFQ-execution path; and/or soften the sim-revert UX for intent/RFQ sources.
+- **KyberSwap** (more important): routes VIA the Base FeeCollector
+  (`usesFeeCollector('kyberswap',8453)=true` since `NEXT_PUBLIC_BASE_FEE_COLLECTOR`
+  is set). A revert there most likely means the deployed Base FeeCollector has NOT
+  whitelisted the Base DEX routers on-chain yet (mainnet routers were whitelisted
+  via timelock 2026-05-26; the Base equivalent is a Sprint-44 deploy step). VERIFY
+  on-chain before promoting Base swaps to prod: confirm the Base FeeCollector
+  whitelists each Base router in `ROUTER_WHITELIST_BY_CHAIN[8453]`. This is a
+  deployment/config item, not a frontend bug. (`vercel env pull` to read the
+  FeeCollector address was security-denied, so I could not verify the whitelist
+  from here.)
