@@ -3,10 +3,13 @@
 import { useState } from 'react'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 
-// Sources shown in the toggle (exclude internal engine)
-const TOGGLEABLE_SOURCES: AggregatorName[] = [
+// Sources shown in the toggle — the 12 real ADAPTER_REGISTRY adapters. Excludes
+// the `uniswap` legacy alias (duplicate of `uniswapv3`) and the internal
+// `teraswap_order_engine` pseudo-source. [SPRINT-9F] Added 'bebop' (the 12th
+// adapter) — it was missing, so users could not disable it even while it quoted.
+export const TOGGLEABLE_SOURCES: AggregatorName[] = [
   '1inch', '0x', 'velora', 'odos', 'kyberswap',
-  'cowswap', 'uniswapv3', 'openocean', 'sushiswap', 'balancer', 'curve',
+  'cowswap', 'uniswapv3', 'openocean', 'sushiswap', 'balancer', 'curve', 'bebop',
 ]
 
 interface SourceToggleProps {

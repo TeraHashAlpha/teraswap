@@ -3,6 +3,14 @@ import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
+// [SPRINT-9E] 0x v2 flow per chain. Mainnet keeps the permit2 endpoint
+// (byte-identical). Other chains (Base) use the allowance-holder endpoint so the
+// returned tx.to is the AllowanceHolder — the address whitelisted for 0x on Base
+// in chains/routers.ts (the permit2 Settler tx.to would fail that whitelist).
+function zeroxQuotePath(chainId: number): string {
+  return chainId === DEFAULT_CHAIN_ID ? '/swap/permit2/quote' : '/swap/allowance-holder/quote'
+}
+
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
   const { key } = AGGREGATOR_APIS['0x']
@@ -15,7 +23,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
   // [P217] 0x v2 defaults to mainnet when chainId is omitted; only attach it
   // for non-mainnet chains so the mainnet request stays byte-identical.
   if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
-  const res = await fetch(`${base}/swap/permit2/quote?${qs}`, {
+  const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
     headers: {
       '0x-api-key': key,
       '0x-version': 'v2',
@@ -57,7 +65,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   })
   // [P217] Attach chainId only for non-mainnet chains (see fetchQuote).
   if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
-  const res = await fetch(`${base}/swap/permit2/quote?${qs}`, {
+  const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
     headers: {
       '0x-api-key': key,
       '0x-version': 'v2',

@@ -1,20 +1,29 @@
 import { useReadContract } from 'wagmi'
 import { getChainlinkFeed, chainlinkAggregatorAbi, evaluateDeviation, type PriceCheck } from '@/lib/chainlink'
+import { useActiveChainId } from './useChainId'
 
 /**
  * Hook: reads Chainlink oracle price for a token and compares with execution price.
  * Returns a PriceCheck with warning level.
+ *
+ * [SPRINT-9E] Chain-aware: the feed is resolved AND read on the ACTIVE chain
+ * (chainId 1 → mainnet feeds, byte-identical; Base → the Base feed). Previously
+ * both the lookup and the read defaulted to mainnet, so on Base the read hit a
+ * mainnet feed address on the Base chain → no contract → chainlinkPrice null →
+ * the platform-fee row showed no USD. Mirrors useEthGasCost's gas-USD fix.
  */
 export function useChainlinkPrice(
   tokenAddress: string | undefined,
   executionPriceUsd: number | null,
 ): PriceCheck {
-  const feedAddress = tokenAddress ? getChainlinkFeed(tokenAddress) : null
+  const chainId = useActiveChainId()
+  const feedAddress = tokenAddress ? getChainlinkFeed(tokenAddress, chainId) : null
 
   const { data: roundData } = useReadContract({
     address: feedAddress!,
     abi: chainlinkAggregatorAbi,
     functionName: 'latestRoundData',
+    chainId,
     query: { enabled: !!feedAddress },
   })
 
@@ -22,6 +31,7 @@ export function useChainlinkPrice(
     address: feedAddress!,
     abi: chainlinkAggregatorAbi,
     functionName: 'decimals',
+    chainId,
     query: { enabled: !!feedAddress },
   })
 

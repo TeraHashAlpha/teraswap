@@ -113,7 +113,11 @@ export async function fetchMetaQuote(
     const { recordSourcePing } = await import('./source-monitor')
     results.forEach((r, i) => {
       const name = sourceNames[i]
-      if (r.status === 'fulfilled' && r.value.toAmount && BigInt(r.value.toAmount) > 0n) {
+      // [SPRINT-9F bug3] An adapter may resolve to null (e.g. Bebop returns null
+      // on a no-route pair instead of throwing). Guard r.value before reading
+      // .toAmount so a null return is recorded as a miss, not a crash that aborts
+      // the whole monitoring loop for every source this cycle.
+      if (r.status === 'fulfilled' && r.value && r.value.toAmount && BigInt(r.value.toAmount) > 0n) {
         recordSourcePing(name, true, elapsed)
       } else {
         const error = r.status === 'rejected' ? String(r.reason) : 'Zero output'

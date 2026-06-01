@@ -109,8 +109,8 @@ export async function detectUniswapV3FeeTier(params: {
   const contracts = getUniswapV3Contracts(chainId)
   if (!contracts) throw new Error(`Uniswap V3: not deployed on chain ${chainId}`)
   const rpcUrl = getRpcUrlForChain(chainId)
-  const sellToken = toWeth(tokenIn)
-  const buyToken = toWeth(tokenOut)
+  const sellToken = toWeth(tokenIn, chainId)
+  const buyToken = toWeth(tokenOut, chainId)
 
   const results = await Promise.allSettled(
     UNISWAP_FEE_TIERS.map(async (fee) => {
@@ -274,8 +274,8 @@ async function fetchUniswapV3Swap(
   const slippageFactor = BigInt(Math.round((1 - clampSlippage(slippage) / 100) * 10000))
   const amountOutMin = amountOut * slippageFactor / 10000n
 
-  const sellToken = toWeth(src)
-  const buyToken = toWeth(dst)
+  const sellToken = toWeth(src, chainId)
+  const buyToken = toWeth(dst, chainId)
   const isNativeIn = isNativeEth(src)
 
   const swapCalldata = encodeFunctionData({

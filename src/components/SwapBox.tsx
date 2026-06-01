@@ -9,6 +9,7 @@ import SwapButton from './SwapButton'
 import TransactionPreview from './TransactionPreview'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import SourceToggle from './SourceToggle'
+import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
@@ -29,7 +30,7 @@ import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
-import { isChainActive, getChainConfig } from '@/lib/chains'
+import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -108,8 +109,15 @@ export default function SwapBox() {
   // existing coming-soon UX (banner + disabled swap) is preserved unchanged.
   const isCorrectChain = !!chain && isChainActive(chain.id)
 
+  // [SPRINT-9F bug4] Active chain id — also feeds the chain-aware spender
+  // allowlist + token remap below. Declared here so the balance query targets
+  // the chain the user is actually on; switching networks now re-reads the
+  // correct balance instead of the stale connected-by-default (mainnet) one.
+  const activeChainId = useActiveChainId()
+
   const { data: balanceIn } = useBalance({
     address,
+    chainId: activeChainId,
     token: tokenIn && !isNativeETH(tokenIn) ? tokenIn.address : undefined,
     query: { enabled: isConnected && isCorrectChain && !!tokenIn },
   })
@@ -125,8 +133,15 @@ export default function SwapBox() {
     [rawMeta, mevProtected],
   )
 
-  // [P222] Active chain — feeds the chain-aware spender allowlist below.
-  const activeChainId = useActiveChainId()
+  // [SPRINT-9E] Re-resolve the selected tokens to the ACTIVE chain's addresses
+  // whenever the chain changes. The defaults (findToken) are mainnet addresses;
+  // without this, Base would quote e.g. MAINNET USDC (0xA0b8…) on chainId 8453 →
+  // every source rejects it ("1inch 400: not valid token") → "No valid quotes".
+  // remapTokenToChain is a no-op on mainnet (same address) so mainnet is unchanged.
+  useEffect(() => {
+    setTokenIn((t) => remapTokenToChain(t, activeChainId))
+    setTokenOut((t) => remapTokenToChain(t, activeChainId))
+  }, [activeChainId])
   // [P223] Swap activation guard. A chain is "coming soon" until its
   // FeeCollector is deployed (config.contracts.feeCollector !== null). Mainnet
   // is active, so chainActive is always true there and nothing below changes.
@@ -577,10 +592,10 @@ export default function SwapBox() {
             </span>
             <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
-          {meta && meta.all.length > 1 && (
+          {shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size) && (
             <div className="mt-1 flex items-center justify-between px-1">
               <SourceToggle excludedSources={excludedSources} onToggle={handleSourceToggle} />
-              <span className="text-[10px] text-cream-35">{meta.all.length} sources queried</span>
+              {meta && <span className="text-[10px] text-cream-35">{meta.all.length} sources queried</span>}
             </div>
           )}
         </div>

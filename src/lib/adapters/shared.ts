@@ -69,11 +69,19 @@ export function friendlyError(source: string, err: unknown): string {
 
 // ── Token helpers ─────────────────────────────────────────
 
-/** Convert NATIVE_ETH sentinel to WETH for Uniswap */
-export function toWeth(token: string): Address {
-  return (token.toLowerCase() === NATIVE_ETH.toLowerCase()
-    ? WETH_ADDRESS
-    : token) as Address
+/** Convert the NATIVE_ETH sentinel to the wrapped-native (WETH) address for the
+ *  given chain. [SPRINT-9E] chainId 1 → mainnet WETH (byte-identical); other
+ *  chains → that chain's wrapped-native (e.g. Base WETH 0x4200…0006). Previously
+ *  hardcoded the mainnet WETH, so native ETH on Base mapped to mainnet WETH and
+ *  Uniswap V3 found "no pool". Non-native tokens pass through unchanged. */
+export function toWeth(token: string, chainId: number = DEFAULT_CHAIN_ID): Address {
+  if (token.toLowerCase() !== NATIVE_ETH.toLowerCase()) return token as Address
+  if (chainId === DEFAULT_CHAIN_ID) return WETH_ADDRESS as Address
+  try {
+    return getChainConfig(chainId).nativeCurrency.wrappedAddress
+  } catch {
+    return WETH_ADDRESS as Address
+  }
 }
 
 export function isNativeEth(token: string): boolean {

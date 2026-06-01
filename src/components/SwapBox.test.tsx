@@ -13,11 +13,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ─── Wagmi ───
 let mockIsConnected = true
+let mockChainId = 1
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({
     address: mockIsConnected ? '0x1111111111111111111111111111111111111111' : undefined,
     isConnected: mockIsConnected,
-    chain: { id: 1, name: 'mainnet' },
+    chain: { id: mockChainId, name: 'chain' },
   })),
   useBalance: vi.fn(() => ({
     data: { value: 10n ** 18n, decimals: 18, symbol: 'ETH', formatted: '1.0' },
@@ -106,6 +107,7 @@ vi.mock('@/lib/mev-preference', () => ({
 }))
 
 import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
+import { useBalance } from 'wagmi'
 import SwapBox from './SwapBox'
 
 function setHookDefaults() {
@@ -178,7 +180,25 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   mockIsConnected = true
+  mockChainId = 1
   setHookDefaults()
+})
+
+describe('SwapBox — chain-aware balance [SPRINT-9F bug4]', () => {
+  it('queries the balance on the ACTIVE chain (mainnet → chainId 1)', () => {
+    renderWithProviders(<SwapBox />)
+    expect(vi.mocked(useBalance)).toHaveBeenCalledWith(
+      expect.objectContaining({ chainId: 1 }),
+    )
+  })
+
+  it('queries the balance on Base after a chain switch (chainId 8453), not the stale default', () => {
+    mockChainId = 8453
+    renderWithProviders(<SwapBox />)
+    expect(vi.mocked(useBalance)).toHaveBeenCalledWith(
+      expect.objectContaining({ chainId: 8453 }),
+    )
+  })
 })
 
 describe('SwapBox — renders', () => {

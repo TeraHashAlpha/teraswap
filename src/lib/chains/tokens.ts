@@ -96,3 +96,19 @@ export function getChainTokenList(chainId: number): Token[] {
     category: inferCategory(t.symbol),
   }))
 }
+
+/**
+ * [SPRINT-9E] Re-resolve a selected token to the active chain's catalog BY SYMBOL,
+ * so a swap quotes the chain's REAL address (e.g. mainnet USDC 0xA0b8… → Base USDC
+ * 0x833589…). Returns the original token unchanged when the same-symbol token on
+ * the chain has the SAME address (mainnet → byte-identical no-op) or no match
+ * exists — preventing the "mainnet USDC on Base → 1inch 400 not valid token →
+ * No valid quotes" class of bug (INC follow-up / SPRINT-9E).
+ */
+export function remapTokenToChain(token: Token | null, chainId: number): Token | null {
+  if (!token) return token
+  const match = getChainTokenList(chainId).find(
+    (t) => t.symbol === token.symbol && t.address.toLowerCase() !== token.address.toLowerCase(),
+  )
+  return match ?? token
+}

@@ -1234,3 +1234,258 @@ mainnet default (separate surfaces; mainnet-identical).
 - Verified on the LOCAL production bundle. The Vercel **Preview** `/api/quote`
   200-check on chains 1 + 8453 remains the hard gate BEFORE re-promoting to prod
   (incident reactivation criteria) — that requires a deploy and is the human step.
+
+## Feedback — SPRINT-9E Phase 1 findings (pre-fix, no guessing)
+
+Investigated via code-reading + real `&debug=sources` on the production bundle
+(`next build && next start`) with the configured API keys.
+
+### Frontend cause — the spec's "single-source Direct-DEX path" does NOT exist (corrected)
+- The swap UI is ALREADY fully chain-agnostic. `useQuote` calls
+  `fetchQuoteViaApi(..., activeChainId, ...)` (passes chainId 8453 on Base) and
+  stores the whole meta-quote `all`; `SwapBox` renders `<QuoteBreakdown meta={meta}>`
+  and the Compare list (`SwapBox` L580 / `QuoteBreakdown` L439) for ANY chain when
+  `meta.all.length > 1`. There is NO chainId branch and NO separate single-source
+  Uniswap path. The pre-9C "Base = only Uniswap V3 Direct DEX" was a downstream
+  symptom of (a) low Base source coverage and (b) the on-chain uniswapv3 adapter
+  mis-quoting mainnet on Base (fixed in SPRINT-9C). With current code, Base now
+  returns 4 valid sources → the Compare list renders. So Phase 2 (UI parity) is
+  already satisfied in code; there is no single-source path to remove.
+
+### Per-source `debug=sources` table (1 WETH/ETH → USDC)
+| source | Base 8453 | Mainnet 1 | Base-specific? |
+|--------|-----------|-----------|----------------|
+| velora | ok | ok | — |
+| kyberswap | ok | ok | — |
+| cowswap | ok (WETH) | ok | — (native ETH → no route, expected) |
+| uniswapv3 | ok (WETH) | ok | — (native ETH → "no pool", minor) |
+| openocean | ok but **WRONG amount** (3.7e13 vs ~1.98e9) | ok | **YES** — Base parse/decimals bug (outlier-filtered, so not user-visible) |
+| bebop | error "no buyTokens" | ok | **YES** — Base JAM response shape/demo |
+| 1inch | error 1inch 403 | error 1inch 403 | NO — identical on both (key/plan; broken on mainnet too in this env) |
+| 0x | error 0x 401 | error 0x 401 | NO locally — identical on both (the local ZEROX key 401s on BOTH chains; cannot verify a Base-only 0x fix without a working prod key) |
+| sushiswap | error 422 | error 422 | NO — identical on both |
+| balancer | error 404 | error 404 | NO — identical on both |
+| odos | error 429 (ODOS_API_KEY unset) | error 429 | NO — needs key |
+| curve | null (mainnet-only by SPRINT-9C) | "no pool" | — (by design) |
+
+### USD cause
+- `useEthGasCost` reads the HARDCODED mainnet `CHAINLINK_ETH_USD` feed via
+  `useReadContract` (which targets the connected chain). On Base that mainnet
+  address is not the ETH/USD feed → `ethPrice = null` → `estimate()` returns null
+  → no gas/fee USD → UI falls back to raw gas units. `useEstimateFeesPerGas()` is
+  already chain-aware (Base gas). Fix: resolve the ETH/USD feed per active chain
+  via `getChainlinkFeed(NATIVE_ETH, chainId)` (mainnet → `CHAINLINK_ETH_USD`
+  unchanged; Base → `0x71041dd…`, already in `CHAINLINK_FEEDS_BY_CHAIN[8453]`).
+
+### Scope note (honest)
+- The keyed/aggregator sources 0x/1inch/sushiswap/balancer return the SAME errors
+  on mainnet AND Base in this environment, so they are NOT reproducible Base-only
+  divergences here — they need a known-good production key + the Vercel Preview to
+  verify (the 0x Base AllowanceHolder fix can be written from the spec but cannot
+  be confirmed locally while the key 401s on both chains). The clearly Base-specific,
+  locally-verifiable gaps are USD (Chainlink feed) and the openocean/bebop Base
+  parsers. Fixing USD + confirming the Compare renders closes the visible parity gap.
+
+## Feedback — SPRINT-9E Phases 2–5 outcomes
+
+### Phase 2 — UI parity: already satisfied (no code change)
+- Confirmed by code-reading: there is NO Base-only single-source "Direct DEX"
+  path to remove. `useQuote` passes `activeChainId` to `/api/quote`; `SwapBox`
+  renders the shared `<QuoteBreakdown meta={meta}>`; the Compare list shows for
+  `meta.all.length > 1` on ANY chain. Base now returns ≥4 sources
+  (velora/kyber/cow/uniswapv3) → the Compare list renders identically to mainnet.
+
+### Phase 3 — source breadth: 0x fixed (whitelist-matched); rest is key/Preview-gated
+- **0x (priority): fixed** — chain-aware allowance-holder endpoint on Base
+  (commit `8181c68`), so tx.to matches the Base whitelist. Live confirmation
+  needs a known-good ZEROX key on Preview (local key 401s on BOTH chains).
+- **1inch (403), sushiswap (422), balancer (404):** identical errors on mainnet
+  AND Base in this env → NOT Base-specific divergences here; broken on both with
+  the local keys/API state. Need a working prod key + Preview to diagnose; no
+  blind code change shipped (would risk the working-on-prod mainnet path).
+- **openocean:** returns a WRONG amount on Base only (≈3.7e13 vs ~1.98e9). It is
+  outlier-filtered (median×3) so it never reaches the UI, but the Base parser is
+  wrong — follow-up: investigate openocean's Base response decimals/field.
+- **bebop:** "no buyTokens" on Base only (ok on mainnet) — follow-up.
+- **odos:** 429 (no ODOS_API_KEY) — needs a key, not a code fix.
+
+### Phase 4 — USD costs: fixed (commit `116e562`)
+- `useEthGasCost` is now chain-aware; Base renders gas + fee in ETH + USD via the
+  shared QuoteBreakdown path (no raw-gas-units fallback). Mainnet byte-identical.
+
+### Phase 5 — verification status (honest)
+- Verified locally on the PRODUCTION bundle (`next build && next start`): Base
+  `&debug=sources` returns velora/kyber/cow/uniswapv3 (+openocean filtered); the
+  USD fix is unit-test-proven; full suite 1318 green; mainnet untouched (tests).
+- **NOT done (out of this environment's reach):** the Vercel **Preview**
+  visual-parity check and the live 0x/1inch verification with a known-good prod
+  key. Per the goal + INC reactivation criteria, that Preview check
+  (`/api/quote` JSON 200 + Compare parity + 0x returning on chains 1 & 8453)
+  remains the hard gate BEFORE promoting to production.
+
+## Feedback — SPRINT-9E Phase 5: Vercel Preview verification (DONE)
+
+Verified on the Vercel **Preview** (HEAD = 0565deb, all 6 fixes, real prod
+env/keys) via the authenticated CLI (`vercel@54.6.1 curl` bypasses Deployment
+Protection for a team member). Deployment:
+`teraswap-et3g80gmd-terahashalphas-projects.vercel.app`.
+
+- **Base WETH→USDC** — `all` = [bebop, kyberswap, velora, uniswapv3] + cowswap ok
+  → 5 valid sources → the Compare list renders on Base (mainnet parity). 0.1 WETH.
+- **Base NATIVE ETH→USDC (the "No valid quotes" screenshot request, amount 2)** —
+  now `all` = [bebop, kyberswap, velora, uniswapv3] (4 sources). The "No valid
+  quotes" is RESOLVED by the chain-aware `toWeth` fix (native ETH → Base WETH →
+  Uniswap V3 pool). The earlier screenshot was the OLD preview (f64e3de) / pre-fix.
+- **Mainnet (chainId 1) WETH→USDC** — `all` = [uniswapv3, bebop, kyberswap, velora,
+  cowswap], crossQuoteWarning=false → UNCHANGED (parity reference intact).
+- **debug=sources (Base, prod keys)**: velora/kyberswap/cowswap/uniswapv3/bebop ok;
+  openocean ok-but-outlier-filtered; **0x → 401** (the 0x API rejects the key —
+  AUTH, not code; my allowance-holder endpoint fix is correct for when a valid key
+  is present, but the prod ZEROX key 401s on 0x's side); 1inch → no route for this
+  pair; odos 429 (no key); sushiswap 422 / balancer 404 (same on mainnet → not
+  Base-specific); curve null (mainnet-only by design).
+
+### Net result
+Base now renders the full Compare list (4–5 sources) with USD costs, matching
+mainnet; the screenshot outage is resolved; mainnet is unchanged. OUTSTANDING (not
+code): **0x on Base needs a 0x key that the API accepts** (current key 401s on
+both chains). Promote to prod only after that and a final visual eyeball on the
+Preview.
+
+## Feedback — SPRINT-9E: 0x root cause = env-var name mismatch (config fix)
+
+`vercel env ls` on the project shows the 0x key is configured as
+**`NEXT_PUBLIC_0X_API_KEY`** (Preview+Production), NOT `ZEROX_API_KEY`. The 0x
+adapter reads `process.env.ZEROX_API_KEY` (server-only, per rule #7), so it gets
+an EMPTY key → the 0x API returns 401 on BOTH Base and mainnet (matching every
+observation). This is why "the same key works on mainnet" did not hold — the
+server-side name the code expects was never set.
+
+FIX (config, not code — and a security upgrade): in Vercel, add
+`ZEROX_API_KEY` (server-only) for Preview + Production with the 0x key value, and
+DELETE `NEXT_PUBLIC_0X_API_KEY` (a NEXT_PUBLIC_ key is shipped in the browser
+bundle; env-validation.ts already warns about exactly this). After that, 0x
+returns on Base via the v2 allowance-holder endpoint added in 8181c68 (whitelist
+already matches the Base AllowanceHolder). No code change — changing the adapter
+to read the NEXT_PUBLIC_ var would violate the server-only-keys constraint.
+
+Note: `NEXT_PUBLIC_BASE_FEE_COLLECTOR` IS set in Vercel, so Base is activated
+(isChainActive(8453)=true) — consistent with the Base swap UI showing quotes.
+
+## Feedback — SPRINT-9E: platform-fee USD missing on Base (fixed) + Base swap-sim reverts (concern)
+
+### Edge case — fee USD was a SECOND chain-aware-feed bug (now fixed)
+Phase 4 made the **gas** USD chain-aware (`useEthGasCost`, 116e562), but the
+**platform-fee** USD in `QuoteBreakdown` (L387-389) reads a *different* source:
+`priceCheck.chainlinkPrice` from `useChainlinkPrice`. That hook was still
+mainnet-pinned — `getChainlinkFeed(tokenAddress)` (no chainId → mainnet feed) and
+`useReadContract` (no `chainId` → reads that mainnet feed address on the Base
+chain → no contract → `roundData` undefined → `chainlinkPrice` null → no "($)"
+next to the fee). User-reported on a Base ETH→USDC quote ("put the platform fee
+with ($) info too, like in mainnet").
+FIX: threaded `useActiveChainId()` through `useChainlinkPrice` (feed lookup +
+both reads), mirroring `useEthGasCost`. Base ETH→USDC now shows the fee in
+ETH + USD; mainnet byte-identical (chainId 1 → same feed, same read). +2 tests,
+full suite 1329 green. No QuoteBreakdown change needed — the JSX already renders
+the USD once `chainlinkPrice` is non-null.
+Note: a Base USDC/USD feed is intentionally NOT yet in
+`CHAINLINK_FEEDS_BY_CHAIN[8453]`, so USDC→ETH on Base still shows no fee-USD (and
+oracle-unavailable warning) — correct: we don't fabricate a price for an
+unverified feed. Add the verified Base USDC/USD feed later to close that gap.
+
+### Concern (NOT code — for Architect / Base deploy ops): pre-swap simulation reverts on Base
+User hit "Simulation reverted: swap would fail on-chain" on Base for **Bebop**
+(and one **KyberSwap** screenshot), asking "is this normal because preview?".
+- It is NOT a preview artifact. The pre-swap sim runs `eth_call` against the REAL
+  Base chain via `getPublicClientForChain(8453)` — identical on preview and prod.
+  The guard worked as designed: "no gas was spent" (it blocked a doomed tx).
+- **Bebop**: FEE-INCOMPATIBLE → routes DIRECT to its JAM settlement (not via
+  FeeCollector). Bebop JAM is RFQ — the returned `tx.data` is a maker-signed quote
+  with a tight validity window. Such self-execution calldata frequently fails a
+  plain `eth_call` pre-swap sim (maker-side signature/balance/expiry state differs
+  under simulation), while AMM routes (Uniswap V3 / Aerodrome-Velora) pass. So
+  Bebop reverting in the sim while others pass is expected, not a build bug.
+  RECOMMENDATION: treat Bebop as a quote/Compare source only, OR add a dedicated
+  RFQ-execution path; and/or soften the sim-revert UX for intent/RFQ sources.
+- **KyberSwap** (more important): routes VIA the Base FeeCollector
+  (`usesFeeCollector('kyberswap',8453)=true` since `NEXT_PUBLIC_BASE_FEE_COLLECTOR`
+  is set). A revert there most likely means the deployed Base FeeCollector has NOT
+  whitelisted the Base DEX routers on-chain yet (mainnet routers were whitelisted
+  via timelock 2026-05-26; the Base equivalent is a Sprint-44 deploy step). VERIFY
+  on-chain before promoting Base swaps to prod: confirm the Base FeeCollector
+  whitelists each Base router in `ROUTER_WHITELIST_BY_CHAIN[8453]`. This is a
+  deployment/config item, not a frontend bug. (`vercel env pull` to read the
+  FeeCollector address was security-denied, so I could not verify the whitelist
+  from here.)
+
+### Assumption corrected — "0x works on mainnet" is FALSE (empirically verified)
+The SPRINT-9E spec assumed 0x already works on mainnet ("same ZEROX_API_KEY
+works on mainnet") and that its absence is a Base-only divergence. Re-ran
+`debug=sources` on the preview for chainId=1 (mainnet WETH→USDC): 0x is in
+`circuit breaker OPEN` state with an **exponentially growing cooldown**
+(24s → 56s across two probes) — the breaker only trips/extends on REPEATED
+failures, so 0x is failing on mainnet just as on Base. Same root cause both
+chains: the key is named `NEXT_PUBLIC_0X_API_KEY` (verified via `vercel env ls`)
+while the adapter reads server-only `ZEROX_API_KEY` → empty key → 401 → breaker
+opens. CONSEQUENCE: 0x is NOT a Base-specific code bug and "converging Base to
+mainnet" does not require 0x (mainnet lacks it too — the mainnet reference list is
+[Uniswap V3, Velora, KyberSwap, CoW], no 0x). The Base 0x code path (v2
+allowance-holder + chainId, 8181c68) is correct and unit-tested; it only needs a
+valid server-side key. FIX remains config-only (set `ZEROX_API_KEY` server-only,
+delete the NEXT_PUBLIC_ one) — a code change to read the NEXT_PUBLIC_ var would
+violate rule #7 (server-only keys) and is explicitly refused.
+
+## Feedback — SPRINT-9F: five reported Base swap-UX bugs (4 code-fixed, 1 config)
+
+User reported five concrete bugs (screenshots) and asked for a workflow. A 5-agent
+investigation workflow + a 4-agent adversarial review workflow drove the fixes.
+
+### bug2 — Bebop missing from the Liquidity Sources selector (da766a2)
+`TOGGLEABLE_SOURCES` (SourceToggle.tsx) was a hardcoded 11-item list that never
+gained 'bebop' when the 12th adapter shipped → users couldn't disable Bebop.
+Added 'bebop' (explicit list, NOT `Object.keys(AGGREGATOR_META)` — that map also
+holds the `uniswap` legacy alias = duplicate "Uniswap V3", and the internal
+`teraswap_order_engine` pseudo-source, both of which must stay out of the selector).
+
+### bug5 — selector vanishes when narrowed to one source (next commit)
+SwapBox gated `<SourceToggle>` on `meta.all.length > 1`; excluding down to one
+source (so the quote returns one) hid the selector with no way back — user trapped
+until a remount (tab switch). Extracted a pure `shouldShowSourceToggle(metaAllLen,
+excludedCount)` (show when >1 quote OR anything excluded), unit-tested; mainnet
+byte-identical when nothing is excluded. Count span guarded against null meta.
+
+### bug4 — balance doesn't react to a wallet network switch (005b10a)
+`useBalance` was called without `chainId`, so after switching networks the balance
+(and MAX/50%) stayed on the connected-by-default chain until a remount. Threaded the
+active chainId into `useBalance`. NOTE: the quote already re-fetched (activeChainId
+in `useQuote` doFetch deps) and tokens already remapped on chain change — balance was
+the confirmed stale piece. If reactivity is still incomplete in the wild, the next
+suspect is `useSwap` reading wagmi `useChainId()` vs SwapBox/useQuote reading
+`useActiveChainId()` (=`useAccount().chain?.id`) — they could momentarily disagree
+during a switch; unify to one source if so.
+
+### bug3 — Bebop errors break the quote/swap (8071bd1 → corrected 998787b)
+Bebop is RFQ/flaky. `fetchQuote` threw, and api.ts surfaced `errors[0]` as the
+headline "No valid quotes. Bebop: no buyTokens amount" even when Bebop was just a
+no-route. FINAL fix (after adversarial review): `buyAmount()` returns null on no
+usable amount; `fetchQuote` returns null ONLY for that no-route case (non-fatal →
+Bebop absent, other sources surface) but lets HTTP/parse failures THROW so the
+circuit breaker trips and source-monitoring records the error — same contract as
+every other adapter. `fetchSwapData` throws on a null amount (firm-quote integrity)
+and its fail-closed security gate (tx.to===settlement, router whitelist) is
+UNCHANGED (security tests assert throws). api.ts got only a defensive `r.value`
+null-guard in the monitoring loop. The escape from a winning-but-unexecutable Bebop
+is bug2 (disable it).
+REVIEW NOTE: my first cut wrapped the whole fetchQuote in try/catch→null. The
+adversarial-review workflow correctly flagged this as CRITICAL — a non-throwing
+return makes `withCircuitBreaker` call `onSuccess()`, so a persistently-down Bebop
+would never trip the breaker (polled forever) and mainnet's monitoring error
+signal changed. The corrected fix throws on real failures, so the breaker +
+monitoring are preserved and mainnet error signals are byte-identical; only the
+no-route case is recorded as a miss (it never was an error).
+
+### bug1 — 0x dead (config-only, see prior 0x entries / b2c018a)
+Confirmed again: `ZEROX_API_KEY` (server-only) is unset; key lives under
+`NEXT_PUBLIC_0X_API_KEY`. No code fix (rule #7). User must rename the Vercel env var.
+
+Suite 1342 green; mainnet test-guarded byte-identical; all commits signed.
