@@ -109,8 +109,15 @@ export default function SwapBox() {
   // existing coming-soon UX (banner + disabled swap) is preserved unchanged.
   const isCorrectChain = !!chain && isChainActive(chain.id)
 
+  // [SPRINT-9F bug4] Active chain id — also feeds the chain-aware spender
+  // allowlist + token remap below. Declared here so the balance query targets
+  // the chain the user is actually on; switching networks now re-reads the
+  // correct balance instead of the stale connected-by-default (mainnet) one.
+  const activeChainId = useActiveChainId()
+
   const { data: balanceIn } = useBalance({
     address,
+    chainId: activeChainId,
     token: tokenIn && !isNativeETH(tokenIn) ? tokenIn.address : undefined,
     query: { enabled: isConnected && isCorrectChain && !!tokenIn },
   })
@@ -125,9 +132,6 @@ export default function SwapBox() {
     () => selectBestWithMevPreference(rawMeta ?? null, mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
     [rawMeta, mevProtected],
   )
-
-  // [P222] Active chain — feeds the chain-aware spender allowlist below.
-  const activeChainId = useActiveChainId()
 
   // [SPRINT-9E] Re-resolve the selected tokens to the ACTIVE chain's addresses
   // whenever the chain changes. The defaults (findToken) are mainnet addresses;
