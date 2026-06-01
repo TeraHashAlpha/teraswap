@@ -1285,3 +1285,40 @@ Investigated via code-reading + real `&debug=sources` on the production bundle
   be confirmed locally while the key 401s on both chains). The clearly Base-specific,
   locally-verifiable gaps are USD (Chainlink feed) and the openocean/bebop Base
   parsers. Fixing USD + confirming the Compare renders closes the visible parity gap.
+
+## Feedback — SPRINT-9E Phases 2–5 outcomes
+
+### Phase 2 — UI parity: already satisfied (no code change)
+- Confirmed by code-reading: there is NO Base-only single-source "Direct DEX"
+  path to remove. `useQuote` passes `activeChainId` to `/api/quote`; `SwapBox`
+  renders the shared `<QuoteBreakdown meta={meta}>`; the Compare list shows for
+  `meta.all.length > 1` on ANY chain. Base now returns ≥4 sources
+  (velora/kyber/cow/uniswapv3) → the Compare list renders identically to mainnet.
+
+### Phase 3 — source breadth: 0x fixed (whitelist-matched); rest is key/Preview-gated
+- **0x (priority): fixed** — chain-aware allowance-holder endpoint on Base
+  (commit `8181c68`), so tx.to matches the Base whitelist. Live confirmation
+  needs a known-good ZEROX key on Preview (local key 401s on BOTH chains).
+- **1inch (403), sushiswap (422), balancer (404):** identical errors on mainnet
+  AND Base in this env → NOT Base-specific divergences here; broken on both with
+  the local keys/API state. Need a working prod key + Preview to diagnose; no
+  blind code change shipped (would risk the working-on-prod mainnet path).
+- **openocean:** returns a WRONG amount on Base only (≈3.7e13 vs ~1.98e9). It is
+  outlier-filtered (median×3) so it never reaches the UI, but the Base parser is
+  wrong — follow-up: investigate openocean's Base response decimals/field.
+- **bebop:** "no buyTokens" on Base only (ok on mainnet) — follow-up.
+- **odos:** 429 (no ODOS_API_KEY) — needs a key, not a code fix.
+
+### Phase 4 — USD costs: fixed (commit `116e562`)
+- `useEthGasCost` is now chain-aware; Base renders gas + fee in ETH + USD via the
+  shared QuoteBreakdown path (no raw-gas-units fallback). Mainnet byte-identical.
+
+### Phase 5 — verification status (honest)
+- Verified locally on the PRODUCTION bundle (`next build && next start`): Base
+  `&debug=sources` returns velora/kyber/cow/uniswapv3 (+openocean filtered); the
+  USD fix is unit-test-proven; full suite 1318 green; mainnet untouched (tests).
+- **NOT done (out of this environment's reach):** the Vercel **Preview**
+  visual-parity check and the live 0x/1inch verification with a known-good prod
+  key. Per the goal + INC reactivation criteria, that Preview check
+  (`/api/quote` JSON 200 + Compare parity + 0x returning on chains 1 & 8453)
+  remains the hard gate BEFORE promoting to production.
