@@ -9,6 +9,7 @@ import SwapButton from './SwapButton'
 import TransactionPreview from './TransactionPreview'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import SourceToggle from './SourceToggle'
+import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
@@ -587,10 +588,10 @@ export default function SwapBox() {
             </span>
             <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
-          {meta && meta.all.length > 1 && (
+          {shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size) && (
             <div className="mt-1 flex items-center justify-between px-1">
               <SourceToggle excludedSources={excludedSources} onToggle={handleSourceToggle} />
-              <span className="text-[10px] text-cream-35">{meta.all.length} sources queried</span>
+              {meta && <span className="text-[10px] text-cream-35">{meta.all.length} sources queried</span>}
             </div>
           )}
         </div>
