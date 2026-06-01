@@ -29,7 +29,7 @@ import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
-import { isChainActive, getChainConfig } from '@/lib/chains'
+import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -127,6 +127,16 @@ export default function SwapBox() {
 
   // [P222] Active chain — feeds the chain-aware spender allowlist below.
   const activeChainId = useActiveChainId()
+
+  // [SPRINT-9E] Re-resolve the selected tokens to the ACTIVE chain's addresses
+  // whenever the chain changes. The defaults (findToken) are mainnet addresses;
+  // without this, Base would quote e.g. MAINNET USDC (0xA0b8…) on chainId 8453 →
+  // every source rejects it ("1inch 400: not valid token") → "No valid quotes".
+  // remapTokenToChain is a no-op on mainnet (same address) so mainnet is unchanged.
+  useEffect(() => {
+    setTokenIn((t) => remapTokenToChain(t, activeChainId))
+    setTokenOut((t) => remapTokenToChain(t, activeChainId))
+  }, [activeChainId])
   // [P223] Swap activation guard. A chain is "coming soon" until its
   // FeeCollector is deployed (config.contracts.feeCollector !== null). Mainnet
   // is active, so chainActive is always true there and nothing below changes.
