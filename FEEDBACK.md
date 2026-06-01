@@ -1489,3 +1489,61 @@ Confirmed again: `ZEROX_API_KEY` (server-only) is unset; key lives under
 `NEXT_PUBLIC_0X_API_KEY`. No code fix (rule #7). User must rename the Vercel env var.
 
 Suite 1342 green; mainnet test-guarded byte-identical; all commits signed.
+
+## Re-review — SPRINT-9F bug3 corrected fix (998787b): APPROVED 0C/0H
+
+A 4-lens adversarial re-review workflow (circuit-breaker / monitoring-parity /
+null-data-flow / test-coverage) + a verified synthesis re-audited `998787b`.
+**Gate: APPROVED — 0 CRITICAL / 0 HIGH.** Every high-confidence claim was checked
+against source before acceptance.
+
+**Original CRITICAL fully resolved.** `8071bd1` wrapped the whole `fetchQuote` body
+in catch→null, so HTTP-502, parse errors AND no-routes ALL returned null and ALL
+fired `withCircuitBreaker.onSuccess()` (circuit-breaker.ts:239) — the breaker was
+fully disabled. `998787b` narrows the null return to the genuine no-route case only:
+`!res.ok` throws (bebop.ts:74), `parseJsonOrThrow` throws, `buyAmount` returns null
+only on a 200-OK with no usable amount (bebop.ts:82). Real failures now reach
+`cb.onFailure()` (circuit-breaker.ts:242) and trip the breaker. `fetchSwapData` still
+throws on a null amount (bebop.ts:133); the fail-closed settlement/whitelist gate
+(bebop.ts:117-127) is intact.
+
+**The 4 lenses independently rated a "CB-vs-source-monitor divergence" as
+CRITICAL/HIGH; downgraded to MEDIUM after verification.** On a no-route the breaker
+records success (`onSuccess()` resets consecutiveFailures) while api.ts:120-124
+records the same null as a false ping (`'Zero output'`). The CRITICAL premise — that
+source-monitor auto-disables a source the breaker still trusts — is FALSE here:
+`isSourceDegraded` (source-monitor.ts:121) has ZERO consumers (grep-confirmed:
+definition only, not even tests). No auto-disable is wired, so the divergence is
+telemetry-only, not operational. **LATENT RISK for the Architect:** if
+`isSourceDegraded` is ever wired into an auto-disable, this divergence becomes
+operational. Decide a project-wide "legitimate absence vs failure" convention first.
+
+### Closed this commit
+- [MEDIUM→done] `fetchSwapData` firm-quote null-throw was untested (an execution-time
+  fund-flow gate). Added `fetchSwapData THROWS on empty buyTokens` to bebop.test.ts:
+  the mock passes the security gate (valid settlement + whitelisted) then asserts
+  `rejects.toThrow(/no buyTokens amount/)`, pinning bebop.ts:133 (not an earlier gate).
+  **Mutation-verified**: neutralizing the throw makes the test fail. Full suite 1343 green.
+
+### Backlog (non-blocking — for Architect triage)
+- [MEDIUM] CB-vs-monitor signal convention (Bebop no-route): classify a no-route via a
+  sentinel/`Result` type so breaker and source-monitor agree, OR document the
+  intentional asymmetry (null = legitimate absence, not a breaker failure).
+- [MEDIUM] No integration test asserts breaker STATE under repeated no-routes
+  (N consecutive nulls → CLOSED; N consecutive throws → OPEN) — would lock in the
+  corrected semantics against regression.
+- [LOW] Cross-adapter check — CORRECTION to the re-review synthesis, which I verified:
+  the synthesis claimed both curve.ts and cow.ts share the null→onSuccess pattern and
+  cited `cow.ts:48,54`. That is WRONG — those lines are a `cow` orderParams validation
+  helper (swap path), and `cow.fetchQuote`→`fetchCowSwapQuote` (cow.ts:109) THROWS on
+  `!res.ok` and never returns a non-throwing null. Only **curve.ts** matches, and only
+  via its deliberate non-mainnet skip (`fetchQuote` returns null at curve.ts:307,312
+  off-chain-1) — a clean "I don't operate here", not a masked failure. Benign; noted
+  for completeness, no fix indicated.
+- [LOW] `998787b` commit message over-claims "mainnet unchanged": true for HTTP/parse
+  errors, but the no-route case changed throw→null vs pre-`8071bd1` (its CB
+  classification now differs). Behavior is intended; only the wording over-claims.
+- [LOW] api.ts:123 records both adapter-null (no-route) and a zero/non-numeric toAmount
+  as `'Zero output'`, losing the no-route vs data-integrity distinction in dashboards.
+- [LOW] No e2e test for the api.ts:120 `r.value` null-guard (adapter-level null IS
+  covered in bebop.test.ts; only the end-to-end monitoring-loop path is uncovered).
