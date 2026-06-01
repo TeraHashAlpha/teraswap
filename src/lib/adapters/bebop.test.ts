@@ -72,6 +72,24 @@ describe('bebop adapter — JAM [SPRINT-9D]', () => {
     expect(calls[0].url).toContain('https://api.bebop.xyz/jam/base/v2/quote')
   })
 
+  // [SPRINT-9F bug3] Bebop is an RFQ source whose quote endpoint is flaky for
+  // some pairs/sizes. A Bebop quote failure must be NON-FATAL — return null so
+  // the meta-quote still shows the other sources, instead of surfacing
+  // "No valid quotes. Bebop: ..." as the headline error.
+  it('fetchQuote returns null on an HTTP error (non-fatal, other sources still quote)', async () => {
+    mockBebop({ error: 'upstream' }, 502)
+    const bebop = await loadBebop()
+    const q = await bebop.fetchQuote({ src: SRC, dst: DST, amount: '1000000000000000000', chainId: 8453 })
+    expect(q).toBeNull()
+  })
+
+  it('fetchQuote returns null when the response has no buyTokens amount (non-fatal)', async () => {
+    mockBebop(bebopBody({ buyTokens: {} }))
+    const bebop = await loadBebop()
+    const q = await bebop.fetchQuote({ src: SRC, dst: DST, amount: '1000000000000000000', chainId: 1 })
+    expect(q).toBeNull()
+  })
+
   it('sends the server-only source-auth header (never a NEXT_PUBLIC key)', async () => {
     mockBebop()
     const bebop = await loadBebop()

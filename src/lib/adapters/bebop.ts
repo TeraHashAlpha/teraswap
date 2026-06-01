@@ -55,27 +55,37 @@ function buyAmount(data: { buyTokens?: Record<string, { amount?: string }> }, ds
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
-  // Price-only (gross): NO fee params so Bebop ranks fairly vs the other sources.
-  const qs = new URLSearchParams({
-    sell_tokens: src,
-    buy_tokens: dst,
-    sell_amounts: amount,
-    taker_address: BEBOP_PRICE_TAKER,
-    gasless: 'false',
-    approval_type: 'Standard',
-  })
-  if (BEBOP_SOURCE) qs.set('source', BEBOP_SOURCE)
+  // [SPRINT-9F bug3] Bebop is an RFQ source: its quote endpoint is flaky for some
+  // pairs/sizes (e.g. an empty buyTokens map → "no buyTokens amount"). A Bebop
+  // quote failure must be NON-FATAL to the meta-quote — return null so the other
+  // sources still surface, instead of Bebop's error becoming the headline
+  // "No valid quotes" message (fetchMetaQuote treats a null return as "absent").
+  try {
+    // Price-only (gross): NO fee params so Bebop ranks fairly vs the other sources.
+    const qs = new URLSearchParams({
+      sell_tokens: src,
+      buy_tokens: dst,
+      sell_amounts: amount,
+      taker_address: BEBOP_PRICE_TAKER,
+      gasless: 'false',
+      approval_type: 'Standard',
+    })
+    if (BEBOP_SOURCE) qs.set('source', BEBOP_SOURCE)
 
-  const res = await fetch(`${bebopQuoteUrl(chainId)}?${qs}`, { headers: authHeaders() })
-  if (!res.ok) throw new Error(`Bebop ${res.status}`)
-  const data = await parseJsonOrThrow<any>(res, 'Bebop')
+    const res = await fetch(`${bebopQuoteUrl(chainId)}?${qs}`, { headers: authHeaders() })
+    if (!res.ok) throw new Error(`Bebop ${res.status}`)
+    const data = await parseJsonOrThrow<any>(res, 'Bebop')
 
-  return {
-    source: 'bebop',
-    toAmount: buyAmount(data, dst),
-    estimatedGas: Number(data?.tx?.gas ?? 0),
-    gasUsd: Number(data?.gasFee?.usd ?? 0),
-    routes: ['Bebop JAM'],
+    return {
+      source: 'bebop',
+      toAmount: buyAmount(data, dst),
+      estimatedGas: Number(data?.tx?.gas ?? 0),
+      gasUsd: Number(data?.gasFee?.usd ?? 0),
+      routes: ['Bebop JAM'],
+    }
+  } catch (err) {
+    console.warn('[TeraSwap] Bebop quote unavailable:', err instanceof Error ? err.message : String(err))
+    return null
   }
 }
 
