@@ -1434,3 +1434,58 @@ allowance-holder + chainId, 8181c68) is correct and unit-tested; it only needs a
 valid server-side key. FIX remains config-only (set `ZEROX_API_KEY` server-only,
 delete the NEXT_PUBLIC_ one) — a code change to read the NEXT_PUBLIC_ var would
 violate rule #7 (server-only keys) and is explicitly refused.
+
+## Feedback — SPRINT-9F: five reported Base swap-UX bugs (4 code-fixed, 1 config)
+
+User reported five concrete bugs (screenshots) and asked for a workflow. A 5-agent
+investigation workflow + a 4-agent adversarial review workflow drove the fixes.
+
+### bug2 — Bebop missing from the Liquidity Sources selector (da766a2)
+`TOGGLEABLE_SOURCES` (SourceToggle.tsx) was a hardcoded 11-item list that never
+gained 'bebop' when the 12th adapter shipped → users couldn't disable Bebop.
+Added 'bebop' (explicit list, NOT `Object.keys(AGGREGATOR_META)` — that map also
+holds the `uniswap` legacy alias = duplicate "Uniswap V3", and the internal
+`teraswap_order_engine` pseudo-source, both of which must stay out of the selector).
+
+### bug5 — selector vanishes when narrowed to one source (next commit)
+SwapBox gated `<SourceToggle>` on `meta.all.length > 1`; excluding down to one
+source (so the quote returns one) hid the selector with no way back — user trapped
+until a remount (tab switch). Extracted a pure `shouldShowSourceToggle(metaAllLen,
+excludedCount)` (show when >1 quote OR anything excluded), unit-tested; mainnet
+byte-identical when nothing is excluded. Count span guarded against null meta.
+
+### bug4 — balance doesn't react to a wallet network switch (005b10a)
+`useBalance` was called without `chainId`, so after switching networks the balance
+(and MAX/50%) stayed on the connected-by-default chain until a remount. Threaded the
+active chainId into `useBalance`. NOTE: the quote already re-fetched (activeChainId
+in `useQuote` doFetch deps) and tokens already remapped on chain change — balance was
+the confirmed stale piece. If reactivity is still incomplete in the wild, the next
+suspect is `useSwap` reading wagmi `useChainId()` vs SwapBox/useQuote reading
+`useActiveChainId()` (=`useAccount().chain?.id`) — they could momentarily disagree
+during a switch; unify to one source if so.
+
+### bug3 — Bebop errors break the quote/swap (8071bd1 → corrected 998787b)
+Bebop is RFQ/flaky. `fetchQuote` threw, and api.ts surfaced `errors[0]` as the
+headline "No valid quotes. Bebop: no buyTokens amount" even when Bebop was just a
+no-route. FINAL fix (after adversarial review): `buyAmount()` returns null on no
+usable amount; `fetchQuote` returns null ONLY for that no-route case (non-fatal →
+Bebop absent, other sources surface) but lets HTTP/parse failures THROW so the
+circuit breaker trips and source-monitoring records the error — same contract as
+every other adapter. `fetchSwapData` throws on a null amount (firm-quote integrity)
+and its fail-closed security gate (tx.to===settlement, router whitelist) is
+UNCHANGED (security tests assert throws). api.ts got only a defensive `r.value`
+null-guard in the monitoring loop. The escape from a winning-but-unexecutable Bebop
+is bug2 (disable it).
+REVIEW NOTE: my first cut wrapped the whole fetchQuote in try/catch→null. The
+adversarial-review workflow correctly flagged this as CRITICAL — a non-throwing
+return makes `withCircuitBreaker` call `onSuccess()`, so a persistently-down Bebop
+would never trip the breaker (polled forever) and mainnet's monitoring error
+signal changed. The corrected fix throws on real failures, so the breaker +
+monitoring are preserved and mainnet error signals are byte-identical; only the
+no-route case is recorded as a miss (it never was an error).
+
+### bug1 — 0x dead (config-only, see prior 0x entries / b2c018a)
+Confirmed again: `ZEROX_API_KEY` (server-only) is unset; key lives under
+`NEXT_PUBLIC_0X_API_KEY`. No code fix (rule #7). User must rename the Vercel env var.
+
+Suite 1342 green; mainnet test-guarded byte-identical; all commits signed.
