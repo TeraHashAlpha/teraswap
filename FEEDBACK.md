@@ -1234,3 +1234,54 @@ mainnet default (separate surfaces; mainnet-identical).
 - Verified on the LOCAL production bundle. The Vercel **Preview** `/api/quote`
   200-check on chains 1 + 8453 remains the hard gate BEFORE re-promoting to prod
   (incident reactivation criteria) — that requires a deploy and is the human step.
+
+## Feedback — SPRINT-9E Phase 1 findings (pre-fix, no guessing)
+
+Investigated via code-reading + real `&debug=sources` on the production bundle
+(`next build && next start`) with the configured API keys.
+
+### Frontend cause — the spec's "single-source Direct-DEX path" does NOT exist (corrected)
+- The swap UI is ALREADY fully chain-agnostic. `useQuote` calls
+  `fetchQuoteViaApi(..., activeChainId, ...)` (passes chainId 8453 on Base) and
+  stores the whole meta-quote `all`; `SwapBox` renders `<QuoteBreakdown meta={meta}>`
+  and the Compare list (`SwapBox` L580 / `QuoteBreakdown` L439) for ANY chain when
+  `meta.all.length > 1`. There is NO chainId branch and NO separate single-source
+  Uniswap path. The pre-9C "Base = only Uniswap V3 Direct DEX" was a downstream
+  symptom of (a) low Base source coverage and (b) the on-chain uniswapv3 adapter
+  mis-quoting mainnet on Base (fixed in SPRINT-9C). With current code, Base now
+  returns 4 valid sources → the Compare list renders. So Phase 2 (UI parity) is
+  already satisfied in code; there is no single-source path to remove.
+
+### Per-source `debug=sources` table (1 WETH/ETH → USDC)
+| source | Base 8453 | Mainnet 1 | Base-specific? |
+|--------|-----------|-----------|----------------|
+| velora | ok | ok | — |
+| kyberswap | ok | ok | — |
+| cowswap | ok (WETH) | ok | — (native ETH → no route, expected) |
+| uniswapv3 | ok (WETH) | ok | — (native ETH → "no pool", minor) |
+| openocean | ok but **WRONG amount** (3.7e13 vs ~1.98e9) | ok | **YES** — Base parse/decimals bug (outlier-filtered, so not user-visible) |
+| bebop | error "no buyTokens" | ok | **YES** — Base JAM response shape/demo |
+| 1inch | error 1inch 403 | error 1inch 403 | NO — identical on both (key/plan; broken on mainnet too in this env) |
+| 0x | error 0x 401 | error 0x 401 | NO locally — identical on both (the local ZEROX key 401s on BOTH chains; cannot verify a Base-only 0x fix without a working prod key) |
+| sushiswap | error 422 | error 422 | NO — identical on both |
+| balancer | error 404 | error 404 | NO — identical on both |
+| odos | error 429 (ODOS_API_KEY unset) | error 429 | NO — needs key |
+| curve | null (mainnet-only by SPRINT-9C) | "no pool" | — (by design) |
+
+### USD cause
+- `useEthGasCost` reads the HARDCODED mainnet `CHAINLINK_ETH_USD` feed via
+  `useReadContract` (which targets the connected chain). On Base that mainnet
+  address is not the ETH/USD feed → `ethPrice = null` → `estimate()` returns null
+  → no gas/fee USD → UI falls back to raw gas units. `useEstimateFeesPerGas()` is
+  already chain-aware (Base gas). Fix: resolve the ETH/USD feed per active chain
+  via `getChainlinkFeed(NATIVE_ETH, chainId)` (mainnet → `CHAINLINK_ETH_USD`
+  unchanged; Base → `0x71041dd…`, already in `CHAINLINK_FEEDS_BY_CHAIN[8453]`).
+
+### Scope note (honest)
+- The keyed/aggregator sources 0x/1inch/sushiswap/balancer return the SAME errors
+  on mainnet AND Base in this environment, so they are NOT reproducible Base-only
+  divergences here — they need a known-good production key + the Vercel Preview to
+  verify (the 0x Base AllowanceHolder fix can be written from the spec but cannot
+  be confirmed locally while the key 401s on both chains). The clearly Base-specific,
+  locally-verifiable gaps are USD (Chainlink feed) and the openocean/bebop Base
+  parsers. Fixing USD + confirming the Compare renders closes the visible parity gap.
