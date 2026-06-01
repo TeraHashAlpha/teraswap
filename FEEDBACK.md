@@ -1322,3 +1322,32 @@ Investigated via code-reading + real `&debug=sources` on the production bundle
   key. Per the goal + INC reactivation criteria, that Preview check
   (`/api/quote` JSON 200 + Compare parity + 0x returning on chains 1 & 8453)
   remains the hard gate BEFORE promoting to production.
+
+## Feedback — SPRINT-9E Phase 5: Vercel Preview verification (DONE)
+
+Verified on the Vercel **Preview** (HEAD = 0565deb, all 6 fixes, real prod
+env/keys) via the authenticated CLI (`vercel@54.6.1 curl` bypasses Deployment
+Protection for a team member). Deployment:
+`teraswap-et3g80gmd-terahashalphas-projects.vercel.app`.
+
+- **Base WETH→USDC** — `all` = [bebop, kyberswap, velora, uniswapv3] + cowswap ok
+  → 5 valid sources → the Compare list renders on Base (mainnet parity). 0.1 WETH.
+- **Base NATIVE ETH→USDC (the "No valid quotes" screenshot request, amount 2)** —
+  now `all` = [bebop, kyberswap, velora, uniswapv3] (4 sources). The "No valid
+  quotes" is RESOLVED by the chain-aware `toWeth` fix (native ETH → Base WETH →
+  Uniswap V3 pool). The earlier screenshot was the OLD preview (f64e3de) / pre-fix.
+- **Mainnet (chainId 1) WETH→USDC** — `all` = [uniswapv3, bebop, kyberswap, velora,
+  cowswap], crossQuoteWarning=false → UNCHANGED (parity reference intact).
+- **debug=sources (Base, prod keys)**: velora/kyberswap/cowswap/uniswapv3/bebop ok;
+  openocean ok-but-outlier-filtered; **0x → 401** (the 0x API rejects the key —
+  AUTH, not code; my allowance-holder endpoint fix is correct for when a valid key
+  is present, but the prod ZEROX key 401s on 0x's side); 1inch → no route for this
+  pair; odos 429 (no key); sushiswap 422 / balancer 404 (same on mainnet → not
+  Base-specific); curve null (mainnet-only by design).
+
+### Net result
+Base now renders the full Compare list (4–5 sources) with USD costs, matching
+mainnet; the screenshot outage is resolved; mainnet is unchanged. OUTSTANDING (not
+code): **0x on Base needs a 0x key that the API accepts** (current key 401s on
+both chains). Promote to prod only after that and a final visual eyeball on the
+Preview.
