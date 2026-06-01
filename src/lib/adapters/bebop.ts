@@ -44,48 +44,49 @@ function authHeaders(): Record<string, string> {
   return { Accept: 'application/json', ...(key ? { 'source-auth': key } : {}) }
 }
 
-/** Pull the output amount for `dst` from Bebop's buyTokens map (case-insensitive). */
-function buyAmount(data: { buyTokens?: Record<string, { amount?: string }> }, dst: string): string {
+/** Pull the output amount for `dst` from Bebop's buyTokens map (case-insensitive).
+ *  Returns null when there is no usable amount (no route) — callers decide whether
+ *  that's a non-fatal "absent" (fetchQuote) or a hard error (fetchSwapData). */
+function buyAmount(data: { buyTokens?: Record<string, { amount?: string }> }, dst: string): string | null {
   const tokens = data?.buyTokens ?? {}
   const match = Object.entries(tokens).find(([addr]) => addr.toLowerCase() === dst.toLowerCase())
   const entry = match?.[1] ?? Object.values(tokens)[0]
-  if (!entry?.amount) throw new Error('Bebop: no buyTokens amount in response')
-  return entry.amount
+  return entry?.amount ?? null
 }
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
-  // [SPRINT-9F bug3] Bebop is an RFQ source: its quote endpoint is flaky for some
-  // pairs/sizes (e.g. an empty buyTokens map → "no buyTokens amount"). A Bebop
-  // quote failure must be NON-FATAL to the meta-quote — return null so the other
-  // sources still surface, instead of Bebop's error becoming the headline
-  // "No valid quotes" message (fetchMetaQuote treats a null return as "absent").
-  try {
-    // Price-only (gross): NO fee params so Bebop ranks fairly vs the other sources.
-    const qs = new URLSearchParams({
-      sell_tokens: src,
-      buy_tokens: dst,
-      sell_amounts: amount,
-      taker_address: BEBOP_PRICE_TAKER,
-      gasless: 'false',
-      approval_type: 'Standard',
-    })
-    if (BEBOP_SOURCE) qs.set('source', BEBOP_SOURCE)
+  // Price-only (gross): NO fee params so Bebop ranks fairly vs the other sources.
+  const qs = new URLSearchParams({
+    sell_tokens: src,
+    buy_tokens: dst,
+    sell_amounts: amount,
+    taker_address: BEBOP_PRICE_TAKER,
+    gasless: 'false',
+    approval_type: 'Standard',
+  })
+  if (BEBOP_SOURCE) qs.set('source', BEBOP_SOURCE)
 
-    const res = await fetch(`${bebopQuoteUrl(chainId)}?${qs}`, { headers: authHeaders() })
-    if (!res.ok) throw new Error(`Bebop ${res.status}`)
-    const data = await parseJsonOrThrow<any>(res, 'Bebop')
+  // [SPRINT-9F bug3] Real upstream failures (HTTP / parse) still THROW so the
+  // circuit breaker trips and source-monitoring records the error — identical to
+  // every other adapter. Only a no-ROUTE is treated as non-fatal below.
+  const res = await fetch(`${bebopQuoteUrl(chainId)}?${qs}`, { headers: authHeaders() })
+  if (!res.ok) throw new Error(`Bebop ${res.status}`)
+  const data = await parseJsonOrThrow<any>(res, 'Bebop')
 
-    return {
-      source: 'bebop',
-      toAmount: buyAmount(data, dst),
-      estimatedGas: Number(data?.tx?.gas ?? 0),
-      gasUsd: Number(data?.gasFee?.usd ?? 0),
-      routes: ['Bebop JAM'],
-    }
-  } catch (err) {
-    console.warn('[TeraSwap] Bebop quote unavailable:', err instanceof Error ? err.message : String(err))
-    return null
+  // No usable buy amount = no route for this pair/size, NOT an upstream error.
+  // Return null (non-fatal) so Bebop is simply absent and the other sources still
+  // surface — instead of "No valid quotes. Bebop: no buyTokens amount" becoming
+  // the headline when Bebop is the lone rejection (the reported bug).
+  const toAmount = buyAmount(data, dst)
+  if (toAmount === null) return null
+
+  return {
+    source: 'bebop',
+    toAmount,
+    estimatedGas: Number(data?.tx?.gas ?? 0),
+    gasUsd: Number(data?.gasFee?.usd ?? 0),
+    routes: ['Bebop JAM'],
   }
 }
 
@@ -126,9 +127,14 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     throw new Error(`Bebop: settlement/approvalTarget not whitelisted on chain ${chainId} — refusing swap`)
   }
 
+  // A firm/executable quote MUST carry an amount — a missing one here is a hard
+  // error (unlike the price-only fetchQuote, where no-route is non-fatal).
+  const toAmount = buyAmount(data, dst)
+  if (toAmount === null) throw new Error('Bebop: no buyTokens amount in response')
+
   return {
     source: 'bebop',
-    toAmount: buyAmount(data, dst),
+    toAmount,
     estimatedGas: Number(data?.tx?.gas ?? 0),
     gasUsd: Number(data?.gasFee?.usd ?? 0),
     routes: ['Bebop JAM'],

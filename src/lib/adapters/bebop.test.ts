@@ -72,22 +72,25 @@ describe('bebop adapter — JAM [SPRINT-9D]', () => {
     expect(calls[0].url).toContain('https://api.bebop.xyz/jam/base/v2/quote')
   })
 
-  // [SPRINT-9F bug3] Bebop is an RFQ source whose quote endpoint is flaky for
-  // some pairs/sizes. A Bebop quote failure must be NON-FATAL — return null so
-  // the meta-quote still shows the other sources, instead of surfacing
-  // "No valid quotes. Bebop: ..." as the headline error.
-  it('fetchQuote returns null on an HTTP error (non-fatal, other sources still quote)', async () => {
-    mockBebop({ error: 'upstream' }, 502)
-    const bebop = await loadBebop()
-    const q = await bebop.fetchQuote({ src: SRC, dst: DST, amount: '1000000000000000000', chainId: 8453 })
-    expect(q).toBeNull()
-  })
-
-  it('fetchQuote returns null when the response has no buyTokens amount (non-fatal)', async () => {
+  // [SPRINT-9F bug3] A no-ROUTE (empty/missing buyTokens) is NON-FATAL: return
+  // null so Bebop is simply absent and the other sources still surface, instead
+  // of "No valid quotes. Bebop: no buyTokens amount" headlining when Bebop is
+  // the lone rejection. But a real upstream FAILURE (HTTP/parse) must still THROW
+  // so the circuit breaker trips and source-monitoring records the error — same
+  // contract as every other adapter (verified by the adversarial review).
+  it('fetchQuote returns null when the response has no buyTokens amount (non-fatal no-route)', async () => {
     mockBebop(bebopBody({ buyTokens: {} }))
     const bebop = await loadBebop()
     const q = await bebop.fetchQuote({ src: SRC, dst: DST, amount: '1000000000000000000', chainId: 1 })
     expect(q).toBeNull()
+  })
+
+  it('fetchQuote THROWS on an HTTP error so the circuit breaker + monitoring still work', async () => {
+    mockBebop({ error: 'upstream' }, 502)
+    const bebop = await loadBebop()
+    await expect(
+      bebop.fetchQuote({ src: SRC, dst: DST, amount: '1000000000000000000', chainId: 8453 }),
+    ).rejects.toThrow(/502/)
   })
 
   it('sends the server-only source-auth header (never a NEXT_PUBLIC key)', async () => {
