@@ -41,6 +41,38 @@ const SOURCE_ERROR_LABELS: Partial<Record<AggregatorName, string>> = {
   balancer: 'Balancer', curve: 'Curve', bebop: 'Bebop',
 }
 
+/**
+ * [SPRINT-9F backlog] How a settled adapter quote maps to a source-monitor
+ * record. THREE outcomes, mirroring the circuit-breaker convention:
+ *   • rejected                     → failure (real error: HTTP/parse/timeout)
+ *   • resolved null                → no_route (the upstream answered but has no
+ *     quote for this pair/size — a legitimate absence, NOT a failure)
+ *   • resolved usable amount       → success
+ *   • resolved present-but-unusable amount (0 / non-numeric) → 'Zero output'
+ *     failure (a data-integrity miss, distinct from a no-route)
+ *
+ * Pure and total: never throws (a non-numeric `toAmount` is caught and treated
+ * as 'Zero output'), so it can't abort the best-effort monitoring loop.
+ */
+export type AdapterPing =
+  | { kind: 'success' }
+  | { kind: 'no_route' }
+  | { kind: 'failure'; error: string }
+
+export function classifyAdapterResult(
+  r: PromiseSettledResult<NormalizedQuote | null>,
+): AdapterPing {
+  if (r.status === 'rejected') return { kind: 'failure', error: String(r.reason) }
+  const v = r.value
+  if (v == null) return { kind: 'no_route' }
+  try {
+    if (v.toAmount && BigInt(v.toAmount) > 0n) return { kind: 'success' }
+  } catch {
+    /* non-numeric toAmount → fall through to the 'Zero output' failure */
+  }
+  return { kind: 'failure', error: 'Zero output' }
+}
+
 // ══════════════════════════════════════════════════════════
 //  META-AGGREGATOR ORCHESTRATOR
 // ══════════════════════════════════════════════════════════
@@ -108,21 +140,20 @@ export async function fetchMetaQuote(
   )
   const elapsed = Date.now() - startTime
 
-  // ── Source monitoring: record success/failure per aggregator ──
+  // ── Source monitoring: record success / failure / no-route per aggregator ──
   try {
-    const { recordSourcePing } = await import('./source-monitor')
+    const { recordSourcePing, recordSourceNoRoute } = await import('./source-monitor')
     results.forEach((r, i) => {
       const name = sourceNames[i]
-      // [SPRINT-9F bug3] An adapter may resolve to null (e.g. Bebop returns null
-      // on a no-route pair instead of throwing). Guard r.value before reading
-      // .toAmount so a null return is recorded as a miss, not a crash that aborts
-      // the whole monitoring loop for every source this cycle.
-      if (r.status === 'fulfilled' && r.value && r.value.toAmount && BigInt(r.value.toAmount) > 0n) {
-        recordSourcePing(name, true, elapsed)
-      } else {
-        const error = r.status === 'rejected' ? String(r.reason) : 'Zero output'
-        recordSourcePing(name, false, elapsed, error)
-      }
+      // [SPRINT-9F backlog] classifyAdapterResult distinguishes a legitimate
+      // no-route (adapter resolved null) from a real failure and from a
+      // present-but-unusable amount ('Zero output'). A no-route is recorded as
+      // NOT-a-failure, matching the circuit breaker's neutral treatment — so it
+      // never inflates the failure / consecutive-failure counters.
+      const ping = classifyAdapterResult(r)
+      if (ping.kind === 'success') recordSourcePing(name, true, elapsed)
+      else if (ping.kind === 'no_route') recordSourceNoRoute(name, elapsed)
+      else recordSourcePing(name, false, elapsed, ping.error)
     })
   } catch { /* monitoring is best-effort */ }
 
