@@ -141,3 +141,74 @@ describe('circuit-breaker — KV pre-seed [P112/M-02]', () => {
     expect(getCircuitBreaker('cowswap').getState()).toBe('OPEN')
   })
 })
+
+// ═══════════════════════════════════════════════════════════════
+// [SPRINT-9F backlog] no-route vs failure convention
+//
+// A resolved null/undefined result means "no route" (a legitimate
+// absence — the adapter responded but has no quote for this pair/size,
+// e.g. bebop.ts:82 or curve's off-mainnet skip). It must be NEUTRAL for
+// the breaker: it neither trips it (not a failure) NOR resets the
+// consecutive-failure counter (which would mask a real failure trend).
+// Only a thrown error is a real failure; only a resolved VALUE is a
+// success.
+// ═══════════════════════════════════════════════════════════════
+
+describe('circuit-breaker — no-route (null) is NEUTRAL [SPRINT-9F backlog]', () => {
+  const fail = () => Promise.reject(new Error('upstream 502'))
+  const noRoute = async () => null
+
+  async function drive(name: string, fn: () => Promise<unknown>, n: number) {
+    for (let i = 0; i < n; i++) {
+      await withCircuitBreaker(name, fn).catch(() => {})
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetAllCircuitBreakers()
+    mockGetAllStatuses.mockResolvedValue([]) // clean cold-start, all CLOSED
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('a no-route (null) does NOT reset the consecutive-failure count', async () => {
+    await drive('bebop', fail, 2)
+    expect(getCircuitBreaker('bebop').getInfo().consecutiveFailures).toBe(2)
+
+    // A no-route between failures must NOT paper over the failure trend.
+    await drive('bebop', noRoute, 1)
+    expect(getCircuitBreaker('bebop').getInfo().consecutiveFailures).toBe(2)
+    expect(getCircuitBreaker('bebop').getState()).toBe('CLOSED')
+
+    // One more real failure crosses the threshold (3) and opens it.
+    await drive('bebop', fail, 1)
+    expect(getCircuitBreaker('bebop').getState()).toBe('OPEN')
+  })
+
+  it('N consecutive no-routes leave the breaker CLOSED (never trips)', async () => {
+    await drive('curve', noRoute, 5)
+    expect(getCircuitBreaker('curve').getState()).toBe('CLOSED')
+    expect(getCircuitBreaker('curve').getInfo().consecutiveFailures).toBe(0)
+  })
+
+  it('N consecutive real failures OPEN the breaker (threshold = 3)', async () => {
+    await drive('odos', fail, 3)
+    expect(getCircuitBreaker('odos').getState()).toBe('OPEN')
+    // Once OPEN, the next call short-circuits without running fn.
+    await expect(
+      withCircuitBreaker('odos', async () => 'should not run'),
+    ).rejects.toThrow(/circuit is OPEN/)
+  })
+
+  it('a resolved VALUE still records success and resets the failure count', async () => {
+    await drive('velora', fail, 2)
+    expect(getCircuitBreaker('velora').getInfo().consecutiveFailures).toBe(2)
+
+    const r = await withCircuitBreaker('velora', async () => 'a-real-quote')
+    expect(r).toBe('a-real-quote')
+    expect(getCircuitBreaker('velora').getInfo().consecutiveFailures).toBe(0)
+  })
+})

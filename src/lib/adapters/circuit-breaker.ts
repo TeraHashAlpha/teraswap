@@ -221,6 +221,20 @@ function ensureInitialized(): Promise<void> {
  * very first request after a cold start sees the persisted state. The
  * pre-seed is a single KV read shared across all concurrent callers —
  * adds one round-trip to the cold-start path, no overhead on warm.
+ *
+ * [SPRINT-9F backlog] no-route vs failure convention — the breaker recognises
+ * THREE outcomes, not two:
+ *   • throw            → real failure  → onFailure() (may OPEN the breaker)
+ *   • resolved value   → success       → onSuccess() (resets / may CLOSE)
+ *   • resolved null/undefined → no-route → NEUTRAL: touch neither counter.
+ * Adapters return `null` for a legitimate no-route (the upstream answered
+ * but has no quote for this pair/size — bebop.ts:82 — or a deliberate
+ * off-chain skip — curve.ts:307/312). That is NOT a failure, so it must
+ * not trip the breaker; but it is NOT proof of health either, so it must
+ * not reset a real failure streak (which onSuccess() would, masking a
+ * source sliding toward OPEN). Keeping it neutral makes the breaker count
+ * ONLY real failures. Non-nullable callers are unaffected (a value is
+ * always a success).
  */
 export async function withCircuitBreaker<T>(
   name: string,
@@ -236,7 +250,8 @@ export async function withCircuitBreaker<T>(
 
   try {
     const result = await fn()
-    cb.onSuccess()
+    // A resolved null/undefined is a no-route → NEUTRAL (see doc above).
+    if (result != null) cb.onSuccess()
     return result
   } catch (err) {
     cb.onFailure()
