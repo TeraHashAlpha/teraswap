@@ -1417,3 +1417,20 @@ User hit "Simulation reverted: swap would fail on-chain" on Base for **Bebop**
   deployment/config item, not a frontend bug. (`vercel env pull` to read the
   FeeCollector address was security-denied, so I could not verify the whitelist
   from here.)
+
+### Assumption corrected — "0x works on mainnet" is FALSE (empirically verified)
+The SPRINT-9E spec assumed 0x already works on mainnet ("same ZEROX_API_KEY
+works on mainnet") and that its absence is a Base-only divergence. Re-ran
+`debug=sources` on the preview for chainId=1 (mainnet WETH→USDC): 0x is in
+`circuit breaker OPEN` state with an **exponentially growing cooldown**
+(24s → 56s across two probes) — the breaker only trips/extends on REPEATED
+failures, so 0x is failing on mainnet just as on Base. Same root cause both
+chains: the key is named `NEXT_PUBLIC_0X_API_KEY` (verified via `vercel env ls`)
+while the adapter reads server-only `ZEROX_API_KEY` → empty key → 401 → breaker
+opens. CONSEQUENCE: 0x is NOT a Base-specific code bug and "converging Base to
+mainnet" does not require 0x (mainnet lacks it too — the mainnet reference list is
+[Uniswap V3, Velora, KyberSwap, CoW], no 0x). The Base 0x code path (v2
+allowance-holder + chainId, 8181c68) is correct and unit-tested; it only needs a
+valid server-side key. FIX remains config-only (set `ZEROX_API_KEY` server-only,
+delete the NEXT_PUBLIC_ one) — a code change to read the NEXT_PUBLIC_ var would
+violate rule #7 (server-only keys) and is explicitly refused.
