@@ -1351,3 +1351,23 @@ mainnet; the screenshot outage is resolved; mainnet is unchanged. OUTSTANDING (n
 code): **0x on Base needs a 0x key that the API accepts** (current key 401s on
 both chains). Promote to prod only after that and a final visual eyeball on the
 Preview.
+
+## Feedback — SPRINT-9E: 0x root cause = env-var name mismatch (config fix)
+
+`vercel env ls` on the project shows the 0x key is configured as
+**`NEXT_PUBLIC_0X_API_KEY`** (Preview+Production), NOT `ZEROX_API_KEY`. The 0x
+adapter reads `process.env.ZEROX_API_KEY` (server-only, per rule #7), so it gets
+an EMPTY key → the 0x API returns 401 on BOTH Base and mainnet (matching every
+observation). This is why "the same key works on mainnet" did not hold — the
+server-side name the code expects was never set.
+
+FIX (config, not code — and a security upgrade): in Vercel, add
+`ZEROX_API_KEY` (server-only) for Preview + Production with the 0x key value, and
+DELETE `NEXT_PUBLIC_0X_API_KEY` (a NEXT_PUBLIC_ key is shipped in the browser
+bundle; env-validation.ts already warns about exactly this). After that, 0x
+returns on Base via the v2 allowance-holder endpoint added in 8181c68 (whitelist
+already matches the Base AllowanceHolder). No code change — changing the adapter
+to read the NEXT_PUBLIC_ var would violate the server-only-keys constraint.
+
+Note: `NEXT_PUBLIC_BASE_FEE_COLLECTOR` IS set in Vercel, so Base is activated
+(isChainActive(8453)=true) — consistent with the Base swap UI showing quotes.
