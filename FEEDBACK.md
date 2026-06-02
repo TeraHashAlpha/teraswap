@@ -1547,3 +1547,47 @@ operational. Decide a project-wide "legitimate absence vs failure" convention fi
   as `'Zero output'`, losing the no-route vs data-integrity distinction in dashboards.
 - [LOW] No e2e test for the api.ts:120 `r.value` null-guard (adapter-level null IS
   covered in bebop.test.ts; only the end-to-end monitoring-loop path is uncovered).
+
+## Audit — Full Codebase Cleanup 2026-06-02 (branch `chore/full-audit-cleanup`)
+
+Autonomous read-only audit of the post-multichain delta (Sprints 41–45 Base
+foundation + SPRINT-9F backlog) since the 2026-05-26 full audit, then SAFE-ONLY
+cleanups. Report: `Audits/FULL-AUDIT-2026-06-02.md` (0 Critical, 0 High, 12 Medium,
+25 Low, 17 Info). Baseline held green throughout: tsc 0, lint 0 errors, 1357 tests.
+
+### Changed (applied as signed commits — behaviour-preserving, CI green after each)
+Dead-code removal only; lint warnings 147 → 110 (−37 `no-unused-vars`), 0 runtime change.
+- `471430f` lib/adapters: unused imports `clampSlippage` (oneinch), `FEE_INCOMPATIBLE_SOURCES`
+  (api.ts, comment-only), `emitTransitionAlert` (quorum-check), `CHAIN_ID` (uniswap); dead
+  local `forwardKey` (sybil-detector).
+- `04ff7ac` hooks: unused imports in useSwap (`WETH_ADDRESS`), useSplitSwap (`erc20Abi`,
+  `useSignTypedData`, `submitCowOrder`, `pollCowOrderStatus`, `updateSwapStatus`, `SplitLeg`),
+  useApproval (`useSignTypedData`, `permit2Abi`, `planApproval`, `PERMIT_SINGLE_TYPES`,
+  `ApprovalMethod`), useTokenImport (`useReadContract`, `erc20Abi`).
+- `36383b3` components: dead `balFormatted` (WalletModal), `resolved` (ThemeToggle), unused
+  `useRef`/`useInView` (DocsPage), `SplitRoute`/`SplitLeg` (SplitRouteVisualizer), `useCallback`
+  (CountdownGate), unused sound imports + `cowOrderUid`/`splitRecommended` destructures (SwapBox),
+  `playError`/`showAdvanced` (LimitOrderPanel), `playError`(+`playTriggerAlert`) (Conditional/DCA panels).
+
+### Deferred (REPORTED, not applied — out of safe scope)
+All in `Audits/FULL-AUDIT-2026-06-02.md` for Architect/Auditor triage. Highlights:
+- **[MEDIUM ×12] Multi-chain `chainId`-threading gaps** — the oracle/price/validation gates were
+  not migrated to be chain-aware (sequencer-check + chainlink fed a mainnet-pinned client;
+  DefiLlama >$10k guard hardcodes `ethereum`; post-execution-validator mainnet-pinned; server-side
+  `isChainActive` gate absent on `/api/quote`+`/api/swap`). All fail-closed today; **Base go-live
+  blockers**. Needs Architect prompts; the price-guard semantics change likely needs an ADR.
+- **[MEDIUM] SPRINT-9F no-route→NEUTRAL convention applied unevenly** — balancer/kyberswap/
+  sushiswap/uniswapv3/curve(mainnet) still THROW on a legitimate no-route (counts as a breaker
+  failure + degrades telemetry). Behavioural quote-semantics change → Architect prompt.
+- **[MEDIUM] No per-adapter timeout on the swap path** (`fetchSwapFromSource`) — partial-DoS gap.
+- **[LOW] UniV3 fee-tier cache key chain-blind** (`shared.ts:134` uses static `CHAIN_ID`); masked
+  today by the swap path's full re-detection.
+- **Not applied though flagged auto-able**: dead `chainId = useChainId()` in Limit/DCA/Conditional
+  order panels — DEFERRED because it intersects the multi-chain finding theme (removing could mask
+  intended-but-incomplete chain-awareness); order-engine `config.ts` unused `chainId` params left
+  as-is (whitelist-adjacent surface, rename = zero functional value); hook-result/param warnings
+  (ActiveApprovals/AdminMonitor/OrderDashboard) left (possible hook side-effects).
+- **Test gaps** (adapters/order-engine still thin) left for an Architect-scoped sprint rather than
+  encoding behaviour assumptions autonomously.
+
+NOTE: contracts were review-only (no Solidity edits). No push/merge/deploy performed.
