@@ -1,6 +1,6 @@
 import { AGGREGATOR_APIS } from '@/lib/constants'
 import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { clampSlippage, parseJsonOrThrow } from './shared'
+import { parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {

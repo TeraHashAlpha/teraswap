@@ -28,7 +28,6 @@ import { WETH_ADDRESS } from './constants'
 import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'
 import { getAllStatuses, getStatus, getThresholds, forceDisable } from './source-state-machine'
-import { emitTransitionAlert } from './alert-wrapper'
 
 // ── Token addresses (Ethereum mainnet) ──────────────────
 

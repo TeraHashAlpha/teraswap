@@ -36,7 +36,6 @@ function detectCircularTrades(trades: TradeEvent[]): SybilFlag | null {
   for (let i = 0; i < trades.length; i++) {
     const t1 = trades[i]
     if (!t1.tokenIn || !t1.tokenOut) continue
-    const forwardKey = `${t1.tokenIn}->${t1.tokenOut}`
 
     for (let j = i + 1; j < trades.length; j++) {
       const t2 = trades[j]

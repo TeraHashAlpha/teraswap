@@ -15,7 +15,6 @@ import {
   UNISWAP_FEE_TIERS,
   WETH_ADDRESS,
   NATIVE_ETH,
-  CHAIN_ID,
 } from './constants'
 
 // ── Minimal ABIs ─────────────────────────────────────────
