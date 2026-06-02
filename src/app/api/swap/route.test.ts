@@ -322,3 +322,24 @@ describe('POST /api/swap — happy path with oracle attached [P127]', () => {
     expect(body.oraclePriceIn).toBeDefined()
   })
 })
+
+// [SPRINT-9G G2 / M11] The route must derive the DefiLlama chain slug from the
+// request chainId and pass it to BOTH the estimatedValueUsd price fetch and
+// validateSwapPrice — so the >$10k guard validates the swap's actual chain.
+describe('POST /api/swap — chain-aware price guard [SPRINT-9G G2]', () => {
+  it('derives the DefiLlama slug from chainId (Base 8453 → "base")', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(mockFetchDefiLlamaPrice).toHaveBeenCalled()
+    expect(mockFetchDefiLlamaPrice.mock.calls[0][1]).toBe('base')
+    expect(mockValidateSwapPrice).toHaveBeenCalled()
+    expect(mockValidateSwapPrice.mock.calls[0][0].chain).toBe('base')
+  })
+
+  it('defaults to "ethereum" when chainId is omitted (mainnet byte-identical)', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(mockFetchDefiLlamaPrice.mock.calls[0][1]).toBe('ethereum')
+    expect(mockValidateSwapPrice.mock.calls[0][0].chain).toBe('ethereum')
+  })
+})
