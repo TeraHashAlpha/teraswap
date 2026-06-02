@@ -427,3 +427,29 @@ describe('useSwap — [P209] simulation fail-open warning', () => {
     expect(result.current.simulationSkipped).toBe(false)
   })
 })
+
+// [SPRINT-9G G6] One chain-id source of truth: useSwap must derive the swap
+// chain from useActiveChainId() (same as the quote pipeline), not a divergent
+// wagmi useChainId(). Otherwise simulate/broadcast could target a different
+// chain than the quote.
+describe('useSwap — chain-id source of truth [SPRINT-9G G6]', () => {
+  it('runs the swap on the ACTIVE (wallet) chain, not a divergent wagmi useChainId', async () => {
+    // Wallet on Base (8453) while wagmi useChainId() still reports mainnet (1).
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
+    mockSwapFetch(swapResponse())
+
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+
+    // The router-whitelist check receives the chainId the swap is built for.
+    // It must be the active chain (8453), proving useActiveChainId — not the
+    // divergent wagmi useChainId (1) — is the single source of truth.
+    expect(mockValidateRouterAddress).toHaveBeenCalled()
+    expect(mockValidateRouterAddress.mock.calls[0][2]).toBe(8453)
+  })
+})

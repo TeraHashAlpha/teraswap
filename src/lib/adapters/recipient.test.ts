@@ -78,7 +78,9 @@ afterEach(() => {
 // Balancer: POST body { receiver }
 // ─────────────────────────────────────────────────────────────
 describe('balancer adapter — recipient threading', () => {
-  const respond = () => ({ buyAmount: '1', to: '0xabc', data: '0xdead', value: '0', gasEstimate: 100_000 })
+  // [SPRINT-9G G7] `to` must be the whitelisted Balancer V2 Vault, else the
+  // adapter's fail-closed gate refuses the swap before the recipient is read.
+  const respond = () => ({ buyAmount: '1', to: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', data: '0xdead', value: '0', gasEstimate: 100_000 })
 
   it('passes recipient through to receiver when provided', async () => {
     mockFetch(respond)

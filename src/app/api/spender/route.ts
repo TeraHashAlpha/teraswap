@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchApproveSpender } from '@/lib/api'
+import { getChainStatus } from '@/lib/chains/activation'
 import type { AggregatorName } from '@/lib/constants'
 
 /**
@@ -17,6 +18,25 @@ export async function GET(req: NextRequest) {
       { error: 'Missing required param: source' },
       { status: 400 },
     )
+  }
+
+  // [SPRINT-9G G4 / L06] Don't hand out an approval spender for a chain that is
+  // unsupported or not yet live (FeeCollector unset) — mirror the /api/swap gate.
+  // Absent chainId → mainnet default → unchecked.
+  if (chainIdParam != null) {
+    const status = getChainStatus(Number(chainIdParam))
+    if (status === 'unsupported') {
+      return NextResponse.json(
+        { error: `Chain ${chainIdParam} is not supported`, code: 'CHAIN_UNSUPPORTED' },
+        { status: 400 },
+      )
+    }
+    if (status === 'coming-soon') {
+      return NextResponse.json(
+        { error: `Chain ${chainIdParam} is not yet available`, code: 'CHAIN_COMING_SOON' },
+        { status: 409 },
+      )
+    }
   }
 
   try {

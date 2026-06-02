@@ -54,6 +54,9 @@ export const SELECTOR_INFO: Record<string, { functionName: string; dexLabel: str
   '0x46c67b6d': { functionName: 'simpleSwap', dexLabel: 'ParaSwap' },
   // ParaSwap (Augustus V6)
   '0xe3ead59e': { functionName: 'swapExactAmountIn', dexLabel: 'ParaSwap V6' },
+  // [SPRINT-9H] ParaSwap / Velora (Augustus V6.2 — single-DEX Curve methods)
+  '0x1a01c532': { functionName: 'swapExactAmountInOnCurveV1', dexLabel: 'Velora V6.2' },
+  '0xe37ed256': { functionName: 'swapExactAmountInOnCurveV2', dexLabel: 'Velora V6.2' },
   // Odos
   '0x83800a8e': { functionName: 'swap', dexLabel: 'Odos' },
   // KyberSwap

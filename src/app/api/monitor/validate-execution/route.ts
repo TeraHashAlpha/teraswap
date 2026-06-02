@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyBearerToken } from '@/lib/auth'
 import { validateExecution, type ValidateExecutionParams, type ExecutionValidation } from '@/lib/post-execution-validator'
 import { getSupabase } from '@/lib/supabase'
+import { getSupportedChainIds } from '@/lib/chains/registry'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 15 // Receipt fetch + RPC calls
@@ -68,6 +69,12 @@ function validateBody(body: unknown): { valid: true; params: ValidateExecutionPa
   if (b.preSwapBalance !== undefined && (typeof b.preSwapBalance !== 'string' || !/^\d+$/.test(b.preSwapBalance))) {
     return { valid: false, error: 'preSwapBalance must be a numeric string if provided' }
   }
+  // [SPRINT-9G G3] Optional chainId — when present it must be a supported chain,
+  // so the validator reads the receipt over the right RPC. Absent → mainnet.
+  if (b.chainId !== undefined &&
+    (typeof b.chainId !== 'number' || !Number.isInteger(b.chainId) || !getSupportedChainIds().includes(b.chainId))) {
+    return { valid: false, error: 'chainId must be a supported chain id if provided' }
+  }
 
   return {
     valid: true,
@@ -79,6 +86,7 @@ function validateBody(body: unknown): { valid: true; params: ValidateExecutionPa
       tokenOutDecimals: b.tokenOutDecimals as number,
       expectedMinOutput: b.expectedMinOutput as string,
       preSwapBalance: b.preSwapBalance as string | undefined,
+      chainId: b.chainId as number | undefined,
     },
   }
 }

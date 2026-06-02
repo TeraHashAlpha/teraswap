@@ -1,6 +1,5 @@
 import {
   FEE_PERCENT,
-  CHAIN_ID,
   WETH_ADDRESS,
   NATIVE_ETH,
 } from '@/lib/constants'
@@ -131,12 +130,15 @@ export function deductFee(amountIn: string): { netAmount: bigint; feeAmount: big
 const FEE_TIER_CACHE_TTL_MS = 45 * 60 * 1000 // 45 minutes
 export const feeTierCache = new Map<string, { bestFee: number; ts: number }>()
 
-export function feeTierCacheKey(tokenIn: string, tokenOut: string): string {
-  return `${CHAIN_ID}:${tokenIn.toLowerCase()}:${tokenOut.toLowerCase()}`
+// [SPRINT-9G G8] Scope the key by chainId so the same pair on different chains
+// can't collide in the cache. Default DEFAULT_CHAIN_ID (1) keeps the mainnet
+// `1:` prefix the key always had — byte-identical.
+export function feeTierCacheKey(tokenIn: string, tokenOut: string, chainId: number = DEFAULT_CHAIN_ID): string {
+  return `${chainId}:${tokenIn.toLowerCase()}:${tokenOut.toLowerCase()}`
 }
 
-export function getCachedFeeTier(tokenIn: string, tokenOut: string): number | null {
-  const key = feeTierCacheKey(tokenIn, tokenOut)
+export function getCachedFeeTier(tokenIn: string, tokenOut: string, chainId: number = DEFAULT_CHAIN_ID): number | null {
+  const key = feeTierCacheKey(tokenIn, tokenOut, chainId)
   const entry = feeTierCache.get(key)
   if (!entry) return null
   if (Date.now() - entry.ts > FEE_TIER_CACHE_TTL_MS) {
@@ -146,11 +148,11 @@ export function getCachedFeeTier(tokenIn: string, tokenOut: string): number | nu
   return entry.bestFee
 }
 
-export function setCachedFeeTier(tokenIn: string, tokenOut: string, bestFee: number): void {
-  const key = feeTierCacheKey(tokenIn, tokenOut)
+export function setCachedFeeTier(tokenIn: string, tokenOut: string, bestFee: number, chainId: number = DEFAULT_CHAIN_ID): void {
+  const key = feeTierCacheKey(tokenIn, tokenOut, chainId)
   feeTierCache.set(key, { bestFee, ts: Date.now() })
 }
 
-export function invalidateCachedFeeTier(tokenIn: string, tokenOut: string): void {
-  feeTierCache.delete(feeTierCacheKey(tokenIn, tokenOut))
+export function invalidateCachedFeeTier(tokenIn: string, tokenOut: string, chainId: number = DEFAULT_CHAIN_ID): void {
+  feeTierCache.delete(feeTierCacheKey(tokenIn, tokenOut, chainId))
 }

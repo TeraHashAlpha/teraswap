@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   useAccount,
-  useChainId,
   useSendTransaction,
   useWaitForTransactionReceipt,
   useSignTypedData,
 } from 'wagmi'
+import { useActiveChainId } from '@/hooks/useChainId'
 import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
@@ -153,7 +153,10 @@ export function useSwap(
   bestNonCowGasUsd?: number,
 ): UseSwapResult {
   const { address } = useAccount()
-  const chainId = useChainId()
+  // [SPRINT-9G G6] Single chain-id source of truth — useActiveChainId() (the
+  // wallet/active chain, same as the quote pipeline), NOT wagmi useChainId(),
+  // so the chain the swap is simulated + broadcast on always matches the quote.
+  const chainId = useActiveChainId()
   const [status, setStatus] = useState<SwapStatus>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cowOrderUid, setCowOrderUid] = useState<string | null>(null)

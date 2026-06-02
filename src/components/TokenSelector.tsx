@@ -2,12 +2,10 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useAccount, useBalance, useReadContracts } from 'wagmi'
-import { formatUnits, erc20Abi } from 'viem'
-import { DEFAULT_TOKENS, getAllTokens, isNativeETH, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
+import { DEFAULT_TOKENS, getAllTokens, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
+import { useTokenBalances } from '@/hooks/useTokenBalances'
 import TokenAddressBadge from './TokenAddressBadge'
 import { useTokenImport } from '@/hooks/useTokenImport'
-import { CHAIN_ID } from '@/lib/constants'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { getChainTokenList, getPopularTokens } from '@/lib/chains/tokens'
@@ -20,90 +18,6 @@ interface Props {
   selected: Token | null
   onSelect: (token: Token) => void
   disabledAddress?: string
-}
-
-// ── Hook: fetch ERC-20 balances for all default tokens via multicall ──
-function useTokenBalances() {
-  const { address, isConnected, chain } = useAccount()
-  const isCorrectChain = chain?.id === CHAIN_ID
-
-  // Native ETH balance
-  const { data: ethBalance } = useBalance({
-    address,
-    query: { enabled: isConnected && isCorrectChain },
-  })
-
-  // ERC-20 balances via multicall
-  const erc20Tokens = useMemo(
-    () => DEFAULT_TOKENS.filter((t) => !isNativeETH(t)),
-    [],
-  )
-
-  const contracts = useMemo(
-    () =>
-      erc20Tokens.map((t) => ({
-        address: t.address as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'balanceOf' as const,
-        args: [address!] as const,
-      })),
-    [address, erc20Tokens],
-  )
-
-  const { data: erc20Results } = useReadContracts({
-    contracts: isConnected && isCorrectChain && address ? contracts : [],
-    query: {
-      enabled: isConnected && isCorrectChain && !!address,
-      refetchInterval: 30_000, // refresh every 30s
-    },
-  })
-
-  // Build a map: address → formatted balance string
-  const balanceMap = useMemo(() => {
-    const map = new Map<string, { raw: bigint; formatted: string }>()
-
-    // ETH native
-    if (ethBalance) {
-      const ethToken = DEFAULT_TOKENS.find((t) => isNativeETH(t))
-      if (ethToken) {
-        map.set(ethToken.address.toLowerCase(), {
-          raw: ethBalance.value,
-          formatted: formatBalance(ethBalance.value, 18),
-        })
-      }
-    }
-
-    // ERC-20s
-    if (erc20Results) {
-      erc20Results.forEach((result, i) => {
-        if (result.status === 'success' && result.result != null) {
-          const val = result.result as bigint
-          if (val > 0n) {
-            map.set(erc20Tokens[i].address.toLowerCase(), {
-              raw: val,
-              formatted: formatBalance(val, erc20Tokens[i].decimals),
-            })
-          }
-        }
-      })
-    }
-
-    return map
-  }, [ethBalance, erc20Results, erc20Tokens])
-
-  return balanceMap
-}
-
-// Format balance nicely: show up to 6 significant digits
-function formatBalance(value: bigint, decimals: number): string {
-  if (value === 0n) return '0'
-  const full = formatUnits(value, decimals)
-  const num = parseFloat(full)
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`
-  if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`
-  if (num >= 1) return num.toFixed(4).replace(/\.?0+$/, '')
-  if (num >= 0.0001) return num.toFixed(6).replace(/\.?0+$/, '')
-  return '<0.0001'
 }
 
 export default function TokenSelector({ selected, onSelect, disabledAddress }: Props) {

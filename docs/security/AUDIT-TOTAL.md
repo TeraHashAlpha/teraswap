@@ -501,3 +501,38 @@ Security gates → Auditor-reviewed, not auto-applied.
 **Safe cleanups applied** (branch `chore/full-audit-cleanup`, 3 signed commits, dead code only,
 1357 tests green). Remaining 25 Low / 17 Info → backlog (incl. stale DEPLOY.md — FeeCollector +
 simulation are in fact already chain-aware).
+
+---
+
+### Sprint 9G Audit (2026-06-02) — Chain-Aware Safety Gates
+
+**Verdict: APPROVED — 0C / 0H / 0M / 1L / 2I.** Report: `Audits/Sprint/SPRINT-9G-AUDIT.md`.
+All 8 re-rated findings above (G1–G8) are now **CLOSED**. Mainnet byte-identical verified on every
+gate. Rule #9 (Chainlink + DefiLlama on Base) genuinely satisfied. 1391 tests (+34).
+
+| Gate | Finding(s) | Status |
+|------|-----------|--------|
+| G1 — Chainlink + sequencer | M04, M06 | ✅ CLOSED |
+| G2 — DefiLlama >$10k | M07, M11 | ✅ CLOSED |
+| G3 — Post-exec validator | M12 | ✅ CLOSED |
+| G4 — Server-side gate | M03, M05, L06 | ✅ CLOSED |
+| G5 — Token balances | M08 | ✅ CLOSED |
+| G6 — Chain-id source | hooks | ✅ CLOSED |
+| G7 — Balancer whitelist | balancer | ✅ CLOSED (9G-L-01: BatchRelayer risk, fail-safe) |
+| G8 — Cache + startedAt | feeTier/startedAt | ✅ CLOSED |
+
+Deploy via Vercel Preview gate → verify Base oracle/guard/validator → promote.
+
+---
+
+### Sprint 9H Audit (2026-06-02) — Base Execution Fixes
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 1I.** Report: `Audits/Sprint/SPRINT-9H-AUDIT.md`.
+Found on 9G Preview. Two fixes: Velora selector allowlist + Bebop fail-soft. 1399 tests (+8).
+
+| Fix | Description | Status |
+|-----|------------|--------|
+| 9H-1 — Velora selectors | Augustus V6.2 `swapExactAmountInOnCurveV1` (0x1a01c532) + `...V2` (0xe37ed256) added to selector allowlist, recipient gate, and tx-preview decoder. Same trust class as existing ParaSwap methods. Only 2 methods added (no blind widening). | ✅ CLOSED |
+| 9H-2 — Bebop fail-soft | Demo-mode (no key) → `fetchQuote` returns null (doesn't rank). Absent settlement → `fetchSwapData` returns null (breaker-neutral). Security gates intact when data present-but-wrong (still throw). | ✅ CLOSED |
+
+**Bundle 9G + 9H → Vercel Preview → verify Velora + Kyber on Base + Bebop no longer wins-then-fails → promote.**

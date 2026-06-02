@@ -4,7 +4,7 @@ import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { verifyBearerToken } from '@/lib/auth'
-import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, getChainStatus } from '@/lib/chains'
 
 /**
  * Shared 503 response for when the circuit breaker has halted routing.
@@ -89,6 +89,17 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
   // Q8: Validate address format
   if (!isValidAddress(src) || !isValidAddress(dst)) {
     return NextResponse.json({ error: 'Invalid token address format' }, { status: 400 })
+  }
+
+  // [SPRINT-9G G4] Quote stays multi-chain-OPEN (price info only — no executable
+  // calldata or fee routing), so coming-soon chains may still be browsed. Reject
+  // only a genuinely UNSUPPORTED chain so we never quote nonexistent-chain
+  // liquidity. Absent chainId → mainnet default → unaffected.
+  if (chainIdParam != null && getChainStatus(Number(chainIdParam)) === 'unsupported') {
+    return NextResponse.json(
+      { error: `Chain ${chainIdParam} is not supported`, code: 'CHAIN_UNSUPPORTED' },
+      { status: 400 },
+    )
   }
 
   // [diag] Admin-gated read-only per-source diagnostic. When `debug=sources` is
@@ -184,6 +195,15 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
     // API-HIGH-05: Validate addresses in POST (was missing)
     if (!isValidAddress(src) || !isValidAddress(dst)) {
       return NextResponse.json({ error: 'Invalid token address format' }, { status: 400 })
+    }
+
+    // [SPRINT-9G G4] Reject an unsupported chain (parity with GET); supported
+    // coming-soon chains stay open for browsing.
+    if (chainId != null && getChainStatus(Number(chainId)) === 'unsupported') {
+      return NextResponse.json(
+        { error: `Chain ${chainId} is not supported`, code: 'CHAIN_UNSUPPORTED' },
+        { status: 400 },
+      )
     }
 
     const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, undefined, chainId)

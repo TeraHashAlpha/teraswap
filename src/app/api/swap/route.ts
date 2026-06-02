@@ -6,6 +6,8 @@ import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
+import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { getChainStatus } from '@/lib/chains/activation'
 
 // [P121] Source allow-list — built from the canonical AGGREGATOR_APIS map so
 // adding/removing a source in constants.ts automatically updates this guard.
@@ -77,6 +79,28 @@ export async function POST(req: NextRequest) {
         { error: 'Unknown aggregator source', code: 'INVALID_SOURCE' },
         { status: 400 },
       )
+    }
+
+    // [SPRINT-9G G4 / M03+M05] Server-side chain-activation gate. The activation
+    // guard must live at the trust boundary (the server), not only in the UI /
+    // /v1 routes — otherwise a direct caller obtains executable, fee-free swap
+    // calldata for a chain TeraSwap has not launched. Reject an unsupported chain
+    // (400) and a not-yet-live "coming-soon" chain (409, FeeCollector unset).
+    // Absent chainId → mainnet default → unchecked → byte-identical.
+    if (chainId != null) {
+      const chainStatus = getChainStatus(Number(chainId))
+      if (chainStatus === 'unsupported') {
+        return NextResponse.json(
+          { error: `Chain ${chainId} is not supported`, code: 'CHAIN_UNSUPPORTED' },
+          { status: 400 },
+        )
+      }
+      if (chainStatus === 'coming-soon') {
+        return NextResponse.json(
+          { error: `Chain ${chainId} is not yet available for swaps`, code: 'CHAIN_COMING_SOON' },
+          { status: 409 },
+        )
+      }
     }
 
     // [Audit B-06] Rate limiting by IP — persistent via Vercel KV.
@@ -183,10 +207,18 @@ export async function POST(req: NextRequest) {
     // price manipulation, extreme slippage, or rogue aggregator responses.
     // [INT-01] Blocking for high-value swaps (>$10k). Fail-open for small swaps.
     if (result.toAmount) {
+      // [SPRINT-9G G2 / M11] DefiLlama chain slug for the swap's chain. Default
+      // mainnet 'ethereum' keeps the guard byte-identical; an unknown chainId
+      // falls back to 'ethereum' rather than throwing. A Base swap now validates
+      // Base prices instead of always-blocking (>$10k) / silently failing open.
+      const llamaChain = (() => {
+        const cid = chainId != null ? Number(chainId) : DEFAULT_CHAIN_ID
+        try { return getChainConfig(cid).slug } catch { return 'ethereum' }
+      })()
       // [INT-01] Estimate swap value in USD for threshold-based blocking
       let estimatedValueUsd = 0
       try {
-        const tokenInPrice = await fetchDefiLlamaPrice(src)
+        const tokenInPrice = await fetchDefiLlamaPrice(src, llamaChain)
         if (tokenInPrice) {
           const amountFloat = Number(amount) / 10 ** srcDecimals
           estimatedValueUsd = amountFloat * tokenInPrice.price
@@ -204,6 +236,7 @@ export async function POST(req: NextRequest) {
           decimalsIn: srcDecimals,
           decimalsOut: dstDecimals,
           estimatedValueUsd,
+          chain: llamaChain,
         })
 
         if (priceCheck && !priceCheck.valid) {

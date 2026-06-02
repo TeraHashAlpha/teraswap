@@ -7,12 +7,13 @@
  * Falls back to CoW quote API for tokens without Chainlink feeds.
  */
 
-import { parseAbi, erc20Abi } from 'viem'
+import { parseAbi, erc20Abi, type PublicClient } from 'viem'
 import { NATIVE_ETH, WETH_ADDRESS, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 import { validateRoundData } from './chainlink'
 import { getChainlinkFeed } from './chains/chainlink-feeds'
 import { isSequencerUp } from './chains/sequencer-check'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
+import { getPublicClientForChain } from './chains/clients'
 import { fetchCurrentPrice } from './limit-order-api'
 import { getPrivateClient } from './rpc'
 
@@ -34,11 +35,11 @@ const aggregatorAbi = parseAbi([
 const feedDecimalsCache = new Map<string, number>()
 const tokenDecimalsCache = new Map<string, number>()
 
-async function getFeedDecimals(feedAddress: `0x${string}`): Promise<number> {
+async function getFeedDecimals(feedAddress: `0x${string}`, client: PublicClient): Promise<number> {
   const cached = feedDecimalsCache.get(feedAddress)
   if (cached !== undefined) return cached
 
-  const decimals = await getClient().readContract({
+  const decimals = await client.readContract({
     address: feedAddress,
     abi: aggregatorAbi,
     functionName: 'decimals',
@@ -58,10 +59,16 @@ export async function getChainlinkPriceUSD(
   const feedAddress = getChainlinkFeed(tokenAddress, chainId)
   if (!feedAddress) return null
 
+  // [SPRINT-9G G1 / M04+M06] Chain-aware client. Mainnet (DEFAULT_CHAIN_ID) keeps
+  // the existing privacy-proxy singleton (`getClient()`) → byte-identical; any
+  // other chain reads the feed + checks the sequencer over THAT chain's RPC.
+  const client: PublicClient =
+    chainId === DEFAULT_CHAIN_ID ? getClient() : getPublicClientForChain(chainId)
+
   // [P218] L2 sequencer-uptime gate — mainnet (DEFAULT_CHAIN_ID) has no
   // sequencer feed and skips this, so the mainnet path is unchanged.
   if (chainId !== DEFAULT_CHAIN_ID) {
-    const seqUp = await isSequencerUp(chainId, getClient())
+    const seqUp = await isSequencerUp(chainId, client)
     if (!seqUp) {
       console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
       return null
@@ -72,7 +79,7 @@ export async function getChainlinkPriceUSD(
     // [P211/FULL-H-04] Destructure ALL round fields and apply the same
     // staleness/validity gates as the swap path (chainlink.ts). A stale or
     // frozen round must NOT be treated as a live price for SL/TP/DCA triggers.
-    const [roundId, answer, startedAt, updatedAt, answeredInRound] = await getClient().readContract({
+    const [roundId, answer, startedAt, updatedAt, answeredInRound] = await client.readContract({
       address: feedAddress,
       abi: aggregatorAbi,
       functionName: 'latestRoundData',
@@ -86,7 +93,7 @@ export async function getChainlinkPriceUSD(
       return null
     }
 
-    const decimals = await getFeedDecimals(feedAddress)
+    const decimals = await getFeedDecimals(feedAddress, client)
     return Number(answer) / (10 ** decimals)
   } catch {
     return null

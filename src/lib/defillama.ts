@@ -181,6 +181,7 @@ export async function validateSwapPrice(params: {
   decimalsIn: number
   decimalsOut: number
   estimatedValueUsd?: number  // [INT-01] If provided, used for high-value threshold logic
+  chain?: string  // [SPRINT-9G G2] DefiLlama chain slug; default 'ethereum' → mainnet byte-identical
 }): Promise<{
   valid: boolean
   blocked: boolean           // [INT-01] true = swap must be blocked
@@ -190,12 +191,15 @@ export async function validateSwapPrice(params: {
   reason?: string
   estimatedValueUsd?: number // [INT-01] Estimated USD value of the swap
 } | null> {
-  const { tokenIn, tokenOut, amountIn, amountOut, decimalsIn, decimalsOut } = params
+  const { tokenIn, tokenOut, amountIn, amountOut, decimalsIn, decimalsOut, chain = 'ethereum' } = params
 
-  // Fetch both prices in parallel
+  // [SPRINT-9G G2] Fetch both prices in parallel ON THE SWAP'S CHAIN. Default
+  // 'ethereum' keeps mainnet byte-identical; a Base swap now validates Base
+  // prices instead of looking up a Base token under the ethereum slug (which
+  // always missed → always-block >$10k / silent fail-open below).
   const [priceIn, priceOut] = await Promise.all([
-    fetchDefiLlamaPrice(tokenIn),
-    fetchDefiLlamaPrice(tokenOut),
+    fetchDefiLlamaPrice(tokenIn, chain),
+    fetchDefiLlamaPrice(tokenOut, chain),
   ])
 
   // Need both prices to validate

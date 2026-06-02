@@ -7,7 +7,8 @@ import {
 import { getChainlinkFeed } from './chains/chainlink-feeds'
 import { isSequencerUp } from './chains/sequencer-check'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
-import { getPrivateClient } from './rpc'
+import { getPublicClientForChain } from './chains/clients'
+import { getRpcUrlForChain } from './adapters/shared'
 
 // [P218] getChainlinkFeed moved to the per-chain registry; re-export so
 // existing `import { getChainlinkFeed } from '@/lib/chainlink'` keeps working.
@@ -139,15 +140,17 @@ export function validateRoundData(
 //  RAW RPC PRICE FETCHES (for DCA engine — no React hooks)
 // ══════════════════════════════════════════════════════════
 
-function getRpcUrl(): string {
-  // In browser context, route through privacy proxy to hide user IP
-  if (typeof window !== 'undefined') return '/api/rpc'
-  return process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
-}
-
-/** Raw RPC call helper */
-async function rpcCall(to: string, data: string): Promise<string> {
-  const res = await fetch(getRpcUrl(), {
+/**
+ * Raw RPC call helper.
+ *
+ * [SPRINT-9G G1 / M04] Chain-aware: `chainId === 1` resolves to the mainnet
+ * channel (browser → /api/rpc privacy proxy, server → RPC_URL) exactly as the
+ * previous local `getRpcUrl()` did — byte-identical. Any other chain hits THAT
+ * chain's RPC via `getRpcUrlForChain` and never falls back to mainnet, so an
+ * L2 (Base) feed read is never made against the mainnet RPC.
+ */
+async function rpcCall(to: string, data: string, chainId: number = DEFAULT_CHAIN_ID): Promise<string> {
+  const res = await fetch(getRpcUrlForChain(chainId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -177,7 +180,7 @@ export async function fetchChainlinkPriceRaw(
   // sequencer. Mainnet (DEFAULT_CHAIN_ID) has no sequencer feed and skips this,
   // so the mainnet path is unchanged.
   if (chainId !== DEFAULT_CHAIN_ID) {
-    const seqUp = await isSequencerUp(chainId, getPrivateClient())
+    const seqUp = await isSequencerUp(chainId, getPublicClientForChain(chainId))
     if (!seqUp) {
       console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
       return null
@@ -189,7 +192,7 @@ export async function fetchChainlinkPriceRaw(
     abi: chainlinkAggregatorAbi,
     functionName: 'decimals',
   })
-  const decResult = await rpcCall(feed, decData)
+  const decResult = await rpcCall(feed, decData, chainId)
   const decimals = Number(decodeFunctionResult({
     abi: chainlinkAggregatorAbi,
     functionName: 'decimals',
@@ -201,18 +204,19 @@ export async function fetchChainlinkPriceRaw(
     abi: chainlinkAggregatorAbi,
     functionName: 'latestRoundData',
   })
-  const lrdResult = await rpcCall(feed, lrdData)
-  const [roundId, answer, , updatedAt, answeredInRound] = decodeFunctionResult({
+  const lrdResult = await rpcCall(feed, lrdData, chainId)
+  const [roundId, answer, startedAt, updatedAt, answeredInRound] = decodeFunctionResult({
     abi: chainlinkAggregatorAbi,
     functionName: 'latestRoundData',
     data: lrdResult as `0x${string}`,
   }) as [bigint, bigint, bigint, bigint, bigint]
 
-  // Security: validate Chainlink data integrity
-  if (answer <= 0n) return null // invalid price
-  if (answeredInRound < roundId) return null // stale round — data not updated in current round
-  const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
-  if (ageSeconds > CHAINLINK_MAX_STALENESS_SEC) return null // data too old
+  // [SPRINT-9G G8] Security: validate Chainlink round integrity via the shared
+  // gate so the swap path enforces the SAME checks as the order-engine reads —
+  // including the `startedAt > 0` incomplete-round guard the inline checks here
+  // previously omitted. Covers answer<=0, answeredInRound<roundId, startedAt<=0,
+  // and staleness. Equivalent to the prior inline checks for any real round.
+  if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, CHAINLINK_MAX_STALENESS_SEC)) return null
 
   const price = Number(answer) / 10 ** decimals
   return { price, updatedAt: Number(updatedAt), roundId }
@@ -263,7 +267,7 @@ export async function fetchHistoricalPrice(
       abi: chainlinkAggregatorAbi,
       functionName: 'decimals',
     })
-    const decResult = await rpcCall(feed, decData)
+    const decResult = await rpcCall(feed, decData, chainId)
     const decimals = Number(decodeFunctionResult({
       abi: chainlinkAggregatorAbi,
       functionName: 'decimals',
@@ -280,7 +284,7 @@ export async function fetchHistoricalPrice(
           functionName: 'getRoundData',
           args: [fullRoundId],
         })
-        const rdResult = await rpcCall(feed, rdData)
+        const rdResult = await rpcCall(feed, rdData, chainId)
         const [rRoundId, answer, startedAt, updatedAt, answeredInRound] = decodeFunctionResult({
           abi: chainlinkAggregatorAbi,
           functionName: 'getRoundData',

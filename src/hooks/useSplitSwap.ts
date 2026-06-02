@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import { parseUnits, encodeFunctionData } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
-import { useAccount, useChainId, useSendTransaction } from 'wagmi'
+import { useAccount, useSendTransaction } from 'wagmi'
+import { useActiveChainId } from '@/hooks/useChainId'
 import {
   validateFeeIntegrity,
   validateRouterAddress,
@@ -103,7 +104,9 @@ export function useSplitSwap(
   slippage: number = DEFAULT_SLIPPAGE,
 ): UseSplitSwapResult {
   const { address } = useAccount()
-  const chainId = useChainId()
+  // [SPRINT-9G G6] Single chain-id source of truth — useActiveChainId() (the
+  // active/wallet chain, matching the quote pipeline), NOT wagmi useChainId().
+  const chainId = useActiveChainId()
   const { sendTransactionAsync } = useSendTransaction()
 
   const [status, setStatus] = useState<SplitSwapStatus>('idle')

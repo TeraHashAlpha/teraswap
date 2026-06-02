@@ -56,6 +56,12 @@ export const TRUSTED_ROUTER_SELECTORS = new Set([
   '0xa94e78ef', // ParaSwap multiSwap: proprietary encoding, router sends to msg.sender
   '0x46c67b6d', // ParaSwap simpleSwap: proprietary encoding, router sends to msg.sender
   '0xe3ead59e', // ParaSwap Augustus V6 swapExactAmountIn: beneficiary defaults to msg.sender (our adapter never sets it)
+  // [SPRINT-9H] Augustus V6.2 single-DEX Curve methods — same trust class as
+  // swapExactAmountIn (Augustus delivers to msg.sender / the receiver our
+  // adapter requests; beneficiary not attacker-settable from the response).
+  // Selectors verified vs the live V6.2 ABI (codeslaw + openchain + viem).
+  '0x1a01c532', // swapExactAmountInOnCurveV1 (CurveV1StableNg)
+  '0xe37ed256', // swapExactAmountInOnCurveV2 (Curve crypto pools)
 ])
 
 /**
@@ -102,6 +108,9 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   '0xa94e78ef', // ParaSwap multiSwap
   '0x46c67b6d', // ParaSwap simpleSwap
   '0xe3ead59e', // ParaSwap Augustus V6 swapExactAmountIn
+  // [SPRINT-9H] Augustus V6.2 single-DEX Curve methods (verified vs live ABI)
+  '0x1a01c532', // swapExactAmountInOnCurveV1 (CurveV1StableNg)
+  '0xe37ed256', // swapExactAmountInOnCurveV2
 ])
 
 // ---------------------------------------------------------------------------

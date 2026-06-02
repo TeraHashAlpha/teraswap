@@ -20,6 +20,25 @@ vi.mock('@/lib/rpc', () => ({
   })),
 }))
 
+// [SPRINT-9G G1] Non-mainnet reads go through getPublicClientForChain(chainId).
+// The fake carries chain.id so a test can assert WHICH chain's client was used,
+// and routes readContract to its own spy (distinct from the mainnet one above).
+const baseReadContract = vi.fn<(opts: { functionName: string }) => Promise<unknown>>()
+vi.mock('@/lib/chains/clients', () => ({
+  getPublicClientForChain: (chainId?: number) => ({
+    chain: { id: chainId },
+    readContract: (opts: { functionName: string }) => baseReadContract(opts),
+  }),
+}))
+
+// [SPRINT-9G G1] Control the L2 sequencer gate + capture the client it receives.
+const mockIsSequencerUp = vi.fn<(chainId?: number, client?: unknown) => Promise<boolean>>(async () => true)
+vi.mock('@/lib/chains/sequencer-check', () => ({
+  isSequencerUp: (chainId: number, client: unknown) => mockIsSequencerUp(chainId, client),
+  SEQUENCER_GRACE_PERIOD_SEC: 3600,
+  _clearSequencerCache: () => {},
+}))
+
 // getChainlinkPriceUSD never calls this, but the module imports it — stub so
 // the import graph stays light.
 vi.mock('@/lib/limit-order-api', () => ({
@@ -95,5 +114,30 @@ describe('price-monitor — isTriggerMet oracle-unavailable guard [P211]', () =>
     // null is exactly what getChainlinkPriceUSD returns on a stale/invalid round.
     expect(isTriggerMet(null, 2000, 'above')).toBe(false)
     expect(isTriggerMet(null, 2000, 'below')).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9G G1 / M04+M06] Chain-aware oracle reads. A Base (8453) price read
+// must use the Base client (getPublicClientForChain) and gate on the Base
+// sequencer — not the mainnet client. Mainnet (chainId 1) stays on getClient().
+// ─────────────────────────────────────────────────────────────
+describe('price-monitor — chain-aware oracle reads [SPRINT-9G G1]', () => {
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+
+  it('reads a Base feed via a Base-bound client (chain.id 8453) and gates on the Base sequencer', async () => {
+    baseReadContract.mockImplementation(async ({ functionName }) => {
+      if (functionName === 'latestRoundData') {
+        const n = BigInt(nowSec())
+        return [100n, 300_000_000_000n, n, n, 100n] // $3000 @ 8 decimals, fresh+complete
+      }
+      if (functionName === 'decimals') return 8
+      throw new Error(`unexpected readContract: ${functionName}`)
+    })
+    const price = await getChainlinkPriceUSD(BASE_WETH, 8453)
+    expect(price).toBeCloseTo(3000, 6)
+    expect(mockIsSequencerUp).toHaveBeenCalled()
+    const client = mockIsSequencerUp.mock.calls[0]?.[1] as { chain?: { id?: number } } | undefined
+    expect(client?.chain?.id).toBe(8453)
   })
 })

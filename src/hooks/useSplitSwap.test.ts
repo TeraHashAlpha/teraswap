@@ -97,6 +97,7 @@ vi.mock('@/lib/swap-simulation', async () => {
 })
 
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { useAccount } from 'wagmi'
 import { useSplitSwap } from './useSplitSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import type { Token } from '@/lib/tokens'
@@ -191,6 +192,12 @@ function mockSwapFetch(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // [SPRINT-9G G6] The active chain now derives from useAccount().chain (via
+  // useActiveChainId). Reset to the default (mainnet, no explicit chain) each
+  // test so a per-test override can't leak — clearAllMocks keeps implementations.
+  vi.mocked(useAccount).mockReturnValue({
+    address: '0x1111111111111111111111111111111111111111',
+  } as unknown as ReturnType<typeof useAccount>)
   mockValidateFeeIntegrity.mockReturnValue({ valid: true })
   mockValidateRouterAddress.mockReturnValue({ valid: true })
   mockUsesFeeCollector.mockReturnValue(true)
@@ -526,35 +533,35 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
 
 describe('useSplitSwap — [P221] chainId threading', () => {
   it('forwards the active chainId to each per-leg swap API call', async () => {
-    const wagmi = await import('wagmi')
-    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
+    // [SPRINT-9G G6] The active chain is now useActiveChainId() (the wallet
+    // chain), not wagmi useChainId() — so set it via useAccount().chain.
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
     // [P225] Use a DIRECT (non-FeeCollector) leg: Base has no FeeCollector
     // deployed yet, so a fee-routed leg would (correctly) throw. We only assert
     // that chainId reaches the per-leg API body — which happens before routing.
     mockUsesFeeCollector.mockReturnValue(false)
-    try {
-      const bodies: Array<Record<string, unknown>> = []
-      vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
-        bodies.push(JSON.parse((init?.body as string) ?? '{}'))
-        return new Response(JSON.stringify(makeQuote()), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      })
 
-      const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
-      const route = makeSplitRoute(makeLeg('1inch', 100))
-      await act(async () => {
-        await result.current.execute(route)
+    const bodies: Array<Record<string, unknown>> = []
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
+      bodies.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response(JSON.stringify(makeQuote()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
       })
-      await waitFor(() => expect(result.current.status).toBe('success'))
+    })
 
-      expect(bodies.length).toBeGreaterThan(0)
-      expect(bodies[0]).toHaveProperty('chainId', 8453)
-    } finally {
-      // Always restore so later suites see the default chain (even if asserts throw).
-      ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
-    }
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+
+    expect(bodies.length).toBeGreaterThan(0)
+    expect(bodies[0]).toHaveProperty('chainId', 8453)
   })
 })
 
@@ -592,5 +599,29 @@ describe('useSplitSwap — safeBigInt guard [10-L-01]', () => {
     // sendTransactionAsync was called — meaning encoding didn't throw
     // and legMinOutput defaulted to 0n.
     expect(mockSendTransactionAsync).toHaveBeenCalledOnce()
+  })
+})
+
+// [SPRINT-9G G6] One chain-id source of truth: useSplitSwap must build each leg
+// for useActiveChainId() (same as the quote pipeline), not a divergent wagmi
+// useChainId().
+describe('useSplitSwap — chain-id source of truth [SPRINT-9G G6]', () => {
+  it('builds each leg on the ACTIVE (wallet) chain, not a divergent wagmi useChainId', async () => {
+    // Wallet on Base (8453) while wagmi useChainId() still reports mainnet (1).
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
+    mockUsesFeeCollector.mockReturnValue(false) // skip FeeCollector path → reach the router check
+    mockSwapFetch(() => makeQuote())
+
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
+    await act(async () => {
+      await result.current.execute(route)
+    })
+
+    expect(mockValidateRouterAddress).toHaveBeenCalled()
+    expect(mockValidateRouterAddress.mock.calls[0][2]).toBe(8453)
   })
 })

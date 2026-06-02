@@ -230,3 +230,54 @@ describe('defillama — validateSwapPrice [TEST-H-02]', () => {
     expect(res!.valid).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9G G2 / M07+M11] Chain-aware price validation. validateSwapPrice must
+// forward the DefiLlama chain slug to BOTH price lookups, so a Base swap is
+// validated against Base prices (key `base:<addr>`), not always-blocked /
+// silently fail-open against the wrong chain. Omitted chain → 'ethereum'
+// (mainnet byte-identical).
+// ─────────────────────────────────────────────────────────────
+describe('defillama — chain-aware validateSwapPrice [SPRINT-9G G2]', () => {
+  /** Stub fetch, recording the `{chain}:{addr}` key of every oracle lookup. */
+  function captureKeys(tokenIn: string): string[] {
+    const keys: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      const key = String(url).split('/current/')[1]
+      keys.push(key)
+      const addr = key.split(':')[1].toLowerCase()
+      const price = addr === tokenIn.toLowerCase() ? 2000 : 1
+      return {
+        ok: true,
+        json: async () => ({ coins: { [key]: { price, symbol: 'TKN', timestamp: Math.floor(Date.now() / 1000), confidence: 1 } } }),
+      }
+    }))
+    return keys
+  }
+
+  it('forwards a Base chain slug to both oracle lookups', async () => {
+    const tokenIn = freshAddr(); const tokenOut = freshAddr()
+    const keys = captureKeys(tokenIn)
+    const res = await validateSwapPrice({
+      tokenIn, tokenOut,
+      amountIn: '1000000000000000000', amountOut: '1960000000',
+      decimalsIn: 18, decimalsOut: 6,
+      chain: 'base',
+    })
+    expect(res!.valid).toBe(true)
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) expect(k.startsWith('base:')).toBe(true)
+  })
+
+  it('defaults to the ethereum slug when chain is omitted (mainnet byte-identical)', async () => {
+    const tokenIn = freshAddr(); const tokenOut = freshAddr()
+    const keys = captureKeys(tokenIn)
+    await validateSwapPrice({
+      tokenIn, tokenOut,
+      amountIn: '1000000000000000000', amountOut: '1960000000',
+      decimalsIn: 18, decimalsOut: 6,
+    })
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) expect(k.startsWith('ethereum:')).toBe(true)
+  })
+})

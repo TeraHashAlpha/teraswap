@@ -1591,3 +1591,92 @@ All in `Audits/FULL-AUDIT-2026-06-02.md` for Architect/Auditor triage. Highlight
   encoding behaviour assumptions autonomously.
 
 NOTE: contracts were review-only (no Solidity edits). No push/merge/deploy performed.
+
+## Sprint 9G — Chain-aware safety gates (branch `feat/sprint-9g-chain-aware-gates`)
+
+Implemented `docs/Prompts/SPRINT-9G.md` (from `Audits/FULL-AUDIT-2026-06-02.md`). Base is LIVE, so the
+chainId-threading gaps were active reductions in Base swap safety. TDD throughout (RED→GREEN per fix),
+one signed atomic commit per fix, full suite + typecheck + lint green after each. Mainnet (chainId 1)
+held byte-identical at every gate, test-guarded. Tests 1357 → 1391 (+34). Lint 110 / 0 errors. No
+contract edits; keys server-only; /api/quote left multi-chain-open (gated to supported chains only).
+
+### Shipped (HIGH first, then MEDIUM/LOW)
+- `3844cee` **G1 [HIGH M04/M06]** — chainlink.ts + price-monitor.ts read L2 feeds + the sequencer gate
+  over `getPublicClientForChain(chainId)` / `getRpcUrlForChain(chainId)` instead of the mainnet client.
+- `2b11284` **G2 [HIGH M07/M11]** — `validateSwapPrice` gains a `chain` slug forwarded to both DefiLlama
+  lookups; `/api/swap` derives it from `getChainConfig(chainId).slug` (the >$10k guard now validates
+  Base prices instead of always-block / silent fail-open).
+- `d5c453f` **G3 [HIGH M12]** — post-execution validator builds its client via
+  `getPublicClientForChain(chainId)` (was mainnet-pinned); the route validates + threads chainId.
+- `ddc2977` **G4 [MED M03/M05/L06]** — server-side activation gate on `/api/swap` (+ `/api/spender`):
+  reject unsupported (400) / coming-soon (409). `/api/quote` rejects only unsupported (stays open for
+  coming-soon browsing per its integration test).
+- `eb6fc5d` **G5 [MED M08]** — extracted `useTokenBalances` into a chain-aware hook (gates on
+  isChainActive, iterates the active chain's catalog, pins reads to `chainId`).
+- `a50360b` **G6 [MED]** — useSwap/useSplitSwap now use `useActiveChainId()` (one source of truth with
+  the quote pipeline), not divergent wagmi `useChainId()`.
+- `e78753b` **G7 [MED/LOW]** — Balancer `fetchSwapData` fail-closed: refuse a non-whitelisted SOR
+  target (mirrors Bebop).
+- `9ab95e3` **G8 [LOW]** — `feeTierCacheKey` scoped by chainId (no cross-chain collision);
+  `fetchChainlinkPriceRaw` delegates to `validateRoundData` (adds the `startedAt>0` guard).
+
+### Caveats / for Architect-Auditor review
+- **[G7] Verify the live Balancer V2 target per chain (Vault vs BatchRelayer).** The fail-closed gate
+  accepts only `getRouterWhitelist(chainId)` members (the V2 Vault `0xBA12…F2C8`). If Balancer's SOR
+  `/order` API returns a different `to` (e.g. a relayer) on a given chain, Balancer execution will be
+  refused there until that address is whitelisted. This matches the pre-existing downstream
+  enforcement (`useSwap.validateRouterAddress`), so it is not a new regression — but confirm before
+  relying on Balancer swaps on Base.
+- **[G2] DefiLlama slug == registry slug** holds for ethereum/base (both match). A future chain whose
+  `getChainConfig().slug` differs from its DefiLlama slug would need a slug map.
+- **[G3] Auth/secret unchanged.** `EXECUTOR_VALIDATION_SECRET` still required; chainId is validated
+  against `getSupportedChainIds()` before use.
+- **Deploy:** ship via the Vercel Preview gate after the Auditor signs off (0C/0H). Do NOT merge to
+  main directly. Base oracle/guard parity should be smoke-tested on a Base preview before promotion.
+
+## Sprint 9H — Base swap-execution fixes (branch `feat/sprint-9h-base-exec-fixes`)
+
+Two execution-path bugs surfaced on the 9G Preview (NOT 9G regressions — the 9G safety gates are
+approved and untouched). Base is live. TDD per fix, atomic signed commits, full suite + typecheck +
+lint green after each. Tests 1391 → 1399 (+8). Lint 110 / 0 errors. No contract / fee / 9G-gate edits.
+
+### Shipped
+- `5e86e1f` **9H-1 — Velora "Unknown swap function selector" on Base.** Velora routes a Base swap
+  through a Curve pool via Augustus V6.2's single-DEX method (not generic swapExactAmountIn), whose
+  selector was absent from the allowlist. Added two **verified** Curve selectors to ALL THREE selector
+  registries (selector allowlist + fail-closed recipient gate + tx-preview decoder), as trusted
+  Augustus V6 methods (same class as the shipped `0xe3ead59e`):
+  - `0x1a01c532` swapExactAmountInOnCurveV1 (CurveV1StableNg — the reported failure)
+  - `0xe37ed256` swapExactAmountInOnCurveV2 (Curve crypto pools)
+  Verified THREE independent ways against the live Augustus V6.2 (`0x6a00…1068`, identical address on
+  Ethereum + Base): codeslaw verified ABI, openchain.xyz signature DB, and local
+  `viem.toFunctionSelector()` over the canonical signature — which reproduced the known-good
+  `0xe3ead59e` exactly, confirming the method. Additive only (every pre-9H selector retained,
+  test-guarded → no mainnet regression).
+- `fa73eb4` **9H-2 — Bebop "incomplete settlement data in response".** In demo-mode (no
+  BEBOP_API_KEY) Bebop priced, won Best, then hard-failed at swap. Now fail-soft: `fetchQuote`
+  returns null when the key is absent (Bebop can't execute → doesn't rank); `fetchSwapData` returns
+  null (breaker-NEUTRAL) on a response lacking settlement fields, instead of throwing. The SECURITY
+  gates (tx.to≠settlement, not-whitelisted) still fail CLOSED. Firm path intact when the key is set.
+
+### Caveats / for Architect-Auditor review
+- **[9H-1] Scope of the selector addition.** Only the two **Curve** Augustus V6.2 methods were added
+  (the reported failure is a Curve route; Base Curve pools span stable=V1 + crypto=V2). The other
+  V6.2 single-DEX methods that Velora could emit on Base were deliberately **NOT** added (no observed
+  failure → no blind widening). If a future Base Velora route via Uniswap/Balancer fails the same
+  way, verify + add its selector the same way. Known V6.2 method IDs for reference (verify before
+  adding): `swapExactAmountInOnUniswapV2`, `swapExactAmountInOnUniswapV3`,
+  `swapExactAmountInOnBalancerV2`, plus the `swapExactAmountOut*` family for buy-side orders.
+- **[9H-1] Latent mainnet gap also closed.** Velora requests v6.2 on ALL chains, so a mainnet Velora
+  Curve route would have hit the same "Unknown selector" block. The fix is additive (no previously
+  allowed selector removed) so it only un-blocks legitimate Curve routes — no behavioural change to
+  any swap that already worked.
+- **[9H-1] Recipient gate trust class.** The Curve selectors were added to TRUSTED_ROUTER_SELECTORS
+  (implicit-recipient), matching the existing treatment of `swapExactAmountIn` — Augustus delivers to
+  the receiver our adapter requests; the beneficiary is not attacker-settable from the response. If
+  the Auditor prefers explicit recipient extraction for the V6.2 Curve tuple, that's a follow-up
+  (the tuple's beneficiary is packed in `partnerAndFee`, not a bare address arg).
+- **[9H-2] Demo-mode discriminator = BEBOP_API_KEY.** Matches the goal's framing (keyless = demo /
+  non-executable). When the production key is configured, Bebop ranks + executes exactly as before.
+- **Deploy:** review + Vercel Preview gate; do NOT merge/deploy. Smoke-test a Base Velora→Curve swap
+  and a keyless-Bebop quote on the Preview before promotion.

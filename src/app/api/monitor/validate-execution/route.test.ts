@@ -295,4 +295,38 @@ describe('POST /api/monitor/validate-execution', () => {
       expect(data.error).toBe('Internal validation error')
     })
   })
+
+  // ── [SPRINT-9G G3 / M12] chainId threading ────────────
+  describe('chainId threading [SPRINT-9G G3]', () => {
+    const okResult = {
+      txHash: TX_HASH, source: '1inch', severity: 'ok', actualOutput: '1000000',
+      expectedMinOutput: '1000000', shortfallPercent: 0, surplusWei: null,
+      reason: 'ok', tokenOut: TOKEN_OUT, tokenOutDecimals: 6,
+      extractionMethod: 'transfer_logs', validatedAt: new Date(0).toISOString(),
+    }
+
+    it('passes a supported chainId (Base 8453) through to validateExecution', async () => {
+      mockValidateExecution.mockResolvedValue(okResult)
+      const handler = await getHandler()
+      const res = await handler(makeRequest({ ...validBody(), chainId: 8453 }, SECRET))
+      expect(res.status).toBe(200)
+      expect(mockValidateExecution).toHaveBeenCalledTimes(1)
+      expect(mockValidateExecution.mock.calls[0][0].chainId).toBe(8453)
+    })
+
+    it('rejects an unsupported chainId with 400 before any validation', async () => {
+      const handler = await getHandler()
+      const res = await handler(makeRequest({ ...validBody(), chainId: 999999 }, SECRET))
+      expect(res.status).toBe(400)
+      expect(mockValidateExecution).not.toHaveBeenCalled()
+    })
+
+    it('omits chainId when not provided (validator defaults to mainnet — byte-identical)', async () => {
+      mockValidateExecution.mockResolvedValue(okResult)
+      const handler = await getHandler()
+      const res = await handler(makeRequest(validBody(), SECRET))
+      expect(res.status).toBe(200)
+      expect(mockValidateExecution.mock.calls[0][0].chainId).toBeUndefined()
+    })
+  })
 })
