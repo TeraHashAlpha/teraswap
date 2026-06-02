@@ -1633,3 +1633,50 @@ contract edits; keys server-only; /api/quote left multi-chain-open (gated to sup
   against `getSupportedChainIds()` before use.
 - **Deploy:** ship via the Vercel Preview gate after the Auditor signs off (0C/0H). Do NOT merge to
   main directly. Base oracle/guard parity should be smoke-tested on a Base preview before promotion.
+
+## Sprint 9H — Base swap-execution fixes (branch `feat/sprint-9h-base-exec-fixes`)
+
+Two execution-path bugs surfaced on the 9G Preview (NOT 9G regressions — the 9G safety gates are
+approved and untouched). Base is live. TDD per fix, atomic signed commits, full suite + typecheck +
+lint green after each. Tests 1391 → 1399 (+8). Lint 110 / 0 errors. No contract / fee / 9G-gate edits.
+
+### Shipped
+- `5e86e1f` **9H-1 — Velora "Unknown swap function selector" on Base.** Velora routes a Base swap
+  through a Curve pool via Augustus V6.2's single-DEX method (not generic swapExactAmountIn), whose
+  selector was absent from the allowlist. Added two **verified** Curve selectors to ALL THREE selector
+  registries (selector allowlist + fail-closed recipient gate + tx-preview decoder), as trusted
+  Augustus V6 methods (same class as the shipped `0xe3ead59e`):
+  - `0x1a01c532` swapExactAmountInOnCurveV1 (CurveV1StableNg — the reported failure)
+  - `0xe37ed256` swapExactAmountInOnCurveV2 (Curve crypto pools)
+  Verified THREE independent ways against the live Augustus V6.2 (`0x6a00…1068`, identical address on
+  Ethereum + Base): codeslaw verified ABI, openchain.xyz signature DB, and local
+  `viem.toFunctionSelector()` over the canonical signature — which reproduced the known-good
+  `0xe3ead59e` exactly, confirming the method. Additive only (every pre-9H selector retained,
+  test-guarded → no mainnet regression).
+- `fa73eb4` **9H-2 — Bebop "incomplete settlement data in response".** In demo-mode (no
+  BEBOP_API_KEY) Bebop priced, won Best, then hard-failed at swap. Now fail-soft: `fetchQuote`
+  returns null when the key is absent (Bebop can't execute → doesn't rank); `fetchSwapData` returns
+  null (breaker-NEUTRAL) on a response lacking settlement fields, instead of throwing. The SECURITY
+  gates (tx.to≠settlement, not-whitelisted) still fail CLOSED. Firm path intact when the key is set.
+
+### Caveats / for Architect-Auditor review
+- **[9H-1] Scope of the selector addition.** Only the two **Curve** Augustus V6.2 methods were added
+  (the reported failure is a Curve route; Base Curve pools span stable=V1 + crypto=V2). The other
+  V6.2 single-DEX methods that Velora could emit on Base were deliberately **NOT** added (no observed
+  failure → no blind widening). If a future Base Velora route via Uniswap/Balancer fails the same
+  way, verify + add its selector the same way. Known V6.2 method IDs for reference (verify before
+  adding): `swapExactAmountInOnUniswapV2`, `swapExactAmountInOnUniswapV3`,
+  `swapExactAmountInOnBalancerV2`, plus the `swapExactAmountOut*` family for buy-side orders.
+- **[9H-1] Latent mainnet gap also closed.** Velora requests v6.2 on ALL chains, so a mainnet Velora
+  Curve route would have hit the same "Unknown selector" block. The fix is additive (no previously
+  allowed selector removed) so it only un-blocks legitimate Curve routes — no behavioural change to
+  any swap that already worked.
+- **[9H-1] Recipient gate trust class.** The Curve selectors were added to TRUSTED_ROUTER_SELECTORS
+  (implicit-recipient), matching the existing treatment of `swapExactAmountIn` — Augustus delivers to
+  the receiver our adapter requests; the beneficiary is not attacker-settable from the response. If
+  the Auditor prefers explicit recipient extraction for the V6.2 Curve tuple, that's a follow-up
+  (the tuple's beneficiary is packed in `partnerAndFee`, not a bare address arg).
+- **[9H-2] Demo-mode discriminator = BEBOP_API_KEY.** Matches the goal's framing (keyless = demo /
+  non-executable). When the production key is configured, Bebop ranks + executes exactly as before.
+- **Deploy:** review + Vercel Preview gate; do NOT merge/deploy. Smoke-test a Base Velora→Curve swap
+  and a keyless-Bebop quote on the Preview before promotion.
