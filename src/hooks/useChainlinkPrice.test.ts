@@ -172,6 +172,43 @@ describe('useChainlinkPrice', () => {
     expect(result.current.chainlinkPrice).toBe(2000)
     expect(result.current.deviation).toBe(0)
   })
+
+  // [SPRINT-9J J1] oracleIntegrityFailed discriminator. Integrity failures
+  // (stale / invalid round) are a genuine oracle-safety event → hard block;
+  // a deviation on a HEALTHY oracle is price impact → informed consent.
+  it("tags answeredInRound<roundId as an oracle-integrity failure", () => {
+    mockGetChainlinkFeed.mockReturnValue(FEED)
+    mockRoundData = roundData({ roundId: 5n, answeredInRound: 3n })
+    mockDecimals = 8
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+  })
+
+  it("tags >25h-old data as an oracle-integrity failure", () => {
+    mockGetChainlinkFeed.mockReturnValue(FEED)
+    mockRoundData = roundData({ answer: 2_000_00000000n, updatedAt: NOW_SECONDS - 26 * 3600 })
+    mockDecimals = 8
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+  })
+
+  it("tags a zero/invalid answer as an oracle-integrity failure", () => {
+    mockGetChainlinkFeed.mockReturnValue(FEED)
+    mockRoundData = roundData({ answer: 0n })
+    mockDecimals = 8
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+  })
+
+  it("does NOT tag a healthy-oracle price-impact deviation as an integrity failure", () => {
+    mockGetChainlinkFeed.mockReturnValue(FEED)
+    mockRoundData = roundData({ answer: 2_000_00000000n })
+    mockDecimals = 8
+    // 2.5% deviation → WARN band, but the oracle is fresh & valid → price impact.
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2050))
+    expect(result.current.level).toBe('warn')
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+  })
 })
 
 describe('useChainlinkPrice — chain-aware feed resolution [SPRINT-9E]', () => {
