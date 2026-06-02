@@ -230,6 +230,13 @@ export const DEFAULT_SLIPPAGE = 0.5
 export const QUOTE_REFRESH_MS = 15_000
 export const INPUT_DEBOUNCE_MS = 500
 export const QUOTE_TIMEOUT_MS = 10_000
+// [SPRINT-9J J2] Swap-BUILD (calldata) timeout/retry. The build is idempotent
+// (it never broadcasts a tx), so a transient/timeout failure can be retried
+// safely. Two attempts × 12s = 24s, comfortably inside the route's maxDuration
+// (60s) so the function fails fast as clean JSON instead of a platform HTML 504.
+export const SWAP_BUILD_TIMEOUT_MS = 12_000
+export const SWAP_BUILD_MAX_ATTEMPTS = 2
+export const SWAP_BUILD_RETRY_BACKOFF_MS = 400
 
 // [LP-04] Smart MEV preference threshold.
 // When the user has NOT toggled "Force MEV Protection" on, the SwapBox

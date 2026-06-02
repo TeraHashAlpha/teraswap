@@ -169,6 +169,11 @@ export interface SwapParams extends QuoteParams {
    *  split sender/receiver fall back to `from` and log a warning. Only
    *  threaded through by /api/v1/swap (not the internal /api/swap). */
   recipient?: string
+  /** [SPRINT-9J J2] Abort signal for the swap-BUILD fetches. Supplied by
+   *  withSwapBuildRetry so a slow upstream is cancelled (not merely abandoned)
+   *  when the per-attempt timeout fires. Optional — adapters that don't thread
+   *  it are still bounded by the wrapper's race timeout. */
+  signal?: AbortSignal
 }
 
 export interface DEXAdapter {

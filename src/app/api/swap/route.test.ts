@@ -74,7 +74,7 @@ vi.mock('@/lib/chains/activation', () => ({
 
 // ── Import after mocks ────────────────────────────────────
 
-import { POST } from './route'
+import { POST, maxDuration } from './route'
 
 // ── Helpers ───────────────────────────────────────────────
 
@@ -312,6 +312,33 @@ describe('POST /api/swap — V12 upstream fetch error [P127]', () => {
     expect(res.status).toBe(502)
     const body = await res.json()
     expect(body.error).toContain('1inch API timeout')
+  })
+})
+
+// [SPRINT-9J J2] The route must ALWAYS return JSON on an upstream failure (never
+// let the platform serve HTML), redact secrets, and declare enough maxDuration
+// that a slow build fails fast as JSON instead of hitting a platform HTML 504.
+describe('POST /api/swap — J2 timeout/JSON safety', () => {
+  it('returns clean JSON (502) even when the build times out', async () => {
+    mockFetchSwapFromSource.mockRejectedValueOnce(new Error('Timeout'))
+    const res = await POST(makeRequest({ source: 'velora', ...VALID_BASE }))
+    expect(res.status).toBe(502)
+    expect(res.headers.get('content-type') ?? '').toContain('application/json')
+    const body = await res.json()
+    expect(typeof body.error).toBe('string')
+  })
+
+  it('does not leak an API key embedded in an upstream error', async () => {
+    mockFetchSwapFromSource.mockRejectedValueOnce(
+      new Error('velora build failed: https://api.paraswap.io/transactions/1?apiKey=SUPER_SECRET_KEY&x=1'),
+    )
+    const res = await POST(makeRequest({ source: 'velora', ...VALID_BASE }))
+    const body = await res.json()
+    expect(body.error).not.toContain('SUPER_SECRET_KEY')
+  })
+
+  it('declares an explicit maxDuration so the function is not cut off mid-build', () => {
+    expect(maxDuration).toBeGreaterThanOrEqual(30)
   })
 })
 
