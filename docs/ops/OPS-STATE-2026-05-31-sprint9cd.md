@@ -19,9 +19,21 @@ signed commits. Brief: `Audits/SPRINT-9CD-AUDIT-BRIEF.md`.
 
 ## State machine
 
-- **Code:** PR #116 (`release/sprint-9cd-base-sources` → `main`) **MERGED**.
-- **Deploy:** **LIVE in production** — Vercel build `40ddde2` on `main` (Ready · Production,
-  2026-05-31). Runbook: `docs/Runbooks/SPRINT-9CD-DEPLOY.md`. Post-deploy verification PENDING.
+- **Code:** PR #116 (9CD, `40ddde2`) → caused 502 → rolled back → fixed PR #117 (`9d72f4b`) →
+  final release PR #118 (`hotfix/quote-route-502`) **MERGED**. (9F test+docs `adc2e55` committed,
+  not yet pushed — rides the next PR.)
+- **Deploy:** ✅ **LIVE + verified in production** — Vercel `adc4188` on `main` (2026-06-02).
+  User-verified: Base multi-source Compare + gas/fee USD (parity w/ mainnet), Base swaps execute.
+  **Base arc CONCLUDED.** Runbook: `docs/Runbooks/SPRINT-9CD-DEPLOY.md`.
+
+## Tomorrow / next session (carry-over)
+1. **Alchemy key allowlist** — enable referrer/domain allowlist on the `teraswap-mainnet-v2` app
+   (`NEXT_PUBLIC_BASE_RPC_URL` is client-exposed; "Sensitive" in Vercel does NOT hide it).
+2. **Contract verification on Basescan** (`forge verify` failed — sync OZ submodule + match deploy
+   compiler settings; use Etherscan V2 key, `--chain base`).
+3. **Push the bundled PR** (9F `adc2e55` + the 5 docs) to `main`.
+4. Review the Code Agent's autonomous 9F-backlog cleanup (no-route vs failure convention) — commits
+   on branch, not merged.
 - **Sources:** 12 total (was 11). Bebop live on chains 1 + 8453. Curve returns null off-mainnet.
 
 ## Env (Vercel production)
