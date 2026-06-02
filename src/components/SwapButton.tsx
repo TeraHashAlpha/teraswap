@@ -16,10 +16,15 @@ interface Props {
   hasSufficientBalance: boolean
   hasQuote: boolean
   quoteLoading: boolean
-  /** When true, price deviation from Chainlink exceeds the block threshold — swap MUST be blocked */
+  /** When true, the swap is blocked (oracle integrity, unverified large swap, or
+   * price-impact consent not yet given) — the button MUST stay disabled. */
   priceBlocked: boolean
-  /** Reason for the block: 'warn' (2-3% deviation), 'danger' (>3%), 'oracle' (no oracle + high value) */
-  blockReason?: 'warn' | 'danger' | 'oracle'
+  /** [SPRINT-9J J1] Block reason:
+   *  - 'price-impact' → healthy oracle, high price impact; user must tick the
+   *    informed-consent checkbox above (recoverable, NOT an indefinite pause)
+   *  - 'oracle-stale' → oracle integrity failure (stale/invalid); hard block
+   *  - 'oracle'       → no Chainlink feed + high-value swap; hard block */
+  blockReason?: 'price-impact' | 'oracle-stale' | 'oracle'
   onApprove: () => void
   onSwap: () => void
 }
@@ -56,12 +61,15 @@ export default function SwapButton({
     if (!hasQuote)
       return { text: 'No quotes available', disabled: true, onClick: () => {}, variant: 'disabled' }
     if (priceBlocked) {
-      const msg = blockReason === 'warn'
-        ? 'Price outside safe range — waiting...'
+      // [SPRINT-9J J1] 'price-impact' is recoverable via the consent checkbox —
+      // surface that instead of an indefinite "waiting" block. Integrity / no-oracle
+      // blocks stay hard errors.
+      const msg = blockReason === 'price-impact'
+        ? 'Confirm price impact to swap'
         : blockReason === 'oracle'
           ? 'No oracle — swap blocked'
-          : 'Price deviation too high — blocked'
-      return { text: msg, disabled: true, onClick: () => {}, variant: blockReason === 'warn' ? 'warning' : 'error' }
+          : 'Oracle data unsafe — swap blocked'
+      return { text: msg, disabled: true, onClick: () => {}, variant: blockReason === 'price-impact' ? 'warning' : 'error' }
     }
     if (approvalStatus === 'approving_permit2')
       return { text: 'Approving...', disabled: true, onClick: () => {}, variant: 'loading' }

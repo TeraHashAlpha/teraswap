@@ -153,10 +153,20 @@ describe('SwapButton', () => {
     expect(btn).toBeDisabled()
   })
 
-  it("disables and explains when price-blocked with reason='danger'", () => {
-    render(<SwapButton {...baseProps} priceBlocked blockReason="danger" />)
+  // [SPRINT-9J J1] price-impact is RECOVERABLE — the button points to the consent
+  // checkbox rather than the old indefinite "outside safe range — waiting".
+  it("price-blocked reason='price-impact' → recoverable, points to the consent step (no 'waiting')", () => {
+    render(<SwapButton {...baseProps} priceBlocked blockReason="price-impact" />)
     const btn = screen.getByRole('button')
-    expect(btn).toHaveTextContent(/blocked/i)
+    expect(btn).toHaveTextContent(/confirm price impact/i)
+    expect(btn).not.toHaveTextContent(/waiting/i)
+    expect(btn).toBeDisabled()
+  })
+
+  it("price-blocked reason='oracle-stale' → hard block, oracle unsafe", () => {
+    render(<SwapButton {...baseProps} priceBlocked blockReason="oracle-stale" />)
+    const btn = screen.getByRole('button')
+    expect(btn).toHaveTextContent(/oracle data unsafe/i)
     expect(btn).toBeDisabled()
   })
 

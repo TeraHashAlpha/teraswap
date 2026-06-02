@@ -57,7 +57,13 @@ vi.mock('./TokenSelector', () => ({
   ),
 }))
 vi.mock('./QuoteBreakdown', () => ({ default: () => <div data-testid="quote-breakdown" /> }))
-vi.mock('./SwapButton', () => ({ default: () => <button data-testid="swap-button">Swap</button> }))
+// [SPRINT-9J J1] Expose the gate props so tests can assert the wiring
+// (priceBlocked + blockReason) without rendering the real button's wagmi deps.
+vi.mock('./SwapButton', () => ({
+  default: (p: { priceBlocked?: boolean; blockReason?: string }) => (
+    <button data-testid="swap-button" data-blocked={String(!!p.priceBlocked)} data-reason={p.blockReason ?? ''}>Swap</button>
+  ),
+}))
 vi.mock('./TransactionPreview', () => ({ default: () => <div data-testid="tx-preview" /> }))
 vi.mock('./SlippageModal', () => ({
   default: ({ onClose }: { onClose: () => void }) => (
@@ -358,5 +364,82 @@ describe('SwapBox — split route indicator', () => {
       fireEvent.change(input, { target: { value: '10000' } })
     })
     expect(screen.getByTestId('split-visualizer')).toBeInTheDocument()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9J J1] Price-impact informed consent vs oracle-integrity hard block.
+// A healthy-oracle deviation is the trade's own price impact → the user can
+// consent and proceed (no indefinite "PRICE OUTSIDE SAFE RANGE — WAITING").
+// A genuine oracle-integrity failure (stale/invalid) stays a HARD block.
+// ─────────────────────────────────────────────────────────────
+const HEALTHY_PRICE_IMPACT = {
+  chainlinkPrice: 2000, executionPrice: 1956, deviation: 0.022,
+  level: 'warn' as const, message: null, oracleUnavailable: false, oracleIntegrityFailed: false,
+}
+const STALE_ORACLE = {
+  chainlinkPrice: 2000, executionPrice: 2000, deviation: 0,
+  level: 'warn' as const, message: 'Chainlink oracle data is stale.', oracleUnavailable: false, oracleIntegrityFailed: true,
+}
+const HEALTHY_OK = {
+  chainlinkPrice: 2000, executionPrice: 2018, deviation: 0.009,
+  level: 'none' as const, message: null, oracleUnavailable: false, oracleIntegrityFailed: false,
+}
+
+function quoteMeta(toAmount: string) {
+  return {
+    meta: { best: { source: '1inch', toAmount, estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } }, all: [], fetchedAt: Date.now() },
+    loading: false, error: null, countdown: 10, refetch: vi.fn(), refresh: vi.fn(),
+  }
+}
+
+describe('SwapBox — J1 price-impact informed consent', () => {
+  it('a healthy-oracle price-impact deviation is CONSENT, not the old indefinite block', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_PRICE_IMPACT)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    const btn = screen.getByTestId('swap-button')
+    // Blocked PENDING consent — but flagged as price-impact (clickable class), not 'warn/danger waiting'.
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('price-impact')
+  })
+
+  it('a stale/invalid oracle is a HARD block (oracle-integrity, no consent)', async () => {
+    useChainlinkPriceMock.mockReturnValue(STALE_ORACLE)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('oracle-stale')
+    // No informed-consent checkbox for a genuine oracle failure.
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('a within-threshold healthy oracle does NOT block (mainnet unaffected)', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+  })
+
+  it('accepting the price-impact consent unblocks the swap', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_PRICE_IMPACT)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    // A fresh quote (new toAmount) clears the stale flag so the consent banner shows.
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const checkbox = screen.getByRole('checkbox')
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('true')
+    await act(async () => { fireEvent.click(checkbox) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
   })
 })
