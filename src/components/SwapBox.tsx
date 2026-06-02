@@ -19,6 +19,7 @@ import TokenAddressBadge from '@/components/TokenAddressBadge'
 import DigitRoller from '@/components/DigitRoller'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { evaluatePriceGate } from '@/lib/price-gate'
+import InfoTooltip from '@/components/InfoTooltip'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
 // analytics-tracker removed (dead code — server-side /api/analytics is the source of truth)
@@ -625,12 +626,11 @@ export default function SwapBox() {
             <span className="text-[12px] font-semibold text-cream-65">
               Force MEV Protection
             </span>
-            <span
-              className="cursor-help text-[10px] text-cream-35"
-              title="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
-            >
-              &#9432;
-            </span>
+            <InfoTooltip
+              className="text-[10px]"
+              label="MEV protection info"
+              content="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
+            />
           </div>
           <button
             onClick={() => setMevProtected(!mevProtected)}
