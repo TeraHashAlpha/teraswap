@@ -205,17 +205,18 @@ export async function fetchChainlinkPriceRaw(
     functionName: 'latestRoundData',
   })
   const lrdResult = await rpcCall(feed, lrdData, chainId)
-  const [roundId, answer, , updatedAt, answeredInRound] = decodeFunctionResult({
+  const [roundId, answer, startedAt, updatedAt, answeredInRound] = decodeFunctionResult({
     abi: chainlinkAggregatorAbi,
     functionName: 'latestRoundData',
     data: lrdResult as `0x${string}`,
   }) as [bigint, bigint, bigint, bigint, bigint]
 
-  // Security: validate Chainlink data integrity
-  if (answer <= 0n) return null // invalid price
-  if (answeredInRound < roundId) return null // stale round — data not updated in current round
-  const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
-  if (ageSeconds > CHAINLINK_MAX_STALENESS_SEC) return null // data too old
+  // [SPRINT-9G G8] Security: validate Chainlink round integrity via the shared
+  // gate so the swap path enforces the SAME checks as the order-engine reads —
+  // including the `startedAt > 0` incomplete-round guard the inline checks here
+  // previously omitted. Covers answer<=0, answeredInRound<roundId, startedAt<=0,
+  // and staleness. Equivalent to the prior inline checks for any real round.
+  if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, CHAINLINK_MAX_STALENESS_SEC)) return null
 
   const price = Number(answer) / 10 ** decimals
   return { price, updatedAt: Number(updatedAt), roundId }

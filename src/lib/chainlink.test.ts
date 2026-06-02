@@ -159,6 +159,20 @@ describe('chainlink — fetchChainlinkPriceRaw [TEST-H-01]', () => {
     expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).toBeNull()
   })
 
+  it('returns null for an incomplete round (startedAt === 0) [SPRINT-9G G8]', async () => {
+    // startedAt === 0 means the round never started — the order-engine path
+    // already rejects this via validateRoundData; the swap path must too.
+    mockChainlinkRpc({
+      decimals: 8,
+      roundId: 100n,
+      answer: 300_000_000_000n,
+      startedAt: 0n,
+      updatedAt: nowSec(),
+      answeredInRound: 100n,
+    })
+    expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).toBeNull()
+  })
+
   it('propagates RPC failure (callers fail-closed via .catch(() => null))', async () => {
     // fetchChainlinkPriceRaw does NOT swallow RPC errors itself — the
     // fail-closed contract is enforced by callers (e.g. computeTokenAmountUsd

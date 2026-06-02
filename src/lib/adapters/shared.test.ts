@@ -6,7 +6,7 @@
  * chain's configured RPC and must NEVER return the mainnet RPC.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { toWeth } from './shared'
+import { toWeth, feeTierCacheKey, getCachedFeeTier, setCachedFeeTier, invalidateCachedFeeTier } from './shared'
 import { NATIVE_ETH, WETH_ADDRESS } from '@/lib/constants'
 
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
@@ -67,5 +67,34 @@ describe('getRpcUrlForChain [SPRINT-9C]', () => {
   it('Base (8453) with no env falls back to the registry Base fallback (a Base RPC, not Ethereum mainnet)', async () => {
     const { getRpcUrlForChain } = await loadShared()
     expect(getRpcUrlForChain(8453)).toBe('https://mainnet.base.org')
+  })
+})
+
+// [SPRINT-9G G8] The Uniswap V3 fee-tier cache key must be scoped by chainId so
+// the same pair on different chains can't collide. Mainnet (chainId 1) keeps the
+// `1:` prefix it always had (byte-identical).
+describe('fee-tier cache — chain-scoped key [SPRINT-9G G8]', () => {
+  const A = '0xAAaAAaAaAAaaAAaaAAaAAAAaaAAaaAAAaAaAaAAa'
+  const B = '0xBbBbbBBbBbBBbbBbBbbbBBBBBBbBBbBbBBBbBbBb'
+
+  afterEach(() => {
+    invalidateCachedFeeTier(A, B, 1)
+    invalidateCachedFeeTier(A, B, 8453)
+  })
+
+  it('scopes the key by chainId (no cross-chain collision)', () => {
+    expect(feeTierCacheKey(A, B, 8453)).not.toBe(feeTierCacheKey(A, B, 1))
+    expect(feeTierCacheKey(A, B, 8453).startsWith('8453:')).toBe(true)
+  })
+
+  it('mainnet key is the default and keeps the `1:` prefix (byte-identical)', () => {
+    expect(feeTierCacheKey(A, B, 1)).toBe(feeTierCacheKey(A, B))
+    expect(feeTierCacheKey(A, B, 1).startsWith('1:')).toBe(true)
+  })
+
+  it('a fee tier cached for mainnet is NOT returned for the same pair on Base', () => {
+    setCachedFeeTier(A, B, 500, 1)
+    expect(getCachedFeeTier(A, B, 1)).toBe(500)
+    expect(getCachedFeeTier(A, B, 8453)).toBeNull()
   })
 })

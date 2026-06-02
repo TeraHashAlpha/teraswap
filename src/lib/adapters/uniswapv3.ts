@@ -191,7 +191,7 @@ export async function detectUniswapV3FeeTier(params: {
 
   const bestFee = valid[0].fee
 
-  setCachedFeeTier(tokenIn, tokenOut, bestFee)
+  setCachedFeeTier(tokenIn, tokenOut, bestFee, chainId)
 
   return { bestFee, candidates, reason }
 }
@@ -244,7 +244,7 @@ async function fetchUniswapV3Swap(
   const contracts = getUniswapV3Contracts(chainId)
   if (!contracts) throw new Error(`Uniswap V3: not deployed on chain ${chainId}`)
 
-  let feeTier = cachedFee ?? getCachedFeeTier(src, dst)
+  let feeTier = cachedFee ?? getCachedFeeTier(src, dst, chainId)
   let amountOut: bigint
   let gasEstimate: number
 
@@ -258,7 +258,7 @@ async function fetchUniswapV3Swap(
       amountOut = BigInt(best.amountOut)
       gasEstimate = best.gasEstimate
     } catch {
-      invalidateCachedFeeTier(src, dst)
+      invalidateCachedFeeTier(src, dst, chainId)
       throw new Error('Uniswap V3: cached fee tier failed, retry needed')
     }
   } else {
