@@ -1591,3 +1591,45 @@ All in `Audits/FULL-AUDIT-2026-06-02.md` for Architect/Auditor triage. Highlight
   encoding behaviour assumptions autonomously.
 
 NOTE: contracts were review-only (no Solidity edits). No push/merge/deploy performed.
+
+## Sprint 9G — Chain-aware safety gates (branch `feat/sprint-9g-chain-aware-gates`)
+
+Implemented `docs/Prompts/SPRINT-9G.md` (from `Audits/FULL-AUDIT-2026-06-02.md`). Base is LIVE, so the
+chainId-threading gaps were active reductions in Base swap safety. TDD throughout (RED→GREEN per fix),
+one signed atomic commit per fix, full suite + typecheck + lint green after each. Mainnet (chainId 1)
+held byte-identical at every gate, test-guarded. Tests 1357 → 1391 (+34). Lint 110 / 0 errors. No
+contract edits; keys server-only; /api/quote left multi-chain-open (gated to supported chains only).
+
+### Shipped (HIGH first, then MEDIUM/LOW)
+- `3844cee` **G1 [HIGH M04/M06]** — chainlink.ts + price-monitor.ts read L2 feeds + the sequencer gate
+  over `getPublicClientForChain(chainId)` / `getRpcUrlForChain(chainId)` instead of the mainnet client.
+- `2b11284` **G2 [HIGH M07/M11]** — `validateSwapPrice` gains a `chain` slug forwarded to both DefiLlama
+  lookups; `/api/swap` derives it from `getChainConfig(chainId).slug` (the >$10k guard now validates
+  Base prices instead of always-block / silent fail-open).
+- `d5c453f` **G3 [HIGH M12]** — post-execution validator builds its client via
+  `getPublicClientForChain(chainId)` (was mainnet-pinned); the route validates + threads chainId.
+- `ddc2977` **G4 [MED M03/M05/L06]** — server-side activation gate on `/api/swap` (+ `/api/spender`):
+  reject unsupported (400) / coming-soon (409). `/api/quote` rejects only unsupported (stays open for
+  coming-soon browsing per its integration test).
+- `eb6fc5d` **G5 [MED M08]** — extracted `useTokenBalances` into a chain-aware hook (gates on
+  isChainActive, iterates the active chain's catalog, pins reads to `chainId`).
+- `a50360b` **G6 [MED]** — useSwap/useSplitSwap now use `useActiveChainId()` (one source of truth with
+  the quote pipeline), not divergent wagmi `useChainId()`.
+- `e78753b` **G7 [MED/LOW]** — Balancer `fetchSwapData` fail-closed: refuse a non-whitelisted SOR
+  target (mirrors Bebop).
+- `9ab95e3` **G8 [LOW]** — `feeTierCacheKey` scoped by chainId (no cross-chain collision);
+  `fetchChainlinkPriceRaw` delegates to `validateRoundData` (adds the `startedAt>0` guard).
+
+### Caveats / for Architect-Auditor review
+- **[G7] Verify the live Balancer V2 target per chain (Vault vs BatchRelayer).** The fail-closed gate
+  accepts only `getRouterWhitelist(chainId)` members (the V2 Vault `0xBA12…F2C8`). If Balancer's SOR
+  `/order` API returns a different `to` (e.g. a relayer) on a given chain, Balancer execution will be
+  refused there until that address is whitelisted. This matches the pre-existing downstream
+  enforcement (`useSwap.validateRouterAddress`), so it is not a new regression — but confirm before
+  relying on Balancer swaps on Base.
+- **[G2] DefiLlama slug == registry slug** holds for ethereum/base (both match). A future chain whose
+  `getChainConfig().slug` differs from its DefiLlama slug would need a slug map.
+- **[G3] Auth/secret unchanged.** `EXECUTOR_VALIDATION_SECRET` still required; chainId is validated
+  against `getSupportedChainIds()` before use.
+- **Deploy:** ship via the Vercel Preview gate after the Auditor signs off (0C/0H). Do NOT merge to
+  main directly. Base oracle/guard parity should be smoke-tested on a Base preview before promotion.
