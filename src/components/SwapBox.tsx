@@ -36,7 +36,7 @@ import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
-import { playSwapConfirmMP3, playCancelOrderMP3, playSwapInitiated, playApproval, playError, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
+import { playSwapConfirmMP3, playCancelOrderMP3, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
@@ -186,7 +186,7 @@ export default function SwapBox() {
   // rather than the engine-computed gasSavingsUsd — the server clamps it
   // (max $500) and computes the persisted gas_savings_usd from there.
   const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
-  const { status: swapStatus, txHash, errorMessage: swapError, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
@@ -209,7 +209,7 @@ export default function SwapBox() {
   const tokenOutPriceCheck = useChainlinkPrice(tokenOut?.address, null)
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
-  const { splitResult, analyzing: splitAnalyzing, splitRecommended, useSplit, toggleSplit } =
+  const { splitResult, analyzing: splitAnalyzing, useSplit, toggleSplit } =
     useSplitRoute(meta, tokenIn, tokenOut, amountIn, isConnected && isCorrectChain)
 
   const {

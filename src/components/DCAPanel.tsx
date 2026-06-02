@@ -17,7 +17,7 @@ import {
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
-import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, playError, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
+import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'

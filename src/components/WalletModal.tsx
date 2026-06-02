@@ -68,10 +68,6 @@ export default function WalletModal({ open, onClose }: Props) {
     ? `${address.slice(0, 6)}···${address.slice(-4)}`
     : ''
 
-  const balFormatted = balance
-    ? `${parseFloat(balance.formatted).toFixed(4)} ${balance.symbol}`
-    : '—'
-
   const [grad1, grad2] = address ? addressToGradient(address) : ['#C8B89A', '#A89878']
 
   // Copy address

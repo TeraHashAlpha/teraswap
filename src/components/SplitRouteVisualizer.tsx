@@ -1,7 +1,7 @@
 'use client'
 
 import { formatUnits } from 'viem'
-import type { SplitQuoteResult, SplitRoute, SplitLeg } from '@/lib/split-routing-types'
+import type { SplitQuoteResult } from '@/lib/split-routing-types'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 import { formatDisplay } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
