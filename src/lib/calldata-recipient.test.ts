@@ -345,8 +345,9 @@ describe('calldata-recipient', () => {
   // ── VALIDATED_SELECTORS allowlist ──────────────────────
 
   describe('VALIDATED_SELECTORS allowlist', () => {
-    it('contains exactly 20 selectors (all known swap selectors)', () => {
-      expect(VALIDATED_SELECTORS.size).toBe(20)
+    it('contains exactly 22 selectors (all known swap selectors)', () => {
+      // [SPRINT-9H] 20 → 22: + Augustus V6.2 swapExactAmountInOnCurveV1/V2.
+      expect(VALIDATED_SELECTORS.size).toBe(22)
     })
 
     it('matches KNOWN_SWAP_SELECTORS from swap-selectors.ts', async () => {

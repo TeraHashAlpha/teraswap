@@ -10,7 +10,7 @@
  * Zero dependencies. No imports.
  */
 
-// ── Known swap function selectors (20 total) ────────────────
+// ── Known swap function selectors (22 total) ────────────────
 
 export const KNOWN_SWAP_SELECTORS: Set<string> = new Set([
   // 1inch
@@ -19,8 +19,17 @@ export const KNOWN_SWAP_SELECTORS: Set<string> = new Set([
   '0xd9627aa4', '0x415565b0',
   // Paraswap (Augustus V5 — legacy)
   '0x3598d8ab', '0xa94e78ef', '0x46c67b6d',
-  // Paraswap (Augustus V6 — swapExactAmountIn)
+  // Paraswap / Velora (Augustus V6.2 — multi-hop swapExactAmountIn)
   '0xe3ead59e',
+  // [SPRINT-9H] Paraswap / Velora (Augustus V6.2 — single-DEX Curve methods).
+  // Base (and mainnet) Velora routes through a Curve pool encode a DEX-specific
+  // method, NOT the generic swapExactAmountIn — so these were blocked as
+  // "Unknown swap function selector" on the Base Preview. Verified 3 ways
+  // against the live Augustus V6.2 (0x6a00…1068, same address on Ethereum +
+  // Base): codeslaw ABI, openchain.xyz, and local viem toFunctionSelector over
+  // the canonical signature (which reproduced the known 0xe3ead59e exactly).
+  '0x1a01c532', // swapExactAmountInOnCurveV1  (CurveV1StableNg — the Base failure)
+  '0xe37ed256', // swapExactAmountInOnCurveV2  (Curve crypto pools)
   // Odos
   '0x83800a8e',
   // KyberSwap
