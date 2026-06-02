@@ -65,11 +65,17 @@ TeraSwapOrderExecutor v2 deployed with all audit findings resolved.
 
 ## Phase 2 — Multi-Chain Expansion
 
-- [ ] Arbitrum support (adapt FeeCollector + aggregation APIs)
-- [ ] Base support
+- [x] ~~**Base support**~~ — ✅ **LIVE** (2026-06-02). Chain-aware adapters (Sprints 43–45 + 9C),
+  per-chain Uniswap V3 registry, FeeCollector + routers whitelisted on Base, gas/fee in ETH+USD at
+  parity with mainnet, Base/mainnet UI parity (9E). 12 sources incl. **Bebop** (ADR-010, 9D).
+  Verified in prod (Vercel `adc4188`): multi-source Compare + USD + swaps execute.
+- [ ] Arbitrum support (adapt FeeCollector + aggregation APIs) — next chain
 - [ ] Polygon support
 - [ ] Chain-aware routing (bridge + swap in one flow)
 - [ ] Cross-chain order execution
+
+_Base arc references: ADR-009 (multi-chain), ADR-010 (Bebop), Sprints 43–45 + 9C/9D/9E/9F,
+INC-2026-05-31-001 (502 → resolved)._
 
 ---
 

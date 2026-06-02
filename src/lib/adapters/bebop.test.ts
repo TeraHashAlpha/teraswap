@@ -132,6 +132,21 @@ describe('bebop adapter — JAM [SPRINT-9D]', () => {
     const bebop = await loadBebop()
     await expect(bebop.fetchSwapData({ src: SRC, dst: DST, amount: '1', from: FROM, slippage: 0.5, chainId: 1 })).rejects.toThrow(/whitelist/i)
   })
+
+  // [SPRINT-9F bug3 re-review] The firm/executable path is asymmetric to fetchQuote:
+  // a no-route (empty buyTokens) is NON-FATAL for fetchQuote (returns null) but a
+  // HARD error for fetchSwapData (a quote about to be executed MUST carry an amount).
+  // The security gates pass here (valid settlement + whitelisted), so the throw can
+  // only come from the firm-quote integrity check (bebop.ts:133), not an earlier
+  // gate — the /no buyTokens amount/ matcher pins that exact path. Closes the
+  // execution-path coverage gap the adversarial review flagged (MEDIUM).
+  it('fetchSwapData THROWS on empty buyTokens — a firm quote MUST carry an amount [SPRINT-9F bug3]', async () => {
+    mockBebop(bebopBody({ buyTokens: {} }))
+    const bebop = await loadBebop()
+    await expect(
+      bebop.fetchSwapData({ src: SRC, dst: DST, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId: 1 }),
+    ).rejects.toThrow(/no buyTokens amount/)
+  })
 })
 
 describe('bebop wiring [SPRINT-9D]', () => {
