@@ -16,9 +16,10 @@
  * @internal — server-only module. Called by POST /api/monitor/validate-execution.
  */
 
-import { createPublicClient, http, parseAbi, formatUnits, type PublicClient, type Log } from 'viem'
-import { mainnet } from 'viem/chains'
+import { parseAbi, formatUnits, type PublicClient, type Log } from 'viem'
 import { kv } from '@/lib/kv'
+import { getPublicClientForChain } from './chains/clients'
+import { DEFAULT_CHAIN_ID } from './chains/registry'
 import { emitTransitionAlert } from './alert-wrapper'
 import { forceDisable } from './source-state-machine'
 
@@ -66,6 +67,9 @@ export interface ValidateExecutionParams {
   expectedMinOutput: string
   /** Optional: user's pre-swap balance of tokenOut (enables balance_diff fallback) */
   preSwapBalance?: string
+  /** [SPRINT-9G G3] Chain the swap executed on. Default mainnet → byte-identical;
+   *  any other chain reads the receipt + balanceOf over THAT chain's RPC. */
+  chainId?: number
 }
 
 // ── Constants ────────────────────────────────────────────
@@ -76,19 +80,6 @@ const WARNING_THRESHOLD = 0.02
 /** KV audit trail key prefix and TTL */
 const AUDIT_KEY_PREFIX = 'teraswap:execution-audit:'
 const AUDIT_TTL_SECONDS = 7 * 24 * 60 * 60 // 7 days
-
-// ── RPC client ───────────────────────────────────────────
-
-function getServerClient(): PublicClient {
-  const rpcUrl = process.env.RPC_URL
-    || process.env.NEXT_PUBLIC_RPC_URL
-    || 'https://eth.llamarpc.com'
-
-  return createPublicClient({
-    chain: mainnet,
-    transport: http(rpcUrl),
-  })
-}
 
 // ── Transfer log extraction ──────────────────────────────
 
@@ -143,6 +134,7 @@ export async function validateExecution(
   const {
     txHash, source, recipient, tokenOut,
     tokenOutDecimals, expectedMinOutput, preSwapBalance,
+    chainId = DEFAULT_CHAIN_ID,
   } = params
 
   const now = new Date().toISOString()
@@ -157,7 +149,7 @@ export async function validateExecution(
 
   let client: PublicClient
   try {
-    client = getServerClient()
+    client = getPublicClientForChain(chainId)
   } catch (err) {
     const result: ExecutionValidation = {
       ...baseResult,

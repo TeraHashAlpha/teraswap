@@ -8,21 +8,28 @@
 
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { validateExecution, type ValidateExecutionParams } from './post-execution-validator'
+import { _clearClientCache } from './chains/clients'
 
 // ── Mocks ────────────────────────────────────────────────
 
-// Mock viem's createPublicClient
+// Mock viem's createPublicClient. [SPRINT-9G G3] Record the chain id each client
+// is built for so a test can assert the validator reads the receipt over the
+// SWAP'S chain RPC (Base 8453), never the mainnet client.
 const mockGetTransactionReceipt = vi.fn()
 const mockReadContract = vi.fn()
+const createdClientChainIds: Array<number | undefined> = []
 
 vi.mock('viem', async () => {
   const actual = await vi.importActual('viem')
   return {
     ...actual,
-    createPublicClient: () => ({
-      getTransactionReceipt: mockGetTransactionReceipt,
-      readContract: mockReadContract,
-    }),
+    createPublicClient: (opts: { chain?: { id?: number } }) => {
+      createdClientChainIds.push(opts?.chain?.id)
+      return {
+        getTransactionReceipt: mockGetTransactionReceipt,
+        readContract: mockReadContract,
+      }
+    },
   }
 })
 
@@ -449,6 +456,34 @@ describe('validateExecution', () => {
       expect(result).toBeDefined()
       expect(result.severity).toBe('unknown')
       expect(result.txHash).toBe(TX_HASH)
+    })
+  })
+
+  // ── [SPRINT-9G G3 / M12] Chain-aware receipt validation ──
+  describe('chain-aware execution validation [SPRINT-9G G3]', () => {
+    it('reads the receipt over the swap chain RPC (Base 8453), never the mainnet client', async () => {
+      _clearClientCache()
+      createdClientChainIds.length = 0
+      mockGetTransactionReceipt.mockResolvedValue({
+        status: 'success',
+        logs: [makeTransferLog('0x' + '1'.repeat(40), RECIPIENT, 1000000n)],
+      })
+      const result = await validateExecution(baseParams({ chainId: 8453 }))
+      expect(result.severity).toBe('ok')
+      // The validator must build a Base client and never the mainnet one.
+      expect(createdClientChainIds).toContain(8453)
+      expect(createdClientChainIds).not.toContain(1)
+    })
+
+    it('defaults to the mainnet client when chainId is omitted (byte-identical)', async () => {
+      _clearClientCache()
+      createdClientChainIds.length = 0
+      mockGetTransactionReceipt.mockResolvedValue({
+        status: 'success',
+        logs: [makeTransferLog('0x' + '1'.repeat(40), RECIPIENT, 1000000n)],
+      })
+      await validateExecution(baseParams())
+      expect(createdClientChainIds).toContain(1)
     })
   })
 })
