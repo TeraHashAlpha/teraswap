@@ -1,4 +1,4 @@
-import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getAdapterApiUrl, getRouterWhitelist, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
@@ -54,6 +54,17 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
 
   if (!data.buyAmount && !data.returnAmount) throw new Error('Balancer: no route')
   const outAmount = data.buyAmount || data.returnAmount || '0'
+
+  // [SPRINT-9G G7] Fail closed: the SOR API's swap target (`data.to`) must be a
+  // whitelisted router on this chain — the Balancer V2 Vault — mirroring the
+  // Bebop gate (bebop.ts:122-128). Refuse rather than hand back executable
+  // calldata aimed at an unverified contract. This matches the whitelist
+  // enforcement already applied downstream (useSwap.validateRouterAddress) and
+  // also covers the /v1/swap path. Verify the live Vault-vs-relayer target per
+  // chain before relying on Balancer execution (see FEEDBACK.md).
+  if (data.to && !getRouterWhitelist(chainId).includes(String(data.to).toLowerCase())) {
+    throw new Error(`Balancer: swap target ${data.to} not whitelisted on chain ${chainId} — refusing swap`)
+  }
 
   return {
     source: 'balancer',
