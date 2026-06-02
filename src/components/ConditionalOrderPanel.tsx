@@ -15,7 +15,7 @@ import {
   getChainlinkFeeds,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
-import { playClick, playTouchMP3, playSwapConfirmMP3, playTriggerAlert, playCancelOrderMP3, playError, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
+import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'

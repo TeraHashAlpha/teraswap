@@ -15,7 +15,7 @@ import {
   getChainlinkFeeds,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
-import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, playError, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
+import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
@@ -163,7 +163,6 @@ function CreateLimitForm({
   const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
   const [amount, setAmount] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(2) // 7 days default
-  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // ── Price state ──────────────────────────────────────────
   const [targetPrice, setTargetPrice] = useState('')

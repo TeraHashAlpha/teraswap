@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 
 interface Props {
   /** ISO-8601 launch date, e.g. "2026-03-02T12:00:00Z" */

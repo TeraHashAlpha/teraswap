@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useReadContract } from 'wagmi'
-import { erc20Abi, getAddress } from 'viem'
+import { getAddress } from 'viem'
 import { addCustomToken, findTokenByAddress, type Token } from '@/lib/tokens'
 
 /**

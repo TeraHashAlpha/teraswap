@@ -10,7 +10,7 @@ const OPTIONS: { mode: ThemeMode; label: string; icon: string }[] = [
 ]
 
 export default function ThemeToggle() {
-  const { mode, setMode, resolved } = useTheme()
+  const { mode, setMode } = useTheme()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
