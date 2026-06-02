@@ -55,6 +55,11 @@ function buyAmount(data: { buyTokens?: Record<string, { amount?: string }> }, ds
 }
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
+  // [SPRINT-9H] Demo-mode (no BEBOP_API_KEY) → the JAM firm response carries no
+  // executable settlement, so a price quote here would win Best and then fail at
+  // swap. Treat it as no executable quote: don't rank Bebop until the key is
+  // configured. With the key present the firm path is unchanged.
+  if (!AGGREGATOR_APIS.bebop.key) return null
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
   // Price-only (gross): NO fee params so Bebop ranks fairly vs the other sources.
   const qs = new URLSearchParams({
@@ -115,7 +120,12 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   const approvalTarget: string | undefined = data?.approvalTarget
   const txTo: string | undefined = data?.tx?.to
   if (!settlement || !approvalTarget || !txTo) {
-    throw new Error('Bebop: incomplete settlement data in response')
+    // [SPRINT-9H] Fail-soft: a response lacking executable settlement fields
+    // (e.g. demo-mode without BEBOP_API_KEY) is "no executable quote", not an
+    // error. Return null so it's circuit-breaker-NEUTRAL and never surfaces as a
+    // hard "incomplete settlement data" failure. The SECURITY gates below
+    // (settlement present-but-wrong / not whitelisted) still fail closed (throw).
+    return null
   }
 
   // ── Security gate (fail closed) ──

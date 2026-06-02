@@ -147,6 +147,30 @@ describe('bebop adapter — JAM [SPRINT-9D]', () => {
       bebop.fetchSwapData({ src: SRC, dst: DST, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId: 1 }),
     ).rejects.toThrow(/no buyTokens amount/)
   })
+
+  // [SPRINT-9H] Fail-soft on a JAM response that lacks executable settlement
+  // fields (e.g. demo-mode without BEBOP_API_KEY). This is "no executable quote",
+  // NOT a hard error: return null (breaker-NEUTRAL) so it never surfaces as the
+  // "incomplete settlement data in response" failure seen on the 9G Preview.
+  // Distinct from the SECURITY rejects above (present-but-wrong → still throw).
+  it('fetchSwapData returns null (fail-soft) when settlement fields are absent [SPRINT-9H]', async () => {
+    // A price-only JAM response: buyTokens amount present, but NO settlementAddress
+    // / approvalTarget / tx — exactly the demo-mode shape.
+    mockBebop({ buyTokens: { [DST]: { amount: '2000000000' } }, gasFee: { usd: 1.23 } })
+    const bebop = await loadBebop()
+    const r = await bebop.fetchSwapData({ src: SRC, dst: DST, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId: 8453 })
+    expect(r).toBeNull()
+  })
+
+  // [SPRINT-9H] In demo-mode (no BEBOP_API_KEY) Bebop can price but not execute,
+  // so it must not rank as Best and then fail at swap. fetchQuote returns null.
+  it('fetchQuote returns null in demo-mode (no BEBOP_API_KEY) so Bebop cannot win Best [SPRINT-9H]', async () => {
+    delete process.env.BEBOP_API_KEY
+    mockBebop() // API would return a price, but with no key we must not quote
+    const bebop = await loadBebop()
+    const q = await bebop.fetchQuote({ src: SRC, dst: DST, amount: '1000000000000000000', chainId: 8453 })
+    expect(q).toBeNull()
+  })
 })
 
 describe('bebop wiring [SPRINT-9D]', () => {
