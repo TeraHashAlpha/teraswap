@@ -68,4 +68,21 @@ describe('evaluatePriceGate [SPRINT-9J J1]', () => {
     expect(gate.mode).toBe('block')
     expect(gate.reason).toBe('oracle-integrity')
   })
+
+  // [SPRINT-9J review F2] A deviation far beyond any plausible price impact (vs a
+  // HEALTHY oracle) is almost certainly manipulation / a broken quote, not
+  // slippage — hard-block it (no click-through). Normal impact stays consent.
+  it('a normal illiquid-route impact (4%) is still CONSENT, not blocked (spec)', () => {
+    expect(evaluatePriceGate(pc({ deviation: 0.04, level: 'danger', executionPrice: 1920 })).mode).toBe('consent')
+  })
+
+  it('an EXTREME deviation (>ceiling) on a healthy oracle is a HARD block (possible manipulation)', () => {
+    const gate = evaluatePriceGate(pc({ deviation: 0.40, level: 'danger', executionPrice: 1200 }))
+    expect(gate.mode).toBe('block')
+    expect(gate.reason).toBe('extreme-deviation')
+  })
+
+  it('a deviation just under the ceiling stays consentable', () => {
+    expect(evaluatePriceGate(pc({ deviation: 0.20, level: 'danger', executionPrice: 1600 })).mode).toBe('consent')
+  })
 })

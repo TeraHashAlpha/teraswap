@@ -27,9 +27,10 @@
  * Loosening this client gate to informed-consent does not weaken those.
  */
 import type { PriceCheck } from './chainlink'
+import { PRICE_IMPACT_CONSENT_CEILING } from './constants'
 
 export type PriceGateMode = 'ok' | 'consent' | 'block'
-export type PriceGateReason = 'none' | 'oracle-integrity' | 'price-impact'
+export type PriceGateReason = 'none' | 'oracle-integrity' | 'price-impact' | 'extreme-deviation'
 
 export interface PriceGateResult {
   mode: PriceGateMode
@@ -59,6 +60,11 @@ export function evaluatePriceGate(check: PriceCheck): PriceGateResult {
   }
 
   if (check.level === 'danger' || check.level === 'warn') {
+    // [review F2] Beyond the consent ceiling it isn't plausible price impact —
+    // treat it as possible manipulation / broken quote and HARD block.
+    if (deviation > PRICE_IMPACT_CONSENT_CEILING) {
+      return { mode: 'block', reason: 'extreme-deviation', deviation }
+    }
     return { mode: 'consent', reason: 'price-impact', deviation }
   }
 

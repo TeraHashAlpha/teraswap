@@ -23,8 +23,9 @@ interface Props {
    *  - 'price-impact' → healthy oracle, high price impact; user must tick the
    *    informed-consent checkbox above (recoverable, NOT an indefinite pause)
    *  - 'oracle-stale' → oracle integrity failure (stale/invalid); hard block
+   *  - 'extreme'      → deviation beyond plausible price impact; hard block
    *  - 'oracle'       → no Chainlink feed + high-value swap; hard block */
-  blockReason?: 'price-impact' | 'oracle-stale' | 'oracle'
+  blockReason?: 'price-impact' | 'oracle-stale' | 'extreme' | 'oracle'
   onApprove: () => void
   onSwap: () => void
 }
@@ -68,7 +69,9 @@ export default function SwapButton({
         ? 'Confirm price impact to swap'
         : blockReason === 'oracle'
           ? 'No oracle — swap blocked'
-          : 'Oracle data unsafe — swap blocked'
+          : blockReason === 'extreme'
+            ? 'Price deviation too high — blocked'
+            : 'Oracle data unsafe — swap blocked'
       return { text: msg, disabled: true, onClick: () => {}, variant: blockReason === 'price-impact' ? 'warning' : 'error' }
     }
     if (approvalStatus === 'approving_permit2')

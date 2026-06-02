@@ -25,6 +25,13 @@ describe('sanitizeUpstreamError [SPRINT-9J J2]', () => {
     }
   })
 
+  it('[review F4] redacts a secret in a URL PATH segment, not just the query', () => {
+    expect(sanitizeUpstreamError('build failed: https://api.foo.com/v1/sk_live_SECRET123ABC/quote'))
+      .not.toContain('sk_live_SECRET123ABC')
+    expect(sanitizeUpstreamError('GET https://api.0x.org/AbCdEf1234567890AbCdEf1234567890/swap 500'))
+      .not.toContain('AbCdEf1234567890AbCdEf1234567890')
+  })
+
   it('preserves a clean human-readable message unchanged', () => {
     expect(sanitizeUpstreamError('1inch API timeout')).toBe('1inch API timeout')
     expect(sanitizeUpstreamError('No route found for this pair')).toBe('No route found for this pair')

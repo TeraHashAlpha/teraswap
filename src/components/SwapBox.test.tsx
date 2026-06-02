@@ -442,4 +442,40 @@ describe('SwapBox — J1 price-impact informed consent', () => {
     await act(async () => { fireEvent.click(checkbox) })
     expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
   })
+
+  // [review F1] Consent is tied to the ACCEPTED deviation — if a quote refresh
+  // escalates the deviation, the stale consent must NOT carry the worse trade.
+  it('re-requires consent when the deviation ESCALATES on a quote refresh', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_PRICE_IMPACT) // 2.2%
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    await act(async () => { fireEvent.click(screen.getByRole('checkbox')) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+    // Auto-poll escalates 2.2% → 3.5% (worse, same trade) — consent must re-arm.
+    useChainlinkPriceMock.mockReturnValue({ ...HEALTHY_PRICE_IMPACT, deviation: 0.035, level: 'danger', executionPrice: 1900 })
+    useQuoteMock.mockReturnValue(quoteMeta('2930000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('price-impact')
+  })
+
+  // [review F2] A deviation far beyond plausible impact is a HARD block — no checkbox.
+  it('hard-blocks an EXTREME deviation (>ceiling) with no consent checkbox', async () => {
+    useChainlinkPriceMock.mockReturnValue({ ...HEALTHY_PRICE_IMPACT, deviation: 0.40, level: 'danger', executionPrice: 1200 })
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('extreme')
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
 })
