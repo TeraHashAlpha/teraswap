@@ -15,14 +15,16 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
 import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, chainlinkAggregatorAbi } from './chainlink'
+import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
 // [P220] Control the L2 sequencer gate. Defaults to "up" so the existing
 // chainId=1 tests (which never call it) and Base tests are unaffected unless a
-// case opts into "down".
-const mockIsSequencerUp = vi.fn<() => Promise<boolean>>(async () => true)
+// case opts into "down". [SPRINT-9G G1] forwards (chainId, client) so a test can
+// assert WHICH client the swap path hands the sequencer gate.
+const mockIsSequencerUp = vi.fn<(chainId?: number, client?: unknown) => Promise<boolean>>(async () => true)
 vi.mock('@/lib/chains/sequencer-check', () => ({
-  isSequencerUp: () => mockIsSequencerUp(),
+  isSequencerUp: (chainId: number, client: unknown) => mockIsSequencerUp(chainId, client),
   SEQUENCER_GRACE_PERIOD_SEC: 3600,
   _clearSequencerCache: () => {},
 }))
@@ -273,5 +275,64 @@ describe('chainlink — multi-chain [P218]', () => {
     // Base feed resolves, but the sequencer gate short-circuits to null before
     // any price RPC is made.
     expect(await fetchChainlinkPriceRaw(BASE_WETH, 8453)).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9G G1 / M04+M06] Chain-aware RPC routing. The Base feed read must hit
+// the BASE RPC (getRpcUrlForChain(8453)), and the sequencer gate must receive a
+// Base-bound client — never the mainnet client/RPC. Mainnet stays byte-identical.
+// ─────────────────────────────────────────────────────────────
+describe('chainlink — chain-aware RPC routing [SPRINT-9G G1]', () => {
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+
+  /** Stub fetch so rpcCall returns a valid fresh round, recording each URL hit. */
+  function captureRpc(): string[] {
+    const urls: string[] = []
+    const now = nowSec()
+    const fetchMock = vi.fn(async (url: unknown, init: { body?: string }) => {
+      urls.push(String(url))
+      const body = JSON.parse(init.body as string)
+      const selector = (body.params[0].data as string).slice(0, 10).toLowerCase()
+      let result: `0x${string}`
+      if (selector === DECIMALS_SELECTOR) {
+        result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: 8 })
+      } else if (selector === LATEST_ROUND_SELECTOR) {
+        result = encodeFunctionResult({
+          abi: chainlinkAggregatorAbi,
+          functionName: 'latestRoundData',
+          result: [100n, 300_000_000_000n, now, now, 100n],
+        })
+      } else {
+        throw new Error(`Unexpected selector ${selector}`)
+      }
+      return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return urls
+  }
+
+  it('routes a Base (8453) feed read to the Base RPC, not the mainnet channel', async () => {
+    const urls = captureRpc()
+    await fetchChainlinkPriceRaw(BASE_WETH, 8453)
+    expect(urls.length).toBeGreaterThan(0)
+    // Every eth_call for a Base feed must target the Base RPC, not /api/rpc or mainnet.
+    for (const u of urls) expect(u).toBe(getRpcUrlForChain(8453))
+  })
+
+  it('hands the sequencer gate a Base-bound client (chain.id 8453), not the mainnet client', async () => {
+    captureRpc()
+    mockIsSequencerUp.mockClear()
+    await fetchChainlinkPriceRaw(BASE_WETH, 8453)
+    expect(mockIsSequencerUp).toHaveBeenCalled()
+    const client = mockIsSequencerUp.mock.calls[0]?.[1] as { chain?: { id?: number } } | undefined
+    expect(client?.chain?.id).toBe(8453)
+  })
+
+  it('mainnet (chainId 1) feed read stays on the mainnet RPC channel (byte-identical)', async () => {
+    const urls = captureRpc()
+    await fetchChainlinkPriceRaw(NATIVE_ETH, 1)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(u).toBe(getRpcUrlForChain(1))
   })
 })
