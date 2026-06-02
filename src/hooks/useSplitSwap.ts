@@ -1,13 +1,11 @@
 import { useState, useCallback, useRef } from 'react'
-import { parseUnits, encodeFunctionData, erc20Abi } from 'viem'
+import { parseUnits, encodeFunctionData } from 'viem'
 import { getPrivateClient } from '@/lib/rpc'
-import { useAccount, useChainId, useSendTransaction, useSignTypedData } from 'wagmi'
+import { useAccount, useChainId, useSendTransaction } from 'wagmi'
 import {
   validateFeeIntegrity,
   validateRouterAddress,
   usesFeeCollector,
-  submitCowOrder,
-  pollCowOrderStatus,
   type NormalizedQuote,
 } from '@/lib/api'
 import {
@@ -17,9 +15,9 @@ import {
   type AggregatorName,
 } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
-import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
+import { logSwapToSupabase } from '@/lib/analytics'
 import { safeBigInt } from '@/lib/utils'
-import type { SplitRoute, SplitLeg } from '@/lib/split-routing-types'
+import type { SplitRoute } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
