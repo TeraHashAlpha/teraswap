@@ -473,3 +473,31 @@ If DNS is compromised:
 ---
 
 > This audit was performed using automated analysis agents. A professional third-party audit by a reputable firm (Trail of Bits, OpenZeppelin, Consensys Diligence) is recommended before handling significant TVL.
+
+---
+
+## Full-codebase audit — 2026-06-02 (post-Base-launch)
+
+**Source:** `Audits/FULL-AUDIT-2026-06-02.md` (9 parallel read-only agents). **Raw result:** 0
+Critical, 0 High, 12 Medium, 25 Low, 17 Info. No fund-loss / auth-bypass / gate-bypass found.
+
+**Architect re-rating.** The 12 Mediums share one root cause — **safety/oracle gates not made
+chain-aware** — and were rated under a stale "Base coming-soon" premise. **Base is LIVE**
+(`isChainActive(8453)===true`), so the following are OPEN and re-rated **HIGH** (active on live Base
+swaps); remediation = **SPRINT-9G** (`docs/Prompts/SPRINT-9G.md`), version A (Base stays live).
+Security gates → Auditor-reviewed, not auto-applied.
+
+| ID | Re-rated | Issue | → |
+|----|----------|-------|---|
+| M04/M06 | **HIGH** | Chainlink feed + L2 sequencer use mainnet-pinned client → Base oracle validation broken (rule #9) | 9G G1 |
+| M07/M11 | **HIGH** | DefiLlama >$10k guard hardcodes `ethereum` → Base sub-$10k fail-open, >$10k over-block | 9G G2 |
+| M12 | **HIGH** | Post-exec balance validator mainnet-pinned → dead on Base (no auto-disable) | 9G G3 |
+| M03/M05/L06 | MEDIUM | `isChainActive` client-side only — `/api/swap`,`/api/quote`,`/api/spender` no server check | 9G G4 |
+| M08 | MEDIUM | `useTokenBalances` not chain-aware → Base balances never render | 9G G5 |
+| hooks | MEDIUM | `useSwap`/`useSplitSwap` use wagmi `useChainId()` vs `useActiveChainId()` — two sources of truth | 9G G6 |
+| balancer | MED/LOW | Balancer adapter not fail-closed on `tx.to` whitelist (unlike Bebop) | 9G G7 |
+| feeTier/startedAt | LOW | feeTier cache key uses static `CHAIN_ID`; swap-path Chainlink omits `startedAt>0` guard | 9G G8 |
+
+**Safe cleanups applied** (branch `chore/full-audit-cleanup`, 3 signed commits, dead code only,
+1357 tests green). Remaining 25 Low / 17 Info → backlog (incl. stale DEPLOY.md — FeeCollector +
+simulation are in fact already chain-aware).
