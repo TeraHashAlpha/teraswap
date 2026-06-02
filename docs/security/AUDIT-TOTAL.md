@@ -522,3 +522,17 @@ gate. Rule #9 (Chainlink + DefiLlama on Base) genuinely satisfied. 1391 tests (+
 | G8 — Cache + startedAt | feeTier/startedAt | ✅ CLOSED |
 
 Deploy via Vercel Preview gate → verify Base oracle/guard/validator → promote.
+
+---
+
+### Sprint 9H Audit (2026-06-02) — Base Execution Fixes
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 1I.** Report: `Audits/Sprint/SPRINT-9H-AUDIT.md`.
+Found on 9G Preview. Two fixes: Velora selector allowlist + Bebop fail-soft. 1399 tests (+8).
+
+| Fix | Description | Status |
+|-----|------------|--------|
+| 9H-1 — Velora selectors | Augustus V6.2 `swapExactAmountInOnCurveV1` (0x1a01c532) + `...V2` (0xe37ed256) added to selector allowlist, recipient gate, and tx-preview decoder. Same trust class as existing ParaSwap methods. Only 2 methods added (no blind widening). | ✅ CLOSED |
+| 9H-2 — Bebop fail-soft | Demo-mode (no key) → `fetchQuote` returns null (doesn't rank). Absent settlement → `fetchSwapData` returns null (breaker-neutral). Security gates intact when data present-but-wrong (still throw). | ✅ CLOSED |
+
+**Bundle 9G + 9H → Vercel Preview → verify Velora + Kyber on Base + Bebop no longer wins-then-fails → promote.**
