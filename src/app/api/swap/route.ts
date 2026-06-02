@@ -7,6 +7,7 @@ import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { getChainStatus } from '@/lib/chains/activation'
 
 // [P121] Source allow-list — built from the canonical AGGREGATOR_APIS map so
 // adding/removing a source in constants.ts automatically updates this guard.
@@ -78,6 +79,28 @@ export async function POST(req: NextRequest) {
         { error: 'Unknown aggregator source', code: 'INVALID_SOURCE' },
         { status: 400 },
       )
+    }
+
+    // [SPRINT-9G G4 / M03+M05] Server-side chain-activation gate. The activation
+    // guard must live at the trust boundary (the server), not only in the UI /
+    // /v1 routes — otherwise a direct caller obtains executable, fee-free swap
+    // calldata for a chain TeraSwap has not launched. Reject an unsupported chain
+    // (400) and a not-yet-live "coming-soon" chain (409, FeeCollector unset).
+    // Absent chainId → mainnet default → unchecked → byte-identical.
+    if (chainId != null) {
+      const chainStatus = getChainStatus(Number(chainId))
+      if (chainStatus === 'unsupported') {
+        return NextResponse.json(
+          { error: `Chain ${chainId} is not supported`, code: 'CHAIN_UNSUPPORTED' },
+          { status: 400 },
+        )
+      }
+      if (chainStatus === 'coming-soon') {
+        return NextResponse.json(
+          { error: `Chain ${chainId} is not yet available for swaps`, code: 'CHAIN_COMING_SOON' },
+          { status: 409 },
+        )
+      }
     }
 
     // [Audit B-06] Rate limiting by IP — persistent via Vercel KV.

@@ -64,6 +64,14 @@ vi.mock('@/lib/defillama', () => ({
   HIGH_VALUE_THRESHOLD_USD: 10_000,
 }))
 
+// [SPRINT-9G G4] Server-side activation gate. Default 'active' so chainId-bearing
+// tests (e.g. the G2 Base price-guard cases) proceed; per-test overrides drive
+// the unsupported/coming-soon branches.
+const mockGetChainStatus = vi.fn().mockReturnValue('active')
+vi.mock('@/lib/chains/activation', () => ({
+  getChainStatus: (id: number) => mockGetChainStatus(id),
+}))
+
 // ── Import after mocks ────────────────────────────────────
 
 import { POST } from './route'
@@ -110,6 +118,7 @@ beforeEach(() => {
   })
   mockValidateSwapPrice.mockClear().mockResolvedValue(null)
   mockFetchDefiLlamaPrice.mockClear().mockResolvedValue(null)
+  mockGetChainStatus.mockClear().mockReturnValue('active')
 })
 
 // ── Tests ─────────────────────────────────────────────────
@@ -341,5 +350,43 @@ describe('POST /api/swap — chain-aware price guard [SPRINT-9G G2]', () => {
     await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
     expect(mockFetchDefiLlamaPrice.mock.calls[0][1]).toBe('ethereum')
     expect(mockValidateSwapPrice.mock.calls[0][0].chain).toBe('ethereum')
+  })
+})
+
+// [SPRINT-9G G4 / M03+M05] The server must enforce the chain-activation gate, not
+// trust the client. A direct caller must not obtain executable (fee-free) swap
+// calldata for an unsupported or not-yet-launched chain.
+describe('POST /api/swap — server-side activation gate [SPRINT-9G G4]', () => {
+  it('rejects an unsupported chain with 400 before rate-limit + upstream', async () => {
+    mockGetChainStatus.mockReturnValueOnce('unsupported')
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 999999 }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.code).toBe('CHAIN_UNSUPPORTED')
+    expect(mockCheckRateLimit).not.toHaveBeenCalled()
+    expect(mockFetchSwapFromSource).not.toHaveBeenCalled()
+  })
+
+  it('rejects a coming-soon chain with 409', async () => {
+    mockGetChainStatus.mockReturnValueOnce('coming-soon')
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe('CHAIN_COMING_SOON')
+    expect(mockFetchSwapFromSource).not.toHaveBeenCalled()
+  })
+
+  it('allows an active chain (Base live) to proceed', async () => {
+    mockGetChainStatus.mockReturnValue('active')
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(res.status).toBe(200)
+  })
+
+  it('does not consult the gate when chainId is omitted (mainnet default)', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(200)
+    expect(mockGetChainStatus).not.toHaveBeenCalled()
   })
 })

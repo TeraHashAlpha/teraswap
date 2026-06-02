@@ -137,4 +137,15 @@ describe('GET /api/quote — debug=sources', () => {
     // diagnostics still returned alongside the failed pipeline
     expect(body.sources).toEqual(DIAG_RESULT.sources)
   })
+
+  // [SPRINT-9G G4] Quote stays multi-chain-OPEN for supported chains (incl.
+  // coming-soon, for browsing) but rejects a genuinely unsupported chain. Uses
+  // the REAL getChainStatus (no mock) — chainId 8453 is supported and unaffected.
+  it('rejects an unsupported chainId with 400 (and never calls fetchMetaQuote)', async () => {
+    const res = await callGET({ src: USDC, dst: WETH, amount: '1000000', chainId: '999999' })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.code).toBe('CHAIN_UNSUPPORTED')
+    expect(fetchMetaQuoteMock).not.toHaveBeenCalled()
+  })
 })
