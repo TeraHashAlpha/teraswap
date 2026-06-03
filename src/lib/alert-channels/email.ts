@@ -56,7 +56,7 @@ export async function sendEmailAlert(
     `<tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;"><strong>Time</strong></td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${payload.timestamp}</td></tr>`,
     '</table>',
     '<p style="margin-top: 16px;">',
-    '<a href="https://teraswap.app/admin/monitor" style="color: #3b82f6;">View Dashboard</a>',
+    '<a href="https://www.teraswap.app/admin/monitor" style="color: #3b82f6;">View Dashboard</a>',
     '</p>',
     '</div>',
   ].join('\n')

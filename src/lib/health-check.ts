@@ -3,7 +3,7 @@
  *
  * Two modes:
  *   - Aggregator: sends a minimal quote request (USDC→USDT, 1 unit)
- *   - Self: HEAD request to teraswap.app
+ *   - Self: HEAD request to www.teraswap.app (canonical host; apex 308-redirects to it)
  *
  * TLS cert capture is deferred to a dedicated tls.connect call
  * (only when baseline comparison is needed, not every tick).

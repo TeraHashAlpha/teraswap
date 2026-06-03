@@ -10,6 +10,24 @@ const nextConfig = {
     ],
   },
 
+  // ── Host canonicalization [SPRINT-9M] ─────────────────
+  // Canonical host is www.teraswap.app (matches layout.tsx SITE_URL + WC metadata).
+  // Enforce apex → www so a single origin serves. The rule fires only when the Host
+  // header is exactly the apex; www, *.vercel.app previews, and localhost don't match
+  // (no redirect loop). 308 permanent. On Vercel a domain-level redirect (apex → www)
+  // can also be configured in Project → Domains (edge-level, fires before this) — see
+  // FEEDBACK; the two coexist safely (edge redirect makes this a no-op fallback).
+  async redirects() {
+    return [
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'teraswap.app' }],
+        destination: 'https://www.teraswap.app/:path*',
+        permanent: true,
+      },
+    ]
+  },
+
   // ── Security Headers ──────────────────────────────────
   // [FE-L-01] Defense-in-depth: vercel.json mirrors all headers below EXCEPT CSP.
   // CSP is Next.js-only because it uses dynamic directives (unsafe-eval in dev).

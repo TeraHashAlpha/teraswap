@@ -1885,3 +1885,78 @@ is what RainbowKit/getDefaultConfig actually resolves; `npm ls @coinbase/wallet-
   (9K invariant intact), tsc 0, lint 0 errors, 1446 tests, `next build` ✓, `npm ci --dry-run` valid.
   **The actual "Coinbase Wallet still appears in the RainbowKit modal AND connects" MUST be confirmed on
   Preview/prod before close** — Preview-test first per the prompt (not a security gate, no Auditor).
+
+## Feedback — SPRINT-9M / M1 canonical host = www (feat/sprint-9m-host-and-lockfile, off origin/main @ 89b3a80)
+
+Owner decision (2026-06-03): canonical host is **www.teraswap.app**. Aligned origin ⇔ canonical ⇔ WC
+metadata to www and enforced apex→www in-repo.
+
+### What changed
+- `app/layout.tsx`: `SITE_URL` → `https://www.teraswap.app` (drives canonical `metadataBase` + `openGraph.url`;
+  Twitter/OG images are relative so they inherit it). This is the mismatch 9K flagged — now resolved.
+- `next.config.js`: added `redirects()` — apex `teraswap.app` → `https://www.teraswap.app/:path*`, **308**,
+  gated on `has: host == teraswap.app`. Verified in `.next/routes-manifest.json` (status 308; `/_next` auto-excluded).
+  Only the bare apex matches → www, `*.vercel.app` previews, and localhost are unaffected (no loop).
+- Self-references aligned to www: `monitored-endpoints.ts` self-probe host, `SwapBox.tsx` share-tweet links (×2),
+  alert-channel dashboard links (discord/email/telegram), and stale comments in `wagmiConfig.ts` + `health-check.ts`.
+
+### Deliberately NOT changed (with rationale — so this isn't read as an oversight)
+- **CORS allowlists keep BOTH hosts** (`cors.ts`, `validation.ts`) and the **CORS fallback defaults** stay apex
+  (`api/log-activity`, `api/log-event`, `api/monitor`). apex remains a *valid* origin (it 308s to www but is still
+  ours), and `validation.test.ts` asserts both apex+www are allowed. Removing apex would be a security/behaviour
+  change requiring an Auditor — out of M1's "host alignment, no behaviour change" scope.
+- **`alerts@teraswap.app`** (email.ts `from`) left as apex — it's a **mail domain**, not a web host; `www` is wrong for email.
+- Test-fixture request URLs using the apex are irrelevant to the canonical host — left as-is.
+
+### Found-and-fixed bug (in scope)
+- `public/robots.txt` advertised `Sitemap: https://teraswap.io/sitemap.xml` — **wrong domain entirely** (`.io`, which
+  is why the `teraswap.app` grep missed it; per memory the only correct domain is `teraswap.app`). Corrected to
+  `https://www.teraswap.app/sitemap.xml`. **Caveat:** no sitemap currently exists (no `app/sitemap.ts` / `public/sitemap.xml`),
+  so `/sitemap.xml` will 404. Crawlers tolerate a 404 sitemap, but owner follow-up: add `app/sitemap.ts` or drop the line
+  (out of M1 host-alignment scope).
+
+### Owner-side step (Vercel)
+- The in-repo `next.config` redirect enforces apex→www at the Next runtime (works regardless of dashboard config).
+  **Preferred additionally:** set apex→www at **Vercel → Project → Domains** (edge-level, fires before the function →
+  no wasted invocation). The two coexist safely (edge redirect makes the in-repo one a no-op fallback). Also confirm the
+  apex `teraswap.app` is assigned to the project so the redirect can fire at all.
+
+### Verification
+- tsc 0, lint 0 errors, 1446 tests pass, `next build` ✓, redirect present in routes-manifest as 308. No swap/contract/gate
+  changes — mainnet/Base byte-identical. Preview-test the apex→www redirect + canonical tags before prod.
+
+## Feedback — SPRINT-9M / M2 @next/swc lockfile persistence (retires the 9I→9K→9L manual restore)
+
+### Mechanism chosen
+Declared all 8 `@next/swc-*` platform packages as the root project's own **`optionalDependencies`**, pinned to
+exact **`16.2.6`** (same version `next` pins its own swc optionals to). package.json gains an `optionalDependencies`
+block; the lockfile gains the matching `packages[""].optionalDependencies`.
+
+### Why it works (root cause of the recurrence)
+A darwin `npm install` prunes from the lockfile any *transitive* optional dependency whose `os`/`cpu` doesn't match
+the install host — so `next`'s own `@next/swc-*` optionals (which are transitive) lost the 5 non-darwin-arm64
+entries each time. npm does **not** prune packages declared as the *root project's* `optionalDependencies`: they
+stay in `packages` + `packages[""].optionalDependencies` regardless of install OS. Only the platform-matching
+binary is actually *installed* (optional + `os`/`cpu` gating), so darwin installs `darwin-arm64` and silently
+skips the other 7 (no `EBADPLATFORM`), while Linux CI installs `linux-x64-gnu`/`musl`.
+
+### Empirical proof
+- Before (9K/9L): a darwin `npm install` pruned the lock from 8 → 3 swc entries (Linux binaries dropped → `npm ci` would fail on Vercel).
+- After this change: a darwin `npm install` keeps **all 8** (verified: 8 before, 8 after; entry-set byte-identical, no churn beyond
+  one harmless npm re-sort of an unrelated `string_decoder` key). `npm ci --dry-run` valid; `next build` ✓ on darwin.
+- Linux confirmation: the lock carries `@next/swc-linux-x64-gnu` + `-musl` with resolved+integrity; the **PR's Linux CI
+  (`npm ci` + `next build`) is the live confirmation** (can't run Linux locally).
+
+### Why `optionalDependencies` and not `dependencies`
+The swc packages carry `os`/`cpu` constraints. In regular `dependencies`, npm would try to install all 8 and fail
+on mismatched platforms (`EBADPLATFORM`). `optionalDependencies` is exactly the gate that makes npm skip non-matching ones.
+
+### Maintenance coupling (IMPORTANT)
+The 8 pins are exact `16.2.6` to dedupe against `next`'s own exact swc pins (avoids a double-install of two swc
+versions). **They MUST be bumped in lockstep whenever `next` is upgraded** — if they drift from `next`'s version,
+npm resolves two swc versions. Worth a small CI assertion (next version === the 8 swc pins) as a follow-up.
+
+### Alternatives rejected
+`.npmrc` `os`/`cpu` (no "keep all platforms" option), committing the lock from Linux CI (fragile; a local darwin
+install re-prunes it), npm config flags. The `optionalDependencies` pin is the community-standard fix for the same
+Rollup/esbuild/next-swc lockfile-pruning class of issue and is the cleanest version-controlled mechanism.

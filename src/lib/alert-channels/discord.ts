@@ -71,7 +71,7 @@ export async function sendDiscordAlert(
             { name: 'Time', value: payload.timestamp, inline: false },
           ],
           footer: { text: 'TeraSwap Monitor' },
-          url: 'https://teraswap.app/admin/monitor',
+          url: 'https://www.teraswap.app/admin/monitor',
         },
       ],
     }),
