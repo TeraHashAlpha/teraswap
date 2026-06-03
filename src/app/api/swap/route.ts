@@ -8,6 +8,14 @@ import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { getChainStatus } from '@/lib/chains/activation'
+import { sanitizeUpstreamError } from '@/lib/sanitize-error'
+
+// [SPRINT-9J J2] Give the function enough headroom that a slow swap-build never
+// hits the platform's default ceiling (which serves an HTML 504 the route never
+// produced → client "Unexpected token '<' … not valid JSON"). The build itself
+// is bounded far lower by SWAP_BUILD_TIMEOUT_MS×attempts, so we fail fast as
+// clean JSON well inside this window rather than ever using it all.
+export const maxDuration = 60
 
 // [P121] Source allow-list — built from the canonical AGGREGATOR_APIS map so
 // adding/removing a source in constants.ts automatically updates this guard.
@@ -290,7 +298,9 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
+    // [SPRINT-9J J2] Always JSON (never let the platform serve HTML), and redact
+    // any secret an upstream adapter error might have echoed (URL apiKey, Bearer).
+    const message = sanitizeUpstreamError(err instanceof Error ? err.message : 'Unknown error')
     return NextResponse.json({ error: message }, { status: 502 })
   }
 }

@@ -10,6 +10,7 @@ import { estimateMevSavings } from '@/lib/mev-savings'
 import { safeBigInt } from '@/lib/utils'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
+import InfoTooltip from './InfoTooltip'
 
 interface Props {
   meta: MetaQuoteResult
@@ -314,7 +315,7 @@ export default function QuoteBreakdown({
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-cream-35">
                 Pool fee tier
-                <span className="cursor-help" title="Uniswap V3 pools charge a fee on every swap. Each token pair can have multiple pools with different fee tiers (0.01%, 0.05%, 0.3%, 1%). TeraSwap automatically picks the pool with the best output for you.">&#9432;</span>
+                <InfoTooltip label="Pool fee tier info" content="Uniswap V3 pools charge a fee on every swap. Each token pair can have multiple pools with different fee tiers (0.01%, 0.05%, 0.3%, 1%). TeraSwap automatically picks the pool with the best output for you." />
               </span>
               <span className="text-xs font-semibold text-orange-400">
                 {best.meta.uniswapV3Fee / 10000}%
@@ -379,7 +380,7 @@ export default function QuoteBreakdown({
         <div className="mb-1 flex items-center justify-between font-medium text-cream-80">
           <span className="flex items-center gap-1">
             Platform fee {feeCollected ? `(${FEE_PERCENT}%)` : ''}
-            <span className="cursor-help text-cream-35" title={feeCollected ? 'This fee supports platform development. Collected by the aggregator API.' : 'No fee for this route. Fees are collected on 1inch, 0x, and KyberSwap routes.'}>&#9432;</span>
+            <InfoTooltip label="Platform fee info" content={feeCollected ? 'This fee supports platform development. Collected by the aggregator API.' : 'No fee for this route. Fees are collected on 1inch, 0x, and KyberSwap routes.'} />
           </span>
           {feeCollected ? (
             <span>
@@ -415,7 +416,7 @@ export default function QuoteBreakdown({
           }`}>
             <span className="flex items-center gap-1">
               Price impact
-              <span className="cursor-help text-cream-35" title="Estimated impact based on Chainlink oracle vs execution price. Higher impact means your trade is large relative to available liquidity.">&#9432;</span>
+              <InfoTooltip label="Price impact info" content="Estimated impact based on Chainlink oracle vs execution price. Higher impact means your trade is large relative to available liquidity." />
             </span>
             <span>~{(priceCheck.deviation * 100).toFixed(2)}%</span>
           </div>

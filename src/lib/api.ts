@@ -20,6 +20,7 @@ import {
   friendlyError,
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
+import { withSwapBuildRetry } from './adapters/swap-build-retry'
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { getFeeIncompatibleSources } from './chains/activation'
@@ -471,14 +472,19 @@ export async function fetchSwapFromSource(
   const adapter = ADAPTER_REGISTRY.find(a => a.name === source)
   if (!adapter) throw new Error(`Unknown source: ${source}`)
 
+  // [SPRINT-9J J2] Bound + retry the build so a slow upstream fails fast as a
+  // clean JSON error instead of the function running to a platform HTML 504.
+  // The build is idempotent (no on-chain broadcast) so the retry is safe; the
+  // circuit breaker sees only the final outcome of the retried attempt.
   const result = await withCircuitBreaker(source, () =>
-    adapter.fetchSwapData({
+    withSwapBuildRetry((signal) => adapter.fetchSwapData({
       src, dst, amount, from, slippage,
       srcDecimals, dstDecimals,
       quoteMeta,
       chainId,
       recipient,
-    })
+      signal,
+    }))
   )
   if (!result) throw new Error(`${source}: no swap data returned`)
   return result

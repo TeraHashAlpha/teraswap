@@ -61,6 +61,12 @@ export interface PriceCheck {
   level: PriceWarningLevel
   message: string | null
   oracleUnavailable: boolean     // true when no Chainlink feed exists for this pair
+  // [SPRINT-9J J1] true when the deviation/warn signal is an ORACLE-INTEGRITY
+  // failure (stale round, answeredInRound<roundId, answer<=0) rather than a
+  // price-impact deviation. Integrity failures are a genuine oracle-safety
+  // event → hard block; a deviation on a healthy oracle is price impact →
+  // informed consent. See evaluatePriceGate in ./price-gate.
+  oracleIntegrityFailed?: boolean
 }
 
 // ── Helpers ──────────────────────────────────────────────

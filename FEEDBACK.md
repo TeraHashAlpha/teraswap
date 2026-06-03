@@ -926,7 +926,6 @@ mainnet default (separate surfaces; mainnet-identical).
   empty-RPC guard, hypothetical VIEM_CHAINS drift, two false-green-test claims,
   test-count). With this fix, all three Sprint-44 mainnet-pinned items are fully
   wired and chain-threaded end-to-end.
-<<<<<<< HEAD
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong
@@ -995,7 +994,6 @@ mainnet default (separate surfaces; mainnet-identical).
   order"), directly validating the new P197 guard, since that behaviour change
   is the part most likely to regress silently. Final suite: 1165 → 1172
   (+7), 0 skipped, 0 failed.
-=======
 
 ## Feedback — Sprint 45 / Base activation goal (this commit)
 
@@ -1030,7 +1028,6 @@ mainnet default (separate surfaces; mainnet-identical).
   no-op-until-env-set wiring; real go-live still requires the actual Base mainnet
   FeeCollector deploy + Sprint 45 audit pass + setting NEXT_PUBLIC_BASE_FEE_COLLECTOR
   in the Vercel production env.
->>>>>>> 3667a50 (feat(base): wire Base FeeCollector to NEXT_PUBLIC_BASE_FEE_COLLECTOR env (null fallback))
 
 ## Feedback — Sprint 45 / fix(base): accept any active chain (this commit)
 
@@ -1738,3 +1735,66 @@ Triage + isolated verification of the 10 open Dependabot PRs. Deliverables:
 - **`gh` is broken on this host:** `/opt/homebrew/bin/gh` is the npm `node-gh` package, not the
   GitHub CLI, and is unauthenticated — cannot enumerate/merge PRs. PR list taken from the prompt
   (authoritative). *Backlog:* install the real `gh` (`brew install gh`) for PR automation.
+## Feedback — SPRINT-9J live swap UX/reliability (feat/sprint-9j-swap-ux, off origin/main @ 4aa5aff)
+
+Three live bugs fixed TDD on top of prod. 5 signed commits. Full suite 1443 passed,
+tsc + lint(0 err) + next build green. J1 is a SECURITY gate (rule #9) → Auditor before prod.
+
+### J1 [HIGH·mainnet] Chainlink-deviation gate blocked legit swaps
+- **Root cause confirmed in code:** `priceCheck.deviation = |executionPrice − chainlinkSpot|/chainlinkSpot`,
+  where executionPrice already bakes in the trade's own price impact — AND `QuoteBreakdown` displays
+  that exact number as "Price impact". `SwapBox.priceBlocked` hard-blocked at BOTH 'warn' (≥2%) and
+  'danger' (≥3%), so a ~2.2% impact on an illiquid PMM route (kipseli-pamm) paused the swap forever
+  (the 15s re-poll recomputed the same impact). The "auto-re-enable poll" was just the quote refresh —
+  there was no timer; it could never clear because the impact persists.
+- **Fix:** new pure `evaluatePriceGate` splits oracle-INTEGRITY (stale / answeredInRound<roundId /
+  startedAt==0 / answer<=0 → hard block, no override) from healthy-oracle DEVIATION (price impact →
+  informed-consent checkbox). The genuine manipulation backstop is UNCHANGED: the server DefiLlama
+  guard (`priceGuardBlocked`, cannot be overridden) + the on-chain minimumOutput. Only the client
+  deviation gate was relaxed to consent.
+
+### Security concern surfaced + remediated by adversarial self-review (20-agent workflow)
+- **[HIGH] consent escalation:** the first cut stored a boolean `priceImpactAccepted`, so a quote
+  refresh that ESCALATED the deviation (2.5% → 3.2%) kept stale consent, and a chain switch (token
+  remap effect) didn't reset it. Now consent stores the ACCEPTED deviation and is valid only while the
+  live deviation ≤ accepted + 0.5%; reset on every trade-parameter change incl. chain switch.
+- **[HIGH] extreme deviation:** a deviation far beyond plausible impact could be clicked through. Added
+  `PRICE_IMPACT_CONSENT_CEILING` (25%) — above it, hard-block as possible manipulation. 2–15% (the
+  user's max slippage) stays consent per spec.
+- **Residual/accepted risk (Auditor please confirm):** for a pair Chainlink CAN price but DefiLlama
+  CANNOT (exotic, small swap < $10k), a 2–25% deviation is consent-based — the user is shown "~X% below
+  the Chainlink reference" and accepts. This is the spec's intended model (price impact → consent);
+  Chainlink is the surfaced reference and minimumOutput caps execution. DefiLlama's small-swap fail-open
+  is pre-existing (rule #9 blocks >$10k when DefiLlama is down).
+
+### J2 [HIGH/MED·Base/Velora] HTML-not-JSON on slow swap-build
+- **Root cause:** `/api/swap` already returns JSON in its catch (verified), but `fetchSwapFromSource`
+  ran `adapter.fetchSwapData` with NO timeout and the route had NO `maxDuration` → a slow Velora
+  `/transactions/{chainId}` outran the platform limit → Vercel served an HTML 504.
+- **Fix:** `withSwapBuildRetry` (per-attempt timeout 12s + AbortSignal + retry of TRANSIENT failures
+  only, 2 attempts) wraps the build inside the circuit breaker; build is idempotent (no broadcast — CoW
+  order-submit is a separate client step) so retry can't double-submit. `export const maxDuration = 60`.
+  502 body now runs `sanitizeUpstreamError` (drops URL path+query, Bearer, key=val) so no API key leaks.
+- **Edge case / deviation from prompt:** the prompt said "AbortController on Velora AND other adapters".
+  I threaded the signal through Velora (the named culprit) only. The `withTimeout` RACE already bounds
+  EVERY adapter to ≤24s < maxDuration 60s → the route returns clean JSON for all sources regardless;
+  the per-adapter AbortSignal is only orphaned-connection hygiene. Threading it through the other ~10
+  adapters is a low-value follow-up (their fetchSwapData would each need the `signal` param), left out
+  to keep the blast radius minimal. The review's "10/12 adapters return HTML 504" claim was verified
+  FALSE for this reason.
+
+### J3 [LOW] info (ⓘ) tooltips didn't open
+- **Root cause:** the icons were bare `<span title="…">` — native HTML title only shows on slow hover,
+  never on click or touch (mobile). New `<InfoTooltip>` opens on click + hover, Escape/outside-click to
+  close, role="tooltip" + aria, content rendered as an escaped text child (no XSS). Replaced 4 icons
+  (QuoteBreakdown ×3, SwapBox MEV ×1). Other `title=` badges (Direct/MEV/refresh) left as-is — not ⓘ togglers.
+
+### Test gaps / tooling
+- **SwapBox is hard to unit-test** (≈10 hooks + 7 children mocked). J1 UI behaviour is asserted via the
+  mocked SwapButton's `data-blocked`/`data-reason` props + banner/checkbox queries; the pure decision
+  logic lives in `evaluatePriceGate` (fully unit-tested) to keep the component thin.
+- **No live preview smoke run here** — verify on Vercel Preview: a mainnet illiquid ETH→USDC (high
+  impact → consent, not indefinite pause), a Base Velora swap (no HTML, bounded+retried), and the ⓘ
+  tooltips on mobile, before promotion.
+- **Adversarial review** (workflow, 20 agents): 17 raised → 12 confirmed (4 actionable, fixed; 8 INFO/
+  no-fix) + 5 correctly dismissed. The actionable confirmations are remediated in commit `14807a8`.
