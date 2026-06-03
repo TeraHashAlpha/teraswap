@@ -13,6 +13,7 @@ import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
+import { orderFallbackSources } from '@/lib/swap-fallback'
 import { useApproval } from '@/hooks/useApproval'
 import Permit2EducationModal from '@/components/Permit2EducationModal'
 import TokenAddressBadge from '@/components/TokenAddressBadge'
@@ -197,7 +198,7 @@ export default function SwapBox() {
   // rather than the engine-computed gasSavingsUsd — the server clamps it
   // (max $500) and computes the persisted gas_savings_usd from there.
   const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
-  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
 
   const executionPriceUsd = meta?.best && tokenIn && tokenOut
@@ -543,9 +544,11 @@ export default function SwapBox() {
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
     } else if (meta?.best.source) {
-      executeSwap(meta.best.source)
+      // [SPRINT-9O Part B] Pass ranked fallbacks so a best route that reverts
+      // pre-swap simulation auto-switches to the next working source.
+      executeSwap(meta.best.source, orderFallbackSources(meta, meta.best.source))
     }
-  }, [approvalReady, approve, meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
+  }, [approvalReady, approve, meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
 
   const handleSwap = useCallback(() => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -568,9 +571,11 @@ export default function SwapBox() {
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
     } else if (meta?.best.source) {
-      executeSwap(meta.best.source)
+      // [SPRINT-9O Part B] Pass ranked fallbacks so a best route that reverts
+      // pre-swap simulation auto-switches to the next working source.
+      executeSwap(meta.best.source, orderFallbackSources(meta, meta.best.source))
     }
-  }, [meta?.best.source, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
+  }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
 
   return (
     <>
@@ -922,6 +927,13 @@ export default function SwapBox() {
         {simulationSkipped && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-warning/90">
             <span aria-hidden="true">&#9888;</span> Simulation unavailable — proceed with caution
+          </div>
+        )}
+        {/* [SPRINT-9O Part B] Best route couldn't execute its pre-swap sim
+            (e.g. mainnet Velora) → we auto-switched to a working source. */}
+        {fallbackNotice && (
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-warning/90">
+            <span aria-hidden="true">&#8635;</span> {fallbackNotice.from} couldn&apos;t execute this route — switched to {fallbackNotice.to}
           </div>
         )}
 

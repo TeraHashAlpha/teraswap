@@ -18,6 +18,7 @@ import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
+import { shouldFallbackToNextSource } from '@/lib/swap-fallback'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 
 // ── Price Guard error (DefiLlama server-side block) ──────
@@ -106,6 +107,14 @@ export interface PendingSwapData {
   swapStartTime: number
 }
 
+/** [SPRINT-9O Part B] Surfaced when the best route couldn't execute and the
+ *  flow auto-switched to a working source. */
+interface SwapFallbackNotice {
+  from: AggregatorName
+  to: AggregatorName
+  reason?: string
+}
+
 interface UseSwapResult {
   status: SwapStatus
   txHash: `0x${string}` | undefined
@@ -122,6 +131,10 @@ interface UseSwapResult {
    *  client-side revert guard. UI surfaces a non-blocking "simulation
    *  unavailable" warning; the on-chain minimumOutput still protects funds. */
   simulationSkipped: boolean
+  /** [SPRINT-9O Part B] Non-null when the best route failed its pre-swap
+   *  simulation (or otherwise couldn't execute) and the flow auto-switched to
+   *  a working source. UI surfaces "switched from X to Y". */
+  fallbackNotice: SwapFallbackNotice | null
   /** Prepared tx data waiting for user confirmation (non-null when status === 'confirming') */
   pendingSwap: PendingSwapData | null
   /** [LP-05] CoW-only: actual output-token surplus over the user's expected
@@ -130,7 +143,7 @@ interface UseSwapResult {
    *  improvement). Null on error, on non-CoW swaps, or when the trades
    *  endpoint didn't return an executedBuyAmount. */
   mevSurplusActualWei: bigint | null
-  execute: (source: AggregatorName) => Promise<void>
+  execute: (source: AggregatorName, fallbacks?: AggregatorName[]) => Promise<void>
   /** Confirm the pending swap after reviewing the transaction preview */
   confirmSwap: () => void
   reset: () => void
@@ -167,6 +180,8 @@ export function useSwap(
   const [simulationSkipped, setSimulationSkipped] = useState(false) // [P209] inconclusive sim → fail-open warning
   const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
   const [mevSurplusActualWei, setMevSurplusActualWei] = useState<bigint | null>(null)
+  // [SPRINT-9O Part B] Set when a best route reverted its pre-swap sim and we auto-fell back.
+  const [fallbackNotice, setFallbackNotice] = useState<SwapFallbackNotice | null>(null)
 
   // Q24: Mounted ref to prevent state updates after unmount (polling race condition)
   const mountedRef = useRef(true)
@@ -230,7 +245,10 @@ export function useSwap(
   })
 
   // ── Standard swap flow (1inch, 0x, Velora, Odos, KyberSwap) ──
-  const executeStandardSwap = useCallback(async (source: AggregatorName) => {
+  // [SPRINT-9O Part B] Ref so the fallback path can re-enter the flow with the
+  // next source without listing executeStandardSwap in its own dependency array.
+  const executeStandardSwapRef = useRef<((source: AggregatorName, fallbacks?: AggregatorName[]) => Promise<void>) | null>(null)
+  const executeStandardSwap = useCallback(async (source: AggregatorName, fallbacks: AggregatorName[] = []) => {
     if (!tokenIn || !tokenOut || !address || !amountIn) return
 
     setErrorMessage(null)
@@ -557,8 +575,23 @@ export function useSwap(
       })
       setStatus('confirming')
     } catch (err) {
-      setStatus('error')
       const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      // [SPRINT-9O Part B] A best route that reverts the pre-swap simulation
+      // (the mainnet Velora→Augustus RouterNotWhitelisted bug) — or otherwise
+      // can't execute — must not dead-end the user. Walk to the next-best source
+      // that simulates OK. Deliberate price-guard blocks and user-actionable
+      // errors (approval needed) stop instead of silently switching.
+      if (
+        fallbacks.length > 0 &&
+        !(err instanceof PriceGuardError) &&
+        shouldFallbackToNextSource(err)
+      ) {
+        const [next, ...rest] = fallbacks
+        console.warn(`[9O] ${source} can't execute (${errMsg.slice(0, 80)}) — falling back to ${next}`)
+        setFallbackNotice({ from: source, to: next, reason: errMsg })
+        return executeStandardSwapRef.current?.(next, rest)
+      }
+      setStatus('error')
       setErrorMessage(errMsg)
       // Detect DefiLlama price guard block
       if (err instanceof PriceGuardError) {
@@ -578,6 +611,8 @@ export function useSwap(
       })
     }
   }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction])
+  // [SPRINT-9O Part B] Keep the ref pointed at the latest closure for the fallback recursion.
+  executeStandardSwapRef.current = executeStandardSwap
 
   // ── CoW Protocol flow (intent-based, EIP-712 signing) ──
   const executeCowSwap = useCallback(async () => {
@@ -865,11 +900,12 @@ export function useSwap(
   }, [tokenIn, tokenOut, address, amountIn, slippage, chainId, signTypedDataAsync])
 
   // ── Main execute dispatcher ──
-  const execute = useCallback(async (source: AggregatorName) => {
+  const execute = useCallback(async (source: AggregatorName, fallbacks: AggregatorName[] = []) => {
+    setFallbackNotice(null) // [SPRINT-9O] fresh swap — clear any prior auto-switch notice
     if (source === 'cowswap') {
       return executeCowSwap()
     }
-    return executeStandardSwap(source)
+    return executeStandardSwap(source, fallbacks)
   }, [executeCowSwap, executeStandardSwap])
 
   // ── Confirm swap after user reviews transaction preview ──
@@ -1076,10 +1112,11 @@ export function useSwap(
     setSimulationSkipped(false)
     setPendingSwap(null)
     setMevSurplusActualWei(null)
+    setFallbackNotice(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
 }
 
 function parseWagmiError(error: Error): string {
