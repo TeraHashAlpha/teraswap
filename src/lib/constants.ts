@@ -230,6 +230,25 @@ export const DEFAULT_SLIPPAGE = 0.5
 export const QUOTE_REFRESH_MS = 15_000
 export const INPUT_DEBOUNCE_MS = 500
 export const QUOTE_TIMEOUT_MS = 10_000
+// [SPRINT-9J J2] Swap-BUILD (calldata) timeout/retry. The build is idempotent
+// (it never broadcasts a tx), so a transient/timeout failure can be retried
+// safely. Two attempts × 12s = 24s, comfortably inside the route's maxDuration
+// (60s) so the function fails fast as clean JSON instead of a platform HTML 504.
+export const SWAP_BUILD_TIMEOUT_MS = 12_000
+export const SWAP_BUILD_MAX_ATTEMPTS = 2
+export const SWAP_BUILD_RETRY_BACKOFF_MS = 400
+// [SPRINT-9J review F2] Upper bound on a CONSENTABLE Chainlink-vs-execution
+// deviation. 2–15% is plausible price impact on an illiquid route (the user's
+// max slippage is 15%), so it stays informed-consent. A deviation beyond this
+// ceiling, against a HEALTHY oracle, is not normal impact — it's almost
+// certainly manipulation or a broken quote → hard-block (no click-through).
+export const PRICE_IMPACT_CONSENT_CEILING = 0.25 // 25%
+// [SPRINT-9J review F1] Consent is granted for a specific deviation; it stays
+// valid only while the live deviation doesn't worsen by more than this tolerance.
+// A quote refresh that escalates the impact beyond accepted+tolerance re-arms the
+// checkbox so the user explicitly re-accepts the worse price. Small jitter within
+// the band does not nag.
+export const PRICE_IMPACT_CONSENT_TOLERANCE = 0.005 // 0.5%
 
 // [LP-04] Smart MEV preference threshold.
 // When the user has NOT toggled "Force MEV Protection" on, the SwapBox

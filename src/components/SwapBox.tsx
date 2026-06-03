@@ -18,6 +18,8 @@ import Permit2EducationModal from '@/components/Permit2EducationModal'
 import TokenAddressBadge from '@/components/TokenAddressBadge'
 import DigitRoller from '@/components/DigitRoller'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
+import { evaluatePriceGate } from '@/lib/price-gate'
+import InfoTooltip from '@/components/InfoTooltip'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
 // analytics-tracker removed (dead code — server-side /api/analytics is the source of truth)
@@ -27,7 +29,7 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
@@ -81,6 +83,13 @@ export default function SwapBox() {
   // Set true when the amount changes; cleared once a fresh `meta` (quote) resolves.
   // Used to suppress the price-deviation banner from flashing on stale data.
   const [priceCheckStale, setPriceCheckStale] = useState(false)
+  // [SPRINT-9J J1] Informed consent for a price-impact deviation. A healthy-oracle
+  // deviation is the trade's OWN price impact (slippage the user accepts), not an
+  // oracle-safety event — so it is acceptable via this checkbox rather than an
+  // indefinite block. [review F1] We store the ACCEPTED deviation (not a bare
+  // boolean) so consent auto-arms again if a quote refresh escalates the impact
+  // beyond what the user accepted. Reset to null on every trade-parameter change.
+  const [acceptedDeviation, setAcceptedDeviation] = useState<number | null>(null)
 
   const handleSourceToggle = useCallback((source: string) => {
     setExcludedSources(prev => {
@@ -141,6 +150,8 @@ export default function SwapBox() {
   useEffect(() => {
     setTokenIn((t) => remapTokenToChain(t, activeChainId))
     setTokenOut((t) => remapTokenToChain(t, activeChainId))
+    // [review F1] A chain switch is a new trade — drop any prior price-impact consent.
+    setAcceptedDeviation(null)
   }, [activeChainId])
   // [P223] Swap activation guard. A chain is "coming soon" until its
   // FeeCollector is deployed (config.contracts.feeCollector !== null). Mainnet
@@ -439,6 +450,7 @@ export default function SwapBox() {
     if (clean === '' || /^\d*\.?\d*$/.test(clean)) {
       setDisplayAmountIn(formatWithSeparator(clean))
       setPriceCheckStale(true)
+      setAcceptedDeviation(null)
       if (swapStatus !== 'idle') resetSwap()
       if (splitSwapStatus !== 'idle') resetSplitSwap()
     }
@@ -449,6 +461,7 @@ export default function SwapBox() {
     setTokenOut(tokenIn)
     setDisplayAmountIn('')
     setPriceCheckStale(true)
+    setAcceptedDeviation(null)
     resetSwap()
     resetSplitSwap()
   }
@@ -456,6 +469,7 @@ export default function SwapBox() {
   function handleSetAmount(value: string) {
     setDisplayAmountIn(formatWithSeparator(value))
     setPriceCheckStale(true)
+    setAcceptedDeviation(null)
   }
 
   // Clear the stale flag whenever a fresh quote (`meta`) resolves — at that
@@ -465,11 +479,28 @@ export default function SwapBox() {
     if (meta?.best?.toAmount) setPriceCheckStale(false)
   }, [meta?.best?.toAmount])
 
-  // ── Security: block swap when Chainlink deviation exceeds threshold ──
-  // Block at BOTH warn (≥2%) and danger (≥3%) — button only re-enables when price
-  // returns fully within parameters (deviation < PRICE_DEVIATION_WARN).
-  // oracleUnavailable tokens are handled separately by the tiered oracle system below.
-  const priceBlocked = (priceCheck.level === 'danger' || priceCheck.level === 'warn') && !priceCheck.oracleUnavailable
+  // ── Security: Chainlink price gate [SPRINT-9J J1] ──
+  // Separate a genuine ORACLE-INTEGRITY failure (stale / invalid round → hard
+  // block, cannot be overridden) from a healthy-oracle DEVIATION, which is the
+  // trade's OWN price impact (slippage the user already accepts → informed
+  // consent). The deviation no longer indefinitely pauses legit illiquid swaps.
+  // Genuine cross-source manipulation is still hard-blocked by the SERVER-side
+  // DefiLlama guard (priceGuardBlocked, cannot be overridden) and the on-chain
+  // minimumOutput caps realised loss. oracleUnavailable → tiered USD gate below.
+  const priceGate = evaluatePriceGate(priceCheck)
+  // [review F2] mode 'block' = oracle-integrity failure OR an extreme deviation
+  // (beyond plausible price impact). Both are HARD blocks (no click-through).
+  const oracleIntegrityBlocked = priceGate.mode === 'block'
+  const isExtremeBlock = oracleIntegrityBlocked && priceGate.reason === 'extreme-deviation'
+  const priceImpactConsentNeeded = priceGate.mode === 'consent'
+  // [review F1] Consent stays valid only while the live deviation hasn't worsened
+  // past the accepted level (+tolerance). A quote refresh that escalates the impact
+  // re-arms the checkbox so the user re-accepts the worse price.
+  const priceImpactAccepted =
+    acceptedDeviation != null && priceCheck.deviation <= acceptedDeviation + PRICE_IMPACT_CONSENT_TOLERANCE
+  const priceImpactBlocking = priceImpactConsentNeeded && !priceImpactAccepted
+  // Security-class block (Chainlink gate), as opposed to the oracle-unavailable gate.
+  const priceGateBlocked = oracleIntegrityBlocked || priceImpactBlocking
 
   // ── Security: block large swaps on tokens without Chainlink oracle ──
   // Estimate USD value of the swap input (only reliable when input is a stablecoin or ETH)
@@ -486,7 +517,7 @@ export default function SwapBox() {
   const oracleUnavailable = priceCheck.oracleUnavailable
   const oracleWarnThreshold = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_WARN_USD
   const oracleBlocked = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_BLOCK_USD
-  const anyBlocked = priceBlocked || oracleBlocked
+  const anyBlocked = priceGateBlocked || oracleBlocked
 
   const handleApproveAndSwap = useCallback(async () => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -495,10 +526,10 @@ export default function SwapBox() {
       if (address) {
         trackWalletActivity(address, {
           category: 'ui',
-          action: priceBlocked ? 'swap_blocked_security' : 'swap_blocked_oracle',
+          action: priceGateBlocked ? 'swap_blocked_security' : 'swap_blocked_oracle',
           token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
           metadata: {
-            reason: priceBlocked ? `price_deviation_${priceCheck.level}` : 'oracle_unavailable_large_swap',
+            reason: priceGateBlocked ? `price_gate_${priceGate.reason}` : 'oracle_unavailable_large_swap',
             deviation: priceCheck.deviation,
             estimatedUsd: estimatedInputUsd,
           },
@@ -522,10 +553,10 @@ export default function SwapBox() {
       if (address) {
         trackWalletActivity(address, {
           category: 'ui',
-          action: priceBlocked ? 'swap_blocked_security' : 'swap_blocked_oracle',
+          action: priceGateBlocked ? 'swap_blocked_security' : 'swap_blocked_oracle',
           token_in: tokenIn?.symbol, token_out: tokenOut?.symbol,
           metadata: {
-            reason: priceBlocked ? `price_deviation_${priceCheck.level}` : 'oracle_unavailable_large_swap',
+            reason: priceGateBlocked ? `price_gate_${priceGate.reason}` : 'oracle_unavailable_large_swap',
             deviation: priceCheck.deviation,
             estimatedUsd: estimatedInputUsd,
           },
@@ -553,7 +584,7 @@ export default function SwapBox() {
               onChange={(e) => handleAmountChange(e.target.value)}
               className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
             />
-            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); resetSwap() }} disabledAddress={tokenOut?.address} />
+            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); resetSwap() }} disabledAddress={tokenOut?.address} />
           </div>
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between px-1 text-xs text-cream-35">
@@ -590,7 +621,7 @@ export default function SwapBox() {
                   ? <span className="inline-block animate-pulse text-cream-35">...</span>
                   : null}
             </span>
-            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); resetSwap() }} disabledAddress={tokenIn?.address} />
+            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); resetSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size) && (
             <div className="mt-1 flex items-center justify-between px-1">
@@ -607,12 +638,11 @@ export default function SwapBox() {
             <span className="text-[12px] font-semibold text-cream-65">
               Force MEV Protection
             </span>
-            <span
-              className="cursor-help text-[10px] text-cream-35"
-              title="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
-            >
-              &#9432;
-            </span>
+            <InfoTooltip
+              className="text-[10px]"
+              label="MEV protection info"
+              content="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
+            />
           </div>
           <button
             onClick={() => setMevProtected(!mevProtected)}
@@ -733,25 +763,50 @@ export default function SwapBox() {
         )}
         {effectiveError && !isSplitActive && !priceGuardBlocked && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{effectiveError}</div>}
         {approvalError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{approvalError}</div>}
-        {/* Price deviation — warn level (2-3%): swap paused until price converges.
-            Gated on `!priceCheckStale` so the banner only appears AFTER a fresh
-            quote resolves for the current sell amount — prevents the warning
-            from flashing on stale priceCheck data while typing. */}
-        {priceBlocked && priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && !priceCheckStale && (
-          <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-            <span className="font-semibold">&#9888; Swap paused:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
-            Waiting for price to return within safe parameters. The button will re-enable automatically.
+        {/* [SPRINT-9J J1] Oracle-INTEGRITY failure (stale / invalid / incomplete
+            round): the oracle itself can't be trusted → HARD block, no override.
+            Stale-gated so it doesn't flash on in-flight quote data. */}
+        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && (
+          <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <span className="font-semibold">&#9888; Swap blocked — oracle data unsafe.</span>{' '}
+            {priceCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
+            <span className="mt-1 block text-[10px] text-danger/80">
+              This guards against trading on a manipulated or outdated oracle and cannot be overridden. Try again once the feed updates.
+            </span>
           </div>
         )}
-        {/* Price deviation — danger level (>3%): hard block. Same stale gate. */}
-        {priceBlocked && priceCheck.level === 'danger' && !priceCheckStale && (
+        {/* [review F2] Extreme deviation vs a healthy oracle — beyond plausible
+            price impact, so it is hard-blocked as possible manipulation / a broken
+            quote (cannot be clicked through). */}
+        {isExtremeBlock && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from Chainlink oracle.
-            This may indicate price manipulation or extreme low liquidity. Swap disabled for your protection.
+            <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(priceCheck.deviation * 100).toFixed(1)}% from the Chainlink oracle — far beyond normal price impact.
+            <span className="mt-1 block text-[10px] text-danger/80">
+              This likely indicates price manipulation or a broken quote and cannot be overridden. Try a smaller amount or a different pair.
+            </span>
+          </div>
+        )}
+        {/* [SPRINT-9J J1] Healthy-oracle DEVIATION = the trade's own price impact on
+            a low-liquidity route (expected, slippage-covered). Informed consent —
+            the user already accepts slippage — instead of an indefinite pause.
+            Genuine manipulation is still caught server-side (DefiLlama guard) and
+            by the on-chain minimum output. */}
+        {priceImpactConsentNeeded && !priceCheckStale && (
+          <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <span className="font-semibold">&#9888; High price impact:</span> this route executes ~{(priceCheck.deviation * 100).toFixed(1)}% below the Chainlink reference price — expected slippage on a low-liquidity route, not an oracle problem.
+            <label className="mt-2 flex items-center gap-2 text-[11px] text-warning/90">
+              <input
+                type="checkbox"
+                checked={priceImpactAccepted}
+                onChange={(e) => setAcceptedDeviation(e.target.checked ? priceCheck.deviation : null)}
+                className="h-3.5 w-3.5 accent-warning"
+              />
+              I understand the price impact and want to proceed.
+            </label>
           </div>
         )}
         {/* Oracle unavailable — tiered warnings */}
-        {oracleUnavailable && hasAmount && meta && !priceBlocked && (
+        {oracleUnavailable && hasAmount && meta && !priceGateBlocked && (
           <>
             {oracleBlocked ? (
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
@@ -795,7 +850,7 @@ export default function SwapBox() {
             "Switch to Ethereum", and the banner + handler guard cover the rest —
             so mixing !chainActive into priceBlocked only created a blockReason
             mismatch with no observable effect. */}
-        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={priceBlocked && priceCheck.level === 'warn' ? 'warn' : priceBlocked && priceCheck.level === 'danger' ? 'danger' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* [P95] Subtle gasless nudge — shown below the swap button when a
             non-CoW route is currently selected but the engine has flagged

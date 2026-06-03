@@ -32,11 +32,17 @@ export async function parseJsonOrThrow<T = unknown>(
 }
 
 // ── Timeout wrapper ──────────────────────────────────────
-export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+// [SPRINT-9J J2] Optional `onTimeout` lets a caller cancel the underlying work
+// (e.g. abort a fetch) at the moment the race is lost — not just stop waiting.
+// Existing 2-arg callers are unaffected.
+export function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout')), ms),
+      setTimeout(() => {
+        try { onTimeout?.() } catch { /* best-effort cancel */ }
+        reject(new Error('Timeout'))
+      }, ms),
     ),
   ])
 }

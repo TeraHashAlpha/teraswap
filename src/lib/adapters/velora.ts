@@ -36,7 +36,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient, srcDecimals = 18, dstDecimals = 18, chainId = DEFAULT_CHAIN_ID } = params
+  const { src, dst, amount, from, slippage, recipient, srcDecimals = 18, dstDecimals = 18, chainId = DEFAULT_CHAIN_ID, signal } = params
   const base = getAdapterApiUrl('velora', chainId)
 
   // Step 1: get price route
@@ -48,8 +48,11 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     network: chainId.toString(),
     version: '6.2',
   })
+  // [SPRINT-9J J2] Thread the build abort signal so a slow Velora upstream is
+  // cancelled when withSwapBuildRetry's timeout fires (the reported HTML-504 path).
   const priceRes = await fetch(`${base}/prices?${priceParams}`, {
     headers: { Accept: 'application/json' },
+    signal,
   })
   if (!priceRes.ok) throw new Error(`Velora price ${priceRes.status}`)
   const priceData = await parseJsonOrThrow<any>(priceRes, 'Velora')
@@ -71,6 +74,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(txBody),
+    signal,
   })
   if (!txRes.ok) {
     let errMsg = `Velora tx ${txRes.status}`

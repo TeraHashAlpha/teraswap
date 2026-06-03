@@ -60,8 +60,9 @@ export function useChainlinkPrice(
   const chainlinkPrice = Number(answer) / 10 ** Number(feedDecimals)
 
   // Security: invalid price
+  // [SPRINT-9J J1] oracleIntegrityFailed → genuine oracle-safety event (hard block).
   if (Number(answer) <= 0) {
-    return { chainlinkPrice: null, executionPrice: executionPriceUsd, deviation: 0, level: 'warn', message: 'Chainlink oracle returned invalid price.', oracleUnavailable: false }
+    return { chainlinkPrice: null, executionPrice: executionPriceUsd, deviation: 0, level: 'warn', message: 'Chainlink oracle returned invalid price.', oracleUnavailable: false, oracleIntegrityFailed: true }
   }
 
   // Security: answeredInRound must equal roundId (data from current round)
@@ -73,6 +74,7 @@ export function useChainlinkPrice(
       level: 'warn',
       message: 'Chainlink oracle data is stale (answeredInRound < roundId). Verify price manually.',
       oracleUnavailable: false,
+      oracleIntegrityFailed: true,
     }
   }
 
@@ -87,6 +89,7 @@ export function useChainlinkPrice(
       level: 'warn',
       message: `Chainlink oracle data outdated (${Math.floor(ageSeconds / 3600)}h old). Verify price manually.`,
       oracleUnavailable: false,
+      oracleIntegrityFailed: true,
     }
   }
 
