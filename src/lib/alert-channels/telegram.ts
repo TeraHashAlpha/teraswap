@@ -82,7 +82,7 @@ export async function sendTelegramAlert(payload: AlertPayload, options?: Telegra
     `<b>Reason:</b> ${safeReason}${reasonSuffix}`,
     `<b>Time:</b> ${payload.timestamp}`,
     '',
-    `<a href="https://teraswap.app/admin/monitor">Dashboard</a>`,
+    `<a href="https://www.teraswap.app/admin/monitor">Dashboard</a>`,
   ].join('\n')
 
   // [API-H-03] No action buttons on grace alerts — operator set the grace, no action needed

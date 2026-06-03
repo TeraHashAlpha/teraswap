@@ -19,7 +19,7 @@ const jetbrainsMono = JetBrains_Mono({
   variable: '--font-mono',
 })
 
-const SITE_URL = 'https://teraswap.app'
+const SITE_URL = 'https://www.teraswap.app'
 const SITE_TITLE = 'TeraSwap — The Gold Standard of DeFi Trading'
 const SITE_DESCRIPTION =
   'Maximum liquidity. Absolute protection. TeraSwap is an Ethereum meta-aggregator that queries 11 liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-free execution via CoW Protocol, and a privacy proxy that hides your IP from all external services.'

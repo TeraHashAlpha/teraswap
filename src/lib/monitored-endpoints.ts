@@ -17,7 +17,7 @@ export interface MonitoredEndpoint {
 
 export const MONITORED_ENDPOINTS: MonitoredEndpoint[] = [
   // ── TeraSwap own domain ──
-  { id: 'teraswap-self', hostname: 'teraswap.app', critical: true },
+  { id: 'teraswap-self', hostname: 'www.teraswap.app', critical: true },
 
   // ── Aggregator API endpoints (from src/lib/constants.ts AGGREGATOR_APIS) ──
   { id: '1inch',     hostname: 'api.1inch.dev',                        critical: true },

@@ -1885,3 +1885,42 @@ is what RainbowKit/getDefaultConfig actually resolves; `npm ls @coinbase/wallet-
   (9K invariant intact), tsc 0, lint 0 errors, 1446 tests, `next build` ✓, `npm ci --dry-run` valid.
   **The actual "Coinbase Wallet still appears in the RainbowKit modal AND connects" MUST be confirmed on
   Preview/prod before close** — Preview-test first per the prompt (not a security gate, no Auditor).
+
+## Feedback — SPRINT-9M / M1 canonical host = www (feat/sprint-9m-host-and-lockfile, off origin/main @ 89b3a80)
+
+Owner decision (2026-06-03): canonical host is **www.teraswap.app**. Aligned origin ⇔ canonical ⇔ WC
+metadata to www and enforced apex→www in-repo.
+
+### What changed
+- `app/layout.tsx`: `SITE_URL` → `https://www.teraswap.app` (drives canonical `metadataBase` + `openGraph.url`;
+  Twitter/OG images are relative so they inherit it). This is the mismatch 9K flagged — now resolved.
+- `next.config.js`: added `redirects()` — apex `teraswap.app` → `https://www.teraswap.app/:path*`, **308**,
+  gated on `has: host == teraswap.app`. Verified in `.next/routes-manifest.json` (status 308; `/_next` auto-excluded).
+  Only the bare apex matches → www, `*.vercel.app` previews, and localhost are unaffected (no loop).
+- Self-references aligned to www: `monitored-endpoints.ts` self-probe host, `SwapBox.tsx` share-tweet links (×2),
+  alert-channel dashboard links (discord/email/telegram), and stale comments in `wagmiConfig.ts` + `health-check.ts`.
+
+### Deliberately NOT changed (with rationale — so this isn't read as an oversight)
+- **CORS allowlists keep BOTH hosts** (`cors.ts`, `validation.ts`) and the **CORS fallback defaults** stay apex
+  (`api/log-activity`, `api/log-event`, `api/monitor`). apex remains a *valid* origin (it 308s to www but is still
+  ours), and `validation.test.ts` asserts both apex+www are allowed. Removing apex would be a security/behaviour
+  change requiring an Auditor — out of M1's "host alignment, no behaviour change" scope.
+- **`alerts@teraswap.app`** (email.ts `from`) left as apex — it's a **mail domain**, not a web host; `www` is wrong for email.
+- Test-fixture request URLs using the apex are irrelevant to the canonical host — left as-is.
+
+### Found-and-fixed bug (in scope)
+- `public/robots.txt` advertised `Sitemap: https://teraswap.io/sitemap.xml` — **wrong domain entirely** (`.io`, which
+  is why the `teraswap.app` grep missed it; per memory the only correct domain is `teraswap.app`). Corrected to
+  `https://www.teraswap.app/sitemap.xml`. **Caveat:** no sitemap currently exists (no `app/sitemap.ts` / `public/sitemap.xml`),
+  so `/sitemap.xml` will 404. Crawlers tolerate a 404 sitemap, but owner follow-up: add `app/sitemap.ts` or drop the line
+  (out of M1 host-alignment scope).
+
+### Owner-side step (Vercel)
+- The in-repo `next.config` redirect enforces apex→www at the Next runtime (works regardless of dashboard config).
+  **Preferred additionally:** set apex→www at **Vercel → Project → Domains** (edge-level, fires before the function →
+  no wasted invocation). The two coexist safely (edge redirect makes the in-repo one a no-op fallback). Also confirm the
+  apex `teraswap.app` is assigned to the project so the redirect can fire at all.
+
+### Verification
+- tsc 0, lint 0 errors, 1446 tests pass, `next build` ✓, redirect present in routes-manifest as 308. No swap/contract/gate
+  changes — mainnet/Base byte-identical. Preview-test the apex→www redirect + canonical tags before prod.

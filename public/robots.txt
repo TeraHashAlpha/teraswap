@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://teraswap.io/sitemap.xml
+Sitemap: https://www.teraswap.app/sitemap.xml

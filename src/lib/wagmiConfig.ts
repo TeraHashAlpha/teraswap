@@ -50,9 +50,11 @@ if (!walletConnectProjectId && typeof window !== 'undefined') {
 // from window.location: with `ssr: true` this module is evaluated server-side
 // (no `window`) at import time, so an auto-derived url can be empty/incorrect,
 // which the Verify API rejects. A fixed url on a Reown-VERIFIED domain
-// (www.teraswap.app — also allowlisted) keeps the session proposal valid.
-// NOTE: the site's canonical SITE_URL in app/layout.tsx is the apex
-// (https://teraswap.app); both apex + www are allowlisted in Reown. See FEEDBACK.
+// (www.teraswap.app) keeps the session proposal valid.
+// NOTE: [SPRINT-9M] www is now the single canonical host — SITE_URL in app/layout.tsx
+// is https://www.teraswap.app and apex→www is redirect-enforced (next.config.js), so
+// origin ⇔ canonical ⇔ WC metadata all align to www. Both apex + www remain allowlisted
+// in Reown. See FEEDBACK.
 export const WALLETCONNECT_METADATA = {
   appName: 'TeraSwap',
   appDescription: 'Ethereum & Base meta-aggregator — best swap price across 11 liquidity sources, with MEV protection.',
