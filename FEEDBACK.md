@@ -926,7 +926,6 @@ mainnet default (separate surfaces; mainnet-identical).
   empty-RPC guard, hypothetical VIEM_CHAINS drift, two false-green-test claims,
   test-count). With this fix, all three Sprint-44 mainnet-pinned items are fully
   wired and chain-threaded end-to-end.
-<<<<<<< HEAD
 ## Feedback — P195 (commit 553b86f)
 
 ### Assumption that turned out wrong
@@ -995,7 +994,6 @@ mainnet default (separate surfaces; mainnet-identical).
   order"), directly validating the new P197 guard, since that behaviour change
   is the part most likely to regress silently. Final suite: 1165 → 1172
   (+7), 0 skipped, 0 failed.
-=======
 
 ## Feedback — Sprint 45 / Base activation goal (this commit)
 
@@ -1030,7 +1028,6 @@ mainnet default (separate surfaces; mainnet-identical).
   no-op-until-env-set wiring; real go-live still requires the actual Base mainnet
   FeeCollector deploy + Sprint 45 audit pass + setting NEXT_PUBLIC_BASE_FEE_COLLECTOR
   in the Vercel production env.
->>>>>>> 3667a50 (feat(base): wire Base FeeCollector to NEXT_PUBLIC_BASE_FEE_COLLECTOR env (null fallback))
 
 ## Feedback — Sprint 45 / fix(base): accept any active chain (this commit)
 
@@ -1681,6 +1678,63 @@ lint green after each. Tests 1391 → 1399 (+8). Lint 110 / 0 errors. No contrac
 - **Deploy:** review + Vercel Preview gate; do NOT merge/deploy. Smoke-test a Base Velora→Curve swap
   and a keyless-Bebop quote on the Preview before promotion.
 
+## Feedback — SPRINT-9I deps maintenance (chore/deps-safe-batch @ 9af1236)
+
+Triage + isolated verification of the 10 open Dependabot PRs. Deliverables:
+`Audits/DEPS-TRIAGE-2026-06-02.md`, `Audits/WAGMI-V3-SCOPING-2026-06-02.md`, and the
+`chore/deps-safe-batch` branch (safe bumps, signed, green). No merge/push to main.
+
+### Assumption that turned out wrong
+- **`/contracts/order-engine` bumps (#92/#93/#94) are NOT safe-batchable** as the prompt assumed.
+  A clean install there `ERESOLVE`s on a **pre-existing hardhat v2/v3 peer conflict**
+  (`hardhat-toolbox@6.1.2` → `hardhat-ethers@3.1.3` peers `hardhat@^2.28.0`, but the project runs
+  `hardhat@3.1.10`). There is no local `.npmrc`, so it does not inherit root `legacy-peer-deps=true`.
+  Applying them needs `--legacy-peer-deps`/`--force` (an already-broken tree) or the
+  **`hardhat-toolbox` v6→v7 major** — neither meets "100% green". → moved to **HOLD**. Per the
+  prompt's own "only keep 100% green" rule, the exclusion is correct. Backlog item: a dedicated
+  `hardhat-toolbox` v7 migration (aligns with hardhat v3, pulls patched ws/serialize-javascript/axios).
+
+### Edge case not covered by the prompt
+- **Lockfile platform pruning.** `npm install` *and* `npm install --package-lock-only` on this
+  darwin-arm64 host **strip the cross-platform `@next/swc-*@16.2.6` optionals** from the lock,
+  leaving only darwin-arm64. CI/Vercel run `npm ci` on **Linux** → would lose
+  `@next/swc-linux-x64-gnu` and fail/​degrade the Next build. Worked around with a **surgical
+  Node-script lock patch** (version/resolved/integrity only) validated by `npm ci --dry-run`.
+  *Backlog:* consider a documented "regenerate lock with all platforms" step (or commit lock from CI)
+  so routine Dependabot bumps don't silently narrow platform coverage.
+- **CodeQL v4.36.0 is an ANNOTATED tag.** Pin must use the dereferenced **commit** SHA
+  `7211b7c8077ea37d8641b6271f6a365a22a5fbfa`, not the tag-object `f52b05f4…`. (gitleaks v2.3.9 is
+  lightweight → SHA == commit.)
+- **Capacitor version skew.** `cap sync` warns `@capacitor/core@8.3.4` ≠ `@capacitor/ios@8.2.0`;
+  #120/#123 should travel with an `@capacitor/ios` 8.3.4 bump. (`@capacitor/android` already 8.3.4.)
+
+### Security concern discovered during implementation
+- **Mandated Sonatype check could not run.** The `sonatype-guide` MCP returned *"Authentication
+  required"* for all three tools — the skill is a MUST-use-before-upgrading gate, so this is a real
+  process gap. Fell back to `npm audit` + registry metadata + changelog review (per the skill's
+  manual-fallback instruction). *Backlog:* configure Sonatype MCP credentials so the dependency
+  security gate is actually enforceable.
+- **gitleaks pin/comment mismatch.** The workflow pinned `44c470ff… # v2.3.7`, but that SHA resolves
+  to tag **v2.3.6** — the comment misrepresented the pinned version. Fixed in the safe batch (SHA →
+  v2.3.9 + accurate comment). Worth a sweep of other SHA-pinned actions for stale comments.
+- **22 moderate npm-audit alerts confirmed wagmi-v3-only.** All transitive under
+  `@wagmi/connectors → @reown/appkit-*` + `@walletconnect/universal-provider`; none reachable by any
+  SPRINT-9I bump. Accepted risk until the wagmi v3 sprint (ADR-008). viem #124 verified green
+  (incl. live mainnet+Base quotes) but should ride **with** wagmi v3, not standalone.
+
+### Test gap
+- **`/contracts/order-engine` has no JS test suite** (`"test": "echo ... exit 1"`). Its only real
+  gate is **Foundry** (`forge build` → exit 0). So npm-side bumps there can't be "test-verified" —
+  another reason to treat them as isolated dev-tooling, not safe-batch.
+- **No live quote-smoke harness.** Verifying viem 2.51 against real mainnet+Base quotes required
+  manually booting `next dev` + curling `/api/quote` (`capture-endpoint-baseline.ts` is the nearest
+  existing tool). *Backlog:* a scripted `npm run smoke:quote` (mainnet+Base, asserts HTTP 200 +
+  ≥1 source) would make viem/wagmi bump verification repeatable.
+
+### Tooling note
+- **`gh` is broken on this host:** `/opt/homebrew/bin/gh` is the npm `node-gh` package, not the
+  GitHub CLI, and is unauthenticated — cannot enumerate/merge PRs. PR list taken from the prompt
+  (authoritative). *Backlog:* install the real `gh` (`brew install gh`) for PR automation.
 ## Feedback — SPRINT-9J live swap UX/reliability (feat/sprint-9j-swap-ux, off origin/main @ 4aa5aff)
 
 Three live bugs fixed TDD on top of prod. 5 signed commits. Full suite 1443 passed,
