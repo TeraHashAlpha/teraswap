@@ -1851,3 +1851,37 @@ session never settles into wagmi state — Reown shows 0 sessions / 7 days. 2 si
   `*.vercel.app` domain must ALSO be added to the Reown allowed-domains list (only prod domains are
   allowlisted today) — otherwise verify directly in production. Confirm a non-zero session reaches the
   Reown dashboard + persists across reload/navigation on www.teraswap.app.
+
+## Feedback — SPRINT-9L remove premature @coinbase/wallet-sdk direct dep (feat/sprint-9l-coinbase-dep-cleanup, off origin/main @ 63d78bf)
+
+Commit `8a441b7`. Removed the root `@coinbase/wallet-sdk@4.3.7` direct dep (P184 leftover, commit
+`4f6f70c`) — the same anti-pattern as the 9K WalletConnect dep. `@wagmi/connectors@6.2.0` ships its own
+nested `@coinbase/wallet-sdk@4.3.6` (+ internal aliased `cbw-sdk: npm:@coinbase/wallet-sdk@3.9.3`), which
+is what RainbowKit/getDefaultConfig actually resolves; `npm ls @coinbase/wallet-sdk` now → single 4.3.6.
+
+### Edge cases / assumptions that held
+- **No valtio-style build break this time.** Unlike 9K (where the WC-stack dedup un-hoisted `valtio` and
+  only `next build` caught it), removing the *unused* root coinbase pruned exactly 2 packages — the root
+  `@coinbase/wallet-sdk@4.3.7` block + its nested `clsx@1.2.1`. `preact`/`viem`/`eventemitter3`/`@noble/hashes`
+  stay hoisted (still required by the nested 4.3.6), so the build was unaffected. Lock diff is 22 deletions,
+  zero churn elsewhere; `next build` ✓ on first try.
+- **@next/swc lock pruning recurred AGAIN (now 9I → 9K → 9L, three sprints running).** darwin `npm install`
+  deterministically prunes the lock from 8 cross-platform `@next/swc-*` optionals to the local arch (kept 3:
+  darwin-arm64, linux-arm64-gnu, linux-arm64-musl; dropped 5: darwin-x64, linux-x64-{gnu,musl}, win32-{arm64,x64})
+  → Linux CI/Vercel `npm ci` would fail. Restored all 8 from the pre-install lock and validated
+  `npm ci --dry-run`. *This is a confirmed, repeatable tax on EVERY dep change on darwin — the backlog
+  project-level fix (CI-regenerated / all-platform lock) is overdue.*
+
+### Concern / scope note
+- This was **latent-risk + dead-weight cleanup, not a confirmed active outage** (unlike the 9K WC case where
+  multiple Cores broke `session_settle` for everyone). npm had nested wagmi's own 4.3.6, so the Coinbase
+  connector was already self-consistent and most likely worked *before* this change. The value here is
+  removing the unused parallel SDK + closing the P184 anti-pattern, not fixing a live break.
+
+### Test gap / verification caveat (owner action — same caveat as 9K)
+- Coinbase Wallet connection (Smart Wallet popup at keys.coinbase.com / WalletLink relay / extension /
+  mobile deep-link) is runtime/relay behaviour and is **not unit-testable here**. Verified statically:
+  `npm ls @coinbase/wallet-sdk` → single 4.3.6 via wagmi, `npm ls @walletconnect/core` → single 2.21.1
+  (9K invariant intact), tsc 0, lint 0 errors, 1446 tests, `next build` ✓, `npm ci --dry-run` valid.
+  **The actual "Coinbase Wallet still appears in the RainbowKit modal AND connects" MUST be confirmed on
+  Preview/prod before close** — Preview-test first per the prompt (not a security gate, no Auditor).
