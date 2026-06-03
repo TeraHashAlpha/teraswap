@@ -2023,3 +2023,46 @@ Preview, re-test ALL connect paths in one pass and report which settle:
   credentials/devices no headless agent has, and the Preview is SSO-gated on top. This is a genuine human-in-the-loop
   step, not skipped effort. Owner runs the matrix above in a browser; I can re-curl `www.teraswap.app` to confirm the
   new COOP value the moment it's promoted.
+
+## Feedback — SPRINT-9O Velora EkuboV3 reverts via FeeCollector (feat/sprint-9o-velora-ekubo-feecollector, off origin/main @ f4983a7)
+
+### Part A — root cause (decoded + reproduced on-chain; NOT what the brief hypothesised)
+The brief guessed a missing Ekubo selector. It is **not** a selector problem. Decoded + reproduced against the live
+Augustus `0x6a000f20…1068` and the mainnet FeeCollector V2 `0x47f2…7459`:
+- The mainnet ETH→USDC EkuboV3 route uses ParaSwap `contractMethod: swapExactAmountIn` → selector **`0xe3ead59e`**,
+  which is ALREADY in `KNOWN_SWAP_SELECTORS` + `calldata-recipient` TRUSTED_ROUTER_SELECTORS. That's why the client
+  "Unknown selector" guard does NOT fire and the revert is on-chain.
+- **The FeeCollector has no on-chain selector check** — `swapETHWithFee` only gates on a **router whitelist**
+  (`if (!whitelistedRouters[router]) revert RouterNotWhitelisted()`, line 191).
+- **`eth_call` reproduction (the decisive evidence):**
+  - E1: USER → `FeeCollector.swapETHWithFee(Augustus, ekuboCalldata, USDC, …)` → **REVERT `RouterNotWhitelisted()`**.
+  - E2: FeeCollector → Augustus DIRECT (same Ekubo calldata) → **SUCCESS**. E2b: EOA → Augustus → SUCCESS.
+  - Direct read of `whitelistedRouters` on FeeCollector V2: Augustus V6 `0x6a00…1068` = **false**; uniswapv3, kyberswap,
+    odos, 1inch, curve, sushi = **true**.
+- **Conclusion = case A.a (contract-level):** the Augustus V6 router is simply **not whitelisted** in the mainnet
+  FeeCollector V2. Augustus/Ekubo themselves work fine *through* the FeeCollector (E2) — once whitelisted, Velora works.
+  This is **not Ekubo-specific**: ParaSwap V6.2 uses the single Augustus entry point for every route, so **all** mainnet
+  Velora fee-routed swaps revert the same way. "Ekubo" was incidental — it was just the best route at test time.
+
+### Part C — proper fix = ESCALATE an on-chain admin whitelist add (NO contract edit here)
+The fix is to whitelist Augustus V6 `0x6A000F20005980200259B80c5102003040001068` on FeeCollector V2:
+`queueRouterChange(0x6a00…1068, true)` then `executeRouterChange(...)` after the **48h timelock** (bootstrap is one-time
+and already spent — the other 6 routers are whitelisted). This is a **contract STATE change requiring the admin key +
+governance/timelock**, outside this code sprint (CLAUDE.md #2/#3). NOT a redeploy and NOT a code change — cheaper than
+the brief's worst case, but still owner/governance. **Action item for the owner.** No selector was added (there is no
+missing selector), so the 9H recipient-decoder mis-parse concern does not apply here.
+
+### Part B — shipped resilience (commit `8de8396`): no route "wins then fails"
+Even after the whitelist is fixed, a best route that reverts pre-swap sim shouldn't block the user. New pure
+`src/lib/swap-fallback.ts` (`orderFallbackSources` + `shouldFallbackToNextSource`, TDD 12 cases) + a ref-based re-entry
+in `useSwap.executeStandardSwap`: on a conclusive route failure it walks the ranked alternatives to the first that
+simulates OK (Uniswap/Kyber already work), surfacing a "switched from X to Y" notice. Price-guard blocks + approval-needed
+errors STOP (don't silently switch). On-chain `minimumOutput` intact. Verified: tsc 0, lint 0 err, 1461 tests, build ✓.
+
+### Notes
+- Investigation was done with `viem` + raw `eth_call`/state-overrides against public mainnet RPCs and the live ParaSwap
+  API (read-only; no temp tooling left in the repo).
+- Human-boundary (per brief): a real Velora/fallback swap settling in a wallet is an OWNER post-merge check (funded
+  wallet + signature) — not attempted here. Part B is Preview-testable; the Part C whitelist add unblocks Velora itself.
+- Out of scope (noted in brief): `eth.merkle.io` CORS (wagmi `rank:true` fallback pinging viem's default RPC) and the
+  `sw.js` 206-cache error — both untouched.
