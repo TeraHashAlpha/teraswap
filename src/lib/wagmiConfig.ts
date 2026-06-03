@@ -45,12 +45,32 @@ if (!walletConnectProjectId && typeof window !== 'undefined') {
   )
 }
 
+// [SPRINT-9K] Explicit WalletConnect dApp metadata.
+// Set the url/icon EXPLICITLY rather than letting WalletConnect auto-derive them
+// from window.location: with `ssr: true` this module is evaluated server-side
+// (no `window`) at import time, so an auto-derived url can be empty/incorrect,
+// which the Verify API rejects. A fixed url on a Reown-VERIFIED domain
+// (www.teraswap.app — also allowlisted) keeps the session proposal valid.
+// NOTE: the site's canonical SITE_URL in app/layout.tsx is the apex
+// (https://teraswap.app); both apex + www are allowlisted in Reown. See FEEDBACK.
+export const WALLETCONNECT_METADATA = {
+  appName: 'TeraSwap',
+  appDescription: 'Ethereum & Base meta-aggregator — best swap price across 11 liquidity sources, with MEV protection.',
+  appUrl: 'https://www.teraswap.app',
+  appIcon: 'https://www.teraswap.app/apple-touch-icon.png',
+} as const
+
 // [P219] Multi-chain: mainnet stays the default (first in the array, so wallets
 // connect to it by default). Base is added so users can switch, but swaps stay
 // gated behind "Coming Soon" until a Base FeeCollector is deployed (ChainSelector).
 // Base uses the public RPC for now (NEXT_PUBLIC_BASE_RPC_URL overrides).
+//
+// `config` is a MODULE SINGLETON — created exactly once per runtime so there is a
+// single WalletConnect Core/provider instance. Do NOT recreate it per-render
+// (a second Core subscribes to a different pairing topic → the wallet settles a
+// topic the dApp isn't listening on → session_settle never reflects). See 9K.
 export const config = getDefaultConfig({
-  appName: 'TeraSwap',
+  ...WALLETCONNECT_METADATA,
   projectId: walletConnectProjectId,
   chains: [mainnet, base],
   transports: {
