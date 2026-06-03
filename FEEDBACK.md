@@ -1960,3 +1960,66 @@ npm resolves two swc versions. Worth a small CI assertion (next version === the 
 `.npmrc` `os`/`cpu` (no "keep all platforms" option), committing the lock from Linux CI (fragile; a local darwin
 install re-prunes it), npm config flags. The `optionalDependencies` pin is the community-standard fix for the same
 Rollup/esbuild/next-swc lockfile-pruning class of issue and is the cleanest version-controlled mechanism.
+
+## Feedback — SPRINT-9N COOP fix for Coinbase Smart Wallet popup (feat/sprint-9n-coop-popups, off origin/main @ 73a9cad)
+
+Coinbase Smart Wallet's popup (keys.coinbase.com/connect) failed in prod with "window.opener is inaccessible
+(COOP policy)". Root cause: `Cross-Origin-Opener-Policy: same-origin` (added SPRINT-6D, defense-in-depth) strips
+`window.opener` from any popup the page opens, so the wallet can't hand the connection back. Fix: COOP
+`same-origin` → **`same-origin-allow-popups`** in BOTH layers (`next.config.js` headers() + `vercel.json` edge),
+kept consistent. WalletConnect is unaffected (it uses a relay WebSocket, not window.opener) — this is orthogonal to 9K/9L.
+
+### crossOriginIsolated / SharedArrayBuffer check (requirement 2 — did NOT need to STOP)
+- Zero uses of `crossOriginIsolated` or `SharedArrayBuffer` in `src/`. More decisively: **COEP `require-corp` is set
+  nowhere** (no `Cross-Origin-Embedder-Policy` header in either config, no `middleware.ts`). Cross-origin isolation
+  needs BOTH COOP `same-origin` AND COEP `require-corp` — so `crossOriginIsolated` was *already permanently false*.
+  Relaxing COOP therefore changes nothing about isolation; nothing could have relied on it.
+
+### Verification (how I confirmed the served header — requirement 3)
+- **Runtime, Next layer:** built + `next start`, then `curl -D` the response → `Cross-Origin-Opener-Policy:
+  same-origin-allow-popups` is actually served, with `Cross-Origin-Resource-Policy: same-origin` and CSP/HSTS/
+  X-Frame-Options/Permissions-Policy all unchanged. (curl, not just config inspection.)
+- **Vercel-edge layer:** `vercel.json` set to the identical value → the two layers AGREE (no conflicting/duplicate
+  COOP). The edge layer only activates on a Vercel deploy → confirm on Preview.
+- tsc 0, lint 0 errors, **1449 tests** (+3), `next build` ✓. CORP/CSP/HSTS/Permissions-Policy/X-Frame-Options byte-identical.
+
+### Added beyond the literal spec (flag for Architect)
+- New regression test `src/lib/security-headers.test.ts` (3 cases): pins COOP to `same-origin-allow-popups` in BOTH
+  files and asserts they agree. Rationale: the value was wrong before (6D) and a future "re-hardening" could silently
+  flip it back to `same-origin` and re-break smart-wallet connect — the test fails loudly if so. Additive only; no
+  header/behaviour touched. Drop if the Architect prefers a pure 2-line config commit.
+
+### Auditor — LIGHT review: APPROVED (0C/0H/0M/0L)
+Independent review confirmed: relaxation bounded to `allow-popups` (not `unsafe-none`/removed); CORP/CSP/HSTS/etc
+untouched; no crossOriginIsolated dependency (COEP never set); reverse-tabnabbing risk acceptable — the sole
+programmatic `window.open` (SwapBox Twitter share) passes `'noopener,noreferrer'` and outbound links use
+`rel="noopener noreferrer"`, framing still blocked by X-Frame-Options DENY + CSP `frame-ancestors 'none'`. Not a
+contract/fund-flow gate. (Auditor I-notes: unrelated working-tree doc edits to ROADMAP.md/AUDIT-TOTAL.md were NOT
+staged — commit holds only the 4 in-scope files; OZ submodule `-dirty` is pre-existing noise.)
+
+### Owner action — runtime wallet re-test (this Preview sits on top of 9K/9L)
+`window.opener` handshakes and relay sessions are runtime/browser behaviour — not unit-testable here. On the 9N
+Preview, re-test ALL connect paths in one pass and report which settle:
+- **Coinbase Smart Wallet** (keys.coinbase.com popup) — the 9N target; expected to connect now (was the failing case).
+- **WalletConnect QR** — 9K dedup (single Core 2.21.1); confirm session settles + persists across reload.
+- **Coinbase Wallet extension / other popup + injected wallets** (MetaMask, etc.) — confirm unaffected.
+- Confirm a swap quote→build is unchanged on mainnet (and Base gated as before). Preview-test before prod.
+
+### Runtime verification actually performed this session (and the hard boundary)
+- **Prod baseline (root cause live):** `curl https://www.teraswap.app/` → `cross-origin-opener-policy: same-origin`
+  (the pre-fix 6D value). Confirms the strict COOP that severs `window.opener` is what's live and breaking
+  Coinbase Smart Wallet — the fix targets a reproduced prod condition. (`cross-origin-resource-policy: same-origin`,
+  unchanged by 9N.)
+- **Next layer (fix works):** local `next start` + `curl -D` → `cross-origin-opener-policy: same-origin-allow-popups`
+  served, CORP/CSP/HSTS intact.
+- **Vercel-edge layer:** `vercel.json` set to the identical value (static, deterministic platform behaviour). The 9N
+  **Preview is deployed and Ready** (`teraswap-git-feat-sprint-9n-coop-popups…`, confirmed = this commit) but is
+  **SSO-protected** → an unauthenticated `curl` gets Vercel's `HTTP 401` auth gate (which runs before the app), and
+  there is **no Protection-Bypass-for-Automation token** configured, so the app's edge header is not curl-verifiable
+  headlessly. It IS verifiable by the owner in an authenticated browser (DevTools → Network → response headers), or
+  publicly on `www.teraswap.app` the moment 9N is promoted to prod (prod domains aren't SSO-gated).
+- **Hard boundary — actual wallet connects are human-gated and could NOT be executed here:** approving a Coinbase
+  Smart Wallet passkey, scanning a WalletConnect QR with a phone, or unlocking an injected wallet all require real
+  credentials/devices no headless agent has, and the Preview is SSO-gated on top. This is a genuine human-in-the-loop
+  step, not skipped effort. Owner runs the matrix above in a browser; I can re-curl `www.teraswap.app` to confirm the
+  new COOP value the moment it's promoted.
