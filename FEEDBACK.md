@@ -1924,3 +1924,39 @@ metadata to www and enforced apex→www in-repo.
 ### Verification
 - tsc 0, lint 0 errors, 1446 tests pass, `next build` ✓, redirect present in routes-manifest as 308. No swap/contract/gate
   changes — mainnet/Base byte-identical. Preview-test the apex→www redirect + canonical tags before prod.
+
+## Feedback — SPRINT-9M / M2 @next/swc lockfile persistence (retires the 9I→9K→9L manual restore)
+
+### Mechanism chosen
+Declared all 8 `@next/swc-*` platform packages as the root project's own **`optionalDependencies`**, pinned to
+exact **`16.2.6`** (same version `next` pins its own swc optionals to). package.json gains an `optionalDependencies`
+block; the lockfile gains the matching `packages[""].optionalDependencies`.
+
+### Why it works (root cause of the recurrence)
+A darwin `npm install` prunes from the lockfile any *transitive* optional dependency whose `os`/`cpu` doesn't match
+the install host — so `next`'s own `@next/swc-*` optionals (which are transitive) lost the 5 non-darwin-arm64
+entries each time. npm does **not** prune packages declared as the *root project's* `optionalDependencies`: they
+stay in `packages` + `packages[""].optionalDependencies` regardless of install OS. Only the platform-matching
+binary is actually *installed* (optional + `os`/`cpu` gating), so darwin installs `darwin-arm64` and silently
+skips the other 7 (no `EBADPLATFORM`), while Linux CI installs `linux-x64-gnu`/`musl`.
+
+### Empirical proof
+- Before (9K/9L): a darwin `npm install` pruned the lock from 8 → 3 swc entries (Linux binaries dropped → `npm ci` would fail on Vercel).
+- After this change: a darwin `npm install` keeps **all 8** (verified: 8 before, 8 after; entry-set byte-identical, no churn beyond
+  one harmless npm re-sort of an unrelated `string_decoder` key). `npm ci --dry-run` valid; `next build` ✓ on darwin.
+- Linux confirmation: the lock carries `@next/swc-linux-x64-gnu` + `-musl` with resolved+integrity; the **PR's Linux CI
+  (`npm ci` + `next build`) is the live confirmation** (can't run Linux locally).
+
+### Why `optionalDependencies` and not `dependencies`
+The swc packages carry `os`/`cpu` constraints. In regular `dependencies`, npm would try to install all 8 and fail
+on mismatched platforms (`EBADPLATFORM`). `optionalDependencies` is exactly the gate that makes npm skip non-matching ones.
+
+### Maintenance coupling (IMPORTANT)
+The 8 pins are exact `16.2.6` to dedupe against `next`'s own exact swc pins (avoids a double-install of two swc
+versions). **They MUST be bumped in lockstep whenever `next` is upgraded** — if they drift from `next`'s version,
+npm resolves two swc versions. Worth a small CI assertion (next version === the 8 swc pins) as a follow-up.
+
+### Alternatives rejected
+`.npmrc` `os`/`cpu` (no "keep all platforms" option), committing the lock from Linux CI (fragile; a local darwin
+install re-prunes it), npm config flags. The `optionalDependencies` pin is the community-standard fix for the same
+Rollup/esbuild/next-swc lockfile-pruning class of issue and is the cleanest version-controlled mechanism.
