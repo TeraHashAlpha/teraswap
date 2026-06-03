@@ -1798,3 +1798,56 @@ tsc + lint(0 err) + next build green. J1 is a SECURITY gate (rule #9) → Audito
   tooltips on mobile, before promotion.
 - **Adversarial review** (workflow, 20 agents): 17 raised → 12 confirmed (4 actionable, fixed; 8 INFO/
   no-fix) + 5 correctly dismissed. The actionable confirmations are remediated in commit `14807a8`.
+
+## Feedback — SPRINT-9K WalletConnect sessions never settle (feat/sprint-9k-walletconnect-session, off origin/main @ c5ce22a)
+
+Prod bug, all users: WC pairing connects (QR, relay WS 101, correct projectId) but the approved
+session never settles into wagmi state — Reown shows 0 sessions / 7 days. 2 signed commits.
+
+### Root cause (dependency, not config or env)
+- `npm ls @walletconnect/core` showed **FOUR** versions installed simultaneously (2.21.0, 2.21.1,
+  2.23.2, 2.23.9). Multiple WC Cores on the same projectId = the wallet approves a pairing TOPIC the
+  dApp's connector isn't subscribed to → `session_settle` never reflects (the prompt's hypothesis #1,
+  confirmed). The connector singleton + single WagmiProvider in `providers.tsx` were already correct;
+  the duplication was purely in the dependency tree.
+- **Regression source:** commit `4f6f70c` [P184] "preinstall wallet connector deps for wagmi v3
+  readiness" added `@walletconnect/ethereum-provider@2.23.9` as a DIRECT dep. The app actually connects
+  via `@wagmi/connectors@6.2.0 → @walletconnect/ethereum-provider@2.21.1` (core 2.21.x); the newer
+  direct dep dragged in a parallel WC stack (core 2.23.x + `@reown/appkit@1.8.17`). wagmi v3 is
+  DEFERRED (ADR-008), so the preinstall was premature AND actively broke connections.
+
+### Fix
+- Removed the premature `@walletconnect/ethereum-provider` direct dep.
+- `overrides`: pinned `@walletconnect/core` + `sign-client` + `universal-provider` → `2.21.1`, giving
+  exactly ONE physical Core (`npm ls @walletconnect/core` → 1).
+- Explicit WC metadata (`appUrl: https://www.teraswap.app`, appIcon, appName) — with `ssr: true` the
+  module runs server-side at import (no `window`), so an auto-derived url can be empty/invalid and
+  rejected by Verify; a fixed url on the verified domain avoids that (hypothesis #2).
+
+### Edge cases / assumptions that turned out to matter
+- **valtio build break (introduced by the dedup, then fixed).** Removing the 2.23.x stack un-hoisted
+  `valtio`, leaving the top-level `derive-valtio` unable to resolve `valtio/vanilla` → Turbopack build
+  failed (tests passed — vitest resolves loosely; only `next build` caught it). Fixed by adding
+  `valtio@1.13.2` as a direct dep to re-hoist it. This is a transitive-resolution workaround — revisit
+  (and likely drop) during the wagmi v3 migration that cleans up this WC/Reown/valtio subtree.
+- **@next/swc lock pruning (recurring, same as 9I).** `npm install` on darwin prunes the lock from 8
+  cross-platform `@next/swc-*` optionals to the local arch only → Linux CI/Vercel `npm ci` would fail.
+  Restored all 8 from `origin/main` and validated `npm ci --dry-run`. *Backlog: a project-level fix
+  (regenerate the lock with all platforms / commit it from CI) so routine dep work stops dropping them.*
+- **@coinbase/wallet-sdk@4.3.7 is ANOTHER P184 premature-prep direct dep** (same commit `4f6f70c`).
+  Not WC-session related so left untouched (minimal/targeted), but it can cause a parallel
+  duplicate-SDK split for Coinbase Wallet — review/remove during the wagmi v3 sprint.
+- **www vs apex.** Per the prompt, metadata url = `https://www.teraswap.app`, but `app/layout.tsx`'s
+  canonical `SITE_URL` is the apex `https://teraswap.app`. Both are allowlisted+verified in Reown, so
+  Verify passes either way, but the serving origin ↔ canonical ↔ WC metadata should be aligned to ONE
+  (ideally redirect to a single canonical host).
+- **`WalletSessionGuard`** (1h inactivity auto-disconnect) is NOT the cause — it only acts once
+  `isConnected` is already true, so it can't explain a session that never settles. Left unchanged.
+
+### Test gap / verification caveat (owner action)
+- A real `session_settle` is runtime/relay/wallet behaviour — not unit-testable here. Verified at the
+  dependency level (one Core), `next build`, `npm ci --dry-run`, 1446 tests, tsc + lint(0 err). **The
+  actual settle MUST be confirmed on Preview/prod.** To test on the Vercel Preview, the Preview
+  `*.vercel.app` domain must ALSO be added to the Reown allowed-domains list (only prod domains are
+  allowlisted today) — otherwise verify directly in production. Confirm a non-zero session reaches the
+  Reown dashboard + persists across reload/navigation on www.teraswap.app.
