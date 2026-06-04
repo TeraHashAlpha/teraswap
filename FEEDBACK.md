@@ -2103,6 +2103,32 @@ Two Base-only prod bugs fixed (mainnet byte-identical, test-guarded):
 - **Owner runtime step (per brief):** actually importing the real Base token (`0x6c240d…2aa2`) in a browser on
   Base, and eyeballing the Base catalog badges, is the post-merge human check — not attempted here. Preview-test before prod.
 
+## Feedback — SPRINT-9Q chain-pinned reads (BASE-REVIEW P0) + rate toggle (feat/sprint-9q-chain-pinned-reads, off origin/main @ 43e751a)
+
+### Q1 — chain-pin the mainnet-pinned reads (commit `da9bca0`)
+- Replaced the 5 mainnet-pinned `getPrivateClient()` reads with `getPublicClientForChain(chainId)`:
+  useSwap FeeCollector + direct allowance pre-flights, the CoW balance/allowance pre-flight, the fallback
+  receipt poller (deps now include `chainId`), and useSplitSwap `waitForReceipt` (threaded `chainId`).
+  chainId 1 → `getPrivateClient` → **mainnet byte-identical by construction** (the property the whole fix
+  leans on; guarded by clients.test).
+- Threaded `chainId` into useApproval's three `useReadContract` reads so the **approval gate reflects the
+  chain the swap executes on**, not the connected-chain default — TDD'd (mainnet=1 + Base=8453).
+- **Edge found while fixing:** `useSplitSwap.test.ts` mocked `@/lib/rpc` (`getPrivateClient`); after the
+  switch it had to mock `@/lib/chains/clients` (`getPublicClientForChain`) or `waitForReceipt` hit the real
+  client and timed out. Repointed the mock (production behaviour unchanged).
+- Did NOT touch the 9O fallback logic — it will simply stop firing spuriously once allowance reads are correct.
+
+### Q2 — rate-invert toggle (commit `34176d6`, pure UI)
+- Display-only inverse (`inputAmount / outputAmount`); zero-output guard prevents Infinity; reuses
+  `formatDisplay` so separators + sub-0.0001 precision match the forward rate. Session-persisted (sessionStorage).
+- **Note for the owner:** the brief's example used a comma ("1,666.67"), but the app's `formatWithSeparator`
+  uses a **space** thousands-separator ("1 666.67"), PT-PT style — left as-is (consistent with the rest of the
+  UI); flag if a comma is wanted (global format change, out of 9Q scope). Tests assert separator-agnostically.
+
+### Boundary
+- This is the FIX for the BASE-REVIEW Phase-1 root cause; the **live USDC→ETH-on-Base wallet confirmation is the
+  owner post-merge step** (funded Base wallet + signature) — not attempted here, no loop. The split-swap Review
+  modal (9R) and Base Chainlink feed map (9S) were left untouched per the brief.
 ## Feedback — BASE-REVIEW 2026-06-04 (read-only audit; report at Audits/BASE-REVIEW-2026-06-04.md)
 
 What the brief missed / where its hypotheses needed correcting:

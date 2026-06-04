@@ -31,8 +31,10 @@ vi.mock('wagmi', () => ({
   })),
 }))
 
-vi.mock('@/lib/rpc', () => ({
-  getPrivateClient: vi.fn(() => ({
+// [SPRINT-9Q] useSplitSwap now resolves its receipt client via the chain-aware
+// getPublicClientForChain (was the mainnet-pinned getPrivateClient). Mock that.
+vi.mock('@/lib/chains/clients', () => ({
+  getPublicClientForChain: vi.fn(() => ({
     getTransactionReceipt: mockGetTransactionReceipt,
   })),
 }))

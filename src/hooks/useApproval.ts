@@ -50,6 +50,7 @@ export function useApproval(
 
   // ── Check 1: Does user have allowance to Permit2 contract? ──
   const { data: permit2TokenAllowance } = useReadContract({
+    chainId, // [SPRINT-9Q] pin the allowance read to the active chain (was connected-chain only)
     address: tokenIn?.address as `0x${string}`,
     abi: erc20Abi,
     functionName: 'allowance',
@@ -61,6 +62,7 @@ export function useApproval(
 
   // ── Check 2: Does token support EIP-2612? ──
   const { data: nonces, isError: noncesError } = useReadContract({
+    chainId, // [SPRINT-9Q] pin to the active chain
     address: tokenIn?.address as `0x${string}`,
     abi: eip2612DetectionAbi,
     functionName: 'nonces',
@@ -72,6 +74,8 @@ export function useApproval(
 
   // ── Check 3: Direct allowance to spender (for exact approve) ──
   const { data: directAllowance, refetch: refetchAllowance } = useReadContract({
+    chainId, // [SPRINT-9Q] pin the spender-allowance read to the active chain — this drives the
+    // approval gate; reading the wrong chain made the gate say "no approval needed" on Base.
     address: tokenIn?.address as `0x${string}`,
     abi: erc20Abi,
     functionName: 'allowance',
