@@ -143,14 +143,20 @@ export default function QuoteBreakdown({
       {priceCheck.level === 'danger' && (
         <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{priceCheck.message}</div>
       )}
-      {priceCheck.level === 'warn' && (
+      {/* [SPRINT-9S S2] Dedup: when the oracle is unavailable the generic warn banner is
+          redundant with the specific notice below — show only the specific one. */}
+      {priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && priceCheck.message && (
         <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">{priceCheck.message}</div>
       )}
 
-      {/* Oracle unavailable — prominent warning */}
+      {/* [SPRINT-9S S2] Oracle unavailable — ONE calm, specific notice naming the token(s)
+          actually missing a feed, and stating the swap is still protected. */}
       {priceCheck.oracleUnavailable && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300">
-          <span className="font-semibold">&#9888; No Chainlink oracle</span> for {tokenIn.symbol} — the quoted price is <strong>not independently verified</strong>. Multi-source comparison is your only protection. Verify the rate manually before swapping.
+          <span className="font-semibold">&#9888; No Chainlink oracle</span> for{' '}
+          {(priceCheck.oracleMissingSymbols?.length ? priceCheck.oracleMissingSymbols : [tokenIn.symbol]).join(' / ')}.
+          {' '}This price isn&apos;t independently Chainlink-verified, but your swap is still protected by{' '}
+          <strong>multi-source price comparison</strong> and an <strong>on-chain minimum-output</strong> guarantee — double-check the rate looks right before swapping.
         </div>
       )}
 

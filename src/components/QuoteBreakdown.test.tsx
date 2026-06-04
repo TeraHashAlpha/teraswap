@@ -240,3 +240,48 @@ describe('QuoteBreakdown — [SPRINT-9Q Q2] rate-invert toggle', () => {
     expect(screen.getByRole('button', { name: /flip rate direction/i }).textContent).toMatch(/1\s*USDC\s*=.*ETH/)
   })
 })
+
+describe('QuoteBreakdown — [SPRINT-9S S2] one calm, specific oracle notice', () => {
+  it('dedupes to a SINGLE notice when oracle is unavailable — suppresses the generic warn banner', () => {
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          priceCheck: {
+            ...idlePriceCheck,
+            level: 'warn',
+            message: 'GENERIC-STALE-BANNER',
+            oracleUnavailable: true,
+            oracleMissingSymbols: ['USDC'],
+          },
+        })}
+      />,
+    )
+    // The specific oracle notice renders once…
+    expect(screen.getAllByText(/no chainlink oracle/i)).toHaveLength(1)
+    // …and the redundant generic warn banner is gone (the two stacked yellow boxes are now one).
+    expect(screen.queryByText('GENERIC-STALE-BANNER')).toBeNull()
+  })
+
+  it('NAMES the token actually missing a feed (direction-agnostic) + states the swap is still protected', () => {
+    // tokenIn is ETH, but the OUTPUT token (DAI here) is the one missing a feed — must name DAI.
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          priceCheck: { ...idlePriceCheck, level: 'warn', oracleUnavailable: true, oracleMissingSymbols: ['DAI'] },
+        })}
+      />,
+    )
+    const notice = screen.getByText(/no chainlink oracle/i).closest('div')!
+    expect(notice.textContent).toMatch(/DAI/)
+    expect(notice.textContent).not.toMatch(/\bETH\b/) // names the missing token, not the input
+    expect(notice.textContent).toMatch(/multi-source/i)
+    expect(notice.textContent).toMatch(/minimum-output/i)
+  })
+
+  it('shows NO oracle notice when both feeds exist (oracleUnavailable=false)', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ priceCheck: { ...idlePriceCheck, oracleUnavailable: false } })} />,
+    )
+    expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+  })
+})

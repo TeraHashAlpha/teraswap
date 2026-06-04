@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, chainlinkAggregatorAbi } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
@@ -377,5 +377,73 @@ describe('chainlink — chain-aware RPC routing [SPRINT-9G G1]', () => {
     await fetchChainlinkPriceRaw(NATIVE_ETH, 1)
     expect(urls.length).toBeGreaterThan(0)
     for (const u of urls) expect(u).toBe(getRpcUrlForChain(1))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9S S2] Direction-agnostic pair oracle verdict.
+// ─────────────────────────────────────────────────────────────
+describe('evaluatePairOracle [SPRINT-9S S2]', () => {
+  const none = (over: Partial<PriceCheck> = {}): PriceCheck => ({
+    chainlinkPrice: 3000, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false, ...over,
+  })
+  const warn = (dev: number): PriceCheck => ({
+    chainlinkPrice: 3000, executionPrice: 3000 * (1 + dev), deviation: dev, level: 'warn', message: 'deviation', oracleUnavailable: false,
+  })
+  const missing = (): PriceCheck => ({
+    chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'warn', message: 'no feed', oracleUnavailable: true,
+  })
+  const integrity = (): PriceCheck => ({
+    chainlinkPrice: 3000, executionPrice: null, deviation: 0, level: 'warn', message: 'stale', oracleUnavailable: false, oracleIntegrityFailed: true,
+  })
+
+  it('produces an IDENTICAL verdict for ETH→USDC and USDC→ETH (direction-agnostic)', () => {
+    // ETH→USDC: the deviation sits on the INPUT (ETH) side; USDC out is neutral.
+    const ethToUsdc = evaluatePairOracle(warn(0.025), none(), 'ETH', 'USDC')
+    // USDC→ETH: same pool, deviation now sits on the OUTPUT (ETH) side; USDC in is neutral.
+    const usdcToEth = evaluatePairOracle(none(), warn(0.025), 'USDC', 'ETH')
+    expect(ethToUsdc.level).toBe('warn')
+    expect(usdcToEth.level).toBe('warn')
+    expect(usdcToEth.level).toBe(ethToUsdc.level)
+    expect(usdcToEth.deviation).toBe(ethToUsdc.deviation)
+    expect(ethToUsdc.oracleUnavailable).toBe(false)
+    expect(usdcToEth.oracleUnavailable).toBe(false)
+  })
+
+  it('flags oracleUnavailable and NAMES whichever side lacks a feed (regardless of direction)', () => {
+    // Missing on the OUTPUT side (e.g. selling ETH for an exotic import) — must still warn + name it.
+    const out = evaluatePairOracle(none(), missing(), 'ETH', 'EXOTIC')
+    expect(out.oracleUnavailable).toBe(true)
+    expect(out.oracleMissingSymbols).toEqual(['EXOTIC'])
+    // Missing on the INPUT side.
+    const inp = evaluatePairOracle(missing(), none(), 'EXOTIC', 'ETH')
+    expect(inp.oracleUnavailable).toBe(true)
+    expect(inp.oracleMissingSymbols).toEqual(['EXOTIC'])
+    // Both missing → both named.
+    const both = evaluatePairOracle(missing(), missing(), 'AAA', 'BBB')
+    expect(both.oracleMissingSymbols).toEqual(['AAA', 'BBB'])
+  })
+
+  it('is "verified" (no warning) only when BOTH feeds exist', () => {
+    const ok = evaluatePairOracle(none(), none(), 'ETH', 'USDC')
+    expect(ok.oracleUnavailable).toBe(false)
+    expect(ok.level).toBe('none')
+    expect(ok.oracleMissingSymbols).toEqual([])
+  })
+
+  it('propagates an oracle-integrity failure on EITHER side (hard-block signal preserved)', () => {
+    expect(evaluatePairOracle(integrity(), none(), 'ETH', 'USDC').oracleIntegrityFailed).toBe(true)
+    expect(evaluatePairOracle(none(), integrity(), 'USDC', 'ETH').oracleIntegrityFailed).toBe(true)
+  })
+
+  it('is a safe drop-in: combine(check, check) preserves that check\'s gate verdict', () => {
+    // SwapBox tests mock useChainlinkPrice once for both calls; the merge must be a no-op there.
+    for (const c of [none(), warn(0.04), integrity()]) {
+      const merged = evaluatePairOracle(c, c, 'ETH', 'USDC')
+      expect(merged.level).toBe(c.level)
+      expect(merged.deviation).toBe(c.deviation)
+      expect(!!merged.oracleIntegrityFailed).toBe(!!c.oracleIntegrityFailed)
+      expect(merged.oracleUnavailable).toBe(c.oracleUnavailable)
+    }
   })
 })
