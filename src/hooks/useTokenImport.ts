@@ -2,7 +2,9 @@
 
 import { useState, useCallback } from 'react'
 import { getAddress } from 'viem'
-import { addCustomToken, findTokenByAddress, type Token } from '@/lib/tokens'
+import { addCustomToken, type Token } from '@/lib/tokens'
+import { findChainToken } from '@/lib/chains/tokens'
+import { useActiveChainId } from '@/hooks/useChainId'
 
 /**
  * Hook to import a custom ERC-20 token by pasting its contract address.
@@ -11,6 +13,9 @@ import { addCustomToken, findTokenByAddress, type Token } from '@/lib/tokens'
 export function useTokenImport() {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // [SPRINT-9P] Import against the ACTIVE chain — a Base address must be read on
+  // Base, not the mainnet proxy (which returned 0x → "Not a valid ERC-20 token").
+  const chainId = useActiveChainId()
 
   const importToken = useCallback(async (address: string): Promise<Token | null> => {
     setError(null)
@@ -24,14 +29,16 @@ export function useTokenImport() {
       return null
     }
 
-    // Check if already exists
-    const existing = findTokenByAddress(checksumAddr)
+    // Check if already exists — chain-scoped so a colliding mainnet address
+    // can't short-circuit a genuine Base import (and vice-versa).
+    const existing = findChainToken(checksumAddr, chainId)
     if (existing) return existing
 
     setImporting(true)
     try {
-      // Use fetch to call our RPC proxy for privacy (hides user IP from RPC provider)
-      const rpcUrl = '/api/rpc'
+      // Use fetch to call our RPC proxy for privacy (hides user IP from RPC provider).
+      // [SPRINT-9P] Pass the active chain so the proxy reads the right chain's RPC.
+      const rpcUrl = `/api/rpc?chainId=${chainId}`
       const addr = address.toLowerCase() as `0x${string}`
 
       const [symbolRes, nameRes, decimalsRes] = await Promise.all([
@@ -73,6 +80,7 @@ export function useTokenImport() {
         decimals,
         logoURI: `https://tokens.1inch.io/${address.toLowerCase()}.png`,
         category: 'Imported',
+        chainId, // [SPRINT-9P] tag the import so the store/lookups stay chain-scoped
       }
 
       addCustomToken(token)
@@ -83,7 +91,7 @@ export function useTokenImport() {
       setImporting(false)
       return null
     }
-  }, [])
+  }, [chainId])
 
   return { importToken, importing, error }
 }

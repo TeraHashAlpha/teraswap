@@ -7,8 +7,9 @@
  * the 1inch token CDN (keyed by token address) with the UI's generic-icon
  * fallback when a logo is missing.
  */
-import { DEFAULT_TOKENS, type Token, type TokenCategory } from '@/lib/tokens'
+import { DEFAULT_TOKENS, findTokenByAddress, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
+import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -111,4 +112,46 @@ export function remapTokenToChain(token: Token | null, chainId: number): Token |
     (t) => t.symbol === token.symbol && t.address.toLowerCase() !== token.address.toLowerCase(),
   )
   return match ?? token
+}
+
+/**
+ * [SPRINT-9P] Chain-scoped token lookup for the import early-return: the chain's
+ * catalog first, then custom tokens imported ON THAT chain. A token imported on
+ * Base never resolves on mainnet (and vice-versa); the same address can be a
+ * different token per chain. chainId 1 stays byte-identical for mainnet-only use.
+ */
+export function findChainToken(address: string, chainId: number): Token | null {
+  const addr = address.toLowerCase()
+  const inCatalog = getChainTokenList(chainId).find((t) => t.address.toLowerCase() === addr)
+  if (inCatalog) return inCatalog
+  const custom = getCustomTokens().find(
+    (t) => t.address.toLowerCase() === addr && (t.chainId ?? DEFAULT_CHAIN_ID) === chainId,
+  )
+  return custom ?? null
+}
+
+/**
+ * [SPRINT-9P] Verified-badge auto-detect, chain-aware. Mainnet keeps
+ * `findTokenByAddress` verbatim (byte-identical); other chains verify against
+ * that chain's CATALOG, so the Base catalog (WETH/USDC/DAI/cbETH/USDbC) shows ✓
+ * while genuinely imported tokens keep the ⚠.
+ */
+export function isVerifiedToken(address: string, chainId: number): boolean {
+  return chainId === DEFAULT_CHAIN_ID
+    ? !!findTokenByAddress(address)
+    : !!getChainToken(address, chainId)
+}
+
+/**
+ * [SPRINT-9P] Chain-aware block-explorer token URL (etherscan.io / basescan.org).
+ * Falls back to mainnet's explorer for an unknown chain rather than throwing.
+ */
+export function explorerTokenUrl(address: string, chainId: number): string {
+  let base = 'https://etherscan.io'
+  try {
+    base = getChainConfig(chainId).blockExplorer
+  } catch {
+    /* unsupported chain — default to mainnet explorer */
+  }
+  return `${base}/token/${address}`
 }
