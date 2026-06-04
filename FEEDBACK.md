@@ -2066,3 +2066,39 @@ errors STOP (don't silently switch). On-chain `minimumOutput` intact. Verified: 
   wallet + signature) — not attempted here. Part B is Preview-testable; the Part C whitelist add unblocks Velora itself.
 - Out of scope (noted in brief): `eth.merkle.io` CORS (wagmi `rank:true` fallback pinging viem's default RPC) and the
   `sw.js` 206-cache error — both untouched.
+
+## Feedback — SPRINT-9P chain-aware token import + verified badge (feat/sprint-9p-chain-aware-tokens, off origin/main @ a54d3c3)
+
+Two Base-only prod bugs fixed (mainnet byte-identical, test-guarded):
+
+### P1 — chain-aware import (commit `9f82ca1`)
+- **Root cause confirmed:** `useTokenImport` hardcoded `'/api/rpc'` (mainnet proxy) and `/api/rpc` had no
+  chainId, so a Base address `eth_call`ed mainnet → `0x` → "Not a valid ERC-20 token".
+- `/api/rpc` now takes `?chainId=` — `resolveProxyChainId` (pure, tested) validates vs the registry
+  (`getSupportedChainIds`), defaults to mainnet when absent (existing callers byte-identical), and the proxy
+  forwards via `getRpcUrlForChain` (never off-mainnet). `getRpcUrlForChain(1)` === the old hardcoded `RPC_URL`
+  precedence on the server, so the mainnet upstream is unchanged.
+- `useTokenImport` uses `useActiveChainId()`, tags the imported `Token.chainId`, and the early-return is
+  chain-scoped (`findChainToken`) so a colliding mainnet address can't short-circuit a genuine Base import.
+- Custom-token store chain-scoped: `addCustomToken` dedups by `(address, chainId)`; `findChainToken` =
+  chain catalog + custom-on-that-chain. Cross-chain collision covered by a test (Base import doesn't leak to mainnet).
+
+### P2 — chain-aware verified badge (commit `0e0a3e1`)
+- `TokenAddressBadge` verified via mainnet `findTokenByAddress`, so the whole Base catalog showed the false ⚠.
+  Now `isVerifiedToken(address, activeChainId)`: mainnet → `findTokenByAddress` (unchanged); Base →
+  `getChainToken(.,8453)`. Explorer link chain-aware (`explorerTokenUrl`: etherscan.io / basescan.org) instead
+  of hardcoded Etherscan. Badge resolves chain via `useActiveChainId()` (optional `chainId` prop override).
+
+### Notes / decisions
+- **Atomic split:** all chain-aware token helpers (incl. the badge's `isVerifiedToken`/`explorerTokenUrl`) live in
+  `chains/tokens.ts` and landed in P1 (with their tests) because that file is touched by both parts; P2 is the
+  pure badge wiring. Each commit is independently green.
+- **Known nuance (spec-mandated):** the mainnet badge keeps `findTokenByAddress`, which includes ALL custom
+  tokens regardless of chain. So a Base-imported custom address *viewed on the mainnet badge* could show ✓.
+  Cosmetic only (badge, not a gate), and the import lookup / store ARE chain-scoped. Left per the brief's
+  "mainnet findTokenByAddress unchanged"; flag if the Architect wants the mainnet badge scoped too.
+- F-03 sanitize, safety gates, FeeCollector, adapters, and the 9O fallback untouched. No contract edits.
+- Verified: tsc 0, lint 0 errors, no new circular deps (added `tokens.ts → chains/registry` edge — clean),
+  1475 tests (+14), `next build` ✓.
+- **Owner runtime step (per brief):** actually importing the real Base token (`0x6c240d…2aa2`) in a browser on
+  Base, and eyeballing the Base catalog badges, is the post-merge human check — not attempted here. Preview-test before prod.

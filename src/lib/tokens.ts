@@ -1,4 +1,5 @@
 import { NATIVE_ETH } from './constants'
+import { DEFAULT_CHAIN_ID } from './chains/registry'
 
 export type TokenCategory =
   | 'Native'
@@ -20,6 +21,11 @@ export interface Token {
   decimals: number
   logoURI: string
   category: TokenCategory
+  /** [SPRINT-9P] Chain the token belongs to. Absent ⇒ mainnet (DEFAULT_CHAIN_ID).
+   *  Imported tokens are tagged with their chainId so the custom-token store and
+   *  lookups stay chain-scoped (a Base import must not resolve on mainnet, and the
+   *  same address can be different tokens on different chains). */
+  chainId?: number
 }
 
 // ── Logo helper (1inch token icons, lowercase address) ───
@@ -732,8 +738,15 @@ export function getAllTokens(): Token[] {
 }
 
 export function addCustomToken(token: Token): void {
-  if (!customTokens.find(t => t.address.toLowerCase() === token.address.toLowerCase())) {
-    customTokens.push({ ...token, category: token.category || 'Imported' })
+  // [SPRINT-9P] Chain-scoped: dedup by (address, chainId) — the SAME address can be
+  // a different token on a different chain, so an import on Base must not be shadowed
+  // by (or shadow) a mainnet token at the same address. Untagged ⇒ mainnet.
+  const cid = token.chainId ?? DEFAULT_CHAIN_ID
+  const exists = customTokens.find(
+    t => t.address.toLowerCase() === token.address.toLowerCase() && (t.chainId ?? DEFAULT_CHAIN_ID) === cid,
+  )
+  if (!exists) {
+    customTokens.push({ ...token, chainId: cid, category: token.category || 'Imported' })
   }
 }
 

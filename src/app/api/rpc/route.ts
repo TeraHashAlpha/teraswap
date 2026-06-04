@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
+import { getRpcUrlForChain } from '@/lib/adapters/shared'
 
 /**
  * Privacy-preserving RPC proxy.
@@ -40,10 +42,6 @@ const BLOCKED_METHODS = new Set([
   'wallet_requestPermissions',
   'wallet_watchAsset',
 ])
-
-const RPC_URL = process.env.RPC_URL
-  || process.env.NEXT_PUBLIC_RPC_URL
-  || 'https://eth.llamarpc.com'
 
 export async function POST(req: NextRequest) {
   // [B-06] Rate limiting by IP — persistent via Vercel KV
@@ -86,8 +84,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // [SPRINT-9P] Resolve the target chain. Absent chainId → mainnet, so existing
+    // callers (POST /api/rpc with no param) are byte-identical. Validated against
+    // the registry (supported chains only) and proxied to that chain's RPC via
+    // getRpcUrlForChain — an off-mainnet read never silently hits the mainnet RPC.
+    const resolved = resolveProxyChainId(req.nextUrl.searchParams.get('chainId'))
+    if ('error' in resolved) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32602, message: resolved.error } },
+        { status: 400 },
+      )
+    }
+    const upstreamUrl = getRpcUrlForChain(resolved.chainId)
+
     // Forward to upstream RPC (without user's IP)
-    const upstream = await fetch(RPC_URL, {
+    const upstream = await fetch(upstreamUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Array.isArray(body) ? requests : requests[0]),
