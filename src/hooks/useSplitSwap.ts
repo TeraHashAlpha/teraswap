@@ -28,15 +28,17 @@ import { getChainConfig } from '@/lib/chains'
 
 export type SplitSwapStatus =
   | 'idle'
-  | 'executing'   // currently executing legs
-  | 'success'     // all legs completed
-  | 'error'       // one or more legs failed
-  | 'partial'     // some legs succeeded, some failed
+  | 'planning'        // [SPRINT-9R R1] Phase A — building + validating + simulating every leg
+  | 'awaiting-review' // [SPRINT-9R R1] plan frozen, awaiting the user's Review Split Plan confirm
+  | 'executing'       // Phase B — signing the reviewed legs
+  | 'success'         // all legs completed
+  | 'error'           // one or more legs failed
+  | 'partial'         // some legs succeeded, some failed
 
 export interface LegStatus {
   source: AggregatorName
   percent: number
-  status: 'pending' | 'fetching' | 'simulating' | 'signing' | 'confirming' | 'success' | 'error'
+  status: 'pending' | 'fetching' | 'simulating' | 'reviewed' | 'signing' | 'confirming' | 'success' | 'error'
   txHash?: `0x${string}`
   error?: string
   /** [P209 / FULL-L-05] false when this leg's pre-flight simulation was
@@ -45,13 +47,51 @@ export interface LegStatus {
   simulated?: boolean
 }
 
+/**
+ * [SPRINT-9R R1] A frozen, reviewed split-leg. Phase A builds + validates + simulates
+ * each leg and captures the EXACT transaction that will broadcast (txTo/txData/value/gas)
+ * plus the inner router calldata for the review decode. Phase B (confirmPlan) signs these
+ * 1:1 — no re-fetch — so the wallet only ever receives calldata the user reviewed.
+ */
+export interface PlannedLeg {
+  source: AggregatorName
+  percent: number
+  /** Input amount (wei) allocated to this leg. */
+  legAmount: bigint
+  routeViaFeeCollector: boolean
+  isNativeIn: boolean
+  /** Inner DEX router target + calldata — what the review modal DECODES (mirrors single-swap). */
+  routerAddress: string
+  routerCalldata: string
+  /** The FINAL tx that will be signed (FeeCollector-wrapped or direct). Absent for skipped legs. */
+  txTo?: `0x${string}`
+  txData?: `0x${string}`
+  txValue?: bigint
+  txGas?: bigint
+  /** FeeCollector-enforced min output (raw wei) for this leg; 0n when not via FeeCollector. */
+  legMinOutput: bigint
+  /** Frozen expected output (raw string) + the route's leg output (for logging). */
+  expectedOut: string
+  outputAmount: string
+  /** false when this leg's pre-flight sim was inconclusive (fail-open). */
+  simulated: boolean
+  /** 'reviewed' = passed Phase A, will sign; 'skipped' = failed pre-flight, will NOT sign. */
+  status: 'reviewed' | 'skipped'
+  error?: string
+}
+
 interface UseSplitSwapResult {
   status: SplitSwapStatus
   legs: LegStatus[]
+  /** [SPRINT-9R R1] The frozen plan the Review Split Plan modal renders + confirmPlan signs. */
+  plannedLegs: PlannedLeg[]
   completedLegs: number
   totalLegs: number
   errorMessage: string | null
+  /** Phase A: build + freeze the plan, then await review. NEVER signs. */
   execute: (splitRoute: SplitRoute) => Promise<void>
+  /** Phase B: sign the reviewed plan 1:1. Only runs from status 'awaiting-review'. */
+  confirmPlan: () => Promise<void>
   reset: () => void
 }
 
@@ -97,9 +137,18 @@ async function waitForReceipt(
   return 'timeout'
 }
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+
 /**
  * Hook that executes a split-route swap — multiple sequential transactions
  * across different DEX sources, each handling a portion of the total amount.
+ *
+ * [SPRINT-9R R1] Two-phase, review-gated:
+ *   execute()      → Phase A: fetch + validate + simulate + FREEZE every leg → 'awaiting-review'.
+ *                    No wallet signature is reachable here.
+ *   confirmPlan()  → Phase B: sign the frozen, reviewed plan 1:1 (no re-fetch).
+ * Re-invoking execute() rebuilds the plan and resets to 'awaiting-review', so any rebuilt leg
+ * is re-reviewed before it can be signed.
  */
 export function useSplitSwap(
   tokenIn: Token | null,
@@ -115,6 +164,7 @@ export function useSplitSwap(
 
   const [status, setStatus] = useState<SplitSwapStatus>('idle')
   const [legs, setLegs] = useState<LegStatus[]>([])
+  const [plannedLegs, setPlannedLegs] = useState<PlannedLeg[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const abortRef = useRef(false)
 
@@ -129,15 +179,17 @@ export function useSplitSwap(
     abortRef.current = true
     setStatus('idle')
     setLegs([])
+    setPlannedLegs([])
     setErrorMessage(null)
   }, [])
 
+  // ── Phase A — build + validate + simulate + FREEZE all legs (NO signing) ──
   const execute = useCallback(async (splitRoute: SplitRoute) => {
     if (!tokenIn || !tokenOut || !address || !amountIn || !splitRoute.isSplit) return
 
     abortRef.current = false
     setErrorMessage(null)
-    setStatus('executing')
+    setStatus('planning')
 
     let totalRaw: bigint
     try {
@@ -148,29 +200,35 @@ export function useSplitSwap(
       return
     }
 
-    // Initialize leg statuses
+    // Initialize leg statuses (rebuild: a fresh plan supersedes any prior review)
     const initialLegs: LegStatus[] = splitRoute.legs.map(leg => ({
       source: leg.source as AggregatorName,
       percent: leg.percent,
       status: 'pending',
     }))
     setLegs(initialLegs)
+    setPlannedLegs([])
 
-    let successCount = 0
-    let errorCount = 0
+    const isNativeIn = isNativeETH(tokenIn)
+    const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut)
+      ? ZERO_ADDRESS
+      : (tokenOut.address as `0x${string}`)
+    const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
+
+    const planned: PlannedLeg[] = []
 
     for (let i = 0; i < splitRoute.legs.length; i++) {
-      if (abortRef.current) break
+      if (abortRef.current) return
 
       const leg = splitRoute.legs[i]
       const source = leg.source as AggregatorName
       const legAmount = (totalRaw * BigInt(leg.percent)) / 100n
+      const routeViaFeeCollector = usesFeeCollector(source, chainId)
 
       try {
         // Step 1: Fetch calldata
         updateLeg(i, { status: 'fetching' })
 
-        const routeViaFeeCollector = usesFeeCollector(source, chainId)
         const apiAmount = routeViaFeeCollector
           ? legAmount - (legAmount * BigInt(FEE_BPS) / 10000n)
           : legAmount
@@ -207,11 +265,9 @@ export function useSplitSwap(
         }
         // [R1] Validate recipient in calldata matches connected wallet.
         // [FULL-M-01] Direct legs reject the FeeCollector as a recipient.
-        if (address) {
-          const recipientCheck = validateCallDataRecipient(calldataHex, address, routeViaFeeCollector, chainId)
-          if (!recipientCheck.valid) {
-            throw new Error(`Split leg recipient mismatch: tokens would go to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet.`)
-          }
+        const recipientCheck = validateCallDataRecipient(calldataHex, address, routeViaFeeCollector, chainId)
+        if (!recipientCheck.valid) {
+          throw new Error(`Split leg recipient mismatch: tokens would go to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet.`)
         }
         // Fee integrity check
         if (leg.quote?.toAmount) {
@@ -221,16 +277,14 @@ export function useSplitSwap(
           }
         }
 
-        // [P207] Pre-leg simulation — eth_call the exact transaction before
-        // the wallet prompt, mirroring the single-swap path. Catches reverts
-        // (stale routing, FeeCollector InsufficientOutput) before broadcast so
-        // no gas is wasted. A failed leg is SKIPPED (continue), not aborted:
-        // other legs may still route through healthy liquidity.
+        // [P207] Pre-leg simulation — eth_call the exact transaction before review,
+        // mirroring the single-swap path. Catches reverts (stale routing, FeeCollector
+        // InsufficientOutput) so a doomed leg is SKIPPED (not signed), not aborted.
         updateLeg(i, { status: 'simulating' })
         const simTx = buildSimulationTx({
           swapData,
           routeViaFeeCollector,
-          isNativeIn: isNativeETH(tokenIn),
+          isNativeIn,
           tokenIn,
           tokenOut,
           rawAmount: legAmount,
@@ -242,111 +296,144 @@ export function useSplitSwap(
         const sim = await simulateSwapTx(simTx)
         if (!sim.success) {
           updateLeg(i, { status: 'error', error: sim.error || 'Simulation failed — leg would revert' })
-          errorCount++
-          continue // Skip this leg, try the next one
+          planned.push({
+            source, percent: leg.percent, legAmount, routeViaFeeCollector, isNativeIn,
+            routerAddress: swapData.tx.to, routerCalldata: calldataHex,
+            legMinOutput: 0n, expectedOut: swapData.toAmount, outputAmount: leg.outputAmount,
+            simulated: true, status: 'skipped', error: sim.error || 'Simulation reverted',
+          })
+          continue // Skip this leg from the signable plan
         }
-        // [P209] Inconclusive sim — proceed, but flag the leg so the UI can
-        // signal it ran without a client-side revert guard.
-        if (sim.simulated === false) {
-          updateLeg(i, { simulated: false })
-        }
-
-        // Step 2: Send transaction
-        updateLeg(i, { status: 'signing' })
-
-        let txHash: `0x${string}`
+        // [P209] Inconclusive sim — proceed, but flag the leg so the UI can signal it ran
+        // without a client-side revert guard (on-chain minimumOutput still protects the fill).
+        const simulated = sim.simulated !== false
 
         // [H-04] Per-leg FeeCollector minimumOutput derived from leg toAmount + user slippage.
-        // ETH output uses address(0); otherwise the ERC-20 output token address.
-        const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
-        const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
-        // [10-L-01] Same guard as useSwap: a malformed leg toAmount
-        // disables the on-chain minimumOutput check for that leg rather
-        // than throwing during calldata encoding.
+        // [10-L-01] A malformed leg toAmount disables the on-chain minimumOutput check for
+        // that leg rather than throwing during calldata encoding.
         const legToAmountBn = safeBigInt(swapData.toAmount)
         const legMinOutput =
           legToAmountBn === null || slippageBpsBn >= 10_000n
             ? 0n
             : (legToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
-        const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut)
-          ? ZERO_ADDRESS
-          : (tokenOut.address as `0x${string}`)
+
+        // FREEZE the EXACT transaction that will broadcast (encode now, sign in confirmPlan).
+        // This is byte-identical to what was just simulated.
+        let txTo: `0x${string}`
+        let txData: `0x${string}`
+        let txValue: bigint
+        let txGas: bigint | undefined
 
         if (routeViaFeeCollector) {
-          // [P225] Resolve the FeeCollector for the active chain (mainnet ===
-          // FEE_COLLECTOR_ADDRESS). Guard null defensively — never encode a
-          // call to the zero address.
+          // [P225] Resolve the FeeCollector for the active chain. Guard null defensively.
           const feeCollectorAddress = getChainConfig(chainId).contracts.feeCollector
           if (!feeCollectorAddress) {
             throw new Error(`Swaps via FeeCollector aren't available on chain ${chainId} yet.`)
           }
-          // Route through FeeCollector
-          if (isNativeETH(tokenIn)) {
-            const feeCollectorData = encodeFunctionData({
+          if (isNativeIn) {
+            txData = encodeFunctionData({
               abi: FEE_COLLECTOR_ABI,
               functionName: 'swapETHWithFee',
-              args: [
-                swapData.tx.to as `0x${string}`,
-                swapData.tx.data as `0x${string}`,
-                tokenOutForFc,
-                legMinOutput,
-              ],
+              args: [swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`, tokenOutForFc, legMinOutput],
             })
-            txHash = await sendTransactionAsync({
-              to: feeCollectorAddress,
-              data: feeCollectorData,
-              value: legAmount,
-              gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined,
-            })
+            txTo = feeCollectorAddress
+            txValue = legAmount
+            txGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 100_000n : undefined
           } else {
-            const feeCollectorData = encodeFunctionData({
+            txData = encodeFunctionData({
               abi: FEE_COLLECTOR_ABI,
               functionName: 'swapTokenWithFee',
-              args: [
-                tokenIn.address as `0x${string}`,
-                legAmount,
-                swapData.tx.to as `0x${string}`,
-                swapData.tx.data as `0x${string}`,
-                tokenOutForFc,
-                legMinOutput,
-              ],
+              args: [tokenIn.address as `0x${string}`, legAmount, swapData.tx.to as `0x${string}`, swapData.tx.data as `0x${string}`, tokenOutForFc, legMinOutput],
             })
-            txHash = await sendTransactionAsync({
-              to: feeCollectorAddress,
-              data: feeCollectorData,
-              value: 0n,
-              gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined,
-            })
+            txTo = feeCollectorAddress
+            txValue = 0n
+            txGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 120_000n : undefined
           }
         } else {
           // Direct swap (0x, etc.)
-          txHash = await sendTransactionAsync({
-            to: swapData.tx.to as `0x${string}`,
-            data: swapData.tx.data as `0x${string}`,
-            value: BigInt(swapData.tx.value || '0'),
-            gas: swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 50_000n : undefined,
-          })
+          txTo = swapData.tx.to as `0x${string}`
+          txData = swapData.tx.data as `0x${string}`
+          txValue = BigInt(swapData.tx.value || '0')
+          txGas = swapData.tx.gas > 0 ? BigInt(swapData.tx.gas) + 50_000n : undefined
         }
 
+        planned.push({
+          source, percent: leg.percent, legAmount, routeViaFeeCollector, isNativeIn,
+          routerAddress: swapData.tx.to, routerCalldata: calldataHex,
+          txTo, txData, txValue, txGas,
+          legMinOutput, expectedOut: swapData.toAmount, outputAmount: leg.outputAmount,
+          simulated, status: 'reviewed',
+        })
+        updateLeg(i, { status: 'reviewed', simulated })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error'
+        updateLeg(i, { status: 'error', error: msg.slice(0, 100) })
+        planned.push({
+          source, percent: leg.percent, legAmount, routeViaFeeCollector, isNativeIn,
+          routerAddress: '', routerCalldata: '',
+          legMinOutput: 0n, expectedOut: '0', outputAmount: leg.outputAmount,
+          simulated: true, status: 'skipped', error: msg.slice(0, 100),
+        })
+      }
+    }
+
+    if (abortRef.current) return
+
+    setPlannedLegs(planned)
+    const signable = planned.filter(p => p.status === 'reviewed')
+    if (signable.length === 0) {
+      setStatus('error')
+      setErrorMessage('No split leg can execute — every leg failed pre-flight checks.')
+      return
+    }
+    // FREEZE: await the user's review of the plan. NO transaction has been signed.
+    setStatus('awaiting-review')
+  }, [tokenIn, tokenOut, address, amountIn, slippage, updateLeg, chainId])
+
+  // ── Phase B — sign the FROZEN, reviewed plan 1:1 (reachable ONLY via the review modal) ──
+  const confirmPlan = useCallback(async () => {
+    // Guard: only a freshly-reviewed plan may be signed. A rebuild (execute()) resets status
+    // to 'awaiting-review' with a NEW plan, so a stale confirm cannot sign old/unreviewed calldata.
+    if (status !== 'awaiting-review') return
+    if (!tokenIn || !tokenOut || !address) return
+
+    abortRef.current = false
+    setStatus('executing')
+
+    let successCount = 0
+    let errorCount = 0
+
+    for (let i = 0; i < plannedLegs.length; i++) {
+      if (abortRef.current) break
+      const p = plannedLegs[i]
+      // Skipped legs (failed Phase-A pre-flight) are never signed.
+      if (p.status !== 'reviewed' || !p.txTo || !p.txData) continue
+
+      try {
+        updateLeg(i, { status: 'signing' })
+        const txHash = await sendTransactionAsync({
+          to: p.txTo,
+          data: p.txData,
+          value: p.txValue ?? 0n,
+          gas: p.txGas,
+        })
         updateLeg(i, { status: 'confirming', txHash })
 
-        // Step 3: Wait for confirmation
         const receipt = await waitForReceipt(txHash, chainId)
-
         if (receipt === 'success') {
           updateLeg(i, { status: 'success' })
           successCount++
           logSwapToSupabase({
             wallet: address,
             chainId,
-            source,
+            source: p.source,
             tokenIn,
             tokenOut,
-            amountIn: legAmount.toString(),
-            amountOut: leg.outputAmount,
+            amountIn: p.legAmount.toString(),
+            amountOut: p.outputAmount,
             slippage,
             mevProtected: false,
-            feeCollected: routeViaFeeCollector,
+            feeCollected: p.routeViaFeeCollector,
             status: 'confirmed',
             txHash,
           })
@@ -359,8 +446,7 @@ export function useSplitSwap(
         const isUserReject = msg.toLowerCase().includes('user rejected') || msg.toLowerCase().includes('user denied')
         updateLeg(i, { status: 'error', error: isUserReject ? 'Rejected in wallet' : msg.slice(0, 100) })
         errorCount++
-
-        // If user rejected, abort remaining legs
+        // If the user rejected, abort the remaining legs.
         if (isUserReject) {
           setErrorMessage('Transaction rejected in wallet.')
           break
@@ -368,25 +454,28 @@ export function useSplitSwap(
       }
     }
 
-    // Final status
-    if (successCount === splitRoute.legs.length) {
+    // Final status — denominator is ALL legs (a skipped leg means not all executed → partial).
+    if (successCount === plannedLegs.length) {
       setStatus('success')
-    } else if (successCount > 0 && errorCount > 0) {
+    } else if (successCount > 0) {
       setStatus('partial')
-      setErrorMessage(`${successCount}/${splitRoute.legs.length} legs completed. ${errorCount} failed.`)
+      // Failed = every leg that didn't succeed (reverted/timed-out signed legs + Phase-A skipped legs).
+      setErrorMessage(`${successCount}/${plannedLegs.length} legs completed. ${plannedLegs.length - successCount} failed.`)
     } else {
       setStatus('error')
       if (!errorMessage) setErrorMessage('Split swap failed.')
     }
-  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransactionAsync, updateLeg, chainId])
+  }, [status, plannedLegs, tokenIn, tokenOut, address, chainId, slippage, sendTransactionAsync, updateLeg, errorMessage])
 
   return {
     status,
     legs,
+    plannedLegs,
     completedLegs,
     totalLegs,
     errorMessage,
     execute,
+    confirmPlan,
     reset,
   }
 }

@@ -217,6 +217,19 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+// [SPRINT-9R R1] Drive the two-phase flow: execute() builds + freezes the plan (Phase A, no
+// signing), then confirmPlan() signs it (Phase B). Confirms ONLY when a plan is awaiting review,
+// so guard/error paths (which resolve before review) behave exactly as a bare execute() did.
+async function runSplit(
+  result: { current: { status: string; execute: (r: SplitRoute) => Promise<void>; confirmPlan: () => Promise<void> } },
+  route: SplitRoute,
+) {
+  await act(async () => { await result.current.execute(route) })
+  if (result.current.status === 'awaiting-review') {
+    await act(async () => { await result.current.confirmPlan() })
+  }
+}
+
 describe('useSplitSwap — initial state', () => {
   it('starts in idle state with no legs or error', () => {
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
@@ -232,18 +245,14 @@ describe('useSplitSwap — guards', () => {
   it('does nothing when tokenIn is missing', async () => {
     const { result } = renderHook(() => useSplitSwap(null, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     expect(result.current.status).toBe('idle')
   })
 
   it('does nothing when tokenOut is missing', async () => {
     const { result } = renderHook(() => useSplitSwap(ETH, null, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     expect(result.current.status).toBe('idle')
   })
 
@@ -252,18 +261,14 @@ describe('useSplitSwap — guards', () => {
     ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValueOnce({ address: undefined })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     expect(result.current.status).toBe('idle')
   })
 
   it('rejects an invalid amountIn (parseUnits throws) with an error status', async () => {
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, 'not-a-number', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     expect(result.current.status).toBe('error')
     expect(result.current.errorMessage).toMatch(/invalid input amount/i)
   })
@@ -274,9 +279,7 @@ describe('useSplitSwap — happy path', () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     expect(result.current.completedLegs).toBe(2)
     expect(mockValidateFeeIntegrity).toHaveBeenCalledTimes(2)
@@ -294,9 +297,7 @@ describe('useSplitSwap — happy path', () => {
     })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     expect(calls).toHaveLength(2)
     // 6e17 * (10_000 - 10) / 10_000 = 599400000000000000
@@ -309,9 +310,7 @@ describe('useSplitSwap — happy path', () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     // swapETHWithFee selector = first 4 bytes of keccak256("swapETHWithFee(address,bytes,address,uint256)").
     // Easier check: the call has a non-zero `value` (we sent ETH).
@@ -323,9 +322,7 @@ describe('useSplitSwap — happy path', () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(WETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     const txArg = mockSendTransactionAsync.mock.calls[0][0]
     expect(txArg.value).toBe(0n)
@@ -337,9 +334,7 @@ describe('useSplitSwap — security validator failures', () => {
     mockSwapFetch(() => makeQuote({ data: '0x' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/calldata|short/i)
   })
@@ -349,9 +344,7 @@ describe('useSplitSwap — security validator failures', () => {
     mockSwapFetch(() => makeQuote({ data: huge }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/abnormally large|injection/i)
   })
@@ -360,9 +353,7 @@ describe('useSplitSwap — security validator failures', () => {
     mockSwapFetch(() => makeQuote({ data: `0xdeadbeef${'0'.repeat(128)}` }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error?.toLowerCase()).toContain('unknown swap selector')
   })
@@ -377,9 +368,7 @@ describe('useSplitSwap — security validator failures', () => {
     })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/recipient/i)
   })
@@ -389,9 +378,7 @@ describe('useSplitSwap — security validator failures', () => {
     mockValidateFeeIntegrity.mockReturnValueOnce({ valid: false, reason: 'too high' })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/fee integrity/i)
   })
@@ -401,9 +388,7 @@ describe('useSplitSwap — security validator failures', () => {
     mockValidateRouterAddress.mockReturnValueOnce({ valid: false, reason: 'Router not whitelisted' })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/not whitelisted|router/i)
   })
@@ -420,9 +405,7 @@ describe('useSplitSwap — partial / mixed outcomes', () => {
     })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('partial'))
     expect(result.current.completedLegs).toBe(1)
     expect(result.current.errorMessage).toMatch(/1\/2.*failed/i)
@@ -436,9 +419,7 @@ describe('useSplitSwap — partial / mixed outcomes', () => {
     mockSendTransactionAsync.mockRejectedValueOnce(rejected)
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     // The leg-local error is the canonical signal; the global errorMessage
     // is overwritten by the final status block (stale-closure on the
@@ -453,9 +434,7 @@ describe('useSplitSwap — partial / mixed outcomes', () => {
     mockGetTransactionReceipt.mockResolvedValueOnce({ status: 'reverted' })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs[0].error).toMatch(/reverted/i)
   })
@@ -466,9 +445,7 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     // One simulation + one broadcast per leg.
     expect(mockSimulateSwapTx).toHaveBeenCalledTimes(2)
@@ -486,9 +463,7 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
       .mockResolvedValue({ success: true, simulated: true })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('partial'))
     // Leg 1 was skipped before broadcast; leg 2 proceeded.
     expect(result.current.legs[0].status).toBe('error')
@@ -502,9 +477,7 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
     mockSimulateSwapTx.mockResolvedValue({ success: false, error: 'Simulation reverted' })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.legs.every(l => l.status === 'error')).toBe(true)
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
@@ -520,9 +493,7 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
       .mockResolvedValue({ success: true, simulated: true })       // leg 2: conclusive pass
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     // Fail-open, not fail-closed: both legs broadcast.
     expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
@@ -557,9 +528,7 @@ describe('useSplitSwap — [P221] chainId threading', () => {
 
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
 
     expect(bodies.length).toBeGreaterThan(0)
@@ -572,9 +541,7 @@ describe('useSplitSwap — reset()', () => {
     mockSwapFetch(() => makeQuote({ data: '0x' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
 
     act(() => {
@@ -594,9 +561,7 @@ describe('useSplitSwap — safeBigInt guard [10-L-01]', () => {
     mockSwapFetch(() => makeQuote({ toAmount: 'not-a-number' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100, 'not-a-number'))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('success'))
     // sendTransactionAsync was called — meaning encoding didn't throw
     // and legMinOutput defaulted to 0n.
@@ -619,11 +584,66 @@ describe('useSplitSwap — chain-id source of truth [SPRINT-9G G6]', () => {
 
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
-    await act(async () => {
-      await result.current.execute(route)
-    })
+    await runSplit(result, route)
 
     expect(mockValidateRouterAddress).toHaveBeenCalled()
     expect(mockValidateRouterAddress.mock.calls[0][2]).toBe(8453)
+  })
+})
+
+describe('useSplitSwap — [SPRINT-9R R1] review gate (no signature without review)', () => {
+  it('execute() freezes the plan and NEVER signs — confirmPlan is required to broadcast', async () => {
+    mockSwapFetch(() => makeQuote())
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => { await result.current.execute(route) })
+    // Phase A complete: plan frozen, awaiting review, NOT a single wallet prompt yet.
+    expect(result.current.status).toBe('awaiting-review')
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+    // The plan lists EVERY leg, all reviewed, with per-leg validation already run in Phase A.
+    expect(result.current.plannedLegs).toHaveLength(2)
+    expect(result.current.plannedLegs.every(p => p.status === 'reviewed')).toBe(true)
+    expect(mockValidateRouterAddress).toHaveBeenCalledTimes(2)
+    expect(mockValidateCallDataRecipient).toHaveBeenCalledTimes(2)
+    // Confirm → exactly one wallet prompt per reviewed leg.
+    await act(async () => { await result.current.confirmPlan() })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
+  })
+
+  it('confirmPlan() is a no-op unless status is awaiting-review (no stale/unreviewed signature)', async () => {
+    mockSwapFetch(() => makeQuote())
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    // No plan was built → confirmPlan must not sign anything.
+    await act(async () => { await result.current.confirmPlan() })
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+    expect(result.current.status).toBe('idle')
+  })
+
+  it('a rebuild re-reviews: re-running execute() refreshes the frozen plan; confirmPlan signs the REBUILT calldata, never the stale one', async () => {
+    mockUsesFeeCollector.mockReturnValue(false) // direct route → txData === router calldata, easy to assert
+    const CALLDATA_A = `${KNOWN_SELECTOR}${'a'.repeat(128)}` as `0x${string}`
+    const CALLDATA_B = `${KNOWN_SELECTOR}${'b'.repeat(128)}` as `0x${string}`
+    let data: `0x${string}` = CALLDATA_A
+    mockSwapFetch(() => makeQuote({ data }))
+    const { result } = renderHook(() => useSplitSwap(WETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
+
+    // Build plan v1 (calldata A) — frozen, awaiting review.
+    await act(async () => { await result.current.execute(route) })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.plannedLegs[0].txData).toBe(CALLDATA_A)
+
+    // REBUILD before signing (e.g. a retry / quote refresh produced new calldata) → re-review.
+    data = CALLDATA_B
+    await act(async () => { await result.current.execute(route) })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.plannedLegs[0].txData).toBe(CALLDATA_B)
+
+    // Confirm signs the REVIEWED (rebuilt) calldata, never the stale A.
+    await act(async () => { await result.current.confirmPlan() })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(1)
+    expect(mockSendTransactionAsync.mock.calls[0][0].data).toBe(CALLDATA_B)
   })
 })

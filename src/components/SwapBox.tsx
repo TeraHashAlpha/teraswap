@@ -7,6 +7,7 @@ import TokenSelector from './TokenSelector'
 import QuoteBreakdown from './QuoteBreakdown'
 import SwapButton from './SwapButton'
 import TransactionPreview from './TransactionPreview'
+import SplitReviewModal from './SplitReviewModal'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import SourceToggle from './SourceToggle'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
@@ -230,7 +231,9 @@ export default function SwapBox() {
     completedLegs: splitCompleted,
     totalLegs: splitTotal,
     errorMessage: splitSwapError,
+    plannedLegs: splitPlannedLegs,
     execute: executeSplitSwap,
+    confirmPlan: confirmSplitPlan,
     reset: resetSplitSwap,
   } = useSplitSwap(tokenIn, tokenOut, amountIn, slippage)
 
@@ -240,6 +243,9 @@ export default function SwapBox() {
   const splitStatusMap: Record<string, SwapStatus> = {
     idle: 'idle', executing: 'swapping', success: 'success',
     error: 'error', partial: 'error',
+    // [SPRINT-9R R1] Phase A (building the plan) reads as 'swapping' (busy);
+    // 'awaiting-review' maps to 'confirming' so the button reflects the open review modal.
+    planning: 'swapping', 'awaiting-review': 'confirming',
   }
   const effectiveSwapStatus: SwapStatus = isSplitActive
     ? (splitStatusMap[splitSwapStatus] ?? 'idle')
@@ -1021,6 +1027,20 @@ export default function SwapBox() {
           minimumOutput={pendingSwap.minimumOutput}
           onConfirm={confirmSwap}
           onCancel={resetSwap}
+        />
+      )}
+
+      {/* [SPRINT-9R R1] Split-swap review — no leg is signed until the user confirms this
+          aggregate plan; each wallet prompt then maps 1:1 to a reviewed leg. A rebuild
+          (re-running executeSplitSwap) returns here with a fresh plan, forcing re-review. */}
+      {isSplitActive && splitSwapStatus === 'awaiting-review' && address && (
+        <SplitReviewModal
+          plannedLegs={splitPlannedLegs}
+          tokenIn={tokenIn}
+          tokenOut={tokenOut}
+          userAddress={address}
+          onConfirm={confirmSplitPlan}
+          onCancel={resetSplitSwap}
         />
       )}
 
