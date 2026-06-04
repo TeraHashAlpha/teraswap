@@ -7,7 +7,7 @@
  * safeBigInt [10-L-01] guard against a malformed `toAmount`.
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -202,5 +202,41 @@ describe('QuoteBreakdown — Base/mainnet Compare parity rendering [SPRINT-9E]',
       <QuoteBreakdown {...makeProps({ meta: multiMeta(), gasEstimate: () => ({ eth: 0.0001, usd: 0.25 }) })} />,
     )
     expect(screen.getByText(/\$0\.25/)).toBeInTheDocument()
+  })
+})
+
+describe('QuoteBreakdown — [SPRINT-9Q Q2] rate-invert toggle', () => {
+  beforeEach(() => { try { sessionStorage.clear() } catch {} })
+
+  it('flips the rate direction on click (display-only, no math drift) and back', () => {
+    // makeProps default: 1 ETH → 3000 USDC.
+    renderWithProviders(<QuoteBreakdown {...makeProps()} />)
+    const btn = () => screen.getByRole('button', { name: /flip rate direction/i })
+    // Forward = ETH→USDC; value 3000 (formatDisplay uses a space thousands-separator).
+    expect(btn().textContent).toMatch(/1\s*ETH\s*=.*USDC/)
+    expect(btn().textContent).toContain('000.0000')
+    fireEvent.click(btn())
+    // Inverse = inputAmount / outputAmount = 1 / 3000 = 0.0003333… → formatDisplay 4dp = "0.0003".
+    expect(btn().textContent).toMatch(/1\s*USDC\s*=.*ETH/)
+    expect(btn().textContent).toContain('0.0003')
+    fireEvent.click(btn())
+    expect(btn().textContent).toMatch(/1\s*ETH\s*=.*USDC/)
+  })
+
+  it('guards a zero output (no Infinity) — inverse shows the — placeholder', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ meta: makeMeta({ toAmount: '0' }) })} />)
+    const btn = screen.getByRole('button', { name: /flip rate direction/i })
+    fireEvent.click(btn)
+    expect(btn.textContent).toMatch(/1\s*USDC\s*=\s*—\s*ETH/)
+  })
+
+  it('persists the chosen direction for the session (survives remount)', () => {
+    const { unmount } = renderWithProviders(<QuoteBreakdown {...makeProps()} />)
+    fireEvent.click(screen.getByRole('button', { name: /flip rate direction/i }))
+    expect(sessionStorage.getItem('teraswap:rateInverted')).toBe('1')
+    unmount()
+    renderWithProviders(<QuoteBreakdown {...makeProps()} />)
+    // Re-mount reads the persisted direction → starts inverted (USDC-first).
+    expect(screen.getByRole('button', { name: /flip rate direction/i }).textContent).toMatch(/1\s*USDC\s*=.*ETH/)
   })
 })

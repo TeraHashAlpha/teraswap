@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type { MetaQuoteResult } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import type { PriceCheck } from '@/lib/chainlink'
@@ -60,6 +61,20 @@ export default function QuoteBreakdown({
   smartMevApplied = false, mevExposedBest = false, onUseGasless,
   onRefresh, refreshing = false,
 }: Props) {
+  // [SPRINT-9Q Q2] Rate-direction toggle (display-only). Persisted for the session so the
+  // chosen reading direction survives quote refreshes / remounts.
+  const [rateInverted, setRateInverted] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try { return sessionStorage.getItem('teraswap:rateInverted') === '1' } catch { return false }
+  })
+  const toggleRateDirection = () => {
+    setRateInverted((prev) => {
+      const next = !prev
+      try { sessionStorage.setItem('teraswap:rateInverted', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
+
   const best = meta.best
   // [10-L-01] Guard against malformed toAmount on the winning quote.
   // If parsing fails, every downstream derived value collapses to 0/—
@@ -72,6 +87,11 @@ export default function QuoteBreakdown({
   const inputAmount = Number(amountIn)
   const rate = outputAmountValid && inputAmount > 0
     ? formatDisplay(outputAmount / inputAmount, 4)
+    : '—'
+  // [SPRINT-9Q Q2] Display-only inverse (1 tokenOut = N tokenIn). Guard zero output so a
+  // div-by-zero never produces Infinity; formatDisplay handles separators + tiny values.
+  const inverseRate = outputAmountValid && outputAmount > 0 && inputAmount > 0
+    ? formatDisplay(inputAmount / outputAmount, 4)
     : '—'
   // Fee is collected when: source has native fee API params, OR FeeCollector proxy is active
   const feeCollected = FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()
@@ -285,7 +305,18 @@ export default function QuoteBreakdown({
             Rate {priceCheck.oracleUnavailable && <span className="text-amber-400">&#9888;</span>}
             {priceCheck.chainlinkPrice != null && !priceCheck.oracleUnavailable && <span className="text-success">&#10003;</span>}
           </span>
-          <span className="text-right text-xs text-cream-80 sm:truncate sm:text-sm">1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</span>
+          <button
+            type="button"
+            onClick={toggleRateDirection}
+            className="inline-flex items-center gap-1 text-right text-xs text-cream-80 transition hover:text-cream sm:text-sm"
+            aria-label="Flip rate direction"
+            title="Click to flip the rate direction"
+          >
+            {rateInverted
+              ? <>1 {tokenOut.symbol} = {inverseRate} {tokenIn.symbol}</>
+              : <>1 {tokenIn.symbol} = {rate} {tokenOut.symbol}</>}
+            <span aria-hidden="true" className="text-cream-35">&#8644;</span>
+          </button>
         </div>
 
         {/* [LP-05] Estimated MEV savings vs non-CoW median (CoW-only, positive only) */}
