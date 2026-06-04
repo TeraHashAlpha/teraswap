@@ -338,6 +338,7 @@ export default function SwapBox() {
         tokenIn: tokenIn.symbol, tokenOut: tokenOut.symbol, amountIn,
         amountOut: outAmount,
         txHash, status: 'confirmed',
+        chainId: activeChainId, // [SPRINT-9S S3] chain-aware explorer link in history
       })
 
       // [LP-05] Patch the swap row with MEV-savings telemetry. Fire-and-forget;

@@ -19,7 +19,7 @@ import {
   withTimeout,
   friendlyError,
 } from './adapters'
-import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates } from './adapters/circuit-breaker'
+import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey } from './adapters/circuit-breaker'
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
@@ -119,7 +119,7 @@ export async function fetchMetaQuote(
 
   // [CB-01] Skip sources with OPEN circuit breaker
   const cbFiltered = allSources.filter(s => {
-    const cb = getCircuitBreaker(s.name)
+    const cb = getCircuitBreaker(circuitKey(s.name, chainId)) // [9S S3] per-chain breaker
     return !cb.isOpen() // isOpen() handles OPEN → HALF_OPEN transition internally
   })
 
@@ -135,7 +135,7 @@ export async function fetchMetaQuote(
   const startTime = Date.now()
   const results = await Promise.allSettled(
     activeSources.map(s =>
-      withCircuitBreaker(s.name, () => withTimeout(s.fetch(), QUOTE_TIMEOUT_MS))
+      withCircuitBreaker(circuitKey(s.name, chainId), () => withTimeout(s.fetch(), QUOTE_TIMEOUT_MS))
     )
   )
   const elapsed = Date.now() - startTime
@@ -321,7 +321,7 @@ async function probeSource(adapter: DEXAdapter, params: QuoteParams): Promise<So
   }
   // Read-only breaker check: getInfo() and getState() are pure; only isOpen()
   // mutates (it transitions OPEN→HALF_OPEN once cooldown elapses), so never use it here.
-  const cb = getCircuitBreaker(source).getInfo()
+  const cb = getCircuitBreaker(circuitKey(source, params.chainId)).getInfo() // [9S S3] per-chain breaker
   if (cb.state === 'OPEN' && cb.cooldownRemaining > 0) {
     return {
       source,
@@ -476,7 +476,7 @@ export async function fetchSwapFromSource(
   // clean JSON error instead of the function running to a platform HTML 504.
   // The build is idempotent (no on-chain broadcast) so the retry is safe; the
   // circuit breaker sees only the final outcome of the retried attempt.
-  const result = await withCircuitBreaker(source, () =>
+  const result = await withCircuitBreaker(circuitKey(source, chainId), () => // [9S S3] per-chain breaker
     withSwapBuildRetry((signal) => adapter.fetchSwapData({
       src, dst, amount, from, slippage,
       srcDecimals, dstDecimals,

@@ -27,6 +27,7 @@ import {
   getCircuitBreaker,
   resetAllCircuitBreakers,
   initFromKV,
+  circuitKey,
 } from './circuit-breaker'
 
 function status(id: string, state: 'active' | 'degraded' | 'disabled') {
@@ -210,5 +211,37 @@ describe('circuit-breaker — no-route (null) is NEUTRAL [SPRINT-9F backlog]', (
     const r = await withCircuitBreaker('velora', async () => 'a-real-quote')
     expect(r).toBe('a-real-quote')
     expect(getCircuitBreaker('velora').getInfo().consecutiveFailures).toBe(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9S S3] Per-chain breaker isolation.
+// ─────────────────────────────────────────────────────────────
+describe('circuitKey + per-chain isolation [SPRINT-9S S3]', () => {
+  beforeEach(() => resetAllCircuitBreakers())
+
+  it('mainnet keeps the BARE source name (byte-identical + KV pre-seed); other chains get a suffix', () => {
+    expect(circuitKey('bebop', 1)).toBe('bebop')          // DEFAULT_CHAIN_ID → bare name
+    expect(circuitKey('bebop', undefined)).toBe('bebop')  // unscoped → bare name
+    expect(circuitKey('bebop', 8453)).toBe('bebop:8453')  // Base → isolated key
+  })
+
+  it('a source failing on Base does NOT open the same source\'s breaker on mainnet', () => {
+    // Trip the Base-scoped breaker (3 consecutive failures → OPEN).
+    const baseCb = getCircuitBreaker(circuitKey('bebop', 8453))
+    baseCb.onFailure(); baseCb.onFailure(); baseCb.onFailure()
+    expect(baseCb.getState()).toBe('OPEN')
+
+    // The mainnet breaker for the same source is a SEPARATE instance — still CLOSED.
+    const mainnetCb = getCircuitBreaker(circuitKey('bebop', 1))
+    expect(mainnetCb.getState()).toBe('CLOSED')
+    expect(mainnetCb.isOpen()).toBe(false)
+  })
+
+  it('and the reverse: a mainnet failure does not open the Base breaker', () => {
+    const mainnetCb = getCircuitBreaker(circuitKey('bebop', 1))
+    mainnetCb.onFailure(); mainnetCb.onFailure(); mainnetCb.onFailure()
+    expect(mainnetCb.getState()).toBe('OPEN')
+    expect(getCircuitBreaker(circuitKey('bebop', 8453)).getState()).toBe('CLOSED')
   })
 })

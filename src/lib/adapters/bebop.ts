@@ -32,6 +32,18 @@ import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './typ
 // uses the real `from`. See FEEDBACK if Bebop ever rejects the placeholder.
 const BEBOP_PRICE_TAKER = '0x1111111111111111111111111111111111111111'
 
+// [SPRINT-9S S3] Bebop self-suppresses without an API key (demo mode returns no executable
+// settlement), chain-agnostically — which made it silently absent on Base. Log ONCE so the
+// missing-key cause is diagnosable in server logs rather than looking like a Base-only outage.
+// The Base path is otherwise wired (host api.bebop.xyz, slug 'base', JAM settlement whitelisted
+// on 8453); the only thing gating Bebop on Base is the env key. See FEEDBACK 9S (S3.4).
+let bebopKeyWarned = false
+function warnBebopKeyMissingOnce(): void {
+  if (bebopKeyWarned) return
+  bebopKeyWarned = true
+  console.info('[bebop] skipped on every chain — BEBOP_API_KEY not set (demo mode has no executable settlement). Set BEBOP_API_KEY to enable Bebop.')
+}
+
 /** Build the JAM quote endpoint for `chainId` (slug = ethereum / base). */
 function bebopQuoteUrl(chainId: number): string {
   const host = getAdapterApiUrl('bebop', chainId) // 'https://api.bebop.xyz'
@@ -59,7 +71,10 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
   // executable settlement, so a price quote here would win Best and then fail at
   // swap. Treat it as no executable quote: don't rank Bebop until the key is
   // configured. With the key present the firm path is unchanged.
-  if (!AGGREGATOR_APIS.bebop.key) return null
+  if (!AGGREGATOR_APIS.bebop.key) {
+    warnBebopKeyMissingOnce()
+    return null
+  }
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
   // Price-only (gross): NO fee params so Bebop ranks fairly vs the other sources.
   const qs = new URLSearchParams({

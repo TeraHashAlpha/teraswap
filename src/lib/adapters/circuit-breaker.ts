@@ -11,9 +11,22 @@
 // known to be unhealthy. KV failures degrade silently to the CLOSED default
 // — never blocking the hot path on a KV read.
 
+import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+
 // ── Types & Config ──────────────────────────────────────────
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN'
+
+/**
+ * [SPRINT-9S S3] Per-chain breaker key. A source failing on one chain must not open the
+ * breaker for the same source on another chain (e.g. a Bebop outage on Base must not block
+ * Bebop on mainnet). Mainnet (DEFAULT_CHAIN_ID) keeps the BARE source name, so its breaker
+ * state, the KV pre-seed (keyed by source id) and the dashboard entries are byte-identical to
+ * before; every other chain gets a `name:chainId` suffix for an isolated breaker.
+ */
+export function circuitKey(name: string, chainId?: number): string {
+  return chainId === undefined || chainId === DEFAULT_CHAIN_ID ? name : `${name}:${chainId}`
+}
 
 export interface CircuitBreakerConfig {
   /** Consecutive failures before opening circuit */

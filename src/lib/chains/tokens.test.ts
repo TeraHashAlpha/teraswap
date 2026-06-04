@@ -2,7 +2,7 @@
  * [P224] Per-chain token catalog (P221).
  */
 import { describe, it, expect } from 'vitest'
-import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl } from './tokens'
+import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl } from './tokens'
 import { DEFAULT_TOKENS, findToken, addCustomToken } from '@/lib/tokens'
 
 describe('chains/tokens [P221]', () => {
@@ -86,6 +86,21 @@ describe('explorerTokenUrl — chain-aware [9P]', () => {
   })
   it('Base → basescan.org', () => {
     expect(explorerTokenUrl(BASE_USDC, 8453)).toBe(`https://basescan.org/token/${BASE_USDC}`)
+  })
+})
+
+describe('explorerTxUrl / explorerAddressUrl — chain-aware [SPRINT-9S S3]', () => {
+  const HASH = '0xabc0000000000000000000000000000000000000000000000000000000000000'
+  it('tx: mainnet → etherscan, Base → basescan', () => {
+    expect(explorerTxUrl(HASH, 1)).toBe(`https://etherscan.io/tx/${HASH}`)
+    expect(explorerTxUrl(HASH, 8453)).toBe(`https://basescan.org/tx/${HASH}`)
+  })
+  it('address: mainnet → etherscan, Base → basescan', () => {
+    expect(explorerAddressUrl(MAINNET_USDC, 1)).toBe(`https://etherscan.io/address/${MAINNET_USDC}`)
+    expect(explorerAddressUrl(BASE_USDC, 8453)).toBe(`https://basescan.org/address/${BASE_USDC}`)
+  })
+  it('unknown chain falls back to mainnet etherscan (never throws)', () => {
+    expect(explorerTxUrl(HASH, 999999)).toBe(`https://etherscan.io/tx/${HASH}`)
   })
 })
 
