@@ -595,7 +595,7 @@ export default function SwapBox() {
               onChange={(e) => handleAmountChange(e.target.value)}
               className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
             />
-            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); resetSwap() }} disabledAddress={tokenOut?.address} />
+            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenOut?.address} />
           </div>
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between px-1 text-xs text-cream-35">
@@ -632,7 +632,7 @@ export default function SwapBox() {
                   ? <span className="inline-block animate-pulse text-cream-35">...</span>
                   : null}
             </span>
-            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); resetSwap() }} disabledAddress={tokenIn?.address} />
+            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size) && (
             <div className="mt-1 flex items-center justify-between px-1">

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { parseUnits, encodeFunctionData } from 'viem'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { useAccount, useSendTransaction } from 'wagmi'
@@ -167,6 +167,16 @@ export function useSplitSwap(
   const [plannedLegs, setPlannedLegs] = useState<PlannedLeg[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const abortRef = useRef(false)
+  // [SPRINT-9R audit] true while Phase B is broadcasting — blocks a concurrent rebuild
+  // (a re-click of the swap button during 'executing', when the review modal is unmounted)
+  // and a double-submit of confirmPlan, both of which could double-broadcast a leg.
+  const executingRef = useRef(false)
+  // [SPRINT-9R audit] the chain + account the frozen plan was built and validated FOR.
+  // confirmPlan refuses to sign if either changed — defence-in-depth alongside the
+  // chain/account-switch reset effects below, so the invariant holds independent of
+  // React effect timing (the plan's calldata embeds the chain-A FeeCollector/router and
+  // the account-A recipient; signing it under chain/account B is exactly [P219]/[FULL-M-04]).
+  const planContextRef = useRef<{ chainId: number; address: string } | null>(null)
 
   const completedLegs = legs.filter(l => l.status === 'success').length
   const totalLegs = legs.length
@@ -177,15 +187,49 @@ export function useSplitSwap(
 
   const reset = useCallback(() => {
     abortRef.current = true
+    executingRef.current = false
+    planContextRef.current = null
     setStatus('idle')
     setLegs([])
     setPlannedLegs([])
     setErrorMessage(null)
   }, [])
 
+  // [SPRINT-9R audit / FULL-M-04 parity] Discard a frozen plan on account switch or
+  // disconnect. useSwap clears its pendingSwap here; useSplitSwap had no such effect, so a
+  // plan reviewed under wallet A survived a switch and confirmPlan would broadcast wallet-A
+  // calldata under wallet B. 9R's review-pause widened this window from near-zero to an
+  // indefinite human-paced wait, so the guard is now load-bearing. Ref comparison fires only
+  // on an actual change — never on every render — so a steady wallet is untouched.
+  const prevAddressRef = useRef(address)
+  useEffect(() => {
+    const prev = prevAddressRef.current
+    const switched = prev && address && prev !== address
+    // Only a genuine connected→disconnected transition invalidates a plan — never the
+    // initial never-connected mount (no plan exists there, and execute() already guards !address).
+    const disconnected = prev && !address
+    if (switched || disconnected) reset()
+    prevAddressRef.current = address
+  }, [address, reset])
+
+  // [SPRINT-9R audit / P219 parity] Discard a frozen plan on chain switch — the plan's
+  // calldata embeds the chain-A FeeCollector address, router target and per-leg minimumOutput,
+  // which must never broadcast onto chain B. Staying on one chain leaves all behaviour
+  // unchanged (ref comparison).
+  const prevChainIdRef = useRef(chainId)
+  useEffect(() => {
+    if (prevChainIdRef.current !== chainId) reset()
+    prevChainIdRef.current = chainId
+  }, [chainId, reset])
+
   // ── Phase A — build + validate + simulate + FREEZE all legs (NO signing) ──
   const execute = useCallback(async (splitRoute: SplitRoute) => {
     if (!tokenIn || !tokenOut || !address || !amountIn || !splitRoute.isSplit) return
+    // [SPRINT-9R audit] Refuse to rebuild while Phase B is mid-broadcast. The swap button
+    // receives the single-swap status (idle during a split) so it stays clickable while the
+    // review modal is unmounted in 'executing'; a re-click here would race the in-flight
+    // confirmPlan loop and double-broadcast already-signed legs.
+    if (executingRef.current) return
 
     abortRef.current = false
     setErrorMessage(null)
@@ -386,6 +430,9 @@ export function useSplitSwap(
       setErrorMessage('No split leg can execute — every leg failed pre-flight checks.')
       return
     }
+    // Stamp the chain + account this plan was built/validated for, so confirmPlan can reject
+    // a stale cross-chain/cross-account signature even if the reset effect hasn't fired yet.
+    planContextRef.current = { chainId, address }
     // FREEZE: await the user's review of the plan. NO transaction has been signed.
     setStatus('awaiting-review')
   }, [tokenIn, tokenOut, address, amountIn, slippage, updateLeg, chainId])
@@ -396,13 +443,27 @@ export function useSplitSwap(
     // to 'awaiting-review' with a NEW plan, so a stale confirm cannot sign old/unreviewed calldata.
     if (status !== 'awaiting-review') return
     if (!tokenIn || !tokenOut || !address) return
+    // [SPRINT-9R audit] Double-submit guard — two synchronous Confirm clicks both capture
+    // status==='awaiting-review' before React re-renders; the ref blocks the second.
+    if (executingRef.current) return
+    // [SPRINT-9R audit] Reject a plan built for a different chain/account than the one now
+    // connected (the reset effect closes the modal, but this holds the invariant synchronously,
+    // independent of effect timing). The frozen calldata embeds the chain-A FeeCollector/router
+    // and the account-A recipient — never sign it under chain/account B.
+    const ctx = planContextRef.current
+    if (!ctx || ctx.chainId !== chainId || ctx.address.toLowerCase() !== address.toLowerCase()) {
+      reset()
+      return
+    }
 
+    executingRef.current = true
     abortRef.current = false
     setStatus('executing')
 
     let successCount = 0
     let errorCount = 0
 
+    try {
     for (let i = 0; i < plannedLegs.length; i++) {
       if (abortRef.current) break
       const p = plannedLegs[i]
@@ -465,7 +526,10 @@ export function useSplitSwap(
       setStatus('error')
       if (!errorMessage) setErrorMessage('Split swap failed.')
     }
-  }, [status, plannedLegs, tokenIn, tokenOut, address, chainId, slippage, sendTransactionAsync, updateLeg, errorMessage])
+    } finally {
+      executingRef.current = false
+    }
+  }, [status, plannedLegs, tokenIn, tokenOut, address, chainId, slippage, sendTransactionAsync, updateLeg, errorMessage, reset])
 
   return {
     status,

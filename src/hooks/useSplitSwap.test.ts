@@ -647,3 +647,80 @@ describe('useSplitSwap — [SPRINT-9R R1] review gate (no signature without revi
     expect(mockSendTransactionAsync.mock.calls[0][0].data).toBe(CALLDATA_B)
   })
 })
+
+// [SPRINT-9R audit] The two-phase review-pause holds a frozen plan in 'awaiting-review' for an
+// indefinite, human-paced wait. These guard the conditions that must INVALIDATE that frozen plan —
+// the parity gaps the auditor flagged (the single-swap useSwap already does all three).
+describe('useSplitSwap — [SPRINT-9R audit] frozen-plan invalidation', () => {
+  it('discards the frozen plan on an account switch (FULL-M-04 parity) — confirmPlan cannot sign wallet-A calldata under wallet B', async () => {
+    mockSwapFetch(() => makeQuote())
+    const { result, rerender } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
+    await act(async () => { await result.current.execute(route) })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.plannedLegs).toHaveLength(1)
+
+    // Wallet switches account while the Review Split Plan modal would be open.
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x2222222222222222222222222222222222222222',
+    } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    // The frozen plan is discarded → modal closes, nothing to confirm.
+    expect(result.current.status).toBe('idle')
+    expect(result.current.plannedLegs).toEqual([])
+    // A late confirm cannot broadcast wallet-A calldata under wallet B.
+    await act(async () => { await result.current.confirmPlan() })
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('discards the frozen plan on a chain switch (P219 parity) — never broadcasts a chain-A plan onto chain B', async () => {
+    mockSwapFetch(() => makeQuote())
+    const { result, rerender } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
+    await act(async () => { await result.current.execute(route) })
+    expect(result.current.status).toBe('awaiting-review')
+
+    // Wallet switches chain (mainnet → Base) while the plan sits frozen.
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    expect(result.current.status).toBe('idle')
+    expect(result.current.plannedLegs).toEqual([])
+    await act(async () => { await result.current.confirmPlan() })
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('refuses to rebuild while Phase B is broadcasting — a swap-button re-click cannot double-broadcast in-flight legs', async () => {
+    mockSwapFetch(() => makeQuote())
+    // Hang the FIRST signature so the hook stays in 'executing' across the re-entry attempt.
+    let release!: (v: `0x${string}`) => void
+    const pending = new Promise<`0x${string}`>(r => { release = r })
+    mockSendTransactionAsync.mockReturnValueOnce(pending)
+
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+    await act(async () => { await result.current.execute(route) })
+    expect(result.current.status).toBe('awaiting-review')
+
+    // Start Phase B but DON'T await — the first leg's signature is pending.
+    let confirmDone!: Promise<void>
+    await act(async () => { confirmDone = result.current.confirmPlan() })
+    expect(result.current.status).toBe('executing')
+    const callsDuringHang = mockSendTransactionAsync.mock.calls.length
+
+    // A concurrent rebuild attempt (button still clickable — it reads the single-swap status) is a no-op.
+    await act(async () => { await result.current.execute(route) })
+    expect(result.current.status).toBe('executing')        // not reset back to 'planning'
+    expect(mockSendTransactionAsync.mock.calls.length).toBe(callsDuringHang) // no extra broadcast
+
+    // Release the in-flight signature; the ORIGINAL Phase B run completes normally (2 legs, no dup).
+    release('0xabc' + '0'.repeat(61) as `0x${string}`)
+    await act(async () => { await confirmDone })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
+  })
+})
