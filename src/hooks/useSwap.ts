@@ -7,7 +7,7 @@ import {
 } from 'wagmi'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
-import { getPrivateClient } from '@/lib/rpc'
+import { getPublicClientForChain } from '@/lib/chains/clients'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
 import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, FEE_NATIVE_SOURCES, type AggregatorName } from '@/lib/constants'
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
@@ -489,7 +489,10 @@ export function useSwap(
           // Pre-flight: verify user approved FeeCollector for the full amount
           if (address) {
             try {
-              const client = getPrivateClient()
+              // [SPRINT-9Q] Read the allowance on the ACTIVE chain — getPrivateClient was
+              // mainnet-pinned, so on Base this read mainnet and the swap reached the (Base)
+              // sim without the real Base-FeeCollector approval. chainId 1 → getPrivateClient.
+              const client = getPublicClientForChain(chainId)
               const allowance = await client.readContract({
                 address: tokenIn!.address as `0x${string}`,
                 abi: erc20Abi,
@@ -530,7 +533,8 @@ export function useSwap(
         // Direct routing — pre-flight allowance check
         if (!isNativeIn && address) {
           try {
-            const client = getPrivateClient()
+            // [SPRINT-9Q] Active-chain allowance read (was mainnet-pinned).
+            const client = getPublicClientForChain(chainId)
             const allowance = await client.readContract({
               address: tokenIn!.address as `0x${string}`,
               abi: erc20Abi,
@@ -644,8 +648,9 @@ export function useSwap(
       // ── [FIX] Pre-flight balance check ──
       // CoW orderbook rejects orders when the user doesn't have enough tokens.
       // Check locally first for a better error message.
-      // [H-01] Mainnet only — Sepolia removed for production
-      const client = getPrivateClient()
+      // [SPRINT-9Q] Chain-pin the CoW pre-flight reads — CoW supports Base, so the
+      // balance/allowance checks must hit the active chain (chainId 1 → mainnet, byte-identical).
+      const client = getPublicClientForChain(chainId)
       try {
         const balance = await client.readContract({
           address: tokenIn.address as `0x${string}`,
@@ -1001,7 +1006,9 @@ export function useSwap(
       if (status !== 'swapping') return // already resolved
 
       // Fallback receipt polling activated
-      const client = getPrivateClient()
+      // [SPRINT-9Q] Poll the ACTIVE chain — was mainnet-pinned, so a Base tx hash never
+      // resolved and the swap hung to the 2-min timeout. chainId 1 → mainnet (unchanged).
+      const client = getPublicClientForChain(chainId)
 
       fallbackTimerRef.current = setInterval(async () => {
         if (!mountedRef.current) { // Q24: stop polling if unmounted
@@ -1074,7 +1081,7 @@ export function useSwap(
         fallbackTimerRef.current = null
       }
     }
-  }, [swapHash, status])
+  }, [swapHash, status, chainId])
 
   useEffect(() => {
     if (sendError) {

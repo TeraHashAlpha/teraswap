@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { parseUnits, encodeFunctionData } from 'viem'
-import { getPrivateClient } from '@/lib/rpc'
+import { getPublicClientForChain } from '@/lib/chains/clients'
 import { useAccount, useSendTransaction } from 'wagmi'
 import { useActiveChainId } from '@/hooks/useChainId'
 import {
@@ -76,9 +76,13 @@ async function fetchSwapViaApi(
 
 async function waitForReceipt(
   txHash: `0x${string}`,
+  chainId: number,
   timeoutMs = 120_000,
 ): Promise<'success' | 'reverted' | 'timeout'> {
-  const client = getPrivateClient()
+  // [SPRINT-9Q] Poll the active chain's client — was mainnet-pinned (getPrivateClient), so a
+  // Base leg's receipt never resolved and the leg reported a false "Confirmation timeout".
+  // chainId 1 → getPrivateClient (mainnet byte-identical).
+  const client = getPublicClientForChain(chainId)
   const start = Date.now()
 
   while (Date.now() - start < timeoutMs) {
@@ -327,7 +331,7 @@ export function useSplitSwap(
         updateLeg(i, { status: 'confirming', txHash })
 
         // Step 3: Wait for confirmation
-        const receipt = await waitForReceipt(txHash)
+        const receipt = await waitForReceipt(txHash, chainId)
 
         if (receipt === 'success') {
           updateLeg(i, { status: 'success' })

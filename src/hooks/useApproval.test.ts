@@ -74,6 +74,8 @@ vi.mock('@/components/Permit2EducationModal', () => ({
 import { renderHook } from '@testing-library/react'
 import { useApproval } from './useApproval'
 import { isNativeETH, type Token } from '@/lib/tokens'
+import { useReadContract, useAccount } from 'wagmi'
+import type { Mock } from 'vitest'
 
 const ETH: Token = {
   address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' as `0x${string}`,
@@ -186,5 +188,37 @@ describe('useApproval', () => {
     const { result } = renderHook(() => useApproval(USDC, '1000', SPENDER))
     expect(result.current.plan?.method).toBe('exact')
     expect(result.current.plan?.needsOnChainApprove).toBe(true)
+  })
+})
+
+describe('useApproval — [SPRINT-9Q] chain-pinned allowance reads', () => {
+  const ADDR = '0x1111111111111111111111111111111111111111'
+
+  beforeEach(() => {
+    // Default: wallet on mainnet (no `chain` → useActiveChainId falls back to 1).
+    ;(useAccount as unknown as Mock).mockReturnValue({ address: ADDR })
+  })
+
+  function allowanceCallChainIds(): Array<number | undefined> {
+    return (useReadContract as unknown as Mock).mock.calls
+      .filter((c) => (c[0] as { functionName?: string })?.functionName === 'allowance')
+      .map((c) => (c[0] as { chainId?: number })?.chainId)
+  }
+
+  it('threads the active chain (mainnet default = 1) into every allowance read', () => {
+    directAllowance = 0n
+    renderHook(() => useApproval(USDC, '1000', SPENDER))
+    const ids = allowanceCallChainIds()
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) expect(id).toBe(1)
+  })
+
+  it('reads allowance on Base (8453) when the wallet is on Base — not mainnet (the 9Q bug)', () => {
+    ;(useAccount as unknown as Mock).mockReturnValue({ address: ADDR, chain: { id: 8453 } })
+    directAllowance = 0n
+    renderHook(() => useApproval(USDC, '1000', SPENDER))
+    const ids = allowanceCallChainIds()
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) expect(id).toBe(8453)
   })
 })
