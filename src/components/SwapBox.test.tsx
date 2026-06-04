@@ -64,7 +64,11 @@ vi.mock('./SwapButton', () => ({
     <button data-testid="swap-button" data-blocked={String(!!p.priceBlocked)} data-reason={p.blockReason ?? ''}>Swap</button>
   ),
 }))
-vi.mock('./TransactionPreview', () => ({ default: () => <div data-testid="tx-preview" /> }))
+// [SPRINT-9R R2] Echo the value props so a test can assert the modal renders the FROZEN
+// pendingSwap snapshot (calldata/source/send/receive), independent of live quote state.
+vi.mock('./TransactionPreview', () => ({ default: (p: { calldata?: string; source?: string; amountInDisplay?: string; expectedOutput?: string }) => (
+  <div data-testid="tx-preview" data-calldata={p.calldata ?? ''} data-source={p.source ?? ''} data-amount-in={p.amountInDisplay ?? ''} data-expected-out={p.expectedOutput ?? ''} />
+) }))
 vi.mock('./SlippageModal', () => ({
   default: ({ onClose }: { onClose: () => void }) => (
     <div data-testid="slippage-modal">
@@ -113,6 +117,8 @@ vi.mock('@/lib/mev-preference', () => ({
 }))
 
 import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
+import { formatUnits } from 'viem'
+import { formatDisplay } from '@/lib/format'
 import { useBalance } from 'wagmi'
 import SwapBox from './SwapBox'
 
@@ -477,5 +483,42 @@ describe('SwapBox — J1 price-impact informed consent', () => {
     expect(btn.getAttribute('data-blocked')).toBe('true')
     expect(btn.getAttribute('data-reason')).toBe('extreme')
     expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+})
+
+describe('SwapBox — [SPRINT-9R R2] Review modal renders the frozen pendingSwap (not live quote)', () => {
+  const FROZEN_PENDING = {
+    source: 'uniswapv3', // a post-fallback target source ≠ any live "best"
+    txTo: '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459' as `0x${string}`,
+    txData: '0xFROZENCALLDATA' as `0x${string}`,
+    txValue: 0n,
+    txGas: undefined,
+    routerAddress: '0x2626664c2603336E57B271c5C0b26F421741e481',
+    routerCalldata: '0xFROZENCALLDATA',
+    routeViaFeeCollector: false,
+    routeType: 'direct' as const,
+    swapToAmount: '2950000000', // 2950 USDC (6dp)
+    rawAmountBn: 1_000_000_000_000_000_000n, // 1 WETH (18dp)
+    tokenIn: { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, logoURI: '', category: 'Native' },
+    tokenOut: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: '', category: 'Stablecoin' },
+    minimumOutput: 0n,
+    swapStartTime: 0,
+  }
+
+  it('renders source/calldata/send/receive from the frozen snapshot even with NO live quote (meta=null)', () => {
+    useSwapMock.mockReturnValue({
+      status: 'confirming', txHash: null, errorMessage: null, cowOrderUid: null,
+      priceGuardBlocked: false, priceGuardDeviation: 0, simulationPassed: true,
+      pendingSwap: FROZEN_PENDING, mevSurplusActualWei: null,
+      execute: vi.fn(), confirmSwap: vi.fn(), reset: vi.fn(),
+    })
+    // meta stays null (setHookDefaults). Before R2 the modal read meta.best/displayAmountIn,
+    // so with no live quote Receive would be blank; now it renders the frozen snapshot.
+    renderWithProviders(<SwapBox />)
+    const probe = screen.getByTestId('tx-preview')
+    expect(probe.getAttribute('data-source')).toBe('uniswapv3')
+    expect(probe.getAttribute('data-calldata')).toBe('0xFROZENCALLDATA')
+    expect(probe.getAttribute('data-amount-in')).toBe(formatDisplay(formatUnits(FROZEN_PENDING.rawAmountBn, 18)))
+    expect(probe.getAttribute('data-expected-out')).toBe(formatDisplay(formatUnits(BigInt(FROZEN_PENDING.swapToAmount), 6)))
   })
 })

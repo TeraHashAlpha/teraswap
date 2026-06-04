@@ -136,6 +136,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAccount } from 'wagmi'
 import { useSwap } from './useSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
+import { parseUnits, formatUnits } from 'viem'
 
 // ─── Fixtures ───
 import type { Token } from '@/lib/tokens'
@@ -451,5 +452,43 @@ describe('useSwap — chain-id source of truth [SPRINT-9G G6]', () => {
     // divergent wagmi useChainId (1) — is the single source of truth.
     expect(mockValidateRouterAddress).toHaveBeenCalled()
     expect(mockValidateRouterAddress.mock.calls[0][2]).toBe(8453)
+  })
+})
+
+describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal integrity)', () => {
+  it('freezes source, token pair and amounts into pendingSwap at confirm time', async () => {
+    mockSwapFetch(swapResponse()) // toAmount = 2950000000
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('1inch') })
+    expect(result.current.status).toBe('confirming')
+    const ps = result.current.pendingSwap
+    expect(ps).not.toBeNull()
+    expect(ps!.source).toBe('1inch')
+    // [R2] token pair is snapshotted so the modal renders the exact quoted pair.
+    expect(ps!.tokenIn).toEqual(TOKEN_IN)
+    expect(ps!.tokenOut).toEqual(TOKEN_OUT)
+    // [R2] the modal's Send/Receive derive from these frozen values.
+    expect(ps!.rawAmountBn).toBe(parseUnits('1', TOKEN_IN.decimals))
+    expect(ps!.swapToAmount).toBe('2950000000')
+    expect(formatUnits(ps!.rawAmountBn, ps!.tokenIn.decimals)).toBe('1')
+    expect(formatUnits(BigInt(ps!.swapToAmount), ps!.tokenOut.decimals)).toBe('2950')
+  })
+
+  it('the snapshot is immune to a live amountIn change while confirming (no drift under the open modal)', async () => {
+    mockSwapFetch(swapResponse())
+    const { result, rerender } = renderHook(
+      ({ amt }) => useSwap(TOKEN_IN, TOKEN_OUT, amt, 0.5),
+      { initialProps: { amt: '1' } },
+    )
+    await act(async () => { await result.current.execute('1inch') })
+    expect(result.current.status).toBe('confirming')
+    const frozenCalldata = result.current.pendingSwap!.routerCalldata
+    const frozenRaw = result.current.pendingSwap!.rawAmountBn
+    const frozenOut = result.current.pendingSwap!.swapToAmount
+    // User edits the amount field behind the open modal — the snapshot must NOT change.
+    rerender({ amt: '999' })
+    expect(result.current.pendingSwap!.routerCalldata).toBe(frozenCalldata)
+    expect(result.current.pendingSwap!.rawAmountBn).toBe(frozenRaw)
+    expect(result.current.pendingSwap!.swapToAmount).toBe(frozenOut)
   })
 })

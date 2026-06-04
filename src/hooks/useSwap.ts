@@ -101,6 +101,10 @@ export interface PendingSwapData {
   swapToAmount: string
   /** Input amount in wei */
   rawAmountBn: bigint
+  /** [SPRINT-9R R2] Frozen token snapshot — the Review modal renders the exact pair that was
+   *  quoted/built, immune to live token-selector changes while status === 'confirming'. */
+  tokenIn: Token
+  tokenOut: Token
   /** [H-04] FeeCollector-enforced minimum output (raw wei). 0n when not routed via FeeCollector. */
   minimumOutput: bigint
   /** Timestamp when swap flow started */
@@ -573,6 +577,9 @@ export function useSwap(
         routeType: pendingRouteType,
         swapToAmount: swapData.toAmount,
         rawAmountBn,
+        // [SPRINT-9R R2] Freeze the token pair alongside the calldata so the preview is fully frozen.
+        tokenIn: tokenIn!,
+        tokenOut: tokenOut!,
         // [H-04] Only populated when routed via FeeCollector — 0x direct and CoW don't apply.
         minimumOutput: routeViaFeeCollector ? minimumOutput : 0n,
         swapStartTime,

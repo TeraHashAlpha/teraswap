@@ -7,6 +7,7 @@ import TokenSelector from './TokenSelector'
 import QuoteBreakdown from './QuoteBreakdown'
 import SwapButton from './SwapButton'
 import TransactionPreview from './TransactionPreview'
+import SplitReviewModal from './SplitReviewModal'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import SourceToggle from './SourceToggle'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
@@ -230,7 +231,9 @@ export default function SwapBox() {
     completedLegs: splitCompleted,
     totalLegs: splitTotal,
     errorMessage: splitSwapError,
+    plannedLegs: splitPlannedLegs,
     execute: executeSplitSwap,
+    confirmPlan: confirmSplitPlan,
     reset: resetSplitSwap,
   } = useSplitSwap(tokenIn, tokenOut, amountIn, slippage)
 
@@ -240,6 +243,9 @@ export default function SwapBox() {
   const splitStatusMap: Record<string, SwapStatus> = {
     idle: 'idle', executing: 'swapping', success: 'success',
     error: 'error', partial: 'error',
+    // [SPRINT-9R R1] Phase A (building the plan) reads as 'swapping' (busy);
+    // 'awaiting-review' maps to 'confirming' so the button reflects the open review modal.
+    planning: 'swapping', 'awaiting-review': 'confirming',
   }
   const effectiveSwapStatus: SwapStatus = isSplitActive
     ? (splitStatusMap[splitSwapStatus] ?? 'idle')
@@ -589,7 +595,7 @@ export default function SwapBox() {
               onChange={(e) => handleAmountChange(e.target.value)}
               className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
             />
-            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); resetSwap() }} disabledAddress={tokenOut?.address} />
+            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenOut?.address} />
           </div>
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between px-1 text-xs text-cream-35">
@@ -626,7 +632,7 @@ export default function SwapBox() {
                   ? <span className="inline-block animate-pulse text-cream-35">...</span>
                   : null}
             </span>
-            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); resetSwap() }} disabledAddress={tokenIn?.address} />
+            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size) && (
             <div className="mt-1 flex items-center justify-between px-1">
@@ -1007,18 +1013,34 @@ export default function SwapBox() {
           routerAddress={pendingSwap.routerAddress}
           source={pendingSwap.source}
           userAddress={address}
-          tokenIn={tokenIn}
-          tokenOut={tokenOut}
-          amountInDisplay={displayAmountIn}
-          expectedOutput={meta?.best ? (() => {
-            // [11-L-01] safeBigInt: malformed toAmount → display "—" in preview.
-            const v = safeBigInt(meta.best.toAmount)
-            return v !== null ? formatDisplay(formatUnits(v, tokenOut?.decimals ?? 18)) : '—'
-          })() : ''}
+          tokenIn={pendingSwap.tokenIn}
+          tokenOut={pendingSwap.tokenOut}
+          amountInDisplay={formatDisplay(formatUnits(pendingSwap.rawAmountBn, pendingSwap.tokenIn.decimals))}
+          expectedOutput={(() => {
+            // [SPRINT-9R R2] Render Send/Receive from the FROZEN pendingSwap snapshot — never live
+            // quote state — so the modal always matches the calldata being signed (incl. after a 9O
+            // source fallback). [11-L-01] safeBigInt: malformed toAmount → "—".
+            const v = safeBigInt(pendingSwap.swapToAmount)
+            return v !== null ? formatDisplay(formatUnits(v, pendingSwap.tokenOut.decimals)) : '—'
+          })()}
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
           minimumOutput={pendingSwap.minimumOutput}
           onConfirm={confirmSwap}
           onCancel={resetSwap}
+        />
+      )}
+
+      {/* [SPRINT-9R R1] Split-swap review — no leg is signed until the user confirms this
+          aggregate plan; each wallet prompt then maps 1:1 to a reviewed leg. A rebuild
+          (re-running executeSplitSwap) returns here with a fresh plan, forcing re-review. */}
+      {isSplitActive && splitSwapStatus === 'awaiting-review' && address && (
+        <SplitReviewModal
+          plannedLegs={splitPlannedLegs}
+          tokenIn={tokenIn}
+          tokenOut={tokenOut}
+          userAddress={address}
+          onConfirm={confirmSplitPlan}
+          onCancel={resetSplitSwap}
         />
       )}
 
