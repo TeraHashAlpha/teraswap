@@ -1007,14 +1007,16 @@ export default function SwapBox() {
           routerAddress={pendingSwap.routerAddress}
           source={pendingSwap.source}
           userAddress={address}
-          tokenIn={tokenIn}
-          tokenOut={tokenOut}
-          amountInDisplay={displayAmountIn}
-          expectedOutput={meta?.best ? (() => {
-            // [11-L-01] safeBigInt: malformed toAmount → display "—" in preview.
-            const v = safeBigInt(meta.best.toAmount)
-            return v !== null ? formatDisplay(formatUnits(v, tokenOut?.decimals ?? 18)) : '—'
-          })() : ''}
+          tokenIn={pendingSwap.tokenIn}
+          tokenOut={pendingSwap.tokenOut}
+          amountInDisplay={formatDisplay(formatUnits(pendingSwap.rawAmountBn, pendingSwap.tokenIn.decimals))}
+          expectedOutput={(() => {
+            // [SPRINT-9R R2] Render Send/Receive from the FROZEN pendingSwap snapshot — never live
+            // quote state — so the modal always matches the calldata being signed (incl. after a 9O
+            // source fallback). [11-L-01] safeBigInt: malformed toAmount → "—".
+            const v = safeBigInt(pendingSwap.swapToAmount)
+            return v !== null ? formatDisplay(formatUnits(v, pendingSwap.tokenOut.decimals)) : '—'
+          })()}
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
           minimumOutput={pendingSwap.minimumOutput}
           onConfirm={confirmSwap}
