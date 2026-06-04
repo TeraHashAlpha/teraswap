@@ -2153,3 +2153,40 @@ What the brief missed / where its hypotheses needed correcting:
   and 9P's token import/badge.
 - Method note: a `vercel env pull` to read the Base FeeCollector address was correctly blocked (too broad —
   dumps all prod secrets); not needed, since the ETH-input invariant settles the router-whitelist question.
+
+## Feedback — SPRINT-9R (commits `965928e` R2, `b9cd4b3` R1, `fc71377` audit remediation)
+
+### R2 — single-swap modal frozen rendering
+- **Edge case not in the prompt:** R2 said "render from the frozen pendingSwap". To do that faithfully I had to
+  add `tokenIn`/`tokenOut` to `PendingSwapData` (useSwap.ts) — the modal needs the frozen token *decimals/symbol*
+  to format Send/Receive, and reading the live `tokenIn`/`tokenOut` would re-introduce drift after a token swap
+  while the modal is open. The prompt only named amounts/source; the token objects were an implicit dependency.
+
+### R1 — split Review Split Plan gate
+- **Trust-surface asymmetry (by design, flagged for the record):** the split modal decodes each leg's INNER
+  `routerCalldata` while `confirmPlan` signs the OUTER FeeCollector-wrapped `txData` — identical to the
+  single-swap modal (it also decodes inner router calldata while sending the wrapped tx). The wrapper provably
+  embeds the reviewed inner bytes (`encodeFunctionData(swap*WithFee, [router, routerData, …])`), so "what is
+  reviewed is what is signed" holds. Noting it so a future reader doesn't mistake it for a gap.
+- **Test-flow change:** restructuring `execute()` into Phase A (freeze, no signing) broke 12 existing split tests
+  that assumed `execute()` signs. Added a `runSplit()` helper (execute, then confirmPlan only if `awaiting-review`)
+  so guard/error tests — which resolve before review — behave exactly as a bare `execute()` did.
+
+### Audit remediation (the auditor's own findings — triaged + fixed this sprint, not deferred)
+- **Security concern discovered during the light review (H):** 9R's deliberate review-PAUSE turned a near-zero
+  window into an indefinite one, exposing that `useSplitSwap` lacked the chain-switch `[P219]` and account-switch
+  `[FULL-M-04]` resets `useSwap` has. Without them, switching wallet chain/account while the modal sits open and
+  then confirming would broadcast a chain-A/account-A frozen plan under chain/account B. Fixed in-scope (it is
+  flow-control, and 9R *created* the exposure): mirrored the two reset effects + a `confirmPlan` chainId/address
+  re-check (defence-in-depth). **Recommend the Architect add a checklist item: any new two-phase/"freeze then
+  confirm" flow must replicate the single-swap chain/account-switch invalidation.**
+- **Concurrency defect (M):** `SwapButton` receives the single-swap `swapStatus` (idle during a split), so it
+  stays clickable in Phase B `executing` (modal unmounted) → a re-click double-broadcasts in-flight legs. Fixed
+  with an `executingRef` re-entry guard in the hook (the single source of truth) rather than the button, so it
+  also covers `confirmPlan` double-submit. **Backlog candidate:** pass `effectiveSwapStatus` to `SwapButton` so
+  the button reflects split state directly (out of 9R's display-only scope; the hook guard is the safety net).
+- **Reset asymmetry (L):** `TokenSelector.onSelect` reset only the single-swap hook; added `resetSplitSwap()`
+  for parity. Shielded today by the modal backdrop, but it was the same latent "input changed, plan not
+  invalidated" family as the H finding.
+- **Not a regression (noted):** the CoW/limit/conditional EIP-712 `signTypedDataAsync` paths still have NO
+  clear-signing review modal — out of 9R scope (split + single swap only), but it is the next signing-trust gap.
