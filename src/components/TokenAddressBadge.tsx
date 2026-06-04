@@ -3,7 +3,8 @@
 import { useState, useCallback } from 'react'
 import { isAddress } from 'viem'
 import { NATIVE_ETH } from '@/lib/constants'
-import { findTokenByAddress } from '@/lib/tokens'
+import { isVerifiedToken, explorerTokenUrl } from '@/lib/chains/tokens'
+import { useActiveChainId } from '@/hooks/useChainId'
 
 function truncateAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -15,6 +16,8 @@ interface Props {
   isVerified?: boolean
   size?: 'sm' | 'md'
   showExplorerLink?: boolean
+  /** [SPRINT-9P] Chain to verify/link against. Defaults to the active chain. */
+  chainId?: number
 }
 
 export default function TokenAddressBadge({
@@ -23,14 +26,19 @@ export default function TokenAddressBadge({
   isVerified,
   size = 'sm',
   showExplorerLink = true,
+  chainId,
 }: Props) {
   const [copied, setCopied] = useState(false)
+  // [SPRINT-9P] Verify + link against the ACTIVE chain (override via `chainId`).
+  // Mainnet behaviour is unchanged; the Base catalog now shows ✓ instead of the false ⚠.
+  const activeChainId = useActiveChainId()
+  const cid = chainId ?? activeChainId
 
   // Auto-detect native if not explicitly set
   const native = isNative ?? address.toLowerCase() === NATIVE_ETH.toLowerCase()
 
-  // Auto-detect verified if not explicitly set
-  const verified = isVerified ?? !!findTokenByAddress(address)
+  // Auto-detect verified if not explicitly set (chain-aware catalog)
+  const verified = isVerified ?? isVerifiedToken(address, cid)
 
   const handleCopy = useCallback((e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation()
@@ -98,13 +106,13 @@ export default function TokenAddressBadge({
       {/* Explorer link — only rendered for runtime-valid addresses (CQL-10) */}
       {showExplorerLink && isAddress(address) && (
         <a
-          href={`https://etherscan.io/token/${address}`}
+          href={explorerTokenUrl(address, cid)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          aria-label="View on Etherscan"
+          aria-label="View on block explorer"
           className="inline-flex text-cream-20 transition hover:text-cream-50"
-          title="View on Etherscan"
+          title="View on block explorer"
         >
           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
