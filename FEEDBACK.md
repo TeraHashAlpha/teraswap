@@ -2102,3 +2102,28 @@ Two Base-only prod bugs fixed (mainnet byte-identical, test-guarded):
   1475 tests (+14), `next build` ✓.
 - **Owner runtime step (per brief):** actually importing the real Base token (`0x6c240d…2aa2`) in a browser on
   Base, and eyeballing the Base catalog badges, is the post-merge human check — not attempted here. Preview-test before prod.
+
+## Feedback — BASE-REVIEW 2026-06-04 (read-only audit; report at Audits/BASE-REVIEW-2026-06-04.md)
+
+What the brief missed / where its hypotheses needed correcting:
+- **Phase-1 hypothesis was half-right.** "Wrong per-chain spender" is FALSE — `fetchApproveSpender` IS
+  chain-aware (returns the Base FeeCollector). The confirmed broken link is the **mainnet-pinned
+  `getPrivateClient()`** (rpc.ts:53, proxies /api/rpc with no chainId) used by the useSwap allowance
+  pre-flights, plus `useApproval`'s reads not pinning `chainId`. A 9O-style Base router-whitelist gap is
+  ruled out by the invariant **ETH-input swaps work on Base ⇒ Base FeeCollector deployed + routers whitelisted.**
+- **The "review-modal bypass" prime suspect (9O fallback) is NOT the bug** — it correctly rebuilds
+  `pendingSwap` and re-presents the modal. The REAL review gaps are: (a) **split-swap has no Review modal
+  at all** (signs each leg directly), and (b) the single-swap modal shows **live** Send/Receive amounts
+  (`displayAmountIn`/`meta.best`) rather than the frozen `pendingSwap`, so after a fallback the numbers can
+  describe a different route than the calldata being signed. Both are more important than the suspected one.
+- **A second, equally-impactful consequence of the same `getPrivateClient` root cause** the brief didn't
+  call out: **receipt polling is mainnet-pinned** (useSwap.ts:1004 fallback poller; useSplitSwap.ts:81), so
+  even a *successful* Base swap can appear to hang to the 2-min timeout, and split legs get false timeouts.
+  Fixing the Phase-1 client makes both fall out for free.
+- **New finding not in the sweep list:** circuit breakers + source-state are **global (no chainId)** →
+  a source failing on mainnet is suppressed on Base and vice-versa (S1).
+- **Confirmed cleanly chain-aware (no action):** the DefiLlama swap price-guard, the pre-swap simulation
+  client (getPublicClientForChain), the gas-cost hook (the $0.00 is legit sub-cent rounding, not a pin),
+  and 9P's token import/badge.
+- Method note: a `vercel env pull` to read the Base FeeCollector address was correctly blocked (too broad —
+  dumps all prod secrets); not needed, since the ETH-input invariant settles the router-whitelist question.
