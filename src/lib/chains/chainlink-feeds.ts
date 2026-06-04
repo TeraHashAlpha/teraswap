@@ -15,13 +15,26 @@ import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string}`>> = {
   // Mainnet — reuse the canonical map (token address → feed proxy).
   1: CHAINLINK_FEEDS,
-  // Base (8453) — keyed by Base token address.
+  // Base (8453) — keyed by Base token address (lowercased; getChainlinkFeed lowercases the lookup).
+  // [SPRINT-9S S1 / rule #9] EACH feed verified 3 independent ways — wrong address = wrong
+  // validation, so no guessing:
+  //   (1) Chainlink reference-data-directory (official feeds-ethereum-mainnet-base-1.json)
+  //   (2) on-chain description() + decimals() read on Base mainnet (cast)
+  //   (3) BaseScan cross-reference (EACAggregatorProxy, Chainlink deployer)
   8453: {
-    // WETH → ETH/USD (verified, data.chain.link)
+    // WETH → ETH/USD   description() "ETH / USD", decimals() 8
     '0x4200000000000000000000000000000000000006': '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
-    // NOTE: further Base feeds (USDC/USD, DAI/USD, cbETH/USD, …) must be
-    // verified against data.chain.link before being added here. Under-
-    // populating is intentional — a wrong feed mis-prices swaps.
+    // USDC → USDC/USD  description() "USDC / USD", decimals() 8  [SPRINT-9S S1]
+    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': '0x458138Fc0D67027E9A6778ef40a6ffC318c69061',
+    // DAI  → DAI/USD   description() "DAI / USD", decimals() 8   [SPRINT-9S S1]
+    '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': '0x591e79239a7d679378eC8c847e5038150364C78F',
+    // NOT mapped, by design (rule #9 — a wrong feed mis-prices swaps):
+    //  • cbETH (0x2Ae3…0DEc22): Chainlink publishes only cbETH/ETH on Base (description()
+    //    "CBETH / ETH", 18 dp — ETH-denominated). Dropping it into this USD-keyed map would
+    //    read ~1.08 as "$1.08". Correct support needs cbETH/ETH × ETH/USD composition, which
+    //    is a validation-layer feature beyond this map (see FEEDBACK 9S — follow-up).
+    //  • USDbC (0xd9aA…b6CA): no Chainlink feed exists on Base (absent from the directory).
+    //  Both correctly fall through to null → multi-source compare + on-chain minimumOutput.
   },
 }
 

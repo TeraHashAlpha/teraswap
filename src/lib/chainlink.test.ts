@@ -275,12 +275,41 @@ describe('chainlink — multi-chain [P218]', () => {
   const BASE_WETH = '0x4200000000000000000000000000000000000006'
   const BASE_ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
   const MAINNET_ETH_USD = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+  // [SPRINT-9S S1] Base feed addresses — verified 3 ways (Chainlink reference-data-directory +
+  // on-chain description()/decimals() on Base + BaseScan EACAggregatorProxy).
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  const BASE_USDC_USD = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
+  const BASE_DAI = '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'
+  const BASE_DAI_USD = '0x591e79239a7d679378eC8c847e5038150364C78F'
+  const BASE_CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const BASE_USDBC = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
 
   it('getChainlinkFeed resolves the Base ETH/USD feed for chainId 8453', () => {
     expect(getChainlinkFeed(BASE_WETH, 8453)).toBe(BASE_ETH_USD)
     // native ETH on Base maps to Base WETH → same feed
     expect(getChainlinkFeed(NATIVE_ETH, 8453)).toBe(BASE_ETH_USD)
     // mainnet still resolves the mainnet ETH/USD feed (unchanged)
+    expect(getChainlinkFeed(NATIVE_ETH, 1)).toBe(MAINNET_ETH_USD)
+  })
+
+  it('[SPRINT-9S S1] resolves the Base USDC/USD and DAI/USD feeds (case-insensitive)', () => {
+    expect(getChainlinkFeed(BASE_USDC, 8453)).toBe(BASE_USDC_USD)
+    expect(getChainlinkFeed(BASE_USDC.toLowerCase(), 8453)).toBe(BASE_USDC_USD)
+    expect(getChainlinkFeed(BASE_DAI, 8453)).toBe(BASE_DAI_USD)
+  })
+
+  it('[SPRINT-9S S1] leaves cbETH and USDbC unfeeded on Base → null (no compatible USD feed)', () => {
+    // cbETH publishes only cbETH/ETH on Base (ETH-denominated → would misprice in this USD-keyed
+    // map); USDbC has no Chainlink feed. Both must fall through to null (multi-source + minOutput).
+    expect(getChainlinkFeed(BASE_CBETH, 8453)).toBeNull()
+    expect(getChainlinkFeed(BASE_USDBC, 8453)).toBeNull()
+  })
+
+  it('[SPRINT-9S S1] mainnet feed map is untouched — Base token addresses do NOT resolve on chainId 1', () => {
+    // The Base additions live only under CHAINLINK_FEEDS_BY_CHAIN[8453]; chainId 1 still reads the
+    // canonical mainnet CHAINLINK_FEEDS. A Base token address must not leak a feed on mainnet.
+    expect(getChainlinkFeed(BASE_USDC, 1)).toBeNull()
+    expect(getChainlinkFeed(BASE_DAI, 1)).toBeNull()
     expect(getChainlinkFeed(NATIVE_ETH, 1)).toBe(MAINNET_ETH_USD)
   })
 
