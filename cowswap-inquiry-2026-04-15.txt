@@ -1,0 +1,31 @@
+Subject: TeraSwap Integration — Security Questions Re: DNS Incident (14 Apr 2026)
+
+Hi CoW Swap / CoW DAO Security Team,
+
+We are TeraSwap (https://teraswap.app), a DEX meta-aggregator that routes through CoW Protocol via api.cow.fi. Our monitoring system (TLS/DNS fingerprinting) automatically disabled the CoW Swap source on 14 April at ~14:54 UTC when the DNS incident was detected.
+
+We are glad to see the frontend has been restored and that smart contracts + backend APIs were confirmed unaffected. Before we reactivate CoW Protocol as a liquidity source, we need clarity on a few points. We would appreciate any information you can share:
+
+1. REGISTRAR RECOVERY STATUS
+   Was the registrar-level access fully revoked and secured, or is the current restoration based on domain locking alone? Specifically: has the attack vector that allowed the DNS records to be modified been permanently closed?
+
+2. api.cow.fi SUBDOMAIN ISOLATION
+   Our integration uses api.cow.fi exclusively (not swap.cow.fi). Can you confirm that api.cow.fi DNS records were not modified during the incident? Is there any infrastructure separation between the subdomains at the registrar level, or do they share the same registrar account and nameserver delegation?
+
+3. POST-MORTEM TIMELINE
+   When do you expect to publish a full post-mortem? We would like to review the root cause analysis before re-enabling routing. If there is a private disclosure channel for integrated partners, we are happy to sign an NDA.
+
+4. GPv2VaultRelayer CONTRACT INTEGRITY
+   Felix Leupold confirmed users should verify the GPv2VaultRelayer contract address. We have 0xC92E8bdf79f0507f65a392b0ab4667716BFE0110 hardcoded. Can you confirm this address remains canonical and was not referenced or spoofed in the malicious frontend?
+
+5. RECOMMENDED MONITORING
+   Are there any additional signals, endpoints, or canary mechanisms you recommend for integrated partners to detect similar incidents faster in the future? We currently fingerprint TLS certificates and DNS A/CNAME records for api.cow.fi on a 5-minute cycle.
+
+We understand you are still in incident response mode and appreciate any level of detail you can share at this stage. Even a brief confirmation on points 1-2 would help us make an informed reactivation decision.
+
+Thank you for the transparency so far — the rapid public communication during the incident was noted and appreciated.
+
+Best regards,
+TeraSwap Team
+https://teraswap.app
+Contact: [INSERT EMAIL / TELEGRAM HANDLE]

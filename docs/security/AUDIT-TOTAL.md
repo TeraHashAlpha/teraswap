@@ -613,3 +613,18 @@ diagnostic. No gate/staleness/threshold changes.
 
 **No gate/staleness/threshold loosening anywhere in the branch.** Mainnet feed map untouched (test:
 Base token addresses → null on chainId 1). All 4 commits SSH-signed.
+
+---
+
+### Sprint 9T Light Review (2026-06-05) — Partner Fees (0x + CoW)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 0I.** 5 commits (3386c42, 0ad9baa, 408cf27, 674f57c, 7182144). All SSH-signed.
+
+| Check | Result |
+|-------|--------|
+| FEE_RECIPIENT everywhere (env/constant) | ✅ 0x: `swapFeeRecipient = FEE_RECIPIENT`. CoW: `partnerFee.recipient = FEE_RECIPIENT` + `referrer.address = FEE_RECIPIENT`. Never hardcoded, never a different address. |
+| Single FEE_BPS source of truth | ✅ `FEE_BPS = 10` (0.1%) used by FeeCollector (minimumOutput math), Bebop (`fee`), 0x (`swapFeeBps`), CoW (`partnerFee.bps`). Test pins `FEE_BPS === 10`. |
+| No-double-charge invariant | ✅ 0x/CoW/Bebop in `FEE_INCOMPATIBLE_SOURCES` → `usesFeeCollector` returns false → partner fee XOR FeeCollector, never both. Invariant test covers all 3 sources on chainId 1. |
+| Native-ETH fix (674f57c) | ✅ `swapFeeToken = sellIsNative ? dst : src` — native ETH sentinel is never sent as swapFeeToken. Test: ETH SELL → fee on buy token (USDC); ERC-20 SELL → fee on sell token. |
+| CoW fail-soft | ✅ `isAppDataRejection` only matches status 400 + appData/partnerFee in description. Other errors (NoLiquidity, 5xx) throw immediately (no retry). On failsoft: drops partnerFee from appData, retries once. appData⇄appDataHash consistency preserved (CoW echoes the hash; parseCowOrderParams validates it; submitCowOrder signs it). |
+| Normalized quotes post-fee | ✅ 0x: `buyAmount` is already post-fee (0x deducts from sell side). CoW: `buyAmount` reflects the partnerFee deduction. Both applied to quote AND swap-build → Compare is fair. |
