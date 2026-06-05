@@ -54,6 +54,9 @@ describe('OrderReviewModal [SPRINT-9U U2]', () => {
     expect(screen.getByTestId('order-price').textContent).toMatch(/3[,.]?000/) // 300000000000 @ 8dp
     expect(screen.getByTestId('order-router').textContent).toMatch(/0x1111\.\.\.2a65/)
     expect(screen.getByTestId('order-nonce').textContent).toBe('7')
+    // [9U audit] the signed priceFeed (oracle) + routerDataHash are part of the trust surface.
+    expect(screen.getByTestId('order-pricefeed').textContent).toMatch(/0x5f4e\.\.\.8419/)
+    expect(screen.getByTestId('order-routerhash').textContent).toMatch(/0x1111\.\.\.1111/)
   })
 
   it('renders DCA schedule instead of a trigger price for DCA orders', () => {

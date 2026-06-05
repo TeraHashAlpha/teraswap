@@ -674,3 +674,15 @@ describe('useOrderEngine — [SPRINT-9U U2] order review gate', () => {
     expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
   })
 })
+
+describe('useOrderEngine — [SPRINT-9U audit] freshness guard', () => {
+  it('confirmOrder refuses to sign an already-expired order (fail-safe, no wasted signature)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig({ expirySeconds: -100 })) }) // expiry in the past
+    expect(result.current.pendingOrder).toBeTruthy()
+    await act(async () => { await result.current.confirmOrder() })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+    expect(result.current.pendingOrder).toBeNull()
+  })
+})

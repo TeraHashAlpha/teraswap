@@ -878,6 +878,14 @@ export function useSwap(
       setStatus('idle')
       return
     }
+    // [SPRINT-9U audit] Freshness: don't waste a signature on an order whose validTo already passed
+    // while the review sat open (CoW would reject it on submit anyway). Fail-safe → re-quote.
+    if (p.message.validTo <= Math.floor(Date.now() / 1000)) {
+      setPendingCowOrder(null)
+      setStatus('error')
+      setErrorMessage('This MEV-protected order expired before you signed — please re-quote.')
+      return
+    }
 
     setStatus('cow_signing')
     trackWalletActivity(address, {

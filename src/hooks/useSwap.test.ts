@@ -609,4 +609,16 @@ describe('useSwap — [SPRINT-9U U1] CoW order review gate', () => {
     await waitFor(() => expect(result.current.pendingCowOrder!.message.buyAmount).toBe(2900000000n))
     expect(result.current.status).toBe('cow_awaiting_review')
   })
+
+  it('[9U audit] confirmCowOrder refuses to sign an order whose validTo already passed (fail-safe)', async () => {
+    const past = Math.floor(Date.now() / 1000) - 100
+    mockSwapFetch(cowResponse(makeCowParams({ validTo: past })))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    await act(async () => { await result.current.confirmCowOrder() })
+    expect(mockSignTypedData).not.toHaveBeenCalled()
+    expect(result.current.status).toBe('error')
+    expect(result.current.pendingCowOrder).toBeNull()
+  })
 })

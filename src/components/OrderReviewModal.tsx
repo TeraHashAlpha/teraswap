@@ -105,6 +105,17 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
             <span className="text-cream-50">Nonce</span>
             <span className="font-mono text-cream-65" data-testid="order-nonce">{o.nonce.toString()}</span>
           </div>
+          {/* [SPRINT-9U audit] priceFeed (the oracle the executor reads to gate your trigger) and the
+              routerDataHash (C-01 anti-calldata-substitution) are part of the signed struct — show them
+              so the review is the full signed trust surface. */}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-cream-50">Price feed (oracle)</span>
+            <span className="font-mono text-cream-65" data-testid="order-pricefeed">{truncAddr(o.priceFeed)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-cream-50">Route constraint hash</span>
+            <span className="font-mono text-cream-35" data-testid="order-routerhash">{truncAddr(o.routerDataHash)}</span>
+          </div>
 
           <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
             Signed once now; the executor runs it autonomously when your condition is met — output is

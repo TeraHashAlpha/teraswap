@@ -488,6 +488,13 @@ export function useOrderEngine() {
       setPendingOrder(null)
       return
     }
+    // [SPRINT-9U audit] Freshness: don't sign an order whose expiry already passed while the review
+    // sat open (it could never trigger). Fail-safe → discard + surface an error so the user recreates.
+    if (Number(p.order.expiry) <= Math.floor(Date.now() / 1000)) {
+      setPendingOrder(null)
+      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: 'Order expired before signing — please recreate it.' })
+      return
+    }
     if (creatingRef.current) return
     creatingRef.current = true
     setPendingOrder(null) // consume the review
