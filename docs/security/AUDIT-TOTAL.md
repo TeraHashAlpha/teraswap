@@ -536,3 +536,80 @@ Found on 9G Preview. Two fixes: Velora selector allowlist + Bebop fail-soft. 139
 | 9H-2 — Bebop fail-soft | Demo-mode (no key) → `fetchQuote` returns null (doesn't rank). Absent settlement → `fetchSwapData` returns null (breaker-neutral). Security gates intact when data present-but-wrong (still throw). | ✅ CLOSED |
 
 **Bundle 9G + 9H → Vercel Preview → verify Velora + Kyber on Base + Bebop no longer wins-then-fails → promote.**
+
+---
+
+### Sprint 9J Audit (2026-06-03) — Swap UX/Reliability
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Sprint/SPRINT-9J-AUDIT.md`.
+Three live fixes. J1 is the security-relevant change (deviation gate). 1443 tests (+45).
+
+| Fix | Risk | Description | Status |
+|-----|------|------------|--------|
+| J1 — Deviation gate | HIGH (security gate) | Classifies oracle-integrity failures (stale/invalid → HARD block) vs price-impact deviations on healthy oracle (→ informed consent). Extreme deviation >25% ceiling also hard-blocks. Server-side DefiLlama guard and on-chain minimumOutput untouched. All genuine protections verified preserved. | ✅ APPROVED |
+| J2 — Swap-build timeout | HIGH/MED | 12s timeout + AbortController + 2× retry on swap-build fetches. Build-only (no double on-chain submit). Error sanitization strips API keys. `/api/swap` always returns JSON. | ✅ APPROVED |
+| J3 — Info tooltips | LOW | Accessible `InfoTooltip` component. Opens on click+hover. No XSS (content rendered as text). | ✅ APPROVED |
+
+J1 approved for production. J2/J3 may ship via Preview gate.
+
+---
+
+### ADR-011 Light Review (2026-06-03) — FeeCollector Augustus Whitelist
+
+**Verdict: APPROVED — 0 findings.** ADR: `docs/ADR/ADR-011-feecollector-augustus-whitelist.md`.
+
+Whitelisting ParaSwap/Velora Augustus V6 (`0x6A000F20005980200259B80c5102003040001068`) on mainnet
+FeeCollector V2 (`0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459`) via timelocked governance
+(`queueRouterChange` → 48h → `executeRouterChange`).
+
+| Check | Result |
+|-------|--------|
+| Address is the legit Augustus V6 | ✅ Confirmed in `routers.ts` (chains 1+8453), `api.ts` (ROUTER_WHITELIST), 9H selector audit, 9O on-chain decode, Base FeeCollector (already whitelisted) |
+| No open AUDIT-TOTAL finding opposes | ✅ SC-CRITICAL-01 (no router validation) was CLOSED by V2 which HAS the whitelist. Adding a known router is the intended use of that control. |
+| No selector added (9H concern N/A) | ✅ Augustus `0xe3ead59e` + 9H Curve methods already in the 22-selector allowlist. This is a contract STATE change, not a code change. |
+| Default-deny control + 48h timelock intact | ✅ The whitelist remains default-deny. The 48h timelock is the safety buffer. Rollback via `queueRouterChange(Augustus, false)`. |
+
+**This is NOT a redeploy** — it is a governance state change on the existing FeeCollector V2 contract.
+
+---
+
+### Sprint 9R Audit (2026-06-04) — Review Integrity
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 1I.** Report: `Audits/Sprint/SPRINT-9R-AUDIT.md`.
+Principle: NO wallet signature without a TeraSwap review of the exact FROZEN calldata.
+
+| Fix | Description | Status |
+|-----|------------|--------|
+| R2 — Frozen single-swap modal | TransactionPreview renders `pendingSwap.tokenIn`/`tokenOut`/`swapToAmount` (frozen at build-time), not live quote state. | ✅ APPROVED |
+| R1 — Two-phase split review | Phase A (execute): build + validate + simulate + freeze `PlannedLeg[]` → `'awaiting-review'`. Phase B (confirmPlan): sign frozen legs 1:1. No `sendTransactionAsync` in Phase A. | ✅ APPROVED |
+| Audit remediation | Chain/account switch with review modal open → plan invalidated (reset effects + confirmPlan chainId/address re-check). Phase-B re-entry guard. TokenSelector.onSelect resets split hook. | ✅ APPROVED |
+
+Scope: display/flow-control only — no changes to gates, simulation, FeeCollector routing, adapters, or selectors.
+
+---
+
+### Sprint 9S Light Review (2026-06-05) — Base Oracle Polish
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 0I.** S1 commit `521074a` (+ S2 `c504740`, S3 `f3204ab`).
+
+**S1 — Base Chainlink feeds verified against the official Chainlink reference-data-directory:**
+
+| Token | Feed | proxyAddress in directory | description() | decimals() | Match |
+|-------|------|--------------------------|---------------|-----------|-------|
+| USDC (0x8335…2913) | USDC/USD | `0x458138Fc0D67027E9A6778ef40a6ffC318c69061` | "USDC / USD" | 8 | ✅ EXACT |
+| DAI (0x50c5…B0Cb) | DAI/USD | `0x591e79239a7d679378eC8c847e5038150364C78F` | "DAI / USD" | 8 | ✅ EXACT |
+
+**cbETH + USDbC correctly LEFT UNMAPPED:** cbETH on Base publishes only `cbETH/ETH` (exchange rate,
+18 decimals — ETH-denominated, NOT USD). No `cbETH/USD` feed exists in the directory. USDbC has no
+Chainlink feed at all. Both fall through to null → multi-source compare + on-chain minimumOutput.
+Rule #9 satisfied: no guessing.
+
+**S2 — direction-agnostic oracle verdict:** `evaluatePairOracle` merges input + output checks
+symmetrically. No threshold change. Integrity failures propagate from EITHER side. Tests verify
+ETH→USDC ≡ USDC→ETH verdict.
+
+**S3 — breakers/links/diagnostics:** chain-aware explorer links, per-chain circuit breakers, Bebop
+diagnostic. No gate/staleness/threshold changes.
+
+**No gate/staleness/threshold loosening anywhere in the branch.** Mainnet feed map untouched (test:
+Base token addresses → null on chainId 1). All 4 commits SSH-signed.
