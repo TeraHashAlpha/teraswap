@@ -1,7 +1,25 @@
-import { AGGREGATOR_APIS } from '@/lib/constants'
+import { AGGREGATOR_APIS, FEE_RECIPIENT, FEE_BPS } from '@/lib/constants'
 import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
+
+/**
+ * [SPRINT-9T T1] Attach TeraSwap's uniform partner fee to a 0x v2 swap request.
+ *
+ * 0x is FEE_INCOMPATIBLE (Permit2 pull model — can't wrap via the FeeCollector), so its
+ * 0.1% is collected through 0x's NATIVE integrator-fee params instead:
+ *   - swapFeeRecipient = FEE_RECIPIENT (env/constant, never hardcoded)
+ *   - swapFeeBps       = FEE_BPS (the SAME bps the FeeCollector + Bebop use — no new number)
+ *   - swapFeeToken     = the SELL token, mirroring the FeeCollector charging on INPUT. 0x deducts
+ *                        the fee from the sell side, so the returned buyAmount is already POST-fee
+ *                        → our normalized toAmount is honest in Compare (no artificial +0.1% edge).
+ * Applied to BOTH the quote and the swap-build request so the displayed quote == what executes.
+ */
+function applyPartnerFee(qs: URLSearchParams, sellToken: string): void {
+  qs.set('swapFeeRecipient', FEE_RECIPIENT)
+  qs.set('swapFeeBps', String(FEE_BPS))
+  qs.set('swapFeeToken', sellToken)
+}
 
 // [SPRINT-9E] 0x v2 flow per chain. Mainnet keeps the permit2 endpoint
 // (byte-identical). Other chains (Base) use the allowance-holder endpoint so the
@@ -23,6 +41,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
   // [P217] 0x v2 defaults to mainnet when chainId is omitted; only attach it
   // for non-mainnet chains so the mainnet request stays byte-identical.
   if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
+  applyPartnerFee(qs, src) // [SPRINT-9T T1] uniform 0.1% on the sell side
   const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
     headers: {
       '0x-api-key': key,
@@ -65,6 +84,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   })
   // [P217] Attach chainId only for non-mainnet chains (see fetchQuote).
   if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
+  applyPartnerFee(qs, src) // [SPRINT-9T T1] same fee on swap-build → quote == execution
   const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
     headers: {
       '0x-api-key': key,
