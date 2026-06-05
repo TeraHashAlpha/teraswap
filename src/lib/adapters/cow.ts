@@ -2,10 +2,10 @@ import {
   CHAIN_ID,
   FEE_RECIPIENT,
   FEE_BPS,
-  WETH_ADDRESS,
   NATIVE_ETH,
   getCowApiBase,
 } from '@/lib/constants'
+import { getWrappedNative } from '@/lib/chains/registry'
 import { clampSlippage } from './shared'
 import { safeBigInt } from '@/lib/utils'
 import type {
@@ -171,8 +171,12 @@ async function fetchCowSwapQuote(
   chainId: number = CHAIN_ID,
 ): Promise<NormalizedQuote> {
   const base = getCowApiBase(chainId)
-  const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
-  const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
+  // [SPRINT-9W] Map native ETH to the wrapped-native of the CALL's chain (Base → 0x4200…0006, NOT
+  // mainnet WETH) so the chain-aware orderbook (api.cow.fi/<slug>) is asked for an address that
+  // exists there. Asking the Base book for mainnet WETH → no quote (the Force-MEV-on-Base bug).
+  const wrapped = getWrappedNative(chainId)
+  const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? wrapped : src
+  const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? wrapped : dst
 
   const data = await postCowQuoteWithFeeFallback(base, (appData) => ({
     sellToken,
@@ -218,8 +222,12 @@ async function fetchCowSwapOrder(
   recipient?: string,
 ): Promise<NormalizedQuote> {
   const base = getCowApiBase(chainId)
-  const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
-  const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
+  // [SPRINT-9W] Map native ETH to the wrapped-native of the CALL's chain (Base → 0x4200…0006, NOT
+  // mainnet WETH) so the chain-aware orderbook (api.cow.fi/<slug>) is asked for an address that
+  // exists there. Asking the Base book for mainnet WETH → no quote (the Force-MEV-on-Base bug).
+  const wrapped = getWrappedNative(chainId)
+  const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? wrapped : src
+  const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? wrapped : dst
 
   // [SPRINT-9T T2] appData now carries the partnerFee (same builder as the quote path → identical
   // quote/order appData). FAIL-SOFT to the fee-free appData only if CoW rejects the partnerFee

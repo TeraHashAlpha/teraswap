@@ -2,7 +2,7 @@
  * [P220] ChainConfig registry resolution (P216).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { getChainConfig, getSupportedChainIds, DEFAULT_CHAIN_ID } from './registry'
+import { getChainConfig, getSupportedChainIds, getWrappedNative, DEFAULT_CHAIN_ID } from './registry'
 
 describe('chains/registry [P216]', () => {
   it('returns the Ethereum mainnet config for chainId 1', () => {
@@ -37,6 +37,26 @@ describe('chains/registry [P216]', () => {
     expect(ids).toContain(1)
     expect(ids).toContain(8453)
     expect(DEFAULT_CHAIN_ID).toBe(1)
+  })
+})
+
+describe('getWrappedNative — chain-aware wrapped-native [SPRINT-9W]', () => {
+  const MAINNET_WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+
+  it('mainnet → mainnet WETH (byte-identical; default chain is mainnet)', () => {
+    expect(getWrappedNative(1)).toBe(MAINNET_WETH)
+    expect(getWrappedNative()).toBe(MAINNET_WETH)
+  })
+
+  it('Base → Base WETH 0x4200…0006 (single source of truth = the registry config)', () => {
+    expect(getWrappedNative(8453)).toBe(BASE_WETH)
+    expect(getWrappedNative(8453)).toBe(getChainConfig(8453).nativeCurrency.wrappedAddress)
+  })
+
+  it('unsupported chain → safe fallback to mainnet WETH, never throws', () => {
+    expect(() => getWrappedNative(99999)).not.toThrow()
+    expect(getWrappedNative(99999)).toBe(MAINNET_WETH)
   })
 })
 

@@ -109,3 +109,20 @@ export function getChainConfig(chainId: number): ChainConfig {
 export function getSupportedChainIds(): number[] {
   return Object.keys(CHAIN_CONFIGS).map(Number)
 }
+
+/**
+ * [SPRINT-9W] Chain-aware wrapped-native (WETH) address, from each chain's registry config:
+ * mainnet → 0xC02a…6Cc2 (WETH_ADDRESS), Base → 0x4200…0006. Falls back to mainnet WETH on an
+ * unsupported chain so a native→wrapped mapping on the hot path never throws.
+ *
+ * Use this (not the global WETH_ADDRESS) whenever mapping the native-ETH sentinel to its wrapped
+ * form for a PER-CHAIN request — asking a chain's API for another chain's WETH yields no quote
+ * (the Base CoW MEV-protection bug this sprint fixes).
+ */
+export function getWrappedNative(chainId: number = DEFAULT_CHAIN_ID): `0x${string}` {
+  try {
+    return getChainConfig(chainId).nativeCurrency.wrappedAddress
+  } catch {
+    return WETH_ADDRESS
+  }
+}
