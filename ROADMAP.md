@@ -65,17 +65,22 @@ TeraSwapOrderExecutor v2 deployed with all audit findings resolved.
 
 ## Phase 2 — Multi-Chain Expansion
 
-- [x] ~~**Base support**~~ — ✅ **LIVE** (2026-06-02). Chain-aware adapters (Sprints 43–45 + 9C),
-  per-chain Uniswap V3 registry, FeeCollector + routers whitelisted on Base, gas/fee in ETH+USD at
-  parity with mainnet, Base/mainnet UI parity (9E). 12 sources incl. **Bebop** (ADR-010, 9D).
-  Verified in prod (Vercel `adc4188`): multi-source Compare + USD + swaps execute.
+- [x] ~~**Base support**~~ — ✅ **LIVE & fully hardened** (2026-06-02). Chain-aware adapters
+  (Sprints 43–45 + 9C), per-chain Uniswap V3 registry, FeeCollector + routers whitelisted on Base,
+  gas/fee in ETH+USD, Base/mainnet UI parity (9E). **12 sources incl. Bebop** (ADR-010, 9D).
+  **Safety/oracle gates chain-aware** (9G: Chainlink + L2 sequencer, DefiLlama >$10k guard,
+  post-execution validator, server-side activation gate — all per-chain; rule #9 satisfied on Base).
+  **Source-execution fixed** (9H: Velora/Augustus V6.2 Curve selectors, Bebop fail-soft).
+  Verified in prod: Velora + Kyber execute, multi-source Compare + USD, mainnet byte-identical.
 - [ ] Arbitrum support (adapt FeeCollector + aggregation APIs) — next chain
 - [ ] Polygon support
 - [ ] Chain-aware routing (bridge + swap in one flow)
 - [ ] Cross-chain order execution
 
-_Base arc references: ADR-009 (multi-chain), ADR-010 (Bebop), Sprints 43–45 + 9C/9D/9E/9F,
-INC-2026-05-31-001 (502 → resolved)._
+_Base arc references: ADR-009 (multi-chain), ADR-010 (Bebop), Sprints 43–45 + 9C/9D/9E/9F/9G/9H,
+full-codebase audit `Audits/FULL-AUDIT-2026-06-02.md` (0C/0H), INC-2026-05-31-001 (502 → resolved).
+Follow-ups (non-blocking): Bebop API key (Prod+Preview), Supabase key in Preview scope, Alchemy key
+allowlist, Basescan contract verification, 9G-L-01 (Balancer BatchRelayer target per chain)._
 
 ---
 
