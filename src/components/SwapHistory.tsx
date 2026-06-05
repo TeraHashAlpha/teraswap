@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 
 export default function SwapHistory() {
   const { records } = useSwapHistory()
@@ -37,8 +37,8 @@ export default function SwapHistory() {
                 <span className={rec.status === 'confirmed' ? 'text-success' : rec.status === 'failed' ? 'text-danger' : 'text-warning'}>
                   {rec.status === 'confirmed' ? '&#10003;' : rec.status === 'failed' ? '&#10007;' : '&#8987;'}
                 </span>
-                <a href={`${ETHERSCAN_TX}${rec.txHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-65 hover:text-cream hover:underline">
-                  Etherscan
+                <a href={explorerTxUrl(rec.txHash, rec.chainId ?? 1)} target="_blank" rel="noopener noreferrer" className="text-cream-65 hover:text-cream hover:underline">
+                  Explorer
                 </a>
               </div>
             </div>

@@ -131,9 +131,11 @@ describe('diagnoseQuoteSources [diag]', () => {
     fakeRegistry = [{ name: '1inch' as DEXAdapter['name'], fetchQuote: spy, fetchSwapData: async () => null }]
     const diagnose = await loadHelper()
     // Drive the SAME breaker instance the probe will read to OPEN (forceOpen sets
-    // lastFailureAt=now, so cooldownRemaining > 0).
-    const { getCircuitBreaker } = await import('@/lib/adapters/circuit-breaker')
-    getCircuitBreaker('1inch').forceOpen('test: pre-opened')
+    // lastFailureAt=now, so cooldownRemaining > 0). [SPRINT-9S S3] The probe now reads the
+    // CHAIN-SCOPED breaker, so open the 8453 key — opening bare '1inch' would leave the Base
+    // probe CLOSED, which itself proves the per-chain isolation.
+    const { getCircuitBreaker, circuitKey } = await import('@/lib/adapters/circuit-breaker')
+    getCircuitBreaker(circuitKey('1inch', 8453)).forceOpen('test: pre-opened')
 
     const res = await diagnose('0xaaa', '0xbbb', '1', 18, 18, 8453)
     const rec = res.sources.find((s) => s.source === '1inch')!
@@ -142,7 +144,7 @@ describe('diagnoseQuoteSources [diag]', () => {
     expect(rec.latencyMs).toBe(0)
     expect(spy).not.toHaveBeenCalled() // OPEN → the adapter is never invoked
     // read-only: the breaker is still OPEN, the probe did not transition it
-    expect(getCircuitBreaker('1inch').getState()).toBe('OPEN')
+    expect(getCircuitBreaker(circuitKey('1inch', 8453)).getState()).toBe('OPEN')
   })
 
   it('is READ-ONLY: a failing source does NOT increment the production breaker (no withCircuitBreaker)', async () => {

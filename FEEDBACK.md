@@ -2190,3 +2190,44 @@ What the brief missed / where its hypotheses needed correcting:
   invalidated" family as the H finding.
 - **Not a regression (noted):** the CoW/limit/conditional EIP-712 `signTypedDataAsync` paths still have NO
   clear-signing review modal — out of 9R scope (split + single swap only), but it is the next signing-trust gap.
+
+## Feedback — SPRINT-9S (commits `521074a` S1, `c504740` S2, `f3204ab` S3)
+
+### S1 — Base feed map
+- **Spec asked for cbETH + USDbC; neither has a usable USD feed on Base (verified, not guessed):**
+  Chainlink publishes only **cbETH/ETH** on Base (on-chain `description()`="CBETH / ETH", 18 dp — ETH-denominated);
+  dropping it into this USD-keyed map would value cbETH at ~$1.08. **USDbC** has no Chainlink feed at all
+  (absent from the reference-data-directory). Both were intentionally left unmapped (rule #9: a wrong feed is
+  worse than none) → they fall through to multi-source + on-chain minimumOutput. **Follow-up for the Architect:**
+  cbETH needs an ETH-denominated **composition** (cbETH/ETH × ETH/USD) — a validation-layer feature (the feed map
+  + `fetchChainlinkPriceRaw`/`useChainlinkPrice` assume X/USD). USDbC could alias to USDC/USD if you accept the
+  approximation (rejected here for independence).
+- **Staleness/heartbeat concern (guard kept untouched per spec, but flagging):** the Base USDC/USD and DAI/USD
+  feeds have a **24h heartbeat** (~17.7h stale when I read them). There are **two** staleness policies in the code:
+  the UI hook `useChainlinkPrice` uses **90,000s (25h)** so the new feeds PASS there (the warning clears — the
+  reported UX bug is fixed), but the raw/server/DCA path `fetchChainlinkPriceRaw` uses `CHAINLINK_MAX_STALENESS_SEC`
+  = **3600s (1h)**, so on that path these stablecoin feeds will usually read as stale → null → multi-source
+  fallback (safe, conservative). If the raw path should actually USE stablecoin feeds, it needs a **per-feed-type
+  staleness** (stablecoins 24h+), which is a deliberate gate change — out of 9S scope ("keep staleness as 9G left").
+
+### S2 — Direction-agnostic validation
+- **Coverage limit (pre-existing, not introduced):** the symmetric deviation check is **stablecoin-anchored**
+  (`execIn`/`execOut` only derive a USD price when one side is USDC/USDT/DAI/USDbC). A **non-stable ↔ non-stable**
+  pair (e.g. ETH↔WBTC) still gets no client-side deviation check — same as before 9S. A fuller fix would compute
+  the expected rate from BOTH feeds (priceIn/priceOut) for any feeded pair; deferred (it changes mainnet behaviour
+  more broadly and wasn't the reported issue). The server-side DefiLlama guard + on-chain minimumOutput still apply.
+
+### S3 — Chain-aware polish
+- **S3.4 Bebop is config-side — OWNER ACTION REQUIRED:** Bebop returns null on EVERY chain when `BEBOP_API_KEY`
+  is unset (demo mode has no executable settlement — `bebop.ts:62`). The Base path is otherwise wired correctly
+  (host `api.bebop.xyz`, slug `base`, JAM settlement + balance-manager whitelisted on 8453). **Set `BEBOP_API_KEY`
+  in the Vercel production env to enable Bebop** (mainnet + Base). Added a one-time server log so this is no longer
+  silent. No code fix needed.
+- **S3.1 explorer links — order links deliberately left on etherscan:** the order engine (DCA/limit/conditional)
+  is **mainnet-only in production** (`order-engine/config.ts:67`), so DCAPanel / LimitOrderPanel / OrderDashboard /
+  ExecutionTimeline / AdminMonitor tx links correctly stay on etherscan — making them follow the *active* chain
+  would mislabel a mainnet order's tx as basescan when the user is on Base. Only the swap-context links (history,
+  wallet address, approval revoke) were made chain-aware. Revisit if the order engine gains multi-chain support.
+- **S3.3 breaker keying — mainnet kept byte-identical:** `circuitKey` returns the bare name for chainId 1, so the
+  KV pre-seed (keyed by source id) and the AdminMonitor dashboard are unchanged; Base breakers appear as
+  `bebop:8453` etc. in `getAllCircuitStates()` (more granular, intended).

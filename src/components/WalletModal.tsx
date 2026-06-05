@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useBalance, useDisconnect, useEnsName, useEnsAvatar } from 'wagmi'
 import { mainnet } from 'wagmi/chains'
-import { ETHERSCAN_ADDRESS } from '@/lib/constants'
+import { explorerAddressUrl } from '@/lib/chains/tokens'
+import { useActiveChainId } from '@/hooks/useChainId'
 
 interface Props {
   open: boolean
@@ -57,6 +58,7 @@ function IdenticonRing({ address }: { address: string }) {
 
 export default function WalletModal({ open, onClose }: Props) {
   const { address, connector } = useAccount()
+  const activeChainId = useActiveChainId() // [SPRINT-9S S3] chain-aware explorer link
   const { data: balance } = useBalance({ address })
   const { data: ensName } = useEnsName({ address, chainId: mainnet.id })
   const { data: ensAvatar } = useEnsAvatar({ name: ensName ?? undefined, chainId: mainnet.id })
@@ -205,15 +207,15 @@ export default function WalletModal({ open, onClose }: Props) {
 
         {/* ── Actions ── */}
         <div className="grid grid-cols-3 gap-2 p-4">
-          {/* View on Etherscan */}
+          {/* [SPRINT-9S S3] View on the active chain's explorer (etherscan ↔ basescan) */}
           <a
-            href={`${ETHERSCAN_ADDRESS}${address}`}
+            href={explorerAddressUrl(address ?? '', activeChainId)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-cream-08 bg-cream-04 px-2 py-2.5 text-[10px] font-medium text-cream-65 transition-all hover:border-cream-15 hover:bg-cream-08 hover:text-cream"
           >
             <EtherscanIcon />
-            Etherscan
+            Explorer
           </a>
 
           {/* View on DeBank */}

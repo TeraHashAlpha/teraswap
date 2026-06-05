@@ -147,11 +147,24 @@ export function isVerifiedToken(address: string, chainId: number): boolean {
  * Falls back to mainnet's explorer for an unknown chain rather than throwing.
  */
 export function explorerTokenUrl(address: string, chainId: number): string {
-  let base = 'https://etherscan.io'
+  return `${explorerBase(chainId)}/token/${address}`
+}
+
+/** [SPRINT-9S S3] Chain-aware explorer base (etherscan.io ↔ basescan.org), mainnet-default. */
+function explorerBase(chainId: number): string {
   try {
-    base = getChainConfig(chainId).blockExplorer
+    return getChainConfig(chainId).blockExplorer
   } catch {
-    /* unsupported chain — default to mainnet explorer */
+    return 'https://etherscan.io' // unsupported chain — default to mainnet explorer
   }
-  return `${base}/token/${address}`
+}
+
+/** [SPRINT-9S S3] Chain-aware transaction explorer URL (etherscan.io ↔ basescan.org). */
+export function explorerTxUrl(txHash: string, chainId: number): string {
+  return `${explorerBase(chainId)}/tx/${txHash}`
+}
+
+/** [SPRINT-9S S3] Chain-aware address explorer URL (etherscan.io ↔ basescan.org). */
+export function explorerAddressUrl(address: string, chainId: number): string {
+  return `${explorerBase(chainId)}/address/${address}`
 }

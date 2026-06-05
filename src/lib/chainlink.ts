@@ -67,6 +67,9 @@ export interface PriceCheck {
   // event → hard block; a deviation on a healthy oracle is price impact →
   // informed consent. See evaluatePriceGate in ./price-gate.
   oracleIntegrityFailed?: boolean
+  // [SPRINT-9S S2] Tokens in the pair that lack a Chainlink feed — populated by
+  // evaluatePairOracle so the warning can name them. Undefined on single-token checks.
+  oracleMissingSymbols?: string[]
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -107,6 +110,59 @@ export function evaluateDeviation(
   }
 
   return { chainlinkPrice, executionPrice, deviation, level: 'none', message: null, oracleUnavailable: false }
+}
+
+/**
+ * [SPRINT-9S S2] Direction-agnostic pair oracle verdict.
+ *
+ * A swap's manipulation risk lives on whichever side is volatile, not on the side the user
+ * happens to be selling. The single-token useChainlinkPrice only checks ONE side, so selling
+ * USDC (input) vs buying USDC (output) produced different verdicts and a spurious "no oracle"
+ * warning. This merges the input- and output-token checks symmetrically:
+ *   - if EITHER token lacks a feed → oracleUnavailable, naming the missing token(s);
+ *   - else → the MORE SEVERE of the two deviation/integrity verdicts. The meaningful
+ *     execution-price comparison sits on the stablecoin-paired side, so the worst-case
+ *     verdict is identical whether the stablecoin is the input or the output.
+ *
+ * Thresholds are NOT changed — it only re-uses the levels evaluateDeviation already produced.
+ * When both checks are the same object (e.g. a single mocked hook), it returns that object's
+ * verdict unchanged, so it is a safe drop-in for the existing gate.
+ */
+export function evaluatePairOracle(
+  inCheck: PriceCheck,
+  outCheck: PriceCheck,
+  inSymbol: string,
+  outSymbol: string,
+): PriceCheck {
+  const missing: string[] = []
+  if (inCheck.oracleUnavailable) missing.push(inSymbol)
+  if (outCheck.oracleUnavailable) missing.push(outSymbol)
+
+  if (missing.length > 0) {
+    // A genuinely unfeeded token (e.g. an exotic import) → ONE calm warning naming it.
+    return {
+      chainlinkPrice: inCheck.chainlinkPrice ?? outCheck.chainlinkPrice ?? null,
+      executionPrice: inCheck.executionPrice ?? outCheck.executionPrice ?? null,
+      deviation: 0,
+      level: 'warn',
+      message: null, // copy supplied by the UI from oracleMissingSymbols
+      oracleUnavailable: true,
+      oracleIntegrityFailed: false,
+      oracleMissingSymbols: missing,
+    }
+  }
+
+  // Both feeds present → take the more severe verdict (integrity > danger > warn > none).
+  const rank = (c: PriceCheck): number =>
+    c.oracleIntegrityFailed ? 4 : c.level === 'danger' ? 3 : c.level === 'warn' ? 2 : 1
+  const worse = rank(outCheck) > rank(inCheck) ? outCheck : inCheck
+  return {
+    ...worse,
+    // Keep the INPUT token's price for display (the "Rate ✓ Verified $X" tooltip).
+    chainlinkPrice: inCheck.chainlinkPrice ?? worse.chainlinkPrice,
+    oracleUnavailable: false,
+    oracleMissingSymbols: [],
+  }
 }
 
 /**

@@ -9,6 +9,9 @@ export interface SwapRecord {
   amountOut: string
   txHash: string
   status: 'pending' | 'confirmed' | 'failed'
+  /** [SPRINT-9S S3] Chain the swap executed on — drives a chain-aware explorer link.
+   *  Optional for back-compat with records persisted before 9S (default mainnet). */
+  chainId?: number
 }
 
 interface SwapHistoryStore {

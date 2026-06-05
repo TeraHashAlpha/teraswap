@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi } from 'viem'
 import { useActiveApprovals, type ApprovalRecord } from '@/hooks/useActiveApprovals'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
+import { useActiveChainId } from '@/hooks/useChainId'
 
 function timeSince(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000)
@@ -16,6 +17,7 @@ function timeSince(ts: number): string {
 
 function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (id: string) => void }) {
   const [revoking, setRevoking] = useState(false)
+  const chainId = useActiveChainId() // [SPRINT-9S S3] chain-aware revoke-tx explorer link
 
   const {
     writeContract,
@@ -66,7 +68,7 @@ function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (
         <span className="flex items-center gap-1 text-[10px] font-semibold text-success">
           &#10003; Revoked
           {revokeHash && (
-            <a href={`${ETHERSCAN_TX}${revokeHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-35 hover:text-cream transition">&#8599;</a>
+            <a href={explorerTxUrl(revokeHash, chainId)} target="_blank" rel="noopener noreferrer" className="text-cream-35 hover:text-cream transition">&#8599;</a>
           )}
         </span>
       ) : revokeError ? (

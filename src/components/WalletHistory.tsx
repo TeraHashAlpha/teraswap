@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAccount } from 'wagmi'
 import { formatUnits } from 'viem'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 
 interface SwapRecord {
   id: string
@@ -240,11 +240,11 @@ export default function WalletHistory() {
                 <div className="text-[11px] text-cream-35">{timeAgo(swap.created_at)}</div>
                 {swap.tx_hash && (
                   <a
-                    href={`${ETHERSCAN_TX}${swap.tx_hash}`}
+                    href={explorerTxUrl(swap.tx_hash, swap.chain_id ?? 1)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[10px] text-cream-35 transition hover:text-cream"
-                    title="View on Etherscan"
+                    title="View on block explorer"
                   >
                     {shortenHash(swap.tx_hash)} ↗
                   </a>
