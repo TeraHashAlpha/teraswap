@@ -149,3 +149,10 @@ describe('GET /api/quote — debug=sources', () => {
     expect(fetchMetaQuoteMock).not.toHaveBeenCalled()
   })
 })
+
+describe('[SPRINT-9X X2] quote function ceiling', () => {
+  it('exports maxDuration = 60 (parity with /api/swap) so the platform never kills it → HTML 504', async () => {
+    const mod = await import('./route')
+    expect(mod.maxDuration).toBe(60)
+  })
+})
