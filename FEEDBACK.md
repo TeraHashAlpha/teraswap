@@ -2231,3 +2231,41 @@ What the brief missed / where its hypotheses needed correcting:
 - **S3.3 breaker keying — mainnet kept byte-identical:** `circuitKey` returns the bare name for chainId 1, so the
   KV pre-seed (keyed by source id) and the AdminMonitor dashboard are unchanged; Base breakers appear as
   `bebop:8453` etc. in `getAllCircuitStates()` (more granular, intended).
+
+## Feedback — SPRINT-9T (commits `3386c42` T1, `0ad9baa` T2, `408cf27` T3, `674f57c` T1-audit-fix)
+
+### T1 — 0x partner fee
+- **Security concern found by the fund-flow Auditor (fixed this sprint, H-rated by one reviewer):** `swapFeeToken=src`
+  sent the **native-ETH sentinel** (0xEeee…) on ETH→token sells — 0x v2 requires an ERC-20 fee token, so 0x would
+  have 400'd (dropping 0x from the most common swap direction) or silently skipped the fee. Fixed: `swapFeeToken`
+  prefers the sell token, falls back to the **buy token** when selling native ETH (at most one side is native).
+  **Recommend the Architect add a checklist item:** any adapter adding a token-typed API param must handle the
+  native-ETH sentinel (the 0x adapter, unlike CoW/uniswapv3, does NOT normalise native→WETH).
+- **0x has NO fail-soft (auditor L, deliberately deferred):** unlike CoW (T2), a 0x fee-param rejection drops 0x
+  from Compare rather than retrying fee-free. The native-ETH fix removes the only known break, and 0x v2
+  monetization is documented as available to ALL integrators with no registration, so a blanket rejection is
+  unlikely. A symmetric 0x fail-soft (retry without fee params on a fee-specific 400) is a reasonable follow-up —
+  left out to keep T1 within the spec's scope (fail-soft was mandated for CoW only).
+- **Stale comment to fix (not edited — out of 9T's adapter scope):** `constants.ts` (FEE_NATIVE_SOURCES = [])
+  says "API fee params require registered partner accounts to work." The Auditor confirmed this is **false for 0x
+  v2** and contradicts this sprint. Left as-is to keep the diff focused; flagging so a maintainer doesn't revert
+  T1 on the strength of that comment.
+
+### T2 — CoW partner fee
+- **Schema verified, not guessed:** appData **v1.1.0** (already in the code) references `partnerFee/v0.1.0.json` =
+  `{ bps, recipient }` (both required) — exactly the spec's shape. No version bump needed. partnerFee.bps = FEE_BPS.
+- **CoW retains a 25% service fee (auditor I — owner should know):** per CoW governance, CoW keeps ~25% of the
+  declared partner fee. So the USER is charged a uniform 0.1% across every source (Compare/win-rate fairness — the
+  stated goal — holds, since each normalized `toAmount` is post-the-same-0.1%), but FEE_RECIPIENT NETS ~0.075% on
+  CoW vs the full 0.1% on 0x/Bebop. This is inherent to CoW's mechanism, not a bug; the recipient/declared bps are
+  correct. Bump CoW's appData bps if you want a higher net (still ≤ CoW's 100 bps cap).
+- **Fail-soft transient display nuance (auditor I):** Compare (`fetchCowSwapQuote`) and the order screen
+  (`fetchCowSwapOrder`) are two independent /quote calls; if one accepts partnerFee and the other fail-softs, the
+  displayed vs signed buyAmount can diverge ~0.1%. Rejection is deterministic per appData schema so they normally
+  agree, and the signed order is always internally consistent (signed over CoW's echoed appDataHash).
+
+### Owner post-merge step
+- **Live fee-arrival check (per spec, OWNER):** after merge, execute a small 0x swap and a CoW swap on a funded
+  wallet and confirm 0.1% lands at FEE_RECIPIENT (DeBank / explorer). 0x credits the swapFeeRecipient at settlement;
+  CoW credits the partnerFee recipient on fill (minus CoW's 25%). If 0x rejects the fee params for a given pair,
+  0x simply won't appear in Compare for that pair (fails safe — never a wrong recipient/amount).
