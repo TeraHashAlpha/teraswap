@@ -84,3 +84,29 @@ data/endpoint-baseline-overrides.json
 
 # Cloudflare Workers node_modules
 workers/*/node_modules/
+
+# ── [CHORE-DOCS-HOUSEKEEPING 2026-06-05] tooling / caches / vendored / runtime ──
+# Generated caches & reports (the CURATED audit trail lives under Audits/** and is committed)
+/cache/
+/contracts/cache/
+/health-reports/
+/reports/
+# Agent / Claude / hallmark tooling + runtime (project skills under .claude/skills/*.md stay tracked)
+/.agents/
+/.hallmark/
+/.claude/scheduled_tasks.lock
+/.claude/worktrees/
+/.claude/wf-full-audit.js
+/.claude/skills/gsap-*
+/.claude/skills/defi-incident-comms
+/.claude/skills/hallmark
+/skills-lock.json
+/sprint-16-goal.html
+# Vendored ERC-7730 clear-signing registry (upstream, not authored here)
+/clear-signing-erc7730-registry/
+# Stray root foundry workspace — the real contracts build is under contracts/ (its own foundry.toml)
+/foundry.toml
+/remappings.txt
+/lib/
+# Generated worker lockfile (package.json is tracked; lock left out per existing convention)
+/workers/monitor-tick-cron/package-lock.json
