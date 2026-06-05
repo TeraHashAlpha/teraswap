@@ -2269,3 +2269,36 @@ What the brief missed / where its hypotheses needed correcting:
   wallet and confirm 0.1% lands at FEE_RECIPIENT (DeBank / explorer). 0x credits the swapFeeRecipient at settlement;
   CoW credits the partnerFee recipient on fill (minus CoW's 25%). If 0x rejects the fee params for a given pair,
   0x simply won't appear in Compare for that pair (fails safe — never a wrong recipient/amount).
+
+## Feedback — CHORE-DOCS-HOUSEKEEPING (commits `2c07367` adr, `2c579b2` prompts, `09fbf40` runbooks, `139c9e1` audits, `8883535` planning, `552f15b` gitignore)
+
+Classified all 1109 untracked entries + 2 modified tracked docs into three buckets. gitleaks (8.30.1,
+repo `.gitleaks.toml`) scanned the staged corpus → **0 real secrets**. Submodule, `src/**`, package files
+and CI workflows untouched. Full table (file → bucket):
+
+| Path / group | Bucket | Notes |
+|---|---|---|
+| `docs/ADR/ADR-001..009` | DOCS (adr) | decision trail |
+| `docs/Prompts/**` (~130: SPRINT-5A…9V, BASE-REVIEW, AUDIT-COMPREHENSIVE-POST-5C, UX-SECURITY, this chore's spec) | DOCS (prompts) | Architect prompt history |
+| `docs/Runbooks/**`, `docs/RUNBOOKS.md` | DOCS (runbooks) | see redaction note below |
+| `Audits/**` (FULL-AUDIT, Incidents/* incl. INC-2026-06-03-001 + vercel-breach + cowswap, SPRINT-*-AUDIT(-BRIEF), Daily/Weekly/Monthly/Quarterly/Sprint, .pdf) | DOCS (audits) | the audit trail |
+| `cowswap-inquiry-2026-04-15.txt`, root audit `*.docx`/`*.pdf` (Security-Audit, Technical-Analysis ×3) | DOCS (audits) | external analysis binaries |
+| `docs/security/AUDIT-TOTAL.md` (modified, tracked) | DOCS (audits) | clean +15-line 9T light-review record |
+| `ROADMAP.md` (modified, tracked) | DOCS (planning) | Architect WIP, committed as-is |
+| `docs/OPS-HYGIENE-REVIEW.md`, `docs/PITCH-DECK-BRIEF.md`, `TERASWAP-EXECUTION-PLAN.md`, `QUESTIONS.md`, `REVIEW-SPRINT3.md`, `SPRINT4-AUDIT-BRIEF.md`, `SPRINT4-PROMPTS.md`, `SPRINT5A-PLAN.md`, `FASE-A-CLOUDFLARE-DNS.md`, `FASE-A-MANUAL.md`, `TeraSwap_CoWIncident_Response.md` | DOCS (planning) | root planning/ops docs |
+| `TeraSwap_CoW_Reactivation_XThread.md`, `TeraSwap_DeFiUnsafe_Thread.md`, `tweet_propamm_quote_tweet.md`, `teraswap-x-thread-cowswap-incident.txt`, `TeraSwap_Competitive_Brief_2026-04-23.md`, `marketing.plugin` | **MARKETING** | moved to `../dex-aggregator 2.marketing/inbox/` (rule #10, NOT committed) |
+| `teraswap_7layer_verified_execution.png` | **MARKETING-SUSPECT** | not referenced by `src/`/`public/`; moved to marketing inbox. **ASK:** owner, confirm — if it's a technical diagram (not promo) it can be re-added under `docs/`. |
+| `.agents/`, `.hallmark/`, `.claude/{scheduled_tasks.lock,worktrees/,wf-full-audit.js}`, `.claude/skills/{gsap-*,defi-incident-comms,hallmark}` | CACHE/TOOLING | gitignored. `.claude/skills/gsap-*`+`hallmark` are symlinks into `.agents/`; project skills `.claude/skills/*.md` stay tracked |
+| `cache/`, `contracts/cache/`, `health-reports/`, `reports/` | CACHE | gitignored (generated; the *curated* trail is `Audits/**`) |
+| `clear-signing-erc7730-registry/` | VENDORED | gitignored (upstream ERC-7730 registry, not authored here) |
+| `foundry.toml`, `remappings.txt`, `lib/` (root) | TOOLING | gitignored — **stray** root forge workspace (`lib/`=vendored OZ); the real contracts build is `contracts/foundry.toml` |
+| `skills-lock.json`, `sprint-16-goal.html` | TOOLING | gitignored |
+| `workers/monitor-tick-cron/package-lock.json` | TOOLING | gitignored (package.json tracked, lock left out per existing `workers/*/node_modules` convention). **NOTE:** owner may prefer to commit it for reproducible installs. |
+
+**Redaction (no real secret):** `docs/RUNBOOKS.md` had two curl examples with bare `YOUR_ANON_KEY` /
+`YOUR_1INCH_KEY` placeholders that tripped gitleaks' `curl-auth-header` rule. These were never real
+secrets; switched to env-var notation (`${SUPABASE_ANON_KEY}` / `${ONEINCH_API_KEY}`) — clearer docs and
+gitleaks-clean. NO `.gitleaks.toml` allowlist was added (per spec: redact/fix, don't allowlist docs).
+
+**Untouched (separate chore):** the dirty `contracts/order-engine/lib/openzeppelin-contracts` submodule
+(chronic test-contracts issue) — left exactly as found.
