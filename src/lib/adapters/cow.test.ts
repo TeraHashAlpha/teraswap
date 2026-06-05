@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import cowAdapter from './cow'
-import { FEE_RECIPIENT, FEE_BPS } from '@/lib/constants'
+import { FEE_RECIPIENT, FEE_BPS, NATIVE_ETH } from '@/lib/constants'
 
 const VALID_QUOTE = {
   sellToken: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
@@ -159,5 +159,61 @@ describe('cow adapter — partner fee [SPRINT-9T T2]', () => {
     const bodies = captureBodies(() => json({ errorType: 'NoLiquidity', description: 'NoLiquidity' }, 400))
     await expect(cowAdapter.fetchSwapData(swapParams)).rejects.toThrow(/CoW quote 400/)
     expect(bodies.length).toBe(1) // no silent fee-free retry on a real error
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9W] Chain-aware wrapped-native mapping (Base MEV-protection fix).
+// ─────────────────────────────────────────────────────────────
+describe('cow adapter — chain-aware wrapped-native [SPRINT-9W]', () => {
+  const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const MAINNET_WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+  const orderParams = { src: NATIVE_ETH, dst: USDC, amount: '1000000000000000000', from: '0x2222222222222222222222222222222222222222', slippage: 0.5, srcDecimals: 18, dstDecimals: 6 }
+
+  const json = (payload: unknown, status = 200) =>
+    new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
+  function captureBodies(responder: () => Response) {
+    const bodies: Array<Record<string, unknown>> = []
+    vi.spyOn(global, 'fetch').mockImplementation(async (...args: unknown[]) => {
+      const init = args[1] as { body?: string } | undefined
+      bodies.push(JSON.parse((init?.body as string) ?? '{}'))
+      return responder()
+    })
+    return bodies
+  }
+
+  beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => {}))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('Base native-ETH SELL → quote request carries Base WETH 0x4200…0006 (not mainnet WETH)', async () => {
+    const bodies = captureBodies(() => json({ id: 1, quote: VALID_QUOTE }))
+    await cowAdapter.fetchQuote({ src: NATIVE_ETH, dst: USDC, amount: '1000000000000000000', chainId: 8453 })
+    expect(bodies[0].sellToken).toBe(BASE_WETH)
+  })
+
+  it('mainnet native-ETH SELL → mainnet WETH 0xC02a… (byte-identical)', async () => {
+    const bodies = captureBodies(() => json({ id: 1, quote: VALID_QUOTE }))
+    await cowAdapter.fetchQuote({ src: NATIVE_ETH, dst: USDC, amount: '1000000000000000000', chainId: 1 })
+    expect(bodies[0].sellToken).toBe(MAINNET_WETH)
+  })
+
+  it('order build (fetchSwapData) uses the SAME Base mapping as the quote', async () => {
+    const bodies = captureBodies(() => json({ id: 1, quote: VALID_QUOTE }))
+    await cowAdapter.fetchSwapData({ ...orderParams, chainId: 8453 })
+    expect(bodies[0].sellToken).toBe(BASE_WETH)
+  })
+
+  it('native-ETH as the BUY token also maps to the chain WETH (Base)', async () => {
+    const bodies = captureBodies(() => json({ id: 1, quote: VALID_QUOTE }))
+    await cowAdapter.fetchQuote({ src: USDC, dst: NATIVE_ETH, amount: '1000000', chainId: 8453 })
+    expect(bodies[0].buyToken).toBe(BASE_WETH)
+  })
+
+  it('ERC20→ERC20 is unchanged on Base (no native mapping applied)', async () => {
+    const bodies = captureBodies(() => json({ id: 1, quote: VALID_QUOTE }))
+    await cowAdapter.fetchQuote({ src: USDC, dst: BASE_WETH, amount: '1000000', chainId: 8453 })
+    expect(bodies[0].sellToken).toBe(USDC)
+    expect(bodies[0].buyToken).toBe(BASE_WETH)
   })
 })
