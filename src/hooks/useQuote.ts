@@ -6,6 +6,7 @@ import { type MetaQuoteResult } from '@/lib/api'
 import { INPUT_DEBOUNCE_MS, QUOTE_REFRESH_MS } from '@/lib/constants'
 import type { Token } from '@/lib/tokens'
 import { logQuoteToSupabase } from '@/lib/analytics'
+import { fetchJson } from '@/lib/fetch-json'
 import { analyzeGasless } from '@/lib/gasless-engine'
 import { useEthGasCost } from './useEthGasCost'
 import { useActiveChainId } from './useChainId'
@@ -62,8 +63,14 @@ async function fetchQuoteViaApi(
     params.set('chainId', String(chainId))
   }
 
-  const res = await fetch(`/api/quote?${params}`, signal ? { signal } : undefined)
-  const data = await res.json()
+  // [SPRINT-9X X3] Parse via fetchJson: an HTML platform error (e.g. a 504 from a maxDuration kill)
+  // yields a CLEAN typed ServiceUnavailableError + one automatic retry — never the raw
+  // 'Unexpected token <, "<!DOCTYPE"... is not valid JSON'. Real JSON envelopes (429/4xx/5xx) pass
+  // through so the status-based handling below (and the 429 backoff) is unchanged.
+  const { res, data } = await fetchJson<MetaQuoteResult & { error?: string }>(
+    `/api/quote?${params}`,
+    signal ? { signal } : undefined,
+  )
 
   if (!res.ok) {
     throw new QuoteApiError(
