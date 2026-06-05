@@ -1,6 +1,7 @@
 import {
   CHAIN_ID,
   FEE_RECIPIENT,
+  FEE_BPS,
   WETH_ADDRESS,
   NATIVE_ETH,
   getCowApiBase,
@@ -99,6 +100,65 @@ function parseCowOrderParams(
   }
 }
 
+// ── [SPRINT-9T T2] CoW partner fee in appData ────────────────
+//
+// CoW is FEE_INCOMPATIBLE (intent-based — no on-chain tx to wrap via the FeeCollector), so its
+// 0.1% is collected through CoW's NATIVE partnerFee mechanism in the order's appData. The appData
+// v1.1.0 schema references partnerFee/v0.1.0.json = { bps, recipient } (both required) — exactly
+// this shape, with the SAME FEE_BPS the FeeCollector/Bebop/0x use (no new magic number). Quote-time
+// and order-time appData are IDENTICAL so the quoted buyAmount (Compare) matches the signed order.
+//
+// appData ⇄ appDataHash consistency: we send the appData STRING in the /quote request; CoW hashes
+// it and echoes back { appData, appDataHash }; parseCowOrderParams validates that pair and
+// submitCowOrder signs/submits exactly it — so the hash always matches the string actually used,
+// fee or fail-soft no-fee.
+function buildCowAppData(withPartnerFee: boolean): string {
+  const metadata: Record<string, unknown> = { referrer: { address: FEE_RECIPIENT, version: '1.0.0' } }
+  if (withPartnerFee) metadata.partnerFee = { bps: FEE_BPS, recipient: FEE_RECIPIENT }
+  return JSON.stringify({ version: '1.1.0', appCode: 'TeraSwap', metadata })
+}
+
+/** True ONLY for a CoW 400 that specifically rejects the appData / partnerFee schema. */
+function isAppDataRejection(status: number, desc: string): boolean {
+  if (status !== 400) return false
+  const d = desc.toLowerCase()
+  return d.includes('appdata') || d.includes('app data') || d.includes('partnerfee') || d.includes('partner fee')
+}
+
+/**
+ * POST /quote with the partner-fee appData. FAIL-SOFT: if (and ONLY if) CoW rejects the partnerFee
+ * appData schema, retry ONCE with the fee-free appData so quoting never breaks over the fee — and
+ * log a structured warning. Every other error (NoLiquidity, SellAmountDoesNotCoverFee, 5xx, …)
+ * propagates unchanged via a tagged Error the callers map to their existing messages.
+ */
+async function postCowQuoteWithFeeFallback(
+  base: string,
+  makeBody: (appData: string) => Record<string, unknown>,
+) {
+  const post = (appData: string) => fetch(`${base}/quote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(makeBody(appData)),
+  })
+
+  let res = await post(buildCowAppData(true))
+  if (res.ok) return res.json()
+
+  let err = await res.json().catch(() => ({}))
+  let desc = String(err.description || err.errorType || '')
+  if (isAppDataRejection(res.status, desc)) {
+    // Never break CoW quoting over the fee — drop the partnerFee and retry once.
+    console.warn(JSON.stringify({ event: 'cow_partner_fee_failsoft', status: res.status, reason: desc.slice(0, 200) }))
+    res = await post(buildCowAppData(false))
+    if (res.ok) return res.json()
+    err = await res.json().catch(() => ({}))
+    desc = String(err.description || err.errorType || '')
+  }
+  const e = new Error(desc || 'quote failed') as Error & { cowStatus?: number }
+  e.cowStatus = res.status
+  throw e
+}
+
 /**
  * CoW Protocol works differently from other aggregators:
  * - Quote: standard price/fee estimation
@@ -114,33 +174,24 @@ async function fetchCowSwapQuote(
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
 
-  const appData = JSON.stringify({ version: '1.1.0', appCode: 'TeraSwap', metadata: {} })
-
-  const res = await fetch(`${base}/quote`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      sellToken,
-      buyToken,
-      sellAmountBeforeFee: amount,
-      kind: 'sell',
-      from: FEE_RECIPIENT,
-      appData,
-      partiallyFillable: false,
-      sellTokenBalance: 'erc20',
-      buyTokenBalance: 'erc20',
-      signingScheme: 'eip712',
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    const desc = err.description || err.errorType || 'quote failed'
+  const data = await postCowQuoteWithFeeFallback(base, (appData) => ({
+    sellToken,
+    buyToken,
+    sellAmountBeforeFee: amount,
+    kind: 'sell',
+    from: FEE_RECIPIENT,
+    appData,
+    partiallyFillable: false,
+    sellTokenBalance: 'erc20',
+    buyTokenBalance: 'erc20',
+    signingScheme: 'eip712',
+  })).catch((e: unknown) => {
+    const desc = e instanceof Error ? e.message : 'quote failed'
     if (desc.includes('SellAmountDoesNotCoverFee') || desc.includes('NoLiquidity')) {
       throw new Error(`CoW: Amount too small or no liquidity for this pair`)
     }
-    throw new Error(`CoW ${res.status}: ${desc}`)
-  }
-  const data = await res.json()
+    throw new Error(`CoW ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}`)
+  })
   const quote = data.quote
 
   return {
@@ -170,36 +221,29 @@ async function fetchCowSwapOrder(
   const sellToken = src.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : src
   const buyToken = dst.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : dst
 
-  const appData = JSON.stringify({
-    version: '1.1.0',
-    appCode: 'TeraSwap',
-    metadata: { referrer: { address: FEE_RECIPIENT, version: '1.0.0' } },
+  // [SPRINT-9T T2] appData now carries the partnerFee (same builder as the quote path → identical
+  // quote/order appData). FAIL-SOFT to the fee-free appData only if CoW rejects the partnerFee
+  // schema, so signing/quoting never breaks over the fee. The order is signed/submitted over the
+  // { appData, appDataHash } CoW echoes back (parseCowOrderParams), so the hash stays consistent.
+  const quoteData = await postCowQuoteWithFeeFallback(base, (appData) => ({
+    sellToken,
+    buyToken,
+    sellAmountBeforeFee: amount,
+    kind: 'sell',
+    from,
+    // [P101] Receiver = address that gets the buyToken once the order is
+    // settled. Defaults to sender; parseCowOrderParams validates whatever
+    // the API echoes back.
+    receiver: recipient ?? from,
+    appData,
+    partiallyFillable: false,
+    sellTokenBalance: 'erc20',
+    buyTokenBalance: 'erc20',
+    signingScheme: 'eip712',
+  })).catch((e: unknown) => {
+    const desc = e instanceof Error ? e.message : 'failed'
+    throw new Error(`CoW quote ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}`)
   })
-  const quoteRes = await fetch(`${base}/quote`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      sellToken,
-      buyToken,
-      sellAmountBeforeFee: amount,
-      kind: 'sell',
-      from,
-      // [P101] Receiver = address that gets the buyToken once the order is
-      // settled. Defaults to sender; parseCowOrderParams validates whatever
-      // the API echoes back.
-      receiver: recipient ?? from,
-      appData,
-      partiallyFillable: false,
-      sellTokenBalance: 'erc20',
-      buyTokenBalance: 'erc20',
-      signingScheme: 'eip712',
-    }),
-  })
-  if (!quoteRes.ok) {
-    const err = await quoteRes.json().catch(() => ({}))
-    throw new Error(`CoW quote ${quoteRes.status}: ${err.description || 'failed'}`)
-  }
-  const quoteData = await quoteRes.json()
   const quote = quoteData.quote
 
   // [11-L-02] Validate CoW response BEFORE BigInt conversion. parseCowOrderParams
