@@ -2269,3 +2269,29 @@ What the brief missed / where its hypotheses needed correcting:
   wallet and confirm 0.1% lands at FEE_RECIPIENT (DeBank / explorer). 0x credits the swapFeeRecipient at settlement;
   CoW credits the partnerFee recipient on fill (minus CoW's 25%). If 0x rejects the fee params for a given pair,
   0x simply won't appear in Compare for that pair (fails safe — never a wrong recipient/amount).
+
+## Feedback — SPRINT-9W (commit `f81cc8b`)
+
+### Fix
+- `getWrappedNative(chainId)` added to `chains/registry.ts` (reads each chain's
+  `nativeCurrency.wrappedAddress` — already present: mainnet `0xC02a…6Cc2`, Base `0x4200…0006` — so no
+  duplicate hardcode; safe fallback to mainnet WETH on an unsupported chain). cow.ts uses it at both
+  mapping sites (quote + order build), sell and buy side, with the call's chainId.
+
+### Sweep report — every `WETH_ADDRESS` use in `src/lib/**` (per the spec's "report chain-pinned uses")
+| Site | Status |
+|---|---|
+| `adapters/cow.ts` (×4: quote + order, sell + buy) | **FIXED** — the live per-chain bug |
+| `adapters/shared.ts` `toWeth(token, chainId)` | Already chain-aware ([SPRINT-9E]); the ACTIVE `adapters/uniswapv3.ts` uses it (`toWeth(tokenIn, chainId)`). No action. |
+| `src/lib/uniswap.ts` `toWeth(token)` (mainnet-pinned, no chainId) | **DEAD CODE** — `quoteUniswapV3`/`buildUniswapSwapTx` are imported nowhere (superseded by `adapters/uniswapv3.ts`). Not a live bug. **Recommend deleting `src/lib/uniswap.ts`** in a separate cleanup chore (out of 9W scope). |
+| `limit-order-api.ts` `resolveToken()` (mainnet-pinned) | Order engine is **mainnet-only in production** (`order-engine/config.ts:67`), so mapping to mainnet WETH is correct today. Would need `getWrappedNative` if limit orders go multi-chain. |
+| `price-monitor.ts:120` (`addr === WETH_ADDRESS`) | Comparison, not a mapping; order-engine/monitoring (mainnet). Fine. |
+| `quorum-check.ts:51` (`QUORUM_REFERENCE_PAIRS.fromToken = WETH_ADDRESS`) | Static mainnet reference pair (WETH→USDC) for the H5 monitoring quorum (`monitoring-loop`, mainnet). Correct as a fixed reference. |
+| `chains/registry.ts:33,49`, `chains/chainlink-feeds.ts:54` | Config source-of-truth / mainnet-branch comparison. Correct. |
+
+### Note
+- This also resolves the **historic cowswap breaker-open on Base** — every Base native-ETH CoW quote was
+  failing (mainnet WETH on the Base book), accumulating breaker failures. With the fix, plus 9S's per-chain
+  breaker keying (`circuitKey`), a Base CoW failure no longer poisons mainnet's `cowswap` breaker either.
+- **OWNER post-merge:** Preview-test, then a live "Force MEV Protection" native-ETH→USDC swap on Base to
+  confirm a CoW quote now returns and the order settles.
