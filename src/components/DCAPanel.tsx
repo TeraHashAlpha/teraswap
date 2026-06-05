@@ -6,6 +6,7 @@ import { parseUnits, formatUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import TokenSelector from './TokenSelector'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
+import OrderReviewModal from './OrderReviewModal'
 import {
   OrderType,
   PriceCondition,
@@ -46,6 +47,9 @@ export default function DCAPanel() {
     latestEvent,
     isSubmitting,
     createOrder,
+    pendingOrder,
+    confirmOrder,
+    clearPendingOrder,
     cancelOrder,
     cancelAllOrders,
     removeOrder,
@@ -106,6 +110,8 @@ export default function DCAPanel() {
 
   return (
     <div className="w-full max-w-[calc(100vw-2rem)] sm:max-w-[460px]">
+      {/* [SPRINT-9U U2] EIP-712 review — no DCA order is signed until the user confirms this frozen struct. */}
+      {pendingOrder && <OrderReviewModal order={pendingOrder} onConfirm={confirmOrder} onCancel={clearPendingOrder} />}
       {/* Tab header */}
       <div className="mb-4 flex gap-1 rounded-xl border border-cream-08 bg-surface-secondary p-1">
         <button
