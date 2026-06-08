@@ -2,13 +2,13 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { DEFAULT_TOKENS, getAllTokens, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
+import { DEFAULT_TOKENS, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import TokenAddressBadge from './TokenAddressBadge'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { getChainTokenList, getPopularTokens } from '@/lib/chains/tokens'
+import { getChainTokenList, getPopularTokens, getSearchCatalog, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
@@ -47,16 +47,21 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
   // Check if search looks like an address
   const isAddressSearch = /^0x[a-fA-F0-9]{40}$/.test(search.trim())
 
+  // [SPRINT-9Y] Search the FULL pinned catalog for the active chain (the long tail),
+  // chain-scoped (9P) and excluding the disabled side. Capped to SEARCH_RESULT_LIMIT
+  // rows so a broad query never janks the list. Only computed while searching.
   const filtered = useMemo(() => {
-    const all = isMainnet ? getAllTokens() : catalog
-    return all.filter(
+    if (!isSearching) return [] as Token[]
+    const disabled = disabledAddress?.toLowerCase()
+    const matches = getSearchCatalog(activeChainId).filter(
       (t) =>
-        t.address.toLowerCase() !== disabledAddress?.toLowerCase() &&
+        t.address.toLowerCase() !== disabled &&
         (t.symbol.toLowerCase().includes(q) ||
           t.name.toLowerCase().includes(q) ||
           t.address.toLowerCase().includes(q)),
     )
-  }, [search, disabledAddress, isMainnet, catalog])
+    return matches.slice(0, SEARCH_RESULT_LIMIT)
+  }, [isSearching, q, disabledAddress, activeChainId])
 
   // Tokens with balance — sorted highest first, shown above categories
   const tokensWithBalance = useMemo(() => {
@@ -194,7 +199,9 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                 <>
                   {filtered.length > 0 && (
                     <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
-                      {filtered.length} result{filtered.length !== 1 ? 's' : ''}
+                      {filtered.length === SEARCH_RESULT_LIMIT
+                        ? `first ${SEARCH_RESULT_LIMIT} results — refine to narrow`
+                        : `${filtered.length} result${filtered.length !== 1 ? 's' : ''}`}
                     </p>
                   )}
                   {filtered.map((token) => (

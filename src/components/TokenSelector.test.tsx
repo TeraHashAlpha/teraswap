@@ -7,7 +7,7 @@
  * filtering behavior.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({
@@ -111,6 +111,66 @@ describe('TokenSelector — modal interactions', () => {
     // The chips row is the first flex-wrap container after the header.
     const chipRow = dialog.querySelector('.flex-wrap')!
     expect(within(chipRow as HTMLElement).queryByText('USDC')).toBeNull()
+  })
+})
+
+describe('[9Y] TokenSelector — expanded catalog + chain-scoped long-tail search', () => {
+  async function setChain(id: number) {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      isConnected: true,
+      chain: { id, name: id === 1 ? 'mainnet' : 'base' },
+    })
+  }
+
+  afterEach(async () => {
+    await setChain(1) // restore mainnet default
+  })
+
+  function openAndSearch(value: string) {
+    fireEvent.click(screen.getByText('Select'))
+    fireEvent.change(screen.getByPlaceholderText(/search name, symbol/i), { target: { value } })
+  }
+
+  it('mainnet: searching a long-tail symbol (ACX) that is NOT a default token shows a result', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openAndSearch('ACX')
+    expect(screen.getAllByText('ACX').length).toBeGreaterThan(0)
+  })
+
+  it('Base: the default view shows expanded suggested majors (AERO, DEGEN)', async () => {
+    await setChain(8453)
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    fireEvent.click(screen.getByText('Select'))
+    const modal = screen.getByText(/Select token/i).closest('div')!.parentElement!
+    expect(within(modal).getAllByText('AERO').length).toBeGreaterThan(0)
+    expect(within(modal).getAllByText('DEGEN').length).toBeGreaterThan(0)
+  })
+
+  it('Base: searching a long-tail symbol (ZRX) finds it in the catalog', async () => {
+    await setChain(8453)
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openAndSearch('ZRX')
+    expect(screen.getAllByText('ZRX').length).toBeGreaterThan(0)
+  })
+
+  it('search is chain-scoped: a Base-only token (AERO) is NOT found on mainnet', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openAndSearch('AERO')
+    // AERO is Base-native and absent from the mainnet catalog → no result row.
+    expect(screen.queryByText('AERO')).toBeNull()
+  })
+
+  it('selecting a long-tail search result calls onSelect with the real catalog token', async () => {
+    await setChain(8453)
+    const onSelect = vi.fn()
+    renderWithProviders(<TokenSelector selected={null} onSelect={onSelect} />)
+    openAndSearch('ZRX')
+    fireEvent.click(screen.getAllByText('ZRX')[0])
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect.mock.calls[0][0].symbol).toBe('ZRX')
+    expect(onSelect.mock.calls[0][0].address.toLowerCase()).toMatch(/^0x[0-9a-f]{40}$/)
   })
 })
 

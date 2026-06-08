@@ -1,15 +1,25 @@
 /**
- * [P221 / ADR-009] Per-chain popular-token catalog.
+ * [P221 / ADR-009 / SPRINT-9Y] Per-chain token catalog.
  *
  * Mainnet (chainId 1) is DERIVED from the existing DEFAULT_TOKENS catalog in
  * src/lib/tokens.ts — it can't drift and the mainnet UI stays byte-identical.
- * Base (8453) is an explicit list of popular, verified Base tokens. Logos use
- * the 1inch token CDN (keyed by token address) with the UI's generic-icon
- * fallback when a logo is missing.
+ * Base (8453) is built from the PINNED Uniswap Labs Default snapshot baked into
+ * token-catalog.generated.ts (+ one CoinGecko bridged-USDT entry) — every address
+ * is sourced + validated (EIP-55, chainId, decimals), NEVER hand-typed.
+ *
+ * Two layers (Matcha-style, SPRINT-9Y):
+ *  - getChainTokenList / getPopularTokens → the curated "Suggested" set shown by
+ *    default (~20-30 majors), categorised.
+ *  - getFullCatalog / getSearchCatalog → the full pinned long tail used by search
+ *    and the verified-✓ badge. import-by-address (non-catalog) stays ⚠.
+ *
+ * Logos use each list entry's own logoURI (per-chain reliable) with the UI's
+ * generic-icon onError fallback; native ETH reuses the canonical 1inch asset.
  */
 import { DEFAULT_TOKENS, findTokenByAddress, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
+import { GENERATED_TOKEN_CATALOG } from './token-catalog.generated'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -17,9 +27,14 @@ export interface ChainToken {
   name: string
   decimals: number
   logoURI: string
-  /** Show in the default/popular quick-select list. */
+  /** Show in the default/popular quick-select chips. */
   popular?: boolean
+  /** Part of the curated "Suggested" set shown by default (no search). */
+  suggested?: boolean
 }
+
+/** [SPRINT-9Y] Max search results rendered at once — keeps a broad query snappy. */
+export const SEARCH_RESULT_LIMIT = 80
 
 function logo(addr: string): string {
   return `https://tokens.1inch.io/${addr.toLowerCase()}.png`
@@ -29,19 +44,33 @@ function logo(addr: string): string {
 // catalog flags the same popular tokens.
 const MAINNET_POPULAR = new Set(['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI'])
 
-// ETH/WETH reuse the canonical mainnet logos (same visual asset).
+// Native ETH reuses the canonical 1inch asset (same visual on every chain).
 const ETH_LOGO = logo('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-const WETH_LOGO = logo('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
 
-// Verified Base (8453) tokens. Addresses cross-checked against Basescan /
-// Circle / Coinbase / MakerDAO official sources.
-const BASE_TOKENS: ChainToken[] = [
-  { address: NATIVE_ETH, symbol: 'ETH', name: 'Ethereum', decimals: 18, logoURI: ETH_LOGO, popular: true },
-  { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, logoURI: WETH_LOGO, popular: true },
-  { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: logo('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'), popular: true },
-  { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI', name: 'Dai Stablecoin', decimals: 18, logoURI: logo('0x50c5725949a6f0c72e6c4a641f24049a917db0cb'), popular: true },
-  { address: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', symbol: 'cbETH', name: 'Coinbase Wrapped Staked ETH', decimals: 18, logoURI: logo('0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22'), popular: true },
-  { address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', symbol: 'USDbC', name: 'USD Base Coin (Bridged)', decimals: 6, logoURI: logo('0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca'), popular: true },
+// [SPRINT-9Y] Base curated "Suggested" majors shown by default (no search). The
+// SYMBOLS are a curation choice; the ADDRESSES come only from the validated
+// generated catalog (token-catalog.generated.ts) — never hand-typed.
+const BASE_SUGGESTED_SYMBOLS = new Set([
+  'ETH', 'WETH', 'USDC', 'USDbC', 'USDT', 'DAI', 'EURC', 'cbETH', 'cbBTC', 'AERO',
+  'VIRTUAL', 'DEGEN', 'TOSHI', 'MORPHO', 'WELL', 'ZORA', 'MOG', 'SPX', 'KAITO',
+  'AIXBT', 'UNI', 'COMP', 'YFI', 'ZRO',
+])
+const BASE_POPULAR_SYMBOLS = new Set(['ETH', 'WETH', 'USDC', 'USDbC', 'DAI', 'cbETH', 'cbBTC', 'AERO'])
+
+// Full Base (8453) catalog: native ETH (sentinel) + the pinned generated list.
+// `suggested`/`popular` flag the curated subset shown by default; the rest is the
+// searchable long tail (all of it renders the verified ✓ on Base).
+const BASE_FULL: ChainToken[] = [
+  { address: NATIVE_ETH, symbol: 'ETH', name: 'Ethereum', decimals: 18, logoURI: ETH_LOGO, popular: true, suggested: true },
+  ...GENERATED_TOKEN_CATALOG[8453].map((t): ChainToken => ({
+    address: t.address,
+    symbol: t.symbol,
+    name: t.name,
+    decimals: t.decimals,
+    logoURI: t.logoURI,
+    popular: BASE_POPULAR_SYMBOLS.has(t.symbol),
+    suggested: BASE_SUGGESTED_SYMBOLS.has(t.symbol),
+  })),
 ]
 
 function toChainToken(t: Token): ChainToken {
@@ -57,7 +86,9 @@ function toChainToken(t: Token): ChainToken {
 
 export const CHAIN_TOKENS: Record<number, ChainToken[]> = {
   1: DEFAULT_TOKENS.map(toChainToken),
-  8453: BASE_TOKENS,
+  // [SPRINT-9Y] Base default view = the curated "Suggested" subset of the full
+  // catalog. The long tail stays reachable via getSearchCatalog / getFullCatalog.
+  8453: BASE_FULL.filter((t) => t.suggested),
 }
 
 /** Popular tokens for a chain (falls back to the whole list if none flagged). */
@@ -75,9 +106,13 @@ export function getChainToken(address: string, chainId: number): ChainToken | nu
 
 function inferCategory(symbol: string): TokenCategory {
   if (symbol === 'ETH' || symbol === 'WETH') return 'Native'
-  if (['USDC', 'USDT', 'DAI', 'USDbC', 'USDe', 'FRAX', 'LUSD'].includes(symbol)) return 'Stablecoin'
+  if (['USDC', 'USDT', 'DAI', 'USDbC', 'USDe', 'FRAX', 'LUSD', 'EURC'].includes(symbol)) return 'Stablecoin'
   if (symbol === 'cbETH' || symbol === 'wstETH' || symbol === 'rETH') return 'Liquid Staking'
   if (symbol.includes('BTC')) return 'Wrapped BTC'
+  // [SPRINT-9Y] light grouping for the curated Base suggested view (cosmetic only).
+  if (['AERO', 'MORPHO', 'WELL', 'UNI', 'COMP', 'YFI'].includes(symbol)) return 'DeFi'
+  if (['VIRTUAL', 'AIXBT', 'KAITO'].includes(symbol)) return 'AI & Data'
+  if (['DEGEN', 'TOSHI', 'MOG', 'SPX'].includes(symbol)) return 'Memecoin'
   return 'Other'
 }
 
@@ -88,15 +123,60 @@ function inferCategory(symbol: string): TokenCategory {
  */
 export function getChainTokenList(chainId: number): Token[] {
   if (chainId === 1) return DEFAULT_TOKENS
-  return (CHAIN_TOKENS[chainId] ?? []).map((t) => ({
+  return (CHAIN_TOKENS[chainId] ?? []).map(chainTokenToToken)
+}
+
+// [SPRINT-9Y] Map a ChainToken to the rich Token the selector renders.
+function chainTokenToToken(t: ChainToken): Token {
+  return {
     address: t.address,
     symbol: t.symbol,
     name: t.name,
     decimals: t.decimals,
     logoURI: t.logoURI,
     category: inferCategory(t.symbol),
-  }))
+  }
 }
+
+// Pinned mainnet long tail = generated chain-1 list minus what DEFAULT_TOKENS already
+// curates (DEFAULT_TOKENS wins, so existing entries stay byte-identical).
+const MAINNET_DEFAULT_ADDR = new Set(DEFAULT_TOKENS.map((t) => t.address.toLowerCase()))
+const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
+  .filter((t) => !MAINNET_DEFAULT_ADDR.has(t.address.toLowerCase()))
+  .map(chainTokenToToken)
+
+// Precomputed full catalogs (stable references → cheap memoisation downstream).
+const MAINNET_FULL: Token[] = [...DEFAULT_TOKENS, ...MAINNET_LONGTAIL]
+const BASE_FULL_TOKENS: Token[] = BASE_FULL.map(chainTokenToToken)
+
+/**
+ * [SPRINT-9Y] The FULL pinned catalog for a chain (curated + long tail), as Token[].
+ * Backs search and the verified-✓ badge. Excludes user-imported custom tokens (those
+ * stay ⚠). chainId 1 = DEFAULT_TOKENS ∪ Uniswap long tail; 8453 = Base full catalog.
+ */
+export function getFullCatalog(chainId: number): Token[] {
+  if (chainId === DEFAULT_CHAIN_ID) return MAINNET_FULL
+  if (chainId === 8453) return BASE_FULL_TOKENS
+  return getChainTokenList(chainId)
+}
+
+/**
+ * [SPRINT-9Y] What the TokenSelector search filters over: the full pinned catalog plus
+ * any custom tokens imported ON THIS chain (chain-scoped, 9P). Returns the stable
+ * catalog reference unchanged when there are no custom tokens for the chain.
+ */
+export function getSearchCatalog(chainId: number): Token[] {
+  const base = getFullCatalog(chainId)
+  const custom = getCustomTokens().filter((t) => (t.chainId ?? DEFAULT_CHAIN_ID) === chainId)
+  if (custom.length === 0) return base
+  const seen = new Set(base.map((t) => t.address.toLowerCase()))
+  const extra = custom.filter((t) => !seen.has(t.address.toLowerCase()))
+  return extra.length === 0 ? base : [...base, ...extra]
+}
+
+// Verified-✓ membership: O(1) lowercase-address lookups over the pinned catalogs.
+const MAINNET_CATALOG_ADDR = new Set(GENERATED_TOKEN_CATALOG[1].map((t) => t.address.toLowerCase()))
+const BASE_CATALOG_ADDR = new Set(BASE_FULL.map((t) => t.address.toLowerCase()))
 
 /**
  * [SPRINT-9E] Re-resolve a selected token to the active chain's catalog BY SYMBOL,
@@ -122,7 +202,9 @@ export function remapTokenToChain(token: Token | null, chainId: number): Token |
  */
 export function findChainToken(address: string, chainId: number): Token | null {
   const addr = address.toLowerCase()
-  const inCatalog = getChainTokenList(chainId).find((t) => t.address.toLowerCase() === addr)
+  // [SPRINT-9Y] match against the FULL catalog (not just the suggested set) so a pasted
+  // long-tail catalog address resolves to the verified ✓ token instead of re-importing.
+  const inCatalog = getFullCatalog(chainId).find((t) => t.address.toLowerCase() === addr)
   if (inCatalog) return inCatalog
   const custom = getCustomTokens().find(
     (t) => t.address.toLowerCase() === addr && (t.chainId ?? DEFAULT_CHAIN_ID) === chainId,
@@ -137,9 +219,14 @@ export function findChainToken(address: string, chainId: number): Token | null {
  * while genuinely imported tokens keep the ⚠.
  */
 export function isVerifiedToken(address: string, chainId: number): boolean {
-  return chainId === DEFAULT_CHAIN_ID
-    ? !!findTokenByAddress(address)
-    : !!getChainToken(address, chainId)
+  const addr = address.toLowerCase()
+  // [SPRINT-9Y] Verified ✓ = membership in the chain's FULL pinned catalog (curated +
+  // long tail). Mainnet keeps findTokenByAddress (DEFAULT_TOKENS + customs, byte-identical)
+  // and OR-s in the Uniswap long tail. Base checks its full catalog. Genuine imports
+  // (not in any list) stay ⚠. Other chains keep the existing suggested-set behaviour.
+  if (chainId === DEFAULT_CHAIN_ID) return !!findTokenByAddress(address) || MAINNET_CATALOG_ADDR.has(addr)
+  if (chainId === 8453) return BASE_CATALOG_ADDR.has(addr)
+  return !!getChainToken(address, chainId)
 }
 
 /**
