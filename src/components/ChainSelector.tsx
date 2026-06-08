@@ -4,12 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useSwitchChain } from 'wagmi'
 import { getSupportedChainIds, getChainConfig } from '@/lib/chains'
 import { useActiveChainId } from '@/hooks/useChainId'
-
-/** Per-chain accent dot colour. */
-const CHAIN_DOT: Record<number, string> = {
-  1: 'bg-cream-65',      // Ethereum
-  8453: 'bg-blue-400',   // Base
-}
+import ChainIcon from './icons/ChainIcon'
 
 /**
  * [P219] Compact chain switcher for the header.
@@ -47,7 +42,7 @@ export default function ChainSelector() {
         aria-label={`Network: ${active.name}`}
         className="flex items-center gap-1.5 rounded-full border border-cream-15 px-3 py-1.5 text-xs font-medium text-cream-65 transition hover:border-cream-35 hover:text-cream"
       >
-        <span className={`h-1.5 w-1.5 rounded-full ${CHAIN_DOT[active.chainId] ?? 'bg-cream-65'} animate-pulse-slow`} />
+        <ChainIcon chainId={active.chainId} className="h-4 w-4 shrink-0" />
         {active.name}
         <span aria-hidden="true" className="text-cream-35">▾</span>
       </button>
@@ -76,7 +71,7 @@ export default function ChainSelector() {
                   isActive ? 'text-cream' : 'text-cream-65 hover:bg-cream-08 hover:text-cream'
                 } disabled:cursor-default`}
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${CHAIN_DOT[c.chainId] ?? 'bg-cream-65'}`} />
+                <ChainIcon chainId={c.chainId} className="h-4 w-4 shrink-0" />
                 <span className="flex-1">{c.name}</span>
                 {comingSoon && (
                   <span className="rounded-full border border-cream-15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-cream-35">
