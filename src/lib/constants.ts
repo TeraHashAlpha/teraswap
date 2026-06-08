@@ -250,6 +250,23 @@ export const PRICE_IMPACT_CONSENT_CEILING = 0.25 // 25%
 // the band does not nag.
 export const PRICE_IMPACT_CONSENT_TOLERANCE = 0.005 // 0.5%
 
+// ── [SPRINT-9W-oracle] cbETH depeg / manipulation circuit-breaker ──────────────
+// A SECOND, independent safety use of an asset's exchange-rate (redemption) feed,
+// on the divergence between its MARKET price feed and its EXCHANGE-RATE feed:
+//   divergence = |market − exchangeRate| / exchangeRate
+// (The swap-price reference itself is UNCHANGED — it stays the market feed, 9V.)
+// Justification for the thresholds: cbETH's market price tracks its protocol
+// redemption rate closely — the normal market-vs-ER spread is WELL under 1%. So a
+// 2% divergence already signals an abnormal dislocation (depeg, pool attack, or a
+// manipulated market feed), and 10% is a near-certain depeg/manipulation. These
+// mirror the 9J band shape (warn → consent, ceiling → hard block) but are tuned to
+// the much tighter normal spread of a liquid-staking token vs its redemption rate.
+export const DEPEG_DIVERGENCE_WARN = 0.02   // 2%  — informed-consent band starts
+export const DEPEG_DIVERGENCE_BLOCK = 0.10  // 10% — hard block (no click-through)
+// Consent is granted for a specific divergence and auto-revokes if it worsens past
+// accepted + this tolerance (mirrors PRICE_IMPACT_CONSENT_TOLERANCE).
+export const DEPEG_CONSENT_TOLERANCE = 0.005 // 0.5%
+
 // [LP-04] Smart MEV preference threshold.
 // When the user has NOT toggled "Force MEV Protection" on, the SwapBox
 // auto-routes through CoW Protocol (or any other mevProtected source)

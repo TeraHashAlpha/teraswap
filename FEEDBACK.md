@@ -2458,3 +2458,31 @@ On-chain `cast` (Base mainnet, 2026-06-08) shows Base has THREE live cbETH feeds
 The reference-data-directory alone was insufficient/misleading here (three same-asset feeds, easy to
 mismatch by name). On-chain `description()`/`decimals()`/`aggregator()` via `cast` was the decisive
 source — worth making the default for any future feed-address audit, not the directory UI.
+
+## Feedback — SPRINT-9W-oracle (f08d0cc core, 6b4f8b6 UI)
+
+### Scope — the depeg breaker is CLIENT-SIDE (consent UX), mirroring 9J (Auditor: confirm sufficient)
+- 9W lives in the SwapBox consent UX + the useDepegCheck hook, exactly like the 9J price-impact
+  gate. It fully covers threat (a) — protecting the USER from unknowingly trading a depegged asset
+  (informed consent / hard block). It only PARTIALLY covers threat (b) — protecting the swap-price
+  gate from a manipulated MARKET feed — because a client bypass could still reach the server swap
+  path. Mitigations already in place there: the server DefiLlama guard + the on-chain minimumOutput
+  cap realised loss. RECOMMEND a follow-up that also computes the market-vs-ER divergence
+  SERVER-side (in the composed/price path), so the breaker protects the non-UI path too. Deferred
+  here to keep 9W a faithful reuse of the 9J consent pattern as the spec directed.
+
+### Note — depeg legs use a STRICTER integrity bar than the display hook (not a loosening)
+- priceFromValidRound checks startedAt>0 (the spec's explicit "round complete, startedAt"
+  requirement), which the existing useChainlinkPrice UI hook does NOT check (it skips startedAt).
+  So the depeg legs are validated MORE strictly than the price display. Intentional + conservative;
+  flagged so it isn't mistaken for an inconsistency.
+
+### Note — ER feed (0x868a…) added to FEED_HEARTBEAT_SEC (86400s → 36h per-feed staleness)
+- Additive: the ER feed had no prior consumer, so this changes no existing behaviour. It only gives
+  the new depeg leg a heartbeat-based staleness consistent with 9V (vs the 90_000 fallback).
+
+### Edge / residual — a market feed manipulated to TRACK the ER would not trip the breaker
+- The breaker keys on divergence, so an attacker who moves the market feed only slightly (staying
+  <2% from the ER) evades it — but then the swap-price reference is barely off, and the 9J
+  price-impact gate + on-chain minimumOutput still bound the outcome. Defense-in-depth, not a sole
+  line. A large manipulation (the realistic attack) trips it.

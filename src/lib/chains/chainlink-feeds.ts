@@ -85,6 +85,7 @@ const FEED_HEARTBEAT_SEC: Record<string, number> = {
   '0x458138fc0d67027e9a6778ef40a6ffc318c69061': 86400,  // USDC/USD (24 h — the 9S stablecoin problem)
   '0x591e79239a7d679378ec8c847e5038150364c78f': 86400,  // DAI/USD  (24 h)
   '0x806b4ac04501c29769051e42783cf04dce41440b': 86400,  // cbETH/ETH MARKET feed (24 h — V2 base leg; see 9V-M-01 note below)
+  '0x868a501e68f3d1e89cfc0d22f6b22e8dabce5f04': 86400,  // cbETH/ETH Exchange-Rate feed (24 h — 9W depeg breaker leg)
 }
 
 /** [SPRINT-9V V1] Heartbeat (seconds) for a feed PROXY address, or null when unknown. */
@@ -159,4 +160,47 @@ export function getComposedFeed(
   const feeds = COMPOSED_FEEDS_BY_CHAIN[chainId]
   if (!feeds) return null
   return feeds[tokenAddress.toLowerCase()] ?? null
+}
+
+/**
+ * [SPRINT-9W-oracle] An asset that has BOTH a market price feed AND an exchange-rate (redemption)
+ * feed for the same pair — the inputs to the depeg circuit-breaker. The MARKET feed remains the
+ * swap-price reference (9V); the EXCHANGE-RATE feed is the manipulation-resistant comparison leg.
+ */
+export interface ExchangeRatePair {
+  symbol: string              // for the depeg warning copy (e.g. "cbETH")
+  market: `0x${string}`       // market price feed (token/ETH) — the 9V swap-price reference
+  exchangeRate: `0x${string}` // exchange-rate / redemption feed (token/ETH) — manipulation-resistant
+}
+
+/**
+ * [SPRINT-9W-oracle / rule #9] Data-driven registry of assets with both a market and an
+ * exchange-rate feed. NOT cbETH-hardcoded — any future LST/LRT with both feeds gets the depeg
+ * breaker by adding an entry here. Keyed by token address (lowercased). MAINNET has none.
+ * Both feeds on-chain verified in 9V-M-01 (description/decimals/aggregator via cast, 2026-06-08).
+ */
+const EXCHANGE_RATE_PAIRS_BY_CHAIN: Record<number, Record<string, ExchangeRatePair>> = {
+  // ── Base (8453) ──
+  8453: {
+    // cbETH (0x2Ae3…0DEc22): market "CBETH / ETH" 0x806b… vs "cbETH-ETH Exchange Rate" 0x868a…
+    // (both 18 dp). Normal market-vs-ER spread ≪1%; a large gap means depeg/manipulation.
+    '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': {
+      symbol: 'cbETH',
+      market: '0x806b4Ac04501c29769051e42783cF04dCE41440b',
+      exchangeRate: '0x868a501e68F3D1E89CfC0D22F6b22E8dabce5F04',
+    },
+  },
+}
+
+/**
+ * [SPRINT-9W-oracle] Resolve the market+exchange-rate feed pair for a token, or null when the
+ * token has no exchange-rate feed (the common case → no depeg check). Defaults to mainnet (none).
+ */
+export function getExchangeRatePair(
+  tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
+): ExchangeRatePair | null {
+  const pairs = EXCHANGE_RATE_PAIRS_BY_CHAIN[chainId]
+  if (!pairs) return null
+  return pairs[tokenAddress.toLowerCase()] ?? null
 }
