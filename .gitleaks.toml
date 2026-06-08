@@ -11,4 +11,13 @@ description = "TeraSwap false-positive allowlist"
 paths = [
   '''\.env\.example''',
   '''contracts/order-engine/''',
+  # [Sprint 9Y] Vendored Uniswap Labs default token list + the catalog
+  # generated from it. Every "secret" here is a PUBLIC ERC-20 contract
+  # address (40 hex chars) or logo URL, not a credential — gitleaks'
+  # generic-api-key entropy heuristic false-positives on token addresses
+  # (e.g. WETH 0xC02a…756Cc2). Scoped to the vendored/generated catalog
+  # paths ONLY; all other src/ + scripts/ files remain fully scanned by
+  # the default ruleset.
+  '''scripts/token-lists/''',
+  '''src/lib/chains/token-catalog\.generated\.ts''',
 ]

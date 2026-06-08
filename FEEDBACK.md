@@ -2540,3 +2540,29 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   <2% from the ER) evades it — but then the swap-price reference is barely off, and the 9J
   price-impact gate + on-chain minimumOutput still bound the outcome. Defense-in-depth, not a sole
   line. A large manipulation (the realistic attack) trips it.
+## Feedback — chore/gitleaks-allowlist-9y (Sprint 9Y follow-up)
+
+### Edge case — vendored Uniswap token list tripped gitleaks (1342 false positives)
+- The 9Y catalog vendored the Uniswap Labs default list (`scripts/token-lists/uniswap-default-v21.3.0.json`,
+  1458 tokens). gitleaks' `generic-api-key` entropy rule false-positives on every 40-hex ERC-20
+  address in it (the `address` / bridge `tokenAddress` fields), producing 1342 findings — this is
+  what fails the Gitleaks check on PR #153. Confirmed all 1342 flagged strings are public contract
+  addresses (WETH/AAVE/1INCH/…), zero real secrets. Fixed with a path-scoped allowlist for
+  `scripts/token-lists/` + `src/lib/chains/token-catalog.generated.ts` only — `[extend] useDefault`
+  stays on, no rule disabled, no broad `src/` allowlist.
+
+### Note — gitleaks-action scans incrementally, so verification is scoped to the 9Y commit range
+- gitleaks-action only scans a PR/push's new commits, not full history. Reproduced the #153 scan
+  via `--log-opts=<base>..<9y-tip>`: 1342 catalog findings → 0 after the allowlist. A full-history
+  scan confirms the catalog drops out while every other path still reports (scanning not weakened).
+
+### Concern / test gap (OUT OF SCOPE — left untouched, flagged for triage)
+- A full-history gitleaks scan (which CI does NOT run today) surfaces 44 PRE-EXISTING false
+  positives in non-catalog files, latent because incremental CI never re-scans them: fake
+  Stripe-key redaction fixtures in `src/lib/sanitize-error.test.ts`, public addresses in
+  `scripts/seed-10-trades.ts`, a legacy XOR-migration constant in `src/hooks/useOrderEngine.ts`,
+  and assorted test fixtures across `src/**/*.test.ts(x)`. All manually confirmed benign — no real
+  secret. They sit outside this task's scope (catalog paths only) so I did not touch them, but a
+  future PR editing any of those files, or a scheduled full scan, would flag them. Recommend the
+  Architect triage them via a fingerprint-based `.gitleaksignore` for the confirmed test fixtures
+  rather than path-allowlisting `src/` (which would blind real scanning).
