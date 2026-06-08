@@ -172,6 +172,18 @@ describe('useQuote — Phase 1 behaviour', () => {
     expect(result.current.meta).toBeNull()
   })
 
+  it('[SPRINT-9X X3] an HTML platform 504 → CLEAN "service busy" error, never the raw JSON-parse crash', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async () =>
+      new Response('<!DOCTYPE html><html><body>504 Gateway Timeout</body></html>', { status: 504, headers: { 'Content-Type': 'text/html' } }),
+    )
+    const { result } = renderHook(() =>
+      useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined),
+    )
+    await waitFor(() => expect(result.current.error).toMatch(/service busy/i))
+    expect(result.current.error).not.toMatch(/DOCTYPE|Unexpected token|not valid JSON/)
+    expect(result.current.meta).toBeNull()
+  })
+
   it('exposes the analyzeGasless overlay alongside best/all on a successful fetch', async () => {
     mockFetchSuccess()
     const { result } = renderHook(() =>

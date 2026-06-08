@@ -34,6 +34,10 @@ import { analyzeGasless } from '@/lib/gasless-engine'
 
 export const dynamic = 'force-dynamic'
 
+// [SPRINT-9X X2] Parity with /api/quote + /api/swap: the same source fan-out can brush the low Vercel
+// default ceiling → platform HTML 504. Give it 60s so it always completes and returns JSON.
+export const maxDuration = 60
+
 // ── CORS ──────────────────────────────────────────────────
 //
 // v1 is a PUBLIC API — browser-origin callers (Telegram bot UI in S14,
