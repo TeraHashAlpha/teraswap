@@ -4,7 +4,7 @@ import {
   PRICE_DEVIATION_BLOCK,
   CHAINLINK_MAX_STALENESS_SEC,
 } from './constants'
-import { getChainlinkFeed } from './chains/chainlink-feeds'
+import { getChainlinkFeed, getFeedStalenessSec } from './chains/chainlink-feeds'
 import { isSequencerUp } from './chains/sequencer-check'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
 import { getPublicClientForChain } from './chains/clients'
@@ -12,7 +12,8 @@ import { getRpcUrlForChain } from './adapters/shared'
 
 // [P218] getChainlinkFeed moved to the per-chain registry; re-export so
 // existing `import { getChainlinkFeed } from '@/lib/chainlink'` keeps working.
-export { getChainlinkFeed } from './chains/chainlink-feeds'
+// [SPRINT-9V V1] getFeedStalenessSec likewise re-exported for the UI hook.
+export { getChainlinkFeed, getFeedStalenessSec } from './chains/chainlink-feeds'
 
 // ── Chainlink AggregatorV3 ABI (minimal) ─────────────────
 export const chainlinkAggregatorAbi = [
@@ -278,7 +279,10 @@ export async function fetchChainlinkPriceRaw(
   // including the `startedAt > 0` incomplete-round guard the inline checks here
   // previously omitted. Covers answer<=0, answeredInRound<roundId, startedAt<=0,
   // and staleness. Equivalent to the prior inline checks for any real round.
-  if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, CHAINLINK_MAX_STALENESS_SEC)) return null
+  // [SPRINT-9V V1] Per-feed staleness: heartbeat×1.5 for a feed with a known heartbeat (e.g. Base
+  // USDC/USD 24h → 36h — fixes the 9S false-stale), else the global CHAINLINK_MAX_STALENESS_SEC
+  // (unchanged for mainnet). The round-INTEGRITY guards inside validateRoundData are untouched.
+  if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, getFeedStalenessSec(feed, CHAINLINK_MAX_STALENESS_SEC))) return null
 
   const price = Number(answer) / 10 ** decimals
   return { price, updatedAt: Number(updatedAt), roundId }

@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
@@ -445,5 +445,54 @@ describe('evaluatePairOracle [SPRINT-9S S2]', () => {
       expect(!!merged.oracleIntegrityFailed).toBe(!!c.oracleIntegrityFailed)
       expect(merged.oracleUnavailable).toBe(c.oracleUnavailable)
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9V V1] Per-feed staleness thresholds (heartbeat × 1.5).
+// ─────────────────────────────────────────────────────────────
+describe('getFeedStalenessSec [SPRINT-9V V1]', () => {
+  const BASE_USDC_USD = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
+  const BASE_ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+  const MAINNET_ETH_USD = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+
+  it('a 24h-heartbeat feed → 36h (heartbeat×1.5); raw gate and UI hook AGREE (global ignored when known)', () => {
+    expect(getFeedStalenessSec(BASE_USDC_USD, 3600)).toBe(129600)   // 86400 × 1.5
+    expect(getFeedStalenessSec(BASE_USDC_USD, 90_000)).toBe(129600) // same regardless of caller global
+    expect(getFeedStalenessSec(BASE_USDC_USD.toLowerCase(), 3600)).toBe(129600) // case-insensitive
+  })
+
+  it('Base ETH/USD (20-min heartbeat) → 30 min (tightening from the 1h global is fine — more conservative)', () => {
+    expect(getFeedStalenessSec(BASE_ETH_USD, 3600)).toBe(1800) // 1200 × 1.5
+  })
+
+  it('an unknown-heartbeat feed → the caller global fallback (fail-conservative; MAINNET byte-identical)', () => {
+    expect(getFeedStalenessSec(MAINNET_ETH_USD, 3600)).toBe(3600)   // mainnet has no per-feed heartbeat
+    expect(getFeedStalenessSec(MAINNET_ETH_USD, 90_000)).toBe(90_000)
+    expect(getFeedStalenessSec('0x000000000000000000000000000000000000dEaD', 3600)).toBe(3600)
+  })
+})
+
+describe('[SPRINT-9V V1] raw gate uses per-feed staleness on Base USDC/USD (24h heartbeat → 36h)', () => {
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+
+  it('a 2h-old round is now VALID (was wrongly STALE under the 1h global — the 9S bug)', async () => {
+    const now = nowSec()
+    mockChainlinkRpc({ decimals: 8, roundId: 100n, answer: 99_960_000n, updatedAt: now - 7_200n, answeredInRound: 100n })
+    const r = await fetchChainlinkPriceRaw(BASE_USDC, 8453)
+    expect(r).not.toBeNull()
+    expect(r!.price).toBeCloseTo(0.9996, 4)
+  })
+
+  it('a 37h-old round is STALE (beyond 36h = heartbeat×1.5) → null — NO loosening past the heartbeat', async () => {
+    const now = nowSec()
+    mockChainlinkRpc({ decimals: 8, roundId: 100n, answer: 99_960_000n, updatedAt: now - 133_200n, answeredInRound: 100n })
+    expect(await fetchChainlinkPriceRaw(BASE_USDC, 8453)).toBeNull()
+  })
+
+  it('round-INTEGRITY still hard-fails regardless of the looser staleness (answeredInRound < roundId)', async () => {
+    const now = nowSec()
+    mockChainlinkRpc({ decimals: 8, roundId: 100n, answer: 99_960_000n, updatedAt: now - 7_200n, answeredInRound: 99n })
+    expect(await fetchChainlinkPriceRaw(BASE_USDC, 8453)).toBeNull()
   })
 })

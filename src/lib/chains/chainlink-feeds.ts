@@ -69,3 +69,39 @@ export function getChainlinkFeed(
   const key = addr === NATIVE_ETH.toLowerCase() ? wrapped : addr
   return feeds[key] ?? null
 }
+
+/**
+ * [SPRINT-9V V1 / rule #9] Per-feed Chainlink HEARTBEAT (max seconds between updates), keyed by the
+ * feed PROXY address (lowercased). Each value verified against the Chainlink reference-data-directory
+ * (feeds-ethereum-mainnet-base-1.json `heartbeat` field) + docs.chain.link + the on-chain decimals
+ * already pinned in 9S. A feed NOT listed here → null → the caller's global fallback
+ * (fail-conservative). MAINNET feeds are deliberately omitted → they keep the existing global
+ * threshold (byte-identical) — the 1h global already matches mainnet majors' ~1h heartbeat, so adding
+ * heartbeat×1.5 there would only loosen with no benefit (see FEEDBACK 9V; surfaced for the Auditor).
+ */
+const FEED_HEARTBEAT_SEC: Record<string, number> = {
+  // ── Base (8453) ──
+  '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70': 1200,   // ETH/USD  (20 min — L2 feed)
+  '0x458138fc0d67027e9a6778ef40a6ffc318c69061': 86400,  // USDC/USD (24 h — the 9S stablecoin problem)
+  '0x591e79239a7d679378ec8c847e5038150364c78f': 86400,  // DAI/USD  (24 h)
+  '0x806b4ac04501c29769051e42783cf04dce41440b': 86400,  // cbETH/ETH (24 h — V2 composition leg)
+}
+
+/** [SPRINT-9V V1] Heartbeat (seconds) for a feed PROXY address, or null when unknown. */
+export function getFeedHeartbeatSec(feed: string): number | null {
+  return FEED_HEARTBEAT_SEC[feed.toLowerCase()] ?? null
+}
+
+/**
+ * [SPRINT-9V V1] Per-feed staleness threshold (seconds), shared by the raw gate (fetchChainlinkPriceRaw)
+ * AND the UI hook (useChainlinkPrice) so they agree on every feed:
+ *   - known heartbeat → heartbeat × 1.5 (margin for a late round);
+ *   - unknown heartbeat → `globalFallback` (each consumer's existing global → fail-conservative,
+ *     and mainnet — which has no heartbeats here — stays byte-identical).
+ * NO loosening of the round-INTEGRITY guards (answer>0 / answeredInRound / startedAt) — those are
+ * unchanged in validateRoundData; this only sets the staleness ceiling.
+ */
+export function getFeedStalenessSec(feed: string, globalFallback: number): number {
+  const hb = getFeedHeartbeatSec(feed)
+  return hb != null ? Math.round(hb * 1.5) : globalFallback
+}

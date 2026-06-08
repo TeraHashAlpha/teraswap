@@ -1,5 +1,5 @@
 import { useReadContract } from 'wagmi'
-import { getChainlinkFeed, chainlinkAggregatorAbi, evaluateDeviation, type PriceCheck } from '@/lib/chainlink'
+import { getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluateDeviation, type PriceCheck } from '@/lib/chainlink'
 import { useActiveChainId } from './useChainId'
 
 /**
@@ -78,10 +78,11 @@ export function useChainlinkPrice(
     }
   }
 
-  // Check staleness — most Chainlink mainnet feeds have a 24h heartbeat
-  // (they only update sooner if price deviates >1%). Use 25h threshold.
+  // [SPRINT-9V V1] Per-feed staleness — heartbeat×1.5 for a feed with a known heartbeat (shared with
+  // the raw gate so both AGREE), else the 90_000 (25h) global this hook used before (mainnet
+  // byte-identical; unknown feeds fail-conservative). The 9G round-integrity checks above are unchanged.
   const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
-  if (ageSeconds > 90_000) { // 25 hours
+  if (ageSeconds > getFeedStalenessSec(feedAddress, 90_000)) {
     return {
       chainlinkPrice,
       executionPrice: executionPriceUsd,
