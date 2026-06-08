@@ -5,6 +5,38 @@ import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { verifyBearerToken } from '@/lib/auth'
 import { DEFAULT_CHAIN_ID, getChainStatus } from '@/lib/chains'
+import { withTimeout } from '@/lib/adapters/shared'
+
+/**
+ * [SPRINT-9X X2] Give the quote function the SAME 60s ceiling as /api/swap (9J/J2). Previously this
+ * route exported NO maxDuration → it ran under the low Vercel plan default (10–15s). The parallel
+ * source fan-out is bounded to QUOTE_TIMEOUT_MS (10s, slow sources are excluded — see fetchMetaQuote),
+ * but with three pre-fan-out Upstash KV awaits the op could brush past that default ceiling, so the
+ * PLATFORM killed the function and returned an HTML 504 — which the browser's res.json() can't parse
+ * ("Unexpected token '<', \"<!DOCTYPE\"..."). 60s leaves the bounded ~10–13s op huge headroom so the
+ * function always completes and returns JSON.
+ */
+export const maxDuration = 60
+
+/**
+ * [SPRINT-9X X2] Bound the pre-fan-out KV gates (halt check + rate-limit). They already fail OPEN on a
+ * KV *error*, but had no timeout — a hung Upstash connection added unbounded wall-clock before any
+ * source was contacted. Fail open on timeout too (quotes are read-only price info), so a slow KV can
+ * never push the function past maxDuration.
+ */
+const KV_GATE_TIMEOUT_MS = 3_000
+
+/**
+ * Fail OPEN only when a KV gate TIMED OUT (a hung Upstash connection). A REAL thrown error is
+ * re-thrown so the GET/POST try/catch still converts it to a JSON 500 — preserving the
+ * INC-2026-05-31-001 "never escapes to HTML" contract (which the route integration tests pin).
+ */
+function onKvTimeout<T>(fallback: T) {
+  return (e: unknown): T => {
+    if (e instanceof Error && e.message === 'Timeout') return fallback
+    throw e
+  }
+}
 
 /**
  * Shared 503 response for when the circuit breaker has halted routing.
@@ -52,10 +84,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
   // [H-03] Circuit breaker halt — short-circuit before rate limiting
-  if (await isSystemHalted()) return haltResponse()
+  if (await withTimeout(isSystemHalted(), KV_GATE_TIMEOUT_MS).catch(onKvTimeout(false))) return haltResponse()
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const rateCheck = await checkRateLimit(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
+  const rateCheck = await withTimeout(
+    checkRateLimit(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
+    KV_GATE_TIMEOUT_MS,
+  ).catch(onKvTimeout({ allowed: true, remaining: QUOTE_RATE_LIMIT.limit, resetAt: Date.now() + QUOTE_RATE_LIMIT.windowMs }))
   if (!rateCheck.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded. Try again in a minute.' },
@@ -165,10 +200,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
 async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
   // [H-03] Circuit breaker halt — short-circuit before rate limiting
-  if (await isSystemHalted()) return haltResponse()
+  if (await withTimeout(isSystemHalted(), KV_GATE_TIMEOUT_MS).catch(onKvTimeout(false))) return haltResponse()
 
   const postIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const postRateCheck = await checkRateLimit(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
+  const postRateCheck = await withTimeout(
+    checkRateLimit(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
+    KV_GATE_TIMEOUT_MS,
+  ).catch(onKvTimeout({ allowed: true, remaining: QUOTE_RATE_LIMIT.limit, resetAt: Date.now() + QUOTE_RATE_LIMIT.windowMs }))
   if (!postRateCheck.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded.' },

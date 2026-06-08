@@ -2327,3 +2327,41 @@ gitleaks-clean. NO `.gitleaks.toml` allowlist was added (per spec: redact/fix, d
 
 **Untouched (separate chore):** the dirty `contracts/order-engine/lib/openzeppelin-contracts` submodule
 (chronic test-contracts issue) — left exactly as found.
+
+## Feedback — SPRINT-9X (commits `6e4be21` X2, `9c52dc4` X3)
+
+### X1 — root cause (confirmed; hypothesis partly corrected)
+- **The real cause is a MISSING `maxDuration`, not an unbounded fan-out.** `/api/quote` exported NO
+  `maxDuration`, so it ran under the low Vercel plan default (10–15s) — unlike `/api/swap` which got
+  `maxDuration=60` in 9J/J2. The quote source fan-out was ALREADY bounded (parallel `Promise.allSettled`,
+  each source wrapped in `withTimeout(QUOTE_TIMEOUT_MS=10s)` → slow sources excluded). The op brushed the
+  low ceiling → Vercel killed the function → platform **HTML 504** → `res.json()` choked.
+- **Hypothesis corrected:** there is NO DefiLlama/oracle/Chainlink call on the quote path (that price-guard
+  lives on the swap path). The latency budget is: 3 pre-fan-out Upstash KV awaits (`isSystemHalted`,
+  `checkRateLimit`, cold-start `initFromKV`) — all **UNBOUNDED** (no timeout) — + the ~10s fan-out.
+- **The route's own try/catch already JSON-wraps every THROWN error** (INC-2026-05-31-001), but it cannot
+  catch a platform `maxDuration` kill (the function is terminated mid-run) — only raising the ceiling does.
+
+### X2 — server bounding
+- `maxDuration=60` on `/api/quote` AND `/api/v1/quote`. The ~10–13s bounded op now has huge headroom.
+- KV gates wrapped in `withTimeout(3s)` that **fails open ONLY on a timeout** (a hung Upstash); a REAL
+  thrown KV error is re-thrown (`onKvTimeout`) so the route's JSON-500 envelope still fires — preserving
+  the INC-2026-05-31-001 contract (the route integration tests pin "throw → JSON 500", which stay green).
+
+### X3 — client guard
+- `lib/fetch-json.ts` (`fetchJson` + typed `ServiceUnavailableError`): HTML/non-JSON body → clean error
+  ('Service busy — please retry in a moment.') + ONE auto-retry; real JSON envelopes pass through. Wired
+  into `useQuote`. **Reusable follow-up:** the spec says "EVERY fetch to our own APIs" — `useSwap`
+  (`fetchSwapViaApi`, which has special PriceGuardError handling) and `useSplitSwap`/`useSplitRoute` still
+  do raw `res.json()`; they're lower-risk now (their routes are bounded), but migrating them to `fetchJson`
+  is a clean follow-up for full coverage.
+
+### Investigation note
+- X1 used a 4-agent workflow; 3 agents failed to emit structured output (a runtime quirk), but the one
+  that returned (fan-out timing) gave the complete root cause + every unbounded await, which is what
+  drove X2/X3. The conclusion was cross-checked by reading the route + `useQuote` directly.
+
+### OWNER post-merge
+- Preview-test, then the live repro: a mainnet ETH→wstETH quote (the reported pair) should now return a
+  Compare list (slow sources simply absent) and NEVER surface the `<!DOCTYPE ... is not valid JSON` string,
+  even under a forced platform timeout.
