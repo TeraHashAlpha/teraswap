@@ -2402,3 +2402,34 @@ changes).
 - Preview-test, then the live repro: a mainnet ETH→wstETH quote (the reported pair) should now return a
   Compare list (slow sources simply absent) and NEVER surface the `<!DOCTYPE ... is not valid JSON` string,
   even under a forced platform timeout.
+
+## Feedback — SPRINT-9V (92c4dbe V1, 68b1b09 V2)
+
+### Assumption / scope decision — V2 composition is RAW-path only (Auditor: confirm acceptable)
+- The composed cbETH/USD price lives in `fetchChainlinkPriceRaw` (the gate that validates swaps),
+  NOT in the UI hook `useChainlinkPrice`. cbETH still renders via the calm no-oracle + multi-source
+  path in the UI. The spec sanctions that as the fallback, and the swap is the safety-relevant
+  surface — but it means the UI UNDER-claims safety for cbETH (says "no oracle" while the swap path
+  has one). A UI-side composed display (two-leg reactive reads) is a clean follow-up, not done here
+  to avoid conditional-hook complexity in a display component during a safety-gate change.
+
+### Concern / behaviour delta — Base ETH/USD direct feed TIGHTENED 3600→1800s
+- V1 added Base ETH/USD heartbeat 1200s → threshold 1800s (heartbeat×1.5). This also tightens the
+  DIRECT WETH/ETH feed on Base from the old 1h global to 30min. More conservative and correct (the
+  feed updates every ≤20min, so 30min is the right ceiling), but it IS a behaviour change beyond the
+  stablecoins: a Base WETH price 30–60min stale now fails where it previously passed. Safe, flagged.
+
+### Assumption — mainnet kept BYTE-IDENTICAL (no per-feed heartbeats)
+- The spec allowed mainnet 1h-heartbeat feeds to be either 1.5h (heartbeat×1.5) or 1h
+  (min(global, heartbeat×1.5)) "if the Auditor prefers conservatism". Chosen: add NO mainnet
+  heartbeats → mainnet keeps its existing globals (raw 3600 = exactly 1h = heartbeat×1.0, UI 90_000).
+  This is the strictly-more-conservative option (1h, not 1.5h) AND keeps the mainnet path provably
+  byte-identical (test-pinned: getFeedStalenessSec(mainnet ETH/USD, 3600) === 3600). If the Auditor
+  wants mainnet to ALSO benefit from heartbeat×1.5 (looser, fewer false-stales), that's a one-line
+  addition to FEED_HEARTBEAT_SEC — deliberately deferred to keep this change additive on Base only.
+
+### Test gap — no UI-hook integration test on a Base feed's new threshold
+- The shared `getFeedStalenessSec` is unit-tested and the RAW gate is integration-tested on Base
+  USDC/USD (2h valid / 37h stale). The UI hook tests still use mainnet feeds (global fallback), so
+  there is no test asserting the hook applies the 36h threshold for a Base feed. Low risk (single
+  shared derivation, both consumers call it), but a Base-feed hook test would close the loop.
