@@ -2458,3 +2458,58 @@ On-chain `cast` (Base mainnet, 2026-06-08) shows Base has THREE live cbETH feeds
 The reference-data-directory alone was insufficient/misleading here (three same-asset feeds, easy to
 mismatch by name). On-chain `description()`/`decimals()`/`aggregator()` via `cast` was the decisive
 source — worth making the default for any future feed-address audit, not the directory UI.
+
+## Feedback — SPRINT-9Y (expanded token catalog + chain/token logos)
+
+### Security concern (pre-existing, out of 9Y scope) — DEFAULT_TOKENS `USDe` is not canonical EIP-55
+While adding the integrity test (`getAddress(addr) === addr`), `getFullCatalog(1)` flagged the
+existing mainnet `USDe` entry: stored `0x4c9EDD5852cd905f23c3acF6C2ff8eca3ce50370`, but the canonical
+checksum is `0x4c9eDD5852CD905F23c3acF6c2ff8eCA3ce50370` — `isAddress(stored, { strict: true })`
+returns **false**. The lowercase address is correct (it IS Ethena USDe), so funds are not at risk
+today, but any strict-checksum guard (viem `isAddress` defaults to strict) would reject it. Left
+untouched here (9Y is mainnet byte-identical / ADD-only); the strict integrity test is therefore
+scoped to the generated catalog. **Recommend** a one-line re-checksum of `DEFAULT_TOKENS.USDe` in a
+follow-up (data-only, no behaviour change).
+
+### Assumption / decision — Base USDT is sourced from CoinGecko (Uniswap omits it)
+The pinned Uniswap Labs Default list has **no** USDT on Base, but the spec lists USDT in the Base
+suggested set. The single USDT/Base entry (`0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2`, 6 dp,
+"L2 Standard Bridged USDT (Base)") is therefore sourced from the CoinGecko Base list (v430.1.0),
+validated + cross-checked. This is the only catalog address NOT from the Uniswap snapshot.
+**Owner/Auditor:** confirm bridged USDT is the desired Base USDT (it is the canonical bridged token;
+Tether has no native Base USDT) — or drop it from the suggested set.
+
+### Decision — one pinned source (Uniswap) for BOTH chains, not CoinGecko-for-Base
+The spec offered CoinGecko's Base `all.json` (2369 tokens) as an option. Rejected as the primary
+source: it is **not** market-cap ordered (its first ~25 entries are long-tail/low-quality tokens),
+so any "cap to top-N" would keep junk and drop majors, and baking all 2369 would bloat the bundle and
+hand a false verified-✓ to unvetted tokens. Uniswap Labs Default is curated/vetted, bounded
+(389 mainnet / 96 Base — no risky capping), already matches the existing `DEFAULT_TOKENS` provenance,
+and covers 11/13 spec Base majors. CoinGecko is used only for the one USDT gap above and as the
+independent cross-validation source.
+
+### Behaviour change — long-tail catalog addresses now resolve/verify (not just the suggested set)
+`isVerifiedToken` and `findChainToken` were widened from the suggested set to the FULL pinned catalog.
+Consequence: pasting a long-tail catalog address (e.g. a Base token outside the ~24 suggested) now
+resolves to the verified ✓ catalog token instead of going through the ⚠ import flow. This is the
+intended "catalog tokens = ✓" behaviour and is chain-scoped (9P intact: a Base address still never
+resolves on mainnet), but it is a visible change from pre-9Y for those addresses.
+
+### Verification / audit note — explorer spot-check is the owner step; automatable check done
+The NON-NEGOTIABLE "spot-check top ~15 per chain on the explorer" was done in its automatable form:
+two-source cross-validation (Uniswap ↔ CoinGecko) agreed on **15/15** Base majors, the 5 pre-existing
+hardcoded Base addresses **match** the Uniswap snapshot (no drift), and all 485 generated addresses
+pass `viem getAddress`. A `token-catalog.test.ts` fixture pins the majors' addresses per chain to
+fail CI on accidental edits. The manual block-explorer eyeball + the Auditor light review of the
+address source remain the recommended pre-prod human steps.
+
+### Performance note — search approach
+Search filters the full per-chain catalog (~400 mainnet / 97 Base) with a memoised, lowercase
+`includes` pass and caps rendered rows at `SEARCH_RESULT_LIMIT = 80` (heading shows "first 80 —
+refine to narrow" when capped). No timing-based test (flaky in CI); guarded instead by size-bound
+assertions (catalogs are hundreds, not CoinGecko's 2369).
+
+### Maintenance note — the catalog is a frozen pin
+`token-catalog.generated.ts` is baked from `scripts/token-lists/uniswap-default-v21.3.0.json`
+(sha256 in the file header). Re-running `node scripts/generate-token-catalog.mjs` against the live
+`tokens.uniswap.org` URL would pull a newer list — regenerate intentionally and re-review addresses.
