@@ -1,4 +1,12 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit'
+import {
+  rabbyWallet,
+  metaMaskWallet,
+  coinbaseWallet,
+  walletConnectWallet,
+  ledgerWallet,
+  injectedWallet,
+} from '@rainbow-me/rainbowkit/wallets'
 import { mainnet, base } from 'wagmi/chains'
 import { http, fallback } from 'wagmi'
 
@@ -62,6 +70,24 @@ export const WALLETCONNECT_METADATA = {
   appIcon: 'https://www.teraswap.app/apple-touch-icon.png',
 } as const
 
+// [SPRINT-9Z] Explicit, mobile-friendly wallet list.
+// getDefaultConfig's DEFAULT list curates a subset that HIDES several wallets on
+// mobile — real users couldn't find Rabby / Ledger / D'CENT in the picker. Passing
+// an explicit `wallets` list fixes that. The generic `walletConnectWallet` is the
+// catch-all that covers D'CENT and ANY WalletConnect wallet via QR / deep-link.
+// The list has no platform branch, so mobile and desktop render the identical set.
+// getDefaultConfig still builds a SINGLE provider/Core from this list (9K holds).
+export const WALLET_GROUPS = [
+  {
+    groupName: 'Recommended',
+    wallets: [rabbyWallet, metaMaskWallet, coinbaseWallet, walletConnectWallet],
+  },
+  {
+    groupName: 'More',
+    wallets: [ledgerWallet, injectedWallet],
+  },
+]
+
 // [P219] Multi-chain: mainnet stays the default (first in the array, so wallets
 // connect to it by default). Base is added so users can switch, but swaps stay
 // gated behind "Coming Soon" until a Base FeeCollector is deployed (ChainSelector).
@@ -75,6 +101,7 @@ export const config = getDefaultConfig({
   ...WALLETCONNECT_METADATA,
   projectId: walletConnectProjectId,
   chains: [mainnet, base],
+  wallets: WALLET_GROUPS,
   transports: {
     [mainnet.id]: buildMainnetTransport(),
     [base.id]: fallback([

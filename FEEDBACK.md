@@ -2566,3 +2566,78 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   future PR editing any of those files, or a scheduled full scan, would flag them. Recommend the
   Architect triage them via a fingerprint-based `.gitleaksignore` for the confirmed test fixtures
   rather than path-allowlisting `src/` (which would blind real scanning).
+## Feedback — SPRINT-9Z mobile-walletconnect (A cb5a5cf / B b6c49af / C d93f644)
+
+### Phase A — connector ids collapse; the list is tested at the WALLET level
+- RainbowKit builds 7 connectors from the 6 wallets, but rabby/metaMask/ledger/walletConnect all
+  collapse to wagmi connector `id='walletConnect'` (they ride the WC connector under the hood);
+  only coinbase→`coinbaseWalletSDK` and injected→`injected` keep native connector ids. So
+  `config.connectors` ids CANNOT distinguish all 6. The primary test therefore asserts the
+  WALLET-LEVEL ids (rabby/metaMask/coinbase/walletConnect/ledger/injected) by invoking the exported
+  `WALLET_GROUPS` fns, with an EXACT set match (catches an unintended extra/missing wallet). A
+  second test asserts the built connectors preserve each identity via `rkDetails.id` (held across
+  the bump), and a third locks UA-independence (the list has no platform branch).
+
+### Phase B — SECURITY / Auditor note (auth/auto-logout control)
+- The 1h idle auto-disconnect is an auth control. Root cause #2 was that the guard READ a stale
+  `connectedAt` on the `isConnected` false→true transition and disconnected the brand-new mobile
+  connect (the deep-link handshake backgrounds the tab). Fix: re-arm the idle timer from NOW on
+  every (re)connect and never read a stale baseline to disconnect. **The fragile mount-time
+  "expired while inactive" disconnect was REMOVED** — the adversarial review confirmed that branch
+  was unreachable after the reset (the effect only re-runs on `isConnected` change), and it was the
+  source of the bug. The 1h idle `setTimeout` (reset on user interaction) remains the control.
+- **Tradeoff (decide, Auditor):** because the baseline resets on every reconnect — incl. wagmi's
+  auto-reconnect on reload — the control is "1h since the last connect/interaction," NOT an absolute
+  session lifetime. A user can keep a session alive by reloading <1h apart (which is itself
+  activity). Genuine idle (tab open, untouched) still disconnects at 1h. This is the deliberate
+  price of not severing the mobile handshake; no major dApp ships a hard absolute 1h cap. If an
+  absolute cap is required, gate it behind an explicit setting decoupled from the connect lifecycle.
+- Hardening from the review: `sessionStorage` access is now fail-soft (Safari private mode / disabled
+  storage can throw — must not crash the guard into an unlimited session). `connectedAt` is now a
+  write-only last-activity marker (nothing reads it after removing the expiry check); kept because
+  the spec references it and it satisfies "reset connectedAt on every new connection" + aids
+  diagnostics. CONNECT_GRACE_MS / the grace window were removed along with the expiry check (the
+  reset alone fixes the bug; the review flagged the grace window as ambiguous/unreachable).
+
+### Phase C — DEVIATIONS (read carefully): rainbowkit 2.2.10 (not 2.2.11), viem NOT bumped
+- **AGPL avoidance — took 2.2.10, not the latest 2.2.11.** The spec said "latest 2.2.x" (= 2.2.11),
+  but 2.2.11 changes its `ua-parser-js` dependency from `^1.0.37` (MIT 1.0.41) to `^2.0.9`, pulling
+  **`ua-parser-js@2.0.10` which is AGPL-3.0-or-later** — a copyleft license risk for a commercial
+  closed-source dapp (ua-parser-js went AGPL at 2.0.0; 1.x stays MIT). Verified via lockfile diff +
+  the installed package's license field. **2.2.10 ships every MOBILE fix** (2.2.7 WC-init/mobile-
+  reject, 2.2.8 MetaMask-SDK mobile path, 2.2.10 mobile connect-flow); 2.2.11 adds only a desktop
+  multi-extension crash fix + SSR/Node-25 safety. `next build` on Node 25 passes on 2.2.10. **Decision
+  for the Architect:** if 2.2.11 is wanted, it requires either an AGPL exception/commercial
+  ua-parser-js license, or a `ua-parser-js: ^1.0.x` override (untested against rainbowkit 2.2.11's
+  `^2.0.9` API — likely breaks). Recommend staying on 2.2.10 until upstream reverts or offers an MIT
+  path; track RainbowKit's ua-parser-js choice.
+- **viem/wagmi/WalletConnect NOT bumped.** The spec listed them, but: wagmi is ALREADY the latest 2.x
+  (2.19.5; npm `latest` is v3 — out of scope per ADR-008); the `@walletconnect/core`/sign-client/
+  universal-provider override (2.21.1) already MATCHES wagmi 2.19.5's transitively-tested
+  `@walletconnect/ethereum-provider@2.21.1` tree (moving it would diverge + pull a prerelease
+  `@reown/appkit`); and viem 2.52.x is not even installable today — the repo enforces
+  `min-release-age=7` (a 7-day dependency cooldown), and viem 2.52.2 (2026-06-04) is younger than
+  that. viem carries no mobile-WC fix and a 5-minor jump (2.47→2.52) crosses tx-encoding paths,
+  against the **mainnet byte-identical** mandate. So only rainbowkit moved. Single
+  `@walletconnect/core@2.21.1` preserved; no wagmi v3.
+
+### #2232 still open
+- RainbowKit #2232 (WC multi-instance "No matching key") is NOT closed by 2.2.x — the root cause is
+  the wagmi WC-connector reconnect path; fix PR #2331 is unmerged. Track separately at the wagmi
+  level. The 2.2.10 bump still delivers the adjacent mobile reliability fixes above.
+
+### Tooling gap — Sonatype Guide MCP unavailable (auth)
+- The mandated pre-upgrade Sonatype Guide check could not run (MCP returned "Authentication
+  required"). Fell back to manual vetting: rainbowkit@2.2.10 and viem are MIT, not deprecated, not
+  malicious, first-party (rainbow.me / wevm); peers resolve cleanly. **Recommend wiring Sonatype MCP
+  credentials** so the dependency-vetting gate runs (it would have caught the 2.2.11 AGPL change
+  directly).
+
+### Verification deferred to OWNER — real devices (decisive)
+- Per spec, the DECISIVE check is real devices: iOS Safari + Android Chrome with Rabby + Ledger +
+  D'CENT (find in picker → connect → return-and-stay-connected). That is an owner post-merge step.
+  Everything automatable is green: TDD (11 new tests), full suite (1639), `next build` (Node 25),
+  single `@walletconnect/core`, no wagmi v3, typecheck + lint (0 errors), 3 SSH-signed atomic
+  commits. The work was adversarially reviewed (4-agent workflow): the AGPL injection, a missing
+  sessionStorage guard, unreachable expiry code, and test-fragility were all surfaced and fixed
+  before this landed.

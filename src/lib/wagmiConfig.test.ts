@@ -16,6 +16,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 type WagmiConfigModule = typeof import('./wagmiConfig')
 let config: WagmiConfigModule['config']
 let WALLETCONNECT_METADATA: WagmiConfigModule['WALLETCONNECT_METADATA']
+let WALLET_GROUPS: WagmiConfigModule['WALLET_GROUPS']
 
 beforeAll(async () => {
   // getDefaultConfig throws without a projectId; provide a dummy BEFORE the
@@ -24,6 +25,7 @@ beforeAll(async () => {
   const mod = await import('./wagmiConfig')
   config = mod.config
   WALLETCONNECT_METADATA = mod.WALLETCONNECT_METADATA
+  WALLET_GROUPS = mod.WALLET_GROUPS
 })
 
 afterAll(() => {
@@ -53,5 +55,56 @@ describe('wagmiConfig — WalletConnect metadata [SPRINT-9K]', () => {
       (c) => c.type === 'walletConnect' || c.id === 'walletConnect',
     )
     expect(wc.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('wagmiConfig — explicit mobile-friendly wallet list [SPRINT-9Z]', () => {
+  // RainbowKit's DEFAULT getDefaultConfig list curates a subset that HIDES
+  // several wallets on mobile (Rabby/Ledger/D'CENT not findable). We pass an
+  // EXPLICIT wallet list instead. Wallet creator fns need projectId/appName to
+  // build, but each wallet's `.id` is independent of those values.
+  const WALLET_OPTS = {
+    projectId: 'test_projectid_0123456789abcdef',
+    appName: 'TeraSwap',
+    appUrl: 'https://www.teraswap.app',
+    appIcon: 'https://www.teraswap.app/apple-touch-icon.png',
+  }
+  const listedWalletIds = (): string[] =>
+    WALLET_GROUPS.flatMap((g) => g.wallets).map(
+      (fn) => (fn as (o: typeof WALLET_OPTS) => { id: string })(WALLET_OPTS).id,
+    )
+
+  it('lists exactly the wallets mobile users need to find (Rabby/MetaMask/Coinbase/WalletConnect/Ledger/Injected)', () => {
+    // Exact set match — an unintended extra or missing wallet must fail the test.
+    expect([...listedWalletIds()].sort()).toEqual(
+      ['coinbase', 'injected', 'ledger', 'metaMask', 'rabby', 'walletConnect'].sort(),
+    )
+  })
+
+  it("includes the generic walletConnect catch-all (covers D'CENT and any WC wallet via QR/deep-link)", () => {
+    expect(listedWalletIds()).toContain('walletConnect')
+  })
+
+  it('exposes the same wallet list under a mobile user-agent (UA-independent — fixes the mobile-hiding regression)', () => {
+    vi.stubGlobal('navigator', {
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    })
+    try {
+      expect(listedWalletIds()).toEqual(
+        expect.arrayContaining(['rabby', 'metaMask', 'coinbase', 'walletConnect', 'ledger', 'injected']),
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('builds connectors that preserve every wallet identity (RainbowKit rkDetails.id)', () => {
+    const rkIds = config.connectors
+      .map((c) => (c as unknown as { rkDetails?: { id?: string } }).rkDetails?.id)
+      .filter((x): x is string => Boolean(x))
+    expect(rkIds).toEqual(
+      expect.arrayContaining(['rabby', 'metaMask', 'coinbase', 'walletConnect', 'ledger', 'injected']),
+    )
   })
 })
