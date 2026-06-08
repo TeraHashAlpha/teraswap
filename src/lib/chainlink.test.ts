@@ -496,3 +496,82 @@ describe('[SPRINT-9V V1] raw gate uses per-feed staleness on Base USDC/USD (24h 
     expect(await fetchChainlinkPriceRaw(BASE_USDC, 8453)).toBeNull()
   })
 })
+
+/** [SPRINT-9V V2] Stub fetch with a DIFFERENT round per feed address (composed legs). */
+function mockComposedRpc(legs: Record<string, RoundConfig>) {
+  const lower: Record<string, RoundConfig> = {}
+  for (const [k, v] of Object.entries(legs)) lower[k.toLowerCase()] = v
+  const fetchMock = vi.fn(async (_url: unknown, init: { body?: string }) => {
+    const body = JSON.parse(init.body as string)
+    const to = String(body.params[0].to).toLowerCase()
+    const selector = String(body.params[0].data).slice(0, 10).toLowerCase()
+    const cfg = lower[to]
+    if (!cfg) throw new Error(`No mock leg for feed ${to}`)
+    let result: `0x${string}`
+    if (selector === DECIMALS_SELECTOR) {
+      result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: cfg.decimals })
+    } else if (selector === LATEST_ROUND_SELECTOR) {
+      result = encodeFunctionResult({
+        abi: chainlinkAggregatorAbi,
+        functionName: 'latestRoundData',
+        result: [cfg.roundId, cfg.answer, cfg.startedAt ?? cfg.updatedAt, cfg.updatedAt, cfg.answeredInRound],
+      })
+    } else {
+      throw new Error(`Unexpected selector ${selector}`)
+    }
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result }) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+describe('[SPRINT-9V V2] composed cbETH/USD on Base = cbETH/ETH × ETH/USD', () => {
+  const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const CBETH_ETH = '0x806b4Ac04501c29769051e42783cF04dCE41440b' // base leg, 18 dp, 24h heartbeat → 36h
+  const ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'    // quote leg, 8 dp, 20min heartbeat → 30min
+
+  it('both legs fresh → price = base(ETH) × quote(USD), decimals handled exactly per-leg', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 3_600n, answeredInRound: 10n }, // 1.08 ETH/cbETH
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 600n,   answeredInRound: 20n }, // $3000/ETH
+    })
+    const r = await fetchChainlinkPriceRaw(CBETH, 8453)
+    expect(r).not.toBeNull()
+    expect(r!.price).toBeCloseTo(3240, 2)                  // 1.08 × 3000 — NOT 1.08 misread as $1.08
+    expect(r!.updatedAt).toBe(Number(now - 3_600n))        // min(legs) = stalest leg (conservative)
+  })
+
+  it('base leg STALE (cbETH/ETH past 36h) → unavailable (null), NO partial pricing', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 133_200n, answeredInRound: 10n }, // 37h
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 600n,      answeredInRound: 20n },
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+  })
+
+  it('quote leg STALE under ITS OWN tighter staleness (ETH/USD past 30min) → unavailable', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 600n,   answeredInRound: 10n },
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 2_400n, answeredInRound: 20n }, // 40min > 30min
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+  })
+
+  it('quote leg INTEGRITY fail (ETH/USD answeredInRound < roundId) → unavailable', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 600n, answeredInRound: 10n },
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 600n, answeredInRound: 19n }, // integrity fail
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+  })
+
+  it('no swap-blocking regression: an UNFEEDED token (USDbC) still returns null (no direct, no composed)', async () => {
+    const USDBC = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
+    mockChainlinkRpc({ decimals: 8, roundId: 1n, answer: 100_000_000n, updatedAt: nowSec(), answeredInRound: 1n })
+    expect(await fetchChainlinkPriceRaw(USDBC, 8453)).toBeNull()
+  })
+})

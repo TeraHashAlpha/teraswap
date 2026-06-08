@@ -105,3 +105,46 @@ export function getFeedStalenessSec(feed: string, globalFallback: number): numbe
   const hb = getFeedHeartbeatSec(feed)
   return hb != null ? Math.round(hb * 1.5) : globalFallback
 }
+
+/** [SPRINT-9V V2] A composed USD price: token/USD = base(token/ETH) × quote(ETH/USD). */
+export interface ComposedFeed {
+  /** Base leg — token priced in ETH (e.g. cbETH/ETH, 18 dp). */
+  base: `0x${string}`
+  /** Quote leg — ETH priced in USD (ETH/USD, 8 dp). product = base × quote = token/USD. */
+  quote: `0x${string}`
+}
+
+/**
+ * [SPRINT-9V V2 / rule #9] Composed Chainlink feeds: token/USD = base(token/ETH) × quote(ETH/USD).
+ * Used ONLY when no DIRECT USD feed exists for the token (getChainlinkFeed → null). BOTH legs are
+ * validated INDEPENDENTLY (integrity + per-feed staleness); either leg invalid → the whole
+ * composition is unavailable (NO partial pricing) → caller falls back to the existing calm
+ * no-oracle path (multi-source compare + on-chain minimumOutput). Keyed by token address
+ * (lowercased). MAINNET has none (untouched).
+ */
+const COMPOSED_FEEDS_BY_CHAIN: Record<number, Record<string, ComposedFeed>> = {
+  // ── Base (8453) ──
+  8453: {
+    // cbETH (0x2Ae3…0DEc22): no direct cbETH/USD feed on Base. Compose cbETH/ETH × ETH/USD.
+    //  • base  cbETH/ETH  0x806b4Ac0… — "CBETH / ETH" 18 dp  (verified 3 ways, 9S + 9V directory)
+    //  • quote ETH/USD    0x71041ddd… — "ETH / USD"  8 dp    (the existing WETH feed)
+    '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': {
+      base: '0x806b4Ac04501c29769051e42783cF04dCE41440b',
+      quote: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
+    },
+  },
+}
+
+/**
+ * [SPRINT-9V V2] Resolve a composed feed for a token, or null. Defaults to mainnet (which has
+ * none → null → byte-identical). A token with a DIRECT feed should never reach here; callers
+ * consult this only after getChainlinkFeed returns null.
+ */
+export function getComposedFeed(
+  tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
+): ComposedFeed | null {
+  const feeds = COMPOSED_FEEDS_BY_CHAIN[chainId]
+  if (!feeds) return null
+  return feeds[tokenAddress.toLowerCase()] ?? null
+}

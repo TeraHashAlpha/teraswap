@@ -4,7 +4,7 @@ import {
   PRICE_DEVIATION_BLOCK,
   CHAINLINK_MAX_STALENESS_SEC,
 } from './constants'
-import { getChainlinkFeed, getFeedStalenessSec } from './chains/chainlink-feeds'
+import { getChainlinkFeed, getFeedStalenessSec, getComposedFeed } from './chains/chainlink-feeds'
 import { isSequencerUp } from './chains/sequencer-check'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
 import { getPublicClientForChain } from './chains/clients'
@@ -229,27 +229,14 @@ async function rpcCall(to: string, data: string, chainId: number = DEFAULT_CHAIN
 }
 
 /**
- * Fetch current Chainlink USD price for a token via direct RPC (non-hook).
- * Returns price as a number (e.g. 2850.42) or null if no feed exists.
+ * [SPRINT-9V V2] Read + fully validate ONE Chainlink feed (decimals + latestRoundData + the 9G
+ * round-integrity gate + per-feed staleness). Returns the decimal-normalised price or null. The
+ * sequencer gate is the CALLER's responsibility (done once per fetch, before any leg is read).
  */
-export async function fetchChainlinkPriceRaw(
-  tokenAddress: string,
-  chainId: number = DEFAULT_CHAIN_ID,
+async function fetchSingleFeedRaw(
+  feed: `0x${string}`,
+  chainId: number,
 ): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
-  const feed = getChainlinkFeed(tokenAddress, chainId)
-  if (!feed) return null
-
-  // [P218] L2 sequencer-uptime gate — never price on a down/recovering
-  // sequencer. Mainnet (DEFAULT_CHAIN_ID) has no sequencer feed and skips this,
-  // so the mainnet path is unchanged.
-  if (chainId !== DEFAULT_CHAIN_ID) {
-    const seqUp = await isSequencerUp(chainId, getPublicClientForChain(chainId))
-    if (!seqUp) {
-      console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
-      return null
-    }
-  }
-
   // Fetch decimals
   const decData = encodeFunctionData({
     abi: chainlinkAggregatorAbi,
@@ -284,8 +271,56 @@ export async function fetchChainlinkPriceRaw(
   // (unchanged for mainnet). The round-INTEGRITY guards inside validateRoundData are untouched.
   if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, getFeedStalenessSec(feed, CHAINLINK_MAX_STALENESS_SEC))) return null
 
+  // Decimals handled exactly per-leg: normalise by THIS feed's own on-chain decimals before any
+  // composition multiplies the resulting numbers (cbETH/ETH 18 dp vs ETH/USD 8 dp).
   const price = Number(answer) / 10 ** decimals
   return { price, updatedAt: Number(updatedAt), roundId }
+}
+
+/**
+ * Fetch current Chainlink USD price for a token via direct RPC (non-hook).
+ * Returns price as a number (e.g. 2850.42) or null if no feed exists.
+ *
+ * [SPRINT-9V V2] If the token has no DIRECT USD feed but a COMPOSED one (e.g. Base cbETH →
+ * cbETH/ETH × ETH/USD), both legs are read and validated INDEPENDENTLY; the product is returned
+ * only when BOTH pass — either leg invalid/stale → null (no partial pricing), exactly like a
+ * missing direct feed, so the existing calm no-oracle + multi-source fallback kicks in.
+ */
+export async function fetchChainlinkPriceRaw(
+  tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
+): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
+  const feed = getChainlinkFeed(tokenAddress, chainId)
+  // Composed feeds are consulted ONLY when no direct USD feed exists (mainnet → null → unchanged).
+  const composed = feed ? null : getComposedFeed(tokenAddress, chainId)
+  if (!feed && !composed) return null
+
+  // [P218] L2 sequencer-uptime gate — never price on a down/recovering
+  // sequencer. Mainnet (DEFAULT_CHAIN_ID) has no sequencer feed and skips this,
+  // so the mainnet path is unchanged. Done ONCE up front; both composed legs share the chain.
+  if (chainId !== DEFAULT_CHAIN_ID) {
+    const seqUp = await isSequencerUp(chainId, getPublicClientForChain(chainId))
+    if (!seqUp) {
+      console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
+      return null
+    }
+  }
+
+  if (feed) {
+    return fetchSingleFeedRaw(feed, chainId)
+  }
+
+  // [SPRINT-9V V2] Composed: token/USD = base(token/ETH) × quote(ETH/USD). BOTH legs must pass
+  // integrity + per-feed staleness; either invalid → unavailable (no partial pricing).
+  const base = await fetchSingleFeedRaw(composed!.base, chainId)
+  if (!base) return null
+  const quote = await fetchSingleFeedRaw(composed!.quote, chainId)
+  if (!quote) return null
+  return {
+    price: base.price * quote.price,
+    updatedAt: Math.min(base.updatedAt, quote.updatedAt), // as fresh as the STALEST leg (conservative)
+    roundId: base.roundId, // representative (base leg); composition has no single round
+  }
 }
 
 /**
