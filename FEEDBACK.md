@@ -2402,3 +2402,59 @@ changes).
 - Preview-test, then the live repro: a mainnet ETH→wstETH quote (the reported pair) should now return a
   Compare list (slow sources simply absent) and NEVER surface the `<!DOCTYPE ... is not valid JSON` string,
   even under a forced platform timeout.
+
+## Feedback — SPRINT-9V (92c4dbe V1, 68b1b09 V2)
+
+### Assumption / scope decision — V2 composition is RAW-path only (Auditor: confirm acceptable)
+- The composed cbETH/USD price lives in `fetchChainlinkPriceRaw` (the gate that validates swaps),
+  NOT in the UI hook `useChainlinkPrice`. cbETH still renders via the calm no-oracle + multi-source
+  path in the UI. The spec sanctions that as the fallback, and the swap is the safety-relevant
+  surface — but it means the UI UNDER-claims safety for cbETH (says "no oracle" while the swap path
+  has one). A UI-side composed display (two-leg reactive reads) is a clean follow-up, not done here
+  to avoid conditional-hook complexity in a display component during a safety-gate change.
+
+### Concern / behaviour delta — Base ETH/USD direct feed TIGHTENED 3600→1800s
+- V1 added Base ETH/USD heartbeat 1200s → threshold 1800s (heartbeat×1.5). This also tightens the
+  DIRECT WETH/ETH feed on Base from the old 1h global to 30min. More conservative and correct (the
+  feed updates every ≤20min, so 30min is the right ceiling), but it IS a behaviour change beyond the
+  stablecoins: a Base WETH price 30–60min stale now fails where it previously passed. Safe, flagged.
+
+### Assumption — mainnet kept BYTE-IDENTICAL (no per-feed heartbeats)
+- The spec allowed mainnet 1h-heartbeat feeds to be either 1.5h (heartbeat×1.5) or 1h
+  (min(global, heartbeat×1.5)) "if the Auditor prefers conservatism". Chosen: add NO mainnet
+  heartbeats → mainnet keeps its existing globals (raw 3600 = exactly 1h = heartbeat×1.0, UI 90_000).
+  This is the strictly-more-conservative option (1h, not 1.5h) AND keeps the mainnet path provably
+  byte-identical (test-pinned: getFeedStalenessSec(mainnet ETH/USD, 3600) === 3600). If the Auditor
+  wants mainnet to ALSO benefit from heartbeat×1.5 (looser, fewer false-stales), that's a one-line
+  addition to FEED_HEARTBEAT_SEC — deliberately deferred to keep this change additive on Base only.
+
+### Test gap — no UI-hook integration test on a Base feed's new threshold
+- The shared `getFeedStalenessSec` is unit-tested and the RAW gate is integration-tested on Base
+  USDC/USD (2h valid / 37h stale). The UI hook tests still use mainnet feeds (global fallback), so
+  there is no test asserting the hook applies the 36h threshold for a Base feed. Low risk (single
+  shared derivation, both consumers call it), but a Base-feed hook test would close the loop.
+
+## Feedback — SPRINT-9V 9V-M-01 (cbETH base-leg verification)
+
+### Surprising finding — the audit's address concern resolved the opposite way + a bigger discovery
+On-chain `cast` (Base mainnet, 2026-06-08) shows Base has THREE live cbETH feeds, all v6 EACAggregatorProxy:
+- `0x806b4Ac0…` "CBETH / ETH" 18 dp, agg `0x53fDcAb0…`, latest 1.1344 — the MARKET-price feed.
+- `0x868a501e…` "cbETH-ETH Exchange Rate" 18 dp, agg `0x4c78deA2…`, latest 1.1320 — the redemption rate.
+- `0xd7818272…` "CBETH / USD" 8 dp, agg `0x71E021bc…`, latest $1906.86 — a DIRECT cbETH/USD feed.
+
+1. **The base leg `0x806b…` was already correct.** It IS in the reference-data-directory (as
+   "CBETH / ETH"); the audit's "absent" was a match against the *Exchange Rate* entry (`0x868a…`),
+   which is a different feed. Decision (Architect, 9V-M-01): KEEP `0x806b…` (the market feed). The
+   Exchange-Rate feed is manipulation-resistant but BLIND to market depeg — wrong semantics for a
+   swap price guard (it would over-value a depegged cbETH). No address change; comment added.
+
+2. **The V2 premise was wrong — a direct CBETH/USD feed exists** (`0xd7818272…`, 8 dp, 20-min
+   heartbeat). The composition still yields a CORRECT price (market cbETH/ETH × ETH/USD ≈ the direct
+   USD feed), but a direct feed would be simpler, tighter (20-min vs the composition's 24-h stalest
+   leg), and have fewer failure modes. **Recommend a follow-up sprint** to switch cbETH to the direct
+   feed (out of scope here: the 9V-M-01 task Do-NOT forbids changing the base×quote architecture).
+
+### Verification method note
+The reference-data-directory alone was insufficient/misleading here (three same-asset feeds, easy to
+mismatch by name). On-chain `description()`/`decimals()`/`aggregator()` via `cast` was the decisive
+source — worth making the default for any future feed-address audit, not the directory UI.

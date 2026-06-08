@@ -14,7 +14,8 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
+import { getComposedFeed } from './chains/chainlink-feeds'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
@@ -445,5 +446,159 @@ describe('evaluatePairOracle [SPRINT-9S S2]', () => {
       expect(!!merged.oracleIntegrityFailed).toBe(!!c.oracleIntegrityFailed)
       expect(merged.oracleUnavailable).toBe(c.oracleUnavailable)
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9V V1] Per-feed staleness thresholds (heartbeat × 1.5).
+// ─────────────────────────────────────────────────────────────
+describe('getFeedStalenessSec [SPRINT-9V V1]', () => {
+  const BASE_USDC_USD = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
+  const BASE_ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+  const MAINNET_ETH_USD = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+
+  it('a 24h-heartbeat feed → 36h (heartbeat×1.5); raw gate and UI hook AGREE (global ignored when known)', () => {
+    expect(getFeedStalenessSec(BASE_USDC_USD, 3600)).toBe(129600)   // 86400 × 1.5
+    expect(getFeedStalenessSec(BASE_USDC_USD, 90_000)).toBe(129600) // same regardless of caller global
+    expect(getFeedStalenessSec(BASE_USDC_USD.toLowerCase(), 3600)).toBe(129600) // case-insensitive
+  })
+
+  it('Base ETH/USD (20-min heartbeat) → 30 min (tightening from the 1h global is fine — more conservative)', () => {
+    expect(getFeedStalenessSec(BASE_ETH_USD, 3600)).toBe(1800) // 1200 × 1.5
+  })
+
+  it('an unknown-heartbeat feed → the caller global fallback (fail-conservative; MAINNET byte-identical)', () => {
+    expect(getFeedStalenessSec(MAINNET_ETH_USD, 3600)).toBe(3600)   // mainnet has no per-feed heartbeat
+    expect(getFeedStalenessSec(MAINNET_ETH_USD, 90_000)).toBe(90_000)
+    expect(getFeedStalenessSec('0x000000000000000000000000000000000000dEaD', 3600)).toBe(3600)
+  })
+})
+
+describe('[SPRINT-9V V1] raw gate uses per-feed staleness on Base USDC/USD (24h heartbeat → 36h)', () => {
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+
+  it('a 2h-old round is now VALID (was wrongly STALE under the 1h global — the 9S bug)', async () => {
+    const now = nowSec()
+    mockChainlinkRpc({ decimals: 8, roundId: 100n, answer: 99_960_000n, updatedAt: now - 7_200n, answeredInRound: 100n })
+    const r = await fetchChainlinkPriceRaw(BASE_USDC, 8453)
+    expect(r).not.toBeNull()
+    expect(r!.price).toBeCloseTo(0.9996, 4)
+  })
+
+  it('a 37h-old round is STALE (beyond 36h = heartbeat×1.5) → null — NO loosening past the heartbeat', async () => {
+    const now = nowSec()
+    mockChainlinkRpc({ decimals: 8, roundId: 100n, answer: 99_960_000n, updatedAt: now - 133_200n, answeredInRound: 100n })
+    expect(await fetchChainlinkPriceRaw(BASE_USDC, 8453)).toBeNull()
+  })
+
+  it('round-INTEGRITY still hard-fails regardless of the looser staleness (answeredInRound < roundId)', async () => {
+    const now = nowSec()
+    mockChainlinkRpc({ decimals: 8, roundId: 100n, answer: 99_960_000n, updatedAt: now - 7_200n, answeredInRound: 99n })
+    expect(await fetchChainlinkPriceRaw(BASE_USDC, 8453)).toBeNull()
+  })
+})
+
+/** [SPRINT-9V V2] Stub fetch with a DIFFERENT round per feed address (composed legs). */
+function mockComposedRpc(legs: Record<string, RoundConfig>) {
+  const lower: Record<string, RoundConfig> = {}
+  for (const [k, v] of Object.entries(legs)) lower[k.toLowerCase()] = v
+  const fetchMock = vi.fn(async (_url: unknown, init: { body?: string }) => {
+    const body = JSON.parse(init.body as string)
+    const to = String(body.params[0].to).toLowerCase()
+    const selector = String(body.params[0].data).slice(0, 10).toLowerCase()
+    const cfg = lower[to]
+    if (!cfg) throw new Error(`No mock leg for feed ${to}`)
+    let result: `0x${string}`
+    if (selector === DECIMALS_SELECTOR) {
+      result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: cfg.decimals })
+    } else if (selector === LATEST_ROUND_SELECTOR) {
+      result = encodeFunctionResult({
+        abi: chainlinkAggregatorAbi,
+        functionName: 'latestRoundData',
+        result: [cfg.roundId, cfg.answer, cfg.startedAt ?? cfg.updatedAt, cfg.updatedAt, cfg.answeredInRound],
+      })
+    } else {
+      throw new Error(`Unexpected selector ${selector}`)
+    }
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result }) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+describe('[SPRINT-9V V2] composed cbETH/USD on Base = cbETH/ETH × ETH/USD', () => {
+  const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const CBETH_ETH = '0x806b4Ac04501c29769051e42783cF04dCE41440b' // base leg, 18 dp, 24h heartbeat → 36h
+  const ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'    // quote leg, 8 dp, 20min heartbeat → 30min
+
+  it('both legs fresh → price = base(ETH) × quote(USD), decimals handled exactly per-leg', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 3_600n, answeredInRound: 10n }, // 1.08 ETH/cbETH
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 600n,   answeredInRound: 20n }, // $3000/ETH
+    })
+    const r = await fetchChainlinkPriceRaw(CBETH, 8453)
+    expect(r).not.toBeNull()
+    expect(r!.price).toBeCloseTo(3240, 2)                  // 1.08 × 3000 — NOT 1.08 misread as $1.08
+    expect(r!.updatedAt).toBe(Number(now - 3_600n))        // min(legs) = stalest leg (conservative)
+  })
+
+  it('base leg STALE (cbETH/ETH past 36h) → unavailable (null), NO partial pricing', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 133_200n, answeredInRound: 10n }, // 37h
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 600n,      answeredInRound: 20n },
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+  })
+
+  it('quote leg STALE under ITS OWN tighter staleness (ETH/USD past 30min) → unavailable', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 600n,   answeredInRound: 10n },
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 2_400n, answeredInRound: 20n }, // 40min > 30min
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+  })
+
+  it('quote leg INTEGRITY fail (ETH/USD answeredInRound < roundId) → unavailable', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 600n, answeredInRound: 10n },
+      [ETH_USD]:   { decimals: 8,  roundId: 20n, answer: 300_000_000_000n,           updatedAt: now - 600n, answeredInRound: 19n }, // integrity fail
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+  })
+
+  it('no swap-blocking regression: an UNFEEDED token (USDbC) still returns null (no direct, no composed)', async () => {
+    const USDBC = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
+    mockChainlinkRpc({ decimals: 8, roundId: 1n, answer: 100_000_000n, updatedAt: nowSec(), answeredInRound: 1n })
+    expect(await fetchChainlinkPriceRaw(USDBC, 8453)).toBeNull()
+  })
+})
+
+describe('[SPRINT-9V 9V-M-01] cbETH base leg = the CBETH/ETH MARKET feed (not the Exchange-Rate feed)', () => {
+  const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const CBETH_ETH_MARKET = '0x806b4Ac04501c29769051e42783cF04dCE41440b'      // "CBETH / ETH"   (chosen)
+  const CBETH_ETH_EXCHRATE = '0x868a501e68F3D1E89CfC0D22F6b22E8dabce5F04'    // "cbETH-ETH Exchange Rate" (rejected)
+  const ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+
+  it('pins the market proxy as the base leg (on-chain verified 2026-06-08); NOT the exchange-rate proxy', () => {
+    const composed = getComposedFeed(CBETH, 8453)
+    expect(composed).not.toBeNull()
+    expect(composed!.base.toLowerCase()).toBe(CBETH_ETH_MARKET.toLowerCase())
+    expect(composed!.base.toLowerCase()).not.toBe(CBETH_ETH_EXCHRATE.toLowerCase())
+    expect(composed!.quote.toLowerCase()).toBe(ETH_USD.toLowerCase())
+  })
+
+  it('decimals nuance: 18-dp base × 8-dp quote → true USD (realistic on-chain values, no $1.13 bug)', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH_MARKET]: { decimals: 18, roundId: 10n, answer: 1_134_400_000_000_000_000n, updatedAt: now - 3_600n, answeredInRound: 10n }, // 1.1344 ETH/cbETH (live mkt)
+      [ETH_USD]:          { decimals: 8,  roundId: 20n, answer: 168_130_000_000n,            updatedAt: now - 600n,   answeredInRound: 20n }, // $1681.30/ETH
+    })
+    const r = await fetchChainlinkPriceRaw(CBETH, 8453)
+    expect(r).not.toBeNull()
+    expect(r!.price).toBeCloseTo(1907.27, 1) // 1.1344 × 1681.30 ≈ $1907 — matches the live direct CBETH/USD feed
   })
 })

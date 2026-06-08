@@ -69,3 +69,94 @@ export function getChainlinkFeed(
   const key = addr === NATIVE_ETH.toLowerCase() ? wrapped : addr
   return feeds[key] ?? null
 }
+
+/**
+ * [SPRINT-9V V1 / rule #9] Per-feed Chainlink HEARTBEAT (max seconds between updates), keyed by the
+ * feed PROXY address (lowercased). Each value verified against the Chainlink reference-data-directory
+ * (feeds-ethereum-mainnet-base-1.json `heartbeat` field) + docs.chain.link + the on-chain decimals
+ * already pinned in 9S. A feed NOT listed here → null → the caller's global fallback
+ * (fail-conservative). MAINNET feeds are deliberately omitted → they keep the existing global
+ * threshold (byte-identical) — the 1h global already matches mainnet majors' ~1h heartbeat, so adding
+ * heartbeat×1.5 there would only loosen with no benefit (see FEEDBACK 9V; surfaced for the Auditor).
+ */
+const FEED_HEARTBEAT_SEC: Record<string, number> = {
+  // ── Base (8453) ──
+  '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70': 1200,   // ETH/USD  (20 min — L2 feed)
+  '0x458138fc0d67027e9a6778ef40a6ffc318c69061': 86400,  // USDC/USD (24 h — the 9S stablecoin problem)
+  '0x591e79239a7d679378ec8c847e5038150364c78f': 86400,  // DAI/USD  (24 h)
+  '0x806b4ac04501c29769051e42783cf04dce41440b': 86400,  // cbETH/ETH MARKET feed (24 h — V2 base leg; see 9V-M-01 note below)
+}
+
+/** [SPRINT-9V V1] Heartbeat (seconds) for a feed PROXY address, or null when unknown. */
+export function getFeedHeartbeatSec(feed: string): number | null {
+  return FEED_HEARTBEAT_SEC[feed.toLowerCase()] ?? null
+}
+
+/**
+ * [SPRINT-9V V1] Per-feed staleness threshold (seconds), shared by the raw gate (fetchChainlinkPriceRaw)
+ * AND the UI hook (useChainlinkPrice) so they agree on every feed:
+ *   - known heartbeat → heartbeat × 1.5 (margin for a late round);
+ *   - unknown heartbeat → `globalFallback` (each consumer's existing global → fail-conservative,
+ *     and mainnet — which has no heartbeats here — stays byte-identical).
+ * NO loosening of the round-INTEGRITY guards (answer>0 / answeredInRound / startedAt) — those are
+ * unchanged in validateRoundData; this only sets the staleness ceiling.
+ */
+export function getFeedStalenessSec(feed: string, globalFallback: number): number {
+  const hb = getFeedHeartbeatSec(feed)
+  return hb != null ? Math.round(hb * 1.5) : globalFallback
+}
+
+/** [SPRINT-9V V2] A composed USD price: token/USD = base(token/ETH) × quote(ETH/USD). */
+export interface ComposedFeed {
+  /** Base leg — token priced in ETH (e.g. cbETH/ETH, 18 dp). */
+  base: `0x${string}`
+  /** Quote leg — ETH priced in USD (ETH/USD, 8 dp). product = base × quote = token/USD. */
+  quote: `0x${string}`
+}
+
+/**
+ * [SPRINT-9V V2 / rule #9] Composed Chainlink feeds: token/USD = base(token/ETH) × quote(ETH/USD).
+ * Used ONLY when no DIRECT USD feed exists for the token (getChainlinkFeed → null). BOTH legs are
+ * validated INDEPENDENTLY (integrity + per-feed staleness); either leg invalid → the whole
+ * composition is unavailable (NO partial pricing) → caller falls back to the existing calm
+ * no-oracle path (multi-source compare + on-chain minimumOutput). Keyed by token address
+ * (lowercased). MAINNET has none (untouched).
+ */
+const COMPOSED_FEEDS_BY_CHAIN: Record<number, Record<string, ComposedFeed>> = {
+  // ── Base (8453) ──
+  8453: {
+    // cbETH (0x2Ae3…0DEc22): composed cbETH/USD = cbETH/ETH × ETH/USD.
+    //  • base  cbETH/ETH  0x806b4Ac0… — "CBETH / ETH" 18 dp   (the MARKET-price feed — CHOSEN)
+    //  • quote ETH/USD    0x71041ddd… — "ETH / USD"  8 dp     (the existing WETH feed)
+    //
+    // [9V-M-01] Base actually has THREE cbETH feeds (all live, v6, on-chain-verified 2026-06-08):
+    //   0x806b4Ac0…  "CBETH / ETH"            18 dp  agg 0x53fDcAb0…  ← base leg used here (MARKET price)
+    //   0x868a501e…  "cbETH-ETH Exchange Rate" 18 dp  agg 0x4c78deA2…  ← NOT used: protocol redemption
+    //       rate, manipulation-resistant but BLIND to market depeg (a swap guard built on it would
+    //       over-value a depegged cbETH). It is a lending-collateral feed, not a swap-price feed.
+    //   0xd7818272…  "CBETH / USD"             8 dp  agg 0x71E021bc…  ← a DIRECT cbETH/USD feed DOES
+    //       exist (20-min heartbeat) — the original V2 premise "no direct feed" was wrong. Adopting it
+    //       would collapse this composition to one read, but that changes the base×quote architecture,
+    //       so it is deferred to a follow-up sprint (see FEEDBACK 9V — 9V-M-01).
+    // The audit's "0x806b… absent from the directory" matched the Exchange-Rate entry; 0x806b… IS in
+    // the directory as "CBETH / ETH". Decision (Architect, 9V-M-01): keep the MARKET feed 0x806b….
+    '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': {
+      base: '0x806b4Ac04501c29769051e42783cF04dCE41440b',
+      quote: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
+    },
+  },
+}
+
+/**
+ * [SPRINT-9V V2] Resolve a composed feed for a token, or null. Defaults to mainnet (which has
+ * none → null → byte-identical). A token with a DIRECT feed should never reach here; callers
+ * consult this only after getChainlinkFeed returns null.
+ */
+export function getComposedFeed(
+  tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
+): ComposedFeed | null {
+  const feeds = COMPOSED_FEEDS_BY_CHAIN[chainId]
+  if (!feeds) return null
+  return feeds[tokenAddress.toLowerCase()] ?? null
+}
