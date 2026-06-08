@@ -8,6 +8,7 @@ import QuoteBreakdown from './QuoteBreakdown'
 import SwapButton from './SwapButton'
 import TransactionPreview from './TransactionPreview'
 import SplitReviewModal from './SplitReviewModal'
+import CowOrderReviewModal from './CowOrderReviewModal'
 import SlippageModal, { calculateAutoSlippage } from './SlippageModal'
 import SourceToggle from './SourceToggle'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
@@ -200,7 +201,7 @@ export default function SwapBox() {
   // rather than the engine-computed gasSavingsUsd — the server clamps it
   // (max $500) and computes the persisted gas_savings_usd from there.
   const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
-  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, mevSurplusActualWei, execute: executeSwap, confirmSwap, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
 
   // [SPRINT-9S S2] Direction-agnostic execution price. Derive the USD price of the NON-stable
@@ -1037,6 +1038,17 @@ export default function SwapBox() {
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
           minimumOutput={pendingSwap.minimumOutput}
           onConfirm={confirmSwap}
+          onCancel={resetSwap}
+        />
+      )}
+
+      {/* [SPRINT-9U U1] CoW order review — the EIP-712 order is frozen and shown here before any
+          wallet signature; confirmCowOrder signs exactly this payload. Chain/account switch or a
+          re-quote invalidates the frozen order (useSwap reset effects) and re-presents. */}
+      {swapStatus === 'cow_awaiting_review' && pendingCowOrder && address && (
+        <CowOrderReviewModal
+          order={pendingCowOrder}
+          onConfirm={confirmCowOrder}
           onCancel={resetSwap}
         />
       )}

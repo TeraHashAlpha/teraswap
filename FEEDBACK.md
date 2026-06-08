@@ -2328,6 +2328,43 @@ gitleaks-clean. NO `.gitleaks.toml` allowlist was added (per spec: redact/fix, d
 **Untouched (separate chore):** the dirty `contracts/order-engine/lib/openzeppelin-contracts` submodule
 (chronic test-contracts issue) — left exactly as found.
 
+## Feedback — SPRINT-9U (commits `6c0027b` CoW, `f7539af` Order Engine)
+
+Extends 9R's "no signature without a review of the exact frozen payload" to EIP-712 typed-data. Both
+parts are two-phase (build+FREEZE → awaiting-review → confirm), reuse 9R's chain/account-switch
+invalidation (ref-compared reset effects + synchronous confirm-time re-check), and are display +
+flow-control ONLY (no CoW order construction / EIP-712 domain·types / order struct / nonce / hash
+changes).
+
+### U1 — CoW order review
+- `executeCowSwap` split: Phase A freezes the EXACT `{ domain, types, message }` + orderParams into
+  `pendingCowOrder` (status `cow_awaiting_review`); `confirmCowOrder` signs that 1:1. CowOrderReviewModal
+  renders from `pendingCowOrder.message`, so modal == signed payload.
+
+### U2 — Order Engine review (single live site)
+- **Scope clarification (important):** all three order types — Limit / DCA / SL·TP — go through ONE hook,
+  `useOrderEngine.createOrder` (the panels `LimitOrderPanel`/`DCAPanel`/`ConditionalOrderPanel` all use it).
+  `useLimitOrder.ts` and `useConditionalOrder.ts` are **legacy/unused** (imported nowhere — like the dead
+  `src/lib/uniswap.ts` 9W flagged). Recommend deleting them in a cleanup chore. So U2 = one two-phase split.
+- `createOrder` now freezes the `OnChainOrder` + hash into `pendingOrder` (no record/submit); `confirmOrder`
+  signs it 1:1. The `creatingRef` "in progress" mutex moved from createOrder (now cheap/idempotent) to
+  confirmOrder. OrderReviewModal renders from the frozen struct.
+
+### Notes / follow-ups for the Architect
+- **Out of scope (creation only, per spec):** the order-engine **CANCEL / invalidate-nonce** EIP-712
+  signatures (`useOrderEngine` cancel paths) still sign without a TeraSwap review modal. Lower-risk
+  (they revoke, not commit funds), but a future sprint could extend the gate to them.
+- **targetPrice display scale:** OrderReviewModal formats `targetPrice` as `formatUnits(_, 8)` (Chainlink
+  USD scale) for the trigger/limit line. The SIGNED value is the raw `order.targetPrice` regardless of how
+  it's displayed; if any feed uses non-8-dp scaling the *label* could read oddly (the signature is still
+  faithful). Flagging in case a future feed needs a per-feed display scale.
+- **Test pattern:** existing createOrder tests were updated to the two-phase flow via a `createAndConfirm`
+  helper that runs Phase A and Phase B in SEPARATE `act()` blocks (so `result.current.confirmOrder` closes
+  over the freshly-set `pendingOrder`) — a same-act call signs nothing (stale closure).
+- **Auditor light review** was run (signing-trust: no bypass / faithful rendering / rebuild+chain-switch
+  invalidation) — see the PR.
+- **OWNER post-merge:** Preview-test, then live signature taps — a CoW (Force-MEV) swap and a Limit + DCA +
+  SL·TP order — confirming the review modal shows the exact terms and the wallet then signs them.
 ## Feedback — SPRINT-9X (commits `6e4be21` X2, `9c52dc4` X3)
 
 ### X1 — root cause (confirmed; hypothesis partly corrected)

@@ -628,3 +628,21 @@ Base token addresses → null on chainId 1). All 4 commits SSH-signed.
 | Native-ETH fix (674f57c) | ✅ `swapFeeToken = sellIsNative ? dst : src` — native ETH sentinel is never sent as swapFeeToken. Test: ETH SELL → fee on buy token (USDC); ERC-20 SELL → fee on sell token. |
 | CoW fail-soft | ✅ `isAppDataRejection` only matches status 400 + appData/partnerFee in description. Other errors (NoLiquidity, 5xx) throw immediately (no retry). On failsoft: drops partnerFee from appData, retries once. appData⇄appDataHash consistency preserved (CoW echoes the hash; parseCowOrderParams validates it; submitCowOrder signs it). |
 | Normalized quotes post-fee | ✅ 0x: `buyAmount` is already post-fee (0x deducts from sell side). CoW: `buyAmount` reflects the partnerFee deduction. Both applied to quote AND swap-build → Compare is fair. |
+
+---
+
+### Sprint 9U Light Review (2026-06-08) — EIP-712 Review Gates
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 1I.** Report: `Audits/Sprint/SPRINT-9U-AUDIT.md`.
+4 commits (6c0027b, f7539af, 4dadedc, 3186b48). All SSH-signed. 13 files, +980/−137, +20 tests.
+Principle: NO EIP-712 signature without TeraSwap review of the exact FROZEN typed-data payload.
+
+| Fix | Description | Status |
+|-----|------------|--------|
+| U1 — CoW order review gate | `executeCowSwap` = Phase A (build + freeze `PendingCowOrder` with domain/types/message → `'cow_awaiting_review'`). `confirmCowOrder` = Phase B (signs frozen payload 1:1). No `signTypedDataAsync` in Phase A. CowOrderReviewModal renders exclusively from frozen struct. | ✅ APPROVED |
+| U2 — Order Engine review gate | `createOrder` = Phase A (build + freeze `PendingOrderReview` with OnChainOrder + computedHash). `confirmOrder` = Phase B (signs frozen struct 1:1). Covers Limit, DCA, SL/TP via single hook. No `signTypedDataAsync`/`writeContractAsync` in Phase A. OrderReviewModal renders exclusively from frozen struct. | ✅ APPROVED |
+| Audit follow-up (3186b48) | Expiry-freshness guard: `confirmCowOrder` rejects if `validTo ≤ now`; `confirmOrder` rejects if `expiry ≤ now`. Prevents signing dead-on-arrival orders. Surfaces `priceFeed`/`routerDataHash` in OrderReviewModal. | ✅ APPROVED |
+| Chain/account invalidation | Both hooks: `prevChainIdRef`/`prevAddressRef` reset effects + synchronous confirm-time re-check (9R pattern). Holds independent of React effect timing. | ✅ APPROVED |
+
+Cancel/invalidate signatures un-gated (creation-only per spec) — defensive ops, not a bypass. Acceptable as follow-up.
+Scope: display/flow-control only — no EIP-712 domain/types/struct changes, no contract changes, no gate/adapter/selector changes.

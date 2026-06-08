@@ -5,6 +5,7 @@ import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
+import OrderReviewModal from './OrderReviewModal'
 import { fetchCurrentPrice } from '@/lib/limit-order-api'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 import {
@@ -52,7 +53,7 @@ const PRICE_PERCENT_PRESETS = [
 // ══════════════════════════════════════════════════════════
 export default function LimitOrderPanel() {
   const [tab, setTab] = useState<'create' | 'orders'>('create')
-  const { limitOrders, latestEvent, isSubmitting, createOrder, cancelOrder, cancelAllOrders, removeOrder } = useOrderEngine()
+  const { limitOrders, latestEvent, isSubmitting, createOrder, pendingOrder, confirmOrder, clearPendingOrder, cancelOrder, cancelAllOrders, removeOrder } = useOrderEngine()
   const { address } = useAccount()
   const chainId = useChainId()
 
@@ -104,6 +105,8 @@ export default function LimitOrderPanel() {
 
   return (
     <div className="w-full max-w-[calc(100vw-2rem)] sm:max-w-[460px]">
+      {/* [SPRINT-9U U2] EIP-712 review — no order is signed until the user confirms this frozen struct. */}
+      {pendingOrder && <OrderReviewModal order={pendingOrder} onConfirm={confirmOrder} onCancel={clearPendingOrder} />}
       {/* Sub-tabs */}
       <div className="mb-3 flex gap-1 rounded-xl border border-cream-08 bg-surface-secondary/60 p-1">
         <button

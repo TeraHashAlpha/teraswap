@@ -134,6 +134,7 @@ vi.mock('@/lib/constants', async () => {
 
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAccount } from 'wagmi'
+import { submitCowOrder, pollCowOrderStatus } from '@/lib/api'
 import { useSwap } from './useSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { parseUnits, formatUnits } from 'viem'
@@ -490,5 +491,134 @@ describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal i
     expect(result.current.pendingSwap!.routerCalldata).toBe(frozenCalldata)
     expect(result.current.pendingSwap!.rawAmountBn).toBe(frozenRaw)
     expect(result.current.pendingSwap!.swapToAmount).toBe(frozenOut)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9U U1] CoW order EIP-712 review gate — no signature without a frozen review.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [SPRINT-9U U1] CoW order review gate', () => {
+  const DEFAULT_ADDR = '0x1111111111111111111111111111111111111111'
+  const OTHER_ADDR = '0x2222222222222222222222222222222222222222'
+
+  function makeCowParams(over: Record<string, unknown> = {}) {
+    return {
+      sellToken: TOKEN_IN.address,
+      buyToken: TOKEN_OUT.address,
+      receiver: DEFAULT_ADDR,
+      sellAmount: '1000000000000000000',
+      buyAmount: '2950000000',
+      validTo: Math.floor(Date.now() / 1000) + 600, // within the 30-min cap → not mutated
+      appData: '{"version":"1.1.0","appCode":"TeraSwap"}',
+      appDataHash: '0x' + 'a'.repeat(64),
+      feeAmount: '500000000000000',
+      kind: 'sell',
+      partiallyFillable: false,
+      sellTokenBalance: 'erc20',
+      buyTokenBalance: 'erc20',
+      from: DEFAULT_ADDR,
+      quoteId: 1,
+      signingScheme: 'eip712',
+      ...over,
+    }
+  }
+  const cowResponse = (params = makeCowParams()) => ({
+    source: 'cowswap', toAmount: params.buyAmount, estimatedGas: 0, gasUsd: 0, routes: [], cowOrderParams: params,
+  })
+
+  afterEach(() => {
+    // Restore the shared useAccount default so other suites aren't polluted.
+    vi.mocked(useAccount).mockReturnValue({ address: DEFAULT_ADDR } as unknown as ReturnType<typeof useAccount>)
+  })
+
+  it('execute(cowswap) FREEZES the order for review and signs NOTHING', async () => {
+    mockSwapFetch(cowResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+
+    expect(mockSignTypedData).not.toHaveBeenCalled() // NO EIP-712 signature before review
+    const p = result.current.pendingCowOrder!
+    expect(p).toBeTruthy()
+    // The frozen message == what will be signed (field-by-field on the deterministic fields).
+    expect(p.message.sellToken.toLowerCase()).toBe(TOKEN_IN.address.toLowerCase())
+    expect(p.message.buyToken.toLowerCase()).toBe(TOKEN_OUT.address.toLowerCase())
+    expect(p.message.sellAmount).toBe(1000000000000000000n)
+    expect(p.message.buyAmount).toBe(2950000000n)
+    expect(p.message.receiver.toLowerCase()).toBe(DEFAULT_ADDR.toLowerCase())
+    expect(p.message.appData).toBe('0x' + 'a'.repeat(64)) // EIP-712 appData field = appDataHash
+    expect(typeof p.message.validTo).toBe('number')
+    expect(p.tokenIn.symbol).toBe('WETH')
+    expect(p.tokenOut.symbol).toBe('USDC')
+  })
+
+  it('confirmCowOrder signs EXACTLY the frozen payload (modal == signed) and submits', async () => {
+    mockSwapFetch(cowResponse())
+    mockSignTypedData.mockResolvedValue('0xsignature')
+    vi.mocked(submitCowOrder).mockResolvedValue('order-uid-1')
+    vi.mocked(pollCowOrderStatus).mockResolvedValue({ status: 'fulfilled', txHash: ('0x' + 'b'.repeat(64)) as `0x${string}` })
+
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    const frozenMessage = result.current.pendingCowOrder!.message
+
+    await act(async () => { await result.current.confirmCowOrder() })
+
+    expect(mockSignTypedData).toHaveBeenCalledTimes(1)
+    const signedArg = mockSignTypedData.mock.calls[0][0]
+    expect(signedArg.primaryType).toBe('Order')
+    expect(signedArg.message).toEqual(frozenMessage) // signs precisely what the modal rendered
+    expect(vi.mocked(submitCowOrder)).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.status).toBe('success'))
+  })
+
+  it('confirmCowOrder is a no-op unless status is cow_awaiting_review (no stray signature)', async () => {
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.confirmCowOrder() })
+    expect(mockSignTypedData).not.toHaveBeenCalled()
+    expect(result.current.status).toBe('idle')
+  })
+
+  it('an account switch with the review open INVALIDATES the frozen order (no sign under wallet B)', async () => {
+    mockSwapFetch(cowResponse())
+    vi.mocked(useAccount).mockReturnValue({ address: DEFAULT_ADDR } as unknown as ReturnType<typeof useAccount>)
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+
+    vi.mocked(useAccount).mockReturnValue({ address: OTHER_ADDR } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    expect(result.current.pendingCowOrder).toBeNull()
+    expect(result.current.status).toBe('idle')
+    await act(async () => { await result.current.confirmCowOrder() })
+    expect(mockSignTypedData).not.toHaveBeenCalled()
+  })
+
+  it('re-running execute(cowswap) re-freezes (rebuild → re-review) with the NEW order', async () => {
+    mockSwapFetch(cowResponse(makeCowParams({ buyAmount: '2950000000' })))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    expect(result.current.pendingCowOrder!.message.buyAmount).toBe(2950000000n)
+
+    // A re-quote with a different output → re-freeze with the new value.
+    mockSwapFetch(cowResponse(makeCowParams({ buyAmount: '2900000000' })))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.pendingCowOrder!.message.buyAmount).toBe(2900000000n))
+    expect(result.current.status).toBe('cow_awaiting_review')
+  })
+
+  it('[9U audit] confirmCowOrder refuses to sign an order whose validTo already passed (fail-safe)', async () => {
+    const past = Math.floor(Date.now() / 1000) - 100
+    mockSwapFetch(cowResponse(makeCowParams({ validTo: past })))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    await act(async () => { await result.current.confirmCowOrder() })
+    expect(mockSignTypedData).not.toHaveBeenCalled()
+    expect(result.current.status).toBe('error')
+    expect(result.current.pendingCowOrder).toBeNull()
   })
 })

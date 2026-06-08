@@ -121,6 +121,17 @@ function makeRow(overrides: Partial<OrderRow> = {}): OrderRow {
   } as OrderRow
 }
 
+// [SPRINT-9U U2] createOrder is now two-phase (Phase A freezes for review; confirmOrder signs).
+// This drives BOTH — in SEPARATE act() blocks so result.current (and the confirmOrder closure over
+// the freshly-set pendingOrder) updates between them — so the existing sign/submit assertions hold.
+async function createAndConfirm(
+  result: { current: { createOrder: (c: CreateOrderConfig) => Promise<void>; confirmOrder: () => Promise<void> } },
+  config: CreateOrderConfig = makeConfig(),
+) {
+  await act(async () => { await result.current.createOrder(config) })
+  await act(async () => { await result.current.confirmOrder() })
+}
+
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
@@ -174,9 +185,7 @@ describe('useOrderEngine — initial state', () => {
 describe('useOrderEngine — createOrder', () => {
   it('signs with the TeraSwapOrderExecutor v2 EIP-712 domain', async () => {
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     const callArg = mockSignTypedDataAsync.mock.calls[0][0] as {
       domain: { name: string; version: string; chainId: number; verifyingContract: string }
       primaryType: string
@@ -195,9 +204,7 @@ describe('useOrderEngine — createOrder', () => {
       return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
     })
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     const message = (mockSignTypedDataAsync.mock.calls[0][0] as { message: { nonce: bigint } }).message
     expect(message.nonce).toBe(42n)
   })
@@ -205,9 +212,7 @@ describe('useOrderEngine — createOrder', () => {
   it('signs an Order struct that includes routerDataHash [C-01]', async () => {
     const hash = ('0x' + 'ab'.repeat(32)) as `0x${string}`
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig({ routerDataHash: hash }))
-    })
+    await createAndConfirm(result, makeConfig({ routerDataHash: hash }))
     const message = (mockSignTypedDataAsync.mock.calls[0][0] as {
       message: { routerDataHash: string }
     }).message
@@ -216,9 +221,7 @@ describe('useOrderEngine — createOrder', () => {
 
   it('defaults dcaTotal to 1 when caller omits it', async () => {
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     const message = (mockSignTypedDataAsync.mock.calls[0][0] as {
       message: { dcaTotal: bigint }
     }).message
@@ -227,9 +230,7 @@ describe('useOrderEngine — createOrder', () => {
 
   it('marks the order active and writes the signature into Supabase', async () => {
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     expect(mockCreateOrderInSupabase).toHaveBeenCalledTimes(1)
     const supabaseArg = mockCreateOrderInSupabase.mock.calls[0][0] as { signature: string }
     expect(supabaseArg.signature).toBe(FAKE_SIG)
@@ -243,9 +244,7 @@ describe('useOrderEngine — createOrder', () => {
       }),
     )
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     expect(result.current.orders[0].status).toBe('error')
     expect(result.current.orders[0].error).toMatch(/rejected/i)
     expect(result.current.isSubmitting).toBe(false)
@@ -259,8 +258,8 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
     // rapid creates, so without local tracking both would sign nonce 5n.
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
-    await act(async () => { await result.current.createOrder(makeConfig()) })
-    await act(async () => { await result.current.createOrder(makeConfig()) })
+    await createAndConfirm(result)
+    await createAndConfirm(result)
 
     const n1 = (mockSignTypedDataAsync.mock.calls[0][0] as { message: { nonce: bigint } }).message.nonce
     const n2 = (mockSignTypedDataAsync.mock.calls[1][0] as { message: { nonce: bigint } }).message.nonce
@@ -268,20 +267,25 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
     expect(n2).toBe(6n)
   })
 
-  it('rejects concurrent create attempts with an "in progress" error', async () => {
-    // Hold the first signature open so the first create stays in-flight.
+  it('[SPRINT-9U U2] confirmOrder is mutex-guarded — a second confirm while signing does not double-submit', async () => {
+    // The "in progress" mutex moved from createOrder (now freezes) to confirmOrder (signs). Hold the
+    // first signature open; a second confirm must be a no-op (pendingOrder consumed + creatingRef),
+    // so only ONE signature/submit happens.
     let release: (s: string) => void = () => {}
     mockSignTypedDataAsync.mockReturnValueOnce(new Promise<string>(r => { release = r }))
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
+    await act(async () => { await result.current.createOrder(makeConfig()) }) // Phase A: freeze
 
     await act(async () => {
-      const p1 = result.current.createOrder(makeConfig()) // suspends at await sign
-      await Promise.resolve() // let it reach the await + set the mutex
-      await expect(result.current.createOrder(makeConfig())).rejects.toThrow(/in progress/i)
-      release(FAKE_SIG) // let the first create finish
-      await p1
+      const c1 = result.current.confirmOrder() // Phase B: in-flight sign
+      await Promise.resolve()
+      await result.current.confirmOrder() // second confirm → no-op
+      release(FAKE_SIG)
+      await c1
     })
+    expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)
+    expect(mockCreateOrderInSupabase).toHaveBeenCalledTimes(1)
   })
 
   it('resets local nonce tracking on account switch', async () => {
@@ -290,7 +294,7 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
     // local high-water mark becomes 5.
     const { result, rerender } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
-    await act(async () => { await result.current.createOrder(makeConfig()) })
+    await createAndConfirm(result)
 
     // Switch to account B whose on-chain nonce is LOWER (2). If the local mark
     // were not reset, getNextNonce would return max(local+1=6, 2)=6; after the
@@ -304,7 +308,7 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
       return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
     })
     await act(async () => { rerender() })
-    await act(async () => { await result.current.createOrder(makeConfig()) })
+    await createAndConfirm(result)
 
     const lastSign = mockSignTypedDataAsync.mock.calls.at(-1)![0] as { message: { nonce: bigint } }
     expect(lastSign.message.nonce).toBe(2n)
@@ -320,9 +324,7 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
       makeRow({ id: 'row-1', order_hash: '0x' + 'aa'.repeat(32) }),
     )
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     const orderId = result.current.orders[0].id
 
     await act(async () => {
@@ -374,9 +376,7 @@ describe('useOrderEngine — removeOrder', () => {
       makeRow({ id: 'row-1', order_hash: '0x' + 'aa'.repeat(32) }),
     )
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     const id = result.current.orders[0].id
     await act(async () => {
       await result.current.cancelOrder(id)
@@ -392,9 +392,7 @@ describe('useOrderEngine — removeOrder', () => {
 
   it('does not remove an active order — it must be cancelled on-chain first [P197]', async () => {
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     const id = result.current.orders[0].id
     expect(result.current.orders[0].status).toBe('active')
     act(() => {
@@ -506,9 +504,7 @@ describe('useOrderEngine — persistence (encrypted localStorage [P200])', () =>
     // promise chain, so this test runs on real timers + waitFor.
     vi.useRealTimers()
     const { result } = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(result)
     // The save effect encrypts + persists asynchronously.
     await waitFor(() => {
       expect(localStorage.getItem('teraswap_orders_v4')).not.toBeNull()
@@ -526,9 +522,7 @@ describe('useOrderEngine — persistence (encrypted localStorage [P200])', () =>
   it('survives unmount + remount via localStorage (Supabase yields no rows)', async () => {
     vi.useRealTimers()
     const first = renderHook(() => useOrderEngine())
-    await act(async () => {
-      await first.result.current.createOrder(makeConfig())
-    })
+    await createAndConfirm(first.result)
     const firstOrders = first.result.current.orders
     expect(firstOrders).toHaveLength(1)
     // Wait for the encrypted write to land before tearing the hook down.
@@ -604,5 +598,91 @@ describe('useOrderEngine — polling', () => {
       await Promise.resolve()
     })
     expect(mockFetchActiveOrders).toHaveBeenCalled()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9U U2] EIP-712 order review gate — no signature without a frozen review.
+// ─────────────────────────────────────────────────────────────
+describe('useOrderEngine — [SPRINT-9U U2] order review gate', () => {
+  afterEach(async () => {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: ADDRESS })
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
+  })
+
+  it('createOrder FREEZES the order for review and signs NOTHING', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(result.current.pendingOrder).toBeTruthy()
+    expect(result.current.pendingOrder!.order.amountIn).toBe(1000000000000000000n)
+    expect(result.current.pendingOrder!.config.orderType).toBe(OrderType.LIMIT)
+    expect(result.current.orders).toHaveLength(0) // no record / no submit until confirm
+    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+  })
+
+  it('confirmOrder signs EXACTLY the frozen order (modal == signed) + submits', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    const frozen = result.current.pendingOrder!.order
+    await act(async () => { await result.current.confirmOrder() })
+    expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)
+    const msg = (mockSignTypedDataAsync.mock.calls[0][0] as { message: Record<string, bigint> }).message
+    expect(msg.amountIn).toBe(frozen.amountIn)
+    expect(msg.minAmountOut).toBe(frozen.minAmountOut)
+    expect(msg.targetPrice).toBe(frozen.targetPrice)
+    expect(msg.nonce).toBe(frozen.nonce)
+    expect(result.current.orders[0].status).toBe('active')
+    expect(result.current.pendingOrder).toBeNull()
+  })
+
+  it('confirmOrder is a no-op when there is no pending review', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.confirmOrder() })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('an account switch INVALIDATES the frozen order (no sign under wallet B)', async () => {
+    const wagmi = await import('wagmi')
+    const { result, rerender } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    expect(result.current.pendingOrder).toBeTruthy()
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: '0x9999999999999999999999999999999999999999' })
+    await act(async () => { rerender() })
+    expect(result.current.pendingOrder).toBeNull()
+    await act(async () => { await result.current.confirmOrder() })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('a chain switch INVALIDATES the frozen order', async () => {
+    const wagmi = await import('wagmi')
+    const { result, rerender } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    expect(result.current.pendingOrder).toBeTruthy()
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
+    await act(async () => { rerender() })
+    expect(result.current.pendingOrder).toBeNull()
+  })
+
+  it('clearPendingOrder discards the review without signing', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    await act(async () => { result.current.clearPendingOrder() })
+    expect(result.current.pendingOrder).toBeNull()
+    await act(async () => { await result.current.confirmOrder() })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+  })
+})
+
+describe('useOrderEngine — [SPRINT-9U audit] freshness guard', () => {
+  it('confirmOrder refuses to sign an already-expired order (fail-safe, no wasted signature)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig({ expirySeconds: -100 })) }) // expiry in the past
+    expect(result.current.pendingOrder).toBeTruthy()
+    await act(async () => { await result.current.confirmOrder() })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+    expect(result.current.pendingOrder).toBeNull()
   })
 })

@@ -15,6 +15,7 @@ import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
 import { safeBigInt } from '@/lib/utils'
 import { isNativeETH, type Token } from '@/lib/tokens'
+import type { CowOrderParams } from '@/lib/adapters/types'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
@@ -78,6 +79,7 @@ export type SwapStatus =
   | 'simulating'
   | 'confirming'        // Waiting for user to review transaction preview
   | 'swapping'
+  | 'cow_awaiting_review' // [SPRINT-9U U1] CoW order frozen, awaiting the user's review before EIP-712 signing
   | 'cow_signing'       // CoW: waiting for user to sign the order
   | 'cow_pending'       // CoW: order submitted, waiting for solver to fill
   | 'success'
@@ -111,6 +113,39 @@ export interface PendingSwapData {
   swapStartTime: number
 }
 
+/**
+ * [SPRINT-9U U1] A frozen CoW order awaiting the user's review before the EIP-712 signature.
+ * Phase A (executeCowSwap) builds + validates + FREEZES the EXACT typed-data payload (domain/types/
+ * message) plus the orderParams needed to submit; Phase B (confirmCowOrder) signs THIS frozen payload
+ * 1:1 — so the review modal renders exactly what the wallet will sign. chainId/account are captured for
+ * a synchronous re-check at confirm time (alongside the chain/account-switch reset effects).
+ */
+export interface PendingCowOrder {
+  /** The EXACT EIP-712 payload that will be signed (frozen). */
+  domain: { name: string; version: string; chainId: number; verifyingContract: `0x${string}` }
+  types: Record<string, ReadonlyArray<{ name: string; type: string }>>
+  message: {
+    sellToken: `0x${string}`; buyToken: `0x${string}`; receiver: `0x${string}`
+    sellAmount: bigint; buyAmount: bigint; validTo: number; appData: `0x${string}`
+    feeAmount: bigint; kind: string; partiallyFillable: boolean
+    sellTokenBalance: string; buyTokenBalance: string
+  }
+  /** For submitCowOrder after signing (no re-fetch). */
+  orderParams: CowOrderParams
+  /** Frozen pair snapshot for faithful display + logging (immune to live token-selector changes). */
+  tokenIn: Token
+  tokenOut: Token
+  /** Raw input amount (wei string) for logging. */
+  rawAmount: string
+  /** Settlement contract the order is bound to (domain.verifyingContract) — shown in the modal. */
+  settlement: `0x${string}`
+  /** Chain + account this order was built/validated for — confirmCowOrder rejects a mismatch. */
+  chainId: number
+  account: `0x${string}`
+  /** Flow start time for duration analytics. */
+  startTime: number
+}
+
 /** [SPRINT-9O Part B] Surfaced when the best route couldn't execute and the
  *  flow auto-switched to a working source. */
 interface SwapFallbackNotice {
@@ -141,6 +176,8 @@ interface UseSwapResult {
   fallbackNotice: SwapFallbackNotice | null
   /** Prepared tx data waiting for user confirmation (non-null when status === 'confirming') */
   pendingSwap: PendingSwapData | null
+  /** [SPRINT-9U U1] Frozen CoW order awaiting review (non-null when status === 'cow_awaiting_review'). */
+  pendingCowOrder: PendingCowOrder | null
   /** [LP-05] CoW-only: actual output-token surplus over the user's expected
    *  quoted output, raw wei. Populated on successful CoW fulfillment when
    *  the solver delivered more than originally quoted (positive price
@@ -150,6 +187,8 @@ interface UseSwapResult {
   execute: (source: AggregatorName, fallbacks?: AggregatorName[]) => Promise<void>
   /** Confirm the pending swap after reviewing the transaction preview */
   confirmSwap: () => void
+  /** [SPRINT-9U U1] Phase B: sign the frozen CoW order + submit. Only runs from 'cow_awaiting_review'. */
+  confirmCowOrder: () => Promise<void>
   reset: () => void
 }
 
@@ -183,6 +222,8 @@ export function useSwap(
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
   const [simulationSkipped, setSimulationSkipped] = useState(false) // [P209] inconclusive sim → fail-open warning
   const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
+  // [SPRINT-9U U1] Frozen CoW order awaiting review before the EIP-712 signature.
+  const [pendingCowOrder, setPendingCowOrder] = useState<PendingCowOrder | null>(null)
   const [mevSurplusActualWei, setMevSurplusActualWei] = useState<bigint | null>(null)
   // [SPRINT-9O Part B] Set when a best route reverted its pre-swap sim and we auto-fell back.
   const [fallbackNotice, setFallbackNotice] = useState<SwapFallbackNotice | null>(null)
@@ -205,6 +246,7 @@ export function useSwap(
     const disconnected = !address
     if (switched || disconnected) {
       setPendingSwap(null)
+      setPendingCowOrder(null) // [SPRINT-9U U1] never sign a CoW order reviewed under wallet A under wallet B
       setStatus('idle')
       setErrorMessage(null)
       setCowOrderUid(null)
@@ -221,6 +263,7 @@ export function useSwap(
   useEffect(() => {
     if (prevChainIdRef.current !== chainId) {
       setPendingSwap(null)
+      setPendingCowOrder(null) // [SPRINT-9U U1] CoW order built for chain A must not be signed on chain B
       setStatus('idle')
       setErrorMessage(null)
       setCowOrderUid(null)
@@ -731,14 +774,8 @@ export function useSwap(
         orderParams.validTo = maxValidTo
       }
 
-      // Step 1: User signs the order via EIP-712
-      setStatus('cow_signing')
-      trackWalletActivity(address, {
-        category: 'swap', action: 'cow_signing', source: 'cowswap',
-        token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-        duration_ms: Date.now() - cowStartTime,
-      })
-
+      // [SPRINT-9U U1] Phase A ends by building the EXACT EIP-712 payload and FREEZING it for review.
+      // The signature (Phase B → confirmCowOrder) is NOT reachable from here — no signTypedData below.
       const domain = {
         name: 'Gnosis Protocol',
         version: 'v2',
@@ -778,104 +815,22 @@ export function useSwap(
         buyTokenBalance: orderParams.buyTokenBalance,
       }
 
-      const signature = await signTypedDataAsync({
+      // [SPRINT-9U U1] FREEZE the exact payload for review. confirmCowOrder signs THIS 1:1 — no
+      // re-fetch, no rebuild — so the review modal shows precisely what the wallet will sign.
+      setPendingCowOrder({
         domain,
         types,
-        primaryType: 'Order',
         message,
-      })
-
-      // Step 2: Submit signed order to CoW orderbook
-      setStatus('cow_pending')
-      const orderUid = await submitCowOrder(orderParams, signature, chainId)
-      setCowOrderUid(orderUid)
-      trackWalletActivity(address, {
-        category: 'swap', action: 'cow_submitted', source: 'cowswap',
-        token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-        order_id: orderUid,
-        duration_ms: Date.now() - cowStartTime,
-      })
-
-      // Log CoW swap (fire-and-forget)
-      logSwapToSupabase({
-        wallet: address,
-        chainId,
-        source: 'cowswap',
+        orderParams,
         tokenIn,
         tokenOut,
-        amountIn: rawAmount,
-        amountOut: orderParams.buyAmount,
-        slippage,
-        mevProtected: true,
-        feeCollected: false,
-        status: 'pending',
-        // [P104] Server derives gas_savings_usd from this advisory value
-        // (clamped to [0, 500]); clients can no longer set the persisted
-        // figure directly.
-        bestNonCowGasUsd,
-        // [P118] Quoted output before slippage — for CoW this is the signed
-        // buyAmount. Surplus on fulfillment = executedBuyAmount - buyAmount.
-        expectedOutput: orderParams.buyAmount,
+        rawAmount,
+        settlement: COW_SETTLEMENT as `0x${string}`,
+        chainId,
+        account: address,
+        startTime: cowStartTime,
       })
-
-      // Step 3: Poll for order fulfillment
-      const result = await pollCowOrderStatus(orderUid, 120_000, chainId)
-
-      if (result.status === 'fulfilled' && result.txHash) {
-        setTxHashState(result.txHash as `0x${string}`)
-        setStatus('success')
-
-        // [LP-05] Compute realised MEV surplus: solver delivered amount
-        // (executedBuyAmount on the trade) minus the buyAmount we signed
-        // for. Positive values indicate price improvement from solver
-        // competition. We swallow parse errors silently — analytics is
-        // best-effort, must never break the success path.
-        // [P117/Sprint 16B] Also persist the surplus to swaps.mev_savings_actual
-        // via the existing log-swap PATCH endpoint.
-        let cowSurplusForPatch: string | undefined
-        if (result.executedBuyAmount) {
-          try {
-            const executed = BigInt(result.executedBuyAmount)
-            const quoted = BigInt(orderParams.buyAmount)
-            const surplus = executed - quoted
-            setMevSurplusActualWei(surplus > 0n ? surplus : 0n)
-            cowSurplusForPatch = surplus > 0n ? surplus.toString() : undefined
-          } catch {
-            setMevSurplusActualWei(null)
-          }
-        }
-        updateSwapStatus({
-          txHash: result.txHash,
-          status: 'confirmed',
-          wallet: address,
-          mevSavingsActual: cowSurplusForPatch,
-        })
-
-        trackWalletActivity(address, {
-          category: 'swap', action: 'swap_confirmed', source: 'cowswap',
-          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-          success: true, tx_hash: result.txHash, order_id: orderUid,
-          duration_ms: Date.now() - cowStartTime,
-        })
-      } else if (result.status === 'cancelled') {
-        setStatus('error')
-        setErrorMessage('Order was cancelled by the protocol.')
-        trackWalletActivity(address, {
-          category: 'swap', action: 'cow_cancelled', source: 'cowswap',
-          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-          success: false, error_code: 'cancelled', order_id: orderUid,
-          duration_ms: Date.now() - cowStartTime,
-        })
-      } else {
-        setStatus('error')
-        setErrorMessage('Order expired. No solver filled it within the time limit. Try again or increase slippage.')
-        trackWalletActivity(address, {
-          category: 'swap', action: 'cow_expired', source: 'cowswap',
-          token_in: tokenIn.symbol, token_out: tokenOut.symbol,
-          success: false, error_code: 'expired', order_id: orderUid,
-          duration_ms: Date.now() - cowStartTime,
-        })
-      }
+      setStatus('cow_awaiting_review')
     } catch (err) {
       setStatus('error')
       // Detect DefiLlama price guard block in CoW flow too
@@ -909,7 +864,134 @@ export function useSwap(
         duration_ms: Date.now() - cowStartTime,
       })
     }
-  }, [tokenIn, tokenOut, address, amountIn, slippage, chainId, signTypedDataAsync])
+  }, [tokenIn, tokenOut, address, amountIn, slippage, chainId, signTypedDataAsync, bestNonCowGasUsd])
+
+  // ── [SPRINT-9U U1] Phase B: sign the FROZEN CoW order + submit (reachable ONLY via the review modal) ──
+  const confirmCowOrder = useCallback(async () => {
+    if (status !== 'cow_awaiting_review') return
+    const p = pendingCowOrder
+    if (!p || !address) return
+    // [9R defense] Reject an order reviewed under a different chain/account than the one now connected.
+    // The reset effects also close the modal; this holds the invariant synchronously regardless of timing.
+    if (p.chainId !== chainId || p.account.toLowerCase() !== address.toLowerCase()) {
+      setPendingCowOrder(null)
+      setStatus('idle')
+      return
+    }
+    // [SPRINT-9U audit] Freshness: don't waste a signature on an order whose validTo already passed
+    // while the review sat open (CoW would reject it on submit anyway). Fail-safe → re-quote.
+    if (p.message.validTo <= Math.floor(Date.now() / 1000)) {
+      setPendingCowOrder(null)
+      setStatus('error')
+      setErrorMessage('This MEV-protected order expired before you signed — please re-quote.')
+      return
+    }
+
+    setStatus('cow_signing')
+    trackWalletActivity(address, {
+      category: 'swap', action: 'cow_signing', source: 'cowswap',
+      token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol,
+      duration_ms: Date.now() - p.startTime,
+    })
+
+    try {
+      // Sign the EXACT frozen payload (no re-fetch, no rebuild).
+      const signature = await signTypedDataAsync({
+        domain: p.domain,
+        types: p.types,
+        primaryType: 'Order',
+        message: p.message,
+      })
+
+      // Submit signed order to CoW orderbook
+      setStatus('cow_pending')
+      const orderUid = await submitCowOrder(p.orderParams, signature, p.chainId)
+      setCowOrderUid(orderUid)
+      trackWalletActivity(address, {
+        category: 'swap', action: 'cow_submitted', source: 'cowswap',
+        token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol,
+        order_id: orderUid,
+        duration_ms: Date.now() - p.startTime,
+      })
+
+      logSwapToSupabase({
+        wallet: address,
+        chainId: p.chainId,
+        source: 'cowswap',
+        tokenIn: p.tokenIn,
+        tokenOut: p.tokenOut,
+        amountIn: p.rawAmount,
+        amountOut: p.orderParams.buyAmount,
+        slippage,
+        mevProtected: true,
+        feeCollected: false,
+        status: 'pending',
+        bestNonCowGasUsd,
+        expectedOutput: p.orderParams.buyAmount,
+      })
+
+      // Poll for order fulfillment
+      const result = await pollCowOrderStatus(orderUid, 120_000, p.chainId)
+      if (result.status === 'fulfilled' && result.txHash) {
+        setTxHashState(result.txHash as `0x${string}`)
+        setStatus('success')
+        let cowSurplusForPatch: string | undefined
+        if (result.executedBuyAmount) {
+          try {
+            const executed = BigInt(result.executedBuyAmount)
+            const quoted = BigInt(p.orderParams.buyAmount)
+            const surplus = executed - quoted
+            setMevSurplusActualWei(surplus > 0n ? surplus : 0n)
+            cowSurplusForPatch = surplus > 0n ? surplus.toString() : undefined
+          } catch {
+            setMevSurplusActualWei(null)
+          }
+        }
+        updateSwapStatus({ txHash: result.txHash, status: 'confirmed', wallet: address, mevSavingsActual: cowSurplusForPatch })
+        trackWalletActivity(address, {
+          category: 'swap', action: 'swap_confirmed', source: 'cowswap',
+          token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol,
+          success: true, tx_hash: result.txHash, order_id: orderUid,
+          duration_ms: Date.now() - p.startTime,
+        })
+      } else if (result.status === 'cancelled') {
+        setStatus('error')
+        setErrorMessage('Order was cancelled by the protocol.')
+        trackWalletActivity(address, { category: 'swap', action: 'cow_cancelled', source: 'cowswap', token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol, success: false, error_code: 'cancelled', order_id: orderUid, duration_ms: Date.now() - p.startTime })
+      } else {
+        setStatus('error')
+        setErrorMessage('Order expired. No solver filled it within the time limit. Try again or increase slippage.')
+        trackWalletActivity(address, { category: 'swap', action: 'cow_expired', source: 'cowswap', token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol, success: false, error_code: 'expired', order_id: orderUid, duration_ms: Date.now() - p.startTime })
+      }
+    } catch (err) {
+      setStatus('error')
+      if (err instanceof PriceGuardError) {
+        setPriceGuardBlocked(true)
+        setPriceGuardDeviation(err.deviation)
+      }
+      let cowErrMsg = 'Unknown error'
+      let cowErrCode = 'unknown'
+      if (err instanceof Error) {
+        const msg = err.message.toLowerCase()
+        if (msg.includes('user rejected') || msg.includes('user denied')) {
+          cowErrMsg = 'Signature rejected in wallet.'; cowErrCode = 'user_rejected'
+        } else if (msg.includes('funds worth at least') || msg.includes('insufficient balance')) {
+          cowErrMsg = `Insufficient balance or allowance for this CoW swap. Ensure you have enough ${p.tokenIn.symbol} and have approved the CoW VaultRelayer.`; cowErrCode = 'insufficient_balance'
+        } else if (msg.includes('insufficient') && msg.includes('allowance')) {
+          cowErrMsg = err.message; cowErrCode = 'insufficient_allowance'
+        } else {
+          cowErrMsg = err.message.slice(0, 200); cowErrCode = 'cow_error'
+        }
+      }
+      setErrorMessage(cowErrMsg)
+      trackWalletActivity(address, {
+        category: 'swap', action: 'swap_rejected', source: 'cowswap',
+        token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol,
+        success: false, error_code: cowErrCode, error_msg: cowErrMsg.slice(0, 200),
+        duration_ms: Date.now() - p.startTime,
+      })
+    }
+  }, [status, pendingCowOrder, address, chainId, slippage, bestNonCowGasUsd, signTypedDataAsync])
 
   // ── Main execute dispatcher ──
   const execute = useCallback(async (source: AggregatorName, fallbacks: AggregatorName[] = []) => {
@@ -1125,12 +1207,13 @@ export function useSwap(
     setSimulationPassed(null)
     setSimulationSkipped(false)
     setPendingSwap(null)
+    setPendingCowOrder(null) // [SPRINT-9U U1]
     setMevSurplusActualWei(null)
     setFallbackNotice(null)
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, mevSurplusActualWei, execute, confirmSwap, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute, confirmSwap, confirmCowOrder, reset }
 }
 
 function parseWagmiError(error: Error): string {

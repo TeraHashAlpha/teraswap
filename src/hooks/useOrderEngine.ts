@@ -230,6 +230,20 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
 }
 
 // ── Hook ─────────────────────────────────────────────────
+/**
+ * [SPRINT-9U U2] A frozen autonomous-order awaiting the user's review before the EIP-712 signature.
+ * createOrder (Phase A) builds + FREEZES this; confirmOrder (Phase B) signs the SAME struct 1:1. The
+ * review modal renders exclusively from it, so modal == signed payload. chainId/account are captured
+ * for a synchronous re-check at confirm time (alongside the chain/account-switch reset effects).
+ */
+export interface PendingOrderReview {
+  order: OnChainOrder
+  config: CreateOrderConfig
+  computedHash: `0x${string}`
+  chainId: number
+  account: `0x${string}`
+}
+
 export function useOrderEngine() {
   const { address } = useAccount()
   const chainId = useChainId()
@@ -237,6 +251,8 @@ export function useOrderEngine() {
   const { writeContractAsync } = useWriteContract()
 
   const [orders, setOrders] = useState<AutonomousOrder[]>([])
+  // [SPRINT-9U U2] Frozen order awaiting review before the EIP-712 signature.
+  const [pendingOrder, setPendingOrder] = useState<PendingOrderReview | null>(null)
   const [latestEvent, setLatestEvent] = useState<OrderEngineEvent | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -252,6 +268,20 @@ export function useOrderEngine() {
   // `creatingRef` is a mutex that serialises createOrder calls.
   const localNonceRef = useRef<bigint | null>(null)
   const creatingRef = useRef(false)
+
+  // [SPRINT-9U U2 / 9R defense] Discard a pending review on chain/account switch — never sign an
+  // order reviewed under chain/account A while connected as B. Ref comparison fires only on a change.
+  const prevOrderChainRef = useRef(chainId)
+  useEffect(() => {
+    if (prevOrderChainRef.current !== chainId) setPendingOrder(null)
+    prevOrderChainRef.current = chainId
+  }, [chainId])
+  const prevOrderAddrRef = useRef(address)
+  useEffect(() => {
+    const prev = prevOrderAddrRef.current
+    if ((prev && address && prev !== address) || (prev && !address)) setPendingOrder(null)
+    prevOrderAddrRef.current = address
+  }, [address])
 
   // ── Read current nonce + invalidated nonce from contract ──
   const { data: currentNonce, refetch: refetchNonce } = useReadContract({
@@ -411,19 +441,9 @@ export function useOrderEngine() {
     return unsub
   }, [address])
 
-  // ── Create + sign + submit order ───────────────────────
+  // ── [SPRINT-9U U2] Create order = Phase A: build + FREEZE for review (NO signature here) ────────
   const createOrder = useCallback(async (config: CreateOrderConfig) => {
     if (!address) throw new Error('Wallet not connected')
-
-    // [P213/FULL-M-06] Serialise creates — two concurrent calls would read the
-    // same nonce before refetch and collide.
-    if (creatingRef.current) {
-      throw new Error('Order creation in progress — please wait')
-    }
-    creatingRef.current = true
-
-    setIsSubmitting(true)
-    const orderId = crypto.randomUUID()
 
     // [P213/FULL-M-06] Session-tracked nonce (max of on-chain and local+1)
     // instead of the raw wagmi read, so rapid sequential creates don't collide.
@@ -453,7 +473,35 @@ export function useOrderEngine() {
     // Compute bytes32 orderHash client-side (matches contract's getOrderHash — no RPC needed)
     const computedHash = computeOrderHash(order)
 
-    // Create local record
+    // [SPRINT-9U U2] FREEZE for review — confirmOrder signs THIS exact struct 1:1 (no rebuild).
+    // Re-calling createOrder (a re-config / re-quote) overwrites the frozen order → re-review.
+    setPendingOrder({ order, config, computedHash, chainId, account: address })
+  }, [address, chainId, getNextNonce])
+
+  // ── [SPRINT-9U U2] Phase B: sign the FROZEN order + submit (reachable ONLY via the review modal) ──
+  const confirmOrder = useCallback(async () => {
+    const p = pendingOrder
+    if (!p || !address) return
+    // [9R defense] Reject a review built under a different chain/account than the one now connected.
+    // The reset effects also clear it; this holds the invariant synchronously, independent of timing.
+    if (p.chainId !== chainId || p.account.toLowerCase() !== address.toLowerCase()) {
+      setPendingOrder(null)
+      return
+    }
+    // [SPRINT-9U audit] Freshness: don't sign an order whose expiry already passed while the review
+    // sat open (it could never trigger). Fail-safe → discard + surface an error so the user recreates.
+    if (Number(p.order.expiry) <= Math.floor(Date.now() / 1000)) {
+      setPendingOrder(null)
+      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: 'Order expired before signing — please recreate it.' })
+      return
+    }
+    if (creatingRef.current) return
+    creatingRef.current = true
+    setPendingOrder(null) // consume the review
+    setIsSubmitting(true)
+
+    const { order, config, computedHash } = p
+    const orderId = crypto.randomUUID()
     const typeLabel = config.orderType === OrderType.LIMIT ? 'limit'
       : config.orderType === OrderType.STOP_LOSS ? 'stop_loss' : 'dca'
 
@@ -472,7 +520,7 @@ export function useOrderEngine() {
       dcaTotal: config.dcaTotal ?? 0,
       createdAt: Date.now(),
       executedAt: null,
-      expiresAt: Number(expiry) * 1000,
+      expiresAt: Number(order.expiry) * 1000,
       error: null,
       amountOut: null,
       txHash: null,
@@ -489,7 +537,7 @@ export function useOrderEngine() {
         verifyingContract: ORDER_EXECUTOR_ADDRESS,
       } as const
 
-      // Sign order
+      // Sign the FROZEN order
       const signature = await signTypedDataAsync({
         domain,
         types: ORDER_EIP712_TYPES,
@@ -525,8 +573,8 @@ export function useOrderEngine() {
         targetPrice: config.targetPrice,
         priceFeed: config.priceFeed,
         priceCondition: config.condition === PriceCondition.ABOVE ? 'above' : 'below',
-        expiry: new Date(Number(expiry) * 1000),
-        nonce: Number(nonce),
+        expiry: new Date(Number(order.expiry) * 1000),
+        nonce: Number(order.nonce),
         router: config.router,
         dcaInterval: config.dcaInterval ?? null,
         dcaTotal: config.dcaTotal ?? null,
@@ -584,7 +632,10 @@ export function useOrderEngine() {
       setIsSubmitting(false)
       creatingRef.current = false // [P213] release the create mutex
     }
-  }, [address, chainId, signTypedDataAsync, getNextNonce, refetchNonce])
+  }, [pendingOrder, address, chainId, signTypedDataAsync, refetchNonce])
+
+  // [SPRINT-9U U2] Cancel a pending review without signing (modal "Cancel").
+  const clearPendingOrder = useCallback(() => setPendingOrder(null), [])
 
   // ── Cancel order (on-chain + Supabase) ─────────────────
   const cancelOrder = useCallback(async (orderId: string) => {
@@ -744,6 +795,10 @@ export function useOrderEngine() {
     isLoading,
     currentNonce: currentNonce ? BigInt(currentNonce.toString()) : 0n,
     createOrder,
+    // [SPRINT-9U U2] EIP-712 review gate
+    pendingOrder,
+    confirmOrder,
+    clearPendingOrder,
     cancelOrder,
     cancelAllOrders,
     removeOrder,
