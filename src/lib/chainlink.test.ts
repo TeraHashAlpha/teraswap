@@ -15,7 +15,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
 import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
-import { getComposedFeed } from './chains/chainlink-feeds'
+import { getComposedFeed, getExchangeRatePair } from './chains/chainlink-feeds'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
@@ -600,5 +600,21 @@ describe('[SPRINT-9V 9V-M-01] cbETH base leg = the CBETH/ETH MARKET feed (not th
     const r = await fetchChainlinkPriceRaw(CBETH, 8453)
     expect(r).not.toBeNull()
     expect(r!.price).toBeCloseTo(1907.27, 1) // 1.1344 × 1681.30 ≈ $1907 — matches the live direct CBETH/USD feed
+  })
+})
+
+describe('getExchangeRatePair [SPRINT-9W-oracle]', () => {
+  const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  it('cbETH on Base → {market 0x806b…, exchangeRate 0x868a…} (data-driven, on-chain verified)', () => {
+    const p = getExchangeRatePair(CBETH, 8453)
+    expect(p).not.toBeNull()
+    expect(p!.symbol).toBe('cbETH')
+    expect(p!.market.toLowerCase()).toBe('0x806b4ac04501c29769051e42783cf04dce41440b')
+    expect(p!.exchangeRate.toLowerCase()).toBe('0x868a501e68f3d1e89cfc0d22f6b22e8dabce5f04')
+  })
+  it('non-cbETH tokens and mainnet → null (no depeg check; mainnet unaffected)', () => {
+    expect(getExchangeRatePair('0x4200000000000000000000000000000000000006', 8453)).toBeNull() // Base WETH
+    expect(getExchangeRatePair(CBETH, 1)).toBeNull()  // mainnet has no exchange-rate pairs
+    expect(getExchangeRatePair(CBETH)).toBeNull()     // default chain = mainnet
   })
 })

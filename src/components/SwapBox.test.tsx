@@ -32,6 +32,7 @@ const useQuoteMock = vi.fn()
 const useSwapMock = vi.fn()
 const useApprovalMock = vi.fn()
 const useChainlinkPriceMock = vi.fn()
+const useDepegCheckMock = vi.fn()
 const useSplitRouteMock = vi.fn()
 const useSplitSwapMock = vi.fn()
 const useSwapHistoryMock = vi.fn()
@@ -42,6 +43,7 @@ vi.mock('@/hooks/useQuote', () => ({ useQuote: (...a: unknown[]) => useQuoteMock
 vi.mock('@/hooks/useSwap', () => ({ useSwap: (...a: unknown[]) => useSwapMock(...a) }))
 vi.mock('@/hooks/useApproval', () => ({ useApproval: (...a: unknown[]) => useApprovalMock(...a) }))
 vi.mock('@/hooks/useChainlinkPrice', () => ({ useChainlinkPrice: (...a: unknown[]) => useChainlinkPriceMock(...a) }))
+vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => useDepegCheckMock(...a) }))
 vi.mock('@/hooks/useSplitRoute', () => ({ useSplitRoute: (...a: unknown[]) => useSplitRouteMock(...a) }))
 vi.mock('@/hooks/useSplitSwap', () => ({ useSplitSwap: (...a: unknown[]) => useSplitSwapMock(...a) }))
 vi.mock('@/hooks/useSwapHistory', () => ({ useSwapHistory: () => useSwapHistoryMock() }))
@@ -163,6 +165,8 @@ function setHookDefaults() {
     message: null,
     oracleUnavailable: false,
   })
+  // [SPRINT-9W-oracle] default: no depeg verdict (non-cbETH / fail-open) → no friction.
+  useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0, symbol: '', message: null })
   useSplitRouteMock.mockReturnValue({
     splitResult: null,
     analyzing: false,
@@ -483,6 +487,103 @@ describe('SwapBox — J1 price-impact informed consent', () => {
     expect(btn.getAttribute('data-blocked')).toBe('true')
     expect(btn.getAttribute('data-reason')).toBe('extreme')
     expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [SPRINT-9W-oracle] cbETH depeg circuit-breaker — a SECOND, independent verdict from
+// market-vs-exchange-rate divergence. Mirrors the 9J consent UX. useDepegCheck is mocked, so the
+// verdict drives the UI directly (the staleness/integrity → 'ok' fail-open is unit-tested in
+// depeg-gate.test.ts). HEALTHY_OK on the price-impact gate keeps depeg the only active verdict.
+// ─────────────────────────────────────────────────────────────
+const DEPEG_CONSENT_5 = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.' }
+const DEPEG_BLOCK_12 = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.' }
+const DEPEG_OK = { mode: 'ok' as const, divergence: 0.003, symbol: 'cbETH', message: null }
+
+describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
+  it('market ≈ ER (0.3%) → no friction', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useDepegCheckMock.mockReturnValue(DEPEG_OK)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+  })
+
+  it('5% off ER → informed CONSENT (depeg-consent) with a checkbox; accepting unblocks', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useDepegCheckMock.mockReturnValue(DEPEG_CONSENT_5)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    // Fresh quote clears the stale flag so the consent banner + checkbox render.
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('depeg-consent')
+    const checkbox = screen.getByRole('checkbox')
+    await act(async () => { fireEvent.click(checkbox) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+  })
+
+  it('consent auto-REVOKES when divergence worsens 5% → 6% (beyond accepted + 0.5%)', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useDepegCheckMock.mockReturnValue(DEPEG_CONSENT_5)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    await act(async () => { fireEvent.click(screen.getByRole('checkbox')) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+    // Divergence worsens to 6% (same trade) — accepted 5% +0.5% tolerance no longer covers it.
+    useDepegCheckMock.mockReturnValue({ ...DEPEG_CONSENT_5, divergence: 0.06 })
+    useQuoteMock.mockReturnValue(quoteMeta('2930000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('depeg-consent')
+  })
+
+  it('12% off ER → HARD block (depeg-block), no consent checkbox', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useDepegCheckMock.mockReturnValue(DEPEG_BLOCK_12)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('depeg-block')
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('either feed stale → hook returns ok → NO false block (falls to multi-source path)', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    // priceFromValidRound nulls a stale leg → evaluateDepeg → 'ok' (unit-tested in depeg-gate.test).
+    useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0, symbol: 'cbETH', message: null })
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('non-cbETH swaps are unchanged (default no-pair verdict adds no friction)', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    // setHookDefaults leaves useDepegCheck = { mode:'ok', symbol:'' } (no exchange-rate pair).
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
   })
 })
 

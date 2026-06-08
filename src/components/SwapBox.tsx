@@ -21,6 +21,7 @@ import Permit2EducationModal from '@/components/Permit2EducationModal'
 import TokenAddressBadge from '@/components/TokenAddressBadge'
 import DigitRoller from '@/components/DigitRoller'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
+import { useDepegCheck } from '@/hooks/useDepegCheck'
 import { evaluatePriceGate } from '@/lib/price-gate'
 import { evaluatePairOracle } from '@/lib/chainlink'
 import InfoTooltip from '@/components/InfoTooltip'
@@ -33,7 +34,7 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
@@ -94,6 +95,11 @@ export default function SwapBox() {
   // boolean) so consent auto-arms again if a quote refresh escalates the impact
   // beyond what the user accepted. Reset to null on every trade-parameter change.
   const [acceptedDeviation, setAcceptedDeviation] = useState<number | null>(null)
+
+  // [SPRINT-9W-oracle] Informed consent for a cbETH depeg (market-vs-exchange-rate divergence) — a
+  // SECOND, independent verdict alongside acceptedDeviation. Same shape (store the ACCEPTED
+  // divergence so consent auto-arms again if it worsens) and same reset-on-trade-param-change rule.
+  const [acceptedDepeg, setAcceptedDepeg] = useState<number | null>(null)
 
   const handleSourceToggle = useCallback((source: string) => {
     setExcludedSources(prev => {
@@ -156,6 +162,7 @@ export default function SwapBox() {
     setTokenOut((t) => remapTokenToChain(t, activeChainId))
     // [review F1] A chain switch is a new trade — drop any prior price-impact consent.
     setAcceptedDeviation(null)
+    setAcceptedDepeg(null) // [SPRINT-9W-oracle] drop depeg consent too
   }, [activeChainId])
   // [P223] Swap activation guard. A chain is "coming soon" until its
   // FeeCollector is deployed (config.contracts.feeCollector !== null). Mainnet
@@ -231,6 +238,9 @@ export default function SwapBox() {
   // [SPRINT-9S S2] Direction-agnostic oracle verdict over BOTH tokens' feeds — symmetric, and
   // warns naming whichever side lacks a feed. Drives the price gate + the QuoteBreakdown notice.
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
+  // [SPRINT-9W-oracle] cbETH depeg circuit-breaker verdict (market-vs-ER divergence). mode 'ok'
+  // when neither token has an exchange-rate pair, or when either feed is stale (fail-open).
+  const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
   const { splitResult, analyzing: splitAnalyzing, useSplit, toggleSplit } =
@@ -470,6 +480,7 @@ export default function SwapBox() {
       setDisplayAmountIn(formatWithSeparator(clean))
       setPriceCheckStale(true)
       setAcceptedDeviation(null)
+      setAcceptedDepeg(null) // [SPRINT-9W-oracle]
       if (swapStatus !== 'idle') resetSwap()
       if (splitSwapStatus !== 'idle') resetSplitSwap()
     }
@@ -481,6 +492,7 @@ export default function SwapBox() {
     setDisplayAmountIn('')
     setPriceCheckStale(true)
     setAcceptedDeviation(null)
+    setAcceptedDepeg(null) // [SPRINT-9W-oracle]
     resetSwap()
     resetSplitSwap()
   }
@@ -489,6 +501,7 @@ export default function SwapBox() {
     setDisplayAmountIn(formatWithSeparator(value))
     setPriceCheckStale(true)
     setAcceptedDeviation(null)
+    setAcceptedDepeg(null) // [SPRINT-9W-oracle]
   }
 
   // Clear the stale flag whenever a fresh quote (`meta`) resolves — at that
@@ -521,6 +534,16 @@ export default function SwapBox() {
   // Security-class block (Chainlink gate), as opposed to the oracle-unavailable gate.
   const priceGateBlocked = oracleIntegrityBlocked || priceImpactBlocking
 
+  // [SPRINT-9W-oracle] cbETH depeg circuit-breaker — a SECOND, independent verdict. Mirrors the 9J
+  // consent state machine: WARN..BLOCK band → informed consent (auto-revokes if divergence worsens
+  // past accepted+tolerance); ≥BLOCK → hard block (no click-through). 'ok' (incl. a stale feed)
+  // adds no friction. The swap-price reference is unchanged.
+  const depegConsentNeeded = depegCheck.mode === 'consent'
+  const depegAccepted = acceptedDepeg != null && depegCheck.divergence <= acceptedDepeg + DEPEG_CONSENT_TOLERANCE
+  const depegConsentBlocking = depegConsentNeeded && !depegAccepted
+  const depegHardBlocked = depegCheck.mode === 'block'
+  const depegBlocking = depegHardBlocked || depegConsentBlocking
+
   // ── Security: block large swaps on tokens without Chainlink oracle ──
   // Estimate USD value of the swap input (only reliable when input is a stablecoin or ETH)
   const estimatedInputUsd = useMemo(() => {
@@ -536,7 +559,7 @@ export default function SwapBox() {
   const oracleUnavailable = pairCheck.oracleUnavailable
   const oracleWarnThreshold = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_WARN_USD
   const oracleBlocked = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_BLOCK_USD
-  const anyBlocked = priceGateBlocked || oracleBlocked
+  const anyBlocked = priceGateBlocked || oracleBlocked || depegBlocking
 
   const handleApproveAndSwap = useCallback(async () => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -607,7 +630,7 @@ export default function SwapBox() {
               onChange={(e) => handleAmountChange(e.target.value)}
               className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-cream outline-none placeholder:text-cream-35 sm:text-2xl"
             />
-            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenOut?.address} />
+            <TokenSelector selected={tokenIn} onSelect={(t) => { setTokenIn(t); setAcceptedDeviation(null); setAcceptedDepeg(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenOut?.address} />
           </div>
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between px-1 text-xs text-cream-35">
@@ -644,7 +667,7 @@ export default function SwapBox() {
                   ? <span className="inline-block animate-pulse text-cream-35">...</span>
                   : null}
             </span>
-            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenIn?.address} />
+            <TokenSelector selected={tokenOut} onSelect={(t) => { setTokenOut(t); setAcceptedDeviation(null); setAcceptedDepeg(null); resetSwap(); resetSplitSwap() }} disabledAddress={tokenIn?.address} />
           </div>
           {shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size) && (
             <div className="mt-1 flex items-center justify-between px-1">
@@ -828,6 +851,33 @@ export default function SwapBox() {
             </label>
           </div>
         )}
+        {/* [SPRINT-9W-oracle] cbETH depeg HARD block — market diverged ≥10% from the exchange
+            rate: likely a depeg or a manipulated market feed. No click-through. */}
+        {depegHardBlocked && !priceCheckStale && (
+          <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <span className="font-semibold">&#9888; Swap blocked — {depegCheck.symbol} depeg.</span>{' '}
+            {depegCheck.message}
+            <span className="mt-1 block text-[10px] text-danger/80">
+              The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+            </span>
+          </div>
+        )}
+        {/* [SPRINT-9W-oracle] cbETH depeg informed-consent — 2–10% off the exchange rate. The user
+            must explicitly accept; consent auto-revokes if the divergence worsens (accepted+0.5%). */}
+        {depegConsentNeeded && !priceCheckStale && (
+          <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <span className="font-semibold">&#9888; Possible depeg:</span> {depegCheck.message}
+            <label className="mt-2 flex items-center gap-2 text-[11px] text-warning/90">
+              <input
+                type="checkbox"
+                checked={depegAccepted}
+                onChange={(e) => setAcceptedDepeg(e.target.checked ? depegCheck.divergence : null)}
+                className="h-3.5 w-3.5 accent-warning"
+              />
+              I understand {depegCheck.symbol} may be depegged and want to proceed.
+            </label>
+          </div>
+        )}
         {/* Oracle unavailable — tiered warnings */}
         {oracleUnavailable && hasAmount && meta && !priceGateBlocked && (
           <>
@@ -873,7 +923,7 @@ export default function SwapBox() {
             "Switch to Ethereum", and the banner + handler guard cover the rest —
             so mixing !chainActive into priceBlocked only created a blockReason
             mismatch with no observable effect. */}
-        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={depegHardBlocked ? 'depeg-block' : isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : depegConsentBlocking ? 'depeg-consent' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* [P95] Subtle gasless nudge — shown below the swap button when a
             non-CoW route is currently selected but the engine has flagged

@@ -178,6 +178,7 @@ const useQuoteMock = vi.fn()
 const useSwapMock = vi.fn()
 const useApprovalMock = vi.fn()
 const useChainlinkPriceMock = vi.fn()
+const useDepegCheckMock = vi.fn()
 const useSplitRouteMock = vi.fn()
 const useSplitSwapMock = vi.fn()
 const useSwapHistoryMock = vi.fn()
@@ -188,6 +189,7 @@ vi.mock('@/hooks/useQuote', () => ({ useQuote: (...a: unknown[]) => useQuoteMock
 vi.mock('@/hooks/useSwap', () => ({ useSwap: (...a: unknown[]) => useSwapMock(...a) }))
 vi.mock('@/hooks/useApproval', () => ({ useApproval: (...a: unknown[]) => useApprovalMock(...a) }))
 vi.mock('@/hooks/useChainlinkPrice', () => ({ useChainlinkPrice: (...a: unknown[]) => useChainlinkPriceMock(...a) }))
+vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => useDepegCheckMock(...a) }))
 vi.mock('@/hooks/useSplitRoute', () => ({ useSplitRoute: (...a: unknown[]) => useSplitRouteMock(...a) }))
 vi.mock('@/hooks/useSplitSwap', () => ({ useSplitSwap: (...a: unknown[]) => useSplitSwapMock(...a) }))
 vi.mock('@/hooks/useSwapHistory', () => ({ useSwapHistory: () => useSwapHistoryMock() }))
@@ -248,6 +250,7 @@ function setSwapHookDefaults() {
   useChainlinkPriceMock.mockReturnValue({
     chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false,
   })
+  useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0, symbol: '', message: null }) // [SPRINT-9W-oracle]
   useSplitRouteMock.mockReturnValue({ splitResult: null, analyzing: false, splitRecommended: false, useSplit: false, toggleSplit: vi.fn() })
   useSplitSwapMock.mockReturnValue({ status: 'idle', legs: [], completedLegs: 0, totalLegs: 0, errorMessage: null, execute: vi.fn(), reset: vi.fn() })
   useSwapHistoryMock.mockReturnValue({ addRecord: vi.fn(), history: [] })
