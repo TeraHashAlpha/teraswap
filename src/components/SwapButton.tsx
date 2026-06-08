@@ -20,12 +20,16 @@ interface Props {
    * price-impact consent not yet given) — the button MUST stay disabled. */
   priceBlocked: boolean
   /** [SPRINT-9J J1] Block reason:
-   *  - 'price-impact' → healthy oracle, high price impact; user must tick the
+   *  - 'price-impact'  → healthy oracle, high price impact; user must tick the
    *    informed-consent checkbox above (recoverable, NOT an indefinite pause)
-   *  - 'oracle-stale' → oracle integrity failure (stale/invalid); hard block
-   *  - 'extreme'      → deviation beyond plausible price impact; hard block
-   *  - 'oracle'       → no Chainlink feed + high-value swap; hard block */
-  blockReason?: 'price-impact' | 'oracle-stale' | 'extreme' | 'oracle'
+   *  - 'oracle-stale'  → oracle integrity failure (stale/invalid); hard block
+   *  - 'extreme'       → deviation beyond plausible price impact; hard block
+   *  - 'oracle'        → no Chainlink feed + high-value swap; hard block
+   *  [SPRINT-9W-oracle]:
+   *  - 'depeg-consent' → asset trading 2–10% off its exchange rate; recoverable
+   *    via the depeg consent checkbox (warning, like price-impact)
+   *  - 'depeg-block'   → asset ≥10% off its exchange rate (depeg/manipulation); hard block */
+  blockReason?: 'price-impact' | 'oracle-stale' | 'extreme' | 'oracle' | 'depeg-consent' | 'depeg-block'
   onApprove: () => void
   onSwap: () => void
 }
@@ -67,12 +71,18 @@ export default function SwapButton({
       // blocks stay hard errors.
       const msg = blockReason === 'price-impact'
         ? 'Confirm price impact to swap'
-        : blockReason === 'oracle'
-          ? 'No oracle — swap blocked'
-          : blockReason === 'extreme'
-            ? 'Price deviation too high — blocked'
-            : 'Oracle data unsafe — swap blocked'
-      return { text: msg, disabled: true, onClick: () => {}, variant: blockReason === 'price-impact' ? 'warning' : 'error' }
+        : blockReason === 'depeg-consent'
+          ? 'Confirm depeg risk to swap'
+          : blockReason === 'depeg-block'
+            ? 'Asset depegged — swap blocked'
+            : blockReason === 'oracle'
+              ? 'No oracle — swap blocked'
+              : blockReason === 'extreme'
+                ? 'Price deviation too high — blocked'
+                : 'Oracle data unsafe — swap blocked'
+      // 'price-impact' & 'depeg-consent' are recoverable (checkbox) → warning; the rest are hard.
+      const recoverable = blockReason === 'price-impact' || blockReason === 'depeg-consent'
+      return { text: msg, disabled: true, onClick: () => {}, variant: recoverable ? 'warning' : 'error' }
     }
     if (approvalStatus === 'approving_permit2')
       return { text: 'Approving...', disabled: true, onClick: () => {}, variant: 'loading' }
