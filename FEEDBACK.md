@@ -2433,3 +2433,28 @@ changes).
   USDC/USD (2h valid / 37h stale). The UI hook tests still use mainnet feeds (global fallback), so
   there is no test asserting the hook applies the 36h threshold for a Base feed. Low risk (single
   shared derivation, both consumers call it), but a Base-feed hook test would close the loop.
+
+## Feedback — SPRINT-9V 9V-M-01 (cbETH base-leg verification)
+
+### Surprising finding — the audit's address concern resolved the opposite way + a bigger discovery
+On-chain `cast` (Base mainnet, 2026-06-08) shows Base has THREE live cbETH feeds, all v6 EACAggregatorProxy:
+- `0x806b4Ac0…` "CBETH / ETH" 18 dp, agg `0x53fDcAb0…`, latest 1.1344 — the MARKET-price feed.
+- `0x868a501e…` "cbETH-ETH Exchange Rate" 18 dp, agg `0x4c78deA2…`, latest 1.1320 — the redemption rate.
+- `0xd7818272…` "CBETH / USD" 8 dp, agg `0x71E021bc…`, latest $1906.86 — a DIRECT cbETH/USD feed.
+
+1. **The base leg `0x806b…` was already correct.** It IS in the reference-data-directory (as
+   "CBETH / ETH"); the audit's "absent" was a match against the *Exchange Rate* entry (`0x868a…`),
+   which is a different feed. Decision (Architect, 9V-M-01): KEEP `0x806b…` (the market feed). The
+   Exchange-Rate feed is manipulation-resistant but BLIND to market depeg — wrong semantics for a
+   swap price guard (it would over-value a depegged cbETH). No address change; comment added.
+
+2. **The V2 premise was wrong — a direct CBETH/USD feed exists** (`0xd7818272…`, 8 dp, 20-min
+   heartbeat). The composition still yields a CORRECT price (market cbETH/ETH × ETH/USD ≈ the direct
+   USD feed), but a direct feed would be simpler, tighter (20-min vs the composition's 24-h stalest
+   leg), and have fewer failure modes. **Recommend a follow-up sprint** to switch cbETH to the direct
+   feed (out of scope here: the 9V-M-01 task Do-NOT forbids changing the base×quote architecture).
+
+### Verification method note
+The reference-data-directory alone was insufficient/misleading here (three same-asset feeds, easy to
+mismatch by name). On-chain `description()`/`decimals()`/`aggregator()` via `cast` was the decisive
+source — worth making the default for any future feed-address audit, not the directory UI.

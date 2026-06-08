@@ -15,6 +15,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
 import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
+import { getComposedFeed } from './chains/chainlink-feeds'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
@@ -573,5 +574,31 @@ describe('[SPRINT-9V V2] composed cbETH/USD on Base = cbETH/ETH × ETH/USD', () 
     const USDBC = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
     mockChainlinkRpc({ decimals: 8, roundId: 1n, answer: 100_000_000n, updatedAt: nowSec(), answeredInRound: 1n })
     expect(await fetchChainlinkPriceRaw(USDBC, 8453)).toBeNull()
+  })
+})
+
+describe('[SPRINT-9V 9V-M-01] cbETH base leg = the CBETH/ETH MARKET feed (not the Exchange-Rate feed)', () => {
+  const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const CBETH_ETH_MARKET = '0x806b4Ac04501c29769051e42783cF04dCE41440b'      // "CBETH / ETH"   (chosen)
+  const CBETH_ETH_EXCHRATE = '0x868a501e68F3D1E89CfC0D22F6b22E8dabce5F04'    // "cbETH-ETH Exchange Rate" (rejected)
+  const ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+
+  it('pins the market proxy as the base leg (on-chain verified 2026-06-08); NOT the exchange-rate proxy', () => {
+    const composed = getComposedFeed(CBETH, 8453)
+    expect(composed).not.toBeNull()
+    expect(composed!.base.toLowerCase()).toBe(CBETH_ETH_MARKET.toLowerCase())
+    expect(composed!.base.toLowerCase()).not.toBe(CBETH_ETH_EXCHRATE.toLowerCase())
+    expect(composed!.quote.toLowerCase()).toBe(ETH_USD.toLowerCase())
+  })
+
+  it('decimals nuance: 18-dp base × 8-dp quote → true USD (realistic on-chain values, no $1.13 bug)', async () => {
+    const now = nowSec()
+    mockComposedRpc({
+      [CBETH_ETH_MARKET]: { decimals: 18, roundId: 10n, answer: 1_134_400_000_000_000_000n, updatedAt: now - 3_600n, answeredInRound: 10n }, // 1.1344 ETH/cbETH (live mkt)
+      [ETH_USD]:          { decimals: 8,  roundId: 20n, answer: 168_130_000_000n,            updatedAt: now - 600n,   answeredInRound: 20n }, // $1681.30/ETH
+    })
+    const r = await fetchChainlinkPriceRaw(CBETH, 8453)
+    expect(r).not.toBeNull()
+    expect(r!.price).toBeCloseTo(1907.27, 1) // 1.1344 × 1681.30 ≈ $1907 — matches the live direct CBETH/USD feed
   })
 })
