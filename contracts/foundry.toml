@@ -8,3 +8,8 @@ via_ir = true
 optimizer = true
 optimizer_runs = 200
 remappings = ["@openzeppelin/=order-engine/lib/openzeppelin-contracts/", "forge-std/=order-engine/lib/openzeppelin-contracts/lib/forge-std/src/"]
+# [CHORE-OZ-SUBMODULE] Same fix as order-engine/foundry.toml: src = "." globs OZ's
+# own formal-verification harnesses (.../openzeppelin-contracts/fv/harnesses/*.sol)
+# which import the generated, gitignored fv/patched/* — skip them so the
+# FeeCollector suite compiles. OZ production contracts + our tests are untouched.
+skip = ["*/fv/**"]
