@@ -105,7 +105,7 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'Stablecoin',
   },
   {
-    address: '0x4c9EDD5852cd905f23c3acF6C2ff8eca3ce50370',
+    address: '0x4c9eDD5852CD905F23c3acF6c2ff8eCA3ce50370',
     symbol: 'USDe',
     name: 'Ethena USDe',
     decimals: 18,
@@ -189,7 +189,7 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'Liquid Staking',
   },
   {
-    address: '0xCd5fE23C85820F7B72D6468176c4aF32e4ff4b25',
+    address: '0xcD5fE23C85820F7B72d6468176c4AF32e4Ff4B25',
     symbol: 'weETH',
     name: 'Wrapped eETH (EtherFi)',
     decimals: 18,
@@ -457,7 +457,7 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'L2 & Infrastructure',
   },
   {
-    address: '0xCa14007Eff0dB1F8135f4C25B34De49AB0d42766',
+    address: '0xCa14007Eff0dB1f8135f4C25B34De49AB0d42766',
     symbol: 'STRK',
     name: 'Starknet',
     decimals: 18,
@@ -497,7 +497,7 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'L2 & Infrastructure',
   },
   {
-    address: '0xB0fFa8000886e57F86dd5264b987b9993715e059',
+    address: '0xb0FFa8000886E57F86dD5264B987B9993715E059',
     symbol: 'W',
     name: 'Wormhole',
     decimals: 18,
