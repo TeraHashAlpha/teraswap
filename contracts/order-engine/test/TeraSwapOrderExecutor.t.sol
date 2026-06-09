@@ -113,6 +113,7 @@ contract MockRouter {
     MockERC20 public outputToken;
     uint256 public outputAmount;
     bool public shouldFail;
+    MockERC20 public inputToken; // when set, the router CONSUMES the approved sell token
 
     constructor(MockERC20 _outputToken, uint256 _outputAmount) {
         outputToken = _outputToken;
@@ -127,12 +128,21 @@ contract MockRouter {
         shouldFail = _fail;
     }
 
-    /// @dev Called by the executor contract — "swaps" by minting output tokens to caller
+    function setInputToken(MockERC20 _t) external {
+        inputToken = _t;
+    }
+
+    /// @dev Called by the executor — "swaps" by CONSUMING the approved input (a real
+    ///      router pulls the sell tokens, so the executor has no input dust to refund)
+    ///      and minting output tokens to the caller.
     fallback() external payable {
         if (shouldFail) {
             revert("Router: swap failed");
         }
-        // Simulate: pull input tokens (already approved), mint output
+        if (address(inputToken) != address(0)) {
+            uint256 amt = inputToken.allowance(msg.sender, address(this));
+            if (amt > 0) inputToken.transferFrom(msg.sender, address(this), amt);
+        }
         outputToken.mint(msg.sender, outputAmount);
     }
 
@@ -290,6 +300,7 @@ contract TeraSwapOrderExecutorTest is Test {
         weth = new MockWETH();
         priceFeed = new MockPriceFeed();
         router = new MockRouter(tokenOut, MIN_OUT + 100e18); // output > minOut
+        router.setInputToken(tokenIn); // consume the sell token like a real router
 
         // Deploy executor
         executor = new TeraSwapOrderExecutor(feeRecipient, admin, address(weth));
@@ -604,9 +615,12 @@ contract TeraSwapOrderExecutorTest is Test {
     // ══════════════════════════════════════════════════════════════
 
     function test_M01_insufficientBalance() public {
-        // Burn user's tokens
+        // Burn user's tokens. Read the balance BEFORE the prank — an inline
+        // balanceOf() in the transfer args consumes the vm.prank (it's the next
+        // call), so transfer would otherwise run as the test contract and underflow.
+        uint256 bal = tokenIn.balanceOf(user);
         vm.prank(user);
-        tokenIn.transfer(address(0xDEAD), tokenIn.balanceOf(user));
+        tokenIn.transfer(address(0xDEAD), bal);
 
         TeraSwapOrderExecutor.Order memory order = _defaultOrder();
         bytes memory sig = _signOrderMemory(order);
@@ -922,6 +936,8 @@ contract TeraSwapOrderExecutorTest is Test {
         order.dcaTotal = 5;
         order.dcaInterval = 1 hours;
         order.priceFeed = address(0); // No price condition for DCA
+        // 5 hourly executions span >4h; the default 1h expiry would trip OrderExpired.
+        order.expiry = block.timestamp + 7 days;
         bytes memory sig = _signOrderMemory(order);
 
         // Execute 5 times
@@ -1087,7 +1103,14 @@ contract TeraSwapOrderExecutorTest is Test {
 
     function test_canExecute_invalidSig() public view {
         TeraSwapOrderExecutor.Order memory order = _defaultOrder();
-        bytes memory badSig = new bytes(65); // zeroed sig
+        // A realistic invalid signature: well-formed but signed by the WRONG key, so
+        // ECDSA recovers a non-owner address and canExecute returns (false, reason).
+        // (A zeroed/malformed sig instead makes OZ 5.x ECDSA.recover REVERT — that's a
+        // separate canExecute-robustness observation, noted in FEEDBACK, not the
+        // wrong-signer case this test is meant to cover.)
+        bytes32 digest = _hashTypedData(_computeOrderHash(order));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(uint256(0xDEAD), digest);
+        bytes memory badSig = abi.encodePacked(r, s, v);
 
         (bool canExec, string memory reason) = executor.canExecute(order, badSig);
         assertFalse(canExec);
@@ -1105,9 +1128,12 @@ contract TeraSwapOrderExecutorTest is Test {
     }
 
     function test_canExecute_insufficientBalance() public {
-        // Burn user tokens
+        // Burn user tokens. Read the balance BEFORE the prank — an inline
+        // balanceOf() in the transfer args consumes the vm.prank (it's the next
+        // call), so transfer would otherwise run as the test contract and underflow.
+        uint256 bal = tokenIn.balanceOf(user);
         vm.prank(user);
-        tokenIn.transfer(address(0xDEAD), tokenIn.balanceOf(user));
+        tokenIn.transfer(address(0xDEAD), bal);
 
         TeraSwapOrderExecutor.Order memory order = _defaultOrder();
         bytes memory sig = _signOrderMemory(order);
