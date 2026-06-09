@@ -85,6 +85,7 @@
     },
     "@walletconnect/core": "2.21.1",
     "@walletconnect/sign-client": "2.21.1",
-    "@walletconnect/universal-provider": "2.21.1"
+    "@walletconnect/universal-provider": "2.21.1",
+    "qr": "0.5.5"
   }
 }
