@@ -20,6 +20,7 @@ import { useApproval } from '@/hooks/useApproval'
 import Permit2EducationModal from '@/components/Permit2EducationModal'
 import TokenAddressBadge from '@/components/TokenAddressBadge'
 import DigitRoller from '@/components/DigitRoller'
+import ChainIcon from './icons/ChainIcon'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useDepegCheck } from '@/hooks/useDepegCheck'
 import { evaluatePriceGate } from '@/lib/price-gate'
@@ -621,6 +622,15 @@ export default function SwapBox() {
   return (
     <>
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] rounded-2xl border border-cream-08 bg-surface-secondary/85 px-3 py-4 shadow-xl shadow-black/20 backdrop-blur-lg sm:max-w-[460px] sm:p-5">
+        {/* [CHORE-POLISH P6] Active-chain indicator — bundled SVG logo (Ethereum/Base),
+            never an external fetch. Mirrors the chain selector; decorative icon, the
+            adjacent name carries the label. */}
+        <div className="mb-3 flex items-center gap-1.5">
+          <ChainIcon chainId={activeChainId} className="h-4 w-4 shrink-0" />
+          <span className="text-[11px] font-semibold uppercase tracking-[1px] text-cream-35">
+            {activeChainId === 8453 ? 'Base' : 'Ethereum'}
+          </span>
+        </div>
         {/* Sell */}
         <div className="mb-1">
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[1.5px] text-cream-35">Sell</label>

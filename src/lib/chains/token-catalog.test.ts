@@ -50,8 +50,8 @@ const BASE_MAJORS: Record<string, string> = {
 
 describe('[9Y] address integrity — every PINNED catalog entry checksummed + valid decimals', () => {
   // Strict EIP-55 on the data this sprint ADDS (the generated catalog). The pre-existing
-  // mainnet DEFAULT_TOKENS list is covered by the byte-identical block below — it is left
-  // untouched (one legacy entry, USDe, carries a non-canonical checksum; flagged in FEEDBACK).
+  // mainnet DEFAULT_TOKENS list is strict-checked by its own test below — as of
+  // CHORE-POLISH P2 every DEFAULT_TOKENS address is canonical EIP-55 (casing-only fixes).
   for (const chainId of [MAINNET, BASE]) {
     it(`chain ${chainId}: every generated entry is EIP-55 with valid integer decimals`, () => {
       const list = GENERATED_TOKEN_CATALOG[chainId]
@@ -89,6 +89,16 @@ describe('[9Y] address integrity — every PINNED catalog entry checksummed + va
       const found = catalog.find((t) => t.symbol === sym)
       expect(found, `missing Base major ${sym}`).toBeDefined()
       expect(found!.address).toBe(addr)
+    }
+  })
+
+  it('every DEFAULT_TOKENS entry is canonical EIP-55 (strict checksum) [CHORE-POLISH P2]', () => {
+    // A non-canonical checksum passes loose isAddress but fails wallets/explorers that
+    // validate strictly. Every stored address must equal its getAddress() form. The
+    // native-ETH sentinel (0xeee…eee) is a convention, not a checksummed address.
+    for (const t of DEFAULT_TOKENS) {
+      if (t.address.toLowerCase() === NATIVE_ETH.toLowerCase()) continue
+      expect(getAddress(t.address), `${t.symbol} (${t.address}) is not canonical EIP-55`).toBe(t.address)
     }
   })
 })
