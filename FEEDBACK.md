@@ -2641,3 +2641,52 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   commits. The work was adversarially reviewed (4-agent workflow): the AGPL injection, a missing
   sessionStorage guard, unreachable expiry code, and test-fragility were all surfaced and fixed
   before this landed.
+## Feedback — HOTFIX rainbowkit-qr-crash (follow-up to SPRINT-9Z Part C)
+
+### Root cause — NOT a @walletconnect incompatibility; a `qr@0.6.0` breaking change
+- The prod crash ("Something went wrong"; `Error: invalid border=0` in a useMemo during the connect-
+  modal/QR render) traced to: `@rainbow-me/rainbowkit@2.2.10 → cuer@0.0.3 → qr`. RainbowKit 2.2.10
+  renders the WalletConnect/Ledger QR via `cuer`, which calls `qr.encodeQR(value, 'raw', { border: 0 })`
+  (a borderless QR). **`qr@0.6.0` shipped a BREAKING change** — `if (!Number.isSafeInteger(border) ||
+  border <= 0) throw 'invalid border'` (≤0.5.5 only checked `!isSafeInteger`, so `border: 0` was
+  valid). cuer@0.0.3's over-permissive range **`qr: "~0"`** (any `0.x`) let npm resolve the breaking
+  `0.6.0`. The original hypothesis (RainbowKit 2.2.10 incompatible with the 9K-pinned
+  @walletconnect/* 2.21.1) was **incorrect** — WC versions are not involved; the QR `border` is a
+  render param independent of the WC URI. Ledger uses the same WC QR path → same crash.
+
+### Fix — surgical `qr` override (Option A; fewest moving parts), keeps RainbowKit 2.2.10
+- Added `"qr": "0.5.5"` to package.json `overrides` (same pattern as the 9K @walletconnect/* pins).
+  0.5.5 is the latest `qr` that BOTH accepts `border: 0` AND exports `encodeQR` as a NAMED export
+  (cuer does `import { encodeQR } from 'qr'`) — both verified. Keeps RainbowKit 2.2.10 + cuer + ALL
+  2.2.x mobile fixes + 9Z Part A (wallet list) + Part B (WalletSessionGuard). Single
+  `@walletconnect/core@2.21.1` unchanged; no wagmi v3; mainnet/Base byte-identical (qr is a
+  QR-render lib only — zero swap/tx impact).
+- Did NOT take Option B (revert RainbowKit to 2.1.x): unnecessary, and it would lose the 2.2.x mobile
+  fixes for no benefit — the crash was a transitive `qr` breaking change, not a RainbowKit defect.
+
+### Version matrix
+| package | version | note |
+|---|---|---|
+| `qr` | **0.5.5** (override) | latest that accepts `border:0`; exports `encodeQR` named + default |
+| `qr` (no fix) | 0.6.0 | added `border<=0` throw → crashes the connect modal |
+| `cuer` | 0.0.3 | RainbowKit's QR component; passes `border:0`; declares `qr:"~0"` (too loose) |
+| `@rainbow-me/rainbowkit` | 2.2.10 | unchanged (keeps mobile fixes) |
+| `@walletconnect/core` / sign-client / universal-provider | 2.21.1 (override) | unchanged; single core |
+| `wagmi` / `viem` | 2.19.5 / 2.47.4 | unchanged; no wagmi v3 |
+
+### Repro / test
+- `src/lib/connect-modal-qr.test.ts` calls cuer's `create()` (the exact fn in RainbowKit's QR
+  useMemo) with WalletConnect AND Ledger URIs: RED (`invalid border=0`) on qr@0.6.0, GREEN on 0.5.5.
+  Guards the precise crashing path so a future `qr` drift re-breaks CI, not prod. (A direct
+  `import 'qr'` guard was dropped — `qr` is a nested transitive dep, not resolvable via a bare
+  specifier from `src/`; testing through `cuer/QrCode` is more faithful anyway.)
+
+### Follow-ups for the Architect
+- The override pins `qr` indefinitely. Track upstream: a `cuer` release that tightens its `qr` range,
+  or a `qr` release that restores `border:0` acceptance, lets the override be dropped. Worth filing
+  the loose `qr: "~0"` range upstream with cuer (it should pin a compatible minor).
+- `min-release-age=7` did NOT prevent this (qr@0.6.0 was already >7 days old when it resolved) — the
+  loose TRANSITIVE range is the real exposure. Consider a policy of pinning/overriding QR + wallet-UI
+  transitive deps so the next breaking patch can't reach prod via a `~0`/`^` range.
+- Decisive verification remains a **Preview check that the WalletConnect + Ledger modals actually
+  open** (owner step before promote); the unit repro + `next build` are the automatable proof.
