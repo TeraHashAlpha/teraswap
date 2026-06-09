@@ -2803,3 +2803,29 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
 - The spec's core "no contract-regression signal in CI" problem is FIXED: `test-contracts` compiles and
   the real suites pass — **OrderExecutor 68/68, FeeCollector 19/19**. All fixes are build-config or
   TEST-code only; no contract source changed, no tests disabled, no masking.
+## Feedback — CHORE-TEST-CONTRACTS-REAL-GATE (ci efa91a8) — follow-up to #159
+
+### Made `test-contracts` a real, blocking gate (it was advisory for the whole 9x arc)
+- **Removed `continue-on-error: true`** from the `test-contracts` job in `.github/workflows/ci.yml`.
+  That flag is exactly why a red contract suite never blocked a PR — the job could fail and the
+  workflow still passed. Safe to remove ONLY now that the suite is green (68/68 + 19/19 on `main` via
+  #159). A red contract suite now FAILS the PR.
+- **Wired the FeeCollector fund-flow suite into CI.** The job previously ran only the order-engine
+  forge tests; added a second step `forge test --match-path 'test/*.t.sol'` in `contracts/`, scoped so
+  it runs the 19 `TeraSwapFeeCollector.t.sol` tests WITHOUT re-running the order-engine suite (the
+  `contracts/` project's `src = "."` also globs `order-engine/test`, so the match-path avoids the
+  double-run). Both steps must pass for the job to succeed.
+
+### Verified red-capable (the whole point)
+- Both suites green: order-engine 68/68, FeeCollector 19/19 (combined `contracts/` run: 87/87).
+- Injected a throwaway failing test into EACH suite's `test/` dir in turn: `forge test` reported
+  `Suite result: FAILED … 1 failed` and exits non-zero → the CI step fails → with `continue-on-error`
+  gone, the job (and PR) fail. Reverted the throwaway tests. So a real Solidity regression in either
+  the OrderExecutor OR the FeeCollector contracts will now turn the PR red.
+
+### No contract source touched
+- This is a CI-config change only (`ci.yml`). Contracts, tests, and the OZ submodule pin are unchanged.
+
+### Remaining (optional) hardening
+- The order-engine and FeeCollector suites are two separate Foundry projects sharing one submodule; if
+  they're ever consolidated, the CI could become a single `forge test` invocation. Not needed now.
