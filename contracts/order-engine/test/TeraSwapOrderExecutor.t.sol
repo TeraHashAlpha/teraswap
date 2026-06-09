@@ -278,6 +278,10 @@ contract TeraSwapOrderExecutorTest is Test {
     uint256 constant EXPIRY_DELTA = 1 hours;
 
     function setUp() public {
+        // [CHORE-OZ-SUBMODULE] forge defaults block.timestamp to 1; warp to a
+        // realistic mainnet time so the tests' staleness/expiry math
+        // (block.timestamp - N, e.g. MockPriceFeed.setStaleness) doesn't underflow.
+        vm.warp(1_700_000_000); // ~2023-11-14
         user = vm.addr(userPk);
 
         // Deploy mocks
