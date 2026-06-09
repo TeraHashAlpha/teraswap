@@ -2690,3 +2690,52 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   transitive deps so the next breaking patch can't reach prod via a `~0`/`^` range.
 - Decisive verification remains a **Preview check that the WalletConnect + Ledger modals actually
   open** (owner step before promote); the unit repro + `next build` are the automatable proof.
+## Feedback — CHORE-POLISH (P1 8a43169 / P2 b4fc0e3 / P3 bcc8e28 / P4 5589c5e / P6 b18faf0 / P7 a15c534)
+
+### P1 — dead-code removal: the two hooks had COLOCATED TESTS (flag per spec)
+- `src/lib/uniswap.ts` had zero references anywhere → deleted outright. BUT `useLimitOrder` and
+  `useConditionalOrder` were each referenced by exactly ONE thing: their OWN colocated `*.test.ts`
+  (plus a code COMMENT in useConditionalOrder.ts mentioning `useLimitOrder.pollAll`, itself deleted).
+  So they were not "zero refs" in the absolute sense the spec's guard describes. Decision: removed
+  each hook TOGETHER with its colocated test (a test that only exercises a dead hook is dead too) —
+  zero PRODUCTION/app usage was verified by whole-repo grep (no imports, dynamic imports, re-exports,
+  JSX, or string refs outside the test). If the team prefers the strict reading, the hooks+tests can
+  be restored from git history; nothing else depended on them.
+
+### P2 — the strict-checksum test surfaced 3 MORE non-canonical addresses beyond USDe
+- The spec named only USDe (9Y-I-01). Adding the "every DEFAULT_TOKENS entry is strict EIP-55" test
+  required fixing every non-canonical entry for it to pass — and `viem getAddress` flagged **4**, not
+  1: `USDe`, `weETH`, `STRK`, `W`. All four fixed to canonical casing (CASING ONLY — identical 20
+  bytes, byte-identical on-chain; logoURIs use lowercase and were untouched). The native-ETH sentinel
+  `0xeee…eee` is intentionally skipped (a convention, not a checksummed address).
+
+### P3 — ADR-012 references INC-2026-06-09-001, which is NOT yet committed on main
+- `Audits/Incidents/INC-2026-06-09-001.md` exists only as an UNTRACKED file in the local main
+  checkout — it is not on `origin/main`, so ADR-012's reference currently dangles. ADR-012 also
+  points at the committed `FEEDBACK.md` HOTFIX section (which has the same evidence), so the
+  cross-reference resolves to at least one committed source. **Recommend committing the incident
+  file** so the ADR↔incident link is whole.
+
+### P5 — apex→www redirect is ALREADY 308 in next.config; the residual is a Vercel-edge setting
+- No code change: `next.config.js` already serves the apex→www redirect with `permanent: true` (308),
+  and its comment already notes the Vercel-edge coexistence. The 307 observed in prod therefore comes
+  from **Vercel's domain-level redirect** (Project → Domains), which fires BEFORE next.config and
+  defaults to 307. **Action (owner, Vercel dashboard):** set the apex `teraswap.app` → `www.teraswap.app`
+  domain redirect to **Permanent (308)** in Project → Domains. Once set, the next.config rule is a
+  redundant in-app fallback (they coexist safely). This is the spec's "document the Vercel domain
+  setting in FEEDBACK instead" path — P5 has no atomic code commit because the code was already correct.
+
+### P7 — re-confirmed: 44 findings, ZERO real secrets
+- The full-history scan flags exactly 44, all `generic-api-key` / `stripe-access-token`, across:
+  `seed-10-trades.ts` (public ERC-20 addresses), `sanitize-error.test.ts` + `FEEDBACK.md` (fake
+  `sk_live_*` redaction fixtures), `useOrderEngine.ts` (the deprecated `TeraSwap_2026_v3` XOR-migration
+  constant), and assorted `*.test.ts(x)` fixtures. None is a real credential. `.gitleaksignore`
+  suppresses only these exact `commit:file:rule:line` fingerprints — verified a freshly planted secret
+  in a non-ignored file is still flagged, so PR-scoped CI and real scanning are untouched.
+
+### Summary
+- 6 atomic SSH-signed code commits (P1, P2, P3, P4, P6, P7) + this FEEDBACK; P5 is config-already-correct
+  → documented above (Vercel dashboard action). No swap/gate/FeeCollector/adapter/oracle/contract
+  changes; P2 casing-only + P6 display-only ⇒ mainnet/Base byte-identical; keys server-only. Full suite
+  green, typecheck + lint (0 errors) + `next build` green, single `@walletconnect/core`, gitleaks
+  full-history clean.

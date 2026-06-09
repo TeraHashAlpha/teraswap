@@ -1,0 +1,84 @@
+# .gitleaksignore — fingerprints of PRE-EXISTING, benign gitleaks false-positives
+# surfaced ONLY by a full-history scan. [CHORE-POLISH P7]
+#
+# Each entry below was re-confirmed benign (NO real secret): fake test fixtures,
+# public on-chain addresses, and one deprecated XOR-migration constant. This file
+# suppresses ONLY these exact commit:file:rule:line fingerprints — it does NOT
+# allowlist any path or rule, so all real scanning (incl. PR-scoped CI) stays intact.
+# Rotating/removing a flagged file regenerates a new fingerprint, which is NOT ignored.
+
+# FEEDBACK.md — Code-Agent notes documenting the fake sk_live_* redaction fixtures (2)
+2ad6b8b8ea4689f076a63cb32003bf0abf533239:FEEDBACK.md:stripe-access-token:1750
+2ad6b8b8ea4689f076a63cb32003bf0abf533239:FEEDBACK.md:stripe-access-token:1750
+
+# scripts/seed-10-trades.ts — public ERC-20 token/router addresses in a local seed/demo script (not secrets) (12)
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:25
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:33
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:43
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:51
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:61
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:69
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:70
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:79
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:87
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:96
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:97
+bdb80426c5335b2437a90736195b2fc1177044c5:scripts/seed-10-trades.ts:generic-api-key:106
+
+# src/app/api/monitor/validate-execution/route.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+627ba0f9567c8b59a2484b6907fb22c8d73c3bd3:src/app/api/monitor/validate-execution/route.test.ts:generic-api-key:32
+627ba0f9567c8b59a2484b6907fb22c8d73c3bd3:src/app/api/monitor/validate-execution/route.test.ts:generic-api-key:33
+
+# src/app/api/v1/quote/route.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+d847564d123a1b43133f991c96bc7bd091edde9b:src/app/api/v1/quote/route.test.ts:generic-api-key:43
+d847564d123a1b43133f991c96bc7bd091edde9b:src/app/api/v1/quote/route.test.ts:generic-api-key:44
+
+# src/components/OrderDashboard.test.tsx — synthetic test fixture (fake key / address), not a real credential (2)
+a2f451ebc11ee87b0f2ee1d437d7fe81fc8da4b9:src/components/OrderDashboard.test.tsx:generic-api-key:35
+a2f451ebc11ee87b0f2ee1d437d7fe81fc8da4b9:src/components/OrderDashboard.test.tsx:generic-api-key:36
+
+# src/components/OrderReviewModal.test.tsx — synthetic test fixture (fake key / address), not a real credential (2)
+f7539afbfd651f9add6b693ffa4edd0811d326f2:src/components/OrderReviewModal.test.tsx:generic-api-key:20
+f7539afbfd651f9add6b693ffa4edd0811d326f2:src/components/OrderReviewModal.test.tsx:generic-api-key:21
+
+# src/hooks/__tests__/swap-validations.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+70e5bac15f69763ba308de0e52e247f2cb1a3b4f:src/hooks/__tests__/swap-validations.test.ts:generic-api-key:71
+70e5bac15f69763ba308de0e52e247f2cb1a3b4f:src/hooks/__tests__/swap-validations.test.ts:generic-api-key:72
+
+# src/hooks/useChainlinkPrice.test.ts — synthetic test fixture (fake key / address), not a real credential (1)
+79f6a81b35d97ff38c739f3230aa56125f4bcd23:src/hooks/useChainlinkPrice.test.ts:generic-api-key:47
+
+# src/hooks/useOrderEngine.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+f31774309e3d0d80ad20f6cac63817791d3a953e:src/hooks/useOrderEngine.test.ts:generic-api-key:93
+f31774309e3d0d80ad20f6cac63817791d3a953e:src/hooks/useOrderEngine.test.ts:generic-api-key:94
+
+# src/hooks/useOrderEngine.ts — legacy XOR-obfuscation migration constant (TeraSwap_2026_v3), deprecated (2)
+eee33fcdb2f7c3fca8400f96df41b0501a7e5712:src/hooks/useOrderEngine.ts:generic-api-key:93
+df0683e03600e64fa46ffa6bad82200045e38f6e:src/hooks/useOrderEngine.ts:generic-api-key:98
+
+# src/lib/adapters/cow.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+be8fdf8bb4620eebec4093fcde6fb12001bd251a:src/lib/adapters/cow.test.ts:generic-api-key:14
+be8fdf8bb4620eebec4093fcde6fb12001bd251a:src/lib/adapters/cow.test.ts:generic-api-key:15
+
+# src/lib/analytics-tracker.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+9c1cc0bf8e097d666f09a71a2121a7928bcfd99f:src/lib/analytics-tracker.test.ts:generic-api-key:33
+9c1cc0bf8e097d666f09a71a2121a7928bcfd99f:src/lib/analytics-tracker.test.ts:generic-api-key:35
+
+# src/lib/calldata-decoder.test.ts — synthetic test fixture (fake key / address), not a real credential (2)
+2c93e01087c0e113e5a9fa107f7a73f1a1211928:src/lib/calldata-decoder.test.ts:generic-api-key:18
+2c93e01087c0e113e5a9fa107f7a73f1a1211928:src/lib/calldata-decoder.test.ts:generic-api-key:19
+
+# src/lib/calldata-recipient.test.ts — synthetic test fixture (fake key / address), not a real credential (4)
+3ca61a5a79fae5810e4144931d8e7a8c35737454:src/lib/calldata-recipient.test.ts:generic-api-key:46
+3ca61a5a79fae5810e4144931d8e7a8c35737454:src/lib/calldata-recipient.test.ts:generic-api-key:47
+3ca61a5a79fae5810e4144931d8e7a8c35737454:src/lib/calldata-recipient.test.ts:generic-api-key:86
+3ca61a5a79fae5810e4144931d8e7a8c35737454:src/lib/calldata-recipient.test.ts:generic-api-key:87
+
+# src/lib/post-execution-validator.test.ts — synthetic test fixture (fake key / address), not a real credential (1)
+627ba0f9567c8b59a2484b6907fb22c8d73c3bd3:src/lib/post-execution-validator.test.ts:generic-api-key:55
+
+# src/lib/sanitize-error.test.ts — fake Stripe sk_live_* + fixture values used to TEST error redaction (4)
+ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:generic-api-key:22
+ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-access-token:17
+ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-access-token:18
+14807a8db0b2cfef7d77eb297304cfd75236c52e:src/lib/sanitize-error.test.ts:stripe-access-token:30

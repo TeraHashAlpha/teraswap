@@ -217,6 +217,20 @@ describe('SwapBox — chain-aware balance [SPRINT-9F bug4]', () => {
   })
 })
 
+describe('SwapBox — active-chain logo [CHORE-POLISH P6]', () => {
+  it('shows the Ethereum chain logo when the active chain is mainnet', () => {
+    mockChainId = 1
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-1')).toBeInTheDocument()
+  })
+
+  it('shows the Base chain logo after switching to Base', () => {
+    mockChainId = 8453
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-8453')).toBeInTheDocument()
+  })
+})
+
 describe('SwapBox — renders', () => {
   it('mounts with default ETH → USDC tokens (no crash)', () => {
     renderWithProviders(<SwapBox />)
