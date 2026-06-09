@@ -2690,3 +2690,65 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   transitive deps so the next breaking patch can't reach prod via a `~0`/`^` range.
 - Decisive verification remains a **Preview check that the WalletConnect + Ledger modals actually
   open** (owner step before promote); the unit repro + `next build` are the automatable proof.
+## Feedback — CHORE-OZ-SUBMODULE (build fix 97dad6a / warp 0ff1a38 / FeeCollector 2680b9e)
+
+### Root cause of the test-contracts compile failure — `exclude` was the wrong key
+- OZ submodule is correctly pinned at **5.6.1** (`45f032d`, matches `contracts/order-engine/package.json`
+  `@openzeppelin/contracts: 5.6.1`) — NOT a version mismatch. The compile failure: `foundry.toml` uses
+  `src = "."`, so forge globs OZ's OWN formal-verification harnesses
+  (`lib/openzeppelin-contracts/fv/harnesses/*.sol`) which import `../patched/*` — a directory GENERATED
+  by OZ's FV Makefile and **gitignored** (never in the submodule checkout) → `Source
+  lib/openzeppelin-contracts/fv/patched/access/Ownable.sol not found`. The existing
+  `exclude = ["lib/openzeppelin-contracts/fv"]` was **silently ignored** (`forge config` shows
+  `exclude = []`); the recognized glob filter is **`skip`**. Fixed with `skip = ["*/fv/**"]` in BOTH
+  `contracts/order-engine/foundry.toml` and `contracts/foundry.toml` (the FeeCollector project shares
+  the same submodule via `libs = ["order-engine/lib"]` and had the identical failure). No real test
+  excluded — only OZ's FV scaffolding (we don't run OZ's formal verification).
+
+### Result — build restored; FeeCollector suite GREEN; OrderExecutor 63/68
+- `forge build` compiles for both projects. **FeeCollector suite (`TeraSwapFeeCollector.t.sol`): 19/19
+  PASS** — the fund-flow contract now has a working, passing suite. OrderExecutor suite: **63/68**.
+- A test-env fix (not contract/assertion logic): forge defaults `block.timestamp` to 1, so tests that
+  simulate staleness via `block.timestamp - 3601` (in MOCK code) underflowed. `setUp` now warps to a
+  realistic time → fixed 3 (chainlink-stale, dca-interval, dca-nonce). No masking — the underflows were
+  purely test-environment.
+
+### STOP & REPORT — 3 OrderExecutor failures are CONTRACT-robustness findings (audited sprint; NOT fixed here)
+Per rules #2/#3 I did NOT change contract source. These need a separate **audited** sprint:
+- **`test_canExecute_invalidSig`** — `canExecute()` (a `view`) calls OZ `ECDSA.recover(...)`. In OZ 5.x
+  `recover` **REVERTS** (`ECDSAInvalidSignature`) on a malformed sig (the test passes a zeroed 65-byte
+  sig) instead of returning `address(0)`, so `canExecute` reverts rather than returning
+  `(false, "Invalid signature")`. Likely fix: `ECDSA.tryRecover` (contract change). This is an
+  OZ-version-induced robustness regression that only surfaced because the build now runs the tests.
+- **`test_canExecute_insufficientBalance` + `test_M01_insufficientBalance`** — with the owner's balance
+  burned to 0, `canExecute` **panics (arithmetic underflow 0x11)** instead of returning
+  `(false, "Insufficient balance")` — a balance check subtracts before guarding `>=`. Likely fix: a
+  checked/`>=` comparison (contract change).
+- Impact note: `canExecute` is an off-chain helper (keepers/UI). These are robustness bugs (reverts
+  where a graceful `false` is expected), not confirmed fund-loss — but they are real and must be fixed
+  + re-audited, not masked.
+
+### Remaining 2 — stale TEST/MOCK drift (test-suite repair, separate)
+- **`test_executeOrder_happyPath`** — the `MockRouter.fallback()` NEVER pulls the input tokens (its own
+  comment says "Simulate: pull input tokens (already approved)" but it only mints output). The contract
+  CORRECTLY refunds the unconsumed input, so the owner nets only the 0.1% fee; the test asserts the
+  owner spends the full `amountIn` (real-router behaviour). Stale mock — fix the mock to pull `netAmount`.
+- **`test_dca_multipleExecutions`** — order `expiry = block.timestamp + 1h` is too short for the
+  multi-interval warps (now `OrderExpired`); the test needs a longer expiry.
+
+### CI gaps to close (recommended)
+1. The `test-contracts` job has **`continue-on-error: true`** — why a red suite never blocked PRs. Once
+   the OrderExecutor suite is green (after the audited sprint), **remove `continue-on-error`** so it
+   becomes a real gate.
+2. The job only runs `contracts/order-engine`; the **FeeCollector (fund-flow) suite has NO CI signal**.
+   Add a step to run it (now that it compiles). Caveat: `contracts/` uses `src = "."`, which also globs
+   the order-engine suite — scope it (e.g. `forge test --match-path 'test/*'`) to avoid double-running.
+3. `forge` defaults `block.timestamp=1`; consider a repo-wide `block_timestamp`/setUp-warp convention so
+   timestamp-dependent tests don't silently depend on the default.
+
+### Net
+- **Build is fixed** (the spec's core "no contract-regression signal" problem): forge compiles + RUNS
+  the real suites (was: total compile failure, zero tests). FeeCollector 19/19. OrderExecutor 63/68,
+  with 3 genuine contract-robustness findings flagged for an audited sprint (the restored signal working
+  as intended) + 2 test-drift items. test-contracts is NOT yet fully green — making it so requires
+  contract fixes (forbidden here) — so this is the spec's STOP-and-report outcome, NOT masked.
