@@ -7,6 +7,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import TokenSelector from './TokenSelector'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
 import OrderReviewModal from './OrderReviewModal'
+import OrderCancelReviewModal from './OrderCancelReviewModal'
 import {
   OrderType,
   PriceCondition,
@@ -50,6 +51,9 @@ export default function DCAPanel() {
     pendingOrder,
     confirmOrder,
     clearPendingOrder,
+    pendingCancel,
+    confirmCancel,
+    clearPendingCancel,
     cancelOrder,
     cancelAllOrders,
     removeOrder,
@@ -112,6 +116,8 @@ export default function DCAPanel() {
     <div className="w-full max-w-[calc(100vw-2rem)] sm:max-w-[460px]">
       {/* [SPRINT-9U U2] EIP-712 review — no DCA order is signed until the user confirms this frozen struct. */}
       {pendingOrder && <OrderReviewModal order={pendingOrder} onConfirm={confirmOrder} onCancel={clearPendingOrder} />}
+      {/* [CANCEL-REVIEW] No cancel/invalidate executes until the user confirms this frozen plan. */}
+      {pendingCancel && <OrderCancelReviewModal review={pendingCancel} onConfirm={confirmCancel} onCancel={clearPendingCancel} />}
       {/* Tab header */}
       <div className="mb-4 flex gap-1 rounded-xl border border-cream-08 bg-surface-secondary p-1">
         <button

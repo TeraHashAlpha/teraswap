@@ -193,3 +193,50 @@ describe('OrderDashboard — cancel all', () => {
     expect(cancelAllOrders).toHaveBeenCalled()
   })
 })
+
+describe('OrderDashboard — [CANCEL-REVIEW] review modal wiring', () => {
+  it('renders the cancel review modal from the hook pendingCancel; confirm/keep wire to the hook', () => {
+    const confirmCancel = vi.fn()
+    const clearPendingCancel = vi.fn()
+    const order = makeOrder({ status: 'active' })
+    useOrderEngineMock.mockReturnValue({
+      orders: [order],
+      activeOrders: [order],
+      historyOrders: [],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+      pendingCancel: {
+        action: 'cancel',
+        orderId: order.id,
+        order,
+        orderStruct: order.order,
+        chainId: 1,
+        account: '0x1111111111111111111111111111111111111111',
+      },
+      confirmCancel,
+      clearPendingCancel,
+    })
+    renderWithProviders(<OrderDashboard />)
+    expect(screen.getByTestId('cancel-action').textContent).toMatch(/cancel order/i)
+    fireEvent.click(screen.getByTestId('cancel-confirm'))
+    expect(confirmCancel).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByTestId('cancel-keep'))
+    expect(clearPendingCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders NO cancel modal when there is no pendingCancel', () => {
+    useOrderEngineMock.mockReturnValue({
+      orders: [],
+      activeOrders: [],
+      historyOrders: [],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+    })
+    renderWithProviders(<OrderDashboard />)
+    expect(screen.queryByTestId('cancel-action')).toBeNull()
+  })
+})

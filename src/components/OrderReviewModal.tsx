@@ -14,26 +14,27 @@ import { formatUnits } from 'viem'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { PendingOrderReview } from '@/hooks/useOrderEngine'
 
-function truncAddr(addr: string): string {
+// [CANCEL-REVIEW] Exported for reuse by OrderCancelReviewModal — same decoders, no new trust surface.
+export function truncAddr(addr: string): string {
   if (!addr || addr.length <= 12) return addr || '—'
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
-function fmtAmount(raw: bigint, decimals: number, symbol: string): string {
+export function fmtAmount(raw: bigint, decimals: number, symbol: string): string {
   const num = parseFloat(formatUnits(raw, decimals))
   if (!isFinite(num)) return '—'
   if (num === 0) return `0 ${symbol}`
   return num < 0.0001 ? `<0.0001 ${symbol}` : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${symbol}`
 }
 
-function fmtTime(expiry: bigint): string {
+export function fmtTime(expiry: bigint): string {
   const ms = Number(expiry) * 1000
   const d = new Date(ms)
   if (isNaN(d.getTime())) return `${expiry}`
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-const TYPE_LABEL: Record<number, string> = {
+export const TYPE_LABEL: Record<number, string> = {
   [OrderType.LIMIT]: 'Limit order',
   [OrderType.STOP_LOSS]: 'Stop-loss / Take-profit',
   [OrderType.DCA]: 'DCA (recurring buy)',
