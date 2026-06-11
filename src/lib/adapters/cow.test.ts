@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import cowAdapter from './cow'
+import cowAdapter, { pollCowOrderStatus } from './cow'
 import { FEE_RECIPIENT, FEE_BPS, NATIVE_ETH } from '@/lib/constants'
 
 const VALID_QUOTE = {
@@ -215,5 +215,29 @@ describe('cow adapter — chain-aware wrapped-native [SPRINT-9W]', () => {
     await cowAdapter.fetchQuote({ src: USDC, dst: BASE_WETH, amount: '1000000', chainId: 8453 })
     expect(bodies[0].sellToken).toBe(USDC)
     expect(bodies[0].buyToken).toBe(BASE_WETH)
+  })
+})
+
+describe('pollCowOrderStatus — poll fetches are time-bounded [RQ-2026-06-11]', () => {
+  it('a hanging status fetch cannot stall the poll: resolves expired by the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      // Upstream hangs forever (stalled connection) — the per-poll timeout must
+      // bound each request so the loop still terminates at maxWaitMs.
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => { /* never settles */ })))
+
+      const poll = pollCowOrderStatus('0x' + 'ee'.repeat(56), 10_000)
+      // Drive well past maxWaitMs (covers per-poll timeouts + sleeps).
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      const result = await Promise.race([
+        poll,
+        Promise.resolve('STILL_HANGING' as const),
+      ])
+      expect(result).toEqual({ status: 'expired' })
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
   })
 })

@@ -6,7 +6,7 @@ import {
   getCowApiBase,
 } from '@/lib/constants'
 import { getWrappedNative } from '@/lib/chains/registry'
-import { clampSlippage } from './shared'
+import { clampSlippage, withTimeout } from './shared'
 import { safeBigInt } from '@/lib/utils'
 import type {
   DEXAdapter,
@@ -349,23 +349,32 @@ export async function pollCowOrderStatus(
   const base = getCowApiBase(chainId)
   const start = Date.now()
   const pollInterval = 3000
+  // [RQ-2026-06-11] Bound each poll request — a stalled connection used to hang
+  // the whole wait indefinitely (well past maxWaitMs).
+  const pollFetchTimeoutMs = 10_000
 
   while (Date.now() - start < maxWaitMs) {
-    const res = await fetch(`${base}/orders/${orderUid}`)
-    if (res.ok) {
-      const order = await res.json()
-      if (order.status === 'fulfilled') {
-        const tradesRes = await fetch(`${base}/trades?orderUid=${orderUid}`)
-        const trades = tradesRes.ok ? await tradesRes.json() : []
-        return {
-          status: 'fulfilled',
-          txHash: trades[0]?.txHash,
-          executedBuyAmount: trades[0]?.executedBuyAmount,
+    try {
+      const res = await withTimeout(fetch(`${base}/orders/${orderUid}`), pollFetchTimeoutMs)
+      if (res.ok) {
+        const order = await res.json()
+        if (order.status === 'fulfilled') {
+          const tradesRes = await withTimeout(fetch(`${base}/trades?orderUid=${orderUid}`), pollFetchTimeoutMs)
+          const trades = tradesRes.ok ? await tradesRes.json() : []
+          return {
+            status: 'fulfilled',
+            txHash: trades[0]?.txHash,
+            executedBuyAmount: trades[0]?.executedBuyAmount,
+          }
+        }
+        if (order.status === 'cancelled' || order.status === 'expired') {
+          return { status: order.status }
         }
       }
-      if (order.status === 'cancelled' || order.status === 'expired') {
-        return { status: order.status }
-      }
+    } catch {
+      // [RQ-2026-06-11] Transient poll failure (timeout / network blip) — keep
+      // polling until the deadline instead of aborting the whole wait. The order
+      // itself is unaffected (this is a read-only status check).
     }
     await new Promise(resolve => setTimeout(resolve, pollInterval))
   }

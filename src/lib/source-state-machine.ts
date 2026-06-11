@@ -124,8 +124,12 @@ export function getThresholds(sourceId: string): SourceThresholds {
     failuresToDisabled: override.failuresToDisabled ?? config.defaults.failuresToDisabled,
     successesToActive: override.successesToActive ?? config.defaults.successesToActive,
     p95LatencyThresholdMs: override.p95LatencyThresholdMs ?? config.defaults.p95LatencyThresholdMs,
-    quorumMaxDeviationPercent: (override as Record<string, unknown>).quorumMaxDeviationPercent as number ?? config.defaults.quorumMaxDeviationPercent,
-    quorumStableMaxDeviationPercent: (override as Record<string, unknown>).quorumStableMaxDeviationPercent as number ?? config.defaults.quorumStableMaxDeviationPercent,
+    // [RQ-2026-06-11] No cast needed: overrides are Partial<SourceThresholds>,
+    // which already carries the optional quorum fields with proper types. The
+    // old `as Record<string, unknown> ... as number` double-cast also silently
+    // disabled type-checking on these security-relevant deviation thresholds.
+    quorumMaxDeviationPercent: override.quorumMaxDeviationPercent ?? config.defaults.quorumMaxDeviationPercent,
+    quorumStableMaxDeviationPercent: override.quorumStableMaxDeviationPercent ?? config.defaults.quorumStableMaxDeviationPercent,
   }
   return validateThresholds(merged, sourceId)
 }
