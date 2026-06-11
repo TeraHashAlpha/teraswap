@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { formatUnits } from 'viem'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 
 /** Raw row shape returned by GET /api/orders/:id/executions. */
 interface Execution {
@@ -284,9 +285,11 @@ export default function ExecutionTimeline({
                   )}
 
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    {/* [RQ-2026-06-11] chain-aware helper; executions are mainnet-only
+                        today (executor on chainId 1 only) → byte-identical mainnet URL. */}
                     {exec.tx_hash && (
                       <a
-                        href={`https://etherscan.io/tx/${exec.tx_hash}`}
+                        href={explorerTxUrl(exec.tx_hash, 1)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-0.5 text-[10px] text-cream-30 hover:text-cream transition-colors"

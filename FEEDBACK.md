@@ -2881,3 +2881,42 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   gate/adapter/swap changes (spec-critic diff-verified: config.ts/index.ts untouched). **LIGHT Auditor
   review before prod** (signing-trust surface), then the owner's live tap-through: cancel one order +
   cancel-all on a wallet, confirming the modal precedes every wallet prompt.
+## Feedback — REVIEW-QUALITY-2026-06-11 (layered multi-agent review; report in Audits/REVIEW-QUALITY-2026-06-11.md)
+
+### On the review method itself (what the Architect should know)
+- **First-pass reviewer noise ran ~30%**: of 60 deduped clusters, 18 were refuted or reclassified
+  by-design by the adversarial verification panel (each verifier re-read the actual code + callers).
+  Examples of confidently-wrong claims: "ThemeContext crashes SSR" (access is effect-guarded),
+  "staleness thresholds conflate chains" (the map is keyed by per-chain feed ADDRESS), "Balancer
+  ungated on Base" (HTTP path carries the chainId). **A verification layer between fan-out review and
+  rectification is not optional** — without it 18 wrong "fixes" would have been proposed.
+- The refuted list is preserved in the report deliberately, so the same noise isn't re-reported by the
+  next review cycle.
+
+### Highest-value discovery came from WRITING A TEST, not from review
+- The drift-guard test for duplicated router addresses (9fb2530) surfaced that order-engine config's
+  `paraswap` entry is labeled "Augustus v6" but carries the **Augustus V5 address**, and `uniswapV3`
+  is SwapRouter V1 — neither matching the chains/routers registry, and paraswap was NOT among the
+  routers the 9O on-chain read confirmed whitelisted in the OrderExecutor. If the contract doesn't
+  whitelist it, a user can sign an order that can NEVER execute (silent dead order). Escalated (E-1)
+  with a `cast call whitelistedRouters(...)` verification step — needs RPC + Auditor.
+
+### Systemic pattern confirmed (again): latent Base traps, not live bugs
+- Every confirmed High clusters around the same shape: functions that ACCEPT a chainId and silently
+  return mainnet values (order-engine config), or features consistently mainnet-pinned end-to-end
+  (portfolio, on-chain monitor). Live mainnet behavior verified correct. Recommendation: a
+  **Base-activation checklist doc** assembled from E-1…E-4 — these will all bite at once when Base
+  swaps/orders activate, and none will surface in mainnet testing.
+
+### Test-infra gap
+- Base-branch coverage is the systemic test gap (usePortfolio fallback, adapter chain-gating, chain
+  registry edge cases are tested mainnet-first). Suggest a convention: every new multi-chain code path
+  ships an `it.each([[1],[8453]])` pair by default.
+
+### Process notes
+- The 7 auto-fixes kept mainnet byte-identical (pin tests written BEFORE refactors) and gate semantics
+  untouched (DefiLlama fix is reliability-only: the documented 3s bound now actually binds the parse;
+  fail-open behavior unchanged). All commits SSH-signed, suite 1612→1617, build+lint+gitleaks green.
+- PR #162 (cancel-review) being in flight constrained two safe fixes (truncAddr consolidation,
+  ConditionalOrderPanel removal decision) — deferred with notes rather than creating cross-PR
+  conflicts. Sequencing matters when multiple branches touch the same components.

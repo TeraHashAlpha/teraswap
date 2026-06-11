@@ -11,7 +11,7 @@
  * cache (2-min TTL, not externally clearable) never returns a stale value.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { validateSwapPrice, HIGH_VALUE_THRESHOLD_USD } from './defillama'
+import { validateSwapPrice, HIGH_VALUE_THRESHOLD_USD, fetchDefiLlamaPrice } from './defillama'
 
 // Mirrors BLOCK_THRESHOLD in defillama.ts validateSwapPrice (local const).
 // The guard is `deviation < BLOCK_THRESHOLD` (strict) → exactly -8% is allowed.
@@ -279,5 +279,41 @@ describe('defillama — chain-aware validateSwapPrice [SPRINT-9G G2]', () => {
     })
     expect(keys.length).toBeGreaterThan(0)
     for (const k of keys) expect(k.startsWith('ethereum:')).toBe(true)
+  })
+})
+
+describe('defillama — fetch timeout covers the body parse [RQ-2026-06-11]', () => {
+  it('aborts a hanging res.json() at FETCH_TIMEOUT_MS and fails soft (null)', async () => {
+    vi.useFakeTimers()
+    try {
+      const addr = freshAddr()
+      let capturedSignal: AbortSignal | undefined
+      // fetch resolves instantly, but the BODY PARSE hangs until the abort
+      // signal fires (a stalled response stream — the INC-class hang).
+      vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { signal?: AbortSignal }) => {
+        capturedSignal = init?.signal
+        return {
+          ok: true,
+          json: () =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () =>
+                reject(new DOMException('The operation was aborted.', 'AbortError')),
+              )
+            }),
+        }
+      }))
+
+      const pending = fetchDefiLlamaPrice(addr)
+      // Let fetch resolve and the parse begin.
+      await vi.advanceTimersByTimeAsync(0)
+      // Cross the 3s budget: the timeout must STILL be armed during the parse.
+      await vi.advanceTimersByTimeAsync(3_001)
+      expect(capturedSignal?.aborted).toBe(true)
+
+      // And the call fails soft (oracle failures never block the swap flow).
+      await expect(pending).resolves.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -65,6 +65,15 @@ const RULES: EnvRule[] = [
     serverOnly: true,
     label: '0x API key (server-only)',
   },
+  // [RQ-2026-06-11] Read by lib/api.ts (Odos quotes are skipped when absent) but
+  // was never registered here — an unset key degraded Odos silently with no
+  // startup warning, unlike its 1inch/0x siblings.
+  {
+    key: 'ODOS_API_KEY',
+    required: false,
+    serverOnly: true,
+    label: 'Odos API key (server-only — Odos quotes skipped when absent)',
+  },
   // ── Supabase (server-only) ──
   {
     key: 'SUPABASE_URL',

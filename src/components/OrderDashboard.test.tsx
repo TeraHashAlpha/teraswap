@@ -160,6 +160,31 @@ describe('OrderDashboard — empty states', () => {
   })
 })
 
+describe('OrderDashboard — explorer link [RQ-2026-06-11]', () => {
+  it('tx-hash link is the mainnet explorer URL (orders are mainnet-only; byte-identical pin)', () => {
+    const txHash = '0x' + 'ab'.repeat(32)
+    const order = makeOrder({ status: 'filled', txHash })
+    useOrderEngineMock.mockReturnValue({
+      orders: [order],
+      activeOrders: [],
+      historyOrders: [order],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+    })
+    renderWithProviders(<OrderDashboard />)
+    fireEvent.click(screen.getByText(/Completed \(1\)/))
+    // Expand the card to reveal the tx link
+    fireEvent.click(screen.getByText(/WETH/).closest('button')!)
+    const link = document.querySelector(`a[href*="${txHash}"]`) as HTMLAnchorElement | null
+    expect(link).toBeTruthy()
+    // Orders are mainnet-only today (executor deployed on chainId 1 only) — the
+    // link must stay the mainnet explorer, produced via the chain-aware helper.
+    expect(link!.href).toBe(`https://etherscan.io/tx/${txHash}`)
+  })
+})
+
 describe('OrderDashboard — cancel all', () => {
   it('renders Cancel All button when more than one active order exists', () => {
     const active = [makeOrder({ status: 'active' }), makeOrder({ status: 'active' })]
