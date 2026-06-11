@@ -72,15 +72,20 @@ export async function fetchDefiLlamaPrice(
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
-    const res = await fetch(`${DEFILLAMA_BASE}/${key}`, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' },
-    })
-    clearTimeout(timeout)
-
-    if (!res.ok) return null
-
-    const json = await res.json()
+    // [RQ-2026-06-11] The timeout stays armed through res.json(): a stalled
+    // response BODY would otherwise hang past the 3s budget (the timer used to
+    // be cleared as soon as the headers arrived, leaving the parse unbounded).
+    let json: { coins?: Record<string, { price?: unknown; symbol?: string; timestamp?: number; confidence?: number }> }
+    try {
+      const res = await fetch(`${DEFILLAMA_BASE}/${key}`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' },
+      })
+      if (!res.ok) return null
+      json = await res.json()
+    } finally {
+      clearTimeout(timeout)
+    }
     const coin = json.coins?.[key]
     // Q59: Validate response structure — reject malformed/zero/negative prices
     if (!coin || typeof coin.price !== 'number' || coin.price <= 0 || !isFinite(coin.price)) return null
@@ -132,15 +137,18 @@ export async function fetchDefiLlamaPrices(
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
-    const res = await fetch(`${DEFILLAMA_BASE}/${missing.join(',')}`, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' },
-    })
-    clearTimeout(timeout)
-
-    if (!res.ok) return result
-
-    const json = await res.json()
+    // [RQ-2026-06-11] Same parse-timeout coverage as fetchDefiLlamaPrice above.
+    let json: { coins?: Record<string, { price?: number; symbol?: string; timestamp?: number; confidence?: number }> }
+    try {
+      const res = await fetch(`${DEFILLAMA_BASE}/${missing.join(',')}`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' },
+      })
+      if (!res.ok) return result
+      json = await res.json()
+    } finally {
+      clearTimeout(timeout)
+    }
     for (const key of missing) {
       const coin = json.coins?.[key]
       if (!coin || !coin.price || coin.price <= 0) continue
