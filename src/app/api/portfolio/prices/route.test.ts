@@ -133,3 +133,30 @@ describe('GET /api/portfolio/prices', () => {
     expect(addresses).toEqual(expect.arrayContaining([USDC.toLowerCase(), WETH.toLowerCase()]))
   })
 })
+
+// ── [E-3] per-chain DefiLlama slug ───────────────────────────────────────────
+
+describe('GET /api/portfolio/prices — chain-aware slug [E-3]', () => {
+  it("defaults to the 'ethereum' slug when chainId is absent (byte-identical pin)", async () => {
+    mockFetchDefiLlamaPrices.mockResolvedValueOnce(new Map())
+    await GET(makeRequest(`?tokens=${USDC}`))
+    const [, chain] = mockFetchDefiLlamaPrices.mock.calls[0]
+    expect(chain).toBe('ethereum')
+  })
+
+  it("maps chainId=8453 to the 'base' slug via the chain registry", async () => {
+    mockFetchDefiLlamaPrices.mockResolvedValueOnce(new Map())
+    const res = await GET(makeRequest(`?tokens=${USDC}&chainId=8453`))
+    expect(res.status).toBe(200)
+    const [, chain] = mockFetchDefiLlamaPrices.mock.calls[0]
+    expect(chain).toBe('base')
+  })
+
+  it('rejects an unsupported chainId with 400 JSON', async () => {
+    const res = await GET(makeRequest(`?tokens=${USDC}&chainId=999999`))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/chain/i)
+    expect(mockFetchDefiLlamaPrices).not.toHaveBeenCalled()
+  })
+})

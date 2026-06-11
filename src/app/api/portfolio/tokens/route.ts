@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { getChainTokenList } from '@/lib/chains/tokens'
 
 /**
  * GET /api/portfolio/tokens?address=<0x..>
@@ -17,7 +19,13 @@ import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
  * multicall path so the Portfolio tab keeps working.
  */
 
-const ALCHEMY_BASE = 'https://eth-mainnet.g.alchemy.com/v2'
+// [E-3] Per-chain Alchemy endpoints — discovery now follows the wallet's active
+// chain. Mainnet (DEFAULT_CHAIN_ID) keeps the original endpoint byte-identically;
+// an unmapped chainId is rejected with 400 before any upstream call.
+const ALCHEMY_BASE_BY_CHAIN: Record<number, string> = {
+  1: 'https://eth-mainnet.g.alchemy.com/v2',
+  8453: 'https://base-mainnet.g.alchemy.com/v2',
+}
 const TOKENS_RATE_LIMIT = { limit: 5, windowMs: 60_000 } as const
 const MAX_TOKENS = 200
 const METADATA_CONCURRENCY = 20
@@ -35,9 +43,19 @@ export interface DiscoveredToken {
 
 // ── Helpers ────────────────────────────────────────────────
 
-const DEFAULT_BY_ADDRESS = new Map<string, Token>()
-for (const t of DEFAULT_TOKENS) {
-  DEFAULT_BY_ADDRESS.set(t.address.toLowerCase(), t)
+// [E-3] Per-chain curated map: mainnet keeps the canonical DEFAULT_TOKENS;
+// other chains curate from their own catalog (a Base address must never be
+// labeled with mainnet metadata — the 9P cross-chain-address lesson).
+const curatedByChain = new Map<number, Map<string, Token>>()
+function curatedFor(chainId: number): Map<string, Token> {
+  let m = curatedByChain.get(chainId)
+  if (!m) {
+    const list = chainId === DEFAULT_CHAIN_ID ? DEFAULT_TOKENS : getChainTokenList(chainId)
+    m = new Map<string, Token>()
+    for (const t of list) m.set(t.address.toLowerCase(), t)
+    curatedByChain.set(chainId, m)
+  }
+  return m
 }
 
 interface AlchemyBalance {
@@ -161,6 +179,18 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // [E-3] Active-chain param. Absent → mainnet (byte-identical for existing
+  // callers); a chain without a mapped Alchemy endpoint is rejected up front.
+  const chainIdParam = req.nextUrl.searchParams.get('chainId')
+  const chainId = chainIdParam != null && chainIdParam !== '' ? Number(chainIdParam) : DEFAULT_CHAIN_ID
+  const alchemyBase = ALCHEMY_BASE_BY_CHAIN[chainId]
+  if (!Number.isInteger(chainId) || !alchemyBase) {
+    return NextResponse.json(
+      { error: `Chain ${chainIdParam} is not supported for portfolio discovery` },
+      { status: 400 },
+    )
+  }
+
   const apiKey = process.env.ALCHEMY_API_KEY
   if (!apiKey) {
     return NextResponse.json(
@@ -169,7 +199,8 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const url = `${ALCHEMY_BASE}/${apiKey}`
+  const url = `${alchemyBase}/${apiKey}`
+  const curated = curatedFor(chainId)
 
   let balancesResult: { address: string; tokenBalances: AlchemyBalance[] }
   try {
@@ -203,7 +234,7 @@ export async function GET(req: NextRequest) {
   // proportional to wallets that hold long-tail tokens.
   const unknownAddrs: string[] = []
   for (const b of nonZero) {
-    if (!DEFAULT_BY_ADDRESS.has(b.contractAddress.toLowerCase())) {
+    if (!curated.has(b.contractAddress.toLowerCase())) {
       unknownAddrs.push(b.contractAddress)
     }
   }
@@ -222,7 +253,7 @@ export async function GET(req: NextRequest) {
 
   const tokens: DiscoveredToken[] = nonZero.map((b) => {
     const addr = b.contractAddress.toLowerCase()
-    const known = DEFAULT_BY_ADDRESS.get(addr)
+    const known = curated.get(addr)
     if (known) {
       return {
         address: addr,

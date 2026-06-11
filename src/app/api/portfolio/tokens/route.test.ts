@@ -283,3 +283,59 @@ describe('GET /api/portfolio/tokens', () => {
     expect(metadataSpy).not.toHaveBeenCalled()
   })
 })
+
+// ── [E-3] per-chain Alchemy discovery ────────────────────────────────────────
+
+describe('GET /api/portfolio/tokens — chain-aware discovery [E-3]', () => {
+  function captureUrlMock(scenario: FetchScenario): { mock: typeof fetch; urls: string[] } {
+    const urls: string[] = []
+    const inner = makeFetchMock(scenario)
+    const mock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(String(url))
+      return (inner as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<Response>)(url, init)
+    }) as unknown as typeof fetch
+    return { mock, urls }
+  }
+
+  it('defaults to the mainnet Alchemy endpoint when chainId is absent (byte-identical pin)', async () => {
+    const { mock, urls } = captureUrlMock({ balances: [] })
+    vi.stubGlobal('fetch', mock)
+    const res = await GET(makeRequest(`?address=${WALLET}`))
+    expect(res.status).toBe(200)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(u).toContain('https://eth-mainnet.g.alchemy.com/v2')
+  })
+
+  it('uses the Base Alchemy endpoint for chainId=8453', async () => {
+    const { mock, urls } = captureUrlMock({ balances: [] })
+    vi.stubGlobal('fetch', mock)
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=8453`))
+    expect(res.status).toBe(200)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(u).toContain('https://base-mainnet.g.alchemy.com/v2')
+  })
+
+  it('rejects an unsupported chainId with 400 JSON', async () => {
+    vi.stubGlobal('fetch', makeFetchMock({ balances: [] }))
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=999999`))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/chain/i)
+  })
+
+  it('curates isDefault from the BASE token list on chainId=8453 (not the mainnet list)', async () => {
+    // Base USDC (native Circle deployment) — in the Base curated catalog, NOT in
+    // mainnet DEFAULT_TOKENS. Discovery on 8453 must flag it isDefault: true.
+    const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+    vi.stubGlobal('fetch', makeFetchMock({
+      balances: [{ contractAddress: BASE_USDC, tokenBalance: '0x0de0b6b3a7640000' }],
+    }))
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=8453`))
+    expect(res.status).toBe(200)
+    const body = await res.json() as { tokens: Array<{ address: string; isDefault: boolean; symbol: string }> }
+    const usdc = body.tokens.find(t => t.address.toLowerCase() === BASE_USDC.toLowerCase())
+    expect(usdc).toBeTruthy()
+    expect(usdc!.isDefault).toBe(true)
+    expect(usdc!.symbol).toBe('USDC')
+  })
+})
