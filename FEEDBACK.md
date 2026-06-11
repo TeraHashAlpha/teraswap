@@ -2920,3 +2920,34 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
 - PR #162 (cancel-review) being in flight constrained two safe fixes (truncAddr consolidation,
   ConditionalOrderPanel removal decision) — deferred with notes rather than creating cross-PR
   conflicts. Sequencing matters when multiple branches touch the same components.
+## Feedback — E-3 portfolio Base activation (56594a9 / b061695 / 3d07294) — LIGHT Auditor
+
+### What changed (the whole feature follows the active chain in one PR)
+- **Routes**: /api/portfolio/tokens accepts chainId (1 → eth-mainnet Alchemy byte-identically; 8453 →
+  base-mainnet; unmapped → 400 before any upstream call) and curates isDefault metadata from the
+  ACTIVE chain's catalog (a Base address is never labeled with mainnet metadata — 9P lesson).
+  /api/portfolio/prices accepts chainId → DefiLlama slug via getChainConfig(chainId).slug
+  ('ethereum'/'base'); unsupported → 400.
+- **Standalone useTokenBalances** widened to { balances, isLoading, isError } + an `enabled` flag
+  (defaults true; TokenSelector — the only other caller — updated). Chain-aware reads unchanged.
+- **usePortfolio**: discovery + prices fetches carry useActiveChainId(); the internal mainnet-pinned
+  fallback hook (chain?.id === CHAIN_ID + DEFAULT_TOKENS walk) is REPLACED by the standalone hook;
+  curation map + fallback walk + the Alchemy-path native-ETH read all follow the active chain; a
+  chain switch synchronously clears the previous chain's tokens (no cross-chain mixing in flight).
+
+### Mainnet byte-identical (behavioral)
+- Mainnet requests now carry an EXPLICIT chainId=1 (URL changes; route semantics identical, both
+  pinned by tests). All 20 pre-existing usePortfolio tests pass unchanged; route mainnet pins added.
+
+### Notes for the LIGHT Auditor
+- Alchemy endpoint map is {1, 8453} — adding a chain requires the endpoint entry + catalog (the 400
+  fail-closed default refuses anything unmapped).
+- The Base curated catalog comes from getChainTokenList(8453) (the 9Y pinned catalog); long-tail Base
+  tokens resolve through Alchemy metadata exactly as long-tail mainnet tokens do.
+- ALCHEMY_API_KEY remains a single key for both endpoints (Alchemy keys are app-scoped across
+  networks). If the deployment uses a network-restricted key, Base discovery 503s and the chain-aware
+  multicall fallback covers it — same degradation path as mainnet.
+
+### Owner post-merge
+- Live check with a Base-funded wallet: Portfolio tab shows Base balances + USD totals; switch to
+  mainnet and back — no cross-chain token mixing.
