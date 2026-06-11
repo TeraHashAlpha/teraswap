@@ -18,12 +18,14 @@ import { getChainTokenList } from '@/lib/chains/tokens'
  * connected-mainnet behaviour, so it stays byte-identical (the old gate was the
  * strict `chain.id === CHAIN_ID`, which left every L2 balance empty).
  */
-export function useTokenBalances() {
+// [E-3] `enabled` lets usePortfolio park the multicall while Alchemy discovery
+// is doing its job (defaults true — existing callers unaffected).
+export function useTokenBalances(enabled: boolean = true) {
   const { address, isConnected } = useAccount()
   const activeChainId = useActiveChainId()
   // Only fetch on a chain that is live (FeeCollector set). isChainActive(1) is
   // true in production, so mainnet behaves exactly as before.
-  const chainEnabled = isChainActive(activeChainId)
+  const chainEnabled = enabled && isChainActive(activeChainId)
 
   // Per-chain catalog. Mainnet keeps the canonical DEFAULT_TOKENS list verbatim.
   const tokens = useMemo(
@@ -32,7 +34,7 @@ export function useTokenBalances() {
   )
 
   // Native balance — read on the active chain.
-  const { data: ethBalance } = useBalance({
+  const { data: ethBalance, isLoading: ethLoading, isError: ethError } = useBalance({
     address,
     chainId: activeChainId,
     query: { enabled: isConnected && chainEnabled },
@@ -55,7 +57,7 @@ export function useTokenBalances() {
     [address, erc20Tokens, activeChainId],
   )
 
-  const { data: erc20Results } = useReadContracts({
+  const { data: erc20Results, isLoading: erc20Loading, isError: erc20Error } = useReadContracts({
     contracts: isConnected && chainEnabled && address ? contracts : [],
     query: {
       enabled: isConnected && chainEnabled && !!address,
@@ -96,7 +98,13 @@ export function useTokenBalances() {
     return map
   }, [ethBalance, erc20Results, erc20Tokens, tokens])
 
-  return balanceMap
+  // [E-3] Widened return: usePortfolio's fallback path needs loading/error
+  // signals alongside the map. (Loading only counts while reads are enabled.)
+  return {
+    balances: balanceMap,
+    isLoading: Boolean(isConnected && chainEnabled && (ethLoading || erc20Loading)),
+    isError: Boolean(ethError || erc20Error),
+  }
 }
 
 // Format balance nicely: show up to 6 significant digits

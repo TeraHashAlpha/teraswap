@@ -13,8 +13,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const useAccountMock = vi.fn()
-const useBalanceMock = vi.fn<(opts: unknown) => { data: undefined }>(() => ({ data: undefined }))
-const useReadContractsMock = vi.fn<(opts: unknown) => { data: undefined }>(() => ({ data: undefined }))
+const useBalanceMock = vi.fn<(opts: unknown) => { data?: { value: bigint } | undefined; isLoading?: boolean; isError?: boolean }>(() => ({ data: undefined }))
+const useReadContractsMock = vi.fn<(opts: unknown) => { data?: Array<{ status: string; result?: bigint }> | undefined; isLoading?: boolean; isError?: boolean }>(() => ({ data: undefined }))
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
   useBalance: (opts: unknown) => useBalanceMock(opts),
@@ -121,5 +121,29 @@ describe('useTokenBalances — chain-aware [SPRINT-9G G5]', () => {
 
     const balOpts = useBalanceMock.mock.calls[0][0] as { query: { enabled: boolean } }
     expect(balOpts.query.enabled).toBe(false)
+  })
+})
+
+describe('useTokenBalances — widened API for the portfolio fallback [E-3]', () => {
+  it('returns { balances, isLoading, isError } (balances is the address→balance map)', () => {
+    useBalanceMock.mockReturnValue({ data: { value: 2n * 10n ** 18n }, isLoading: false, isError: false })
+    const { result } = renderHook(() => useTokenBalances())
+    expect(result.current.balances).toBeInstanceOf(Map)
+    expect(typeof result.current.isLoading).toBe('boolean')
+    expect(typeof result.current.isError).toBe('boolean')
+  })
+
+  it('enabled=false disables every wagmi read (lets usePortfolio park the multicall while Alchemy works)', () => {
+    renderHook(() => useTokenBalances(false))
+    const balOpts = useBalanceMock.mock.calls[0][0] as { query: { enabled: boolean } }
+    expect(balOpts.query.enabled).toBe(false)
+    const rcOpts = useReadContractsMock.mock.calls[0][0] as { query: { enabled: boolean } }
+    expect(rcOpts.query.enabled).toBe(false)
+  })
+
+  it('surfaces isError from either wagmi read', () => {
+    useReadContractsMock.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+    const { result } = renderHook(() => useTokenBalances())
+    expect(result.current.isError).toBe(true)
   })
 })
