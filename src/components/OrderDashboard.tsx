@@ -7,6 +7,7 @@ import { useOrderEngine } from '@/hooks/useOrderEngine'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { AutonomousOrder, AutonomousOrderStatus } from '@/lib/order-engine'
 import { chainlinkAggregatorAbi } from '@/lib/chainlink'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 import ExecutionTimeline from './ExecutionTimeline'
 import { playTouchMP3 } from '@/lib/sounds'
 
@@ -354,10 +355,13 @@ function OrderCard({
             </div>
           )}
 
-          {/* Tx hash */}
+          {/* Tx hash — [RQ-2026-06-11] chain-aware helper; orders are mainnet-only
+              today (executor deployed on chainId 1 only, AutonomousOrder carries no
+              chainId), so this stays the mainnet explorer byte-identically. When the
+              order engine activates on Base, thread the order's chain here. */}
           {order.txHash && (
             <a
-              href={`https://etherscan.io/tx/${order.txHash}`}
+              href={explorerTxUrl(order.txHash, 1)}
               target="_blank"
               rel="noopener noreferrer"
               className="mb-3 flex items-center gap-1 text-[11px] text-cream-40 hover:text-cream transition-colors"
