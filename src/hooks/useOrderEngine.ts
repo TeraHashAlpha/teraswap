@@ -244,6 +244,32 @@ export interface PendingOrderReview {
   account: `0x${string}`
 }
 
+/**
+ * [CANCEL-REVIEW] A frozen cancel/invalidate plan awaiting the user's review — closes the 9U FEEDBACK
+ * gap: cancel/invalidate signatures (and the on-chain cancel tx) were un-gated. cancelOrder /
+ * cancelAllOrders (Phase A) FREEZE this; confirmCancel (Phase B) executes the SAME frozen payload 1:1
+ * (`orderStruct` is the exact cancelOrder() tx arg; `newNonce` the exact invalidateNonces() arg). The
+ * review modal renders exclusively from it, so modal == executed payload. chainId/account are captured
+ * for the synchronous confirm-time re-check (alongside the chain/account-switch reset effects).
+ * Chain-agnostic: carries the ACTIVE chainId (Base-ready), never assumes mainnet.
+ */
+export type PendingCancelReview =
+  | {
+      action: 'cancel'
+      orderId: string
+      order: AutonomousOrder
+      orderStruct: OnChainOrder
+      chainId: number
+      account: `0x${string}`
+    }
+  | {
+      action: 'invalidate'
+      newNonce: bigint
+      affectedOrders: AutonomousOrder[]
+      chainId: number
+      account: `0x${string}`
+    }
+
 export function useOrderEngine() {
   const { address } = useAccount()
   const chainId = useChainId()
@@ -253,6 +279,8 @@ export function useOrderEngine() {
   const [orders, setOrders] = useState<AutonomousOrder[]>([])
   // [SPRINT-9U U2] Frozen order awaiting review before the EIP-712 signature.
   const [pendingOrder, setPendingOrder] = useState<PendingOrderReview | null>(null)
+  // [CANCEL-REVIEW] Frozen cancel/invalidate plan awaiting review before any tx/signature.
+  const [pendingCancel, setPendingCancel] = useState<PendingCancelReview | null>(null)
   const [latestEvent, setLatestEvent] = useState<OrderEngineEvent | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -271,15 +299,22 @@ export function useOrderEngine() {
 
   // [SPRINT-9U U2 / 9R defense] Discard a pending review on chain/account switch — never sign an
   // order reviewed under chain/account A while connected as B. Ref comparison fires only on a change.
+  // [CANCEL-REVIEW] The same invalidation applies to a frozen cancel/invalidate plan.
   const prevOrderChainRef = useRef(chainId)
   useEffect(() => {
-    if (prevOrderChainRef.current !== chainId) setPendingOrder(null)
+    if (prevOrderChainRef.current !== chainId) {
+      setPendingOrder(null)
+      setPendingCancel(null)
+    }
     prevOrderChainRef.current = chainId
   }, [chainId])
   const prevOrderAddrRef = useRef(address)
   useEffect(() => {
     const prev = prevOrderAddrRef.current
-    if ((prev && address && prev !== address) || (prev && !address)) setPendingOrder(null)
+    if ((prev && address && prev !== address) || (prev && !address)) {
+      setPendingOrder(null)
+      setPendingCancel(null)
+    }
     prevOrderAddrRef.current = address
   }, [address])
 
@@ -637,16 +672,18 @@ export function useOrderEngine() {
   // [SPRINT-9U U2] Cancel a pending review without signing (modal "Cancel").
   const clearPendingOrder = useCallback(() => setPendingOrder(null), [])
 
-  // ── Cancel order (on-chain + Supabase) ─────────────────
+  // ── [CANCEL-REVIEW] Cancel order = Phase A: FREEZE the cancel plan for review (NO tx/signature) ──
   const cancelOrder = useCallback(async (orderId: string) => {
     if (!address) return
     const order = orders.find(o => o.id === orderId)
     if (!order) return
 
     try {
-      // Reconstruct the order struct with proper BigInt types (may be strings from localStorage)
+      // Reconstruct the order struct with proper BigInt types (may be strings from localStorage).
+      // This FROZEN struct is the exact cancelOrder() tx argument confirmCancel sends 1:1 — the
+      // review modal renders from it, so modal == executed payload.
       const o = order.order
-      const orderStruct = {
+      const orderStruct: OnChainOrder = {
         owner: o.owner,
         tokenIn: o.tokenIn,
         tokenOut: o.tokenOut,
@@ -659,75 +696,108 @@ export function useOrderEngine() {
         expiry: BigInt(o.expiry.toString()),
         nonce: BigInt(o.nonce.toString()),
         router: o.router,
-        routerDataHash: o.routerDataHash || '0x0000000000000000000000000000000000000000000000000000000000000000',  // [C-01]
+        routerDataHash: (o.routerDataHash || '0x0000000000000000000000000000000000000000000000000000000000000000') as `0x${string}`,  // [C-01]
         dcaInterval: BigInt(o.dcaInterval.toString()),
         dcaTotal: BigInt(o.dcaTotal.toString()),
       }
 
-      // Cancel on-chain — contract verifies msg.sender == order.owner, then marks hash as cancelled
-      await writeContractAsync({
-        address: ORDER_EXECUTOR_ADDRESS,
-        abi: ORDER_EXECUTOR_ABI,
-        functionName: 'cancelOrder',
-        args: [orderStruct],
-      })
-
-      // Cancel in Supabase (uses the stored order_hash, which may be UUID or bytes32).
-      // [FULL-H-01] The PATCH endpoint now requires an EIP-712 CancelOrder
-      // signature. We sign over the resolved Supabase row id so the server can
-      // recover the signer and confirm ownership. A declined signature is
-      // swallowed by cancelOrderInSupabase (returns false) — the on-chain
-      // cancel above is authoritative, so the order is still cancelled.
-      await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
-        const signature = await signTypedDataAsync({
-          domain: getOrderExecutorDomain(chainId),
-          types: CANCEL_ORDER_TYPES,
-          primaryType: 'CancelOrder',
-          message: { id: rowId, action: 'cancel' },
-        })
-        return { signature, chainId }
-      })
-
-      setOrders(prev => prev.map(o =>
-        o.id === orderId
-          ? { ...o, status: 'cancelled' as AutonomousOrderStatus }
-          : o
-      ))
-      setLatestEvent({ type: 'order_cancelled', orderId })
+      // Re-calling cancelOrder overwrites the frozen plan → re-review. chainId is the ACTIVE
+      // chain (chain-agnostic — ready for the Base order engine), captured for the confirm-time
+      // re-check.
+      setPendingCancel({ action: 'cancel', orderId, order, orderStruct, chainId, account: address })
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel failed'
       setLatestEvent({ type: 'order_error', orderId, error: errorMsg })
     }
-  }, [address, orders, writeContractAsync, chainId, signTypedDataAsync])
+  }, [address, orders, chainId])
 
-  // ── Cancel ALL active orders in one tx (nonce invalidation) ──
+  // ── [CANCEL-REVIEW] Cancel ALL = Phase A: FREEZE the invalidate plan for review (NO tx) ──
   const cancelAllOrders = useCallback(async () => {
     if (!address) return
     const nonce = currentNonce !== undefined ? BigInt(currentNonce.toString()) : 0n
     const invalidated = currentInvalidatedNonce !== undefined ? BigInt(currentInvalidatedNonce.toString()) : 0n
-    // newNonce must be > invalidatedNonces[user] AND should cover all current orders
+    // newNonce must be > invalidatedNonces[user] AND should cover all current orders.
+    // FROZEN here — confirmCancel sends exactly this value (no recompute after review).
     const newNonce = (nonce > invalidated ? nonce : invalidated) + 1n
 
+    const affectedOrders = orders.filter(o =>
+      o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled'
+    )
+
+    setPendingCancel({ action: 'invalidate', newNonce, affectedOrders, chainId, account: address })
+  }, [address, orders, currentNonce, currentInvalidatedNonce, chainId])
+
+  // ── [CANCEL-REVIEW] Phase B: execute the FROZEN plan (reachable ONLY via the review modal) ──
+  const confirmCancel = useCallback(async () => {
+    const p = pendingCancel
+    if (!p || !address) return
+    // [9R defense] Reject a review built under a different chain/account than the one now connected.
+    // The reset effects also clear it; this holds the invariant synchronously, independent of timing.
+    if (p.chainId !== chainId || p.account.toLowerCase() !== address.toLowerCase()) {
+      setPendingCancel(null)
+      return
+    }
+    setPendingCancel(null) // consume the review (also serialises double-confirms)
+
+    if (p.action === 'cancel') {
+      const { orderId, order, orderStruct } = p
+      try {
+        // Cancel on-chain — contract verifies msg.sender == order.owner, then marks hash as
+        // cancelled. Sends the FROZEN struct the user just reviewed, 1:1.
+        await writeContractAsync({
+          address: ORDER_EXECUTOR_ADDRESS,
+          abi: ORDER_EXECUTOR_ABI,
+          functionName: 'cancelOrder',
+          args: [orderStruct],
+        })
+
+        // Cancel in Supabase (uses the stored order_hash, which may be UUID or bytes32).
+        // [FULL-H-01] The PATCH endpoint now requires an EIP-712 CancelOrder
+        // signature. We sign over the resolved Supabase row id so the server can
+        // recover the signer and confirm ownership. A declined signature is
+        // swallowed by cancelOrderInSupabase (returns false) — the on-chain
+        // cancel above is authoritative, so the order is still cancelled.
+        // Domain uses the ACTIVE chainId (chain-agnostic, [H-05]).
+        await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
+          const signature = await signTypedDataAsync({
+            domain: getOrderExecutorDomain(chainId),
+            types: CANCEL_ORDER_TYPES,
+            primaryType: 'CancelOrder',
+            message: { id: rowId, action: 'cancel' },
+          })
+          return { signature, chainId }
+        })
+
+        setOrders(prev => prev.map(o =>
+          o.id === orderId
+            ? { ...o, status: 'cancelled' as AutonomousOrderStatus }
+            : o
+        ))
+        setLatestEvent({ type: 'order_cancelled', orderId })
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel failed'
+        setLatestEvent({ type: 'order_error', orderId, error: errorMsg })
+      }
+      return
+    }
+
+    // p.action === 'invalidate'
     try {
       await writeContractAsync({
         address: ORDER_EXECUTOR_ADDRESS,
         abi: ORDER_EXECUTOR_ABI,
         functionName: 'invalidateNonces',
-        args: [newNonce],
+        args: [p.newNonce], // the FROZEN nonce the user reviewed
       })
 
-      // Mark all active orders as cancelled in Supabase + local state.
+      // Mark all reviewed orders as cancelled in Supabase + local state.
       // [FULL-H-01] The PATCH endpoint now requires an EIP-712 CancelOrder
       // signature, so each per-order Supabase sync must be signed too — without
       // this the rows would stay 'active' in Supabase while the chain + local
-      // UI show 'cancelled' (DB/chain divergence). One signature per active
+      // UI show 'cancelled' (DB/chain divergence). One signature per reviewed
       // order; declined signatures are swallowed (on-chain invalidateNonces is
       // authoritative regardless).
-      const active = orders.filter(o =>
-        o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled'
-      )
-
-      for (const order of active) {
+      for (const order of p.affectedOrders) {
         await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
           const signature = await signTypedDataAsync({
             domain: getOrderExecutorDomain(chainId),
@@ -739,8 +809,10 @@ export function useOrderEngine() {
         }).catch(() => {})
       }
 
+      // Mark exactly the REVIEWED set locally — the UI matches what the modal showed.
+      const affectedIds = new Set(p.affectedOrders.map(o => o.id))
       setOrders(prev => prev.map(o =>
-        (o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled')
+        affectedIds.has(o.id)
           ? { ...o, status: 'cancelled' as AutonomousOrderStatus }
           : o
       ))
@@ -750,7 +822,10 @@ export function useOrderEngine() {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel all failed'
       setLatestEvent({ type: 'order_error', orderId: 'all', error: errorMsg })
     }
-  }, [address, orders, writeContractAsync, currentNonce, currentInvalidatedNonce, chainId, signTypedDataAsync])
+  }, [pendingCancel, address, chainId, writeContractAsync, signTypedDataAsync])
+
+  // [CANCEL-REVIEW] Dismiss a pending cancel review without executing (modal "Keep order(s)").
+  const clearPendingCancel = useCallback(() => setPendingCancel(null), [])
 
   // ── Remove order from local list ───────────────────────
   const removeOrder = useCallback((orderId: string) => {
@@ -799,6 +874,10 @@ export function useOrderEngine() {
     pendingOrder,
     confirmOrder,
     clearPendingOrder,
+    // [CANCEL-REVIEW] cancel/invalidate review gate (cancelOrder/cancelAllOrders only FREEZE)
+    pendingCancel,
+    confirmCancel,
+    clearPendingCancel,
     cancelOrder,
     cancelAllOrders,
     removeOrder,

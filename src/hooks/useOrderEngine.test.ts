@@ -319,7 +319,7 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
 })
 
 describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
-  it('cancelOrder writes on-chain and updates Supabase', async () => {
+  it('cancelOrder (reviewed via confirmCancel) writes on-chain and updates Supabase', async () => {
     mockCreateOrderInSupabase.mockResolvedValue(
       makeRow({ id: 'row-1', order_hash: '0x' + 'aa'.repeat(32) }),
     )
@@ -327,9 +327,9 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
     await createAndConfirm(result)
     const orderId = result.current.orders[0].id
 
-    await act(async () => {
-      await result.current.cancelOrder(orderId)
-    })
+    // [CANCEL-REVIEW] cancelOrder now freezes for review; confirmCancel executes.
+    await act(async () => { await result.current.cancelOrder(orderId) })
+    await act(async () => { await result.current.confirmCancel() })
     expect(mockWriteContractAsync).toHaveBeenCalled()
     // [FULL-H-01] cancelOrder now passes an EIP-712 signing callback as the
     // third argument so the PATCH endpoint can verify order ownership.
@@ -341,7 +341,7 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
     expect(result.current.orders[0].status).toBe('cancelled')
   })
 
-  it('cancelAllOrders invalidates nonces and marks all active orders cancelled', async () => {
+  it('cancelAllOrders (reviewed via confirmCancel) invalidates nonces and marks all active orders cancelled', async () => {
     mockFetchUserOrders.mockResolvedValue([
       makeRow({ id: 'r1', order_hash: '0x' + 'aa'.repeat(32) }),
       makeRow({ id: 'r2', order_hash: '0x' + 'bb'.repeat(32) }),
@@ -350,9 +350,9 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
     await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
 
-    await act(async () => {
-      await result.current.cancelAllOrders()
-    })
+    // [CANCEL-REVIEW] cancelAllOrders freezes the invalidate plan; confirmCancel executes.
+    await act(async () => { await result.current.cancelAllOrders() })
+    await act(async () => { await result.current.confirmCancel() })
     const writeCall = mockWriteContractAsync.mock.calls[0][0] as { functionName: string }
     expect(writeCall.functionName).toBe('invalidateNonces')
     expect(result.current.orders.every(o => o.status === 'cancelled')).toBe(true)
@@ -367,6 +367,186 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
   })
 })
 
+describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () => {
+  afterEach(async () => {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: ADDRESS })
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
+  })
+
+  async function seedOneActiveOrder(result: Parameters<typeof createAndConfirm>[0]) {
+    mockCreateOrderInSupabase.mockResolvedValue(
+      makeRow({ id: 'row-1', order_hash: '0x' + 'aa'.repeat(32) }),
+    )
+    await createAndConfirm(result)
+  }
+
+  it('cancelOrder FREEZES the cancel for review and executes NOTHING', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await seedOneActiveOrder(result)
+    const order = result.current.orders[0]
+    mockWriteContractAsync.mockClear()
+    mockSignTypedDataAsync.mockClear()
+    mockCancelOrderInSupabase.mockClear()
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(mockCancelOrderInSupabase).not.toHaveBeenCalled()
+    expect(result.current.orders[0].status).toBe('active') // nothing executed
+    const p = result.current.pendingCancel!
+    expect(p).toBeTruthy()
+    expect(p.action).toBe('cancel')
+    if (p.action === 'cancel') {
+      expect(p.orderId).toBe(order.id)
+      // The FROZEN tx struct mirrors the order 1:1 (the exact cancelOrder() arg).
+      expect(p.orderStruct.amountIn).toBe(BigInt(order.order.amountIn.toString()))
+      expect(p.orderStruct.nonce).toBe(BigInt(order.order.nonce.toString()))
+      expect(p.orderStruct.owner).toBe(order.order.owner)
+    }
+    expect(p.chainId).toBe(1)
+    expect(p.account).toBe(ADDRESS)
+  })
+
+  it('confirmCancel sends the on-chain cancel with EXACTLY the frozen struct (modal == executed)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await seedOneActiveOrder(result)
+    const order = result.current.orders[0]
+    mockWriteContractAsync.mockClear()
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    const frozen = result.current.pendingCancel!
+    const frozenStruct = frozen.action === 'cancel' ? frozen.orderStruct : null
+    await act(async () => { await result.current.confirmCancel() })
+
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
+    const call = mockWriteContractAsync.mock.calls[0][0] as { functionName: string; args: [Record<string, unknown>] }
+    expect(call.functionName).toBe('cancelOrder')
+    // Field-by-field: the tx arg IS the frozen struct the modal rendered.
+    expect(call.args[0]).toEqual(frozenStruct)
+    expect(result.current.orders[0].status).toBe('cancelled')
+    expect(result.current.pendingCancel).toBeNull()
+  })
+
+  it('the Supabase removal signature uses the ACTIVE chain domain (chain-agnostic, not pinned to 1)', async () => {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453) // Base
+    mockCancelOrderInSupabase.mockImplementation(
+      async (_w: unknown, _h: unknown, sign: (rowId: string) => Promise<{ signature: string; chainId: number }>) => {
+        await sign('row-uuid-1')
+        return true
+      },
+    )
+    const { result } = renderHook(() => useOrderEngine())
+    await seedOneActiveOrder(result)
+    const order = result.current.orders[0]
+    mockSignTypedDataAsync.mockClear()
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    await act(async () => { await result.current.confirmCancel() })
+
+    const sigCall = mockSignTypedDataAsync.mock.calls.at(-1)![0] as {
+      domain: { chainId: number }
+      message: { id: string; action: string }
+    }
+    expect(sigCall.domain.chainId).toBe(8453) // active chain, never hardcoded mainnet
+    expect(sigCall.message).toEqual({ id: 'row-uuid-1', action: 'cancel' })
+  })
+
+  it('cancelAllOrders FREEZES an invalidate review (frozen newNonce + affected orders, no tx)', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r1', order_hash: '0x' + 'aa'.repeat(32) }),
+      makeRow({ id: 'r2', order_hash: '0x' + 'bb'.repeat(32) }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    mockWriteContractAsync.mockClear()
+
+    await act(async () => { await result.current.cancelAllOrders() })
+
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+    const p = result.current.pendingCancel!
+    expect(p.action).toBe('invalidate')
+    if (p.action === 'invalidate') {
+      expect(p.newNonce).toBe(6n) // contract nonce 5n (mock) > invalidated 0n → 5n + 1n
+      expect(p.affectedOrders.map(o => o.id).sort()).toEqual(['r1', 'r2'])
+    }
+  })
+
+  it('confirmCancel(invalidate) sends invalidateNonces with the FROZEN nonce', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r1', order_hash: '0x' + 'aa'.repeat(32) }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    mockWriteContractAsync.mockClear()
+
+    await act(async () => { await result.current.cancelAllOrders() })
+    const frozen = result.current.pendingCancel!
+    const frozenNonce = frozen.action === 'invalidate' ? frozen.newNonce : null
+    await act(async () => { await result.current.confirmCancel() })
+
+    const call = mockWriteContractAsync.mock.calls[0][0] as { functionName: string; args: [bigint] }
+    expect(call.functionName).toBe('invalidateNonces')
+    expect(call.args[0]).toBe(frozenNonce) // the frozen value, not a recompute
+    expect(result.current.orders.every(o => o.status === 'cancelled')).toBe(true)
+    expect(result.current.pendingCancel).toBeNull()
+  })
+
+  it('confirmCancel is a no-op when there is no pending cancel review', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.confirmCancel() })
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('an account switch INVALIDATES the pending cancel (no execution under wallet B)', async () => {
+    const wagmi = await import('wagmi')
+    const { result, rerender } = renderHook(() => useOrderEngine())
+    await seedOneActiveOrder(result)
+    const order = result.current.orders[0]
+    mockWriteContractAsync.mockClear()
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    expect(result.current.pendingCancel).toBeTruthy()
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: '0x9999999999999999999999999999999999999999' })
+    await act(async () => { rerender() })
+    expect(result.current.pendingCancel).toBeNull()
+    await act(async () => { await result.current.confirmCancel() })
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+  })
+
+  it('a chain switch INVALIDATES the pending cancel', async () => {
+    const wagmi = await import('wagmi')
+    const { result, rerender } = renderHook(() => useOrderEngine())
+    await seedOneActiveOrder(result)
+    const order = result.current.orders[0]
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    expect(result.current.pendingCancel).toBeTruthy()
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
+    await act(async () => { rerender() })
+    expect(result.current.pendingCancel).toBeNull()
+  })
+
+  it('clearPendingCancel discards the review without executing', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await seedOneActiveOrder(result)
+    const order = result.current.orders[0]
+    mockWriteContractAsync.mockClear()
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    act(() => { result.current.clearPendingCancel() })
+    expect(result.current.pendingCancel).toBeNull()
+    await act(async () => { await result.current.confirmCancel() })
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+    expect(result.current.orders[0].status).toBe('active')
+  })
+})
+
 describe('useOrderEngine — removeOrder', () => {
   // [P197] removeOrder now no-ops on ACTIVE orders (they must be cancelled
   // on-chain first). This test removes a terminal (cancelled) order — the
@@ -378,9 +558,9 @@ describe('useOrderEngine — removeOrder', () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result)
     const id = result.current.orders[0].id
-    await act(async () => {
-      await result.current.cancelOrder(id)
-    })
+    // [CANCEL-REVIEW] two-phase: freeze then confirm.
+    await act(async () => { await result.current.cancelOrder(id) })
+    await act(async () => { await result.current.confirmCancel() })
     expect(result.current.orders[0].status).toBe('cancelled')
     mockCancelOrderInSupabase.mockClear()
     act(() => {

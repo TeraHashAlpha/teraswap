@@ -9,6 +9,7 @@ import type { AutonomousOrder, AutonomousOrderStatus } from '@/lib/order-engine'
 import { chainlinkAggregatorAbi } from '@/lib/chainlink'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import ExecutionTimeline from './ExecutionTimeline'
+import OrderCancelReviewModal from './OrderCancelReviewModal'
 import { playTouchMP3 } from '@/lib/sounds'
 
 // ── Status config ──────────────────────────────────────
@@ -33,6 +34,7 @@ export default function OrderDashboard() {
   const {
     orders, activeOrders, historyOrders,
     cancelOrder, cancelAllOrders, removeOrder,
+    pendingCancel, confirmCancel, clearPendingCancel,
     isLoading,
   } = useOrderEngine()
 
@@ -76,6 +78,8 @@ export default function OrderDashboard() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* [CANCEL-REVIEW] No cancel/invalidate executes until the user confirms this frozen plan. */}
+      {pendingCancel && <OrderCancelReviewModal review={pendingCancel} onConfirm={confirmCancel} onCancel={clearPendingCancel} />}
       {/* Header row */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-bold text-cream">

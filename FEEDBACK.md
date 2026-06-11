@@ -2829,6 +2829,58 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
 ### Remaining (optional) hardening
 - The order-engine and FeeCollector suites are two separate Foundry projects sharing one submodule; if
   they're ever consolidated, the CI could become a single `forge test` invocation. Not needed now.
+## Feedback — CHORE-CANCEL-REVIEW (hook a9e43d5 / modal d7e98d3 / wiring fe1af13)
+
+### What's now gated (closes the 9U FEEDBACK gap)
+- **Single cancel** (Limit/DCA/SL·TP): the on-chain `cancelOrder(orderStruct)` tx **and** the EIP-712
+  `CancelOrder { id, action }` Supabase-removal signature. **Cancel-all**: the `invalidateNonces(newNonce)`
+  tx **and** the per-order removal signatures. `cancelOrder`/`cancelAllOrders` only FREEZE a
+  `PendingCancelReview` (the exact tx struct / the exact nonce + affected orders); `confirmCancel` —
+  reachable only from the review modal — executes the FROZEN payload 1:1 with the 9R synchronous
+  chain/account re-check; the 9U reset effects (prevChainIdRef/prevAddressRef pattern) also clear it.
+  All 4 cancel entry points (OrderDashboard, DCA/Limit/Conditional panels) render the modal from their
+  own hook instance, mirroring the 9U create review exactly.
+- **CoW: checked, no cancellation path exists** in the app (the only "cancel" near CoW is the swap-flow
+  abort in useSwap, not an order-cancel signature) — nothing to gate. If CoW order cancellation ships
+  later (it signs an `OrderCancellations` typed-data), it MUST get the same review.
+
+### Chain-agnostic (per the owner's L2-only direction)
+- The frozen plan carries `useChainId()` (the ACTIVE chain) and the removal-signature domain stays
+  `getOrderExecutorDomain(chainId)` — nothing pins chainId 1. Test pins the Base case (domain.chainId
+  8453). Note the engine itself still has a single `ORDER_EXECUTOR_ADDRESS` (env-overridable, currently
+  the mainnet deployment) — making THAT per-chain is the order-engine activation work, out of scope here;
+  the review layer is already chain-correct.
+
+### One deliberate behavioral delta (display-state only — flag for the Auditor)
+- Old `cancelAllOrders` marked locally-cancelled by STATUS PREDICATE at execution time; `confirmCancel`
+  now marks exactly the FROZEN `affectedOrders` ids (and signs Supabase removals for exactly that list),
+  so the UI/DB sync matches what the modal showed. The on-chain `invalidateNonces` semantics are
+  untouched. An order created in another panel instance between freeze and confirm is not retro-marked —
+  on-chain nonce ordering governs it regardless (its nonce ≥ the frozen newNonce ⇒ unaffected).
+
+### Adversarial review (3-agent: bypass / faithfulness / spec) — PASS before push
+- **No bypass**: no caller of the cancel tx, `CANCEL_ORDER_TYPES` signature, or `cancelOrderInSupabase`
+  outside `confirmCancel`; review consumed before execution (double-confirm serialised); both reset
+  effects + the synchronous re-check verified line-by-line against the 9U defenses.
+- **Faithful**: modal fields == executed payload (frozen `orderStruct`/`newNonce`) field-by-field;
+  execution bodies match the pre-diff code (same tx, domain, types/message, Supabase sync, events).
+- Notes (documented, no action): (1) if multiple order panels ever render simultaneously, each hook
+  instance has its own `pendingCancel` — fine today (one dashboard visible), consider a shared context
+  if panels co-render later; (2) an order filled/cancelled remotely while the modal sits open still
+  sends the frozen struct — the contract rejects it (authoritative, safe), error surfacing could be
+  friendlier; (3) Supabase PATCH does the atomic `status='active'` re-check server-side (no TOCTOU).
+
+### Test fixtures — gitleaks
+- The new modal test uses the public WETH/USDC mainnet addresses as fixtures; tagged with inline
+  `gitleaks:allow` (the first-class mechanism) so the PR-scoped scan stays clean without widening any
+  allowlist. Range-scan verified: 0 leaks.
+
+### Verification + OWNER step
+- TDD: 15 new tests (9 hook gate + 4 modal + 2 wiring) + 3 existing cancel tests moved to the two-phase
+  flow. Full suite 1627; typecheck + lint (0 errors) + `next build` green; no contract/EIP-712-domain/
+  gate/adapter/swap changes (spec-critic diff-verified: config.ts/index.ts untouched). **LIGHT Auditor
+  review before prod** (signing-trust surface), then the owner's live tap-through: cancel one order +
+  cancel-all on a wallet, confirming the modal precedes every wallet prompt.
 ## Feedback — REVIEW-QUALITY-2026-06-11 (layered multi-agent review; report in Audits/REVIEW-QUALITY-2026-06-11.md)
 
 ### On the review method itself (what the Architect should know)
