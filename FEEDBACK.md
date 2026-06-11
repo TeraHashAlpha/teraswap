@@ -2881,3 +2881,40 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   gate/adapter/swap changes (spec-critic diff-verified: config.ts/index.ts untouched). **LIGHT Auditor
   review before prod** (signing-trust surface), then the owner's live tap-through: cancel one order +
   cancel-all on a wallet, confirming the modal precedes every wallet prompt.
+## Feedback — E-2 sequencer gate on the QUOTE path (9604e43) — SECURITY GATE, FULL Auditor
+
+### What changed (additive only — the price-read gate is untouched)
+- `fetchMetaQuote` now refuses to quote any non-mainnet chain whose sequencer is not confirmed up,
+  reusing `isSequencerUp` VERBATIM (down→false, 1h recovery grace→false, RPC error→fail-safe false,
+  30s cache — all already unit-tested). Placement: top of `fetchMetaQuote`, BEFORE the quote cache, so
+  cached quotes also stop within one 30s check-cycle of a down transition, and before the rate
+  limiter so refused requests don't consume budget. `/api/quote` (GET + POST) maps the typed
+  `SequencerDownError` to 503 `{ error, sequencerDown: true }` + `Retry-After: 60`; the calm message
+  ("Base sequencer is down or recovering — quotes are paused until it stabilizes.") surfaces through
+  useQuote's existing error state and recovers automatically on the normal refresh cadence.
+
+### Placement decision (in-lib, not route-level) — why
+- Gating inside `fetchMetaQuote` covers EVERY caller (the /api/quote GET + POST today, any future
+  server caller) instead of only the route; the route adds the HTTP shape. /api/v1/* is unaffected
+  (explicitly mainnet-only, rejects non-1 chainIds before quoting).
+
+### On-chain verification (9V lesson — directory-by-name is not evidence)
+- `cast call 0xBCF85224fc0756B9Fa45aA7892530B47e10b6433 "description()(string)"` on Base
+  → **"L2 Sequencer Uptime Status Feed"**; `decimals()` = 0; live `latestRoundData` answer=0 (up),
+  startedAt well past the grace window. The registry address is the genuine Chainlink feed.
+
+### For the FULL Auditor (this changes when users can quote on L2)
+- Confirm the refusal semantics: fail-safe direction is REFUSE (an RPC error on the sequencer feed
+  blocks Base quotes — availability cost accepted for safety; mainnet unaffected).
+- **Open question flagged**: the SWAP-build path (`/api/swap` → fetchSwapFromSource) does not have an
+  explicit sequencer refusal of its own — it relies on the oracle-validation gate (which IS
+  sequencer-gated) plus this new quote-path gate upstream of any UI swap. Confirm whether swap
+  building deserves the same explicit `SequencerDownError` refusal for defense-in-depth, or whether
+  the existing oracle gate suffices (a swap can only be built from a quote the UI obtained, which is
+  now gated). If desired, the same one-line gate drops into the swap route.
+- The 30s `isSequencerUp` cache bounds detection latency: a down transition can serve quotes for up
+  to ~30s. Same cache the price-read gate already uses — unchanged, just inherited.
+
+### Merge-order note
+- PR #164 (review-quality) is open and also appends to FEEDBACK.md — whichever merges second will hit
+  the usual append-only FEEDBACK conflict (resolution: keep both sections).
