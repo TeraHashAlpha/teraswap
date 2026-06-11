@@ -23,12 +23,15 @@ import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey 
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
+import { isSequencerUp, SequencerDownError } from './chains/sequencer-check'
+import { getPublicClientForChain } from './chains/clients'
 import { getFeeIncompatibleSources } from './chains/activation'
 import type { NormalizedQuote, MetaQuoteResult, QuoteMeta, QuoteParams, DEXAdapter } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
 export type { NormalizedQuote, MetaQuoteResult, FeeTierCandidate, FeeTierDetection, QuoteMeta, CowQuoteMeta, UniswapV3QuoteMeta, GenericQuoteMeta } from './adapters'
 export { submitCowOrder, pollCowOrderStatus, detectUniswapV3FeeTier } from './adapters'
+export { SequencerDownError } from './chains/sequencer-check'
 export { getAllCircuitStates }
 
 // [SPRINT-9D] Friendly per-source labels for the "no valid quotes" error,
@@ -92,6 +95,22 @@ export async function fetchMetaQuote(
    *  callers (which don't pass it) keep mainnet behaviour exactly. */
   chainId?: number,
 ): Promise<MetaQuoteResult> {
+  // [E-2 / REVIEW-QUALITY-2026-06-11] L2 sequencer-uptime gate on the QUOTE path.
+  // The P218 gate protected the Chainlink price READ; quote sourcing was
+  // independent, so a down/recovering sequencer could still serve L2 quotes
+  // against stale liquidity. Refuse to quote any non-mainnet chain whose
+  // sequencer is not confirmed up (isSequencerUp = down→false, recovery grace
+  // window→false, RPC error→false fail-safe; result cached 30s). Placed BEFORE
+  // the quote cache so cached quotes also stop the moment the check flips.
+  // Mainnet is byte-identical: the gate is never consulted for chainId 1/omitted.
+  if (chainId != null && chainId !== DEFAULT_CHAIN_ID) {
+    const seqUp = await isSequencerUp(chainId, getPublicClientForChain(chainId))
+    if (!seqUp) {
+      console.warn(`[E-2] Quote refused: chain ${chainId} sequencer down or in grace period`)
+      throw new SequencerDownError(chainId)
+    }
+  }
+
   // [P188] Server-side cache — check BEFORE the rate limiter so a
   // cache hit never costs a token in the outbound budget.
   const cacheKey = quoteCacheKey({ src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId })

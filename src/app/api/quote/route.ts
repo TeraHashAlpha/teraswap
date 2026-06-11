@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
+import { SequencerDownError } from '@/lib/chains/sequencer-check'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { verifyBearerToken } from '@/lib/auth'
@@ -184,6 +185,14 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
       },
     })
   } catch (err) {
+    // [E-2] L2 sequencer down/recovering — calm, typed 503 the client can
+    // surface as "quotes paused" (vs a generic upstream failure).
+    if (err instanceof SequencerDownError) {
+      return NextResponse.json(
+        { error: err.message, sequencerDown: true },
+        { status: 503, headers: { 'Retry-After': '60' } },
+      )
+    }
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 502 })
   }
@@ -254,6 +263,14 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
       },
     })
   } catch (err) {
+    // [E-2] L2 sequencer down/recovering — calm, typed 503 the client can
+    // surface as "quotes paused" (vs a generic upstream failure).
+    if (err instanceof SequencerDownError) {
+      return NextResponse.json(
+        { error: err.message, sequencerDown: true },
+        { status: 503, headers: { 'Retry-After': '60' } },
+      )
+    }
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 502 })
   }
