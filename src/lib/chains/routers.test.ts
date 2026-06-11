@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import { getRouterWhitelist, isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './routers'
 import { ROUTER_WHITELIST } from '@/lib/api'
+import { WHITELISTED_ROUTERS } from '@/lib/order-engine'
 
 describe('chains/routers [P222]', () => {
   it('the Base whitelist contains at least 5 routers', () => {
@@ -15,6 +16,19 @@ describe('chains/routers [P222]', () => {
   it('the mainnet whitelist matches the existing ROUTER_WHITELIST in api.ts', () => {
     // getRouterWhitelist(1) must mirror ROUTER_WHITELIST exactly (no drift).
     expect(new Set(getRouterWhitelist(1))).toEqual(new Set(ROUTER_WHITELIST))
+  })
+
+  it('[RQ-2026-06-11] order-engine shared router addresses mirror this registry (no drift)', () => {
+    // The 1inch AggregationRouter v6 and 0x Exchange Proxy addresses are ALSO
+    // defined in src/lib/order-engine/config.ts (WHITELISTED_ROUTERS — they flow
+    // into SIGNED orders). Pin the duplicated values against drift. NOTE: the
+    // order-engine's `paraswap` (Augustus V5 address, labeled v6) and `uniswapV3`
+    // (SwapRouter V1, not SwapRouter02) entries deliberately differ from this
+    // registry — they mirror the OrderExecutor CONTRACT's own whitelist and are
+    // escalated for verification separately (REVIEW-QUALITY-2026-06-11).
+    const mainnet = ROUTER_WHITELIST_BY_CHAIN[1]
+    expect(WHITELISTED_ROUTERS['1inch'].address.toLowerCase()).toBe(mainnet['1inch'].toLowerCase())
+    expect(WHITELISTED_ROUTERS['0x'].address.toLowerCase()).toBe(mainnet['0x'].toLowerCase())
   })
 
   it('isWhitelistedRouter validates per chain', () => {
