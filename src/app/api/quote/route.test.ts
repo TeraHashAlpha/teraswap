@@ -156,3 +156,21 @@ describe('[SPRINT-9X X2] quote function ceiling', () => {
     expect(mod.maxDuration).toBe(60)
   })
 })
+
+// ── [E-2] sequencer-down mapping ─────────────────────────────────────────────
+
+describe('/api/quote — L2 sequencer gate mapping [E-2]', () => {
+  it('maps SequencerDownError to a calm 503 JSON with sequencerDown: true', async () => {
+    // The harness vi.resetModules()-then-dynamically-imports the route, so the
+    // error must come from the SAME (fresh) module registry for instanceof to hold.
+    const { SequencerDownError } = await import('@/lib/chains/sequencer-check')
+    fetchMetaQuoteMock.mockRejectedValueOnce(new SequencerDownError(8453))
+    const res = await callGET({ src: USDC, dst: WETH, amount: '1000000', chainId: '8453' })
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.sequencerDown).toBe(true)
+    expect(body.error).toMatch(/^Base sequencer is down or recovering/i)
+    expect(body.error).toMatch(/quotes are paused/i)
+    expect(res.headers.get('Retry-After')).toBe('60')
+  })
+})

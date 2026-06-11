@@ -16,6 +16,26 @@ import { getChainConfig } from './registry'
 /** Price feeds may lag for up to an hour after the sequencer recovers. */
 export const SEQUENCER_GRACE_PERIOD_SEC = 3600
 
+/**
+ * [E-2 / REVIEW-QUALITY-2026-06-11] Typed refusal thrown by the QUOTE path when
+ * an L2's sequencer is down or still inside the recovery grace window. The
+ * /api/quote route maps it to a calm 503 { error, sequencerDown: true } so the
+ * client can show "quotes paused" instead of a generic failure.
+ */
+export class SequencerDownError extends Error {
+  readonly sequencerDown = true as const
+  readonly chainId: number
+  constructor(chainId: number) {
+    let chainName = `Chain ${chainId}`
+    try {
+      chainName = getChainConfig(chainId).name
+    } catch { /* unknown chain — keep the numeric label */ }
+    super(`${chainName} sequencer is down or recovering — quotes are paused until it stabilizes.`)
+    this.name = 'SequencerDownError'
+    this.chainId = chainId
+  }
+}
+
 /** Cache the per-chain result briefly to avoid hammering the RPC. */
 const CACHE_TTL_MS = 30_000
 
