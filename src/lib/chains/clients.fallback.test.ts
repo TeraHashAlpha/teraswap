@@ -49,11 +49,15 @@ describe('chains/clients — Base RPC fallback [CHORE-POLISH-3 P3]', () => {
   })
 
   it('fails over to the registry fallback RPC when the Base primary errors', async () => {
-    const seenUrls: string[] = []
+    // Exact parsed-host comparison (not substring/prefix matching) — more
+    // precise for a URL-dispatching mock and avoids the CodeQL
+    // js/incomplete-url-substring-sanitization pattern.
+    const hostOf = (u: string) => new URL(u).host
+    const seenHosts: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url)
-      seenUrls.push(u)
-      if (u.startsWith(PRIMARY)) {
+      const host = hostOf(String(url))
+      seenHosts.push(host)
+      if (host === hostOf(PRIMARY)) {
         // 401 is a deterministic HTTP error → viem fails over without retries.
         return new Response('Unauthorized', { status: 401 })
       }
@@ -67,8 +71,8 @@ describe('chains/clients — Base RPC fallback [CHORE-POLISH-3 P3]', () => {
     const block = await getPublicClientForChain(8453).getBlockNumber()
 
     expect(block).toBe(123456n) // 0x1e240 — served by the FALLBACK transport
-    expect(seenUrls.some((u) => u.startsWith(PRIMARY))).toBe(true)
-    expect(seenUrls.some((u) => u.startsWith(FALLBACK))).toBe(true)
+    expect(seenHosts).toContain(hostOf(PRIMARY))
+    expect(seenHosts).toContain(hostOf(FALLBACK))
   })
 
   it('keeps a single configured URL as a plain http transport (no wrapper)', () => {
