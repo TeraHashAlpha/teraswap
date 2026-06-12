@@ -47,3 +47,40 @@ describe('chains/sequencer-check [P218]', () => {
     expect(await isSequencerUp(8453, client)).toBe(false)
   })
 })
+
+describe('chains/sequencer-check — single-flight [E2-AUDIT H-1]', () => {
+  it('concurrent checks during a cache miss share ONE in-flight RPC read (no thundering herd)', async () => {
+    let reads = 0
+    let release!: (v: readonly [bigint, bigint, bigint, bigint, bigint]) => void
+    const gate = new Promise<readonly [bigint, bigint, bigint, bigint, bigint]>((res) => { release = res })
+    const client = {
+      readContract: () => {
+        reads += 1
+        return gate // every caller awaits the SAME slow round-trip
+      },
+    }
+
+    // 25 simultaneous quote requests arrive during the cache-miss window.
+    const calls = Promise.all(Array.from({ length: 25 }, () => isSequencerUp(8453, client)))
+    // Resolve the single round-trip: sequencer up, past the grace period.
+    release([1n, 0n, BigInt(nowSec() - SEQUENCER_GRACE_PERIOD_SEC - 100), 0n, 1n])
+    const results = await calls
+
+    expect(results.every((r) => r === true)).toBe(true)
+    expect(reads).toBe(1) // the herd shared one read
+  })
+
+  it('a failed in-flight read is not poisoned into the cache for followers beyond the fail-safe verdict', async () => {
+    let reads = 0
+    const failing = {
+      readContract: () => {
+        reads += 1
+        return Promise.reject(new Error('rpc down'))
+      },
+    }
+    const [a, b] = await Promise.all([isSequencerUp(8453, failing), isSequencerUp(8453, failing)])
+    expect(a).toBe(false) // fail-safe refuse (unchanged semantics)
+    expect(b).toBe(false)
+    expect(reads).toBe(1) // shared even on the failure path
+  })
+})

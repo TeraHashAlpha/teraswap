@@ -67,9 +67,17 @@ interface CacheEntry {
 }
 const cache = new Map<number, CacheEntry>()
 
+// [E2-AUDIT H-1] Single-flight: concurrent checks during a cache miss share ONE
+// in-flight RPC read instead of each paying their own (the audit's
+// thundering-herd finding — worst exactly at TTL expiry under load and during
+// outage transitions). Verdict semantics are unchanged; the entry clears once
+// the shared read settles and writes the cache.
+const inFlight = new Map<number, Promise<boolean>>()
+
 /** Test-only: reset the per-chain cache between cases. */
 export function _clearSequencerCache(): void {
   cache.clear()
+  inFlight.clear()
 }
 
 /**
@@ -93,20 +101,32 @@ export async function isSequencerUp(chainId: number, publicClient: SequencerClie
   const cached = cache.get(chainId)
   if (cached && cached.expiresAt > Date.now()) return cached.up
 
-  let up: boolean
-  try {
-    const [, answer, startedAt] = (await publicClient.readContract({
-      address: feed,
-      abi: SEQUENCER_ABI,
-      functionName: 'latestRoundData',
-    })) as readonly [bigint, bigint, bigint, bigint, bigint]
-    const isUp = answer === 0n // 0 = up, 1 = down
-    const sinceStartedSec = Math.floor(Date.now() / 1000) - Number(startedAt)
-    up = isUp && sinceStartedSec >= SEQUENCER_GRACE_PERIOD_SEC
-  } catch {
-    up = false // fail safe
-  }
+  // [E2-AUDIT H-1] Join an in-flight read instead of issuing another.
+  const pending = inFlight.get(chainId)
+  if (pending) return pending
 
-  cache.set(chainId, { up, expiresAt: Date.now() + CACHE_TTL_MS })
-  return up
+  const flight = (async (): Promise<boolean> => {
+    let up: boolean
+    try {
+      const [, answer, startedAt] = (await publicClient.readContract({
+        address: feed,
+        abi: SEQUENCER_ABI,
+        functionName: 'latestRoundData',
+      })) as readonly [bigint, bigint, bigint, bigint, bigint]
+      const isUp = answer === 0n // 0 = up, 1 = down
+      const sinceStartedSec = Math.floor(Date.now() / 1000) - Number(startedAt)
+      up = isUp && sinceStartedSec >= SEQUENCER_GRACE_PERIOD_SEC
+    } catch {
+      up = false // fail safe
+    }
+    cache.set(chainId, { up, expiresAt: Date.now() + CACHE_TTL_MS })
+    return up
+  })()
+
+  inFlight.set(chainId, flight)
+  try {
+    return await flight
+  } finally {
+    inFlight.delete(chainId)
+  }
 }
