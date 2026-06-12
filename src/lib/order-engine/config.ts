@@ -37,8 +37,17 @@ export const CANCEL_ORDER_TYPES = {
 } as const
 
 // ── Default whitelisted routers ──────────────────────────
-// These are the DEX routers that are whitelisted in the contract.
-// Users must select one when creating an order.
+// These are the DEX routers whitelisted in the OrderExecutor CONTRACT
+// (0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130) — verified on-chain via
+// whitelistedRouters(address) (E-1, REVIEW-QUALITY-2026-06-11). Users must
+// select one when creating an order; the selection flows into the SIGNED
+// order, so this map must mirror the contract exactly.
+//
+// NOT the same set as the FeeCollector/swap path: the instant-swap fee flow
+// routes through Augustus V6 (0x6A000F20005980200259B80c5102003040001068,
+// ADR-011), which the OrderExecutor does NOT whitelist. Do not "upgrade" the
+// paraswap entry here to V6 — conditional orders would revert until an owner
+// whitelist tx landed on the OrderExecutor.
 // [H-01] Mainnet only — Sepolia routers removed for production.
 
 type RouterEntry = { address: `0x${string}`; label: string }
@@ -53,10 +62,14 @@ const MAINNET_ROUTERS: Record<string, RouterEntry> = {
     label: '0x Exchange Proxy',
   },
   paraswap: {
+    // Augustus V5 — the address was always V5 and is whitelisted on the
+    // OrderExecutor; only the LABEL wrongly said v6 (fixed, E-1).
     address: '0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57' as `0x${string}`,
-    label: 'Paraswap Augustus v6',
+    label: 'Paraswap Augustus v5',
   },
   uniswapV3: {
+    // Uniswap V3 protocol's original SwapRouter (not SwapRouter02 — that one
+    // is the swap path's router; the OrderExecutor whitelists this one).
     address: '0xE592427A0AEce92De3Edee1F18E0157C05861564' as `0x${string}`,
     label: 'Uniswap V3 SwapRouter',
   },
