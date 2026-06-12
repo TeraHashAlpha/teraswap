@@ -174,3 +174,39 @@ describe('/api/quote — L2 sequencer gate mapping [E-2]', () => {
     expect(res.headers.get('Retry-After')).toBe('60')
   })
 })
+
+// ── [E2-AUDIT] POST handler: chainId coercion + sequencer mapping ────────────
+
+describe('POST /api/quote — chainId coercion + sequencer mapping [E2-AUDIT]', () => {
+  async function callPOST(body: Record<string, unknown>) {
+    const { POST } = await import('./route')
+    const req = new NextRequest('http://localhost/api/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return POST(req)
+  }
+
+  it('coerces a STRING chainId from the JSON body to a number before fetchMetaQuote', async () => {
+    fetchMetaQuoteMock.mockResolvedValueOnce(META_RESULT)
+    const res = await callPOST({ src: USDC, dst: WETH, amount: '1000000', chainId: '8453' })
+    expect(res.status).toBe(200)
+    // 7th arg (chainId) must be the NUMBER 8453 — a raw string would defeat the
+    // strict mainnet short-circuit in fetchMetaQuote ("1" !== 1) and leak a
+    // string chainId into every adapter.
+    const args = fetchMetaQuoteMock.mock.calls.at(-1)!
+    expect(args[6]).toBe(8453)
+  })
+
+  it('maps SequencerDownError to the same calm 503 JSON as GET', async () => {
+    const { SequencerDownError } = await import('@/lib/chains/sequencer-check')
+    fetchMetaQuoteMock.mockRejectedValueOnce(new SequencerDownError(8453))
+    const res = await callPOST({ src: USDC, dst: WETH, amount: '1000000', chainId: 8453 })
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.sequencerDown).toBe(true)
+    expect(body.error).toMatch(/^Base sequencer is down or recovering/i)
+    expect(res.headers.get('Retry-After')).toBe('60')
+  })
+})

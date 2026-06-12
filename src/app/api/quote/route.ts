@@ -230,7 +230,14 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
   }
   try {
     const body = await req.json()
-    const { src, dst, amount, srcDecimals = 18, dstDecimals = 18, chainId } = body
+    const { src, dst, amount, srcDecimals = 18, dstDecimals = 18, chainId: chainIdRaw } = body
+    // [E2-AUDIT L] Coerce ONCE at the boundary (mirrors GET): a STRING chainId
+    // from the JSON body ("1"/"8453") would defeat fetchMetaQuote's strict
+    // mainnet short-circuit ("1" !== 1) and leak a string into the adapters.
+    const chainId = chainIdRaw != null && chainIdRaw !== '' ? Number(chainIdRaw) : undefined
+    if (chainIdRaw != null && chainIdRaw !== '' && !Number.isInteger(chainId)) {
+      return NextResponse.json({ error: `Invalid chainId: ${String(chainIdRaw)}` }, { status: 400 })
+    }
 
     if (!src || !dst || !amount) {
       return NextResponse.json(
