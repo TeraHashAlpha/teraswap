@@ -6,7 +6,7 @@
  * behaviour is byte-identical. Other chains get a cached client built from the
  * chain's configured RPC (falling back to viem's default public RPC).
  */
-import { createPublicClient, http, type Chain, type PublicClient } from 'viem'
+import { createPublicClient, fallback, http, type Chain, type PublicClient } from 'viem'
 import { mainnet, base } from 'viem/chains'
 import { getPrivateClient } from '@/lib/rpc'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
@@ -29,10 +29,22 @@ export function getPublicClientForChain(chainId: number = DEFAULT_CHAIN_ID): Pub
 
   const chain = VIEM_CHAINS[chainId]
   const config = getChainConfig(chainId) // throws on an unsupported chain
-  const client = createPublicClient({
-    chain,
-    transport: http(config.rpc.primary || undefined), // undefined → viem default public RPC
-  }) as PublicClient
+
+  // [CHORE-POLISH-3 P3] Use the registry's fallback RPCs. Previously only
+  // http(primary) was built, so a degraded Base primary failed ALL Base reads
+  // (quote simulation / portfolio / monitor). Mirrors wagmiConfig's transport
+  // pattern: a single URL stays a plain http transport; several become a viem
+  // fallback() chain tried in order. The mainnet path above (getPrivateClient
+  // → /api/rpc privacy proxy) is intentionally untouched.
+  const urls = [config.rpc.primary, ...(config.rpc.fallbacks ?? [])].filter(Boolean)
+  const transport =
+    urls.length === 0
+      ? http() // no configured RPC at all → viem default public RPC for the chain
+      : urls.length === 1
+        ? http(urls[0])
+        : fallback(urls.map((url) => http(url)))
+
+  const client = createPublicClient({ chain, transport }) as PublicClient
   clientCache.set(chainId, client)
   return client
 }
