@@ -29,6 +29,9 @@ import { kv } from '@/lib/kv'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from './constants'
 import { ORDER_EXECUTOR_ADDRESS } from './order-engine/config'
 import { emitTransitionAlert } from './alert-wrapper'
+// [E-4] Multi-chain: targets + clients resolve per chain from the registry.
+import { DEFAULT_CHAIN_ID, getChainConfig, getSupportedChainIds } from './chains/registry'
+import { getPublicClientForChain } from './chains/clients'
 
 // ── Types ────────────────────────────────────────────────
 
@@ -41,6 +44,9 @@ export interface OnChainEvent {
   blockNumber: number
   args: Record<string, unknown>
   severity: EventSeverity
+  /** [E-4] Chain the event was observed on. Absent in legacy KV records
+   *  (retry queue / audit trail written before multi-chain) → mainnet. */
+  chainId?: number
 }
 
 export interface OnChainScanResult {
@@ -58,6 +64,21 @@ export interface OnChainScanResult {
   permanentlyLost?: number
   /** [10-L-04] Number of retry-queue entries successfully delivered this tick. */
   retriesDelivered?: number
+  /** [E-4] Per-chain outcomes for the NON-mainnet chains scanned this tick.
+   *  The top-level fields remain the MAINNET scan (the pre-E-4 contract), so
+   *  monitoring-loop's logging keeps working unchanged. */
+  chains?: Array<{
+    chainId: number
+    fromBlock: number
+    toBlock: number
+    eventsFound: number
+    criticalCount: number
+    warningCount: number
+    infoCount: number
+    blockAdvanceHeld?: boolean
+    /** Scan failed for this chain this tick (RPC error etc.). */
+    failed?: boolean
+  }>
 }
 
 /** [10-L-04] Persistent retry-queue entry shape. */
@@ -221,8 +242,13 @@ function maybeElevateFeeEvent(event: OnChainEvent, log: Log): OnChainEvent {
 
 /** Max blocks per eth_getLogs call (prevents RPC timeout) */
 const MAX_BLOCKS_PER_SCAN = 1000
-/** KV key for last scanned block */
+/** KV key for last scanned block. [E-4] Mainnet keeps the EXACT legacy key
+ *  (cursor continuity across the deploy); other chains get a :chainId suffix
+ *  so cursors can never mix. */
 const LAST_BLOCK_KEY = 'teraswap:onchain:last-block'
+function lastBlockKey(chainId: number): string {
+  return chainId === DEFAULT_CHAIN_ID ? LAST_BLOCK_KEY : `${LAST_BLOCK_KEY}:${chainId}`
+}
 /** KV key for recent critical events (7-day TTL) */
 const CRITICAL_EVENTS_KEY = 'teraswap:onchain:critical-events'
 const CRITICAL_EVENTS_TTL = 7 * 24 * 60 * 60
@@ -240,7 +266,7 @@ const ONCHAIN_TICK_INTERVAL = 1
  *  through to the KV-backed lastScannedBlock; when set we skip the
  *  eth_getLogs sweep if no new block has been mined since. Acceptable
  *  to lose on a Lambda cold start; the KV value catches us up. */
-let lastScannedBlockInMemory: number | null = null
+const lastScannedBlockInMemory = new Map<number, number>() // [E-4] per-chain
 
 /** [10-L-04] KV key for the alert retry queue. AlertRetryEntry[]. */
 const ALERT_RETRY_KEY = 'teraswap:onchain:alert-retry'
@@ -253,15 +279,62 @@ const MAX_RETRY_QUEUE_LENGTH = 256
 
 // ── RPC client ───────────────────────────────────────────
 
-function getServerClient(): PublicClient {
-  const rpcUrl = process.env.RPC_URL
-    || process.env.NEXT_PUBLIC_RPC_URL
-    || 'https://eth.llamarpc.com'
+function getServerClient(chainId: number = DEFAULT_CHAIN_ID): PublicClient {
+  // [E-4] Mainnet keeps this EXACT construction (byte-identical: same env
+  // resolution + llamarpc fallback as before). Other chains route through the
+  // per-chain client factory (registry RPC).
+  if (chainId === DEFAULT_CHAIN_ID) {
+    const rpcUrl = process.env.RPC_URL
+      || process.env.NEXT_PUBLIC_RPC_URL
+      || 'https://eth.llamarpc.com'
 
-  return createPublicClient({
-    chain: mainnet,
-    transport: http(rpcUrl),
-  })
+    return createPublicClient({
+      chain: mainnet,
+      transport: http(rpcUrl),
+    })
+  }
+  return getPublicClientForChain(chainId) as PublicClient
+}
+
+// ── [E-4] Per-chain scan targets ─────────────────────────
+
+interface ChainScanTargets {
+  chainId: number
+  /** OrderExecutor — deployed on mainnet only today (not in the registry). */
+  executor?: `0x${string}`
+  feeCollector?: `0x${string}`
+  /** V1 wind-down — mainnet only. */
+  feeCollectorV1?: `0x${string}`
+}
+
+/** Every supported chain that has at least one deployed, monitorable contract.
+ *  Registry-driven: Base joins automatically once its FeeCollector is set. */
+function getScanTargets(): ChainScanTargets[] {
+  const targets: ChainScanTargets[] = []
+  for (const chainId of getSupportedChainIds()) {
+    let feeCollector: `0x${string}` | undefined
+    try {
+      feeCollector = getChainConfig(chainId).contracts.feeCollector ?? undefined
+    } catch {
+      continue
+    }
+    const t: ChainScanTargets = {
+      chainId,
+      feeCollector,
+      ...(chainId === DEFAULT_CHAIN_ID
+        ? { executor: ORDER_EXECUTOR_ADDRESS, feeCollectorV1: FEE_COLLECTOR_V1_ADDRESS }
+        : {}),
+    }
+    if (t.executor || t.feeCollector || t.feeCollectorV1) targets.push(t)
+  }
+  return targets
+}
+
+const MAINNET_TARGETS: ChainScanTargets = {
+  chainId: DEFAULT_CHAIN_ID,
+  executor: ORDER_EXECUTOR_ADDRESS,
+  feeCollector: FEE_COLLECTOR_ADDRESS,
+  feeCollectorV1: FEE_COLLECTOR_V1_ADDRESS,
 }
 
 // ── Core scan ────────────────────────────────────────────
@@ -274,31 +347,23 @@ export async function scanContractEvents(
   fromBlock: number,
   toBlock: number,
   client: PublicClient,
+  // [E-4] Which contracts to scan, per chain. Defaults to the full mainnet set
+  // so existing callers/tests are byte-identical.
+  targets: ChainScanTargets = MAINNET_TARGETS,
 ): Promise<OnChainEvent[]> {
   // Cap range
   const effectiveTo = Math.min(toBlock, fromBlock + MAX_BLOCKS_PER_SCAN - 1)
 
-  // Fetch logs from OrderExecutor + both FeeCollector versions in parallel.
-  // V1 still emits Sweep on residual-balance recoveries even though no new
-  // swaps route there; merging V1's logs into feeCollectorLogs keeps any
-  // such admin actions visible to the classifier without changing downstream
-  // classification logic (V1 and V2 share the SwapWithFee event signature).
+  // Fetch logs from the chain's deployed contracts in parallel.
+  // Mainnet: OrderExecutor + both FeeCollector versions (V1 still emits Sweep
+  // on residual-balance recoveries even though no new swaps route there; V1
+  // and V2 share the SwapWithFee event signature so classification is shared).
+  // Base: FeeCollector V2 only (no executor / V1 deployed there).
+  const range = { fromBlock: BigInt(fromBlock), toBlock: BigInt(effectiveTo) }
   const [executorLogs, feeCollectorV2Logs, feeCollectorV1Logs] = await Promise.all([
-    client.getLogs({
-      address: ORDER_EXECUTOR_ADDRESS,
-      fromBlock: BigInt(fromBlock),
-      toBlock: BigInt(effectiveTo),
-    }),
-    client.getLogs({
-      address: FEE_COLLECTOR_ADDRESS,
-      fromBlock: BigInt(fromBlock),
-      toBlock: BigInt(effectiveTo),
-    }),
-    client.getLogs({
-      address: FEE_COLLECTOR_V1_ADDRESS,
-      fromBlock: BigInt(fromBlock),
-      toBlock: BigInt(effectiveTo),
-    }),
+    targets.executor ? client.getLogs({ address: targets.executor, ...range }) : Promise.resolve([] as Log[]),
+    targets.feeCollector ? client.getLogs({ address: targets.feeCollector, ...range }) : Promise.resolve([] as Log[]),
+    targets.feeCollectorV1 ? client.getLogs({ address: targets.feeCollectorV1, ...range }) : Promise.resolve([] as Log[]),
   ])
   const feeCollectorLogs = [...feeCollectorV2Logs, ...feeCollectorV1Logs]
 
@@ -318,6 +383,7 @@ export async function scanContractEvents(
       blockNumber: Number(log.blockNumber ?? 0),
       args: extractArgs(log),
       severity: classification.severity,
+      chainId: targets.chainId, // [E-4]
     }
     events.push(event)
   }
@@ -336,6 +402,7 @@ export async function scanContractEvents(
       blockNumber: Number(log.blockNumber ?? 0),
       args: extractArgs(log),
       severity: classification.severity,
+      chainId: targets.chainId, // [E-4]
     }
     // Elevate large fee events
     event = maybeElevateFeeEvent(event, log)
@@ -368,25 +435,26 @@ function extractArgs(log: Log): Record<string, unknown> {
 async function dispatchEventAlert(event: OnChainEvent): Promise<void> {
   if (event.severity === 'info') return
 
+  // [E-4] Chain tag. Mainnet (and legacy retry-queue entries without a chainId)
+  // keeps the EXACT pre-E-4 source key + reason strings — byte-identical so the
+  // alert-wrapper's dedup keys and any downstream parsing are unaffected. Other
+  // chains get a distinct per-chain source (separate dedup) + an explicit
+  // chain marker in the reason.
+  const chainId = event.chainId ?? DEFAULT_CHAIN_ID
+  const source = chainId === DEFAULT_CHAIN_ID
+    ? `onchain-${event.contract.toLowerCase()}`
+    : `onchain-${event.contract.toLowerCase()}-${chainId}`
+  const chainSuffix = chainId === DEFAULT_CHAIN_ID ? '' : ` (chain ${chainId})`
+
   if (event.severity === 'critical') {
-    const reason = `on-chain-critical: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})`
-    await emitTransitionAlert(
-      `onchain-${event.contract.toLowerCase()}`,
-      'active',
-      'disabled',
-      reason,
-    )
+    const reason = `on-chain-critical: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})${chainSuffix}`
+    await emitTransitionAlert(source, 'active', 'disabled', reason)
     return
   }
 
   // warning
-  const reason = `on-chain-warning: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})`
-  await emitTransitionAlert(
-    `onchain-${event.contract.toLowerCase()}`,
-    'active',
-    'degraded',
-    reason,
-  )
+  const reason = `on-chain-warning: ${event.contract}.${event.eventName} in tx ${event.txHash} (block ${event.blockNumber})${chainSuffix}`
+  await emitTransitionAlert(source, 'active', 'degraded', reason)
 }
 
 /**
@@ -424,17 +492,17 @@ async function routeAlertsTracking(events: OnChainEvent[]): Promise<{
 
 // ── KV persistence ───────────────────────────────────────
 
-async function getLastScannedBlock(): Promise<number | null> {
+async function getLastScannedBlock(chainId: number): Promise<number | null> {
   try {
-    return await kv.get<number>(LAST_BLOCK_KEY)
+    return await kv.get<number>(lastBlockKey(chainId))
   } catch {
     return null
   }
 }
 
-async function setLastScannedBlock(blockNumber: number): Promise<void> {
+async function setLastScannedBlock(chainId: number, blockNumber: number): Promise<void> {
   try {
-    await kv.set(LAST_BLOCK_KEY, blockNumber)
+    await kv.set(lastBlockKey(chainId), blockNumber)
   } catch (err) {
     console.warn('[ONCHAIN] Failed to persist last scanned block:', err instanceof Error ? err.message : err)
   }
@@ -569,7 +637,9 @@ async function processRetryQueue(): Promise<{
 async function enqueueFailedAlerts(failures: OnChainEvent[]): Promise<void> {
   if (failures.length === 0) return
   const existing = await readRetryQueue()
-  const key = (e: OnChainEvent) => `${e.txHash}|${e.eventName}|${e.blockNumber}`
+  // [E-4] Chain-qualified: the same tx-hash/event/block coordinates can in
+  // principle exist on two chains. Legacy entries (no chainId) hash as mainnet.
+  const key = (e: OnChainEvent) => `${e.chainId ?? DEFAULT_CHAIN_ID}|${e.txHash}|${e.eventName}|${e.blockNumber}`
   const existingKeys = new Set(existing.map(en => key(en.event)))
   const now = new Date().toISOString()
   const additions: AlertRetryEntry[] = failures
@@ -622,19 +692,30 @@ export async function shouldRunOnChainScan(): Promise<boolean> {
  *    KV failure for the audit trail does NOT block advancement (the
  *    alert was already delivered) — see quality criterion 3 on [10-L-04].
  */
-export async function runOnChainScan(): Promise<OnChainScanResult | null> {
-  // ── 1. Drain retry queue first ─────────────────────────────
-  // If an alert that failed N ticks ago succeeds now, we want to
-  // deliver it before chewing RPC budget on new blocks. Failures here
-  // bump the per-entry attempt count; events that hit MAX_ALERT_ATTEMPTS
-  // are dropped + alerts_lost_total++.
-  const retryResult = await processRetryQueue()
+interface ChainScanOutcome {
+  fromBlock: number
+  toBlock: number
+  eventsFound: number
+  criticalCount: number
+  warningCount: number
+  infoCount: number
+  blockAdvanceHeld?: boolean
+}
+
+/**
+ * [E-4] Scan ONE chain end-to-end (steps 2–8 of the pre-E-4 flow), with its
+ * own client, contract set, KV cursor, and in-memory fast-path entry. Returns
+ * null on RPC failure (cursor untouched — retried next tick), exactly like
+ * the single-chain version did.
+ */
+async function scanOneChain(targets: ChainScanTargets): Promise<ChainScanOutcome | null> {
+  const { chainId } = targets
 
   let client: PublicClient
   try {
-    client = getServerClient()
+    client = getServerClient(chainId)
   } catch (err) {
-    console.error('[ONCHAIN] RPC client init failed:', err instanceof Error ? err.message : err)
+    console.error(`[ONCHAIN] RPC client init failed (chain ${chainId}):`, err instanceof Error ? err.message : err)
     return null
   }
 
@@ -644,36 +725,30 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
     const blockBn = await client.getBlockNumber()
     currentBlock = Number(blockBn)
   } catch (err) {
-    console.error('[ONCHAIN] Failed to get current block:', err instanceof Error ? err.message : err)
+    console.error(`[ONCHAIN] Failed to get current block (chain ${chainId}):`, err instanceof Error ? err.message : err)
     return null
   }
 
-  // [P109] In-memory fast-path: if we already scanned `currentBlock` in
-  // this process, the only "new" thing this tick could deliver is what
-  // already lives in the retry queue (drained above). Skip the KV read
-  // and the eth_getLogs sweep entirely. Cold-start safe — the cache is
-  // null on first call and we fall through to the KV-backed value.
-  if (lastScannedBlockInMemory !== null && currentBlock <= lastScannedBlockInMemory) {
+  // [P109] In-memory fast-path (per chain): if we already scanned
+  // `currentBlock` in this process, skip the KV read and the eth_getLogs
+  // sweep. Cold-start safe — absent on first call, falls through to KV.
+  const memLast = lastScannedBlockInMemory.get(chainId)
+  if (memLast !== undefined && currentBlock <= memLast) {
     return {
-      fromBlock: lastScannedBlockInMemory + 1,
+      fromBlock: memLast + 1,
       toBlock: currentBlock,
       eventsFound: 0,
       criticalCount: 0,
       warningCount: 0,
       infoCount: 0,
-      ...(retryResult.permanentlyLost > 0 ? { permanentlyLost: retryResult.permanentlyLost } : {}),
-      ...(retryResult.delivered > 0 ? { retriesDelivered: retryResult.delivered } : {}),
     }
   }
 
   // Determine scan range
-  const lastScanned = await getLastScannedBlock()
+  const lastScanned = await getLastScannedBlock(chainId)
   const fromBlock = lastScanned != null ? lastScanned + 1 : currentBlock - 100 // First run: scan last 100 blocks
 
   if (fromBlock > currentBlock) {
-    // No new blocks since last scan — but the retry queue may have done
-    // useful work; surface that on the result so the monitoring tick log
-    // line still reflects what happened.
     return {
       fromBlock,
       toBlock: currentBlock,
@@ -681,8 +756,6 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
       criticalCount: 0,
       warningCount: 0,
       infoCount: 0,
-      ...(retryResult.permanentlyLost > 0 ? { permanentlyLost: retryResult.permanentlyLost } : {}),
-      ...(retryResult.delivered > 0 ? { retriesDelivered: retryResult.delivered } : {}),
     }
   }
 
@@ -692,10 +765,10 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
   // Scan
   let events: OnChainEvent[]
   try {
-    events = await scanContractEvents(fromBlock, toBlock, client)
+    events = await scanContractEvents(fromBlock, toBlock, client, targets)
   } catch (err) {
     // RPC failure → do NOT advance last-block (retry next tick)
-    console.error('[ONCHAIN] eth_getLogs failed:', err instanceof Error ? err.message : err)
+    console.error(`[ONCHAIN] eth_getLogs failed (chain ${chainId}):`, err instanceof Error ? err.message : err)
     return null
   }
 
@@ -703,36 +776,22 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
   const { delivered: _deliveredEvents, failed: failedEvents } = await routeAlertsTracking(events)
 
   // ── 6. Push failures to the retry queue ───────────────────
-  // Filter out info-severity (dispatchEventAlert is a no-op for info, so
-  // failed won't contain info, but keep the filter as a defensive belt).
   const failuresToRetry = failedEvents.filter(e => e.severity !== 'info')
   if (failuresToRetry.length > 0) {
     await enqueueFailedAlerts(failuresToRetry)
   }
 
   // ── 7. Persist audit trail (independent of advancement) ───
-  // This is the only path that writes to CRITICAL_EVENTS_KEY; KV failure
-  // here logs a warn but does NOT prevent block advancement, per
-  // [10-L-04] quality criterion: "Alert succeeds + KV fails → block
-  // advanced (alert was delivered)".
   await storeCriticalEvents(events)
 
-  // ── 8. Gated block advancement ────────────────────────────
-  // Block advances only when every non-info event delivered. A single
-  // critical or warning failure holds the range back; next tick re-scans
-  // and `emitTransitionAlert`'s grace-period dedup prevents duplicate
-  // Telegram messages for the events that DID deliver this round.
+  // ── 8. Gated block advancement (per-chain cursor) ──────────
   const blockAdvanceHeld = failuresToRetry.length > 0
   if (!blockAdvanceHeld) {
-    await setLastScannedBlock(toBlock)
-    // [P109] Update the in-memory fast-path cache so the next tick can
-    // short-circuit without re-reading KV. We only update on full
-    // success (no retry-held block) so the next tick still re-scans the
-    // problem range when something was held back.
-    lastScannedBlockInMemory = toBlock
+    await setLastScannedBlock(chainId, toBlock)
+    lastScannedBlockInMemory.set(chainId, toBlock)
   } else {
     console.warn(
-      `[ONCHAIN] Holding lastScannedBlock at ${lastScanned ?? 'unset'} — ${failuresToRetry.length} alert(s) failed; ` +
+      `[ONCHAIN] Holding lastScannedBlock (chain ${chainId}) at ${lastScanned ?? 'unset'} — ${failuresToRetry.length} alert(s) failed; ` +
         `events queued for retry (max ${MAX_ALERT_ATTEMPTS} attempts each).`,
     )
   }
@@ -742,10 +801,10 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
   const infoCount = events.filter(e => e.severity === 'info').length
 
   if (criticalCount > 0) {
-    console.error(`[ONCHAIN] ${criticalCount} CRITICAL events in blocks ${fromBlock}–${toBlock}`)
+    console.error(`[ONCHAIN] ${criticalCount} CRITICAL events in blocks ${fromBlock}–${toBlock} (chain ${chainId})`)
   }
   if (warningCount > 0) {
-    console.warn(`[ONCHAIN] ${warningCount} warning events in blocks ${fromBlock}–${toBlock}`)
+    console.warn(`[ONCHAIN] ${warningCount} warning events in blocks ${fromBlock}–${toBlock} (chain ${chainId})`)
   }
 
   return {
@@ -756,8 +815,48 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
     warningCount,
     infoCount,
     ...(blockAdvanceHeld ? { blockAdvanceHeld: true } : {}),
+  }
+}
+
+export async function runOnChainScan(): Promise<OnChainScanResult | null> {
+  // ── 1. Drain retry queue first (ONCE per tick, all chains) ─
+  // If an alert that failed N ticks ago succeeds now, we want to
+  // deliver it before chewing RPC budget on new blocks. Failures here
+  // bump the per-entry attempt count; events that hit MAX_ALERT_ATTEMPTS
+  // are dropped + alerts_lost_total++.
+  const retryResult = await processRetryQueue()
+
+  // ── [E-4] Scan every chain with deployed contracts ─────────
+  // Mainnet first (its outcome is the top-level result — the pre-E-4
+  // contract monitoring-loop logs); each additional chain runs with its
+  // OWN client + cursor and reports under `chains`. One chain's failure
+  // never blocks another's scan or cursor.
+  const targets = getScanTargets()
+  const mainnetTargets = targets.find(t => t.chainId === DEFAULT_CHAIN_ID)
+  const otherTargets = targets.filter(t => t.chainId !== DEFAULT_CHAIN_ID)
+
+  const mainnetOutcome = mainnetTargets ? await scanOneChain(mainnetTargets) : null
+
+  const chainOutcomes: NonNullable<OnChainScanResult['chains']> = []
+  for (const t of otherTargets) {
+    const outcome = await scanOneChain(t)
+    chainOutcomes.push(
+      outcome
+        ? { chainId: t.chainId, ...outcome }
+        : { chainId: t.chainId, fromBlock: 0, toBlock: 0, eventsFound: 0, criticalCount: 0, warningCount: 0, infoCount: 0, failed: true },
+    )
+  }
+
+  // Pre-E-4 contract: a mainnet scan failure returns null (monitoring-loop
+  // logs a warn). Non-mainnet outcomes were still processed above — their
+  // alerts/cursors are independent — they're just not reportable this tick.
+  if (!mainnetOutcome) return null
+
+  return {
+    ...mainnetOutcome,
     ...(retryResult.permanentlyLost > 0 ? { permanentlyLost: retryResult.permanentlyLost } : {}),
     ...(retryResult.delivered > 0 ? { retriesDelivered: retryResult.delivered } : {}),
+    ...(chainOutcomes.length > 0 ? { chains: chainOutcomes } : {}),
   }
 }
 
@@ -766,7 +865,7 @@ export async function runOnChainScan(): Promise<OnChainScanResult | null> {
 /** [P109] Reset the in-memory fast-path cache. Test-only — do not
  *  call from production code. */
 export function _resetLastScannedBlockCache(): void {
-  lastScannedBlockInMemory = null
+  lastScannedBlockInMemory.clear()
 }
 
 export const _internal = {

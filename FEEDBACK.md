@@ -2988,6 +2988,39 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
 ### Owner post-merge
 - Live check with a Base-funded wallet: Portfolio tab shows Base balances + USD totals; switch to
   mainnet and back — no cross-chain token mixing.
+## Feedback — E-4 multi-chain on-chain monitor (no Auditor — monitoring infra)
+
+### What changed
+- Registry-driven scan targets (mainnet: executor + FC v2 + FC v1; Base: its FeeCollector — joins via
+  NEXT_PUBLIC_BASE_FEE_COLLECTOR, no hardcoded chain list). Per-chain clients (mainnet construction
+  byte-identical; others via getPublicClientForChain). Per-chain KV cursors (mainnet keeps the EXACT
+  legacy key — cursor continuity across this deploy; others ':<chainId>'-suffixed). Chain-tagged
+  events/alerts/retry-dedup (mainnet alert strings byte-identical → alert-wrapper dedup unaffected;
+  legacy retry-queue entries without chainId default to mainnet). runOnChainScan keeps its pre-E-4
+  return contract (top level = mainnet; monitoring-loop untouched) + a `chains` array.
+- One deliberate deviation from the spec letter: the spec said "client via getPublicClientForChain"
+  for ALL chains, but for chainId 1 that would have CHANGED the mainnet client construction (the
+  monitor uses RPC_URL/llamarpc directly; getPublicClientForChain(1) routes through the privacy
+  client). The same spec sentence mandates mainnet byte-identical — byte-identical wins: mainnet keeps
+  the exact pre-E-4 construction; only non-mainnet chains use the factory.
+- Post-execution validation: verified ALREADY chain-aware end-to-end (the 9G G3 route validates +
+  threads chainId; post-execution-validator reads via getPublicClientForChain(chainId)) — no change.
+
+### OWNER ops checklist (the monitor only works if its runtime can reach Base)
+1. **RPC reach:** the Cloudflare-Worker-driven tick runs server-side — Base scanning uses the
+   registry's Base RPC (NEXT_PUBLIC_BASE_RPC_URL or https://mainnet.base.org). Confirm the prod env
+   sets a real Base RPC (Alchemy base-mainnet recommended — public RPC rate limits may throttle
+   eth_getLogs over 1000-block ranges).
+2. **Registry env:** NEXT_PUBLIC_BASE_FEE_COLLECTOR must hold the deployed Base FeeCollector in prod —
+   the monitor derives its Base target from it (unset → Base silently not scanned, BY DESIGN).
+3. **External validate-execution caller:** the route accepts chainId (9G G3) — confirm whatever infra
+   POSTs /api/monitor/validate-execution for Base swaps includes chainId: 8453 in the body (absent →
+   the validator defaults to mainnet and would mis-read Base receipts).
+4. **First Base tick:** with no prior cursor, the first scan covers the last 100 Base blocks (~3min on
+   Base's 2s blocks) — expect a small burst of historical SwapWithFee infos in KV, no alert spam
+   (info severity is KV-only).
+5. Preview-test before promote: trigger a tick against Preview env and confirm the log line shows the
+   Base leg (chains: [{ chainId: 8453, ... }]).
 
 ## Feedback — CHORE-POLISH-3 (P1 a3c4379 / P2 5d0441d / P3 7cdaf7e / P4 34c8ad4)
 
