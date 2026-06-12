@@ -4,7 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useBalance, useReadContracts } from 'wagmi'
 import { formatUnits, erc20Abi } from 'viem'
 import { DEFAULT_TOKENS, isNativeETH, type Token, type TokenCategory } from '@/lib/tokens'
-import { CHAIN_ID } from '@/lib/constants'
+import { useActiveChainId } from '@/hooks/useChainId'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getChainTokenList } from '@/lib/chains/tokens'
+import { useTokenBalances } from './useTokenBalances'
 
 // ── Public surface ────────────────────────────────────────
 
@@ -78,87 +81,10 @@ interface RawBalance {
   formatted: string
 }
 
-// ── Fallback hook: DEFAULT_TOKENS multicall ──────────────
-//
-// Kept as the safety net for environments where ALCHEMY_API_KEY is
-// unset. When discovery is available, we explicitly disable the wagmi
-// hooks so RPC quota isn't wasted on a 80-call multicall we won't read.
-
-function useTokenBalances(enabled: boolean): {
-  balances: Map<string, RawBalance>
-  isLoading: boolean
-  isError: boolean
-} {
-  const { address, isConnected, chain } = useAccount()
-  const isCorrectChain = chain?.id === CHAIN_ID
-  const wagmiEnabled = enabled && isConnected && isCorrectChain && !!address
-
-  const { data: ethBalance, isLoading: ethLoading, isError: ethError } = useBalance({
-    address,
-    query: { enabled: wagmiEnabled, refetchInterval: 30_000 },
-  })
-
-  const erc20Tokens = useMemo(
-    () => DEFAULT_TOKENS.filter((t) => !isNativeETH(t)),
-    [],
-  )
-
-  const contracts = useMemo(
-    () =>
-      erc20Tokens.map((t) => ({
-        address: t.address as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'balanceOf' as const,
-        args: [address!] as const,
-      })),
-    [address, erc20Tokens],
-  )
-
-  const {
-    data: erc20Results,
-    isLoading: erc20Loading,
-    isError: erc20Error,
-  } = useReadContracts({
-    contracts: wagmiEnabled ? contracts : [],
-    query: {
-      enabled: wagmiEnabled,
-      refetchInterval: 30_000,
-    },
-  })
-
-  const balances = useMemo(() => {
-    const map = new Map<string, RawBalance>()
-    if (ethBalance) {
-      const ethToken = DEFAULT_TOKENS.find(isNativeETH)
-      if (ethToken) {
-        map.set(ethToken.address.toLowerCase(), {
-          raw: ethBalance.value,
-          formatted: formatBalance(ethBalance.value, 18),
-        })
-      }
-    }
-    if (erc20Results) {
-      erc20Results.forEach((result, i) => {
-        if (result.status === 'success' && result.result != null) {
-          const val = result.result as bigint
-          if (val > 0n) {
-            map.set(erc20Tokens[i].address.toLowerCase(), {
-              raw: val,
-              formatted: formatBalance(val, erc20Tokens[i].decimals),
-            })
-          }
-        }
-      })
-    }
-    return map
-  }, [ethBalance, erc20Results, erc20Tokens])
-
-  return {
-    balances,
-    isLoading: wagmiEnabled && (ethLoading || erc20Loading),
-    isError: ethError || erc20Error,
-  }
-}
+// [E-3] The mainnet-pinned internal fallback hook (chain?.id === CHAIN_ID,
+// DEFAULT_TOKENS-only) was replaced by the standalone chain-aware
+// useTokenBalances (./useTokenBalances), which follows the ACTIVE chain's
+// catalog and RPC and is gated by isChainActive.
 
 // ── Primary path: Alchemy token discovery ────────────────
 //
@@ -167,7 +93,7 @@ function useTokenBalances(enabled: boolean): {
 // unset on the server — we surface isAvailable=false so usePortfolio()
 // can switch to the multicall fallback for this render.
 
-function useDiscoveredTokens(address: string | undefined): {
+function useDiscoveredTokens(address: string | undefined, chainId: number): {
   tokens: DiscoveredToken[]
   isLoading: boolean
   isError: boolean
@@ -200,7 +126,7 @@ function useDiscoveredTokens(address: string | undefined): {
     const fetchDiscovery = async () => {
       setIsLoading(true)
       try {
-        const res = await fetch(`/api/portfolio/tokens?address=${encodeURIComponent(address)}`)
+        const res = await fetch(`/api/portfolio/tokens?address=${encodeURIComponent(address)}&chainId=${chainId}`)
         if (cancelled || fetchIdRef.current !== myFetchId) return
         if (res.status === 503) {
           // Discovery not configured server-side — falls through to the
@@ -260,7 +186,20 @@ function useDiscoveredTokens(address: string | undefined): {
       cancelled = true
       clearInterval(interval)
     }
-  }, [address, refreshCounter])
+  }, [address, chainId, refreshCounter])
+
+  // [E-3] A chain switch must not display the PREVIOUS chain's tokens while the
+  // new chain's discovery is in flight — clear synchronously on change.
+  const prevChainRef = useRef(chainId)
+  useEffect(() => {
+    if (prevChainRef.current !== chainId) {
+      setTokens([])
+      setIsError(false)
+      failCountRef.current = 0
+      setIsAvailable(true)
+    }
+    prevChainRef.current = chainId
+  }, [chainId])
 
   return { tokens, isLoading, isError, isAvailable, refreshCounter, bump }
 }
@@ -271,13 +210,14 @@ function useDiscoveredTokens(address: string | undefined): {
 // per call, so we chunk; results merge into one record.
 async function fetchPricesBatched(
   addresses: string[],
+  chainId: number,
 ): Promise<Record<string, number>> {
   if (addresses.length === 0) return {}
   const out: Record<string, number> = {}
   for (let i = 0; i < addresses.length; i += PRICES_BATCH_SIZE) {
     const batch = addresses.slice(i, i + PRICES_BATCH_SIZE)
     const res = await fetch(
-      `/api/portfolio/prices?tokens=${encodeURIComponent(batch.join(','))}`,
+      `/api/portfolio/prices?tokens=${encodeURIComponent(batch.join(','))}&chainId=${chainId}`,
     )
     if (!res.ok) {
       // Surface the first batch failure as an exception so the caller
@@ -310,8 +250,21 @@ async function fetchPricesBatched(
  */
 export function usePortfolio(): PortfolioData {
   const { address } = useAccount()
+  // [E-3] Everything below follows the ACTIVE chain: discovery, prices, the
+  // multicall fallback, and the curated metadata map.
+  const activeChainId = useActiveChainId()
+  const chainTokens = useMemo(
+    () => (activeChainId === DEFAULT_CHAIN_ID ? DEFAULT_TOKENS : getChainTokenList(activeChainId)),
+    [activeChainId],
+  )
+  const curatedByAddress = useMemo(() => {
+    if (activeChainId === DEFAULT_CHAIN_ID) return DEFAULT_BY_ADDRESS
+    const m = new Map<string, Token>()
+    for (const t of chainTokens) m.set(t.address.toLowerCase(), t)
+    return m
+  }, [activeChainId, chainTokens])
 
-  const discovery = useDiscoveredTokens(address)
+  const discovery = useDiscoveredTokens(address, activeChainId)
   const useAlchemyPath = discovery.isAvailable
 
   // The wagmi multicall hooks must NOT fire when Alchemy is doing its
@@ -330,6 +283,7 @@ export function usePortfolio(): PortfolioData {
   // wasted RPC.
   const { data: nativeEthBalance } = useBalance({
     address,
+    chainId: activeChainId, // [E-3] read the native balance on the active chain
     query: { enabled: useAlchemyPath && !!address, refetchInterval: 30_000 },
   })
 
@@ -357,7 +311,7 @@ export function usePortfolio(): PortfolioData {
       // [P195] Prepend native ETH so it shows at the top of the list;
       // alchemy_getTokenBalances never returns it.
       if (nativeEthBalance && nativeEthBalance.value > 0n) {
-        const ethToken = DEFAULT_TOKENS.find(isNativeETH)
+        const ethToken = chainTokens.find(isNativeETH)
         if (ethToken) {
           out.push({
             token: ethToken,
@@ -375,7 +329,7 @@ export function usePortfolio(): PortfolioData {
         }
         if (raw <= 0n) continue
         const lower = d.address.toLowerCase()
-        const curated = DEFAULT_BY_ADDRESS.get(lower)
+        const curated = curatedByAddress.get(lower)
         const token: Token = curated ?? {
           address: d.address as `0x${string}`,
           symbol: d.symbol,
@@ -392,16 +346,16 @@ export function usePortfolio(): PortfolioData {
       }
       return out
     }
-    // Fallback: walk DEFAULT_TOKENS and pick up non-zero entries.
+    // Fallback: walk the ACTIVE chain's catalog and pick up non-zero entries.
     const out: HeldEntry[] = []
-    for (const token of DEFAULT_TOKENS) {
+    for (const token of chainTokens) {
       const bal = multicallBalances.get(token.address.toLowerCase())
       if (bal && bal.raw > 0n) {
         out.push({ token, balance: bal.raw, balanceFormatted: bal.formatted })
       }
     }
     return out
-  }, [useAlchemyPath, discovery.tokens, multicallBalances, nativeEthBalance])
+  }, [useAlchemyPath, discovery.tokens, multicallBalances, nativeEthBalance, chainTokens, curatedByAddress])
 
   // ── Step 2: fetch USD prices ───────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({})
@@ -436,7 +390,7 @@ export function usePortfolio(): PortfolioData {
       setPricesLoading(true)
       try {
         const addresses = heldAddressesKey ? heldAddressesKey.split(',') : []
-        const merged = await fetchPricesBatched(addresses)
+        const merged = await fetchPricesBatched(addresses, activeChainId)
         if (cancelled || fetchIdRef.current !== myFetchId) return
         setPrices(merged)
         setPricesError(false)
@@ -455,7 +409,7 @@ export function usePortfolio(): PortfolioData {
       cancelled = true
       clearInterval(interval)
     }
-  }, [heldAddressesKey, heldEntries.length, refreshCounter])
+  }, [heldAddressesKey, heldEntries.length, refreshCounter, activeChainId])
 
   // ── Step 3: enrich + sort ──────────────────────────────
   const tokens = useMemo<PortfolioToken[]>(() => {

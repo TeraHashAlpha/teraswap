@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { fetchDefiLlamaPrices } from '@/lib/defillama'
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { DEFAULT_CHAIN_ID, getChainConfig, getSupportedChainIds } from '@/lib/chains/registry'
 
 /**
  * GET /api/portfolio/prices?tokens=<addr1,addr2,...>
@@ -81,11 +82,23 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // [E-3] Active-chain param → DefiLlama slug via the chain registry. Absent →
+  // mainnet 'ethereum' (byte-identical for existing callers); unsupported → 400.
+  const chainIdParam = req.nextUrl.searchParams.get('chainId')
+  const chainId = chainIdParam != null && chainIdParam !== '' ? Number(chainIdParam) : DEFAULT_CHAIN_ID
+  if (!Number.isInteger(chainId) || !getSupportedChainIds().includes(chainId)) {
+    return NextResponse.json(
+      { error: `Chain ${chainIdParam} is not supported for portfolio prices` },
+      { status: 400 },
+    )
+  }
+  const chainSlug = getChainConfig(chainId).slug
+
   // De-duplicate (lowercase) before hitting DefiLlama.
   const addresses = Array.from(new Set(raw.map((a) => a.toLowerCase())))
 
   try {
-    const result = await fetchDefiLlamaPrices(addresses, 'ethereum')
+    const result = await fetchDefiLlamaPrices(addresses, chainSlug)
     const prices: Record<string, number> = {}
     for (const [addr, data] of result) {
       prices[addr.toLowerCase()] = data.price

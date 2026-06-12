@@ -25,7 +25,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
   const [search, setSearch] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const { importToken, importing, error: importError } = useTokenImport()
-  const balanceMap = useTokenBalances()
+  const { balances: balanceMap } = useTokenBalances()
   // [P221] Per-chain token catalog. Mainnet keeps the full DEFAULT_TOKENS list
   // (categories + balances) exactly as before; other chains browse their own
   // catalog. Memoised so the dependent lists below stay referentially stable.

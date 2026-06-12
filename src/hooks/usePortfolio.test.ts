@@ -78,7 +78,33 @@ vi.mock('@/lib/tokens', async () => {
   }
 })
 
-vi.mock('@/lib/constants', () => ({ CHAIN_ID: 1 }))
+vi.mock('@/lib/constants', async (importOriginal) => {
+  // Partial: the chain registry (now in usePortfolio's import graph) needs the
+  // real address constants; only CHAIN_ID stays pinned for the fixtures.
+  const actual = await importOriginal<typeof import('@/lib/constants')>()
+  return { ...actual, CHAIN_ID: 1 }
+})
+
+// [E-3] Chain plumbing mocks: the hook (and the standalone useTokenBalances it
+// now delegates to) follow the ACTIVE chain. useActiveChainId derives from the
+// wagmi account mock; isChainActive is true for both fixture chains; the BASE
+// catalog is a 2-token fixture (native ETH + Base USDC, 6dp).
+vi.mock('@/hooks/useChainId', () => ({
+  useActiveChainId: () => accountMock.chain?.id ?? 1,
+}))
+vi.mock('@/lib/chains', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chains')>()
+  return { ...actual, isChainActive: () => true, DEFAULT_CHAIN_ID: 1 }
+})
+vi.mock('@/lib/chains/tokens', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chains/tokens')>()
+  const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+  const BASE_FIXTURE = [
+    { address: NATIVE, symbol: 'ETH', name: 'Ether', decimals: 18, logoURI: 'eth.png', category: 'Native' },
+    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', name: 'USD Coin (Base)', decimals: 6, logoURI: 'usdc.png', category: 'Stablecoin' },
+  ]
+  return { ...actual, getChainTokenList: (id: number) => (id === 8453 ? BASE_FIXTURE : actual.getChainTokenList(id)) }
+})
 
 // ─── Module under test ───────────────────────────────────
 
@@ -622,3 +648,65 @@ describe('usePortfolio', () => {
   })
 })
 
+
+// ── [E-3] portfolio Base activation ──────────────────────────────────────────
+
+describe('usePortfolio — chain-aware [E-3]', () => {
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'.toLowerCase()
+
+  it('mainnet: discovery + prices requests carry chainId=1 (explicit, behavior-identical)', async () => {
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    const tokenCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/tokens'))
+    expect(tokenCalls.length).toBeGreaterThan(0)
+    expect(String(tokenCalls[0][0])).toContain('chainId=1')
+    await waitFor(() => {
+      const priceCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/prices'))
+      expect(priceCalls.length).toBeGreaterThan(0)
+      expect(String(priceCalls[0][0])).toContain('chainId=1')
+    })
+  })
+
+  it('Base (8453) + Alchemy 503: the multicall fallback fetches BASE balances and prices thread chainId=8453', async () => {
+    accountMock = {
+      address: '0x1111111111111111111111111111111111111111',
+      isConnected: true,
+      chain: { id: 8453, name: 'base' },
+    }
+    // Discovery stays 503 (default mock) → fallback path. The wagmi mocks feed
+    // the chain-aware fallback: native ETH 2.0 + one ERC-20 result that maps
+    // positionally onto the BASE catalog fixture (Base USDC, 6dp).
+    readContractsMock = {
+      data: [{ status: 'success', result: 5_000_000n }], // 5 USDC (6dp) on Base
+      isLoading: false,
+      isError: false,
+    }
+    fetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/portfolio/tokens')) {
+        return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: 'unavailable' }) })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ prices: { [NATIVE_ETH]: 3000, [BASE_USDC]: 1 } }),
+      })
+    })
+
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+
+    const symbols = result.current.tokens.map((t) => t.token.symbol)
+    expect(symbols).toContain('USDC') // the BASE-catalog USDC, not the mainnet one
+    const usdc = result.current.tokens.find((t) => t.token.symbol === 'USDC')!
+    expect(usdc.token.address.toLowerCase()).toBe(BASE_USDC)
+    expect(usdc.balanceFormatted).toBe('5')
+
+    // Discovery + prices were asked on the active chain.
+    const tokenCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/tokens'))
+    expect(String(tokenCalls[0][0])).toContain('chainId=8453')
+    await waitFor(() => {
+      const priceCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/prices'))
+      expect(priceCalls.length).toBeGreaterThan(0)
+      expect(String(priceCalls[0][0])).toContain('chainId=8453')
+    })
+  })
+})
