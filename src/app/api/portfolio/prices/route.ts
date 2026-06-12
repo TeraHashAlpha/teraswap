@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { fetchDefiLlamaPrices } from '@/lib/defillama'
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
-import { DEFAULT_CHAIN_ID, getChainConfig, getSupportedChainIds } from '@/lib/chains/registry'
+import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
+import { isPortfolioSupportedChain } from '@/lib/portfolio-chains'
 
 /**
  * GET /api/portfolio/prices?tokens=<addr1,addr2,...>
@@ -84,9 +85,11 @@ export async function GET(req: NextRequest) {
 
   // [E-3] Active-chain param → DefiLlama slug via the chain registry. Absent →
   // mainnet 'ethereum' (byte-identical for existing callers); unsupported → 400.
+  // [CHORE-POLISH-3 P2] Validates against the SAME shared allowlist as the
+  // tokens route (@/lib/portfolio-chains) — the two can no longer drift.
   const chainIdParam = req.nextUrl.searchParams.get('chainId')
   const chainId = chainIdParam != null && chainIdParam !== '' ? Number(chainIdParam) : DEFAULT_CHAIN_ID
-  if (!Number.isInteger(chainId) || !getSupportedChainIds().includes(chainId)) {
+  if (!isPortfolioSupportedChain(chainId)) {
     return NextResponse.json(
       { error: `Chain ${chainIdParam} is not supported for portfolio prices` },
       { status: 400 },
