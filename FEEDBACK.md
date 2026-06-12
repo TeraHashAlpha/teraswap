@@ -3052,3 +3052,29 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   1inch/0x/paraswap-V5/uniswapV3-SwapRouter = true, Augustus V6 = false). The drift test pins config
   ↔ fixture; it cannot pin fixture ↔ chain. If the contract whitelist ever changes (owner tx), the
   fixture must be re-verified with cast before being edited — comment says so inline.
+
+## Feedback — CHORE-DEPS-2 (batch 6e3e88c / codeql 374f403 / triage c38476d)
+
+### Edge case
+- **@capacitor/ios has NO Dependabot PR but must move with #120/#123.** The isolated 8.3.4
+  verification surfaced `cap sync` warning that core@8.3.4 ≠ ios@8.2.0 — the "pair" is a TRIO.
+  Dependabot apparently doesn't track the platform package the same way. Merging #120+#123 alone
+  ships a version skew; the triage doc downgrades them to needs-follow-up (trio bump).
+- **`ios/App/CapApp-SPM/Package.swift` is stale on main.** The 8.2.0-era sync output already differs
+  from the committed file (capacitor-swift-pm pinned `exact` + 3 plugin SPM entries missing). A
+  `cap sync` + ios/ commit is due at the next mobile release independent of any bump.
+- **#92 and #94 conflict with each other** (both bump hardhat-toolbox 6.1.2→7.0.0 in
+  /contracts/order-engine; #94 is the superset). Merging one forces the other to rebase/close —
+  pick #94, expect #92 to go away.
+
+### Concern
+- **node20 CI deadline cluster (2026-09-16).** gitleaks-action v2.3.9 AND actions/checkout v4.2.2
+  (still pinned in codeql.yml + gitleaks.yml) are node20 actions: GitHub flipped the default runner
+  to node24 on 2026-06-02 (already past) and removes node20 entirely on 2026-09-16 — at which point
+  those two workflows STOP WORKING. The triage marks #135 "merge promptly" and #136 "align all
+  workflows to one v6 SHA"; exact tag-target SHAs are in the doc. This is a dated obligation, not
+  housekeeping.
+- **The "one viem" invariant has a permanent caveat:** `@walletconnect/utils@2.21.1` pins
+  `viem@2.23.2` EXACT in a nested copy (pre-existing on main, unrelated to these PRs). Singleton
+  checks must read "one top-level deduped viem + the known WC-internal nested copy" or they will
+  false-positive. Goes away only when the WC stack moves (wagmi-v3 sprint, ADR-008).
