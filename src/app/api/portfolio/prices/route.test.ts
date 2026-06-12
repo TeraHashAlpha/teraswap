@@ -30,6 +30,7 @@ vi.mock('@/lib/defillama', () => ({
 // ── Import route after mocks ─────────────────────────────
 
 import { GET } from './route'
+import { PORTFOLIO_SUPPORTED_CHAINS } from '@/lib/portfolio-chains'
 
 // ── Fixtures ─────────────────────────────────────────────
 
@@ -150,6 +151,20 @@ describe('GET /api/portfolio/prices — chain-aware slug [E-3]', () => {
     expect(res.status).toBe(200)
     const [, chain] = mockFetchDefiLlamaPrices.mock.calls[0]
     expect(chain).toBe('base')
+  })
+
+
+  it('[CHORE-POLISH-3 P2] accepts exactly the shared PORTFOLIO_SUPPORTED_CHAINS set (same source as tokens route)', async () => {
+    // Parameterized over the SHARED allowlist module — the same constant the
+    // tokens route pins against, so the two routes can never drift apart.
+    for (const chainId of PORTFOLIO_SUPPORTED_CHAINS) {
+      mockFetchDefiLlamaPrices.mockResolvedValueOnce(new Map())
+      const res = await GET(makeRequest(`?tokens=${USDC}&chainId=${chainId}`))
+      expect(res.status).toBe(200)
+    }
+    // A real chain outside the set (Arbitrum) is rejected before DefiLlama.
+    const res = await GET(makeRequest(`?tokens=${USDC}&chainId=42161`))
+    expect(res.status).toBe(400)
   })
 
   it('rejects an unsupported chainId with 400 JSON', async () => {

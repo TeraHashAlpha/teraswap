@@ -30,6 +30,7 @@ vi.mock('@/lib/kv-rate-limiter', () => ({
 }))
 
 import { GET } from './route'
+import { PORTFOLIO_SUPPORTED_CHAINS } from '@/lib/portfolio-chains'
 
 // ── Fixtures ─────────────────────────────────────────────
 
@@ -313,6 +314,20 @@ describe('GET /api/portfolio/tokens — chain-aware discovery [E-3]', () => {
     expect(res.status).toBe(200)
     expect(urls.length).toBeGreaterThan(0)
     for (const u of urls) expect(u).toContain('https://base-mainnet.g.alchemy.com/v2')
+  })
+
+
+  it('[CHORE-POLISH-3 P2] accepts exactly the shared PORTFOLIO_SUPPORTED_CHAINS set', async () => {
+    // Parameterized over the SHARED allowlist module — the same constant the
+    // prices route pins against, so the two routes can never drift apart.
+    vi.stubGlobal('fetch', makeFetchMock({ balances: [] }))
+    for (const chainId of PORTFOLIO_SUPPORTED_CHAINS) {
+      const res = await GET(makeRequest(`?address=${WALLET}&chainId=${chainId}`))
+      expect(res.status).toBe(200)
+    }
+    // A real chain outside the set (Arbitrum) is rejected before any upstream call.
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=42161`))
+    expect(res.status).toBe(400)
   })
 
   it('rejects an unsupported chainId with 400 JSON', async () => {

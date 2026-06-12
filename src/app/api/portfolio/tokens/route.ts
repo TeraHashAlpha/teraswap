@@ -4,6 +4,7 @@ import { checkRateLimit } from '@/lib/kv-rate-limiter'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { getChainTokenList } from '@/lib/chains/tokens'
+import { ALCHEMY_BASE_BY_CHAIN, isPortfolioSupportedChain } from '@/lib/portfolio-chains'
 
 /**
  * GET /api/portfolio/tokens?address=<0x..>
@@ -19,13 +20,11 @@ import { getChainTokenList } from '@/lib/chains/tokens'
  * multicall path so the Portfolio tab keeps working.
  */
 
-// [E-3] Per-chain Alchemy endpoints — discovery now follows the wallet's active
+// [E-3] Per-chain Alchemy endpoints — discovery follows the wallet's active
 // chain. Mainnet (DEFAULT_CHAIN_ID) keeps the original endpoint byte-identically;
 // an unmapped chainId is rejected with 400 before any upstream call.
-const ALCHEMY_BASE_BY_CHAIN: Record<number, string> = {
-  1: 'https://eth-mainnet.g.alchemy.com/v2',
-  8453: 'https://base-mainnet.g.alchemy.com/v2',
-}
+// [CHORE-POLISH-3 P2] The endpoint map + chain allowlist now live in the
+// shared @/lib/portfolio-chains module — ONE source for BOTH portfolio routes.
 const TOKENS_RATE_LIMIT = { limit: 5, windowMs: 60_000 } as const
 const MAX_TOKENS = 200
 const METADATA_CONCURRENCY = 20
@@ -183,13 +182,13 @@ export async function GET(req: NextRequest) {
   // callers); a chain without a mapped Alchemy endpoint is rejected up front.
   const chainIdParam = req.nextUrl.searchParams.get('chainId')
   const chainId = chainIdParam != null && chainIdParam !== '' ? Number(chainIdParam) : DEFAULT_CHAIN_ID
-  const alchemyBase = ALCHEMY_BASE_BY_CHAIN[chainId]
-  if (!Number.isInteger(chainId) || !alchemyBase) {
+  if (!isPortfolioSupportedChain(chainId)) {
     return NextResponse.json(
       { error: `Chain ${chainIdParam} is not supported for portfolio discovery` },
       { status: 400 },
     )
   }
+  const alchemyBase = ALCHEMY_BASE_BY_CHAIN[chainId]
 
   const apiKey = process.env.ALCHEMY_API_KEY
   if (!apiKey) {

@@ -193,6 +193,16 @@ https://basescan.org/address/0x<DEPLOYED_ADDRESS>#code
    NEXT_PUBLIC_BASE_FEE_COLLECTOR=0x<BASE_MAINNET_FEE_COLLECTOR>
    ```
 
+   > **⚠️ ALCHEMY_API_KEY app scope** [CHORE-POLISH-3 P4 / E3-I-02]: o
+   > `ALCHEMY_API_KEY` (server-only, já configurado para o portfolio mainnet)
+   > serve TAMBÉM o discovery Base — no dashboard Alchemy a app da key tem de
+   > ter **eth-mainnet E base-mainnet** ativados. Uma key só-mainnet degrada
+   > silenciosamente o discovery Base para 503 (o fallback multicall cobre,
+   > mas com pior UX). Verificar: `curl -s -X POST
+   > https://base-mainnet.g.alchemy.com/v2/$ALCHEMY_API_KEY -H 'content-type:
+   > application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'`
+   > tem de devolver um result (não um erro de auth/network-not-enabled).
+
 3. **Commit + push:**
    ```bash
    git add src/lib/chains/registry.ts

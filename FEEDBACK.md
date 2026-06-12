@@ -3021,3 +3021,34 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
    (info severity is KV-only).
 5. Preview-test before promote: trigger a tick against Preview env and confirm the log line shows the
    Base leg (chains: [{ chainId: 8453, ... }]).
+
+## Feedback — CHORE-POLISH-3 (P1 a3c4379 / P2 5d0441d / P3 7cdaf7e / P4 34c8ad4)
+
+### Edge case
+- **P3 only materializes the fallback chain when a primary is configured.** The registry's Base
+  `rpc.primary` defaults to `''` when `NEXT_PUBLIC_BASE_RPC_URL` is unset, so `[primary,
+  ...fallbacks].filter(Boolean)` yields the single registry fallback (`https://mainnet.base.org`) →
+  a plain http transport, same resilience as before. The fallback() chain (primary → public RPC)
+  only exists where it matters: production, where the env var is set. Not a gap — but if a second
+  Base fallback RPC is ever wanted for the no-env case, add it to `registry.ts rpc.fallbacks`.
+- **P3 composes with PR #168 (E-4 multi-chain monitor) at zero cost**: the monitor's
+  `getServerClient(8453)` delegates to `getPublicClientForChain`, so Base event scanning gains RPC
+  failover automatically when both PRs are merged. No file overlap in src/ — but **FEEDBACK.md will
+  conflict** with #168 (both append a section); resolution is the usual keep-both, theirs-first.
+- **P2 intentionally rejects "prices-only" chains.** The shared set is derived from the Alchemy
+  endpoint map (the discovery constraint), so a future registry chain WITHOUT an Alchemy endpoint is
+  rejected by BOTH portfolio routes — consistency was chosen over partial (prices-but-no-discovery)
+  support. If partial support is ever desired, split the constant, don't widen it silently.
+
+### Concern
+- **P4's warning can flag absence but not mis-scope.** env-validation only sees whether
+  `ALCHEMY_API_KEY` is set — a key scoped to eth-mainnet only still degrades Base discovery to 503
+  at request time. Detecting that requires a live base-mainnet probe (not appropriate at module
+  import); the BASE-ACTIVATION runbook now carries a curl one-liner for the owner to verify scope
+  at deploy time. Residual risk documented, not eliminated.
+
+### Assumption
+- **P1 fixture trusts the owner's on-chain verification** (OrderExecutor `whitelistedRouters()`:
+  1inch/0x/paraswap-V5/uniswapV3-SwapRouter = true, Augustus V6 = false). The drift test pins config
+  ↔ fixture; it cannot pin fixture ↔ chain. If the contract whitelist ever changes (owner tx), the
+  fixture must be re-verified with cast before being edited — comment says so inline.

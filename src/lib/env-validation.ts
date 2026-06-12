@@ -74,6 +74,21 @@ const RULES: EnvRule[] = [
     serverOnly: true,
     label: 'Odos API key (server-only — Odos quotes skipped when absent)',
   },
+  // ── Alchemy Enhanced API (server-only) ──
+  // [CHORE-POLISH-3 P4 / E3-I-02] One key serves BOTH eth-mainnet and
+  // base-mainnet since E-3 (portfolio Base discovery). Warning-only: when
+  // absent, /api/portfolio/tokens 503s and usePortfolio falls back to the
+  // multicall path. NOTE the app-scope requirement in the label — a key
+  // scoped to mainnet only SILENTLY degrades Base discovery to 503 (Alchemy
+  // rejects base-mainnet calls), which env validation cannot detect.
+  {
+    key: 'ALCHEMY_API_KEY',
+    required: false,
+    serverOnly: true,
+    label:
+      'Alchemy API key (server-only — must be app-scoped to BOTH eth-mainnet ' +
+      'AND base-mainnet; a mainnet-only key degrades Base portfolio discovery to 503)',
+  },
   // ── Supabase (server-only) ──
   {
     key: 'SUPABASE_URL',
