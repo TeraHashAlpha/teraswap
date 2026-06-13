@@ -92,7 +92,9 @@ vi.mock('./monitored-endpoints', () => ({
 // ── Mock fingerprint-validator ─────────────────────────
 
 vi.mock('./fingerprint-validator', () => ({
-  loadBaseline: vi.fn(() => null), // No baseline → skip H2
+  loadBaseline: vi.fn(() => null), // No baseline → H2 fail-closed (reported degraded)
+  // [CHORE-POLISH-4 P2] real pass-through so the fail-closed reason is exercised
+  evaluateBaselineHealth: vi.fn(() => ({ healthy: false, reason: 'H2 baseline empty/placeholder — run npm run baseline:capture' })),
   validateTLS: vi.fn(),
   validateDNS: vi.fn(),
   captureLiveTLS: vi.fn(),
@@ -279,6 +281,14 @@ describe('monitoring-loop H5 integration', () => {
     mockShouldRunQuorum.mockResolvedValue(false)
     const result = await runMonitoringTick()
     expect('quorum' in result).toBe(false)
+  })
+
+  it('[CHORE-POLISH-4 P2] reports H2 fail-closed when the baseline is empty (no vacuous pass)', async () => {
+    // loadBaseline is mocked to return null (empty/placeholder baseline). H2 must NOT silently
+    // skip-and-look-healthy: the tick must surface h2BaselineMissing so an empty baseline is visible.
+    const result = await runMonitoringTick()
+    expect(result.h2BaselineMissing).toBe(true)
+    expect(result.h2Reason).toMatch(/baseline/i)
   })
 })
 

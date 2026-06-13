@@ -3167,3 +3167,85 @@ commits. Docs-only; no code, no submodule.
   "no untracked docs" requires sweeping them.
 - **Audits/Incidents/*** had no untracked/modified entries (already tracked) — nothing to commit.
 - The `contracts/order-engine/lib/openzeppelin-contracts` submodule modification was EXCLUDED (docs-only).
+
+## Feedback — CHORE-POLISH-4 (P1 2229673 + harden 518836e / P2 018dbb3 / P3 4e646dc / P4 cb60fbe / P5 7c37c58)
+
+5 P-items + 1 review-driven hardening, all atomic signed commits. Full local gates green: tsc, lint
+(0 errors), vitest 1683/1683, next build, forge OrderExecutor 68/68 + FeeCollector 19/19. gitleaks full
+git-history scan: no leaks. A 3-agent adversarial review of the branch passed (0 must-fix) and caught one
+real P1 false-negative gap — fixed (see P1 hardening below).
+
+### P1 — gitleaks bare-hex rule
+- **Rule**: `evm-private-key-keyword-proximity` (keyword-proximity primary, per spec). Fires only when a
+  64-hex value sits next to a private-key keyword with `[:=]` — `PRIVATE_KEY = 0x..64`, `privKey: "..64"`.
+- **False-positive budget — validated LIVE (gitleaks 8.30.1)**: positive fixture flags; negative fixture
+  (tx hash / keccak / block hash / storage slot, no keyword) clean; a `\b` terminator blocks 65-hex; prose
+  "private key rotation policy … <hash>" does NOT match (no `[:=]` adjacency). Per-rule allowlist
+  (`regexTarget="line"`) needed because the rule's Secret capture is the keyword, not the value — a
+  global value-allowlist matched the wrong target (caught empirically, fixed).
+- **No path-blinding**: a DIFFERENT (non-allowlisted) key dropped into `scripts/gitleaks-fixtures/` still
+  flags — proven. The allowlist suppresses ONLY the two exact known-safe values.
+- **Hardening (518836e, review-driven):** the adversarial review proved a false-NEGATIVE gap with the
+  first `regexTarget="line"` allowlist — it suppressed the WHOLE line, so a real key co-located with an
+  allowlisted value (`PRIVATE_KEY=0x1111… # anvil 0xac09…`) was silently missed. Fixed to
+  `regexTarget="match"` (suppression scoped to the keyword+value match, not the line); re-proven that such
+  a co-located real key now flags while the fixture/Anvil stay suppressed and the full history scan is clean.
+- **Known out-of-scope false-negatives (acceptable, by design):** the rule requires a `[:=]` separator and
+  a fixed keyword set, so `PRIVATE_KEY is 0x..64`, `The private key 0x..64` (no `[:=]`), and `seedPhrase:`
+  are NOT caught. The three spec-named near-miss shapes (`PRIVATE_KEY="0x..64"`, `export PK=0x..64`,
+  `mnemonic: 0x..64`) plus the multi-line key-on-next-line case all DO flag. Broadening would reintroduce
+  the FP flood the spec explicitly warns against; left tight per the false-positive budget.
+- **⚠ FLAGGED FOR ARCHITECT REVIEW (spec line 104):** the new rule produced ONE finding on a committed
+  file — `docs/guides/E2E-FORK-TEST.md` (also `contracts/order-engine/test-run.js`, already path-allowlisted).
+  Triaged + INDEPENDENTLY VERIFIED (cast wallet address): it is the **published Anvil/Hardhat default
+  account #0 key** (`0xac09…ff80` → public `0xf39Fd6…2266`), a throwaway local-dev key, **NOT a real
+  exposure — no rotation needed**. Value-allowlisted (not path) + annotated in `.gitleaks.toml`. With that,
+  the full git-history scan returns zero findings. **Architect: confirm the triage / decide whether to scrub
+  the Anvil key from the fork-test doc.**
+
+### P2 — H2 baseline fail-closed (path **b**)
+- H2 (TLS+DNS drift) compared endpoints to `data/endpoint-baseline.json`, a committed PLACEHOLDER
+  (`generatedAt:null, endpoints:{}`) → `loadBaseline()` null → the H2 block was silently skipped → vacuous
+  pass (validated nothing, looked healthy).
+- **Path (b) fail-closed, NOT (a) seed**: a correct baseline is not safely derivable in-repo — capture needs
+  live TLS/DNS of 10 external hosts, only valid post-Cloudflare-migration + human-reviewed (ADR-001 §90);
+  auto-seeding could pin a compromised endpoint. So: surface the empty baseline (`h2BaselineMissing` +
+  `h2Reason` in the tick result + loud `console.error`) instead of skipping silently. Deliberately does NOT
+  forceDisable sources on an empty baseline (that would brick the aggregator) — fail-closed here = report
+  degraded, not disable swaps.
+- **Test** (`fingerprint-validator.test.ts` + a monitoring-loop assertion): locks that placeholder / null /
+  0-endpoints → NOT populated/healthy, seeded → healthy, and the tick reports `h2BaselineMissing` on an empty
+  baseline. Green on the current (empty) baseline AND stays correct once the operator seeds it.
+- **Operator action to fully close H2**: run `npm run baseline:capture` after the Cloudflare migration, review
+  the diff, commit the populated `data/endpoint-baseline.json`.
+
+### P3 — service worker 206
+- Root cause: both `cache.put` sites guarded with `if (response.ok)`, which is true for ALL 2xx incl. 206 →
+  `Cache.put` rejects the partial response. Changed both to `response && response.status === 200`; what is
+  cached on a 200 is unchanged.
+- **No SW unit-test harness** (sw.js is a runtime-fetched asset, eslint-ignored). **Manual verification**:
+  trigger a range request (e.g. an `<audio>`/`<video>` element or a `Range:` header fetch to a cached asset
+  path) → confirm NO `Partial response (status code 206) is unsupported` console error. `node --check public/sw.js` passes.
+
+### P4 — dead code (knip + ts-prune + manual cross-check)
+- **Removed (1, provably unused):** `src/lib/database.types.ts` — generated Supabase `interface Database`,
+  ZERO importers (static/dynamic/string) anywhere, no doc/ADR/config/build reference, regenerable via
+  `supabase gen types typescript`. tsc green after removal.
+- **KEPT (rule #4 / doc-referenced):** `source-preferences.ts` (Incident 2026-04-14 source-disable mechanism),
+  `ConditionalOrderPanel.tsx` / `DCAPanel.tsx` / `conditional-order-types.ts` (feature-gated, pending PR #162,
+  tracked in REVIEW-QUALITY/FULL-AUDIT), `test-utils/mock-wagmi.ts` (documented canonical test infra, SPRINT-9C).
+- **KEPT (knip false-positives — runtime/peer/native coupling):** `public/sw.js` (PWA register), `@capacitor/*`
+  (native build), `valtio` (rainbowkit peer), `@eslint/eslintrc` (legacy lint compat).
+- **Flagged for Architect (separate deliberate decision, NOT a behaviour-neutral cleanup):** the `tsparticles`
+  cluster (`tsparticles-engine`, `@tsparticles/react`, `@tsparticles/slim`) is genuinely unused in code
+  (ParticleNetwork.tsx is hand-rolled canvas) but multiple current audit docs track it as live pending a 3→4
+  bump — left per "any doubt → leave it".
+
+### P5 — qr pin
+- **Single-instance invariant CONFIRMED:** exactly one `qr@0.5.5` in the tree (`@paulmillr/qr@0.2.1` is a
+  DIFFERENT scoped package, not `qr`). Did NOT bump qr.
+- **Comment-at-the-pin not viable inline:** JSON has no comments, and a sibling `"//qr"` key inside
+  `overrides` makes npm re-resolve and desyncs the lockfile (tested → 15k-line lockfile churn → would break
+  `npm ci`'s package.json↔lockfile sync in CI; reverted). Used a **guard test** (`src/lib/qr-pin.test.ts`)
+  instead — tamper-evident (FAILS if the override is bumped/dropped), commit-independent, carries the WHY +
+  INC-2026-06-09-001 link. (Spec allowed "comment/guard only".)

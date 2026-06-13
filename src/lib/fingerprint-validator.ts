@@ -59,6 +59,34 @@ let cachedBaseline: BaselineFile | null = null
 let cachedOverrides: Record<string, OverrideEntry> = {}
 let baselineLoaded = false
 
+/**
+ * [CHORE-POLISH-4 P2] True ONLY when the baseline is genuinely populated — a `generatedAt`
+ * timestamp AND at least one endpoint. The committed placeholder
+ * ({ generatedAt: null, endpoints: {} }) is NOT populated, so H2 must treat it as "validation
+ * disabled", never as a healthy pass. Pure (no fs) so the fail-closed contract is testable.
+ */
+export function isBaselinePopulated(raw: BaselineFile | null | undefined): boolean {
+  return !!(raw && raw.generatedAt && raw.endpoints && Object.keys(raw.endpoints).length > 0)
+}
+
+/**
+ * [CHORE-POLISH-4 P2] Fail-closed H2 baseline health for the monitoring surface. An empty /
+ * placeholder baseline reports `healthy: false` with a seeding reason — so a vacuous H2 (which
+ * validates nothing) can never report healthy. Pure helper over a given baseline object.
+ */
+export function evaluateBaselineHealth(raw: BaselineFile | null | undefined): { healthy: boolean; reason: string } {
+  if (isBaselinePopulated(raw)) {
+    return { healthy: true, reason: `ok: ${Object.keys(raw!.endpoints).length} endpoints (generated ${raw!.generatedAt})` }
+  }
+  return {
+    healthy: false,
+    reason:
+      'H2 baseline empty/placeholder (generatedAt=null / 0 endpoints) — H2 (TLS+DNS drift) is ' +
+      'validating NOTHING. Seed via `npm run baseline:capture` after the Cloudflare migration, ' +
+      'review the diff, and commit (ADR-001 §90).',
+  }
+}
+
 export function loadBaseline(): BaselineFile | null {
   if (baselineLoaded) return cachedBaseline
 
@@ -69,11 +97,11 @@ export function loadBaseline(): BaselineFile | null {
     const baselinePath = path.resolve(process.cwd(), 'data/endpoint-baseline.json')
     if (fs.existsSync(baselinePath)) {
       const raw = JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) as BaselineFile
-      if (raw.generatedAt && Object.keys(raw.endpoints).length > 0) {
+      if (isBaselinePopulated(raw)) {
         cachedBaseline = raw
         console.log(`[H2] Baseline loaded: ${Object.keys(raw.endpoints).length} endpoints from ${raw.generatedAt}`)
       } else {
-        console.warn('[H2] Baseline file exists but is empty/placeholder — H2 validation disabled')
+        console.warn('[H2] Baseline file exists but is empty/placeholder — H2 validation disabled (fail-closed: reported degraded in the monitor tick)')
       }
     } else {
       console.warn('[H2] No baseline file at data/endpoint-baseline.json — H2 validation disabled')

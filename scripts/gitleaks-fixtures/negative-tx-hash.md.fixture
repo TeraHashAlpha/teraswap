@@ -1,0 +1,7 @@
+<!-- FIXTURE (CHORE-POLISH-4 P1): real-looking keccak / tx / block hashes with NO private-key
+     keyword adjacent. The keyword-proximity rule MUST NOT flag any of these (proves no flood
+     on the 64-hex strings that are everywhere in a blockchain repo). -->
+Transaction hash: 0x9f8e7d6c5b4a39281706f5e4d3c2b1a0998877665544332211ffeeddccbbaa00
+keccak256(domainSeparator) = 7c2b1a0998877665544332211ffeeddccbbaa00112233445566778899aabbccdd
+Block hash 0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+storageSlot[3] = 0x0000000000000000000000000000000000000000000000000000000000000001
