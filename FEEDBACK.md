@@ -3379,3 +3379,44 @@ spec says flag Architect only if degraded currently pages — it does not).
 - `monitoring-loop.test.ts`: placeholder → tick `h2Status='pending-baseline'` with `transitions: []`
   (non-paging — no source disabled); genuine-fault mock → `h2Status='degraded'`, still `transitions: []`.
 - Gates: tsc clean, lint 0 errors, vitest 1691/1691, next build, forge 68/68 + 19/19.
+
+## Feedback — CHORE-ORDER-EXEC-PREP (A 74d6017 / B trim+this)
+
+Two atomic signed commits off latest origin/main. Mainnet byte-identical (swap path + order signing);
+no Solidity/contract changes. tsc clean, lint 0 errors, vitest 1700/1700, next build, forge 68/68 + 19/19.
+
+### Part A — caller-migration list (every ORDER_EXECUTOR_ADDRESS consumer)
+| Caller | Before | After |
+|---|---|---|
+| `config.ts` (definition) | single `ORDER_EXECUTOR_ADDRESS` | `ORDER_EXECUTOR_BY_CHAIN { 1:<mainnet>, 8453:null }` + `getOrderExecutor(chainId)` |
+| `config.ts` `getOrderExecutorDomain` | `verifyingContract = ORDER_EXECUTOR_ADDRESS` | resolves via `getOrderExecutor`; **throws** on null. Mainnet (1) unchanged |
+| `order-engine/index.ts` | re-export `ORDER_EXECUTOR_ADDRESS` | + `ORDER_EXECUTOR_BY_CHAIN`, `getOrderExecutor` |
+| `useOrderEngine.ts` | 5× bare addr (2 nonce reads, 1 create domain, 2 cancel/invalidate writes) | `orderExecutor = getOrderExecutor(chainId)`; reads `enabled` only when non-null; create + cancel/invalidate **fail-closed** (no sign/tx + error event) when null; domain via `getOrderExecutorDomain(chainId)` |
+| `api/orders` POST | `executorAddress = ORDER_EXECUTOR_ADDRESS` | `getOrderExecutor(CHAIN_ID)`; null → **400** before any signature verification |
+| `api/orders/[id]` cancel | `getOrderExecutorDomain(chainId)` | **UNCHANGED** — now throws on null (acceptable: no executor → no valid order existed) |
+| `on-chain-monitor.ts` | `executor: ORDER_EXECUTOR_ADDRESS` (mainnet + dynamic targets) | dynamic `getScanTargets` adds an executor target only where `getOrderExecutor(chainId)` is non-null → **Base scanned for its FeeCollector but NOT for OrderExecutor events**; `MAINNET_TARGETS` static keeps the alias |
+
+### Deprecated-alias decision
+**Kept** `ORDER_EXECUTOR_ADDRESS` as a `@deprecated` mainnet-only alias = `ORDER_EXECUTOR_BY_CHAIN[1]`
+(rather than full removal). Rationale: the monitor's static `MAINNET_TARGETS` + the multichain test's
+mainnet assertion read cleaner as "the mainnet executor", and the alias de-risks the migration (any
+missed importer still resolves to mainnet). ALL chain-variant logic resolves per-chain via
+`getOrderExecutor`; the alias is purely a mainnet constant. Base's address enters
+`ORDER_EXECUTOR_BY_CHAIN` ONLY when a real Base OrderExecutor is deployed + verified (documented inline).
+
+### Mainnet EIP-712 — UNCHANGED (no Architect flag)
+`getOrderExecutorDomain(1)` deep-equals the previous domain (`verifyingContract = 0xeFC31ADb…f130`),
+test-pinned in `order-executor.test.ts` + `useOrderEngine.test.ts`. Mainnet order-signing semantics are
+byte-identical → **no Architect escalation** (the spec's escalation condition is not met).
+
+### Base fail-closed — everywhere (test-pinned)
+create (no signature), cancel/invalidate (no tx/signature), POST (400), monitor (no executor scan),
+`getOrderExecutorDomain` (throws). Tests: `getOrderExecutor(1)/8453`, domain(1) byte-identical /
+domain(8453) throws, Base order creation fail-closed, POST chainId 8453 → 400, monitor skips Base executor.
+
+### Part B — trimmed order tabs
+`src/app/page.tsx`: removed `'limit'` + `'sltp'` from the `SwapMode` type, `COMING_SOON_MODES`,
+`COMING_SOON_META`, and the tab array. Kept `'dca'` (the "Soon" teaser). Nav is now
+Swap / Portfolio / DCA(Soon) / Orders / History / Analytics — no Limit, no SL/TP, no dead render branch.
+`LimitOrderPanel.tsx` / `ConditionalOrderPanel.tsx` / `DCAPanel.tsx` were **NOT deleted** (rule #4) —
+only unwired from the nav (re-add the type/array/META entries to re-wire later).

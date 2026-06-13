@@ -61,7 +61,7 @@ import { useOrderEngine } from './useOrderEngine'
 import {
   OrderType,
   PriceCondition,
-  ORDER_EXECUTOR_ADDRESS,
+  getOrderExecutor,
   type CreateOrderConfig,
   type OrderRow,
 } from '@/lib/order-engine'
@@ -193,7 +193,7 @@ describe('useOrderEngine — createOrder', () => {
     expect(callArg.domain.name).toBe('TeraSwapOrderExecutor')
     expect(callArg.domain.version).toBe('2')
     expect(callArg.domain.chainId).toBe(1)
-    expect(callArg.domain.verifyingContract).toBe(ORDER_EXECUTOR_ADDRESS)
+    expect(callArg.domain.verifyingContract).toBe(getOrderExecutor(1)) // mainnet executor, byte-identical
     expect(callArg.primaryType).toBe('Order')
   })
 
@@ -429,29 +429,20 @@ describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () 
     expect(result.current.pendingCancel).toBeNull()
   })
 
-  it('the Supabase removal signature uses the ACTIVE chain domain (chain-agnostic, not pinned to 1)', async () => {
+  it('[CHORE-ORDER-EXEC-PREP A] order creation is FAIL-CLOSED on a chain with no OrderExecutor (Base) — no EIP-712 signature', async () => {
+    // On Base (8453) there is NO OrderExecutor (0xeFC3…f130 is the FeeCollector there). The hook must
+    // never EIP-712-sign an order against a non-existent executor — creation fail-closes (no signature,
+    // an error event, no order persisted). (When Base gets a real executor, add it to
+    // ORDER_EXECUTOR_BY_CHAIN and the active-chain domain flows through unchanged.)
     const wagmi = await import('wagmi')
-    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453) // Base
-    mockCancelOrderInSupabase.mockImplementation(
-      async (_w: unknown, _h: unknown, sign: (rowId: string) => Promise<{ signature: string; chainId: number }>) => {
-        await sign('row-uuid-1')
-        return true
-      },
-    )
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453) // Base — no executor
     const { result } = renderHook(() => useOrderEngine())
-    await seedOneActiveOrder(result)
-    const order = result.current.orders[0]
     mockSignTypedDataAsync.mockClear()
 
-    await act(async () => { await result.current.cancelOrder(order.id) })
-    await act(async () => { await result.current.confirmCancel() })
+    await createAndConfirm(result)
 
-    const sigCall = mockSignTypedDataAsync.mock.calls.at(-1)![0] as {
-      domain: { chainId: number }
-      message: { id: string; action: string }
-    }
-    expect(sigCall.domain.chainId).toBe(8453) // active chain, never hardcoded mainnet
-    expect(sigCall.message).toEqual({ id: 'row-uuid-1', action: 'cancel' })
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled() // never signs against a non-existent executor
+    expect(result.current.latestEvent?.type).toBe('order_error')
   })
 
   it('cancelAllOrders FREEZES an invalidate review (frozen newNonce + affected orders, no tx)', async () => {

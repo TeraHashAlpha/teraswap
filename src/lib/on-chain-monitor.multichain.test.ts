@@ -168,4 +168,16 @@ describe('on-chain-monitor — multi-chain [E-4]', () => {
       eventsFound: 0,
     })
   })
+
+  it('[CHORE-ORDER-EXEC-PREP A] Base gets a FeeCollector target but NO OrderExecutor — the monitor skips it', () => {
+    const targets = _internal.getScanTargets()
+    const base = targets.find(t => t.chainId === 8453)
+    const mainnet = targets.find(t => t.chainId === 1)
+    // Base is still scanned for its FeeCollector...
+    expect(base?.feeCollector?.toLowerCase()).toBe(FAKE_BASE_FC.toLowerCase())
+    // ...but NOT for OrderExecutor events (0xeFC3…f130 is the FeeCollector on Base, not an executor).
+    expect(base?.executor).toBeUndefined()
+    // Mainnet still scans the real OrderExecutor.
+    expect(mainnet?.executor?.toLowerCase()).toBe(ORDER_EXECUTOR_ADDRESS.toLowerCase())
+  })
 })

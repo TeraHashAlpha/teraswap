@@ -18,7 +18,7 @@ import { useAccount, useChainId, useSignTypedData, useReadContract, useWriteCont
 import { keccak256, encodeAbiParameters, toBytes } from 'viem'
 import {
   ORDER_EXECUTOR_ABI,
-  ORDER_EXECUTOR_ADDRESS,
+  getOrderExecutor,
   ORDER_EIP712_TYPES,
   CANCEL_ORDER_TYPES,
   getOrderExecutorDomain,
@@ -273,6 +273,9 @@ export type PendingCancelReview =
 export function useOrderEngine() {
   const { address } = useAccount()
   const chainId = useChainId()
+  // [CHORE-ORDER-EXEC-PREP A] Resolve the OrderExecutor for the connected chain. null = no executor
+  // deployed there (e.g. Base today) → order creation / signing / on-chain reads are fail-closed.
+  const orderExecutor = getOrderExecutor(chainId)
   const { signTypedDataAsync } = useSignTypedData()
   const { writeContractAsync } = useWriteContract()
 
@@ -320,18 +323,18 @@ export function useOrderEngine() {
 
   // ── Read current nonce + invalidated nonce from contract ──
   const { data: currentNonce, refetch: refetchNonce } = useReadContract({
-    address: ORDER_EXECUTOR_ADDRESS,
+    address: orderExecutor ?? undefined,
     abi: ORDER_EXECUTOR_ABI,
     functionName: 'nonces',
     args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    query: { enabled: !!address && !!orderExecutor }, // fail-closed: no executor on this chain → no read
   })
   const { data: currentInvalidatedNonce } = useReadContract({
-    address: ORDER_EXECUTOR_ADDRESS,
+    address: orderExecutor ?? undefined,
     abi: ORDER_EXECUTOR_ABI,
     functionName: 'invalidatedNonces',
     args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    query: { enabled: !!address && !!orderExecutor },
   })
 
   // ── Load orders on mount / wallet change ───────────────
@@ -530,6 +533,13 @@ export function useOrderEngine() {
       setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: 'Order expired before signing — please recreate it.' })
       return
     }
+    // [CHORE-ORDER-EXEC-PREP A] Fail-closed: never sign an order on a chain with no OrderExecutor
+    // (e.g. Base — the same address is the FeeCollector there, not an executor).
+    if (!orderExecutor) {
+      setPendingOrder(null)
+      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: `Conditional orders are not yet available on chain ${chainId}.` })
+      return
+    }
     if (creatingRef.current) return
     creatingRef.current = true
     setPendingOrder(null) // consume the review
@@ -564,13 +574,10 @@ export function useOrderEngine() {
     setOrders(prev => [newOrder, ...prev])
 
     try {
-      // EIP-712 domain (dynamic chainId)
-      const domain = {
-        name: 'TeraSwapOrderExecutor',
-        version: '2',
-        chainId,
-        verifyingContract: ORDER_EXECUTOR_ADDRESS,
-      } as const
+      // [CHORE-ORDER-EXEC-PREP A] EIP-712 domain via the per-chain resolver. Mainnet (chainId 1) is
+      // byte-identical to the previous inline domain; it throws on a chain with no executor — but the
+      // fail-closed guard above already returned for that case, so this is reached only when valid.
+      const domain = getOrderExecutorDomain(chainId)
 
       // Sign the FROZEN order
       const signature = await signTypedDataAsync({
@@ -667,7 +674,7 @@ export function useOrderEngine() {
       setIsSubmitting(false)
       creatingRef.current = false // [P213] release the create mutex
     }
-  }, [pendingOrder, address, chainId, signTypedDataAsync, refetchNonce])
+  }, [pendingOrder, address, chainId, orderExecutor, signTypedDataAsync, refetchNonce])
 
   // [SPRINT-9U U2] Cancel a pending review without signing (modal "Cancel").
   const clearPendingOrder = useCallback(() => setPendingOrder(null), [])
@@ -739,13 +746,21 @@ export function useOrderEngine() {
     }
     setPendingCancel(null) // consume the review (also serialises double-confirms)
 
+    // [CHORE-ORDER-EXEC-PREP A] Fail-closed: no OrderExecutor on this chain → no on-chain cancel/
+    // invalidate (and getOrderExecutorDomain would throw). On such chains no order could have been
+    // created, so this is defensive; it also narrows `orderExecutor` to non-null below.
+    if (!orderExecutor) {
+      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: `Conditional orders are not available on chain ${chainId}.` })
+      return
+    }
+
     if (p.action === 'cancel') {
       const { orderId, order, orderStruct } = p
       try {
         // Cancel on-chain — contract verifies msg.sender == order.owner, then marks hash as
         // cancelled. Sends the FROZEN struct the user just reviewed, 1:1.
         await writeContractAsync({
-          address: ORDER_EXECUTOR_ADDRESS,
+          address: orderExecutor,
           abi: ORDER_EXECUTOR_ABI,
           functionName: 'cancelOrder',
           args: [orderStruct],
@@ -784,7 +799,7 @@ export function useOrderEngine() {
     // p.action === 'invalidate'
     try {
       await writeContractAsync({
-        address: ORDER_EXECUTOR_ADDRESS,
+        address: orderExecutor,
         abi: ORDER_EXECUTOR_ABI,
         functionName: 'invalidateNonces',
         args: [p.newNonce], // the FROZEN nonce the user reviewed
@@ -822,7 +837,7 @@ export function useOrderEngine() {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel all failed'
       setLatestEvent({ type: 'order_error', orderId: 'all', error: errorMsg })
     }
-  }, [pendingCancel, address, chainId, writeContractAsync, signTypedDataAsync])
+  }, [pendingCancel, address, chainId, orderExecutor, writeContractAsync, signTypedDataAsync])
 
   // [CANCEL-REVIEW] Dismiss a pending cancel review without executing (modal "Keep order(s)").
   const clearPendingCancel = useCallback(() => setPendingCancel(null), [])
