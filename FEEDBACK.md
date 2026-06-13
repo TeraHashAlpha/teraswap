@@ -3134,3 +3134,36 @@ Closes the node20 2026-09-16 deadline flagged in Audits/DEPS-TRIAGE-2026-06-12.m
   commands are byte-unchanged and a checkout-version bump cannot alter the checked-out tree. Residual
   (does the action binary execute on the runner) is near-zero for two GA, GitHub-/widely-maintained
   actions and is the owner-PR's job to confirm.
+
+## Feedback — CHORE-DOCS-CATCHUP-2 (a080646 / 501b934 / 6385867 / d5f15a7 / 87dd1be)
+
+Docs-housekeeping sweep (like #145/#158): 32 working-tree docs committed in 5 grouped signed
+commits. Docs-only; no code, no submodule.
+
+### Security concern (HIGH — contained, never committed)
+- During the working-tree inventory, the **uncommitted local modification** to
+  `docs/Runbooks/FEECOLLECTOR-AUGUSTUS-WHITELIST.md` was found to contain accidental editor scratch
+  (clipboard cruft + a stray `cast` line) INCLUDING **a real secp256k1 private key** pasted into the
+  file. It was **EXCLUDED and never committed** — the runbook on `main` is unchanged, and that runbook
+  is outside this catch-up's scope anyway (`docs/Runbooks/` is not in the doc set). The affected key was
+  reported to the owner out-of-band for **rotation**. Lesson: a private key reached a local working
+  file, and **gitleaks did NOT flag the bare-hex key** — the pre-commit secret audit below is
+  load-bearing, not ceremonial.
+
+### Method (secret audit before commit, per the goal)
+- Four independent passes over the 32 committed docs, ALL clean (0 real secrets, 0 redactions needed):
+  (1) `gitleaks --staged`; (2) deterministic danger-pattern grep (0x{64} / RPC-URL-with-key / Bearer /
+  JWT / telegram-token / AWS / BEGIN-KEY / secret-assignments); (3) a 9-agent adversarial semantic audit
+  (8 group scanners + 1 critic independently re-reading the highest-risk ops health snapshots) — 50
+  candidates, ALL non-secret (env-var NAMES, commit SHAs, public contract addresses, committer email,
+  fixture patterns like `sk_live_*`); (4) a final re-confirm sweep.
+
+### Scope decisions (for the Architect)
+- **ADR-012 already on `origin/main`** (`ADR-012-avoid-transitive-copyleft-deps.md`) — the goal said
+  "incl. ADR-012" but it had already landed; only the modified **ADR-008** was committed.
+- **Audits/Daily/* + Audits/Weekly/*** were INCLUDED though the goal's explicit list named only
+  Audits/Sprint/* — they are an established committed pattern (57 daily + 9 weekly already on main;
+  `.gitignore`: "the curated audit trail lives under Audits/** and is committed") and the acceptance
+  "no untracked docs" requires sweeping them.
+- **Audits/Incidents/*** had no untracked/modified entries (already tracked) — nothing to commit.
+- The `contracts/order-engine/lib/openzeppelin-contracts` submodule modification was EXCLUDED (docs-only).
