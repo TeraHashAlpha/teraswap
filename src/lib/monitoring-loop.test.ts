@@ -91,10 +91,15 @@ vi.mock('./monitored-endpoints', () => ({
 
 // ── Mock fingerprint-validator ─────────────────────────
 
+const mockGetBaselineState = vi.fn((): { state: 'ok' | 'pending-baseline' | 'degraded'; reason: string } => ({
+  state: 'pending-baseline',
+  reason: 'H2 baseline is the intentional placeholder — run npm run baseline:capture',
+}))
 vi.mock('./fingerprint-validator', () => ({
-  loadBaseline: vi.fn(() => null), // No baseline → H2 fail-closed (reported degraded)
-  // [CHORE-POLISH-4 P2] real pass-through so the fail-closed reason is exercised
-  evaluateBaselineHealth: vi.fn(() => ({ healthy: false, reason: 'H2 baseline empty/placeholder — run npm run baseline:capture' })),
+  loadBaseline: vi.fn(() => null), // No baseline → H2 reports a non-ok status (default: pending-baseline)
+  // [CHORE-HYGIENE-1 A] 3-state classifier — default placeholder → pending-baseline (non-paging);
+  // overridden per-test for the degraded (genuine fault) case.
+  getBaselineState: () => mockGetBaselineState(),
   validateTLS: vi.fn(),
   validateDNS: vi.fn(),
   captureLiveTLS: vi.fn(),
@@ -283,12 +288,21 @@ describe('monitoring-loop H5 integration', () => {
     expect('quorum' in result).toBe(false)
   })
 
-  it('[CHORE-POLISH-4 P2] reports H2 fail-closed when the baseline is empty (no vacuous pass)', async () => {
-    // loadBaseline is mocked to return null (empty/placeholder baseline). H2 must NOT silently
-    // skip-and-look-healthy: the tick must surface h2BaselineMissing so an empty baseline is visible.
+  it('[CHORE-HYGIENE-1 A] placeholder → h2Status=pending-baseline (informational, NON-paging)', async () => {
+    // loadBaseline mocked → null + getBaselineState mocked → pending-baseline (the intentional
+    // placeholder). The tick must SURFACE it (not silently skip) but treat it as EXPECTED, not a
+    // fault: no source is disabled (transitions empty), so it cannot page the watchdog/kill-switch.
     const result = await runMonitoringTick()
-    expect(result.h2BaselineMissing).toBe(true)
-    expect(result.h2Reason).toMatch(/baseline/i)
+    expect(result.h2Status).toBe('pending-baseline')
+    expect(result.h2Reason).toMatch(/placeholder/i)
+    expect(result.transitions).toEqual([]) // non-paging: H2 disabled no source
+  })
+
+  it('[CHORE-HYGIENE-1 A] genuine fault (missing/corrupt) → h2Status=degraded, still does not disable sources', async () => {
+    mockGetBaselineState.mockReturnValueOnce({ state: 'degraded' as const, reason: 'H2 baseline file MISSING — fail-closed (genuine fault).' })
+    const result = await runMonitoringTick()
+    expect(result.h2Status).toBe('degraded')
+    expect(result.transitions).toEqual([]) // fail-closed reports degraded but never bricks the aggregator
   })
 })
 

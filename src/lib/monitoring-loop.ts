@@ -25,7 +25,8 @@ import {
 } from './source-state-machine'
 import {
   loadBaseline,
-  evaluateBaselineHealth,
+  getBaselineState,
+  type H2BaselineState,
   validateTLS,
   validateDNS,
   captureLiveTLS,
@@ -130,12 +131,17 @@ export interface MonitoringTickResult {
   /** True when the 6-hourly Supabase keepalive ping fired during this tick. */
   supabaseKeepalive?: boolean
   /**
-   * [CHORE-POLISH-4 P2] Fail-closed H2 signal: true when the TLS/DNS baseline is
-   * empty/placeholder, so H2 validated NOTHING this tick. Surfaced (instead of silently
-   * skipped) so an empty baseline can never look healthy in the /api/monitor/tick surface.
+   * [CHORE-HYGIENE-1 A] H2 baseline status when H2 is NOT validating (absent when validating a
+   * populated baseline). Two non-`ok` states, surfaced so the dead H2 layer is visible but
+   * distinguishable:
+   *  - `pending-baseline` — the intentional placeholder is present (EXPECTED pre-Cloudflare-
+   *    migration). Informational only — does NOT count toward unhealthy / watchdog / kill-switch /
+   *    Telegram P0 (investigation in FEEDBACK confirmed nothing pages on this field).
+   *  - `degraded` — genuine fault (baseline missing / unparseable / malformed). Fail-closed
+   *    (the PR #177 / P2 behaviour) — surfaced as degraded.
    */
-  h2BaselineMissing?: boolean
-  /** Human-readable reason + seeding instruction when h2BaselineMissing is true. */
+  h2Status?: H2BaselineState
+  /** Reason; for `pending-baseline` it carries the seeding trigger to exit the pending state. */
   h2Reason?: string
 }
 
@@ -192,13 +198,14 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   )
 
   // ── H2: TLS + DNS baseline validation ─────────────────
-  // [CHORE-POLISH-4 P2] Fail-closed on an empty/placeholder baseline. Previously the H2 block
-  // was silently skipped when loadBaseline() returned null — H2 validated NOTHING yet the tick
-  // still looked healthy (vacuous pass). We now surface the gap loudly + in the tick result so
-  // it can't hide. We deliberately do NOT forceDisable every source on an empty baseline (that
-  // would brick the aggregator); fail-closed here = report H2 as degraded, not disable swaps.
+  // [CHORE-POLISH-4 P2 / CHORE-HYGIENE-1 A] Fail-closed when there is no usable baseline, but
+  // distinguish the EXPECTED placeholder from a genuine fault. When loadBaseline() returns null
+  // we surface a 3-way h2Status (never a silent vacuous pass): `pending-baseline` (the intentional
+  // placeholder, informational, NON-paging) vs `degraded` (missing/unparseable/malformed — a real
+  // fault, fail-closed). We deliberately do NOT forceDisable sources in either case (that would
+  // brick the aggregator); the distinction is observability — neither state pages today.
   const baseline = loadBaseline()
-  let h2BaselineMissing = false
+  let h2Status: H2BaselineState | undefined
   let h2Reason: string | undefined
   if (baseline) {
     await Promise.allSettled(
@@ -225,9 +232,15 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
       })
     )
   } else {
-    h2BaselineMissing = true
-    h2Reason = evaluateBaselineHealth(baseline).reason
-    console.error(`[H2] FAIL-CLOSED: ${h2Reason}`)
+    // [CHORE-HYGIENE-1 A] No usable baseline → classify. `pending-baseline` (the committed
+    // placeholder) is EXPECTED and informational — loadBaseline already logged it at info level
+    // and it does not page. Only a genuine fault (`degraded`) escalates to console.error.
+    const st = getBaselineState()
+    h2Status = st.state
+    h2Reason = st.reason
+    if (st.state === 'degraded') {
+      console.error(`[H2] FAIL-CLOSED (fault): ${h2Reason}`)
+    }
   }
 
   // ── H5: Quorum cross-check (every 5th tick) ──────────
@@ -332,6 +345,6 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(warmup ? { warmup: true } : {}),
     ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
-    ...(h2BaselineMissing ? { h2BaselineMissing: true, h2Reason } : {}),
+    ...(h2Status ? { h2Status, h2Reason } : {}),
   }
 }

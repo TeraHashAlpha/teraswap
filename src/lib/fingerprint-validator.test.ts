@@ -13,7 +13,7 @@
  * seeds a real baseline, while still failing if anyone reintroduces the vacuous-pass logic.
  */
 import { describe, it, expect } from 'vitest'
-import { isBaselinePopulated, evaluateBaselineHealth } from './fingerprint-validator'
+import { isBaselinePopulated, evaluateBaselineHealth, classifyBaseline, getBaselineState, resetBaseline } from './fingerprint-validator'
 
 const PLACEHOLDER = { generatedAt: null, endpoints: {} }
 const SEEDED = {
@@ -48,5 +48,50 @@ describe('H2 baseline fail-closed [CHORE-POLISH-4 P2]', () => {
 
   it('evaluateBaselineHealth reports HEALTHY on a seeded baseline', () => {
     expect(evaluateBaselineHealth(SEEDED).healthy).toBe(true)
+  })
+})
+
+/**
+ * [CHORE-HYGIENE-1 A] 3-state H2 baseline classification. Investigation (see FEEDBACK) confirmed
+ * the P2 H2-degraded state is already NON-PAGING (informational only). This item is therefore
+ * minimal LABELLING: distinguish the intentional placeholder (pending-baseline, EXPECTED) from a
+ * genuine fault (missing / unparseable / malformed → degraded, fail-closed), so the known-pending
+ * state is never confused with a real fault.
+ */
+describe('H2 baseline 3-state classification [CHORE-HYGIENE-1 A]', () => {
+  it('MISSING file → degraded (genuine fault, fail-closed)', () => {
+    expect(classifyBaseline({ exists: false }).state).toBe('degraded')
+  })
+
+  it('UNPARSEABLE file → degraded', () => {
+    expect(classifyBaseline({ exists: true, parseError: true }).state).toBe('degraded')
+  })
+
+  it('MALFORMED (no/invalid endpoints object) → degraded — NOT confused with the placeholder', () => {
+    expect(classifyBaseline({ exists: true, raw: { generatedAt: null } }).state).toBe('degraded')
+    expect(classifyBaseline({ exists: true, raw: { generatedAt: null, endpoints: [] } }).state).toBe('degraded')
+    expect(classifyBaseline({ exists: true, raw: 'not-an-object' }).state).toBe('degraded')
+  })
+
+  it('the intentional placeholder (generatedAt:null, endpoints:{}) → pending-baseline (EXPECTED, non-paging)', () => {
+    const c = classifyBaseline({ exists: true, raw: { generatedAt: null, endpoints: {} } })
+    expect(c.state).toBe('pending-baseline')
+    expect(c.reason).toMatch(/placeholder/i)
+    expect(c.reason).toMatch(/capture/i) // documents the exit trigger (seed post-migration)
+  })
+
+  it('valid structure with a timestamp but 0 endpoints → still pending-baseline (the "and/or")', () => {
+    expect(classifyBaseline({ exists: true, raw: { generatedAt: '2026-06-13T00:00:00.000Z', endpoints: {} } }).state).toBe('pending-baseline')
+  })
+
+  it('a populated baseline → ok (normal validation runs)', () => {
+    expect(classifyBaseline({ exists: true, raw: SEEDED }).state).toBe('ok')
+  })
+
+  it('the REAL committed data/endpoint-baseline.json is currently pending-baseline, NOT degraded', () => {
+    // The committed file is the placeholder → pending-baseline (informational, non-paging).
+    // Flips to 'ok' once the operator seeds it post-Cloudflare-migration.
+    resetBaseline()
+    expect(getBaselineState().state).toBe('pending-baseline')
   })
 })
