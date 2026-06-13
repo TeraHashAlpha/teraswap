@@ -87,6 +87,24 @@ Instead of full migration, Sprint 34 will:
 2. **Pin wagmi v2 indefinitely** — Acceptable short-term but v2 will stop getting security patches eventually.
 3. **Fork RainbowKit for v3 compat** — Maintenance burden not justified.
 
+## Update 2026-06-11 (Architect) — reconfirmed BLOCKED + prep recommendation REVERSED
+
+- **Still blocked:** RainbowKit has NO production release supporting wagmi v3 (discussion #2575 still
+  open). Decision to DEFER stands. Forcing v3 would break wallet connectivity via RainbowKit's
+  `getDefaultConfig`.
+- **⚠ Sprint-34 prep item #2 ("install future peer deps early") is SUPERSEDED — do NOT do it.** Doing
+  exactly this is what commit P184 did, which caused: (a) **4 duplicate `@walletconnect/core` versions**
+  → mobile/desktop sessions never settled (fixed 9K, single-core overrides), and (b) a **parallel
+  `@coinbase/wallet-sdk` stack** (removed 9L). Pre-installing wallet peer deps under wagmi v2 pulls
+  parallel/duplicate stacks. **Never pre-install v3 peer deps while on v2.** See INC (9K/9L) +
+  INC-2026-06-09-001 (the broader "loose transitive range" lesson).
+- **Safe prep that remains valid:** the proactive `useSwitchChain().chains → useChains()` fix in
+  SwapButton (works in both v2 and v3). TypeScript is already on 5.9.3 (prep item #1 done).
+- **Trigger to revisit:** a RainbowKit release that officially supports wagmi v3 → then scope the full
+  migration as its own gated sprint (touches the fragile wallet layer → full test + real-device WC +
+  Auditor; must reconcile with 9K single-core overrides, 9Z RainbowKit pin, the qr@0.5.5 pin, the
+  explicit wallet list, COOP, and WalletSessionGuard).
+
 ## References
 
 - [Wagmi v2→v3 Migration Guide](https://wagmi.sh/react/guides/migrate-from-v2-to-v3)

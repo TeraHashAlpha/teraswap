@@ -646,3 +646,166 @@ Principle: NO EIP-712 signature without TeraSwap review of the exact FROZEN type
 
 Cancel/invalidate signatures un-gated (creation-only per spec) — defensive ops, not a bypass. Acceptable as follow-up.
 Scope: display/flow-control only — no EIP-712 domain/types/struct changes, no contract changes, no gate/adapter/selector changes.
+
+---
+
+### Sprint 9V Audit (2026-06-08) — Per-Feed Chainlink Staleness + Composed cbETH/USD
+
+**Verdict: APPROVED — 0C / 0H / 1M (CLOSED `7dd84f0`) / 0L / 2I.** Report: `Audits/Sprint/SPRINT-9V-AUDIT.md`.
+⚠️ **SAFETY GATE MODIFICATION** — modifies Chainlink staleness validation (rule #9).
+Branch: `feat/sprint-9v-per-feed-staleness`. 3 commits (92c4dbe, 68b1b09, 41c8dba). All SSH-signed. +305/−27 lines, +11 tests.
+
+| Check | Result |
+|-------|--------|
+| NO LOOSENING — staleness = heartbeat×1.5, shared by raw gate + UI hook | ✅ Single `getFeedStalenessSec(feed, globalFallback)` called by BOTH consumers. 37h USDC/USD → STALE (test-pinned). validateRoundData integrity guards (answer>0, answeredInRound, startedAt) byte-identical. |
+| Heartbeats verified vs Chainlink directory | ✅ ETH/USD 1200, USDC/USD 86400, DAI/USD 86400 — all proxy + heartbeat EXACT match. ⚠️ cbETH/ETH heartbeat 86400 CORRECT but proxy address mismatch (see 9V-M-01). |
+| Mainnet byte-identical | ✅ No mainnet feeds in FEED_HEARTBEAT_SEC → global fallback preserved (raw=3600, UI=90000). Test-pinned. |
+| Composed cbETH/USD = cbETH/ETH × ETH/USD | ✅ Per-leg decimal normalisation (no $1.08 bug). Both legs independently integrity+staleness checked. Either leg fails → null (no partial pricing). updatedAt = min(legs). Sequencer check once before legs. |
+| Scope — other safety gates untouched | ✅ Zero changes to deviation thresholds, DefiLlama guard, sequencer check, price-gate, post-exec validator, selectors, calldata-recipient, constants. No contract changes. |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| 9V-M-01 | **MEDIUM → CLOSED** | cbETH/ETH proxy `0x806b4Ac0…` confirmed correct via on-chain `cast` (`7dd84f0`). Base has 3 cbETH feeds; audit matched the Exchange-Rate entry (`0x868a…`), not the market feed. Address unchanged; +2 pinning tests. Follow-up: direct CBETH/USD feed discovered (`0xd7818272…`). |
+| 9V-I-01 | INFO | V2 composition is raw-path only; UI hook still shows "no oracle" for cbETH on Base. Display inconsistency, not security — swap path has oracle protection. Follow-up: UI-side composed display. |
+| 9V-I-02 | INFO | Base ETH/USD tightened 3600→1800s (heartbeat×1.5). More conservative (not loosening). Behaviour delta: 30-60min stale rounds now fail. Safe — feed updates every ≤20min. |
+
+---
+
+### Sprint 9W-oracle Audit (2026-06-08) — cbETH Depeg / Manipulation Circuit-Breaker
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 3I.** Report: `Audits/Sprint/SPRINT-9W-ORACLE-AUDIT.md`.
+⚠️ **NEW SAFETY GATE** — adds a depeg circuit-breaker on top of existing oracle infrastructure (rule #9). Does NOT modify any existing gate.
+Branch: `feat/sprint-9w-oracle-depeg-breaker`. 4 commits (f08d0cc, 6b4f8b6, 070ead9, 21ba309). All SSH-signed. +534/−17 lines, +20 tests.
+
+| Check | Result |
+|-------|--------|
+| Swap-price reference unchanged (9V market feed 0x806b…) | ✅ chainlink.ts, useChainlinkPrice.ts, price-gate.ts have ZERO changes. ER feed (0x868a…) read ONLY in useDepegCheck, passed ONLY to evaluateDepeg — never enters pricing. |
+| Divergence = \|market−ER\|/ER, thresholds 2%→consent / ≥10%→hard-block | ✅ mode:'block' renders no checkbox ("cannot be overridden"). mode:'consent' requires checkbox. Consent auto-revokes at accepted+0.5%. Resets on every trade-param change (9J pattern). Test-pinned at all boundaries. |
+| Fail-open: either leg stale/invalid → 'ok' (no false block) | ✅ priceFromValidRound null→evaluateDepeg→'ok'. Cannot be abused: user cannot make a fresh feed appear stale without RPC compromise (self-griefing). Defense-in-depth: DefiLlama + on-chain minimumOutput bound loss. |
+| priceFromValidRound startedAt>0 check | ✅ Stricter than useChainlinkPrice (which omits startedAt). Fail-open direction — can only cause 'ok' (no verdict), never a false block. Conservative and sound. |
+| Data-driven registry (EXCHANGE_RATE_PAIRS_BY_CHAIN) | ✅ Only cbETH on Base. Mainnet: no entries. Non-cbETH: returns null → no RPC reads, no friction. Extensible for future LSTs. |
+| Scope: no 9J/9V/9S loosening, no contracts, mainnet byte-identical | ✅ Zero changes to chainlink.ts, useChainlinkPrice.ts, price-gate.ts, defillama.ts, sequencer-check.ts, selectors, calldata-recipient, constants (thresholds/deviation). FEED_HEARTBEAT_SEC: +1 additive entry (ER feed). No contract changes. |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| 9W-I-01 | INFO | Hook checks tokenIn first, then tokenOut — if both tokens have ER pairs, only one gets checked. Acceptable for current single-entry registry. |
+| 9W-I-02 | INFO | priceFromValidRound checks startedAt>0 but useChainlinkPrice does not — minor inconsistency, safe direction (depeg legs stricter). |
+| 9W-I-03 | INFO | Breaker is client-side only (matching 9J). A server-side divergence check in /api/swap would strengthen defense against manipulated market feeds reaching the server. Bounded by DefiLlama + minimumOutput. Clean follow-up, not a gate. |
+
+### Sprint 9Y Light Review (2026-06-08) — Expanded Pinned Token Catalog (Matcha-style)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Sprint/SPRINT-9Y-AUDIT.md`.
+⚠️ **ADDRESS CORRECTNESS** — wrong address = scam token. Catalog sourced from pinned vendored Uniswap Labs Default v21.3.0, validated via viem `getAddress` (EIP-55) + chainId + integer decimals. Re-generation confirmed BYTE-IDENTICAL to committed file.
+Branch: `feat/sprint-9y-token-catalog`. 2 commits (7d144e0, c5bdb9e). Both SSH-signed. +20945/−41 lines, 389 mainnet + 97 Base tokens.
+
+| Check | Result |
+|-------|--------|
+| Catalog source: pinned vendored Uniswap snapshot, generator deterministic | ✅ SHA256 verified. Re-run in sandbox → byte-identical output. No drift, no hand edits. |
+| Address spot-check: top 13 mainnet + 12 Base majors | ✅ All canonical. USDT Base verified on BaseScan (583k holders, correct symbol/decimals). |
+| Pre-existing 5 Base addresses match catalog | ✅ WETH, USDC, DAI, cbETH, USDbC — all identical between old hardcoded list and generated catalog. |
+| Non-Uniswap addition: USDT Base (CoinGecko-sourced) | ✅ `0xfde4C96c…` confirmed canonical Bridged Tether USD on Base. Passes same validate() pipeline. |
+| Mainnet DEFAULT_TOKENS byte-identical (ADD-only) | ✅ `getChainTokenList(1) === DEFAULT_TOKENS` (strict identity, test-pinned with `toBe`). Long tail is additive via getFullCatalog. |
+| Verified ✓ vs imported ⚠ (9P intact) | ✅ Catalog tokens → ✓ on their chain. Imports → ⚠. Cross-chain isolation preserved. |
+| USDe non-canonical checksum (FEEDBACK) | ✅ Pre-existing, out of 9Y scope. One-line follow-up. |
+| Scope: no existing gate loosening, no contracts | ✅ Zero changes to oracle, pricing, DeFi, API, or contract code. |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| 9Y-I-01 | INFO | Pre-existing: USDe in DEFAULT_TOKENS has non-canonical EIP-55 checksum. Lowercase address is correct (no funds risk). One-line re-checksum follow-up. |
+| 9Y-I-02 | INFO | Single non-Uniswap entry (USDT Base, CoinGecko-sourced) breaks single-source provenance. BaseScan-verified correct. FEEDBACK flags for owner confirmation. |
+
+### Sprint 9Z Light Review (2026-06-08) — Mobile WalletConnect (wallet list + session guard + RainbowKit 2.2.10)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 3I.** Report: `Audits/Sprint/SPRINT-9Z-AUDIT.md`.
+⚠️ **AUTH CONTROL** — Part B touches the 1h idle auto-disconnect (WalletSessionGuard). The stale-baseline mount-time expiry check — which killed fresh mobile WC connections — is removed. The 1h idle setTimeout (reset on user interaction) is preserved and test-pinned at the 59m/61m boundary.
+Branch: `feat/sprint-9z-mobile-walletconnect` / PR #155. 4 commits (cb5a5cf, b6c49af, d93f644, 4b6f3b2). All SSH-signed. +472/−47 lines, +199 test lines.
+
+| Check | Result |
+|-------|--------|
+| 1h idle auto-disconnect preserved | ✅ Test-pinned: 59min no disconnect, 61min disconnects. User activity resets timer. Genuine idle still triggers. |
+| Fresh connect not killed by stale baseline | ✅ Stale connectedAt (2h old) + new connect → no disconnect. Visibility change during handshake → no disconnect. |
+| sessionStorage fail-soft | ✅ Safari private mode (setItem throws) → guard doesn't crash, in-memory timer still governs. Test-pinned. |
+| Wallet list: additive only, no trust change | ✅ 6 wallets (rabby/metaMask/coinbase/walletConnect/ledger/injected), all from @rainbow-me/rainbowkit/wallets. Same projectId/metadata (9K). Exact-set test. UA-independent (fixes mobile hiding). |
+| RainbowKit 2.2.10 (not 2.2.11) — AGPL avoidance | ✅ 2.2.11 pulls ua-parser-js@2.0.10 (AGPL-3.0). 2.2.10 ships all mobile fixes (2.2.7/2.2.8/2.2.10), stays MIT. ua-parser-js: ^1.0.37 in lockfile (MIT). Rationale documented in FEEDBACK. |
+| Single @walletconnect/core preserved | ✅ 1 instance at 2.21.1 (lockfile verified). Overrides pin core/sign-client/universal-provider. Direct @walletconnect/ethereum-provider dep removed (transitive). |
+| No wagmi v3, mainnet byte-identical | ✅ wagmi 2.19.5, viem 2.47.4 — both unchanged. No contract/oracle/API changes. |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| 9Z-I-01 | INFO | Auth control is now "1h since last connect/interaction" (not absolute cap). Acceptable: reload is activity, no major dApp has absolute cap, genuine idle disconnects. Separate control if hard cap ever needed. |
+| 9Z-I-02 | INFO | RainbowKit #2232 (WC multi-instance "No matching key") NOT fixed by 2.2.x — root cause in wagmi WC-connector reconnect. Track at wagmi level. |
+| 9Z-I-03 | INFO | AGPL avoidance rationale is in FEEDBACK. Consider a brief ADR if licensing decision needs to survive beyond append-only FEEDBACK. |
+
+### Sprint E-2 Audit (2026-06-11) — L2 Sequencer-Uptime Gate on Quote Path
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Sprint/SPRINT-E2-AUDIT.md`.
+⚠️ **SECURITY GATE (rule #9)** — extends L2 sequencer-uptime protection to the quote path (`fetchMetaQuote`/`/api/quote`). The existing Chainlink price-read gate (P218, `chainlink.ts`) is **UNTOUCHED**.
+Branch: `fix/e2-sequencer-quote-gate` / PR #165. 2 commits (9604e43, d8bdaa0). Both SSH-signed. +182/−1 lines, +4 tests.
+
+| Check | Result |
+|-------|--------|
+| ADDITIVE only — existing price-read sequencer gate (chainlink.ts) untouched | ✅ Zero changes to chainlink.ts, price-gate.ts, defillama.ts, adapters, swap route, constants. New gate is a SECOND consumer of the same `isSequencerUp` function. |
+| Gate placement: top of fetchMetaQuote, before cache and rate limiter | ✅ Cached pre-outage quotes cannot be served once the check flips. Refused requests don't consume outbound budget. Covers every caller (fetchMetaQuote is the sole quote entry point). |
+| Grace-window logic matches price-read gate exactly | ✅ Both call identical `isSequencerUp(chainId, getPublicClientForChain(chainId))`. Same logic: answer===0n AND sinceStartedSec >= SEQUENCER_GRACE_PERIOD_SEC (3600s). Same fail-safe (RPC error → false). |
+| Refusal shape: typed 503 + sequencerDown flag + Retry-After | ✅ `{ error: "…sequencer is down…", sequencerDown: true }`, status 503, `Retry-After: 60`. Client can render calm "quotes paused" UX. |
+| Feed address verified on-chain (9V lesson) | ✅ `0xBCF85224fc0756B9Fa45aA7892530B47e10b6433` — FEEDBACK documents `cast description()` → "L2 Sequencer Uptime Status Feed". Not a new address, just a new consumer. |
+| Mainnet byte-identical | ✅ Gate condition: `chainId != null && chainId !== DEFAULT_CHAIN_ID`. chainId 1 and undefined both skip. Test-pinned (isSequencerUp never called). |
+| Negative-path tests | ✅ Down/refuses (SequencerDownError), up/proceeds, mainnet-never-consulted, route maps to 503+Retry-After. |
+| No NEXT_PUBLIC_ leak, no contract/adapter changes | ✅ Only new export: `SequencerDownError` (typed Error class). |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| E2-I-01 | INFO | Swap-build path (`/api/swap`) has no explicit sequencer refusal. Defense-in-depth: quote gate (upstream) + oracle price-read gate (P218, inline) provide layered coverage. One-liner follow-up recommended, not a blocker. |
+| E2-I-02 | INFO | 30s `isSequencerUp` cache bounds detection latency. Same cache the existing price-read gate uses (inherited, not new). Acceptable RPC-cost / detection-speed trade-off. |
+
+**FEEDBACK open questions — Auditor rulings:**
+1. **Swap-path explicit gate:** NOT REQUIRED for merge. Quote gate is upstream (no quote → no swap); oracle gate (P218) is inline secondary. Adding it is a clean one-liner follow-up for defense-in-depth.
+2. **30s cache latency:** ACCEPTABLE (inherited from existing price-read gate, unchanged).
+
+### Sprint E-3 Audit (2026-06-12) — Portfolio Base Activation (chain-aware data, LIGHT)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 2L-I.** Report: `Audits/Sprint/SPRINT-E3-AUDIT.md`.
+Data multi-chain, **not** a security gate. Branch `fix/e3-portfolio-base` / PR #166. 4 functional
+commits (`56594a9`, `b061695`, `3d07294`, `3fc4abf`), all SSH-signed. +404/−112, 11 files. No Solidity /
+adapter / gate / fee / router / constants changes. Tests independently re-executed in-session: **42/42**.
+
+| Check | Result |
+|-------|--------|
+| Alchemy endpoint per chain; mainnet pin byte-identical | ✅ `[1]`=eth-mainnet (string-identical to old `ALCHEMY_BASE`), `[8453]`=base-mainnet. Test-pinned. |
+| UNMAPPED chain → 400 fail-closed (before any upstream call) | ✅ Both routes 400 pre-fetch; upstream `not.toHaveBeenCalled()` test-pinned. No silent wrong-chain. |
+| DefiLlama slug via registry | ✅ On-source: `getChainConfig(1).slug==='ethereum'` (byte-identical), `(8453)==='base'`. |
+| chainId threaded end-to-end (usePortfolio + both routes) | ✅ discovery URL, prices URL, `useBalance({chainId})`, curated map + fallback walk all key off one `useActiveChainId()`; `prevChainRef` clears prior-chain tokens synchronously on switch. |
+| Internal mainnet-pinned fallback → standalone chain-aware `useTokenBalances` | ✅ Old `chain?.id===CHAIN_ID`/`DEFAULT_TOKENS` gate replaced by `isChainActive(activeChainId)` + active-chain catalog; `enabled=!useAlchemyPath` parks multicall; no ETH double-count. |
+| Mainnet byte-identical | ✅ chainId absent → identical URL/map/slug/shape; explicit `chainId=1` treated identically to absent. 20 prior tests unchanged. |
+| Base-503 fallback test real | ✅ 8453 + discovery 503 → multicall returns **Base** USDC (`0x833589…`, 6dp, `'5'`); URLs carry `chainId=8453`. |
+| 9P cross-chain mislabel guard | ✅ Curation chain-scoped via `getChainTokenList(8453)`; Base USDC `isDefault` from Base list, never mainnet metadata. Test-pinned. |
+| No gate/FeeCollector/adapter/contract change; no `NEXT_PUBLIC_` leak | ✅ `ALCHEMY_API_KEY` server-only; portfolio-only diff; zero Solidity/gate touch. |
+| Any chain ≠ 1/8453 safe | ✅ `getSupportedChainIds()`={1,8453}=Alchemy map; else 400 → fallback gates `isChainActive=false` → empty, never wrong-chain. |
+| All `useTokenBalances` call sites migrated (Map → object) | ✅ TokenSelector + usePortfolio both updated; no stragglers. |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| E3-L-01 | LOW | "Supported chains" allowlist defined twice (registry `getSupportedChainIds()` in prices route vs hardcoded `ALCHEMY_BASE_BY_CHAIN` in tokens route). Identical `{1,8453}` today; latent drift if a 3rd chain is added to one but not the other (still fail-closed, read-only). Recommend a shared `PORTFOLIO_SUPPORTED_CHAINS` constant. Non-blocking. |
+| E3-I-01 | INFO | `Number(chainIdParam)` accepts hex/scientific forms; harmless (fixed allowlist, read-only path). |
+| E3-I-02 | INFO | `ALCHEMY_API_KEY` is one key for both endpoints — deploy checklist: confirm app-scoped (eth-mainnet + base-mainnet). Restricted key → 503 → chain-aware multicall fallback covers it. |
+
+### Sprint E2-I-01 Audit (2026-06-12) — Sequencer gate on the Base swap-build path (LIGHT)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Sprint/SPRINT-E2-I01-AUDIT.md`.
+⚠️ **SECURITY GATE (rule #9)** — **additive** belt-and-suspenders follow-up to E-2 (PR #167), per
+finding E2-I-01. Branch `fix/sequencer-swap-path` / PR #170, commit `3079d67` (SSH-signed). +95/−0, 2
+files (`swap/route.ts` +25, `swap/route.test.ts` +70). `sequencer-check.ts` **unchanged**. Tests
+re-executed in-session: **24/24**.
+
+| Check | Result |
+|-------|--------|
+| Strict reuse of `sequencer-check.ts` — no fork of feed/grace/threshold | ✅ Only `route.ts`+`route.test.ts` touched. Route imports `isSequencerUp`/`SequencerDownError`/`getPublicClientForChain` and calls the exact api.ts:107 shape. Feed/grace/cache stay owned by `sequencer-check.ts`. |
+| Fail-safe preserved (down/grace/RPC-error → refuse; no fail-open) | ✅ `isSequencerUp` returns false for down/in-grace/RPC-error; route refuses on `!seqUp`. Unknown-chain `true` unreachable (activation gate rejects first; mainnet skipped). |
+| Mainnet byte-identical (absent/1 → 0 calls, test-pinned) | ✅ Guard `chainId != null && Number(chainId) !== DEFAULT_CHAIN_ID`. Test asserts absent + `chainId=1` → 200, `isSequencerUp`/`getPublicClientForChain` **not** called. |
+| Placement: after activation gate, before rate-limit + upstream | ✅ `route.ts:113`, before `[Audit B-06]` limiter + `fetchSwapFromSource`. Test asserts neither `checkRateLimit` nor `fetchSwapFromSource` called on a down sequencer. |
+| 503 `{error,sequencerDown:true}` + `Retry-After:60` identical to quote gate (#167) | ✅ Byte-identical body/status/header; same `SequencerDownError.message` source. Inline-check vs throw-catch style differs but wire output identical (prompt permitted either). |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| E2I01-I-01 | INFO | Refusal message ("…quotes are paused…") is generic to the swap-build path; intentionally single-sourced from `SequencerDownError` for one unified "paused" UX. No change recommended. |
+| E2I01-I-02 | INFO | Commit `3079d67` already merged to `main` at audit time. `main` ≠ prod and the gate is additive + now 0C/0H; recorded as a process note (rules #2/#3 prefer the Auditor pass before merge), not a code defect. |
