@@ -25,6 +25,7 @@ import {
 } from './source-state-machine'
 import {
   loadBaseline,
+  evaluateBaselineHealth,
   validateTLS,
   validateDNS,
   captureLiveTLS,
@@ -128,6 +129,14 @@ export interface MonitoringTickResult {
   reason?: string
   /** True when the 6-hourly Supabase keepalive ping fired during this tick. */
   supabaseKeepalive?: boolean
+  /**
+   * [CHORE-POLISH-4 P2] Fail-closed H2 signal: true when the TLS/DNS baseline is
+   * empty/placeholder, so H2 validated NOTHING this tick. Surfaced (instead of silently
+   * skipped) so an empty baseline can never look healthy in the /api/monitor/tick surface.
+   */
+  h2BaselineMissing?: boolean
+  /** Human-readable reason + seeding instruction when h2BaselineMissing is true. */
+  h2Reason?: string
 }
 
 /**
@@ -183,7 +192,14 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   )
 
   // ── H2: TLS + DNS baseline validation ─────────────────
+  // [CHORE-POLISH-4 P2] Fail-closed on an empty/placeholder baseline. Previously the H2 block
+  // was silently skipped when loadBaseline() returned null — H2 validated NOTHING yet the tick
+  // still looked healthy (vacuous pass). We now surface the gap loudly + in the tick result so
+  // it can't hide. We deliberately do NOT forceDisable every source on an empty baseline (that
+  // would brick the aggregator); fail-closed here = report H2 as degraded, not disable swaps.
   const baseline = loadBaseline()
+  let h2BaselineMissing = false
+  let h2Reason: string | undefined
   if (baseline) {
     await Promise.allSettled(
       MONITORED_ENDPOINTS.map(async (ep) => {
@@ -208,6 +224,10 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
         }
       })
     )
+  } else {
+    h2BaselineMissing = true
+    h2Reason = evaluateBaselineHealth(baseline).reason
+    console.error(`[H2] FAIL-CLOSED: ${h2Reason}`)
   }
 
   // ── H5: Quorum cross-check (every 5th tick) ──────────
@@ -312,5 +332,6 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(warmup ? { warmup: true } : {}),
     ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
+    ...(h2BaselineMissing ? { h2BaselineMissing: true, h2Reason } : {}),
   }
 }
