@@ -23,14 +23,15 @@ import { playTouchMP3 } from '@/lib/sounds'
 // /docs, /privacy, and /terms each have their own Next.js route, so they
 // don't need to be part of the in-memory AppPage state machine.
 export type AppPage = 'landing' | 'swap'
-export type SwapMode = 'instant' | 'portfolio' | 'dca' | 'limit' | 'sltp' | 'orders' | 'history' | 'analytics'
+// [CHORE-ORDER-EXEC-PREP B] Limit + SL/TP tabs removed from the nav (kept DCA as the "Soon" teaser).
+// LimitOrderPanel / ConditionalOrderPanel components are NOT deleted (rule #4) — only unwired from
+// the nav; re-add 'limit'/'sltp' here (+ array + COMING_SOON_META) to re-wire later.
+export type SwapMode = 'instant' | 'portfolio' | 'dca' | 'orders' | 'history' | 'analytics'
 
-const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
+const COMING_SOON_MODES = new Set<SwapMode>(['dca'])
 
 const COMING_SOON_META: Record<string, { icon: string; title: string; desc: string }> = {
   dca:  { icon: '⟳', title: 'Smart DCA Engine', desc: 'Automated dollar-cost averaging with price-aware buying windows. Coming to L2 soon.' },
-  limit: { icon: '⇅', title: 'Limit Orders', desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order. Coming to L2 soon.' },
-  sltp: { icon: '⛨', title: 'Stop Loss / Take Profit', desc: 'Automated position protection powered by Chainlink oracles. Coming to L2 soon.' },
 }
 
 function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void }) {
@@ -100,8 +101,6 @@ export default function Home() {
               ['instant', 'Swap'],
               ['portfolio', 'Portfolio'],
               ['dca', 'DCA'],
-              ['limit', 'Limit'],
-              ['sltp', 'SL / TP'],
               ['orders', 'Orders'],
               ['history', 'History'],
               ['analytics', 'Analytics'],
