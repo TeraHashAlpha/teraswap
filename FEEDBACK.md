@@ -3278,3 +3278,29 @@ This removes the recurring weekly-audit **"tsparticles major breaking bump (3→
 It is NOT pulled by the v3 packages (v3 uses `@tsparticles/engine`), so removing react/slim did not drop
 it. Left in place to stay faithful to the explicit instruction; **recommend a one-line follow-up to drop
 `tsparticles-engine@2.12.0`** for a fully clean tsparticles removal.
+
+## Feedback — CHORE-POLISH-5b — remove leftover tsparticles-engine@2.12.0 (v2)
+
+Follow-up to the same PR (#178): drops the third unused tsparticles dep flagged above, completing
+the tsparticles removal. One signed commit.
+
+### `npm ls tsparticles-engine` — direct + no dependents
+```
+teraswap@0.1.0
+└── tsparticles-engine@2.12.0
+```
+A direct dependency only (leaf under root, no children). Lockfile cross-check: "depended on by: root"
+— NO other package (transitive/peer/optional) requires it. Zero imports in src/scripts/workers/tests.
+Safe to remove.
+
+### Packages dropped (1)
+- **Direct (1):** `tsparticles-engine@2.12.0` (the old v2 standalone engine, no `@` scope). It had no
+  transitive children, so removal drops exactly 1 package. Lockfile **1164 → 1163**, regenerated via
+  clean `npm install` (not hand-edited).
+- **Result: ZERO tsparticles-family packages remain** in the tree (this + the 37 from the first commit
+  = 38 total removed). The recurring weekly-audit tsparticles noise is now fully gone.
+
+### Verification
+tsc clean · lint 0 errors · vitest 1683/1683 · next build · forge 68/68 + 19/19. Dot background
+unaffected — `src/components/ParticleNetwork.tsx` (custom canvas) untouched. Mainnet byte-identical
+(unused dep); no contract/gate/adapter changes.
