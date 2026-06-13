@@ -38,12 +38,12 @@ regex = '''(?i)(private[_-]?key|priv[_-]?key|secret[_-]?key|mnemonic|keystore|\b
 keywords = ["private", "privkey", "priv_key", "priv-key", "secret_key", "secret-key", "mnemonic", "keystore", "pk"]
 
   # Per-rule value-allowlist (NOT a path allowlist) for two KNOWN-PUBLIC 64-hex values this rule
-  # surfaces. regexTarget="line" because the rule's Secret capture is the keyword, so the value is
-  # matched against the whole line. Scoped to THIS rule only — the scanner stays fully active
-  # everywhere; any DIFFERENT key (a real leak), even in these same files, still flags.
+  # surfaces. regexTarget="match" (the keyword+value match, NOT the whole line) so suppression is
+  # scoped to exactly these values: a DIFFERENT real key — even co-located on the same line as an
+  # allowlisted value — still flags (line-scope would blind it). Scoped to THIS rule only.
   [[rules.allowlists]]
   description = "P1 fixture fake key + published Anvil/Hardhat default account #0 key"
-  regexTarget = "line"
+  regexTarget = "match"
   regexes = [
     # The P1 positive proof fixture's FAKE key (scripts/gitleaks-fixtures/positive-*). Allowlisting
     # the exact value keeps the committed fixture from reddening the CI git-history scan.
