@@ -3305,6 +3305,35 @@ tsc clean · lint 0 errors · vitest 1683/1683 · next build · forge 68/68 + 19
 unaffected — `src/components/ParticleNetwork.tsx` (custom canvas) untouched. Mainnet byte-identical
 (unused dep); no contract/gate/adapter changes.
 
+## Feedback — CHORE-HYGIENE-1 Item B — Dependabot re-triage
+
+One signed commit (doc-only). Full triage: `Audits/DEPS-TRIAGE-2026-06-13.md`.
+
+### App safe-batch: EMPTY this round
+All 5 open Dependabot PRs are excluded from the app safe-batch — none is a non-core, non-mobile,
+singleton-preserving app bump:
+- **#148 viem (app)** → HOLD (core-runtime, wagmi-v3 coupled, ADR-008 — never bump alone).
+- **#120/#123 @capacitor/core+cli** → verify-isolated (mobile); and a TRIO — needs `@capacitor/ios@8.3.4`
+  too (no Dependabot PR for ios; merging the two alone leaves ios@8.2.0 skewed).
+- **#174 undici / #175 ws+viem** → `contracts/order-engine` dev-tooling, separate lockfile, out of the
+  app batch (the contract gate is Foundry `forge test`, which doesn't read npm).
+
+So `chore/deps-safe-batch-3` carries only the triage doc + this note — no app dependency change to apply.
+The single-instance invariant (one each of @walletconnect/core, qr@0.5.5, viem, @coinbase/wallet-sdk) is
+untouched.
+
+### ⚠ Security flag — undici #174 IS a security patch (prioritise)
+undici 6.23.0 → 6.26.0 clears three GHSA advisories fixed in **6.24.0**: CVE-2026-1525 (HTTP request
+smuggling), CVE-2026-1527 (CRLF injection via `upgrade`), CVE-2026-1528 (WebSocket 64-bit overflow DoS).
+It's a dev-tooling transitive in `contracts/order-engine` (`dev:true`, not on a user request path → lower
+exposure), so it stays OUT of the app safe-batch, but the owner should **merge Dependabot #174 promptly**
+in the contracts workspace. Clean one-line, zero-new-package, MIT bump; does not touch the app lockfile or
+the Foundry gate. No other security-relevant bump surfaced → no further Architect escalation beyond undici.
+
+### Other notes
+- **#175 contracts viem** is independent of **#148 app viem**: the contracts workspace has ZERO wagmi, so
+  ADR-008's viem-coupling does not bind there. `@adraffy/ens-normalize` in its diff is a hoist (net-zero new package).
+- **#94/#92** (prior round, toolbox): #94 supersedes #92 — owner closes #92 in the UI (no longer in the open set this round).
 ## Feedback — CHORE-HYGIENE-1 Item A — H2 pending-baseline vs degraded
 
 One signed commit. Off latest origin/main (1b740a8, has #177/#178/#179).
