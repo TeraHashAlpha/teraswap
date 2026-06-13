@@ -60,6 +60,21 @@ let cachedOverrides: Record<string, OverrideEntry> = {}
 let baselineLoaded = false
 
 /**
+ * [CHORE-HYGIENE-1 A] Three-way H2 baseline state:
+ *  - `ok`               — populated baseline; H2 validates TLS/DNS drift normally.
+ *  - `pending-baseline` — the intentional PLACEHOLDER (generatedAt=null and/or 0 endpoints) is
+ *                          present. EXPECTED pre-Cloudflare-migration; informational, NON-paging.
+ *  - `degraded`         — genuine fault: file missing, unparseable, or malformed (not the known
+ *                          placeholder). Stays fail-closed (the PR #177 / P2 behaviour).
+ * Investigation (FEEDBACK) confirmed neither non-`ok` state pages today — this distinction is
+ * labelling so a known-pending state is never mistaken for a real fault.
+ */
+export type H2BaselineState = 'ok' | 'pending-baseline' | 'degraded'
+
+let baselineState: H2BaselineState = 'degraded'
+let baselineStateReason = ''
+
+/**
  * [CHORE-POLISH-4 P2] True ONLY when the baseline is genuinely populated — a `generatedAt`
  * timestamp AND at least one endpoint. The committed placeholder
  * ({ generatedAt: null, endpoints: {} }) is NOT populated, so H2 must treat it as "validation
@@ -87,27 +102,79 @@ export function evaluateBaselineHealth(raw: BaselineFile | null | undefined): { 
   }
 }
 
+/**
+ * [CHORE-HYGIENE-1 A] Pure classifier — maps a baseline-file read result to a 3-way state +
+ * reason. Pure (no fs) so every branch is deterministically testable. `raw` is `unknown` because
+ * it is untrusted file content; a missing/array/non-object `endpoints` is MALFORMED (a genuine
+ * fault), NOT the known placeholder.
+ */
+export function classifyBaseline(read: { exists: boolean; parseError?: boolean; raw?: unknown }): {
+  state: H2BaselineState
+  reason: string
+} {
+  if (!read.exists) {
+    return { state: 'degraded', reason: 'H2 baseline file MISSING at data/endpoint-baseline.json — fail-closed (genuine fault: the file should exist).' }
+  }
+  if (read.parseError) {
+    return { state: 'degraded', reason: 'H2 baseline file is UNPARSEABLE (invalid JSON) — fail-closed (genuine fault).' }
+  }
+  const raw = read.raw
+  if (typeof raw !== 'object' || raw === null) {
+    return { state: 'degraded', reason: 'H2 baseline is MALFORMED (not a JSON object) — fail-closed (genuine fault), not the known placeholder.' }
+  }
+  const endpoints = (raw as { endpoints?: unknown }).endpoints
+  if (typeof endpoints !== 'object' || endpoints === null || Array.isArray(endpoints)) {
+    return { state: 'degraded', reason: 'H2 baseline is MALFORMED (no valid `endpoints` object) — fail-closed (genuine fault), not the known placeholder.' }
+  }
+  const bf = raw as BaselineFile
+  if (isBaselinePopulated(bf)) {
+    return { state: 'ok', reason: `ok: ${Object.keys(bf.endpoints).length} endpoints (generated ${bf.generatedAt})` }
+  }
+  // Valid structure but empty: the intentional placeholder (generatedAt=null and/or 0 endpoints).
+  return {
+    state: 'pending-baseline',
+    reason:
+      'H2 baseline is the intentional PLACEHOLDER (generatedAt=null / 0 endpoints) — EXPECTED ' +
+      'pre-Cloudflare-migration. NOT a fault and does NOT page; H2 (TLS+DNS drift) is inactive ' +
+      'until seeded. Exit pending-baseline by running `npm run baseline:capture` after the ' +
+      'migration, reviewing the diff, and committing data/endpoint-baseline.json (ADR-001 §90).',
+  }
+}
+
+/** [CHORE-HYGIENE-1 A] Current H2 baseline state + reason (reads + classifies the file once, cached). */
+export function getBaselineState(): { state: H2BaselineState; reason: string } {
+  loadBaseline() // ensures the file is read + the state classified/cached
+  return { state: baselineState, reason: baselineStateReason }
+}
+
 export function loadBaseline(): BaselineFile | null {
   if (baselineLoaded) return cachedBaseline
 
   baselineLoaded = true
 
-  // Load baseline
-  try {
-    const baselinePath = path.resolve(process.cwd(), 'data/endpoint-baseline.json')
-    if (fs.existsSync(baselinePath)) {
-      const raw = JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) as BaselineFile
-      if (isBaselinePopulated(raw)) {
-        cachedBaseline = raw
-        console.log(`[H2] Baseline loaded: ${Object.keys(raw.endpoints).length} endpoints from ${raw.generatedAt}`)
-      } else {
-        console.warn('[H2] Baseline file exists but is empty/placeholder — H2 validation disabled (fail-closed: reported degraded in the monitor tick)')
-      }
-    } else {
-      console.warn('[H2] No baseline file at data/endpoint-baseline.json — H2 validation disabled')
+  // Load + classify baseline (3-way state: ok / pending-baseline / degraded).
+  const baselinePath = path.resolve(process.cwd(), 'data/endpoint-baseline.json')
+  let read: { exists: boolean; parseError?: boolean; raw?: unknown }
+  if (!fs.existsSync(baselinePath)) {
+    read = { exists: false }
+  } else {
+    try {
+      read = { exists: true, raw: JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) }
+    } catch {
+      read = { exists: true, parseError: true }
     }
-  } catch (err) {
-    console.warn('[H2] Failed to load baseline:', err)
+  }
+  const classified = classifyBaseline(read)
+  baselineState = classified.state
+  baselineStateReason = classified.reason
+  if (classified.state === 'ok') {
+    cachedBaseline = read.raw as BaselineFile
+    console.log(`[H2] Baseline loaded: ${Object.keys(cachedBaseline.endpoints).length} endpoints from ${cachedBaseline.generatedAt}`)
+  } else if (classified.state === 'pending-baseline') {
+    // EXPECTED, informational — NOT an error, does not page.
+    console.info(`[H2] pending-baseline (expected): ${classified.reason}`)
+  } else {
+    console.warn(`[H2] degraded (fail-closed): ${classified.reason}`)
   }
 
   // Load overrides (optional)
@@ -129,6 +196,8 @@ export function resetBaseline(): void {
   cachedBaseline = null
   cachedOverrides = {}
   baselineLoaded = false
+  baselineState = 'degraded'
+  baselineStateReason = ''
 }
 
 // ── TLS validation ──────────────────────────────────────
