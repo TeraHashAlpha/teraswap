@@ -77,7 +77,9 @@ Smart Contracts
 
 
 
-ContractNetworkAddressFeeCollector V2Ethereum Mainnet0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459OrderExecutor v2Base0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130
+ContractNetworkAddress
+FeeCollector V2 Ethereum Mainnet 0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459
+OrderExecutor v2 Base 0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130
 
 All contracts are MIT-licensed, source-verified, and developed/tested with Foundry (87 contract tests).
 
