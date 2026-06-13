@@ -8,6 +8,8 @@ import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { getChainStatus } from '@/lib/chains/activation'
+import { isSequencerUp, SequencerDownError } from '@/lib/chains/sequencer-check'
+import { getPublicClientForChain } from '@/lib/chains/clients'
 import { sanitizeUpstreamError } from '@/lib/sanitize-error'
 
 // [SPRINT-9J J2] Give the function enough headroom that a slow swap-build never
@@ -107,6 +109,29 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: `Chain ${chainId} is not yet available for swaps`, code: 'CHAIN_COMING_SOON' },
           { status: 409 },
+        )
+      }
+    }
+
+    // [E2-I-01] L2 sequencer gate on the swap-BUILD path — belt-and-suspenders
+    // to the E-2 quote gate (Audits/Sprint/SPRINT-E2-AUDIT.md). Single source of
+    // truth: isSequencerUp (sequencer-check.ts) owns the feed address, the
+    // recovery grace window, and the fail-safe direction (down / in-grace /
+    // RPC error → false → refuse). Placed after the activation gate (chain is
+    // known supported + active) and BEFORE the rate limiter and the upstream
+    // fetch, so a sequencer-down request burns neither rate-limit budget nor an
+    // upstream call. Mainnet is byte-identical: absent chainId or
+    // DEFAULT_CHAIN_ID never consults the gate (no client construction either).
+    if (chainId != null && Number(chainId) !== DEFAULT_CHAIN_ID) {
+      const seqUp = await isSequencerUp(Number(chainId), getPublicClientForChain(Number(chainId)))
+      if (!seqUp) {
+        console.warn(`[E2-I-01] Swap build refused: chain ${Number(chainId)} sequencer down or in grace period`)
+        // Reuse SequencerDownError for the message so the refusal wording stays
+        // single-sourced with the quote gate (one "paused" UX client-side).
+        const seqErr = new SequencerDownError(Number(chainId))
+        return NextResponse.json(
+          { error: seqErr.message, sequencerDown: true },
+          { status: 503, headers: { 'Retry-After': '60' } },
         )
       }
     }

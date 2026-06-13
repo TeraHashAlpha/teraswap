@@ -3078,3 +3078,59 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   `viem@2.23.2` EXACT in a nested copy (pre-existing on main, unrelated to these PRs). Singleton
   checks must read "one top-level deduped viem + the known WC-internal nested copy" or they will
   false-positive. Goes away only when the WC stack moves (wagmi-v3 sprint, ADR-008).
+## Feedback — E2-I-01 sequencer gate on the swap-build path (3079d67)
+
+### Assumption
+- **The refusal message says "quotes are paused" on the SWAP path — by design.** The 503 reuses
+  SequencerDownError's message verbatim (single source, per the prompt's reuse mandate), and that
+  string was written for the quote gate. It is accurate enough (when the sequencer is down BOTH
+  paths pause) and keeps the client's one-"paused"-UX contract. If swap-specific wording is ever
+  wanted, it must be added in sequencer-check.ts (e.g. a message param), NOT forked in the route.
+- **Inline check→return, not throw/catch:** this route's gates (activation, source allow-list,
+  rate limit) all return NextResponse directly; only upstream/adapter failures flow through the
+  outer catch. The prompt allowed either — inline matches the local style and keeps the
+  SequencerDownError-instanceof mapping a quote-route-only concern.
+
+### Edge case
+- **Placement after the activation gate is load-bearing for input hygiene.** A malformed body
+  chainId ("abc" → NaN) hits getChainStatus(NaN) → 'unsupported' → 400 BEFORE the sequencer gate,
+  so isSequencerUp/getPublicClientForChain only ever see registry-valid non-mainnet chainIds.
+  Anyone reordering these gates later must keep activation first (or re-add coercion).
+
+## Feedback — CI-action-pins (gitleaks 5ba7671 / checkout 1d44926)
+
+Closes the node20 2026-09-16 deadline flagged in Audits/DEPS-TRIAGE-2026-06-12.md
+(Dependabot #135 + #136). GitHub-Actions SHA pins only — no app/source changes.
+
+### Assumption
+- **Comment style: exact tag, not the prompt's `# v3.x`.** The prompt suggested a `# v3.x`
+  comment for gitleaks-action; I pinned with `# v3.0.0` (and checkout with `# v6.0.3`) — the
+  EXACT tag each SHA resolves to. Rationale: the whole point of a SHA pin is that an auditor can
+  verify "does SHA == tag?"; a `.x` comment is ambiguous (the SHA is exactly v3.0.0, not "any v3").
+  This also matches the repo's existing convention (`# v4.2.2`, `# v2.3.9`). Both SHAs were
+  verified against their tags before pinning (e0c47f4f→v3.0.0 lightweight; df4cb1c0→v6.0.3
+  annotated-tag target).
+
+### Edge case
+- **A 5th workflow exists but was correctly untouched.** `monitoring-watchdog.yml` has no
+  `actions/checkout` step (cron watchdog), so the "4 workflows" in the prompt is exactly right for
+  checkout users (ci/codeql/gitleaks/security-audit). Flagging it so a future reader doesn't think
+  it was missed. 9 checkout usages total were aligned (codeql×1, gitleaks×1, security-audit×1,
+  ci×6); grep confirms zero stale checkout pins remain.
+- **codeql.yml is touched by TWO unmerged branches.** This branch changes codeql.yml's
+  `actions/checkout` line; chore/deps-safe-batch-2 (CHORE-DEPS-2, also unmerged) changes
+  codeql.yml's `codeql-action` lines. Different lines → git auto-merges cleanly, but the owner
+  merging both PRs should expect codeql.yml in both diffs (no manual conflict expected). FEEDBACK.md
+  itself WILL conflict at the tail with the deps-batch section (both append) — keep-both.
+
+### Concern (verification scope)
+- **The 4 checkout-using workflows trigger only on push-to-main / PR-to-main**, so they do NOT run
+  on a feature-branch push — CI-green for the runner-side execution of checkout v6 / gitleaks v3
+  confirms on the OWNER's PR (per "owner opens PR/merges"). Local verification floor done here:
+  (a) all 5 workflows parse (yaml.safe_load); (b) both target SHAs verified against their tags
+  (GA releases, pure node20→node24, zero behavioral change per upstream notes); (c) diff is exactly
+  the 1 gitleaks-action + 9 checkout lines, 0 collateral; (d) the real test-contracts gate re-run
+  green on this branch locally (forge: OrderExecutor 68/68 + FeeCollector 19/19) — its forge
+  commands are byte-unchanged and a checkout-version bump cannot alter the checked-out tree. Residual
+  (does the action binary execute on the runner) is near-zero for two GA, GitHub-/widely-maintained
+  actions and is the owner-PR's job to confirm.

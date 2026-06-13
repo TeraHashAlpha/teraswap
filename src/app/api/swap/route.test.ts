@@ -72,6 +72,24 @@ vi.mock('@/lib/chains/activation', () => ({
   getChainStatus: (id: number) => mockGetChainStatus(id),
 }))
 
+// [E2-I-01] Sequencer gate on the swap-BUILD path. isSequencerUp defaults to
+// true so existing chainId-bearing tests pass the gate; the REAL
+// SequencerDownError is kept (the route reuses it for the single-sourced
+// refusal message — no wording duplicated in the route).
+const mockIsSequencerUp = vi.fn().mockResolvedValue(true)
+vi.mock('@/lib/chains/sequencer-check', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chains/sequencer-check')>()
+  return {
+    ...actual,
+    isSequencerUp: (...args: unknown[]) => mockIsSequencerUp(...args),
+  }
+})
+
+const mockGetPublicClientForChain = vi.fn().mockReturnValue({ __fake: 'client' })
+vi.mock('@/lib/chains/clients', () => ({
+  getPublicClientForChain: (...args: unknown[]) => mockGetPublicClientForChain(...args),
+}))
+
 // ── Import after mocks ────────────────────────────────────
 
 import { POST, maxDuration } from './route'
@@ -119,6 +137,8 @@ beforeEach(() => {
   mockValidateSwapPrice.mockClear().mockResolvedValue(null)
   mockFetchDefiLlamaPrice.mockClear().mockResolvedValue(null)
   mockGetChainStatus.mockClear().mockReturnValue('active')
+  mockIsSequencerUp.mockClear().mockResolvedValue(true)
+  mockGetPublicClientForChain.mockClear()
 })
 
 // ── Tests ─────────────────────────────────────────────────
@@ -415,5 +435,55 @@ describe('POST /api/swap — server-side activation gate [SPRINT-9G G4]', () => 
     const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
     expect(res.status).toBe(200)
     expect(mockGetChainStatus).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/swap — Base sequencer gate on the swap-build path [E2-I-01]', () => {
+  it('refuses the swap build with 503 when the Base sequencer is down (before rate limit + upstream)', async () => {
+    mockIsSequencerUp.mockResolvedValueOnce(false)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(res.status).toBe(503)
+    expect(res.headers.get('Retry-After')).toBe('60')
+    const body = await res.json()
+    expect(body.sequencerDown).toBe(true)
+    expect(body.error).toMatch(/sequencer/i)
+    // The gate runs BEFORE the rate limiter and the upstream fetch — a down
+    // sequencer burns neither rate-limit budget nor an upstream call.
+    expect(mockCheckRateLimit).not.toHaveBeenCalled()
+    expect(mockFetchSwapFromSource).not.toHaveBeenCalled()
+    // The shared check was consulted with the per-chain client (api.ts shape).
+    expect(mockIsSequencerUp).toHaveBeenCalledTimes(1)
+    expect(mockIsSequencerUp.mock.calls[0][0]).toBe(8453)
+    expect(mockGetPublicClientForChain).toHaveBeenCalledWith(8453)
+  })
+
+  it('refuses within the recovery grace window (grace logic lives in isSequencerUp → false)', async () => {
+    // isSequencerUp resolves false for "recovered < SEQUENCER_GRACE_PERIOD_SEC
+    // ago" exactly as for hard-down; the route must honour that false the same.
+    mockIsSequencerUp.mockResolvedValueOnce(false)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(res.status).toBe(503)
+    expect(res.headers.get('Retry-After')).toBe('60')
+    const body = await res.json()
+    expect(body.sequencerDown).toBe(true)
+  })
+
+  it('proceeds normally on Base when the sequencer is up', async () => {
+    mockFetchSwapFromSource.mockResolvedValue(VALID_SWAP_RESULT)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(res.status).toBe(200)
+    expect(mockIsSequencerUp).toHaveBeenCalledTimes(1)
+    expect(mockFetchSwapFromSource).toHaveBeenCalledTimes(1)
+  })
+
+  it('mainnet byte-identical: absent chainId and chainId=1 never consult the sequencer', async () => {
+    mockFetchSwapFromSource.mockResolvedValue(VALID_SWAP_RESULT)
+    const resAbsent = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(resAbsent.status).toBe(200)
+    const resMainnet = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 1 }))
+    expect(resMainnet.status).toBe(200)
+    // No isSequencerUp call, no per-chain client construction for either form.
+    expect(mockIsSequencerUp).not.toHaveBeenCalled()
+    expect(mockGetPublicClientForChain).not.toHaveBeenCalled()
   })
 })
