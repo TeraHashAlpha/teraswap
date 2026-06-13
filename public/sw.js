@@ -72,8 +72,11 @@ self.addEventListener('fetch', (event) => {
       caches.match(request).then((cached) => {
         if (cached) return cached
         return fetch(request).then((response) => {
-          // Only cache successful responses
-          if (response.ok) {
+          // [CHORE-POLISH-4 P3] Cache ONLY a full 200 — never a 206 Partial Content.
+          // response.ok is true for ALL 2xx incl. 206; Cache.put rejects a partial
+          // response ("Partial response (status code 206) is unsupported"), which
+          // surfaced as a console error + failed write on range/media requests.
+          if (response && response.status === 200) {
             const clone = response.clone()
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
           }
@@ -88,8 +91,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(request)
       .then((response) => {
-        // Cache the latest version for offline fallback
-        if (response.ok) {
+        // [CHORE-POLISH-4 P3] Cache the latest version for offline fallback — full 200
+        // only (skip 206 Partial Content; Cache.put throws on a partial response).
+        if (response && response.status === 200) {
           const clone = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
         }
