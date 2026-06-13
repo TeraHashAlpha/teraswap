@@ -3052,3 +3052,22 @@ assertions (catalogs are hundreds, not CoinGecko's 2369).
   1inch/0x/paraswap-V5/uniswapV3-SwapRouter = true, Augustus V6 = false). The drift test pins config
   ↔ fixture; it cannot pin fixture ↔ chain. If the contract whitelist ever changes (owner tx), the
   fixture must be re-verified with cast before being edited — comment says so inline.
+
+## Feedback — E2-I-01 sequencer gate on the swap-build path (3079d67)
+
+### Assumption
+- **The refusal message says "quotes are paused" on the SWAP path — by design.** The 503 reuses
+  SequencerDownError's message verbatim (single source, per the prompt's reuse mandate), and that
+  string was written for the quote gate. It is accurate enough (when the sequencer is down BOTH
+  paths pause) and keeps the client's one-"paused"-UX contract. If swap-specific wording is ever
+  wanted, it must be added in sequencer-check.ts (e.g. a message param), NOT forked in the route.
+- **Inline check→return, not throw/catch:** this route's gates (activation, source allow-list,
+  rate limit) all return NextResponse directly; only upstream/adapter failures flow through the
+  outer catch. The prompt allowed either — inline matches the local style and keeps the
+  SequencerDownError-instanceof mapping a quote-route-only concern.
+
+### Edge case
+- **Placement after the activation gate is load-bearing for input hygiene.** A malformed body
+  chainId ("abc" → NaN) hits getChainStatus(NaN) → 'unsupported' → 400 BEFORE the sequencer gate,
+  so isSequencerUp/getPublicClientForChain only ever see registry-valid non-mainnet chainIds.
+  Anyone reordering these gates later must keep activation first (or re-add coercion).
