@@ -21,3 +21,37 @@ paths = [
   '''scripts/token-lists/''',
   '''src/lib/chains/token-catalog\.generated\.ts''',
 ]
+
+# [CHORE-POLISH-4 P1] Bare 64-hex EVM private key — keyword-proximity variant.
+# gitleaks' default rules catch *labelled* provider secrets but MISS a bare 0x-prefixed /
+# 0x-less 64-hex (32-byte) EVM key. A real key was once pasted into a local, uncommitted runbook
+# and slipped past the scanner (the INC-2026-06-09-001 near-miss); we caught it by manual/semantic
+# review. This rule closes the tooling gap WITHOUT flooding: a blockchain repo is full of 64-hex
+# strings (keccak/tx/block hashes, storage slots, merkle roots), so we never flag bare hex — we
+# fire ONLY when a 64-hex value sits immediately next to a private-key KEYWORD with an assignment
+# or colon, e.g. `PRIVATE_KEY = 0x..64`, `privKey: "..64"`. Applies to ALL paths incl. docs/,
+# Audits/, *.md runbooks (where the near-miss lived). ADDS to the default ruleset only.
+[[rules]]
+id = "evm-private-key-keyword-proximity"
+description = "Bare 64-hex EVM private key next to a private-key keyword (INC-2026-06-09-001 near-miss)"
+regex = '''(?i)(private[_-]?key|priv[_-]?key|secret[_-]?key|mnemonic|keystore|\bPK\b)["'\s]{0,8}[:=]\s*["']?(0x)?[0-9a-fA-F]{64}\b'''
+keywords = ["private", "privkey", "priv_key", "priv-key", "secret_key", "secret-key", "mnemonic", "keystore", "pk"]
+
+  # Per-rule value-allowlist (NOT a path allowlist) for two KNOWN-PUBLIC 64-hex values this rule
+  # surfaces. regexTarget="line" because the rule's Secret capture is the keyword, so the value is
+  # matched against the whole line. Scoped to THIS rule only — the scanner stays fully active
+  # everywhere; any DIFFERENT key (a real leak), even in these same files, still flags.
+  [[rules.allowlists]]
+  description = "P1 fixture fake key + published Anvil/Hardhat default account #0 key"
+  regexTarget = "line"
+  regexes = [
+    # The P1 positive proof fixture's FAKE key (scripts/gitleaks-fixtures/positive-*). Allowlisting
+    # the exact value keeps the committed fixture from reddening the CI git-history scan.
+    '''0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef''',
+    # Published ANVIL / HARDHAT default account #0 private key (derives to the canonical public
+    # 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266) — a throwaway local-dev key in the E2E fork-test
+    # docs (docs/guides/E2E-FORK-TEST.md). NOT a real secret, no rotation needed.
+    # ⚠ FLAGGED FOR ARCHITECT REVIEW per CHORE-POLISH-4 (a finding on a committed file); triaged as
+    # the public Anvil key (INC-2026-06-09-001 near-miss context) — see FEEDBACK.md.
+    '''0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80''',
+  ]
