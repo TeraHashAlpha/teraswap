@@ -16,7 +16,7 @@
 ├─────────────────────────────────────────────────────────────────────┤
 │                      EXECUTION FLOW                                  │
 │                                                                      │
-│  Gelato Web3 Function (runs every 30s):                              │
+│  Self-hosted executor (executor/executor.js, every 30s):             │
 │    → Fetches active orders from Supabase                             │
 │    → Checks conditions via OrderExecutor.canExecute()                │
 │    → When conditions met: builds swap route + executes               │
@@ -42,7 +42,7 @@
 | Component | File | Description |
 |-----------|------|-------------|
 | Smart Contract | `TeraSwapOrderExecutor.sol` | On-chain execution, signature verification, price checks |
-| Gelato Function | `gelato/web3Function.ts` | Off-chain monitoring, route building, execution triggering |
+| Self-hosted Executor | `executor/executor.js` | Off-chain order polling, on-chain condition checks, route building, `executeOrder()` submission |
 | DB Schema | `schema.sql` | Supabase orders table with indexes |
 | API Routes | `api/orders.ts` | CRUD operations for orders (draft) |
 
@@ -90,22 +90,26 @@ cast send $EXECUTOR "setRouter(address,bool)" $ONEINCH_ROUTER true
 -- Run schema.sql in Supabase SQL Editor
 ```
 
-### 3. Deploy Gelato Web3 Function
+### 3. Run the self-hosted executor
+The executor (`executor/executor.js`) is a standalone Node.js keeper: it polls Supabase for active
+orders, checks each one's conditions on-chain via `canExecute()`, builds the swap route, and submits
+`executeOrder()` transactions directly. The **executor wallet pays gas**, so keep it funded.
+
 ```bash
-# Install Gelato CLI
-npm install -g @gelatonetwork/web3-functions-sdk
+cd executor
 
-# Create secrets file
-cat > .env.gelato << EOF
-SUPABASE_URL=https://twpcliydcjlwzrpggqdz.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<key>
-ORDER_EXECUTOR_ADDRESS=<deployed-address>
-EOF
+# Required environment (server-side only — never expose the signer):
+#   RPC_URL                     — chain RPC endpoint
+#   EXECUTOR_PRIVATE_KEY        — executor wallet key (pays gas)
+#                                 (or KMS_KEY_ID / VAULT_ADDR for a managed signer)
+#   SUPABASE_URL                — Supabase project URL
+#   SUPABASE_SERVICE_ROLE_KEY   — Supabase service-role key
+#   ORDER_EXECUTOR_ADDRESS      — deployed OrderExecutor address
+#   CHAIN_ID                    — target chain id (defaults to mainnet)
+# Optional: FLASHBOTS_RPC_URL (MEV-protected submission), gas-tier overrides.
 
-# Deploy
-npx w3f deploy gelato/web3Function.ts \
-  --secrets .env.gelato \
-  --chain 1
+# Start it (typically under a process manager / systemd / container):
+node executor.js
 ```
 
 ### 4. Connect to TeraSwap Frontend
@@ -117,25 +121,21 @@ npx w3f deploy gelato/web3Function.ts \
 
 - **0.1% (10 bps)** on each executed order (same as regular swaps)
 - Fee collected in input token before swap execution
-- Gelato execution fees paid from prepaid Gelato balance (ETH)
+- Gas is paid directly by the executor wallet (must be funded with ETH) — no third-party keeper fees
 
 ## Roadmap
 
-### Phase 1: Gelato (Current)
-- ✅ TeraSwapOrderExecutor.sol — smart contract
-- ✅ Gelato Web3 Function — off-chain monitoring
+### Phase 1: Self-hosted executor (Current)
+- ✅ TeraSwapOrderExecutor.sol — smart contract (deployed on Ethereum mainnet)
+- ✅ Self-hosted executor (`executor/executor.js`) — off-chain keeper that replaced the deprecated Gelato Web3 Function (March 2026)
 - ✅ Supabase orders table — order storage
 - ✅ API routes — order management
-- ⬜ Audit smart contract
-- ⬜ Deploy to testnet → mainnet
-- ⬜ Frontend integration (order creation UI)
-- ⬜ Deploy Gelato function
+- ✅ Frontend order creation + management UI
+- ⬜ Base OrderExecutor deployment (byte-identical redeploy — see `docs/Runbooks/BASE-ORDEREXECUTOR-DEPLOY.md`)
 
-### Phase 2: Custom Keeper Network (Future)
-- Replace Gelato with TeraSwap's own keeper network
-- Run dedicated nodes monitoring orders
+### Phase 2: Keeper Network (Future)
+- Run dedicated, redundant keeper nodes monitoring orders
 - Lower latency (sub-10s execution)
-- No Gelato fees — only gas costs
 - MEV-protected execution via Flashbots
 - Multi-chain support (Arbitrum, Base, Polygon)
 
@@ -152,5 +152,5 @@ npx w3f deploy gelato/web3Function.ts \
 2. **Router Whitelist**: Only admin can add/remove routers — prevents routing to malicious contracts
 3. **Signature Replay**: Nonce tracking prevents the same signature from being used twice
 4. **Price Manipulation**: Chainlink oracles are resistant to flash loan attacks
-5. **Gelato Trust**: Gelato is the executor — they can't steal funds (contract verifies everything on-chain) but could grief by not executing
+5. **Executor Trust**: The self-hosted executor wallet triggers execution — it cannot steal funds (the contract verifies the EIP-712 signature, Chainlink price condition, router whitelist, nonce, and `minAmountOut` on-chain) but could grief by not executing. TeraSwap runs the executor itself, so there is no third-party keeper dependency.
 6. **User Cancellation**: Users can always cancel orders or revoke token approvals

@@ -3420,3 +3420,35 @@ domain(8453) throws, Base order creation fail-closed, POST chainId 8453 → 400,
 Swap / Portfolio / DCA(Soon) / Orders / History / Analytics — no Limit, no SL/TP, no dead render branch.
 `LimitOrderPanel.tsx` / `ConditionalOrderPanel.tsx` / `DCAPanel.tsx` were **NOT deleted** (rule #4) —
 only unwired from the nav (re-add the type/array/META entries to re-wire later).
+
+## Feedback — CHORE-REMOVE-GELATO (P1 removal / P2 README)
+
+Gelato Web3 Functions were deprecated March 2026 and replaced by the self-hosted executor
+(`executor/executor.js`). Two atomic signed commits. tsc clean, lint 0 errors, forge 68/68 + 19/19.
+
+### P1 — dead-code proof (grep results)
+`contracts/order-engine/gelato/` (web3Function.ts, package.json, schema.json, tsconfig.json) is
+referenced by **NO** live code / build / CI / package script — proven before removal:
+- **No code import/require** anywhere: `grep -riE "require\(.*gelato|from .*gelato|import.*gelato|web3Function"` → only the README + the dir itself (now removed). src/ + executor/ + scripts: zero.
+- **No npm workspace**: neither root `package.json` nor `contracts/order-engine/package.json` has a `workspaces` field or references gelato — it was a standalone, orphaned package.
+- **No CI reference**: `grep -ri "gelato|w3f|web3function" .github/` → zero.
+- **No package script** references `w3f`/`gelato`.
+- The ONLY references to the directory were: the `tsconfig.json` **exclude** entry (the *opposite* of a dependency — it kept tsc from compiling the Gelato SDK code; now moot), `deploy.js`'s printed console.log "step 3", and the README (P2). → **provably dead, not a STOP.** No live reference → **no Architect flag.**
+
+Removed the 4-file directory (502 lines; git history preserves it, per the CHORE-POLISH-4 precedent).
+Also cleaned the now-moot `tsconfig.json` exclude entry and updated `deploy.js`'s printed step 3
+(`cd gelato && npx w3f deploy web3Function.ts` → `cd executor && node executor.js`) so no instruction
+points at the removed directory.
+
+### P2 — README rewritten to the self-hosted executor
+`contracts/order-engine/README.md`:
+- **EXECUTION FLOW**: "Gelato Web3 Function (runs every 30s)" → "Self-hosted executor (`executor/executor.js`, every 30s)".
+- **Components**: "Gelato Function | `gelato/web3Function.ts`" → "Self-hosted Executor | `executor/executor.js`".
+- **Deployment §3**: "Deploy Gelato Web3 Function" (`npx w3f deploy`, `.env.gelato`) → "Run the self-hosted executor" (`node executor.js`) with the real env vars from `executor.js` (RPC_URL, EXECUTOR_PRIVATE_KEY / KMS_KEY_ID / VAULT_ADDR, SUPABASE_*, ORDER_EXECUTOR_ADDRESS, CHAIN_ID; optional FLASHBOTS_RPC_URL). Also **dropped a hardcoded Supabase project URL** that was in the old block.
+- **Fee Structure**: "Gelato execution fees from prepaid Gelato balance" → "gas paid directly by the executor wallet (must be funded) — no third-party keeper fees".
+- **Roadmap Phase 1**: "Gelato (Current)" + Gelato checkboxes → "Self-hosted executor (Current)"; Phase 2 dropped the now-completed "Replace Gelato" framing.
+- **Security §5**: "Gelato Trust" → "Executor Trust" (self-hosted wallet; the on-chain verification points — EIP-712, Chainlink, router whitelist, nonce, minAmountOut — are restated intact). The EXECUTION-FLOW SECURITY block + Security §1–4,6 are unchanged.
+
+### Untouched (per spec)
+- **`TeraSwapOrderExecutor.sol` NOT modified** — the "GELATO CHECKER" comment on `canExecute` left as-is (`canExecute` is a generic view STILL used by the self-hosted executor; a comment-only relabel would diverge from the verified mainnet source). No `src/` or `executor/` behaviour change.
+- Remaining prose "Gelato" mentions in `schema.sql` + `api/orders.ts` comments + `executor.js` ("replaces Gelato") are accurate historical context, outside the README scope — left as-is. `.gitignore`'s `.env.gelato` entry is harmless and left.
