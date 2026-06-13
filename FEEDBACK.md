@@ -3334,3 +3334,48 @@ the Foundry gate. No other security-relevant bump surfaced → no further Archit
 - **#175 contracts viem** is independent of **#148 app viem**: the contracts workspace has ZERO wagmi, so
   ADR-008's viem-coupling does not bind there. `@adraffy/ens-normalize` in its diff is a hoist (net-zero new package).
 - **#94/#92** (prior round, toolbox): #94 supersedes #92 — owner closes #92 in the UI (no longer in the open set this round).
+## Feedback — CHORE-HYGIENE-1 Item A — H2 pending-baseline vs degraded
+
+One signed commit. Off latest origin/main (1b740a8, has #177/#178/#179).
+
+### Investigation (required) — does the P2 H2-degraded state PAGE? **NO — it is already non-paging/informational.**
+Traced exactly what the merged P2 fail-closed does on origin/main. The `h2BaselineMissing` signal
+(now `h2Status`) is surfaced in the tick result + a log line, and pages NOTHING:
+- **No consumer:** a full-repo grep shows NOTHING reads `h2BaselineMissing` — it is only set + spread
+  into the tick JSON. No dashboard/watchdog/kill-switch consumes it.
+- **No forceDisable:** the empty-baseline `else` branch sets flags + logs only; it never calls
+  `forceDisable`. `forceDisable` lives solely in the populated-baseline TLS/DNS-mismatch path.
+- **No failures increment:** `failures` is incremented only in H1; H2-empty never touches it.
+- **Watchdog can't see it:** `monitoring-watchdog.yml` checks `/api/monitor/heartbeat` only, and
+  `healthy = grace || tickFresh` (a pure dead-man's-switch — `src/app/api/monitor/heartbeat/route.ts:28`).
+  `writeHeartbeat` runs unconditionally, so an empty H2 baseline still yields a fresh, healthy heartbeat.
+- **No Sentry page:** `sentry.server.config.ts` has NO `captureConsoleIntegration`, so the H2
+  `console.error` is never sent to Sentry as an event.
+- **No Telegram P0:** Telegram alerts fire via `emitTransitionAlert` on source STATE TRANSITIONS;
+  H2-empty causes no transition (no forceDisable), so no P0.
+- **Tick route:** `/api/monitor/tick` returns the result as JSON; it only special-cases `skipped`.
+
+**Conclusion → minimal LABELLING (not a full split).** Per the spec, since degraded is already
+non-paging, this item introduces the explicit `pending-baseline` status so a known-pending state is
+not confused with a real fault, and keeps the change minimal. **No Architect escalation needed** (the
+spec says flag Architect only if degraded currently pages — it does not).
+
+### What changed (minimal)
+- `fingerprint-validator.ts`: pure `classifyBaseline(read)` → 3-way state `ok | pending-baseline |
+  degraded` (+ `getBaselineState()` cached). MISSING / UNPARSEABLE / MALFORMED (no valid `endpoints`
+  object) → `degraded` (genuine fault, fail-closed). The intentional placeholder (generatedAt=null
+  and/or 0 endpoints, valid structure) → `pending-baseline` (EXPECTED, informational). Populated → `ok`.
+- `monitoring-loop.ts`: the tick result now carries `h2Status` (replacing the binary
+  `h2BaselineMissing` — nothing read it) + `h2Reason`. `pending-baseline` logs at `console.info`
+  (expected); `degraded` keeps `console.error` (fault). Neither forceDisables — observability only,
+  byte-identical to the swap path.
+- **Exit trigger documented inline + in the reason string:** seed `data/endpoint-baseline.json` via
+  `npm run baseline:capture` after the Cloudflare migration, review, commit (ADR-001 §90).
+
+### Tests
+- `fingerprint-validator.test.ts` (+7): classifier for missing/unparseable/malformed → degraded;
+  placeholder (both null-generatedAt and timestamp+0-endpoints) → pending-baseline; populated → ok;
+  and the REAL committed `data/endpoint-baseline.json` currently classifies as `pending-baseline`.
+- `monitoring-loop.test.ts`: placeholder → tick `h2Status='pending-baseline'` with `transitions: []`
+  (non-paging — no source disabled); genuine-fault mock → `h2Status='degraded'`, still `transitions: []`.
+- Gates: tsc clean, lint 0 errors, vitest 1691/1691, next build, forge 68/68 + 19/19.
