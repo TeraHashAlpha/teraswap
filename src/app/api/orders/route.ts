@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
-import { ORDER_EXECUTOR_ADDRESS } from '@/lib/order-engine/config'
+import { getOrderExecutor } from '@/lib/order-engine/config'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
@@ -130,11 +130,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Limit/Stop-Loss orders require a Chainlink price feed' }, { status: 400 })
     }
 
-    // Signature verification — uses ORDER_EXECUTOR_ADDRESS from config (with env override)
-    const executorAddress = ORDER_EXECUTOR_ADDRESS
+    // [CHORE-ORDER-EXEC-PREP A] Resolve the OrderExecutor for this server's chain and FAIL-CLOSED
+    // before any signature verification. CHAIN_ID defaults to mainnet (1) → byte-identical; a chain
+    // with no deployed executor (e.g. Base — that address is the FeeCollector there) is rejected up
+    // front rather than verified against the wrong contract.
+    const chainId = parseInt(process.env.CHAIN_ID || '1', 10)
+    const executorAddress = getOrderExecutor(chainId)
+    if (!executorAddress) {
+      return NextResponse.json(
+        { error: `Conditional orders are not yet available on chain ${chainId}` },
+        { status: 400 },
+      )
+    }
     {
       try {
-        const chainId = parseInt(process.env.CHAIN_ID || '1', 10)
         const domain = { ...EIP712_DOMAIN, chainId, verifyingContract: executorAddress }
         const orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
         const conditionEnum = body.priceCondition === 'above' ? 0 : 1

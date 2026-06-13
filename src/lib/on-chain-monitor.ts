@@ -27,7 +27,7 @@ import { createPublicClient, http, keccak256, toBytes, type PublicClient, type L
 import { mainnet } from 'viem/chains'
 import { kv } from '@/lib/kv'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from './constants'
-import { ORDER_EXECUTOR_ADDRESS } from './order-engine/config'
+import { ORDER_EXECUTOR_ADDRESS, getOrderExecutor } from './order-engine/config'
 import { emitTransitionAlert } from './alert-wrapper'
 // [E-4] Multi-chain: targets + clients resolve per chain from the registry.
 import { DEFAULT_CHAIN_ID, getChainConfig, getSupportedChainIds } from './chains/registry'
@@ -318,12 +318,15 @@ function getScanTargets(): ChainScanTargets[] {
     } catch {
       continue
     }
+    // [CHORE-ORDER-EXEC-PREP A] Scan a real OrderExecutor only — skip chains with none (e.g. Base,
+    // where 0xeFC3…f130 is the FeeCollector, NOT an executor; do NOT scan it for OrderExecutor
+    // events). feeCollectorV1 remains mainnet-only.
+    const executor = getOrderExecutor(chainId)
     const t: ChainScanTargets = {
       chainId,
       feeCollector,
-      ...(chainId === DEFAULT_CHAIN_ID
-        ? { executor: ORDER_EXECUTOR_ADDRESS, feeCollectorV1: FEE_COLLECTOR_V1_ADDRESS }
-        : {}),
+      ...(executor ? { executor } : {}),
+      ...(chainId === DEFAULT_CHAIN_ID ? { feeCollectorV1: FEE_COLLECTOR_V1_ADDRESS } : {}),
     }
     if (t.executor || t.feeCollector || t.feeCollectorV1) targets.push(t)
   }
@@ -886,4 +889,6 @@ export const _internal = {
   enqueueFailedAlerts,
   // [P109] in-memory cache reset
   resetLastScannedBlockCache: _resetLastScannedBlockCache,
+  // [CHORE-ORDER-EXEC-PREP A] expose for the executor-skip test (Base has no OrderExecutor target)
+  getScanTargets,
 } as const

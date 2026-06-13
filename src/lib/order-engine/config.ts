@@ -2,24 +2,50 @@
  * TeraSwapOrderExecutor v2 — Contract addresses & config
  */
 
-// ── Contract address (mainnet) ───────────────────────────
-// Deployed TeraSwapOrderExecutor v2 on Ethereum mainnet.
-// Env var override available for migration/upgrade scenarios.
-export const ORDER_EXECUTOR_ADDRESS = (
-  process.env.NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS ??
-  '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
-) as `0x${string}`
+// ── Contract addresses (per-chain) ───────────────────────
+// [CHORE-ORDER-EXEC-PREP A] The OrderExecutor is chain-specific, and the same address means
+// DIFFERENT contracts on different chains: 0xeFC31ADb…f130 is the OrderExecutor on MAINNET (has
+// executeOrder) but a FeeCollector on BASE (swapTokenWithFee, NO executeOrder — different bytecode,
+// same address). So the order engine MUST resolve per-chain and FAIL-CLOSED where no real
+// OrderExecutor exists, or it would EIP-712-sign / execute / monitor against the wrong contract.
+// Add a chain's address here ONLY after a real OrderExecutor is deployed + verified there.
+export const ORDER_EXECUTOR_BY_CHAIN: Record<number, `0x${string}` | null> = {
+  // Mainnet OrderExecutor (verified: has executeOrder). Env override kept for mainnet upgrades only.
+  1: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS ??
+    '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130') as `0x${string}`,
+  // Base (8453): NO OrderExecutor deployed — 0xeFC3…f130 on Base is the FeeCollector, NOT an executor.
+  8453: null,
+}
+
+/** Resolve the OrderExecutor for a chain, or null when none is deployed (caller must fail-closed). */
+export function getOrderExecutor(chainId: number): `0x${string}` | null {
+  return ORDER_EXECUTOR_BY_CHAIN[chainId] ?? null
+}
+
+/**
+ * @deprecated Mainnet-only convenience alias = ORDER_EXECUTOR_BY_CHAIN[1]. New / chain-variant code
+ * MUST use getOrderExecutor(chainId) and fail-closed on null. Retained only for mainnet-static
+ * contexts (the on-chain monitor's mainnet target + tests).
+ */
+export const ORDER_EXECUTOR_ADDRESS = ORDER_EXECUTOR_BY_CHAIN[1] as `0x${string}`
 
 // ── EIP-712 domain ───────────────────────────────────────
-// [H-05] chainId must NOT be `as const` — it's set dynamically from the
-// connected wallet's chain to match the contract's deployment chain.
-// Using `as const` prevented runtime updates and hardcoded chainId: 1.
+// [H-05] chainId must NOT be `as const` — it's set dynamically from the connected wallet's chain to
+// match the contract's deployment chain. [CHORE-ORDER-EXEC-PREP A] verifyingContract is resolved
+// per-chain and THROWS when the chain has no OrderExecutor — never sign/verify EIP-712 against a
+// non-existent (or wrong-bytecode) executor. Mainnet (chainId 1) result is unchanged.
 export function getOrderExecutorDomain(chainId: number) {
+  const verifyingContract = getOrderExecutor(chainId)
+  if (!verifyingContract) {
+    throw new Error(
+      `No OrderExecutor deployed on chain ${chainId} — conditional orders are unavailable there`,
+    )
+  }
   return {
     name: 'TeraSwapOrderExecutor' as const,
     version: '2' as const,
     chainId,
-    verifyingContract: ORDER_EXECUTOR_ADDRESS,
+    verifyingContract,
   }
 }
 
