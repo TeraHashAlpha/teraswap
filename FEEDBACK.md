@@ -3249,3 +3249,32 @@ real P1 false-negative gap — fixed (see P1 hardening below).
   `npm ci`'s package.json↔lockfile sync in CI; reverted). Used a **guard test** (`src/lib/qr-pin.test.ts`)
   instead — tamper-evident (FAILS if the override is bumped/dropped), commit-independent, carries the WHY +
   INC-2026-06-09-001 link. (Spec allowed "comment/guard only".)
+
+## Feedback — CHORE-POLISH-5 — remove unused @tsparticles/* deps
+
+One signed commit. Removed the two unused tsparticles v3 deps; the dot background is the custom
+canvas `src/components/ParticleNetwork.tsx` (React-only, UNTOUCHED), never tsparticles.
+
+### Verification (no import exists → safe)
+- grep across src/ scripts/ workers/ tests + `npx knip`: ZERO `@tsparticles/*` imports anywhere.
+  `ParticleNetwork.tsx` imports only `react`; it is still rendered on home/privacy/docs/analytics pages.
+
+### Packages removed (37 total: 2 direct + 35 transitive)
+- **Direct (2):** `@tsparticles/react@3.0.0`, `@tsparticles/slim@3.9.1`.
+- **Transitive (35):** the entire `@tsparticles/*` v3 subtree that `slim` bundles — `@tsparticles/engine`,
+  `basic`, `move-base`/`move-parallax`, all `interaction-external-*` / `interaction-particles-*`,
+  all `shape-*`, all `updater-*`, and the `plugin-*-color`/`plugin-easing-quad` packages.
+- Lockfile package count: **1201 → 1164** (−37). Lockfile regenerated via a clean `npm install`
+  (NOT hand-edited). tsc clean, lint 0 errors, vitest 1683/1683 (one transient flake on the first
+  run, green on two re-runs — unrelated: tsparticles is unimported), next build OK, forge 68/68 + 19/19.
+
+### Clears recurring audit noise
+This removes the recurring weekly-audit **"tsparticles major breaking bump (3→4)"** finding — the
+`@tsparticles/*` v3 packages were the subject of that noise and are now gone.
+
+### ⚠ Adjacent finding — a THIRD unused tsparticles dep left in scope
+`tsparticles-engine@2.12.0` (the **v2** engine, a SEPARATE standalone direct dep) is ALSO unused
+(knip-confirmed) but is OUTSIDE this goal's named scope ("Remove both deps" = the two `@tsparticles/*`).
+It is NOT pulled by the v3 packages (v3 uses `@tsparticles/engine`), so removing react/slim did not drop
+it. Left in place to stay faithful to the explicit instruction; **recommend a one-line follow-up to drop
+`tsparticles-engine@2.12.0`** for a fully clean tsparticles removal.
