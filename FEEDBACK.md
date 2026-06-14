@@ -3452,3 +3452,37 @@ points at the removed directory.
 ### Untouched (per spec)
 - **`TeraSwapOrderExecutor.sol` NOT modified** — the "GELATO CHECKER" comment on `canExecute` left as-is (`canExecute` is a generic view STILL used by the self-hosted executor; a comment-only relabel would diverge from the verified mainnet source). No `src/` or `executor/` behaviour change.
 - Remaining prose "Gelato" mentions in `schema.sql` + `api/orders.ts` comments + `executor.js` ("replaces Gelato") are accurate historical context, outside the README scope — left as-is. `.gitignore`'s `.env.gelato` entry is harmless and left.
+
+## Feedback — CHORE-EXECUTOR-KEY-GUARD — plaintext-key refusal now covers all production chains
+
+`contracts/order-engine/executor/executor.js` only. Off-chain executor — no contract / `src/` / signing /
+execution change. forge 68/68 + 19/19, node --check valid, gitleaks clean.
+
+### Before → after (the guard)
+**Before** (mainnet-only): refused a plaintext `EXECUTOR_PRIVATE_KEY` ONLY when `CHAIN_ID === 1`; every
+other chain — including **Base (8453), also real funds** — just printed a generic WARNING and accepted it.
+
+**After** (production-chain): a plaintext key is FATAL on every chain that is NOT in an explicit testnet
+allowlist `TESTNET_CHAIN_IDS = { 11155111 (Sepolia), 84532 (Base Sepolia) }`. So mainnet **and Base and any
+future prod chain** refuse it; testnets still allow it (dev). KMS/Vault are preferred and bypass the guard.
+Log messages now name the actual chain (`CHAIN_ID=${CHAIN_ID}`) instead of hardcoded "mainnet (CHAIN_ID=1)".
+
+### Bypass env names (either enables the override)
+- `ALLOW_PLAINTEXT_KEY` — new generic override.
+- `ALLOW_PLAINTEXT_KEY_MAINNET` — retained for back-compat (the old name).
+Both documented in the executor header env block. Also fixed the header's stale `CHAIN_ID` comment
+("defaults to 11155111 (Sepolia)" → "defaults to 1 (mainnet)" — it was misleading + dangerous, since the
+code defaults to mainnet where plaintext is fatal).
+
+### Verification (ran the real executor under each env permutation)
+| Case | Result |
+|---|---|
+| `CHAIN_ID=8453` + plaintext (no KMS/Vault/override) | **exit 1** — `FATAL … production chain CHAIN_ID=8453` |
+| `CHAIN_ID=8453` + `KMS_KEY_ID` | guard skipped (no plaintext-FATAL) → starts |
+| `CHAIN_ID=11155111` (Sepolia) + plaintext | `WARNING … on testnet` → starts |
+| `CHAIN_ID=1` + plaintext (no override) | **exit 1** — `FATAL … CHAIN_ID=1` (unchanged) |
+| `CHAIN_ID=1` + `ALLOW_PLAINTEXT_KEY_MAINNET` | override WARNING → starts (back-compat) |
+| `CHAIN_ID=8453` + `ALLOW_PLAINTEXT_KEY` | override WARNING → starts (new generic) |
+
+(The start cases exit non-zero only on the downstream fake RPC/KMS — `FATAL: plaintext` count was 0 in all,
+confirming the guard itself passed.) KMS/Vault signing paths untouched; signing/execution logic unchanged.

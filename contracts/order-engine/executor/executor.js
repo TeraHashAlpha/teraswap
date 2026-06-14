@@ -34,7 +34,13 @@
  *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
  *   ORDER_EXECUTOR_ADDRESS      -- Deployed contract address
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
- *   CHAIN_ID                    -- (optional) Chain ID, defaults to 11155111 (Sepolia)
+ *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet)
+ *
+ * SIGNING (prefer a managed signer over a plaintext key -- required on every production chain):
+ *   KMS_KEY_ID                  -- (recommended) AWS KMS key id for signing
+ *   VAULT_ADDR                  -- HashiCorp Vault signer address
+ *   ALLOW_PLAINTEXT_KEY         -- bypass the production-chain plaintext-key refusal (DANGEROUS)
+ *   ALLOW_PLAINTEXT_KEY_MAINNET -- back-compat alias for ALLOW_PLAINTEXT_KEY (either enables the bypass)
  */
 
 import {
@@ -90,6 +96,11 @@ const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
 const FEE_COLLECTOR_ADDRESS = process.env.FEE_COLLECTOR_ADDRESS || ""
 const API_URL = process.env.TERASWAP_API_URL || ""
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
+
+// [CHORE-EXECUTOR-KEY-GUARD] Chains where a plaintext EXECUTOR_PRIVATE_KEY is acceptable (dev/testnet
+// only -- no real funds). Every OTHER chain (mainnet 1, Base 8453, and any future production chain)
+// requires a managed signer (KMS/Vault) unless an explicit override is set.
+const TESTNET_CHAIN_IDS = new Set([11155111 /* Sepolia */, 84532 /* Base Sepolia */])
 
 // [B-02] Flashbots Protect RPC -- prevents MEV/sandwich attacks on executor txs
 const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
@@ -163,14 +174,20 @@ function validateConfig() {
   }
 
   if (hasKey && !hasKms && !hasVault) {
-    if (CHAIN_ID === 1) {
-      // [EX-01] Hard-fail on mainnet with plaintext key -- too dangerous
-      console.error("FATAL: plaintext EXECUTOR_PRIVATE_KEY is not allowed on mainnet (CHAIN_ID=1).")
-      console.error("   Configure KMS_KEY_ID (AWS KMS) or VAULT_ADDR (HashiCorp Vault) instead.")
-      console.error("   If you intentionally want to run with a plaintext key, set ALLOW_PLAINTEXT_KEY_MAINNET=true")
-      if (!process.env.ALLOW_PLAINTEXT_KEY_MAINNET) process.exit(1)
+    // [EX-01 / CHORE-EXECUTOR-KEY-GUARD] A plaintext EXECUTOR_PRIVATE_KEY controls real funds on any
+    // PRODUCTION chain, so it is FATAL on every chain that is NOT an explicit testnet (mainnet 1, Base
+    // 8453, and any future prod chain). Prefer KMS_KEY_ID (AWS KMS) / VAULT_ADDR (HashiCorp Vault).
+    // Escape hatch: ALLOW_PLAINTEXT_KEY (generic) or ALLOW_PLAINTEXT_KEY_MAINNET (back-compat alias).
+    const allowPlaintext = !!process.env.ALLOW_PLAINTEXT_KEY || !!process.env.ALLOW_PLAINTEXT_KEY_MAINNET
+    if (TESTNET_CHAIN_IDS.has(CHAIN_ID)) {
+      console.warn(`WARNING: Using plaintext EXECUTOR_PRIVATE_KEY on testnet (CHAIN_ID=${CHAIN_ID}) -- migrate to KMS/Vault before any production chain!`)
+    } else if (allowPlaintext) {
+      console.warn(`WARNING: plaintext EXECUTOR_PRIVATE_KEY accepted on production CHAIN_ID=${CHAIN_ID} via an explicit override (ALLOW_PLAINTEXT_KEY) -- this is DANGEROUS; migrate to KMS/Vault.`)
     } else {
-      console.warn("WARNING: Using plaintext EXECUTOR_PRIVATE_KEY -- migrate to KMS/Vault before mainnet!")
+      console.error(`FATAL: plaintext EXECUTOR_PRIVATE_KEY is not allowed on production chain CHAIN_ID=${CHAIN_ID}.`)
+      console.error("   Configure KMS_KEY_ID (AWS KMS) or VAULT_ADDR (HashiCorp Vault) instead.")
+      console.error("   To intentionally run with a plaintext key, set ALLOW_PLAINTEXT_KEY=true (or ALLOW_PLAINTEXT_KEY_MAINNET).")
+      process.exit(1)
     }
   }
 }
