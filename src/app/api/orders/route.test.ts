@@ -50,11 +50,11 @@ function req(body: unknown) {
 }
 
 describe('POST /api/orders — chain-aware fail-closed [CHORE-ORDER-EXEC-PREP A]', () => {
-  it('chainId 8453 (Base — no OrderExecutor) → 400 fail-closed BEFORE signature verification', async () => {
-    process.env.CHAIN_ID = '8453'
+  it('an UNWIRED chain (no OrderExecutor) → 400 fail-closed BEFORE signature verification', async () => {
+    process.env.CHAIN_ID = '42161' // Arbitrum — not in ORDER_EXECUTOR_BY_CHAIN (Base 8453 is now wired)
     const res = await POST(req(validBody()))
     expect(res.status).toBe(400)
-    expect((await res.json()).error).toMatch(/not yet available on chain 8453/i)
+    expect((await res.json()).error).toMatch(/not yet available on chain 42161/i)
   })
 
   it('mainnet (chainId 1) passes the executor guard (rejected only later, never with the chain-unavailable 400)', async () => {
