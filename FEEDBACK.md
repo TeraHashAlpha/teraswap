@@ -3486,3 +3486,30 @@ code defaults to mainnet where plaintext is fatal).
 
 (The start cases exit non-zero only on the downstream fake RPC/KMS — `FATAL: plaintext` count was 0 in all,
 confirming the guard itself passed.) KMS/Vault signing paths untouched; signing/execution logic unchanged.
+
+## Feedback — CHORE-BASE-ORDER-EXECUTOR-WIRE — wire the deployed Base OrderExecutor
+
+Go-live follow-up to CHORE-ORDER-EXEC-PREP (which set `8453: null`). One signed commit.
+
+### What changed
+- `src/lib/order-engine/config.ts`: `ORDER_EXECUTOR_BY_CHAIN[8453] = '0x135B339902Ea4E0fB4CF059961dc8856bA1D2598'`
+  (was `null`). EIP-55 checksum verified (`cast to-check-sum-address` returns the value exactly). Mainnet
+  entry unchanged. It is a DIFFERENT contract from the Base FeeCollector at 0xeFC3…f130 (its own deployment).
+- Effect: `getOrderExecutor(8453)` now returns the Base address; `getOrderExecutorDomain(8453)` returns
+  `{ chainId: 8453, verifyingContract: 0x135B…2598 }` instead of throwing; the order engine no longer
+  fail-closes on Base (create / sign / POST / monitor now operate on Base). An UNWIRED chain (e.g. 42161)
+  still fail-closes — that property is retained.
+
+### Tests updated (the Base→null pins, now wired)
+- `order-executor.test.ts`: `getOrderExecutor(8453)` = Base addr; `getOrderExecutorDomain(8453)` returns the
+  Base domain (no longer throws). Added an unwired-chain (42161) domain-throws assertion to keep that coverage.
+- `useOrderEngine.test.ts`: the "Base creation fail-closed" test repointed to an UNWIRED chain (42161) — the
+  fail-closed property still holds for unwired chains; Base now signs normally.
+- `api/orders/route.test.ts`: the "8453 → 400" test repointed to 42161 (Base now passes the executor guard).
+- `on-chain-monitor.multichain.test.ts`: Base now scans BOTH its FeeCollector AND its wired OrderExecutor
+  (the dynamic `getScanTargets` executor target is non-null for Base now).
+
+### Not touched (per spec)
+- **DCA tab stays "Soon"** — `page.tsx` unchanged (UI go-live is the separate step).
+- No contract/Solidity change; no `src/` behaviour change beyond the address wiring. Mainnet byte-identical.
+  forge 68/68 + 19/19, vitest 1701/1701.

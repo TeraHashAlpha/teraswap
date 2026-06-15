@@ -429,13 +429,13 @@ describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () 
     expect(result.current.pendingCancel).toBeNull()
   })
 
-  it('[CHORE-ORDER-EXEC-PREP A] order creation is FAIL-CLOSED on a chain with no OrderExecutor (Base) — no EIP-712 signature', async () => {
-    // On Base (8453) there is NO OrderExecutor (0xeFC3…f130 is the FeeCollector there). The hook must
-    // never EIP-712-sign an order against a non-existent executor — creation fail-closes (no signature,
-    // an error event, no order persisted). (When Base gets a real executor, add it to
-    // ORDER_EXECUTOR_BY_CHAIN and the active-chain domain flows through unchanged.)
+  it('[CHORE-ORDER-EXEC-PREP A] order creation is FAIL-CLOSED on an UNWIRED chain — no EIP-712 signature', async () => {
+    // On a chain with NO OrderExecutor wired (here 42161/Arbitrum — not in ORDER_EXECUTOR_BY_CHAIN) the
+    // hook must never EIP-712-sign an order against a non-existent executor — creation fail-closes (no
+    // signature, an error event, no order persisted). (Base 8453 is now WIRED —
+    // CHORE-BASE-ORDER-EXECUTOR-WIRE — so it signs normally with the Base domain.)
     const wagmi = await import('wagmi')
-    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453) // Base — no executor
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(42161) // Arbitrum — no executor wired
     const { result } = renderHook(() => useOrderEngine())
     mockSignTypedDataAsync.mockClear()
 

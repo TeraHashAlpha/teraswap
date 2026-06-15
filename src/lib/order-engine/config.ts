@@ -13,8 +13,9 @@ export const ORDER_EXECUTOR_BY_CHAIN: Record<number, `0x${string}` | null> = {
   // Mainnet OrderExecutor (verified: has executeOrder). Env override kept for mainnet upgrades only.
   1: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS ??
     '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130') as `0x${string}`,
-  // Base (8453): NO OrderExecutor deployed — 0xeFC3…f130 on Base is the FeeCollector, NOT an executor.
-  8453: null,
+  // Base (8453): OrderExecutor deployed + verified (its own contract with executeOrder — a DIFFERENT
+  // deployment from the Base FeeCollector at 0xeFC3…f130). Wired in CHORE-BASE-ORDER-EXECUTOR-WIRE.
+  8453: '0x135B339902Ea4E0fB4CF059961dc8856bA1D2598' as `0x${string}`,
 }
 
 /** Resolve the OrderExecutor for a chain, or null when none is deployed (caller must fail-closed). */
