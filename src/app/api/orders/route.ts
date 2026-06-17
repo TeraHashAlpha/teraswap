@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
 import { getOrderExecutor, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
+import { getDcaFreezeState } from '@/lib/dca-freeze'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
@@ -111,6 +112,26 @@ export async function POST(req: NextRequest) {
             chunkAmount: chunkAmount.toString(),
           },
           { status: 400 },
+        )
+      }
+
+      // [DCA-FREEZE] Circuit-breaker gate — ONLY for new DCA orders. When the
+      // breaker is frozen we refuse to CREATE new DCA positions, but existing
+      // orders are untouched (no update/delete here) and cancellation stays
+      // available (the cancel route never reads this flag). Fail-open: any read
+      // error ⇒ getDcaFreezeState() returns { frozen:false } and we proceed.
+      // Non-DCA orders (limit/stop_loss) never reach this branch — byte-identical.
+      const fz = await getDcaFreezeState()
+      if (fz.frozen) {
+        return NextResponse.json(
+          {
+            error:
+              'New DCA orders are temporarily paused' +
+              (fz.reason ? ': ' + fz.reason : '') +
+              '. Existing orders are unaffected and you can still cancel them.',
+            frozen: true,
+          },
+          { status: 403 },
         )
       }
     }

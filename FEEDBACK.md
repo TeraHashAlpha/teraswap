@@ -3748,3 +3748,65 @@ intent: "after #199 merges, so the new tests are present to extend"). **Merge #1
 ### Verification
 tsc clean · lint 0 errors · vitest **1841/1841** · forge OrderExecutor **68/68**. No Auditor (both LOW,
 non-gate; the contract still enforces the floor and the orderHash still binds the signed struct).
+## Feedback — SPRINT-DCA-OBSERVABILITY-FREEZE — executor alerts, freeze-urgency score, user-safe freeze
+
+**Advisory only — the bot NEVER auto-freezes.** No contract/Solidity change; no execution/gate behaviour change;
+mainnet byte-identical when not frozen and Telegram unset. Built via a 7-agent, 2-phase workflow (foundations →
+integration). Verify: vitest **1873/1873** (CI), keeper node:test **freeze-score 12/12 + alert 6/6** (manual —
+the keeper is not in CI), tsc clean, lint 0 errors, forge **68/68**, executor smoke-imports to a config error
+(no syntax/import break). **⚠ Auditor review required before merge** (freeze touches order execution).
+
+### Freeze-urgency score (Part B) — weights & thresholds (`executor/freeze-score.js`, documented constants)
+| Signal | Constant | Max weight | Ramp |
+|--------|----------|-----------|------|
+| Unexplained ETH outflow (dominant) | `WEIGHT_OUTFLOW_MAX` | **12** | linear by `outflow/threshold`, clamped at ratio 1.0 |
+| Low/critical gas | `WEIGHT_GAS_MAX` | **4** | `<$1` ⇒ full 4; `$1–$5` ⇒ partial (floor `GAS_LOW_PARTIAL_FLOOR=1`); `≥$5` ⇒ 0; **missing/undefined ⇒ 0** (fail-open) |
+| Repeated exec failures | `WEIGHT_FAILURES_MAX` | **4** | linear to `FAILURES_CAP_COUNT=4`, then pinned |
+| RPC down | `WEIGHT_RPC_DOWN` | **3** | flat |
+| | `SCORE_MAX` | **cap 0–20** | integer-rounded, monotonic |
+
+Tiers (`scoreTier`): **`info` < 8 ≤ `warn` < 15 ≤ `critical`**. Every alert embeds `Freeze-urgency: N/20 (tier)`;
+warn appends "⚠️ consider freezing — POST /api/admin/dca-freeze", critical "🛑 strongly consider freezing NOW".
+Two deliberate calibrations the agent flagged: (a) an *explicit* `gasUsdValue:0` ⇒ full gas weight (empty/drained
+wallet) but a *missing* value ⇒ 0 (no invented urgency on a fail-open read); (b) the `$1–$5` partial floors at 1
+so `$4.99` survives integer rounding as a non-zero signal.
+
+### Alert thresholds (Part A, `executor/alert.js` builders, all via the existing fail-safe `sendTelegramAlert`)
+- **🆕 New DCA** (info): first cycle a DCA id is seen (`dca_executed===0`) — token in→out, quantity, duration =
+  `dcaInterval × dcaTotal`, parts = `dcaTotal`, per-chunk.
+- **⛽ Low gas** (warn): `balanceEth × ETH-USD < $5` (`GAS_LOW_USD=5`). ETH-USD read from `ETH_USD_FEED`
+  (default mainnet `0x5f4e…8419`, 8-dec Chainlink), observability-only.
+- **🚨 Unexplained outflow** (critical): per cycle `start − end − ownGasSpent > OUTFLOW_THRESHOLD_ETH`
+  (default **0.01 ETH**). The KMS-held key means any non-gas outflow is anomalous.
+- **⚙️ Ops**: crash/RPC/failed-exec/stale-lock.
+
+### Freeze-trigger surface (Part C)
+- **Flag:** Supabase `circuit_breaker` (row `id='dca'`: `frozen`, `reason`, `updated_at`, `updated_by`) —
+  `supabase/circuit-breaker.sql` (operator applies it; readers **fail-open** if the table/row is missing).
+- **Writer (the only one):** `POST /api/admin/dca-freeze` `{frozen, reason}` — **admin Bearer auth**
+  (`DCA_FREEZE_SECRET` via `verifyBearerToken`, mirroring `/api/admin/kill-switch`); `GET` returns current state.
+  Helper `src/lib/dca-freeze.ts` (`getDcaFreezeState`/`setDcaFreezeState`).
+- **Honored by:** the keeper (`readFreezeFlag` each cycle → skips `order_type==='dca'`, leaves them `active` to
+  resume = **delay-not-loss**; non-DCA unaffected; alerts once per state transition) and the create API
+  (`POST /api/orders` returns **403** for a new DCA while frozen — existing orders untouched).
+- **USER-SAFETY INVARIANT (tested — `orders-freeze.test.ts`):** frozen ⇒ new DCA 403 with `insert` never called;
+  limit/stop_loss not blocked; the cancel route (`[id]/route.ts`) does **not** import the freeze flag (cancel
+  always allowed); no fund/approval touch (the flag is data-only). On-chain `pause()`/`unpause()` documented as
+  the **nuclear** escalation in `docs/Runbooks/DCA-FREEZE.md`.
+
+### Flagged for the Auditor (by-design trade-offs to bless)
+1. **Spec said "admin wallet 0x9A38"; the server uses a Bearer secret.** That's the *actual* admin-API auth in
+   this repo (kill-switch/api-keys) — the `0x9A38` wallet is the **client-side** `/admin` UI gate
+   (`NEXT_PUBLIC_ADMIN_WALLET`), and the server enforces `DCA_FREEZE_SECRET`. Same trust boundary, established
+   pattern.
+2. **Fail-open reads.** Keeper + API treat an unreadable flag as NOT frozen (don't halt users/execution on a
+   transient DB error); `pause()` is the fail-safe for a confirmed compromise. Auditor should confirm fail-open
+   is the right default for a *security* freeze (vs fail-closed).
+3. **Freeze-honor locks before skipping.** A frozen DCA order is atomically locked (`executing`) then returned to
+   `active` — a brief lock + one PATCH per frozen DCA per cycle (churn under a long freeze). Delay-not-loss holds;
+   a future pass could check `order_type` pre-lock.
+4. **Outflow over-alerts on a manual keeper-wallet withdrawal** (only the executor's own gas is subtracted) — by
+   design (over-alert, never auto-freeze). ETH/USD round staleness is not validated (observability-only, never a
+   gate). New-DCA tracking is in-memory (at-least-once re-alert after a restart for a still-fresh position).
+5. **`setDcaFreezeState` when Supabase is unconfigured** returns the requested state without throwing (consistent
+   shape) rather than hard-failing — the admin route surfaces real upsert errors but a misconfig is silent.
