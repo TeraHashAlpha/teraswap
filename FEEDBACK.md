@@ -3708,3 +3708,43 @@ Authored via a 6-area writer→reviewer workflow (each writer reads the source +
 new file, self-verifies with `vitest run`; an adversarial reviewer gates real-assertions/deterministic/
 no-source-edit). Two type-only fixes were needed post-hoc (`vi.fn((..._args: unknown[]) => …)` — the agents'
 `vitest run` self-check uses esbuild and doesn't typecheck; the CI `tsc` gate does).
+
+## Feedback — CHORE-DCA-PRELAUNCH-FIXES — the two LOW findings from #199
+
+Fixes the two LOW findings #199 flagged. **No contract/Solidity change; no execution/gate behaviour change;
+mainnet byte-identical.** TDD: the two #199 tests that *documented* the buggy behaviour were flipped to assert
+the fix (RED), then implemented (GREEN). 1837 → **1841** tests.
+
+### Base-branch note
+#199 (`sprint/order-engine-tests`) had **not merged** when this started, so origin/main lacked the tests this
+must extend — and #199's `useOrderEngine.conditional.test.ts` *pins the buggy behaviour* (`does NOT reject a
+sub-floor amount`), which Fix 1 changes. Branching off plain origin/main would leave that test asserting the old
+behaviour → main red once both land. So this branch is **stacked on `sprint/order-engine-tests`** (the spec's
+intent: "after #199 merges, so the new tests are present to extend"). **Merge #199 first**, then this.
+
+### Fix 1 — client-side MIN_ORDER_AMOUNT pre-sign floor guard
+- **Single source of truth:** `MIN_ORDER_AMOUNT = 10_000n` now lives in `order-engine/config.ts` (re-exported
+  via the barrel), mirroring `TeraSwapOrderExecutor.sol:126`. The server API (`route.ts`) now **imports** it
+  instead of its own local `BigInt(10_000)` — same value, so its behaviour is byte-identical — and the client
+  guard reads the same constant, so the two floors can't drift. `config.test.ts` pins `=== 10_000n`.
+- **Guard:** `useOrderEngine.createOrder` (Phase A, before the review freeze) now rejects when
+  `floor(amountIn / (dcaTotal ?? 1)) < MIN_ORDER_AMOUNT` — the SAME per-execution math the signed struct uses
+  (non-DCA reduces to `amountIn`). It surfaces an `order_error` event (which `DCAPanel` already toasts) and
+  returns **without** freezing/signing/persisting — chosen over `throw` to match the hook's existing error
+  channel and not depend on the caller catching. Tests: sub-floor (9999) rejected, just-at-floor (10000)
+  allowed, DCA per-chunk sub-floor (15000/2=7500) rejected, DCA at-floor (20000/2=10000) allowed.
+
+### Fix 2 — DCA omitted-param default symmetry (persist what was signed)
+- `confirmOrder` now persists `dcaInterval/dcaTotal` from the **signed struct** (`Number(order.dcaInterval)` /
+  `Number(order.dcaTotal)`) instead of re-deriving `config.* ?? null`, and the second default in
+  `supabase.ts` (`?? 0` / `?? 1`) is removed (its param tightened to `number`). The signed struct is now the
+  single source for the persisted DCA params.
+- **No stored-data change:** the previous path already resolved `null → 0/1` (supabase.ts `??`, then route.ts
+  `??`), so the DB already stored `0/1`. This removes the redundant double-default (the #199 "asymmetry" was a
+  code smell, not a data divergence) so the write path can't disagree with the signed struct. Test asserts the
+  persisted args equal the signed struct (`0/1`) for an omitted-DCA order and equal the real params for a DCA
+  order.
+
+### Verification
+tsc clean · lint 0 errors · vitest **1841/1841** · forge OrderExecutor **68/68**. No Auditor (both LOW,
+non-gate; the contract still enforces the floor and the orderHash still binds the signed struct).

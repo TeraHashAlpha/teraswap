@@ -149,6 +149,15 @@ export const MAX_EXPIRY_DAYS = 90
 export const MAX_ACTIVE_ORDERS = 20
 export const ORDER_POLL_INTERVAL_MS = 10_000  // poll Supabase every 10s
 
+// [CHORE-DCA-PRELAUNCH-FIXES] Minimum order amount, in token base units — the SINGLE
+// SOURCE OF TRUTH mirroring the on-chain constant
+//   TeraSwapOrderExecutor.sol:126  `uint256 public constant MIN_ORDER_AMOUNT = 10_000;`
+// (pinned by contracts/order-engine/test-run.js: "MIN_ORDER_AMOUNT is 10000"). Used by the
+// client pre-sign guard (useOrderEngine) AND the server create-order API so the client floor
+// and the contract floor can't drift. For DCA this applies PER EXECUTION
+// (floor(amountIn / dcaTotal)); below it the contract reverts DCAChunkTooSmall / OrderTooSmall.
+export const MIN_ORDER_AMOUNT = 10_000n
+
 // ── Presets for expiry ───────────────────────────────────
 export const EXPIRY_PRESETS = [
   { label: '1h',  seconds: 3600 },

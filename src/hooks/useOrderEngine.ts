@@ -19,6 +19,7 @@ import { keccak256, encodeAbiParameters, toBytes } from 'viem'
 import {
   ORDER_EXECUTOR_ABI,
   getOrderExecutor,
+  MIN_ORDER_AMOUNT,
   ORDER_EIP712_TYPES,
   CANCEL_ORDER_TYPES,
   getOrderExecutorDomain,
@@ -483,6 +484,24 @@ export function useOrderEngine() {
   const createOrder = useCallback(async (config: CreateOrderConfig) => {
     if (!address) throw new Error('Wallet not connected')
 
+    // [CHORE-DCA-PRELAUNCH-FIXES Fix 1] Pre-sign floor guard. Reject BEFORE freezing for
+    // review / signing / persisting when the per-execution amount is below the contract's
+    // MIN_ORDER_AMOUNT, so the user is never asked to spend an EIP-712 signature on an order
+    // the contract will revert (DCAChunkTooSmall / OrderTooSmall). DCA divides per chunk via
+    // the SAME default the signed struct uses (dcaTotal ?? 1) ⇒ non-DCA reduces to amountIn.
+    const perExecution = BigInt(config.amountIn) / BigInt(config.dcaTotal ?? 1)
+    if (perExecution < MIN_ORDER_AMOUNT) {
+      const isDca = (config.dcaTotal ?? 1) > 1
+      setLatestEvent({
+        type: 'order_error',
+        orderId: crypto.randomUUID(),
+        error: isDca
+          ? `Each DCA buy must be at least ${Number(MIN_ORDER_AMOUNT).toLocaleString()} base units (the on-chain minimum). Increase the total amount or reduce the number of buys.`
+          : `Order amount must be at least ${Number(MIN_ORDER_AMOUNT).toLocaleString()} base units (the on-chain minimum).`,
+      })
+      return
+    }
+
     // [P213/FULL-M-06] Session-tracked nonce (max of on-chain and local+1)
     // instead of the raw wagmi read, so rapid sequential creates don't collide.
     const nonce = getNextNonce()
@@ -514,7 +533,7 @@ export function useOrderEngine() {
     // [SPRINT-9U U2] FREEZE for review — confirmOrder signs THIS exact struct 1:1 (no rebuild).
     // Re-calling createOrder (a re-config / re-quote) overwrites the frozen order → re-review.
     setPendingOrder({ order, config, computedHash, chainId, account: address })
-  }, [address, chainId, getNextNonce])
+  }, [address, chainId, getNextNonce, setLatestEvent])
 
   // ── [SPRINT-9U U2] Phase B: sign the FROZEN order + submit (reachable ONLY via the review modal) ──
   const confirmOrder = useCallback(async () => {
@@ -618,8 +637,12 @@ export function useOrderEngine() {
         expiry: new Date(Number(order.expiry) * 1000),
         nonce: Number(order.nonce),
         router: config.router,
-        dcaInterval: config.dcaInterval ?? null,
-        dcaTotal: config.dcaTotal ?? null,
+        // [CHORE-DCA-PRELAUNCH-FIXES Fix 2] Persist EXACTLY what was signed — the frozen
+        // struct is canonical (the orderHash binds it). Use the struct's dca values (which
+        // already applied the 0n/1n defaults) instead of re-deriving a different `?? null`
+        // default here, so the stored row can't disagree with the signed struct.
+        dcaInterval: Number(order.dcaInterval),
+        dcaTotal: Number(order.dcaTotal),
         signature,
         orderData: {
           owner: order.owner,

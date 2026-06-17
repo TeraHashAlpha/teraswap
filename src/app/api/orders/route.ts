@@ -6,13 +6,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
-import { getOrderExecutor } from '@/lib/order-engine/config'
+import { getOrderExecutor, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
 const MAX_ACTIVE_ORDERS = 20
-// [API-02] Mirror contract MIN_ORDER_AMOUNT to fail-fast before Supabase insert
-const MIN_ORDER_AMOUNT = BigInt(10_000)
+// [API-02] MIN_ORDER_AMOUNT (= contract's 10_000) is now imported from order-engine/config.ts —
+// [CHORE-DCA-PRELAUNCH-FIXES] single source of truth shared with the client pre-sign guard.
 
 const EIP712_DOMAIN = { name: 'TeraSwapOrderExecutor', version: '2' }
 const ORDER_TYPES = {
