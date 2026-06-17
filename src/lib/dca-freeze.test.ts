@@ -229,17 +229,14 @@ describe('setDcaFreezeState', () => {
     ).rejects.toThrow(/permission denied/)
   })
 
-  it('returns the requested state without throwing when Supabase is unconfigured', async () => {
+  it('[201-L-01] THROWS (fail-closed) when Supabase is unconfigured — the write did NOT persist', async () => {
+    // The WRITE path is fail-closed: a freeze that cannot be persisted must NOT
+    // look like success, so the admin route surfaces a 503 and the operator knows
+    // the freeze did not take. (The READ path stays fail-open — see above.)
     mockGetSupabase.mockReturnValue(null)
 
-    const state = await setDcaFreezeState(true, 'no backend', 'admin')
-
-    expect(state).toEqual({
-      frozen: true,
-      reason: 'no backend',
-      updatedAt: state.updatedAt,
-      updatedBy: 'admin',
-    })
-    expect(state.updatedAt).toBeTypeOf('string')
+    await expect(
+      setDcaFreezeState(true, 'no backend', 'admin'),
+    ).rejects.toThrow(/unconfigured|not persist/i)
   })
 })
