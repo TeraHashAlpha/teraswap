@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.700.0",
-    "ethers": "^6.16.0",
     "viem": "2.47.10"
   }
 }
