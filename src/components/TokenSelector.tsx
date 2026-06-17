@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { DEFAULT_TOKENS, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import TokenAddressBadge from './TokenAddressBadge'
+import TokenLogo from './TokenLogo'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -23,6 +24,10 @@ interface Props {
 export default function TokenSelector({ selected, onSelect, disabledAddress }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  // [SPRINT token-selector-ux P4] Active category filter. null ⇒ show all (exact
+  // pre-P4 behaviour). When set, BOTH the grouped view and the long-tail search
+  // are restricted to tokens whose `category` matches.
+  const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const { importToken, importing, error: importError } = useTokenImport()
   const { balances: balanceMap } = useTokenBalances()
@@ -35,6 +40,15 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     () => (isMainnet ? DEFAULT_TOKENS : getChainTokenList(activeChainId)),
     [isMainnet, activeChainId],
   )
+
+  // [SPRINT token-selector-ux P4] Categories actually present in the active catalog,
+  // ordered by CATEGORY_DISPLAY_ORDER. Empty categories (e.g. 'Stocks' — no tokens
+  // shipped) produce no chip. Drives the filter-chip row below the search input.
+  const availableCategories = useMemo(() => {
+    const present = new Set<string>()
+    for (const token of catalog) present.add(token.category || 'Other')
+    return CATEGORY_DISPLAY_ORDER.filter((cat) => present.has(cat))
+  }, [catalog])
 
   // Focus input when modal opens
   useEffect(() => {
@@ -56,12 +70,14 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     const matches = getSearchCatalog(activeChainId).filter(
       (t) =>
         t.address.toLowerCase() !== disabled &&
+        // [P4] When a category filter is active, search WITHIN it only.
+        (activeCategory === null || (t.category || 'Other') === activeCategory) &&
         (t.symbol.toLowerCase().includes(q) ||
           t.name.toLowerCase().includes(q) ||
           t.address.toLowerCase().includes(q)),
     )
     return matches.slice(0, SEARCH_RESULT_LIMIT)
-  }, [isSearching, q, disabledAddress, activeChainId])
+  }, [isSearching, q, disabledAddress, activeChainId, activeCategory])
 
   // Tokens with balance — sorted highest first, shown above categories
   const tokensWithBalance = useMemo(() => {
@@ -69,6 +85,8 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     return catalog
       .filter((t) => {
         const addr = t.address.toLowerCase()
+        // [P4] Honor the active category filter so "Your Tokens" stays consistent.
+        if (activeCategory !== null && (t.category || 'Other') !== activeCategory) return false
         return addr !== disabled && balanceMap.has(addr)
       })
       .sort((a, b) => {
@@ -80,7 +98,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
         if (balA > balB) return -1
         return 0
       })
-  }, [disabledAddress, balanceMap, catalog])
+  }, [disabledAddress, balanceMap, catalog, activeCategory])
 
   // Build category groups (only when not searching), excluding tokens already shown in "Your tokens"
   const groups = useMemo(() => {
@@ -92,13 +110,15 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
       const addr = token.address.toLowerCase()
       if (addr === disabled || balanceAddrs.has(addr)) continue
       const cat = token.category || 'Other'
+      // [P4] When a category filter is active, only build that group.
+      if (activeCategory !== null && cat !== activeCategory) continue
       if (!categoryMap.has(cat)) categoryMap.set(cat, [])
       categoryMap.get(cat)!.push(token)
     }
     return CATEGORY_DISPLAY_ORDER
       .filter((cat) => categoryMap.has(cat))
       .map((cat) => ({ label: cat, tokens: categoryMap.get(cat)! }))
-  }, [disabledAddress, isSearching, tokensWithBalance, catalog])
+  }, [disabledAddress, isSearching, tokensWithBalance, catalog, activeCategory])
 
   const popularTokens = useMemo(() => {
     const disabled = disabledAddress?.toLowerCase()
@@ -116,10 +136,16 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     ).filter(Boolean) as Token[]
   }, [disabledAddress, isMainnet, activeChainId, catalog])
 
-  function handleSelect(token: Token) {
-    onSelect(token)
+  function closeModal() {
     setOpen(false)
     setSearch('')
+    // [P4] Reset the category filter so the next open starts on "show all".
+    setActiveCategory(null)
+  }
+
+  function handleSelect(token: Token) {
+    onSelect(token)
+    closeModal()
   }
 
   async function handleImportToken() {
@@ -138,7 +164,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
       >
         {selected ? (
           <>
-            <img src={selected.logoURI} alt="" className="h-5 w-5 rounded-full" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            <TokenLogo token={selected} size={20} className="rounded-full" />
             {selected.symbol}
           </>
         ) : (
@@ -151,7 +177,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
       {open && createPortal(
         <div
           className="fixed inset-0 z-[70] flex items-end justify-center bg-[#080B10] sm:items-start sm:pt-[15vh]"
-          onClick={() => setOpen(false)}
+          onClick={closeModal}
         >
           <div
             className="w-full max-w-sm rounded-t-2xl border border-cream-08 bg-[#0F1318] p-4 shadow-2xl shadow-black/60 sm:rounded-2xl"
@@ -160,7 +186,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
             {/* Header */}
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-cream">Select token</h3>
-              <button onClick={() => { setOpen(false); setSearch('') }} className="text-cream-35 transition hover:text-cream">&#10005;</button>
+              <button onClick={closeModal} className="text-cream-35 transition hover:text-cream">&#10005;</button>
             </div>
 
             {/* Search input */}
@@ -173,8 +199,38 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
               className="mb-3 w-full rounded-xl border border-cream-08 bg-surface-tertiary px-3 py-2.5 text-sm text-cream placeholder:text-cream-35 outline-none focus:border-cream-35 transition-colors"
             />
 
-            {/* Popular tokens — quick select chips */}
-            {!isSearching && (
+            {/* [P4] Category filter chips — one per category present in the catalog,
+                ordered by CATEGORY_DISPLAY_ORDER. Tapping toggles the active filter
+                (tap the active chip again ⇒ back to "show all"). Applies to BOTH the
+                grouped view and the search results. */}
+            {availableCategories.length > 0 && (
+              <div className="mb-3 flex flex-nowrap gap-1.5 overflow-x-auto scrollbar-thin">
+                {availableCategories.map((cat) => {
+                  const active = activeCategory === cat
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setActiveCategory((prev) => (prev === cat ? null : cat))}
+                      className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                        active
+                          ? 'border-cream-gold text-cream'
+                          : 'border-cream-08 bg-surface-tertiary text-cream-80 hover:border-cream-35 hover:bg-cream-05 hover:text-cream'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Popular tokens — quick select chips.
+                [P4] Hidden while a category filter is active so the "show all"
+                quick-picks don't leak cross-category tokens into the filtered view.
+                With no active category this is unchanged from before P4. */}
+            {!isSearching && activeCategory === null && (
               <div className="mb-3 flex flex-wrap gap-1.5">
                 {popularTokens.map((token) => (
                   <button
@@ -182,7 +238,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                     onClick={() => handleSelect(token)}
                     className="flex items-center gap-1.5 rounded-full border border-cream-08 bg-surface-tertiary px-2.5 py-1 text-xs font-medium text-cream-80 transition hover:border-cream-35 hover:bg-cream-05 hover:text-cream"
                   >
-                    <img src={token.logoURI} alt="" className="h-4 w-4 rounded-full" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    <TokenLogo token={token} size={16} />
                     {token.symbol}
                   </button>
                 ))}
@@ -286,15 +342,7 @@ function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: To
       onClick={() => onSelect(token)}
       className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-[#1E2530]"
     >
-      <img
-        src={token.logoURI}
-        alt=""
-        className="h-8 w-8 rounded-full bg-surface-tertiary"
-        onError={(e) => {
-          const img = e.target as HTMLImageElement
-          img.style.display = 'none'
-        }}
-      />
+      <TokenLogo token={token} size={32} className="bg-surface-tertiary" />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-cream-gold">{token.symbol}</div>
         <div className="truncate text-xs text-cream-35">{token.name}</div>

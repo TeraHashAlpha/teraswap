@@ -11,6 +11,10 @@ export type TokenCategory =
   | 'AI & Data'
   | 'Memecoin'
   | 'Gaming & Metaverse'
+  // [SPRINT token-selector-ux P3] Forward-compatible category. Ships EMPTY — no
+  // token uses 'Stocks' yet (xStocks are not shipped), so it produces no group
+  // and no filter chip until verified tokens are added later.
+  | 'Stocks'
   | 'Other'
   | 'Imported'
 
@@ -773,5 +777,8 @@ export function isNativeETH(token: Token): boolean {
 export const CATEGORY_DISPLAY_ORDER: TokenCategory[] = [
   'Native', 'Stablecoin', 'Wrapped BTC', 'Liquid Staking', 'DeFi',
   'L2 & Infrastructure', 'AI & Data', 'Gaming & Metaverse', 'Memecoin',
+  // [SPRINT token-selector-ux P3] 'Stocks' ships EMPTY (no tokens yet) → it
+  // produces no group/chip; kept here so grouping is forward-compatible.
+  'Stocks',
   'Imported', 'Other',
 ]

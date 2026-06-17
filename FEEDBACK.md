@@ -4015,3 +4015,63 @@ files changed. The single-instance invariants (@walletconnect/core, qr@0.5.5, vi
 (no dep added/bumped except the executor `ethers` drop). The biggest lesson: **re-verify every static-analysis
 hit** — knip's 232 "unused" items contained ~6 outright false positives I found by hand (valtio, the sounds
 trio, capacitor) before they could cause a hidden break.
+## Feedback — SPRINT-TOKEN-SELECTOR-UX — logos, verified badge, category filter, xStocks (skipped)
+
+Frontend only; no backend/contract/gate change. Search / import-by-address / "Your Tokens" / balances all
+intact (the integrator confirms no regression when no category is active). Verify: tsc clean · lint 0 errors ·
+**vitest 1913/1913** (+19 new) · next build · forge **68/68**. Built via a 2-phase workflow (parallel
+TokenLogo + badge + Stocks-category, then the TokenSelector integration).
+
+### ⚠️ Part 3 — xStocks: VERIFIED → **SKIPPED** (do NOT ship; security decision)
+Per the "verify availability + liquidity, else report and skip; never fabricate addresses" mandate, I researched
+the official sources and **shipped ZERO xStocks token entries** (no guessed addresses anywhere). Findings:
+- **xStocks (Backed Finance) are Solana-primary** — 60+ tokenized US equities launched 2025-06-30 as **SPL
+  tokens on Solana**; that's where the liquidity is (Kraken + Solana DEXs).
+- **Not on Base.** Base is not a supported xStocks chain.
+- **On Ethereum they're bridged** (Backed + Chainlink CCIP "xBridge"), and where they have Uniswap liquidity it
+  is behind **Uniswap v4 compliance hooks (KYC + allowlists)** — i.e. **permissioned**. TeraSwap is a
+  *permissionless* aggregator (1inch/0x/Uniswap V2-V3/Velora/CoW); it **cannot route** KYC-gated v4-hook pools,
+  so even the EVM xStocks that exist are **not routable here** → users would get "no route" + the catalog would
+  carry equities with no swap path.
+- I could not authoritatively verify exact official EVM ERC-20 addresses in-session, and guessing one = users
+  buying a scam. **So: skip.** Sources: Kraken/Backed/Solana xStocks announcements + the Uniswap-RWA
+  (KYC-hook) integration coverage (June 2026).
+- **What I DID ship:** the `'Stocks'` `TokenCategory` + its slot in `CATEGORY_DISPLAY_ORDER`, so the catalog and
+  the new category filter are forward-compatible. It's **empty** → no "Stocks" group, no "Stocks" chip, until
+  real tokens are added.
+- **To add xStocks later (owner action):** obtain the official **Ethereum** ERC-20 addresses from Backed
+  Finance's official token list/docs, **cross-check each** against a reputable verified list + the issuer site,
+  AND confirm there is **permissionless, routable** DEX liquidity on a source TeraSwap aggregates (not a
+  KYC-gated v4 pool). Only then add them under `category: 'Stocks'`. Until both hold, do not add them.
+
+### Part 1 — `<TokenLogo>` (no more blank circles)
+New `src/components/TokenLogo.tsx`: fallback chain **`token.logoURI` → Trust Wallet CDN (EIP-55-checksummed
+address, a *different* source from the catalog's 1inch URLs) → generated avatar** (deterministic
+`hsl(hashOfAddress)` circle + the symbol's initials, no new dependency, never blank). Wired into all **three**
+former `<img onError={display:none}>` spots (trigger, popular chip, TokenRow).
+
+### Part 2 — verified badge: green shield + white ✓
+`TokenAddressBadge` verified branch redesigned from the gold rosette to a crisp **green shield with a white
+check** (inline SVG, not an emoji). Logic unchanged (`isVerified ?? isVerifiedToken(address, cid)`) — so the
+green shield shows **only for curated/verified** tokens; imported/unverified keep the **amber** warning triangle.
+
+### Part 4 — category-filter chips
+A row of category chips (derived from the categories *present* in the active catalog, ordered by
+`CATEGORY_DISPLAY_ORDER`) below the search box. Tapping filters the grouped list **and** search results to that
+category (search-within-filter); tapping the active chip clears it; the filter resets when the modal closes.
+Popular quick-select chips kept (no regression).
+
+### 🐞 Bug I caught + fixed during review (gates missed it)
+`<TokenLogo>` held its fallback index in state but didn't reset it when the `token` prop changed **in place** —
+so the **trigger** (a single instance reused as `selected` switches) could show the *previous* token's generated
+avatar for a new token that actually has a working logo. List rows/chips are keyed per `token.address` so they
+were fine; only the trigger was exposed. Fixed inside the component (reset-state-during-render on
+`token.address` change — defensive for any caller) + added a regression test (`rerender` with a new token must
+show its `<img>`, not the stale avatar). Exactly the kind of stateful UX bug a fresh-render test suite doesn't
+exercise.
+
+### Note (Part 1 edge case, by the TokenLogo agent)
+The native-ETH sentinel `0xeeee…eeee` *is* a valid EIP-55 checksum target, so `getAddress()` does **not** throw
+on it (the try/catch guard is load-bearing only for genuinely non-0x/garbage input). Native ETH's real
+`logoURI` works in production; with an empty logoURI it still terminates safely on the avatar — no behaviour
+issue, just correcting the prompt's assumption.

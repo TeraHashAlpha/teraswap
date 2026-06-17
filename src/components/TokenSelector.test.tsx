@@ -174,6 +174,117 @@ describe('[9Y] TokenSelector — expanded catalog + chain-scoped long-tail searc
   })
 })
 
+describe('[token-selector-ux P1] TokenLogo renders (no blank circle)', () => {
+  it('renders a logo image for a selected token in the trigger', () => {
+    const token = {
+      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as `0x${string}`,
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+      logoURI: 'https://tokens.1inch.io/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.png',
+      category: 'Stablecoin' as const,
+    }
+    renderWithProviders(<TokenSelector selected={token} onSelect={vi.fn()} />)
+    // TokenLogo renders an <img> with alt=symbol (never a blank circle: when the
+    // src 404s it advances to TrustWallet then a generated avatar).
+    const logo = screen.getByAltText('USDC') as HTMLImageElement
+    expect(logo.tagName).toBe('IMG')
+    expect(logo.getAttribute('src')).toContain('0xa0b86991')
+  })
+
+  it('renders a logo for popular chips inside the modal', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    fireEvent.click(screen.getByText('Select'))
+    // ETH is a popular chip — its TokenLogo renders an <img alt="ETH"> (or, if the
+    // catalog logoURI is empty, a generated avatar). Either way the symbol shows.
+    const modal = screen.getByText(/Select token/i).closest('div')!.parentElement!
+    expect(within(modal).getAllByText('ETH').length).toBeGreaterThan(0)
+  })
+})
+
+describe('[token-selector-ux P4] category filter chips', () => {
+  function openModal() {
+    fireEvent.click(screen.getByText('Select'))
+  }
+
+  function modalRoot() {
+    return screen.getByText(/Select token/i).closest('div')!.parentElement! as HTMLElement
+  }
+
+  /** The category-chip row is the first `overflow-x-auto` flex container in the modal. */
+  function categoryChip(label: string) {
+    const root = modalRoot()
+    const chipRow = root.querySelector('.overflow-x-auto') as HTMLElement
+    return within(chipRow).getByText(label)
+  }
+
+  it('clicking a category chip filters the grouped rows to that category', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    // Before filtering: both a Memecoin (PEPE) and a Wrapped BTC (WBTC) row exist.
+    expect(screen.getAllByText('WBTC').length).toBeGreaterThan(0)
+    // Activate the Memecoin filter.
+    fireEvent.click(categoryChip('Memecoin'))
+    // PEPE (Memecoin) IS shown.
+    expect(screen.getAllByText('PEPE').length).toBeGreaterThan(0)
+    // WBTC (Wrapped BTC) is NOT shown — it belongs to a different category.
+    expect(screen.queryByText('WBTC')).toBeNull()
+  })
+
+  it('clicking the active chip again clears the filter (back to show-all)', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    fireEvent.click(categoryChip('Memecoin'))
+    expect(screen.queryByText('WBTC')).toBeNull()
+    // Toggle the same chip off.
+    fireEvent.click(categoryChip('Memecoin'))
+    // The full catalog is back — WBTC reappears.
+    expect(screen.getAllByText('WBTC').length).toBeGreaterThan(0)
+  })
+
+  it('search within an active category only returns that category matches', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    // Filter to DeFi, then search a DeFi token (UNI) and a non-DeFi token (WBTC).
+    fireEvent.click(categoryChip('DeFi'))
+    const input = screen.getByPlaceholderText(/search name, symbol/i) as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'uni' } })
+    expect(screen.getAllByText('UNI').length).toBeGreaterThan(0)
+    // WBTC is Wrapped BTC, not DeFi → excluded from the in-category search.
+    fireEvent.change(input, { target: { value: 'wbtc' } })
+    expect(screen.queryByText('WBTC')).toBeNull()
+  })
+
+  it('search still works with no category active (unchanged behaviour)', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    const input = screen.getByPlaceholderText(/search name, symbol/i) as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'wbtc' } })
+    expect(screen.getByText(/result/)).toBeInTheDocument()
+    expect(screen.getAllByText('WBTC').length).toBeGreaterThan(0)
+  })
+
+  it('the "Stocks" chip does NOT appear (no Stocks tokens shipped)', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    const root = modalRoot()
+    const chipRow = root.querySelector('.overflow-x-auto') as HTMLElement
+    expect(within(chipRow).queryByText('Stocks')).toBeNull()
+  })
+
+  it('resets the active filter when the modal closes and reopens', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    fireEvent.click(categoryChip('Memecoin'))
+    expect(screen.queryByText('WBTC')).toBeNull()
+    // Close via the X button, then reopen.
+    fireEvent.click(screen.getByText('✕'))
+    openModal()
+    // Filter is back to "show all" — WBTC is visible again.
+    expect(screen.getAllByText('WBTC').length).toBeGreaterThan(0)
+  })
+})
+
 describe('TokenSelector — wallet disconnected', () => {
   it('still renders the trigger when wallet is not connected', async () => {
     const wagmi = await import('wagmi')
