@@ -32,9 +32,12 @@ export interface Token {
   chainId?: number
 }
 
-// ── Logo helper (1inch token icons, lowercase address) ───
-function logo(addr: string): string {
-  return `https://tokens.1inch.io/${addr.toLowerCase()}.png`
+// ── Logo helper (DefiLlama token icons, chainId-aware, lowercase address) ───
+// chainId-aware so the same helper resolves real logos on mainnet (1) and L2s
+// (e.g. Base 8453). DefiLlama keys by chainId + lowercase address — no
+// checksum-casing pitfall and 200s on both chains for the long-tail catalog.
+function logo(addr: string, chainId = 1): string {
+  return `https://token-icons.llamao.fi/icons/tokens/${chainId}/${addr.toLowerCase()}?h=48&w=48`
 }
 
 // ── Top 80+ tokens by Ethereum on-chain volume ──────────
@@ -47,7 +50,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'ETH',
     name: 'Ether',
     decimals: 18,
-    logoURI: logo('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'),
+    logoURI: '/tokens/eth.png',
     category: 'Native',
   },
   {
@@ -55,7 +58,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'WETH',
     name: 'Wrapped Ether',
     decimals: 18,
-    logoURI: logo('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'),
+    logoURI: '/tokens/weth.png',
     category: 'Native',
   },
 
@@ -65,7 +68,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'USDC',
     name: 'USD Coin',
     decimals: 6,
-    logoURI: logo('0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+    logoURI: '/tokens/usdc.png',
     category: 'Stablecoin',
   },
   {
@@ -73,7 +76,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'USDT',
     name: 'Tether USD',
     decimals: 6,
-    logoURI: logo('0xdac17f958d2ee523a2206206994597c13d831ec7'),
+    logoURI: '/tokens/usdt.png',
     category: 'Stablecoin',
   },
   {
@@ -81,7 +84,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'DAI',
     name: 'Dai Stablecoin',
     decimals: 18,
-    logoURI: logo('0x6b175474e89094c44da98b954eedeac495271d0f'),
+    logoURI: '/tokens/dai.png',
     category: 'Stablecoin',
   },
   {
@@ -145,7 +148,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'BOLD',
     name: 'Liquity BOLD',
     decimals: 18,
-    logoURI: logo('0x6440f144b7e50d6a8439336510312d2f54beb01d'), // TODO: 1inch logo returns 403 — may need local fallback /public/tokens/bold.png
+    logoURI: logo('0x6440f144b7e50d6a8439336510312d2f54beb01d'),
     category: 'Stablecoin',
   },
 
@@ -155,7 +158,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'WBTC',
     name: 'Wrapped BTC',
     decimals: 8,
-    logoURI: logo('0x2260fac5e5542a773aa44fbcfedf7c193bc2c599'),
+    logoURI: '/tokens/wbtc.png',
     category: 'Wrapped BTC',
   },
   {
@@ -189,7 +192,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'cbETH',
     name: 'Coinbase Wrapped Staked ETH',
     decimals: 18,
-    logoURI: logo('0xbe9895146f7af43049ca1c1ae358b0541ea49704'),
+    logoURI: '/tokens/cbeth.png',
     category: 'Liquid Staking',
   },
   {
@@ -271,7 +274,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'LINK',
     name: 'Chainlink',
     decimals: 18,
-    logoURI: logo('0x514910771af9ca656af840dff83e8264ecf986ca'),
+    logoURI: '/tokens/link.png',
     category: 'DeFi',
   },
   {
@@ -279,7 +282,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'UNI',
     name: 'Uniswap',
     decimals: 18,
-    logoURI: logo('0x1f9840a85d5af5bf1d1762f925bdaddc4201f984'),
+    logoURI: '/tokens/uni.png',
     category: 'DeFi',
   },
   {

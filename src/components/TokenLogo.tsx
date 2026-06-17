@@ -5,20 +5,25 @@
  * ever renders a blank circle.
  *
  * The TokenSelector previously used bare `<img onError={display:none}>` in three
- * places (trigger, popular chip, TokenRow). When the catalog logoURI 404s (e.g.
- * 1inch returns 403 for some entries — see BOLD in src/lib/tokens.ts) the image
- * vanished and left an empty circle. <TokenLogo> walks a deterministic fallback
- * chain instead:
- *   1. token.logoURI                       (the catalog URL, usually 1inch)
- *   2. Trust Wallet assets CDN, keyed by   (a DIFFERENT source from the 1inch
- *      the EIP-55 CHECKSUMMED address        catalog, so a 1inch outage/404 still
- *                                            has a real shot at a logo)
- *   3. a GENERATED AVATAR                   (deterministic colour from the address
- *      (never blank)                          + the symbol's initials)
+ * places (trigger, popular chip, TokenRow). When the catalog logoURI 404s (the old
+ * 1inch icons are mainnet-keyed → 404 on Base, 403 for some mainnet entries) the
+ * image vanished and left an empty circle. <TokenLogo> walks a deterministic,
+ * de-duplicated fallback chain of reliable sources instead:
+ *   1. token.logoURI                       (the catalog URL: local /tokens/*.png for
+ *                                            core brands, else DefiLlama)
+ *   2. DefiLlama token-icons, keyed by     (chainId-aware, lowercase address — no
+ *      chainId + LOWERCASE address           checksum-casing pitfall; 200s on both
+ *                                            mainnet AND Base for the long tail)
+ *   3. Trust Wallet assets CDN, keyed by   (a DIFFERENT per-chain source, so a
+ *      the EIP-55 CHECKSUMMED address        DefiLlama miss still has a real shot)
+ *   4. a GENERATED AVATAR                   (deterministic colour from the address
+ *      (TRUE last resort, never blank)        + the symbol's initials — now rare)
  *
- * Steps 1–2 are <img> elements; an onError advances the internal index. Step 3 is
- * pure DOM (a coloured rounded div with initials) and can never error, so the
- * fallback always terminates on something visible.
+ * Steps 1–3 are <img> elements; an onError advances the internal index. The list is
+ * de-duplicated by exact URL string, so a catalog token whose logoURI is ALREADY the
+ * DefiLlama URL never retries the same src. Step 4 is pure DOM (a coloured rounded
+ * div with initials) and can never error, so the fallback always terminates on
+ * something visible.
  */
 import { useMemo, useState } from 'react'
 import { getAddress } from 'viem'
@@ -35,6 +40,15 @@ interface Props {
 const TRUST_WALLET_CHAIN: Record<number, string> = {
   1: 'ethereum',
   8453: 'base',
+}
+
+/**
+ * DefiLlama token-icons URL. chainId-aware and keyed by the LOWERCASE address, so
+ * there is no checksum-casing pitfall — it resolves real logos on both mainnet (1)
+ * and Base (8453). Defaults to mainnet when chainId is absent.
+ */
+function defiLlamaLogo(address: string, chainId?: number): string {
+  return `https://token-icons.llamao.fi/icons/tokens/${chainId ?? 1}/${address.toLowerCase()}?h=48&w=48`
 }
 
 /**
@@ -67,12 +81,21 @@ function initials(symbol: string): string {
 }
 
 export default function TokenLogo({ token, size = 32, className }: Props) {
-  // Ordered list of <img> src candidates. Index === sources.length ⇒ generated avatar.
+  // Ordered, DE-DUPLICATED list of <img> src candidates, reliable sources first.
+  // Index === sources.length ⇒ generated avatar (the TRUE last resort).
+  //   1. token.logoURI                     (catalog: local /tokens/*.png or DefiLlama)
+  //   2. DefiLlama (chainId + lowercase)   (200s on mainnet AND Base for the long tail)
+  //   3. Trust Wallet (per-chain checksum) (a different source; skipped if not 0x)
+  // Dedupe by exact URL string so a catalog logoURI that ALREADY equals the DefiLlama
+  // URL is not pushed (and retried) twice.
   const sources = useMemo(() => {
     const list: string[] = []
-    if (typeof token.logoURI === 'string' && token.logoURI.length > 0) list.push(token.logoURI)
-    const tw = trustWalletLogo(token.address, token.chainId)
-    if (tw) list.push(tw)
+    const push = (url: string | null) => {
+      if (url && !list.includes(url)) list.push(url)
+    }
+    if (typeof token.logoURI === 'string' && token.logoURI.length > 0) push(token.logoURI)
+    push(defiLlamaLogo(token.address, token.chainId))
+    push(trustWalletLogo(token.address, token.chainId))
     return list
   }, [token.logoURI, token.address, token.chainId])
 

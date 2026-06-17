@@ -4075,3 +4075,63 @@ The native-ETH sentinel `0xeeee…eeee` *is* a valid EIP-55 checksum target, so 
 on it (the try/catch guard is load-bearing only for genuinely non-0x/garbage input). Native ETH's real
 `logoURI` works in production; with an empty logoURI it still terminates safely on the avatar — no behaviour
 issue, just correcting the prompt's assumption.
+
+## Feedback — CHORE-TOKEN-LOGOS-FIX — real logos, not initials (fix the 1inch source)
+
+Same PR (#207). The #207 `<TokenLogo>` fallback was firing for almost every token because the catalog's
+`logoURI` came from `tokens.1inch.io/<addr>.png` — **mainnet-keyed, 404s on Base, 403s for some mainnet** — so
+step 1 failed and everything fell to the initials avatar. Fixed the **source**. Frontend only. Verify: tsc clean
+· lint 0 errors · **vitest 1917/1917** · next build · forge 68/68. Built via a 3-agent workflow (mainnet catalog
++ chains catalog + TokenLogo reorder).
+
+### CDN verification (did this FIRST — it regressed once, so no guessing)
+HEAD-tested each candidate on **both** chains; only shipped what returned **200**:
+| Source | mainnet | Base | used as |
+|---|---|---|---|
+| `tokens.1inch.io/<addr>.png` (old) | 403 (some) | **404** | ❌ removed |
+| DefiLlama `token-icons.llamao.fi/icons/tokens/<chainId>/<lowercase-addr>` | **200** | **200** (incl. cbETH) | long-tail primary |
+| Trust Wallet `blockchains/{ethereum,base}/assets/<EIP-55>/logo.png` | **200** | **200** | secondary |
+
+### What shipped
+1. **Local bundled core assets** (Matcha-grade, 100% reliable, no external 404): downloaded + **PNG-validated**
+   10 logos into `public/tokens/` — `eth, weth, usdc, usdt, dai, cbeth, wbtc, link, uni, usdbc`.png (2.9–34 KB
+   each, verified PNG magic bytes). The curated core tokens' `logoURI` now points to `/tokens/<symbol>.png`
+   (symbol-keyed ⇒ same brand logo on mainnet AND Base; e.g. USDC on chain 1 and Base both use `/tokens/usdc.png`).
+2. **`logo()` rewritten** in `src/lib/tokens.ts` + `src/lib/chains/tokens.ts`: `logo(addr, chainId)` → the
+   **DefiLlama chainId-aware URL** (replaces 1inch). The Base catalog passes `8453`; mainnet `1`. So the long
+   tail / discovered tokens now resolve real logos on Base too (the 1inch 403 TODO on BOLD is gone — it resolves
+   via DefiLlama). Lowercase address ⇒ no EIP-55 checksum pitfall.
+3. **`<TokenLogo>` reordered + deduped** to `logoURI → DefiLlama(chainId,addr) → Trust Wallet(chainId,checksum)
+   → avatar`. Dedupe by URL so a catalog `logoURI` that already equals the DefiLlama URL isn't retried. The
+   generated-initials avatar is now the **TRUE last resort** — reached only when all three real sources error.
+   The #207 in-place-token-change reset + its test are preserved.
+
+### Why initials are now rare (the proof)
+- **Core (ETH/WETH/USDC/USDT/DAI/cbETH/WBTC/LINK/UNI/USDbC):** `logoURI = /tokens/*.png` — a bundled asset that
+  always 200s ⇒ TokenLogo step 1 succeeds ⇒ **never reaches the avatar**, on either chain.
+- **Long tail + "Your Tokens" (discovered):** DefiLlama (chainId-aware, 200 on both chains) ⇒ real logo; Trust
+  Wallet as backup. Initials only for a genuinely unknown token both CDNs lack.
+
+### Preview verification
+- **Local core assets:** all 10 `public/tokens/*.png` are valid PNGs, and the **production build serves them
+  200** at `/tokens/<symbol>.png` (`next start` → `curl`, the *same* `/public` static serving Vercel uses). So
+  every core token resolves at TokenLogo step 1 (logoURI) and **never reaches the initials avatar** — on mainnet
+  AND Base (the asset is the brand logo, identical across chains).
+- **Long-tail resolver:** the DefiLlama URLs return **200 on mainnet AND Base** (directly verified — table above).
+- **Vercel Preview caveat:** the branch preview is **auth-protected** (anonymous requests get **401**, not the
+  asset), so a headless `curl` can't fetch its files — the equivalent proof is the prod-build asset serving +
+  the public DefiLlama 200s above (also posted as a PR comment). The owner can visually confirm real logos on
+  the authenticated preview for ETH/USDC/WETH/cbETH/WBTC on both chains.
+
+### Tests
+`TokenLogo.test.tsx`: a token with a real `logoURI` renders that `<img>` (not the avatar); an empty-logoURI
+known address advances to the **DefiLlama** `<img>` (asserts `token-icons.llamao.fi` + chainId + lowercase addr,
+incl. a Base `/8453/` path) before any avatar; the initials avatar appears only after all three sources error;
+the #207 in-place reset test kept. 1917/1917 green.
+
+### Workflow note (caught + handled)
+Two parallel agents both edited `src/lib/tokens.ts` (the TokenLogo agent overstepped its file scope into the
+`logo()` source). I flagged the race and verified the merged on-disk result was coherent — exactly one `logo()`
+definition (DefiLlama), 9 core local refs, no 1inch left, full suite + build green — rather than trusting the
+agents' independent self-reports. (For next time, the file ownership should be enforced harder so two agents
+can't touch the same file.)
