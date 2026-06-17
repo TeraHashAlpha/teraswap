@@ -34,6 +34,12 @@ function findPriceFeed(token: Token, chainId: number): string {
   return feeds[key]?.address ?? ''
 }
 
+// [SPRINT-DCA-UNGATE] The DCA circuit-breaker (#201) returns an HTTP 403 whose message begins
+// "New DCA orders are temporarily paused…". We can't poll a status endpoint (none exists — handle
+// the 403), so we detect that error and switch the form into a calm paused state instead of
+// surfacing a raw failure, disabling submit so the user isn't bounced again.
+const DCA_PAUSED_RE = /temporarily paused/i
+
 // ══════════════════════════════════════════════════════════
 //  DCA PANEL — Autonomous DCA via TeraSwapOrderExecutor v2
 // ══════════════════════════════════════════════════════════
@@ -60,6 +66,9 @@ export default function DCAPanel() {
   } = useOrderEngine()
 
   const { toast } = useToast()
+
+  // [SPRINT-DCA-UNGATE] Set when a freeze-403 is observed → paused UX + disabled submit.
+  const [frozen, setFrozen] = useState(false)
 
   // Browser push notifications (fires when tab is in background)
   useOrderNotifications(latestEvent)
@@ -99,7 +108,14 @@ export default function DCAPanel() {
     if (latestEvent.type === 'order_error') {
       stopWaitingSound()
       playCancelOrderMP3()
-      toast({ type: 'error', title: 'DCA order failed', description: latestEvent.error || 'Order could not be submitted.' })
+      // [SPRINT-DCA-UNGATE] The freeze-403 is an operational pause, not a user error — show a calm
+      // "temporarily paused" notice (no raw error) and latch the disabled state.
+      if (DCA_PAUSED_RE.test(latestEvent.error || '')) {
+        setFrozen(true)
+        toast({ type: 'error', title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' })
+      } else {
+        toast({ type: 'error', title: 'DCA order failed', description: latestEvent.error || 'Order could not be submitted.' })
+      }
     }
   }, [latestEvent])
 
@@ -146,6 +162,7 @@ export default function DCAPanel() {
         <CreateDCAForm
           isConnected={isConnected}
           isSubmitting={isSubmitting}
+          paused={frozen}
           onSubmit={createOrder}
         />
       ) : (
@@ -176,10 +193,12 @@ export default function DCAPanel() {
 function CreateDCAForm({
   isConnected,
   isSubmitting,
+  paused,
   onSubmit,
 }: {
   isConnected: boolean
   isSubmitting: boolean
+  paused: boolean
   onSubmit: (config: CreateOrderConfig) => Promise<void>
 }) {
   const chainId = useChainId()
@@ -217,7 +236,7 @@ function CreateDCAForm({
     return `${(days / 30).toFixed(1)} months`
   }, [parts, interval])
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
@@ -439,6 +458,13 @@ function CreateDCAForm({
         </div>
       )}
 
+      {/* [SPRINT-DCA-UNGATE] Freeze (403) notice — submit is also disabled via canCreate. */}
+      {paused && (
+        <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[12px] text-amber-300">
+          <span className="font-semibold">DCA temporarily paused.</span> New DCA orders are paused right now — existing orders are unaffected and you can still cancel them.
+        </div>
+      )}
+
       {/* Create button */}
       {!isConnected ? (
         <div className="flex justify-center">
@@ -457,6 +483,8 @@ function CreateDCAForm({
         >
           {isSubmitting
             ? 'Signing order...'
+            : paused
+            ? 'DCA temporarily paused'
             : !tokenIn || !tokenOut
             ? 'Select Tokens'
             : Number(totalDisplay) <= 0

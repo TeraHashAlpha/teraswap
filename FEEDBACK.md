@@ -3811,6 +3811,50 @@ so `$4.99` survives integer rounding as a non-zero signal.
 5. **`setDcaFreezeState` when Supabase is unconfigured** returns the requested state without throwing (consistent
    shape) rather than hard-failing — the admin route surfaces real upsert errors but a misconfig is silent.
 
+
+## Feedback — SPRINT-DCA-UNGATE (branch sprint/dca-ungate)
+
+Wired the built-but-dormant DCA panel behind a launch flag (frontend only): `src/lib/dca-launch.ts` (new
+gate), `src/app/page.tsx` (tab gating + render), `src/components/DCAPanel.tsx` (freeze UX). Tests added:
+`dca-launch.test.ts` (8), `src/app/page.test.tsx` (4), `src/components/DCAPanel.test.tsx` (4).
+
+### Launch flag + go-live
+- **Flag:** `NEXT_PUBLIC_DCA_ENABLED` — default **OFF**; only the exact literal `"true"` enables it (a stray
+  `"1"`/`"TRUE"`/`""` can never accidentally launch). While off, the DCA tab is byte-identical to today's
+  disabled "Soon" teaser.
+- **Go-live = flip `NEXT_PUBLIC_DCA_ENABLED=true`** in the Base deployment env AFTER the manual e2e + the
+  OrderExecutor router whitelist + executor funding. No code change required to launch.
+
+### Edge case (a prompt assumption that needed correcting)
+- The prompt's gate ("`isChainActive(8453)` AND `getOrderExecutor(chainId)` non-null") is **insufficient for
+  "Base only"**: `getOrderExecutor(1)` (mainnet) is ALSO non-null (`ORDER_EXECUTOR_BY_CHAIN[1]` is the live
+  mainnet executor), so the literal gate would offer DCA on **mainnet** when the flag is on — violating
+  "mainnet not offered". `isDcaLive` therefore adds an explicit `chainId === 8453` pin. Covered by
+  `dca-launch.test.ts` ("flag ON + mainnet ⇒ NOT live").
+- **`isChainActive(8453)` is itself gated on `NEXT_PUBLIC_BASE_FEE_COLLECTOR`** (Base's `feeCollector` is
+  `process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR || null`). So flipping `NEXT_PUBLIC_DCA_ENABLED` alone is NOT
+  enough — Base must also be "active" (its FeeCollector env set) for the gate to pass. **Add
+  `NEXT_PUBLIC_BASE_FEE_COLLECTOR` to the go-live checklist.**
+
+### Concern
+- **Freeze-403 detection is by the server's message string** (`/temporarily paused/i`), because
+  `createOrderInSupabase` rethrows only `json.error` and drops the HTTP status + `frozen:true` flag. Robust
+  against the current copy (pinned by `orders-freeze.test.ts` → `^New DCA orders are temporarily paused\.`)
+  but it couples the UI to that wording. A sturdier fix would thread the 403 status / `frozen` flag through
+  `createOrderInSupabase → useOrderEngine`, but that edits the **shared** order-creation path (Limit/SL/TP) —
+  outside the frontend-only, DCA-scoped minimal change. Flagged for a future pass.
+- **Paused state is sticky for the session** (until reload). If ops un-freezes the breaker, a user who already
+  hit the 403 must reload to retry. Acceptable for a rare circuit-breaker state; noted for awareness.
+
+### Test gap (now closed)
+- There was no client-side test for the #200 `MIN_ORDER_AMOUNT` pre-sign floor on the DCA path, nor for the
+  freeze-403 UI. Both are now covered in `DCAPanel.test.tsx` (against the REAL `useOrderEngine` with only wagmi
+  + the Supabase I/O mocked, so build → EIP-712 sign → submit is exercised end-to-end). Gate/flag semantics:
+  `dca-launch.test.ts`; page tab wiring + "Limit/SL·TP stay removed": `page.test.tsx`.
+
+### Out of scope (pre-existing, not introduced here)
+- The CI `audit` gate is RED on a WalletConnect/Reown advisory (blocks all PRs until a wagmi/walletconnect
+  bump) — unrelated to this frontend DCA change.
 ## Feedback — CHORE-201-L-01 — make the freeze WRITE path fail-closed
 
 Resolves audit finding **L-01** from #201 (flag #5 above). Tests + a 5-line behaviour change only; stacked on
