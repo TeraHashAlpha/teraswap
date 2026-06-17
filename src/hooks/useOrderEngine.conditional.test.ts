@@ -354,37 +354,48 @@ describe('useOrderEngine — DCA param building', () => {
     expect(typeof orderData.dcaInterval).toBe('string')
   })
 
-  it('passes OMITTED DCA params to Supabase as null at the top level (struct uses 0n/1n) — asymmetry pinned', async () => {
-    // The struct builder defaults dcaInterval->0n, dcaTotal->1n, but the
-    // top-level Supabase args use `config.dcaInterval ?? null` /
-    // `config.dcaTotal ?? null`. These are NOT the same default; the
-    // createOrderInSupabase boundary later re-applies `?? 0` / `?? 1`. This
-    // pins the hook-boundary contract so a refactor that "unifies" them is caught.
+  it('[Fix 2] persists OMITTED DCA params matching the SIGNED struct (0 / 1), not null', async () => {
+    // The signed struct is canonical (the orderHash binds it). The persisted
+    // top-level dca fields must equal exactly what was signed — no second,
+    // different default on the write path. For an omitted-DCA (LIMIT) order the
+    // struct defaults to dcaInterval 0n / dcaTotal 1n.
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result, makeConfig()) // LIMIT, no DCA fields
     const arg = lastSupabaseArg()
-    expect(arg.dcaInterval).toBeNull()
-    expect(arg.dcaTotal).toBeNull()
-    // ...while the SIGNED struct (authoritative for the hash) used the 0n/1n defaults.
     const orderData = arg.orderData as Record<string, unknown>
-    expect(orderData.dcaInterval).toBe('0')
-    expect(orderData.dcaTotal).toBe('1')
+    // top-level Supabase args === signed struct (0 / 1) === the orderData snapshot.
+    expect(arg.dcaInterval).toBe(0)
+    expect(arg.dcaTotal).toBe(1)
+    expect(String(arg.dcaInterval)).toBe(orderData.dcaInterval)
+    expect(String(arg.dcaTotal)).toBe(orderData.dcaTotal)
+  })
+
+  it('[Fix 2] persists a real DCA order’s params matching the signed struct', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await createAndConfirm(
+      result,
+      makeConfig({ orderType: OrderType.DCA, dcaInterval: 43_200, dcaTotal: 10, amountIn: '1000000', routerDataHash: undefined }),
+    )
+    const arg = lastSupabaseArg()
+    const orderData = arg.orderData as Record<string, unknown>
+    expect(arg.dcaInterval).toBe(43_200)
+    expect(arg.dcaTotal).toBe(10)
+    expect(String(arg.dcaInterval)).toBe(orderData.dcaInterval)
+    expect(String(arg.dcaTotal)).toBe(orderData.dcaTotal)
   })
 })
 
 // ─────────────────────────────────────────────────────────────
-// amountIn / minAmountOut + MIN_ORDER_AMOUNT (10000 wei) floor.
+// [CHORE-DCA-PRELAUNCH-FIXES Fix 1] client-side MIN_ORDER_AMOUNT floor guard.
 //
-// FINDING: MIN_ORDER_AMOUNT (10000) is a CONTRACT-only constant (exposed in the
-// ABI), enforced on-chain — there is NO client-side floor validation inside
-// useOrderEngine. The hook builds whatever amount the config provides; the
-// "just-below floor rejected" client check the spec asked for does not exist.
-// Rather than fake a non-existent guard, we pin the ACTUAL behaviour: a sub-floor
-// amount is built verbatim with no rejection, and a just-at/above amount is also
-// passed through unchanged. The protective floor is the contract's job.
-// (Reported as a low-severity coverage/UX note in discoveredBugs.)
+// createOrder rejects BEFORE freezing/signing/persisting when the per-execution
+// amount is below the contract floor (DCA: floor(amountIn/dcaTotal); non-DCA:
+// amountIn), surfaced via an `order_error` event (DCAPanel toasts it) — so the
+// user is never asked to sign an order the contract will revert
+// (DCAChunkTooSmall / OrderTooSmall). MIN_ORDER_AMOUNT is the single shared
+// constant from order-engine/config.ts, mirroring the on-chain 10_000.
 // ─────────────────────────────────────────────────────────────
-describe('useOrderEngine — amount passthrough (MIN_ORDER_AMOUNT is contract-side only)', () => {
+describe('useOrderEngine — MIN_ORDER_AMOUNT pre-sign floor guard [Fix 1]', () => {
   it('builds amountIn/minAmountOut as exact bigints from the wei strings', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
@@ -394,25 +405,44 @@ describe('useOrderEngine — amount passthrough (MIN_ORDER_AMOUNT is contract-si
     expect(result.current.pendingOrder!.order.minAmountOut).toBe(2_900_000_000n)
   })
 
-  it('does NOT reject a sub-floor amount client-side (9999 wei < MIN_ORDER_AMOUNT 10000) — built verbatim', async () => {
+  it('REJECTS a sub-floor amount client-side (9999 < 10000) before freezing/signing/persisting', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
       await result.current.createOrder(makeConfig({ amountIn: '9999', minAmountOut: '1' }))
     })
-    // No client floor: the order is still frozen for review, no error event.
-    expect(result.current.pendingOrder).toBeTruthy()
-    expect(result.current.pendingOrder!.order.amountIn).toBe(9_999n)
+    // Not frozen for review; an order_error surfaced for the UI to toast.
+    expect(result.current.pendingOrder).toBeNull()
+    expect(result.current.latestEvent?.type).toBe('order_error')
+    expect((result.current.latestEvent as { error: string }).error).toMatch(/minimum|too small|10,000/i)
+    // confirmOrder is a no-op (nothing frozen) → never signs or persists.
     await act(async () => { await result.current.confirmOrder() })
-    // It even signs + submits — the 10000-wei floor is enforced ON-CHAIN, not here.
-    expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)
-    expect(lastSignedMessage().amountIn).toBe(9_999n)
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
   })
 
-  it('builds a just-at-floor amount (10000 wei) unchanged', async () => {
+  it('ALLOWS a just-at-floor amount (10000) — frozen for review, no error', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
       await result.current.createOrder(makeConfig({ amountIn: '10000', minAmountOut: '1' }))
     })
     expect(result.current.pendingOrder!.order.amountIn).toBe(10_000n)
+    expect(result.current.latestEvent?.type).not.toBe('order_error')
+  })
+
+  it('REJECTS a DCA order whose per-chunk amount is sub-floor (floor(15000/2)=7500 < 10000)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ orderType: OrderType.DCA, amountIn: '15000', dcaInterval: 3_600, dcaTotal: 2, minAmountOut: '1' }))
+    })
+    expect(result.current.pendingOrder).toBeNull()
+    expect(result.current.latestEvent?.type).toBe('order_error')
+  })
+
+  it('ALLOWS a DCA order whose per-chunk amount is exactly at floor (20000/2=10000)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ orderType: OrderType.DCA, amountIn: '20000', dcaInterval: 3_600, dcaTotal: 2, minAmountOut: '1' }))
+    })
+    expect(result.current.pendingOrder!.order.amountIn).toBe(20_000n)
   })
 })

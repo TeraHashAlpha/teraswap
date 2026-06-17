@@ -30,6 +30,7 @@ import {
   getWhitelistedRouters,
   getDefaultRouter,
   getChainlinkFeeds,
+  MIN_ORDER_AMOUNT,
 } from './config'
 
 // Byte-identical, checksummed mainnet-behaviour constants (must match config.ts exactly).
@@ -122,6 +123,16 @@ describe('CANCEL_ORDER_TYPES [FULL-H-01]', () => {
       { name: 'id', type: 'string' },
       { name: 'action', type: 'string' },
     ])
+  })
+})
+
+describe('MIN_ORDER_AMOUNT [CHORE-DCA-PRELAUNCH-FIXES] — single source pinned to the contract', () => {
+  it('equals the on-chain constant TeraSwapOrderExecutor.sol MIN_ORDER_AMOUNT = 10_000 (bigint)', () => {
+    // Contract: `uint256 public constant MIN_ORDER_AMOUNT = 10_000;` (TeraSwapOrderExecutor.sol:126),
+    // pinned on-chain by contracts/order-engine/test-run.js ("MIN_ORDER_AMOUNT is 10000"). If the
+    // contract floor ever changes, this MUST change with it — the client guard + server API both read it.
+    expect(MIN_ORDER_AMOUNT).toBe(10_000n)
+    expect(typeof MIN_ORDER_AMOUNT).toBe('bigint')
   })
 })
 

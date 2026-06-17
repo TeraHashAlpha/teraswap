@@ -82,8 +82,10 @@ export async function createOrderInSupabase(params: {
   expiry: Date
   nonce: number
   router: string
-  dcaInterval: number | null
-  dcaTotal: number | null
+  // [CHORE-DCA-PRELAUNCH-FIXES Fix 2] Canonical DCA params taken from the SIGNED struct
+  // (never null on the write path) — single source of truth, no second default here.
+  dcaInterval: number
+  dcaTotal: number
   signature: string
   orderData: Record<string, unknown>
   tokenInSymbol: string
@@ -113,8 +115,8 @@ export async function createOrderInSupabase(params: {
         expiry: Math.floor(params.expiry.getTime() / 1000),
         nonce: params.nonce,
         router: params.router,
-        dcaInterval: params.dcaInterval ?? 0,
-        dcaTotal: params.dcaTotal ?? 1,
+        dcaInterval: params.dcaInterval,
+        dcaTotal: params.dcaTotal,
         signature: params.signature,
         orderData: params.orderData,
         tokenInDecimals: params.tokenInDecimals,
