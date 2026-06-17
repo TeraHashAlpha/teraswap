@@ -3513,3 +3513,84 @@ Go-live follow-up to CHORE-ORDER-EXEC-PREP (which set `8453: null`). One signed 
 - **DCA tab stays "Soon"** — `page.tsx` unchanged (UI go-live is the separate step).
 - No contract/Solidity change; no `src/` behaviour change beyond the address wiring. Mainnet byte-identical.
   forge 68/68 + 19/19, vitest 1701/1701.
+
+## Feedback — CHORE-EXECUTOR-DEPS — declare the keeper's missing runtime deps
+
+Manifest + lockfile only (`contracts/order-engine/executor/package.json` + new `package-lock.json`). No
+logic/contract/`src/` change.
+
+### Import audit (executor.js, kms-signer.js, event-watcher.js, monitor.js, alert.js)
+Every external `import`/`require`/dynamic `import()` reconciled against `dependencies`:
+
+| Specifier | Kind | Status before | Action |
+|---|---|---|---|
+| `viem`, `viem/accounts` | **static** import (executor.js, kms-signer.js) | imported, **NOT declared** | **added** `viem@2.47.10` |
+| `@aws-sdk/client-kms` | **dynamic** `await import()` (kms-signer.js KMS path) | imported, **NOT declared** | **added** `@aws-sdk/client-kms@^3.700.0` |
+| `ethers` | — | declared | **kept** — but see "declared-but-unused" below |
+| `fs`, `http`, `os`, `path` | static | Node built-ins | none |
+| `./alert.js` `./event-watcher.js` `./kms-signer.js` `./monitor.js` | static | local | none |
+
+- **Vault path** (`kms-signer.js` ~L206–221, `VAULT_ADDR`/`VAULT_TOKEN`/`VAULT_KEY_NAME`): it is a **TODO stub**
+  ("Vault signer configured but not yet implemented", falls back to plaintext) — **no `node-vault`/axios/HTTP
+  client is imported**, so **no dep needed**. When implemented it should use built-in `fetch` (Node ≥18) to stay
+  dependency-free.
+- **`dotenv`**: not used — executor.js loads `.env.executor` **manually** ("no dotenv dependency", L65).
+- **`@supabase/supabase-js`**: not imported — Supabase is reached via built-in `fetch` (REST), no SDK.
+
+### Versions (pinned, no major bump)
+- `viem@2.47.10` — exact, matches the sibling `contracts/order-engine/package.json` (app uses 2.47.4; both 2.47.x).
+- `@aws-sdk/client-kms@^3.700.0` — stays on the v3 line; clean install resolved **3.1070.0** with a coherent
+  `@smithy/*`/`@aws-sdk/core` set (there was **no** pre-existing `@smithy` in the lockfile to match — the executor
+  had only `ethers` declared). 67 packages, lockfile committed → reproducible.
+
+### Proof — clean standalone install + smoke-import of both entrypoints
+Isolated in `/tmp` so the monorepo root `node_modules` can't mask missing deps (in prod the keeper is deployed
+standalone, **not** under the monorepo, so root resolution does not apply).
+
+**BEFORE** (old manifest, `ethers` only, `rm -rf node_modules package-lock.json && npm install`):
+- `node executor.js` → `ERR_MODULE_NOT_FOUND` (`viem`, a static import — fails before `main()`).
+- KMS path → `ERR_MODULE_NOT_FOUND: Cannot find package 'viem'`.
+- *Isolating the headline gap* — add `viem` but **not** `@aws-sdk`: `executor.js` then imports fine **without**
+  KMS (config error only — masks the latent bug), but the moment `KMS_KEY_ID` is set (as in prod) the dynamic
+  import dies: `ERR_MODULE_NOT_FOUND: Cannot find package '@aws-sdk/client-kms'`. This is why a static-analysis/CI
+  lint would miss it — the failure only triggers when KMS signing is actually configured.
+
+**AFTER** (this manifest, clean install — 67 pkgs):
+- `node executor.js` (no env) → `FATAL: Missing required env vars: RPC_URL, SUPABASE_URL, …` — i.e. fails **only
+  on missing config**, NOT `ERR_MODULE_NOT_FOUND`. ✅
+- KMS path (`KMS_KEY_ID` set, no AWS creds) → `Could not load credentials from any providers` — the AWS SDK
+  **loaded and executed**, proving `@aws-sdk/client-kms` resolves; it now fails on AWS config, not module
+  resolution. ✅
+- `node_modules/viem` (2.47.10) and `node_modules/@aws-sdk/client-kms` (3.1070.0) both present locally.
+
+### npm audit (report only — `npm audit fix --force` NOT run, per spec + keep-npm discipline)
+`3 vulnerabilities (2 moderate, 1 high)` — all trace to a single root: **`ws` 8.0.0–8.20.1 (HIGH)**
+(GHSA-58qx-3vcg-4xpx uninitialised-memory disclosure + GHSA-96hv-2xvq-fx4p memory-exhaustion DoS), pulled
+transitively by **both** `viem` (≤2.49.3) and `ethers` (≥6) → reported as 2 moderate edges + the 1 high root.
+
+- **Runtime-path assessment (HIGH `ws`): NOT exercised.** The executor uses viem `http()` transport **exclusively**
+  (executor.js L891/901/910/915 — public + wallet + Flashbots clients all `http(RPC_URL)`); there is **no**
+  WebSocket transport anywhere in the package (no `webSocket(`/`wss://`/`WebSocketProvider`). `ws` is in the tree
+  but its code is never loaded at runtime, so live exposure is effectively nil. **Flagging the HIGH for Architect
+  triage anyway** (it's a high in the tree of a fund-moving keeper).
+- **The spec expected "1 moderate, 1 high"** — that was the *old* `ethers`-only tree. Adding `viem` (which also
+  depends on the same vulnerable `ws`) introduced the **2nd moderate** edge. Net new risk = none (same root `ws`).
+- **Fix path for the Architect (deferred — out of this chore's "manifest + add-missing" scope):**
+  - `viem 2.47.10 → 2.52.2` clears the viem→ws edge and is **non-major** (`fixAvailable.isSemVerMajor:false`).
+  - The `ethers→ws` edge only "fixes" via `ethers@5.8.0`, a **breaking major downgrade** — which is exactly what
+    `npm audit fix --force` would do (and why it must not be run; also violates the no-downgrade rule). Better:
+    **remove `ethers` entirely** — see below.
+
+### Declared-but-unused: `ethers`
+`ethers` is declared but **imported nowhere** (the package migrated to `viem`; zero `ethers` references in any
+`.js`). I **kept** it (this chore is scoped to *adding* missing deps, not removing). Recommend a follow-up to drop
+it: it's dead weight on the standalone install **and** is one of the two vulnerable-`ws` carriers — removing it
+eliminates a moderate audit edge for free.
+
+### CI coverage
+**CI does NOT cover the executor package.** `lint` = `eslint src` (src only); `typecheck` = `tsc --noEmit` (tsconfig
+scoped to src, executor excluded); `test` = `vitest run` (src specs); `test-contracts` = forge (Solidity only). No
+workflow installs/builds/tests `contracts/order-engine/executor`. **Verification for this change is the manual
+clean-install + dual-entrypoint smoke-import above.** Consider a tiny CI job (`npm ci` + the no-env smoke-import,
+asserting non-`ERR_MODULE_NOT_FOUND`) so the keeper's manifest can't silently rot again — backlog item for the
+Architect.
