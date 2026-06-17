@@ -3636,3 +3636,75 @@ ua-parser-js        : 1.0.41                          → 1.0.41            (ADR
   in `ci.yml` + `security-audit.yml`). It fails on any non-allowlisted high/critical (verified it has teeth)
   and only *warns* on stale entries (so it can't surprise-red `main` later). The allowlist self-empties once the
   two follow-up overrides land (~06-19 / ~06-22).
+
+## Feedback — SPRINT-ORDER-ENGINE-TESTS — test coverage for the order/Base paths going live
+
+Tests only — **no production logic changed** (every new file is a `*.test.ts`; all 6 reviewer agents confirmed
+`git status -- src/` shows only test files). 6 new files, **+136 tests** (1701 → **1837**, all green).
+
+### Phase 0 — coverage before → after (v8, target surface)
+Measured with a temporary `@vitest/coverage-v8` (matching vitest 4.1.8), **not committed** — the manifest is
+reverted; CI runs `vitest run` without coverage.
+
+| Module | Stmts before→after | Branch before→after | Funcs before→after | Lines before→after |
+|--------|--------------------|---------------------|--------------------|--------------------|
+| `lib/order-engine/config.ts` | 86.95 → **100** | 100 → 100 | 40 → **100** | 86.95 → **100** |
+| `app/api/orders/route.ts` (create) | 37.27 → **71.81** | 34.92 → **73.8** | 50 → 50 | 40.59 → **76.23** |
+| `app/api/orders/[id]/route.ts` (cancel) | **0 → 100** | **0 → 100** | **0 → 100** | **0 → 100** |
+| `hooks/useOrderEngine.ts` | 82.46 → 82.46 | 69.19 → **71.56** | 83.33 → 83.33 | 85.66 → 85.66 |
+| `lib/on-chain-monitor.ts` | 87.89 → 87.89 | 71.09 → **72.83** | 100 → 100 | 89.86 → 89.86 |
+| `lib/limit-order-api.ts` | **0 → 96.15** | **0 → 83.33** | **0 → 77.77** | **0 → 100** |
+| `lib/conditional-order-types.ts` | 0 → 0 | 100 → 100 | 100 → 100 | 0 → 0 |
+| **target surface (all)** | 67.8 → **84.82** | 53.7 → **75.42** | 76.85 → **87.6** | 69.45 → **87.58** |
+
+### Phase 1 — new tests per high-risk path
+- **`config.test.ts` (20)** — #184 chain-aware core: `getOrderExecutor` 1/8453 resolve, 42161/0/999999/-1 →
+  null (incl. the falsy-chainId `?? null` guard); `getOrderExecutorDomain` deep-equals mainnet/Base domains and
+  **throws** for 42161; Base addr asserted ≠ the mainnet string (FeeCollector-confusion invariant);
+  `CANCEL_ORDER_TYPES` shape; router/feed getters byte-identical + chainId-ignored; env-override via
+  resetModules+dynamic-import.
+- **`orders-create.validation.test.ts` (39)** — every create-API 400 branch: address/sig-format/amount/
+  MIN_ORDER_AMOUNT (incl. exact-floor passes), expiry past/now/>90d, DCA interval/total/chunk, tokenIn==tokenOut,
+  priceFeed rules; **per-chain EIP-712**: asserts `recoverTypedDataAddress` is called with
+  `verifyingContract === mainnet executor` and `chainId === 1`; recovered≠wallet → "Signature mismatch";
+  orderData mismatch → 400. (Did not duplicate the existing `route.test.ts` unwired-chain/guard tests.)
+- **`orders-cancel.test.ts` (23)** — the previously **0%** cancel route: EIP-712 owner-only auth — non-owner
+  (recovered≠wallet) → 400; correct per-chain domain asserted; **unwired chain (42161) → domain throws → 400
+  "Invalid cancel signature"** (never verifies vs a non-existent executor); happy path → `{ok:true}`; 404/403/409/
+  500/503 branches; GET auth.
+- **`on-chain-monitor.chain-aware.test.ts` (5)** — `getScanTargets()`: mainnet executor = real OrderExecutor;
+  wired Base executor = `0x135B…2598` and **asserted ≠ the Base FeeCollector** `0xeFC3…f130` (no scanning the
+  wrong contract for order events); **unwired chain → no executor scan target**; per-chain cursor keys.
+- **`limit-order-api.test.ts` (33)** — the previously **0%** CoW module: `computeBuyAmount` decimal-diff +/−/0 +
+  exact worked examples + zero + large bigint; `buildLimitOrderParams` ETH→WETH, validTo (fake timers), appData
+  referrer/orderClass; `fetchCurrentPrice`/`submitLimitOrder`/`fetchLimitOrderStatus` (filledPercent, fulfilled→
+  trades)/`cancelLimitOrder` happy + error paths (fetch mocked at the boundary).
+- **`useOrderEngine.conditional.test.ts` (16)** — price-condition ABOVE/BELOW mapping, DCA interval/total/
+  minAmountOut boundaries, expiry handling (jsdom + wagmi mocks per the existing hook test).
+
+### Spec discrepancies (assumptions that were wrong)
+- **`src/hooks/useConditionalOrder.ts` does not exist.** The conditional-order/DCA/price-condition/expiry logic
+  lives in `useOrderEngine.ts` — covered there. The Phase-0 list should be corrected.
+- **`conditional-order-types.ts` has no testable logic** — it is pure `type`/`interface` definitions + 3
+  constants (no functions/branches), so it stays 0% statements by construction. Listing it as a coverage target
+  is misleading; the DCA/limit *param* logic is in `limit-order-api.ts` + the create route + the hook (all tested).
+
+### 🐞 Flagged for Architect — do NOT fix here (tests document current behaviour; suite stays green)
+1. **[LOW] No client-side `MIN_ORDER_AMOUNT` (10000 wei) floor in `useOrderEngine`.** `createOrder`/`confirmOrder`
+   build `amountIn` verbatim with no floor check (the 10000 floor exists only as the on-chain contract constant /
+   the create-API server guard). A 9999-wei order is frozen, **EIP-712-signed, and persisted** before the
+   contract rejects it on execution — wasted signature/UX, not a fund risk. `useOrderEngine.ts:483-517`.
+   Test documents current behaviour (`… does NOT reject a sub-floor amount client-side`) + a `FINDING:` comment.
+2. **[LOW] Omitted-DCA-param default asymmetry.** The signed/hashed struct carries `dcaInterval=0n / dcaTotal=1n`
+   while the hook passes `null/null` to Supabase (re-defaulted again at `supabase.ts:116`). Two defaulting sites
+   for one value → the persisted row can diverge from the signed struct. The `orderHash` binds the struct (so
+   execution is unaffected), but it's a data-consistency smell. `useOrderEngine.ts:506-508` vs `:621-622`.
+
+Neither is security/gate-adjacent (the contract + server API enforce the floor; the orderHash binds the signed
+struct), so **no Auditor** per the spec — but both warrant an Architect backlog item before DCA go-live.
+
+### Method note
+Authored via a 6-area writer→reviewer workflow (each writer reads the source + existing sibling test, writes a
+new file, self-verifies with `vitest run`; an adversarial reviewer gates real-assertions/deterministic/
+no-source-edit). Two type-only fixes were needed post-hoc (`vi.fn((..._args: unknown[]) => …)` — the agents'
+`vitest run` self-check uses esbuild and doesn't typecheck; the CI `tsc` gate does).
