@@ -1,0 +1,57 @@
+# Keeper unit tests — runs the self-hosted DCA keeper's node:test suite in CI.
+#
+# WHY A SEPARATE WORKFLOW (CHORE-KEEPER-CI / SPRINT-201 audit gap):
+#   The keeper lives in contracts/order-engine/executor/ with its own
+#   package.json + lockfile (deps declared in #194). Its tests —
+#   freeze-score.test.mjs (12) + alert.test.mjs (6) = 18 — were NOT run in
+#   CI, so a future change could break them silently. This gate runs them on
+#   every PR to main. It is PURELY ADDITIVE: it does not touch the app CI jobs
+#   in ci.yml (build/lint/typecheck/audit/lockfile-lint/test-contracts).
+#
+# NO SECRETS / RPC / SUPABASE:
+#   The keeper tests are pure unit tests with mocked/absent I/O —
+#   freeze-score.js is side-effect-free, and alert.test.mjs unsets TELEGRAM_*
+#   so alert.js only logs and never hits the network. alert.js reads CHAIN_ID
+#   with a "1" default, so no env var is required to import. Nothing here needs
+#   a secret, an RPC URL, or a database.
+
+name: "Keeper Tests"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  keeper-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/order-engine/executor
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "20"
+          cache: "npm"
+          # cache-dependency-path is relative to the workspace root (the
+          # setup-node action runs there; defaults.working-directory only
+          # applies to `run` steps).
+          cache-dependency-path: contracts/order-engine/executor/package-lock.json
+      # Unit tests need no native builds, so skip install scripts — faster and
+      # safer, consistent with the repo-root .npmrc `ignore-scripts=true`.
+      - name: Install keeper deps
+        run: npm ci --ignore-scripts
+      # `node --test` auto-discovers *.test.mjs in this directory (it skips
+      # node_modules) — freeze-score.test.mjs + alert.test.mjs = 18 tests.
+      # A non-zero exit on any failing test fails the job, and thus the PR.
+      - name: Run keeper node:test suite
+        run: node --test
