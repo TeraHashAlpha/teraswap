@@ -83,6 +83,11 @@
     "@walletconnect/core": "2.21.1",
     "@walletconnect/sign-client": "2.21.1",
     "@walletconnect/universal-provider": "2.21.1",
-    "qr": "0.5.5"
+    "qr": "0.5.5",
+    "hono": "4.12.25",
+    "@walletconnect/jsonrpc-ws-connection": {
+      "ws": "7.5.11"
+    },
+    "ws": "8.21.0"
   }
 }

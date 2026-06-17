@@ -32,8 +32,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts=false
 
-      - name: Check for high/critical vulnerabilities
-        run: npm audit --audit-level=high
+      - name: Check for high/critical vulnerabilities (allowlist-aware)
+        # Allowlist-aware gate: fails on any high/critical NOT in audit-allowlist.json
+        # (entries are min-release-age-blocked fixes with dated TODOs). See
+        # scripts/audit-gate.mjs.
+        run: node scripts/audit-gate.mjs
 
       - name: Check for moderate vulnerabilities (advisory)
         run: npm audit --audit-level=moderate || true

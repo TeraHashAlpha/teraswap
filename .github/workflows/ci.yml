@@ -72,8 +72,11 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci --ignore-scripts=false
-      - name: Security audit (high/critical)
-        run: npm audit --audit-level=high
+      - name: Security audit (high/critical, allowlist-aware)
+        # Fails on any high/critical NOT in audit-allowlist.json. The allowlist holds
+        # only fixes blocked by .npmrc min-release-age=7 (each with a dated TODO). See
+        # scripts/audit-gate.mjs + audit-allowlist.json.
+        run: node scripts/audit-gate.mjs
 
   lockfile-lint:
     runs-on: ubuntu-latest

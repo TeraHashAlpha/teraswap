@@ -3513,3 +3513,46 @@ Go-live follow-up to CHORE-ORDER-EXEC-PREP (which set `8453: null`). One signed 
 - **DCA tab stays "Soon"** — `page.tsx` unchanged (UI go-live is the separate step).
 - No contract/Solidity change; no `src/` behaviour change beyond the address wiring. Mainnet byte-identical.
   forge 68/68 + 19/19, vitest 1701/1701.
+
+## Feedback — CHORE-WC-REOWN-ADVISORY — fix the WC/Reown audit-gate failure
+
+Full triage: `Audits/WC-REOWN-ADVISORY-2026-06-16.md`. Deps/overrides + audit-config only; no app logic.
+
+### Assumption that turned out wrong (prompt framing)
+- The prompt says the 4 HIGH advisories are `@reown/appkit-*` (`<=1.8.9`) via `@wagmi/connectors`. They are
+  **not**. The 4 HIGH (confirmed against #194's CI log + a fresh `npm audit`) are **`form-data`, `hono`,
+  `vite`, `ws`**. The `@reown/appkit-*` / `@walletconnect/*` chain is the **moderate** bulk (the "Depends on
+  vulnerable versions of …" lines), which the bare `npm audit` output makes look like the headline. The fix
+  therefore targets the real high packages, not `@reown/appkit`. Worth correcting in the prompt template.
+
+### Edge case — `min-release-age=7` splits the patches
+- `.npmrc` `min-release-age=7` refuses versions published <7 days ago, so two of the four fixes are **not
+  installable today**: `form-data@4.0.6` (pub 2026-06-12, ages in ~06-19) and `vite@8.0.16` (pub 2026-06-15,
+  ages in ~06-22). `ws@8.21.0/7.5.11` (2026-05-22) and `hono@4.12.25` (2026-06-09) are aged-in.
+- Chosen split per the prompt's preferred/fallback structure: **override** the aged-in two; **allowlist** the
+  blocked two (with dated TODOs to convert to overrides once they age in). `.npmrc` left unchanged; no
+  min-release-age bypass. (Architect: an all-override pin with a one-time freshness exception is the
+  alternative — noted in the triage; ping me to switch.)
+
+### Tree deltas (`npm ls`)
+```
+@walletconnect/core : 2.21.1                         → 2.21.1            (still exactly ONE — P184 holds)
+ws                  : 7.5.10, 8.18.0, 8.18.3, 8.20.0 → 7.5.11, 8.21.0    (override; clears GHSA-96hv + GHSA-58qx)
+hono                : 4.12.23                         → 4.12.25           (override; clears GHSA-88fw)
+@noble/hashes       : 1.4.0,1.7.0,1.7.1,1.7.2,1.8.0  → 1.4.0,1.7.0,1.7.1,1.8.0   (dedup side-effect:
+                      @scure/bip32 & bip39 declare ~1.7.1; their 1.7.2 copy collapsed onto shared 1.7.1 —
+                      in range, 1-patch; signing/derivation tests green)
+ua-parser-js        : 1.0.41                          → 1.0.41            (ADR-012 canary; 1.x = MIT, not 2.x AGPL)
+@rainbow-me/rainbowkit : 2.2.10 (unchanged)   wagmi : 2.19.5 (unchanged)
+```
+`npm audit`: 34 → 19 (1 low, 16 moderate, **2 high** remaining: `form-data` + `vite`, both allowlisted).
+
+### Test gap / concern
+- **CI does not cover the WalletConnect browser pairing flow.** The `ws` override forces
+  `@walletconnect/jsonrpc-ws-connection` onto a different ws patch (7.5.11). tsc/lint/vitest(1701)/build/forge
+  all pass, but a real QR + mobile-deeplink connect should be smoke-tested before merge (manual-verify step in
+  the triage). Browser uses native `WebSocket`, so risk is low, but it's untested in CI.
+- **New CI surface:** `scripts/audit-gate.mjs` is now the security gate (replaces `npm audit --audit-level=high`
+  in `ci.yml` + `security-audit.yml`). It fails on any non-allowlisted high/critical (verified it has teeth)
+  and only *warns* on stale entries (so it can't surprise-red `main` later). The allowlist self-empties once the
+  two follow-up overrides land (~06-19 / ~06-22).
