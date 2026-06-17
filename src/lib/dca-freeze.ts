@@ -102,11 +102,12 @@ export async function setDcaFreezeState(
   }
 
   if (!sb) {
-    // Unconfigured backend — nothing to persist. Surface the requested state
-    // so callers get a consistent shape; the keeper's on-chain pause() remains
-    // the real safety net.
-    console.error('[dca-freeze] setDcaFreezeState: Supabase unconfigured')
-    return newState
+    // [201-L-01] FAIL-CLOSED write path: if there is no backend to persist to,
+    // the freeze did NOT take — surface that as a failure (the admin route maps
+    // a throw to 503) so the operator never believes a freeze succeeded when it
+    // didn't. (The READ path stays fail-open by design — see getDcaFreezeState.)
+    console.error('[dca-freeze] setDcaFreezeState: Supabase unconfigured — freeze NOT persisted')
+    throw new Error('Supabase unconfigured — freeze state was NOT persisted')
   }
 
   const { error } = await sb.from(TABLE).upsert({
