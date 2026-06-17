@@ -3942,3 +3942,76 @@ Breakdown is `freeze-score.test.mjs` (12) + `alert.test.mjs` (6) = 18, matching 
   the tests, and the executor has no audit-gate today), so these are surfaced here for the Architect rather than
   silently shipped. The executor dep tree currently has no Dependabot/`audit-gate` coverage equivalent to the
   app's `scripts/audit-gate.mjs` — a candidate backlog item.
+
+## Feedback — CHORE-DEAD-CODE-SWEEP — conservative unused-code/deps cleanup
+
+Removal-only; no behaviour change; mainnet byte-identical. The conservative mandate paid off: I ran knip +
+ts-prune, then **adversarially re-verified every candidate** (a 5-agent verify workflow + my own grep). Most
+"unused" findings are FALSE POSITIVES that static tools and even the agents missed — so the safe removal set is
+small and the documented "left-it" list is large (by design). Verify: tsc clean · lint 0 errors · **vitest
+1894/1894** · next build · forge **68/68** · keeper `npm ci` + smoke-import + `node --test` **18/18**.
+
+### Analyzer report (raw)
+- **knip**: 29 unused files · 7 unused deps · 1 unused devDep · 2 unlisted deps · 88 unused exports · **99
+  unused exported types**. (`ts-prune`: 204 unused exports — noisier, dominated by Next.js convention
+  `default`/`metadata` entry points it can't model.)
+- Across all 232 candidates the verification verdict was **36 SAFE_REMOVE (32 distinct) / 196 LEAVE**.
+
+### REMOVED (provably-unused, all gates green)
+1. **`contracts/order-engine/executor/` — dropped `ethers`** (the explicit #194 finding). Confirmed **zero**
+   `ethers` imports across the keeper (it uses viem); removed from `package.json` + regenerated the lockfile with
+   a clean `npm install` (no hand-edits). Lockfile **67 → 53 packages** (ethers + transitives gone). `npm ci`
+   installs, the keeper smoke-imports to a config error (NOT module-not-found — proves ethers was unused), and
+   the keeper `node --test` stays 18/18.
+2. **5 dead exports** (verified zero references repo-wide, non-security, no dynamic dispatch, no cascade):
+   `SwapBoxSkeleton` (`src/components/Skeleton.tsx`), `ANALYTICS_VERSION` (`src/lib/analytics-types.ts`),
+   `ETHERSCAN_TOKEN` + `ETHERSCAN_ADDRESS` (`src/lib/constants.ts`). *(`loadEventsAsync` was a SAFE_REMOVE
+   candidate but cascades into `syncFromSupabase` — left it; see below.)*
+
+### LEFT IT — "possibly-dynamic / intentional / documented-keep" (the conservative list)
+**Deps — all LEFT (none were actually dead):**
+- `valtio` — an **intentional** direct dep (INC-2026-06-03-001 + FEEDBACK: removing it un-hoists a transitive);
+  zero TS imports is expected.
+- `@capacitor/*` (core/ios/android/browser/splash-screen/status-bar/cli) — back a **real Capacitor iOS native
+  build** (`capacitor.config.ts` + `ios/App/App.xcodeproj`); consumed by `cap sync`, not TS imports. Removing
+  any breaks the native build.
+- `@eslint/eslintrc` (devDep) — the flat `eslint.config.mjs` uses `eslint-config-next` directly (not FlatCompat),
+  so it's not strictly required, **but** it's a low-value/borderline removal that lint tooling may still expect —
+  left it (note for a future focused pass).
+
+**Files — all LEFT (false positives):** the keeper runtime (`executor/*.js` + the `*.test.mjs` run by the new
+`keeper-tests` CI), the Cloudflare worker (`workers/monitor-tick-cron/src/index.ts`, wrangler `main`), contract
+compile/deploy/hardhat tooling, `public/sw.js` (PWA SW registered by string path), `scripts/generate-token-
+catalog.mjs` (codegen). Plus **documented deliberate-keeps** from the prior P4 review: `ConditionalOrderPanel.tsx`,
+`CountdownGate.tsx`, `conditional-order-types.ts`, `source-preferences.ts`, `test-utils/mock-wagmi.ts`;
+`scripts/seed-10-trades.ts` (pinned in `.gitleaksignore`); `scripts/token-category-overrides.ts` (used by the
+`tokens:sync` script); `contracts/order-engine/api/orders.ts` (order-execution subsystem, security-adjacent).
+
+**Types — all 99 LEFT:** runtime-free but flagged by knip; verification found them re-exported via barrels or used
+in type positions/`import type` that knip misses — conservative LEAVE (a low-risk follow-up could prune them).
+
+**Exports — LEFT despite SAFE_REMOVE verdicts:**
+- **🔒 18 security/gate-adjacent exports — FLAGGED FOR ARCHITECT (not removed in this conservative PR):**
+  `approvals.ts` Permit2 helpers (`permit2Abi`, `getPermit2Domain`, `PERMIT_SINGLE_TYPES`, `planApproval`,
+  `getPermit2Deadline`, `getPermit2Expiration`), `circuit-breaker.ts:getLastTrip`,
+  `post-execution-validator.ts:getAuditTrail`, `adapters/shared.ts:deductFee`, `source-monitor.ts`
+  (`isSourceDegraded`, `getDegradedSources`), `source-state-machine.ts:resetAllStates`,
+  `split-router.ts:analyzeSplitRoute`, `rpc.ts:getRpcUrl`, `rate-limiter.ts:priceLimiter`,
+  `quorum-check.ts:IQR_MULTIPLIER`, `limit-order-types.ts` (`LIMIT_STORAGE_KEY`, `LIMIT_POLL_INTERVAL_MS`).
+  These greped to zero references, but they live on swap/approval/oracle/circuit-breaker/order-execution paths —
+  several look like **scaffolding for in-flight features** (e.g. the Permit2 approval set, whose stale FEEDBACK
+  note about `useApproval` suggests it was mid-development). Per the spec, removals here need Architect sign-off.
+- **`sounds.ts` play* (9) — LEFT.** I caught the verify agents producing **false positives** here:
+  `playApproval`, `playSwapInitiated`, `playError` are referenced in the SwapBox/DigitRoller test mocks
+  (`vi.mock('@/lib/sounds', …)`). That over-mocking is harmless but it means the agents' sounds analysis is
+  unreliable, so I left the whole unused-sounds set for a focused follow-up (remove the dead helpers **and** their
+  dangling mock keys together).
+- `loadEventsAsync` — cascades into `syncFromSupabase` (also flagged); left both to avoid a partial cascade.
+
+### Method note
+The analyzer tools (knip) were installed **temporarily** to measure (exact-version pin, like a coverage tool) and
+**reverted** — the root `package.json`/lockfile are unchanged; only the executor manifest/lockfile + the 3 src
+files changed. The single-instance invariants (@walletconnect/core, qr@0.5.5, viem, coinbase-sdk) are untouched
+(no dep added/bumped except the executor `ethers` drop). The biggest lesson: **re-verify every static-analysis
+hit** — knip's 232 "unused" items contained ~6 outright false positives I found by hand (valtio, the sounds
+trio, capacitor) before they could cause a hidden break.

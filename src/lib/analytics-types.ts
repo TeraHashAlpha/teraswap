@@ -110,4 +110,3 @@ export interface DashboardData {
 
 // ── Storage key ──
 export const ANALYTICS_STORAGE_KEY = 'teraswap_analytics_events'
-export const ANALYTICS_VERSION = 1
