@@ -146,6 +146,17 @@ describe('/api/admin/dca-freeze', () => {
       expect(body).toEqual(UNFROZEN_STATE)
     })
 
+    it('[201-L-01] returns 503 (NOT 200) when the write fails to persist — fail-closed', async () => {
+      // setDcaFreezeState throws when the backend is unconfigured or the upsert
+      // fails; the admin must learn the freeze did NOT take.
+      mockSetDcaFreezeState.mockRejectedValueOnce(
+        new Error('Supabase unconfigured — freeze state NOT persisted'),
+      )
+      const res = await POST(makePost({ frozen: true, reason: 'outflow' }, SECRET))
+      expect(res.status).toBe(503)
+      expect((await res.json()).error).toMatch(/failed to set freeze state/i)
+    })
+
     it('defaults reason to "" when omitted', async () => {
       mockSetDcaFreezeState.mockResolvedValueOnce(FROZEN_STATE)
       await POST(makePost({ frozen: true }, SECRET))

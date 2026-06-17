@@ -3810,3 +3810,21 @@ so `$4.99` survives integer rounding as a non-zero signal.
    gate). New-DCA tracking is in-memory (at-least-once re-alert after a restart for a still-fresh position).
 5. **`setDcaFreezeState` when Supabase is unconfigured** returns the requested state without throwing (consistent
    shape) rather than hard-failing — the admin route surfaces real upsert errors but a misconfig is silent.
+
+## Feedback — CHORE-201-L-01 — make the freeze WRITE path fail-closed
+
+Resolves audit finding **L-01** from #201 (flag #5 above). Tests + a 5-line behaviour change only; stacked on
+`sprint/dca-observability-freeze` (#201 not yet merged).
+
+- **`src/lib/dca-freeze.ts`:** `setDcaFreezeState` no longer returns the requested state when Supabase is
+  unconfigured — it now **throws** (`Supabase unconfigured — freeze state was NOT persisted`). Combined with the
+  pre-existing throw on an upsert error, the WRITE path is **fail-closed**: any state that didn't persist
+  surfaces as a failure. The admin route (`POST /api/admin/dca-freeze`) already maps a throw to **503** (its
+  existing catch), so the operator now learns the freeze did NOT take instead of seeing a false 200.
+- **READ path unchanged (still fail-open):** `getDcaFreezeState` continues to return `NOT_FROZEN` on
+  unconfigured/missing/error — per the approved audit (don't block users/keeper on a transient read; on-chain
+  `pause()` is the security fail-safe). The asymmetry is deliberate: a freeze that silently fails is dangerous
+  (operator believes they're safe); a read that fails open is the documented, accepted default.
+- **Tests:** `dca-freeze.test.ts` flips "unconfigured returns state" → "unconfigured THROWS"; `route.test.ts`
+  adds "write fails to persist → POST 503" (success still 200). vitest 1878/1878, tsc + lint clean. No Auditor
+  (LOW, a follow-up to the already-approved #201 audit).
