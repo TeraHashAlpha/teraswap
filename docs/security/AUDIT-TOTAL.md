@@ -809,3 +809,26 @@ re-executed in-session: **24/24**.
 |----|----------|-------------|
 | E2I01-I-01 | INFO | Refusal message ("…quotes are paused…") is generic to the swap-build path; intentionally single-sourced from `SequencerDownError` for one unified "paused" UX. No change recommended. |
 | E2I01-I-02 | INFO | Commit `3079d67` already merged to `main` at audit time. `main` ≠ prod and the gate is additive + now 0C/0H; recorded as a process note (rules #2/#3 prefer the Auditor pass before merge), not a code defect. |
+
+### Sprint 201 Audit (2026-06-13) — DCA Observability + User-Safe Manual Freeze
+
+**Verdict: APPROVED — 0C / 0H / 0M / 1L / 6I.** Report: `Audits/Sprint/SPRINT-201-AUDIT.md`.
+⚠️ **Gates DCA order execution** (rules #2/#3) — advisory observability (Telegram + 0–20 score) + a
+**manual admin-only freeze**. Branch `sprint/dca-observability-freeze` / PR #201, commit `4f9cee3`
+(SSH-signed). +2187/−2, 16 files. No Solidity/contract change. Keeper `node:test` re-run in-session:
+**18/18** (12 freeze-score + 6 alert; keeper is NOT in CI).
+
+| Check | Result |
+|-------|--------|
+| User-safety invariant — freeze = delay, not loss | ✅ Frozen DCA returned to `active` (no `executeOrder`, no funds/approvals); new DCA → 403 with `insert` never reached (gate inside `orderType==='dca'`, before insert); cancel route never reads the flag (cancel always allowed); pending DCAs resume post-unfreeze (cumulative tracking untouched). Test-pinned (`orders-freeze.test.ts`). |
+| No auto-freeze — single writer | ✅ `setDcaFreezeState` called only from `POST /api/admin/dca-freeze` after Bearer auth; keeper/score/alerts read-only; SQL RLS deny-all to anon, service-role-only writes. 0–20 score is informational, triggers no state change. |
+| Bearer admin auth (trade-off 1) | ✅ BLESS. `verifyBearerToken` = SHA-256 + `timingSafeEqual` (constant-time, no length leak), server-only, not logged. `0x9A38` is only the client UI gate. |
+| Fail-open reads (trade-off 2) | ✅ BLESS. On-chain `pause()` (DB-independent) is the real fail-safe; `executeOrder` is on-chain-guarded so a keeper running during a DB outage can't lose funds; fail-closed would be a liveness footgun with no security gain. No attack window. |
+| Lock-before-skip (3) / outflow over-alert + ETH-USD staleness + in-mem dedup (4) | ✅ BLESS. Delay-not-loss holds; all advisory, never a gate. |
+| Unexplained-ETH-outflow detection | ✅ `ownGasSpentWei` accumulated per `executeOrder` (gasUsed×effectiveGasPrice) and subtracted; 0.01 ETH/cycle threshold sane for a Base gas wallet. INFO: per-cycle window can miss a sub-threshold drip-drain (false neg); manual withdrawals over-alert (false pos) — advisory only. |
+| Non-blocking + mainnet byte-identical | ✅ `sendTelegramAlert` no-ops when unset + never throws (10s abort); all alert/score/read calls wrapped never-throw + fail-open; not-frozen + Telegram-unset ⇒ no execution change. Secrets server-only, not logged. Dormant pre-activation state safe. |
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| 201-L-01 | LOW | `setDcaFreezeState` (`dca-freeze.ts:106`) returns success without persisting when Supabase is unconfigured ⇒ admin freeze **falsely reports 200** though nothing was written (inconsistent with the upsert-error→503 path). Trade-off 5 ACCEPT-WITH-HARDENING: make the **write** path fail-closed (throw → 503). Remediation prompt in the report. Not user-exploitable; `pause()` remains the real stop. |
+| 201-I-01..06 | INFO | Fail-open reads (keep `pause()` authoritative; optional `FREEZE_FAILCLOSED`); per-cycle outflow false-neg (rolling window future); outflow false-pos on manual withdrawal; Telegram token in URL (only `err.message` logged today); lock-before-skip churn (optional pre-lock `order_type` check); in-memory new-DCA dedup re-alerts after restart. All non-blocking. |
