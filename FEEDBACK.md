@@ -3872,3 +3872,73 @@ Resolves audit finding **L-01** from #201 (flag #5 above). Tests + a 5-line beha
 - **Tests:** `dca-freeze.test.ts` flips "unconfigured returns state" → "unconfigured THROWS"; `route.test.ts`
   adds "write fails to persist → POST 503" (success still 200). vitest 1878/1878, tsc + lint clean. No Auditor
   (LOW, a follow-up to the already-approved #201 audit).
+## Feedback — CHORE-KEEPER-CI (branch `chore/keeper-ci`, pending commit)
+
+Added a CI gate that runs the keeper's `node:test` suite on every PR (audit gap, SPRINT-201). Implemented as a
+**new, isolated workflow** `.github/workflows/keeper-tests.yml` rather than a job inside `ci.yml`, so `ci.yml`
+(build/lint/typecheck/audit/lockfile-lint/test-contracts) is **byte-for-byte untouched** — strictly additive,
+per the "do NOT change existing jobs" requirement.
+
+### Job definition (`.github/workflows/keeper-tests.yml`)
+```yaml
+name: "Keeper Tests"
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  keeper-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/order-engine/executor
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: contracts/order-engine/executor/package-lock.json
+      - name: Install keeper deps
+        run: npm ci --ignore-scripts
+      - name: Run keeper node:test suite
+        run: node --test
+```
+Action SHAs reuse the exact pins already in `ci.yml`; `permissions: contents: read` is least-privilege; no
+secrets, RPC, or Supabase are referenced.
+
+### Red/green proof (local, Node `node --test`, in a worktree off `origin/main`)
+```
+GREEN (pristine):   node --test  →  exit 0   | tests 18 | pass 18 | fail 0
+RED (1 assertion flipped: scoreTier(8) "warn"→"info"):
+                    node --test  →  exit 1   | tests 18 | pass 17 | fail 1
+reverted → git status clean (only the new workflow file untracked)
+```
+`node --test` exits non-zero on any failing test → the `run:` step fails → the job (and thus the PR) fails.
+Breakdown is `freeze-score.test.mjs` (12) + `alert.test.mjs` (6) = 18, matching the prompt.
+
+### Notes / observations
+- **No dummy env needed.** The prompt allowed a dummy env var "if a test needs one to import." None does:
+  `freeze-score.js` is pure (no imports, no I/O); `alert.js` imports only `os` + `freeze-score.js`, reads
+  `process.env.CHAIN_ID` with a `"1"` default, and `alert.test.mjs` `delete`s `TELEGRAM_*` so the sender
+  logs-only and never hits the network. So the job stays env-free.
+- **`--ignore-scripts` on the install.** The keeper tests need no native build, and the repo-root `.npmrc`
+  already sets `ignore-scripts=true`; passing `--ignore-scripts` explicitly makes the job deterministic and
+  faster regardless of which `.npmrc` npm resolves from a subdirectory. The tests only import `os` + the two
+  local modules, so they don't even load `ethers`/`@aws-sdk/client-kms`/`viem` — `npm ci` still runs to prove
+  the executor's lockfile installs cleanly.
+- **Node 20 (vs Node 22 in `ci.yml`).** Honored the prompt's explicit "Node 20". The keeper runs on Node 20 on
+  the self-hosted box; flagging the version divergence from the app CI in case the Architect wants them unified.
+
+### Concern (test gap → dependency, for triage)
+- `npm ci` in `contracts/order-engine/executor` reports **3 advisories (1 high, 2 moderate)** in the keeper's
+  own dependency tree. This job intentionally does **not** gate on `npm audit` (the prompt scoped it to running
+  the tests, and the executor has no audit-gate today), so these are surfaced here for the Architect rather than
+  silently shipped. The executor dep tree currently has no Dependabot/`audit-gate` coverage equivalent to the
+  app's `scripts/audit-gate.mjs` — a candidate backlog item.
