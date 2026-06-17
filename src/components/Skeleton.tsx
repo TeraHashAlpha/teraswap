@@ -42,39 +42,6 @@ export default function Skeleton({ className = '', lines = 1, circle }: Skeleton
   )
 }
 
-/** Skeleton for the full SwapBox layout — shown while wallet/chain is loading */
-export function SwapBoxSkeleton() {
-  return (
-    <div className="mx-auto w-full max-w-[calc(100vw-2rem)] rounded-2xl border border-cream-08 bg-surface-secondary/85 px-3 py-4 shadow-xl shadow-black/20 backdrop-blur-lg sm:max-w-[460px] sm:p-5">
-      {/* Sell label */}
-      <div className="mb-1">
-        <Skeleton className="mb-2 h-3 w-8" />
-        <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3">
-          <Skeleton className="h-8 flex-1" />
-          <Skeleton className="h-8 w-24 rounded-lg" />
-        </div>
-      </div>
-
-      {/* Invert button */}
-      <div className="relative z-10 -my-2 flex justify-center">
-        <Skeleton circle className="h-9 w-9" />
-      </div>
-
-      {/* Receive label */}
-      <div className="mb-4 mt-1">
-        <Skeleton className="mb-2 h-3 w-12" />
-        <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary p-3">
-          <Skeleton className="h-8 flex-1" />
-          <Skeleton className="h-8 w-24 rounded-lg" />
-        </div>
-      </div>
-
-      {/* Button */}
-      <Skeleton className="h-12 w-full rounded-xl" />
-    </div>
-  )
-}
-
 /** Skeleton for QuoteBreakdown */
 export function QuoteBreakdownSkeleton() {
   return (

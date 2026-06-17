@@ -371,8 +371,6 @@ export const WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as cons
 
 // ── Etherscan ────────────────────────────────────────────
 export const ETHERSCAN_TX = 'https://etherscan.io/tx/'
-export const ETHERSCAN_TOKEN = 'https://etherscan.io/token/'
-export const ETHERSCAN_ADDRESS = 'https://etherscan.io/address/'
 
 // ── Price deviation (Chainlink) ─────────────────────────
 // [L-02] Tightened for mainnet safety: block at 3% (was 5%).
