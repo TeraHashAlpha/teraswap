@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { useChainId } from 'wagmi'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import LandingPage from '@/components/LandingPage'
 import ScrollSpy from '@/components/ScrollSpy'
@@ -14,11 +15,15 @@ const OrderDashboard = dynamic(() => import('@/components/OrderDashboard'), { ss
 const WalletHistory = dynamic(() => import('@/components/WalletHistory'), { ssr: false })
 // [P167] Portfolio tab is wallet-dependent — never server-render.
 const PortfolioTab = dynamic(() => import('@/components/PortfolioTab'), { ssr: false })
+// [SPRINT-DCA-UNGATE] DCA panel is wallet-dependent (encrypted localStorage + EIP-712 signing) —
+// never server-render. Only mounted once the launch flag + Base gate (isDcaLive) is satisfied.
+const DCAPanel = dynamic(() => import('@/components/DCAPanel'), { ssr: false })
 import Footer from '@/components/Footer'
 import SwapErrorBoundary from '@/components/SwapErrorBoundary'
 import HelpButton from '@/components/HelpButton'
 import NotificationBanner from '@/components/NotificationBanner'
 import { playTouchMP3 } from '@/lib/sounds'
+import { isDcaLive } from '@/lib/dca-launch'
 
 // /docs, /privacy, and /terms each have their own Next.js route, so they
 // don't need to be part of the in-memory AppPage state machine.
@@ -58,6 +63,12 @@ function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void 
 export default function Home() {
   const [page, setPage] = useState<AppPage>('landing')
   const [swapMode, setSwapMode] = useState<SwapMode>('instant')
+
+  // [SPRINT-DCA-UNGATE] DCA is offered only when the launch flag is on AND the wallet is on Base
+  // with a wired OrderExecutor (see isDcaLive). Default (flag off / not Base) ⇒ false ⇒ the DCA tab
+  // stays the "Soon" teaser, byte-identical to today.
+  const chainId = useChainId()
+  const dcaLive = isDcaLive(chainId)
 
   const handleLaunchApp = useCallback(() => {
     setPage('swap')
@@ -105,7 +116,8 @@ export default function Home() {
               ['history', 'History'],
               ['analytics', 'Analytics'],
             ] as [SwapMode, string][]).map(([mode, label]) => {
-              const comingSoon = COMING_SOON_MODES.has(mode)
+              // DCA leaves the "Soon" teaser only when it's live; all other coming-soon modes stay gated.
+              const comingSoon = COMING_SOON_MODES.has(mode) && !(mode === 'dca' && dcaLive)
               return (
                 <button
                   key={mode}
@@ -147,6 +159,12 @@ export default function Home() {
                   cross-component store refactor; per sprint spec we just
                   switch tabs and let the user pick. */}
               <PortfolioTab onSwapToken={() => setSwapMode('instant')} />
+            </div>
+          ) : swapMode === 'dca' && dcaLive ? (
+            <div className="w-full max-w-[460px]">
+              {/* [SPRINT-DCA-UNGATE] Functional DCA panel — only reachable when the launch flag is on
+                  and the wallet is on Base (the tab is otherwise disabled, so this is defensive too). */}
+              <DCAPanel />
             </div>
           ) : COMING_SOON_MODES.has(swapMode) ? (
             <div className="w-full max-w-[460px]">
