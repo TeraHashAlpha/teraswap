@@ -119,7 +119,10 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'USDe',
     name: 'Ethena USDe',
     decimals: 18,
-    logoURI: logo('0x4c9edd5852cd905f23c3acf6c2ff8eca3ce50370'),
+    // Pinned local asset — USDe is absent from CoinGecko's curated per-chain list
+    // (so the resolver fell through to a generated avatar). Uses the Ethena protocol
+    // mark, the same logo as the ENA token.
+    logoURI: '/tokens/usde.png',
     category: 'Stablecoin',
   },
   {
@@ -507,11 +510,15 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'L2 & Infrastructure',
   },
   {
-    address: '0xb0FFa8000886E57F86dD5264B987B9993715E059',
+    // Corrected address: the previous entry (0xb0FFa…B987B9993715E059) was NOT the
+    // real Wormhole token — it matched no known contract, which is also why its logo
+    // never resolved. The canonical W contract is below (EIP-55 checksummed, verified
+    // against CoinGecko's per-chain list and Trust Wallet assets).
+    address: '0xB0fFa8000886e57F86dd5264b9582b2Ad87b2b91',
     symbol: 'W',
     name: 'Wormhole',
     decimals: 18,
-    logoURI: logo('0xb0ffa8000886e57f86dd5264b987b9993715e059'),
+    logoURI: '/tokens/w.png',
     category: 'L2 & Infrastructure',
   },
   {
@@ -679,7 +686,9 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: '1INCH',
     name: '1inch',
     decimals: 18,
-    logoURI: logo('0x111111111117dc0aa78b770fa6a738034120c302'),
+    // Pinned local asset — CoinGecko's large logo for 1INCH is a 114-byte placeholder
+    // and Trust Wallet's PNG is the clean source, so we ship it locally for reliability.
+    logoURI: '/tokens/1inch.png',
     category: 'DeFi',
   },
   {

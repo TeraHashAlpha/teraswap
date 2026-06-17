@@ -204,7 +204,12 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
                 (tap the active chip again ⇒ back to "show all"). Applies to BOTH the
                 grouped view and the search results. */}
             {availableCategories.length > 0 && (
-              <div className="mb-3 flex flex-nowrap gap-1.5 overflow-x-auto scrollbar-thin">
+              // Horizontally scrollable on overflow. Reuses the swap-mode tab-bar
+              // pattern from page.tsx: `no-scrollbar` hides the scrollbar track (which
+              // otherwise rendered as a stray gray bar under the chips), and
+              // `tab-bar-fade` adds a right-edge fade on mobile hinting more categories
+              // lie beyond the edge. Stays touch-scrollable.
+              <div className="no-scrollbar tab-bar-fade mb-3 flex flex-nowrap gap-1.5 overflow-x-auto">
                 {availableCategories.map((cat) => {
                   const active = activeCategory === cat
                   return (

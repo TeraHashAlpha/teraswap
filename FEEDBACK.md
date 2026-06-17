@@ -4178,3 +4178,39 @@ The ~1.5 MB lists stay server-side (fetched inside the route, never imported int
 unchanged**. Per warm instance the list is fetched once (~1 s cold, then in-memory); the redirect responses are
 CDN-cached (`s-maxage`), so steady-state lambda invocations and CoinGecko fetches are minimal. No client-side
 CoinGecko calls ⇒ no client rate-limit risk.
+
+---
+
+## Feedback — Token-selector polish: manual logos + gray bar + chip scroll (PR #207)
+
+Three frontend fixes on `sprint/token-selector-ux`. Frontend only (catalog + one component + 3 static
+assets; no contract/fund-flow change). Verify: tsc clean · lint 0 errors · **vitest 1927/1927** · next build ·
+3 pinned logos serve **200 image/png** via `next start`.
+
+### Concern (security) — a catalog token had the WRONG contract address
+While pinning the **W (Wormhole)** logo I found its catalog address was
+`0xb0FFa8000886E57F86dD5264B987B9993715E059` — which matches **no known contract**: it is absent from
+CoinGecko's per-chain list and from Trust Wallet, and only the first 24 hex chars overlap the real token
+(looks like a corrupted/typo'd address). That is *why* its logo never resolved (DefiLlama 404 → avatar), but
+the real risk is a **swap-catalog entry pointing at the wrong contract** — a user selecting "W" would have
+transacted against an unintended address. Corrected to the canonical, EIP-55-checksummed Wormhole contract
+`0xB0fFa8000886e57F86dd5264b9582b2Ad87b2b91` (verified against CoinGecko's per-chain list *and* Trust Wallet
+assets; once corrected, the logo also resolves natively). **Recommend a CI guard that validates every catalog
+`address` against a trusted token list (CoinGecko per-chain / Trust Wallet) so a wrong address can't be merged.**
+USDe (`0x4c9eDD…ce50370`) and 1INCH (`0x1111…C302`) were re-verified and are **correct** — they only lacked logos.
+
+### Edge case — "pin so it ALWAYS resolves" ⇒ local assets, not just a logoURI override
+- **USDe** is genuinely **absent from CoinGecko's curated per-chain list** (the resolver's primary source), so it
+  fell through to a generated avatar. Pinned a **local** `/tokens/usde.png` using the **Ethena protocol mark**
+  (the same logo as the ENA token, per the request) — sourced from CoinGecko's `ethena.png`.
+- **1INCH** *is* in the per-chain list, but CoinGecko's `large` variant is a **114-byte placeholder**; Trust
+  Wallet's PNG is the clean source. Shipped locally as `/tokens/1inch.png` (Trust Wallet, 256²) for reliability.
+- All three pinned as local `/tokens/*.png` (matching the core-10 convention) so they resolve with **zero CDN
+  dependency** — the strongest interpretation of "always resolve."
+
+### Edge case — the "stray gray bar" was the chip row's scrollbar track
+The bar under the category chips was the **horizontal scrollbar track** from `scrollbar-thin` on the
+overflowing `overflow-x-auto` chip row (`TokenSelector.tsx`). Fixes 2 and 3 collapse into one change: replaced
+`scrollbar-thin` with the swap-mode tab-bar pattern from `page.tsx` — **`no-scrollbar`** (hides the track ⇒ no
+gray bar) **+ `tab-bar-fade`** (right-edge mask fade on ≤639px hinting more categories scroll past the edge),
+keeping `overflow-x-auto` (touch-scrollable). Both utilities are global (`globals.css`), so the reuse is literal.
