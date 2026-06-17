@@ -10,20 +10,21 @@
  * image vanished and left an empty circle. <TokenLogo> walks a deterministic,
  * de-duplicated fallback chain of reliable sources instead:
  *   1. token.logoURI                       (the catalog URL: local /tokens/*.png for
- *                                            core brands, else DefiLlama)
- *   2. DefiLlama token-icons, keyed by     (chainId-aware, lowercase address — no
- *      chainId + LOWERCASE address           checksum-casing pitfall; 200s on both
- *                                            mainnet AND Base for the long tail)
- *   3. Trust Wallet assets CDN, keyed by   (a DIFFERENT per-chain source, so a
- *      the EIP-55 CHECKSUMMED address        DefiLlama miss still has a real shot)
+ *                                            core brands, else the Alchemy logoURI)
+ *   2. /api/token-logo route, keyed by     (server-side: resolves via the per-chain
+ *      chainId + LOWERCASE address           CoinGecko list — near-universal — and
+ *                                            falls back to DefiLlama internally; 302
+ *                                            redirect, cached at the edge)
+ *   3. Trust Wallet assets CDN, keyed by   (a DIFFERENT per-chain source, so a route
+ *      the EIP-55 CHECKSUMMED address        miss still has a real shot)
  *   4. a GENERATED AVATAR                   (deterministic colour from the address
  *      (TRUE last resort, never blank)        + the symbol's initials — now rare)
  *
  * Steps 1–3 are <img> elements; an onError advances the internal index. The list is
  * de-duplicated by exact URL string, so a catalog token whose logoURI is ALREADY the
- * DefiLlama URL never retries the same src. Step 4 is pure DOM (a coloured rounded
- * div with initials) and can never error, so the fallback always terminates on
- * something visible.
+ * route URL never retries the same src. Step 4 is pure DOM (a coloured rounded div
+ * with initials) and can never error, so the fallback always terminates on something
+ * visible.
  */
 import { useMemo, useState } from 'react'
 import { getAddress } from 'viem'
@@ -43,12 +44,14 @@ const TRUST_WALLET_CHAIN: Record<number, string> = {
 }
 
 /**
- * DefiLlama token-icons URL. chainId-aware and keyed by the LOWERCASE address, so
- * there is no checksum-casing pitfall — it resolves real logos on both mainnet (1)
- * and Base (8453). Defaults to mainnet when chainId is absent.
+ * The read-only `/api/token-logo` route URL. chainId-aware and keyed by the LOWERCASE
+ * address (the EXACT byte-for-byte format the catalog `logo()` helper produces, so a
+ * catalog token whose logoURI is already this URL dedupes to a single candidate). The
+ * route resolves real logos via the per-chain CoinGecko list (near-universal) and
+ * falls back to DefiLlama server-side. Defaults to mainnet when chainId is absent.
  */
-function defiLlamaLogo(address: string, chainId?: number): string {
-  return `https://token-icons.llamao.fi/icons/tokens/${chainId ?? 1}/${address.toLowerCase()}?h=48&w=48`
+function routeLogo(address: string, chainId?: number): string {
+  return `/api/token-logo?chainId=${chainId ?? 1}&address=${address.toLowerCase()}`
 }
 
 /**
@@ -83,18 +86,18 @@ function initials(symbol: string): string {
 export default function TokenLogo({ token, size = 32, className }: Props) {
   // Ordered, DE-DUPLICATED list of <img> src candidates, reliable sources first.
   // Index === sources.length ⇒ generated avatar (the TRUE last resort).
-  //   1. token.logoURI                     (catalog: local /tokens/*.png or DefiLlama)
-  //   2. DefiLlama (chainId + lowercase)   (200s on mainnet AND Base for the long tail)
+  //   1. token.logoURI                     (catalog: local /tokens/*.png or Alchemy)
+  //   2. /api/token-logo (chainId + lc)    (CoinGecko list → DefiLlama, server-side)
   //   3. Trust Wallet (per-chain checksum) (a different source; skipped if not 0x)
-  // Dedupe by exact URL string so a catalog logoURI that ALREADY equals the DefiLlama
-  // URL is not pushed (and retried) twice.
+  // Dedupe by exact URL string so a catalog logoURI that ALREADY equals the route URL
+  // is not pushed (and retried) twice.
   const sources = useMemo(() => {
     const list: string[] = []
     const push = (url: string | null) => {
       if (url && !list.includes(url)) list.push(url)
     }
     if (typeof token.logoURI === 'string' && token.logoURI.length > 0) push(token.logoURI)
-    push(defiLlamaLogo(token.address, token.chainId))
+    push(routeLogo(token.address, token.chainId))
     push(trustWalletLogo(token.address, token.chainId))
     return list
   }, [token.logoURI, token.address, token.chainId])

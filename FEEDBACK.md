@@ -4135,3 +4135,46 @@ Two parallel agents both edited `src/lib/tokens.ts` (the TokenLogo agent overste
 definition (DefiLlama), 9 core local refs, no 1inch left, full suite + build green — rather than trusting the
 agents' independent self-reports. (For next time, the file ownership should be enforced harder so two agents
 can't touch the same file.)
+
+## Feedback — CHORE-TOKEN-LOGOS-COVERAGE — near-100% logo coverage via a cached resolver route
+
+Same PR (#207). Frontend + one read-only route. Verify: tsc clean · lint 0 errors · **vitest 1926/1926** (+9) ·
+next build · forge 68/68. 3-agent workflow with **strict file ownership** (all 3 confirmed `editedOnlyOwnFiles` —
+no race this time).
+
+### Diagnosis (did it FIRST, per the spec)
+HEAD-tested the failing tokens — the gap is **broad, not just DefiLlama**:
+| Token (mainnet) | DefiLlama-by-addr | Trust Wallet | CoinGecko-API | **CoinGecko per-chain LIST** |
+|---|---|---|---|---|
+| PENDLE / FRAX / LUSD / PYUSD | **404** | **404** | 404 | **✓ has logoURI** |
+
+Root cause confirmed: the by-address icon endpoints have holes; the comprehensive **CoinGecko per-chain list**
+(`tokens.coingecko.com/{ethereum,base}/all.json` — 4909 / 2370 tokens, ~1 MB / ~0.5 MB) contains all four with
+real logoURIs (host `assets.coingecko.com`). That list is the Matcha-grade source — but it must NOT be shipped
+to the client.
+
+### Fix: a cached read-only resolver route
+`GET /api/token-logo?chainId=<1|8453>&address=<0x…>`:
+- Caches the CoinGecko per-chain list **in memory** (module-level, 12 h TTL, fetched once per warm instance) —
+  **never bundled/shipped to the client** (no bundle bloat; the client bundle is unchanged).
+- Address in list ⇒ **302 → its logoURI**, `Cache-Control: public, s-maxage=86400, stale-while-revalidate=604800`
+  (so the per-token redirect is **CDN-cached** ⇒ the lambda is hit ~once per token, no client rate-limits).
+- Not in list / fetch error ⇒ **302 → DefiLlama** by-address (fail-safe; never 500s).
+- The catalog `logo(addr, chainId)` now returns this route URL (long tail resolves CoinGecko-first); `<TokenLogo>`
+  chain is `logoURI → /api/token-logo → Trust Wallet → avatar` (deduped by URL). Core-10 keep their **local**
+  `/tokens/*.png`; discovered keep their Alchemy logo; **avatar is the true last resort.**
+
+### Coverage proof (prod build, `next start` → `curl` the route, follow the 302 to the image)
+- **Named failing tokens → real logos now:** PENDLE / FRAX / LUSD / PYUSD (mainnet) ⇒ all **200**.
+- **Broad sample (≥20, long-tail):** 20 mixed mainnet tokens (XEN, GYEN, UNCX, USDV, CVXCRV, …) ⇒ all **200**.
+- **Base (chainId 8453):** 6 Base tokens ⇒ all **200**.
+- **Imageless control:** a fake `0xdead…beef` ⇒ **404** (route → DefiLlama 404 → client falls to the avatar) —
+  confirming initials remain ONLY for genuinely image-less tokens.
+- (The branch Vercel Preview is auth-protected/401 to anonymous curl, as in the prior task — the prod-build route
+  proof above is the equivalent; owner can eyeball the authenticated Preview. Proof reposted as a PR comment.)
+
+### Perf / no-bloat
+The ~1.5 MB lists stay server-side (fetched inside the route, never imported into client code) — **client bundle
+unchanged**. Per warm instance the list is fetched once (~1 s cold, then in-memory); the redirect responses are
+CDN-cached (`s-maxage`), so steady-state lambda invocations and CoinGecko fetches are minimal. No client-side
+CoinGecko calls ⇒ no client rate-limit risk.

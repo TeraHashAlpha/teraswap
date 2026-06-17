@@ -32,12 +32,15 @@ export interface Token {
   chainId?: number
 }
 
-// ── Logo helper (DefiLlama token icons, chainId-aware, lowercase address) ───
-// chainId-aware so the same helper resolves real logos on mainnet (1) and L2s
-// (e.g. Base 8453). DefiLlama keys by chainId + lowercase address — no
-// checksum-casing pitfall and 200s on both chains for the long-tail catalog.
+// ── Logo helper (server-side CoinGecko-first resolver route, chainId-aware) ───
+// Returns our read-only /api/token-logo route URL (NOT a CDN URL directly). The
+// route resolves CoinGecko's comprehensive PER-CHAIN list server-side first
+// (near-universal real logos for the long tail incl. PENDLE/FRAX/LUSD/PYUSD which
+// 404 on the DefiLlama/Trust/CoinGecko by-address endpoints), then falls back to
+// DefiLlama by-address. chainId-aware so the same helper resolves on mainnet (1)
+// and L2s (e.g. Base 8453). Lowercased address so <TokenLogo> can dedupe candidates.
 function logo(addr: string, chainId = 1): string {
-  return `https://token-icons.llamao.fi/icons/tokens/${chainId}/${addr.toLowerCase()}?h=48&w=48`
+  return `/api/token-logo?chainId=${chainId}&address=${addr.toLowerCase()}`
 }
 
 // ── Top 80+ tokens by Ethereum on-chain volume ──────────

@@ -14,9 +14,10 @@
  *    and the verified-✓ badge. import-by-address (non-catalog) stays ⚠.
  *
  * Logos: core majors point to bundled local assets in public/tokens/ (validated, no
- * 404); the long tail uses DefiLlama's chainId-aware CDN (token-icons.llamao.fi),
- * which serves Base + mainnet logos reliably. The UI's generated-initials avatar stays
- * the FINAL onError fallback. Native ETH uses the local /tokens/eth.png asset.
+ * 404); the long tail uses our read-only /api/token-logo route, which resolves
+ * CoinGecko's comprehensive per-chain list server-side first (near-universal real logos)
+ * and falls back to DefiLlama by-address. The UI's generated-initials avatar stays the
+ * FINAL onError fallback. Native ETH uses the local /tokens/eth.png asset.
  */
 import { DEFAULT_TOKENS, findTokenByAddress, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
@@ -39,15 +40,16 @@ export interface ChainToken {
 export const SEARCH_RESULT_LIMIT = 80
 
 /**
- * [SPRINT-9Y / token-selector-ux] Per-chain logo URL. DefiLlama's token-icons CDN is
- * chainId-aware and keyed by the LOWERCASE address (no EIP-55 checksum-casing pitfall),
- * verified 200 on BOTH mainnet (1) and Base (8453) — unlike the old mainnet-only
- * `tokens.1inch.io/<addr>.png` (404 on Base, 403 on some mainnet entries). Long-tail
- * entries use this; the verified core majors point to bundled local assets (see
- * CORE_LOCAL_LOGO) so they NEVER 404.
+ * [SPRINT-9Y / token-selector-ux] Per-chain logo URL — our read-only /api/token-logo
+ * route (NOT a CDN URL directly). The route resolves CoinGecko's comprehensive PER-CHAIN
+ * list server-side FIRST (near-universal real logos for the long tail, incl. tokens that
+ * 404 on the DefiLlama/Trust/CoinGecko by-address endpoints), then falls back to DefiLlama
+ * by-address. chainId-aware and keyed by the LOWERCASE address (no EIP-55 checksum-casing
+ * pitfall, and so <TokenLogo> can dedupe candidates). Long-tail entries use this; the
+ * verified core majors point to bundled local assets (see CORE_LOCAL_LOGO) so they NEVER 404.
  */
 function logo(addr: string, chainId: number): string {
-  return `https://token-icons.llamao.fi/icons/tokens/${chainId}/${addr.toLowerCase()}?h=48&w=48`
+  return `/api/token-logo?chainId=${chainId}&address=${addr.toLowerCase()}`
 }
 
 // [token-selector-ux] Core brand logos bundled into public/tokens/ (validated, 100%

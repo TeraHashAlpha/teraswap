@@ -4,9 +4,10 @@
  * to drop a bare <img onError={display:none}>, leaving a blank circle when the
  * catalog logoURI 404'd (the old 1inch icons are mainnet-keyed → 404 on Base).
  * TokenLogo now walks a de-duplicated chain of RELIABLE sources first —
- * logoURI → DefiLlama (chainId-aware) → Trust Wallet CDN → generated avatar — so a
- * token ALWAYS shows a real logo where one exists and the initials avatar is a rare,
- * true last resort.
+ * logoURI → /api/token-logo route (chainId-aware) → Trust Wallet CDN → generated
+ * avatar — so a token ALWAYS shows a real logo where one exists and the initials
+ * avatar is a rare, true last resort. The route resolves via the per-chain CoinGecko
+ * list server-side and falls back to DefiLlama internally.
  *
  * jsdom never actually loads images, so we drive the fallback by firing onError on
  * the rendered <img> — no network is touched.
@@ -32,22 +33,21 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
     expect(screen.queryByText('US')).toBeNull()
   })
 
-  // (b) An empty logoURI advances to the DefiLlama <img> (chainId + lowercase addr)
-  //     BEFORE any avatar — DefiLlama is the first reliable candidate.
-  it('advances to the DefiLlama <img> (chainId + lowercase) before any avatar', () => {
+  // (b) An empty logoURI advances to the ROUTE <img> (chainId + lowercase addr)
+  //     BEFORE any avatar — the /api/token-logo route is the first reliable candidate.
+  it('advances to the /api/token-logo <img> (chainId + lowercase) before any avatar', () => {
     render(<TokenLogo token={{ address: USDC, symbol: 'USDC', logoURI: '', chainId: 1 }} />)
     const img = screen.getByRole('img', { name: 'USDC' })
     const src = img.getAttribute('src') ?? ''
-    expect(src).toContain('token-icons.llamao.fi')
-    expect(src).toContain('/1/') // chainId honored
-    expect(src).toContain(USDC.toLowerCase()) // lowercase address — no checksum pitfall
+    expect(src).toContain('/api/token-logo?chainId=1')
+    expect(src).toContain(`address=${USDC.toLowerCase()}`) // lowercase address — no checksum pitfall
     // Still an <img>, NOT the initials avatar.
     expect(screen.queryByText('US')).toBeNull()
   })
 
-  // logoURI → DefiLlama: a present-but-broken logoURI falls through to DefiLlama
-  // before Trust Wallet.
-  it('falls from a broken logoURI to the DefiLlama <img>', () => {
+  // logoURI → route: a present-but-broken logoURI falls through to the route before
+  // Trust Wallet.
+  it('falls from a broken logoURI to the /api/token-logo <img>', () => {
     render(
       <TokenLogo
         token={{ address: USDC, symbol: 'USDC', logoURI: 'https://example.com/usdc.png', chainId: 1 }}
@@ -55,57 +55,56 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
     )
     fireEvent.error(screen.getByRole('img', { name: 'USDC' }))
     const src = screen.getByRole('img', { name: 'USDC' }).getAttribute('src') ?? ''
-    expect(src).toContain('token-icons.llamao.fi')
-    expect(src).toContain(USDC.toLowerCase())
+    expect(src).toContain('/api/token-logo?chainId=1')
+    expect(src).toContain(`address=${USDC.toLowerCase()}`)
   })
 
-  // DefiLlama → Trust Wallet: after logoURI + DefiLlama error, the per-chain Trust
-  // Wallet (EIP-55 checksummed) <img> is the last image candidate.
-  it('advances logoURI → DefiLlama → Trust Wallet <img>', () => {
+  // route → Trust Wallet: after logoURI + route error, the per-chain Trust Wallet
+  // (EIP-55 checksummed) <img> is the last image candidate.
+  it('advances logoURI → /api/token-logo → Trust Wallet <img>', () => {
     render(
       <TokenLogo
         token={{ address: USDC, symbol: 'USDC', logoURI: 'https://example.com/usdc.png', chainId: 1 }}
       />,
     )
-    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // logoURI → DefiLlama
-    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // DefiLlama → Trust Wallet
+    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // logoURI → route
+    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // route → Trust Wallet
     const src = screen.getByRole('img', { name: 'USDC' }).getAttribute('src') ?? ''
     expect(src).toContain('trustwallet/assets')
     expect(src).toContain(USDC) // checksummed (EIP-55) address preserved
   })
 
-  // (c) Only after logoURI + DefiLlama + Trust Wallet ALL error does the initials
-  //     avatar appear (no <img> left, initials text present).
-  it('renders the GENERATED AVATAR only once logoURI + DefiLlama + Trust Wallet all error', () => {
+  // (c) Only after logoURI + route + Trust Wallet ALL error does the initials avatar
+  //     appear (no <img> left, initials text present).
+  it('renders the GENERATED AVATAR only once logoURI + route + Trust Wallet all error', () => {
     render(
       <TokenLogo
         token={{ address: USDC, symbol: 'USDC', logoURI: 'https://example.com/usdc.png', chainId: 1 }}
       />,
     )
-    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // logoURI → DefiLlama
-    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // DefiLlama → Trust Wallet
+    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // logoURI → route
+    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // route → Trust Wallet
     fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // Trust Wallet → avatar
     // No <img> left; the avatar shows the symbol's initials as visible text.
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByText('US')).toBeInTheDocument()
   })
 
-  // (d) A Base token (chainId 8453) produces the '/8453/' DefiLlama path — chainId
+  // (d) A Base token (chainId 8453) produces the 'chainId=8453' route path — chainId
   //     is honored end-to-end.
-  it('honors chainId: a Base (8453) token produces the /8453/ DefiLlama path', () => {
-    // A Base address (USDbC) — empty logoURI so DefiLlama is the first <img>.
+  it('honors chainId: a Base (8453) token produces the chainId=8453 route path', () => {
+    // A Base address (USDbC) — empty logoURI so the route is the first <img>.
     const USDbC = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA' as const
     render(<TokenLogo token={{ address: USDbC, symbol: 'USDbC', logoURI: '', chainId: 8453 }} />)
     const src = screen.getByRole('img', { name: 'USDbC' }).getAttribute('src') ?? ''
-    expect(src).toContain('token-icons.llamao.fi')
-    expect(src).toContain('/8453/')
-    expect(src).toContain(USDbC.toLowerCase())
+    expect(src).toContain('/api/token-logo?chainId=8453')
+    expect(src).toContain(`address=${USDbC.toLowerCase()}`)
   })
 
   it('reaches the generated avatar once every image candidate errors (initials visible, not blank)', () => {
     render(<TokenLogo token={{ address: USDC, symbol: 'USDC', logoURI: '', chainId: 1 }} />)
-    // empty logoURI is skipped → DefiLlama img, then Trust Wallet img, then avatar.
-    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // DefiLlama → Trust Wallet
+    // empty logoURI is skipped → route img, then Trust Wallet img, then avatar.
+    fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // route → Trust Wallet
     fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // Trust Wallet → avatar
     expect(screen.queryByRole('img')).toBeNull()
     const avatar = screen.getByText('US')
@@ -142,8 +141,8 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
   })
 
   it('does not crash on the native ETH pseudo-address and still reaches a visible avatar', () => {
-    // The 0xeeee… sentinel is a checksummable lowercase address, so both the DefiLlama
-    // and Trust Wallet steps are attempted (they just won't resolve). The fallback must
+    // The 0xeeee… sentinel is a checksummable lowercase address, so both the route and
+    // Trust Wallet steps are attempted (they just won't resolve). The fallback must
     // still terminate safely on the deterministic avatar — never a blank circle.
     render(<TokenLogo token={{ address: NATIVE_ETH, symbol: 'ETH', logoURI: '', chainId: 1 }} />)
     let img = screen.queryByRole('img', { name: 'ETH' })
@@ -157,7 +156,7 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
 
   it('does not crash on a garbage / non-0x address and reaches the avatar', () => {
     // getAddress() throws on an unparseable address → Trust Wallet step is skipped.
-    // DefiLlama uses .toLowerCase() (no checksum), so it still emits one img; once that
+    // The route uses .toLowerCase() (no checksum), so it still emits one img; once that
     // errors the avatar renders.
     render(<TokenLogo token={{ address: 'not-an-address' as `0x${string}`, symbol: 'Z', logoURI: '' }} />)
     let img = screen.queryByRole('img', { name: 'Z' })
@@ -169,19 +168,20 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
     expect(screen.getByText('Z')).toBeInTheDocument()
   })
 
-  // Dedupe: a catalog logoURI that ALREADY equals the DefiLlama URL must not be
-  // pushed (and retried) twice — one error should advance past it straight to Trust
-  // Wallet, not re-render the identical DefiLlama src.
-  it('dedupes a logoURI that already equals the DefiLlama URL (no double retry)', () => {
-    const defiLlama = `https://token-icons.llamao.fi/icons/tokens/1/${USDC.toLowerCase()}?h=48&w=48`
-    render(<TokenLogo token={{ address: USDC, symbol: 'USDC', logoURI: defiLlama, chainId: 1 }} />)
-    // First src is the (deduped) DefiLlama URL.
-    expect(screen.getByRole('img', { name: 'USDC' }).getAttribute('src')).toBe(defiLlama)
+  // Dedupe: a catalog logoURI that ALREADY equals the route URL must not be pushed
+  // (and retried) twice — one error should advance past it straight to Trust Wallet,
+  // not re-render the identical route src. The catalog `logo()` helper produces this
+  // EXACT byte-for-byte format, so this is the real-world dedupe case.
+  it('dedupes a logoURI that already equals the /api/token-logo URL (no double retry)', () => {
+    const route = `/api/token-logo?chainId=1&address=${USDC.toLowerCase()}`
+    render(<TokenLogo token={{ address: USDC, symbol: 'USDC', logoURI: route, chainId: 1 }} />)
+    // First src is the (deduped) route URL.
+    expect(screen.getByRole('img', { name: 'USDC' }).getAttribute('src')).toBe(route)
     // One error must skip the duplicate and land on Trust Wallet — not the same URL.
     fireEvent.error(screen.getByRole('img', { name: 'USDC' }))
     const src = screen.getByRole('img', { name: 'USDC' }).getAttribute('src') ?? ''
     expect(src).toContain('trustwallet/assets')
-    expect(src).not.toBe(defiLlama)
+    expect(src).not.toBe(route)
   })
 
   // (e) #207: resets the fallback when the token changes IN PLACE — no stale avatar.
