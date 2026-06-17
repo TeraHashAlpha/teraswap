@@ -36,6 +36,12 @@
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
  *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet)
  *
+ * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
+ *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
+ *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec (default mainnet feed)
+ *   LOW_GAS_USD_THRESHOLD       -- (optional) USD gas-value below which a low-gas alert fires (default 5)
+ *   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -- (optional) Telegram alert sink (see alert.js)
+ *
  * SIGNING (prefer a managed signer over a plaintext key -- required on every production chain):
  *   KMS_KEY_ID                  -- (recommended) AWS KMS key id for signing
  *   VAULT_ADDR                  -- HashiCorp Vault signer address
@@ -61,6 +67,14 @@ import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
 import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
+// [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
+import { computeFreezeScore, scoreTier } from "./freeze-score.js"
+import {
+  alertNewDcaPosition,
+  alertLowGas,
+  alertUnexplainedOutflow,
+  alertOps,
+} from "./alert.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -105,6 +119,20 @@ const TESTNET_CHAIN_IDS = new Set([11155111 /* Sepolia */, 84532 /* Base Sepolia
 // [B-02] Flashbots Protect RPC -- prevents MEV/sandwich attacks on executor txs
 const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
 
+// [DCA-OBS] Freeze-observability env vars (all OPTIONAL, safe defaults; alerting
+// is non-blocking and only fires when Telegram is configured via alert.js).
+//   OUTFLOW_THRESHOLD_ETH  -- ETH leaving the executor wallet beyond own gas spend
+//                             that counts as a "full alarm" unexplained outflow.
+//                             Default 0.01 ETH. Drives the DOMINANT freeze signal.
+//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals) used to
+//                             value the wallet's ETH for the low-gas signal.
+//                             Default = mainnet ETH/USD feed.
+//   LOW_GAS_USD_THRESHOLD  -- USD value of the wallet's ETH below which we emit a
+//                             low-gas alert. Default 5 (matches freeze-score GAS_LOW_USD).
+const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0.01")
+const ETH_USD_FEED = process.env.ETH_USD_FEED || "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
+const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
+
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
@@ -132,6 +160,18 @@ const RETRY_BACKOFF_BASE = 5_000 // [Audit] Base backoff 5s (exponential: 5s, 10
 
 // [Audit] Per-order retry tracking
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }
+
+// [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
+//   seenDcaOrderIds          -- DCA order ids already announced via alertNewDcaPosition.
+//   consecutiveExecFailures  -- back-to-back executeOrder failures (drives a freeze signal;
+//                               reset to 0 on any successful execution).
+//   rpcDown                  -- last cycle could not read chain state (RPC unreachable).
+//   freezeAlertedState       -- the frozen flag last alerted on, so we alert ONCE per
+//                               state transition (null = never alerted this run).
+const seenDcaOrderIds = new Set()
+let consecutiveExecFailures = 0
+let rpcDown = false
+let freezeAlertedState = null
 
 // ---- Chain config (minimal, supports any chain ID) ---------------------
 
@@ -377,6 +417,47 @@ async function recordExecution(orderId, txHash, amountIn, amountOut, gasUsed) {
   })
 }
 
+// [DCA-OBS] Keeper-side freeze read. Reads the SAME circuit_breaker table the
+// admin route + create-order API use (single fixed row id='dca'). FAIL-OPEN:
+// any error / missing table / missing row ⇒ { frozen:false } so the keeper keeps
+// running (the on-chain pause() is the nuclear fail-safe; this only delays DCA).
+async function readFreezeFlag() {
+  try {
+    const res = await supabaseFetch(
+      "circuit_breaker?id=eq.dca&select=frozen,reason"
+    )
+    if (!res.ok) {
+      log(`  WARNING: freeze read failed (HTTP ${res.status}) -- treating as NOT frozen`)
+      return { frozen: false }
+    }
+    const rows = await res.json()
+    const row = Array.isArray(rows) ? rows[0] : null
+    if (!row) return { frozen: false }
+    return { frozen: row.frozen === true, reason: row.reason || null }
+  } catch (err) {
+    log(`  WARNING: freeze read error (${err.message}) -- treating as NOT frozen`)
+    return { frozen: false }
+  }
+}
+
+// [DCA-OBS] Read ETH/USD from the Chainlink aggregator (8 decimals). Returns a
+// Number USD price, or null if the feed read fails (non-fatal; low-gas signal is
+// simply skipped that cycle). Never throws.
+async function readEthUsd(publicClient) {
+  try {
+    const [, answer] = await publicClient.readContract({
+      address: getAddress(ETH_USD_FEED),
+      abi: PRICE_FEED_ABI,
+      functionName: "latestRoundData",
+    })
+    const usd = Number(answer) / 1e8
+    return Number.isFinite(usd) && usd > 0 ? usd : null
+  } catch (err) {
+    log(`  WARNING: ETH/USD feed read failed (${err.message?.slice(0, 80)}) -- skipping low-gas signal`)
+    return null
+  }
+}
+
 // ---- Swap route fetcher ------------------------------------------------
 
 async function fetchSwapRoute(tokenIn, tokenOut, amount, from, router) {
@@ -508,11 +589,180 @@ function resolveGasTier(currentGasPrice, baseFee, urgency) {
   }
 }
 
+// ---- Freeze-observability helpers (all NON-BLOCKING / fail-safe) --------
+// These NEVER throw and NEVER alter the execution path. They only read state,
+// compute the freeze-urgency score (computeFreezeScore) and emit Telegram alerts
+// (no-ops unless Telegram is configured). The bot NEVER auto-freezes.
+
+/**
+ * Compute a cycle-level freeze-urgency score from the current observability
+ * context. Outflow defaults to 0 (only known at cycle END). Never throws.
+ * @param {{ethUsd:number|null, walletBalanceEth:number, unexplainedOutflowEth?:number}} ctx
+ */
+function scoreFromContext(ctx) {
+  try {
+    const gasUsdValue =
+      ctx && typeof ctx.ethUsd === "number" && Number.isFinite(ctx.ethUsd)
+        ? ctx.walletBalanceEth * ctx.ethUsd
+        : undefined
+    return computeFreezeScore({
+      unexplainedOutflowEth: (ctx && ctx.unexplainedOutflowEth) || 0,
+      outflowThresholdEth: OUTFLOW_THRESHOLD_ETH,
+      gasUsdValue,
+      consecutiveExecFailures,
+      rpcDown,
+    })
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Cycle START observability: capture the wallet ETH balance, read the freeze
+ * flag ONCE, read ETH/USD ONCE, emit a one-shot freeze alert + a low-gas alert.
+ * Returns a context object consumed at cycle end. Never throws; on any failure
+ * it returns safe fail-open defaults (NOT frozen).
+ */
+async function beginCycleObservability(publicClient, walletAddress, monitor) {
+  const ctx = {
+    walletAddress,
+    cycleStartBalanceWei: null,
+    walletBalanceEth: 0,
+    frozen: false,
+    freezeReason: null,
+    ethUsd: null,
+  }
+
+  try {
+    ctx.cycleStartBalanceWei = await publicClient.getBalance({ address: walletAddress })
+    ctx.walletBalanceEth = Number(formatEther(ctx.cycleStartBalanceWei))
+    rpcDown = false
+  } catch (err) {
+    // Could not read chain state ⇒ flag RPC down for the score; keep going.
+    rpcDown = true
+    log(`  WARNING: balance read failed (${err.message?.slice(0, 80)}) -- rpcDown=true`)
+    try {
+      await alertOps({ kind: "rpc", detail: `balance read failed: ${err.message}` }, scoreFromContext(ctx))
+    } catch { /* never throw */ }
+  }
+
+  // Freeze flag (fail-open). Alert ONCE per state transition (frozen<->unfrozen).
+  try {
+    const flag = await readFreezeFlag()
+    ctx.frozen = flag.frozen === true
+    ctx.freezeReason = flag.reason || null
+    if (ctx.frozen !== freezeAlertedState) {
+      freezeAlertedState = ctx.frozen
+      if (ctx.frozen) {
+        await alertOps(
+          { kind: "failed-exec", detail: `DCA execution is FROZEN (circuit_breaker). Reason: ${ctx.freezeReason || "n/a"}. Non-DCA orders still execute.` },
+          scoreFromContext(ctx),
+        )
+      }
+    }
+  } catch { /* never throw */ }
+
+  // ETH/USD for the low-gas signal (cached for the cycle; non-fatal on failure).
+  try {
+    ctx.ethUsd = await readEthUsd(publicClient)
+    if (typeof ctx.ethUsd === "number" && ctx.cycleStartBalanceWei !== null) {
+      const gasUsdValue = ctx.walletBalanceEth * ctx.ethUsd
+      if (gasUsdValue < LOW_GAS_USD_THRESHOLD) {
+        await alertLowGas(
+          { balanceEth: ctx.walletBalanceEth.toFixed(6), gasUsdValue: gasUsdValue.toFixed(2) },
+          scoreFromContext(ctx),
+        )
+      }
+    }
+  } catch { /* never throw */ }
+
+  return ctx
+}
+
+/**
+ * Cycle END observability: capture the wallet balance again and compute
+ * unexplainedOutflowEth = max(0, (start - end - ownGasSpentWei)/1e18). If it
+ * exceeds OUTFLOW_THRESHOLD_ETH, emit alertUnexplainedOutflow with the score.
+ * Never throws.
+ * @param {object} ctx — from beginCycleObservability
+ * @param {bigint} ownGasSpentWei — gas this executor itself spent this cycle
+ */
+async function endCycleObservability(ctx, publicClient, ownGasSpentWei) {
+  if (!ctx || ctx.cycleStartBalanceWei === null) return
+  try {
+    const endBalanceWei = await publicClient.getBalance({ address: ctx.walletAddress })
+    const ownGas = typeof ownGasSpentWei === "bigint" ? ownGasSpentWei : 0n
+    let outflowWei = ctx.cycleStartBalanceWei - endBalanceWei - ownGas
+    if (outflowWei < 0n) outflowWei = 0n
+    const unexplainedOutflowEth = Number(formatEther(outflowWei))
+    if (unexplainedOutflowEth > OUTFLOW_THRESHOLD_ETH) {
+      const score = scoreFromContext({ ...ctx, unexplainedOutflowEth })
+      await alertUnexplainedOutflow(
+        {
+          outflowEth: unexplainedOutflowEth.toFixed(6),
+          thresholdEth: OUTFLOW_THRESHOLD_ETH,
+          walletAddress: ctx.walletAddress,
+        },
+        score,
+      )
+    }
+  } catch { /* never throw */ }
+}
+
+/**
+ * Detect a never-before-seen DCA order and announce it ONCE. Tracks seen ids
+ * in-memory (dca_executed===0 is the "new" signal). Never throws.
+ * @param {object} dbOrder — the Supabase order row
+ * @param {object} ctx — observability context (for the score)
+ */
+async function maybeAlertNewDca(dbOrder, ctx) {
+  try {
+    if (!dbOrder || dbOrder.order_type !== "dca") return
+    if (seenDcaOrderIds.has(dbOrder.id)) return
+    // dca_executed===0 ⇒ a fresh position; still mark any DCA id as seen so we
+    // announce each one at most once for this process lifetime.
+    seenDcaOrderIds.add(dbOrder.id)
+    if (Number(dbOrder.dca_executed || 0) !== 0) return
+
+    const od = dbOrder.order_data || {}
+    const tokenInSymbol = dbOrder.token_in_symbol || od.tokenInSymbol || "?"
+    const tokenOutSymbol = dbOrder.token_out_symbol || od.tokenOutSymbol || "?"
+    const decimalsIn = Number(dbOrder.token_in_decimals ?? od.tokenInDecimals ?? 18)
+    const dcaTotal = Number(dbOrder.dca_total || od.dcaTotal || 0)
+    const dcaInterval = Number(dbOrder.dca_interval || od.dcaInterval || 0)
+
+    let amountInHuman = String(dbOrder.amount_in ?? od.amountIn ?? "0")
+    let perChunkHuman = "?"
+    try {
+      const amountInWei = BigInt(dbOrder.amount_in ?? od.amountIn ?? "0")
+      amountInHuman = formatUnits(amountInWei, decimalsIn)
+      if (dcaTotal > 0) {
+        perChunkHuman = formatUnits(amountInWei / BigInt(dcaTotal), decimalsIn)
+      }
+    } catch { /* fall back to raw strings */ }
+
+    await alertNewDcaPosition(
+      { tokenInSymbol, tokenOutSymbol, amountInHuman, dcaInterval, dcaTotal, perChunkHuman },
+      scoreFromContext(ctx),
+    )
+  } catch { /* never throw */ }
+}
+
 // ---- Main execution loop -----------------------------------------------
 
 async function executeCycle(publicClient, walletClient, contract, flashbotsPublicClient, flashbotsWalletClient, monitor = null) {
   log("Starting execution cycle...")
   if (monitor) monitor.onCycleStart()
+
+  // [DCA-OBS] Cycle-start observability: snapshot balance, freeze flag, ETH/USD.
+  // Fully fail-open + non-blocking — never affects the execution path below.
+  const walletAddress = walletClient?.account?.address
+  const obsCtx = walletAddress
+    ? await beginCycleObservability(publicClient, walletAddress, monitor)
+    : null
+  const cycleFrozen = obsCtx ? obsCtx.frozen === true : false
+  // Gas this executor itself spends this cycle (sum of receipt.gasUsed*price).
+  let ownGasSpentWei = 0n
 
   // 0. Unlock stale orders
   await unlockStaleOrders()
@@ -522,6 +772,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   if (orders.length === 0) {
     log("  No active orders")
+    // [DCA-OBS] Still close out observability (outflow check) even with no orders.
+    await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
     return
   }
 
@@ -565,6 +817,20 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       if (!od) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... missing order_data, skipping`)
         await updateOrderStatus(dbOrder.id, "active")
+        skipped++
+        continue
+      }
+
+      // [DCA-OBS] Announce a never-before-seen DCA position (non-blocking).
+      await maybeAlertNewDca(dbOrder, obsCtx)
+
+      // [DCA-OBS] FREEZE-HONOR: if this cycle is frozen, DCA orders are delayed
+      // (NOT lost) — return them to 'active' so they RESUME on a later cycle once
+      // the operator unfreezes. Non-DCA (limit/stop_loss) are UNAFFECTED. The bot
+      // never sets the freeze flag; this only honors a human's freeze.
+      if (cycleFrozen && dbOrder.order_type === "dca") {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... DCA execution FROZEN -- delaying (left active)`)
+        await updateOrderStatus(dbOrder.id, "active") // Unlock; resumes when unfrozen
         skipped++
         continue
       }
@@ -696,10 +962,16 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         log(`  Order ${dbOrder.id.slice(0, 8)}... executed! Gas: ${receipt.gasUsed.toString()}`)
 
         // [EX-MON] Track gas spent
-        if (monitor && receipt.gasUsed) {
+        if (receipt.gasUsed) {
           const effectiveGasPrice = receipt.effectiveGasPrice || 0n
-          monitor.onGasSpent(receipt.gasUsed * effectiveGasPrice)
+          const txGasWei = receipt.gasUsed * effectiveGasPrice
+          if (monitor) monitor.onGasSpent(txGasWei)
+          // [DCA-OBS] Accumulate THIS executor's own gas spend so the cycle-end
+          // outflow check can subtract it (legitimate spend, not a drain).
+          ownGasSpentWei += txGasWei
         }
+        // [DCA-OBS] A successful execution clears the consecutive-failure signal.
+        consecutiveExecFailures = 0
 
         // Update status based on order type
         if (dbOrder.order_type === "dca") {
@@ -759,11 +1031,21 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         executed++
       } else {
         log(`  TX reverted: ${txHash}`)
+        // [DCA-OBS] A reverted tx still burned gas — count it as own spend so it
+        // is NOT mistaken for an unexplained outflow; and as a failure signal.
+        try {
+          if (receipt.gasUsed) {
+            ownGasSpentWei += receipt.gasUsed * (receipt.effectiveGasPrice || 0n)
+          }
+        } catch { /* ignore */ }
+        consecutiveExecFailures++
         await updateOrderStatus(dbOrder.id, "active") // Unlock for retry
       }
     } catch (err) {
       console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
       errors++
+      // [DCA-OBS] Execution threw (RPC/revert/timeout) — bump the failure signal.
+      consecutiveExecFailures++
       stats.totalErrors++
       stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
 
@@ -793,6 +1075,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   if (executed > 0) stats.lastExecutionAt = new Date().toISOString()
 
   if (monitor) monitor.onCycleEnd(executed, errors)
+
+  // [DCA-OBS] Cycle-end observability: unexplained-outflow check (subtracting
+  // this executor's own gas spend). Non-blocking + fail-safe.
+  await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
 
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
 }
