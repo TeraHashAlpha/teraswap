@@ -78,6 +78,25 @@ jobs:
         # scripts/audit-gate.mjs + audit-allowlist.json.
         run: node scripts/audit-gate.mjs
 
+  catalog-address-guard:
+    # [CHORE-CATALOG-ADDRESS-GUARD] Deterministic gate over the curated token catalog
+    # (src/lib/tokens.ts + src/lib/chains/tokens.ts, chains 1 + 8453). Every token must
+    # have on-chain bytecode (no dead addresses like the W/USDe/weETH removed this sprint),
+    # be present in a bundled reputable token list (or be allowlisted), and have a unique
+    # symbol per chain (no legacy+current duplicates like MORPHO). Reads a committed verdict
+    # cache (src/lib/chains/catalog-guard.trust.json) refreshed by scripts/refresh-catalog-guard.ts
+    # — NO network at gate time, so it is reproducible and never flaky.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Catalog address guard
+        run: npx vitest run src/lib/chains/catalog-address-guard.test.ts
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
