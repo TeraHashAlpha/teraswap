@@ -4268,3 +4268,36 @@ from the verifier: do NOT confuse 0x3432B6…964D0 with the FRAXLEGACY stablecoi
 ### Verification
 tsc clean · lint 0 errors · **vitest 1929/1929** (+2) · next build · local `next start`: weeth/usde/1inch/w
 pinned logos all 200 image/png; route 302s rsETH/ezETH/stETH to `/large/` (crisp); corrected weETH addr resolves.
+
+---
+
+## Feedback — Remove the non-transferable Legacy MORPHO duplicate (PR #207)
+
+The mainnet catalog listed TWO MORPHO (curated `tokens.ts` + the generated long tail, deduped by ADDRESS so
+both surfaced). Removed the legacy entry from `DEFAULT_TOKENS`; the current one stays via the generated catalog.
+
+### On-chain confirmation (did NOT assume the goal's labels — verified via public RPC)
+| | name / symbol | supply | `transfer(0xdead, 0)` probe | CoinGecko |
+|---|---|---|---|---|
+| **legacy** `0x9994E35Db50125E0DF82e4c2dde62496CE330999` | Morpho Token / MORPHO | ~1.0B | **REVERTED — `UNAUTHORIZED`** (non-transferable) | "MORPHO / **Legacy Morpho**" |
+| **current** `0x58D97B57BB95320F9a05dC918Aef65434969c2B2` | Morpho Token / MORPHO | ~1.0B | **OK → returns true** (transferable) | "MORPHO / Morpho" |
+
+The transferability probe is an `eth_call` of `transfer(0x…dEaD, 0)` from a zero-balance EOA: a transferable
+ERC20 returns true, a globally non-transferable one reverts. The legacy token reverts with `UNAUTHORIZED` — it
+is the original vote-only, non-transferable MORPHO, so **a swap involving it would always revert** (broken in a
+swap catalog, not just a cosmetic duplicate). The current `0x58D9` is the transferable migration target with real
+DEX liquidity (CoinGecko's canonical "Morpho"). Decision: remove legacy, keep current. Confirmed.
+
+### Other chains
+Base (8453) lists only ONE MORPHO, `0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842` — on-chain `transfer(0xdead,0)`
+succeeds (transferable) and CoinGecko's Base list labels it "Morpho", so it is already the current token. No
+duplicate to remove on Base. After the change, `getFullCatalog` returns exactly 1 MORPHO per chain (1 and 8453).
+
+### Note
+This is a 4th catalog correctness issue found on this branch (after the W/USDe/weETH dead addresses) — reinforces
+the earlier recommendation for a CI guard that, per catalog entry, asserts on-chain bytecode AND (for swappable
+tokens) that `transfer` does not statically revert / the token is in a trusted tradeable list. A non-transferable
+or dead contract should never be swap-selectable.
+
+### Verification
+tsc clean · lint 0 errors · vitest 1929/1929 · getFullCatalog(1)=1 MORPHO (0x58D9), getFullCatalog(8453)=1 (0xBAa5CC).

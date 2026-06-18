@@ -443,14 +443,6 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'DeFi',
   },
   {
-    address: '0x9994E35Db50125E0DF82e4c2dde62496CE330999',
-    symbol: 'MORPHO',
-    name: 'Morpho',
-    decimals: 18,
-    logoURI: logo('0x9994e35db50125e0df82e4c2dde62496ce330999'),
-    category: 'DeFi',
-  },
-  {
     address: '0x9D65fF81a3c488d585bBfb0Bfe3c7707c7917f54',
     symbol: 'SSV',
     name: 'SSV Network',
