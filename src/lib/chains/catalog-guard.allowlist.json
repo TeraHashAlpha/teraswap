@@ -6,7 +6,8 @@
     "knownDeprecated: PRE-EXISTING deprecated/migrated legacy tokens the guard surfaced; advisory warn, flagged for Architect cleanup.",
     "duplicateSymbolExempt: same symbol legitimately at >1 address on one chain — ADDRESS-scoped (every colliding address must be listed).",
     "nativeEth: native-ETH sentinel, exempt from on-chain + trusted-list checks.",
-    "The guard still FAILS on any NON-allowlisted dead/identity-mismatch/trusted-list-miss/duplicate, so the allowlist never hides a NEW bad token."
+    "The guard still FAILS on any NON-allowlisted dead/identity-mismatch/trusted-list-miss/duplicate, so the allowlist never hides a NEW bad token.",
+    "knownDeprecated cleared by CHORE-CATALOG-CLEANUP: LCX/RBC replaced with canonical addresses, LOOM/OMNI/REP removed (non-routable/duplicate) — all verified on-chain + official sources."
   ],
   "nativeEth": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
   "trustedListExempt": [
@@ -262,43 +263,7 @@
       "reason": "Legit catalog/on-chain symbol mismatch — wrapped/bridged TAO on Base (on-chain uTAO). Pinned to on-chain symbol \"uTAO\"."
     }
   ],
-  "knownDeprecated": [
-    {
-      "chainId": 1,
-      "address": "0x037A54AaB062628C9Bbae1FDB1583c195585fe41",
-      "symbol": "LCX",
-      "canonicalAddress": "0x8cd41041505885ef0ad3858181d66f17be8aae7e",
-      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x8cd41041505885ef0ad3858181d66f17be8aae7e."
-    },
-    {
-      "chainId": 1,
-      "address": "0xA4e8C3Ec456107eA67d3075bF9e3DF3A75823DB0",
-      "symbol": "LOOM",
-      "canonicalAddress": "0x42476f744292107e34519f9c357927074ea3f75d",
-      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x42476f744292107e34519f9c357927074ea3f75d."
-    },
-    {
-      "chainId": 1,
-      "address": "0x36E66fbBce51e4cD5bd3C62B637Eb411b18949D4",
-      "symbol": "OMNI",
-      "canonicalAddress": "0x6e6F6d696e61decd6605bD4a57836c5DB6923340",
-      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x6e6F6d696e61decd6605bD4a57836c5DB6923340."
-    },
-    {
-      "chainId": 1,
-      "address": "0xA4EED63db85311E22dF4473f87CcfC3DaDCFA3E3",
-      "symbol": "RBC",
-      "canonicalAddress": "0x3330bfb7332ca23cd071631837dc289b09c33333",
-      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x3330bfb7332ca23cd071631837dc289b09c33333."
-    },
-    {
-      "chainId": 1,
-      "address": "0x1985365e9f78359a9B6AD760e32412f4a445E862",
-      "symbol": "REP",
-      "canonicalAddress": "0x221657776846890989a759ba2973e427dff5c9bb",
-      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x221657776846890989a759ba2973e427dff5c9bb."
-    }
-  ],
+  "knownDeprecated": [],
   "duplicateSymbolExempt": [
     {
       "chainId": 1,

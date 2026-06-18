@@ -8,7 +8,7 @@
  * Base USDT (bridged) added from CoinGecko Base list v430.1.0 — Uniswap omits it.
  *
  * Every address validated: viem getAddress (EIP-55) + chainId + integer decimals.
- * Counts: chain 1 = 389, chain 8453 = 97.
+ * Counts: chain 1 = 386, chain 8453 = 97.
  */
 
 export interface GeneratedToken {
@@ -207,14 +207,13 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0x96543ef8d2C75C26387c1a319ae69c0BEE6f3fe7', symbol: 'KUJI', name: 'Kujira', decimals: 6, logoURI: 'https://assets.coingecko.com/coins/images/20685/standard/kuji-200x200.png' },
     { address: '0x88909D489678dD17aA6D9609F89B0419Bf78FD9a', symbol: 'L3', name: 'Layer3', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/37768/large/Square.png' },
     { address: '0x0fc2a55d5BD13033f1ee0cdd11f60F7eFe66f467', symbol: 'LA', name: 'Lagrange', decimals: 18, logoURI: 'https://s2.coinmarketcap.com/static/img/coins/64x64/36510.png' },
-    { address: '0x037A54AaB062628C9Bbae1FDB1583c195585fe41', symbol: 'LCX', name: 'LCX', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/9985/thumb/zRPSu_0o_400x400.jpg?1574327008' },
+    { address: '0x8CD41041505885EF0aD3858181D66f17BE8aae7E', symbol: 'LCX', name: 'LCX', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/9985/large/256_lcxlogo.png?1770805695' },
     { address: '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32', symbol: 'LDO', name: 'Lido DAO', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/13573/thumb/Lido_DAO.png?1609873644' },
     { address: '0x1789e0043623282D5DCc7F213d703C6D8BAfBB04', symbol: 'LINEA', name: 'Linea', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/68507/large/linea-logo.jpeg?1756025484' },
     { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', name: 'ChainLink Token', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x514910771AF9Ca656af840dff83E8264EcF986CA/logo.png' },
     { address: '0x232CE3bd40fCd6f80f3d55A522d03f25Df784Ee2', symbol: 'LIT', name: 'Lighter', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/71121/large/lighter.png?1765888098' },
     { address: '0xb59490aB09A0f526Cc7305822aC65f2Ab12f9723', symbol: 'LIT', name: 'Litentry', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/13825/large/logo_200x200.png' },
     { address: '0x61E90A50137E1F645c9eF4a0d3A4f01477738406', symbol: 'LOKA', name: 'League of Kingdoms', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/22572/thumb/loka_64pix.png?1642643271' },
-    { address: '0xA4e8C3Ec456107eA67d3075bF9e3DF3A75823DB0', symbol: 'LOOM', name: 'Loom Network', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA4e8C3Ec456107eA67d3075bF9e3DF3A75823DB0/logo.png' },
     { address: '0x58b6A8A3302369DAEc383334672404Ee733aB239', symbol: 'LPT', name: 'Livepeer', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/7137/thumb/logo-circle-green.png?1619593365' },
     { address: '0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D', symbol: 'LQTY', name: 'Liquity', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/14665/thumb/200-lqty-icon.png?1617631180' },
     { address: '0xBBbbCA6A901c926F240b89EacB641d8Aec7AEafD', symbol: 'LRC', name: 'LoopringCoin V2', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xBBbbCA6A901c926F240b89EacB641d8Aec7AEafD/logo.png' },
@@ -260,7 +259,6 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0x8207c1FfC5B6804F6024322CcF34F29c3541Ae26', symbol: 'OGN', name: 'Origin Protocol', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/3296/thumb/op.jpg?1547037878' },
     { address: '0x75231F58b43240C9718Dd58B4967c5114342a86c', symbol: 'OKB', name: 'OKB', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/4463/large/WeChat_Image_20220118095654.png?1696505053' },
     { address: '0xd26114cd6EE289AccF82350c8d8487fedB8A0C07', symbol: 'OMG', name: 'OMG Network', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/776/thumb/OMG_Network.jpg?1591167168' },
-    { address: '0x36E66fbBce51e4cD5bd3C62B637Eb411b18949D4', symbol: 'OMNI', name: 'Omni Network', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/36465/standard/Symbol-Color.png?1711511095' },
     { address: '0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3', symbol: 'ONDO', name: 'Ondo Finance', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/26580/standard/ONDO.png?1696525656' },
     { address: '0x6F59e0461Ae5E2799F1fB3847f05a63B16d0DbF8', symbol: 'ORCA', name: 'ORCA Alliance', decimals: 18, logoURI: 'https://s2.coinmarketcap.com/static/img/coins/64x64/5183.png' },
     { address: '0x0258F474786DdFd37ABCE6df6BBb1Dd5dfC4434a', symbol: 'ORN', name: 'Orion Protocol', decimals: 8, logoURI: 'https://assets.coingecko.com/coins/images/11841/thumb/orion_logo.png?1594943318' },
@@ -298,11 +296,10 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0x03ab458634910AaD20eF5f1C8ee96F1D6ac54919', symbol: 'RAI', name: 'Rai Reflex Index', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/14004/thumb/RAI-logo-coin.png?1613592334' },
     { address: '0xba5BDe662c17e2aDFF1075610382B9B691296350', symbol: 'RARE', name: 'SuperRare', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/17753/thumb/RARE.jpg?1629220534' },
     { address: '0xFca59Cd816aB1eaD66534D82bc21E7515cE441CF', symbol: 'RARI', name: 'Rarible', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/11845/thumb/Rari.png?1594946953' },
-    { address: '0xA4EED63db85311E22dF4473f87CcfC3DaDCFA3E3', symbol: 'RBC', name: 'Rubic', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12629/thumb/200x200.png?1607952509' },
+    { address: '0x3330BFb7332cA23cd071631837dC289B09C33333', symbol: 'RBC', name: 'Rubic', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12629/large/rubic.png?1696512437' },
     { address: '0x6123B0049F904d730dB3C36a31167D9d4121fA6B', symbol: 'RBN', name: 'Ribbon Finance', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/15823/thumb/RBN_64x64.png?1633529723' },
     { address: '0xc43C6bfeDA065fE2c4c11765Bf838789bd0BB5dE', symbol: 'RED', name: 'Redstone', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/53640/large/RedStone_Logo_New_White.png?1740640919' },
     { address: '0x408e41876cCCDC0F92210600ef50372656052a38', symbol: 'REN', name: 'Republic Token', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x408e41876cCCDC0F92210600ef50372656052a38/logo.png' },
-    { address: '0x1985365e9f78359a9B6AD760e32412f4a445E862', symbol: 'REP', name: 'Reputation Augur v1', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x1985365e9f78359a9B6AD760e32412f4a445E862/logo.png' },
     { address: '0x221657776846890989a759BA2973e427DfF5C9bB', symbol: 'REPv2', name: 'Reputation Augur v2', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x221657776846890989a759BA2973e427DfF5C9bB/logo.png' },
     { address: '0x8f8221aFbB33998d8584A2B05749bA73c37a938a', symbol: 'REQ', name: 'Request', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/1031/thumb/Request_icon_green.png?1643250951' },
     { address: '0x557B933a7C2c45672B610F8954A3deB39a51A8Ca', symbol: 'REVV', name: 'REVV', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12373/thumb/REVV_TOKEN_Refined_2021_%281%29.png?1627652390' },

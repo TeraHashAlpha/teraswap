@@ -42,6 +42,25 @@ const BASE_USDT = {
   logoURI: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
 }
 
+// [CHORE-CATALOG-CLEANUP] Curated corrections to the vendored Uniswap snapshot — deprecated /
+// migrated tokens the catalog-address-guard (#209) surfaced, each VERIFIED on-chain (name/symbol/
+// decimals/transferability) + authoritative sources (Etherscan + official + CoinGecko). See FEEDBACK
+// for the per-token disposition. Keyed by `chainId:loweraddress`.
+//
+// REMOVALS — drop the entry entirely (canonical is dead/non-routable, or already present):
+const REMOVALS = new Set([
+  '1:0xa4e8c3ec456107ea67d3075bf9e3df3a75823db0', // LOOM — migrated to 0x42476f74…; the new token is DEX-dead (~$30 24h, fee-tier dust pools) → non-routable, remove.
+  '1:0x36e66fbbce51e4cd5bd3c62b637eb411b18949d4', // OMNI — Omni Network rebranded + redenominated 1:75 to Nomina (NOM, 0x6e6F6d…); the successor is non-routable on DEX (single ~$610-TVL pool) and trades under a different ticker → remove.
+  '1:0x1985365e9f78359a9b6ad760e32412f4a445e862', // REP — Augur "Reputation v1", deprecated; REPv2 (0x221657…) is already a separate catalog entry → remove (would duplicate).
+])
+// REMAPS — replace a deprecated address with the verified canonical token (full metadata):
+const REMAPS = {
+  // LCX V1 "Old Contract" → LCX Token 2.0 (1:1 upgrade; CoinGecko/CMC moved to the new address; active liquidity).
+  '1:0x037a54aab062628c9bbae1fdb1583c195585fe41': { chainId: 1, address: '0x8cd41041505885ef0ad3858181d66f17be8aae7e', symbol: 'LCX', name: 'LCX', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/9985/large/256_lcxlogo.png?1770805695' },
+  // Rubic "Old RBC Token" (NON-TRANSFERABLE on-chain — transfer reverts) → migrated 1:1 RUBIC TOKEN (transferable).
+  '1:0xa4eed63db85311e22df4473f87ccfc3dadcfa3e3': { chainId: 1, address: '0x3330bfb7332ca23cd071631837dc289b09c33333', symbol: 'RBC', name: 'Rubic', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12629/large/rubic.png?1696512437' },
+}
+
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
@@ -64,11 +83,20 @@ function buildChain(tokens, chainId) {
   const out = []
   for (const t of tokens) {
     if (t.chainId !== chainId) continue
-    const address = validate(t)
+    let address = validate(t)
+    let entry = { address, symbol: t.symbol, name: t.name, decimals: t.decimals, logoURI: t.logoURI || '' }
+    // [CHORE-CATALOG-CLEANUP] apply curated removals / remaps before dedup.
+    const srcKey = `${chainId}:${address.toLowerCase()}`
+    if (REMOVALS.has(srcKey)) continue
+    const remap = REMAPS[srcKey]
+    if (remap) {
+      address = validate(remap)
+      entry = { address, symbol: remap.symbol, name: remap.name, decimals: remap.decimals, logoURI: remap.logoURI }
+    }
     const key = address.toLowerCase()
     if (seen.has(key)) continue // first occurrence wins
     seen.add(key)
-    out.push({ address, symbol: t.symbol, name: t.name, decimals: t.decimals, logoURI: t.logoURI || '' })
+    out.push(entry)
   }
   // deterministic order → stable diffs: symbol (case-insensitive) then address
   out.sort((a, b) => a.symbol.toLowerCase().localeCompare(b.symbol.toLowerCase()) || a.address.localeCompare(b.address))
