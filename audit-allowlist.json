@@ -31,6 +31,18 @@
       "ageInOn": "2026-06-22",
       "runtimePath": "DEV-ONLY: transitive via vitest@4.1.8 (test runner). vite is never in the production bundle (the app builds with Next.js). The advisory is a vite dev-server `server.fs.deny` bypass on Windows — not reachable in CI or prod.",
       "reason": "Fix 8.0.16 is blocked by .npmrc min-release-age=7 until ~2026-06-22. TODO: replace this entry with an `overrides` pin \"vite\": \"8.0.16\" once it ages in."
+    },
+    {
+      "id": "GHSA-vmh5-mc38-953g",
+      "package": "undici",
+      "severity": "high",
+      "vulnerableRange": ">=7.23.0 <7.28.0",
+      "installed": "7.25.0",
+      "fixedIn": "7.28.0",
+      "fixPublished": "2026-06-15",
+      "ageInOn": "2026-06-22",
+      "runtimePath": "DEV-ONLY: transitive via jsdom@29.1.1 -> root devDependency (the vitest DOM test environment). undici is never in the production bundle (the app builds with Next.js) and is not used at app runtime. The advisory is a TLS certificate-validation bypass in undici's SOCKS5 ProxyAgent; TeraSwap configures no SOCKS5 proxy in tests or production, so the affected code path is never exercised.",
+      "reason": "Fix 7.28.0 is blocked by .npmrc min-release-age=7 until ~2026-06-22. TODO: replace this entry with an `overrides` pin \"undici\": \"7.28.0\" once it ages in. Advisory GHSA-vmh5-mc38-953g published 2026-06-18 — auto-surfaced by the CI audit gate; flagged for Architect review."
     }
   ]
 }

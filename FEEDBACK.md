@@ -4301,3 +4301,25 @@ or dead contract should never be swap-selectable.
 
 ### Verification
 tsc clean · lint 0 errors · vitest 1929/1929 · getFullCatalog(1)=1 MORPHO (0x58D9), getFullCatalog(8453)=1 (0xBAa5CC).
+
+---
+
+## Feedback — CI unblock: allowlist new undici advisory GHSA-vmh5-mc38-953g (PR #207)
+
+NOT related to the MORPHO change — surfaced because the `audit` CI gate runs `npm audit` against the LIVE
+advisory DB. A HIGH advisory **published 2026-06-18 14:28 UTC** (hours before the run) red-ed the gate on the
+MORPHO commit (71e7386), and would red ANY push made right now (it's branch/repo-wide, not a regression):
+  HIGH  undici (GHSA-vmh5-mc38-953g) — TLS cert-validation bypass via dropped requestTls in SOCKS5 ProxyAgent.
+
+### Triage (for Architect review — per audit-allowlist.json policy)
+- **undici 7.25.0 is DEV-ONLY**: `npm why undici` → transitive via `jsdom@29.1.1` (the vitest DOM env). It is
+  never in the production bundle (Next.js builds the app) and unused at app runtime. The bug is in undici's
+  SOCKS5 ProxyAgent; TeraSwap configures no SOCKS5 proxy anywhere → the affected path is never exercised.
+- **Fix exists (7.28.0) but is un-installable now**: 7.28.0 published 2026-06-15 (3 days old) → blocked by
+  `.npmrc min-release-age=7` until ~2026-06-22. This is EXACTLY the temporary case audit-allowlist.json is for
+  (identical to the existing dev-only `vite` entry).
+- **Action**: added a dated, justified allowlist entry (`ageInOn: 2026-06-22`) with the standard TODO to convert
+  it to an `overrides` pin `"undici": "7.28.0"` once it ages in (then delete the entry). The gate never weakens
+  for un-triaged findings — anything not listed still reds it. Local `node scripts/audit-gate.mjs` → PASSED
+  (3 allowlisted, 0 blocking). (Same one-line follow-up will retire the form-data/vite/undici entries together
+  after 2026-06-22.)
