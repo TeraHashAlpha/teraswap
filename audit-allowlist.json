@@ -5,44 +5,12 @@
     "min-release-age=7 (the patched version is published but <7 days old). Each entry MUST be",
     "converted to an npm `overrides` pin and DELETED from this file once its fix ages past",
     "min-release-age (see `ageInOn`). The gate FAILS on ANY high/critical advisory NOT listed here,",
-    "so the allowlist never weakens the gate for un-triaged findings. Reviewed by the Architect."
+    "so the allowlist never weakens the gate for un-triaged findings. Reviewed by the Architect.",
+    "STATUS 2026-06-18: empty. The three prior entries (form-data GHSA-hmw2-7cc7-3qxx, vite",
+    "GHSA-fx2h-pf6j-xcff, undici GHSA-vmh5-mc38-953g) are now pinned to their patched versions via",
+    "`overrides` in package.json (form-data 4.0.6, vite 8.0.16, undici 7.28.0). npm audit reports 0",
+    "high/critical. The committed lockfile pins those versions, so `npm ci`/`npm install` install them",
+    "cleanly while .npmrc keeps min-release-age=7 for all other (future) dependency resolution."
   ],
-  "allow": [
-    {
-      "id": "GHSA-hmw2-7cc7-3qxx",
-      "package": "form-data",
-      "severity": "high",
-      "vulnerableRange": "4.0.0 - 4.0.5",
-      "installed": "4.0.5",
-      "fixedIn": "4.0.6",
-      "fixPublished": "2026-06-12",
-      "ageInOn": "2026-06-19",
-      "runtimePath": "transitive: axios@1.16.0 -> @coinbase/cdp-sdk -> @base-org/account -> @wagmi/connectors. CRLF injection requires attacker-controlled multipart field names/filenames — not a code path TeraSwap exercises (no user-driven multipart uploads through the Coinbase SDK).",
-      "reason": "Fix 4.0.6 is blocked by .npmrc min-release-age=7 until ~2026-06-19. TODO: replace this entry with an `overrides` pin \"form-data\": \"4.0.6\" once it ages in."
-    },
-    {
-      "id": "GHSA-fx2h-pf6j-xcff",
-      "package": "vite",
-      "severity": "high",
-      "vulnerableRange": "8.0.0 - 8.0.15",
-      "installed": "8.0.10",
-      "fixedIn": "8.0.16",
-      "fixPublished": "2026-06-15",
-      "ageInOn": "2026-06-22",
-      "runtimePath": "DEV-ONLY: transitive via vitest@4.1.8 (test runner). vite is never in the production bundle (the app builds with Next.js). The advisory is a vite dev-server `server.fs.deny` bypass on Windows — not reachable in CI or prod.",
-      "reason": "Fix 8.0.16 is blocked by .npmrc min-release-age=7 until ~2026-06-22. TODO: replace this entry with an `overrides` pin \"vite\": \"8.0.16\" once it ages in."
-    },
-    {
-      "id": "GHSA-vmh5-mc38-953g",
-      "package": "undici",
-      "severity": "high",
-      "vulnerableRange": ">=7.23.0 <7.28.0",
-      "installed": "7.25.0",
-      "fixedIn": "7.28.0",
-      "fixPublished": "2026-06-15",
-      "ageInOn": "2026-06-22",
-      "runtimePath": "DEV-ONLY: transitive via jsdom@29.1.1 -> root devDependency (the vitest DOM test environment). undici is never in the production bundle (the app builds with Next.js) and is not used at app runtime. The advisory is a TLS certificate-validation bypass in undici's SOCKS5 ProxyAgent; TeraSwap configures no SOCKS5 proxy in tests or production, so the affected code path is never exercised.",
-      "reason": "Fix 7.28.0 is blocked by .npmrc min-release-age=7 until ~2026-06-22. TODO: replace this entry with an `overrides` pin \"undici\": \"7.28.0\" once it ages in. Advisory GHSA-vmh5-mc38-953g published 2026-06-18 — auto-surfaced by the CI audit gate; flagged for Architect review."
-    }
-  ]
+  "allow": []
 }
