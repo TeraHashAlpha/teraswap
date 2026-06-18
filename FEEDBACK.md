@@ -4015,6 +4015,314 @@ files changed. The single-instance invariants (@walletconnect/core, qr@0.5.5, vi
 (no dep added/bumped except the executor `ethers` drop). The biggest lesson: **re-verify every static-analysis
 hit** — knip's 232 "unused" items contained ~6 outright false positives I found by hand (valtio, the sounds
 trio, capacitor) before they could cause a hidden break.
+## Feedback — SPRINT-TOKEN-SELECTOR-UX — logos, verified badge, category filter, xStocks (skipped)
+
+Frontend only; no backend/contract/gate change. Search / import-by-address / "Your Tokens" / balances all
+intact (the integrator confirms no regression when no category is active). Verify: tsc clean · lint 0 errors ·
+**vitest 1913/1913** (+19 new) · next build · forge **68/68**. Built via a 2-phase workflow (parallel
+TokenLogo + badge + Stocks-category, then the TokenSelector integration).
+
+### ⚠️ Part 3 — xStocks: VERIFIED → **SKIPPED** (do NOT ship; security decision)
+Per the "verify availability + liquidity, else report and skip; never fabricate addresses" mandate, I researched
+the official sources and **shipped ZERO xStocks token entries** (no guessed addresses anywhere). Findings:
+- **xStocks (Backed Finance) are Solana-primary** — 60+ tokenized US equities launched 2025-06-30 as **SPL
+  tokens on Solana**; that's where the liquidity is (Kraken + Solana DEXs).
+- **Not on Base.** Base is not a supported xStocks chain.
+- **On Ethereum they're bridged** (Backed + Chainlink CCIP "xBridge"), and where they have Uniswap liquidity it
+  is behind **Uniswap v4 compliance hooks (KYC + allowlists)** — i.e. **permissioned**. TeraSwap is a
+  *permissionless* aggregator (1inch/0x/Uniswap V2-V3/Velora/CoW); it **cannot route** KYC-gated v4-hook pools,
+  so even the EVM xStocks that exist are **not routable here** → users would get "no route" + the catalog would
+  carry equities with no swap path.
+- I could not authoritatively verify exact official EVM ERC-20 addresses in-session, and guessing one = users
+  buying a scam. **So: skip.** Sources: Kraken/Backed/Solana xStocks announcements + the Uniswap-RWA
+  (KYC-hook) integration coverage (June 2026).
+- **What I DID ship:** the `'Stocks'` `TokenCategory` + its slot in `CATEGORY_DISPLAY_ORDER`, so the catalog and
+  the new category filter are forward-compatible. It's **empty** → no "Stocks" group, no "Stocks" chip, until
+  real tokens are added.
+- **To add xStocks later (owner action):** obtain the official **Ethereum** ERC-20 addresses from Backed
+  Finance's official token list/docs, **cross-check each** against a reputable verified list + the issuer site,
+  AND confirm there is **permissionless, routable** DEX liquidity on a source TeraSwap aggregates (not a
+  KYC-gated v4 pool). Only then add them under `category: 'Stocks'`. Until both hold, do not add them.
+
+### Part 1 — `<TokenLogo>` (no more blank circles)
+New `src/components/TokenLogo.tsx`: fallback chain **`token.logoURI` → Trust Wallet CDN (EIP-55-checksummed
+address, a *different* source from the catalog's 1inch URLs) → generated avatar** (deterministic
+`hsl(hashOfAddress)` circle + the symbol's initials, no new dependency, never blank). Wired into all **three**
+former `<img onError={display:none}>` spots (trigger, popular chip, TokenRow).
+
+### Part 2 — verified badge: green shield + white ✓
+`TokenAddressBadge` verified branch redesigned from the gold rosette to a crisp **green shield with a white
+check** (inline SVG, not an emoji). Logic unchanged (`isVerified ?? isVerifiedToken(address, cid)`) — so the
+green shield shows **only for curated/verified** tokens; imported/unverified keep the **amber** warning triangle.
+
+### Part 4 — category-filter chips
+A row of category chips (derived from the categories *present* in the active catalog, ordered by
+`CATEGORY_DISPLAY_ORDER`) below the search box. Tapping filters the grouped list **and** search results to that
+category (search-within-filter); tapping the active chip clears it; the filter resets when the modal closes.
+Popular quick-select chips kept (no regression).
+
+### 🐞 Bug I caught + fixed during review (gates missed it)
+`<TokenLogo>` held its fallback index in state but didn't reset it when the `token` prop changed **in place** —
+so the **trigger** (a single instance reused as `selected` switches) could show the *previous* token's generated
+avatar for a new token that actually has a working logo. List rows/chips are keyed per `token.address` so they
+were fine; only the trigger was exposed. Fixed inside the component (reset-state-during-render on
+`token.address` change — defensive for any caller) + added a regression test (`rerender` with a new token must
+show its `<img>`, not the stale avatar). Exactly the kind of stateful UX bug a fresh-render test suite doesn't
+exercise.
+
+### Note (Part 1 edge case, by the TokenLogo agent)
+The native-ETH sentinel `0xeeee…eeee` *is* a valid EIP-55 checksum target, so `getAddress()` does **not** throw
+on it (the try/catch guard is load-bearing only for genuinely non-0x/garbage input). Native ETH's real
+`logoURI` works in production; with an empty logoURI it still terminates safely on the avatar — no behaviour
+issue, just correcting the prompt's assumption.
+
+## Feedback — CHORE-TOKEN-LOGOS-FIX — real logos, not initials (fix the 1inch source)
+
+Same PR (#207). The #207 `<TokenLogo>` fallback was firing for almost every token because the catalog's
+`logoURI` came from `tokens.1inch.io/<addr>.png` — **mainnet-keyed, 404s on Base, 403s for some mainnet** — so
+step 1 failed and everything fell to the initials avatar. Fixed the **source**. Frontend only. Verify: tsc clean
+· lint 0 errors · **vitest 1917/1917** · next build · forge 68/68. Built via a 3-agent workflow (mainnet catalog
++ chains catalog + TokenLogo reorder).
+
+### CDN verification (did this FIRST — it regressed once, so no guessing)
+HEAD-tested each candidate on **both** chains; only shipped what returned **200**:
+| Source | mainnet | Base | used as |
+|---|---|---|---|
+| `tokens.1inch.io/<addr>.png` (old) | 403 (some) | **404** | ❌ removed |
+| DefiLlama `token-icons.llamao.fi/icons/tokens/<chainId>/<lowercase-addr>` | **200** | **200** (incl. cbETH) | long-tail primary |
+| Trust Wallet `blockchains/{ethereum,base}/assets/<EIP-55>/logo.png` | **200** | **200** | secondary |
+
+### What shipped
+1. **Local bundled core assets** (Matcha-grade, 100% reliable, no external 404): downloaded + **PNG-validated**
+   10 logos into `public/tokens/` — `eth, weth, usdc, usdt, dai, cbeth, wbtc, link, uni, usdbc`.png (2.9–34 KB
+   each, verified PNG magic bytes). The curated core tokens' `logoURI` now points to `/tokens/<symbol>.png`
+   (symbol-keyed ⇒ same brand logo on mainnet AND Base; e.g. USDC on chain 1 and Base both use `/tokens/usdc.png`).
+2. **`logo()` rewritten** in `src/lib/tokens.ts` + `src/lib/chains/tokens.ts`: `logo(addr, chainId)` → the
+   **DefiLlama chainId-aware URL** (replaces 1inch). The Base catalog passes `8453`; mainnet `1`. So the long
+   tail / discovered tokens now resolve real logos on Base too (the 1inch 403 TODO on BOLD is gone — it resolves
+   via DefiLlama). Lowercase address ⇒ no EIP-55 checksum pitfall.
+3. **`<TokenLogo>` reordered + deduped** to `logoURI → DefiLlama(chainId,addr) → Trust Wallet(chainId,checksum)
+   → avatar`. Dedupe by URL so a catalog `logoURI` that already equals the DefiLlama URL isn't retried. The
+   generated-initials avatar is now the **TRUE last resort** — reached only when all three real sources error.
+   The #207 in-place-token-change reset + its test are preserved.
+
+### Why initials are now rare (the proof)
+- **Core (ETH/WETH/USDC/USDT/DAI/cbETH/WBTC/LINK/UNI/USDbC):** `logoURI = /tokens/*.png` — a bundled asset that
+  always 200s ⇒ TokenLogo step 1 succeeds ⇒ **never reaches the avatar**, on either chain.
+- **Long tail + "Your Tokens" (discovered):** DefiLlama (chainId-aware, 200 on both chains) ⇒ real logo; Trust
+  Wallet as backup. Initials only for a genuinely unknown token both CDNs lack.
+
+### Preview verification
+- **Local core assets:** all 10 `public/tokens/*.png` are valid PNGs, and the **production build serves them
+  200** at `/tokens/<symbol>.png` (`next start` → `curl`, the *same* `/public` static serving Vercel uses). So
+  every core token resolves at TokenLogo step 1 (logoURI) and **never reaches the initials avatar** — on mainnet
+  AND Base (the asset is the brand logo, identical across chains).
+- **Long-tail resolver:** the DefiLlama URLs return **200 on mainnet AND Base** (directly verified — table above).
+- **Vercel Preview caveat:** the branch preview is **auth-protected** (anonymous requests get **401**, not the
+  asset), so a headless `curl` can't fetch its files — the equivalent proof is the prod-build asset serving +
+  the public DefiLlama 200s above (also posted as a PR comment). The owner can visually confirm real logos on
+  the authenticated preview for ETH/USDC/WETH/cbETH/WBTC on both chains.
+
+### Tests
+`TokenLogo.test.tsx`: a token with a real `logoURI` renders that `<img>` (not the avatar); an empty-logoURI
+known address advances to the **DefiLlama** `<img>` (asserts `token-icons.llamao.fi` + chainId + lowercase addr,
+incl. a Base `/8453/` path) before any avatar; the initials avatar appears only after all three sources error;
+the #207 in-place reset test kept. 1917/1917 green.
+
+### Workflow note (caught + handled)
+Two parallel agents both edited `src/lib/tokens.ts` (the TokenLogo agent overstepped its file scope into the
+`logo()` source). I flagged the race and verified the merged on-disk result was coherent — exactly one `logo()`
+definition (DefiLlama), 9 core local refs, no 1inch left, full suite + build green — rather than trusting the
+agents' independent self-reports. (For next time, the file ownership should be enforced harder so two agents
+can't touch the same file.)
+
+## Feedback — CHORE-TOKEN-LOGOS-COVERAGE — near-100% logo coverage via a cached resolver route
+
+Same PR (#207). Frontend + one read-only route. Verify: tsc clean · lint 0 errors · **vitest 1926/1926** (+9) ·
+next build · forge 68/68. 3-agent workflow with **strict file ownership** (all 3 confirmed `editedOnlyOwnFiles` —
+no race this time).
+
+### Diagnosis (did it FIRST, per the spec)
+HEAD-tested the failing tokens — the gap is **broad, not just DefiLlama**:
+| Token (mainnet) | DefiLlama-by-addr | Trust Wallet | CoinGecko-API | **CoinGecko per-chain LIST** |
+|---|---|---|---|---|
+| PENDLE / FRAX / LUSD / PYUSD | **404** | **404** | 404 | **✓ has logoURI** |
+
+Root cause confirmed: the by-address icon endpoints have holes; the comprehensive **CoinGecko per-chain list**
+(`tokens.coingecko.com/{ethereum,base}/all.json` — 4909 / 2370 tokens, ~1 MB / ~0.5 MB) contains all four with
+real logoURIs (host `assets.coingecko.com`). That list is the Matcha-grade source — but it must NOT be shipped
+to the client.
+
+### Fix: a cached read-only resolver route
+`GET /api/token-logo?chainId=<1|8453>&address=<0x…>`:
+- Caches the CoinGecko per-chain list **in memory** (module-level, 12 h TTL, fetched once per warm instance) —
+  **never bundled/shipped to the client** (no bundle bloat; the client bundle is unchanged).
+- Address in list ⇒ **302 → its logoURI**, `Cache-Control: public, s-maxage=86400, stale-while-revalidate=604800`
+  (so the per-token redirect is **CDN-cached** ⇒ the lambda is hit ~once per token, no client rate-limits).
+- Not in list / fetch error ⇒ **302 → DefiLlama** by-address (fail-safe; never 500s).
+- The catalog `logo(addr, chainId)` now returns this route URL (long tail resolves CoinGecko-first); `<TokenLogo>`
+  chain is `logoURI → /api/token-logo → Trust Wallet → avatar` (deduped by URL). Core-10 keep their **local**
+  `/tokens/*.png`; discovered keep their Alchemy logo; **avatar is the true last resort.**
+
+### Coverage proof (prod build, `next start` → `curl` the route, follow the 302 to the image)
+- **Named failing tokens → real logos now:** PENDLE / FRAX / LUSD / PYUSD (mainnet) ⇒ all **200**.
+- **Broad sample (≥20, long-tail):** 20 mixed mainnet tokens (XEN, GYEN, UNCX, USDV, CVXCRV, …) ⇒ all **200**.
+- **Base (chainId 8453):** 6 Base tokens ⇒ all **200**.
+- **Imageless control:** a fake `0xdead…beef` ⇒ **404** (route → DefiLlama 404 → client falls to the avatar) —
+  confirming initials remain ONLY for genuinely image-less tokens.
+- (The branch Vercel Preview is auth-protected/401 to anonymous curl, as in the prior task — the prod-build route
+  proof above is the equivalent; owner can eyeball the authenticated Preview. Proof reposted as a PR comment.)
+
+### Perf / no-bloat
+The ~1.5 MB lists stay server-side (fetched inside the route, never imported into client code) — **client bundle
+unchanged**. Per warm instance the list is fetched once (~1 s cold, then in-memory); the redirect responses are
+CDN-cached (`s-maxage`), so steady-state lambda invocations and CoinGecko fetches are minimal. No client-side
+CoinGecko calls ⇒ no client rate-limit risk.
+
+---
+
+## Feedback — Token-selector polish: manual logos + gray bar + chip scroll (PR #207)
+
+Three frontend fixes on `sprint/token-selector-ux`. Frontend only (catalog + one component + 3 static
+assets; no contract/fund-flow change). Verify: tsc clean · lint 0 errors · **vitest 1927/1927** · next build ·
+3 pinned logos serve **200 image/png** via `next start`.
+
+### Concern (security) — a catalog token had the WRONG contract address
+While pinning the **W (Wormhole)** logo I found its catalog address was
+`0xb0FFa8000886E57F86dD5264B987B9993715E059` — which matches **no known contract**: it is absent from
+CoinGecko's per-chain list and from Trust Wallet, and only the first 24 hex chars overlap the real token
+(looks like a corrupted/typo'd address). That is *why* its logo never resolved (DefiLlama 404 → avatar), but
+the real risk is a **swap-catalog entry pointing at the wrong contract** — a user selecting "W" would have
+transacted against an unintended address. Corrected to the canonical, EIP-55-checksummed Wormhole contract
+`0xB0fFa8000886e57F86dd5264b9582b2Ad87b2b91` (verified against CoinGecko's per-chain list *and* Trust Wallet
+assets; once corrected, the logo also resolves natively). **Recommend a CI guard that validates every catalog
+`address` against a trusted token list (CoinGecko per-chain / Trust Wallet) so a wrong address can't be merged.**
+USDe (`0x4c9eDD…ce50370`) and 1INCH (`0x1111…C302`) were re-verified and are **correct** — they only lacked logos.
+
+### Edge case — "pin so it ALWAYS resolves" ⇒ local assets, not just a logoURI override
+- **USDe** is genuinely **absent from CoinGecko's curated per-chain list** (the resolver's primary source), so it
+  fell through to a generated avatar. Pinned a **local** `/tokens/usde.png` using the **Ethena protocol mark**
+  (the same logo as the ENA token, per the request) — sourced from CoinGecko's `ethena.png`.
+- **1INCH** *is* in the per-chain list, but CoinGecko's `large` variant is a **114-byte placeholder**; Trust
+  Wallet's PNG is the clean source. Shipped locally as `/tokens/1inch.png` (Trust Wallet, 256²) for reliability.
+- All three pinned as local `/tokens/*.png` (matching the core-10 convention) so they resolve with **zero CDN
+  dependency** — the strongest interpretation of "always resolve."
+
+### Edge case — the "stray gray bar" was the chip row's scrollbar track
+The bar under the category chips was the **horizontal scrollbar track** from `scrollbar-thin` on the
+overflowing `overflow-x-auto` chip row (`TokenSelector.tsx`). Fixes 2 and 3 collapse into one change: replaced
+`scrollbar-thin` with the swap-mode tab-bar pattern from `page.tsx` — **`no-scrollbar`** (hides the track ⇒ no
+gray bar) **+ `tab-bar-fade`** (right-edge mask fade on ≤639px hinting more categories scroll past the edge),
+keeping `overflow-x-auto` (touch-scrollable). Both utilities are global (`globals.css`), so the reuse is literal.
+
+---
+
+## Feedback — Token logos round 2: systemic crisp-logo route fix + 2 MORE dead addresses (PR #207)
+
+Triggered by a screenshot showing weETH/rsETH rendering generated-initials avatars. Diagnosed the WHOLE
+catalog (192 entries → 108 unique, mainnet + Base) deterministically rather than fixing two tokens by hand.
+
+### Concern (security) — TWO more catalog tokens had DEAD contract addresses
+Running an on-chain `name()/symbol()/totalSupply()` + `getCode()` check on every flagged address (public RPC)
+plus a CoinGecko cross-reference found that, like W last round, **USDe and weETH pointed at addresses with NO
+bytecode** (undeployed/EOA — not tokens at all):
+| symbol | catalog (DEAD) address | shares prefix | canonical (corrected) | on-chain |
+|---|---|---|---|---|
+| USDe  | 0x4c9eDD…**ca3ce50370** | 0x4c9edd5852cd905f (8 bytes) | 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3 | name "USDe", ~4.5B supply |
+| weETH | 0xcD5fE23…**4Ff4B25**   | 0xcD5fE23C85820F7B72 (9 bytes) | 0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee | name "Wrapped eETH", ~1.6M supply |
+Both look like single-transcription-error corruptions of the real address (shared vanity prefix, then diverge).
+A swap-catalog entry on a dead/undeployed address is a correctness+safety bug. Corrections were then
+**independently confirmed by a 12-agent verification workflow** (verify + double adversarial refutation per
+token): USDe via Ethena docs + Etherscan-verified + CoinGecko + Ethplorer; weETH via Etherscan-verified UUPS
+proxy + official ether.fi GitBook + CoinGecko + Uniswap. All `refuted: false`, high confidence. Corroboration:
+the corrected USDe address already matches the USDe Chainlink-feed key in `src/lib/constants.ts:332` — so the
+rest of the codebase was already on the right address; only the token catalog was wrong.
+
+**Three dead/wrong addresses found across two rounds (W, USDe, weETH).** STRONG recommendation: add a CI guard
+that, for every catalog entry, asserts (a) the address has on-chain bytecode and (b) symbol↔address agrees with
+a trusted list (CoinGecko per-chain / Trust Wallet). I can provide the audit script (it found all three).
+
+### Root-cause (systemic) — the resolver served CoinGecko 25px `thumb` images
+The diagnosis showed only ONE true 0-byte avatar (weETH, the dead address). Every OTHER non-pinned token
+resolved, but only to CoinGecko's **`thumb`** variant (25px, 270–1750 B) — low-res/dark icons that look blank
+on the dark UI and were the real reason rsETH/etc. looked "missing". Fix is one rewrite in `/api/token-logo`:
+when redirecting to a CoinGecko logoURI, swap the `/thumb/` path segment for `/large/` (the 250px variant,
+present whenever thumb is). This upgrades **all ~88 CG-resolved tokens at once** (e.g. rsETH 640B→8.5KB, ezETH
+→14KB, stETH→13.7KB, AAVE→10.6KB) with **zero new local assets** — far better than pinning dozens of PNGs.
+TDD: 2 new route tests (thumb→large rewrite; non-CoinGecko URL untouched). `large` is host-gated to
+assets/coin-images.coingecko.com and uses plain string ops so encoded filenames/queries survive.
+
+### weETH logo — per request, uses the ether.fi brand mark
+Pinned `/tokens/weeth.png` = the official ether.fi (ETHFI) icon (CoinGecko image 35958, 250², converted to PNG),
+mirroring the USDe→ENA precedent ("o mesmo logo da ether.fi"). The corrected address ALSO resolves to a clean
+48KB weETH logo via the route, so the local pin is defense-in-depth.
+
+### Edge case (false-positive flags) — 3 stale-ticker REBRANDS, addresses are CORRECT
+The deterministic audit also flagged DYDX→ETHDYDX, FXS→FRAX, RNDR→RENDER as "address belongs to a different
+symbol". The workflow confirmed all three are the SAME canonical contracts, just rebranded/relabeled by
+CoinGecko — addresses are correct, only the tickers are outdated. Left the tickers as-is (changing them is a
+product/UX decision and could break user muscle memory); flagging for the Architect to decide. (FXS watch-out
+from the verifier: do NOT confuse 0x3432B6…964D0 with the FRAXLEGACY stablecoin 0x853d955a… or the LayerZero OFT
+0x23432452…280d0.)
+
+### Verification
+tsc clean · lint 0 errors · **vitest 1929/1929** (+2) · next build · local `next start`: weeth/usde/1inch/w
+pinned logos all 200 image/png; route 302s rsETH/ezETH/stETH to `/large/` (crisp); corrected weETH addr resolves.
+
+---
+
+## Feedback — Remove the non-transferable Legacy MORPHO duplicate (PR #207)
+
+The mainnet catalog listed TWO MORPHO (curated `tokens.ts` + the generated long tail, deduped by ADDRESS so
+both surfaced). Removed the legacy entry from `DEFAULT_TOKENS`; the current one stays via the generated catalog.
+
+### On-chain confirmation (did NOT assume the goal's labels — verified via public RPC)
+| | name / symbol | supply | `transfer(0xdead, 0)` probe | CoinGecko |
+|---|---|---|---|---|
+| **legacy** `0x9994E35Db50125E0DF82e4c2dde62496CE330999` | Morpho Token / MORPHO | ~1.0B | **REVERTED — `UNAUTHORIZED`** (non-transferable) | "MORPHO / **Legacy Morpho**" |
+| **current** `0x58D97B57BB95320F9a05dC918Aef65434969c2B2` | Morpho Token / MORPHO | ~1.0B | **OK → returns true** (transferable) | "MORPHO / Morpho" |
+
+The transferability probe is an `eth_call` of `transfer(0x…dEaD, 0)` from a zero-balance EOA: a transferable
+ERC20 returns true, a globally non-transferable one reverts. The legacy token reverts with `UNAUTHORIZED` — it
+is the original vote-only, non-transferable MORPHO, so **a swap involving it would always revert** (broken in a
+swap catalog, not just a cosmetic duplicate). The current `0x58D9` is the transferable migration target with real
+DEX liquidity (CoinGecko's canonical "Morpho"). Decision: remove legacy, keep current. Confirmed.
+
+### Other chains
+Base (8453) lists only ONE MORPHO, `0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842` — on-chain `transfer(0xdead,0)`
+succeeds (transferable) and CoinGecko's Base list labels it "Morpho", so it is already the current token. No
+duplicate to remove on Base. After the change, `getFullCatalog` returns exactly 1 MORPHO per chain (1 and 8453).
+
+### Note
+This is a 4th catalog correctness issue found on this branch (after the W/USDe/weETH dead addresses) — reinforces
+the earlier recommendation for a CI guard that, per catalog entry, asserts on-chain bytecode AND (for swappable
+tokens) that `transfer` does not statically revert / the token is in a trusted tradeable list. A non-transferable
+or dead contract should never be swap-selectable.
+
+### Verification
+tsc clean · lint 0 errors · vitest 1929/1929 · getFullCatalog(1)=1 MORPHO (0x58D9), getFullCatalog(8453)=1 (0xBAa5CC).
+
+---
+
+## Feedback — CI unblock: allowlist new undici advisory GHSA-vmh5-mc38-953g (PR #207)
+
+NOT related to the MORPHO change — surfaced because the `audit` CI gate runs `npm audit` against the LIVE
+advisory DB. A HIGH advisory **published 2026-06-18 14:28 UTC** (hours before the run) red-ed the gate on the
+MORPHO commit (71e7386), and would red ANY push made right now (it's branch/repo-wide, not a regression):
+  HIGH  undici (GHSA-vmh5-mc38-953g) — TLS cert-validation bypass via dropped requestTls in SOCKS5 ProxyAgent.
+
+### Triage (for Architect review — per audit-allowlist.json policy)
+- **undici 7.25.0 is DEV-ONLY**: `npm why undici` → transitive via `jsdom@29.1.1` (the vitest DOM env). It is
+  never in the production bundle (Next.js builds the app) and unused at app runtime. The bug is in undici's
+  SOCKS5 ProxyAgent; TeraSwap configures no SOCKS5 proxy anywhere → the affected path is never exercised.
+- **Fix exists (7.28.0) but is un-installable now**: 7.28.0 published 2026-06-15 (3 days old) → blocked by
+  `.npmrc min-release-age=7` until ~2026-06-22. This is EXACTLY the temporary case audit-allowlist.json is for
+  (identical to the existing dev-only `vite` entry).
+- **Action**: added a dated, justified allowlist entry (`ageInOn: 2026-06-22`) with the standard TODO to convert
+  it to an `overrides` pin `"undici": "7.28.0"` once it ages in (then delete the entry). The gate never weakens
+  for un-triaged findings — anything not listed still reds it. Local `node scripts/audit-gate.mjs` → PASSED
+  (3 allowlisted, 0 blocking). (Same one-line follow-up will retire the form-data/vite/undici entries together
+  after 2026-06-22.)
 
 ---
 

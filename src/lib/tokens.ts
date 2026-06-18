@@ -11,6 +11,10 @@ export type TokenCategory =
   | 'AI & Data'
   | 'Memecoin'
   | 'Gaming & Metaverse'
+  // [SPRINT token-selector-ux P3] Forward-compatible category. Ships EMPTY — no
+  // token uses 'Stocks' yet (xStocks are not shipped), so it produces no group
+  // and no filter chip until verified tokens are added later.
+  | 'Stocks'
   | 'Other'
   | 'Imported'
 
@@ -28,9 +32,15 @@ export interface Token {
   chainId?: number
 }
 
-// ── Logo helper (1inch token icons, lowercase address) ───
-function logo(addr: string): string {
-  return `https://tokens.1inch.io/${addr.toLowerCase()}.png`
+// ── Logo helper (server-side CoinGecko-first resolver route, chainId-aware) ───
+// Returns our read-only /api/token-logo route URL (NOT a CDN URL directly). The
+// route resolves CoinGecko's comprehensive PER-CHAIN list server-side first
+// (near-universal real logos for the long tail incl. PENDLE/FRAX/LUSD/PYUSD which
+// 404 on the DefiLlama/Trust/CoinGecko by-address endpoints), then falls back to
+// DefiLlama by-address. chainId-aware so the same helper resolves on mainnet (1)
+// and L2s (e.g. Base 8453). Lowercased address so <TokenLogo> can dedupe candidates.
+function logo(addr: string, chainId = 1): string {
+  return `/api/token-logo?chainId=${chainId}&address=${addr.toLowerCase()}`
 }
 
 // ── Top 80+ tokens by Ethereum on-chain volume ──────────
@@ -43,7 +53,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'ETH',
     name: 'Ether',
     decimals: 18,
-    logoURI: logo('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'),
+    logoURI: '/tokens/eth.png',
     category: 'Native',
   },
   {
@@ -51,7 +61,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'WETH',
     name: 'Wrapped Ether',
     decimals: 18,
-    logoURI: logo('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'),
+    logoURI: '/tokens/weth.png',
     category: 'Native',
   },
 
@@ -61,7 +71,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'USDC',
     name: 'USD Coin',
     decimals: 6,
-    logoURI: logo('0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+    logoURI: '/tokens/usdc.png',
     category: 'Stablecoin',
   },
   {
@@ -69,7 +79,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'USDT',
     name: 'Tether USD',
     decimals: 6,
-    logoURI: logo('0xdac17f958d2ee523a2206206994597c13d831ec7'),
+    logoURI: '/tokens/usdt.png',
     category: 'Stablecoin',
   },
   {
@@ -77,7 +87,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'DAI',
     name: 'Dai Stablecoin',
     decimals: 18,
-    logoURI: logo('0x6b175474e89094c44da98b954eedeac495271d0f'),
+    logoURI: '/tokens/dai.png',
     category: 'Stablecoin',
   },
   {
@@ -105,11 +115,16 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'Stablecoin',
   },
   {
-    address: '0x4c9eDD5852CD905F23c3acF6c2ff8eCA3ce50370',
+    // Corrected address: the previous entry (0x4c9eDD…ca3ce50370) had NO bytecode on-chain
+    // — a dead/corrupted variant sharing only the first 8 bytes with the real token. The
+    // canonical Ethena USDe contract is below (verified on-chain: name/symbol "USDe", ~4.5B
+    // supply; + Ethena docs, Etherscan, CoinGecko — and it matches the USDe Chainlink feed
+    // key in constants.ts). Logo pinned to the Ethena mark — the same logo as the ENA token.
+    address: '0x4c9EDD5852cd905f086C759E8383e09bff1E68B3',
     symbol: 'USDe',
     name: 'Ethena USDe',
     decimals: 18,
-    logoURI: logo('0x4c9edd5852cd905f23c3acf6c2ff8eca3ce50370'),
+    logoURI: '/tokens/usde.png',
     category: 'Stablecoin',
   },
   {
@@ -141,7 +156,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'BOLD',
     name: 'Liquity BOLD',
     decimals: 18,
-    logoURI: logo('0x6440f144b7e50d6a8439336510312d2f54beb01d'), // TODO: 1inch logo returns 403 — may need local fallback /public/tokens/bold.png
+    logoURI: logo('0x6440f144b7e50d6a8439336510312d2f54beb01d'),
     category: 'Stablecoin',
   },
 
@@ -151,7 +166,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'WBTC',
     name: 'Wrapped BTC',
     decimals: 8,
-    logoURI: logo('0x2260fac5e5542a773aa44fbcfedf7c193bc2c599'),
+    logoURI: '/tokens/wbtc.png',
     category: 'Wrapped BTC',
   },
   {
@@ -185,15 +200,20 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'cbETH',
     name: 'Coinbase Wrapped Staked ETH',
     decimals: 18,
-    logoURI: logo('0xbe9895146f7af43049ca1c1ae358b0541ea49704'),
+    logoURI: '/tokens/cbeth.png',
     category: 'Liquid Staking',
   },
   {
-    address: '0xcD5fE23C85820F7B72d6468176c4AF32e4Ff4B25',
+    // Corrected address: the previous entry (0xcD5fE23…4Ff4B25) had NO bytecode on-chain —
+    // a dead/corrupted variant of the canonical token (shared 18-hex prefix, then diverged).
+    // The real ether.fi Wrapped eETH contract is below (verified on-chain + Etherscan verified
+    // page, ether.fi GitBook, CoinGecko). Logo pinned to the ether.fi brand mark, per request
+    // (the same logo as ether.fi / the ETHFI token).
+    address: '0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee',
     symbol: 'weETH',
     name: 'Wrapped eETH (EtherFi)',
     decimals: 18,
-    logoURI: logo('0xcd5fe23c85820f7b72d6468176c4af32e4ff4b25'),
+    logoURI: '/tokens/weeth.png',
     category: 'Liquid Staking',
   },
   {
@@ -267,7 +287,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'LINK',
     name: 'Chainlink',
     decimals: 18,
-    logoURI: logo('0x514910771af9ca656af840dff83e8264ecf986ca'),
+    logoURI: '/tokens/link.png',
     category: 'DeFi',
   },
   {
@@ -275,7 +295,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'UNI',
     name: 'Uniswap',
     decimals: 18,
-    logoURI: logo('0x1f9840a85d5af5bf1d1762f925bdaddc4201f984'),
+    logoURI: '/tokens/uni.png',
     category: 'DeFi',
   },
   {
@@ -423,14 +443,6 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'DeFi',
   },
   {
-    address: '0x9994E35Db50125E0DF82e4c2dde62496CE330999',
-    symbol: 'MORPHO',
-    name: 'Morpho',
-    decimals: 18,
-    logoURI: logo('0x9994e35db50125e0df82e4c2dde62496ce330999'),
-    category: 'DeFi',
-  },
-  {
     address: '0x9D65fF81a3c488d585bBfb0Bfe3c7707c7917f54',
     symbol: 'SSV',
     name: 'SSV Network',
@@ -497,11 +509,15 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'L2 & Infrastructure',
   },
   {
-    address: '0xb0FFa8000886E57F86dD5264B987B9993715E059',
+    // Corrected address: the previous entry (0xb0FFa…B987B9993715E059) was NOT the
+    // real Wormhole token — it matched no known contract, which is also why its logo
+    // never resolved. The canonical W contract is below (EIP-55 checksummed, verified
+    // against CoinGecko's per-chain list and Trust Wallet assets).
+    address: '0xB0fFa8000886e57F86dd5264b9582b2Ad87b2b91',
     symbol: 'W',
     name: 'Wormhole',
     decimals: 18,
-    logoURI: logo('0xb0ffa8000886e57f86dd5264b987b9993715e059'),
+    logoURI: '/tokens/w.png',
     category: 'L2 & Infrastructure',
   },
   {
@@ -669,7 +685,9 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: '1INCH',
     name: '1inch',
     decimals: 18,
-    logoURI: logo('0x111111111117dc0aa78b770fa6a738034120c302'),
+    // Pinned local asset — CoinGecko's large logo for 1INCH is a 114-byte placeholder
+    // and Trust Wallet's PNG is the clean source, so we ship it locally for reliability.
+    logoURI: '/tokens/1inch.png',
     category: 'DeFi',
   },
   {
@@ -773,5 +791,8 @@ export function isNativeETH(token: Token): boolean {
 export const CATEGORY_DISPLAY_ORDER: TokenCategory[] = [
   'Native', 'Stablecoin', 'Wrapped BTC', 'Liquid Staking', 'DeFi',
   'L2 & Infrastructure', 'AI & Data', 'Gaming & Metaverse', 'Memecoin',
+  // [SPRINT token-selector-ux P3] 'Stocks' ships EMPTY (no tokens yet) → it
+  // produces no group/chip; kept here so grouping is forward-compatible.
+  'Stocks',
   'Imported', 'Other',
 ]

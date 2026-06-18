@@ -13,8 +13,11 @@
  *  - getFullCatalog / getSearchCatalog → the full pinned long tail used by search
  *    and the verified-✓ badge. import-by-address (non-catalog) stays ⚠.
  *
- * Logos use each list entry's own logoURI (per-chain reliable) with the UI's
- * generic-icon onError fallback; native ETH reuses the canonical 1inch asset.
+ * Logos: core majors point to bundled local assets in public/tokens/ (validated, no
+ * 404); the long tail uses our read-only /api/token-logo route, which resolves
+ * CoinGecko's comprehensive per-chain list server-side first (near-universal real logos)
+ * and falls back to DefiLlama by-address. The UI's generated-initials avatar stays the
+ * FINAL onError fallback. Native ETH uses the local /tokens/eth.png asset.
  */
 import { DEFAULT_TOKENS, findTokenByAddress, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
@@ -36,16 +39,41 @@ export interface ChainToken {
 /** [SPRINT-9Y] Max search results rendered at once — keeps a broad query snappy. */
 export const SEARCH_RESULT_LIMIT = 80
 
-function logo(addr: string): string {
-  return `https://tokens.1inch.io/${addr.toLowerCase()}.png`
+/**
+ * [SPRINT-9Y / token-selector-ux] Per-chain logo URL — our read-only /api/token-logo
+ * route (NOT a CDN URL directly). The route resolves CoinGecko's comprehensive PER-CHAIN
+ * list server-side FIRST (near-universal real logos for the long tail, incl. tokens that
+ * 404 on the DefiLlama/Trust/CoinGecko by-address endpoints), then falls back to DefiLlama
+ * by-address. chainId-aware and keyed by the LOWERCASE address (no EIP-55 checksum-casing
+ * pitfall, and so <TokenLogo> can dedupe candidates). Long-tail entries use this; the
+ * verified core majors point to bundled local assets (see CORE_LOCAL_LOGO) so they NEVER 404.
+ */
+function logo(addr: string, chainId: number): string {
+  return `/api/token-logo?chainId=${chainId}&address=${addr.toLowerCase()}`
+}
+
+// [token-selector-ux] Core brand logos bundled into public/tokens/ (validated, 100%
+// reliable, no 404). The brand mark is identical across chains, so map BY SYMBOL — a
+// core token on ANY chain catalog here points to its local file instead of a remote CDN.
+const CORE_LOCAL_LOGO: Record<string, string> = {
+  ETH: '/tokens/eth.png',
+  WETH: '/tokens/weth.png',
+  USDC: '/tokens/usdc.png',
+  USDT: '/tokens/usdt.png',
+  DAI: '/tokens/dai.png',
+  cbETH: '/tokens/cbeth.png',
+  WBTC: '/tokens/wbtc.png',
+  LINK: '/tokens/link.png',
+  UNI: '/tokens/uni.png',
+  USDbC: '/tokens/usdbc.png',
 }
 
 // Mirrors TokenSelector's existing POPULAR_SYMBOLS so the derived mainnet
 // catalog flags the same popular tokens.
 const MAINNET_POPULAR = new Set(['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI'])
 
-// Native ETH reuses the canonical 1inch asset (same visual on every chain).
-const ETH_LOGO = logo('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+// Native ETH uses the bundled local asset (same visual on every chain, never 404s).
+const ETH_LOGO = CORE_LOCAL_LOGO.ETH
 
 // [SPRINT-9Y] Base curated "Suggested" majors shown by default (no search). The
 // SYMBOLS are a curation choice; the ADDRESSES come only from the validated
@@ -67,7 +95,10 @@ const BASE_FULL: ChainToken[] = [
     symbol: t.symbol,
     name: t.name,
     decimals: t.decimals,
-    logoURI: t.logoURI,
+    // [token-selector-ux] Core majors → bundled local asset (no 404). Long tail →
+    // DefiLlama's chainId-aware CDN (8453), which serves Base logos the old generated
+    // logoURI (mainnet-keyed 1inch / dead optimism mirrors) frequently 404'd on Base.
+    logoURI: CORE_LOCAL_LOGO[t.symbol] ?? logo(t.address, 8453),
     popular: BASE_POPULAR_SYMBOLS.has(t.symbol),
     suggested: BASE_SUGGESTED_SYMBOLS.has(t.symbol),
   })),
