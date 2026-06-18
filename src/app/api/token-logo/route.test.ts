@@ -158,4 +158,35 @@ describe('GET /api/token-logo', () => {
     // Second request reuses the warm in-memory map — only one list fetch.
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('upgrades a CoinGecko /thumb/ logo to the crisp /large/ variant', async () => {
+    // The per-chain list ships the 25px `thumb`; the selector needs the 250px `large`.
+    const addr = '0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC'
+    const thumb = 'https://assets.coingecko.com/coins/images/33800/thumb/Icon___Dark.png?1702991855'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tokens: [{ address: addr, symbol: 'FOO', decimals: 18, logoURI: thumb }] }),
+    } as unknown as Response))
+
+    const res = await GET(req({ chainId: '1', address: addr }))
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      'https://assets.coingecko.com/coins/images/33800/large/Icon___Dark.png?1702991855',
+    )
+  })
+
+  it('leaves a non-CoinGecko logo URL unchanged', async () => {
+    const addr = '0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD'
+    const url = 'https://example.com/assets/thumb/bar.png'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tokens: [{ address: addr, symbol: 'BAR', decimals: 18, logoURI: url }] }),
+    } as unknown as Response))
+
+    const res = await GET(req({ chainId: '1', address: addr }))
+
+    // Only CoinGecko-hosted URLs are rewritten; everything else passes through verbatim.
+    expect(res.headers.get('location')).toBe(url)
+  })
 })

@@ -119,6 +119,25 @@ async function getChainMap(chainId: string): Promise<Map<string, string> | null>
   }
 }
 
+/**
+ * CoinGecko serves three size variants per coin image at
+ * `.../coins/images/<id>/{thumb,small,large}/<file>`. The per-chain list's logoURI is the
+ * 25px `thumb` — too low-res for the token selector (logos look blurry/empty on the dark UI).
+ * Rewrite it to the 250px `large` variant, which is present whenever `thumb` is. Only touches
+ * CoinGecko-hosted URLs (assets/coin-images) and only when a `/thumb/` segment exists; any other
+ * URL passes through verbatim. Plain string ops (no URL re-encoding) so query/encoded names survive.
+ */
+function upgradeCoinGeckoLogo(url: string): string {
+  if (
+    (url.startsWith('https://assets.coingecko.com/') ||
+      url.startsWith('https://coin-images.coingecko.com/')) &&
+    url.includes('/thumb/')
+  ) {
+    return url.replace('/thumb/', '/large/')
+  }
+  return url
+}
+
 /** Build the 302 redirect with the given Cache-Control header. */
 function redirect(target: string, cacheControl: string): NextResponse {
   const res = NextResponse.redirect(target, 302)
@@ -145,7 +164,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const map = await getChainMap(chainId)
   const cgLogo = map?.get(lower)
   if (cgLogo) {
-    return redirect(cgLogo, CG_CACHE_CONTROL)
+    return redirect(upgradeCoinGeckoLogo(cgLogo), CG_CACHE_CONTROL)
   }
 
   // ③ Fall back to DefiLlama by-address (also covers a failed list fetch).

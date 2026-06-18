@@ -115,13 +115,15 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'Stablecoin',
   },
   {
-    address: '0x4c9eDD5852CD905F23c3acF6c2ff8eCA3ce50370',
+    // Corrected address: the previous entry (0x4c9eDD…ca3ce50370) had NO bytecode on-chain
+    // — a dead/corrupted variant sharing only the first 8 bytes with the real token. The
+    // canonical Ethena USDe contract is below (verified on-chain: name/symbol "USDe", ~4.5B
+    // supply; + Ethena docs, Etherscan, CoinGecko — and it matches the USDe Chainlink feed
+    // key in constants.ts). Logo pinned to the Ethena mark — the same logo as the ENA token.
+    address: '0x4c9EDD5852cd905f086C759E8383e09bff1E68B3',
     symbol: 'USDe',
     name: 'Ethena USDe',
     decimals: 18,
-    // Pinned local asset — USDe is absent from CoinGecko's curated per-chain list
-    // (so the resolver fell through to a generated avatar). Uses the Ethena protocol
-    // mark, the same logo as the ENA token.
     logoURI: '/tokens/usde.png',
     category: 'Stablecoin',
   },
@@ -202,11 +204,16 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'Liquid Staking',
   },
   {
-    address: '0xcD5fE23C85820F7B72d6468176c4AF32e4Ff4B25',
+    // Corrected address: the previous entry (0xcD5fE23…4Ff4B25) had NO bytecode on-chain —
+    // a dead/corrupted variant of the canonical token (shared 18-hex prefix, then diverged).
+    // The real ether.fi Wrapped eETH contract is below (verified on-chain + Etherscan verified
+    // page, ether.fi GitBook, CoinGecko). Logo pinned to the ether.fi brand mark, per request
+    // (the same logo as ether.fi / the ETHFI token).
+    address: '0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee',
     symbol: 'weETH',
     name: 'Wrapped eETH (EtherFi)',
     decimals: 18,
-    logoURI: logo('0xcd5fe23c85820f7b72d6468176c4af32e4ff4b25'),
+    logoURI: '/tokens/weeth.png',
     category: 'Liquid Staking',
   },
   {

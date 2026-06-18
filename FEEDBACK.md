@@ -4214,3 +4214,57 @@ overflowing `overflow-x-auto` chip row (`TokenSelector.tsx`). Fixes 2 and 3 coll
 `scrollbar-thin` with the swap-mode tab-bar pattern from `page.tsx` — **`no-scrollbar`** (hides the track ⇒ no
 gray bar) **+ `tab-bar-fade`** (right-edge mask fade on ≤639px hinting more categories scroll past the edge),
 keeping `overflow-x-auto` (touch-scrollable). Both utilities are global (`globals.css`), so the reuse is literal.
+
+---
+
+## Feedback — Token logos round 2: systemic crisp-logo route fix + 2 MORE dead addresses (PR #207)
+
+Triggered by a screenshot showing weETH/rsETH rendering generated-initials avatars. Diagnosed the WHOLE
+catalog (192 entries → 108 unique, mainnet + Base) deterministically rather than fixing two tokens by hand.
+
+### Concern (security) — TWO more catalog tokens had DEAD contract addresses
+Running an on-chain `name()/symbol()/totalSupply()` + `getCode()` check on every flagged address (public RPC)
+plus a CoinGecko cross-reference found that, like W last round, **USDe and weETH pointed at addresses with NO
+bytecode** (undeployed/EOA — not tokens at all):
+| symbol | catalog (DEAD) address | shares prefix | canonical (corrected) | on-chain |
+|---|---|---|---|---|
+| USDe  | 0x4c9eDD…**ca3ce50370** | 0x4c9edd5852cd905f (8 bytes) | 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3 | name "USDe", ~4.5B supply |
+| weETH | 0xcD5fE23…**4Ff4B25**   | 0xcD5fE23C85820F7B72 (9 bytes) | 0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee | name "Wrapped eETH", ~1.6M supply |
+Both look like single-transcription-error corruptions of the real address (shared vanity prefix, then diverge).
+A swap-catalog entry on a dead/undeployed address is a correctness+safety bug. Corrections were then
+**independently confirmed by a 12-agent verification workflow** (verify + double adversarial refutation per
+token): USDe via Ethena docs + Etherscan-verified + CoinGecko + Ethplorer; weETH via Etherscan-verified UUPS
+proxy + official ether.fi GitBook + CoinGecko + Uniswap. All `refuted: false`, high confidence. Corroboration:
+the corrected USDe address already matches the USDe Chainlink-feed key in `src/lib/constants.ts:332` — so the
+rest of the codebase was already on the right address; only the token catalog was wrong.
+
+**Three dead/wrong addresses found across two rounds (W, USDe, weETH).** STRONG recommendation: add a CI guard
+that, for every catalog entry, asserts (a) the address has on-chain bytecode and (b) symbol↔address agrees with
+a trusted list (CoinGecko per-chain / Trust Wallet). I can provide the audit script (it found all three).
+
+### Root-cause (systemic) — the resolver served CoinGecko 25px `thumb` images
+The diagnosis showed only ONE true 0-byte avatar (weETH, the dead address). Every OTHER non-pinned token
+resolved, but only to CoinGecko's **`thumb`** variant (25px, 270–1750 B) — low-res/dark icons that look blank
+on the dark UI and were the real reason rsETH/etc. looked "missing". Fix is one rewrite in `/api/token-logo`:
+when redirecting to a CoinGecko logoURI, swap the `/thumb/` path segment for `/large/` (the 250px variant,
+present whenever thumb is). This upgrades **all ~88 CG-resolved tokens at once** (e.g. rsETH 640B→8.5KB, ezETH
+→14KB, stETH→13.7KB, AAVE→10.6KB) with **zero new local assets** — far better than pinning dozens of PNGs.
+TDD: 2 new route tests (thumb→large rewrite; non-CoinGecko URL untouched). `large` is host-gated to
+assets/coin-images.coingecko.com and uses plain string ops so encoded filenames/queries survive.
+
+### weETH logo — per request, uses the ether.fi brand mark
+Pinned `/tokens/weeth.png` = the official ether.fi (ETHFI) icon (CoinGecko image 35958, 250², converted to PNG),
+mirroring the USDe→ENA precedent ("o mesmo logo da ether.fi"). The corrected address ALSO resolves to a clean
+48KB weETH logo via the route, so the local pin is defense-in-depth.
+
+### Edge case (false-positive flags) — 3 stale-ticker REBRANDS, addresses are CORRECT
+The deterministic audit also flagged DYDX→ETHDYDX, FXS→FRAX, RNDR→RENDER as "address belongs to a different
+symbol". The workflow confirmed all three are the SAME canonical contracts, just rebranded/relabeled by
+CoinGecko — addresses are correct, only the tickers are outdated. Left the tickers as-is (changing them is a
+product/UX decision and could break user muscle memory); flagging for the Architect to decide. (FXS watch-out
+from the verifier: do NOT confuse 0x3432B6…964D0 with the FRAXLEGACY stablecoin 0x853d955a… or the LayerZero OFT
+0x23432452…280d0.)
+
+### Verification
+tsc clean · lint 0 errors · **vitest 1929/1929** (+2) · next build · local `next start`: weeth/usde/1inch/w
+pinned logos all 200 image/png; route 302s rsETH/ezETH/stETH to `/large/` (crisp); corrected weETH addr resolves.
