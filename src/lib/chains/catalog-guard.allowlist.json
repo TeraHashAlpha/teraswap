@@ -1,0 +1,313 @@
+{
+  "$comment": [
+    "Allowlist for catalog-address-guard.test.ts. Every entry is a CONSCIOUS, reviewed exception.",
+    "trustedListExempt: addresses absent from CoinGecko per-chain list but verified-real (bytecode + on-chain symbol) — Uniswap-sourced or legit ticker collisions.",
+    "symbolMismatchExempt: catalog symbol legitimately differs from on-chain symbol() (artifact/rebrand/wrap); PINNED to the expected on-chain symbol so the exemption is identity-bound.",
+    "knownDeprecated: PRE-EXISTING deprecated/migrated legacy tokens the guard surfaced; advisory warn, flagged for Architect cleanup.",
+    "duplicateSymbolExempt: same symbol legitimately at >1 address on one chain — ADDRESS-scoped (every colliding address must be listed).",
+    "nativeEth: native-ETH sentinel, exempt from on-chain + trusted-list checks.",
+    "The guard still FAILS on any NON-allowlisted dead/identity-mismatch/trusted-list-miss/duplicate, so the allowlist never hides a NEW bad token."
+  ],
+  "nativeEth": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+  "trustedListExempt": [
+    {
+      "chainId": 1,
+      "address": "0x845576c64f9754CF09d87e45B720E82F3EeF522C",
+      "symbol": "AVT",
+      "reason": "LEGIT ticker collision (catalog-guard-triage): a different real project shares the ticker; CoinGecko lists the other one. The catalog address and the CoinGecko address are two DISTINCT, real projects that share the \"AVT\" ticker — a genuine ti"
+    },
+    {
+      "chainId": 1,
+      "address": "0x3294395e62F4eB6aF3f1Fcf89f5602D90Fb3Ef69",
+      "symbol": "CELO",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0xD417144312DbF50465b1C641d016962017Ef6240",
+      "symbol": "CQT",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x3Ab6Ed69Ef663bd986Ee59205CCaD8A20F98b4c2",
+      "symbol": "DREP",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x720CD16b011b987Da3518fbf38c3071d4F0D1495",
+      "symbol": "FLUX",
+      "reason": "LEGIT ticker collision (catalog-guard-triage): a different real project shares the ticker; CoinGecko lists the other one. Two DISTINCT legitimate projects share the \"FLUX\" ticker, so this is a ticker collision, not a deprecation/migration."
+    },
+    {
+      "chainId": 1,
+      "address": "0x8c15Ef5b4B21951d50E53E4fbdA8298FFAD25057",
+      "symbol": "FX",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x96543ef8d2C75C26387c1a319ae69c0BEE6f3fe7",
+      "symbol": "KUJI",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",
+      "symbol": "MATIC",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x33349B282065b0284d756F0577FB39c158F935e6",
+      "symbol": "MPL",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0xF433089366899D83a9f26A773D59ec7eCF30355e",
+      "symbol": "MTL",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x5Ca381bBfb58f0092df149bD3D243b08B9a8386e",
+      "symbol": "MXC",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x6F59e0461Ae5E2799F1fB3847f05a63B16d0DbF8",
+      "symbol": "ORCA",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0xc1D204d77861dEf49b6E769347a883B15EC397Ff",
+      "symbol": "PAX",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x4123a133ae3c521FD134D7b13A2dEC35b56c2463",
+      "symbol": "QRDO",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x99ea4dB9EE77ACD40B119BD1dC4E33e1C070b80d",
+      "symbol": "QSP",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x70b7f7044D2ca8E2F1E999B90EF16d7Cb7A0cDA1",
+      "symbol": "QUAI",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x006BeA43Baa3f7A6f765F14f10A1a1b08334EF45",
+      "symbol": "STX",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0xC3d21f79C3120A4fFda7A535f8005a7c297799bF",
+      "symbol": "TERM",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x70D2b7C19352bB76e4409858FF5746e500f2B67c",
+      "symbol": "UPI",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0xf983da3ca66964C02628189Ea8Ca99fa9E24f66c",
+      "symbol": "WANLOG",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0xc221b7E65FfC80DE234bbB6667aBDd46593D34F0",
+      "symbol": "WCFG",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x6C28f8caB28121eD757EdB36201511aA18Cdd187",
+      "symbol": "WFB",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x09B6a9E1DD102bD95B3DD5025bCa3540eBf77982",
+      "symbol": "WRON",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0x1F9bD96DDB4Bd07d6061f8933e9bA9EDE9967550",
+      "symbol": "BOBA",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0x7C298664BD6582f6f264c2Cb5a4B9cC09b6E3889",
+      "symbol": "MLN",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0xE6bAA3Fedb5Dc88b2c59ba4812388Bb0906D19dB",
+      "symbol": "NCT",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0x5c97D726bf5130AE15408cE32bc764e458320D2f",
+      "symbol": "QUAI",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0xc3De830EA07524a0761646a6a4e4be0e114a3C83",
+      "symbol": "UNI",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0xD7B99ffB8B2afc6fe013a17207cbe50f223aDc94",
+      "symbol": "XYO",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0xAA61bB7777bD01B684347961918f1E07fBbCe7CF",
+      "symbol": "ZKC",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 8453,
+      "address": "0x3bB4445D30AC020a84c1b5A8A2C6248ebC9779D0",
+      "symbol": "ZRX",
+      "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    }
+  ],
+  "symbolMismatchExempt": [
+    {
+      "chainId": 1,
+      "address": "0x4f2b33840227DDD0e28da8d4185D6fa07ADfed87",
+      "symbol": "BASED1",
+      "onchainSymbol": "BASED",
+      "reason": "Legit catalog/on-chain symbol mismatch — catalog suffix to disambiguate the BASED ticker. Pinned to on-chain symbol \"BASED\"."
+    },
+    {
+      "chainId": 1,
+      "address": "0xC9746F73cC33a36c2cD55b8aEFD732586946Cedd",
+      "symbol": "BOBBOB",
+      "onchainSymbol": "BOB",
+      "reason": "Legit catalog/on-chain symbol mismatch — catalog suffix to disambiguate the BOB ticker. Pinned to on-chain symbol \"BOB\"."
+    },
+    {
+      "chainId": 1,
+      "address": "0xa3EE21C306A700E682AbCdfe9BaA6A08F3820419",
+      "symbol": "CTC",
+      "onchainSymbol": "G-CRE",
+      "reason": "Legit catalog/on-chain symbol mismatch — Creditcoin bridged variant (on-chain G-CRE). Pinned to on-chain symbol \"G-CRE\"."
+    },
+    {
+      "chainId": 1,
+      "address": "0x2aeAbde1aB736c59E9A19BeD67681869eEF39526",
+      "symbol": "DOVU",
+      "onchainSymbol": "DOVU[eth]",
+      "reason": "Legit catalog/on-chain symbol mismatch — on-chain symbol is chain-suffixed (DOVU[eth]/DOVU[base]). Pinned to on-chain symbol \"DOVU[eth]\"."
+    },
+    {
+      "chainId": 1,
+      "address": "0xB0076DE78Dc50581770BBa1D211dDc0aD4F2a241",
+      "symbol": "EDGEX",
+      "onchainSymbol": "EDGE",
+      "reason": "Legit catalog/on-chain symbol mismatch — catalog suffix to disambiguate the EDGE ticker. Pinned to on-chain symbol \"EDGE\"."
+    },
+    {
+      "chainId": 1,
+      "address": "0x1a7e4e63778B4f12a199C062f3eFdD288afCBce8",
+      "symbol": "agEUR",
+      "onchainSymbol": "EURA",
+      "reason": "Legit catalog/on-chain symbol mismatch — Angle rebrand: on-chain symbol is EURA, catalog keeps agEUR. Pinned to on-chain symbol \"EURA\"."
+    },
+    {
+      "chainId": 8453,
+      "address": "0xB38266e0e9D9681b77aEB0A280E98131b953F865",
+      "symbol": "DOVU",
+      "onchainSymbol": "DOVU[base]",
+      "reason": "Legit catalog/on-chain symbol mismatch — on-chain symbol is chain-suffixed (DOVU[eth]/DOVU[base]). Pinned to on-chain symbol \"DOVU[base]\"."
+    },
+    {
+      "chainId": 8453,
+      "address": "0x16EE7ecAc70d1028E7712751E2Ee6BA808a7dd92",
+      "symbol": "FUN1",
+      "onchainSymbol": "FUN",
+      "reason": "Legit catalog/on-chain symbol mismatch — catalog suffix to disambiguate the FUN ticker. Pinned to on-chain symbol \"FUN\"."
+    },
+    {
+      "chainId": 8453,
+      "address": "0xFdCa15bd55F350a36E63C47661914d80411d2C22",
+      "symbol": "TAO",
+      "onchainSymbol": "uTAO",
+      "reason": "Legit catalog/on-chain symbol mismatch — wrapped/bridged TAO on Base (on-chain uTAO). Pinned to on-chain symbol \"uTAO\"."
+    }
+  ],
+  "knownDeprecated": [
+    {
+      "chainId": 1,
+      "address": "0x037A54AaB062628C9Bbae1FDB1583c195585fe41",
+      "symbol": "LCX",
+      "canonicalAddress": "0x8cd41041505885ef0ad3858181d66f17be8aae7e",
+      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x8cd41041505885ef0ad3858181d66f17be8aae7e."
+    },
+    {
+      "chainId": 1,
+      "address": "0xA4e8C3Ec456107eA67d3075bF9e3DF3A75823DB0",
+      "symbol": "LOOM",
+      "canonicalAddress": "0x42476f744292107e34519f9c357927074ea3f75d",
+      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x42476f744292107e34519f9c357927074ea3f75d."
+    },
+    {
+      "chainId": 1,
+      "address": "0x36E66fbBce51e4cD5bd3C62B637Eb411b18949D4",
+      "symbol": "OMNI",
+      "canonicalAddress": "0x6e6F6d696e61decd6605bD4a57836c5DB6923340",
+      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x6e6F6d696e61decd6605bD4a57836c5DB6923340."
+    },
+    {
+      "chainId": 1,
+      "address": "0xA4EED63db85311E22dF4473f87CcfC3DaDCFA3E3",
+      "symbol": "RBC",
+      "canonicalAddress": "0x3330bfb7332ca23cd071631837dc289b09c33333",
+      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x3330bfb7332ca23cd071631837dc289b09c33333."
+    },
+    {
+      "chainId": 1,
+      "address": "0x1985365e9f78359a9B6AD760e32412f4a445E862",
+      "symbol": "REP",
+      "canonicalAddress": "0x221657776846890989a759ba2973e427dff5c9bb",
+      "reason": "DEPRECATED/MIGRATED legacy token (catalog-guard-triage, high confidence). Pre-existing in the catalog; allowlisted to keep the guard green under read-only-tokens.ts. FLAGGED for Architect cleanup -> canonical 0x221657776846890989a759ba2973e427dff5c9bb."
+    }
+  ],
+  "duplicateSymbolExempt": [
+    {
+      "chainId": 1,
+      "symbol": "LIT",
+      "addresses": [
+        "0x232CE3bd40fCd6f80f3d55A522d03f25Df784Ee2",
+        "0xb59490aB09A0f526Cc7305822aC65f2Ab12f9723"
+      ],
+      "reason": "LEGIT ticker collision — two distinct real projects share \"LIT\" (catalog-guard-triage, high confidence)."
+    }
+  ]
+}
