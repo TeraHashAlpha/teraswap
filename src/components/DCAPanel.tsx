@@ -18,12 +18,15 @@ import {
   getChainlinkFeeds,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
-import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
+import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
+import { getWrappedNative } from '@/lib/chains/registry'
+import { findChainToken } from '@/lib/chains/tokens'
+import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { ETHERSCAN_TX, NATIVE_ETH } from '@/lib/constants'
 import BetaDisclaimer from './BetaDisclaimer'
 
 // ── Map token symbols to Chainlink feeds ─────────────────
@@ -190,6 +193,15 @@ export default function DCAPanel() {
 //  CREATE DCA FORM
 // ══════════════════════════════════════════════════════════
 
+// [CHORE-DCA-WETH-INPUT] The chain's wrapped-native (WETH) as a rich Token, used as the
+// DCA spend/input default and as the recovery target if the input ever became native ETH.
+// Chain-aware (never hardcoded): getWrappedNative resolves mainnet/Base WETH, findChainToken
+// returns the catalog Token (symbol/logo/decimals). Returns null only if a chain catalog
+// lacks WETH (no supported chain does today) — the selector then shows "Select".
+function wethFor(chainId: number): Token | null {
+  return findChainToken(getWrappedNative(chainId), chainId)
+}
+
 function CreateDCAForm({
   isConnected,
   isSubmitting,
@@ -202,12 +214,31 @@ function CreateDCAForm({
   onSubmit: (config: CreateOrderConfig) => Promise<void>
 }) {
   const chainId = useChainId()
-  const [tokenIn, setTokenIn] = useState<Token | null>(
-    DEFAULT_TOKENS.find(t => t.symbol === 'USDC') ?? null
-  )
+  // [CHORE-DCA-WETH-INPUT] DCA spends an ERC-20: default the INPUT to the chain's WETH
+  // (never native ETH). The OUTPUT still defaults to native ETH (contract unwraps WETH→ETH).
+  const [tokenIn, setTokenIn] = useState<Token | null>(() => wethFor(chainId))
   const [tokenOut, setTokenOut] = useState<Token | null>(
     DEFAULT_TOKENS.find(t => t.symbol === 'ETH') ?? null
   )
+
+  // [CHORE-DCA-WETH-INPUT] Keep the spend token pinned to the active chain's WETH. Also
+  // recovers if the input ever became native ETH (it can't via the selector, which hides
+  // it — this is belt-and-suspenders) so the signed struct's tokenIn is always an ERC-20.
+  useEffect(() => {
+    setTokenIn(prev => (prev && !isNativeETH(prev) ? prev : wethFor(chainId)))
+  }, [chainId])
+
+  // [CHORE-DCA-WETH-INPUT] Advisory guidance for the "holds only native ETH" case: if the
+  // wallet has ETH but ~zero WETH, hint to wrap first. Native ETH is keyed under its sentinel
+  // address; WETH under the chain's wrapped-native address. Non-blocking (they can wrap elsewhere).
+  const { balances } = useTokenBalances()
+  const hasNativeOnly = useMemo(() => {
+    const weth = wethFor(chainId)
+    const wethKey = weth?.address.toLowerCase()
+    const nativeBal = balances.get(NATIVE_ETH.toLowerCase())?.raw ?? 0n
+    const wethBal = wethKey ? (balances.get(wethKey)?.raw ?? 0n) : 0n
+    return nativeBal > 0n && wethBal === 0n
+  }, [balances, chainId])
   const [totalDisplay, setTotalDisplay] = useState('')
   const [partsIdx, setPartsIdx] = useState(2) // default: 7
   const [intervalIdx, setIntervalIdx] = useState(3) // default: 1d
@@ -292,6 +323,7 @@ function CreateDCAForm({
             selected={tokenIn}
             onSelect={setTokenIn}
             disabledAddress={tokenOut?.address}
+            hideNativeInput
           />
           <input
             type="text"
@@ -307,6 +339,12 @@ function CreateDCAForm({
             className="flex-1 bg-transparent text-right text-lg font-semibold text-cream outline-none placeholder:text-cream-20"
           />
         </div>
+        {/* [CHORE-DCA-WETH-INPUT] Advisory hint when the wallet holds native ETH but no WETH. */}
+        {hasNativeOnly && (
+          <p className="mt-1 text-[11px] text-cream-35">
+            DCA spends an ERC-20 token. You hold native ETH — wrap it to WETH first to start a DCA.
+          </p>
+        )}
       </div>
 
       {/* Arrow */}

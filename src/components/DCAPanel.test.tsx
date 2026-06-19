@@ -34,6 +34,11 @@ vi.mock('wagmi', () => ({
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),
   useWriteContract: () => ({ writeContractAsync: mockWriteContractAsync }),
   useReadContract: (opts: { functionName: string }) => mockReadContractImpl(opts),
+  // [CHORE-DCA-WETH-INPUT] CreateDCAForm now reads useTokenBalances() (which calls useBalance +
+  // useReadContracts) for the "wrap ETH first" advisory hint. Default: empty balances ⇒ no hint,
+  // so the existing build/sign/submit assertions are unaffected.
+  useBalance: () => ({ data: undefined, isLoading: false, isError: false }),
+  useReadContracts: () => ({ data: [], isLoading: false, isError: false }),
 }))
 
 // Keep enums/constants/config real (getOrderExecutor, MIN_ORDER_AMOUNT, presets);
@@ -124,7 +129,8 @@ describe('DCAPanel — create form', () => {
 describe('DCAPanel — valid order build → sign → submit', () => {
   it('builds, EIP-712 signs against the Base executor domain, and submits a DCA order', async () => {
     renderWithProviders(<DCAPanel />)
-    enterAmount('100') // 100 USDC over 7 buys ⇒ ~14.28 USDC/buy, well above the floor
+    // [CHORE-DCA-WETH-INPUT] The DCA INPUT now defaults to the chain's WETH (18 dec), not USDC.
+    enterAmount('100') // 100 WETH over 7 buys ⇒ ~14.28 WETH/buy, well above the floor
 
     fireEvent.click(startDcaButton())
     // Phase A froze the order for review — confirm it to sign + submit (Phase B).
@@ -146,7 +152,9 @@ describe('DCAPanel — valid order build → sign → submit', () => {
 describe('DCAPanel — #200 client-side MIN_ORDER_AMOUNT floor', () => {
   it('blocks a sub-floor per-execution amount client-side — never reaches review or signing', async () => {
     renderWithProviders(<DCAPanel />)
-    enterAmount('0.05') // 0.05 USDC over 7 buys ⇒ ~7,142 base units/buy < 10,000 floor
+    // [CHORE-DCA-WETH-INPUT] INPUT defaults to WETH (18 dec) now: 5e-14 WETH = 50,000 base units
+    // over 7 buys ⇒ ~7,142 base units/buy < 10,000 floor (same sub-floor case as before).
+    enterAmount('0.00000000000005')
 
     fireEvent.click(startDcaButton())
 

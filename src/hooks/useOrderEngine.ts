@@ -41,6 +41,9 @@ import type {
   OrderRow,
 } from '@/lib/order-engine'
 import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
+import { NATIVE_ETH } from '@/lib/constants'
+import { getWrappedNative } from '@/lib/chains/registry'
+import { findChainToken } from '@/lib/chains/tokens'
 
 // ── Order hash computation (matches contract's getOrderHash) ──
 const ORDER_TYPEHASH = keccak256(toBytes(
@@ -502,6 +505,16 @@ export function useOrderEngine() {
       return
     }
 
+    // [CHORE-DCA-WETH-INPUT] Defense-in-depth: a conditional order's tokenIn (spend token)
+    // must be an ERC-20 — the OrderExecutor pulls it via Permit2/transferFrom, which the
+    // native-ETH sentinel can't satisfy (the contract would revert, wasting an EIP-712
+    // signature). The UI hides native ETH from the DCA INPUT selector, but resolve the
+    // sentinel here too (chain-aware WETH, never hardcoded) so it can NEVER reach the signed
+    // struct. tokenOut is left untouched — native ETH is a valid OUTPUT (contract unwraps).
+    const tokenInAddress = config.tokenIn.address.toLowerCase() === NATIVE_ETH.toLowerCase()
+      ? getWrappedNative(chainId)
+      : (config.tokenIn.address as `0x${string}`)
+
     // [P213/FULL-M-06] Session-tracked nonce (max of on-chain and local+1)
     // instead of the raw wagmi read, so rapid sequential creates don't collide.
     const nonce = getNextNonce()
@@ -510,7 +523,7 @@ export function useOrderEngine() {
     // Build on-chain order struct
     const order: OnChainOrder = {
       owner: address,
-      tokenIn: config.tokenIn.address as `0x${string}`,
+      tokenIn: tokenInAddress,
       tokenOut: config.tokenOut.address as `0x${string}`,
       amountIn: BigInt(config.amountIn),
       minAmountOut: BigInt(config.minAmountOut),
@@ -569,6 +582,16 @@ export function useOrderEngine() {
     const typeLabel = config.orderType === OrderType.LIMIT ? 'limit'
       : config.orderType === OrderType.STOP_LOSS ? 'stop_loss' : 'dca'
 
+    // [CHORE-DCA-WETH-INPUT] If createOrder remapped a native-ETH input to WETH, the signed
+    // struct + persisted token_in already hold the WETH address. Derive the matching display
+    // symbol/decimals from the per-chain catalog so the stored/in-memory metadata doesn't keep
+    // labelling a WETH address as "ETH". Reachable for limit/stop_loss (whose panels still offer
+    // native ETH as input); the order-build guard rewrites it for all conditional types.
+    const tokenInRemapped = order.tokenIn.toLowerCase() !== config.tokenIn.address.toLowerCase()
+    const resolvedTokenIn = tokenInRemapped ? findChainToken(order.tokenIn, p.chainId) : undefined
+    const tokenInSymbol = resolvedTokenIn?.symbol ?? config.tokenIn.symbol
+    const tokenInDecimals = resolvedTokenIn?.decimals ?? config.tokenIn.decimals
+
     const newOrder: AutonomousOrder = {
       id: orderId,
       orderHash: computedHash,
@@ -576,8 +599,8 @@ export function useOrderEngine() {
       signature: '',
       status: 'signing',
       orderType: config.orderType,
-      tokenInSymbol: config.tokenIn.symbol,
-      tokenInDecimals: config.tokenIn.decimals,
+      tokenInSymbol,
+      tokenInDecimals,
       tokenOutSymbol: config.tokenOut.symbol,
       tokenOutDecimals: config.tokenOut.decimals,
       dcaExecuted: 0,
@@ -627,7 +650,11 @@ export function useOrderEngine() {
         wallet: address,
         orderHash: computedHash, // Real bytes32 hash from contract's getOrderHash
         orderType: typeLabel,
-        tokenIn: config.tokenIn.address,
+        // [CHORE-DCA-WETH-INPUT] Persist EXACTLY what was signed/hashed (order.tokenIn), not
+        // config.tokenIn.address — if a native-ETH sentinel was resolved to WETH above, the
+        // stored row must match the signed struct (the orderHash binds order.tokenIn), else the
+        // DB row and the on-chain order would disagree. Mirrors [CHORE-DCA-PRELAUNCH-FIXES Fix 2].
+        tokenIn: order.tokenIn,
         tokenOut: config.tokenOut.address,
         amountIn: config.amountIn,
         minAmountOut: config.minAmountOut,
@@ -661,9 +688,9 @@ export function useOrderEngine() {
           dcaInterval: order.dcaInterval.toString(),
           dcaTotal: order.dcaTotal.toString(),
         },
-        tokenInSymbol: config.tokenIn.symbol,
+        tokenInSymbol,
         tokenOutSymbol: config.tokenOut.symbol,
-        tokenInDecimals: config.tokenIn.decimals,
+        tokenInDecimals,
         tokenOutDecimals: config.tokenOut.decimals,
       })
 
