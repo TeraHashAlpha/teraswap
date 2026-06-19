@@ -11,6 +11,9 @@ export type TokenCategory =
   | 'AI & Data'
   | 'Memecoin'
   | 'Gaming & Metaverse'
+  // [SPRINT-RWA-GOLD] Tokenized physical gold (RWA). Each token is issuer-redeemable for
+  // physical gold; this is a utility category for the swap UI, NOT investment/yield advice.
+  | 'Gold'
   // [SPRINT token-selector-ux P3] Forward-compatible category. Ships EMPTY — no
   // token uses 'Stocks' yet (xStocks are not shipped), so it produces no group
   // and no filter chip until verified tokens are added later.
@@ -707,12 +710,26 @@ export const DEFAULT_TOKENS: Token[] = [
     category: 'DeFi',
   },
   {
+    // [SPRINT-RWA-GOLD] PAX Gold — issuer Paxos (paxos.com/paxgold); each PAXG = 1 fine troy oz
+    // LBMA gold. Verified: Etherscan source-verified; on-chain symbol PAXG / decimals 18 /
+    // transferable; CoinGecko-listed; deep Uniswap liquidity (PAXG/WETH ~$12.7M, PAXG/USDC ~$2.5M).
     address: '0x45804880De22913dAFE09f4980848ECE6EcbAf78',
     symbol: 'PAXG',
     name: 'PAX Gold',
     decimals: 18,
-    logoURI: logo('0x45804880de22913dafe09f4980848ece6ecbaf78'),
-    category: 'Other',
+    logoURI: 'https://assets.coingecko.com/coins/images/9519/large/paxgold.png?1696509604',
+    category: 'Gold',
+  },
+  {
+    // [SPRINT-RWA-GOLD] Tether Gold — issuer Tether (tether.to); each XAU₮ = 1 troy fine oz gold.
+    // Verified: Etherscan source-verified; on-chain symbol "XAUt" (== XAUT case-insensitively) /
+    // decimals 6 / transferable; CoinGecko-listed; deep Uniswap liquidity (XAUt/USDT ~$10.3M).
+    address: '0x68749665FF8D2d112Fa859AA293F07A622782F38',
+    symbol: 'XAUT',
+    name: 'Tether Gold',
+    decimals: 6,
+    logoURI: 'https://assets.coingecko.com/coins/images/10481/large/logo.png?1774627372',
+    category: 'Gold',
   },
   {
     address: '0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D',
@@ -791,6 +808,8 @@ export function isNativeETH(token: Token): boolean {
 export const CATEGORY_DISPLAY_ORDER: TokenCategory[] = [
   'Native', 'Stablecoin', 'Wrapped BTC', 'Liquid Staking', 'DeFi',
   'L2 & Infrastructure', 'AI & Data', 'Gaming & Metaverse', 'Memecoin',
+  // [SPRINT-RWA-GOLD] tokenized gold (PAXG, XAUT).
+  'Gold',
   // [SPRINT token-selector-ux P3] 'Stocks' ships EMPTY (no tokens yet) → it
   // produces no group/chip; kept here so grouping is forward-compatible.
   'Stocks',

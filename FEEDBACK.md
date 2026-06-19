@@ -4547,3 +4547,53 @@ on-chain value is unknown). `refresh-catalog-guard.ts` records `decimals` per to
 On-chain (publicnode RPC) + official sources · catalog-guard **16/16** (501 verdicts, 0 dead, 0 decimals
 mismatch) · tsc clean · lint 0 errors · vitest 1945/1945 · next build. Chain 1: 386→385 (Litentry removed). No
 dependency/lockfile change; `tokens.ts` untouched (serialized with gold-RWA). Stacked on #210.
+
+---
+
+## Feedback — SPRINT-RWA-GOLD: tokenized gold (PAXG + XAUT) under a new "Gold" category
+
+Adds a `Gold` token category with two issuer-redeemable tokenized-gold tokens, **mainnet-only**. Every check the
+catalog-address-guard (#209/#211) enforces passes; `guard:refresh` updated the cache; guard 16/16 green.
+
+### PROPOSED FINAL LIST — for owner sign-off BEFORE merge
+| symbol | chain | address | on-chain symbol / decimals | transferable | issuer (official) | trusted-list | DEX liquidity (routable) |
+|---|---|---|---|---|---|---|---|
+| **PAXG** | mainnet (1) | `0x45804880De22913dAFE09f4980848ECE6EcbAf78` | PAXG / **18** | yes | **Paxos** — paxos.com/paxgold; Etherscan source-verified ("Paxos Gold") | ✓ CoinGecko | Uniswap PAXG/WETH **~$12.7M**, PAXG/USDC ~$2.5M, PAXG/XAUt ~$5.2M |
+| **XAUT** | mainnet (1) | `0x68749665FF8D2d112Fa859AA293F07A622782F38` | **XAUt** / **6** | yes | **Tether** — tether.to; Etherscan source-verified ("Tether Gold") | ✓ CoinGecko | Uniswap XAUt/USDT **~$10.3M** ($6.8M 24h), XAUt/USDC ~$4.5M |
+
+Notes: XAUT's on-chain symbol is `XAUt` (lower-case t) — matches the catalog `XAUT` case-insensitively (the guard's
+identity check is case-insensitive). XAUT is **6 decimals** (a classic foot-gun — the catalog is set to 6 and the
+guard's decimals check enforces it). Each token = 1 troy oz of LBMA/allocated physical gold, issuer-redeemable.
+
+### Verification per the goal (each token, both ✓)
+1. **Address vs official issuer** — Etherscan verified token pages confirm "Paxos Gold"/Paxos and "Tether
+   Gold"/Tether at these exact addresses, with the issuers' official sites linked + source-verified contracts.
+2. **On-chain** — `symbol()`/`decimals()`/`transfer(0x..dead,0)` read live (PAXG PAXG/18/ok; XAUT XAUt/6/ok).
+3. **Routable liquidity** — deep Uniswap (a whitelisted router) pools (above), so a real quote routes.
+4. **Per-chain** — checked Base: **no PAXG/XAUT on Base** (the Base "gold" tickers are unrelated projects —
+   GoldenBoys/Goldn/GoldPesa/…). So **mainnet-only**; no Base entry added.
+5. **Real logos** — direct CoinGecko PNGs (PAXG 19.5KB, XAUT 14KB, both 200). **No investment/yield framing** —
+   category is "Gold", names are the issuers' ("PAX Gold"/"Tether Gold"); a code comment states it's a UI
+   utility category, not advice.
+
+### Implementation
+`'Gold'` added to `TokenCategory` + `CATEGORY_DISPLAY_ORDER`. PAXG was already curated (re-categorised Other→Gold,
+crisp logo). XAUT added to `DEFAULT_TOKENS` (decimals 6) — it dedupes the generated long-tail entry (same address)
+so it appears once, under Gold. `getFullCatalog(1)` → exactly 1 PAXG + 1 XAUT.
+
+### Surfaced (NOT added) — other RWA candidates found
+- **XAUM** (Matrixdock Gold, `0x2103E845C5E135493Bb6c2A4f0B8651956eA8682`) — another tokenized gold, but **thin
+  liquidity** (top Uniswap XAUM/USDT ~$96k) and Matrixdock applies some transfer controls → verify
+  permissionless + routability before considering.
+- **Ondo "Tokenized" stocks/ETFs** (GMEON, COSTON, NEMON, SHYON, IBITON, URAON, …) — a large, growing on-chain
+  RWA set, BUT **permissioned (KYC / Ondo Global Markets restrictions)** → fails the "permissionless" bar; not
+  swap-catalog candidates as-is.
+- **Treasuries / yield RWA** (VBILL, USDY, OUSG, BUIDL, …) — mostly permissioned and/or yield-bearing
+  (marketing-sensitive); skip for a permissionless swap catalog.
+- Net: among **permissionless + liquid** RWA, PAXG/XAUT (gold) are the clear fit today; the rest is largely
+  permissioned. Each future candidate must pass the same 5 checks + a permissionless-transfer confirmation.
+
+### Verification (gates)
+On-chain (publicnode RPC) + Etherscan/CoinGecko/Dexscreener · **catalog-address-guard 16/16** (PAXG/XAUT in the
+verdict cache, all checks pass) · tsc clean · lint 0 errors · vitest 1945/1945 · next build. Owner signs off the
+two addresses before merge.
