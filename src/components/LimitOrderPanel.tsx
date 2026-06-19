@@ -549,7 +549,7 @@ function CreateLimitForm({
       {/* Info badge */}
       <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2">
         <span className="text-[10px] text-cream-50">
-          <span className="font-semibold text-cream-gold">Autonomous execution</span> — Chainlink oracles monitor price. Your order executes via 1inch when target is hit. Sign once, no browser needed.
+          <span className="font-semibold text-cream-gold">Autonomous execution</span> — Chainlink oracles monitor price. Your order executes via 1inch when target is hit. Approve once, then sign — no infinite approvals, no browser needed.
         </span>
       </div>
     </div>
