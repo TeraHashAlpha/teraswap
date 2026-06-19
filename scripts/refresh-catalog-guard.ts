@@ -35,6 +35,7 @@ const transferAbi = [
   { type: 'function', name: 'transfer', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] },
 ] as const
 const symbolAbi = [{ type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] }] as const
+const decimalsAbi = [{ type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] }] as const
 
 async function cgAddressSet(chainId: number): Promise<Set<string> | null> {
   try {
@@ -49,13 +50,13 @@ async function cgAddressSet(chainId: number): Promise<Set<string> | null> {
 
 async function onchain(client: ReturnType<typeof createPublicClient>, address: string) {
   let a: `0x${string}`
-  try { a = getAddress(address) } catch { return { hasBytecode: null, transferable: null, onchainSymbol: null } }
+  try { a = getAddress(address) } catch { return { hasBytecode: null, transferable: null, onchainSymbol: null, decimals: null } }
   let hasBytecode: boolean | null = null
   try {
     const code = await client.getCode({ address: a })
     hasBytecode = !!code && code !== '0x'
-  } catch { return { hasBytecode: null, transferable: null, onchainSymbol: null } }
-  if (!hasBytecode) return { hasBytecode, transferable: false, onchainSymbol: null }
+  } catch { return { hasBytecode: null, transferable: null, onchainSymbol: null, decimals: null } }
+  if (!hasBytecode) return { hasBytecode, transferable: false, onchainSymbol: null, decimals: null }
   // On-chain symbol() binds the verdict to the token IDENTITY (catches a typo to ANOTHER live
   // token under the same catalog symbol). null when symbol() is bytes32/missing/RPC-fails.
   let onchainSymbol: string | null = null
@@ -63,13 +64,20 @@ async function onchain(client: ReturnType<typeof createPublicClient>, address: s
     const s = await client.readContract({ address: a, abi: symbolAbi, functionName: 'symbol' })
     onchainSymbol = typeof s === 'string' && s.length > 0 && s.length <= 32 ? s : null
   } catch { onchainSymbol = null }
+  // On-chain decimals() — cross-checked vs the catalog (fund-affecting; the swap path sizes amounts with it).
+  let decimals: number | null = null
+  try {
+    const d = await client.readContract({ address: a, abi: decimalsAbi, functionName: 'decimals' })
+    decimals = typeof d === 'number' ? d : Number(d)
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) decimals = null
+  } catch { decimals = null }
   try {
     await client.call({ account: FROM as `0x${string}`, to: a, data: encodeFunctionData({ abi: transferAbi, functionName: 'transfer', args: [DEAD, 0n] }) })
-    return { hasBytecode, transferable: true, onchainSymbol }
+    return { hasBytecode, transferable: true, onchainSymbol, decimals }
   } catch (e: unknown) {
     const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? '').toLowerCase()
-    if (msg.includes('revert') || msg.includes('execution')) return { hasBytecode, transferable: false, onchainSymbol }
-    return { hasBytecode, transferable: null, onchainSymbol } // RPC/infra — unknown, non-fatal
+    if (msg.includes('revert') || msg.includes('execution')) return { hasBytecode, transferable: false, onchainSymbol, decimals }
+    return { hasBytecode, transferable: null, onchainSymbol, decimals } // RPC/infra — unknown, non-fatal
   }
 }
 
@@ -97,6 +105,7 @@ async function run() {
           hasBytecode: oc.hasBytecode,
           transferable: oc.transferable,
           onchainSymbol: oc.onchainSymbol,
+          decimals: oc.decimals,
         }
         if (idx % 50 === 0) console.error(`  ${chainId}: ${idx}/${cat.length}`)
       }

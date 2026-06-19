@@ -127,10 +127,28 @@ describe('catalog-address-guard — catches the four failure classes', () => {
     expect(f.some((x) => x.check === 'verdict-cache')).toBe(true)
   })
 
+  it('DECIMALS — catalog decimals ≠ on-chain decimals() ⇒ fatal (the FLUX 18-vs-8 bug)', () => {
+    // FLUX: the catalog carried decimals 18 but the contract is 8 — a fund-affecting 10^10 swap-sizing error.
+    const flux = '0x720CD16b011b987Da3518fbf38c3071d4F0D1495'
+    const v: Verdict[] = [{ chainId: 1, address: flux, symbol: 'FLUX', inTrustedList: true, hasBytecode: true, transferable: true, onchainSymbol: 'FLUX', decimals: 8 }]
+    const f = fatal(auditChain(1, [{ address: flux, symbol: 'FLUX', decimals: 18 }], v, AL))
+    expect(f.some((x) => x.check === 'decimals')).toBe(true)
+    // corrected to 8 ⇒ no decimals fatal
+    expect(fatal(auditChain(1, [{ address: flux, symbol: 'FLUX', decimals: 8 }], v, AL)).some((x) => x.check === 'decimals')).toBe(false)
+  })
+
+  it('DECIMALS — unknown on-chain decimals (null) ⇒ advisory warn, never fatal', () => {
+    const addr = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    const v: Verdict[] = [{ chainId: 1, address: addr, symbol: 'WETH', inTrustedList: true, hasBytecode: true, transferable: true, onchainSymbol: 'WETH', decimals: null }]
+    const f = auditChain(1, [{ address: addr, symbol: 'WETH', decimals: 18 }], v, AL)
+    expect(fatal(f).some((x) => x.check === 'decimals')).toBe(false)
+    expect(warnings(f).some((x) => x.check === 'decimals')).toBe(true)
+  })
+
   it('a clean token (in trusted list, bytecode, transferable, unique) ⇒ no findings', () => {
     const usdc = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-    const v: Verdict[] = [{ chainId: 1, address: usdc, symbol: 'USDC', inTrustedList: true, hasBytecode: true, transferable: true }]
-    expect(auditChain(1, [{ address: usdc, symbol: 'USDC' }], v, AL)).toEqual([])
+    const v: Verdict[] = [{ chainId: 1, address: usdc, symbol: 'USDC', inTrustedList: true, hasBytecode: true, transferable: true, onchainSymbol: 'USDC', decimals: 6 }]
+    expect(auditChain(1, [{ address: usdc, symbol: 'USDC', decimals: 6 }], v, AL)).toEqual([])
   })
 
   it('native-ETH sentinel is exempt from on-chain + trusted-list checks', () => {
