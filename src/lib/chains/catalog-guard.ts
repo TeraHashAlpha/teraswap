@@ -23,6 +23,8 @@
 export interface TokenLike {
   address: string
   symbol: string
+  /** Catalog decimals — cross-checked against on-chain decimals() when present. */
+  decimals?: number
 }
 
 export interface Verdict {
@@ -34,6 +36,8 @@ export interface Verdict {
   transferable: boolean | null
   /** On-chain symbol() recorded at refresh — binds the verdict to the token IDENTITY. null = bytes32/RPC-fail. */
   onchainSymbol?: string | null
+  /** On-chain decimals() recorded at refresh — cross-checked vs the catalog. null = RPC-fail/non-standard. */
+  decimals?: number | null
 }
 
 export interface Allowlist {
@@ -48,7 +52,7 @@ export interface Allowlist {
 
 export interface Finding {
   severity: 'fatal' | 'warn'
-  check: 'bytecode' | 'trusted-list' | 'duplicate-symbol' | 'transferable' | 'verdict-cache' | 'deprecated' | 'identity'
+  check: 'bytecode' | 'trusted-list' | 'duplicate-symbol' | 'transferable' | 'verdict-cache' | 'deprecated' | 'identity' | 'decimals'
   chainId: number
   symbol: string
   address: string
@@ -118,6 +122,15 @@ export function auditChain(
       if (!(expected && expected === v.onchainSymbol.toUpperCase())) {
         findings.push({ severity: 'fatal', check: 'identity', chainId, symbol: t.symbol, address: t.address, message: `on-chain symbol() = "${v.onchainSymbol}" but catalog symbol = "${t.symbol}" — the address may be a different token. Correct the address, or add a symbolMismatchExempt entry if this is a legit rebrand/wrap/artifact.` })
       }
+    }
+
+    // ①ᶜ decimals — catalog `decimals` MUST equal the on-chain `decimals()`. FUND-AFFECTING: the swap path
+    // sizes amounts with `token.decimals` via parseUnits/formatUnits (useSwap.ts), so a mismatch corrupts the
+    // raw sell amount + balance/allowance math. null ⇒ advisory (RPC/non-standard at refresh).
+    if (typeof t.decimals === 'number' && v.decimals != null && v.decimals !== t.decimals) {
+      findings.push({ severity: 'fatal', check: 'decimals', chainId, symbol: t.symbol, address: t.address, message: `catalog decimals ${t.decimals} ≠ on-chain decimals() ${v.decimals} — corrupts swap amount sizing (parseUnits/formatUnits). Correct the catalog decimals.` })
+    } else if (typeof t.decimals === 'number' && v.decimals === null) {
+      findings.push({ severity: 'warn', check: 'decimals', chainId, symbol: t.symbol, address: t.address, message: 'on-chain decimals() unknown (RPC/non-standard) at refresh — re-run refresh.' })
     }
 
     // ② trusted-list — not in a reputable list and not allowlisted ⇒ fatal. null ⇒ advisory.

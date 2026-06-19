@@ -7,16 +7,11 @@
     "duplicateSymbolExempt: same symbol legitimately at >1 address on one chain — ADDRESS-scoped (every colliding address must be listed).",
     "nativeEth: native-ETH sentinel, exempt from on-chain + trusted-list checks.",
     "The guard still FAILS on any NON-allowlisted dead/identity-mismatch/trusted-list-miss/duplicate, so the allowlist never hides a NEW bad token.",
-    "knownDeprecated cleared by CHORE-CATALOG-CLEANUP: LCX/RBC replaced with canonical addresses, LOOM/OMNI/REP removed (non-routable/duplicate) — all verified on-chain + official sources."
+    "knownDeprecated cleared by CHORE-CATALOG-CLEANUP: LCX/RBC replaced with canonical addresses, LOOM/OMNI/REP removed (non-routable/duplicate) — all verified on-chain + official sources.",
+    "CHORE-CATALOG-COLLISIONS-DECIMALS: removed AVT/ArtVerse trustedListExempt (replaced by Aventus, in CG) + LIT duplicateSymbolExempt (Litentry removed). FLUX/WMTX decimals corrected (8/6) in the catalog; the new decimals guard cross-checks on-chain decimals()."
   ],
   "nativeEth": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
   "trustedListExempt": [
-    {
-      "chainId": 1,
-      "address": "0x845576c64f9754CF09d87e45B720E82F3EeF522C",
-      "symbol": "AVT",
-      "reason": "LEGIT ticker collision (catalog-guard-triage): a different real project shares the ticker; CoinGecko lists the other one. The catalog address and the CoinGecko address are two DISTINCT, real projects that share the \"AVT\" ticker — a genuine ti"
-    },
     {
       "chainId": 1,
       "address": "0x3294395e62F4eB6aF3f1Fcf89f5602D90Fb3Ef69",
@@ -264,15 +259,5 @@
     }
   ],
   "knownDeprecated": [],
-  "duplicateSymbolExempt": [
-    {
-      "chainId": 1,
-      "symbol": "LIT",
-      "addresses": [
-        "0x232CE3bd40fCd6f80f3d55A522d03f25Df784Ee2",
-        "0xb59490aB09A0f526Cc7305822aC65f2Ab12f9723"
-      ],
-      "reason": "LEGIT ticker collision — two distinct real projects share \"LIT\" (catalog-guard-triage, high confidence)."
-    }
-  ]
+  "duplicateSymbolExempt": []
 }

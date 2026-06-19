@@ -52,6 +52,8 @@ const REMOVALS = new Set([
   '1:0xa4e8c3ec456107ea67d3075bf9e3df3a75823db0', // LOOM — migrated to 0x42476f74…; the new token is DEX-dead (~$30 24h, fee-tier dust pools) → non-routable, remove.
   '1:0x36e66fbbce51e4cd5bd3c62b637eb411b18949d4', // OMNI — Omni Network rebranded + redenominated 1:75 to Nomina (NOM, 0x6e6F6d…); the successor is non-routable on DEX (single ~$610-TVL pool) and trades under a different ticker → remove.
   '1:0x1985365e9f78359a9b6ad760e32412f4a445e862', // REP — Augur "Reputation v1", deprecated; REPv2 (0x221657…) is already a separate catalog entry → remove (would duplicate).
+  // [CHORE-CATALOG-COLLISIONS-DECIMALS]
+  '1:0xb59490ab09a0f526cc7305822ac65f2ab12f9723', // LIT — Litentry (deprecated; rebranded to Heima/HEI, 1:1 swap Feb 2025). The current canonical "LIT" (Lighter, 0x232CE3…) is a separate catalog entry → remove the Litentry one (resolves the LIT duplicate-symbol).
 ])
 // REMAPS — replace a deprecated address with the verified canonical token (full metadata):
 const REMAPS = {
@@ -59,6 +61,16 @@ const REMAPS = {
   '1:0x037a54aab062628c9bbae1fdb1583c195585fe41': { chainId: 1, address: '0x8cd41041505885ef0ad3858181d66f17be8aae7e', symbol: 'LCX', name: 'LCX', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/9985/large/256_lcxlogo.png?1770805695' },
   // Rubic "Old RBC Token" (NON-TRANSFERABLE on-chain — transfer reverts) → migrated 1:1 RUBIC TOKEN (transferable).
   '1:0xa4eed63db85311e22df4473f87ccfc3dadcfa3e3': { chainId: 1, address: '0x3330bfb7332ca23cd071631837dc289b09c33333', symbol: 'RBC', name: 'Rubic', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12629/large/rubic.png?1696512437' },
+  // [CHORE-CATALOG-COLLISIONS-DECIMALS] AVT ticker collision: catalog pointed at "ArtVerse Token" (dead, ~$0
+  // volume, untracked). The AVT users expect is Aventus — CoinGecko-canonical, actively traded. OWNER-SIGNED-OFF.
+  '1:0x845576c64f9754cf09d87e45b720e82f3eef522c': { chainId: 1, address: '0x0d88ed6e74bbfd96b831231638b66c05571e824f', symbol: 'AVT', name: 'Aventus', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/901/large/aventus.png?1728614945' },
+}
+// [CHORE-CATALOG-COLLISIONS-DECIMALS] DECIMALS_OVERRIDES — same address, CORRECTED decimals. The vendored Uniswap
+// snapshot carried a wrong `decimals` for these (fund-affecting: the swap path uses token.decimals in parseUnits/
+// formatUnits — see useSwap.ts:314,695). Each value is the on-chain `decimals()` (verified via eth_call).
+const DECIMALS_OVERRIDES = {
+  '1:0x720cd16b011b987da3518fbf38c3071d4f0d1495': 8, // FLUX (RunOnFlux) — on-chain decimals()=8, snapshot had 18.
+  '8453:0x3e31966d4f81c72d2a55310a6365a56a4393e98d': 6, // WMTX (World Mobile Token, Base) — on-chain decimals()=6, snapshot had 18.
 }
 
 function sha256(path) {
@@ -92,6 +104,9 @@ function buildChain(tokens, chainId) {
     if (remap) {
       address = validate(remap)
       entry = { address, symbol: remap.symbol, name: remap.name, decimals: remap.decimals, logoURI: remap.logoURI }
+    }
+    if (Object.prototype.hasOwnProperty.call(DECIMALS_OVERRIDES, srcKey)) {
+      entry.decimals = DECIMALS_OVERRIDES[srcKey] // same address, corrected decimals
     }
     const key = address.toLowerCase()
     if (seen.has(key)) continue // first occurrence wins

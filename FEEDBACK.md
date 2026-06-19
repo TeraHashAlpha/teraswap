@@ -4504,3 +4504,46 @@ check (on-chain `decimals()` vs catalog) in a follow-up — it would have caught
 On-chain verified (publicnode RPC) + 8-agent official-source workflow. tsc clean · lint 0 errors · vitest
 1943/1943 · next build · **catalog-address-guard 14/14**. Edits are generator + generated catalog + guard
 fixtures only; `src/lib/tokens.ts` untouched-by-this-chore except as serialized with the gold-RWA work.
+
+---
+
+## Feedback — CHORE-CATALOG-COLLISIONS-DECIMALS: FLUX decimals fix + AVT/LIT collisions + a decimals guard
+
+Resolves the catalog-guard owner-sign-off items + extends the guard so the decimals class can't regress. All
+changes are curation in `scripts/generate-token-catalog.mjs` (regenerated) — `tokens.ts` untouched. Every address
++ decimal verified on-chain (eth_call) + official source.
+
+### (1) FLUX decimals — FUND-AFFECTING, live swap-path impact (NOT display-only)
+On-chain `decimals()` = **8**, catalog had **18** (verified via eth_call). **This DID reach the live swap path:**
+- `src/hooks/useSwap.ts:314` & `:695` size the raw sell amount with `parseUnits(amountIn, tokenIn.decimals)` —
+  with `18`, "1 FLUX" becomes `1e18` raw = **10^10 FLUX** (FLUX is 8-dec), a 10-billion-x overstatement.
+- Balance/allowance checks (`useSwap.ts:712-735`) use `formatUnits(balance, tokenIn.decimals)` — a held FLUX
+  balance renders 10^10× too small.
+- **Net practical effect:** a FLUX swap is mis-sized AND the pre-flight balance check ("need" ≫ "have") fails
+  closed, so the swap is **blocked/reverts rather than silently draining funds** — but FLUX was effectively
+  un-swappable and every FLUX amount/balance shown was wrong by 10^10. A real swap-path bug, not display-only.
+- **Fix:** `decimals: 18 → 8` (kept the FLUX address — RunOnFlux is the project users mean). OWNER-SIGN-OFF.
+
+### A SECOND decimals bug found by the new guard's audit
+While building the decimals cross-check I audited on-chain `decimals()` for the whole catalog: besides FLUX,
+**WMTX (World Mobile Token, Base 0x3e31966d…) had catalog `18` vs on-chain `6`** (a 10^12 error). Fixed to **6**.
+No other mismatches across 501 tokens.
+
+### (2) AVT — REPLACE (owner-sign-off) | (3) LIT — REMOVE the deprecated entry
+- **AVT** `0x845576…` (ArtVerse Token — dead, ~$0 volume, untracked) → **Aventus** `0x0d88ed6e…` (the AVT users
+  expect; CoinGecko-canonical, actively traded; on-chain decimals 18, in CG). REMAP'd; dropped the stale
+  ArtVerse trustedListExempt entry.
+- **LIT** — the "duplicate" was one canonical + one deprecated: kept **Lighter** `0x232CE3…` (current canonical
+  LIT, a16z-backed); **removed Litentry** `0xb59490…` (deprecated — rebranded to Heima/HEI, 1:1 swap Feb 2025,
+  confirmed on-chain "Litentry"/LIT). Cleared the LIT duplicateSymbolExempt (now single).
+
+### (4) Guard extension — on-chain decimals() cross-check (would've caught FLUX)
+`catalog-guard.ts` now FATALs when catalog `decimals` ≠ the cached on-chain `decimals()` (advisory warn when the
+on-chain value is unknown). `refresh-catalog-guard.ts` records `decimals` per token. 2 new regression tests
+(FLUX 18-vs-8 → fatal, corrected → clean, null → warn). Live prove-it: baseline 0 fatal; reintroducing FLUX
+`decimals: 18` → **RED [decimals]**.
+
+### Verification
+On-chain (publicnode RPC) + official sources · catalog-guard **16/16** (501 verdicts, 0 dead, 0 decimals
+mismatch) · tsc clean · lint 0 errors · vitest 1945/1945 · next build. Chain 1: 386→385 (Litentry removed). No
+dependency/lockfile change; `tokens.ts` untouched (serialized with gold-RWA). Stacked on #210.

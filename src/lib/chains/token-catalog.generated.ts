@@ -8,7 +8,7 @@
  * Base USDT (bridged) added from CoinGecko Base list v430.1.0 — Uniswap omits it.
  *
  * Every address validated: viem getAddress (EIP-55) + chainId + integer decimals.
- * Counts: chain 1 = 386, chain 8453 = 97.
+ * Counts: chain 1 = 385, chain 8453 = 97.
  */
 
 export interface GeneratedToken {
@@ -64,7 +64,7 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0x18aAA7115705e8be94bfFEBDE57Af9BFc265B998', symbol: 'AUDIO', name: 'Audius', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12913/thumb/AudiusCoinLogo_2x.png?1603425727' },
     { address: '0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a', symbol: 'AUSD', name: 'AUSD', decimals: 6, logoURI: 'https://coin-images.coingecko.com/coins/images/39284/large/AUSD_1024px.png?1764684132' },
     { address: '0xa6C0c097741D55ECd9a3A7DeF3A8253fD022ceB9', symbol: 'AVA', name: 'AVA', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/3014/large/AVA_Logo_160x160px_Black.png?1696503750' },
-    { address: '0x845576c64f9754CF09d87e45B720E82F3EeF522C', symbol: 'AVT', name: 'Artverse Token', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/19727/thumb/ewnektoB_400x400.png?1635767094' },
+    { address: '0x0d88eD6E74bbFD96B831231638b66C05571e824F', symbol: 'AVT', name: 'Aventus', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/901/large/aventus.png?1728614945' },
     { address: '0x467719aD09025FcC6cF6F8311755809d45a5E5f3', symbol: 'AXL', name: 'Axelar', decimals: 6, logoURI: 'https://assets.coingecko.com/coins/images/27277/large/V-65_xQ1_400x400.jpeg' },
     { address: '0xBB0E17EF65F82Ab018d8EDd776e8DD940327B28b', symbol: 'AXS', name: 'Axie Infinity', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/13029/thumb/axie_infinity_logo.png?1604471082' },
     { address: '0xA27EC0006e59f245217Ff08CD52A7E8b169E62D2', symbol: 'AZTEC', name: 'Aztec', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/70681/large/aztec.png?1763091883' },
@@ -158,7 +158,7 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0x7C135549504245B5eAe64fc0E99Fa5ebabb8e35D', symbol: 'FIDD', name: 'Fidelity Digital Dollar', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/102171776/large/FIDD-Green_%28792px%29.png?1769612802' },
     { address: '0xef3A930e1FfFFAcd2fc13434aC81bD278B0ecC8d', symbol: 'FIS', name: 'Stafi', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/12423/thumb/stafi_logo.jpg?1599730991' },
     { address: '0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E', symbol: 'FLOKI', name: 'FLOKI', decimals: 9, logoURI: 'https://assets.coingecko.com/coins/images/16746/standard/PNG_image.png?1696516318' },
-    { address: '0x720CD16b011b987Da3518fbf38c3071d4F0D1495', symbol: 'FLUX', name: 'Flux', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x720CD16b011b987Da3518fbf38c3071d4F0D1495/logo.png' },
+    { address: '0x720CD16b011b987Da3518fbf38c3071d4F0D1495', symbol: 'FLUX', name: 'Flux', decimals: 8, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x720CD16b011b987Da3518fbf38c3071d4F0D1495/logo.png' },
     { address: '0x41545f8b9472D758bB669ed8EaEEEcD7a9C4Ec29', symbol: 'FORT', name: 'Forta', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/25060/thumb/Forta_lgo_%281%29.png?1655353696' },
     { address: '0x77FbA179C79De5B7653F68b5039Af940AdA60ce0', symbol: 'FORTH', name: 'Ampleforth Governance Token', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/14917/thumb/photo_2021-04-22_00.00.03.jpeg?1619020835' },
     { address: '0xc770EEfAd204B5180dF6a14Ee197D99d808ee52d', symbol: 'FOX', name: 'ShapeShift FOX Token', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/9988/thumb/FOX.png?1574330622' },
@@ -212,7 +212,6 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0x1789e0043623282D5DCc7F213d703C6D8BAfBB04', symbol: 'LINEA', name: 'Linea', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/68507/large/linea-logo.jpeg?1756025484' },
     { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', name: 'ChainLink Token', decimals: 18, logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x514910771AF9Ca656af840dff83E8264EcF986CA/logo.png' },
     { address: '0x232CE3bd40fCd6f80f3d55A522d03f25Df784Ee2', symbol: 'LIT', name: 'Lighter', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/71121/large/lighter.png?1765888098' },
-    { address: '0xb59490aB09A0f526Cc7305822aC65f2Ab12f9723', symbol: 'LIT', name: 'Litentry', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/13825/large/logo_200x200.png' },
     { address: '0x61E90A50137E1F645c9eF4a0d3A4f01477738406', symbol: 'LOKA', name: 'League of Kingdoms', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/22572/thumb/loka_64pix.png?1642643271' },
     { address: '0x58b6A8A3302369DAEc383334672404Ee733aB239', symbol: 'LPT', name: 'Livepeer', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/7137/thumb/logo-circle-green.png?1619593365' },
     { address: '0x6DEA81C8171D0bA574754EF6F8b412F2Ed88c54D', symbol: 'LQTY', name: 'Liquity', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/14665/thumb/200-lqty-icon.png?1617631180' },
@@ -497,7 +496,7 @@ export const GENERATED_TOKEN_CATALOG: Record<number, GeneratedToken[]> = {
     { address: '0xeF4461891DfB3AC8572cCf7C794664A8DD927945', symbol: 'WCT', name: 'WalletConnect Token', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/50390/large/wc-token1.png?1727569464' },
     { address: '0xA88594D404727625A9437C3f886C7643872296AE', symbol: 'WELL', name: 'Moonwell', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/26133/large/WELL.png?1696525221' },
     { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, logoURI: 'https://ethereum-optimism.github.io/data/WETH/logo.png' },
-    { address: '0x3e31966d4f81C72D2a55310A6365A56A4393E98D', symbol: 'WMTX', name: 'World Mobile Token', decimals: 18, logoURI: 'https://coin-images.coingecko.com/coins/images/17333/large/Token_icon_round_1024.png?1741247846' },
+    { address: '0x3e31966d4f81C72D2a55310A6365A56A4393E98D', symbol: 'WMTX', name: 'World Mobile Token', decimals: 6, logoURI: 'https://coin-images.coingecko.com/coins/images/17333/large/Token_icon_round_1024.png?1741247846' },
     { address: '0xD7B99ffB8B2afc6fe013a17207cbe50f223aDc94', symbol: 'XYO', name: 'XYO Network', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/4519/thumb/XYO_Network-logo.png?1547039819' },
     { address: '0x9EaF8C1E34F05a589EDa6BAfdF391Cf6Ad3CB239', symbol: 'YFI', name: 'yearn finance', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/11849/thumb/yfi-192x192.png?1598325330' },
     { address: '0xaAC78d1219c08AecC8e37e03858FE885f5EF1799', symbol: 'YGG', name: 'Yield Guild Games', decimals: 18, logoURI: 'https://assets.coingecko.com/coins/images/17358/thumb/le1nzlO6_400x400.jpg?1632465691' },
