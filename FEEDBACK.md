@@ -4454,3 +4454,53 @@ need live network — it conflicts with the "deterministic, no flaky network gat
 as a SCHEDULED non-blocking job instead; the identity binding already makes cache-poisoning require a deployed
 look-alike contract. (2) Promoting transferability to FATAL needs a probe that USDT-class tokens tolerate — left
 advisory for now (the duplicate-symbol check is the fatal MORPHO catch; a single-entry legacy swap is warned).
+
+---
+
+## Feedback — CHORE-CATALOG-CLEANUP: fix the catalog-guard (#209) findings (branch chore/catalog-cleanup)
+
+Fixes the 5 deprecated tokens + surfaces the 3 ticker collisions the #209 guard flagged. All 5 deprecated live in
+the GENERATED long tail (`token-catalog.generated.ts`, sourced from the pinned Uniswap snapshot), so the durable
+fix is a curation layer (REMOVALS/REMAPS) in `scripts/generate-token-catalog.mjs` — re-run + commit, NOT a hand
+edit. Every address VERIFIED on-chain (name/symbol/decimals/transferability) + official sources (Etherscan,
+project docs, CoinGecko) via an 8-agent workflow. No fabricated addresses.
+
+### (1) Deprecated — APPLIED (5)
+| token | catalog (old) | disposition | canonical (new) | why |
+|---|---|---|---|---|
+| **LCX** | 0x037A54…fe41 | **REPLACE** | 0x8cd41041…ae7e | Etherscan "Old Contract"; LCX Token 2.0 1:1 upgrade; ACTIVE liquidity (Uniswap V3 + CEX). On-chain LCX/18. |
+| **RBC** | 0xA4EED63…a3E3 | **REPLACE** | 0x3330bfb7…3333 | Old RBC is **NON-TRANSFERABLE on-chain** (transfer reverts — a broken swap token, like legacy MORPHO); migrated 1:1 to a transferable RUBIC TOKEN. On-chain RBC/18. |
+| **LOOM** | 0xA4e8C3Ec…3DB0 | **REMOVE** | (0x42476f… exists but **DEX-dead**, ~$30 24h, dust fee-tier pools) | non-routable for aggregation. |
+| **OMNI** | 0x36E66fbB…49D4 | **REMOVE** | (rebranded to **Nomina/NOM** 0x6e6F6d…, non-routable on DEX) | see correction below. |
+| **REP** | 0x1985365e…E862 | **REMOVE** | REPv2 0x221657… **already a catalog entry** | Augur v1 deprecated; replacing would duplicate. |
+
+**Correction to #209's triage (important):** the #209 knownDeprecated note listed OMNI's "canonical" as
+`0x6e6F6d…` — that address is actually **Nomina (NOM)**, a DIFFERENT token (vanity address "nomina"), already in
+the catalog as NOM. On-chain + web verification this round established: catalog OMNI `0x36E66…` IS the real Omni
+Network (name "Omni Network", 100M supply), which **rebranded + 1:75-redenominated to Nomina (NOM) in Sept 2025**;
+the NOM successor is non-routable on DEX (single ~$610-TVL pool). Net: OMNI is genuinely deprecated → REMOVE, but
+NOT by pointing it at the wrong "canonical". (Had we trusted the triage blindly we'd have mislabeled Nomina as
+OMNI — exactly why the goal mandated per-token on-chain verification.)
+
+Mechanism: `REMOVALS`/`REMAPS` in the generator → regenerated catalog (chain 1: 389 → 386). Cleared all 5
+`knownDeprecated` allowlist entries. Ran `npm run guard:refresh` (501 verdicts, 0 dead) → **catalog-address-guard
+14/14 GREEN**. LCX/RBC new addresses are in CoinGecko (trusted-list + identity pass natively).
+
+### (2) Ticker collisions — PROPOSALS for owner sign-off (NOT applied — no silent swap)
+| token | catalog points to | users likely expect | proposal |
+|---|---|---|---|
+| **AVT** | ArtVerse Token 0x845576… (**dead**, ~$0 vol, untracked) | **Aventus** 0x0d88ed… (rank ~#636, active) | **REPLACE** — catalog points at the wrong, moribund AVT. |
+| **FLUX** | RunOnFlux Flux 0x720CD16… (mcap ~$21M, ~$3.2M/24h) | **Same** (RunOnFlux). Datamine FLUX owns the CG "flux" slug but is a ~$110k micro-cap. | **KEEP** the address. ⚠ **BUT** — see decimals bug. |
+| **LIT** | Lighter 0x232CE3… (✓ canonical, ~$408M) **+** Litentry 0xb59490… (deprecated→Heima/HEI, residual) | **Lighter** | **REMOVE the Litentry entry** (0xb59490…), keep Lighter; resolves the duplicate-symbol. |
+
+### ⚠ HIGH-severity bug found (FLUX decimals) — for owner sign-off
+The FLUX entry (0x720CD16…) has **`decimals: 18` but the contract's on-chain `decimals()` is `8`** (verified via
+eth_call). A 10^10 error — any FLUX swap would mis-size amounts catastrophically. NOT changed here (FLUX is in the
+owner-sign-off bucket), but strongly recommend the owner approve the one-line fix `decimals: 18 → 8`. (This is a
+metadata-correctness bug independent of the ticker collision.) Suggest the guard add an optional decimals cross-
+check (on-chain `decimals()` vs catalog) in a follow-up — it would have caught this.
+
+### Verification
+On-chain verified (publicnode RPC) + 8-agent official-source workflow. tsc clean · lint 0 errors · vitest
+1943/1943 · next build · **catalog-address-guard 14/14**. Edits are generator + generated catalog + guard
+fixtures only; `src/lib/tokens.ts` untouched-by-this-chore except as serialized with the gold-RWA work.
