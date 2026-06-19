@@ -8,6 +8,10 @@ import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
 import { getOrderExecutor, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
 import { getDcaFreezeState } from '@/lib/dca-freeze'
+import { NATIVE_ETH } from '@/lib/constants'
+
+// [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
+const CONDITIONAL_ORDER_TYPES = new Set(['limit', 'stop_loss', 'dca'])
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
@@ -57,6 +61,23 @@ export async function POST(req: NextRequest) {
       if (!ADDRESS_RE.test(body[field] ?? '')) {
         return NextResponse.json({ error: `Invalid ${field} address` }, { status: 400 })
       }
+    }
+
+    // [CHORE-DCA-WETH-INPUT] Fail-closed: a conditional order's INPUT (spend token) must be an
+    // ERC-20 (WETH), never native ETH. The OrderExecutor pulls tokenIn via Permit2/transferFrom,
+    // which the native sentinel can't satisfy, so reject it here (case-insensitive — the sentinel
+    // is EIP-55 mixed case). tokenOut may still be native ETH (the contract unwraps WETH→ETH on
+    // delivery). Placed after the address loop (tokenIn is now a known-valid hex string) and before
+    // any signature/DB work. Instant-swap is a different route and is unaffected.
+    if (
+      CONDITIONAL_ORDER_TYPES.has(body.orderType) &&
+      typeof body.tokenIn === 'string' &&
+      body.tokenIn.toLowerCase() === NATIVE_ETH.toLowerCase()
+    ) {
+      return NextResponse.json(
+        { error: 'Use WETH (not native ETH) as the order input' },
+        { status: 400 },
+      )
     }
 
     if (!body.signature || !body.orderHash) {

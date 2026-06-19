@@ -4624,3 +4624,75 @@ Full triage: `Audits/DEPS-TRIAGE-2026-06-19.md` (7-agent per-PR workflow + lockf
   (Dependabot anti-pattern; moves with the next Next-core bump).
 - **#187 dev-deps group (@types/node, eslint-config-next) → also BATCH_SAFE** — held out of this batch only to
   match the goal's scope (#198+#196); recommend adding it to this batch or the next.
+
+---
+
+## Feedback — CHORE-DCA-WETH-INPUT (pending commit)
+
+Owner decision (b): restrict the DCA/conditional-order INPUT (spend) token to ERC-20s — hide native ETH,
+present WETH (chain-aware). OUTPUT/buy selector unchanged (native ETH still allowed; contract unwraps WETH→ETH).
+Implemented across AREA A (UI), AREA B (useOrderEngine guard), AREA C (server fail-closed). AREA D foundation
+(`getWrappedNative`, `isNativeETH`) reused as-is — no new foundation helper added.
+
+### Edge case
+- **DCA test floor value depended on token decimals.** DCAPanel.test.tsx's "#200 client-side floor" case used
+  `0.05` chosen for USDC (6 dec ⇒ 50,000 base units / 7 buys ≈ 7,142 < 10,000 floor). Changing the INPUT default
+  from USDC to chain-WETH (18 dec) made `0.05` WETH = 5e16 base units — far ABOVE the floor — so the test would
+  have flipped to "not blocked". Updated to `0.00000000000005` (5e-14 WETH = 50,000 base units) to preserve the
+  exact sub-floor assertion. The "valid build" case (`100`) stays above the floor under WETH and only its comment
+  was updated.
+
+### Assumption that turned out wrong
+- **DCAPanel.test.tsx's wagmi mock was incomplete for the new balance read.** Adding the "wrap ETH first"
+  advisory (which calls `useTokenBalances()` → `useBalance` + `useReadContracts`) broke all 4 DCAPanel tests with
+  "No useBalance export is defined on the wagmi mock". Extended the test's `vi.mock('wagmi')` with inert
+  `useBalance`/`useReadContracts` stubs (empty balances ⇒ no hint) so the build/sign/submit assertions are
+  unaffected. No production change was needed for this.
+
+### Concern (security / fund-flow — flagged, NOT fixed here)
+- **`limit-order-api.ts` `resolveToken()` (L15-17) hardcodes mainnet WETH** for the CoW sell/buy mapping. With
+  option (b) the INPUT is never the native sentinel, but the OUTPUT/buy selector still allows native ETH and
+  flows through this path. On Base, a native-ETH BUY would wrap to MAINNET WETH ⇒ CoW returns no quote
+  (same bug class as SPRINT-9E/9W that `getWrappedNative` was created to fix). Recommend a follow-up to thread
+  `chainId` through `createLimitOrder`/quote calls and replace `WETH_ADDRESS` with `getWrappedNative(chainId)`.
+  Out of scope for this chore (the prompt scoped AREA C to the orders route, not the CoW limit path).
+
+### Concern (consistency — flagged, NOT fixed here)
+- **LimitOrderPanel.tsx and ConditionalOrderPanel.tsx default `tokenIn` to native ETH** (DEFAULT_TOKENS[0]) and
+  use the same shared TokenSelector with NO `hideNativeInput`. Their CoW path remaps native→WETH, so they may be
+  functionally OK on mainnet, but the spend-side UX is now inconsistent with DCA (and the Base CoW-wrap concern
+  above applies). The `hideNativeInput` prop is ready to be set on those INPUT selectors if the owner wants
+  parity. Not changed under this chore.
+
+### Test gap (closed)
+- **Server-side native-ETH-input rejection** had zero coverage (the sentinel passes ADDRESS_RE as a structurally
+  valid hex address). Added a describe block in orders-create.validation.test.ts covering all three conditional
+  types (limit/stop_loss/dca), case-insensitivity (mixed/lower/upper sentinel), a control that WETH tokenIn
+  reaches 201, and a control that native ETH as tokenOUT is NOT rejected (it's allowed as output).
+- **Order-build native→WETH resolution** is covered in useOrderEngine.test.ts (mainnet + Base chain WETH +
+  non-native pass-through). Note: this guard runs in Phase A (createOrder), so the frozen/reviewed struct already
+  holds WETH and confirmOrder signs it 1:1 — no Phase-A/Phase-B divergence.
+
+### Note (persistence consistency)
+- useOrderEngine now persists `order.tokenIn` (the signed/hashed struct value) instead of `config.tokenIn.address`
+  for the Supabase row, so if a native sentinel were ever resolved to WETH the DB row matches the signed struct
+  (the orderHash binds `order.tokenIn`). Mirrors the [CHORE-DCA-PRELAUNCH-FIXES Fix 2] "persist exactly what was
+  signed" philosophy. `order_data.tokenIn` already used `order.tokenIn`, so the API's order_data cross-check stays
+  consistent.
+- **Display-metadata follow-through (added in review).** The address fix above left `token_in_symbol`/
+  `token_in_decimals` reading `config.tokenIn.*`, so a native→WETH remap produced a WETH `token_in` address still
+  labelled `"ETH"` (decimals happened to match at 18, so amounts were unaffected — cosmetic only). `confirmOrder`
+  now derives the resolved token's symbol/decimals via `findChainToken(order.tokenIn, chainId)` when (and only
+  when) a remap occurred, for both the in-memory order and the persisted row, so the stored metadata matches the
+  signed address. Reachable for limit/stop_loss (their panels still offer native ETH as input; the DCA selector
+  hides it). Covered by a new useOrderEngine.test.ts case asserting `tokenInSymbol === 'WETH'` (not `'ETH'`) after
+  a native-ETH remap.
+
+### Verification
+- `npx vitest run` → **1955 passed** (implementation pass); only `connect-modal-qr.test.ts` fails — PRE-EXISTING
+  (qr@0.6.0 / `cuer/QrCode` import, INC-2026-06-09-001), confirmed failing on a clean `git stash` baseline,
+  unrelated to this change. Scoped re-run after the review fix above → **122 passed** across the 4 affected suites.
+- `npx tsc --noEmit` → clean for all changed files (the lone error is the same pre-existing `cuer/QrCode` import
+  in connect-modal-qr.test.ts, which is not in this diff).
+- Diff touches only the 9 intended files (4 prod + 4 test + FEEDBACK.md). Instant-swap (SwapBox) and the
+  LimitOrderPanel suites stay green (regression guard for the shared TokenSelector default-off behavior).

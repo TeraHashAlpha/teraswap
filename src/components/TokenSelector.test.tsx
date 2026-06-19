@@ -285,6 +285,37 @@ describe('[token-selector-ux P4] category filter chips', () => {
   })
 })
 
+describe('[CHORE-DCA-WETH-INPUT] TokenSelector — hideNativeInput (DCA spend selector)', () => {
+  /** The popular-chip row is the first `flex-wrap` container in the modal. */
+  function chipRow(): HTMLElement {
+    const dialog = screen.getByText(/Select token/).closest('div')!.parentElement!
+    return dialog.querySelector('.flex-wrap') as HTMLElement
+  }
+
+  it('hideNativeInput: native ETH is absent from the popular chips but WETH stays', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} hideNativeInput />)
+    fireEvent.click(screen.getByText('Select'))
+    const row = chipRow()
+    expect(within(row).queryByText('ETH')).toBeNull()
+    expect(within(row).getAllByText('WETH').length).toBeGreaterThan(0)
+  })
+
+  it('hideNativeInput: searching "eth" never returns the native-ETH row (WETH still found)', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} hideNativeInput />)
+    fireEvent.click(screen.getByText('Select'))
+    fireEvent.change(screen.getByPlaceholderText(/search name, symbol/i), { target: { value: 'eth' } })
+    // No bare "ETH" symbol row — only WETH (and other *eth* matches) survive the filter.
+    expect(screen.queryByText('ETH')).toBeNull()
+    expect(screen.getAllByText('WETH').length).toBeGreaterThan(0)
+  })
+
+  it('default (no prop): native ETH still selectable — instant-swap path unchanged', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    fireEvent.click(screen.getByText('Select'))
+    expect(screen.getAllByText('ETH').length).toBeGreaterThan(0)
+  })
+})
+
 describe('TokenSelector — wallet disconnected', () => {
   it('still renders the trigger when wallet is not connected', async () => {
     const wagmi = await import('wagmi')

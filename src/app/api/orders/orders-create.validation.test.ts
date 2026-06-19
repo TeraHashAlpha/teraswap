@@ -40,6 +40,8 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 import { POST } from './route'
+import { NATIVE_ETH } from '@/lib/constants'
+import { getWrappedNative } from '@/lib/chains/registry'
 
 // Mainnet executor (byte-identical to ORDER_EXECUTOR_BY_CHAIN[1]).
 const MAINNET_EXECUTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
@@ -299,6 +301,50 @@ describe('POST /api/orders — token & price-feed validation', () => {
     const { status, json } = await post(validBody({ orderType: 'limit', priceFeed: ZERO_ADDR }))
     expect(status).toBe(400)
     expect(json.error).toMatch(/require a Chainlink price feed/i)
+  })
+})
+
+// ── native-ETH input rejection [CHORE-DCA-WETH-INPUT] ───────
+describe('POST /api/orders — native-ETH input rejected (CHORE-DCA-WETH-INPUT)', () => {
+  const REJECT_MSG = 'Use WETH (not native ETH) as the order input'
+
+  for (const orderType of ['limit', 'stop_loss', 'dca'] as const) {
+    it(`${orderType}: tokenIn === native ETH sentinel → 400 "${REJECT_MSG}"`, async () => {
+      const extra =
+        orderType === 'dca'
+          ? { priceFeed: ZERO_ADDR, dcaInterval: 3600, dcaTotal: 10, amountIn: '1000000' }
+          : {}
+      const { status, json } = await post(validBody({ orderType, tokenIn: NATIVE_ETH, ...extra }))
+      expect(status).toBe(400)
+      expect(json.error).toBe(REJECT_MSG)
+      // Fail-closed before any DB work.
+      expect(mockInsert).not.toHaveBeenCalled()
+    })
+  }
+
+  it('lowercased native sentinel is still rejected (case-insensitive)', async () => {
+    const { status, json } = await post(validBody({ tokenIn: NATIVE_ETH.toLowerCase() }))
+    expect(status).toBe(400)
+    expect(json.error).toBe(REJECT_MSG)
+  })
+
+  it('uppercased native sentinel is still rejected (case-insensitive)', async () => {
+    const { status, json } = await post(
+      validBody({ tokenIn: ('0x' + NATIVE_ETH.slice(2).toUpperCase()) }),
+    )
+    expect(status).toBe(400)
+    expect(json.error).toBe(REJECT_MSG)
+  })
+
+  it('native ETH as tokenOUT is NOT rejected by this gate (output may be native ETH)', async () => {
+    // tokenOut native, tokenIn a normal ERC-20 → passes the native-input gate → reaches 201.
+    const { status } = await post(validBody({ tokenOut: NATIVE_ETH }))
+    expect(status).toBe(201)
+  })
+
+  it('WETH tokenIn is NOT rejected by the native gate (proceeds to 201)', async () => {
+    const { status } = await post(validBody({ tokenIn: getWrappedNative(1) }))
+    expect(status).toBe(201)
   })
 })
 

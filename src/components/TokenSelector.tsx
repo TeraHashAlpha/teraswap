@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { DEFAULT_TOKENS, CATEGORY_DISPLAY_ORDER, type Token } from '@/lib/tokens'
+import { DEFAULT_TOKENS, CATEGORY_DISPLAY_ORDER, isNativeETH, type Token } from '@/lib/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import TokenAddressBadge from './TokenAddressBadge'
 import TokenLogo from './TokenLogo'
@@ -19,9 +19,14 @@ interface Props {
   selected: Token | null
   onSelect: (token: Token) => void
   disabledAddress?: string
+  /** [CHORE-DCA-WETH-INPUT] When true, native ETH is hidden from EVERY list (popular
+   *  chips, Your Tokens, category groups, search) so it can't be picked as a spend/input
+   *  token; WETH stays selectable. Off by default — instant swap and the DCA OUTPUT/buy
+   *  selector are byte-identical. Set true ONLY on the DCA INPUT selector. */
+  hideNativeInput?: boolean
 }
 
-export default function TokenSelector({ selected, onSelect, disabledAddress }: Props) {
+export default function TokenSelector({ selected, onSelect, disabledAddress, hideNativeInput = false }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   // [SPRINT token-selector-ux P4] Active category filter. null ⇒ show all (exact
@@ -37,8 +42,13 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
   const activeChainId = useActiveChainId()
   const isMainnet = activeChainId === DEFAULT_CHAIN_ID
   const catalog = useMemo(
-    () => (isMainnet ? DEFAULT_TOKENS : getChainTokenList(activeChainId)),
-    [isMainnet, activeChainId],
+    () => {
+      const base = isMainnet ? DEFAULT_TOKENS : getChainTokenList(activeChainId)
+      // [CHORE-DCA-WETH-INPUT] Drop native ETH from the catalog when this is a spend/input
+      // selector. `tokensWithBalance` and `groups` derive from `catalog`, so they inherit it.
+      return hideNativeInput ? base.filter((t) => !isNativeETH(t)) : base
+    },
+    [isMainnet, activeChainId, hideNativeInput],
   )
 
   // [SPRINT token-selector-ux P4] Categories actually present in the active catalog,
@@ -70,6 +80,8 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     const matches = getSearchCatalog(activeChainId).filter(
       (t) =>
         t.address.toLowerCase() !== disabled &&
+        // [CHORE-DCA-WETH-INPUT] Spend/input selector never surfaces native ETH in search.
+        !(hideNativeInput && isNativeETH(t)) &&
         // [P4] When a category filter is active, search WITHIN it only.
         (activeCategory === null || (t.category || 'Other') === activeCategory) &&
         (t.symbol.toLowerCase().includes(q) ||
@@ -77,7 +89,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
           t.address.toLowerCase().includes(q)),
     )
     return matches.slice(0, SEARCH_RESULT_LIMIT)
-  }, [isSearching, q, disabledAddress, activeChainId, activeCategory])
+  }, [isSearching, q, disabledAddress, activeChainId, activeCategory, hideNativeInput])
 
   // Tokens with balance — sorted highest first, shown above categories
   const tokensWithBalance = useMemo(() => {
@@ -131,10 +143,14 @@ export default function TokenSelector({ selected, onSelect, disabledAddress }: P
     }
     return POPULAR_SYMBOLS.map((sym) =>
       DEFAULT_TOKENS.find(
-        (t) => t.symbol === sym && t.address.toLowerCase() !== disabled,
+        (t) =>
+          t.symbol === sym &&
+          t.address.toLowerCase() !== disabled &&
+          // [CHORE-DCA-WETH-INPUT] Spend/input selector hides the native-ETH chip ('ETH'); WETH stays.
+          !(hideNativeInput && isNativeETH(t)),
       ),
     ).filter(Boolean) as Token[]
-  }, [disabledAddress, isMainnet, activeChainId, catalog])
+  }, [disabledAddress, isMainnet, activeChainId, catalog, hideNativeInput])
 
   function closeModal() {
     setOpen(false)

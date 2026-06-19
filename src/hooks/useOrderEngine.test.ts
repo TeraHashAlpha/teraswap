@@ -65,6 +65,8 @@ import {
   type CreateOrderConfig,
   type OrderRow,
 } from '@/lib/order-engine'
+import { NATIVE_ETH } from '@/lib/constants'
+import { getWrappedNative } from '@/lib/chains/registry'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = ('0x' + 'cc'.repeat(65))
@@ -791,6 +793,53 @@ describe('useOrderEngine — [SPRINT-9U U2] order review gate', () => {
     expect(result.current.pendingOrder!.config.orderType).toBe(OrderType.LIMIT)
     expect(result.current.orders).toHaveLength(0) // no record / no submit until confirm
     expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+  })
+
+  // [CHORE-DCA-WETH-INPUT] Defense-in-depth: a conditional order's tokenIn (spend token) can
+  // never be the native-ETH sentinel — it must resolve to the chain's WETH before freezing, so
+  // confirmOrder signs WETH 1:1 (the contract can't pull native ETH via Permit2/transferFrom).
+  it('resolves a native-ETH tokenIn to the chain WETH before freezing (never the sentinel)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ tokenIn: { address: NATIVE_ETH, symbol: 'ETH', decimals: 18 } }))
+    })
+    const frozen = result.current.pendingOrder!.order
+    expect(frozen.tokenIn.toLowerCase()).toBe(getWrappedNative(1).toLowerCase())
+    expect(frozen.tokenIn.toLowerCase()).not.toBe(NATIVE_ETH.toLowerCase())
+  })
+
+  it('resolves a native-ETH tokenIn to the active chain WETH (Base 8453)', async () => {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
+    const { result, rerender } = renderHook(() => useOrderEngine())
+    await act(async () => { rerender() })
+    await act(async () => {
+      await result.current.createOrder(makeConfig({ tokenIn: { address: NATIVE_ETH, symbol: 'ETH', decimals: 18 } }))
+    })
+    const frozen = result.current.pendingOrder!.order
+    expect(frozen.tokenIn.toLowerCase()).toBe(getWrappedNative(8453).toLowerCase())
+    expect(frozen.tokenIn.toLowerCase()).not.toBe(getWrappedNative(1).toLowerCase())
+  })
+
+  it('a non-native tokenIn passes through unchanged (WETH stays WETH)', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await result.current.createOrder(makeConfig()) })
+    const frozen = result.current.pendingOrder!.order
+    // makeConfig() default tokenIn is mainnet WETH — must be byte-identical (no remap).
+    expect(frozen.tokenIn.toLowerCase()).toBe('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
+  })
+
+  // [CHORE-DCA-WETH-INPUT] When a native-ETH input is remapped to WETH, the persisted display
+  // metadata must follow the signed address — a WETH token_in row must not keep saying "ETH".
+  it('persists WETH symbol/decimals (not the ETH input) when native-ETH is remapped', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await createAndConfirm(result, makeConfig({ tokenIn: { address: NATIVE_ETH, symbol: 'ETH', decimals: 18 } }))
+    expect(mockCreateOrderInSupabase).toHaveBeenCalledTimes(1)
+    const arg = mockCreateOrderInSupabase.mock.calls[0][0] as { tokenIn: string; tokenInSymbol: string; tokenInDecimals: number }
+    expect(arg.tokenIn.toLowerCase()).toBe(getWrappedNative(1).toLowerCase())
+    expect(arg.tokenInSymbol).toBe('WETH')
+    expect(arg.tokenInSymbol).not.toBe('ETH')
+    expect(arg.tokenInDecimals).toBe(18)
   })
 
   it('confirmOrder signs EXACTLY the frozen order (modal == signed) + submits', async () => {
