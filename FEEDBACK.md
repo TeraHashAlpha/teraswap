@@ -4597,3 +4597,30 @@ so it appears once, under Gold. `getFullCatalog(1)` → exactly 1 PAXG + 1 XAUT.
 On-chain (publicnode RPC) + Etherscan/CoinGecko/Dexscreener · **catalog-address-guard 16/16** (PAXG/XAUT in the
 verdict cache, all checks pass) · tsc clean · lint 0 errors · vitest 1945/1945 · next build. Owner signs off the
 two addresses before merge.
+
+---
+
+## Feedback — CHORE-DEPS-TRIAGE-JUN19: triage 7 Dependabot PRs + safe batch
+
+Full triage: `Audits/DEPS-TRIAGE-2026-06-19.md` (7-agent per-PR workflow + lockfile/audit cross-checks).
+
+### Applied — `chore/deps-safe-batch-4` (this PR, for owner to merge)
+- **#198 js-yaml 4.1.1→4.2.0** (transitive dev) + **#196 tar 7.5.13→7.5.16** (transitive; **fixes
+  CVE-2026-53655**, MEDIUM). Lockfile-only — **2 packages changed**, nothing else. `npm ci` reproducible.
+
+### Invariants held (verified)
+- **#208 override pins intact**: undici 7.28.0 / form-data 4.0.6 / vite 8.0.16 → **audit-gate 0/0/0** (npm audit clean).
+- **Single-instance**: @walletconnect/core 1×, qr 1×, coinbase-sdk 1×. (viem is dual 2.23.2/2.47.4 — PRE-EXISTING, ADR-008; not touched here.)
+- **No AGPL/copyleft**: js-yaml MIT, tar BlueOak-1.0.0 (permissive).
+- **catalog-address-guard 16/16**; tsc clean · lint 0 errors · vitest 1945/1945 · build.
+
+### Owner actions on the OTHER 5 PRs (dispositions in the triage doc)
+- **#191 + #190 @capacitor/core+cli → ISOLATE** (native iOS/Android — needs a build smoke-test). #190's red `lint`
+  is a **transient npm-cache infra flake** (`EEXIST/ENOENT rename` in `~/.npm/_cacache`), not a code error —
+  **re-run the job** to clear it; #191 (same change) passes lint.
+- **#189 viem 2.47.4→2.52.2 → HOLD** per ADR-008 (coupled to the planned wagmi-v3 migration; "no wagmi-v3"; viem
+  already dual-version). Don't merge piecemeal.
+- **#188 @next/swc-darwin-arm64 → CLOSE** — a lone platform-SWC binary that doesn't match Next core 16.2.6
+  (Dependabot anti-pattern; moves with the next Next-core bump).
+- **#187 dev-deps group (@types/node, eslint-config-next) → also BATCH_SAFE** — held out of this batch only to
+  match the goal's scope (#198+#196); recommend adding it to this batch or the next.
