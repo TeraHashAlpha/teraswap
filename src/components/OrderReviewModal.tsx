@@ -13,6 +13,7 @@
 import { formatUnits } from 'viem'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { PendingOrderReview } from '@/hooks/useOrderEngine'
+import { useOrderApproval } from '@/hooks/useOrderApproval'
 
 // [CANCEL-REVIEW] Exported for reuse by OrderCancelReviewModal — same decoders, no new trust surface.
 export function truncAddr(addr: string): string {
@@ -52,6 +53,18 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
   const priceLabel = config.orderType === OrderType.LIMIT ? 'Limit price' : 'Trigger price'
   const dir = o.condition === PriceCondition.ABOVE ? '≥' : '≤'
 
+  // [CHORE-DCA-APPROVAL-FLOW] Two-step gate: the executor pulls the input token via a DIRECT
+  // ERC-20 allowance (NOT Permit2), so the user must approve the executor for the FULL signed
+  // total (o.amountIn) BEFORE the EIP-712 signature. The hook resolves the executor + token per
+  // the FROZEN order's chainId (never hardcoded) and approves the EXACT total (no max-uint). The
+  // "Confirm & Sign Order" button stays DISABLED until that approval confirms. Applies to all three
+  // panels that route through the executor (DCA/Limit/SL·TP) via this shared modal.
+  const approval = useOrderApproval(o.tokenIn, o.amountIn, order.chainId)
+  // Per AREA A: o.amountIn is the TOTAL; per-buy = amountIn / dcaTotal (floor). The contract's
+  // cumulative tracking gives any rounding remainder to the FINAL chunk, so the sum of all chunks
+  // equals o.amountIn exactly. We display the TOTAL as Total and the floored per-buy as Per buy.
+  const perBuy = isDca && o.dcaTotal > 0n ? o.amountIn / o.dcaTotal : o.amountIn
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Review autonomous order">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
@@ -72,10 +85,19 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
             <span className="text-cream-50">Pair</span>
             <span className="font-medium text-cream" data-testid="order-pair">{config.tokenIn.symbol} &#8594; {config.tokenOut.symbol}</span>
           </div>
+          {/* [CHORE-DCA-APPROVAL-FLOW] o.amountIn is the TOTAL (the exact value signed + approved).
+              For DCA, label it "Total to spend" and add a derived "Per buy" = amountIn/dcaTotal so
+              what's shown == what's signed/pulled. For non-DCA it's the single-fill "Sell" amount. */}
           <div className="flex items-center justify-between">
-            <span className="text-cream-50">{isDca ? 'Amount per buy' : 'Sell'}</span>
+            <span className="text-cream-50">{isDca ? 'Total to spend' : 'Sell'}</span>
             <span className="font-medium text-cream" data-testid="order-amountin">{fmtAmount(o.amountIn, config.tokenIn.decimals, config.tokenIn.symbol)}</span>
           </div>
+          {isDca && (
+            <div className="flex items-center justify-between">
+              <span className="text-cream-50">Per buy</span>
+              <span className="font-medium text-cream" data-testid="order-perbuy">{fmtAmount(perBuy, config.tokenIn.decimals, config.tokenIn.symbol)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-cream-50">Minimum received</span>
             <span className="font-medium text-cream" data-testid="order-minout">{fmtAmount(o.minAmountOut, config.tokenOut.decimals, config.tokenOut.symbol)}</span>
@@ -119,18 +141,43 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
           </div>
 
           <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
-            Signed once now; the executor runs it autonomously when your condition is met — output is
-            protected by the on-chain minimum received above. No funds move until then.
+            {approval.needsApproval
+              ? `Two steps: first approve the exact ${fmtAmount(o.amountIn, config.tokenIn.decimals, config.tokenIn.symbol)} on-chain (one-time, no infinite approvals), then sign the order. The executor then runs it autonomously — output is protected by the on-chain minimum received above.`
+              : 'Approved on-chain — now sign the order. The executor runs it autonomously when your condition is met; output is protected by the on-chain minimum received above. No funds move until then.'}
           </div>
         </div>
 
         <div className="shrink-0 border-t border-cream-08 bg-surface-secondary px-5 py-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:pb-4">
-          <button
-            onClick={onConfirm}
-            className="flex h-12 w-full items-center justify-center rounded-full border-2 border-cream-80 bg-transparent text-[14px] font-bold uppercase tracking-[1.5px] text-cream transition-all hover:bg-cream hover:text-black sm:h-auto sm:py-3"
-          >
-            Confirm &amp; Sign Order
-          </button>
+          {/* [CHORE-DCA-APPROVAL-FLOW] Approve-then-sign gate. While allowance < the signed total
+              the user must approve the executor for the EXACT total first; "Confirm & Sign Order"
+              is DISABLED until the approve tx confirms. On an unwired chain (no executor) approval
+              .needsApproval is false, so the flow falls through to the existing single-step sign and
+              confirmOrder's own fail-closed guard surfaces the unavailable-chain error. */}
+          {approval.needsApproval ? (
+            <button
+              onClick={approval.approve}
+              disabled={approval.status === 'approving' || approval.status === 'confirming' || approval.status === 'ready'}
+              data-testid="order-approve"
+              className="flex h-12 w-full items-center justify-center rounded-full border-2 border-cream-gold bg-cream-gold text-[14px] font-bold uppercase tracking-[1.5px] text-[#080B10] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:h-auto sm:py-3"
+            >
+              {approval.status === 'approving'
+                ? 'Confirm in wallet…'
+                : approval.status === 'confirming'
+                  ? 'Approving…'
+                  : `Approve ${config.tokenIn.symbol}`}
+            </button>
+          ) : (
+            <button
+              onClick={onConfirm}
+              data-testid="order-confirm"
+              className="flex h-12 w-full items-center justify-center rounded-full border-2 border-cream-80 bg-transparent text-[14px] font-bold uppercase tracking-[1.5px] text-cream transition-all hover:bg-cream hover:text-black sm:h-auto sm:py-3"
+            >
+              Confirm &amp; Sign Order
+            </button>
+          )}
+          {approval.error && (
+            <p className="mt-2 text-center text-[11px] text-red-400" data-testid="order-approve-error">{approval.error}</p>
+          )}
           <button
             onClick={onCancel}
             className="mt-2 flex h-12 w-full items-center justify-center text-center text-xs text-cream-35 transition hover:text-cream-50 sm:h-auto sm:py-2"

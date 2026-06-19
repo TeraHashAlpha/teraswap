@@ -3,11 +3,41 @@
  * [SPRINT-9U U2] OrderReviewModal — renders the DECODED frozen autonomous-order exactly as it will be
  * signed (type, pair, amounts, trigger/limit price, expiry, min output, router, nonce).
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// [CHORE-DCA-APPROVAL-FLOW] The modal now consumes useOrderApproval (a wagmi-backed hook) to gate
+// the sign button behind a one-time executor approval. Mock it so tests drive isApproved/needsApproval
+// directly without standing up a wagmi provider. Default: already approved → single-step sign flow
+// (keeps the existing confirm/cancel assertions green).
+const mockUseOrderApproval = vi.fn()
+vi.mock('@/hooks/useOrderApproval', () => ({
+  useOrderApproval: (...args: unknown[]) => mockUseOrderApproval(...args),
+}))
+
 import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
 import OrderReviewModal from './OrderReviewModal'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
+import { getOrderExecutor } from '@/lib/order-engine'
 import type { PendingOrderReview } from '@/hooks/useOrderEngine'
+
+function approvalState(over: Partial<{ needsApproval: boolean; isApproved: boolean; status: string; error: string | null; approve: () => void; spender: string | null; allowance: bigint | undefined }> = {}) {
+  return {
+    spender: getOrderExecutor(1),
+    allowance: 10n ** 30n,
+    isApproved: true,
+    needsApproval: false,
+    status: 'idle',
+    error: null,
+    approve: vi.fn(),
+    ...over,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  // Default: approved → "Confirm & Sign Order" shown.
+  mockUseOrderApproval.mockReturnValue(approvalState())
+})
 
 const ROUTER = '0x111111125421ca6dc452d289314280a0f8842a65'
 const ACCOUNT = '0x1111111111111111111111111111111111111111'
@@ -73,5 +103,60 @@ describe('OrderReviewModal [SPRINT-9U U2]', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
     expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  // [CHORE-DCA-APPROVAL-FLOW] Per-buy/total label fix — what's displayed == what's signed.
+  it('DCA labels o.amountIn as the TOTAL and shows a derived Per buy = amountIn/dcaTotal', () => {
+    // amountIn 1e18 (= "1 WETH") over 10 buys → per buy = 0.1 WETH.
+    renderWithProviders(<OrderReviewModal order={makeReview({ orderType: OrderType.DCA })} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    // The amount row is now labelled "Total to spend" (not "Amount per buy") and shows the full total.
+    expect(screen.getByText(/total to spend/i)).toBeTruthy()
+    expect(screen.getByTestId('order-amountin').textContent).toMatch(/1\s*WETH/)
+    // Per-buy row = amountIn / dcaTotal = 0.1 WETH (locale may render the decimal as , or .).
+    expect(screen.getByTestId('order-perbuy').textContent).toMatch(/0[.,]1\s*WETH/)
+  })
+
+  it('non-DCA keeps the single "Sell" amount and shows no Per buy row', () => {
+    renderWithProviders(<OrderReviewModal order={makeReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByText(/^Sell$/)).toBeTruthy()
+    expect(screen.queryByTestId('order-perbuy')).toBeNull()
+  })
+
+  // [CHORE-DCA-APPROVAL-FLOW] Approve-then-sign gate.
+  it('shows "Approve {symbol}" and DISABLES the sign button when approval is needed', () => {
+    const approve = vi.fn()
+    mockUseOrderApproval.mockReturnValue(approvalState({ needsApproval: true, isApproved: false, approve }))
+    const onConfirm = vi.fn()
+    renderWithProviders(<OrderReviewModal order={makeReview()} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    // The sign button is not rendered while approval is pending; an Approve button is.
+    expect(screen.queryByTestId('order-confirm')).toBeNull()
+    const approveBtn = screen.getByTestId('order-approve')
+    expect(approveBtn.textContent).toMatch(/approve\s*WETH/i)
+    fireEvent.click(approveBtn)
+    expect(approve).toHaveBeenCalledTimes(1)
+    expect(onConfirm).not.toHaveBeenCalled() // approving must NOT sign
+  })
+
+  it('passes the FROZEN tokenIn, total amountIn and chainId to useOrderApproval', () => {
+    const review = makeReview({ orderType: OrderType.DCA })
+    renderWithProviders(<OrderReviewModal order={review} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(mockUseOrderApproval).toHaveBeenCalledWith(review.order.tokenIn, review.order.amountIn, review.chainId)
+  })
+
+  it('once approved, the Approve step disappears and "Confirm & Sign Order" calls onConfirm', () => {
+    mockUseOrderApproval.mockReturnValue(approvalState({ needsApproval: false, isApproved: true }))
+    const onConfirm = vi.fn()
+    renderWithProviders(<OrderReviewModal order={makeReview()} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId('order-approve')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /confirm & sign order/i }))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a pending label while the approve tx confirms', () => {
+    mockUseOrderApproval.mockReturnValue(approvalState({ needsApproval: true, isApproved: false, status: 'confirming' }))
+    renderWithProviders(<OrderReviewModal order={makeReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    const approveBtn = screen.getByTestId('order-approve') as HTMLButtonElement
+    expect(approveBtn.textContent).toMatch(/approving/i)
+    expect(approveBtn.disabled).toBe(true)
   })
 })

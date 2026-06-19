@@ -506,8 +506,9 @@ export function useOrderEngine() {
     }
 
     // [CHORE-DCA-WETH-INPUT] Defense-in-depth: a conditional order's tokenIn (spend token)
-    // must be an ERC-20 — the OrderExecutor pulls it via Permit2/transferFrom, which the
-    // native-ETH sentinel can't satisfy (the contract would revert, wasting an EIP-712
+    // must be an ERC-20 — the OrderExecutor pulls it via a DIRECT ERC-20 allowance/transferFrom
+    // to the executor (NOT Permit2; see useOrderApproval), which the native-ETH sentinel can't
+    // satisfy (the contract would revert, wasting an EIP-712
     // signature). The UI hides native ETH from the DCA INPUT selector, but resolve the
     // sentinel here too (chain-aware WETH, never hardcoded) so it can NEVER reach the signed
     // struct. tokenOut is left untouched — native ETH is a valid OUTPUT (contract unwraps).

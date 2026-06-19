@@ -4696,3 +4696,56 @@ Implemented across AREA A (UI), AREA B (useOrderEngine guard), AREA C (server fa
   in connect-modal-qr.test.ts, which is not in this diff).
 - Diff touches only the 9 intended files (4 prod + 4 test + FEEDBACK.md). Instant-swap (SwapBox) and the
   LimitOrderPanel suites stay green (regression guard for the shared TokenSelector default-off behavior).
+
+## Feedback — CHORE-DCA-APPROVAL-FLOW (pending commit)
+
+The DCA/conditional-order flow signed the EIP-712 order but never prompted an ERC-20 approval, so the keeper
+skipped every order with "Insufficient allowance". Added a one-time **exact-total** `approve(executor, amountIn)`
+gate before signing, via a new reusable hook `useOrderApproval` wired into the shared `OrderReviewModal` (so
+DCA / Limit / SL·TP all inherit it). No Solidity/keeper change; instant-swap untouched.
+
+### Per-buy/total resolution (contract is authoritative)
+- **`order.amountIn` is the TOTAL across all DCA chunks**, NOT per-buy — verified directly in
+  `TeraSwapOrderExecutor.sol`: the DCA branch uses cumulative tracking (`cumulativeTarget=(amountIn*(execCount+1))
+  /dcaTotal`, `previouslyExecuted=(amountIn*execCount)/dcaTotal`, `executeAmount=cumulativeTarget-previouslyExecuted`,
+  last chunk = `amountIn-previouslyExecuted`). The per-chunk pulls telescope to **exactly** `order.amountIn`
+  ([HIGH-003 fix]); the final chunk absorbs the floor remainder. Non-DCA pulls `amountIn` once.
+- So the one-time approval is `approve(executor, order.amountIn)` — the FULL total, **no max-uint** — for both DCA
+  and non-DCA. The review modal previously mislabelled the total as **"Amount per buy"**; corrected to
+  **"Total to spend"** with a separate DCA-only **"Per buy" = floor(amountIn/dcaTotal)** row. What's displayed now
+  equals what's signed equals what's pulled.
+- **canExecute checks only the PER-CHUNK amount** (`amountIn/dcaTotal` for DCA), so it would pass after approving a
+  single chunk — but then chunks 2..n revert `InsufficientAllowance`. The UI gate therefore requires
+  `allowance >= the FULL total` (pinned by a test asserting a per-chunk allowance does NOT open the gate).
+
+### Overlap with chore/dca-weth-input
+- The gate reads/approves the **FROZEN `order.tokenIn`**, which `useOrderEngine` already remaps from the native-ETH
+  sentinel → chain WETH (`getWrappedNative`, useOrderEngine.ts ~L514) before freezing. So for Limit/SL·TP panels
+  that still default `tokenIn` to native ETH, the approval correctly targets the WETH the executor actually pulls.
+  The two chores interlock at `order.tokenIn`; the approval layer needs no extra remap — it piggybacks on the
+  dca-weth-input remap.
+
+### Test gap (deliberate, flagged)
+- **No hook-level allowance re-check in `useOrderEngine.confirmOrder`** (defense-in-depth). The modal gate disables
+  "Confirm & Sign Order" until the approve receipt confirms; `confirmOrder` keeps its chain/account/expiry/executor
+  fail-closed guards; and the contract reverts `InsufficientAllowance` on-chain — so a bypassed gate yields at worst
+  a signed-but-non-executable order (no fund loss). A blocking re-check was intentionally NOT added because the
+  existing `useOrderEngine.test` harness mocks the `allowance` read to `undefined`, so it would destabilise ~30
+  tests. **Recommended follow-up:** add the re-check after extending that harness to feed an allowance value.
+
+### Notes (added in review)
+- Tightened the Approve button to also disable on `status === 'ready'` (the window between the approve receipt and
+  the allowance refetch propagating), preventing a duplicate approve prompt on a fast double-click. The exact-total
+  approve is idempotent, so this is UX hardening, not a fund risk.
+- Corrected a now-stale comment in `useOrderEngine.ts` (~L509) that said the executor pulls "via Permit2/transferFrom"
+  — the contract uses a **direct** ERC-20 allowance to the executor (no Permit2); reworded to match the new hook doc.
+- Latent footgun (pre-existing, no action this chore): `getWrappedNative` falls back to mainnet WETH on chains with
+  no registry config. Cannot leak onto a wired path today (unwired chain → `getOrderExecutor` null → no approve),
+  but any future chain added to `ORDER_EXECUTOR_BY_CHAIN` must also populate its wrapped-native config.
+
+### Verification
+- `vitest` scoped suites (useOrderApproval, OrderReviewModal, useOrderEngine, DCAPanel, LimitOrderPanel): **75 passed**.
+  Full suite (implementer): **1971 passed**; the only failing file is the pre-existing `connect-modal-qr.test.ts`
+  (`cuer/QrCode`, INC-2026-06-09-001), unrelated and untouched.
+- `npx tsc --noEmit` → clean except that same pre-existing error. `eslint` → 0 errors.
+- No Solidity/keeper change; SwapBox/instant-swap byte-identical; CoW path not given a (wrong) executor approval.
