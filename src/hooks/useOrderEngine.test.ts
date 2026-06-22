@@ -239,6 +239,35 @@ describe('useOrderEngine — createOrder', () => {
     expect(result.current.orders[0].status).toBe('active')
   })
 
+  // [CHORE-ORDER-API-CHAIN-AWARE] The POSTed chainId MUST equal the chainId the order was SIGNED
+  // under (one load-bearing `signedChainId` const feeds both the signing domain and the POST).
+  it('POSTs the SIGNED chainId to Supabase (sent == signed), mainnet → 1', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    await createAndConfirm(result)
+    const supabaseArg = mockCreateOrderInSupabase.mock.calls[0][0] as { chainId: number }
+    expect(supabaseArg.chainId).toBe(1)
+    const domainChainId = (mockSignTypedDataAsync.mock.calls[0][0] as { domain: { chainId: number } }).domain.chainId
+    expect(supabaseArg.chainId).toBe(domainChainId) // sent == signed
+  })
+
+  it('POSTs chainId 8453 (sent == signed) when the connected chain is Base', async () => {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(8453)
+    try {
+      const { result, rerender } = renderHook(() => useOrderEngine())
+      await act(async () => { rerender() })
+      await createAndConfirm(result)
+      const supabaseArg = mockCreateOrderInSupabase.mock.calls[0][0] as { chainId: number }
+      expect(supabaseArg.chainId).toBe(8453)
+      const domainChainId = (mockSignTypedDataAsync.mock.calls[0][0] as { domain: { chainId: number } }).domain.chainId
+      expect(supabaseArg.chainId).toBe(domainChainId) // sent == signed across chains
+    } finally {
+      // Restore the default chain so this mutation can't leak into later tests (vi.clearAllMocks
+      // in beforeEach clears calls but NOT a mockReturnValue override).
+      ;(wagmi.useChainId as ReturnType<typeof vi.fn>).mockReturnValue(1)
+    }
+  })
+
   it('falls back to error state when user rejects', async () => {
     mockSignTypedDataAsync.mockRejectedValueOnce(
       Object.assign(new Error('User rejected the request.'), {

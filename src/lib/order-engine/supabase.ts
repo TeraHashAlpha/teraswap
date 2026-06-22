@@ -70,6 +70,10 @@ export interface ExecutionRow {
 // ── Create order (via server-side API — bypasses RLS) ────
 export async function createOrderInSupabase(params: {
   wallet: string
+  // [CHORE-ORDER-API-CHAIN-AWARE] The chainId the order was SIGNED under (= the chainId passed to
+  // getOrderExecutorDomain at sign time). The backend derives its verify domain from THIS value, so
+  // sent == signed and recovery is byte-identical to the signing domain.
+  chainId: number
   orderHash: string
   orderType: 'limit' | 'stop_loss' | 'dca'
   tokenIn: string
@@ -101,6 +105,8 @@ export async function createOrderInSupabase(params: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         wallet: params.wallet,
+        // [CHORE-ORDER-API-CHAIN-AWARE] Backend derives the verify domain from this signed chainId.
+        chainId: params.chainId,
         orderHash: params.orderHash,
         orderType: params.orderType,
         tokenIn: params.tokenIn,

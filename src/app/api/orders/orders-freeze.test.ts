@@ -96,6 +96,7 @@ afterEach(() => {
 function validBody(overrides: Record<string, unknown> = {}) {
   return {
     wallet: WALLET,
+    chainId: 1, // [CHORE-ORDER-API-CHAIN-AWARE] verify domain is derived from this signed chainId
     tokenIn: TOKEN_IN,
     tokenOut: TOKEN_OUT,
     router: ROUTER,

@@ -4794,3 +4794,76 @@ Advanced (always visible). No native-ETH re-add, no buy/output change, no contra
 - `tsc --noEmit` clean (no non-`cuer` errors); `eslint` → 0 errors on the changed/new files.
 - Scope: native ETH not re-added to the spend selector; buy/output side unchanged; no contract/keeper change; no
   hardcoded WETH/balance.
+
+## Feedback — CHORE-ORDER-API-CHAIN-AWARE (uncommitted — Code Agent will record the hash at commit time)
+
+### Ops step (MUST apply to the live DB)
+- `contracts/order-engine/schema.sql` adds `idx_orders_chain_status (chain_id, status)` and partial
+  `idx_orders_chain_active (chain_id, status, created_at) WHERE status='active'`. The `chain_id` COLUMN already
+  existed (NOT NULL DEFAULT 1), so no `ALTER`; but the SQL migration / index creation is NOT run by CI against
+  prod — it must be applied manually in the Supabase SQL editor. Use `CREATE INDEX CONCURRENTLY` in prod to avoid
+  locking the `orders` table (CONCURRENTLY must run OUTSIDE a transaction). Until applied, the chain-scoped keeper
+  query still works, just sequential-scans.
+
+### Keeper rollout ordering (deploy order matters)
+- Deploy the route.ts change (persists `chain_id` from the verified signed chainId) BEFORE scoping the keeper
+  query, so new rows carry the correct `chain_id` when the scoped keeper starts filtering. `executor.js` now
+  filters `fetchActiveOrders` + `unlockStaleOrders` (and defensively `lockOrder`) by `&chain_id=eq.${CHAIN_ID}`. A
+  keeper with a misconfigured `CHAIN_ID` will silently process ZERO orders (fail-safe — executes nothing rather
+  than the wrong chain), so verify `CHAIN_ID` is set before deploying the scoped keeper.
+
+### Backfill caveat for legacy Base rows
+- Pre-existing rows all have `chain_id=1` (the DEFAULT) — correct for mainnet, no backfill needed there. BUT any
+  Base orders created during the `CHAIN_ID=8453` Vercel stop-gap were ALSO stored with `chain_id=1` (the old
+  insert never wrote chain_id). After this change a Base keeper (`CHAIN_ID=8453`) will NOT see those legacy rows.
+  If any real Base orders exist, ops must `UPDATE orders SET chain_id=8453 WHERE <identify base rows>` before the
+  scoped Base keeper runs. (Per project memory, DCA/Base is still gated OFF behind NEXT_PUBLIC_DCA_ENABLED, so
+  likely zero real Base rows — but confirm.)
+
+### Mainnet byte-identity (AREA B) — VERIFIED, no discrepancy
+- `getOrderExecutorDomain(1)` is byte-identical to the route's previous hand-assembled mainnet domain field-for-
+  field (name 'TeraSwapOrderExecutor', version '2', chainId 1, verifyingContract via the SAME `getOrderExecutor(1)`
+  — neither object carries `salt` or any extra key). Already pinned by `order-executor.test.ts:31-38` and
+  `config.test.ts`. So swapping the route's verify domain to `getOrderExecutorDomain(chainId)` is a no-op for chain
+  1. No mainnet behavior was changed (per the prompt: I did NOT touch the contract, ORDER_TYPES, or the domain
+  name/version). The unused `EIP712_DOMAIN` constant was removed (it only fed the old hand-assembled domain).
+
+### Existing-test compat touch (flagged)
+- `orders-freeze.test.ts` was NOT in the prompt's Files-affected list but its `validBody()` reaches the
+  verification/insert path for non-DCA + not-frozen DCA cases, so those 4 tests would 400 on the new "Invalid
+  chainId" guard. Added `chainId: 1` to that file's `validBody()` (one line) to keep them green — same one-line fix
+  applied to `route.test.ts` and `orders-create.validation.test.ts` per the prompt.
+
+### Test gap / out-of-scope note
+- GET /api/orders (the wallet's order list, route.ts:292-325) is wallet-scoped and NOT chain-scoped. This is
+  intentional for now (the UI shows all of a wallet's orders across chains), and the keeper does NOT use this
+  endpoint (it queries Supabase REST directly). If the UI later needs per-chain filtering, add an optional
+  `&chainId=` query param there. Out of scope for this chore.
+- The signed EIP-712 MESSAGE deliberately does NOT carry chainId (it lives only in the DOMAIN); chainId is a
+  separate top-level POST field. order_data (M-07 cross-check) also does not carry chainId, so no new cross-check
+  was needed there.
+
+### Verification
+- `vitest`: full suite 2004 passed; only the pre-existing `connect-modal-qr.test.ts` (`cuer/QrCode`,
+  INC-2026-06-09-001) fails — confirmed identical on a clean tree, unrelated/untouched. Orders API dir: 90 passed;
+  useOrderEngine: 50 passed; order-executor + config domain-parity: green.
+- RED-on-regression proven: temporarily pinning the verify domain to `getOrderExecutorDomain(1)` (the
+  env/hardcoded-1 regression) turns the Base-domain test (validation) and the real-signature Base test (route.test)
+  RED; reverted. The "body.chainId != signed chainId" case correctly yields 'Signature mismatch'.
+- `tsc --noEmit`: clean except the pre-existing `cuer/QrCode` error. `eslint` on changed files: 0 errors (one
+  pre-existing set-state-in-effect warning at useOrderEngine.ts:351, unrelated to this change).
+
+### Auditor finding (LOW, pre-Base-launch — NOT fixed in this chore)
+- **`unique_order_hash` is global, but `getOrderHash`/`computeOrderHash` does not bind chainId.** The orders table
+  has `CONSTRAINT unique_order_hash UNIQUE (order_hash)` (schema.sql:92), and `computeOrderHash`
+  (useOrderEngine.ts) hashes only the Order struct — chainId + verifyingContract live in the EIP-712 *domain*
+  (which correctly binds the signature), not in the persisted `order_hash`. The nonce is read per-chain, so the
+  same user could produce an identical Order struct on mainnet and Base → the **same `order_hash` with two valid
+  signatures**; the second insert collides on `unique_order_hash` → 409 "Order already exists". This is a
+  cross-chain **availability/correctness** wrinkle, NOT an authorization or fund-flow defect (the on-chain
+  OrderExecutor is the authoritative verifier and rejects any signature not bound to its own domain). It is latent
+  today because Base/DCA is flag-gated OFF ([[project_dca_launch_flag]]). This chore is what first makes
+  multi-chain order storage real in one DB, so flagging it. **Required before flipping `NEXT_PUBLIC_DCA_ENABLED`
+  on for Base:** make the constraint chain-scoped — `UNIQUE (chain_id, order_hash)` (validate no current cross-chain
+  duplicates first; `chain_id` already exists NOT NULL DEFAULT 1). Left to backlog per the auditor's scoping
+  (out of scope while Base is gated OFF; a constraint swap is a delicate prod migration of its own).

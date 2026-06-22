@@ -116,6 +116,13 @@ CREATE INDEX IF NOT EXISTS idx_orders_type       ON orders (order_type);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_pair       ON orders (token_in, token_out);
 CREATE INDEX IF NOT EXISTS idx_orders_hash       ON orders (order_hash);
+-- [CHORE-ORDER-API-CHAIN-AWARE] The keeper scopes its active-orders query by (status, chain_id) so a
+-- per-chain keeper only processes its own rows. The chain_id column already exists (see above);
+-- these indexes keep the chain-scoped poll fast. OPS: apply to the LIVE Supabase DB manually (CI does
+-- NOT run migrations against prod) — use CREATE INDEX CONCURRENTLY in prod to avoid locking the table
+-- (CONCURRENTLY must run outside a transaction).
+CREATE INDEX IF NOT EXISTS idx_orders_chain_status ON orders (chain_id, status);
+CREATE INDEX IF NOT EXISTS idx_orders_chain_active ON orders (chain_id, status, created_at) WHERE status = 'active';
 
 CREATE INDEX IF NOT EXISTS idx_executions_order  ON order_executions (order_id);
 
