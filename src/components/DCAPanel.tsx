@@ -16,12 +16,14 @@ import {
   EXPIRY_PRESETS,
   getDefaultRouter,
   getChainlinkFeeds,
+  MIN_ORDER_AMOUNT,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
 import { getWrappedNative } from '@/lib/chains/registry'
 import { findChainToken } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
+import { quickFillRaw, perChunkRaw } from '@/lib/dca-quick-fill'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
@@ -231,7 +233,7 @@ function CreateDCAForm({
   // [CHORE-DCA-WETH-INPUT] Advisory guidance for the "holds only native ETH" case: if the
   // wallet has ETH but ~zero WETH, hint to wrap first. Native ETH is keyed under its sentinel
   // address; WETH under the chain's wrapped-native address. Non-blocking (they can wrap elsewhere).
-  const { balances } = useTokenBalances()
+  const { balances, isLoading: balancesLoading } = useTokenBalances()
   const hasNativeOnly = useMemo(() => {
     const weth = wethFor(chainId)
     const wethKey = weth?.address.toLowerCase()
@@ -239,6 +241,16 @@ function CreateDCAForm({
     const wethBal = wethKey ? (balances.get(wethKey)?.raw ?? 0n) : 0n
     return nativeBal > 0n && wethBal === 0n
   }, [balances, chainId])
+
+  // [CHORE-DCA-UX-POLISH] Selected SPEND token (WETH) balance from the SAME chain-aware
+  // useTokenBalances map the wrap-ETH hint already uses — keyed by the chain's wrapped-native
+  // address (never hardcoded), so it refetches on token/account/chain change. `raw` is the
+  // bigint balance (drives the BigInt preset math); `formatted` is the display string.
+  const spendEntry = useMemo(() => {
+    const key = tokenIn && !isNativeETH(tokenIn) ? tokenIn.address.toLowerCase() : undefined
+    return key ? balances.get(key) : undefined
+  }, [balances, tokenIn])
+  const spendRaw = spendEntry?.raw ?? 0n
   const [totalDisplay, setTotalDisplay] = useState('')
   const [partsIdx, setPartsIdx] = useState(2) // default: 7
   const [intervalIdx, setIntervalIdx] = useState(3) // default: 1d
@@ -249,6 +261,38 @@ function CreateDCAForm({
   const parts = DCA_TOTAL_PRESETS[partsIdx]
   const interval = DCA_INTERVAL_PRESETS[intervalIdx]
   const expiry = EXPIRY_PRESETS[expiryIdx]
+
+  // [CHORE-DCA-UX-POLISH] Balance line text: the map's `formatted` string + symbol, or "—" while
+  // balances load or when disconnected / no balance entry. The raw bigint (spendRaw) — not this
+  // display string — drives the preset math, so there is no float drift.
+  const balanceDisplay = useMemo(() => {
+    if (!isConnected || balancesLoading || !spendEntry) return '—'
+    return `${spendEntry.formatted} ${tokenIn?.symbol ?? ''}`.trim()
+  }, [isConnected, balancesLoading, spendEntry, tokenIn])
+
+  const presetsDisabled = !isConnected || spendRaw === 0n
+
+  // [CHORE-DCA-UX-POLISH] Quick-fill: slice the raw balance in the smallest unit via quickFillRaw
+  // (pure BigInt — never Number()/float; 100% returns the FULL balance unchanged), then formatUnits
+  // once into the input. setTotalDisplay is the SAME setter the manual input writes.
+  function fillPct(pct: 25 | 50 | 100) {
+    if (!tokenIn || spendRaw === 0n) return
+    setTotalDisplay(formatUnits(quickFillRaw(spendRaw, pct), tokenIn.decimals))
+  }
+
+  // [CHORE-DCA-UX-POLISH] Re-run the EXISTING per-chunk MIN_ORDER_AMOUNT floor after any fill
+  // (preset or manual): per-chunk = floor(amountIn / parts) via perChunkRaw — the SAME split
+  // useOrderEngine.createOrder enforces. When under-floor, surface the SAME hint copy the
+  // submit-time guard uses. The hard pre-sign block still lives in createOrder — this is an
+  // inline advisory, not a new gate.
+  const underMin = useMemo(() => {
+    if (!totalDisplay || !tokenIn || !parts) return false
+    try {
+      return perChunkRaw(parseUnits(totalDisplay, tokenIn.decimals), parts) < MIN_ORDER_AMOUNT
+    } catch {
+      return false
+    }
+  }, [totalDisplay, tokenIn, parts])
 
   // Derived values
   const perPart = useMemo(() => {
@@ -339,6 +383,33 @@ function CreateDCAForm({
             className="flex-1 bg-transparent text-right text-lg font-semibold text-cream outline-none placeholder:text-cream-20"
           />
         </div>
+        {/* [CHORE-DCA-UX-POLISH] Balance line + 25/50/100% quick-fill for the spend token (WETH). */}
+        <div className="mt-1 flex items-center justify-between">
+          <span data-testid="dca-spend-balance" className="text-[11px] text-cream-35">
+            Balance: {balanceDisplay}
+          </span>
+          <div className="flex gap-1">
+            {([25, 50, 100] as const).map(p => (
+              <button
+                key={p}
+                type="button"
+                disabled={presetsDisabled}
+                onClick={() => { playClick(); fillPct(p) }}
+                className="rounded-md border border-cream-08 px-2 py-0.5 text-[11px] text-cream-35 transition-colors enabled:hover:text-cream-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {p}%
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* [CHORE-DCA-UX-POLISH] Re-validate the per-chunk MIN_ORDER_AMOUNT floor and surface the
+            SAME hint copy the submit-time guard uses (useOrderEngine.ts). The hard block stays in
+            createOrder — this is an inline advisory after a preset/manual fill lands under-floor. */}
+        {underMin && (
+          <p className="mt-1 text-[11px] text-amber-300">
+            Each DCA buy must be at least {Number(MIN_ORDER_AMOUNT).toLocaleString()} base units (the on-chain minimum). Increase the total amount or reduce the number of buys.
+          </p>
+        )}
         {/* [CHORE-DCA-WETH-INPUT] Advisory hint when the wallet holds native ETH but no WETH. */}
         {hasNativeOnly && (
           <p className="mt-1 text-[11px] text-cream-35">
@@ -415,6 +486,29 @@ function CreateDCAForm({
         </div>
       </div>
 
+      {/* [CHORE-DCA-UX-POLISH] Order expiry — always visible (moved out of Advanced), alongside
+          Number of Buys / Interval. State/values/behaviour unchanged; only the render moved. */}
+      <div className="mb-4">
+        <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
+          Order expiry
+        </label>
+        <div className="flex gap-2 flex-wrap">
+          {EXPIRY_PRESETS.map((e, idx) => (
+            <button
+              key={e.seconds}
+              onClick={() => { setExpiryIdx(idx); playClick() }}
+              className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all ${
+                expiryIdx === idx
+                  ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                  : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
+              }`}
+            >
+              {e.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Summary */}
       {Number(totalDisplay) > 0 && (
         <div className="mb-4 rounded-xl border border-cream-08 bg-surface-primary p-3 text-[13px]">
@@ -467,28 +561,6 @@ function CreateDCAForm({
                   }`}
                 >
                   {s}%
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Expiry */}
-          <div className="rounded-xl border border-cream-08 bg-surface-primary p-3">
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
-              Order expiry
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              {EXPIRY_PRESETS.map((e, idx) => (
-                <button
-                  key={e.seconds}
-                  onClick={() => { setExpiryIdx(idx); playClick() }}
-                  className={`rounded-lg border px-3 py-1 text-[12px] font-semibold transition-all ${
-                    expiryIdx === idx
-                      ? 'border-cream-gold bg-cream-gold/10 text-cream'
-                      : 'border-cream-08 text-cream-35 hover:text-cream-50'
-                  }`}
-                >
-                  {e.label}
                 </button>
               ))}
             </div>

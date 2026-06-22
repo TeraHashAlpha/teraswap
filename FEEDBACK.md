@@ -4749,3 +4749,48 @@ DCA / Limit / SL·TP all inherit it). No Solidity/keeper change; instant-swap un
   (`cuer/QrCode`, INC-2026-06-09-001), unrelated and untouched.
 - `npx tsc --noEmit` → clean except that same pre-existing error. `eslint` → 0 errors.
 - No Solidity/keeper change; SwapBox/instant-swap byte-identical; CoW path not given a (wrong) executor approval.
+
+## Feedback — CHORE-DCA-UX-POLISH (pending commit)
+
+Pure-UI polish of the DCA "New DCA" spend step, on top of the merged chore/dca-weth-input + chore/dca-approval-flow:
+a wallet balance line for the selected spend token (WETH), 25/50/100% quick-fill, and Order Expiry moved out of
+Advanced (always visible). No native-ETH re-add, no buy/output change, no contract/keeper touch.
+
+### Edge case (pre-existing scaffold drove the contract)
+- The worktree was pre-seeded with three untracked scaffold files that define this chore's contract:
+  `src/lib/dca-quick-fill.ts` (pure BigInt helpers `quickFillRaw`/`perChunkRaw`), `src/lib/dca-quick-fill.test.ts`
+  (9 tests), and `src/components/DCAPanel.ux-polish.test.tsx` (12 UI tests, incl. a `1e18+1` wei round-trip that
+  proves no float drift, the sub-floor MIN hint, and Expiry-outside-Advanced). Implemented `DCAPanel.tsx` against
+  those (single source for the % + per-chunk math) rather than inventing parallel logic — committed alongside.
+
+### Reuse / scope decisions
+- **% math** goes through `quickFillRaw` (smallest-unit BigInt: 25/50% = `floor(raw*pct/100)`, 100% = the full
+  `raw` unchanged → exact to the wei) then a single `formatUnits` into the same `setTotalDisplay` the manual input
+  uses. No `Number()`/`parseFloat` on the balance.
+- **Balance line** reuses the existing chain-aware `useTokenBalances` map (keyed by the chain's wrapped-native /
+  WETH address — never hardcoded), so it refetches on token/account/chain change. The raw bigint drives the math;
+  the map's `formatted` string is display-only.
+- **MIN floor advisory** reuses the exact `MIN_ORDER_AMOUNT` (10,000n) per-chunk check (`perChunkRaw(total, parts)
+  < MIN`), identical to `useOrderEngine.createOrder`. The hard pre-sign block stays in `createOrder`; this is an
+  inline advisory. It intentionally fires for manual sub-floor input too (a benign superset of "after a preset"),
+  which is strictly better UX with identical logic.
+- **Expiry** only relocated (out of Advanced, alongside Number of buys / Interval); its state/values/submit usage
+  are unchanged. Slippage stays under Advanced.
+
+### Minor follow-ups (flagged, NOT changed — out of pure-UI scope or deliberately deferred)
+- **Zero-balance display**: a connected wallet with exactly 0 WETH shows "Balance: —" (not "Balance: 0 WETH")
+  because `useTokenBalances` omits zero-value ERC-20 entries from its map. The quick-fill buttons are still
+  correctly disabled (`spendRaw === 0n`), so there is no functional impact, and the seeded scaffold contract tests
+  loading/disconnected → "—" but does not specify the zero case. Left as-is to stay faithful to the scaffold; a
+  follow-up could render "0 {symbol}" when `isConnected && !isLoading && !isError && no entry`.
+- **MIN-hint copy duplication**: the inline advisory string is byte-identical to `useOrderEngine.ts` (both use
+  `Number(MIN_ORDER_AMOUNT).toLocaleString()`). A shared constant would avoid future drift but touches
+  `useOrderEngine` (beyond pure-UI scope) — recommend extracting the copy into `@/lib/order-engine` as a backlog item.
+
+### Verification
+- `vitest` (scaffolds + DCAPanel): **25 passed** (dca-quick-fill 9, DCAPanel.ux-polish 12, DCAPanel build/sign 4).
+  Implementer's full suite: 1995 passed; only the pre-existing `connect-modal-qr.test.ts` (`cuer/QrCode`,
+  INC-2026-06-09-001) fails, unrelated/untouched.
+- `tsc --noEmit` clean (no non-`cuer` errors); `eslint` → 0 errors on the changed/new files.
+- Scope: native ETH not re-added to the spend selector; buy/output side unchanged; no contract/keeper change; no
+  hardcoded WETH/balance.
