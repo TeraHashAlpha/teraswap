@@ -41,8 +41,10 @@ const SECTIONS: DocSection[] = [
   { id: 'mev-protection', title: 'MEV Protection', icon: '⌬' },
   { id: 'privacy', title: 'Privacy', icon: '◍' },
   { id: 'fee-structure', title: 'Fee Structure', icon: '◇' },
+  { id: 'order-engine', title: 'Order Engine', icon: '⊞' },
   { id: 'limit-orders', title: 'Limit Orders', icon: '⊕' },
   { id: 'stop-loss', title: 'Stop Loss / Take Profit', icon: '⛊' },
+  { id: 'dca', title: 'DCA', icon: '⟳' },
   { id: 'split-routing', title: 'Split Routing', icon: '⫘' },
   { id: 'analytics', title: 'Analytics Dashboard', icon: '◫' },
   { id: 'roadmap', title: 'Roadmap', icon: '▸' },
@@ -109,7 +111,7 @@ function Tag({ children }: { children: React.ReactNode }) {
 function FlowDiagram() {
   const steps = [
     { label: 'User', sub: 'Initiates swap', color: '#C8B89A' },
-    { label: 'TeraSwap', sub: 'Queries 11 sources', color: '#E8D5B7' },
+    { label: 'TeraSwap', sub: 'Queries all sources', color: '#E8D5B7' },
     { label: 'Compare', sub: 'Best net output', color: '#C8B89A' },
     { label: 'Validate', sub: 'Chainlink oracle', color: '#4ADE80' },
     { label: 'Execute', sub: 'On-chain swap', color: '#E8D5B7' },
@@ -244,10 +246,11 @@ export default function DocsPage() {
         <AnimatedSection id="overview">
           <SectionTitle icon="◈" title="Overview" />
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap is a <strong className="text-cream">meta-aggregator</strong> for decentralized exchanges on Ethereum.
-            Instead of searching manually across multiple DEXs, TeraSwap queries <strong className="text-cream">11 independent
-            liquidity sources</strong> simultaneously and automatically routes your trade through whichever offers the best
-            net output — accounting for gas costs, slippage, and pool fees.
+            TeraSwap is a <strong className="text-cream">meta-aggregator</strong> for decentralized exchanges. Instant
+            swaps are live on Ethereum Mainnet. Instead of searching manually across multiple DEXs, TeraSwap queries
+            <strong className="text-cream"> up to 12 independent liquidity sources</strong> simultaneously and
+            automatically routes your trade through whichever offers the best net output — accounting for gas costs,
+            slippage, and pool fees.
           </p>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             Every swap is validated against <strong className="text-cream">Chainlink price oracles</strong> and{' '}
@@ -258,11 +261,12 @@ export default function DocsPage() {
           </p>
           <div className="flex flex-wrap gap-2">
             <Tag>Non-custodial</Tag>
-            <Tag>Open source</Tag>
-            <Tag>11 DEX sources</Tag>
+            <Tag>Permissionless · no KYC</Tag>
+            <Tag>Up to 12 DEX sources</Tag>
             <Tag>Multi-oracle verified</Tag>
             <Tag>MEV protected</Tag>
             <Tag>IP protected</Tag>
+            <Tag>Beta · unaudited</Tag>
           </div>
         </AnimatedSection>
 
@@ -278,8 +282,7 @@ export default function DocsPage() {
           </p>
           <FlowDiagram />
           <p className="text-[15px] leading-relaxed text-cream-65">
-            The entire comparison happens in under <strong className="text-cream">5 seconds</strong>. Each source
-            has an independent timeout — if one API is slow, the others still compete. The winning quote
+            Each source has an independent timeout — if one API is slow, the others still compete. The winning quote
             is then executed directly from the user&apos;s wallet with a single transaction.
           </p>
         </AnimatedSection>
@@ -290,8 +293,9 @@ export default function DocsPage() {
         <AnimatedSection id="liquidity-sources">
           <SectionTitle icon="◉" title="Liquidity Sources" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap integrates 11 liquidity sources across three categories: API aggregators that
-            themselves search hundreds of pools, direct on-chain protocols, and intent-based systems.
+            TeraSwap integrates up to 12 liquidity sources across three categories: API aggregators that
+            themselves search hundreds of pools, direct on-chain protocols, and intent-based systems. Every
+            registered adapter is queried in parallel on each quote.
           </p>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">API Aggregators</h3>
@@ -299,7 +303,7 @@ export default function DocsPage() {
             variants={stagger} className="mb-6 grid gap-3 sm:grid-cols-2"
           >
             <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching 400+ liquidity sources across DeFi." />
-            <SourceCard name="0x / Matcha" type="Aggregator" desc="Professional-grade RFQ system with Permit2 gasless approvals." />
+            <SourceCard name="0x / Matcha" type="Aggregator" desc="Professional-grade RFQ system; uses Permit2's pull model for allowances." />
             <SourceCard name="Velora (ParaSwap)" type="Aggregator" desc="Multi-path routing with MEV-aware execution strategies." />
             <SourceCard name="Odos" type="Aggregator" desc="Smart order routing with atomic multi-hop path optimization." />
             <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across 100+ DEXs with auto-compounding." />
@@ -316,11 +320,12 @@ export default function DocsPage() {
             <SourceCard name="Curve Finance" type="On-Chain" desc="CurveRouterNG for optimized stablecoin and crypto pool swaps with minimal slippage." />
           </motion.div>
 
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">Intent-Based</h3>
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">Intent-Based & RFQ</h3>
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="grid gap-3 sm:grid-cols-2"
           >
             <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order — full MEV protection, gasless execution." />
+            <SourceCard name="Bebop" type="RFQ" desc="Request-for-quote market makers via JAM settlement. Chain-aware adapter; participates when its partner key is configured." />
           </motion.div>
         </AnimatedSection>
 
@@ -337,14 +342,14 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'Parallel Fan-Out', desc: 'All 11 sources queried simultaneously with independent 5s timeouts. No source blocks another.' },
+              { num: '01', title: 'Parallel Fan-Out', desc: 'All registered sources are queried simultaneously, each with an independent 10-second timeout. No source blocks another — a slow API simply drops out of that round.' },
               { num: '02', title: 'Gas-Aware Ranking', desc: 'Quotes ranked by net output considering estimated gas costs in USD. When outputs are close, cheaper gas wins the tiebreak. CoW Protocol (gasless for users) naturally benefits.' },
               { num: '03', title: 'Statistical Outlier Detection', desc: 'True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above 3× median is rejected.' },
               { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: 'Automatically tests all 4 fee tiers (0.01%, 0.05%, 0.3%, 1%) and selects the pool with best output. Results are cached for faster subsequent quotes.' },
               { num: '05', title: 'Oracle Validation', desc: 'Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above 2% trigger a warning; above 3% the swap is blocked. A second server-side check via DefiLlama blocks swaps >8% below fair market value.' },
-              { num: '06', title: 'Cross-Quote Consensus', desc: 'The winning quote is compared against the median of all 11 sources. If it deviates >5% from consensus, a warning is raised. Quotes >3× above median are automatically removed as outliers.' },
-              { num: '07', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 15%] — impossible to create negative factors. Enforced at both UI input and calculation level across all 11 sources.' },
-              { num: '08', title: 'Multi-Chain EIP-712', desc: 'CoW Protocol signing uses the wallet\'s current chainId dynamically, enabling future multi-chain support without code changes.' },
+              { num: '06', title: 'Cross-Quote Consensus', desc: 'The winning quote is compared against the median of all responding sources. If it deviates >5% from consensus, a warning is raised. Quotes >3× above median are automatically removed as outliers.' },
+              { num: '07', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 15%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.' },
+              { num: '08', title: 'Chain-Aware EIP-712', desc: 'EIP-712 signing binds to the wallet\'s current chainId dynamically. This is what lets the order engine operate per-chain today — a separate OrderExecutor is deployed on both Ethereum Mainnet and Base — rather than being mainnet-only.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
                 className="flex gap-4 rounded-xl border p-5"
@@ -373,15 +378,17 @@ export default function DocsPage() {
             variants={stagger} className="grid gap-4 sm:grid-cols-2"
           >
             {[
-              { title: 'Chainlink Oracle Validation', desc: 'Every swap rate is cross-referenced with decentralized price feeds. Supports 24+ token pairs with automatic deviation detection. Warns at 2%, blocks at 3%.', badge: 'Oracle' },
-              { title: 'DefiLlama Server-Side Check', desc: 'A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >8% below fair market value. Covers thousands of tokens.', badge: 'Oracle' },
+              { title: 'Chainlink Oracle Validation', desc: 'Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The mainnet registry covers roughly 30 token feeds, with automatic deviation detection: warns at 2%, hard-blocks at 3%.', badge: 'Oracle' },
+              { title: 'DefiLlama Server-Side Check', desc: 'A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >8% below fair market value. If this secondary oracle is unreachable, swaps estimated above $10,000 are blocked while small swaps fail open.', badge: 'Oracle' },
               { title: 'Cross-Quote Consensus', desc: 'The winning quote is validated against the median of all aggregator responses. Deviations >5% are flagged; quotes >3× above median are removed automatically.', badge: 'Safety' },
               { title: 'Privacy Proxy', desc: 'All blockchain reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external RPC providers or DEX APIs.', badge: 'Privacy' },
               { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where professional solvers compete — your trade is never exposed to sandwich attacks.', badge: 'MEV' },
-              { title: 'Permit2 Approvals', desc: 'Off-chain signature-based approvals eliminate the need for unlimited token allowances. Your tokens stay under your control.', badge: 'Approval' },
-              { title: 'No Infinite Approvals', desc: 'Each approval is scoped to the exact amount needed for the swap. Nothing more, nothing less.', badge: 'Wallet' },
-              { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. All swaps execute directly between your wallet and the DEX contracts.', badge: 'Trust' },
-              { title: 'Transaction Simulation', desc: 'Before execution, the swap calldata is validated to ensure it will succeed. Failed simulations are caught before you spend gas.', badge: 'Safety' },
+              { title: 'Exact-Amount Approvals', desc: 'Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist — never an infinite/max-uint approval. (The 0x source uses Permit2\'s pull model, which still requires an on-chain approve to the Permit2 contract — TeraSwap does not ship gasless off-chain signature approvals as the general path.)', badge: 'Approval' },
+              { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction — it never holds user funds between transactions.', badge: 'Trust' },
+              { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
+              { title: 'Token-Catalog Guard (CI)', desc: 'Every curated token is verified against its on-chain reality before it ships: contract bytecode must exist (no dead addresses), on-chain symbol() and decimals() must match the catalog entry (decimals are fund-affecting for swap sizing), the address must appear in a reputable per-chain token list, and no two catalog tokens may share a symbol on the same chain. This runs as a CI gate.', badge: 'Safety' },
+              { title: 'On-Chain Admin Timelocks', desc: 'Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a 48-hour delay (and expire if not executed within a 7-day grace window). An emergency pause is also available.', badge: 'Contract' },
+              { title: 'Beta · Unaudited', desc: 'TeraSwap is in beta and its smart contracts are unaudited — a site-wide banner and per-panel disclaimer say so. Contracts are deployed and verified on the block explorer; the underlying DEXs you route through have their own audited contracts.', badge: 'Notice' },
             ].map((item) => (
               <motion.div key={item.title} variants={childFade}
                 whileHover={{ y: -2, borderColor: 'rgba(200,184,154,0.25)' }}
@@ -427,7 +434,7 @@ export default function DocsPage() {
             How TeraSwap protects you
           </h3>
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            For every swap, TeraSwap evaluates CoW Protocol alongside the other ten liquidity sources.
+            For every swap, TeraSwap evaluates CoW Protocol alongside its other liquidity sources.
             When CoW wins, the swap follows an MEV-protected path:
           </p>
           <ul className="mb-6 list-disc space-y-2 pl-5 text-[15px] leading-relaxed text-cream-65 marker:text-cream-35">
@@ -441,10 +448,11 @@ export default function DocsPage() {
               block, so there&apos;s no in-block reordering window for a sandwicher to exploit.
             </li>
             <li>
-              <strong className="text-cream">Limit orders, stop-loss and take-profit</strong> all execute
-              through this path by default. Conditional orders are the highest-MEV-risk products on most
-              aggregators because the trigger price is publicly known; TeraSwap signs them off-chain so
-              they aren&apos;t observable until they fill.
+              <strong className="text-cream">Conditional orders</strong> (limit, stop-loss / take-profit, DCA)
+              are signed off-chain on the order engine, so the trigger price isn&apos;t observable in a public
+              mempool until the keeper executes — unlike on-chain conditional orders whose target price is
+              public. Note: conditional orders are settled by the keeper through whitelisted DEX routers via
+              the OrderExecutor contract, not through CoW&apos;s solver auction.
             </li>
           </ul>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
@@ -464,7 +472,7 @@ export default function DocsPage() {
             public mempool, accepting the MEV exposure as the cost of cheaper execution.
           </p>
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap compares <strong className="text-cream">all 11 sources, including CoW</strong>, on
+            TeraSwap compares <strong className="text-cream">every source, including CoW</strong>, on
             every quote. When CoW&apos;s batch-auction price (net of solver competition) beats the
             public-mempool venues by more than the gas savings, the swap auto-routes through CoW — best
             price <em>and</em> MEV protection, picked algorithmically. When a public-mempool venue
@@ -475,8 +483,9 @@ export default function DocsPage() {
           </p>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             We don&apos;t claim &ldquo;zero MEV&rdquo; — we claim significantly reduced MEV exposure on
-            the paths that flow through CoW, no exposure at all on conditional orders, and an
-            algorithmic choice on every other swap that takes both price and MEV cost into account.
+            the paths that flow through CoW, a hard on-chain minimum-output floor that bounds any sandwich
+            on conditional and DCA orders, and an algorithmic choice on every other swap that takes both
+            price and MEV cost into account.
           </p>
         </AnimatedSection>
 
@@ -494,10 +503,10 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to Alchemy, LlamaRPC, and other providers — never yours.' },
+              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers — never yours.' },
               { num: '02', title: 'API Proxy Layer', desc: 'All external aggregator API calls (1inch, 0x, CoW, Odos, KyberSwap, etc.) are also proxied server-side through /api/quote and /api/swap. Your browser never makes direct requests to these services.' },
-              { num: '03', title: 'Method Whitelist', desc: 'The RPC proxy only allows read-only methods (eth_call, eth_getTransactionReceipt, eth_getBalance, etc.). Write methods like eth_sendRawTransaction are blocked to prevent misuse.' },
-              { num: '04', title: 'Rate Limiting', desc: '60 requests per IP per minute on the RPC proxy to prevent abuse. Swap endpoint limited to 20 requests per minute.' },
+              { num: '03', title: 'Method Policy (Blacklist)', desc: 'The RPC proxy relays every read method by default and explicitly blocks only signing/transaction methods (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). A blacklist is used deliberately — a method whitelist devolves into whack-a-mole. Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
+              { num: '04', title: 'Rate Limiting', desc: '300 requests per IP per minute on the RPC proxy to prevent abuse. The swap endpoint is limited to 20 requests per minute.' },
               { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -527,7 +536,7 @@ export default function DocsPage() {
                   ['All DEX aggregator quotes', '/api/quote', 'Yes'],
                   ['Swap calldata from all aggregators', '/api/swap', 'Yes'],
                   ['RPC reads (eth_call, receipts, etc.)', '/api/rpc', 'Yes'],
-                  ['CoW Protocol order submission', '/api/orders', 'Yes'],
+                  ['Conditional-order create / read', '/api/orders', 'Yes'],
                   ['Spender addresses', '/api/spender', 'Yes'],
                 ].map(([service, endpoint, hidden], i) => (
                   <tr key={i} style={{ borderTop: '1px solid #1E2530' }}>
@@ -553,7 +562,12 @@ export default function DocsPage() {
         <AnimatedSection id="fee-structure">
           <SectionTitle icon="◇" title="Fee Structure" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap maintains a transparent, simple fee structure with no hidden costs:
+            TeraSwap charges a flat <strong className="text-cream">0.1% (10 bps)</strong> platform fee, deducted from
+            the input amount before the swap and collected on-chain by the <strong className="text-cream">TeraSwapFeeCollector</strong> contract.
+            The collector pulls the input, takes the fee, forwards the net amount to the DEX router, and atomically
+            refunds any leftover input and ETH in the same transaction — so it never holds your funds between
+            transactions. Token approvals to the collector are <strong className="text-cream">exact-amount</strong>
+            {' '}(never infinite / max-uint), granted directly to the spender. No spread markup, no hidden costs.
           </p>
 
           <div className="overflow-hidden rounded-xl border" style={{ borderColor: '#1E2530' }}>
@@ -593,13 +607,70 @@ export default function DocsPage() {
 
         <Divider />
 
+        {/* ═══ ORDER ENGINE ═══ */}
+        <AnimatedSection id="order-engine">
+          <SectionTitle icon="⊞" title="Order Engine" />
+          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
+            Limit orders, stop-loss / take-profit, and DCA are all <strong className="text-cream">conditional orders</strong>{' '}
+            on a single on-chain engine: the non-upgradeable <strong className="text-cream">TeraSwapOrderExecutor</strong> contract
+            (EIP-712 domain <span className="font-mono text-[13px] text-cream">TeraSwapOrderExecutor</span> version 2). You place
+            an order by signing it <strong className="text-cream">off-chain with EIP-712</strong> — there is no on-chain
+            transaction to create an order — and an autonomous keeper later executes it on-chain when its conditions are met.
+            Conditional orders are <strong className="text-cream">not</strong> routed through CoW Protocol; CoW is only used on
+            the instant-swap MEV-protection path.
+          </p>
+          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+            There are three order types: <strong className="text-cream">LIMIT</strong>, <strong className="text-cream">STOP_LOSS</strong>,
+            and <strong className="text-cream">DCA</strong>. Take-profit is not a separate type — it is a STOP_LOSS order with an
+            &ldquo;above&rdquo; price condition (stop-loss uses &ldquo;below&rdquo;).
+          </p>
+
+          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
+            variants={stagger} className="space-y-4"
+          >
+            {[
+              { num: '01', title: 'Sign Once, Off-Chain (EIP-712)', desc: 'You sign the order with your wallet and grant a direct, exact-amount ERC-20 allowance to the executor contract for the order total — never an infinite/max-uint approval, and not Permit2. The executor pulls tokens via a direct transferFrom when it executes. No transaction is broadcast to place the order.' },
+              { num: '02', title: 'Whitelisted DEX Routing', desc: 'When a keeper executes an order, the contract routes the swap through a whitelisted DEX router (1inch by default) and enforces a per-execution minimum-output (slippage) floor. The router set is governed on-chain by an allowlist.' },
+              { num: '03', title: 'On-Chain Validation (canExecute)', desc: 'Before any execution the contract independently re-checks the order signature, that it is not cancelled or nonce-invalidated, that it has not expired, the router whitelist, the schedule, the price condition, and that your balance and allowance still cover the amount. The same checks are re-enforced inside executeOrder — the gate is on-chain, not advisory.' },
+              { num: '04', title: 'Chainlink Price Conditions', desc: 'Limit and stop-loss / take-profit orders carry a Chainlink price feed plus a target price and a direction (above / below). The order is only eligible once the on-chain feed crosses the trigger. (A pure DCA order carries no price condition — see the DCA section.)' },
+              { num: '05', title: 'Cancel & Mass-Invalidate', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all of your pending orders at once. You stay in control of your own funds throughout.' },
+              { num: '06', title: 'Keeper Signs in an HSM', desc: 'The off-chain keeper that submits executions signs with a key held in a hardware security module (AWS KMS): the private key never leaves the HSM and only signatures are returned. Adding or rotating a keeper, changing the router whitelist, or sweeping funds is gated by a 48-hour on-chain timelock (admin transfer uses a longer 7-day delay), each with a 7-day grace window.' },
+              { num: '07', title: 'Fail-Closed, Chain-Aware', desc: 'The engine refuses to sign, read, or execute on any chain without a wired OrderExecutor, and the EIP-712 domain is bound to the connected chain. Order creation is rejected server-side — before the signature is even verified — for any chain whose executor is not in the fixed allowlist. Today only Ethereum Mainnet and Base are wired.' },
+            ].map((step) => (
+              <motion.div key={step.num} variants={childFade}
+                className="flex gap-4 rounded-xl border p-5"
+                style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
+              >
+                <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
+                <div>
+                  <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
+                  <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+
+          <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
+            <span className="font-semibold text-cream-65">Deployments:</span> the OrderExecutor is deployed and verified on
+            the block explorer — Ethereum Mainnet at <span className="font-mono">0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130</span>{' '}
+            and Base at <span className="font-mono">0x135B339902Ea4E0fB4CF059961dc8856bA1D2598</span>. Conditional-order
+            creation panels are chain-agnostic in the UI; per-chain availability is enforced centrally by the fail-closed engine.
+          </div>
+        </AnimatedSection>
+
+        <Divider />
+
         {/* ═══ LIMIT ORDERS ═══ */}
         <AnimatedSection id="limit-orders">
           <SectionTitle icon="⊕" title="Limit Orders" />
-          <ComingSoonBanner note="Limit Orders are not yet available — the section below previews the upcoming flow. Watch the roadmap for the launch date." />
+          <ComingSoonBanner note="Limit-order creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
           <div className="opacity-50">
             <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-              Set your target price and let CoW Protocol solvers execute when the market reaches your level. Zero gas fees, MEV-protected, and partially fillable. Limit orders use <strong className="text-cream">2% default slippage</strong> and are ideal for precise entry and exit targets where you want solver competition to deliver the best possible fill price.
+              A limit order (OrderType LIMIT) lets you set a target price; the order becomes eligible once a Chainlink
+              price feed crosses your level, and the keeper then executes it on-chain through the order engine. Limit
+              orders use a <strong className="text-cream">2% default slippage</strong> floor and are ideal for precise
+              entry and exit targets. See the <strong className="text-cream">Order Engine</strong> section above for the
+              shared signing, validation, and execution model.
             </p>
 
             <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
@@ -607,10 +678,10 @@ export default function DocsPage() {
             >
               {[
                 { num: '01', title: 'Set Target Price', desc: 'Define exactly how many tokens you want to receive per unit sold. The market price is shown for reference, with percentage difference calculated in real-time.' },
-                { num: '02', title: 'Choose Expiry', desc: 'Orders can be valid from 1 hour to 90 days. After expiry, unfilled orders are automatically removed from the orderbook.' },
-                { num: '03', title: 'EIP-712 Signing', desc: 'Sign the order with your wallet — no on-chain transaction needed. Your tokens stay in your wallet until a solver fills the order.' },
-                { num: '04', title: 'Solver Competition', desc: 'Professional solvers on CoW Protocol compete to fill your order at the best possible rate, often providing price improvement beyond your limit price.' },
-                { num: '05', title: 'Partial Fills', desc: 'Enable partial fills to allow your order to be executed across multiple solver batches. This increases the chances of getting filled for larger orders.' },
+                { num: '02', title: 'Choose Expiry', desc: 'Orders carry an expiry; the contract refuses to execute an order past its expiry, and expired orders stop being eligible.' },
+                { num: '03', title: 'EIP-712 Signing', desc: 'Sign the order off-chain with your wallet — no on-chain transaction to place it. You grant an exact-amount allowance to the executor; your tokens stay in your wallet until the order executes.' },
+                { num: '04', title: 'Chainlink-Gated Execution', desc: 'The order is monitored against a Chainlink feed. When the trigger is reached, the keeper executes it on-chain via the OrderExecutor through a whitelisted DEX router (1inch by default) — you pay no gas at execution time because the keeper sends the transaction.' },
+                { num: '05', title: 'On-Chain Min-Output Floor', desc: 'Execution enforces a per-order minimum-output (slippage) floor on-chain, so a fill below your tolerance reverts rather than settling against you.' },
               ].map((step) => (
                 <motion.div key={step.num} variants={childFade}
                   className="flex gap-4 rounded-xl border p-5"
@@ -632,10 +703,14 @@ export default function DocsPage() {
         {/* ═══ STOP LOSS / TAKE PROFIT ═══ */}
         <AnimatedSection id="stop-loss">
           <SectionTitle icon="⛊" title="Stop Loss / Take Profit" />
-          <ComingSoonBanner note="Stop Loss / Take Profit is not yet available — the section below previews the upcoming flow. Watch the roadmap for the launch date." />
+          <ComingSoonBanner note="Stop-loss / take-profit creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
           <div className="opacity-50">
             <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-              Protect your positions or lock in gains automatically. Chainlink oracles monitor prices in real-time, and when your trigger is hit, a CoW Protocol limit order is auto-submitted for MEV-protected execution.
+              Protect your positions or lock in gains automatically. Stop-loss and take-profit are the same on-chain
+              order type (STOP_LOSS) distinguished by direction: stop-loss triggers when the price falls <strong className="text-cream">below</strong>{' '}
+              your target, take-profit when it rises <strong className="text-cream">above</strong>. A Chainlink feed gates the
+              trigger, and when the condition is met the keeper executes the swap on-chain via the OrderExecutor and a
+              whitelisted DEX router.
             </p>
             <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
               <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses <strong className="text-cream-65">5% default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses <strong className="text-cream-65">2% slippage</strong> like limit orders.
@@ -645,10 +720,10 @@ export default function DocsPage() {
               variants={stagger} className="space-y-4"
             >
               {[
-                { num: '01', title: 'Set Trigger Price (USD)', desc: 'Define your stop loss or take profit level in USD. For stop loss, the order triggers when price drops below your target. For take profit, it triggers when price rises above.' },
-                { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'Prices are polled every 5 seconds via Chainlink on-chain oracles — the industry standard for reliable, tamper-proof price feeds.' },
-                { num: '03', title: 'Automatic Execution', desc: 'When your trigger fires, a CoW Protocol limit order is automatically created and submitted. You sign once upfront — no manual action needed at trigger time.' },
-                { num: '04', title: 'MEV-Protected Fill', desc: 'The triggered order goes through CoW Protocol\'s solver competition, ensuring MEV-protected execution with zero gas fees.' },
+                { num: '01', title: 'Set Trigger Price', desc: 'Define your stop loss or take profit level. For stop loss, the order becomes eligible when price drops below your target; for take profit, when price rises above it.' },
+                { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'The trigger is evaluated against Chainlink on-chain price feeds — the industry standard for reliable, tamper-proof prices. The condition is checked on-chain inside the contract before any execution.' },
+                { num: '03', title: 'Automatic Execution', desc: 'You sign once upfront. When the trigger fires, the keeper executes the order on-chain via the OrderExecutor — no manual action needed at trigger time, and no gas paid by you at execution.' },
+                { num: '04', title: 'Whitelisted-Router Fill', desc: 'The triggered swap routes through a whitelisted DEX router (1inch by default), with a per-order minimum-output floor enforced on-chain.' },
                 { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
               ].map((step) => (
                 <motion.div key={step.num} variants={childFade}
@@ -668,6 +743,63 @@ export default function DocsPage() {
 
         <Divider />
 
+        {/* ═══ DCA ═══ */}
+        <AnimatedSection id="dca">
+          <SectionTitle icon="⟳" title="DCA (Dollar-Cost Averaging)" />
+          <ComingSoonBanner note="DCA ships with launch — it is not live yet. It rolls out first on Base (L2). The section below previews how it works." />
+          <div className="opacity-50">
+            <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
+              DCA splits a single buy into a series of smaller, scheduled purchases that run autonomously —{' '}
+              <strong className="text-cream">without you signing each one</strong>. You set the input token, the output
+              token, the total amount, the number of buys, and the interval between them. Each buy is settled at
+              execution time by the keeper through the single whitelisted DEX router committed in your signed order
+              (1inch by default), bounded by your per-buy minimum-output (slippage) floor enforced on-chain. Unlike
+              the instant-swap path, conditional and DCA orders are not routed through CoW.
+            </p>
+            <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
+              Setup is two steps: a one-time, <strong className="text-cream">exact-amount</strong> ERC-20 approval to the
+              OrderExecutor for the full total (never an infinite/max approval), and a{' '}
+              <strong className="text-cream">single EIP-712 signature</strong> over the whole plan. Because the contract
+              pulls the input via a direct ERC-20 transfer, the input is always an ERC-20 — a native-ETH input is
+              automatically wrapped to WETH before signing. From there a self-hosted keeper executes each buy on-chain
+              when its turn comes due, paying the gas itself.
+            </p>
+
+            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
+              variants={stagger} className="space-y-4"
+            >
+              {[
+                { num: '01', title: 'Sign Once, Run Autonomously', desc: 'One exact-amount WETH approval to the OrderExecutor plus a single EIP-712 signature covers the whole series. The keeper supplies fresh swap calldata each run; it never asks you to sign again. There is no per-execution signing.' },
+                { num: '02', title: 'Cumulative Chunk Accounting', desc: 'Each buy is sized by cumulative accounting: executeAmount = total × (n+1) / count − total × n / count, with the final buy taking the exact remainder. Across all executions the amounts sum to exactly your total — no buy is skipped, duplicated, or double-spent, and no dust is stranded.' },
+                { num: '03', title: 'On-Chain Gating Each Run', desc: 'Before each execution the contract independently re-checks your balance, your allowance, the schedule interval (it will not run early), and the order\'s expiry. An execution counter only advances after a successful swap, so the schedule can never run ahead of itself.' },
+                { num: '04', title: 'Schedule-Only, No Oracle Needed', desc: 'A pure DCA order carries no price condition (priceFeed = address(0) ⇒ the price check is always true): it runs on schedule regardless of price. It is not price-aware. An optional Chainlink condition can be attached, but the shipped DCA flow runs purely on a fixed interval for a fixed number of buys.' },
+                { num: '05', title: 'Routed at Market, Floor Enforced On-Chain', desc: 'At each turn the keeper builds a swap at market time and settles it through the single whitelisted DEX router committed in your signed order (1inch by default), with your per-buy minimum-output floor enforced on-chain. Unlike the instant-swap path, conditional and DCA orders are not routed through CoW.' },
+                { num: '06', title: 'You Stay in Control', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all pending orders. A manual circuit-breaker can pause the creation of new DCA orders — but it only delays: it never cancels or moves funds, existing orders keep running, and they can still be cancelled.' },
+              ].map((step) => (
+                <motion.div key={step.num} variants={childFade}
+                  className="flex gap-4 rounded-xl border p-5"
+                  style={{ borderColor: '#1E2530', background: 'rgba(14,18,24,0.4)' }}
+                >
+                  <span className="mt-0.5 text-2xl font-bold" style={{ color: 'rgba(200,184,154,0.2)' }}>{step.num}</span>
+                  <div>
+                    <h4 className="mb-1 text-sm font-semibold text-cream">{step.title}</h4>
+                    <p className="text-[13px] leading-relaxed text-cream-50">{step.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </motion.div>
+
+            <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
+              <span className="font-semibold text-cream-65">Why Base first:</span> DCA is offered only on Base (an
+              Ethereum L2), by design — never on mainnet. A recurring series of small buys on Ethereum Mainnet would be
+              dominated by per-execution gas, so DCA rolls out on a low-fee L2 where small, frequent buys are viable. It
+              ships with launch and is not presented as live until then.
+            </div>
+          </div>
+        </AnimatedSection>
+
+        <Divider />
+
         {/* ═══ SPLIT ROUTING ═══ */}
         <AnimatedSection id="split-routing">
           <SectionTitle icon="⫘" title="Split Routing" />
@@ -681,7 +813,7 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'Quote Collection', desc: 'All 11 sources are queried at multiple sub-amounts (20%, 30%, 40%, 50%, 60%, 70%, 80%) in parallel. Each source reports its output for each partial amount.' },
+              { num: '01', title: 'Quote Collection', desc: 'Split-eligible sources are queried at multiple sub-amounts in parallel (the set of percentages is derived from the candidate split configurations). Each source reports its output for each partial amount.' },
               { num: '02', title: 'Combinatorial Optimization', desc: 'The engine tests all 2-way and 3-way split configurations across eligible sources. Pre-defined splits (50/50, 60/40, 70/30, 80/20, 50/30/20, etc.) are evaluated for every pairwise and triple source combination.' },
               { num: '03', title: 'Gas-Adjusted Comparison', desc: 'Each split candidate\'s total output is compared against the best single-source quote. Gas costs are factored in — a split that gains 0.1% but doubles gas cost may not be worth it.' },
               { num: '04', title: 'Visualization & Execution', desc: 'When a split improves output by ≥0.1% (10 bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions — one per leg — with the pre-computed amounts.' },
@@ -723,7 +855,7 @@ export default function DocsPage() {
             {[
               { n: 1, title: 'KPI Metrics', desc: 'Total volume, fees collected, unique wallets, and average trade size — filterable by period (24h, 7d, 30d, All Time).' },
               { n: 2, title: 'Aggregator Ranking', desc: 'Volume and win-rate per source, showing which DEX routes deliver the best execution for your trades.' },
-              { n: 3, title: 'Hourly Heatmap', desc: 'Visual breakdown of volume by hour (UTC), revealing peak trading windows and optimal DCA scheduling times.' },
+              { n: 3, title: 'Hourly Heatmap', desc: 'Visual breakdown of volume by hour (UTC), revealing peak trading windows.' },
               { n: 4, title: 'Wallet Tracker', desc: 'Automatic wallet profiling with trade counts and volumes. Export snapshots for airdrop planning or loyalty programs.' },
               { n: 5, title: 'Daily Volume Chart', desc: '30-day bar chart showing daily trading volume trends and trade frequency.' },
             ].map((step) => (
@@ -756,41 +888,36 @@ export default function DocsPage() {
           >
             {[
               { phase: 'Phase 1', status: 'Live', color: '#4ADE80', items: [
-                'Meta-aggregator with 11 liquidity sources',
+                'Instant swaps on Ethereum Mainnet',
+                'Meta-aggregator with up to 12 liquidity sources',
                 'Chainlink oracle price validation (2% warn / 3% block)',
                 'DefiLlama server-side oracle validation',
                 'Cross-quote median consensus validation',
                 'Privacy proxy (IP hidden from all external services)',
                 'MEV protection via CoW Protocol',
-                'Permit2 + EIP-2612 gasless approvals',
+                'Exact-amount approvals (no infinite approvals)',
                 'Active approvals manager with revoke',
                 'Curve Finance on-chain routing',
-                'Smart DCA with price-aware buying windows',
                 'Gas-aware quote ranking',
                 'Statistical outlier detection (true median)',
                 'Slippage safety clamp across all sources',
-                'Dynamic multi-chain EIP-712 signing',
-                'Limit orders via CoW Protocol (zero gas, partially fillable)',
-                'Stop loss + take profit (Chainlink-triggered, adaptive slippage)',
+                'Dynamic chain-aware EIP-712 signing',
                 'Split routing (multi-DEX trade optimization)',
                 'Public analytics dashboard (volume, routes, pairs, activity)',
-                'Private admin monitor (revenue, sybil detection, wallet cohorts)',
-                'Sybil/wash trading detector (6 heuristics + wallet clustering)',
-                'Airdrop-ready wallet snapshots & exports',
-                'Supabase backend (24/7 order monitoring without PC)',
-                'Fee collection smart contract (verified on Etherscan)',
-                'Order Engine smart contract (EIP-712 signed orders)',
+                'Token-catalog guard (on-chain identity check in CI)',
+                'Fee collection smart contract (deployed & verified)',
+                'Order Engine smart contract (EIP-712 signed orders, deployed & verified)',
                 'Sentry error monitoring',
               ] },
-              { phase: 'Phase 2', status: 'Next', color: '#C8B89A', items: [
-                'Own DCA smart contracts (Chainlink Automation)',
-                'Trailing stop loss (auto-adjust trigger)',
-                'Bebop RFQ (12th source)',
-                'Base network support',
-                'Multi-hop Curve routing',
+              { phase: 'Phase 2', status: 'Ships with launch', color: '#C8B89A', items: [
+                'DCA on Base (schedule-based, keeper-executed)',
+                'Limit orders on the order engine (Chainlink-gated)',
+                'Stop loss + take profit (Chainlink-gated, adaptive slippage)',
+                'Base network activation for swaps',
+                'Bebop RFQ source',
               ] },
               { phase: 'Phase 3', status: 'Planned', color: 'rgba(200,184,154,0.4)', items: [
-                'Multi-chain expansion (Arbitrum, Optimism, Base)',
+                'Further multi-chain expansion (Arbitrum, Optimism)',
                 'Cross-chain swaps via LI.FI',
                 'Uniswap V4 Hooks integration',
                 'TeraShield — premium privacy mode (paid feature)',
