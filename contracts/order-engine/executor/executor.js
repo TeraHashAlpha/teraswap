@@ -346,7 +346,11 @@ async function supabaseFetch(path, options = {}) {
 }
 
 async function fetchActiveOrders() {
-  const query = `orders?status=eq.active&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`
+  // [CHORE-ORDER-API-CHAIN-AWARE] Scope the active-orders query by the keeper's configured chain so a
+  // per-chain keeper only processes its OWN chain's rows. Without this filter a mainnet keeper would
+  // pick up Base rows (and vice-versa) and execute them against the wrong OrderExecutor. Relies on the
+  // create route persisting chain_id (deployed first); pre-existing rows default to chain_id=1.
+  const query = `orders?status=eq.active&chain_id=eq.${CHAIN_ID}&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`
   log(`  Querying: ${SUPABASE_URL}/rest/v1/${query.slice(0, 80)}...`)
   const res = await supabaseFetch(query)
   if (!res.ok) {
@@ -364,7 +368,10 @@ async function fetchActiveOrders() {
 
 async function lockOrder(orderId) {
   const res = await supabaseFetch(
-    `orders?id=eq.${orderId}&status=eq.active`,
+    // [CHORE-ORDER-API-CHAIN-AWARE] Defense-in-depth: the id is already row-specific, but the chain
+    // filter ensures a keeper can only claim rows for its own chain even if an id from another chain
+    // somehow reached this call.
+    `orders?id=eq.${orderId}&status=eq.active&chain_id=eq.${CHAIN_ID}`,
     {
       method: "PATCH",
       headers: { Prefer: "return=headers-only" },
@@ -390,7 +397,9 @@ async function updateOrderStatus(orderId, status) {
 async function unlockStaleOrders() {
   const cutoff = new Date(Date.now() - LOCK_TIMEOUT_MS).toISOString()
   await supabaseFetch(
-    `orders?status=eq.executing&updated_at=lt.${cutoff}`,
+    // [CHORE-ORDER-API-CHAIN-AWARE] Chain-scope the stale-unlock so a per-chain keeper only releases
+    // its OWN in-flight rows, never another chain's keeper's locked rows.
+    `orders?status=eq.executing&chain_id=eq.${CHAIN_ID}&updated_at=lt.${cutoff}`,
     {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },

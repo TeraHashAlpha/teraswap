@@ -617,10 +617,17 @@ export function useOrderEngine() {
     setOrders(prev => [newOrder, ...prev])
 
     try {
+      // [CHORE-ORDER-API-CHAIN-AWARE] Single load-bearing value: the chainId this order is SIGNED
+      // under. p.chainId === chainId is already asserted synchronously by the guard above (the
+      // p.chainId !== chainId check that clears the review), so the connected chain and the frozen
+      // plan's chain are identical here. Using ONE const for BOTH the signing domain AND the POSTed
+      // chainId makes the sent == signed invariant explicit — a future refactor cannot let them
+      // diverge.
+      const signedChainId = chainId
       // [CHORE-ORDER-EXEC-PREP A] EIP-712 domain via the per-chain resolver. Mainnet (chainId 1) is
       // byte-identical to the previous inline domain; it throws on a chain with no executor — but the
       // fail-closed guard above already returned for that case, so this is reached only when valid.
-      const domain = getOrderExecutorDomain(chainId)
+      const domain = getOrderExecutorDomain(signedChainId)
 
       // Sign the FROZEN order
       const signature = await signTypedDataAsync({
@@ -649,6 +656,9 @@ export function useOrderEngine() {
       // Submit to Supabase
       const row = await createOrderInSupabase({
         wallet: address,
+        // [CHORE-ORDER-API-CHAIN-AWARE] = the chainId used to build the signing domain above; the
+        // backend reuses getOrderExecutorDomain(this) for byte-identical recovery (sent == signed).
+        chainId: signedChainId,
         orderHash: computedHash, // Real bytes32 hash from contract's getOrderHash
         orderType: typeLabel,
         // [CHORE-DCA-WETH-INPUT] Persist EXACTLY what was signed/hashed (order.tokenIn), not

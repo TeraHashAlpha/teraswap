@@ -45,6 +45,8 @@ import { getWrappedNative } from '@/lib/chains/registry'
 
 // Mainnet executor (byte-identical to ORDER_EXECUTOR_BY_CHAIN[1]).
 const MAINNET_EXECUTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
+// Base OrderExecutor (ORDER_EXECUTOR_BY_CHAIN[8453]) — a DIFFERENT contract from the mainnet one.
+const BASE_EXECUTOR = '0x135B339902Ea4E0fB4CF059961dc8856bA1D2598'
 
 const WALLET = '0x1111111111111111111111111111111111111111'
 const TOKEN_IN = '0x2222222222222222222222222222222222222222'
@@ -80,6 +82,7 @@ afterEach(() => {
 function validBody(overrides: Record<string, unknown> = {}) {
   return {
     wallet: WALLET,
+    chainId: 1, // [CHORE-ORDER-API-CHAIN-AWARE] verify domain is derived from this signed chainId
     tokenIn: TOKEN_IN,
     tokenOut: TOKEN_OUT,
     router: ROUTER,
@@ -349,10 +352,9 @@ describe('POST /api/orders — native-ETH input rejected (CHORE-DCA-WETH-INPUT)'
 })
 
 // ── Per-chain EIP-712 verifyingContract (#184) ──────────────
-describe('POST /api/orders — per-chain EIP-712 domain binding (#184)', () => {
-  it('CHAIN_ID=1: recoverTypedDataAddress receives mainnet executor as verifyingContract AND chainId 1', async () => {
-    process.env.CHAIN_ID = '1'
-    await post(validBody())
+describe('POST /api/orders — per-chain EIP-712 domain binding (#184, CHORE-ORDER-API-CHAIN-AWARE)', () => {
+  it('body.chainId=1: recoverTypedDataAddress receives mainnet executor as verifyingContract AND chainId 1', async () => {
+    await post(validBody({ chainId: 1 }))
     expect(mockRecover).toHaveBeenCalledTimes(1)
     const arg = mockRecover.mock.calls[0][0] as {
       domain: { name: string; version: string; chainId: number; verifyingContract: string }
@@ -363,6 +365,51 @@ describe('POST /api/orders — per-chain EIP-712 domain binding (#184)', () => {
     expect(arg.domain.name).toBe('TeraSwapOrderExecutor')
     expect(arg.domain.version).toBe('2')
     expect(arg.primaryType).toBe('Order')
+  })
+
+  // RED-on-regression: if the verify domain were ever pinned to env/hardcoded-1 instead of
+  // body.chainId, this asserts the Base domain (8453 + Base executor) is the one recovery uses.
+  it('body.chainId=8453: recoverTypedDataAddress receives the BASE executor as verifyingContract AND chainId 8453', async () => {
+    // process.env.CHAIN_ID is still '1' (beforeEach) — proving the route ignores it and uses body.chainId.
+    await post(validBody({ chainId: 8453 }))
+    expect(mockRecover).toHaveBeenCalledTimes(1)
+    const arg = mockRecover.mock.calls[0][0] as {
+      domain: { name: string; version: string; chainId: number; verifyingContract: string }
+    }
+    expect(arg.domain.verifyingContract).toBe(BASE_EXECUTOR)
+    expect(arg.domain.chainId).toBe(8453)
+    expect(arg.domain.name).toBe('TeraSwapOrderExecutor')
+    expect(arg.domain.version).toBe('2')
+  })
+
+  it('unsupported chain (42161) → 400 BEFORE verification (recover + insert never called)', async () => {
+    const { status, json } = await post(validBody({ chainId: 42161 }))
+    expect(status).toBe(400)
+    expect(json.error).toMatch(/not yet available on chain 42161/i)
+    expect(mockRecover).not.toHaveBeenCalled()
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('non-integer chainId → 400 "Invalid chainId" BEFORE verification', async () => {
+    const { status, json } = await post(validBody({ chainId: '8453' }))
+    expect(status).toBe(400)
+    expect(json.error).toBe('Invalid chainId')
+    expect(mockRecover).not.toHaveBeenCalled()
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('happy path persists chain_id from the signed body (mainnet → 1)', async () => {
+    await post(validBody({ chainId: 1 }))
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+    const insertArg = (mockInsert.mock.calls[0] as unknown[])[0] as { chain_id: number }
+    expect(insertArg.chain_id).toBe(1)
+  })
+
+  it('happy path persists chain_id=8453 for a Base order', async () => {
+    await post(validBody({ chainId: 8453 }))
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+    const insertArg = (mockInsert.mock.calls[0] as unknown[])[0] as { chain_id: number }
+    expect(insertArg.chain_id).toBe(8453)
   })
 
   it('recovered === wallet → proceeds to 201 (happy path)', async () => {

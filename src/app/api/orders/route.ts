@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
-import { getOrderExecutor, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
+import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
 import { getDcaFreezeState } from '@/lib/dca-freeze'
 import { NATIVE_ETH } from '@/lib/constants'
 
@@ -19,7 +19,6 @@ const MAX_ACTIVE_ORDERS = 20
 // [API-02] MIN_ORDER_AMOUNT (= contract's 10_000) is now imported from order-engine/config.ts —
 // [CHORE-DCA-PRELAUNCH-FIXES] single source of truth shared with the client pre-sign guard.
 
-const EIP712_DOMAIN = { name: 'TeraSwapOrderExecutor', version: '2' }
 const ORDER_TYPES = {
   Order: [
     { name: 'owner', type: 'address' },
@@ -172,11 +171,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Limit/Stop-Loss orders require a Chainlink price feed' }, { status: 400 })
     }
 
-    // [CHORE-ORDER-EXEC-PREP A] Resolve the OrderExecutor for this server's chain and FAIL-CLOSED
-    // before any signature verification. CHAIN_ID defaults to mainnet (1) → byte-identical; a chain
-    // with no deployed executor (e.g. Base — that address is the FeeCollector there) is rejected up
-    // front rather than verified against the wrong contract.
-    const chainId = parseInt(process.env.CHAIN_ID || '1', 10)
+    // [CHORE-ORDER-API-CHAIN-AWARE] Derive the verification chain from the SIGNED order (body.chainId)
+    // — the SAME chainId the frontend put in the EIP-712 domain when it signed (getOrderExecutorDomain
+    // on the client). The server no longer reads process.env.CHAIN_ID for verification, so a single
+    // deployment serves every wired chain. Validate it's an integer, then FAIL-CLOSED before any
+    // signature verification when the chain has no real OrderExecutor (mirrors the cancel route's
+    // body.chainId precedent in [id]/route.ts). The executor address is resolved server-side from the
+    // allowlist (getOrderExecutor), NEVER from the body — a forged chainId either resolves to null
+    // (400 here) or to a real executor whose domain the signature won't recover under ('Signature
+    // mismatch'). Mainnet (chainId 1) is byte-identical: getOrderExecutorDomain(1) === the previous
+    // hand-assembled domain field-for-field.
+    const chainId = body.chainId
+    if (typeof chainId !== 'number' || !Number.isInteger(chainId)) {
+      return NextResponse.json({ error: 'Invalid chainId' }, { status: 400 })
+    }
     const executorAddress = getOrderExecutor(chainId)
     if (!executorAddress) {
       return NextResponse.json(
@@ -186,7 +194,7 @@ export async function POST(req: NextRequest) {
     }
     {
       try {
-        const domain = { ...EIP712_DOMAIN, chainId, verifyingContract: executorAddress }
+        const domain = getOrderExecutorDomain(chainId)
         const orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
         const conditionEnum = body.priceCondition === 'above' ? 0 : 1
 
@@ -201,7 +209,7 @@ export async function POST(req: NextRequest) {
         }
 
         const recovered = await recoverTypedDataAddress({
-          domain: domain as { name: string; version: string; chainId: number; verifyingContract: `0x${string}` },
+          domain,
           types: ORDER_TYPES,
           primaryType: 'Order' as const,
           message,
@@ -269,6 +277,10 @@ export async function POST(req: NextRequest) {
         order_data: body.orderData ?? null,
         token_in_decimals: body.tokenInDecimals ?? 18,
         token_out_decimals: body.tokenOutDecimals ?? 18,
+        // [CHORE-ORDER-API-CHAIN-AWARE] Persist the VERIFIED signed chainId (not process.env.CHAIN_ID)
+        // so a Base order stores chain_id=8453 and mainnet stores chain_id=1 (= today's DEFAULT,
+        // byte-identical). The keeper scopes its active-orders query by this column per chain.
+        chain_id: chainId,
         status: 'active',
       })
       .select()
