@@ -4926,3 +4926,35 @@ final adversarial fact-check; only verified facts were written, unverifiable cla
 - `tsc --noEmit` clean except the pre-existing unrelated `connect-modal-qr.test.ts` → `cuer/QrCode`
   (INC-2026-06-09-001), untouched. `eslint src/components/DocsPage.tsx` → 0 errors. `dca-launch` suite 8/8.
 - Secrets/scope review: PASS (no secret/infra leak; docs-only scope). Fact-check: the 4 issues above were fixed.
+## Feedback — CHORE-LIMIT-COW-WETH-CHAINAWARE (pending commit)
+
+### Edge case (out of scope — strong follow-up)
+- **The CoW orderbook ENDPOINT in `limit-order-api.ts` is still mainnet-only.** This chore fixes the *token*
+  resolution (native→WETH per chain), but every fetch in the file targets the static
+  `COW_BASE = AGGREGATOR_APIS.cowswap.base` = `https://api.cow.fi/mainnet/api/v1` (`/quote`, `/orders`,
+  `/orders/{uid}`, `/trades`, DELETE). A `getCowApiBase(chainId)` helper + `COW_API_URLS` (incl. Base `8453`
+  → `https://api.cow.fi/base/api/v1`) already exist in `constants.ts`. So even with chain-aware WETH, a Base
+  limit/conditional order would still POST to the *mainnet* orderbook → no quote / wrong-network submission.
+  This is the SAME chain-awareness defect class and the natural completion of multi-chain CoW limit orders.
+  Left out per this chore's stated WETH-only scope; recommend a follow-up that threads `chainId` into the base
+  URL too (`fetchCurrentPrice`/`submitLimitOrder`/`fetchLimitOrderStatus`/`cancelLimitOrder`). Latent today —
+  Base limit orders are gated off ([[project_dca_launch_flag]]).
+
+### Test gap / wiring note
+- **`buildLimitOrderParams` has NO production caller on `origin/main`.** The order-creation hooks
+  (`useLimitOrder.ts`, `useConditionalOrder.ts`) that call it are not present on `main` (they live on other
+  branches). The new `chainId` param is fully plumbed and unit-tested, but only `fetchCurrentPrice` is wired to
+  live callers today (`LimitOrderPanel.tsx`, now passing `useChainId()`). **When those hooks land/merge they must
+  pass `chainId` (`useChainId()`) as the 3rd arg to `buildLimitOrderParams`**, or the mainnet-WETH defect
+  reappears at order-signing time. Flagging so the Architect verifies the wiring when the hooks merge.
+
+### Concern (out of scope — left mainnet-scoped, byte-identical)
+- **`price-monitor.ts` `getTokenPriceUSD` is mainnet-hardcoded.** Its CoW USD fallback hardcodes mainnet USDC
+  (`0xA0b8…eB48`) and checks mainnet `WETH_ADDRESS`, and calls `fetchCurrentPrice` *without* a `chainId` (so it
+  stays mainnet — no regression, byte-identical). Full multi-chain SL/TP USD pricing would need chain-aware USDC
+  + the endpoint fix above; deliberately left untouched to keep this chore scoped to native→WETH resolution.
+
+### Verification
+- `vitest run src/lib/limit-order-api.test.ts`: RED on the 3 new chain-aware cases before the fix (returned
+  mainnet `0xc02a…` instead of Base `0x4200…`), GREEN after. Existing mainnet assertions
+  (`NATIVE_ETH → WETH_ADDRESS`, chainId omitted) stay green → mainnet byte-identical.

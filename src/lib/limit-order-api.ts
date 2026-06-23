@@ -6,14 +6,19 @@
  * partiallyFillable=true and user-defined buyAmount for price targets.
  */
 
-import { AGGREGATOR_APIS, NATIVE_ETH, WETH_ADDRESS, FEE_RECIPIENT } from './constants'
+import { AGGREGATOR_APIS, NATIVE_ETH, FEE_RECIPIENT } from './constants'
+import { getWrappedNative } from './chains/registry'
 import type { LimitOrderConfig } from './limit-order-types'
 
 const COW_BASE = AGGREGATOR_APIS.cowswap.base
 
-// ── Helper: resolve ETH → WETH ──────────────────────────────
-function resolveToken(addr: string): string {
-  return addr.toLowerCase() === NATIVE_ETH.toLowerCase() ? WETH_ADDRESS : addr
+// ── Helper: resolve ETH → WETH (chain-aware) ────────────────
+// Maps the native-ETH sentinel to the wrapped-native of the order's chain so a
+// non-mainnet limit/conditional order routes against the correct WETH (mainnet
+// 0xC02a…6Cc2, Base 0x4200…0006). chainId omitted → mainnet (DEFAULT_CHAIN_ID),
+// keeping mainnet behaviour byte-identical. [CHORE-LIMIT-COW-WETH-CHAINAWARE]
+function resolveToken(addr: string, chainId?: number): string {
+  return addr.toLowerCase() === NATIVE_ETH.toLowerCase() ? getWrappedNative(chainId) : addr
 }
 
 // ── Compute buyAmount from sellAmount + targetPrice ─────────
@@ -45,9 +50,10 @@ export async function fetchCurrentPrice(
   sellAmount: string,
   sellDecimals: number,
   buyDecimals: number,
+  chainId?: number,
 ): Promise<number> {
-  const src = resolveToken(sellToken)
-  const dst = resolveToken(buyToken)
+  const src = resolveToken(sellToken, chainId)
+  const dst = resolveToken(buyToken, chainId)
 
   const res = await fetch(`${COW_BASE}/quote`, {
     method: 'POST',
@@ -84,6 +90,7 @@ export async function fetchCurrentPrice(
 export function buildLimitOrderParams(
   config: LimitOrderConfig,
   from: string,
+  chainId?: number,
 ): {
   sellToken: string
   buyToken: string
@@ -101,8 +108,8 @@ export function buildLimitOrderParams(
   from: string
   signingScheme: string
 } {
-  const sellToken = resolveToken(config.tokenIn.address)
-  const buyToken = resolveToken(config.tokenOut.address)
+  const sellToken = resolveToken(config.tokenIn.address, chainId)
+  const buyToken = resolveToken(config.tokenOut.address, chainId)
 
   const buyAmount = computeBuyAmount(
     config.sellAmount,

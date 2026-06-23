@@ -215,6 +215,7 @@ function CreateLimitForm({
           oneUnit,
           tokenIn.decimals,
           tokenOut.decimals,
+          chainId,
         )
         setMarketPrice(price)
         if (!targetPrice && price > 0) {
@@ -225,7 +226,7 @@ function CreateLimitForm({
       setLoadingPrice(false)
     }
     fetchPrice()
-  }, [tokenIn?.address, tokenOut?.address])
+  }, [tokenIn?.address, tokenOut?.address, chainId])
 
   useEffect(() => {
     const internal = parseFloat(targetPrice)
@@ -636,6 +637,7 @@ function OrderCard({
   onRemove?: (id: string) => void
 }) {
   const [currentPrice, setCurrentPrice] = useState<number | null>(null)
+  const chainId = useChainId()
 
   const statusColors: Record<string, string> = {
     signing: 'text-yellow-400',
@@ -689,6 +691,7 @@ function OrderCard({
         const price = await fetchCurrentPrice(
           tokenIn, tokenOut, sellAmount,
           order.tokenInDecimals, order.tokenOutDecimals,
+          chainId,
         )
         if (!cancelled && price > 0) setCurrentPrice(price)
       } catch { /* silently ignore */ }
@@ -697,7 +700,7 @@ function OrderCard({
     fetchPrice()
     const interval = setInterval(fetchPrice, 30_000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [isActive, order.order?.tokenIn, order.order?.tokenOut, order.order?.amountIn, order.tokenInDecimals, order.tokenOutDecimals])
+  }, [isActive, order.order?.tokenIn, order.order?.tokenOut, order.order?.amountIn, order.tokenInDecimals, order.tokenOutDecimals, chainId])
 
   // Price distance percentage
   const priceInfo = useMemo(() => {
