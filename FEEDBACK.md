@@ -4907,3 +4907,93 @@ Advanced (always visible). No native-ETH re-add, no buy/output change, no contra
 ### Verification
 - `node --test` (keeper suite): 22 pass (18 existing + 4 new). New cases prove chainId is included for Base
   (8453) and omitted (byte-identical legacy body) for mainnet/absent. `node --check executor.js`: clean.
+## Feedback — CHORE-DOCS-REFRESH (pending commit)
+
+Refreshed the in-app technical docs (`src/components/DocsPage.tsx`, +`src/components/LegalPage.tsx` one-line fix):
+added a gated DCA section, reconciled Limit/SL·TP with current per-chain reality, deepened depth truthfully, and
+fixed stale claims. Every written claim was verified against the contracts/code by a 5-cluster verify phase and a
+final adversarial fact-check; only verified facts were written, unverifiable claims were omitted.
+
+### Claims it could NOT verify → OMITTED from the docs (Architect, confirm before publish if any should be added)
+- **Keeper cron cadence** (e.g. "every 30s") — only in an off-chain executor doc-comment, not verified in
+  `executor.js` from this pass. No execution interval is stated in the docs.
+- **Flashbots Protect for conditional-order MEV resistance** — off-chain operational claim (contract comment H-04),
+  unverifiable here. Omitted; the docs state conditional/DCA orders settle via a whitelisted router and are NOT
+  routed through CoW, with the on-chain minimum-output floor as the bound (no "MEV-protected" claim for DCA).
+- **A specific Chainlink polling cadence for Limit/SL·TP** ("every 5s") — contradicted by the 10s client poll;
+  omitted (docs say the condition is checked on-chain, no cadence).
+- **"Each chunk routes for BEST price"** as an on-chain guarantee — softened to "settled at market time through the
+  single whitelisted router committed in the signed order (1inch default), bounded by your minimum-output floor."
+- **HashiCorp Vault** as a live alternative signer — configured but not implemented; only AWS KMS signing is described.
+- **Exact Chainlink token-pair count / DefiLlama "thousands of tokens"** — replaced with the verified "~30 mainnet
+  feeds" and a non-marketing DefiLlama framing.
+- **Whether DCA/conditional orders are user-reachable today** — not asserted; DCA is gated (ComingSoonBanner "ships
+  with launch, Base first, not live yet" + dimmed body), Limit/SL·TP shown as "not currently exposed in the app".
+
+### Security-claim docs flagged for OWNER REVIEW (per the brief — no Auditor for docs)
+- The **AWS KMS / HSM keeper-signing** and **on-chain timelock** statements are written in public-safe framing only —
+  no KMS key IDs/ARNs, account/region, IAM, env/secret names, IPs, or infra. Timelock durations (48h router/executor/
+  sweep, 7-day admin/grace, emergency `pause()`) were taken from the contract, not assumed. Owner: confirm this public
+  framing is acceptable before publish. (Secrets/scope review PASSED: no leak; "beta · unaudited" posture preserved
+  and strengthened; no "audited"/"unhackable".)
+- **Public addresses published**: OrderExecutor mainnet `0xeFC31ADb…f130` + Base `0x135B3399…2598` (deployed/verified
+  on the explorer, per the verified allowlist). FeeCollector address was deliberately NOT published. Owner: confirm
+  the address-publishing policy for the docs surface.
+
+### Fixes applied in review (adversarial fact-check caught these — were overstatements/contradictions)
+- DCA section §05 + intro claimed a "CoW path is MEV-protected" for DCA — **false**: the OrderExecutor router
+  whitelist is `{1inch, 0x, paraswap, uniswapV3}`, CoW is not whitelisted, and each chunk is one signed router call.
+  Rewritten to the truthful single-whitelisted-router framing; "not routed through CoW" stated explicitly.
+- DCA §05 "11+ sources" (rest of doc says "up to 12") and an implied live multi-source fan-out at execution —
+  corrected (the keeper settles each chunk through the one committed router, floor enforced on-chain).
+- MEV section "no exposure at all on conditional orders" — **overstated**; changed to "a hard on-chain
+  minimum-output floor that bounds any sandwich on conditional and DCA orders".
+- Privacy method-blacklist enumeration was under-inclusive — added `eth_signTransaction` + `personal_sign`.
+
+### LegalPage contact domain (OWNER CONFIRM)
+- `LegalPage.tsx` had `legal@teraswap.io` (×2) — `teraswap.io` is a **forbidden domain** (canonical host is
+  `teraswap.app`; see [[project_site_url]]). Corrected to `legal@teraswap.app` to remove the forbidden reference.
+  Owner: confirm the legal contact local-part/domain is correct (the address itself isn't derivable from code).
+
+### Naming reconciliation
+- The brief referenced `isDcaEnabled()` / a `SectionBanner`; the real symbols are `isDcaLaunchEnabled()` /
+  `isDcaLive(chainId)` (env `NEXT_PUBLIC_DCA_ENABLED`) and the `ComingSoonBanner` component. DCA gating uses the
+  existing static `ComingSoonBanner` (DocsPage has no runtime chain/flag awareness — a runtime flag would flicker
+  per wallet connection); the env-var name is never written into the docs.
+
+### Verification
+- `tsc --noEmit` clean except the pre-existing unrelated `connect-modal-qr.test.ts` → `cuer/QrCode`
+  (INC-2026-06-09-001), untouched. `eslint src/components/DocsPage.tsx` → 0 errors. `dca-launch` suite 8/8.
+- Secrets/scope review: PASS (no secret/infra leak; docs-only scope). Fact-check: the 4 issues above were fixed.
+## Feedback — CHORE-LIMIT-COW-WETH-CHAINAWARE (pending commit)
+
+### Edge case (out of scope — strong follow-up)
+- **The CoW orderbook ENDPOINT in `limit-order-api.ts` is still mainnet-only.** This chore fixes the *token*
+  resolution (native→WETH per chain), but every fetch in the file targets the static
+  `COW_BASE = AGGREGATOR_APIS.cowswap.base` = `https://api.cow.fi/mainnet/api/v1` (`/quote`, `/orders`,
+  `/orders/{uid}`, `/trades`, DELETE). A `getCowApiBase(chainId)` helper + `COW_API_URLS` (incl. Base `8453`
+  → `https://api.cow.fi/base/api/v1`) already exist in `constants.ts`. So even with chain-aware WETH, a Base
+  limit/conditional order would still POST to the *mainnet* orderbook → no quote / wrong-network submission.
+  This is the SAME chain-awareness defect class and the natural completion of multi-chain CoW limit orders.
+  Left out per this chore's stated WETH-only scope; recommend a follow-up that threads `chainId` into the base
+  URL too (`fetchCurrentPrice`/`submitLimitOrder`/`fetchLimitOrderStatus`/`cancelLimitOrder`). Latent today —
+  Base limit orders are gated off ([[project_dca_launch_flag]]).
+
+### Test gap / wiring note
+- **`buildLimitOrderParams` has NO production caller on `origin/main`.** The order-creation hooks
+  (`useLimitOrder.ts`, `useConditionalOrder.ts`) that call it are not present on `main` (they live on other
+  branches). The new `chainId` param is fully plumbed and unit-tested, but only `fetchCurrentPrice` is wired to
+  live callers today (`LimitOrderPanel.tsx`, now passing `useChainId()`). **When those hooks land/merge they must
+  pass `chainId` (`useChainId()`) as the 3rd arg to `buildLimitOrderParams`**, or the mainnet-WETH defect
+  reappears at order-signing time. Flagging so the Architect verifies the wiring when the hooks merge.
+
+### Concern (out of scope — left mainnet-scoped, byte-identical)
+- **`price-monitor.ts` `getTokenPriceUSD` is mainnet-hardcoded.** Its CoW USD fallback hardcodes mainnet USDC
+  (`0xA0b8…eB48`) and checks mainnet `WETH_ADDRESS`, and calls `fetchCurrentPrice` *without* a `chainId` (so it
+  stays mainnet — no regression, byte-identical). Full multi-chain SL/TP USD pricing would need chain-aware USDC
+  + the endpoint fix above; deliberately left untouched to keep this chore scoped to native→WETH resolution.
+
+### Verification
+- `vitest run src/lib/limit-order-api.test.ts`: RED on the 3 new chain-aware cases before the fix (returned
+  mainnet `0xc02a…` instead of Base `0x4200…`), GREEN after. Existing mainnet assertions
+  (`NATIVE_ETH → WETH_ADDRESS`, chainId omitted) stay green → mainnet byte-identical.
