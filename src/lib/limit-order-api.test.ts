@@ -454,3 +454,74 @@ describe('cancelLimitOrder', () => {
     await expect(cancelLimitOrder(UID, '0xsig')).rejects.toThrow(/401/)
   })
 })
+
+// ════════════════════════════════════════════════════════════
+// chain-aware native→WETH resolution [CHORE-LIMIT-COW-WETH-CHAINAWARE]
+// ════════════════════════════════════════════════════════════
+// The CoW limit/conditional routing path must resolve the native-ETH sentinel
+// to the WETH of the *order's chain*, not a hardcoded mainnet WETH. Sending a
+// mainnet-WETH address to the Base CoW orderbook yields no quote (same defect
+// class as SPRINT-9E/9W). Mainnet behaviour (chainId omitted or 1) is unchanged.
+describe('chain-aware WETH resolution', () => {
+  const FROM = '0x1111111111111111111111111111111111111111'
+  const BASE = 8453
+  const MAINNET = 1
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+
+  it('buildLimitOrderParams resolves NATIVE_ETH to BASE WETH for a Base order', () => {
+    const params = buildLimitOrderParams(
+      makeConfig({ tokenIn: ETH_TOKEN, tokenOut: USDC_TOKEN }),
+      FROM,
+      BASE,
+    )
+    expect(params.sellToken.toLowerCase()).toBe(BASE_WETH.toLowerCase())
+    expect(params.sellToken.toLowerCase()).not.toBe(WETH_ADDRESS.toLowerCase())
+  })
+
+  it('buildLimitOrderParams resolves a NATIVE_ETH buyToken to BASE WETH for a Base order', () => {
+    const params = buildLimitOrderParams(
+      makeConfig({ tokenIn: USDC_TOKEN, tokenOut: ETH_TOKEN }),
+      FROM,
+      BASE,
+    )
+    expect(params.buyToken.toLowerCase()).toBe(BASE_WETH.toLowerCase())
+  })
+
+  it('buildLimitOrderParams keeps mainnet WETH for an explicit mainnet (1) order', () => {
+    const params = buildLimitOrderParams(
+      makeConfig({ tokenIn: ETH_TOKEN }),
+      FROM,
+      MAINNET,
+    )
+    expect(params.sellToken).toBe(WETH_ADDRESS)
+  })
+
+  it('buildLimitOrderParams leaves non-native ERC20 tokens untouched on Base', () => {
+    const params = buildLimitOrderParams(
+      makeConfig({ tokenIn: USDC_TOKEN, tokenOut: USDC_TOKEN }),
+      FROM,
+      BASE,
+    )
+    expect(params.sellToken).toBe(USDC_TOKEN.address)
+    expect(params.buyToken).toBe(USDC_TOKEN.address)
+  })
+
+  it('fetchCurrentPrice POSTs BASE WETH for a native-ETH Base quote', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ quote: { buyAmount: '2000000000' } }),
+    )
+    await fetchCurrentPrice(NATIVE_ETH, USDC_TOKEN.address, '1000000000000000000', 18, 6, BASE)
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.sellToken.toLowerCase()).toBe(BASE_WETH.toLowerCase())
+    expect(body.sellToken.toLowerCase()).not.toBe(WETH_ADDRESS.toLowerCase())
+  })
+
+  it('fetchCurrentPrice still POSTs mainnet WETH for a native-ETH mainnet quote', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ quote: { buyAmount: '2000000000' } }),
+    )
+    await fetchCurrentPrice(NATIVE_ETH, USDC_TOKEN.address, '1000000000000000000', 18, 6, MAINNET)
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.sellToken).toBe(WETH_ADDRESS)
+  })
+})
