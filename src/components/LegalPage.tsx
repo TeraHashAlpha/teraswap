@@ -167,7 +167,7 @@ function PrivacyPolicy() {
       <SectionTitle id="pp-contact">14. Contact</SectionTitle>
       <P>
         If you have questions about this Privacy Policy or wish to exercise your data rights,
-        please contact us at <span className="text-cream-65 font-medium">legal@teraswap.io</span>.
+        please contact us via <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="text-cream-65 font-medium transition hover:text-cream hover:underline">DM @TeraHash on X</a>.
       </P>
     </>
   )
@@ -385,7 +385,7 @@ function TermsOfService() {
       <SectionTitle id="tos-contact">20. Contact</SectionTitle>
       <P>
         If you have questions about these Terms of Service, please contact us
-        at <span className="text-cream-65 font-medium">legal@teraswap.io</span>.
+        via <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="text-cream-65 font-medium transition hover:text-cream hover:underline">DM @TeraHash on X</a>.
       </P>
     </>
   )
