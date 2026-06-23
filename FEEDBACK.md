@@ -4868,6 +4868,45 @@ Advanced (always visible). No native-ETH re-add, no buy/output change, no contra
   duplicates first; `chain_id` already exists NOT NULL DEFAULT 1). Left to backlog per the auditor's scoping
   (out of scope while Base is gated OFF; a constraint swap is a delicate prod migration of its own).
 
+## Feedback — CHORE-KEEPER-SWAP-CHAINID (pending commit)
+
+### Assumption that turned out wrong (IMPORTANT — gates the "no 400 on Base" outcome)
+- The prompt assumed "thread chainId → keeper gets a valid Base route (no 400) → canExecute + execute".
+  Threading chainId is necessary and correct, but **it is not sufficient while Base is gated off.**
+  `src/app/api/swap/route.ts` runs a server-side activation gate (`getChainStatus(chainId)`,
+  `src/lib/chains/activation.ts`): a chain is `active` only once its `contracts.feeCollector` is set in the
+  registry. On `origin/main` Base's FeeCollector is still `null` → `getChainStatus(8453) === 'coming-soon'`
+  (proven by `activation.test.ts:18`), so a keeper request with `chainId: 8453` now returns **409
+  CHAIN_COMING_SOON**, not a route. Net effect of this fix: the keeper stops the WRONG behaviour (silently
+  mis-routing Base tokens on mainnet → 400 no-route) and instead hits the route on the CORRECT chain; the
+  request is then correctly refused (409) until Base launches. **Full end-to-end "valid route → execute" on
+  Base additionally requires the Base FeeCollector deployment that flips `coming-soon`→`active`** (the same
+  gate TeraHash flips for the frontend per ADR-009 / [[project_dca_launch_flag]]). That deployment is out of
+  this chore's scope (Do-NOT: change the contract). Once it lands, no code change is needed here — chainId is
+  already threaded.
+
+### Edge case / design note
+- `executor.js` is a side-effectful ESM script (top-level env reads, key-guard that can FATAL, and an
+  unconditional `main()` at the bottom), so `fetchSwapRoute` cannot be imported in a `node:test` without
+  running the keeper. Following the existing keeper pattern (pure modules `freeze-score.js` / `alert.js` tested
+  by `*.test.mjs`), the /api/swap body construction was extracted into a pure, side-effect-free module
+  `swap-route.js` (`buildSwapRoutePayload`) that `fetchSwapRoute` now uses; the test (`swap-route.test.mjs`)
+  exercises the real payload builder. This is the only way to unit-test "the keeper passes chainId" without a
+  larger refactor of executor.js's module-level execution (which would be riskier and out of scope).
+
+### Parity / mainnet-byte-identical decision
+- `/api/swap` reads `chainId` from the JSON **body** (verified in `route.ts:60-71`); the frontend instant-swap
+  (`src/hooks/useSwap.ts`, `useSplitSwap.ts`) sends it as a body field too — so the keeper sends it in the body
+  (not a query param), matching the route + frontend contract. For mainnet (`CHAIN_ID=1`) the field is
+  **omitted** (the route's documented "absent chainId → mainnet default → byte-identical" path), so the
+  mainnet request body is unchanged vs the pre-fix keeper. Only a non-mainnet `CHAIN_ID` (e.g. 8453) adds the
+  field. No chainId is hardcoded — the value comes from `process.env.CHAIN_ID` (the existing `CHAIN_ID`
+  constant); `MAINNET_CHAIN_ID = 1` is only the mainnet-default sentinel, mirroring executor.js's existing
+  `process.env.CHAIN_ID || "1"`.
+
+### Verification
+- `node --test` (keeper suite): 22 pass (18 existing + 4 new). New cases prove chainId is included for Base
+  (8453) and omitted (byte-identical legacy body) for mainnet/absent. `node --check executor.js`: clean.
 ## Feedback — CHORE-DOCS-REFRESH (pending commit)
 
 Refreshed the in-app technical docs (`src/components/DocsPage.tsx`, +`src/components/LegalPage.tsx` one-line fix):

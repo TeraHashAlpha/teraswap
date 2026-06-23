@@ -69,6 +69,7 @@ import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier } from "./freeze-score.js"
+import { buildSwapRoutePayload } from "./swap-route.js" // [chore/keeper-swap-chainid] chain-aware /api/swap body
 import {
   alertNewDcaPosition,
   alertLowGas,
@@ -469,25 +470,22 @@ async function readEthUsd(publicClient) {
 
 // ---- Swap route fetcher ------------------------------------------------
 
-async function fetchSwapRoute(tokenIn, tokenOut, amount, from, router) {
+async function fetchSwapRoute(tokenIn, tokenOut, amount, from, router, chainId) {
   if (!API_URL) {
     log("  TERASWAP_API_URL not configured -- skipping swap route")
     return null
   }
 
   try {
+    // [chore/keeper-swap-chainid] chainId is sent in the BODY (per /api/swap +
+    // the frontend useSwap contract) so Base chunks route on Base, not mainnet.
+    // Omitted on mainnet (CHAIN_ID=1) → byte-identical legacy request.
     const res = await fetch(`${API_URL}/api/swap`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source: "best",
-        src: tokenIn,
-        dst: tokenOut,
-        amount,
-        from,
-        slippage: 0.5,
-        preferredRouter: router,
-      }),
+      body: JSON.stringify(
+        buildSwapRoutePayload({ tokenIn, tokenOut, amount, from, router, chainId }),
+      ),
     })
 
     if (!res.ok) {
@@ -899,7 +897,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         dbOrder.token_out,
         dbOrder.amount_in,
         CONTRACT_ADDRESS,
-        dbOrder.router
+        dbOrder.router,
+        CHAIN_ID // [chore/keeper-swap-chainid] keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
       )
 
       if (!swapData) {
