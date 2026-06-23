@@ -4997,3 +4997,30 @@ final adversarial fact-check; only verified facts were written, unverifiable cla
 - `vitest run src/lib/limit-order-api.test.ts`: RED on the 3 new chain-aware cases before the fix (returned
   mainnet `0xc02a…` instead of Base `0x4200…`), GREEN after. Existing mainnet assertions
   (`NATIVE_ETH → WETH_ADDRESS`, chainId omitted) stay green → mainnet byte-identical.
+
+## Feedback — CHORE-KEEPER-SWAP-PAYLOAD-FIX (pending commit)
+
+### Captured 400/422 bodies (reproduced against https://www.teraswap.app, Base WETH→USDC, 0.01 WETH)
+- **Keeper's exact pre-fix body** `{"source":"best","src":"0x4200…0006","dst":"0x8335…2913","amount":"10000000000000000","from":…,"slippage":0.5,"preferredRouter":…,"chainId":8453}`
+  → **HTTP 400** `{"error":"Unknown aggregator source","code":"INVALID_SOURCE"}`
+- **Concrete source but NO decimals** `{"source":"velora",…,"chainId":8453}` (no srcDecimals/dstDecimals)
+  → **HTTP 422** `{"error":"Swap output is 100.0% below fair market value (DefiLlama oracle)…","priceGuard":true,"deviation":-0.9999999999990021,"blocked":true}`
+- **Fixed flow** (GET `/api/quote` → `best.source="velora"`, then POST `/api/swap` with `source:"velora"` + `srcDecimals:18,dstDecimals:6`)
+  → **HTTP 200** with `tx.data` (`toAmount=16613912` ≈ 16.6 USDC, correct). Verified end-to-end with the REAL `swap-route.js` builders.
+
+### The exact mismatch (two bugs; #223's chainId was necessary but not sufficient)
+1. **`source: "best"` is not a valid source.** `/api/swap` enforces `ALLOWED_SOURCES = new Set(Object.keys(AGGREGATOR_APIS))` (route.ts:26) = `velora, odos, kyberswap, cowswap, uniswap, uniswapv3, openocean, sushiswap, balancer, curve, bebop, teraswap_order_engine`. `"best"` is a meta-selector, not a key → 400 INVALID_SOURCE. The frontend never sends "best": it GETs `/api/quote` (which returns `best.source`, a CONCRETE aggregator) and then POSTs `/api/swap` with that source. The keeper had no quote step. **Fix:** added `fetchBestSource` (GET `/api/quote` via `buildQuotePath`) → pass `best.source` to `/api/swap`.
+2. **Missing `srcDecimals`/`dstDecimals`.** `/api/swap` defaults both to 18; a 6-decimal output (USDC) is then mis-scaled and the DefiLlama price guard 422s it. The frontend always sends token decimals. **Fix:** the keeper now passes `srcDecimals`/`dstDecimals` from the order row (`token_in_decimals`/`token_out_decimals`, with `order_data`+18 fallbacks) to both `/api/quote` and `/api/swap`.
+
+### Assumption corrected — #223's "byte-identical legacy" test encoded a broken body
+- The chore/keeper-swap-chainid test asserted the mainnet body equalled `{source:"best",…,preferredRouter}` as "legacy/correct". That body was never valid (source "best" → 400 on every chain). This chore rewrites `swap-route.test.mjs` to the real `/api/swap` contract. "Mainnet path unchanged" is preserved in the sense that matters: chainId is still omitted on mainnet (byte-identical chainId handling in both quote + swap); the source/decimals fix applies uniformly to all chains (mainnet was equally broken before).
+
+### Discovered no-op — `preferredRouter` was never read by `/api/swap`
+- The keeper sent `preferredRouter: dbOrder.router`, but `/api/swap` destructures only `source, src, dst, amount, from, slippage, srcDecimals, dstDecimals, quoteMeta, chainId, recipient` (route.ts:61-76) and never forwards `preferredRouter` to `fetchSwapFromSource`. It was a silent no-op. Dropped it so the body matches the contract (asserted by the schema test). `dbOrder.router` is still used for the on-chain order struct — only the dead `preferredRouter` body field was removed.
+
+### Edge case / follow-up (not fixed here)
+- **No fallback source.** If `/api/quote`'s single `best.source` then fails at `/api/swap` (e.g. a transient adapter error, or a FeeCollector recipient nuance for a fee-routed source when `from` is the OrderExecutor rather than the FeeCollector), the keeper returns null and retries next tick. A future enhancement could iterate `quote.all[]` sources in rank order. Out of scope for the 400/422 fix.
+- This fix is only reachable on Base once the Base FeeCollector is deployed (activation gate active) — it is, in production today (the e2e POST returned 200).
+
+### Verification
+- `node --test` keeper suite: 26 pass (18 existing + 8 rewritten/added swap-route cases). `node --check executor.js`: clean. End-to-end production POST (real builders): 400 (old body) → 200 with tx.data (fixed flow).
