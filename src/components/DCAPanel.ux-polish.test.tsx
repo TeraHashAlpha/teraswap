@@ -159,7 +159,7 @@ describe('DCAPanel spend step — quick-fill % presets', () => {
 
 describe('DCAPanel spend step — per-chunk MIN re-validation', () => {
   it('surfaces the min hint after a preset fills a sub-floor per-chunk amount', () => {
-    // 50,000 base units total; default 7 buys ⇒ floor(50000/7)=7,142 < 10,000 floor.
+    // 50,000 base units total; default 10 buys ⇒ floor(50000/10)=5,000 < 10,000 floor.
     setBalances({ raw: 50_000n, formatted: '<0.0001' })
     renderWithProviders(<DCAPanel />)
     fireEvent.click(pctButton('100%'))

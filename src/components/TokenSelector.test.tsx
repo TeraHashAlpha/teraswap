@@ -334,3 +334,29 @@ describe('TokenSelector — wallet disconnected', () => {
     })
   })
 })
+
+describe('[chore/dca-ux-tweaks] category chip row is horizontally scrollable (no wrap/clip)', () => {
+  function modalRoot() {
+    return screen.getByText(/Select token/i).closest('div')!.parentElement! as HTMLElement
+  }
+
+  it('the chip row scrolls horizontally — overflow-x-auto + flex-nowrap, never flex-wrap', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    fireEvent.click(screen.getByText('Select'))
+    const chipRow = modalRoot().querySelector('.overflow-x-auto') as HTMLElement
+    expect(chipRow).toBeTruthy()
+    expect(chipRow.classList.contains('overflow-x-auto')).toBe(true) // swipe / horizontal scroll
+    expect(chipRow.classList.contains('flex-nowrap')).toBe(true)     // single row, no wrapping
+    expect(chipRow.classList.contains('flex-wrap')).toBe(false)      // would clip / multi-row
+  })
+
+  it('multiple categories are rendered in that one scroll row (all reachable on overflow)', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    fireEvent.click(screen.getByText('Select'))
+    const chipRow = modalRoot().querySelector('.overflow-x-auto') as HTMLElement
+    // Several categories coexist in the single horizontally-scrollable row.
+    expect(within(chipRow).getByText('Stablecoin')).toBeInTheDocument()
+    expect(within(chipRow).getByText('Memecoin')).toBeInTheDocument()
+    expect(within(chipRow).queryAllByRole('button').length).toBeGreaterThan(2)
+  })
+})

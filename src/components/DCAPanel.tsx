@@ -252,8 +252,8 @@ function CreateDCAForm({
   }, [balances, tokenIn])
   const spendRaw = spendEntry?.raw ?? 0n
   const [totalDisplay, setTotalDisplay] = useState('')
-  const [partsIdx, setPartsIdx] = useState(2) // default: 7
-  const [intervalIdx, setIntervalIdx] = useState(3) // default: 1d
+  const [partsIdx, setPartsIdx] = useState(2) // default: 10 buys [chore/dca-ux-tweaks]
+  const [intervalIdx, setIntervalIdx] = useState(4) // default: 1d (1h prepended shifted 1d 3→4) [chore/dca-ux-tweaks]
   const [expiryIdx, setExpiryIdx] = useState(3) // default: 30d
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [slippage, setSlippage] = useState('0.5')

@@ -204,7 +204,11 @@ export const EXPIRY_PRESETS = [
 ] as const
 
 // ── DCA interval presets ─────────────────────────────────
+// [chore/dca-ux-tweaks] 1h (3600s) added as the first option (server accepts
+// dcaInterval ≥ 60s). Prepending shifts indices — DCAPanel's default intervalIdx
+// is bumped to keep 1d the default.
 export const DCA_INTERVAL_PRESETS = [
+  { label: '1h',  seconds: 3600 },
   { label: '4h',  seconds: 14400 },
   { label: '8h',  seconds: 28800 },
   { label: '12h', seconds: 43200 },
@@ -214,4 +218,6 @@ export const DCA_INTERVAL_PRESETS = [
 ] as const
 
 // ── DCA total presets ────────────────────────────────────
-export const DCA_TOTAL_PRESETS = [3, 5, 7, 10, 14, 30] as const
+// [chore/dca-ux-tweaks] dropped 7 + 14, added 15 + 20. The per-chunk
+// MIN_ORDER_AMOUNT floor (DCAPanel) still gates 20/30 on a small total.
+export const DCA_TOTAL_PRESETS = [3, 5, 10, 15, 20, 30] as const
