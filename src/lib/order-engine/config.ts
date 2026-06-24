@@ -102,15 +102,51 @@ const MAINNET_ROUTERS: Record<string, RouterEntry> = {
   },
 }
 
-/** Get whitelisted routers for a given chainId */
-export function getWhitelistedRouters(chainId: number): Record<string, RouterEntry> {
-  // Only mainnet routers supported in production
-  return MAINNET_ROUTERS
+// ── Base (8453) whitelisted routers ──────────────────────
+// [chore/dca-router-chainaware] Conditional orders sign `order.router`, and the
+// keeper must build calldata for THAT router (executeOrder approves + calls it).
+// These are the routers that are BOTH (a) whitelisted on the Base OrderExecutor
+// (0x135B339902Ea4E0fB4CF059961dc8856bA1D2598 — verified on-chain via
+// whitelistedRouters()) AND (b) serveable by /api/swap (so the keeper can fetch
+// matching calldata): Augustus V6 ← source `velora`, SwapRouter02 ← source
+// `uniswapv3`. 1inch v6 is also whitelisted on-chain but /api/swap CANNOT build
+// 1inch calldata on Base (HTTP 502) — deliberately EXCLUDED so orders never
+// commit an unserveable router (the original SwapFailed root cause, PR #225).
+const BASE_ROUTERS: Record<string, RouterEntry> = {
+  augustusV6: {
+    address: '0x6A000F20005980200259B80c5102003040001068' as `0x${string}`,
+    label: 'ParaSwap Augustus v6',
+  },
+  uniswapV3: {
+    address: '0x2626664c2603336E57B271c5C0b26F421741e481' as `0x${string}`,
+    label: 'Uniswap SwapRouter02',
+  },
 }
 
-/** Default router for a given chainId */
+const ROUTERS_BY_CHAIN: Record<number, Record<string, RouterEntry>> = {
+  1: MAINNET_ROUTERS,
+  8453: BASE_ROUTERS,
+}
+
+// The router-map key whose entry is committed by default at order creation.
+const DEFAULT_ROUTER_KEY_BY_CHAIN: Record<number, string> = {
+  1: '1inch',         // mainnet unchanged
+  8453: 'augustusV6', // Base → Augustus V6 (serveable via /api/swap `velora`)
+}
+
+/**
+ * Get whitelisted routers for a given chainId. Unknown chains fall back to the
+ * mainnet map (mainnet behaviour byte-identical). [chore/dca-router-chainaware]
+ */
+export function getWhitelistedRouters(chainId: number): Record<string, RouterEntry> {
+  return ROUTERS_BY_CHAIN[chainId] ?? MAINNET_ROUTERS
+}
+
+/** Default router for a given chainId (the one order creation commits). */
 export function getDefaultRouter(chainId: number): RouterEntry {
-  return MAINNET_ROUTERS['1inch']
+  const routers = getWhitelistedRouters(chainId)
+  const key = DEFAULT_ROUTER_KEY_BY_CHAIN[chainId] ?? '1inch'
+  return routers[key] ?? MAINNET_ROUTERS['1inch']
 }
 
 // Legacy export for backward compatibility (mainnet default)

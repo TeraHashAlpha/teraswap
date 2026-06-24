@@ -69,7 +69,7 @@ import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier } from "./freeze-score.js"
-import { buildSwapRoutePayload, buildQuotePath } from "./swap-route.js" // [chore/keeper-swap-payload-fix] quote→swap, chain-aware body
+import { buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk
 import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
 import {
   alertNewDcaPosition,
@@ -471,41 +471,29 @@ async function readEthUsd(publicClient) {
 
 // ---- Swap route fetcher ------------------------------------------------
 
-// [chore/keeper-swap-payload-fix] The keeper has no UI quote step, so it must
-// ask /api/quote which CONCRETE source wins before building swap calldata —
-// /api/swap rejects the meta-source "best" (400 INVALID_SOURCE). Mirrors the
-// frontend (quote → swap). Returns the best source id, or null on any failure.
-async function fetchBestSource(tokenIn, tokenOut, amount, chainId, srcDecimals, dstDecimals) {
-  const url = `${API_URL}${buildQuotePath({ tokenIn, tokenOut, amount, srcDecimals, dstDecimals, chainId })}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    console.error(`  Quote API error: ${res.status} ${body.slice(0, 300)}`)
-    return null
-  }
-  const data = await res.json()
-  return data?.best?.source || null
-}
-
-async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecimals, dstDecimals) {
+// [chore/dca-router-chainaware] A conditional order is EIP-712-signed with a
+// specific order.router; executeOrder approves + calls THAT router with the
+// keeper's calldata. So the keeper must build calldata for order.router — it
+// requests the /api/swap source that targets it (sourceForRouter), NOT an
+// unconstrained "best source" (which would hand e.g. Augustus calldata to the
+// 1inch router → SwapFailed). `amount` here is the per-chunk NET amount (after
+// the contract's 0.1% tokenIn fee — see computeNetChunkAmount at the call site).
+async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecimals, dstDecimals, router) {
   if (!API_URL) {
     log("  TERASWAP_API_URL not configured -- skipping swap route")
     return null
   }
 
-  try {
-    // 1. Resolve the best CONCRETE aggregator source via /api/quote (the keeper
-    //    cannot send "best" — that 400s INVALID_SOURCE).
-    const source = await fetchBestSource(tokenIn, tokenOut, amount, chainId, srcDecimals, dstDecimals)
-    if (!source) {
-      console.error("  Swap route: no quote source available")
-      return null
-    }
+  const source = sourceForRouter(router)
+  if (!source) {
+    console.error(`  Swap route: no /api/swap source maps to order.router ${router} -- skipping (would mis-route)`)
+    return null
+  }
 
-    // 2. Build calldata for that source. chainId is a BODY field (per /api/swap +
-    //    the frontend useSwap contract) so Base chunks route on Base, not mainnet;
-    //    omitted on mainnet (CHAIN_ID=1) → byte-identical chainId handling. Token
-    //    decimals are required so non-18-dec outputs aren't 422'd by the price guard.
+  try {
+    // chainId is a BODY field (per /api/swap + the frontend useSwap contract) so
+    // Base chunks route on Base; omitted on mainnet (CHAIN_ID=1) → byte-identical.
+    // Token decimals are required so non-18-dec outputs aren't 422'd by the guard.
     const res = await fetch(`${API_URL}/api/swap`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -515,16 +503,26 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     })
 
     if (!res.ok) {
-      // [chore/keeper-swap-payload-fix] Log the response BODY, not just the
-      // status — the status alone hid the INVALID_SOURCE / priceGuard cause.
+      // Log the response BODY, not just the status — the status alone hid the
+      // INVALID_SOURCE / priceGuard cause (chore/keeper-swap-payload-fix).
       const body = await res.text().catch(() => "")
-      console.error(`  Swap API error: ${res.status} ${body.slice(0, 300)}`)
+      console.error(`  Swap API error: ${res.status} ${body.slice(0, 300)} (source=${source})`)
       return null
     }
 
     const data = await res.json()
     if (!data.tx?.data) {
       console.error("  Swap route: missing tx data")
+      return null
+    }
+
+    // [chore/dca-router-chainaware] FUND-FLOW GUARD: the calldata MUST target the
+    // signed order.router (the contract approves + calls exactly that router). If
+    // /api/swap returned calldata for a different router, refuse — sending it
+    // would approve order.router but the call target would differ → SwapFailed.
+    const target = data.tx.to
+    if (!target || !router || target.toLowerCase() !== router.toLowerCase()) {
+      console.error(`  Swap route: tx.to ${target} != order.router ${router} (source=${source}) -- refusing to mis-route`)
       return null
     }
 
@@ -920,20 +918,33 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         continue
       }
 
-      // Fetch swap route. [chore/keeper-swap-payload-fix] Pass token decimals
-      // (required so a non-18-dec output isn't 422'd by the price guard) from the
-      // order row, with order_data + 18 fallbacks (same source as the DCA alert).
+      // Fetch swap route. Token decimals (required so a non-18-dec output isn't
+      // 422'd by the price guard) come from the order row, order_data + 18
+      // fallbacks (same source as the DCA alert). [chore/keeper-swap-payload-fix]
       const odSwap = dbOrder.order_data || {}
       const srcDecimals = Number(dbOrder.token_in_decimals ?? odSwap.tokenInDecimals ?? 18)
       const dstDecimals = Number(dbOrder.token_out_decimals ?? odSwap.tokenOutDecimals ?? 18)
+      // [chore/dca-router-chainaware] Build the route for the per-chunk NET amount
+      // the contract will actually swap — it takes the 0.1% tokenIn fee first and,
+      // for DCA, swaps only the cumulative per-chunk slice — and constrain it to the
+      // SIGNED order.router (executeOrder approves + calls exactly that router). All
+      // swap params come from orderStruct (the EIP-712-signed order), not the DB row.
+      const isDca = dbOrder.order_type === "dca"
+      const netAmount = computeNetChunkAmount({
+        amountIn: orderStruct.amountIn,
+        dcaTotal: Number(orderStruct.dcaTotal),
+        execCount: Number(dbOrder.dca_executed || 0),
+        isDca,
+      })
       const swapData = await fetchSwapRoute(
-        dbOrder.token_in,
-        dbOrder.token_out,
-        dbOrder.amount_in,
+        orderStruct.tokenIn,
+        orderStruct.tokenOut,
+        netAmount,
         CONTRACT_ADDRESS,
         CHAIN_ID, // keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
         srcDecimals,
         dstDecimals,
+        orderStruct.router,
       )
 
       if (!swapData) {
