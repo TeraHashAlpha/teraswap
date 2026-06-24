@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
-import { AGGREGATOR_META, ETHERSCAN_TX, type AggregatorName } from '@/lib/constants'
+import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 import type { DashboardData, PeriodMetrics } from '@/lib/analytics-types'
 
 // [P96] Subset of /api/stats response we consume here. We only read the
@@ -129,8 +130,8 @@ function ActivityFeed({ trades }: { trades: DashboardData['recentTrades'] }) {
               <span>{sourceLabel(t.source)}</span>
               <span>{timeAgo(t.timestamp)}</span>
               {t.txHash && (
-                <a href={`${ETHERSCAN_TX}${t.txHash}`} target="_blank" rel="noopener noreferrer"
-                  className="text-cream-35 transition hover:text-cream" title="View on Etherscan">↗</a>
+                <a href={explorerTxUrl(t.txHash, t.chainId)} target="_blank" rel="noopener noreferrer"
+                  className="text-cream-35 transition hover:text-cream" title="View transaction">↗</a>
               )}
             </span>
           </div>
