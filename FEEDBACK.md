@@ -5063,3 +5063,28 @@ The real fix is **not keeper-only and not a contract change** — and I could NO
 ### This commit (safe, keeper-only, deployable now)
 - `revert-decode.js` + wiring → the next executeOrder revert logs the decoded `SwapFailed` inner reason (router shown), so the literal blob is captured. Logging only; never throws.
 - `node --test`: 31 pass (26 prior + 5 revert-decode). It does **not** by itself fix the SwapFailed — that needs the sign-off fix above.
+
+## Feedback — CHORE-DCA-ROUTER-CHAINAWARE (pending commit)
+
+Implements the PR #225 proposal (ARCHITECT-APPROVED). Fixes the Base DCA `SwapFailed` root cause.
+
+### What changed
+1. **Chain-aware committed router** (`src/lib/order-engine/config.ts`): `getDefaultRouter`/`getWhitelistedRouters` now branch on chainId. Base (8453) → `BASE_ROUTERS` (Augustus V6 `0x6A000F20005980200259B80c5102003040001068` = default, + Uniswap SwapRouter02 `0x2626664c2603336E57B271c5C0b26F421741e481`) — both verified on-chain whitelisted on the Base OrderExecutor AND serveable by `/api/swap`. 1inch is excluded on Base (whitelisted on-chain but `/api/swap` 502s it). Mainnet (1) and unknown chains → `MAINNET_ROUTERS` / 1inch default, **byte-identical**. The three order panels already commit `getDefaultRouter(chainId).address`, so Base orders now commit Augustus V6 automatically.
+2. **Keeper routes CONSTRAINED to `order.router`** (`executor.js` `fetchSwapRoute` + `swap-route.js` `sourceForRouter`): the keeper resolves the `/api/swap` source that targets the SIGNED `order.router` (Augustus V6→`velora`, SwapRouter02→`uniswapv3`, 1inch→`1inch`) instead of the unconstrained best-source, and **refuses to send if `tx.to !== order.router`** (fund-flow guard). The #224 quote→best-source step (`fetchBestSource`) is removed — wrong for conditional orders, which commit a router.
+3. **Per-chunk NET amount** (`swap-route.js` `computeNetChunkAmount`): the keeper builds the route for exactly what the contract swaps — the cumulative per-chunk `executeAmount` (last chunk = remainder, no dust) minus the 0.1% tokenIn fee (`FEE_BPS=10`/`BPS_DENOMINATOR=10000`), replicating `TeraSwapOrderExecutor.executeOrder` in BigInt. All swap params now come from `orderStruct` (the signed order), not the DB row.
+
+### Verification
+- **Route-building (production, real builders):** Base DCA order (0.04 WETH / 4 chunks, chunk #0) → `computeNetChunkAmount` = `9990000000000000` (0.01 WETH − 0.1%) → `sourceForRouter(Augustus V6)` = `velora` → POST `/api/swap` → **200, `tx.to = 0x6a00…1068` (= committed Augustus V6), `toAmount` ≈ 16.68 USDC**. The fund-flow guard passes; the swap leg hits the signed router for the net amount. (Pre-fix: 1inch-committed → Augustus calldata to 1inch router → SwapFailed.)
+- **Tests:** keeper `node --test` 41 pass (incl. 8 new: `computeNetChunkAmount` cross-checked to the contract incl. remainder/dust + non-DCA, `sourceForRouter`); `config.test.ts` 24 pass (mainnet byte-identical; Base→Augustus default; 1inch-on-Base exclusion). `tsc`: clean for changed files (the lone `cuer/QrCode` error is pre-existing stale-deps, resolves on CI's fresh install).
+- **Swap-leg eth_call simulation (state overrides):** inconclusive — reverted "unknown reason", a Base-WETH storage-layout / Augustus-internals simulation limitation, NOT a calldata problem (the route-building proof + on-chain whitelist stand).
+- **On-chain `executeOrder` success tx — NOT captured (limitation, ops action required).** A real success tx needs: a freshly re-signed Base DCA order committing Augustus V6 (this fix; new orders only), the owner's WETH + approval to the OrderExecutor, and the whitelisted keeper key to send `executeOrder`. I have no keys/funds, so I cannot produce it. Everything needed is in place; ops should: deploy (git pull + pm2 restart), create one fresh Base DCA order, let the keeper execute, and capture the tx hash + output + fee here.
+
+### Auditor (signed-order + fund-flow) — APPROVED (0C / 0H)
+`computeNetChunkAmount` verified byte-identical to the contract over 15 edge cases. Decisive safety property: the contract `forceApprove(order.router, netAmount)` then `forceApprove(…, 0)` bounds the router pull to the contract-computed netAmount regardless of calldata, so a keeper amount bug can only cause SwapFailed, never an over-pull/drain. Router guard + `/api/swap` recipient validation prevent mis-routing. Mainnet improved, not regressed. Findings (non-blocking):
+- **L-1:** if a DCA tx confirms on-chain but the Supabase PATCH fails, `dbOrder.dca_executed` lags `dcaExecutions[orderHash]` → the keeper builds the wrong chunk index (harmless for even splits; remainder case degrades to SwapFailed, never loss). Backlog: seed `execCount` from on-chain `dcaExecutions(orderHash)` instead of the DB row.
+- **L-2:** mainnet `paraswap` (Augustus V5 `0xDEF171…`) + old `uniswapV3` (`0xE592…`) in `MAINNET_ROUTERS` have no `sourceForRouter` entry (and `/api/swap`'s velora targets V6, not V5 — so they're not cleanly serveable anyway). Latent: there is NO UI router picker, so only the chain default (1inch on mainnet) is ever committed. Backlog: a CI assertion that every committed router has a serveable source, and reconcile the mainnet whitelist to serveable routers.
+- **I-1:** the orders API doesn't validate `body.router` against the whitelist (defense-in-depth holds: on-chain revert + keeper fail-skip). Optional hardening.
+- **I-2:** `buildQuotePath` is now dead in production (test-only); harmless, left in place.
+
+### Migration note (ops)
+Existing Base DCA orders signed with `order.router = 1inch` remain unexecutable (immutable signature; 1inch unserveable on Base) — they must be cancelled/re-issued after this ships. New Base DCA orders commit Augustus V6 and execute.

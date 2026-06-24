@@ -37,6 +37,8 @@ import {
 const MAINNET_EXECUTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
 const BASE_EXECUTOR = '0x135B339902Ea4E0fB4CF059961dc8856bA1D2598'
 const ONEINCH_V6 = '0x111111125421cA6dc452d289314280a0f8842A65'
+const BASE_AUGUSTUS_V6 = '0x6A000F20005980200259B80c5102003040001068'
+const BASE_SWAPROUTER02 = '0x2626664c2603336E57B271c5C0b26F421741e481'
 const ETH_USD_FEED = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
 
 describe('getOrderExecutor — wired chains', () => {
@@ -136,26 +138,34 @@ describe('MIN_ORDER_AMOUNT [CHORE-DCA-PRELAUNCH-FIXES] — single source pinned 
   })
 })
 
-describe('getWhitelistedRouters / getDefaultRouter — mainnet-only (chainId ignored)', () => {
-  it('returns the mainnet 1inch v6 router with its exact whitelisted address', () => {
+describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-router-chainaware]', () => {
+  it('mainnet (1) is UNCHANGED — 1inch v6 with its exact whitelisted address', () => {
     const routers = getWhitelistedRouters(1)
     expect(routers['1inch']).toEqual({ address: ONEINCH_V6, label: '1inch v6' })
   })
 
-  it('IGNORES chainId — Base (8453) and an unwired chain get the SAME mainnet map', () => {
-    // Documents current behaviour: these getters do NOT branch on chainId. If a future
-    // change adds per-chain routers, this assertion forces an intentional update.
-    const mainnet = getWhitelistedRouters(1)
-    expect(getWhitelistedRouters(8453)).toBe(mainnet)
-    expect(getWhitelistedRouters(42161)).toBe(mainnet)
-    expect(getWhitelistedRouters(0)).toBe(mainnet)
+  it('getDefaultRouter(1) is the 1inch entry (mainnet byte-identical)', () => {
+    expect(getDefaultRouter(1)).toEqual({ address: ONEINCH_V6, label: '1inch v6' })
   })
 
-  it('getDefaultRouter(anyChain) is the 1inch entry (address 0x1111…2A65)', () => {
-    const expected = { address: ONEINCH_V6, label: '1inch v6' }
-    expect(getDefaultRouter(1)).toEqual(expected)
-    expect(getDefaultRouter(8453)).toEqual(expected)
-    expect(getDefaultRouter(42161)).toEqual(expected)
+  it('Base (8453) returns the Base-whitelisted, /api/swap-serveable routers (Augustus V6 + SwapRouter02)', () => {
+    const routers = getWhitelistedRouters(8453)
+    expect(routers['augustusV6']).toEqual({ address: BASE_AUGUSTUS_V6, label: 'ParaSwap Augustus v6' })
+    expect(routers['uniswapV3']).toEqual({ address: BASE_SWAPROUTER02, label: 'Uniswap SwapRouter02' })
+  })
+
+  it('Base (8453) does NOT offer 1inch — /api/swap cannot serve it on Base (was the SwapFailed cause)', () => {
+    expect(getWhitelistedRouters(8453)['1inch']).toBeUndefined()
+  })
+
+  it('getDefaultRouter(8453) commits Augustus V6 (0x6A00…1068), not mainnet 1inch', () => {
+    expect(getDefaultRouter(8453)).toEqual({ address: BASE_AUGUSTUS_V6, label: 'ParaSwap Augustus v6' })
+    expect(getDefaultRouter(8453).address).not.toBe(ONEINCH_V6)
+  })
+
+  it('an unwired chain falls back to the mainnet map + default (byte-identical)', () => {
+    expect(getWhitelistedRouters(42161)).toBe(getWhitelistedRouters(1))
+    expect(getDefaultRouter(42161)).toEqual({ address: ONEINCH_V6, label: '1inch v6' })
   })
 })
 
