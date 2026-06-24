@@ -5088,3 +5088,22 @@ Implements the PR #225 proposal (ARCHITECT-APPROVED). Fixes the Base DCA `SwapFa
 
 ### Migration note (ops)
 Existing Base DCA orders signed with `order.router = 1inch` remain unexecutable (immutable signature; 1inch unserveable on Base) — they must be cancelled/re-issued after this ships. New Base DCA orders commit Augustus V6 and execute.
+
+## Feedback — CHORE-DCA-UX-TWEAKS (pending commit)
+
+Pure-UI tweaks; no order-engine/contract/keeper logic touched.
+
+### Assumption corrected — category-chip scrollability was ALREADY implemented
+Requirement 3 (horizontally-scrollable category chips) is already on `main`: `TokenSelector.tsx` renders the chip row as `flex flex-nowrap gap-1.5 overflow-x-auto no-scrollbar tab-bar-fade` (added by the token-selector-ux sprint; `no-scrollbar`/`tab-bar-fade` defined in `globals.css`). So no UI change was needed there — I added a **regression test** instead (asserts `overflow-x-auto` + `flex-nowrap`, never `flex-wrap`, and that multiple categories render in the single scroll row).
+
+### Edge case — prepending 1h shifts interval indices
+`DCA_INTERVAL_PRESETS` is index-addressed by `DCAPanel`'s `intervalIdx`. Adding 1h at index 0 shifts `1d` from index 3→4, so I bumped the default `intervalIdx` 3→4 to **keep 1d the default** (no UX regression). Dropping 7/14 from `DCA_TOTAL_PRESETS` shifts the default `partsIdx=2` value 7→10 (a sensible default; the goal didn't pin one). Stale "7 buys" comments in the existing DCA tests were corrected to "10".
+
+### Note — presets live under order-engine/config.ts but are UI-only
+`DCA_TOTAL_PRESETS` / `DCA_INTERVAL_PRESETS` sit in `src/lib/order-engine/config.ts` but are consumed **only** by `DCAPanel` (the option chips) — not by the keeper (it imports nothing from the frontend), the contract, or any engine logic. Editing the arrays is therefore a pure-UI change per the goal's "no order engine/contract/keeper" constraint; the contract accepts any `dcaTotal`/`dcaInterval ≥ 60s`.
+
+### Floor validation kept + verified
+The per-chunk `MIN_ORDER_AMOUNT` floor (DCAPanel `perChunkRaw(...) < MIN_ORDER_AMOUNT`) is untouched and now exercised at a high buy count: a new test selects **30 buys** with a small total → the on-chain-minimum hint surfaces and submit is blocked (never signed).
+
+### Verification
+`vitest`: config 27, DCAPanel 7, DCAPanel.ux-polish 14 (#216 unaffected), TokenSelector 26, dca-quick-fill — all green (81 across the touched files). `tsc`: clean for changed files. `eslint`: 0 errors.

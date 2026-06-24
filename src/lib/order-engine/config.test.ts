@@ -31,6 +31,8 @@ import {
   getDefaultRouter,
   getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
+  DCA_TOTAL_PRESETS,
+  DCA_INTERVAL_PRESETS,
 } from './config'
 
 // Byte-identical, checksummed mainnet-behaviour constants (must match config.ts exactly).
@@ -218,5 +220,21 @@ describe('NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS env override (read at module load)'
     vi.resetModules()
     const fresh = await import('./config')
     expect(fresh.getOrderExecutor(1)).toBe(MAINNET_EXECUTOR)
+  })
+})
+
+describe('DCA presets [chore/dca-ux-tweaks]', () => {
+  it('DCA_TOTAL_PRESETS = 3, 5, 10, 15, 20, 30 (dropped 7+14, added 15+20)', () => {
+    expect([...DCA_TOTAL_PRESETS]).toEqual([3, 5, 10, 15, 20, 30])
+  })
+
+  it('DCA_INTERVAL_PRESETS leads with 1h (3600s) then 4h…7d', () => {
+    expect(DCA_INTERVAL_PRESETS[0]).toEqual({ label: '1h', seconds: 3600 })
+    expect(DCA_INTERVAL_PRESETS.map((p) => p.label)).toEqual(['1h', '4h', '8h', '12h', '1d', '3d', '7d'])
+    expect(DCA_INTERVAL_PRESETS.map((p) => p.seconds)).toEqual([3600, 14400, 28800, 43200, 86400, 259200, 604800])
+  })
+
+  it('every interval is ≥ the server minimum (60s)', () => {
+    for (const p of DCA_INTERVAL_PRESETS) expect(p.seconds).toBeGreaterThanOrEqual(60)
   })
 })

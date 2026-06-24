@@ -130,7 +130,7 @@ describe('DCAPanel — valid order build → sign → submit', () => {
   it('builds, EIP-712 signs against the Base executor domain, and submits a DCA order', async () => {
     renderWithProviders(<DCAPanel />)
     // [CHORE-DCA-WETH-INPUT] The DCA INPUT now defaults to the chain's WETH (18 dec), not USDC.
-    enterAmount('100') // 100 WETH over 7 buys ⇒ ~14.28 WETH/buy, well above the floor
+    enterAmount('100') // 100 WETH over the default 10 buys ⇒ 10 WETH/buy, well above the floor
 
     fireEvent.click(startDcaButton())
     // Phase A froze the order for review — confirm it to sign + submit (Phase B).
@@ -153,7 +153,7 @@ describe('DCAPanel — #200 client-side MIN_ORDER_AMOUNT floor', () => {
   it('blocks a sub-floor per-execution amount client-side — never reaches review or signing', async () => {
     renderWithProviders(<DCAPanel />)
     // [CHORE-DCA-WETH-INPUT] INPUT defaults to WETH (18 dec) now: 5e-14 WETH = 50,000 base units
-    // over 7 buys ⇒ ~7,142 base units/buy < 10,000 floor (same sub-floor case as before).
+    // over the default 10 buys ⇒ 5,000 base units/buy < 10,000 floor (still a sub-floor case).
     enterAmount('0.00000000000005')
 
     fireEvent.click(startDcaButton())
@@ -178,5 +178,37 @@ describe('DCAPanel — freeze (403) handling', () => {
     expect(await screen.findByText(/existing orders are unaffected/i)).toBeInTheDocument()
     const submit = screen.getByRole('button', { name: /temporarily paused/i }) as HTMLButtonElement
     expect(submit).toBeDisabled()
+  })
+})
+
+describe('DCAPanel — buys/interval presets [chore/dca-ux-tweaks]', () => {
+  it('renders the updated Number of Buys presets (3/5/10/15/20/30); 7 and 14 are gone', () => {
+    renderWithProviders(<DCAPanel />)
+    for (const n of ['3', '5', '10', '15', '20', '30']) {
+      expect(screen.getByRole('button', { name: n })).toBeInTheDocument()
+    }
+    expect(screen.queryByRole('button', { name: '7' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '14' })).toBeNull()
+  })
+
+  it('offers a 1h interval option (added first)', () => {
+    renderWithProviders(<DCAPanel />)
+    // '1h' is also an expiry label, so there is ≥1 such button; the interval one is present.
+    expect(screen.getAllByRole('button', { name: '1h' }).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('a high buy count (30) that puts the per-chunk under MIN_ORDER_AMOUNT surfaces the floor hint and blocks submit', async () => {
+    renderWithProviders(<DCAPanel />)
+    // 2e-13 WETH = 200,000 base units. At the default 10 buys → 20,000/buy (ok); at 30 → 6,666/buy (< 10,000 floor).
+    enterAmount('0.0000000000002')
+    expect(screen.queryByText(/on-chain minimum/i)).toBeNull() // ok at the default buy count
+
+    fireEvent.click(screen.getByRole('button', { name: '30' }))
+
+    expect(await screen.findByText(/on-chain minimum/i)).toBeInTheDocument()
+    fireEvent.click(startDcaButton())
+    // Under-floor ⇒ never frozen for review, never signed.
+    await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
   })
 })
