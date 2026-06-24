@@ -70,6 +70,7 @@ import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier } from "./freeze-score.js"
 import { buildSwapRoutePayload, buildQuotePath } from "./swap-route.js" // [chore/keeper-swap-payload-fix] quote→swap, chain-aware body
+import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
 import {
   alertNewDcaPosition,
   alertLowGas,
@@ -1084,6 +1085,18 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         await updateOrderStatus(dbOrder.id, "active") // Unlock for retry
       }
     } catch (err) {
+      // [chore/dca-swapfailed] If the revert is SwapFailed(bytes), unwrap the
+      // inner DEX-router reason so the log shows WHY the on-chain swap reverted
+      // (e.g. allowance/amount mismatch, or an empty revert = order.router does
+      // not match the calldata's target router). Logging only — never throws.
+      try {
+        const sf = decodeSwapFailed(extractRevertData(err))
+        if (sf) {
+          // dbOrder (loop var) is in catch scope; orderStruct is not (declared in the try).
+          const failedRouter = dbOrder.router ?? (dbOrder.order_data || {}).router ?? "?"
+          console.error(`  Order ${dbOrder.id.slice(0, 8)}... SwapFailed → ${sf.reason} (router=${failedRouter}, inner=${sf.innerHex})`)
+        }
+      } catch { /* never let diagnostics mask the original error */ }
       console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
       errors++
       // [DCA-OBS] Execution threw (RPC/revert/timeout) — bump the failure signal.

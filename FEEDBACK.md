@@ -5024,3 +5024,42 @@ final adversarial fact-check; only verified facts were written, unverifiable cla
 
 ### Verification
 - `node --test` keeper suite: 26 pass (18 existing + 8 rewritten/added swap-route cases). `node --check executor.js`: clean. End-to-end production POST (real builders): 400 (old body) → 200 with tx.data (fixed flow).
+
+## Feedback — CHORE-DCA-SWAPFAILED (pending commit)
+
+### Decoded revert selector
+- `0xff9fa595` = **`SwapFailed(bytes reason)`** (verified via keccak; TeraSwapOrderExecutor.sol:246, raised at line 497: `(ok,result)=order.router.call(routerData); if(!ok) revert SwapFailed(result);`). The inner `bytes` is the DEX-router's own revert.
+- **I could NOT decode the LITERAL inner blob** — it was logged by the keeper running on EC2 and I have no access to those logs, and the on-chain `SwapFailed` cannot be re-reached without a real signed order + funded executeOrder tx (a fake signature reverts at signature-check, before the swap). To capture it on the next run, this chore adds `revert-decode.js` (`decodeSwapFailed`/`extractRevertData`) wired into the keeper's executeOrder catch: it unwraps `SwapFailed(bytes)` → the inner `Error(string)`/`Panic`/empty/raw reason and logs it. Deploy (git pull + pm2 restart) and the next failure will log e.g. `SwapFailed → empty revert … (router=0x1111…)` or `… Error(string): ERC20: transfer amount exceeds allowance`.
+
+### Root cause (evidence-backed) — NOT a contract bug, NOT keeper-only-fixable
+The keeper's `from`/taker is **already correct** (`from = ORDER_EXECUTOR_ADDRESS` = the OrderExecutor contract; `/api/swap` sets `recipient = from`, so output returns to the contract which takes the fee + forwards to `order.owner`). The user's taker hypothesis is **not** the cause. Two real bugs:
+
+1. **PRIMARY — router mismatch (config/architecture).** A Base DCA order commits `order.router = 1inch v6 (0x111111125421cA6dc452d289314280a0f8842A65)` because `getDefaultRouter(chainId)`/`getWhitelistedRouters(chainId)` (src/lib/order-engine/config.ts:106-114) **ignore `chainId`** and always return the mainnet router map (confirmed by config.test.ts:139 "mainnet-only"); `DCAPanel.tsx:345` signs `router: getDefaultRouter(chainId).address`. `executeOrder` then calls `order.router` (1inch) with the keeper's calldata. But the keeper builds calldata via `/api/swap`, which **cannot produce 1inch calldata on Base** — `source:"1inch"` → **502** (probed against production). Post-#224 the keeper uses the *best* source (`velora` → Augustus V6 `0x6a00…1068`), whose target router ≠ `order.router` (1inch). The contract hands Augustus-format calldata to the 1inch router → it reverts → `SwapFailed` (inner reason ≈ empty/foreign-selector revert). `1inch` IS whitelisted on the Base contract, so `canExecute` passes and it reaches the swap. This breaks **every** chain's conditional orders (the keeper has never executed one — [[project_executor_status]]), Base just surfaced it first.
+
+   Production `/api/swap` source→router probe (Base WETH→USDC, from = Base OrderExecutor):
+   | source | result | tx.to (router) |
+   |---|---|---|
+   | 1inch | 502 | — (1inch unavailable on Base) |
+   | velora | 200 | 0x6a00…1068 (Augustus V6) |
+   | uniswapv3 | 200 | 0x2626…481 (SwapRouter02) |
+   | 0x | 400 | unknown selector 0x2213bc0b |
+
+   On-chain Base OrderExecutor (0x135B…2598) `whitelistedRouters()` (read-only):
+   ✅ 1inch v6 (committed, unservable) · ✅ Augustus V6 `0x6a00…1068` (= velora) · ✅ UniV3 SwapRouter02 `0x2626…481` (= uniswapv3) · ❌ Augustus V5 · ❌ old UniV3 SwapRouter · (0x ExchangeProxy unverified).
+
+2. **SECONDARY — amount mismatch (keeper).** The keeper builds the swap for `dbOrder.amount_in` (the full signed `order.amountIn`), but `executeOrder` (a) takes the 0.1% fee in tokenIn first and `forceApprove(order.router, netAmount)` (netAmount = executeAmount − fee), and (b) for DCA swaps only `order.amountIn / dcaTotal` per chunk. So the router would try to pull far more than is approved → `SwapFailed` (allowance) **even if the router matched**. The swap amount must be the per-chunk `netAmount`.
+
+### Why I stopped short of a code "fix" (flagged for sign-off)
+The real fix is **not keeper-only and not a contract change** — and I could NOT satisfy the goal's "verify end-to-end: executeOrder succeeds" because:
+- Existing Base DCA orders are **EIP-712-signed** with `order.router = 1inch` (immutable). No keeper/API change can make `/api/swap` produce 1inch calldata on Base (502). **These orders can never execute — they must be cancelled/refunded + re-created** (owner/ops action, possibly user funds).
+- Fixing NEW orders requires changing **what users sign** (order-creation router config) — a product/security decision (config.ts:69 says the map "must mirror the contract exactly", verified on-chain), squarely needing owner sign-off.
+
+### Proposed fix (for sign-off) — chain-aware router + matched keeper source + re-issue
+1. **Order creation (frontend):** make `getDefaultRouter`/`getWhitelistedRouters` **chain-aware**. For Base, restrict to routers that are BOTH whitelisted on the Base OrderExecutor AND serveable by `/api/swap` — i.e. **Augustus V6 `0x6a00…1068` (source `velora`)** and/or **UniV3 SwapRouter02 `0x2626…481` (source `uniswapv3`)**. Pick a per-chain default among those.
+2. **Keeper:** request `/api/swap` with the **source that matches `order.router`** (a router→source map, NOT the best-source from #224 — that's only valid for instant swaps with no committed router), with **`amount = per-chunk netAmount`** (replicate the contract's cumulative DCA formula: `executeAmount = amountIn*(n+1)/dcaTotal − amountIn*n/dcaTotal`, last chunk = remainder; `netAmount = executeAmount − executeAmount*10/10000`), `from = OrderExecutor`. Verify `result.tx.to === order.router` before sending.
+3. **Ops:** cancel + re-issue existing Base DCA orders once (1)+(2) ship.
+4. **No Solidity change** — the contract correctly enforces the signed router (H-01) and the fee.
+
+### This commit (safe, keeper-only, deployable now)
+- `revert-decode.js` + wiring → the next executeOrder revert logs the decoded `SwapFailed` inner reason (router shown), so the literal blob is captured. Logging only; never throws.
+- `node --test`: 31 pass (26 prior + 5 revert-decode). It does **not** by itself fix the SwapFailed — that needs the sign-off fix above.
