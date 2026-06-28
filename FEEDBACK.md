@@ -5107,3 +5107,46 @@ The per-chunk `MIN_ORDER_AMOUNT` floor (DCAPanel `perChunkRaw(...) < MIN_ORDER_A
 
 ### Verification
 `vitest`: config 27, DCAPanel 7, DCAPanel.ux-polish 14 (#216 unaffected), TokenSelector 26, dca-quick-fill — all green (81 across the touched files). `tsc`: clean for changed files. `eslint`: 0 errors.
+
+## Feedback — CHORE-ANALYTICS-DCA-EXECUTIONS (chore/analytics-dca-executions)
+
+Surfaces DCA / conditional-order executions in the public Analytics dashboard. Before this, only instant swaps (the `swaps` table) showed; keeper-driven `executeOrder` fills (real protocol volume) were invisible.
+
+### Data-flow map (verified on origin/main @ 875e1e9)
+
+| | Instant swaps | Order executions (DCA/limit/SL) |
+|---|---|---|
+| **Write path** | client → `POST /api/log-swap` → `swaps.insert(...)` (USD valued server-side via Chainlink `computeTokenAmountUsd`, fallback to client value) | keeper `executor.js` `recordExecution()` → `order_executions` POST (`order_id, tx_hash, amount_in, amount_out:'0', gas_used, executed_at`) |
+| **Table** | `swaps` (wallet, tokens+symbols, amounts, `amount_in_usd`, `source`, `chain_id`, `status`, `tx_hash`) | `order_executions` (refs `orders` via `order_id`; tokens/wallet/chain/router live on `orders`) |
+| **Read path** | `GET /api/analytics` → `.from('swaps').eq('status','confirmed')` → `computeFromSwaps` (now `computeDashboard`) → every metric | **was: none** → now merged at read time |
+
+**Root cause:** keeper executions are recorded in `order_executions`, but `/api/analytics` only ever read `swaps` and hardcoded `type:'swap'` (`route.ts:192`). Different write path, never joined into the read path.
+
+### What changed (read-path merge — NO contract, NO keeper change)
+- **`src/app/api/analytics/route.ts`**: `GET` now also fetches confirmed `order_executions` with the parent `orders` row embedded (one PostgREST query, fail-soft → `[]` on any error so the swaps path never regresses). New `computeDashboard(swaps, executions)` builds events from both, **de-dupes by `tx_hash` (swap row wins)**, sorts newest-first, and feeds the existing aggregation (`buildDashboard`, formerly `computeFromSwaps`). Executions map to `TradeType` (`dca→dca_buy`, `limit→limit_fill`, `stop_loss→sltp_trigger`), source via `ROUTER_TO_SOURCE` (Augustus V6 → `velora`, so DCA fills bucket with instant `velora` in Best Routes), chain from `orders.chain_id`.
+- **`src/components/AnalyticsDashboard.tsx`**: Recent Activity tx link now uses the existing chain-aware `explorerTxUrl(txHash, chainId)` (etherscan ↔ basescan) instead of the mainnet-only `ETHERSCAN_TX`. The `ActivityFeed` already renders `dca_buy`→"DCA Buy" (blue), `limit_fill`, `sltp_trigger`.
+- **`src/app/api/analytics/route.test.ts`** (new): 9 tests — exactly-once counting, per-chunk valuation, labelling, route/chain carry, Best Routes/Popular Pairs/Volume-Trend inclusion, tx-hash dedupe (no double-count), no-regression, embed-failure safety, limit/SL mapping.
+
+### Backfill status — AUTOMATIC (no migration/script)
+The already-executed chunk (order `4ed3d6de`, tx `0x4691b42a…d7fac`) is **already a row in `order_executions`**. Because analytics now reads that table at request time, the chunk appears in the dashboard on deploy — no backfill job. Preconditions (both hold for a normally-recorded keeper fill): the row's `status` is `confirmed` (schema default; keeper omits it) and its `orders` parent embeds. It values as `orders.amount_in / dca_total` WETH × `APPROX_PRICES.WETH`, chain Base (8453), source `velora`, label "DCA Buy".
+
+### Concern (valuation — per-chunk vs full amount)
+The keeper writes the **FULL signed order amount** to `order_executions.amount_in` on *every* chunk (`executor.js` `recordExecution(dbOrder.id, txHash, dbOrder.amount_in, …)`), not the per-execution slice. Valuing executions off that raw column would overcount DCA volume by `dca_total×`. The read path therefore deliberately derives the per-chunk gross from the authoritative signed order: `orders.amount_in / dca_total` (BigInt floor div; non-DCA `dca_total=1` → full amount). This is robust regardless of the keeper quirk and needs no keeper change. Backlog option: fix `recordExecution` to store the real per-chunk net amount so `order_executions` is truthful for all consumers.
+
+### Concern (USD valuation fidelity — not fabrication)
+Instant swaps prefer a stored Chainlink `amount_in_usd`; executions have no stored USD, so they take the **same `estimateUsdValue` (APPROX_PRICES) fallback** instant swaps use when their stored USD is null — derived from real on-chain amounts, never invented. Net effect: DCA volume is an estimate of the same kind already present in the dashboard, not a fabricated figure. Tokens absent from `APPROX_PRICES` value at $0 but still count as a trade — identical to instant-swap behaviour.
+
+### Concern (Best Routes win-rate semantic)
+`bySource.winRate = count / total` where `total` is now all events (swaps + executions). Adding executions shifts the denominator, so instant-swap win-rate percentages move slightly and executions appear as their own route row. This is the intended consequence of "Best Routes include executions"; volume/trade counts are unaffected and correct. `feeUsd` is 0 for executions (on-chain fee not exposed per-chunk; `totalFees` is not a displayed KPI).
+
+### Test gap / CI note
+CI (`.github/workflows/ci.yml`) runs lint (advisory, `|| true`), typecheck, audit, lockfile-lint, catalog-address-guard, `test-contracts` (forge), `keeper-tests` (`node --test`) — but **does not run the main Vitest suite** (only `guard:check` on one file). The new `route.test.ts` (9/9) was verified locally via `npx vitest run`; `tsc --noEmit` is clean for the changed files (the lone `cuer/QrCode` error is a pre-existing stale-deps artifact of the worktree resolving against another branch's `node_modules` — `cuer` is in origin/main's lockfile, so CI's fresh `npm ci` resolves it). This chore touches no contracts/keeper/catalog/deps, so those gates are unaffected.
+
+### Out of scope (read `swaps` only; deliberately untouched to avoid regression)
+- `GET /api/analytics/export` (per-wallet CSV) and `src/lib/personal-analytics.ts` (per-wallet stats) still read only `swaps`. Extending them to executions is a follow-up; the protocol-wide dashboard was the goal here.
+- `order_executions` live schema has diverged from `contracts/order-engine/schema.sql` (keeper omits `execution_number`/`fee_amount`, adds `executed_at`); the read query selects only columns that reliably exist.
+
+### Adversarial review (multi-agent) — 2 applied, 1 rejected
+- **APPLIED (regression, high): `winRate` semantics.** A reviewer correctly flagged that adding executions to the `bySource` denominator changed `winRate` (documented as "% of times this source won the quote"). Fixed so `winRate` uses a **swaps-only numerator + denominator** — instant-swap win rates are now byte-identical to before; executions still contribute to each source's `tradeCount`/`volumeUsd` but, having no quote contest, neither inflate nor dilute win rates. Covered by two new tests (`winRate` quote-share + swaps-only no-regression).
+- **APPLIED (correctness, low): `perChunkAmount` silent `'0'`.** Added a `console.warn` when `amount_in` is non-numeric so a corrupt row surfaces in logs instead of silently becoming a $0 trade (behaviour unchanged: still counts as a trade at $0, same as an unpriceable instant swap).
+- **REJECTED (claimed keeper "critical execution failure"): not a defect in this change.** The finding observed that `ROUTER_TO_SOURCE` (analytics) maps two mainnet routers — Augustus V5 `0xDEF171…` and UniV3 SwapRouter `0xE592…` — that the keeper's `swap-route.js` `ROUTER_SOURCE` does not. That keeper↔config mismatch is the **pre-existing L-2 backlog item** (see the CHORE-DCA-ROUTER-CHAINAWARE feedback above), unrelated to and untouched by this read-only analytics change. My map only affects how analytics *labels* an execution and deliberately mirrors `config.ts` `MAINNET_ROUTERS`; in practice mainnet orders only ever commit the 1inch default (no UI router picker), so no execution with those routers exists to mislabel. No keeper code is changed here, so no execution path is affected.

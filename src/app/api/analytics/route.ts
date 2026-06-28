@@ -23,23 +23,34 @@ export async function GET() {
     // Fetch only confirmed swaps for volume/fee metrics.
     // Excludes: pending (not yet mined or user cancelled), failed, abandoned.
     // This ensures cancelled wallet rejections are never counted as volume.
-    const { data: swaps, error } = await supabase
-      .from('swaps')
-      .select('*')
-      .eq('status', 'confirmed')
-      .order('created_at', { ascending: false })
-      .limit(5000)
+    //
+    // [CHORE-ANALYTICS-DCA-EXECUTIONS] In parallel, fetch confirmed conditional-
+    // order fills (DCA / limit / stop-loss) from order_executions. Keeper-driven
+    // executions never flow through /api/log-swap, so they are absent from the
+    // `swaps` table; merging them in here (vs the keeper writing a swaps row)
+    // gives automatic backfill of already-executed chunks with no contract or
+    // keeper change. The execution fetch is fail-soft: any error returns [] so a
+    // problem there never regresses instant-swap analytics.
+    const [{ data: swaps, error }, executions] = await Promise.all([
+      supabase
+        .from('swaps')
+        .select('*')
+        .eq('status', 'confirmed')
+        .order('created_at', { ascending: false })
+        .limit(5000),
+      fetchConfirmedExecutions(supabase),
+    ])
 
     if (error) {
       console.error('[analytics] Failed to query swaps:', error.message)
       return NextResponse.json({ enabled: true, dashboard: emptyDashboard(), error: error.message })
     }
 
-    if (!swaps || swaps.length === 0) {
+    if ((!swaps || swaps.length === 0) && executions.length === 0) {
       return NextResponse.json({ enabled: true, dashboard: emptyDashboard() })
     }
 
-    const dashboard = computeFromSwaps(swaps)
+    const dashboard = computeDashboard(swaps ?? [], executions)
     return NextResponse.json(
       { enabled: true, dashboard },
       {
@@ -51,6 +62,39 @@ export async function GET() {
   } catch (err) {
     console.error('[analytics] Error:', err)
     return NextResponse.json({ enabled: false, dashboard: emptyDashboard() })
+  }
+}
+
+/**
+ * [CHORE-ANALYTICS-DCA-EXECUTIONS] Fetch confirmed conditional-order fills with
+ * their parent order embedded (wallet, token pair, chain, router live on the
+ * order). Selects only columns that reliably exist (the live order_executions
+ * table has diverged from contracts/order-engine/schema.sql — the keeper omits
+ * execution_number/fee_amount and adds executed_at). Fail-soft: any error or
+ * unconfigured client returns [] so instant-swap analytics never regress.
+ */
+async function fetchConfirmedExecutions(
+  supabase: NonNullable<ReturnType<typeof getSupabase>>,
+): Promise<Record<string, unknown>[]> {
+  try {
+    const { data, error } = await supabase
+      .from('order_executions')
+      .select(
+        'id,created_at,tx_hash,amount_in,amount_out,status,order_id,' +
+          'orders(wallet,order_type,token_in,token_in_symbol,token_out,token_out_symbol,chain_id,router,dca_total,amount_in)',
+      )
+      .eq('status', 'confirmed')
+      .order('created_at', { ascending: false })
+      .limit(5000)
+
+    if (error) {
+      console.error('[analytics] order_executions query failed:', error.message)
+      return []
+    }
+    return (data as unknown as Record<string, unknown>[]) ?? []
+  } catch (err) {
+    console.error('[analytics] order_executions query error:', err)
+    return []
   }
 }
 
@@ -207,6 +251,111 @@ function swapToEvent(row: Record<string, unknown>): TradeEvent {
   }
 }
 
+// ── [CHORE-ANALYTICS-DCA-EXECUTIONS] Conditional-order executions ──
+//
+// order_executions rows reference an `orders` row (embedded via the order_id
+// FK) for everything the swaps table carries inline: wallet, token pair, chain,
+// and the committed router. We surface these executions as analytics trades so
+// real protocol volume from DCA / limit / stop-loss fills is no longer invisible.
+
+// Committed router address → instant-swap source name, so a Velora DCA fill
+// buckets together with instant `velora` swaps in Best Routes. MUST mirror
+// contracts/order-engine/executor/swap-route.js `ROUTER_SOURCE` and the
+// per-chain whitelist in src/lib/order-engine/config.ts. Keyed lowercased
+// (addresses are globally unique → chain-agnostic).
+const ROUTER_TO_SOURCE: Record<string, string> = {
+  // Base (8453)
+  '0x6a000f20005980200259b80c5102003040001068': 'velora',     // ParaSwap/Velora Augustus V6
+  '0x2626664c2603336e57b271c5c0b26f421741e481': 'uniswapv3',  // Uniswap SwapRouter02
+  // Mainnet (1)
+  '0x111111125421ca6dc452d289314280a0f8842a65': '1inch',      // 1inch v6
+  '0xdef1c0ded9bec7f1a1670819833240f027b25eff': '0x',         // 0x Exchange Proxy
+  '0xdef171fe48cf0115b1d80b88dc8eab59176fee57': 'velora',     // Augustus v5 (ParaSwap) → group with velora
+  '0xe592427a0aece92de3edee1f18e0157c05861564': 'uniswapv3',  // Uniswap V3 SwapRouter
+}
+
+// orders.order_type → the dashboard's TradeType (analytics-types.ts). The
+// AnalyticsDashboard ActivityFeed already renders these labels/colours.
+const ORDER_TYPE_EVENT: Record<string, string> = {
+  dca: 'dca_buy',
+  limit: 'limit_fill',
+  stop_loss: 'sltp_trigger',
+}
+
+/**
+ * Per-execution gross input amount, in raw token units.
+ * The keeper records the FULL signed order amount on every execution row
+ * (executor.js recordExecution → dbOrder.amount_in), so a single chunk is
+ * orders.amount_in / dca_total. For limit/stop-loss orders dca_total is 1, so
+ * this is the full amount (one execution). BigInt floor division, string in/out.
+ */
+function perChunkAmount(amountInRaw: unknown, dcaTotal: number): string {
+  try {
+    const total = BigInt(String(amountInRaw ?? '0').split('.')[0] || '0')
+    const n = BigInt(Math.max(Math.floor(dcaTotal) || 1, 1))
+    return (total / n).toString()
+  } catch {
+    // Non-numeric amount_in (DB stores it as free TEXT). Fall back to 0 — the
+    // execution still counts as a trade but contributes $0, the same as an
+    // instant swap with an unpriceable token. Warn so silent data corruption is
+    // visible in logs rather than vanishing into a zero-volume row.
+    console.warn('[analytics] perChunkAmount: invalid amount_in', { amountInRaw, dcaTotal })
+    return '0'
+  }
+}
+
+/**
+ * Convert an order_executions row (with its `orders` parent embedded) into a
+ * TradeEvent. Returns null when the parent order didn't embed (can't value or
+ * attribute it). USD volume uses the SAME estimateUsdValue path swaps fall back
+ * to — no fabrication, no stored USD invented.
+ */
+export function executionToEvent(row: Record<string, unknown>): TradeEvent | null {
+  const orderRaw = (row as { orders?: unknown }).orders
+  const order = (Array.isArray(orderRaw) ? orderRaw[0] : orderRaw) as
+    | Record<string, unknown>
+    | null
+    | undefined
+  if (!order) return null
+
+  const createdAt = row.created_at ? new Date(row.created_at as string) : new Date()
+  const ts = createdAt.getTime()
+
+  const tokenInSymbol = (order.token_in_symbol as string) || ''
+  const tokenOutSymbol = (order.token_out_symbol as string) || ''
+  const dcaTotal = Math.max(Number(order.dca_total) || 1, 1)
+  const chunkRaw = perChunkAmount(order.amount_in, dcaTotal)
+
+  const volumeUsd = estimateUsdValue(chunkRaw, tokenInSymbol)
+  const humanIn = rawToHuman(chunkRaw, tokenInSymbol)
+
+  const router = ((order.router as string) || '').toLowerCase()
+  const orderType = (order.order_type as string) || ''
+
+  return {
+    id: (row.id as string) || (row.tx_hash as string) || '',
+    type: ORDER_TYPE_EVENT[orderType] || 'order',
+    wallet: (order.wallet as string) || '',
+    timestamp: ts,
+    hour: createdAt.getUTCHours(),
+    tokenIn: tokenInSymbol,
+    tokenInAddress: (order.token_in as string) || '',
+    tokenOut: tokenOutSymbol,
+    tokenOutAddress: (order.token_out as string) || '',
+    amountIn: humanIn.toString(),
+    // The keeper does not parse output logs (execution.amount_out is '0'), so we
+    // leave the per-chunk output blank rather than display a wrong/zero figure.
+    amountOut: '',
+    volumeUsd,
+    // Order fees are taken on-chain; we don't have a confirmed per-chunk fee and
+    // won't fabricate one. Fees aren't a dashboard KPI, so 0 is safe here.
+    feeUsd: 0,
+    source: ROUTER_TO_SOURCE[router] || 'order',
+    txHash: (row.tx_hash as string) || '',
+    chainId: Number(order.chain_id) || 1,
+  }
+}
+
 function filterByPeriod(events: TradeEvent[], ms: number): TradeEvent[] {
   const cutoff = Date.now() - ms
   return events.filter(e => e.timestamp >= cutoff)
@@ -222,30 +371,70 @@ function computePeriodMetrics(events: TradeEvent[]): PeriodMetrics {
   }
 }
 
-function computeFromSwaps(swaps: Record<string, unknown>[]): DashboardResponse {
-  const events = swaps.map(swapToEvent)
+/**
+ * [CHORE-ANALYTICS-DCA-EXECUTIONS] Merge instant swaps with conditional-order
+ * executions into a single, de-duplicated, newest-first event stream, then
+ * aggregate. Executions are valued by the SAME functions as swaps (see
+ * executionToEvent → estimateUsdValue), never fabricated. A tx that somehow
+ * appears in both tables is counted exactly once (the swaps row wins), so
+ * volume / trade counts can never double-count.
+ */
+export function computeDashboard(
+  swaps: Record<string, unknown>[],
+  executions: Record<string, unknown>[],
+): DashboardResponse {
+  const swapEvents = swaps.map(swapToEvent)
+  const execEvents = executions
+    .map(executionToEvent)
+    .filter((e): e is TradeEvent => e !== null)
 
+  const seenTx = new Set<string>()
+  const events: TradeEvent[] = []
+  // Swaps first so a tx present in both tables resolves to the swap row.
+  for (const e of [...swapEvents, ...execEvents]) {
+    if (e.txHash) {
+      if (seenTx.has(e.txHash)) continue
+      seenTx.add(e.txHash)
+    }
+    events.push(e)
+  }
+  events.sort((a, b) => b.timestamp - a.timestamp)
+
+  return buildDashboard(events)
+}
+
+function buildDashboard(events: TradeEvent[]): DashboardResponse {
   // Period metrics
   const allTime = computePeriodMetrics(events)
   const last24h = computePeriodMetrics(filterByPeriod(events, 24 * 60 * 60 * 1000))
   const last7d = computePeriodMetrics(filterByPeriod(events, 7 * 24 * 60 * 60 * 1000))
   const last30d = computePeriodMetrics(filterByPeriod(events, 30 * 24 * 60 * 60 * 1000))
 
-  // Source metrics
-  const sourceMap = new Map<string, { count: number; volume: number }>()
+  // Source metrics. tradeCount + volume include every event (so order
+  // executions show up in Best Routes), but `winRate` keeps its original
+  // meaning — "% of times this source won the QUOTE" — by using a swaps-only
+  // numerator and denominator. Conditional-order fills have no quote contest to
+  // win, so they neither inflate nor dilute win rates: instant-swap win-rate
+  // numbers are byte-identical to before this change. [CHORE-ANALYTICS-DCA-EXECUTIONS]
+  const sourceMap = new Map<string, { count: number; volume: number; swapCount: number }>()
+  let swapTotal = 0
   for (const e of events) {
-    const entry = sourceMap.get(e.source) || { count: 0, volume: 0 }
+    const entry = sourceMap.get(e.source) || { count: 0, volume: 0, swapCount: 0 }
     entry.count++
     entry.volume += e.volumeUsd
+    if (e.type === 'swap') {
+      entry.swapCount++
+      swapTotal++
+    }
     sourceMap.set(e.source, entry)
   }
-  const total = events.length || 1
+  const swapDenom = swapTotal || 1
   const bySource = Array.from(sourceMap.entries())
     .map(([source, data]) => ({
       source,
       tradeCount: data.count,
       volumeUsd: data.volume,
-      winRate: (data.count / total) * 100,
+      winRate: (data.swapCount / swapDenom) * 100,
     }))
     .sort((a, b) => b.volumeUsd - a.volumeUsd)
 
