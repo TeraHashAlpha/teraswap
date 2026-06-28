@@ -71,6 +71,15 @@ import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus
 import { computeFreezeScore, scoreTier } from "./freeze-score.js"
 import { buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk
 import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
+// [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
+// + parent-order status transition (pure, unit-tested in record-execution.test.mjs).
+import {
+  decodeOrderExecuted,
+  shouldRecord,
+  nextOrderStatus,
+  buildExecutionRow,
+  recordExecutionRow,
+} from "./record-execution.js"
 import {
   alertNewDcaPosition,
   alertLowGas,
@@ -413,20 +422,10 @@ async function unlockStaleOrders() {
   )
 }
 
-async function recordExecution(orderId, txHash, amountIn, amountOut, gasUsed) {
-  await supabaseFetch("order_executions", {
-    method: "POST",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({
-      order_id: orderId,
-      tx_hash: txHash,
-      amount_in: amountIn,
-      amount_out: amountOut || "0",
-      gas_used: gasUsed || "0",
-      executed_at: new Date().toISOString(),
-    }),
-  })
-}
+// [CHORE-KEEPER-RECORD-EXECUTIONS] The per-fill order_executions write now lives in
+// record-execution.js (recordExecutionRow): idempotent (keyed by tx_hash), schema-valid
+// (writes execution_number + fee_amount, drops the phantom executed_at column), and it
+// CHECKS res.ok instead of swallowing failures. See the confirmed-success block below.
 
 // [DCA-OBS] Keeper-side freeze read. Reads the SAME circuit_breaker table the
 // admin route + create-order API use (single fixed row id='dca'). FAIL-OPEN:
@@ -1012,7 +1011,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // Wait for confirmation
       const receipt = await txPublicClient.waitForTransactionReceipt({ hash: txHash })
 
-      if (receipt.status === "success") {
+      if (shouldRecord(receipt)) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... executed! Gas: ${receipt.gasUsed.toString()}`)
 
         // [EX-MON] Track gas spent
@@ -1027,38 +1026,26 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [DCA-OBS] A successful execution clears the consecutive-failure signal.
         consecutiveExecFailures = 0
 
-        // Update status based on order type
+        const now = new Date().toISOString()
+
+        // [CHORE-KEEPER-RECORD-EXECUTIONS] Advance the parent order's status / exec-count.
+        // DCA cycles active⇄active until the final chunk, then 'executed' (UI "N of M" reads
+        // orders.dca_executed); limit/stop-loss complete on their single fill.
         if (dbOrder.order_type === "dca") {
-          const newExecCount = (dbOrder.dca_executed || 0) + 1
-          const now = new Date().toISOString()
-          if (newExecCount >= dbOrder.dca_total) {
-            // All DCA executions complete
-            await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
-              method: "PATCH",
-              headers: { Prefer: "return=minimal" },
-              body: JSON.stringify({
-                status: "executed",
-                dca_executed: newExecCount,
-                dca_last_exec: now,
-                executed_at: now,
-                tx_hash: txHash,
-                updated_at: now,
-              }),
-            })
-          } else {
-            // DCA: back to active for next interval
-            await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
-              method: "PATCH",
-              headers: { Prefer: "return=minimal" },
-              body: JSON.stringify({
-                status: "active",
-                dca_executed: newExecCount,
-                dca_last_exec: now,
-                tx_hash: txHash,
-                updated_at: now,
-              }),
-            })
+          const next = nextOrderStatus(dbOrder)
+          const orderPatch = {
+            status: next.status,
+            dca_executed: next.dca_executed,
+            dca_last_exec: now,
+            tx_hash: txHash,
+            updated_at: now,
           }
+          if (next.complete) orderPatch.executed_at = now
+          await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
+            method: "PATCH",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify(orderPatch),
+          })
         } else {
           // Limit / Stop-Loss: single execution
           await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
@@ -1066,21 +1053,31 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
             headers: { Prefer: "return=minimal" },
             body: JSON.stringify({
               status: "executed",
-              executed_at: new Date().toISOString(),
+              executed_at: now,
               tx_hash: txHash,
-              updated_at: new Date().toISOString(),
+              updated_at: now,
             }),
           })
         }
 
-        // Record execution
-        await recordExecution(
-          dbOrder.id,
-          txHash,
-          dbOrder.amount_in,
-          null, // amountOut from events (could parse logs)
-          receipt.gasUsed.toString()
-        )
+        // [CHORE-KEEPER-RECORD-EXECUTIONS] Record ONE order_executions row for this
+        // confirmed fill (idempotent, keyed by tx_hash). Per-chunk amount_in/amount_out/fee
+        // are decoded from the on-chain OrderExecuted event (authoritative); analytics (#228)
+        // values the chunk from the parent order, so no USD is written here. Failures are
+        // surfaced, not swallowed (the original silent-400 bug that left the table empty).
+        const decoded = decodeOrderExecuted(receipt.logs, CONTRACT_ADDRESS)
+        if (!decoded) {
+          log(`  WARNING: OrderExecuted event not found in tx ${txHash.slice(0, 10)}... — recording with fallback amounts`)
+        }
+        const execRow = buildExecutionRow({ dbOrder, txHash, receipt, decoded })
+        const rec = await recordExecutionRow(supabaseFetch, execRow)
+        if (rec.recorded) {
+          log(`  Recorded execution #${execRow.execution_number} for order ${dbOrder.id.slice(0, 8)}...`)
+        } else if (rec.reason === "duplicate") {
+          log(`  Execution for tx ${txHash.slice(0, 10)}... already recorded — skipping`)
+        } else {
+          console.error(`  Failed to record execution for ${dbOrder.id.slice(0, 8)}...: ${rec.error}`)
+        }
 
         executed++
       } else {
