@@ -97,6 +97,22 @@ jobs:
       - name: Catalog address guard
         run: npx vitest run src/lib/chains/catalog-address-guard.test.ts
 
+  fee-usd-guard:
+    # [chore/swap-fee-usd-fix] Gate the platform-fee USD valuation. The full vitest
+    # suite is not run in CI (only single-file guards), so this pins the regression:
+    # a non-oracle fee token (e.g. AERO) must be valued from the reliably-priced side
+    # (~$0.002), never the fee amount × the other leg's ETH price (~$5.79).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Platform-fee USD guard
+        run: npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
