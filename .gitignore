@@ -110,3 +110,10 @@ workers/*/node_modules/
 /lib/
 # Generated worker lockfile (package.json is tracked; lock left out per existing convention)
 /workers/monitor-tick-cron/package-lock.json
+
+# ── [chore/category-scroll-fix] Playwright real-render tests ──
+# Generated harness (esbuild bundle + compiled Tailwind, built in globalSetup) + runner output.
+/e2e/**/.harness/
+/test-results/
+/playwright-report/
+/playwright/.cache/

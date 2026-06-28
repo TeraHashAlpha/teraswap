@@ -335,19 +335,35 @@ describe('TokenSelector — wallet disconnected', () => {
   })
 })
 
-describe('[chore/dca-ux-tweaks] category chip row is horizontally scrollable (no wrap/clip)', () => {
+describe('[chore/category-scroll-fix] category chip row — DOM contract (structure only)', () => {
+  // NOTE: JSDOM does NO layout/overflow, so it can NOT prove the row actually
+  // scrolls — the original `[chore/dca-ux-tweaks]` test "passed" while the row was
+  // un-scrollable for desktop mouse users. These cases only assert the DOM contract
+  // the real scroller depends on; the ACTUAL scroll proof (overflow + wheel + drag +
+  // last-category reachable) lives in e2e/category-chips/category-chips.pw.ts, which
+  // renders the real component in real Chromium.
   function modalRoot() {
     return screen.getByText(/Select token/i).closest('div')!.parentElement! as HTMLElement
   }
 
-  it('the chip row scrolls horizontally — overflow-x-auto + flex-nowrap, never flex-wrap', () => {
+  it('the chip row has the single-row scroll contract — overflow-x-auto + flex-nowrap, never flex-wrap', () => {
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     fireEvent.click(screen.getByText('Select'))
     const chipRow = modalRoot().querySelector('.overflow-x-auto') as HTMLElement
     expect(chipRow).toBeTruthy()
-    expect(chipRow.classList.contains('overflow-x-auto')).toBe(true) // swipe / horizontal scroll
+    expect(chipRow.classList.contains('overflow-x-auto')).toBe(true) // horizontal scroller
     expect(chipRow.classList.contains('flex-nowrap')).toBe(true)     // single row, no wrapping
-    expect(chipRow.classList.contains('flex-wrap')).toBe(false)      // would clip / multi-row
+    expect(chipRow.classList.contains('flex-wrap')).toBe(false)      // would multi-row / not overflow
+  })
+
+  it('chips do not shrink to fit — each chip is shrink-0 so the row genuinely overflows', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    fireEvent.click(screen.getByText('Select'))
+    const chipRow = modalRoot().querySelector('.overflow-x-auto') as HTMLElement
+    const chips = within(chipRow).getAllByRole('button')
+    // Without shrink-0, flex items compress to fit and the row never overflows
+    // (so there is nothing to scroll). Guard that invariant here.
+    expect(chips.every((b) => b.classList.contains('shrink-0'))).toBe(true)
   })
 
   it('multiple categories are rendered in that one scroll row (all reachable on overflow)', () => {

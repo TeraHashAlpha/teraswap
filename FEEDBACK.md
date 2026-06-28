@@ -5183,3 +5183,93 @@ Goal: the keeper must record each confirmed on-chain `executeOrder` to the DB so
 
 ### Deploy
 - Keeper: `git pull` + `pm2 restart` (picks up `executor.js` + new `record-execution.js`). **No DB migration required** (idempotency is app-level); optionally apply `idx_executions_tx_hash` from `schema.sql`. **No frontend change** — the Analytics (#228) and UI reads were already correct on `main`; this chore only makes the keeper write the rows they read.
+
+---
+
+## Feedback — chore/category-scroll-fix (token-selector category chips real-browser scroll)
+
+Goal: the TokenSelector category chips don't scroll horizontally in a real browser
+(owner confirmed, tried multiple ways). A JSDOM regression test "passed" but proved
+nothing (JSDOM does no layout). Branch `chore/category-scroll-fix` off `origin/main`.
+
+### Diagnosed root cause (verified in REAL Chromium @1280px — not JSDOM)
+The premise "it doesn't scroll" was half-misleading: the row **already overflowed and
+was already touch/trackpad-scrollable**. Measured on the exact `origin/main` markup in
+headless Chromium:
+
+| signal | value | meaning |
+|---|---|---|
+| `scrollWidth` vs `clientWidth` | **846 > 350** | the row genuinely overflows (content is there) |
+| `scrollLeft` after a vertical mouse wheel | **0** | a mouse wheel does NOT scroll it |
+| `scrollbar-width` | **none** (`no-scrollbar`) | no scrollbar to drag |
+| `mask-image` @1280px | **none** | the `tab-bar-fade` hint is `@media (max-width:639px)` → desktop has no affordance |
+| last category reachable by a mouse user | **false** | clipped + no input path |
+
+**The culprit was not an ancestor clipping the x-axis and not chip-wrapping** (the two
+things the prompt asked me to check first — I confirmed neither). The portal mounts the
+modal on `<body>` and the card is overflow-visible; the chips were already
+`whitespace-nowrap` so `min-width:auto` kept them from compressing → the row overflowed
+fine. The real bug is **desktop-mouse INPUT + discoverability**: `no-scrollbar` (class on
+the row) hides the only draggable handle, `tab-bar-fade` (the affordance) is mobile-only,
+and a classic vertical mouse wheel can't scroll a horizontal container without a JS
+handler — and there was none. So for a desktop mouse user the row is un-scrollable AND
+gives no hint there's more, i.e. "it doesn't scroll".
+
+### What changed
+- **New `src/components/CategoryChips.tsx`** (extracted from the inline row in
+  `TokenSelector.tsx`): bounded-width scroller (`w-full max-w-full flex-nowrap
+  overflow-x-auto`) with **`shrink-0`** chips, plus three desktop-mouse fixes:
+  drag-to-scroll (pointer events, with the drag-terminating click swallowed so a drag
+  never toggles a filter), vertical-wheel→horizontal-scroll translation, and dynamic
+  left/right **edge-fade affordances shown on every viewport** (toggled by scroll
+  position). Touch/trackpad behaviour is unchanged; filter behaviour (tap toggles, tap
+  active again clears) is byte-identical.
+- `TokenSelector.tsx` renders `<CategoryChips/>` in place of the inline row (same
+  `availableCategories`/`activeCategory` wiring → cancel/filter paths untouched).
+
+### Assumption that turned out wrong (worth a library note)
+- **React's `onWheel` is a PASSIVE listener** (React attaches `wheel`/`touchstart`/
+  `touchmove` as passive on the root), so `e.preventDefault()` inside a JSX `onWheel`
+  handler is a silent no-op (and warns). This version attaches a **native non-passive**
+  `wheel` listener via `useEffect` (`{ passive: false }`) so the page doesn't also scroll.
+  Drag uses **window-level** pointermove/up (not `setPointerCapture`, which would hijack
+  the chip `click` target and break the filter toggle).
+
+### Tests
+- **Real-browser proof** = `e2e/category-chips/category-chips.pw.ts` (Playwright/Chromium,
+  desktop @1280px). Asserts `scrollWidth>clientWidth`, the last chip starts off-screen,
+  the right fade shows / left hidden, a **mouse wheel** moves `scrollLeft`, **programmatic
+  scroll** moves it, after scrolling to the end the **last category is fully visible** and
+  the fades flip, **drag-to-scroll** moves the row, and a real click toggles while a drag
+  does not. The harness (`build.mjs` globalSetup) bundles the REAL component with esbuild +
+  the app's compiled Tailwind and loads it via `file://` — **no dev server, no network, no
+  secrets**, so it's deterministic in CI.
+- The misleading JSDOM block (`[chore/dca-ux-tweaks] … is horizontally scrollable`) was
+  **reframed, not deleted** → `[chore/category-scroll-fix] … DOM contract (structure
+  only)`, with an explicit comment that JSDOM cannot prove scrolling and that the real
+  proof is the `.pw.ts`. Kept the still-valid structural guards and added one asserting
+  every chip is `shrink-0` (the invariant that makes the row overflow).
+
+### CI / tooling notes for the Architect
+- **Separate workflow `.github/workflows/e2e.yml`** (additive; pinned action SHAs, Node 22,
+  `--ignore-scripts=false` so esbuild's platform binary + the tailwind CLI are present).
+  Rationale: the frontend CI (`ci.yml`) runs **no full vitest suite** — only single-file
+  guard jobs — so a new test is only actually gated if it has its own job. The `.pw.ts`
+  files are named `*.pw.ts` (not `*.test.ts`) so vitest never picks them up and vice-versa;
+  `e2e` is excluded from `tsconfig` (Playwright transpiles its own files).
+- **New devDependencies:** `@playwright/test@1.61.0` and `esbuild@0.25.12`.
+  - `@playwright/test` was first pinned at `1.50.1` (to match locally-cached Chromium) but
+    that **reds the `audit` gate** — `playwright <1.55.1` has HIGH `GHSA-7mvr-c777-76hp`
+    (browser download without SSL-cert verification). Bumped to **1.61.0**, the newest
+    patched release that is also `>=7d` old per `.npmrc min-release-age=7` (1.61.1 was only
+    6d old). Audit gate is green (0 high/critical); CI's `playwright install --with-deps
+    chromium` fetches the matching browser (rev 1228).
+- **Sonatype-guide MCP was unavailable** (auth required in this environment), so the two
+  dev deps were vetted via the project's own enforced gates (`npm audit` high/critical +
+  `lockfile-lint`) instead — both green. Flagging so the Architect can run a Sonatype pass.
+
+### Concern (pre-existing, not fixed here)
+- `tab-bar-fade` (mobile-only) is still used by the **swap-mode tab bar** in
+  `src/app/page.tsx`, which has the *same* class of desktop-mouse limitation (overflow with
+  no desktop affordance / wheel handler). Out of scope for this chore (different component),
+  but it's the same bug pattern and a candidate to reuse `CategoryChips`'s approach.
