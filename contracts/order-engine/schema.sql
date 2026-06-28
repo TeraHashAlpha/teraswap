@@ -125,6 +125,14 @@ CREATE INDEX IF NOT EXISTS idx_orders_chain_status ON orders (chain_id, status);
 CREATE INDEX IF NOT EXISTS idx_orders_chain_active ON orders (chain_id, status, created_at) WHERE status = 'active';
 
 CREATE INDEX IF NOT EXISTS idx_executions_order  ON order_executions (order_id);
+-- [CHORE-KEEPER-RECORD-EXECUTIONS] Defense-in-depth idempotency for the keeper's per-fill
+-- recording. One executeOrder tx emits exactly one OrderExecuted event, so tx_hash is unique
+-- per fill. The keeper is ALREADY idempotent at the app layer (recordExecutionRow checks for an
+-- existing row by tx_hash before inserting), so this index is OPTIONAL and the keeper does not
+-- depend on it — it just hardens against duplicate fills from a concurrent writer. OPS: apply to
+-- the LIVE Supabase DB manually (CI does NOT run migrations against prod); creation requires the
+-- table to be free of duplicate tx_hash rows. Safe to re-run (IF NOT EXISTS).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executions_tx_hash ON order_executions (tx_hash);
 
 -- ══════════════════════════════════════════════════════════════
 -- [L-05] ROW LEVEL SECURITY — Proper policies
