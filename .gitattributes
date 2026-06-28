@@ -1,0 +1,4 @@
+# FEEDBACK.md is append-only (each prompt adds a section, never removes).
+# Use the built-in union merge driver so concurrent appends from both sides
+# are auto-concatenated instead of producing recurring merge conflicts.
+FEEDBACK.md merge=union
