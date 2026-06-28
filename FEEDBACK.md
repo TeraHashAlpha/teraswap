@@ -5258,3 +5258,16 @@ full suite 2067/2067 green, typecheck clean, lint clean.
 - The verification worktree borrowed `node_modules` from another branch and was missing
   `cuer@0.0.3` (declared in `package-lock.json`, used by `connect-modal-qr.test.ts`). Installed it
   locally for the clean full-suite run; CI's `npm ci` installs it from the lockfile.
+
+### Adversarial review — fixes applied
+A multi-lens adversarial review of this diff surfaced two real issues (both fixed here, with tests):
+- **checkRoute over-blocked on 502.** `/api/quote` returns HTTP 502 for BOTH a genuine no-route
+  ("No valid quotes") AND transient all-timeout / all-network blips ("All sources timed out",
+  "Network error"). The first cut treated *every* 502 as a no-route, which would false-block a
+  genuinely routable imported token during a brief upstream blip — contradicting the documented
+  fail-open policy. `checkRoute` now inspects the 502 body and blocks ONLY on /no valid quotes/i;
+  transient/unknown 502s fail OPEN.
+- **Stale-pair race in the DCA gate.** Switching the buy/sell token while a routability check was
+  in-flight could apply the old pair's "no route" block to the newly-selected (unchecked) pair (the
+  TokenSelectors aren't disabled during the check). Added a monotonic `routeCheckSeq` guard: a token
+  change bumps the id and the in-flight result is dropped if the id no longer matches.

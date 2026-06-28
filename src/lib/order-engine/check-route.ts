@@ -7,11 +7,14 @@
  * approves/signs, so the order panel can warn + BLOCK up front (used especially for imported tokens).
  *
  * Fail-OPEN policy: only a DEFINITIVE "no route" blocks —
- *   - HTTP 502 (the quote route returns this when every aggregator source fails → "No valid quotes"),
- *   - or a 200 with an empty quote set.
- * Everything else (network error, 429 rate-limit, 503 sequencer-down/halt, 4xx/5xx) fails OPEN so a
- * transient quote outage never blocks a legitimate order — the executor still protects each fill via
- * the on-chain minAmountOut.
+ *   - HTTP 502 whose body is the genuine no-route error ("No valid quotes"), or
+ *   - a 200 with an empty quote set.
+ * Everything else fails OPEN so a transient quote outage never blocks a legitimate order — the
+ * executor still protects each fill via the on-chain minAmountOut. NOTE: /api/quote also returns 502
+ * for transient all-timeout / all-network blips ("All sources timed out", "Network error"), so we
+ * must inspect the 502 body and NOT treat every 502 as a no-route (that would false-block a routable
+ * imported token during a brief upstream blip). 429 / 503 (sequencer-down/halt) / 500 / network error
+ * all fail OPEN too.
  */
 
 export interface RouteCheckParams {
@@ -56,8 +59,16 @@ export async function checkRoute(p: RouteCheckParams): Promise<RouteCheckResult>
       return hasRoute ? { routable: true } : { routable: false, reason: NO_ROUTE_REASON }
     }
 
-    // 502 = the meta-quote pipeline found no valid quotes from any source → no route on this chain.
-    if (res.status === 502) return { routable: false, reason: NO_ROUTE_REASON }
+    // 502 is ambiguous on /api/quote: a genuine no-route ("No valid quotes") AND transient
+    // all-timeout / all-network blips both surface as 502. Block ONLY on the genuine no-route message;
+    // fail OPEN for transient/unknown 502 bodies so a blip never false-blocks a routable token.
+    if (res.status === 502) {
+      const body = await res.json().catch(() => null)
+      const msg = body && typeof body.error === 'string' ? body.error : ''
+      return /no valid quotes/i.test(msg)
+        ? { routable: false, reason: NO_ROUTE_REASON }
+        : { routable: true }
+    }
 
     // 429 / 503 / 500 / other → transient or ambiguous: fail OPEN (don't block on infra/ops issues).
     return { routable: true }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
@@ -278,8 +278,11 @@ function CreateDCAForm({
   const [checkingRoute, setCheckingRoute] = useState(false)
   const hasImported = tokenIn?.category === 'Imported' || tokenOut?.category === 'Imported'
 
-  // Clear a stale block when the user changes either token (a new pair is a fresh check).
-  useEffect(() => { setRouteBlock(null) }, [tokenIn, tokenOut])
+  // Monotonic id for routability checks: a token change (or a newer check) bumps it, so an in-flight
+  // check whose pair was swapped mid-flight is dropped instead of blocking the now-selected pair.
+  const routeCheckSeq = useRef(0)
+  // Clear a stale block AND invalidate any in-flight check when the user changes either token.
+  useEffect(() => { setRouteBlock(null); routeCheckSeq.current++ }, [tokenIn, tokenOut])
 
   const parts = DCA_TOTAL_PRESETS[partsIdx]
   const interval = DCA_INTERVAL_PRESETS[intervalIdx]
@@ -356,6 +359,7 @@ function CreateDCAForm({
     // The check uses the per-chunk amount (what each execution actually swaps). checkRoute fails OPEN
     // on transient quote outages, so only a definitive "no route" blocks.
     if (hasImported) {
+      const seq = ++routeCheckSeq.current // claim this check
       setCheckingRoute(true)
       let routable = true
       let reason: string | undefined
@@ -373,6 +377,12 @@ function CreateDCAForm({
         reason = result.reason
       } finally {
         setCheckingRoute(false)
+      }
+      // Drop a stale result if the user changed the pair (or started a newer check) mid-flight —
+      // never block/sign the now-selected pair on a check that ran against the old one.
+      if (routeCheckSeq.current !== seq) {
+        stopWaitingSound()
+        return
       }
       if (!routable) {
         stopWaitingSound()

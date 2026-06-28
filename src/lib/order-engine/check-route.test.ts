@@ -70,6 +70,29 @@ describe('checkRoute — no route (BLOCK)', () => {
   })
 })
 
+// /api/quote returns HTTP 502 for BOTH a genuine no-route ("No valid quotes") AND transient
+// all-timeout / all-network blips. Only the former is a real no-route — the transient 502s must
+// fail OPEN so a brief upstream blip never blocks a legitimately routable imported token.
+describe('checkRoute — transient 502 fails OPEN (not a real no-route)', () => {
+  it('does not block a 502 whose body is "All sources timed out"', async () => {
+    fetchMock.mockResolvedValue(jsonRes(502, { error: 'All sources timed out. Check your connection and try again.' }))
+    const res = await checkRoute(PARAMS)
+    expect(res.routable).toBe(true)
+  })
+
+  it('does not block a 502 whose body is "Network error"', async () => {
+    fetchMock.mockResolvedValue(jsonRes(502, { error: 'Network error. Check your internet connection.' }))
+    const res = await checkRoute(PARAMS)
+    expect(res.routable).toBe(true)
+  })
+
+  it('fails OPEN on a 502 with no parseable body (ambiguous)', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 502, json: async () => { throw new Error('no body') } })
+    const res = await checkRoute(PARAMS)
+    expect(res.routable).toBe(true)
+  })
+})
+
 describe('checkRoute — fail OPEN on transient/ambiguous errors', () => {
   it('does not block on a network error (fetch throws)', async () => {
     fetchMock.mockRejectedValue(new Error('network down'))

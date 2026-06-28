@@ -48,7 +48,7 @@ vi.mock('@/components/TokenSelector', () => ({
   default: ({ selected, onSelect, hideNativeInput }: { selected: { symbol?: string } | null; onSelect: (t: unknown) => void; hideNativeInput?: boolean }) => (
     <div data-testid="token-selector">
       <span>{selected?.symbol ?? 'Select'}</span>
-      {hideNativeInput && (
+      {hideNativeInput ? (
         <button
           data-testid="pick-imported-input"
           onClick={() => onSelect({
@@ -56,6 +56,14 @@ vi.mock('@/components/TokenSelector', () => ({
             symbol: 'ETHFI', name: 'Ether.fi', decimals: 18, logoURI: '', category: 'Imported', chainId: 8453,
           })}
         >pick-imported</button>
+      ) : (
+        <button
+          data-testid="pick-other-output"
+          onClick={() => onSelect({
+            address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+            symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: '', category: 'Stablecoin', chainId: 8453,
+          })}
+        >pick-out</button>
       )}
     </div>
   ),
@@ -64,7 +72,7 @@ vi.mock('@/components/BetaDisclaimer', () => ({ default: () => <div /> }))
 vi.mock('./OrderReviewModal', () => ({ default: () => null }))
 vi.mock('./OrderCancelReviewModal', () => ({ default: () => null }))
 
-import { renderWithProviders, screen, fireEvent, waitFor } from '@/test-utils/render'
+import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import DCAPanel from './DCAPanel'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
@@ -108,6 +116,24 @@ describe('DCAPanel — routability gate (imported tokens)', () => {
 
     await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
     expect(checkRouteMock).not.toHaveBeenCalled()
+  })
+
+  it('drops a stale route block when the pair changes while the check is in flight', async () => {
+    let resolveCheck!: (v: { routable: boolean; reason?: string }) => void
+    checkRouteMock.mockReturnValue(new Promise(r => { resolveCheck = r }))
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('pick-imported-input')) // tokenIn → ETHFI (imported)
+    enterAmount('100')
+    startDca() // begins the in-flight check for the ETHFI pair
+    await waitFor(() => expect(checkRouteMock).toHaveBeenCalledTimes(1))
+
+    // User swaps the BUY token mid-check → a different pair that was never checked.
+    fireEvent.click(screen.getByTestId('pick-other-output'))
+    // The OLD check now resolves not-routable.
+    await act(async () => { resolveCheck({ routable: false, reason: 'No swap route found on this network.' }) })
+
+    // The stale block must NOT be applied to the newly-selected pair.
+    expect(screen.queryByText(/no swap route found/i)).toBeNull()
   })
 
   it('passes the per-chunk amount and target chainId to checkRoute', async () => {
