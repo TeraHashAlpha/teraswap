@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const useAccountMock = vi.fn()
 const useChainIdMock = vi.fn(() => 8453)
 const useTokenBalancesMock = vi.fn()
+const useTokenBalanceMock = vi.fn()
 const createOrderMock = vi.fn()
 
 vi.mock('wagmi', () => ({
@@ -26,6 +27,13 @@ vi.mock('wagmi', () => ({
 
 vi.mock('@/hooks/useTokenBalances', () => ({
   useTokenBalances: () => useTokenBalancesMock(),
+}))
+
+// [CHORE-DCA-UX-FIXES] Bug 1: the spend line now reads the SELECTED token directly (balanceOf) as a
+// fallback for imported tokens absent from the curated catalog. Mock it; default = no direct value
+// (so curated-catalog tests below are driven purely by useTokenBalances, unchanged).
+vi.mock('@/hooks/useTokenBalance', () => ({
+  useTokenBalance: () => useTokenBalanceMock(),
 }))
 
 vi.mock('@/hooks/useOrderEngine', () => ({
@@ -90,6 +98,19 @@ function setBalances(opts: { raw?: bigint; formatted?: string; isLoading?: boole
   })
 }
 
+// Direct balanceOf for the SELECTED token (the imported-token fallback). Default: no value resolved.
+function setDirectBalance(
+  opts: { raw?: bigint; formatted?: string; hasValue?: boolean; isLoading?: boolean } = {},
+) {
+  useTokenBalanceMock.mockReturnValue({
+    raw: opts.raw ?? 0n,
+    hasValue: opts.hasValue ?? false,
+    formatted: opts.formatted,
+    isLoading: opts.isLoading ?? false,
+    isError: false,
+  })
+}
+
 const amountInput = () => screen.getByPlaceholderText('0.00') as HTMLInputElement
 const pctButton = (label: '25%' | '50%' | '100%') => screen.getByRole('button', { name: label })
 
@@ -98,6 +119,34 @@ beforeEach(() => {
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true })
   useChainIdMock.mockReturnValue(8453) // Base — WETH default input
   setBalances({ raw: 2_500000000000000000n, formatted: '2.5' }) // 2.5 WETH
+  setDirectBalance() // no direct value by default — curated catalog drives the tests above
+})
+
+// [CHORE-DCA-UX-FIXES] Bug 1: a selected token that is ABSENT from the curated useTokenBalances
+// catalog (imported/unverified) still shows its balance + drives quick-fill, via the direct read.
+describe('DCAPanel spend step — imported-token balance (direct read fallback)', () => {
+  it('shows the direct balance when the selected token is not in the curated catalog', () => {
+    setBalances({}) // catalog multicall has no entry for this token
+    setDirectBalance({ raw: 100_000000000000000000n, formatted: '100', hasValue: true })
+    renderWithProviders(<DCAPanel />)
+    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: 100')
+  })
+
+  it('quick-fill 100% uses the direct (imported) balance to the wei', () => {
+    setBalances({}) // not in catalog
+    setDirectBalance({ raw: ONE + 1n, formatted: '1', hasValue: true })
+    renderWithProviders(<DCAPanel />)
+    expect(pctButton('100%')).not.toBeDisabled()
+    fireEvent.click(pctButton('100%'))
+    expect(amountInput()).toHaveValue('1.000000000000000001')
+  })
+
+  it('still shows "—" when neither the catalog nor the direct read has a value yet', () => {
+    setBalances({})
+    setDirectBalance({ hasValue: false, isLoading: true })
+    renderWithProviders(<DCAPanel />)
+    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: —')
+  })
 })
 
 describe('DCAPanel spend step — balance line', () => {

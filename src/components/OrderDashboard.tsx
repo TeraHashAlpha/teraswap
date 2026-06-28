@@ -7,6 +7,7 @@ import { useOrderEngine } from '@/hooks/useOrderEngine'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { AutonomousOrder, AutonomousOrderStatus } from '@/lib/order-engine'
 import { chainlinkAggregatorAbi } from '@/lib/chainlink'
+import { failedOrderReason } from '@/lib/order-engine/failed-reason'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import ExecutionTimeline from './ExecutionTimeline'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
@@ -352,10 +353,11 @@ function OrderCard({
             )}
           </div>
 
-          {/* Error message */}
-          {order.error && (
+          {/* Error / failure reason — [CHORE-DCA-UX-FIXES] Bug 3b: a failed order always shows a
+              reason, even when the keeper persisted none (order.error === null). */}
+          {(order.error || order.status === 'error') && (
             <div className="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-[11px] text-red-400">
-              {order.error}
+              {failedOrderReason(order.error)}
             </div>
           )}
 

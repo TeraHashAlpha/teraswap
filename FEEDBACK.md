@@ -5212,3 +5212,49 @@ CI does **not** run the full vitest suite — the only vitest invocation was the
 
 ### Deploy
 - Frontend only (`vercel` deploy). No contract, no keeper, no DB change.
+---
+
+## Feedback — CHORE-DCA-UX-FIXES (chore/dca-ux-fixes)
+
+Three DCA order-creation UX bugs, frontend-only (no contract/keeper change). Implemented TDD;
+full suite 2067/2067 green, typecheck clean, lint clean.
+
+### Edge case
+- **Bug 2 (approve → sign hang) had two root causes, not one.** The visible cause was the on-chain
+  allowance read lagging behind the approve receipt (`needsApproval` stayed `true` until the refetch
+  propagated, so the modal sat on a disabled "Approve"). But `useWaitForTransactionReceipt` was also
+  called **without `chainId`**, so on Base the confirmation could watch the wrong chain and never
+  fire. Fixed both: pinned the receipt watcher to the frozen `chainId`, and added a receipt-scoped
+  `approvedFor` snapshot so the gate opens on confirmation independent of the allowance refetch. The
+  snapshot is keyed to the exact approved amount, so a later larger order re-closes the gate.
+
+### Concern
+- **The routability gate (Bug 3a) is scoped to imported tokens only** (`category === 'Imported'` on
+  either leg), not all pairs. Rationale: keep the curated happy path zero-latency / zero-extra-RPC and
+  match the spec's "esp. imported ⚠️ tokens". Trade-off: a *curated-but-thin* pair with no route would
+  still slip through to the keeper. If the Architect wants belt-and-suspenders, broaden the trigger to
+  all pairs (the `checkRoute` helper already supports it).
+- **`checkRoute` fails OPEN on transient/ambiguous errors** (429 rate-limit, 503 sequencer-down/halt,
+  network error) — only a definitive "no route" (HTTP 502 / empty quote set) blocks. So an unroutable
+  order created *during a quote outage* could still be signed and then fail at the keeper. That failure
+  is now non-silent (see below), so the trade-off favours not blocking legitimate orders during
+  outages.
+
+### Test gap (keeper-side, out of scope here)
+- **The keeper persists no failure reason.** `updateOrderStatus(id, "failed")` writes only `status` +
+  `updated_at`, never the `error` column (the revert reason is logged + held in memory only). Bug 3b's
+  UI now shows a generic default reason (`failedOrderReason()`) so a failed order is never a bare
+  "Failed", but users can't see *why*. A follow-up keeper change to persist the actual revert reason
+  into `orders.error` would let the UI show specifics (it already renders `order.error` when present).
+
+### Concern (poll semantics)
+- **`fetchActiveOrders` now also requests terminal statuses** (`executed,failed,cancelled,expired`)
+  so the in-app poll catches an order's transition out of "active" — previously a keeper-failed order
+  was never re-read by the poll and stayed "active" forever / appeared to vanish. The function name is
+  now a slight misnomer (it fetches *tracked* orders incl. terminal). Consider renaming to
+  `fetchTrackedOrders` in a follow-up (kept the name here to avoid churn — no test pins it).
+
+### Env note (not a code issue)
+- The verification worktree borrowed `node_modules` from another branch and was missing
+  `cuer@0.0.3` (declared in `package-lock.json`, used by `connect-modal-qr.test.ts`). Installed it
+  locally for the clean full-suite run; CI's `npm ci` installs it from the lockfile.

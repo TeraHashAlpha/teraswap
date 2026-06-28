@@ -185,6 +185,28 @@ describe('OrderDashboard — explorer link [RQ-2026-06-11]', () => {
   })
 })
 
+describe('OrderDashboard — [CHORE-DCA-UX-FIXES] failed order reason', () => {
+  it('shows a default reason for a failed order when the keeper persisted no error', () => {
+    const failed = makeOrder({ status: 'error', error: null })
+    useOrderEngineMock.mockReturnValue({
+      orders: [failed],
+      activeOrders: [],
+      historyOrders: [failed],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+    })
+    renderWithProviders(<OrderDashboard />)
+    // Failed orders live under the Cancelled tab; the status badge already reads "Failed".
+    fireEvent.click(screen.getByText(/Cancelled \(1\)/))
+    expect(screen.getByText(/Failed/)).toBeInTheDocument()
+    // Expand the card to reveal the reason.
+    fireEvent.click(screen.getByText(/WETH/).closest('button')!)
+    expect(screen.getByText(/could not be executed/i)).toBeInTheDocument()
+  })
+})
+
 describe('OrderDashboard — cancel all', () => {
   it('renders Cancel All button when more than one active order exists', () => {
     const active = [makeOrder({ status: 'active' }), makeOrder({ status: 'active' })]

@@ -21,13 +21,15 @@ const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockRefetchAllowance = vi.fn<() => Promise<unknown>>()
 const mockReadContractImpl =
   vi.fn<(opts: { functionName: string }) => { data: unknown; refetch: () => Promise<unknown> }>()
-const mockReceiptImpl = vi.fn<() => { isSuccess: boolean }>()
+const mockReceiptImpl =
+  vi.fn<(opts?: { hash?: string; chainId?: number }) => { isSuccess: boolean; isError?: boolean }>()
 
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: '0x1111111111111111111111111111111111111111' })),
   useReadContract: (opts: { functionName: string }) => mockReadContractImpl(opts),
   useWriteContract: () => ({ writeContractAsync: mockWriteContractAsync }),
-  useWaitForTransactionReceipt: () => mockReceiptImpl(),
+  // Pass the receipt-watcher opts through so tests can assert the chainId it watches.
+  useWaitForTransactionReceipt: (opts: { hash?: string; chainId?: number }) => mockReceiptImpl(opts),
 }))
 
 import { renderHook, act } from '@testing-library/react'
@@ -132,5 +134,46 @@ describe('useOrderApproval — gate opens after approve confirms', () => {
     // The confirm effect re-fetches the allowance so the gate can open.
     expect(mockRefetchAllowance).toHaveBeenCalled()
     expect(result.current.status).toBe('ready')
+  })
+
+  // [CHORE-DCA-UX-FIXES] Bug 2: after the approve tx CONFIRMS, the flow must auto-advance to Sign
+  // even if the on-chain allowance read hasn't repropagated yet (the old code left needsApproval=true
+  // until the refetch landed, so the modal hung on a disabled "Approve" until a tab leave/re-enter).
+  it('AUTO-ADVANCES to sign on receipt confirm even while the allowance read is still stale', () => {
+    // The allowance read still reports the OLD zero allowance (refetch not yet propagated)…
+    mockReadContractImpl.mockImplementation(() => ({ data: 0n, refetch: mockRefetchAllowance }))
+    mockReceiptImpl.mockReturnValue({ isSuccess: true })
+    const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 1))
+    // …yet the receipt confirmation alone opens the gate so the Sign step shows.
+    expect(result.current.isApproved).toBe(true)
+    expect(result.current.needsApproval).toBe(false)
+  })
+
+  it('watches the approve receipt on the FROZEN chainId (Base 8453, not the connected chain)', () => {
+    renderHook(() => useOrderApproval(WETH, TOTAL, 8453))
+    const watchedChains = mockReceiptImpl.mock.calls.map(c => c[0]?.chainId)
+    expect(watchedChains).toContain(8453)
+  })
+
+  it('reports an error when the approve tx receipt REVERTS on-chain (handles rejected/failed)', () => {
+    mockReceiptImpl.mockReturnValue({ isSuccess: false, isError: true })
+    const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 1))
+    expect(result.current.status).toBe('error')
+    expect(result.current.error).toMatch(/fail/i)
+  })
+
+  it('RE-CLOSES the gate when the order total grows beyond what was just approved', () => {
+    // A confirmed approve for TOTAL must not green-light a later, LARGER order — the receipt-based
+    // gate is scoped to the exact approved amount, so a bigger amountIn needs a fresh approval.
+    mockReadContractImpl.mockImplementation(() => ({ data: 0n, refetch: mockRefetchAllowance }))
+    mockReceiptImpl.mockReturnValue({ isSuccess: true })
+    const { result, rerender } = renderHook(
+      ({ amt }: { amt: bigint }) => useOrderApproval(WETH, amt, 1),
+      { initialProps: { amt: TOTAL } },
+    )
+    expect(result.current.needsApproval).toBe(false) // approved for TOTAL
+    rerender({ amt: TOTAL * 2n })
+    expect(result.current.isApproved).toBe(false)
+    expect(result.current.needsApproval).toBe(true)
   })
 })
