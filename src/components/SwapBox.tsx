@@ -735,7 +735,7 @@ export default function SwapBox() {
                   : '(MEV protected)'}
               </p>
             )}
-            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
+            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
           </div>
         )}
         {/* Quote loading skeleton */}
