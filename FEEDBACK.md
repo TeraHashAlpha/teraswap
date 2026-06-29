@@ -5360,3 +5360,74 @@ A multi-lens adversarial review of this diff surfaced two real issues (both fixe
   in-flight could apply the old pair's "no route" block to the newly-selected (unchecked) pair (the
   TokenSelectors aren't disabled during the check). Added a monotonic `routeCheckSeq` guard: a token
   change bumps the id and the in-flight result is dropped if the id no longer matches.
+
+---
+
+## Feedback — CHORE-DCA-POSITIONS-DASHBOARD (chore/dca-positions-dashboard)
+
+A captivating DCA Positions dashboard: per active order a "Mission Control" card whose centrepiece is
+a live next-buy countdown (HH:MM:SS, 1s tick) inside an SVG fills progress ring, a route badge, real
+per-buy/total amounts, expiry, and a newest-first fills timeline with per-fill USD + BaseScan links.
+Frontend only (no contract/keeper change). Built TDD; full suite 2146 green, typecheck + lint clean.
+Designed via a multi-agent scout→design-panel→synthesis workflow ("Mission Control" angle won).
+
+### Edge case (pre-existing bug fixed)
+- **`rowToOrder` hardcoded `tokenInDecimals`/`tokenOutDecimals` = 18.** Orders hydrated from Supabase
+  always reported 18-decimal tokens, so a USDC(6) spend amount rendered ~1e12× too large. Now reads
+  `row.token_in_decimals`/`token_out_decimals` (defaulting to 18 for legacy rows). Required threading
+  `token_in_decimals`/`token_out_decimals` into `OrderRow` (the columns existed in the DB + the keeper
+  persists them; the type just never modelled them).
+
+### Edge case (pre-existing bug fixed)
+- **Explorer links were hardcoded to mainnet Etherscan** (`ETHERSCAN_TX`, `explorerTxUrl(tx, 1)`) even
+  though DCA runs on Base. Threaded `orders.chain_id` → `OrderRow.chain_id` → `AutonomousOrder.chainId`
+  (and added it to the executions endpoint's order meta). The moved `DCAOrderCard` and the new fills
+  timeline now link chain-aware (BaseScan for Base). `chainId` is OPTIONAL on `AutonomousOrder`
+  (defaults to 1) so existing fixtures/legacy records don't break; real DCA rows carry `chain_id=8453`.
+
+### Concern (cross-boundary duplication, by convention)
+- `usd.ts` (`APPROX_PRICES`/`fillUsd`) and `route-source.ts` (`ROUTER_TO_SOURCE`/`routeLabel`) MIRROR
+  the analytics route (#228) and the keeper's `swap-route.js`. I deliberately did NOT refactor the
+  tested analytics route to import them — the keeper is JS and can't import TS, so these maps are
+  already duplicated-with-"MUST mirror"-comment across boundaries (the project's existing pattern). The
+  new TS modules carry the same mirror comment. If we later want the analytics route to consume them
+  (TS→TS), that's a safe follow-up its test would guard.
+
+### No fabrication
+- Per-fill USD uses `fillUsd` (shared `APPROX_PRICES`) and returns null → renders "—" (never "$0") for
+  tokens with no known price (e.g. imported ETHFI). DCA's `priceFeed = address(0)` means
+  `price_at_execution` is null; amounts come only from real `order_executions` rows.
+
+### No-jank / no-hammer
+- The 1s countdown (`CountdownCenter`) recomputes remaining from the target each tick (no drift), stops
+  once due, and NEVER fetches. Per-card execution data refreshes on a 30s interval that PAUSES while
+  the tab is hidden and refetches on a `dca_execution` event for that order (`useOrderExecutions`).
+  Order state stays reactive via `useOrderEngine`.
+
+### Refactor note (no regression)
+- The existing inline `DCAPositionsList`/`DCAOrderCard` were removed from `DCAPanel`; `DCAOrderCard`
+  moved verbatim to `src/components/dca/DCAOrderCard.tsx` (used for HISTORY, defensive about partial
+  order data) and `DCADashboard` now owns the Positions tab. Cancel/Remove/Cancel-All/Remove-All wiring
+  and the tab count are preserved; the existing DCAPanel tests (create form, freeze-403, failed-order
+  reason, routability, ux-polish) stay green.
+
+### Visual QA caveat
+- States/behaviour are covered by component tests; live visual QA is pending a seeded Base environment
+  (DCA is gated behind `NEXT_PUBLIC_DCA_ENABLED`, so the dashboard isn't reachable in prod yet). Brand
+  styling follows the design synthesis (exact cream/gold/success tokens, constellation glow, reduced-
+  motion-safe motion).
+
+### Adversarial review — fixes applied
+A multi-lens review of this diff confirmed 3 real issues (all fixed here, with tests); the double-1s-timer concerns were dismissed (cheap same-props re-renders), but I added a small due-guard anyway:
+- **`APPROX_PRICES` had 8 dead mixed-case keys** (`stETH`, `wstETH`, `cbETH`, `rETH`, `sUSD`, `crvUSD`,
+  `renBTC`, `tBTC`) — the lookup uppercases the symbol, so those tokens silently rendered "—" instead
+  of their price. Uppercased the literals in `usd.ts` AND mirrored the identical latent bug in the
+  analytics route (`route.test.ts` stays green). Safe direction (under-display, never fabricated).
+- **Undefined Tailwind classes `text-cream-30` / `text-cream-40`** in DCAFillsTimeline (the cream scale
+  has 35/20, not 30/40 — `40` lives under `gold`). They emitted no CSS → wrong inherited color. Changed
+  to `text-cream-35`.
+- **NextBuyRing orbit dot was offset ~90°** from the arc head: the `-π/2` start offset was double-
+  applied under the `-rotate-90` svg. Dropped it (the dot now shares the arc's θ=0 origin); added a
+  geometry test pinning the dot's SVG-local position.
+- **MissionControlCard accent interval** now stops once the buy is due (was re-rendering every second
+  forever while the order stayed live) — addresses the dismissed "re-renders forever" nit.

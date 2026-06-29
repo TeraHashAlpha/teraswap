@@ -40,7 +40,7 @@ export async function GET(
   const { data: order } = await supabase
     .from('orders')
     .select(
-      'wallet, token_in_symbol, token_out_symbol, token_in_decimals, token_out_decimals, dca_total, dca_executed, tx_hash, amount_out, gas_used, executed_at, executed_price',
+      'wallet, chain_id, token_in_symbol, token_out_symbol, token_in_decimals, token_out_decimals, dca_total, dca_executed, tx_hash, amount_out, gas_used, executed_at, executed_price',
     )
     .eq('id', id)
     .single()
@@ -59,6 +59,7 @@ export async function GET(
     .order('execution_number', { ascending: true })
 
   const orderMeta = {
+    chain_id: order.chain_id ?? null,
     token_in_symbol: order.token_in_symbol,
     token_out_symbol: order.token_out_symbol,
     token_in_decimals: order.token_in_decimals,

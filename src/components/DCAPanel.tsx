@@ -18,7 +18,7 @@ import {
   getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
 } from '@/lib/order-engine'
-import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
+import type { CreateOrderConfig } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
 import { getWrappedNative } from '@/lib/chains/registry'
 import { findChainToken } from '@/lib/chains/tokens'
@@ -26,12 +26,12 @@ import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { quickFillRaw, perChunkRaw } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
-import { failedOrderReason } from '@/lib/order-engine/failed-reason'
+import DCADashboard from './dca/DCADashboard'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import { ETHERSCAN_TX, NATIVE_ETH } from '@/lib/constants'
+import { NATIVE_ETH } from '@/lib/constants'
 import BetaDisclaimer from './BetaDisclaimer'
 
 // ── Map token symbols to Chainlink feeds ─────────────────
@@ -174,12 +174,14 @@ export default function DCAPanel() {
           onSubmit={createOrder}
         />
       ) : (
-        <DCAPositionsList
+        <DCADashboard
           active={activeDCA}
           history={historyDCA}
+          latestEvent={latestEvent}
           onCancel={cancelOrder}
           onCancelAll={cancelAllOrders}
           onRemove={removeOrder}
+          onCreate={() => setTab('create')}
         />
       )}
 
@@ -683,194 +685,6 @@ function CreateDCAForm({
             : `Start DCA — ${parts} buys over ${totalDuration}`
           }
         </button>
-      )}
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════
-//  DCA POSITIONS LIST
-// ══════════════════════════════════════════════════════════
-
-function DCAPositionsList({
-  active,
-  history,
-  onCancel,
-  onCancelAll,
-  onRemove,
-}: {
-  active: AutonomousOrder[]
-  history: AutonomousOrder[]
-  onCancel: (id: string) => void
-  onCancelAll: () => Promise<void>
-  onRemove: (id: string) => void
-}) {
-  if (active.length === 0 && history.length === 0) {
-    return (
-      <div className="rounded-2xl border border-cream-08 bg-surface-secondary p-8 text-center">
-        <p className="text-[15px] text-cream-50">No DCA positions yet</p>
-        <p className="mt-1 text-[12px] text-cream-35">Create one to start autonomous dollar cost averaging</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-3">
-      {active.length > 0 && (
-        <>
-          {active.length > 1 && (
-            <div className="flex justify-end">
-              <button
-                onClick={() => { onCancelAll(); playClick() }}
-                className="rounded-lg border border-danger/30 px-2.5 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors"
-              >
-                Cancel All
-              </button>
-            </div>
-          )}
-          {active.map(order => (
-            <DCAOrderCard key={order.id} order={order} onCancel={() => { playClick(); onCancel(order.id) }} />
-          ))}
-        </>
-      )}
-
-      {history.length > 0 && (
-        <>
-          <div className="flex items-center justify-between px-1 pt-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-cream-35">
-              History
-            </span>
-            {history.length > 1 && (
-              <button
-                onClick={() => { history.forEach(o => onRemove(o.id)); playClick() }}
-                className="rounded-lg border border-cream-08 px-2.5 py-1 text-[10px] text-cream-35 hover:text-cream-50 transition-colors"
-              >
-                Remove All
-              </button>
-            )}
-          </div>
-          {history.map(order => (
-            <DCAOrderCard key={order.id} order={order} onRemove={() => { playClick(); onRemove(order.id) }} />
-          ))}
-        </>
-      )}
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════
-//  DCA ORDER CARD
-// ══════════════════════════════════════════════════════════
-
-function DCAOrderCard({
-  order,
-  onCancel,
-  onRemove,
-}: {
-  order: AutonomousOrder
-  onCancel?: () => void
-  onRemove?: () => void
-}) {
-  const progress = order.dcaTotal > 0 ? order.dcaExecuted / order.dcaTotal : 0
-  const isActive = order.status === 'active' || order.status === 'executing' || order.status === 'partially_filled'
-
-  const statusColor: Record<string, string> = {
-    signing: 'bg-yellow-400',
-    active: 'bg-success',
-    executing: 'bg-blue-400',
-    partially_filled: 'bg-cyan-400',
-    filled: 'bg-cream-50',
-    cancelled: 'bg-danger',
-    expired: 'bg-cream-35',
-    error: 'bg-danger',
-  }
-
-  const statusLabel: Record<string, string> = {
-    signing: 'Signing...',
-    active: 'Active',
-    executing: 'Executing...',
-    partially_filled: `${order.dcaExecuted}/${order.dcaTotal} fills`,
-    filled: 'Completed',
-    cancelled: 'Cancelled',
-    expired: 'Expired',
-    error: 'Failed',
-  }
-
-  const amountIn = order.order?.amountIn
-    ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
-    : '—'
-
-  // Time remaining
-  const timeLeft = order.expiresAt - Date.now()
-  const daysLeft = Math.max(0, Math.floor(timeLeft / (1000 * 60 * 60 * 24)))
-  const hoursLeft = Math.max(0, Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)))
-
-  return (
-    <div className="rounded-2xl border border-cream-08 bg-surface-secondary p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[15px] font-semibold text-cream">
-            {order.tokenInSymbol} → {order.tokenOutSymbol}
-          </span>
-          <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-            isActive ? 'bg-success/15 text-success' : order.status === 'error' ? 'bg-danger/15 text-danger' : 'bg-cream-08 text-cream-35'
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${statusColor[order.status] || 'bg-cream-35'}`} />
-            {statusLabel[order.status] || order.status}
-          </span>
-        </div>
-        {isActive && onCancel && (
-          <button onClick={onCancel} className="rounded-lg border border-danger/30 px-2 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors">
-            Cancel
-          </button>
-        )}
-        {!isActive && onRemove && (
-          <button onClick={onRemove} className="rounded-lg border border-cream-08 px-2 py-1 text-[10px] text-cream-50 hover:text-cream transition-colors">
-            Remove
-          </button>
-        )}
-      </div>
-
-      {/* Progress bar */}
-      <div className="mb-2 h-1.5 rounded-full bg-cream-08 overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-gold to-gold-light transition-all duration-500"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-      <div className="flex justify-between text-[11px] text-cream-35 mb-3">
-        <span>{order.dcaExecuted} of {order.dcaTotal} buys</span>
-        <span>{Number(amountIn).toFixed(2)} {order.tokenInSymbol} total</span>
-      </div>
-
-      {/* Time remaining */}
-      {isActive && timeLeft > 0 && (
-        <div className="rounded-xl border border-cream-08 bg-surface-primary p-2.5 text-[12px] mb-3">
-          <div className="flex justify-between">
-            <span className="text-cream-35">Expires in</span>
-            <span className="font-semibold text-cream">{daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h`}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Error / failure reason — [CHORE-DCA-UX-FIXES] Bug 3b: a failed order always shows a reason,
-          even when the keeper persisted none (order.error === null), so it never reads as a bare
-          "Failed" and never vanishes without context. */}
-      {(order.error || order.status === 'error') && (
-        <p className="mb-2 text-[11px] text-red-400">{failedOrderReason(order.error)}</p>
-      )}
-
-      {/* Tx hash */}
-      {order.txHash && (
-        <a
-          href={`${ETHERSCAN_TX}${order.txHash}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block text-[11px] text-cream-gold hover:underline"
-        >
-          View on Etherscan ↗
-        </a>
       )}
     </div>
   )

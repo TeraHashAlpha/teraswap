@@ -657,6 +657,34 @@ describe('useOrderEngine — token symbols from Supabase row [P196]', () => {
   })
 })
 
+describe('useOrderEngine — [CHORE-DCA-POSITIONS-DASHBOARD] chain + decimals threading', () => {
+  it('maps chain_id and the REAL token decimals from the Supabase row', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r1', chain_id: 8453, token_in_decimals: 6, token_out_decimals: 18 }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    const o = result.current.orders[0]
+    expect(o.chainId).toBe(8453)
+    expect(o.tokenInDecimals).toBe(6) // regression guard: rowToOrder used to hardcode 18
+    expect(o.tokenOutDecimals).toBe(18)
+  })
+
+  it('defaults chain to mainnet (1) and decimals to 18 when the row omits them (legacy)', async () => {
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r2', chain_id: undefined, token_in_decimals: undefined, token_out_decimals: undefined }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    const o = result.current.orders[0]
+    expect(o.chainId).toBe(1)
+    expect(o.tokenInDecimals).toBe(18)
+    expect(o.tokenOutDecimals).toBe(18)
+  })
+})
+
 describe('useOrderEngine — derived filters', () => {
   it('separates active vs history orders by status', async () => {
     mockFetchUserOrders.mockResolvedValue([

@@ -184,10 +184,12 @@ const TOKEN_DECIMALS: Record<string, number> = {
 }
 
 // Approximate USD prices for volume estimation when amount_in_usd is null
+// [CHORE-DCA-POSITIONS-DASHBOARD] Keys UPPERCASE to match the toUpperCase() lookup in
+// estimateUsdValue — mixed-case literals (stETH, cbETH, …) were dead keys that never resolved.
 const APPROX_PRICES: Record<string, number> = {
-  ETH: 3500, WETH: 3500, stETH: 3500, wstETH: 4000, cbETH: 3600, rETH: 3800,
-  USDC: 1, USDT: 1, DAI: 1, FRAX: 1, LUSD: 1, sUSD: 1, crvUSD: 1, GHO: 1, PYUSD: 1,
-  WBTC: 95000, renBTC: 95000, tBTC: 95000,
+  ETH: 3500, WETH: 3500, STETH: 3500, WSTETH: 4000, CBETH: 3600, RETH: 3800,
+  USDC: 1, USDT: 1, DAI: 1, FRAX: 1, LUSD: 1, SUSD: 1, CRVUSD: 1, GHO: 1, PYUSD: 1,
+  WBTC: 95000, RENBTC: 95000, TBTC: 95000,
   UNI: 12, LINK: 18, AAVE: 200, MKR: 1500, CRV: 0.5, LDO: 2,
 }
 
