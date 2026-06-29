@@ -33,10 +33,17 @@ export interface OrderRow {
   order_hash: string
   order_type: 'limit' | 'stop_loss' | 'dca'
   status: AutonomousOrderStatus
+  // [CHORE-DCA-POSITIONS-DASHBOARD] Chain the order executes on; drives BaseScan links + chain-keyed
+  // logos. Nullable for legacy rows (consumers default to mainnet=1).
+  chain_id?: number | null
   token_in: string
   token_out: string
   token_in_symbol: string | null
   token_out_symbol: string | null
+  // [CHORE-DCA-POSITIONS-DASHBOARD] Real token decimals (persisted at create time). Previously ignored
+  // by rowToOrder (hardcoded 18) → wrong amounts for non-18 tokens like USDC(6).
+  token_in_decimals?: number | null
+  token_out_decimals?: number | null
   amount_in: string
   min_amount_out: string
   target_price: string

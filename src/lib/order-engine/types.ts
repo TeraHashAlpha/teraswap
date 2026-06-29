@@ -73,6 +73,10 @@ export interface AutonomousOrder {
   signature: string             // EIP-712 signature
   status: AutonomousOrderStatus
   orderType: OrderType
+  // [CHORE-DCA-POSITIONS-DASHBOARD] Chain the order executes on (from orders.chain_id). Optional for
+  // legacy/local records; consumers default to mainnet (1). DCA is Base (8453) → drives BaseScan links
+  // + chain-keyed token logos.
+  chainId?: number
   // Token metadata (for display)
   tokenInSymbol: string
   tokenInDecimals: number

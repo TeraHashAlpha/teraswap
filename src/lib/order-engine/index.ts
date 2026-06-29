@@ -10,3 +10,8 @@ export { OrderType, PriceCondition, ORDER_EIP712_TYPES } from './types'
 export type { OnChainOrder, AutonomousOrder, AutonomousOrderStatus, CreateOrderConfig, OrderEngineEvent } from './types'
 export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, fetchDCAExecutions, subscribeToOrders } from './supabase'
 export type { OrderRow, ExecutionRow } from './supabase'
+// [CHORE-DCA-POSITIONS-DASHBOARD] Positions dashboard helpers (pure, unit-tested).
+export { nextBuyAtMs, isDue, formatHMS } from './dca-countdown'
+export { fillUsd, APPROX_PRICES } from './usd'
+export { sourceForRouter, routeLabel, ROUTER_TO_SOURCE } from './route-source'
+export { failedOrderReason, DEFAULT_FAILED_REASON } from './failed-reason'

@@ -44,6 +44,7 @@ import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getWrappedNative } from '@/lib/chains/registry'
 import { findChainToken } from '@/lib/chains/tokens'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
 // ── Order hash computation (matches contract's getOrderHash) ──
 const ORDER_TYPEHASH = keccak256(toBytes(
@@ -218,10 +219,14 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     signature: row.signature,
     status: mapDbStatus(row.status as string),
     orderType: typeMap[row.order_type] ?? OrderType.LIMIT,
+    // [CHORE-DCA-POSITIONS-DASHBOARD] Thread the chain (BaseScan links + chain-keyed logos) and the
+    // REAL token decimals (was hardcoded 18 → wrong amounts for USDC(6) etc.). Safe defaults preserve
+    // legacy/mainnet behaviour byte-identically.
+    chainId: row.chain_id ?? DEFAULT_CHAIN_ID,
     tokenInSymbol: row.token_in_symbol || '',
-    tokenInDecimals: 18,
+    tokenInDecimals: row.token_in_decimals ?? 18,
     tokenOutSymbol: row.token_out_symbol || '',
-    tokenOutDecimals: 18,
+    tokenOutDecimals: row.token_out_decimals ?? 18,
     dcaExecuted: row.dca_executed,
     dcaTotal: row.dca_total ?? 0,
     createdAt: new Date(row.created_at).getTime(),
@@ -599,6 +604,9 @@ export function useOrderEngine() {
       order,
       signature: '',
       status: 'signing',
+      // [CHORE-DCA-POSITIONS-DASHBOARD] Stamp the chain it's signed under (= connected chain) so the
+      // optimistic record drives BaseScan links/logos before the Supabase round-trip.
+      chainId,
       orderType: config.orderType,
       tokenInSymbol,
       tokenInDecimals,
