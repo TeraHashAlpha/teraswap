@@ -114,7 +114,7 @@ export default function WalletModal({ open, onClose }: Props) {
       {/* Modal */}
       <div
         ref={modalRef}
-        className="relative z-10 w-full animate-slide-up overflow-hidden rounded-t-2xl border border-cream-15 bg-surface shadow-2xl shadow-black/40 sm:w-[320px] sm:animate-fade-slide-in sm:rounded-2xl"
+        className="relative z-10 max-h-[92dvh] w-full animate-slide-up overflow-y-auto overscroll-contain rounded-t-2xl border border-cream-15 bg-surface shadow-2xl shadow-black/40 sm:w-[320px] sm:animate-fade-slide-in sm:rounded-2xl"
       >
         {/* Drag pill — mobile bottom-sheet affordance */}
         <div className="mx-auto mt-3 mb-1 h-1 w-10 rounded-full bg-cream-15 sm:hidden" />
@@ -156,7 +156,7 @@ export default function WalletModal({ open, onClose }: Props) {
               </span>
               <button
                 onClick={handleCopy}
-                className="mt-1 flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono text-cream-50 transition-colors hover:bg-cream-08 hover:text-cream-80"
+                className="mt-1 inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono text-cream-50 transition-colors hover:bg-cream-08 hover:text-cream-80"
               >
                 {shortAddr}
                 <CopyIcon copied={copied} />
@@ -165,7 +165,7 @@ export default function WalletModal({ open, onClose }: Props) {
           ) : (
             <button
               onClick={handleCopy}
-              className="flex items-center gap-2 rounded-full px-3 py-1 font-mono text-sm font-medium text-cream transition-colors hover:bg-cream-08"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-full px-3 py-1 font-mono text-sm font-medium text-cream transition-colors hover:bg-cream-08"
             >
               {shortAddr}
               <CopyIcon copied={copied} />
@@ -243,7 +243,7 @@ export default function WalletModal({ open, onClose }: Props) {
         <div className="px-4 pb-4">
           <button
             onClick={() => { disconnect(); onClose() }}
-            className="group flex w-full items-center justify-center gap-2 rounded-xl border border-danger/20 bg-danger/5 px-3 py-2.5 text-xs font-semibold text-danger/70 transition-all hover:border-danger/40 hover:bg-danger/10 hover:text-danger"
+            className="group flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-danger/20 bg-danger/5 px-3 py-2.5 text-xs font-semibold text-danger/70 transition-all hover:border-danger/40 hover:bg-danger/10 hover:text-danger"
           >
             <DisconnectIcon />
             Disconnect

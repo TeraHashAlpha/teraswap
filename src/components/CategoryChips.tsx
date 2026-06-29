@@ -142,7 +142,7 @@ export default function CategoryChips({ categories, active, onToggle }: Props) {
                 }
                 onToggle(cat)
               }}
-              className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+              className={`inline-flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition ${
                 isActive
                   ? 'border-cream-gold text-cream'
                   : 'border-cream-08 bg-surface-tertiary text-cream-80 hover:border-cream-35 hover:bg-cream-05 hover:text-cream'

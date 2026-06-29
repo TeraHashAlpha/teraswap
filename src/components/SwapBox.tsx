@@ -812,7 +812,7 @@ export default function SwapBox() {
             <span className="font-semibold">&#128737; Swap blocked by server-side price protection.</span>{' '}
             The swap output is {priceGuardDeviation != null ? `${(Math.abs(priceGuardDeviation) * 100).toFixed(1)}%` : 'significantly'} below the fair market price
             verified by DefiLlama oracle. This may indicate extreme slippage, low liquidity, or a mispriced token.
-            <span className="mt-1 block text-[10px] text-danger/80">
+            <span className="mt-1 block text-xs text-danger/80">
               Try a smaller amount, a different token pair, or wait for liquidity to stabilize. This protection cannot be overridden.
             </span>
           </div>
@@ -826,7 +826,7 @@ export default function SwapBox() {
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked — oracle data unsafe.</span>{' '}
             {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
-            <span className="mt-1 block text-[10px] text-danger/80">
+            <span className="mt-1 block text-xs text-danger/80">
               This guards against trading on a manipulated or outdated oracle and cannot be overridden. Try again once the feed updates.
             </span>
           </div>
@@ -837,7 +837,7 @@ export default function SwapBox() {
         {isExtremeBlock && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(pairCheck.deviation * 100).toFixed(1)}% from the Chainlink oracle — far beyond normal price impact.
-            <span className="mt-1 block text-[10px] text-danger/80">
+            <span className="mt-1 block text-xs text-danger/80">
               This likely indicates price manipulation or a broken quote and cannot be overridden. Try a smaller amount or a different pair.
             </span>
           </div>
@@ -850,12 +850,12 @@ export default function SwapBox() {
         {priceImpactConsentNeeded && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
             <span className="font-semibold">&#9888; High price impact:</span> this route executes ~{(pairCheck.deviation * 100).toFixed(1)}% below the Chainlink reference price — expected slippage on a low-liquidity route, not an oracle problem.
-            <label className="mt-2 flex items-center gap-2 text-[11px] text-warning/90">
+            <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
               <input
                 type="checkbox"
                 checked={priceImpactAccepted}
                 onChange={(e) => setAcceptedDeviation(e.target.checked ? pairCheck.deviation : null)}
-                className="h-3.5 w-3.5 accent-warning"
+                className="h-5 w-5 accent-warning"
               />
               I understand the price impact and want to proceed.
             </label>
@@ -867,7 +867,7 @@ export default function SwapBox() {
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked — {depegCheck.symbol} depeg.</span>{' '}
             {depegCheck.message}
-            <span className="mt-1 block text-[10px] text-danger/80">
+            <span className="mt-1 block text-xs text-danger/80">
               The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
             </span>
           </div>
@@ -877,12 +877,12 @@ export default function SwapBox() {
         {depegConsentNeeded && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
             <span className="font-semibold">&#9888; Possible depeg:</span> {depegCheck.message}
-            <label className="mt-2 flex items-center gap-2 text-[11px] text-warning/90">
+            <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
               <input
                 type="checkbox"
                 checked={depegAccepted}
                 onChange={(e) => setAcceptedDepeg(e.target.checked ? depegCheck.divergence : null)}
-                className="h-3.5 w-3.5 accent-warning"
+                className="h-5 w-5 accent-warning"
               />
               I understand {depegCheck.symbol} may be depegged and want to proceed.
             </label>
@@ -895,7 +895,7 @@ export default function SwapBox() {
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
                 <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
                 This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
-                <span className="mt-1 block text-[10px] text-danger/80">
+                <span className="mt-1 block text-xs text-danger/80">
                   This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
                 </span>
               </div>
@@ -904,7 +904,7 @@ export default function SwapBox() {
                 <span className="font-semibold">&#9888; No oracle verification — high value swap.</span>{' '}
                 This token has no Chainlink price feed. The quoted price cannot be independently verified.
                 Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} will be blocked.
-                <span className="mt-1 block text-[10px] text-warning/80">
+                <span className="mt-1 block text-xs text-warning/80">
                   Verify the price manually on CoinGecko or Etherscan before proceeding.
                 </span>
               </div>
@@ -972,14 +972,14 @@ export default function SwapBox() {
             <button
               type="button"
               onClick={() => setMevProtected(true)}
-              className="font-medium text-cream-65 underline-offset-2 transition hover:text-cream hover:underline"
+              className="-my-3 inline-flex min-h-[44px] items-center font-medium text-cream-65 underline-offset-2 transition hover:text-cream hover:underline sm:my-0 sm:min-h-0"
             >
               Enable
             </button>
             <button
               type="button"
               onClick={dismissMevHint}
-              className="text-cream-35 transition hover:text-cream-65"
+              className="-my-3 inline-flex h-11 w-11 items-center justify-center text-cream-35 transition hover:text-cream-65 sm:m-0 sm:h-auto sm:w-auto"
               aria-label="Dismiss MEV protection hint"
             >
               ×

@@ -238,7 +238,7 @@ export default function AnalyticsDashboard() {
       <div className="flex items-center gap-1.5">
         {(['all', '24h', '7d', '30d'] as Period[]).map((p) => (
           <button key={p} onClick={() => setPeriod(p)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            className={`inline-flex min-h-[44px] items-center rounded-lg px-3 text-xs font-semibold transition ${
               period === p
                 ? 'bg-cream/10 text-cream'
                 : 'text-cream-35 hover:bg-cream-08 hover:text-cream-65'

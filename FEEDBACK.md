@@ -5507,3 +5507,58 @@ A multi-lens review confirmed 3 issues (all fixed; the rest dismissed):
 Dismissed (verified non-issues): a stale `drag.moved` (re-initialised on every pointerdown);
 OrderDashboard counts wrapping to 2 lines after dropping `truncate` (acceptable — wraps, never clips);
 the Analytics axis dates at 11px (decorative, not load-bearing critical text).
+
+## Feedback — chore/mobile-ux-polish-2 (mobile UX PR 2/2)
+
+### Harness "root cause" — the premise was already resolved in #242
+The task brief framed this as "fix the CI mobile-harness failure (ERR_FILE_NOT_FOUND, unblocks main)".
+On investigation that failure was **already fixed by #242**: its root cause was the default
+`playwright.config.ts` over-collecting `e2e/mobile/*.pw.ts` into the desktop `category-scroll` job
+(which never built the mobile harness) — #242 scoped the default config to `./e2e/category-chips` and
+added a dedicated `e2e.yml` step running the mobile suite under `playwright.mobile.config.ts`. By the
+time PR 2/2 branched off `origin/main`, the latest E2E run on main was **green**. So nothing was
+red to "unblock"; this PR **hardens** the harness rather than repairing a live break:
+- `e2e/mobile/build.mjs` is now runnable standalone (`import.meta.url` entry guard) and `e2e.yml`
+  builds the harness in an **explicit step** before the Playwright run. A missing/stale harness now
+  fails loudly at `node e2e/mobile/build.mjs` instead of as an opaque `ERR_FILE_NOT_FOUND` mid-suite.
+  The mobile config's `globalSetup` still builds it too (idempotent — belt-and-suspenders).
+
+### Tap-target / critical-text sweep (the #242 catalog)
+≥44px tap targets + ≥12px critical text applied across (className-only, no logic change):
+- **SwapBox**: MEV-hint Enable link + dismiss `×` (`-my-3` hit-area expansion, `sm:` reset so desktop
+  is untouched); high-impact + depeg informed-consent rows/checkboxes (`min-h-[44px]`, `h-5 w-5`);
+  the five oracle/depeg/price-guard block explanation sub-texts 10px → `text-xs` (12px, critical).
+- **WalletModal**: bottom sheet now `max-h-[92dvh] overflow-y-auto overscroll-contain` so it scrolls
+  and fits in **landscape** (was `overflow-hidden`, content could be cut off); ENS + non-ENS
+  copy-address chips and the Disconnect button → `min-h-[44px]`.
+- **DCA Positions dashboard (#236)**: MissionControlCard Cancel/Remove, OrbitStatRow amounts (12px,
+  no number truncation), DCAFillsTimeline rows/badges/error/tx-link (`min-h-[44px]`). The scout's
+  first pass **missed** `DCADashboard` (Cancel All / Remove All / "Start a DCA" CTA) and
+  `DCAOrderCard` (Cancel / Remove) — all were 10px text on `py-1` (~24px) buttons; swept to match.
+- **Chips / filters**: CategoryChips, TokenSelector trigger + popular chips, AnalyticsDashboard period
+  filters, OrderDashboard meta/grid/Cancel/Remove, PortfolioTab USD/Swap/Add/refresh/category labels.
+
+### New real-viewport test
+`e2e/mobile/dca-tap-targets.pw.ts` (+ `mount-dca.tsx`, built to `dca.html` by the same harness build)
+mounts the **props-only** #236 components with fixtures and asserts, at iPhone SE 375 / iPhone 14 390 /
+Pixel 7 412: every `button`/`a[href]` ≥44px, the critical numbers (OrbitStat amounts, fill amounts,
+per-fill USD) ≥12px, and no horizontal overflow. 27/27 mobile specs pass (18 ModeTabs + 9 DCA).
+
+### Concern — esbuild needed a `process` shim for the DCA tree
+`src/lib/constants.ts` (pulled in transitively via the order-engine/route helpers) reads
+`process.env.BEBOP_SOURCE` / `NEXT_PUBLIC_FEE_PERCENT` / `NEXT_PUBLIC_FEE_RECIPIENT` at module
+top-level. There is no `process` in a `file://` browser bundle, so the DCA harness threw
+`process is not defined` and rendered nothing. Fixed in `build.mjs` with a one-line esbuild `banner`
+shimming `globalThis.process ||= { env: {} }` (env-derived constants fall back to defaults — correct
+for a presentational harness). Worth noting: those constants doing top-level env reads makes the
+module awkward to import outside Next; a lazy getter would be cleaner (backlog, not in scope here).
+
+### Out-of-catalog sub-44px controls left as-is (not regressed; future global-chrome pass)
+The disconnected-state dev-server audit surfaced sub-44px controls **outside** the #242 catalog, left
+untouched to respect scope + "don't break layout": footer legal/social links (~33px, already given a
+mobile `py-2`), the fixed `♫` audio toggle (32px), the header `CONNECT WALLET` button (35px), the MEV
+on/off **switch** (24px — a switch, conventionally <44px), the amount `<input>` (28px in a tall row),
+and the shared `InfoTooltip` `ⓘ` (10px). The last is an inline primitive used in many tight label
+rows app-wide — an inline-exception affordance where forcing a 44px measured box would break layouts
+(and a `::before` hit-area wouldn't change the measured rect anyway). Recommend a separate
+global-chrome/header tap-target pass rather than widening this PR.

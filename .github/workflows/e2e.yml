@@ -47,5 +47,10 @@ jobs:
         run: npx playwright test
       # [chore/mobile-ux-polish] Mobile-viewport real-render suite — its own config + globalSetup +
       # iPhone SE / iPhone 14 / Pixel 7 projects. Same isolated harness pattern (no server/env).
+      # [chore/mobile-ux-polish-2] Build the file:// harness EXPLICITLY first (esbuild + compiled
+      # Tailwind) so a missing/stale harness fails loudly here rather than as an opaque
+      # ERR_FILE_NOT_FOUND inside Playwright. The mobile config's globalSetup also builds it (idempotent).
+      - name: Build mobile harness
+        run: node e2e/mobile/build.mjs
       - name: Run real-render Playwright tests (mobile viewports)
         run: npx playwright test --config playwright.mobile.config.ts

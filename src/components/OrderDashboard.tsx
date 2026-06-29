@@ -174,7 +174,7 @@ function LivePrice({ priceFeed, targetPrice, decimals = 8 }: {
   const isClose = Math.abs(pctDiff) < 2
 
   return (
-    <span className={`text-[10px] ${isClose ? 'text-amber-300' : 'text-cream-30'}`}>
+    <span className={`text-xs ${isClose ? 'text-amber-300' : 'text-cream-35'}`}>
       Now ${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       {' '}({pctDiff >= 0 ? '+' : ''}{pctDiff.toFixed(1)}%)
     </span>
@@ -265,7 +265,7 @@ function OrderCard({
               {order.tokenOutSymbol || '?'}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
             <span className="rounded bg-cream-08 px-1.5 py-0.5 font-medium text-cream-50">
               {typeCfg.label}
             </span>
@@ -320,7 +320,7 @@ function OrderCard({
       {expanded && (
         <div className="border-t border-cream-08 px-4 py-3">
           {/* [Melhoria 6] Responsive grid: 1 col mobile, 2 col desktop */}
-          <div className="mb-3 grid grid-cols-1 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-2">
+          <div className="mb-3 grid grid-cols-1 gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
             <div>
               <span className="text-cream-40">Created</span>
               <p className="font-medium text-cream-70">
@@ -400,7 +400,7 @@ function OrderCard({
             {isActive && (
               <button
                 onClick={(e) => { e.stopPropagation(); playTouchMP3(); onCancel() }}
-                className="flex-1 rounded-xl border border-red-500/20 bg-red-500/10 py-2 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20"
+                className="min-h-[44px] flex-1 rounded-xl border border-red-500/20 bg-red-500/10 py-2.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20"
               >
                 Cancel Order
               </button>
@@ -408,7 +408,7 @@ function OrderCard({
             {!isActive && (
               <button
                 onClick={(e) => { e.stopPropagation(); playTouchMP3(); onRemove() }}
-                className="flex-1 rounded-xl border border-cream-08 py-2 text-xs font-semibold text-cream-40 transition-colors hover:bg-cream-08 hover:text-cream"
+                className="min-h-[44px] flex-1 rounded-xl border border-cream-08 py-2.5 text-xs font-semibold text-cream-50 transition-colors hover:bg-cream-08 hover:text-cream"
               >
                 Remove
               </button>

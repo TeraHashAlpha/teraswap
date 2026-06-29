@@ -31,8 +31,8 @@ function fmtExpiry(expiresAtMs: number): string {
 function StatBox({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border border-cream-08 bg-cream-04 px-2.5 py-1.5">
-      <span className="text-[9px] font-medium uppercase tracking-wide text-cream-35">{label}</span>
-      <span className="truncate text-[12px] font-semibold text-cream">{children}</span>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-cream-35">{label}</span>
+      <span className="text-[12px] font-semibold leading-tight tabular-nums text-cream">{children}</span>
     </div>
   )
 }

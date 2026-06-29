@@ -109,7 +109,7 @@ export default function MissionControlCard({
           {isLive && onCancel && (
             <button
               onClick={onCancel}
-              className="rounded-lg border border-danger/30 px-2 py-1 text-[10px] text-danger/70 transition-colors hover:text-danger"
+              className="inline-flex min-h-[44px] items-center rounded-lg border border-danger/30 px-3 text-xs text-danger/70 transition-colors hover:text-danger"
             >
               Cancel
             </button>
@@ -117,7 +117,7 @@ export default function MissionControlCard({
           {!isLive && !isSigning && onRemove && (
             <button
               onClick={onRemove}
-              className="rounded-lg border border-cream-08 px-2 py-1 text-[10px] text-cream-50 transition-colors hover:text-cream"
+              className="inline-flex min-h-[44px] items-center rounded-lg border border-cream-08 px-3 text-xs text-cream-50 transition-colors hover:text-cream"
             >
               Remove
             </button>
@@ -137,7 +137,7 @@ export default function MissionControlCard({
         ) : (
           <NextBuyRing progress={isCompleted ? 1 : progress} accent={accent} size={200}>
             <CountdownCenter targetMs={targetMs} terminalLabel={terminalLabel} />
-            <span className="mt-1 text-[11px] text-cream-50">{order.dcaExecuted} of {order.dcaTotal} buys</span>
+            <span className="mt-1 text-xs text-cream-50">{order.dcaExecuted} of {order.dcaTotal} buys</span>
           </NextBuyRing>
         )}
       </div>
