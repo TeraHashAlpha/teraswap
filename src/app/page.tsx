@@ -8,6 +8,7 @@ import ScrollSpy from '@/components/ScrollSpy'
 import Header from '@/components/Header'
 import SwapBox from '@/components/SwapBox'
 import SwapHistory from '@/components/SwapHistory'
+import ModeTabs from '@/components/ModeTabs'
 import dynamic from 'next/dynamic'
 // Q5: Dynamic imports for heavy components (charts, tables) — loaded on demand
 const AnalyticsDashboard = dynamic(() => import('@/components/AnalyticsDashboard'), { ssr: false })
@@ -105,44 +106,26 @@ export default function Home() {
             <NotificationBanner />
           </div>
 
-          {/* Swap / DCA mode toggle — scrolls horizontally on narrow viewports
-              with a right-side fade hint that more tabs exist beyond the edge. */}
-          <div className="no-scrollbar tab-bar-fade sticky top-0 z-40 mb-4 flex w-full max-w-[calc(100vw-1.5rem)] snap-x snap-mandatory gap-1 overflow-x-auto rounded-xl border border-cream-08 bg-surface-secondary/95 p-1 backdrop-blur-md sm:max-w-[540px]">
-            {([
+          {/* [chore/mobile-ux-polish] Mode navigation — extracted to <ModeTabs>, which genuinely
+              scrolls horizontally on mobile (no flex-1 squish), gives ≥44px tap targets + ≥12px
+              labels, and shows dynamic edge-fades reflecting real scroll position. */}
+          <ModeTabs
+            tabs={([
               ['instant', 'Swap'],
               ['portfolio', 'Portfolio'],
               ['dca', 'DCA'],
               ['orders', 'Orders'],
               ['history', 'History'],
               ['analytics', 'Analytics'],
-            ] as [SwapMode, string][]).map(([mode, label]) => {
-              // DCA leaves the "Soon" teaser only when it's live; all other coming-soon modes stay gated.
-              const comingSoon = COMING_SOON_MODES.has(mode) && !(mode === 'dca' && dcaLive)
-              return (
-                <button
-                  key={mode}
-                  onClick={() => { if (comingSoon) return; playTouchMP3(); setSwapMode(mode) }}
-                  disabled={comingSoon}
-                  aria-disabled={comingSoon}
-                  title={comingSoon ? 'Coming soon' : undefined}
-                  className={`flex-1 snap-start whitespace-nowrap rounded-lg px-2 py-3 text-[11px] font-semibold transition-all sm:px-0 sm:py-2 sm:text-[13px] ${
-                    comingSoon
-                      ? 'cursor-not-allowed text-cream-35 opacity-50'
-                      : swapMode === mode
-                        ? 'bg-cream-gold text-[#080B10]'
-                        : 'text-cream-50 hover:text-cream'
-                  }`}
-                >
-                  {label}
-                  {comingSoon && (
-                    <span className="ml-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[7px] font-bold text-amber-300 sm:text-[9px]">
-                      Soon
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+            ] as [SwapMode, string][]).map(([mode, label]) => ({
+              mode,
+              label,
+              // DCA leaves the "Soon" teaser only when it's live; other coming-soon modes stay gated.
+              comingSoon: COMING_SOON_MODES.has(mode) && !(mode === 'dca' && dcaLive),
+            }))}
+            active={swapMode}
+            onSelect={(mode) => { playTouchMP3(); setSwapMode(mode as SwapMode) }}
+          />
 
           {swapMode === 'instant' ? (
             <>

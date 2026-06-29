@@ -203,7 +203,8 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
             {/* Header */}
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-cream">Select token</h3>
-              <button onClick={closeModal} className="text-cream-35 transition hover:text-cream">&#10005;</button>
+              {/* [chore/mobile-ux-polish] ≥44px dismiss hit area (was a ~16px glyph). */}
+              <button onClick={closeModal} aria-label="Close" className="-mr-2 flex h-11 w-11 items-center justify-center text-lg text-cream-35 transition hover:text-cream">&#10005;</button>
             </div>
 
             {/* Search input */}
@@ -279,7 +280,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                       <div className="mb-2">
                         <TokenAddressBadge address={search.trim() as `0x${string}`} isVerified={false} size="md" />
                       </div>
-                      <p className="mb-3 px-4 text-[10px] leading-relaxed text-amber-300/70">
+                      <p className="mb-3 px-4 text-xs leading-relaxed text-amber-300/80">
                         You are importing a token not in TeraSwap&apos;s default list. Anyone can create a token using any symbol or name. Verify the contract address matches the official source.
                       </p>
                       <button

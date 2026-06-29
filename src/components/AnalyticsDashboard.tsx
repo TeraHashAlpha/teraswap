@@ -184,7 +184,7 @@ function DailyVolumeChart({ data }: { data: DashboardData['dailyVolume'] }) {
           />
         ))}
       </div>
-      <div className="mt-1 flex justify-between text-[8px] text-cream-35">
+      <div className="mt-1 flex justify-between text-[11px] text-cream-35">
         <span>{data[0]?.date}</span>
         <span>{data[data.length - 1]?.date}</span>
       </div>

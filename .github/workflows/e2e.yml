@@ -43,5 +43,9 @@ jobs:
         run: npm ci --ignore-scripts=false
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      - name: Run real-render Playwright tests
+      - name: Run real-render Playwright tests (category-chips)
         run: npx playwright test
+      # [chore/mobile-ux-polish] Mobile-viewport real-render suite — its own config + globalSetup +
+      # iPhone SE / iPhone 14 / Pixel 7 projects. Same isolated harness pattern (no server/env).
+      - name: Run real-render Playwright tests (mobile viewports)
+        run: npx playwright test --config playwright.mobile.config.ts
