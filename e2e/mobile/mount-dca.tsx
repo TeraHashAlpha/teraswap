@@ -118,8 +118,17 @@ function Harness() {
         <DCAOrderCard order={makeOrder({ id: 'h-active' })} onCancel={noop} />
       </Section>
 
-      <Section title="History card (terminal → Remove)">
-        <DCAOrderCard order={makeOrder({ id: 'h-done', status: 'filled', dcaExecuted: 6 })} onRemove={noop} />
+      <Section title="History card (terminal → Remove + explorer link)">
+        <DCAOrderCard
+          order={makeOrder({
+            id: 'h-done',
+            status: 'filled',
+            dcaExecuted: 6,
+            // A real txHash surfaces the "View on explorer" link so the tap-target test measures it.
+            txHash: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+          })}
+          onRemove={noop}
+        />
       </Section>
 
       <Section title="Dashboard history list (Remove All + cards)">

@@ -5562,3 +5562,20 @@ and the shared `InfoTooltip` `ⓘ` (10px). The last is an inline primitive used 
 rows app-wide — an inline-exception affordance where forcing a 44px measured box would break layouts
 (and a `::before` hit-area wouldn't change the measured rect anyway). Recommend a separate
 global-chrome/header tap-target pass rather than widening this PR.
+
+### Adversarial review — 1 fix applied
+A 4-lens review (Tailwind validity / desktop regression / harness-test correctness / scope-safety),
+each finding adversarially verified, raised 21 candidates; the scope lens **confirmed** the diff is
+className/layout + harness/test + CI only (every added/removed `src/` line is a className edit; no
+handler/conditional/hook/data-testid/contract/keeper/env change). One real **LOW** was confirmed and
+fixed:
+- **DCAOrderCard "View on explorer" link was an un-swept sub-44px / 11px tap target — and the harness
+  never measured it.** Every `mount-dca.tsx` fixture defaulted `txHash: null`, so the
+  `{order.txHash && (…)}` anchor never rendered; the tap-target test sweeps `button, a[href]` and so
+  silently skipped it (false "every swept control ≥44px" confidence). This was inconsistent with the
+  PR's own standard — the sibling `DCAFillsTimeline` tx link got `min-h-[44px]` in the same PR. Fix:
+  brought the link to `inline-flex min-h-[44px] items-center text-xs` (44px / 12px, verified) **and**
+  gave a terminal `DCAOrderCard` fixture a real `txHash` so the test now renders + measures it. 27/27
+  mobile specs still pass.
+Dismissed (verified non-issues): the 19 other candidates — incl. the intentional, FEEDBACK-documented
+trade-offs (out-of-catalog chrome, 11px micro-labels/badges, the `process` shim) and style nits.

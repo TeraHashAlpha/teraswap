@@ -116,7 +116,7 @@ export default function DCAOrderCard({
           href={explorerTxUrl(order.txHash, order.chainId ?? 1)}
           target="_blank"
           rel="noopener noreferrer"
-          className="block text-[11px] text-cream-gold hover:underline"
+          className="inline-flex min-h-[44px] items-center text-xs text-cream-gold hover:underline"
         >
           View on explorer ↗
         </a>
