@@ -71,12 +71,12 @@ export default function DCAOrderCard({
           </span>
         </div>
         {isActive && onCancel && (
-          <button onClick={onCancel} className="rounded-lg border border-danger/30 px-2 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors">
+          <button onClick={onCancel} className="inline-flex min-h-[44px] items-center rounded-lg border border-danger/30 px-3 text-xs text-danger/70 hover:text-danger transition-colors">
             Cancel
           </button>
         )}
         {!isActive && onRemove && (
-          <button onClick={onRemove} className="rounded-lg border border-cream-08 px-2 py-1 text-[10px] text-cream-50 hover:text-cream transition-colors">
+          <button onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-cream-08 px-3 text-xs text-cream-50 hover:text-cream transition-colors">
             Remove
           </button>
         )}
@@ -116,7 +116,7 @@ export default function DCAOrderCard({
           href={explorerTxUrl(order.txHash, order.chainId ?? 1)}
           target="_blank"
           rel="noopener noreferrer"
-          className="block text-[11px] text-cream-gold hover:underline"
+          className="inline-flex min-h-[44px] items-center text-xs text-cream-gold hover:underline"
         >
           View on explorer ↗
         </a>

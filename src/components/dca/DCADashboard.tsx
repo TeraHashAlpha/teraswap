@@ -33,7 +33,7 @@ export default function DCADashboard({ active, history, latestEvent, onCancel, o
         {onCreate && (
           <button
             onClick={() => { playClick(); onCreate() }}
-            className="relative mt-4 rounded-xl bg-gradient-to-r from-gold to-gold-light px-5 py-2.5 text-[13px] font-bold uppercase tracking-wider text-[#080B10] transition-all hover:brightness-110 active:scale-[0.98]"
+            className="relative mt-4 inline-flex min-h-[44px] items-center justify-center rounded-xl bg-gradient-to-r from-gold to-gold-light px-5 text-[13px] font-bold uppercase tracking-wider text-[#080B10] transition-all hover:brightness-110 active:scale-[0.98]"
           >
             Start a DCA
           </button>
@@ -50,7 +50,7 @@ export default function DCADashboard({ active, history, latestEvent, onCancel, o
             <div className="flex justify-end">
               <button
                 onClick={() => { onCancelAll(); playClick() }}
-                className="rounded-lg border border-danger/30 px-2.5 py-1 text-[10px] text-danger/70 hover:text-danger transition-colors"
+                className="inline-flex min-h-[44px] items-center rounded-lg border border-danger/30 px-3 text-xs text-danger/70 hover:text-danger transition-colors"
               >
                 Cancel All
               </button>
@@ -75,7 +75,7 @@ export default function DCADashboard({ active, history, latestEvent, onCancel, o
             {history.length > 1 && (
               <button
                 onClick={() => { history.forEach(o => onRemove(o.id)); playClick() }}
-                className="rounded-lg border border-cream-08 px-2.5 py-1 text-[10px] text-cream-35 hover:text-cream-50 transition-colors"
+                className="inline-flex min-h-[44px] items-center rounded-lg border border-cream-08 px-3 text-xs text-cream-35 hover:text-cream-50 transition-colors"
               >
                 Remove All
               </button>

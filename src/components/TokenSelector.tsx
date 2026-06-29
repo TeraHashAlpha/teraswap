@@ -177,7 +177,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
       {/* Trigger button */}
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-full border border-cream-15 bg-surface-hover px-3 py-1.5 text-sm font-semibold text-cream-95 transition hover:border-cream-35 hover:bg-cream-05"
+        className="flex min-h-[44px] items-center gap-2 rounded-full border border-cream-15 bg-surface-hover px-3 text-sm font-semibold text-cream-95 transition hover:border-cream-35 hover:bg-cream-05"
       >
         {selected ? (
           <>
@@ -245,7 +245,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                   <button
                     key={token.address}
                     onClick={() => handleSelect(token)}
-                    className="flex items-center gap-1.5 rounded-full border border-cream-08 bg-surface-tertiary px-2.5 py-1 text-xs font-medium text-cream-80 transition hover:border-cream-35 hover:bg-cream-05 hover:text-cream"
+                    className="flex min-h-[44px] items-center gap-1.5 rounded-full border border-cream-08 bg-surface-tertiary px-3 text-xs font-medium text-cream-80 transition hover:border-cream-35 hover:bg-cream-05 hover:text-cream"
                   >
                     <TokenLogo token={token} size={16} />
                     {token.symbol}

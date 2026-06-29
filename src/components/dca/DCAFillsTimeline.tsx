@@ -72,11 +72,11 @@ export default function DCAFillsTimeline({
         {ordered.map((f) => {
           const success = f.status === 'success' || f.status === 'executed' || f.status === 'confirmed'
           return (
-            <li key={f.id} data-testid="fill-row" className="flex items-start justify-between gap-2 text-[11px]">
+            <li key={f.id} data-testid="fill-row" className="flex items-start justify-between gap-2 text-xs">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="font-semibold text-cream">#{f.execution_number}</span>
-                  <span className={`rounded px-1 py-0.5 text-[9px] font-bold ${success ? 'bg-emerald-400/10 text-emerald-300' : 'bg-red-400/10 text-red-400'}`}>
+                  <span className={`rounded px-1 py-0.5 text-[11px] font-bold ${success ? 'bg-emerald-400/10 text-emerald-300' : 'bg-red-400/10 text-red-400'}`}>
                     {success ? 'SUCCESS' : 'FAILED'}
                   </span>
                   <span className="text-cream-35" data-testid="fill-usd">{fmtUsd(f.amount_in, tokenInDecimals, tokenInSymbol)}</span>
@@ -85,13 +85,13 @@ export default function DCAFillsTimeline({
                   {fmtAmount(f.amount_in, tokenInDecimals, tokenInSymbol)} <span className="text-cream-35">→</span>{' '}
                   <span className="text-cream">{fmtAmount(f.amount_out, tokenOutDecimals, tokenOutSymbol)}</span>
                 </p>
-                {f.error && <p className="mt-0.5 text-[10px] text-red-400/80 line-clamp-1">{f.error}</p>}
+                {f.error && <p className="mt-0.5 text-[11px] text-red-400/80 line-clamp-1">{f.error}</p>}
                 {f.tx_hash && (
                   <a
                     href={explorerTxUrl(f.tx_hash, chainId)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-0.5 inline-flex items-center gap-0.5 text-[10px] text-cream-35 transition-colors hover:text-cream-gold"
+                    className="mt-0.5 inline-flex min-h-[44px] items-center gap-0.5 py-2 text-[11px] text-cream-35 transition-colors hover:text-cream-gold"
                   >
                     <span className="font-mono">{f.tx_hash.slice(0, 8)}…{f.tx_hash.slice(-6)}</span>
                     <span aria-hidden="true">↗</span>

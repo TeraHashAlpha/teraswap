@@ -103,14 +103,14 @@ function PortfolioRow({
       <div className="flex items-center gap-3">
         <div className="text-right">
           <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
-          <div className="text-[11px] text-cream-50 tabular-nums">
+          <div className="text-xs text-cream-50 tabular-nums">
             {valueUsd !== null ? usdFormatter.format(valueUsd) : '—'}
           </div>
         </div>
         {onSwapToken && (
           <button
             onClick={() => onSwapToken(token)}
-            className="rounded-lg border border-cream-08 px-2.5 py-1 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-cream-08 px-2.5 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream"
             aria-label={`Swap ${token.symbol}`}
           >
             Swap
@@ -152,7 +152,7 @@ function DiscoveredRow({
           <div className="truncate text-[11px] text-cream-50">{token.name}</div>
           {!imported && (
             <div
-              className="mt-0.5 font-mono text-[10px] text-cream-35"
+              className="mt-0.5 font-mono text-[11px] text-cream-35"
               title={token.address}
             >
               {shortenAddress(token.address)}
@@ -163,7 +163,7 @@ function DiscoveredRow({
       <div className="flex items-center gap-3">
         <div className="text-right">
           <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
-          <div className="text-[11px] text-cream-50 tabular-nums">
+          <div className="text-xs text-cream-50 tabular-nums">
             {valueUsd !== null ? usdFormatter.format(valueUsd) : '—'}
           </div>
         </div>
@@ -171,7 +171,7 @@ function DiscoveredRow({
           onSwapToken && (
             <button
               onClick={() => onSwapToken(token)}
-              className="rounded-lg border border-cream-08 px-2.5 py-1 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream"
+              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-cream-08 px-2.5 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream"
               aria-label={`Swap ${token.symbol}`}
             >
               Swap
@@ -180,7 +180,7 @@ function DiscoveredRow({
         ) : (
           <button
             onClick={() => onAdd(token)}
-            className="rounded-lg border border-cream-gold/40 bg-cream-gold/10 px-2.5 py-1 text-[11px] font-medium text-cream-gold transition hover:bg-cream-gold/20"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-cream-gold/40 bg-cream-gold/10 px-2.5 text-[11px] font-medium text-cream-gold transition hover:bg-cream-gold/20"
             aria-label={`Add ${token.symbol} to tokens`}
           >
             Add
@@ -295,7 +295,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
           <button
             onClick={refresh}
             disabled={isLoading}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cream-08 text-cream-50 transition hover:border-cream-35 hover:text-cream disabled:opacity-50"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cream-08 text-cream-50 transition hover:border-cream-35 hover:text-cream disabled:opacity-50"
             aria-label="Refresh portfolio"
           >
             <RefreshIcon spinning={isLoading} />
@@ -309,7 +309,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
           <span>Failed to load portfolio.</span>
           <button
             onClick={refresh}
-            className="rounded border border-danger/40 px-2 py-0.5 text-[11px] font-semibold text-danger transition hover:bg-danger/20"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded border border-danger/40 px-2 text-[11px] font-semibold text-danger transition hover:bg-danger/20"
           >
             Try again
           </button>
@@ -340,7 +340,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
         <div className="space-y-4">
           {grouped.map(([category, entries]) => (
             <div key={category} className="space-y-1.5">
-              <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream-35">
+              <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cream-35">
                 {category}
               </div>
               {entries.map((entry) => (

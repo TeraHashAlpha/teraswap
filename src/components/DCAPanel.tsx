@@ -146,7 +146,7 @@ export default function DCAPanel() {
       <div className="mb-4 flex gap-1 rounded-xl border border-cream-08 bg-surface-secondary p-1">
         <button
           onClick={() => setTab('create')}
-          className={`flex-1 rounded-lg py-2 text-[13px] font-semibold transition-all ${
+          className={`flex min-h-[44px] flex-1 items-center justify-center rounded-lg text-[13px] font-semibold transition-all ${
             tab === 'create'
               ? 'bg-cream-gold text-[#080B10]'
               : 'text-cream-50 hover:text-cream'
@@ -156,7 +156,7 @@ export default function DCAPanel() {
         </button>
         <button
           onClick={() => setTab('positions')}
-          className={`flex-1 rounded-lg py-2 text-[13px] font-semibold transition-all ${
+          className={`flex min-h-[44px] flex-1 items-center justify-center rounded-lg text-[13px] font-semibold transition-all ${
             tab === 'positions'
               ? 'bg-cream-gold text-[#080B10]'
               : 'text-cream-50 hover:text-cream'
@@ -465,7 +465,7 @@ function CreateDCAForm({
                 type="button"
                 disabled={presetsDisabled}
                 onClick={() => { playClick(); fillPct(p) }}
-                className="rounded-md border border-cream-08 px-2 py-0.5 text-[11px] text-cream-35 transition-colors enabled:hover:text-cream-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-cream-08 px-2 text-[11px] text-cream-35 transition-colors enabled:hover:text-cream-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {p}%
               </button>
@@ -533,7 +533,7 @@ function CreateDCAForm({
             <button
               key={n}
               onClick={() => { setPartsIdx(idx); playClick() }}
-              className={`flex-1 rounded-lg border py-1.5 text-[13px] font-semibold transition-all ${
+              className={`flex min-h-[44px] items-center justify-center rounded-lg border text-[13px] font-semibold transition-all ${
                 partsIdx === idx
                   ? 'border-cream-gold bg-cream-gold/10 text-cream'
                   : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
@@ -555,7 +555,7 @@ function CreateDCAForm({
             <button
               key={iv.seconds}
               onClick={() => { setIntervalIdx(idx); playClick() }}
-              className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all ${
+              className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
                 intervalIdx === idx
                   ? 'border-cream-gold bg-cream-gold/10 text-cream'
                   : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
@@ -578,7 +578,7 @@ function CreateDCAForm({
             <button
               key={e.seconds}
               onClick={() => { setExpiryIdx(idx); playClick() }}
-              className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all ${
+              className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
                 expiryIdx === idx
                   ? 'border-cream-gold bg-cream-gold/10 text-cream'
                   : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
@@ -619,7 +619,7 @@ function CreateDCAForm({
       {/* Advanced */}
       <button
         onClick={() => setShowAdvanced(!showAdvanced)}
-        className="mb-3 text-[11px] text-cream-35 hover:text-cream-50 transition-colors"
+        className="mb-3 inline-flex min-h-[44px] items-center text-xs text-cream-35 hover:text-cream-50 transition-colors"
       >
         {showAdvanced ? '▾' : '▸'} Advanced settings
       </button>
@@ -635,7 +635,7 @@ function CreateDCAForm({
                 <button
                   key={s}
                   onClick={() => setSlippage(s)}
-                  className={`rounded-lg border px-3 py-1 text-[12px] font-semibold transition-all ${
+                  className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
                     slippage === s
                       ? 'border-cream-gold bg-cream-gold/10 text-cream'
                       : 'border-cream-08 text-cream-35 hover:text-cream-50'
