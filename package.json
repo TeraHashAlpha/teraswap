@@ -36,7 +36,7 @@
     "@capacitor/splash-screen": "8.0.1",
     "@capacitor/status-bar": "8.0.2",
     "@rainbow-me/rainbowkit": "2.2.10",
-    "@sentry/nextjs": "10.53.1",
+    "@sentry/nextjs": "10.59.0",
     "@supabase/supabase-js": "2.108.2",
     "@tanstack/react-query": "5.50.1",
     "@upstash/redis": "1.38.0",
