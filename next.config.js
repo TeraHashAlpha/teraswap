@@ -47,8 +47,12 @@ const nextConfig = {
               "worker-src 'self'",
               // Styles: self + inline (Tailwind/Next.js)
               "style-src 'self' 'unsafe-inline'",
-              // Images: self + token icon CDNs + data URIs
-              "img-src 'self' data: https://tokens.1inch.io https://assets.coingecko.com https://raw.githubusercontent.com",
+              // Images: self + token icon CDNs + data URIs + blob: object URLs.
+              // [wallet-logos-fix] blob: is REQUIRED for the WalletConnect/Reown "All Wallets"
+              // modal: AppKit fetches each wallet logo via JS (allowed by connect-src below) and
+              // renders it as a same-origin blob: object URL in an <img>. Without blob: here, every
+              // wallet icon is CSP-blocked (img-src) → generic placeholder. Mirrors media-src's blob:.
+              "img-src 'self' data: blob: https://tokens.1inch.io https://assets.coingecko.com https://raw.githubusercontent.com",
               // Fonts: self (Inter/JetBrains Mono via next/font) + Fontshare CDN (Clash Display)
               "font-src 'self' data: https://cdn.fontshare.com",
               // Connect: aggregator APIs + RPC + WalletConnect + CoW + Etherscan

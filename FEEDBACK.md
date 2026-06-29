@@ -5579,3 +5579,57 @@ fixed:
   mobile specs still pass.
 Dismissed (verified non-issues): the 19 other candidates — incl. the intentional, FEEDBACK-documented
 trade-offs (out-of-catalog chrome, 11px micro-labels/badges, the `process` shim) and style nits.
+
+## Feedback — chore/wallet-logos-fix (WalletConnect "All Wallets" logos = placeholders)
+
+### Confirmed root cause (diagnosed in a real browser, not assumed)
+In the WalletConnect/Reown AppKit **"All Wallets"** modal every wallet logo (Binance, MetaMask,
+SafePal, Trust, OKX, Fireblocks, OKX, Bitget, Uniswap, …) rendered as the generic placeholder.
+Diagnosed live on `https://www.teraswap.app` (desktop; the cause is a response header so it is
+viewport-independent — identical on mobile):
+- The wallet icons are **not** loaded as remote `<img src="https://cdn…">`. AppKit **fetches** each
+  logo via JS (XHR/fetch, permitted by `connect-src` which already lists `api.web3modal.org` /
+  `explorer-api.walletconnect.com`) and renders it as a **same-origin `blob:` object URL** inside a
+  `wui-image`'s `<img>`. DOM probe (piercing the `w3m-modal` shadow tree): all 12 `wui-image` `<img>`
+  had `src="blob:https://www.teraswap.app/…"` with `complete:true` but **`naturalWidth:0`** (blocked).
+- The page CSP `img-src` (next.config.js) allowed `data:` but **not `blob:`**. A controlled in-page
+  test proved it: a `data:` image loaded (`naturalWidth=1`) while a same-origin `blob:` image was
+  **blocked**, firing `securitypolicyviolation { blockedURI:"blob", effectiveDirective:"img-src" }`.
+- Network panel showed **no** failed remote icon request (CSP blocks `blob:` rendering at the policy
+  layer — there is no network fetch to 404), ruling out a stale projectId / 404 / broken-fallback.
+
+So: NOT a missing external image host. The connect-src fetch already succeeds and produces a blob; the
+only missing grant is rendering that `blob:` in `<img>`.
+
+### Fix — minimal CSP delta (owner review: security-adjacent)
+```
+img-src:  'self' data:        https://tokens.1inch.io https://assets.coingecko.com https://raw.githubusercontent.com
+       →  'self' data: blob:  https://tokens.1inch.io https://assets.coingecko.com https://raw.githubusercontent.com
+```
+**Exact delta: `img-src` gains the single token `blob:`.** Nothing else changes — no new external
+host, no other directive, no other header. This is strictly necessary and strictly sufficient, and it
+mirrors the file's existing `media-src 'self' blob:`. `connect-src` was already sufficient (untouched).
+`vercel.json` carries no CSP (Next.js-only, per the in-file note), so no edge mirror to sync.
+Wallet/connect/projectId logic untouched.
+
+### Verification (diagnosed + confirmed in a real browser)
+**Before** (production `www.teraswap.app`, current CSP): the "All Wallets" grid shows every wallet as a
+placeholder. Programmatic confirmation through the `w3m-modal` shadow tree: all 12 `wui-image` `<img>`
+have `src="blob:https://www.teraswap.app/…"` with `naturalWidth:0`; a controlled in-page test renders a
+`data:` image but the browser **blocks a same-origin `blob:` image** with
+`securitypolicyviolation { blockedURI:"blob", effectiveDirective:"img-src" }`. Network panel shows no
+failed remote icon request (CSP blocks at the policy layer).
+
+**After** (branch Vercel preview deploy, fixed CSP): the identical controlled test now **renders a
+`blob:` `<img>`** (`naturalWidth=1`) with **zero CSP violations**, and a `connect-src` logo fetch
+produces no violation — i.e. the exact pipeline the AppKit grid uses (fetch → blob → `<img>`) is now
+permitted end-to-end.
+
+HONEST CAVEAT: the live AppKit "All Wallets" *grid* could **not** be exercised on the *preview* domain —
+WalletConnect's relay refuses to subscribe on the non-allowlisted `*.vercel.app` host ("Subscribing…
+failed"; also a benign `metadata.url` mismatch warning). That is a projectId domain-allowlist /
+relay limitation of preview deploys, **unrelated to CSP** (no blob/img-src error in the console there).
+Because `blob:` in `img-src` was the *sole* blocker — `connect-src` already worked, as proven by the 12
+blobs production successfully created — the preview's blob-render proof is conclusive. The live grid
+will visually confirm on production once this merges and redeploys. Before/after evidence (production
+placeholder grid; preview blob-render) captured in the review session.
