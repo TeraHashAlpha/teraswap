@@ -5273,3 +5273,31 @@ gives no hint there's more, i.e. "it doesn't scroll".
   `src/app/page.tsx`, which has the *same* class of desktop-mouse limitation (overflow with
   no desktop affordance / wheel handler). Out of scope for this chore (different component),
   but it's the same bug pattern and a candidate to reuse `CategoryChips`'s approach.
+## Feedback — CHORE-SWAP-FEE-USD-FIX (this commit)
+
+Goal: the instant-swap "Platform fee" (0.1%) USD was wildly wrong for tokens without a Chainlink oracle — AERO→WETH (~$1.87 swap) showed `$5.79` instead of ~$0.002. The fee AMOUNT (0.003716 AERO) was correct; only the USD display was wrong. Branch `chore/swap-fee-usd-fix` off `origin/main`.
+
+### Root cause
+`QuoteBreakdown.tsx` rendered fee USD as `feeAbsolute × priceCheck.chainlinkPrice`, where `feeAbsolute` is denominated in the **input** token (AERO) but `priceCheck` is the merged `pairCheck`. `evaluatePairOracle()` (src/lib/chainlink.ts:145) fills `chainlinkPrice` with the **other leg's** price when a token has no feed (`inCheck.chainlinkPrice ?? outCheck.chainlinkPrice`), so for AERO→WETH it became WETH's ETH/USD price (~$1558 live). Multiplying an AERO quantity by ETH's price → `0.003716 × ~1558 ≈ $5.79`. The guard was only `chainlinkPrice != null` (not `!oracleUnavailable`), so the cross-leg fallback leaked into the fee row (the Rate tooltip was already guarded, so only the fee row showed it).
+
+### Fix (valuation/display layer only — `chainlink.ts` left untouched)
+- New pure module `src/lib/fee-usd.ts`: `swapNotionalUsd()` (reliably-priced notional, **prefers the input side**, falls back to the output side, returns `null` when neither token has its own oracle — never a cross-leg price), `feeUsd()` (= `notional × FEE_PERCENT/100`, `null` when no reliable notional), `formatFeeUsd()` (2 decimals ≥ $0.01, 3 decimals sub-cent so `0.00187 → "0.002"` instead of `"0.00"`).
+- `QuoteBreakdown.tsx`: fee USD now = `feeUsd(swapNotionalUsd({ inputAmount, inputPrice: tokenInUsdPrice, outputAmount, outputPrice: tokenOutUsdPrice }), FEE_PERCENT)`. Two new props (`tokenInUsdPrice`/`tokenOutUsdPrice`) carry each token's OWN oracle price; `SwapBox.tsx` passes the untainted single-token checks (`priceCheck.chainlinkPrice` = input, `tokenOutPriceCheck.chainlinkPrice` = output). The fee AMOUNT calc, the fee rate, and the contract are all unchanged.
+- **Oracle-input swaps are byte-identical:** when the input token has a feed, `swapNotionalUsd` returns `inputAmount × inputPrice`, so `feeUsd = inputAmount × inputPrice × 0.1%` == the previous `feeAbsolute × inputPrice`.
+
+### Why value from the notional, not re-price the fee token
+The fee is taken from the input, but `inputValueUSD ≈ outputValueUSD` for the same trade, so `0.1% × (reliably-priced notional)` IS the fee in USD — and only ever uses a price that genuinely belongs to a token. AERO→WETH → `0.1% × (0.0005 WETH × $3740) ≈ $0.00187 → "$0.002"`. No fabricated USD: when neither side has an oracle the USD figure is omitted entirely.
+
+### Verification
+- `src/lib/fee-usd.test.ts` (11 tests, node env): input-priced→input, input-unpriced→output (AERO→WETH), neither→null, `feeUsd` math, `formatFeeUsd` (incl. `0.00187 → "0.002"`), and an end-to-end regression asserting the AERO fee is < $0.01 and ≈ $0.00187, NOT the inflated value.
+- `src/components/QuoteBreakdown.test.tsx` (+3 tests, jsdom): AERO→WETH renders `$0.002` and NOT `$5.79`/`$13.9`; WETH→USDC oracle-input renders the unchanged `$3.74`; neither-oracle renders the fee amount with no `($…)` USD.
+- Local: fee-usd 11/11, QuoteBreakdown 19/19, SwapBox 27/27, `tsc --noEmit` clean, `check:circular` clean.
+
+### CI note (important)
+CI does **not** run the full vitest suite — the only vitest invocation was the single-file `catalog-address-guard` job. A test added to a `*.test.tsx` would therefore NOT be gated. So I added a `fee-usd-guard` job to `.github/workflows/ci.yml` (mirroring `catalog-address-guard`) that runs `npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx`, pinning the regression. typecheck/build cover the wiring across all files.
+
+### Concern (pre-existing, not fixed here)
+- The underlying cross-leg fallback in `evaluatePairOracle` (chainlink.ts:145 & :163) still populates `chainlinkPrice` from the other leg for an unfeeded token. It no longer leaks into the fee row (which now ignores `priceCheck.chainlinkPrice` for valuation), and the Rate tooltip is guarded — but if a future consumer reads `pairCheck.chainlinkPrice` without an `!oracleUnavailable` guard, it could resurface. Worth a follow-up to make that function return `null` for an unfeeded leg. Out of scope for this display fix.
+
+### Deploy
+- Frontend only (`vercel` deploy). No contract, no keeper, no DB change.

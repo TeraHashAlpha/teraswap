@@ -8,6 +8,7 @@ import type { ApprovalPlan } from '@/lib/approvals'
 import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { isFeeCollectorActive } from '@/lib/api'
 import { estimateMevSavings } from '@/lib/mev-savings'
+import { swapNotionalUsd, feeUsd, formatFeeUsd } from '@/lib/fee-usd'
 import { safeBigInt } from '@/lib/utils'
 import { formatUnits } from 'viem'
 import { formatDisplay, formatWithSeparator } from '@/lib/format'
@@ -21,6 +22,12 @@ interface Props {
   slippage: number
   countdown: number
   priceCheck: PriceCheck
+  /** [chore/swap-fee-usd-fix] Each token's OWN Chainlink USD price (null when it
+   *  has no feed). Used to value the platform fee from the reliably-priced side
+   *  instead of `priceCheck.chainlinkPrice`, which falls back to the OTHER leg's
+   *  price for an unfeeded token (mis-valuing e.g. an AERO fee at WETH's price). */
+  tokenInUsdPrice?: number | null
+  tokenOutUsdPrice?: number | null
   approvalPlan: ApprovalPlan | null
   onEditSlippage: () => void
   gasEstimate?: (gasUnits: number) => { eth: number; usd: number } | null
@@ -57,7 +64,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 }
 
 export default function QuoteBreakdown({
-  meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, approvalPlan, onEditSlippage, gasEstimate,
+  meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, tokenInUsdPrice, tokenOutUsdPrice, approvalPlan, onEditSlippage, gasEstimate,
   smartMevApplied = false, mevExposedBest = false, onUseGasless,
   onRefresh, refreshing = false,
 }: Props) {
@@ -96,6 +103,22 @@ export default function QuoteBreakdown({
   // Fee is collected when: source has native fee API params, OR FeeCollector proxy is active
   const feeCollected = FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()
   const feeAbsolute = feeCollected ? (inputAmount * FEE_PERCENT) / 100 : 0
+  // [chore/swap-fee-usd-fix] Fee USD = FEE_PERCENT% of the swap's REAL notional,
+  // taken from whichever side is reliably priced (its own oracle) — NEVER the
+  // input-token fee amount × the other leg's price. For AERO→WETH (AERO unfeeded)
+  // this values the fee off the WETH output oracle (~$0.002), not WETH's price ×
+  // an AERO amount (~$5.79). Oracle-input swaps are unchanged.
+  const platformFeeUsd = feeCollected
+    ? feeUsd(
+        swapNotionalUsd({
+          inputAmount,
+          inputPrice: tokenInUsdPrice ?? null,
+          outputAmount,
+          outputPrice: tokenOutUsdPrice ?? null,
+        }),
+        FEE_PERCENT,
+      )
+    : null
   const minOutput = outputAmount * (1 - slippage / 100)
 
   const secondBest = meta.all[1]
@@ -422,8 +445,8 @@ export default function QuoteBreakdown({
           {feeCollected ? (
             <span>
               {formatDisplay(feeAbsolute, 6)} {tokenIn.symbol}
-              {priceCheck.chainlinkPrice != null && (
-                <span className="ml-1 font-normal text-cream-50">(${(feeAbsolute * priceCheck.chainlinkPrice).toFixed(2)})</span>
+              {platformFeeUsd != null && (
+                <span className="ml-1 font-normal text-cream-50">(${formatFeeUsd(platformFeeUsd)})</span>
               )}
             </span>
           ) : (

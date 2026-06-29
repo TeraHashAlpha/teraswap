@@ -285,3 +285,79 @@ describe('QuoteBreakdown — [SPRINT-9S S2] one calm, specific oracle notice', (
     expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
   })
 })
+
+// [chore/swap-fee-usd-fix] Platform-fee USD must be valued from the reliably-priced
+// side, never the fee (input) token × the other leg's price.
+describe('QuoteBreakdown — platform fee USD (non-oracle fee token)', () => {
+  const AERO: Token = {
+    address: '0x940181a94A35A4569E4529A3CDfB74e38FD98631' as `0x${string}`,
+    symbol: 'AERO',
+    name: 'Aerodrome',
+    decimals: 18,
+    logoURI: '',
+    category: 'DeFi',
+  }
+  const WETH: Token = {
+    address: '0x4200000000000000000000000000000000000006' as `0x${string}`,
+    symbol: 'WETH',
+    name: 'Wrapped Ether',
+    decimals: 18,
+    logoURI: '',
+    category: 'Native',
+  }
+
+  it('AERO→WETH: values the AERO fee off the WETH oracle (~$0.002), NOT WETH price × an AERO amount (~$5.79)', () => {
+    // ~$1.87 swap: 0.0005 WETH out at $3740. AERO (input) has no Chainlink feed.
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          tokenIn: AERO,
+          tokenOut: WETH,
+          amountIn: '3.716',
+          meta: makeMeta({ source: '0x', toAmount: '500000000000000' }), // 0.0005 WETH
+          tokenInUsdPrice: null, // AERO: no oracle
+          tokenOutUsdPrice: 3740, // WETH/USD oracle
+        })}
+      />,
+    )
+    expect(screen.getByText(/\$0\.002/)).toBeInTheDocument()
+    // The bug valued the fee in the dollars, not sub-cent.
+    expect(screen.queryByText(/\$5\.79/)).toBeNull()
+    expect(screen.queryByText(/\$13\.9/)).toBeNull()
+  })
+
+  it('oracle-input swap is unchanged: WETH→USDC fee = 0.1% × input notional ($3.74)', () => {
+    // 1 WETH in at $3740 → fee USD = 0.1% × $3740 = $3.74 (identical to the old
+    // feeAbsolute × inputPrice, since the input token IS priced).
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: '1',
+          meta: makeMeta({ toAmount: '3740000000' }), // 3740 USDC
+          tokenInUsdPrice: 3740, // WETH/USD oracle
+          tokenOutUsdPrice: 1, // USDC
+        })}
+      />,
+    )
+    expect(screen.getByText(/\$3\.74/)).toBeInTheDocument()
+  })
+
+  it('no oracle on either side: shows the fee amount but NO USD figure (never fabricated)', () => {
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          tokenIn: AERO,
+          tokenOut: { ...USDC, symbol: 'USDbC' },
+          amountIn: '3.716',
+          tokenInUsdPrice: null,
+          tokenOutUsdPrice: null,
+        })}
+      />,
+    )
+    // Fee amount in AERO still renders; no "($X)" USD figure is shown for the fee.
+    expect(screen.getAllByText(/AERO/).length).toBeGreaterThan(0)
+    expect(document.body.textContent).not.toMatch(/\(\$\d/)
+  })
+})
