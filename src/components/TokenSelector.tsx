@@ -6,6 +6,7 @@ import { DEFAULT_TOKENS, CATEGORY_DISPLAY_ORDER, isNativeETH, type Token } from 
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import TokenAddressBadge from './TokenAddressBadge'
 import TokenLogo from './TokenLogo'
+import CategoryChips from './CategoryChips'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -220,31 +221,17 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                 (tap the active chip again ⇒ back to "show all"). Applies to BOTH the
                 grouped view and the search results. */}
             {availableCategories.length > 0 && (
-              // Horizontally scrollable on overflow. Reuses the swap-mode tab-bar
-              // pattern from page.tsx: `no-scrollbar` hides the scrollbar track (which
-              // otherwise rendered as a stray gray bar under the chips), and
-              // `tab-bar-fade` adds a right-edge fade on mobile hinting more categories
-              // lie beyond the edge. Stays touch-scrollable.
-              <div className="no-scrollbar tab-bar-fade mb-3 flex flex-nowrap gap-1.5 overflow-x-auto">
-                {availableCategories.map((cat) => {
-                  const active = activeCategory === cat
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => setActiveCategory((prev) => (prev === cat ? null : cat))}
-                      className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                        active
-                          ? 'border-cream-gold text-cream'
-                          : 'border-cream-08 bg-surface-tertiary text-cream-80 hover:border-cream-35 hover:bg-cream-05 hover:text-cream'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  )
-                })}
-              </div>
+              // [chore/category-scroll-fix] Extracted to <CategoryChips/>: a real
+              // horizontal scroller that works for desktop MOUSE users too (drag +
+              // wheel-translation + edge-fade affordances), not only touch/trackpad.
+              // The previous inline row overflowed but was un-scrollable AND
+              // un-discoverable with a mouse — proven in real Chromium (see the
+              // e2e/category-chips Playwright test; JSDOM could never prove layout).
+              <CategoryChips
+                categories={availableCategories}
+                active={activeCategory}
+                onToggle={(cat) => setActiveCategory((prev) => (prev === cat ? null : cat))}
+              />
             )}
 
             {/* Popular tokens — quick select chips.

@@ -1,0 +1,47 @@
+# Real-render (Playwright/Chromium) tests — proving what JSDOM cannot: layout,
+# horizontal scrolling, and pointer/wheel input.
+#
+# WHY A SEPARATE WORKFLOW (chore/category-scroll-fix):
+#   The token-selector category chips "passed" a JSDOM test while being
+#   un-scrollable for desktop mouse users — JSDOM does no layout. This gate mounts
+#   the REAL component in real Chromium and asserts it actually overflows and scrolls
+#   (wheel + drag) to the last category. It is purely ADDITIVE: it does not touch the
+#   app CI jobs in ci.yml, and the frontend CI runs no full vitest suite, so a
+#   dedicated workflow is the only way this proof is actually gated.
+#
+# NO SECRETS / RPC / SUPABASE: the test renders an isolated component harness
+# (esbuild bundle + the app's compiled Tailwind CSS) via file:// — no dev server,
+# no network, no env.
+
+name: "E2E (real-render)"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  category-scroll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      # Scripts ON (like ci.yml): the harness build (globalSetup) needs esbuild's
+      # platform binary + the local tailwind CLI, which are set up by install scripts.
+      - name: Install deps
+        run: npm ci --ignore-scripts=false
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run real-render Playwright tests
+        run: npx playwright test
