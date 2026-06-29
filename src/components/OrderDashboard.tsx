@@ -111,7 +111,7 @@ export default function OrderDashboard() {
           <button
             key={key}
             onClick={() => { playTouchMP3(); setFilter(key) }}
-            className={`min-w-0 flex-1 truncate rounded-lg py-1.5 text-[11px] font-semibold transition-all ${
+            className={`min-w-0 flex-1 rounded-lg py-2 text-xs font-semibold transition-all ${
               filter === key
                 ? 'bg-cream-gold text-[#080B10]'
                 : 'text-cream-50 hover:text-cream'

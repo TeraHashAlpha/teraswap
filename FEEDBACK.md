@@ -5431,3 +5431,79 @@ A multi-lens review of this diff confirmed 3 real issues (all fixed here, with t
   geometry test pinning the dot's SVG-local position.
 - **MissionControlCard accent interval** now stops once the buy is due (was re-rendering every second
   forever while the order stayed live) — addresses the dismissed "re-renders forever" nit.
+
+---
+
+## Feedback — CHORE-MOBILE-UX-POLISH (chore/mobile-ux-polish) — PR 1 of 2
+
+Comprehensive mobile UX audit + first round of fixes, verified on REAL mobile viewports (Playwright
+Chromium device emulation — iPhone SE 375px, iPhone 14 390px, Pixel 7 412px — NOT JSDOM). The diff is
+large per the brief, so it is split: **PR 1 = tab bar + overflow + the highest-impact table/modal
+critical-text fixes**; **PR 2 = the comprehensive ≥44px tap-target sweep** (cataloged below).
+
+### Audit method
+- Static-harness Playwright (the proven `e2e/category-chips` `file://` pattern, no dev server/env):
+  new `e2e/mobile/` + `playwright.mobile.config.ts` (3 device-viewport projects on Chromium) →
+  `npm run test:e2e:mobile` (15 tests, all green).
+- Full-app dev-server audit (real Chromium, 3 viewports) via `scripts`-style harness → before/after
+  screenshots + per-view horizontal-overflow / tap-target / tab-bar metrics. (Needed a dummy
+  `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` to get past RainbowKit's hard "No projectId" throw — the app
+  renders its error boundary without it.)
+
+### FIXED in PR 1
+- **Tab bar (the headline).** Root cause: each tab had `flex-1`, so the 6 tabs SHARED the capped
+  width and squished to ~54px-wide / 41px-tall with 11px labels — `overflow-x-auto` never had anything
+  to scroll, the static `.tab-bar-fade` mask permanently dimmed the last tab ("Analytics"), and there
+  was no drag/wheel input. Extracted `<ModeTabs>` (reusing the #235 CategoryChips scroll mechanics):
+  `shrink-0` tabs that genuinely overflow + scroll, `min-h-[44px]` tap targets, `text-[13px]` labels
+  (≥12px), dynamic edge-fades reflecting real scroll position, drag + vertical-wheel→horizontal, and
+  the active tab auto-scrolls into view. Verified @375/390/412: overflows+scrolls, last tab reachable,
+  every tab ≥44px, labels ≥12px, bar never exceeds viewport. Desktop unchanged (fits, so no scroll).
+- **Horizontal overflow.** The old bar overshot the 375px viewport by ~11px (`button` right=386);
+  after-audit shows **zero off-viewport offenders on all three devices**.
+- **Critical sub-12px text:** Analytics chart-axis dates `text-[8px]→[11px]`; WalletHistory status
+  badges (confirmed/failed/pending — load-bearing) `text-[9px]→text-xs (12px)`; TokenSelector
+  unverified-import warning `text-[10px]→text-xs`.
+- **Tables/modals:** OrderDashboard filter tabs dropped `truncate` (was clipping counts like
+  "Completed (12)"→"Compl…") + bumped to 12px; TokenSelector close button given a ≥44px hit area (was
+  a ~16px glyph).
+
+### DEFERRED to PR 2 (full catalog — audited, not yet fixed)
+Pervasive **sub-44px tap targets** (measured 10–34px) across: SwapBox dismiss-× (~14px) + consent
+checkbox (14px) + 11px consent copy; PortfolioTab per-token Swap/Add (~26px), refresh (~32px), filters
+(~20px) + 10px text; DCAPanel %-presets (~22px), buys/interval/expiry/slippage presets (~30px), advanced
+toggle (~26px); dca dashboard (#236) MissionControlCard Cancel/Remove (~26px, 10px) + OrbitStatRow 9px
+labels & per-buy amount truncation + DCAFillsTimeline 9–10px + tx-link (~14px); CategoryChips & popular
+chips (~28px); Analytics period filters (~28px) + 11px activity rows; OrderDashboard order data (10px) +
+destructive Cancel/Remove (~32px). Plus: WalletModal landscape vertical-scroll; OrderReviewModal
+long-amount-row hardening (min-w-0/wrap — unconfirmed risk; modal is already full-width+scrollable+
+dismissable); and an a11y note — `layout.tsx` sets `maximum-scale=1` (kills the iOS input-zoom-jank the
+brief wanted, but also disables user pinch-zoom; left as-is since the brief prioritised no-zoom-jank).
+
+### Notes
+- `ModeTabs` uses plain `<button>`s (not `role=tab`) to preserve the existing button semantics the
+  `page.test.tsx` gating tests assert; `scrollIntoView` is optional-chained so it no-ops under jsdom.
+- No order-engine/keeper/contract change; no business logic touched — purely layout/className + the
+  tab-bar component extraction. Desktop (`sm:`+) rendering preserved.
+
+### Adversarial review — fixes applied
+A multi-lens review confirmed 3 issues (all fixed; the rest dismissed):
+- **Sticky tab-bar regression.** `sticky top-0` sat on the scroller, but its new `relative` wrapper had
+  zero sticky travel (the edge-fades are `absolute`, so the wrapper's height == the scroller's) → the
+  bar no longer pinned (it did before, as a direct child of `<main>`). Moved `sticky top-0 z-40` to the
+  OUTER wrapper (containing block = the tall page column); the inner `relative` div still hosts the
+  absolute fades. Added a Playwright sticky-pin assertion (the bar stays at viewport top after an 800px
+  scroll) across all 3 viewports.
+- **CI E2E over-collection.** The default `playwright.config.ts` used `testDir: './e2e'` +
+  `testMatch: '**/*.pw.ts'`, so the existing `category-scroll` CI job (which runs `npx playwright test`
+  with the category-chips globalSetup + Desktop Chrome) also picked up `e2e/mobile/*.pw.ts` → the
+  mobile harness wasn't built → `ERR_FILE_NOT_FOUND`, turning the job red. Scoped the default config to
+  `./e2e/category-chips`, AND added a dedicated `e2e.yml` step that runs the mobile suite under
+  `playwright.mobile.config.ts` — so the mobile tests are now genuinely CI-gated under their own
+  harness + device projects (not just local).
+- **Type-check coverage (low).** `tsconfig.json` excludes `e2e/`, so the new `*.pw.ts`/`mount.tsx`
+  aren't covered by `tsc` — this matches the pre-existing convention (Playwright transpiles via esbuild
+  without type-checking; the category-chips specs are excluded too). Left as-is.
+Dismissed (verified non-issues): a stale `drag.moved` (re-initialised on every pointerdown);
+OrderDashboard counts wrapping to 2 lines after dropping `truncate` (acceptable — wraps, never clips);
+the Analytics axis dates at 11px (decorative, not load-bearing critical text).

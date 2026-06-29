@@ -96,12 +96,12 @@ function sourceLabel(s: string): string {
 
 function statusBadge(status: string) {
   if (status === 'confirmed' || status === 'success') {
-    return <span className="rounded bg-success/20 px-1 py-0.5 text-[9px] font-bold uppercase text-success">confirmed</span>
+    return <span className="rounded bg-success/20 px-1.5 py-0.5 text-xs font-bold uppercase text-success">confirmed</span>
   }
   if (status === 'failed' || status === 'reverted') {
-    return <span className="rounded bg-danger/20 px-1 py-0.5 text-[9px] font-bold uppercase text-danger">failed</span>
+    return <span className="rounded bg-danger/20 px-1.5 py-0.5 text-xs font-bold uppercase text-danger">failed</span>
   }
-  return <span className="rounded bg-cream-15/40 px-1 py-0.5 text-[9px] font-bold uppercase text-cream-35">pending</span>
+  return <span className="rounded bg-cream-15/40 px-1.5 py-0.5 text-xs font-bold uppercase text-cream-35">pending</span>
 }
 
 export default function WalletHistory() {

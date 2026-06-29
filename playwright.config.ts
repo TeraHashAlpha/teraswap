@@ -10,7 +10,10 @@ import { defineConfig, devices } from '@playwright/test'
  * dev server, no network, no env/secrets, so it is deterministic in CI.
  */
 export default defineConfig({
-  testDir: './e2e',
+  // Scoped to the category-chips suite only — the mobile suite (e2e/mobile) has its OWN config +
+  // globalSetup (playwright.mobile.config.ts), so the default `test:e2e` run must not pick it up
+  // (it builds a different harness). [chore/mobile-ux-polish]
+  testDir: './e2e/category-chips',
   testMatch: '**/*.pw.ts',
   globalSetup: './e2e/category-chips/build.mjs',
   fullyParallel: true,
