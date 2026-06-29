@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
@@ -23,7 +23,10 @@ import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
 import { getWrappedNative } from '@/lib/chains/registry'
 import { findChainToken } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
+import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { quickFillRaw, perChunkRaw } from '@/lib/dca-quick-fill'
+import { checkRoute } from '@/lib/order-engine/check-route'
+import { failedOrderReason } from '@/lib/order-engine/failed-reason'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
@@ -233,7 +236,7 @@ function CreateDCAForm({
   // [CHORE-DCA-WETH-INPUT] Advisory guidance for the "holds only native ETH" case: if the
   // wallet has ETH but ~zero WETH, hint to wrap first. Native ETH is keyed under its sentinel
   // address; WETH under the chain's wrapped-native address. Non-blocking (they can wrap elsewhere).
-  const { balances, isLoading: balancesLoading } = useTokenBalances()
+  const { balances } = useTokenBalances()
   const hasNativeOnly = useMemo(() => {
     const weth = wethFor(chainId)
     const wethKey = weth?.address.toLowerCase()
@@ -242,15 +245,25 @@ function CreateDCAForm({
     return nativeBal > 0n && wethBal === 0n
   }, [balances, chainId])
 
-  // [CHORE-DCA-UX-POLISH] Selected SPEND token (WETH) balance from the SAME chain-aware
-  // useTokenBalances map the wrap-ETH hint already uses — keyed by the chain's wrapped-native
-  // address (never hardcoded), so it refetches on token/account/chain change. `raw` is the
-  // bigint balance (drives the BigInt preset math); `formatted` is the display string.
-  const spendEntry = useMemo(() => {
+  // [CHORE-DCA-UX-POLISH] Selected SPEND token balance from the chain-aware useTokenBalances map
+  // (the CURATED catalog), keyed by the chain's wrapped-native address (never hardcoded).
+  const mapEntry = useMemo(() => {
     const key = tokenIn && !isNativeETH(tokenIn) ? tokenIn.address.toLowerCase() : undefined
     return key ? balances.get(key) : undefined
   }, [balances, tokenIn])
-  const spendRaw = spendEntry?.raw ?? 0n
+
+  // [CHORE-DCA-UX-FIXES] Bug 1: imported/unverified spend tokens (e.g. ETHFI on Base) are NOT in the
+  // curated useTokenBalances catalog, so the map has no entry and the line used to show "—" with the
+  // presets disabled even when the wallet held the token. Read the SELECTED token's balance directly
+  // (balanceOf) as a fallback — ONLY when the catalog has no entry, so curated tokens keep the
+  // existing multicall path (no extra RPC, no #216 regression). `spendRaw` (bigint) drives the preset
+  // math; `spendFormatted` is the display string.
+  const directSpend = useTokenBalance(tokenIn, chainId, {
+    enabled: isConnected && !!tokenIn && !isNativeETH(tokenIn) && !mapEntry,
+  })
+  const spendRaw = mapEntry?.raw ?? directSpend.raw ?? 0n
+  const spendFormatted = mapEntry?.formatted ?? directSpend.formatted
+  const hasSpendBalance = !!mapEntry || directSpend.hasValue
   const [totalDisplay, setTotalDisplay] = useState('')
   const [partsIdx, setPartsIdx] = useState(2) // default: 10 buys [chore/dca-ux-tweaks]
   const [intervalIdx, setIntervalIdx] = useState(4) // default: 1d (1h prepended shifted 1d 3→4) [chore/dca-ux-tweaks]
@@ -258,17 +271,30 @@ function CreateDCAForm({
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [slippage, setSlippage] = useState('0.5')
 
+  // [CHORE-DCA-UX-FIXES] Bug 3a: routability gate state. `hasImported` flags an imported/unverified
+  // token on either side (the keeper has no curated route for thin tokens); `routeBlock` holds the
+  // block reason after a failed pre-check; `checkingRoute` disables submit while the quote runs.
+  const [routeBlock, setRouteBlock] = useState<string | null>(null)
+  const [checkingRoute, setCheckingRoute] = useState(false)
+  const hasImported = tokenIn?.category === 'Imported' || tokenOut?.category === 'Imported'
+
+  // Monotonic id for routability checks: a token change (or a newer check) bumps it, so an in-flight
+  // check whose pair was swapped mid-flight is dropped instead of blocking the now-selected pair.
+  const routeCheckSeq = useRef(0)
+  // Clear a stale block AND invalidate any in-flight check when the user changes either token.
+  useEffect(() => { setRouteBlock(null); routeCheckSeq.current++ }, [tokenIn, tokenOut])
+
   const parts = DCA_TOTAL_PRESETS[partsIdx]
   const interval = DCA_INTERVAL_PRESETS[intervalIdx]
   const expiry = EXPIRY_PRESETS[expiryIdx]
 
-  // [CHORE-DCA-UX-POLISH] Balance line text: the map's `formatted` string + symbol, or "—" while
-  // balances load or when disconnected / no balance entry. The raw bigint (spendRaw) — not this
-  // display string — drives the preset math, so there is no float drift.
+  // [CHORE-DCA-UX-POLISH] Balance line text: the resolved `formatted` string + symbol, or "—" while
+  // disconnected / before any balance (catalog or direct read) has resolved. The raw bigint
+  // (spendRaw) — not this display string — drives the preset math, so there is no float drift.
   const balanceDisplay = useMemo(() => {
-    if (!isConnected || balancesLoading || !spendEntry) return '—'
-    return `${spendEntry.formatted} ${tokenIn?.symbol ?? ''}`.trim()
-  }, [isConnected, balancesLoading, spendEntry, tokenIn])
+    if (!isConnected || !hasSpendBalance) return '—'
+    return `${spendFormatted ?? ''} ${tokenIn?.symbol ?? ''}`.trim()
+  }, [isConnected, hasSpendBalance, spendFormatted, tokenIn])
 
   const presetsDisabled = !isConnected || spendRaw === 0n
 
@@ -311,18 +337,60 @@ function CreateDCAForm({
     return `${(days / 30).toFixed(1)} months`
   }, [parts, interval])
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
+    setRouteBlock(null)
     startWaitingSound()
 
     let amountIn: string
     try {
       amountIn = parseUnits(totalDisplay, tokenIn.decimals).toString()
     } catch {
+      stopWaitingSound()
       return // Invalid input (e.g. too many decimals)
     }
+
+    // [CHORE-DCA-UX-FIXES] Bug 3a: routability pre-check for imported/unverified tokens. A thin
+    // imported token (e.g. ETHFI) may have NO aggregator route on the target chain — the keeper would
+    // revert executeOrder and the order would silently fail. Verify a route exists BEFORE approve/sign
+    // and BLOCK if none. Scoped to imported tokens so curated pairs keep the zero-latency happy path.
+    // The check uses the per-chunk amount (what each execution actually swaps). checkRoute fails OPEN
+    // on transient quote outages, so only a definitive "no route" blocks.
+    if (hasImported) {
+      const seq = ++routeCheckSeq.current // claim this check
+      setCheckingRoute(true)
+      let routable = true
+      let reason: string | undefined
+      try {
+        const perChunk = perChunkRaw(BigInt(amountIn), parts)
+        const result = await checkRoute({
+          src: tokenIn.address,
+          dst: tokenOut.address,
+          amount: (perChunk > 0n ? perChunk : BigInt(amountIn)).toString(),
+          srcDecimals: tokenIn.decimals,
+          dstDecimals: tokenOut.decimals,
+          chainId,
+        })
+        routable = result.routable
+        reason = result.reason
+      } finally {
+        setCheckingRoute(false)
+      }
+      // Drop a stale result if the user changed the pair (or started a newer check) mid-flight —
+      // never block/sign the now-selected pair on a check that ran against the old one.
+      if (routeCheckSeq.current !== seq) {
+        stopWaitingSound()
+        return
+      }
+      if (!routable) {
+        stopWaitingSound()
+        setRouteBlock(reason ?? 'No swap route found for this pair on this network.')
+        return
+      }
+    }
+
     // minAmountOut = 1 wei for DCA — cannot be 0 (contract reverts with InvalidMinOutput).
     // Actual slippage protection is handled per-fill by the executor's swap route.
     const minAmountOut = '1'
@@ -415,6 +483,17 @@ function CreateDCAForm({
           <p className="mt-1 text-[11px] text-cream-35">
             DCA spends an ERC-20 token. You hold native ETH — wrap it to WETH first to start a DCA.
           </p>
+        )}
+        {/* [CHORE-DCA-UX-FIXES] Bug 3a: imported-token heads-up + routability block. We verify a swap
+            route exists (per-chunk) before letting the order be signed, since thin imported tokens may
+            have no aggregator route and would silently fail at keeper execution. */}
+        {hasImported && !routeBlock && (
+          <p className="mt-1 text-[11px] text-amber-300" data-testid="dca-imported-notice">
+            ⚠️ Imported token — limited liquidity. We&apos;ll verify a swap route before placing the order.
+          </p>
+        )}
+        {routeBlock && (
+          <p className="mt-1 text-[11px] text-red-400" data-testid="dca-route-block">{routeBlock}</p>
         )}
       </div>
 
@@ -593,6 +672,8 @@ function CreateDCAForm({
         >
           {isSubmitting
             ? 'Signing order...'
+            : checkingRoute
+            ? 'Checking route…'
             : paused
             ? 'DCA temporarily paused'
             : !tokenIn || !tokenOut
@@ -773,9 +854,11 @@ function DCAOrderCard({
         </div>
       )}
 
-      {/* Error */}
-      {order.error && (
-        <p className="mb-2 text-[11px] text-red-400">{order.error}</p>
+      {/* Error / failure reason — [CHORE-DCA-UX-FIXES] Bug 3b: a failed order always shows a reason,
+          even when the keeper persisted none (order.error === null), so it never reads as a bare
+          "Failed" and never vanishes without context. */}
+      {(order.error || order.status === 'error') && (
+        <p className="mb-2 text-[11px] text-red-400">{failedOrderReason(order.error)}</p>
       )}
 
       {/* Tx hash */}

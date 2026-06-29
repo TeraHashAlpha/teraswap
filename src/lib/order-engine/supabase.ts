@@ -157,10 +157,16 @@ export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
   }
 }
 
-// ── Fetch active orders for wallet ───────────────────────
+// ── Fetch orders the poll tracks (live + terminal) for a wallet ──────────────
+// [CHORE-DCA-UX-FIXES] Bug 3b: this feeds useOrderEngine's poll. It MUST include the terminal
+// statuses, not just the live ones — otherwise, when the keeper marks an order 'failed' (or
+// 'executed'/'cancelled'/'expired'), the poll never sees the transition and the order stays "active"
+// in the UI forever / silently vanishes from where the user expected it. Including the terminal
+// statuses lets the poll move a failed order to "Failed" so it never vanishes.
+const POLL_STATUSES = 'active,executing,partially_filled,executed,failed,cancelled,expired'
 export async function fetchActiveOrders(wallet: string): Promise<OrderRow[]> {
   try {
-    const res = await fetch(`/api/orders?wallet=${wallet}&status=active,executing,partially_filled`)
+    const res = await fetch(`/api/orders?wallet=${wallet}&status=${POLL_STATUSES}`)
     if (!res.ok) return []
     const json = await res.json()
     return json.orders ?? []

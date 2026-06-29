@@ -28,7 +28,7 @@
  * null/wrong spender (and confirmOrder's own fail-closed guard surfaces the error).
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi } from 'viem'
 import { getOrderExecutor } from '@/lib/order-engine'
@@ -78,16 +78,43 @@ export function useOrderApproval(
     query: { enabled },
   })
 
-  const isApproved =
-    !!spender && allowance !== undefined && amountIn !== undefined && allowance >= amountIn
-  // Until the allowance read resolves we treat it as "not yet approved" so the gate stays closed
-  // (fail-closed). On an unwired chain (spender === null) there is no valid approve target.
-  const needsApproval = !!spender && !isApproved
-
   // ── Exact approve write (NO max-uint) ──
   const { writeContractAsync } = useWriteContract()
   const [approveHash, setApproveHash] = useState<`0x${string}` | undefined>(undefined)
-  const { isSuccess: approveConfirmed } = useWaitForTransactionReceipt({ hash: approveHash })
+  // [CHORE-DCA-UX-FIXES] Bug 2: pin the receipt watcher to the FROZEN order's chainId so the
+  // confirmation fires on the right chain (Base, not the connected/last-used chain). isError lets
+  // us surface an on-chain revert / dropped tx as an error instead of hanging.
+  const { isSuccess: approveConfirmed, isError: approveReverted } = useWaitForTransactionReceipt({
+    hash: approveHash,
+    chainId,
+  })
+
+  // [CHORE-DCA-UX-FIXES] Bug 2: the on-chain allowance read can lag behind the approve receipt
+  // (wagmi/RQ propagation), which previously left needsApproval=true after a confirmed approve — the
+  // modal hung on a disabled "Approve" until a tab leave/re-enter forced a fresh read. Record what
+  // the confirmed receipt approved (token+spender+amount+chain) and treat THAT as approved
+  // immediately, independent of the allowance refetch. Scoped to the exact approved amount so a
+  // later, LARGER order still requires a fresh approval (the gate re-closes).
+  const [approvedFor, setApprovedFor] = useState<
+    { token: string; spender: string; amount: bigint; chainId: number } | null
+  >(null)
+
+  const justApproved =
+    !!approvedFor &&
+    !!tokenIn &&
+    !!spender &&
+    amountIn !== undefined &&
+    approvedFor.token === tokenIn.toLowerCase() &&
+    approvedFor.spender === spender.toLowerCase() &&
+    approvedFor.chainId === chainId &&
+    approvedFor.amount >= amountIn
+
+  const isApproved =
+    (!!spender && allowance !== undefined && amountIn !== undefined && allowance >= amountIn) ||
+    justApproved
+  // Until the allowance read resolves we treat it as "not yet approved" so the gate stays closed
+  // (fail-closed). On an unwired chain (spender === null) there is no valid approve target.
+  const needsApproval = !!spender && !isApproved
 
   const approve = useCallback(async () => {
     // Fail-closed: never approve a null/wrong spender, and never approve max-uint.
@@ -115,13 +142,38 @@ export function useOrderApproval(
     }
   }, [tokenIn, spender, amountIn, chainId, writeContractAsync])
 
-  // ── Re-read allowance once the approve tx confirms so the gate opens ──
+  // ── Auto-advance once the approve tx confirms ──
+  // We snapshot the order context (token/spender/amount/chain) at the moment of confirmation via a
+  // ref, and fire ONLY on the approveConfirmed transition — NOT whenever amountIn changes. So a
+  // confirmed approve for one total never silently green-lights a later, larger order (the gate
+  // re-closes); a genuinely new approve (new receipt) records afresh. Records the approved context so
+  // the gate opens immediately (justApproved) and the modal advances to Sign, AND re-reads the
+  // allowance so the on-chain value catches up. We no longer wait on the refetch — that lag was the
+  // hang (Bug 2).
+  const ctxRef = useRef({ tokenIn, spender, amountIn, chainId })
+  ctxRef.current = { tokenIn, spender, amountIn, chainId }
   useEffect(() => {
-    if (approveConfirmed) {
+    if (!approveConfirmed) return
+    const c = ctxRef.current
+    if (c.tokenIn && c.spender && c.amountIn !== undefined) {
       void refetchAllowance()
+      setApprovedFor({
+        token: c.tokenIn.toLowerCase(),
+        spender: c.spender.toLowerCase(),
+        amount: c.amountIn,
+        chainId: c.chainId,
+      })
       setStatus('ready')
     }
   }, [approveConfirmed, refetchAllowance])
+
+  // ── Surface an on-chain failure (reverted / dropped approve tx) ──
+  useEffect(() => {
+    if (approveReverted) {
+      setStatus('error')
+      setError('Approval transaction failed on-chain. Please try again.')
+    }
+  }, [approveReverted])
 
   return { spender, allowance, isApproved, needsApproval, status, error, approve }
 }

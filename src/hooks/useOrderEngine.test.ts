@@ -801,6 +801,31 @@ describe('useOrderEngine — polling', () => {
     })
     expect(mockFetchActiveOrders).toHaveBeenCalled()
   })
+
+  // [CHORE-DCA-UX-FIXES] Bug 3b: when the keeper marks a tracked order 'failed', the poll must move it
+  // to 'error' (Failed/history) instead of leaving it stuck "active" / silently vanishing.
+  it('moves a keeper-failed order from active → error (Failed), never stuck/vanished', async () => {
+    const HASH = '0x' + 'ab'.repeat(32)
+    mockFetchUserOrders.mockResolvedValue([makeRow({ id: 'r1', order_hash: HASH, status: 'active' })])
+    // The poll observes the keeper's terminal transition (DB 'failed' → UI 'error').
+    mockFetchActiveOrders.mockResolvedValue([
+      makeRow({ id: 'r1', order_hash: HASH, status: 'failed' as unknown as 'error', error: null }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150)
+      await Promise.resolve()
+    })
+
+    // The order is reconciled to 'error' (Failed) and lives in history — never stuck active / vanished.
+    const order = result.current.orders.find(o => o.id === 'r1')!
+    expect(order.status).toBe('error')
+    expect(result.current.historyOrders.map(o => o.id)).toContain('r1')
+    expect(result.current.activeOrders.map(o => o.id)).not.toContain('r1')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────
