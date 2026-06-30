@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react'
 
+import { SUPPORT_EMAIL } from '@/lib/constants'
+
 type LegalType = 'privacy' | 'terms'
 
 interface Props {
@@ -167,7 +169,8 @@ function PrivacyPolicy() {
       <SectionTitle id="pp-contact">14. Contact</SectionTitle>
       <P>
         If you have questions about this Privacy Policy or wish to exercise your data rights,
-        please contact us via <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="text-cream-65 font-medium transition hover:text-cream hover:underline">DM @TeraHash on X</a>.
+        please email us at <a href={`mailto:${SUPPORT_EMAIL}`} className="text-cream-65 font-medium transition hover:text-cream hover:underline">{SUPPORT_EMAIL}</a>{' '}
+        or <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="text-cream-65 font-medium transition hover:text-cream hover:underline">DM @TeraHash on X</a>.
       </P>
     </>
   )
@@ -384,8 +387,9 @@ function TermsOfService() {
 
       <SectionTitle id="tos-contact">20. Contact</SectionTitle>
       <P>
-        If you have questions about these Terms of Service, please contact us
-        via <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="text-cream-65 font-medium transition hover:text-cream hover:underline">DM @TeraHash on X</a>.
+        If you have questions about these Terms of Service, please email us at{' '}
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="text-cream-65 font-medium transition hover:text-cream hover:underline">{SUPPORT_EMAIL}</a>{' '}
+        or <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="text-cream-65 font-medium transition hover:text-cream hover:underline">DM @TeraHash on X</a>.
       </P>
     </>
   )

@@ -2,6 +2,8 @@
 
 import { Component, type ReactNode } from 'react'
 
+import { SUPPORT_EMAIL } from '@/lib/constants'
+
 interface Props {
   children: ReactNode
 }
@@ -38,6 +40,12 @@ export default class SwapErrorBoundary extends Component<Props, State> {
           <h3 className="mb-2 text-sm font-semibold text-cream-90">Something went wrong</h3>
           <p className="mb-4 text-xs text-cream-50">
             The swap interface encountered an error. Your funds are safe.
+          </p>
+          <p className="mb-4 text-xs text-cream-50">
+            Still stuck? Contact{' '}
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="font-medium text-cream-65 transition hover:text-cream hover:underline">
+              {SUPPORT_EMAIL}
+            </a>
           </p>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
