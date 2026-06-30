@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { helpSections } from '@/lib/help-content'
+import { SUPPORT_EMAIL } from '@/lib/constants'
 
 interface HelpDrawerProps {
   open: boolean
@@ -186,6 +187,16 @@ export default function HelpDrawer({ open, onClose }: HelpDrawerProps) {
                     }}
                   >
                     <span>𝕏</span> Follow on X
+                  </a>
+                  <a
+                    href={`mailto:${SUPPORT_EMAIL}`}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[13px] transition-opacity hover:opacity-80"
+                    style={{
+                      color: '#E8E0D4',
+                      border: '1px solid rgba(200,184,154,0.08)',
+                    }}
+                  >
+                    <span>✉</span> Contact support
                   </a>
                 </div>
               </div>

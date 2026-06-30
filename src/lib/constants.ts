@@ -1,6 +1,12 @@
 // ── API & Chain ──────────────────────────────────────────
 export const CHAIN_ID = 1 // Ethereum mainnet
 
+// ── Contact / Support ────────────────────────────────────
+// PUBLIC support address only — never the recovery-root ops email.
+// Single source of truth — every contact touchpoint (footer, docs, help drawer,
+// legal pages, beta disclaimer, error boundaries) renders a mailto: from this.
+export const SUPPORT_EMAIL = 'support_teraswap@proton.me'
+
 // ── Aggregator APIs ──────────────────────────────────────
 export const AGGREGATOR_APIS = {
   '1inch': {

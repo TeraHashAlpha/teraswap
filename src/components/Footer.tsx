@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { FEE_PERCENT } from '@/lib/constants'
+import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
 
 export default function Footer() {
@@ -33,6 +33,8 @@ export default function Footer() {
       <Link href="/privacy" className="py-2 text-cream-50 transition hover:text-cream active:text-cream sm:py-0">Privacy</Link>
       <span className="text-cream-15">|</span>
       <Link href="/terms" className="py-2 text-cream-50 transition hover:text-cream active:text-cream sm:py-0">Terms</Link>
+      <span className="text-cream-15">|</span>
+      <a href={`mailto:${SUPPORT_EMAIL}`} className="py-2 text-cream-50 transition hover:text-cream active:text-cream sm:py-0" aria-label={`Email support at ${SUPPORT_EMAIL}`}>Contact</a>
       <span className="text-cream-15">|</span>
       <span>&copy; 2026 TeraSwap</span>
       <span className="text-cream-15">|</span>

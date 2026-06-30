@@ -3,6 +3,8 @@
 import * as Sentry from '@sentry/nextjs'
 import { useEffect } from 'react'
 
+import { SUPPORT_EMAIL } from '@/lib/constants'
+
 export default function GlobalError({
   error,
   reset,
@@ -21,6 +23,12 @@ export default function GlobalError({
           <h2 style={{ fontSize: 24, marginBottom: 12 }}>Something went wrong</h2>
           <p style={{ fontSize: 14, opacity: 0.6, marginBottom: 24 }}>
             An unexpected error occurred. The team has been notified.
+          </p>
+          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 24 }}>
+            Need help? Contact{' '}
+            <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#C8B89A', textDecoration: 'none' }}>
+              {SUPPORT_EMAIL}
+            </a>
           </p>
           <button
             onClick={reset}
