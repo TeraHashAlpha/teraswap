@@ -5633,3 +5633,49 @@ Because `blob:` in `img-src` was the *sole* blocker — `connect-src` already wo
 blobs production successfully created — the preview's blob-render proof is conclusive. The live grid
 will visually confirm on production once this merges and redeploys. Before/after evidence (production
 placeholder grid; preview blob-render) captured in the review session.
+
+## Feedback — chore/support-contact-email (surface public support email)
+
+### Single source of truth
+`export const SUPPORT_EMAIL = 'support_teraswap@proton.me'` defined ONCE in **`src/lib/constants.ts`**
+(new `// ── Contact / Support ──` section, line 8), carrying the required comment *"PUBLIC support
+address only — never the recovery-root ops email."* Verified the literal address appears in NO other
+file (`grep 'support_teraswap@proton.me' src/` → only constants.ts). All seven touchpoints
+`import { SUPPORT_EMAIL } from '@/lib/constants'` and render `href={`mailto:${SUPPORT_EMAIL}`}`.
+
+### Every place the email was surfaced (accessible mailto:, on-brand, responsive)
+| Touchpoint | File | What |
+|---|---|---|
+| Footer Contact link | `src/components/Footer.tsx` | New `Contact` mailto in the link row (after Terms), reuses the canonical footer link style + `aria-label="Email support at …"` |
+| Docs | `src/components/DocsPage.tsx` | NEW closing **Support** `<AnimatedSection>` (Docs had no contact before) — `✉ Support` with BOTH `@TeraHash on X` (kept) and the email, in the existing card style |
+| Help/Support drawer | `src/components/HelpDrawer.tsx` | `✉ Contact support` pill added to the "Need more help?" list beside "Follow on X" (the drawer opened by the ⊙ help FAB) |
+| Privacy contact (§14) | `src/components/LegalPage.tsx` | Email made the primary data-rights channel, X DM kept alongside |
+| Terms contact (§20) | `src/components/LegalPage.tsx` | Same treatment |
+| Beta/as-is disclaimer | `src/components/BetaDisclaimer.tsx` | Appended "Questions? Contact <email>" to the experimental/"as is"/no-warranties footnote |
+| Error boundary (swap) | `src/components/SwapErrorBoundary.tsx` | "Still stuck? Contact <email>" under the fallback card (Tailwind link style) |
+| Error boundary (global) | `src/app/global-error.tsx` | "Need help? Contact <email>" — inline-styled (`#C8B89A`) since global-error renders its own html/body without Tailwind |
+
+### Accessibility & brand
+Real `<a href="mailto:…">` anchors (keyboard-focusable, screen-reader friendly; visible text is the
+email or a clear label, with `aria-label` where the label is generic like "Contact"). No `target/rel`
+on mailto links (they open the mail client, not a tab). Styling matches the three established on-brand
+link patterns (footer inline `text-cream-50`, prose `text-cream-65 … hover:underline`, drawer pill);
+cream/gold tokens only. Responsive: footer link flows in the existing `flex-wrap` row; docs/help use
+existing responsive containers.
+
+### Deliberate scoping decisions
+- **Obfuscation: intentionally skipped.** The brief marked it optional with the hard constraint "don't
+  break the mailto." Any real anti-scraper scheme (JS reassembly / not emitting the address in the SSR
+  HTML) would break no-JS use, SSR, and/or screen-reader accessibility — a bad trade for a public
+  support inbox. Kept plain, robust, accessible mailto links.
+- **`BetaBanner.tsx` (the dismissible site-wide "Beta version — unaudited" top banner) left untouched.**
+  Its measured height drives a `--beta-banner-h` CSS layout variable, so appending text risks
+  wrapping/layout shift. `BetaDisclaimer.tsx` is the canonical "experimental / as-is / no warranties"
+  disclaimer and is the right home for the contact line.
+- **X handle `@TeraHash` kept** alongside the email in Docs and Legal (per brief). The only other
+  email in the repo, `alerts@teraswap.app` (internal monitoring sender), was left as-is — it is not a
+  public support inbox.
+
+### Verification
+Typecheck clean for all 8 changed files; ESLint clean; 43/43 component tests pass (page/Footer +
+SwapBox/DCAPanel/LimitOrderPanel which render BetaDisclaimer). No business-logic/keeper/contract change.

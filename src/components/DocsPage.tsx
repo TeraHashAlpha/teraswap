@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
+import { SUPPORT_EMAIL } from '@/lib/constants'
+
 // ── Animation helpers ─────────────────────────────────────
 
 const ease = [0.16, 1, 0.3, 1] as [number, number, number, number]
@@ -951,6 +953,31 @@ export default function DocsPage() {
               </motion.div>
             ))}
           </motion.div>
+        </AnimatedSection>
+
+        <Divider />
+
+        <AnimatedSection id="support">
+          <SectionTitle icon="✉" title="Support" />
+          <div className="rounded-lg border border-cream-08 bg-surface-secondary p-4 text-sm text-cream-50">
+            <p>Questions, bug reports, or feedback? Reach us on X or by email:</p>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+              <a
+                href="https://x.com/TeraHash"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-cream-65 transition hover:text-cream hover:underline"
+              >
+                @TeraHash on X
+              </a>
+              <a
+                href={`mailto:${SUPPORT_EMAIL}`}
+                className="font-medium text-cream-65 transition hover:text-cream hover:underline"
+              >
+                {SUPPORT_EMAIL}
+              </a>
+            </div>
+          </div>
         </AnimatedSection>
 
         {/* Bottom spacer */}
