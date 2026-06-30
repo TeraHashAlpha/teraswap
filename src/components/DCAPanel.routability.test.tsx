@@ -151,3 +151,37 @@ describe('DCAPanel — routability gate (imported tokens)', () => {
     expect(arg.amount).toBe('10000000000000000000') // 10 ETHFI per chunk
   })
 })
+
+describe('DCAPanel — creation guard (schedule cannot finish before expiry)', () => {
+  it('BLOCKS when interval × buys > expiry: shows the block, disables submit, never signs', () => {
+    renderWithProviders(<DCAPanel />) // defaults: curated WETH→ETH, 10 buys × 1d, 30d expiry (fits)
+    enterAmount('100')
+    // No block on the (fitting) defaults.
+    expect(screen.queryByTestId('dca-expiry-block')).toBeNull()
+    expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()
+
+    // Make the schedule overrun the expiry: 30 buys × 3d = 90d, but expiry stays 30d.
+    fireEvent.click(screen.getByRole('button', { name: '30' })) // Number of Buys → 30
+    fireEvent.click(screen.getByRole('button', { name: '3d' })) // Interval → 3d
+
+    const block = screen.getByTestId('dca-expiry-block')
+    expect(block).toBeInTheDocument()
+    expect(block.textContent).toMatch(/expir/i)
+    expect(screen.getByRole('button', { name: /Start DCA/i })).toBeDisabled()
+
+    startDca() // clicking a disabled button must not create the order
+    expect(createOrderMock).not.toHaveBeenCalled()
+  })
+
+  it('UNBLOCKS once the expiry is widened enough to fit the schedule', () => {
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+    fireEvent.click(screen.getByRole('button', { name: '30' })) // 30 buys
+    fireEvent.click(screen.getByRole('button', { name: '3d' })) // × 3d = 90d
+    expect(screen.getByTestId('dca-expiry-block')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '90d' })) // expiry 90d == needed 90d → fits
+    expect(screen.queryByTestId('dca-expiry-block')).toBeNull()
+    expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()
+  })
+})

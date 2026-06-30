@@ -86,6 +86,15 @@ import {
   alertUnexplainedOutflow,
   alertOps,
 } from "./alert.js"
+// [chore/dca-resilience] Transient-vs-permanent failure classification + retry
+// decision + reason-bearing orders patches (pure, unit-tested in
+// retry-policy.test.mjs). Replaces the old blunt MAX_RETRIES=3 → 'failed' (no
+// reason) that permanently failed a routable DCA on a single transient miss.
+import {
+  MAX_CYCLE_FAILURES,
+  backoffMs,
+  planFailureHandling,
+} from "./retry-policy.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -166,10 +175,14 @@ const BASEFEE_MULT_URGENT   = parseFloat(process.env.GAS_BASEFEE_MULT_URGENT   |
 
 // Urgency thresholds
 const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "7200") // 2 hours
-const MAX_RETRIES = 3           // [Audit] Max retries per order before marking failed
-const RETRY_BACKOFF_BASE = 5_000 // [Audit] Base backoff 5s (exponential: 5s, 10s, 20s)
 
-// [Audit] Per-order retry tracking
+// [chore/dca-resilience] Per-order CONSECUTIVE transient-failure tracking. A miss
+// (no route this cycle, route/API hiccup, transient revert, momentary slippage)
+// keeps the order ACTIVE and retries a later cycle with backoff (backoffMs); only
+// a PERMANENT reason (classifyFailure) or the consecutive-failure CAP
+// (MAX_CYCLE_FAILURES, default 8) marks it 'failed' — with the real reason. The
+// count resets to 0 on any successful execution. In-memory only (resets on keeper
+// restart — see FEEDBACK).
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }
 
 // [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
@@ -403,6 +416,65 @@ async function updateOrderStatus(orderId, status) {
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
   })
+}
+
+// [chore/dca-resilience] Single failure handler for BOTH the no-route path and a
+// thrown/reverted execution. The decision is the pure, unit-tested
+// planFailureHandling() (retry-policy.js); this function only EXECUTES the plan:
+//   (1) expiry wins — an expired order becomes 'expired' (its own status), never
+//       a generic route 'failed';
+//   (2) a PERMANENT cause (allowance/balance/nonce) fails NOW with that reason;
+//   (3) a TRANSIENT miss keeps the order ACTIVE and retries a later cycle
+//       (backoff), failing only after MAX_CYCLE_FAILURES consecutive misses with
+//       no_route_after_retries + a one-shot #201 Telegram alert.
+// Never double-executes: only status/error/updated_at are written here — never
+// dca_executed — so completed DCA chunks are preserved.
+async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, noRoute = false } = {}, obsCtx = null) {
+  const prev = orderRetries.get(dbOrder.id)
+  const plan = planFailureHandling({
+    dbOrder,
+    err,
+    swapReason,
+    noRoute,
+    prevFailures: prev ? prev.count : 0,
+    nowSec: Math.floor(Date.now() / 1000),
+    nowIso: new Date().toISOString(),
+  })
+
+  // [#201] One-shot Telegram alert at the cap, BEFORE flagging failed.
+  if (plan.alert) {
+    try {
+      await alertOps(
+        {
+          kind: "failed-exec",
+          detail: `Order ${dbOrder.id.slice(0, 8)}… (${dbOrder.order_type}) hit ${plan.failures} consecutive transient failures — flagging FAILED (${plan.reason}). Completed chunks (dca_executed=${dbOrder.dca_executed ?? 0}) are kept.`,
+        },
+        scoreFromContext(obsCtx || {}),
+      )
+    } catch { /* alert is best-effort, never blocks the fail */ }
+  }
+
+  // Apply the Supabase patch (status [+ error] + updated_at).
+  await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(plan.patch),
+  })
+
+  // Update the in-memory consecutive-miss tracker.
+  if (plan.clearRetries) {
+    orderRetries.delete(dbOrder.id)
+  } else {
+    orderRetries.set(dbOrder.id, { count: plan.failures, lastAttempt: Date.now() })
+  }
+
+  if (plan.kind === "expired") {
+    log(`  Order ${dbOrder.id.slice(0, 8)}... expired — recording 'expired', not a route failure`)
+  } else if (plan.kind === "fail") {
+    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} (after ${plan.failures} attempt(s))`)
+  } else {
+    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
+  }
 }
 
 async function unlockStaleOrders() {
@@ -820,21 +892,24 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
     if (executed >= MAX_BATCH) break
 
     try {
-      // Check if expired (off-chain pre-filter)
+      // Check if expired (off-chain pre-filter). [chore/dca-resilience] An order
+      // that expires mid-retry is recorded 'expired' (its own status) — never a
+      // generic route 'failed' — so the UI shows the real cause; drop any stale
+      // retry-tracker entry so the Map does not leak.
       const expiryTs = Number(dbOrder.expiry)
       if (expiryTs < Math.floor(Date.now() / 1000)) {
         await updateOrderStatus(dbOrder.id, "expired")
+        orderRetries.delete(dbOrder.id)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
         continue
       }
 
-      // [Audit] Check retry backoff -- skip if too soon
+      // [chore/dca-resilience] Honor the per-order backoff — skip until the
+      // exponential (capped) window since the last transient miss has elapsed,
+      // so a transient route/API outage has time to recover between retries.
       const retryState = orderRetries.get(dbOrder.id)
-      if (retryState) {
-        const backoff = RETRY_BACKOFF_BASE * Math.pow(2, retryState.count - 1)
-        if (Date.now() - retryState.lastAttempt < backoff) {
-          continue // Still in backoff window
-        }
+      if (retryState && Date.now() - retryState.lastAttempt < backoffMs(retryState.count)) {
+        continue // Still in backoff window — retry a later cycle
       }
 
       // Atomic lock
@@ -947,8 +1022,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       )
 
       if (!swapData) {
-        log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route, will retry`)
-        await updateOrderStatus(dbOrder.id, "active") // Unlock
+        // [chore/dca-resilience] No route THIS cycle is transient: keep the order
+        // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
+        // consecutive misses does this fail with no_route_after_retries (+alert).
+        log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
+        await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
         skipped++
         continue
       }
@@ -1025,6 +1103,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         }
         // [DCA-OBS] A successful execution clears the consecutive-failure signal.
         consecutiveExecFailures = 0
+        // [chore/dca-resilience] ...and resets THIS order's transient-miss count,
+        // so a later isolated miss starts fresh (consecutive, not cumulative).
+        orderRetries.delete(dbOrder.id)
 
         const now = new Date().toISOString()
 
@@ -1090,16 +1171,25 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           }
         } catch { /* ignore */ }
         consecutiveExecFailures++
-        await updateOrderStatus(dbOrder.id, "active") // Unlock for retry
+        // [chore/dca-resilience] A mined revert (no decodable reason here) is
+        // treated as a transient miss: keep the order active and retry a later
+        // cycle (backoff), capping at MAX_CYCLE_FAILURES so a persistently
+        // reverting tx stops burning gas and fails with no_route_after_retries
+        // (+alert) instead of re-sending forever.
+        await handleExecutionFailure(dbOrder, {}, obsCtx)
       }
     } catch (err) {
       // [chore/dca-swapfailed] If the revert is SwapFailed(bytes), unwrap the
       // inner DEX-router reason so the log shows WHY the on-chain swap reverted
       // (e.g. allowance/amount mismatch, or an empty revert = order.router does
-      // not match the calldata's target router). Logging only — never throws.
+      // not match the calldata's target router). The unwrapped reason ALSO feeds
+      // classifyFailure below so a permanent cause (allowance/balance/nonce) is
+      // failed-with-reason immediately rather than retried to the cap.
+      let swapReason = null
       try {
         const sf = decodeSwapFailed(extractRevertData(err))
         if (sf) {
+          swapReason = sf.reason
           // dbOrder (loop var) is in catch scope; orderStruct is not (declared in the try).
           const failedRouter = dbOrder.router ?? (dbOrder.order_data || {}).router ?? "?"
           console.error(`  Order ${dbOrder.id.slice(0, 8)}... SwapFailed → ${sf.reason} (router=${failedRouter}, inner=${sf.innerHex})`)
@@ -1112,21 +1202,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       stats.totalErrors++
       stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
 
-      // [Audit] Retry tracking with exponential backoff
-      const retryState = orderRetries.get(dbOrder.id) || { count: 0, lastAttempt: 0 }
-      retryState.count++
-      retryState.lastAttempt = Date.now()
-      orderRetries.set(dbOrder.id, retryState)
-
-      if (retryState.count >= MAX_RETRIES) {
-        log(`  Order ${dbOrder.id.slice(0, 8)}... max retries (${MAX_RETRIES}) reached, marking failed`)
-        await updateOrderStatus(dbOrder.id, "failed")
-        orderRetries.delete(dbOrder.id)
-      } else {
-        const backoff = RETRY_BACKOFF_BASE * Math.pow(2, retryState.count - 1)
-        log(`  Order ${dbOrder.id.slice(0, 8)}... retry ${retryState.count}/${MAX_RETRIES}, backoff ${backoff / 1000}s`)
-        await updateOrderStatus(dbOrder.id, "active") // Unlock for retry
-      }
+      // [chore/dca-resilience] Classify transient vs permanent and decide retry
+      // (keep active) vs fail-with-specific-reason — replaces the old blunt
+      // MAX_RETRIES=3 → 'failed' (no reason), which permanently failed a routable
+      // DCA on a single transient miss and masked the real cause.
+      await handleExecutionFailure(dbOrder, { err, swapReason }, obsCtx)
     }
   }
 

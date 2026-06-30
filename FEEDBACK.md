@@ -5634,6 +5634,49 @@ blobs production successfully created — the preview's blob-render proof is con
 will visually confirm on production once this merges and redeploys. Before/after evidence (production
 placeholder grid; preview blob-render) captured in the review session.
 
+## Feedback — chore/dca-resilience
+
+Resilient DCA: transient misses retry across cycles (backoff + cap + alert) instead of permanently
+failing a routable order on one miss; the keeper now persists the SPECIFIC terminal reason
+(`expired` / `no_route_after_retries` / `insufficient_balance` / `insufficient_allowance` /
+`nonce_invalid`) to `orders.error` and the UI maps it; a creation guard blocks DCAs whose schedule
+can't finish before expiry. No contract / fund-flow / mainnet-instant-swap changes.
+
+### Edge case
+- **`order_executions` failed-row recording was deliberately NOT added.** The goal said "reason written
+  to order_executions/orders", but `order_executions` has NOT-NULL `amount_in/amount_out/fee` and feeds
+  the #228 analytics UNION (per-chunk valuation). Writing a synthetic failed row risks distorting
+  fill counts / valuations. The terminal reason is persisted to `orders.error` — the single field the
+  UI's `failedOrderReason` already reads — which fully satisfies "persist + show the real reason"
+  without touching fund-flow analytics. Revisit if a per-attempt failure ledger is ever wanted.
+- **The reverted-receipt path (mined tx, `status: 'reverted'`) previously re-sent forever.** It only
+  unlocked the order to `active` with NO per-order cap, so a persistently-reverting tx burned gas every
+  ~30s indefinitely. It now funnels through the same transient handler (backoff + cap), so it stops and
+  fails with `no_route_after_retries` after the cap. We can't decode the revert reason from a receipt
+  without a re-simulation/trace, so a reverted receipt is classified transient (no specific reason).
+
+### Concern
+- **The consecutive-failure cap is in-memory (`orderRetries` Map), so a keeper restart resets it.** This
+  matches the pre-existing pattern and avoids a schema migration (CI does not run migrations vs prod).
+  Worst case: a keeper that restarts frequently gives a genuinely-unroutable order a few extra attempts
+  before failing — benign (strictly better than premature failure). If we want the cap to survive
+  restarts, add an `orders.retry_count` column and persist it (migration + keeper write).
+- **Backoff spacing approximates "retry next scheduled cycle".** For DCA, `canExecute` stays true
+  between a missed chunk and its retry (the interval already elapsed), so without backoff the keeper
+  would re-attempt every 30s poll. The capped exponential backoff (30s → 30min, default `MAX_CYCLE_FAILURES`=8)
+  spreads ~8 retries over ~2–3h before failing with `no_route_after_retries` — long enough to ride out a
+  transient route/API outage, short enough that a genuinely-unroutable order surfaces a reason promptly.
+  Tunable via `MAX_CYCLE_FAILURES` / `RETRY_BACKOFF_BASE_MS` / `RETRY_BACKOFF_MAX_MS`.
+- **Ambiguous transfer reverts (`TRANSFER_FROM_FAILED`, `STF`) are classified TRANSIENT, not
+  balance/allowance.** They're ambiguous between balance and allowance (and even transient), so we never
+  guess a specific reason — such an order rides the cap and fails honestly with `no_route_after_retries`
+  rather than a possibly-wrong `insufficient_balance`/`insufficient_allowance`. Only unambiguous ERC20 /
+  Permit2 signatures ("exceeds allowance/balance", "AllowanceExpired", nonce/already-executed) are
+  classified permanent and failed immediately.
+- **Test gap closed:** the keeper's per-order failure orchestration was previously untestable
+  (executor.js auto-runs `main()` on import). The whole decision is now a pure `planFailureHandling()`
+  (retry-policy.test.mjs, 31 cases) and executor.js only executes the plan — so transient/permanent,
+  cap+alert, expiry-precedence and partial-progress-preservation are all unit-covered.
 ## Feedback — chore/support-contact-email (surface public support email)
 
 ### Single source of truth

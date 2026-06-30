@@ -17,6 +17,7 @@ import {
   getDefaultRouter,
   getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
+  dcaScheduleFitsExpiry,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
@@ -339,10 +340,22 @@ function CreateDCAForm({
     return `${(days / 30).toFixed(1)} months`
   }, [parts, interval])
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute
+  // [chore/dca-resilience] Creation guard: a schedule that can't finish before
+  // the order expires (interval × buys > expiry) is doomed to a partial,
+  // eventually-failed order. Block submit + show a fix BEFORE the user signs.
+  const scheduleFit = useMemo(
+    () => dcaScheduleFitsExpiry({ intervalSeconds: interval.seconds, dcaTotal: parts, expirySeconds: expiry.seconds }),
+    [interval, parts, expiry],
+  )
+
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
+    // [chore/dca-resilience] Hard guard (defense-in-depth): never sign a DCA whose
+    // schedule can't complete before it expires. canCreate already gates the
+    // button, but this also blocks any programmatic call.
+    if (!scheduleFit.fits) return
     setRouteBlock(null)
     startWaitingSound()
 
@@ -588,6 +601,13 @@ function CreateDCAForm({
             </button>
           ))}
         </div>
+        {/* [chore/dca-resilience] Creation guard: interval × buys can't complete
+            before this expiry → block submit (canCreate) and explain the fix. */}
+        {!scheduleFit.fits && (
+          <p className="mt-2 text-[11px] text-red-400" data-testid="dca-expiry-block">
+            {scheduleFit.reason}
+          </p>
+        )}
       </div>
 
       {/* Summary */}

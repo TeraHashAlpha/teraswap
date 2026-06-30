@@ -113,6 +113,25 @@ jobs:
       - name: Platform-fee USD guard
         run: npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx
 
+  dca-resilience-guard:
+    # [chore/dca-resilience] The full vitest suite is not run in CI (only single-file
+    # guards), so this pins the DCA-resilience UI regressions: (1) failedOrderReason
+    # maps the keeper's SPECIFIC terminal reason codes (expired / no_route_after_retries
+    # / insufficient_balance / insufficient_allowance / nonce_invalid / cancelled) to
+    # human messages instead of the generic "swap route unavailable"; (2) the DCA create
+    # form blocks a schedule that can't finish before expiry (interval × buys > expiry).
+    # The keeper-side policy (retry-policy.test.mjs) is gated by keeper-tests.yml.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: DCA resilience guard (failure reasons + creation guard)
+        run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel.routability.test.tsx
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
