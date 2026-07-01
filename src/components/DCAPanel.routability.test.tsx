@@ -14,6 +14,7 @@ const useAccountMock = vi.fn()
 const useChainIdMock = vi.fn(() => 8453)
 const createOrderMock = vi.fn()
 const checkRouteMock = vi.fn()
+const checkOracleMock = vi.fn()
 
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
@@ -26,6 +27,9 @@ vi.mock('@/hooks/useTokenBalance', () => ({
 vi.mock('@/lib/order-engine/check-route', () => ({
   checkRoute: (...args: unknown[]) => checkRouteMock(...args),
   NO_ROUTE_REASON: 'No swap route found for this pair on this network.',
+}))
+vi.mock('@/lib/order-engine/check-oracle', () => ({
+  checkOracleCoverage: (...args: unknown[]) => checkOracleMock(...args),
 }))
 vi.mock('@/hooks/useOrderEngine', () => ({
   useOrderEngine: () => ({
@@ -81,6 +85,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true })
   useChainIdMock.mockReturnValue(8453)
+  // Default: the bought token HAS an oracle → no note (individual tests override).
+  checkOracleMock.mockResolvedValue({ hasOracle: true })
 })
 
 const enterAmount = (v: string) => fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: v } })
@@ -183,5 +189,34 @@ describe('DCAPanel — creation guard (schedule cannot finish before expiry)', (
     fireEvent.click(screen.getByRole('button', { name: '90d' })) // expiry 90d == needed 90d → fits
     expect(screen.queryByTestId('dca-expiry-block')).toBeNull()
     expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()
+  })
+})
+
+describe('DCAPanel — oracle-less advisory note', () => {
+  it('renders the neutral note (naming the token) when the bought token has no oracle', async () => {
+    checkOracleMock.mockResolvedValue({ hasOracle: false })
+    renderWithProviders(<DCAPanel />) // default buy token = ETH; effect fires on mount (debounced)
+    const note = await screen.findByTestId('dca-oracle-note')
+    expect(note).toHaveTextContent(/has no price oracle/i)
+    expect(note).toHaveTextContent(/best available DEX route/i)
+  })
+
+  it('does NOT render the note when the token has an oracle, and NEVER disables submit', async () => {
+    checkOracleMock.mockResolvedValue({ hasOracle: true })
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+    // Give the debounced probe time to resolve, then confirm no note + submit enabled.
+    await waitFor(() => expect(checkOracleMock).toHaveBeenCalled())
+    expect(screen.queryByTestId('dca-oracle-note')).toBeNull()
+    expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()
+  })
+
+  it('is informational only — the note does NOT block submission (createOrder still fires)', async () => {
+    checkOracleMock.mockResolvedValue({ hasOracle: false })
+    renderWithProviders(<DCAPanel />) // curated ETH pair → no routability pre-check
+    await screen.findByTestId('dca-oracle-note') // note is showing
+    enterAmount('100')
+    startDca()
+    await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
   })
 })

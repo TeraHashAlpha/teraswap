@@ -5722,3 +5722,72 @@ existing responsive containers.
 ### Verification
 Typecheck clean for all 8 changed files; ESLint clean; 43/43 component tests pass (page/Footer +
 SwapBox/DCAPanel/LimitOrderPanel which render BetaDisclaimer). No business-logic/keeper/contract change.
+
+## Feedback — chore/oracle-less-advisory
+
+Neutral, informational creation-time note when a DCA targets a token with no independent price oracle
+(no Chainlink feed AND no DefiLlama coverage on the active chain). Informational ONLY — never blocks
+submission; no execution/on-chain/keeper change. Follows the INC investigation that found sub-$10k DCA
+into oracle-less tokens (e.g. ETHFI on Base) fills with no independent price cross-check.
+
+### Detection logic (dynamic, no hardcoded token list)
+- **Chainlink** — synchronous per-chain registry lookup, no network: `getChainlinkFeed(token, chainId)`
+  (direct USD feed) `|| getComposedFeed(token, chainId)` (composed, e.g. Base cbETH = cbETH/ETH ×
+  ETH/USD), from `src/lib/chains/chainlink-feeds.ts`. Native-ETH is normalised to wrapped inside
+  `getChainlinkFeed`. Base maps WETH/USDC/DAI (+ cbETH composed) → those never show the note.
+- **DefiLlama** — only probed when there is NO Chainlink feed (saves a call for curated tokens). New
+  `probeDefiLlamaCoverage(token, chainSlug)` in `defillama.ts` returns a **tri-state**: `covered` /
+  `none` (API responded, no usable price) / `unknown` (HTTP error / timeout / abort). Uses the same 3s
+  timeout + 2min cache as the price-guard fetch.
+- **Decision** — pure `resolveOracleCoverage(hasChainlink, defillama)` (unit-tested): oracle-less **only**
+  when `!hasChainlink && defillama === 'none'`. `'unknown'` **fails OPEN** (treated as covered) so a
+  transient DefiLlama blip never shows a false note.
+- **Transport** — server route `GET /api/oracle-coverage?token&chainId` (mirrors the checkRoute→/api/quote
+  proxy pattern: address+chain validation, light rate-limit, fail-open catch). Client `checkOracleCoverage`
+  fails OPEN on any non-2xx / malformed / network error. DCAPanel calls it **debounced (400ms) +
+  seq-guarded** on `[tokenOut, chainId]` (same pattern as the routability pre-check), so rapid token
+  switches drop stale results.
+- **Scope** — DCA only. Limit/Stop-Loss orders REQUIRE a Chainlink `priceFeed` to express their price
+  condition, so an oracle-less token can't be used for them; only DCA (`priceFeed = address(0)`) reaches
+  this case. The note names the **bought** token (`tokenOut`); DCA `tokenIn` is pinned to WETH (priceable).
+
+### Edge case
+- `probeDefiLlamaCoverage` distinguishes `none` (definitive) from `unknown` (transient) precisely to avoid
+  a false note when DefiLlama itself is briefly unreachable — `fetchDefiLlamaPrice` collapses both to
+  `null`, which would have mis-shown the note. The endpoint short-circuits (no DefiLlama call) whenever a
+  Chainlink feed exists, so the common curated-token path adds zero network latency.
+
+### P2 — per-fill protection for oracle-less tokens (ASSESSMENT ONLY — no change made this PR)
+**Current protection for an oracle-less DCA chunk (as shipped):**
+1. Aggregator route's own quoted slippage (DCA panel default 0.5%, capped 15% server-side).
+2. On-chain `minAmountOut = 1 wei` for DCA (the contract accepts essentially any output).
+3. Server `/api/swap` DefiLlama guard — **fails open < $10k** and blocks ≥ $10k only when the oracle is
+   unavailable. For an oracle-less token, sub-$10k chunks get **no independent cross-check** (Chainlink
+   absent for DCA `priceFeed=0`; DefiLlama has no price). So the *only* effective per-fill bound is the
+   aggregator's own slippage on `amountIn` — there is no oracle sanity floor on `amountOut`.
+
+**Options considered (recommendation: (a) now, (b) later; NOT in this PR):**
+- **(a) Tighter DEFAULT slippage for oracle-less DCA (recommended).** When the note is shown, default the
+  DCA slippage to a lower value (e.g. 0.5%→0.3%) and/or surface it prominently. Cheap, client-side, no
+  keeper/contract change; trade-off: more "insufficient output" reverts on genuinely thin/volatile tokens
+  → those become transient misses that #246 already retries/caps, so no permanent-fail regression. Net
+  positive for a recurring buy.
+- **(b) Keeper cross-source sanity on `minAmountOut` (later, higher-value).** Have the keeper set a real
+  per-fill `minAmountOut` from the aggregator quote × (1 − slippage) instead of `1 wei`, so a bad route
+  reverts on-chain rather than filling at any price. This is the strongest fix but **touches the
+  keeper/execution path and the signed-order min-output semantics** → explicitly out of scope here (goal:
+  do NOT touch keeper/on-chain safety). Trade-off: must be signed into the order or applied at execute
+  time within the signed `minAmountOut` envelope; needs its own audit.
+- **(c) Lower per-chunk USD cap for oracle-less tokens (optional).** Cap oracle-less DCA chunk size below
+  the $10k DefiLlama-guard threshold is moot (they're already sub-$10k by nature); a *lower* advisory cap
+  (e.g. warn above $X) adds friction with little benefit given (a)/(b). Not recommended.
+
+**Bottom line:** the order fills correctly today; the exposure is quality-of-fill on thin liquidity, not
+loss of funds or double-execution. (a) is a low-risk follow-up; (b) is the real hardening but must be a
+separate keeper PR with an audit. This PR ships only the informed-consent note.
+
+### Verification
+`oracle-coverage.test.ts` (5) + `check-oracle.test.ts` (6) + DCAPanel oracle-note wiring in
+`DCAPanel.routability.test.tsx` (3) = 14 new tests; typecheck clean; ESLint 0 errors (advisory
+set-state-in-effect warnings only, same pattern as the existing routability effect). Note renders for an
+oracle-less bought token, absent for WETH/USDC (Chainlink-covered), and never disables submit.
