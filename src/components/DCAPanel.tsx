@@ -27,6 +27,7 @@ import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { quickFillRaw, perChunkRaw } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
+import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
 import DCADashboard from './dca/DCADashboard'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
@@ -287,6 +288,25 @@ function CreateDCAForm({
   // Clear a stale block AND invalidate any in-flight check when the user changes either token.
   useEffect(() => { setRouteBlock(null); routeCheckSeq.current++ }, [tokenIn, tokenOut])
 
+  // [chore/oracle-less-advisory] Detect whether the BOUGHT token has an independent
+  // price oracle (Chainlink feed OR DefiLlama coverage) on the active chain. When it
+  // does NOT, we render a NEUTRAL, informational heads-up (never blocks submission).
+  // Debounced + seq-guarded like the routability check; fails OPEN so a transient
+  // probe outage never shows a false note.
+  const [oracleLess, setOracleLess] = useState(false)
+  const oracleCheckSeq = useRef(0)
+  useEffect(() => {
+    setOracleLess(false)
+    const seq = ++oracleCheckSeq.current
+    const addr = tokenOut?.address
+    if (!addr) return
+    const t = setTimeout(async () => {
+      const { hasOracle } = await checkOracleCoverage({ token: addr, chainId })
+      if (oracleCheckSeq.current === seq) setOracleLess(!hasOracle)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [tokenOut, chainId])
+
   const parts = DCA_TOTAL_PRESETS[partsIdx]
   const interval = DCA_INTERVAL_PRESETS[intervalIdx]
   const expiry = EXPIRY_PRESETS[expiryIdx]
@@ -534,6 +554,16 @@ function CreateDCAForm({
             Best price at each execution
           </span>
         </div>
+        {/* [chore/oracle-less-advisory] NEUTRAL, informational note (plain text +
+            bold only — deliberately NO warning colours/icons/callout) shown when
+            the bought token has no independent price oracle. Informational only —
+            it never disables submit. */}
+        {oracleLess && tokenOut && (
+          <p className="mt-2 text-[11px] leading-relaxed text-cream-50" data-testid="dca-oracle-note">
+            <span className="font-semibold text-cream">{tokenOut.symbol} has no price oracle</span>{' '}
+            — fills use the best available DEX route, so the execution price depends on on-chain liquidity.
+          </p>
+        )}
       </div>
 
       {/* Number of parts */}

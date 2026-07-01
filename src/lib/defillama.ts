@@ -108,6 +108,64 @@ export async function fetchDefiLlamaPrice(
 }
 
 /**
+ * [chore/oracle-less-advisory] Tri-state DefiLlama coverage probe for the
+ * creation-time "no price oracle" note. Unlike fetchDefiLlamaPrice (which
+ * collapses "no price" and "network error" both to null), this distinguishes:
+ *   - 'covered' → a usable, sufficiently-confident price exists;
+ *   - 'none'    → the API responded but has no usable price for this coin;
+ *   - 'unknown' → the probe itself failed (HTTP error / timeout / abort) so
+ *                 coverage can't be determined → the caller FAILS OPEN.
+ * Never throws. Reuses the same cache/timeout as fetchDefiLlamaPrice.
+ */
+export async function probeDefiLlamaCoverage(
+  tokenAddress: string,
+  chain: string = 'ethereum',
+): Promise<'covered' | 'none' | 'unknown'> {
+  const key = `${chain}:${tokenAddress.toLowerCase()}`
+
+  const cached = cache.get(key)
+  if (cached && Date.now() < cached.expiresAt) return 'covered'
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    let json: { coins?: Record<string, { price?: unknown; symbol?: string; timestamp?: number; confidence?: number }> }
+    try {
+      const res = await fetch(`${DEFILLAMA_BASE}/${key}`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      })
+      if (!res.ok) return 'unknown' // transient upstream error — don't assert "none"
+      json = await res.json()
+    } finally {
+      clearTimeout(timeout)
+    }
+    const coin = json.coins?.[key]
+    const usable =
+      !!coin &&
+      typeof coin.price === 'number' &&
+      coin.price > 0 &&
+      isFinite(coin.price) &&
+      !(typeof coin.confidence === 'number' && coin.confidence < 0.5)
+    if (usable) {
+      cache.set(key, {
+        data: {
+          price: coin!.price as number,
+          symbol: coin!.symbol || '?',
+          timestamp: coin!.timestamp || Math.floor(Date.now() / 1000),
+          confidence: coin!.confidence ?? 1,
+        },
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      })
+      return 'covered'
+    }
+    return 'none' // responded, but no usable price → definitively uncovered
+  } catch {
+    return 'unknown' // network / timeout / abort → can't determine
+  }
+}
+
+/**
  * Fetch prices for multiple tokens in a single API call.
  * DefiLlama supports comma-separated coin IDs.
  */
