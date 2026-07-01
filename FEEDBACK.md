@@ -5791,3 +5791,65 @@ separate keeper PR with an audit. This PR ships only the informed-consent note.
 `DCAPanel.routability.test.tsx` (3) = 14 new tests; typecheck clean; ESLint 0 errors (advisory
 set-state-in-effect warnings only, same pattern as the existing routability effect). Note renders for an
 oracle-less bought token, absent for WETH/USDC (Chainlink-covered), and never disables submit.
+
+## Feedback — chore/dca-deviation-guard
+
+Keeper-side execution-QUALITY defer gate for DCA fills. A DCA executes through the ONE pinned
+`order.router` (best-of-N is impossible for a signed order — see the routing investigation), so this
+gate does not re-route; it compares the committed route's expected out to the best UNCONSTRAINED
+cross-agg quote and DEFERS (never fails, never switches aggregators) within a bounded window if the
+committed route has drifted. Pure decision logic in `deviation-guard.js` (27 tests); wired into
+`executor.js` after the routerDataHash check, before the gas-tier block; DCA orders only. No contract /
+on-chain / pinned-router change; DCA market-price neutrality untouched (the chunk still buys regardless
+of price — this guards execution quality, not timing).
+
+### DEFER-vs-FAIL rules (the core invariant)
+- **DEFER is its OWN state, NOT a failure.** On defer the gate only `updateOrderStatus(active)` +
+  `continue`. It **does not** touch the `orderRetries` Map, **does not** call `handleExecutionFailure`,
+  **does not** mark the order `failed`/`expired`, and **does not** emit a failure alert. So a deviation
+  defer can never trip the #246 `MAX_CYCLE_FAILURES` cap or surface as a failed order.
+- **Real failures still use #246 unchanged.** A missing route (`fetchSwapRoute` → null) or a
+  thrown/reverted `executeOrder` still funnels through `handleExecutionFailure` (transient→retry-with-cap,
+  permanent→fail-with-reason). The deviation gate sits strictly between a *successful* route fetch and the
+  send, so the two paths never overlap.
+- **Fail-OPEN everywhere.** No cross-agg reference (all sources fail/timeout, unparseable quote), a window
+  shorter than one poll cycle, or an unparseable due time all resolve to EXECUTE — consistent with the
+  DefiLlama-guard <$10k fail-open. We never block a DCA on our own uncertainty.
+- **Bounded, never stuck.** Window = `[dueSec, dueSec + DCA_DEVIATION_WINDOW_FRACTION × interval]` from the
+  SCHEDULED due time (first chunk = `created_at` since `dcaLastExecution[hash]` starts at 0 on-chain;
+  subsequent = `last_exec + interval`). Window-end still-deviated ⇒ EXECUTE anyway (with a **non-paging**
+  advisory Telegram note via `alertOps(…, score 0)`). The window (0.25× by default) ends well before the
+  next chunk becomes due and before expiry (the expiry pre-filter runs first each cycle), so no overlap,
+  no double-execute.
+
+### Reference aggregator sources
+The cross-agg REFERENCE is the existing **unconstrained `/api/quote` meta-quote** (`fetchBestQuote` →
+`buildQuotePath` → `GET /api/quote`), i.e. the same best-of-N pipeline the instant swap uses (1inch, 0x,
+Odos, KyberSwap, ParaSwap/Velora, Balancer, etc. — whatever `AGGREGATOR_APIS` yields for the chain),
+`json.best.toAmount`. The EXECUTION route is unchanged: still `/api/swap` constrained to `order.router`
+(`sourceForRouter` + the `tx.to == order.router` guard). Per-source timeouts + caching live in the
+`/api/quote` server; the keeper adds only a 5s `AbortController` cap so a slow reference never stalls a
+poll cycle. Reference vs committed are measured on the **same net-chunk input** (`computeNetChunkAmount`,
+after the 0.1% fee), so the comparison is apples-to-apples.
+
+### Config (documented in docs/Prompts/CHORE-DCA-DEVIATION-GUARD.md + .env)
+`DCA_DEVIATION_THRESHOLD=0.01` (1%, clamped [0,1]), `DCA_DEVIATION_WINDOW_FRACTION=0.25` (clamped (0,1]).
+Global for now; both fail-safe to their defaults on unparseable input.
+
+### Concern / follow-up
+- The gate spends one extra `/api/quote` round-trip **per due DCA chunk** (only when a chunk is actually
+  eligible, not every poll). Bounded by the 5s timeout and the server-side quote cache; negligible for the
+  current order volume, but if DCA volume grows, consider caching the reference per (pair, chunk) for the
+  poll interval.
+- The advisory note reuses `alertOps({ kind: 'dca-deviation' }, 0)` (info tier, no escalation) rather than
+  a dedicated builder, to avoid new alert surface. If ops wants to filter it distinctly from other
+  `alertOps` kinds, a small `alertDcaDeviation` builder in alert.js (mirroring the others) is a clean
+  follow-up.
+
+### Verification
+`deviation-guard.test.mjs` = 27 node:test cases (defer-in-window; recovers→execute; window-elapsed→
+execute-anyway+atWindowEnd; window<poll-cycle floor; fail-open on missing reference; committed-better→
+execute; computeDeviation math + best<=0 guard; dcaDueSec first vs subsequent + null; env clamps;
+never-throws). Full keeper suite 127/127 (`node --test`, auto-gated by keeper-tests.yml). `node --check
+executor.js` OK. 3 adversarial review lenses (defer-vs-fail, window/timing, fail-open/neutrality/no-double-
+exec) all approved with zero findings.
