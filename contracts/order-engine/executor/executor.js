@@ -69,7 +69,7 @@ import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier } from "./freeze-score.js"
-import { buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk
+import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
 import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
 // + parent-order status transition (pure, unit-tested in record-execution.test.mjs).
@@ -95,6 +95,19 @@ import {
   backoffMs,
   planFailureHandling,
 } from "./retry-policy.js"
+// [chore/dca-deviation-guard] Execution-QUALITY defer gate for DCA fills (pure,
+// unit-tested in deviation-guard.test.mjs). Compares the committed order.router's
+// quote to the best cross-agg quote; if the committed route has drifted past the
+// threshold it DEFERS the fill within a bounded window — it never fails, never
+// switches aggregators, and never touches DCA market-price neutrality. SEPARATE
+// from retry-policy.js: a defer is NOT a failure (no orderRetries, no failure alert).
+import {
+  DCA_DEVIATION_THRESHOLD,
+  DCA_DEVIATION_WINDOW_FRACTION,
+  computeDeviation,
+  dcaDueSec,
+  decideDcaExecution,
+} from "./deviation-guard.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -597,10 +610,40 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
       return null
     }
 
-    return { data: data.tx.data }
+    // [chore/dca-deviation-guard] Also surface the committed router's expected out
+    // (data.toAmount) so the DCA quality gate can compare it against the best
+    // cross-agg quote. Callers keep using swapData.data unchanged; toAmount is null
+    // when the API omits it (⇒ the gate treats the reference as unavailable ⇒
+    // fail-open ⇒ execute).
+    return { data: data.tx.data, toAmount: data.toAmount ?? null }
   } catch (err) {
     console.error("  fetchSwapRoute error:", err.message)
     return null
+  }
+}
+
+// [chore/dca-deviation-guard] Best-of-N cross-aggregator REFERENCE quote for the
+// DCA quality gate. Unlike fetchSwapRoute (which is CONSTRAINED to the signed
+// order.router) this GETs the UNCONSTRAINED /api/quote meta-quote — the same
+// best-of-N the instant swap uses — purely as a yardstick to measure how far the
+// committed route has drifted. It NEVER changes which router the fill uses. Fully
+// fail-open: any missing config / error / timeout / missing field ⇒ null ⇒ the
+// gate executes (we never block a DCA on our own uncertainty). Never throws.
+async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, dstDecimals) {
+  if (!API_URL) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a poll cycle
+  try {
+    const path = buildQuotePath({ tokenIn, tokenOut, amount: String(amount), srcDecimals, dstDecimals, chainId })
+    const res = await fetch(`${API_URL}${path}`, { signal: controller.signal })
+    if (!res.ok) return null
+    const json = await res.json()
+    const best = json?.best?.toAmount
+    return best != null ? String(best) : null
+  } catch {
+    return null // fail-open: timeout / network / parse error ⇒ no reference
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -1044,6 +1087,76 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           skipped++
           continue
         }
+      }
+
+      // ── DCA execution-QUALITY defer gate ── [chore/dca-deviation-guard]
+      // A DCA fill goes through the ONE pinned order.router (best-of-N is not an
+      // option for a signed order). This gate does NOT re-route and does NOT fail:
+      // it compares the committed route's expected out (swapData.toAmount) to the
+      // best UNCONSTRAINED cross-agg quote and, if the committed route has drifted
+      // past DCA_DEVIATION_THRESHOLD, DEFERS the fill within a bounded window (a
+      // fraction of the DCA interval). Fail-OPEN: a missing reference or a window
+      // shorter than one poll cycle ⇒ execute. A DEFER is NOT a failure — it just
+      // unlocks the order (active) and retries next cycle; it MUST NOT touch
+      // orderRetries, call handleExecutionFailure, mark 'failed', or emit a failure
+      // alert. DCA still buys regardless of market price — this guards execution
+      // QUALITY, not market timing.
+      if (isDca) {
+        const dueSec = dcaDueSec(dbOrder)
+        const bestOut = await fetchBestQuote(
+          orderStruct.tokenIn,
+          orderStruct.tokenOut,
+          netAmount,
+          CHAIN_ID,
+          srcDecimals,
+          dstDecimals,
+        )
+        // Reference is only usable when BOTH sides are present; otherwise fail-open.
+        const referenceAvailable = bestOut != null && swapData.toAmount != null
+        const deviation = referenceAvailable
+          ? computeDeviation(bestOut, swapData.toAmount)
+          : 0
+        const decision = decideDcaExecution({
+          deviation,
+          threshold: DCA_DEVIATION_THRESHOLD,
+          nowSec: Math.floor(Date.now() / 1000),
+          dueSec,
+          intervalSec: Number(orderStruct.dcaInterval),
+          windowFraction: DCA_DEVIATION_WINDOW_FRACTION,
+          pollIntervalSec: POLL_INTERVAL_MS / 1000,
+          referenceAvailable,
+        })
+
+        if (decision.action === "defer") {
+          const windowSec = DCA_DEVIATION_WINDOW_FRACTION * Number(orderStruct.dcaInterval)
+          log(
+            `  Order ${dbOrder.id.slice(0, 8)}... DCA DEFER -- committed route ${(deviation * 100).toFixed(2)}% below best cross-agg quote (threshold ${(DCA_DEVIATION_THRESHOLD * 100).toFixed(2)}%); waiting within ${Math.round(windowSec)}s window`,
+          )
+          // Unlock and retry a later cycle. NOT a failure: do NOT touch orderRetries,
+          // do NOT call handleExecutionFailure, do NOT mark 'failed', no failure alert.
+          await updateOrderStatus(dbOrder.id, "active")
+          skipped++
+          continue
+        }
+
+        if (decision.atWindowEnd) {
+          log(
+            `  Order ${dbOrder.id.slice(0, 8)}... DCA executing anyway at window end -- still ${(deviation * 100).toFixed(2)}% below best cross-agg quote`,
+          )
+          // ADVISORY, non-paging: score 0 ⇒ 'info' tier ⇒ no escalation tail.
+          // alertOps never throws, but guard anyway so a monitoring hiccup can never
+          // block the fill.
+          try {
+            await alertOps(
+              {
+                kind: "dca-deviation",
+                detail: `Order ${dbOrder.id} executed at window-end still deviated ${(deviation * 100).toFixed(2)}% vs best cross-agg quote`,
+              },
+              0,
+            )
+          } catch {}
+        }
+        // else: route competitive / fail-open / sub-poll window ⇒ fall through and execute.
       }
 
       // ── Gas Strategy: tier-based execution ──
