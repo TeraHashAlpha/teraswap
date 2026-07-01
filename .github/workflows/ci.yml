@@ -132,6 +132,23 @@ jobs:
       - name: DCA resilience guard (failure reasons + creation guard)
         run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel.routability.test.tsx
 
+  oracle-advisory-guard:
+    # [chore/oracle-less-advisory] Pins the oracle-coverage detection behind the
+    # creation-time "no price oracle" note: resolveOracleCoverage (note ONLY when
+    # no Chainlink feed AND DefiLlama definitively has no price; a failed probe
+    # fails open) + checkOracleCoverage's fail-open client policy. The DCAPanel
+    # render wiring is covered by dca-resilience-guard (DCAPanel.routability.test.tsx).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Oracle-less advisory guard (detection + fail-open)
+        run: npx vitest run src/lib/order-engine/oracle-coverage.test.ts src/lib/order-engine/check-oracle.test.ts
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
