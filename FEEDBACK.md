@@ -5853,3 +5853,54 @@ execute; computeDeviation math + best<=0 guard; dcaDueSec first vs subsequent + 
 never-throws). Full keeper suite 127/127 (`node --test`, auto-gated by keeper-tests.yml). `node --check
 executor.js` OK. 3 adversarial review lenses (defer-vs-fail, window/timing, fail-open/neutrality/no-double-
 exec) all approved with zero findings.
+
+## Feedback — CHORE-TOKEN-CATALOG-PIPELINE (branch chore/token-catalog-pipeline)
+
+### Per-source reliability (first live run, 2026-07-01)
+- **uniswap** (tokens.uniswap.org): OK live on both chains; vendored-snapshot fallback (v21.3.0) untriggered.
+- **coingecko** (tokens.coingecko.com per-chain all.json): OK; the SAME download is injected into the shared
+  verdict collector as the guard's trusted-list set (one fetch, two consumers).
+- **oneinch** (tokens.1inch.io v1.2): OK on 1 + 8453.
+- **trustwallet** (raw.githubusercontent tokenlist.json): OK on 1 + 8453.
+- **superchain** (optimism.tokenlist.json, Base only): OK.
+- **defillama** (coins.llama.fi/prices/current, batched 100): OK, no failed batches.
+- **publicnode RPCs**: throttled the first 803-token probe burst (81 unreadable rows → the fail-closed core
+  check correctly ABORTED the first build on USDC). Fixed with retry passes (2× at concurrency 4) in the
+  shared collector — the rerun resolved every core. `GUARD_RPC_1/8453` env overrides remain available.
+
+### Current tokens that FAILED cross-verification (kept in catalog, honest ⚠, never dropped)
+- Mainnet (25, all `insufficient-sources` — single-list tokens, largely the guard's existing
+  trustedListExempt set): AVT, CELO, CQT, CRPT, DREP, FLUX, FX, JAM, KUJI, MPL, MXC, ORCA, PAX, PSTAKE,
+  QRDO, QSP, QUAI, STX, TERM, TONE, UPI, WANLOG, WCFG, WFB, WRON.
+- Base (2): APXUSD, QUAI.
+- UX note: under the old membership-derived badge these showed ✓; they now show the honest ⚠ until a second
+  source lists them. This is the intended trust-signal fix, but it IS a visible change.
+
+### Symbol conflicts resolved by canonical priority — Architect review suggested
+Curated seeds always win a symbol conflict by design (priority: curated > superchain > uniswap > coingecko >
+oneinch > trustwallet > defillama). First run kept the pre-existing catalog address and rejected the other
+candidate for: CULT, OHM, FLX, RADAR, COOK, MUSD, KNC (mainnet) and UP (Base). For **OHM** (kept
+0x383518…v1, rejected 0x64aa33…v2) and **KNC** (kept legacy 0xdd974D…, rejected current 0xdeFA4e…) the
+REJECTED address is the CoinGecko-canonical one — no regression vs today's catalog, but these two look like
+LCX/RBC-style migration candidates for curated REMAPS in a follow-up chore.
+
+### Behaviour change (security fix, intentional)
+- `isVerifiedToken` now reads the persisted per-token `verified` field (>=2-source agreement + guard PASS).
+  A mainnet session import NO LONGER flips to ✓ (the 9P-era `findTokenByAddress`-over-customs quirk is gone);
+  unverified curated seeds show ⚠ instead of a false ✓.
+
+### Persistence / scheduling decision
+- Catalogs are COMMITTED (src/config/generated/token-catalog.{1,8453}.json) — runtime is fully static.
+- Regeneration: `npm run tokens:sync` manually, plus `.github/workflows/token-catalog-refresh.yml`
+  (Mondays 06:00 UTC + workflow_dispatch) which rebuilds, re-gates with the no-network guards, and opens a
+  PR. Scheduled workflows only fire from the default branch — it activates once this lands on main.
+
+### Edge cases / scope notes
+- CoinGecko VOLUME data is not fetched in P1 (the id-join needs the ~20MB coins/list + markets pages); the
+  low-liquidity bump therefore keys off the DefiLlama price-confidence floor (`defillamaConfidenceMin` 0.9).
+  `liquidityFloorUsd` is wired and takes over whenever volume data is supplied (env-gated CG markets is the
+  natural follow-up).
+- The pipeline is self-seeding (current catalog = next run's seeds) so nothing ever silently drops; genuine
+  removals must go through curated REMOVALS (ported from generate-token-catalog.mjs, which this supersedes).
+- guard-fatal rejections on the first run: 2 (mainnet) + 1 (Base) NEW candidates were caught by the reused
+  guard gate before ever entering the catalog — the reuse requirement doing its job.

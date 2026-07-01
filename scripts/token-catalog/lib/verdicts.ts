@@ -92,16 +92,44 @@ export interface TokenIdentity {
  * CoinGecko address set per chain (the pipeline reuses its own coingecko source fetch);
  * chains without an injected set are fetched here, exactly like the original script.
  */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function probePass(
+  client: ReturnType<typeof createPublicClient>,
+  cat: TokenIdentity[],
+  concurrency: number,
+  onProgress: (idx: number) => void,
+): Promise<Array<Awaited<ReturnType<typeof onchainProbe>>>> {
+  let i = 0
+  const rows: Array<Awaited<ReturnType<typeof onchainProbe>>> = new Array(cat.length)
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (i < cat.length) {
+      const idx = i++
+      rows[idx] = await onchainProbe(client, cat[idx].address)
+      onProgress(idx)
+    }
+  }))
+  return rows
+}
+
+/** An on-chain read that came back null for infra reasons (throttled/unreachable RPC). */
+function unreadable(oc: { hasBytecode: boolean | null; decimals: number | null }): boolean {
+  return oc.hasBytecode == null || (oc.hasBytecode === true && oc.decimals == null)
+}
+
 export async function collectVerdicts(
   tokens: TokenIdentity[],
   opts: {
     concurrency?: number
     log?: (msg: string) => void
     cgSets?: Map<number, Set<string> | null>
+    /** Extra low-concurrency passes over rows whose on-chain reads failed (RPC throttling). */
+    retries?: number
   } = {},
 ): Promise<Verdict[]> {
   const log = opts.log ?? ((m: string) => console.error(m))
   const Q = opts.concurrency ?? 10
+  const retries = opts.retries ?? 2
   const out: Verdict[] = []
   const chainIds = [...new Set(tokens.map((t) => t.chainId))]
   for (const chainId of chainIds) {
@@ -111,27 +139,36 @@ export async function collectVerdicts(
     const client = createPublicClient({ transport: http(GUARD_RPC[chainId]) })
     const cat = tokens.filter((t) => t.chainId === chainId)
     log(`chain ${chainId}: ${cat.length} tokens`)
-    let i = 0
-    const rows: Verdict[] = new Array(cat.length)
-    await Promise.all(Array.from({ length: Q }, async () => {
-      while (i < cat.length) {
-        const idx = i++
-        const t = cat[idx]
-        const oc = await onchainProbe(client, t.address)
-        rows[idx] = {
-          chainId,
-          address: t.address,
-          symbol: t.symbol,
-          inTrustedList: cgSet ? cgSet.has(t.address.toLowerCase()) : null,
-          hasBytecode: oc.hasBytecode,
-          transferable: oc.transferable,
-          onchainSymbol: oc.onchainSymbol,
-          decimals: oc.decimals,
-        }
-        if (idx % 50 === 0) log(`  ${chainId}: ${idx}/${cat.length}`)
-      }
-    }))
-    out.push(...rows)
+    const probes = await probePass(client, cat, Q, (idx) => {
+      if (idx % 50 === 0) log(`  ${chainId}: ${idx}/${cat.length}`)
+    })
+    // Retry rows whose reads failed for infra reasons — a public RPC throttles bursts, and
+    // the pipeline fails closed on unreadable cores / refuses unreadable new tokens, so a
+    // transient null must get a second (slower) chance before it becomes a verdict.
+    for (let r = 1; r <= retries; r++) {
+      const idxs = probes.map((p, idx) => (unreadable(p) ? idx : -1)).filter((i) => i >= 0)
+      if (idxs.length === 0) break
+      log(`  ${chainId}: retry pass ${r} — ${idxs.length} unreadable row(s)`)
+      await sleep(1500 * r)
+      const retryProbes = await probePass(client, idxs.map((i) => cat[i]), Math.min(4, Q), () => {})
+      idxs.forEach((catIdx, j) => {
+        if (!unreadable(retryProbes[j])) probes[catIdx] = retryProbes[j]
+      })
+    }
+    for (let idx = 0; idx < cat.length; idx++) {
+      const t = cat[idx]
+      const oc = probes[idx]
+      out.push({
+        chainId,
+        address: t.address,
+        symbol: t.symbol,
+        inTrustedList: cgSet ? cgSet.has(t.address.toLowerCase()) : null,
+        hasBytecode: oc.hasBytecode,
+        transferable: oc.transferable,
+        onchainSymbol: oc.onchainSymbol,
+        decimals: oc.decimals,
+      })
+    }
   }
   return out
 }
