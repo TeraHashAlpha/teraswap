@@ -61,10 +61,18 @@ verified badge **real**: `verified: true` + `sources: [...]` persisted per token
      (`liquidityFloorUsd` 24h-volume, or DefiLlama confidence < `defillamaConfidenceMin` when volume
      is unknown). New (non-seed) tokens must additionally count `coingecko` among their sources — this
      keeps the catalog-address-guard `trusted-list` gate green by construction.
-   - (b) **On-chain validation**: `symbol()` matches consensus case-insensitively (bytes32 symbols
-     handled) and `decimals()` matches exactly. The stored address is the EIP-55 checksum (fixes the
-     lowercase-storage casing bug class).
+   - (b) **The token PASSES the existing catalog guard (#209–#211) — REUSED, not reimplemented.**
+     The pipeline collects fresh verdicts with the refresh script's own collection code (extracted
+     to a shared module; `scripts/refresh-catalog-guard.ts` becomes a thin CLI over it) and gates
+     each candidate through `auditChain()` from `src/lib/chains/catalog-guard.ts`: bytecode,
+     on-chain `symbol()` identity, on-chain `decimals()` FATAL cross-check, trusted-list membership,
+     duplicate-symbol-per-chain — with the SAME committed allowlist
+     (`catalog-guard.allowlist.json`). A candidate with any fatal finding is not verified; a
+     candidate whose verdict is unreadable (RPC null) is not added. The stored address is the EIP-55
+     checksum (fixes the lowercase-storage casing bug class).
    - Persist `verified: true` + `sources: [...]` per token in the JSON.
+   - The SAME verdicts refresh `catalog-guard.trust.json` (byte-identical writer), so the CI gate
+     stays green with a single network pass.
 4. **Anti-spoofing (critical):** key by **checksummed ADDRESS**, never by symbol. Sources giving
    DIFFERENT addresses for the same symbol are NEVER merged — each address stands alone on its own
    agreement count. If more than one address for the same `(chainId, symbol)` qualifies, keep the one
@@ -101,15 +109,21 @@ verified badge **real**: `verified: true` + `sources: [...]` persisted per token
 - NEVER overload catalog membership as "verified".
 - NEVER drop core tokens on a source outage; NEVER silently drop current tokens (flag in FEEDBACK).
 - Do NOT change swap/execution/routing logic.
-- Do NOT add a logo CDN host without adding it to `next.config.js` CSP `img-src` (this change adds
-  none: logos remain `public/tokens/*` or `/api/token-logo` — both `'self'`).
+- Do NOT reimplement the guard's on-chain checks — route candidates THROUGH `auditChain` + the
+  shared verdict collector.
+- Do NOT regress the logo story: `<TokenLogo>` keeps its documented fallback chain (catalog URL →
+  `/api/token-logo` CoinGecko-first/DefiLlama-fallback route → Trust Wallet CDN → generated
+  avatar); generated logoURIs are `public/tokens/*` for core brands else the route URL — both
+  `'self'`, byte-format-identical to `routeLogo()` so `<TokenLogo>` dedupes. No new CDN ⇒ no CSP
+  `img-src` change.
 - Do NOT delete superseded files (`sync-token-categories.ts`, `generate-token-catalog.mjs`) — mark
   superseded.
 
 ## Files affected
 
 - `docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md` (this spec)
-- `scripts/token-catalog/` — `build.ts` + `lib/{config,types,sources,verify,onchain,category}.ts` + tests
+- `scripts/token-catalog/` — `build.ts` + `lib/{config,types,sources,verify,verdicts,category}.ts` + tests
+- `scripts/refresh-catalog-guard.ts` — thin CLI over the extracted shared verdict collector
 - `src/config/generated/token-catalog.{1,8453}.json` — generated, committed
 - `src/lib/chains/token-catalog.generated.ts` — shim over the JSONs
 - `src/lib/tokens.ts`, `src/lib/chains/tokens.ts` — `verified`/`sources` fields, real `isVerifiedToken`
@@ -127,9 +141,9 @@ present; `npm run tokens:sync` reproduces the catalog deterministically from the
 
 ## Quality criteria
 
-- Tests: cross-verify (2 vs 3-for-low-liquidity), on-chain symbol/decimals match + mismatch rejection,
-  same-symbol address-conflict rejection, allowlist force-include under total source outage,
-  source-outage-tolerant build (one source down ⇒ build succeeds, logged).
+- Tests: cross-verify (2 vs 3-for-low-liquidity), guard-PASS gating (fatal ⇒ rejected/unverified,
+  unreadable ⇒ not added), same-symbol address-conflict rejection, allowlist force-include under
+  total source outage, source-outage-tolerant build (one source down ⇒ build succeeds, logged).
 - `catalog-address-guard` stays green over the expanded catalog (trust fixture refreshed).
 - Existing suites pass with the new verified semantics (tests encoding the old membership quirk updated).
 - 0C/0H against `docs/security/AUDIT-TOTAL.md`; no fund-flow/swap logic touched.
