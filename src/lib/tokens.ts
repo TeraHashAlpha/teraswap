@@ -33,6 +33,14 @@ export interface Token {
    *  lookups stay chain-scoped (a Base import must not resolve on mainnet, and the
    *  same address can be different tokens on different chains). */
   chainId?: number
+  /** [CHORE-TOKEN-CATALOG-PIPELINE] REAL cross-verification flag from the generated
+   *  catalog: >=2 independent sources agreed on this (chainId, EIP-55 address) AND the
+   *  catalog guard passed it on-chain. NOT membership-derived — session imports and
+   *  unverified curated entries stay false/absent (the badge shows ⚠ honestly). */
+  verified?: boolean
+  /** Sources that agreed on this (chainId, address) at build time (e.g. uniswap,
+   *  coingecko, oneinch; 'native' for the ETH sentinel, 'curated' for pinned cores). */
+  sources?: string[]
 }
 
 // ── Logo helper (server-side CoinGecko-first resolver route, chainId-aware) ───

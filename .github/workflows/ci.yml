@@ -149,6 +149,26 @@ jobs:
       - name: Oracle-less advisory guard (detection + fail-open)
         run: npx vitest run src/lib/order-engine/oracle-coverage.test.ts src/lib/order-engine/check-oracle.test.ts
 
+  token-catalog-pipeline-guard:
+    # [CHORE-TOKEN-CATALOG-PIPELINE] The full vitest suite is not run in CI (only
+    # single-file guards), so this gates the catalog build pipeline: merge keyed by
+    # (chainId, EIP-55 address), >=2-source agreement (>=3 low-liquidity), symbol-conflict
+    # rejection, guard-PASS gating (the EXISTING catalog guard, reused), core allowlist
+    # force-include under total source outage, outage-tolerant build — PLUS the invariants
+    # of the COMMITTED generated catalogs (schema, EIP-55, cores present+verified, no
+    # duplicate address/symbol, verified⇒sources, CSP-safe 'self' logo URLs) and the
+    # pinned per-chain majors. NO network — pure logic + committed JSON.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Token-catalog pipeline guard (cross-verify logic + committed catalog invariants)
+        run: npx vitest run scripts/token-catalog/lib/verify.test.ts scripts/token-catalog/lib/guard-gate.test.ts scripts/token-catalog/lib/build-chain.test.ts scripts/token-catalog/lib/sources.test.ts scripts/token-catalog/lib/category.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts src/lib/chains/tokens.test.ts
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:

@@ -1,28 +1,34 @@
 /**
- * [P221 / ADR-009 / SPRINT-9Y] Per-chain token catalog.
+ * [P221 / ADR-009 / SPRINT-9Y / CHORE-TOKEN-CATALOG-PIPELINE] Per-chain token catalog.
  *
- * Mainnet (chainId 1) is DERIVED from the existing DEFAULT_TOKENS catalog in
- * src/lib/tokens.ts — it can't drift and the mainnet UI stays byte-identical.
- * Base (8453) is built from the PINNED Uniswap Labs Default snapshot baked into
- * token-catalog.generated.ts (+ one CoinGecko bridged-USDT entry) — every address
- * is sourced + validated (EIP-55, chainId, decimals), NEVER hand-typed.
+ * Mainnet (chainId 1) keeps DEFAULT_TOKENS (src/lib/tokens.ts) as the curated view; the
+ * long tail and BOTH chains' verified state come from the CROSS-VERIFIED generated
+ * catalogs (src/config/generated/token-catalog.<chainId>.json via
+ * token-catalog.generated.ts, built by `npm run tokens:sync`): >=2 independent sources
+ * agreeing on the (chainId, EIP-55 address) + a catalog-guard PASS. Every address is
+ * sourced + validated, NEVER hand-typed.
  *
  * Two layers (Matcha-style, SPRINT-9Y):
  *  - getChainTokenList / getPopularTokens → the curated "Suggested" set shown by
  *    default (~20-30 majors), categorised.
- *  - getFullCatalog / getSearchCatalog → the full pinned long tail used by search
- *    and the verified-✓ badge. import-by-address (non-catalog) stays ⚠.
+ *  - getFullCatalog / getSearchCatalog → the full generated catalog used by search
+ *    and the ✓ badge.
+ *
+ * Verified ✓ is a REAL per-token field now (verified + sources from the pipeline) —
+ * catalog membership does NOT imply ✓ (unverified curated seeds show ⚠ honestly), and
+ * session imports are NEVER ✓ (the old mainnet quirk where an import turned ✓ is gone).
  *
  * Logos: core majors point to bundled local assets in public/tokens/ (validated, no
  * 404); the long tail uses our read-only /api/token-logo route, which resolves
  * CoinGecko's comprehensive per-chain list server-side first (near-universal real logos)
  * and falls back to DefiLlama by-address. The UI's generated-initials avatar stays the
- * FINAL onError fallback. Native ETH uses the local /tokens/eth.png asset.
+ * FINAL onError fallback. Native ETH uses the local /tokens/eth.png asset. The generated
+ * logoURIs are exactly those two forms (both CSP 'self') — enforced by
+ * token-catalog-json.test.ts.
  */
-import { DEFAULT_TOKENS, findTokenByAddress, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
-import { NATIVE_ETH } from '@/lib/constants'
+import { DEFAULT_TOKENS, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
-import { GENERATED_TOKEN_CATALOG } from './token-catalog.generated'
+import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -34,23 +40,21 @@ export interface ChainToken {
   popular?: boolean
   /** Part of the curated "Suggested" set shown by default (no search). */
   suggested?: boolean
+  /** [CHORE-TOKEN-CATALOG-PIPELINE] Real cross-verification flag from the pipeline. */
+  verified?: boolean
+  /** Sources that agreed on this (chainId, address) at build time. */
+  sources?: string[]
+  /** Pipeline-resolved category (curated > overrides > heuristic). */
+  category?: TokenCategory
 }
 
 /** [SPRINT-9Y] Max search results rendered at once — keeps a broad query snappy. */
 export const SEARCH_RESULT_LIMIT = 80
 
-/**
- * [SPRINT-9Y / token-selector-ux] Per-chain logo URL — our read-only /api/token-logo
- * route (NOT a CDN URL directly). The route resolves CoinGecko's comprehensive PER-CHAIN
- * list server-side FIRST (near-universal real logos for the long tail, incl. tokens that
- * 404 on the DefiLlama/Trust/CoinGecko by-address endpoints), then falls back to DefiLlama
- * by-address. chainId-aware and keyed by the LOWERCASE address (no EIP-55 checksum-casing
- * pitfall, and so <TokenLogo> can dedupe candidates). Long-tail entries use this; the
- * verified core majors point to bundled local assets (see CORE_LOCAL_LOGO) so they NEVER 404.
- */
-function logo(addr: string, chainId: number): string {
-  return `/api/token-logo?chainId=${chainId}&address=${addr.toLowerCase()}`
-}
+// [CHORE-TOKEN-CATALOG-PIPELINE] Long-tail logo URLs (the read-only /api/token-logo
+// route: CoinGecko-first server-side, DefiLlama fallback, keyed by chainId + LOWERCASE
+// address) are now BAKED into the generated catalog by the pipeline's logoFor — same
+// byte format as before, so <TokenLogo> keeps deduping its candidate chain.
 
 // [token-selector-ux] Core brand logos bundled into public/tokens/ (validated, 100%
 // reliable, no 404). The brand mark is identical across chains, so map BY SYMBOL — a
@@ -72,9 +76,6 @@ const CORE_LOCAL_LOGO: Record<string, string> = {
 // catalog flags the same popular tokens.
 const MAINNET_POPULAR = new Set(['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI'])
 
-// Native ETH uses the bundled local asset (same visual on every chain, never 404s).
-const ETH_LOGO = CORE_LOCAL_LOGO.ETH
-
 // [SPRINT-9Y] Base curated "Suggested" majors shown by default (no search). The
 // SYMBOLS are a curation choice; the ADDRESSES come only from the validated
 // generated catalog (token-catalog.generated.ts) — never hand-typed.
@@ -85,24 +86,43 @@ const BASE_SUGGESTED_SYMBOLS = new Set([
 ])
 const BASE_POPULAR_SYMBOLS = new Set(['ETH', 'WETH', 'USDC', 'USDbC', 'DAI', 'cbETH', 'cbBTC', 'AERO'])
 
-// Full Base (8453) catalog: native ETH (sentinel) + the pinned generated list.
-// `suggested`/`popular` flag the curated subset shown by default; the rest is the
-// searchable long tail (all of it renders the verified ✓ on Base).
-const BASE_FULL: ChainToken[] = [
-  { address: NATIVE_ETH, symbol: 'ETH', name: 'Ethereum', decimals: 18, logoURI: ETH_LOGO, popular: true, suggested: true },
-  ...GENERATED_TOKEN_CATALOG[8453].map((t): ChainToken => ({
-    address: t.address,
-    symbol: t.symbol,
-    name: t.name,
-    decimals: t.decimals,
-    // [token-selector-ux] Core majors → bundled local asset (no 404). Long tail →
-    // DefiLlama's chainId-aware CDN (8453), which serves Base logos the old generated
-    // logoURI (mainnet-keyed 1inch / dead optimism mirrors) frequently 404'd on Base.
-    logoURI: CORE_LOCAL_LOGO[t.symbol] ?? logo(t.address, 8453),
-    popular: BASE_POPULAR_SYMBOLS.has(t.symbol),
-    suggested: BASE_SUGGESTED_SYMBOLS.has(t.symbol),
-  })),
-]
+const KNOWN_CATEGORIES = new Set<TokenCategory>([
+  'Native', 'Stablecoin', 'Wrapped BTC', 'Liquid Staking', 'DeFi',
+  'L2 & Infrastructure', 'AI & Data', 'Memecoin', 'Gaming & Metaverse',
+  'Gold', 'Stocks', 'Other', 'Imported',
+])
+
+// Pipeline category, treated as advisory: 'Other' means "no curated opinion", so we
+// return undefined and let the runtime inferCategory heuristic refine it (review finding:
+// trusting the pipeline's 'Other' verbatim collapsed the Base selector grouping).
+function generatedCategory(t: GeneratedToken): TokenCategory | undefined {
+  if (!KNOWN_CATEGORIES.has(t.category as TokenCategory) || t.category === 'Other') return undefined
+  return t.category as TokenCategory
+}
+
+// Case-insensitive symbol-set membership: the pipeline's consensus casing follows the
+// on-chain symbol (e.g. Base "Mog", not "MOG"), so curation sets must not be casing-bound
+// (review finding: the Mog chip silently dropped from the suggested set).
+const upper = (set: Set<string>) => new Set([...set].map((s) => s.toUpperCase()))
+const BASE_SUGGESTED_UPPER = upper(BASE_SUGGESTED_SYMBOLS)
+const BASE_POPULAR_UPPER = upper(BASE_POPULAR_SYMBOLS)
+
+// Full Base (8453) catalog — straight from the cross-verified generated catalog (which
+// includes the native-ETH sentinel row and CSP-'self' logoURIs: bundled core assets or
+// the /api/token-logo route). `suggested`/`popular` flag the curated subset shown by
+// default; the rest is the searchable long tail with REAL per-token verified state.
+const BASE_FULL: ChainToken[] = GENERATED_TOKEN_CATALOG[8453].map((t): ChainToken => ({
+  address: t.address,
+  symbol: t.symbol,
+  name: t.name,
+  decimals: t.decimals,
+  logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
+  popular: BASE_POPULAR_UPPER.has(t.symbol.toUpperCase()),
+  suggested: BASE_SUGGESTED_UPPER.has(t.symbol.toUpperCase()),
+  verified: t.verified,
+  sources: t.sources,
+  category: generatedCategory(t),
+}))
 
 function toChainToken(t: Token): ChainToken {
   return {
@@ -112,6 +132,9 @@ function toChainToken(t: Token): ChainToken {
     decimals: t.decimals,
     logoURI: t.logoURI,
     popular: MAINNET_POPULAR.has(t.symbol),
+    verified: t.verified,
+    sources: t.sources,
+    category: t.category,
   }
 }
 
@@ -165,19 +188,46 @@ function chainTokenToToken(t: ChainToken): Token {
     name: t.name,
     decimals: t.decimals,
     logoURI: t.logoURI,
-    category: inferCategory(t.symbol),
+    category: t.category ?? inferCategory(t.symbol),
+    verified: t.verified,
+    sources: t.sources,
   }
 }
 
-// Pinned mainnet long tail = generated chain-1 list minus what DEFAULT_TOKENS already
-// curates (DEFAULT_TOKENS wins, so existing entries stay byte-identical).
+// [CHORE-TOKEN-CATALOG-PIPELINE] Real per-token verification, straight from the generated
+// catalogs: (chainId, lowercase address) → {verified, sources}.
+const GENERATED_BY_ADDR: Record<number, Map<string, GeneratedToken>> = Object.fromEntries(
+  Object.entries(GENERATED_TOKEN_CATALOG).map(([cid, list]) => [
+    Number(cid),
+    new Map(list.map((t) => [t.address.toLowerCase(), t])),
+  ]),
+)
+
+// Mainnet long tail = generated chain-1 catalog minus what DEFAULT_TOKENS already curates
+// (DEFAULT_TOKENS wins on metadata/ordering; verified/sources come from the pipeline).
 const MAINNET_DEFAULT_ADDR = new Set(DEFAULT_TOKENS.map((t) => t.address.toLowerCase()))
 const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
   .filter((t) => !MAINNET_DEFAULT_ADDR.has(t.address.toLowerCase()))
-  .map(chainTokenToToken)
+  .map((t): Token => ({
+    address: t.address,
+    symbol: t.symbol,
+    name: t.name,
+    decimals: t.decimals,
+    logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
+    category: generatedCategory(t) ?? inferCategory(t.symbol),
+    verified: t.verified,
+    sources: t.sources,
+  }))
+
+// DEFAULT_TOKENS annotated with the pipeline's verified/sources (the hand list keeps its
+// metadata/order; a curated entry the pipeline could NOT verify stays honestly ⚠).
+const MAINNET_CURATED: Token[] = DEFAULT_TOKENS.map((t) => {
+  const g = GENERATED_BY_ADDR[1]?.get(t.address.toLowerCase())
+  return { ...t, verified: g?.verified === true, sources: g?.sources }
+})
 
 // Precomputed full catalogs (stable references → cheap memoisation downstream).
-const MAINNET_FULL: Token[] = [...DEFAULT_TOKENS, ...MAINNET_LONGTAIL]
+const MAINNET_FULL: Token[] = [...MAINNET_CURATED, ...MAINNET_LONGTAIL]
 const BASE_FULL_TOKENS: Token[] = BASE_FULL.map(chainTokenToToken)
 
 /**
@@ -205,10 +255,6 @@ export function getSearchCatalog(chainId: number): Token[] {
   return extra.length === 0 ? base : [...base, ...extra]
 }
 
-// Verified-✓ membership: O(1) lowercase-address lookups over the pinned catalogs.
-const MAINNET_CATALOG_ADDR = new Set(GENERATED_TOKEN_CATALOG[1].map((t) => t.address.toLowerCase()))
-const BASE_CATALOG_ADDR = new Set(BASE_FULL.map((t) => t.address.toLowerCase()))
-
 /**
  * [SPRINT-9E] Re-resolve a selected token to the active chain's catalog BY SYMBOL,
  * so a swap quotes the chain's REAL address (e.g. mainnet USDC 0xA0b8… → Base USDC
@@ -219,8 +265,11 @@ const BASE_CATALOG_ADDR = new Set(BASE_FULL.map((t) => t.address.toLowerCase()))
  */
 export function remapTokenToChain(token: Token | null, chainId: number): Token | null {
   if (!token) return token
+  // Case-insensitive symbol match: the pipeline's consensus casing follows the on-chain
+  // symbol per chain (mainnet 'MOG' ↔ Base 'Mog' are the same asset).
+  const sym = token.symbol.toLowerCase()
   const match = getChainTokenList(chainId).find(
-    (t) => t.symbol === token.symbol && t.address.toLowerCase() !== token.address.toLowerCase(),
+    (t) => t.symbol.toLowerCase() === sym && t.address.toLowerCase() !== token.address.toLowerCase(),
   )
   return match ?? token
 }
@@ -244,20 +293,18 @@ export function findChainToken(address: string, chainId: number): Token | null {
 }
 
 /**
- * [SPRINT-9P] Verified-badge auto-detect, chain-aware. Mainnet keeps
- * `findTokenByAddress` verbatim (byte-identical); other chains verify against
- * that chain's CATALOG, so the Base catalog (WETH/USDC/DAI/cbETH/USDbC) shows ✓
- * while genuinely imported tokens keep the ⚠.
+ * [SPRINT-9P → CHORE-TOKEN-CATALOG-PIPELINE] Verified-badge auto-detect, chain-aware.
+ *
+ * ✓ now reads the REAL per-token `verified` field persisted by the catalog pipeline
+ * (>=2 independent sources agreed on this (chainId, EIP-55 address) AND the catalog
+ * guard passed it on-chain) — NOT catalog membership. Consequences:
+ *  - an unverified curated seed in the catalog shows the honest ⚠;
+ *  - session imports are NEVER ✓ (fixes the 9P-era mainnet quirk where an imported
+ *    token flipped to ✓ because findTokenByAddress scanned the custom-token cache);
+ *  - chains without a generated catalog have no verified tokens (fail-closed).
  */
 export function isVerifiedToken(address: string, chainId: number): boolean {
-  const addr = address.toLowerCase()
-  // [SPRINT-9Y] Verified ✓ = membership in the chain's FULL pinned catalog (curated +
-  // long tail). Mainnet keeps findTokenByAddress (DEFAULT_TOKENS + customs, byte-identical)
-  // and OR-s in the Uniswap long tail. Base checks its full catalog. Genuine imports
-  // (not in any list) stay ⚠. Other chains keep the existing suggested-set behaviour.
-  if (chainId === DEFAULT_CHAIN_ID) return !!findTokenByAddress(address) || MAINNET_CATALOG_ADDR.has(addr)
-  if (chainId === 8453) return BASE_CATALOG_ADDR.has(addr)
-  return !!getChainToken(address, chainId)
+  return GENERATED_BY_ADDR[chainId]?.get(address.toLowerCase())?.verified === true
 }
 
 /**

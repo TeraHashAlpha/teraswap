@@ -9,7 +9,14 @@ export default defineConfig({
     // `// @vitest-environment jsdom` at the top of their file so we
     // don't penalise the pure-logic suite with a JSDOM bootstrap.
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', '__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
+    include: [
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      '__tests__/**/*.test.ts',
+      '__tests__/**/*.test.tsx',
+      // [CHORE-TOKEN-CATALOG-PIPELINE] build-time catalog pipeline logic is pure + unit-tested.
+      'scripts/token-catalog/**/*.test.ts',
+    ],
     // jsdom shim for tests that touch `localStorage`/`window` via the
     // jsdom env. happy-dom would be faster but jsdom has wider parity
     // with libraries like @testing-library/react.

@@ -1,0 +1,86 @@
+# [CHORE-TOKEN-CATALOG-PIPELINE] Scheduled token-catalog regeneration.
+#
+# Runs `npm run tokens:sync` (the multi-source cross-verified pipeline — see
+# docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md), gates the result with the SAME
+# no-network guards CI runs, and opens a PR when the committed catalogs or the
+# guard trust fixture changed. Nothing lands on main without review + CI.
+#
+# NOTE: scheduled workflows only run from the DEFAULT branch — this activates once
+# merged to main. Triggers are schedule/workflow_dispatch only (no untrusted input
+# is ever interpolated into run: commands).
+#
+# The PR branch commit is created by github-actions[bot] (unsigned): main's
+# signed-commit protection applies to MERGE commits — merge via the GitHub UI
+# (squash), which produces a GitHub web-flow-signed commit.
+#
+# GITHUB_TOKEN limitations (known, accepted for P1):
+#  - `gh pr create` needs the repo/org setting "Allow GitHub Actions to create and
+#    approve pull requests" — flip it once, or the last step fails (the refreshed
+#    catalogs are still gated + pushed to the branch).
+#  - Events created with the built-in GITHUB_TOKEN do NOT trigger other workflows,
+#    so ci.yml will NOT auto-run on the bot PR. The catalog-specific gates run
+#    IN-JOB below; re-trigger full CI by closing/reopening the PR (or pushing an
+#    empty commit), or upgrade this workflow to a GitHub App/PAT token later.
+
+name: "Token catalog refresh"
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: token-catalog-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+
+      - name: Rebuild token catalogs (multi-source cross-verify + guard)
+        # The GUARD_RPC_* secrets are OPTIONAL overrides. They are exported only when
+        # non-empty: an undefined secret expands to "" and would otherwise DEFINE the env
+        # var as empty — verdicts.ts uses `??`, which does not replace "", so the publicnode
+        # default would be defeated and every run would fail on an empty RPC URL.
+        env:
+          GUARD_RPC_1_OVERRIDE: ${{ secrets.GUARD_RPC_1 }}
+          GUARD_RPC_8453_OVERRIDE: ${{ secrets.GUARD_RPC_8453 }}
+        run: |
+          if [ -n "$GUARD_RPC_1_OVERRIDE" ]; then export GUARD_RPC_1="$GUARD_RPC_1_OVERRIDE"; fi
+          if [ -n "$GUARD_RPC_8453_OVERRIDE" ]; then export GUARD_RPC_8453="$GUARD_RPC_8453_OVERRIDE"; fi
+          npm run tokens:sync
+
+      - name: Gate the regenerated catalogs (same no-network guards as CI)
+        run: npx vitest run src/lib/chains/catalog-address-guard.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts
+
+      - name: Open a PR when the catalogs changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- src/config/generated src/lib/chains/catalog-guard.trust.json; then
+            echo "catalogs unchanged — nothing to do"
+            exit 0
+          fi
+          BRANCH="chore/token-catalog-refresh-$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add src/config/generated src/lib/chains/catalog-guard.trust.json
+          git commit -m "chore(catalog): scheduled tokens:sync refresh"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore(catalog): scheduled token-catalog refresh" \
+            --body "Automated \`npm run tokens:sync\` refresh (cross-verified multi-source catalog + guard trust fixture). Gated by catalog-address-guard + catalog JSON invariants before this PR was opened. See docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md." \
+            --base main \
+            --head "$BRANCH"
