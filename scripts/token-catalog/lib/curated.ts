@@ -32,6 +32,22 @@ const REMAPS: Record<string, Omit<SourceEntry, 'source'>> = {
   '1:0x845576c64f9754cf09d87e45b720e82f3eef522c': {
     chainId: 1, address: '0x0d88eD6E74bbFD96B831231638b66C05571e824F' as `0x${string}`, symbol: 'AVT', name: 'Aventus', decimals: 18,
   },
+  // [CHORE-OHM-KNC-REMAP] OHM v1 → Olympus v2. Official v2 migration (Dec 2021);
+  // docs.olympusdao.finance lists 0x3835… under "Token Contracts (Legacy V1)". Verified
+  // on-chain 2026-07-01 (both symbol OHM / 9 decimals, live+transferable) — but v1 is
+  // market-dead: CoinGecko "Olympus v1", vol24h ~$570, mcap $0 vs v2 (id "olympus",
+  // rank ~141, vol24h ~$101k, mcap ~$246M). OWNER SIGN-OFF pending (PR gate).
+  '1:0x383518188c0c6d7730d91b2c03a03c837814a899': {
+    chainId: 1, address: '0x64aa3364F17a4D01c6f1751Fd97C2BD3D7e7f1D5' as `0x${string}`, symbol: 'OHM', name: 'Olympus', decimals: 9,
+  },
+  // [CHORE-OHM-KNC-REMAP] KNC legacy (KNCL) → Kyber Network Crystal v2. Official 1:1
+  // migration (Apr 2021, kyber.org/migrate; legacy renamed KNCL). Verified on-chain
+  // 2026-07-01: v2 name() = "Kyber Network Crystal v2" (CoinGecko-canonical KNC, rank
+  // ~838, vol24h ~$3.2M) vs legacy (CoinGecko "Kyber Network Crystal Legacy"/KNCL,
+  // vol24h ~$2.2k). OWNER SIGN-OFF pending (PR gate).
+  '1:0xdd974d5c2e2928dea5f71b9825b8b646686bd200': {
+    chainId: 1, address: '0xdeFA4e8a7bcBA345F687a2f1456F5Edd9CE97202' as `0x${string}`, symbol: 'KNC', name: 'Kyber Network Crystal', decimals: 18,
+  },
 }
 
 // DECIMALS_OVERRIDES — same address, CORRECTED decimals (each value = on-chain decimals(),
@@ -61,6 +77,26 @@ export function applyCuratedCorrections(entries: SourceEntry[]): SourceEntry[] {
  *  ride back in through the seed-preservation path). */
 export function isCuratedRemoval(chainId: number, address: string): boolean {
   return REMOVALS.has(`${chainId}:${address.toLowerCase()}`)
+}
+
+/**
+ * [CHORE-OHM-KNC-REMAP] Apply curated corrections to a SEED. The seed baseline pins the
+ * PRE-remap catalog, so seeds must pass through the same removals/remaps/decimals fixes
+ * as source entries — otherwise a remapped deprecated address (e.g. OHM v1 / KNC legacy)
+ * rides back in as a curated seed, holds the ticker via curated priority, and ejects the
+ * canonical token. Returns null for removed seeds; a remapped seed keeps its category.
+ */
+export function correctSeed(chainId: number, seed: SeedToken): SeedToken | null {
+  const key = `${chainId}:${seed.address.toLowerCase()}`
+  if (REMOVALS.has(key)) return null
+  const remap = REMAPS[key]
+  if (remap) {
+    return { address: remap.address, symbol: remap.symbol, name: remap.name, decimals: remap.decimals, category: seed.category }
+  }
+  if (Object.prototype.hasOwnProperty.call(DECIMALS_OVERRIDES, key)) {
+    return { ...seed, decimals: DECIMALS_OVERRIDES[key] }
+  }
+  return seed
 }
 
 // Bridged USDT on Base — Uniswap's Base list omits it; sourced + spot-checked from the

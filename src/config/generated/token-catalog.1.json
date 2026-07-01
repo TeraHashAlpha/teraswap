@@ -19,7 +19,7 @@
   ],
   "counts": {
     "included": 842,
-    "verified": 816
+    "verified": 815
   },
   "tokens": [
     {
@@ -6235,12 +6235,12 @@
       ]
     },
     {
-      "address": "0xdd974D5C2e2928deA5F71b9825b8b646686BD200",
+      "address": "0xdeFA4e8a7bcBA345F687a2f1456F5Edd9CE97202",
       "symbol": "KNC",
       "name": "Kyber Network Crystal",
       "decimals": 18,
       "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xdd974d5c2e2928dea5f71b9825b8b646686bd200",
+      "logoURI": "/api/token-logo?chainId=1&address=0xdefa4e8a7bcba345f687a2f1456f5edd9ce97202",
       "verified": true,
       "sources": [
         "curated",
@@ -7539,12 +7539,9 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=1&address=0x87d73e916d7057945c9bcd8cdd94e42a6f47f776",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "coingecko",
-        "oneinch",
-        "defillama"
+        "curated"
       ]
     },
     {
@@ -7766,16 +7763,17 @@
       ]
     },
     {
-      "address": "0x383518188C0C6d7730D91b2c03a03C837814a899",
+      "address": "0x64aa3364F17a4D01c6f1751Fd97C2BD3D7e7f1D5",
       "symbol": "OHM",
-      "name": "Olympus v1",
+      "name": "Olympus",
       "decimals": 9,
       "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0x383518188c0c6d7730d91b2c03a03c837814a899",
+      "logoURI": "/api/token-logo?chainId=1&address=0x64aa3364f17a4d01c6f1751fd97c2bd3d7e7f1d5",
       "verified": true,
       "sources": [
         "curated",
         "coingecko",
+        "oneinch",
         "trustwallet",
         "defillama"
       ]

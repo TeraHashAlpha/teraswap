@@ -5929,3 +5929,38 @@ LCX/RBC-style migration candidates for curated REMAPS in a follow-up chore.
   13 tokens admitted under the pre-fix rule persist as permanent ⚠ rows. FIXED: committed
   scripts/token-catalog/seed-baseline.json (extracted programmatically from main's pinned catalog) is the
   never-silently-drop anchor; post-baseline additions persist only while they remain VERIFIED.
+
+## Feedback — CHORE-OHM-KNC-REMAP (branch chore/ohm-knc-remap)
+
+### Per-token verdict table (verified 2026-07-01: on-chain via publicnode eth_call, market via CoinGecko + DefiLlama, official via project docs)
+
+**OHM (Olympus, mainnet)** — catalog held the DEPRECATED v1 → REMAPPED to v2.
+
+| address | on-chain symbol/name/decimals | market | official status | catalog |
+|---|---|---|---|---|
+| `0x383518…4a899` (v1) | OHM / "Olympus" / 9 — live, transferable, supply ~476k | CoinGecko id `olympus-v1` "Olympus v1", rank none, vol24h ~$570, mcap $0; DefiLlama price STALE ($46 vs real $16.6) | docs.olympusdao.finance lists it under "Token Contracts (Legacy V1)"; v2 migration Dec 2021 | WAS held — now remapped out |
+| `0x64aa33…7f1D5` (v2) | OHM / "Olympus" / 9 — live, transferable, supply ~19.7M | CoinGecko id `olympus`, rank ~141, vol24h ~$101k, mcap ~$246M | CURRENT canonical OHM | NOW held, verified ✓ (coingecko+oneinch+trustwallet) |
+
+**KNC (Kyber Network Crystal, mainnet)** — catalog held the DEPRECATED legacy → REMAPPED to v2.
+
+| address | on-chain symbol/name/decimals | market | official status | catalog |
+|---|---|---|---|---|
+| `0xdd974D…D200` (legacy) | KNC / "Kyber Network Crystal" / 18 — live, transferable, supply ~11.3M | CoinGecko id `kyber-network` "Kyber Network Crystal **Legacy**", symbol KNCL, rank ~2707, vol24h ~$2.2k | renamed KNCL after the Apr-2021 1:1 migration (kyber.org/migrate) | WAS held — now remapped out |
+| `0xdeFA4e…97202` (v2) | KNC / "Kyber Network Crystal **v2**" / 18 — live, transferable, supply ~241M | CoinGecko id `kyber-network-crystal`, rank ~838, vol24h ~$3.2M, mcap ~$18.7M | CURRENT canonical KNC | NOW held, verified ✓ (uniswap+coingecko+oneinch) |
+
+### Canonical decision
+Both catalog addresses were the deprecated side of an official 1:1 migration — exactly the LCX/RBC
+class. Remapped via the pipeline's curated REMAPS (source-entry path) **plus the new `correctSeed`
+seed-path correction**: the seed baseline pins the pre-remap catalog, so without it the old address
+would ride back in as a curated seed and eject the canonical token via curated priority (covered by
+6 new unit tests). Deprecated addresses are fully absent from the catalog AND the trust fixture — no
+knownDeprecated allowlist entry needed. Trap worth recording: the on-chain probe alone could NOT
+distinguish the pairs (both sides live, transferable, same symbol/decimals) — market data + official
+docs were the deciding signals, and DefiLlama even reported a confident-but-stale $46 price for dead
+OHM v1 (single thin pool), which is why it stays a non-voting source.
+
+### Edge case
+- NFTX (0x87d73E…) newly appears as an unverified seed this run — a previous verified addition that
+  lost a source vote to list churn; the wash-out mechanism will drop it next run unless it recovers.
+
+### OWNER SIGN-OFF REQUIRED before merge (address curation = user-facing trust signal).
