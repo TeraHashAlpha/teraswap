@@ -5904,3 +5904,28 @@ LCX/RBC-style migration candidates for curated REMAPS in a follow-up chore.
   removals must go through curated REMOVALS (ported from generate-token-catalog.mjs, which this supersedes).
 - guard-fatal rejections on the first run: 2 (mainnet) + 1 (Base) NEW candidates were caught by the reused
   guard gate before ever entering the catalog — the reuse requirement doing its job.
+
+### Adversarial review round (multi-agent, 5 lenses → per-finding verification) — 9 confirmed, all addressed
+- **[M] DefiLlama auto-vote defeated the low-liquidity floor** — its identity row is near-automatic for
+  any priced pool, i.e. available precisely for the thin tokens the >=3 rule targets. FIXED: 'defillama'
+  is non-voting (market signal + provenance only); enforced by unit tests + the committed-JSON invariant.
+- **[M] Grindable symbol-conflict tiebreak** — with volume unpopulated, full ties fell to lexicographic
+  address order, which a vanity CREATE2 address can win. FIXED: a full tie rejects the whole group
+  (kept:null conflict, needs curation).
+- **[M] Core-ticker impostor could fail every build** — a 2-list "USDC" at a wrong address reached the
+  guard audit, whose duplicate-symbol FATAL marked the real core too → CoreTokenValidationError. FIXED:
+  new candidates colliding with seed/core tickers are rejected before the audit.
+- **[M] token-catalog-refresh.yml injected GUARD_RPC_* as empty strings** (undefined secrets + `??`)
+  → every scheduled run would fail. FIXED: conditional export, publicnode defaults preserved.
+- **[M] Base category collapse** — trusting the pipeline's 'Other' verbatim killed the selector grouping.
+  FIXED: generated category is advisory; 'Other' defers to the runtime inferCategory heuristic.
+- **[L] MOG→Mog casing** (consensus follows on-chain casing) dropped the suggested chip and broke the
+  exact-symbol cross-chain remap. FIXED: case-insensitive suggested/popular sets + remapTokenToChain.
+- **[L] tokens:sync vs guard:refresh trusted-list divergence** (validated subset vs raw superset of the
+  same CoinGecko list). FIXED: the injected set now mirrors cgAddressSet exactly.
+- **[L] GITHUB_TOKEN limitations** — bot PRs don't trigger ci.yml and PR creation needs the
+  Actions-create-PR repo setting. Documented honestly in the workflow header (PAT/GitHub App later).
+- **Self-seeding ratchet (follow-up found while fixing):** seeding each run from the previous output let
+  13 tokens admitted under the pre-fix rule persist as permanent ⚠ rows. FIXED: committed
+  scripts/token-catalog/seed-baseline.json (extracted programmatically from main's pinned catalog) is the
+  never-silently-drop anchor; post-baseline additions persist only while they remain VERIFIED.

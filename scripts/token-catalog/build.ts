@@ -29,6 +29,7 @@ import type { Allowlist, Verdict } from '@/lib/chains/catalog-guard'
 import allowlistJson from '@/lib/chains/catalog-guard.allowlist.json'
 import { CATEGORY_OVERRIDES } from '../token-category-overrides'
 import { PIPELINE_CONFIG, CORE_TOKENS } from './lib/config'
+import seedBaseline from './seed-baseline.json'
 import type { SeedToken } from './lib/types'
 import { buildChainCatalog } from './lib/build-chain'
 import { makeFetchers, makeMarketFetcher } from './lib/fetch-sources'
@@ -58,8 +59,18 @@ function logoFor(chainId: number, address: string, symbol: string): string {
   return CORE_LOCAL_LOGO[symbol] ?? `/api/token-logo?chainId=${chainId}&address=${address.toLowerCase()}`
 }
 
-/** Current-catalog seeds for a chain: DEFAULT_TOKENS (mainnet) + the previous pinned
- *  catalog + curated Base additions — minus native ETH (core-handled) and curated removals. */
+/**
+ * Current-catalog seeds for a chain (the never-silently-drop set):
+ *  - DEFAULT_TOKENS (mainnet hand-curated list)
+ *  - the committed SEED BASELINE (the pinned catalog at pipeline introduction — extracted
+ *    programmatically, see seed-baseline.json)
+ *  - curated Base additions
+ *  - PLUS previous-run additions ONLY while they remain VERIFIED — an addition that later
+ *    loses its source agreement washes out instead of ratcheting in as a permanent ⚠ row
+ *    (adversarial-review follow-up: without the baseline, one loose run would seed the
+ *    next forever).
+ *  Minus native ETH (core-handled) and curated removals.
+ */
 function seedsFor(chainId: number): Map<string, SeedToken> {
   const seeds = new Map<string, SeedToken>()
   const push = (s: SeedToken) => {
@@ -72,11 +83,15 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
       push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, category: t.category, logoURI: t.logoURI })
     }
   }
-  for (const t of GENERATED_TOKEN_CATALOG[chainId] ?? []) {
-    // previous-pin logoURIs are legacy external CDN URLs — recomputed via logoFor instead
+  const baseline = (seedBaseline as unknown as Record<string, SeedToken[]>)[String(chainId)] ?? []
+  for (const t of baseline) {
     push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
   }
   if (chainId === 8453) for (const s of CURATED_BASE_SEEDS) push(s)
+  for (const t of GENERATED_TOKEN_CATALOG[chainId] ?? []) {
+    if (!t.verified) continue // post-baseline additions persist only while verified
+    push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
+  }
   return seeds
 }
 

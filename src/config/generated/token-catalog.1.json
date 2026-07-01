@@ -18,8 +18,8 @@
     "uniswap"
   ],
   "counts": {
-    "included": 802,
-    "verified": 777
+    "included": 842,
+    "verified": 816
   },
   "tokens": [
     {
@@ -44,6 +44,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x45e02bc2875a2914c4f585bbf92a6f28bc07cb70",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -58,6 +59,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x14fee680690900ba0cccfc76ad70fd1b95d10e16",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -72,6 +74,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5a3e6a77ba2f983ec0d371ea3b475f8bc0811ad5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -86,6 +89,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb6ed7644c69416d67b522e20bc294a9a9b405b31",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -109,20 +113,6 @@
       ]
     },
     {
-      "address": "0xa4eF4b0B23C1fc81d3f9ecF93510e64f58A4A016",
-      "symbol": "1MIL",
-      "name": "1MillionNFTs",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xa4ef4b0b23c1fc81d3f9ecf93510e64f58a4a016",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
       "address": "0x6c3F90f043a72FA612cbac8115EE7e52BDe6E490",
       "symbol": "3Crv",
       "name": "LP 3pool Curve",
@@ -131,6 +121,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6c3f90f043a72fa612cbac8115ee7e52bde6e490",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -161,6 +152,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xffc97d72e13e01096502cb8eb52dee56f74dad7b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -192,6 +184,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x05ec93c0365baaeabf7aeffb0972ea7ecdd39cf1",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -222,6 +215,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa361718326c15715591c299427c62086f69923d9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -236,6 +230,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0e8d6b471e332f140e7d9dbb99e5e3822f728da6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -282,6 +277,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x028171bca77440897b824ca71d1c56cac55b68a3",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -312,6 +308,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcfcecfe2bd2fed07a9145222e8a7ad9cf1ccd22a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -343,6 +340,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xac6df26a590f08dcc95d5a4705ae8abbc88509ef",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -372,6 +370,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x71aef7b30728b9bb371578f36c5a1f1502a5723e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -386,6 +385,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa700b4eb416be35b2911fd5dee80678ff64ff6c9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -400,6 +400,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2516e7b3f76294e03c42aa4c5b5b4dce9c436fb8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -414,6 +415,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x977b6fc5de62598b08c85ac8cf2b745874e8b78c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -428,6 +430,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7b95ec873268a6bfc6427e7a28e396db9d0ebc65",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -442,6 +445,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x018008bfb33d285247a21d44e50697654f754e63",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -456,6 +460,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x545bd6c032efdde65a377a6719def2796c8e0f2e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -470,6 +475,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd4e245848d6e1220dbe62e155d89fa327e43cb06",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -484,6 +490,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5b502e3796385e1e9755d7043b9c945c3accec9c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -498,6 +505,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9a44fd41566876a39655f74971a3a6ea0a17a454",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -512,6 +520,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5e8c8a7243651db1384c0ddfdbe39761e8e7e51a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -526,6 +535,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3fe6a295459fae07df8a0cecc36f37160fe86aa9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -540,6 +550,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8a458a9dc9048e005d22849f470891b840296619",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -554,6 +565,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcc9ee9483f662091a1de4795249e24ac0ac2630f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -568,6 +580,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb76cf92076adbf1d9c39294fa8e7a67579fde357",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -582,6 +595,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4c612e3b15b96ff9a6faed838f8d07d479a8dd4c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -596,6 +610,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc7b4c17861357b8abb91f25581e7263e08dcb59c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -610,6 +625,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1ba9843bd4327c6c77011406de5fa8749f7e3479",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -624,6 +640,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf6d2224916ddfbbab6e6bd0d1b7034f4ae0cab18",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -638,6 +655,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -652,6 +670,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x23878914efe38d27c4d67ab83ed1b93a74d4086a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -666,6 +685,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5ee5bf7ae06d1be5997a1a72006fe6c607ec6de8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -680,6 +700,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -694,6 +715,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0b925ed163218f6662a35e0f0371ac234f9e9371",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -724,6 +746,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe1b4d34e8754600962cd944b535180bd758e6c2e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -738,6 +761,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5b7533812759b45c2b44c19e320ba2cd2681b542",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -769,6 +793,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x738865301a9b7dd80dc3666dd48cf034ec42bdda",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -815,6 +840,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3301ee63fb29f863f2333bd4466acb46cd8323e6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -829,6 +855,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x39c6b3e42d6a679d7d776778fe880bc9487c2eda",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -859,6 +886,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb26c4b3ca601136daf98593feaeff9e0ca702a8d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -889,6 +917,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0100546f2cd4c9d97f798ffc9755e47865ff7ee6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -934,6 +963,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa06bc25b5805d5f8d82847d191cb4af5a3e873e0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -963,6 +993,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7ca4408137eb639570f8e647d9bd7b7e8717514a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1009,6 +1040,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xbc6da0fe9ad5f3b0d58160288917aa56653660e9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1023,6 +1055,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa685a61171bb30d4072b338c80cb7b2c865c873e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1037,6 +1070,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc713e5e149d5d0715dcd1c156a020976e7e56b88",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1068,6 +1102,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd46ba6d942050d489dbd938a2c909a5d5039a161",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -1083,6 +1118,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4dc26fc5854e7648a064a4abd590bbe71724c277",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1113,6 +1149,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe95a203b1a91a908f9b9ce46459d101078c2c3cb",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -1208,6 +1245,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4104b135dbc9609fc1a9490e61369036497660c8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1237,6 +1275,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x95a4492f028aa1fd432ea71146b433e7b4446611",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -1268,6 +1307,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x672fdba7055bddfa8fd6bd45b1455ce5eb97f499",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1282,6 +1322,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0f71b8de197a1c84d31de0f1fa7926c365f052b3",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1296,6 +1337,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcc12abe4ff81c9378d670de1b57f8e0dd228d77a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1326,6 +1368,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1337def16f9b486faed0293eb623dc8395dfe46a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -1387,6 +1430,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x35f6b052c598d933d69a4eec4d04c73a191fe6c2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1432,6 +1476,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x823556202e86763853b40e9cde725f412e294689",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1446,6 +1491,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6c5024cd4f8a59110119c56f8933403a539555eb",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1491,6 +1537,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xdacd69347de42babfaecd09dc88958378780fb62",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -1505,6 +1552,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x101cc05f4a51c0319f570d5e146a8c625198e636",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1566,6 +1614,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb9d7cb55f463405cdfbe4e90a6d2df01c2b92bf1",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1580,6 +1629,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc0c293ce456ff0ed870add98a0828dd4d2903dbf",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1594,6 +1644,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xaaaaaa20d9e0e2461697782ef11675f668207961",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1623,6 +1674,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xbcca60bb61934080951369a648fb03df4f96263c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1637,6 +1689,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3ed3b47dd13ec9a98b44e6204a523e766b225811",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1666,6 +1719,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa41f142b6eb2b164f8164cae0716892ce02f311f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1680,6 +1734,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf5f52266a57e6d7312da39bd7ab9527b9e975c40",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1706,6 +1761,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9ff58f4ffb29fa2266ab25e75e2a8b3503311656",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1720,6 +1776,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x030ba81f1c18d280636f32af80b9aad02cf0854e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1766,6 +1823,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5165d24277cd063f5ac44efd447b27025e888f37",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1780,6 +1838,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xdf7ff54aacacbff42dfe29dd6144a69b629f8c9e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1809,6 +1868,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9e6be44cc1236eef7e1f197418592d363bedcd5a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1823,6 +1883,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xac57de9c1a09fec648e93eb98875b212db0d460b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1837,6 +1898,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3449fc1cd036255ba1eb19d65ff4ba2b8903a69a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1851,6 +1913,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x32b86b99441480a7e5bd3a26c124ec2373e3f015",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1898,6 +1961,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x38e68a37e401f7271568cecaac63c6b1e19130b4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -1944,6 +2008,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x07150e919b4de5fd6a63de1f9384828396f25fdc",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -1991,23 +2056,10 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9be89d2a4cd102d8fecc6bf9da793be995c22541",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0xf3dcbc6D72a4E1892f7917b7C43b74131Df8480e",
-      "symbol": "BDP",
-      "name": "Big Data Protocol",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xf3dcbc6d72a4e1892f7917b7c43b74131df8480e",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
         "defillama"
       ]
     },
@@ -2036,6 +2088,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2af1df3ab0ab157e1e2ad8f88a7d04fbea0c7dc6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2050,6 +2103,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa91ac63d040deb1b7a5e4d4134ad23eb0ba07e14",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -2064,6 +2118,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0d02755a5700414b26ff040e1de35d337df56218",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2078,6 +2133,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcf3c8be2e2c42331da80ef210e9b1b307c03d36a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2093,20 +2149,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x97ad75064b20fb2b2447fed4fa953bf7f007a706",
       "verified": true,
       "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0xDC349913d53b446485E98b76800b6254f43Df695",
-      "symbol": "BEZOGE",
-      "name": "Bezoge Earth",
-      "decimals": 9,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xdc349913d53b446485e98b76800b6254f43df695",
-      "verified": true,
-      "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2121,6 +2164,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0c7d5ae016f806603cb1782bea29ac69471cab9c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2152,6 +2196,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x25e1474170c4c0aa64fa98123bdc8db49d7802fa",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -2166,6 +2211,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2257,6 +2303,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x41a3dba3d677e573636ba691a70ff2d606c29666",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -2286,6 +2333,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcab84bc21f9092167fcfe0ea60f5ce053ab39a1e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2332,6 +2380,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x725c263e32c72ddc3a19bea12c5a0479a81ee688",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -2346,6 +2395,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb8c77482e45f1f44de1745f52c74426c631bdd52",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2376,6 +2426,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb0b195aefa3650a6908f15cdac7d92f8a5791b0b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2421,6 +2472,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb90b2a35c65dbc466b04240097ca756ad2005295",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2481,6 +2533,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1151cb3d861920e07a38e03eead12c32178567f6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2495,6 +2548,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x289ff00235d2b98b0145ff5d4435d3e92f9540a6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2509,20 +2563,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x64d0f55cd8c7133a9d7102b13987235f486f2224",
       "verified": true,
       "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0xBC19712FEB3a26080eBf6f2F7849b417FdD792CA",
-      "symbol": "BORING",
-      "name": "BoringDAO",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xbc19712feb3a26080ebf6f2f7849b417fdd792ca",
-      "verified": true,
-      "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2537,6 +2578,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc477d038d5420c6a9e0b031712f61c5120090de9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2566,6 +2608,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x509a38b7a1cc0dcd83aa9d06214663d9ec7c7f4a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2596,6 +2639,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc669928185dbce49d2230cc9b0979be6dc797957",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2627,6 +2671,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x35d8949372d46b7a3d5a56006ae77b215fc69bc0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2641,6 +2686,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xde342a3e269056fc3305f9e315f4c40d917ba521",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2686,6 +2732,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x03be5c903c727ee2c8c4e9bc0acc860cca4715e2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2700,6 +2747,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x954b890704693af242613edef1b603825afcd708",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2715,6 +2763,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf3b9569f82b18aef890de263b84189bd33ebe452",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2761,6 +2810,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5d3a536e4d6dbd6114cc1ead35777bab948e3643",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2775,6 +2825,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfe18ae03741a5b84e39c295ac9c856ed7991c38e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2789,6 +2840,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xaaaebe6fe48e54f431b0c390cfaf0b017d09d42d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2804,6 +2856,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x26c8afbbfe1ebaca03c2bb082e69d0476bffe099",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2862,6 +2915,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x63b4f3e3fa4e438698ce330e365e831f7ccd1ef4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2877,6 +2931,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc4c2614e694cf534d407ee49f8e44d125e4681c4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -2907,6 +2962,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9ce84f6a69986a83d92c324df10bc8e64771030f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2952,6 +3008,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x675bbc7514013e2073db7a919f6e4cbef576de37",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -2999,6 +3056,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc834fa996fa3bec7aad3693af486ae53d8aa8b50",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -3028,6 +3086,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x62359ed7505efc61ff1d56fef82158ccaffa23d7",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -3135,6 +3194,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2ba592f78db6436527729929aaf6c908497cb200",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -3178,6 +3238,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x32a7c02e79c4ea1008dd6564b35f131428673c41",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3224,6 +3285,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xae41b275aaaf484b541a5881a2dded9515184cca",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3300,6 +3362,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0000000000c5dc95539589fbd24be07c6c14eca4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3314,6 +3377,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x39aa39c021dfbae8fac545936693ac917d5e7563",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3328,6 +3392,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xad55aebc9b8c03fc43cd9f62260391c13c23e7c0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3358,6 +3423,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x38e4adb44ef08f22f5b5b76a8f0c2d0dcbe7dca1",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -3390,6 +3456,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x62b9c7356a2dc64a1969e19c23e4f579f9810aa7",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3404,6 +3471,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x505b5eda5e25a67e1c24a2bf1a527ed9eb88bf04",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3451,6 +3519,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0f51bb10119727a7e5ea3538074fb341f56b09ad",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -3481,6 +3550,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8f693ca8d21b157107184d29d398a8d082b38b76",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3510,6 +3580,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9393fdc77090f31c7db989390d43f454b1a6e7f3",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3524,6 +3595,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9ea3b5b4ec044b70375236a281986106457b20ef",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -3554,6 +3626,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xde5ed76e7c05ec5e4572cfc88d1acea165109e44",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3568,6 +3641,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xde4ee8057785a7e8e800db58f9784845a5c2cbd6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3598,6 +3672,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5f64ab1544d28732f0a24f4713c2c8ec0da089f0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -3613,6 +3688,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x431ad2ff6a9c365805ebad47ee021148d6f7dbe0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -3627,6 +3703,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9695e0114e12c0d3a3636fab5a18e6b737529023",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3641,6 +3718,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x53c8395465a84955c95159814461466053dedede",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3655,6 +3733,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x62dc4817588d53a056cbbd18231d91ffccd34b2a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3678,20 +3757,6 @@
       ]
     },
     {
-      "address": "0x9e5BD9D9fAd182ff0A93bA8085b664bcab00fA68",
-      "symbol": "DINGER",
-      "name": "Dinger",
-      "decimals": 9,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0x9e5bd9d9fad182ff0a93ba8085b664bcab00fa68",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
       "address": "0xbb1EE07d6c7BAeB702949904080eb61f5D5e7732",
       "symbol": "DINU",
       "name": "Dogey-Inu",
@@ -3700,6 +3765,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xbb1ee07d6c7baeb702949904080eb61f5d5e7732",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3714,6 +3780,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc719d010b63e5bbf2c0551872cd5316ed26acd83",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -3744,6 +3811,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x43dfc4159d86f3a37a5a4b3d4580b888ad7d4ddd",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3758,20 +3826,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1121acc14c63f3c872bfca497d10926a6098aac5",
       "verified": true,
       "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0x8AEC4bbDcfB451aA289bfBD3C2F4E34A44ADa1be",
-      "symbol": "dogwifhat",
-      "name": "dogwifhat",
-      "decimals": 9,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0x8aec4bbdcfb451aa289bfbd3c2f4e34a44ada1be",
-      "verified": true,
-      "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3786,6 +3841,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x865377367054516e17014ccded1e7d814edc9ce4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3816,6 +3872,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc0f9bd5fa5698b6505f643900ffa515ea5df54a9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3862,6 +3919,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf3ae5d769e153ef72b4e3591ac004e89f48107a1",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3876,6 +3934,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa150db9b1fa65b44799d4dd949d922c0a33ee606",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3917,6 +3976,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3affcca64c2a6f4e3b6bd9c64cd2c969efd1ecbe",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -3931,6 +3991,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf94e7d0710709388bce3161c32b4eea56d3f91cc",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -3960,23 +4021,10 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc0ba369c8db6eb3924965e5c4fd0b4c1b91e305f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0xa52bfFAD02B1FE3f86A543a4e81962d3B3bB01A7",
-      "symbol": "DUCKER",
-      "name": "Duckereum",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xa52bffad02b1fe3f86a543a4e81962d3b3bb01a7",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
         "defillama"
       ]
     },
@@ -3989,6 +4037,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x940a2db1b7008b6c776d4faaca729d6d4a4aa551",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4003,6 +4052,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x10633216e7e8281e33c86f02bf8e565a635d9770",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4017,6 +4067,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe7f58a92476056627f9fdb92286778abd83b285f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4062,6 +4113,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1559fa1b8f28238fd5d76d9f434ad86fd20d1559",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4091,6 +4143,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x35fa164735182de50811e8e2e824cfb9b6118ac2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4136,6 +4189,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xbf2179859fc6d5bee9bf9158632dc51678a4100e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4150,6 +4204,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xea17df5cf6d172224892b5477a16acb111182478",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4181,6 +4236,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x15874d65e649880c2614e7a480cb7c9a55787ff6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -4196,6 +4252,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xbd2949f67dcdc549c6ebe98696449fa79d988a9f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4322,6 +4379,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe72b141df173b999ae7c1adcbf60cc9833ce56a8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4336,6 +4394,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xaa6e8127831c9de45ae56bb1b0d4d4da6e5665bd",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -4366,6 +4425,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfd09911130e6930bf87f2b0554c44f400bd80d3e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4443,6 +4503,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5f7827fdeb7c20b443265fc2f40845b715385ff2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4457,6 +4518,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x39b8b6385416f4ca36a20319f70d28621895279d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4516,6 +4578,22 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xdb25f211ab05b1c97d595516f45794528a807ad8",
       "verified": true,
       "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xC581b735A1688071A1746c968e0798D642EDE491",
+      "symbol": "EURT",
+      "name": "Euro Tether",
+      "decimals": 6,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xc581b735a1688071a1746c968e0798d642ede491",
+      "verified": true,
+      "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4545,6 +4623,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6468e79a80c0eab0f9a2b574c8d5bc374af59414",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4591,6 +4670,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc5f0f7b66764f6ec8c8dff7ba683102295e16409",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4605,6 +4685,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x956f47f50a910163d8bf957cf5846d573e7f87ca",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -4636,6 +4717,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfa1c09fc8b491b6a4d3ff53a10cad29381b3f949",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4698,6 +4780,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6f40d4a6237c257fff2db00fa0510deeecd303eb",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4724,6 +4807,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6243d8cea23066d098a15582d81a598b4e8391f4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -4739,6 +4823,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4c2e59d098df7b6cbae0848d66de2f8a4889b9c3",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4753,6 +4838,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xff7f8f301f7a706e3cfd3d2275f5dc0b9ee8009b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4832,6 +4918,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe5caef4af8780e59df925470b050fb23c43ca68c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -4846,6 +4933,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5e8422345238f34275888049021821e8e08caa1f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4860,6 +4948,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcacd6fd266af91b8aed52accc382b4e165586e29",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4890,6 +4979,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x50d1c9771902476076ecfc8b2a83ad6b9355a4c9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4904,6 +4994,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x419d0d8bdd9af5e606ae2232ed285aff190e711b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -4919,6 +5010,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x970b9bb2c0444f5e81e9d0efb84c8ccdcdcaf84d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -4945,6 +5037,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x365accfca291e7d3914637abf1f7635db165bb09",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5022,6 +5115,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xba3335588d9403515223f109edc4eb7269a9ab5d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5036,6 +5130,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6b9f031d718dded0d681c20cb754f97b3bb81b78",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5050,6 +5145,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x15b7c0c907e4c6b9adaaaabc300c08991d6cea05",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5111,6 +5207,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x038a68ff68c393373ec894015816e33ad41bd564",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5141,6 +5238,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9f9c8ec3534c3ce16f928381372bfbfbfb9f4d24",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5156,6 +5254,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd9016a907dc0ecfa3ca425ab20b6b785b42f2373",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5187,6 +5286,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb1f871ae9462f1b2c6826e88a7827e76f86751d4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5216,6 +5316,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9ab7bb7fdc60f4357ecfef43986818a2a3569c62",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5230,6 +5331,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0ab87046fbb341d058f17cbc4c1133f25a20a52f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5244,6 +5346,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa64dfe8d86963151e6496bee513e366f6e42ed79",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5258,6 +5361,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xeeaa40b28a2d1b0b08f6f97bb1dd4b75316c6107",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -5272,6 +5376,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8390a1da07e376ef7add4be859ba74fb83aa02d5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5291,20 +5396,6 @@
         "coingecko",
         "oneinch",
         "trustwallet",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0xe0B9a2C3E9f40CF74B2C7F591B2b0CCa055c3112",
-      "symbol": "GS",
-      "name": "Genesis Shards",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xe0b9a2c3e9f40cf74b2c7f591b2b0cca055c3112",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
         "defillama"
       ]
     },
@@ -5333,6 +5424,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x83e9f223e1edb3486f876ee888d76bfba26c475a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5394,6 +5486,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0e29e5abbb5fd88e28b2d355774e73bd47de3bcd",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5408,6 +5501,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x72e5390edb7727e3d4e3436451dadaff675dbcc0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5422,6 +5516,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd9c2d319cd7e6177336b0a9c93c21cb48d84fb54",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5436,6 +5531,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x292fcdd1b104de5a00250febba9bc6a5092a0076",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5450,6 +5546,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x584bc13c7d411c00c01a62e8019472de68768430",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5465,6 +5562,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2b591e99afe9f32eaa6214f7b7629768c40eeb39",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5480,6 +5578,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xeef9f339514298c6a857efcfc1a762af84438dee",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5511,6 +5610,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7968bc6a03017ea2de509aaa816f163db0f35148",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5541,6 +5641,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfad45e47083e4607302aa43c65fb3106f1cd7607",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5556,6 +5657,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1db1591540d7a6062be0837ca3c808add28844f6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5586,6 +5688,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x43a96962254855f16b925556f9e97be436a43448",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5600,6 +5703,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6c6ee5e31d828de241282b9606c8e98ea48526e2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5615,6 +5719,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6f259637dcd74c767781e37bc6133cd6a68aa161",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5629,6 +5734,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9aab071b4129b083b01cb5a0cb513ce7eca26fa5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5643,6 +5749,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x111111517e4929d3dcbdfa7cce55d30d4b6bc4d6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5657,6 +5764,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xebd9d99a3982d547c5bb4db7e3b1f9f14b67eb83",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5816,6 +5924,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x579cea1889991f68acc35ff5c3dd0621ff29b0c9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5845,6 +5954,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x73d7c860998ca3c01ce8c808f5577d94d545d1b4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5887,6 +5997,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xba386a4ca26b85fd057ab1ef86e3dc7bdeb5ce70",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5901,6 +6012,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x73374ea518de7addd4c2b624c0e8b113955ee041",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5915,6 +6027,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe7c3d8c9a439fede00d2600032d5db0be71c3c29",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -5961,6 +6074,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb9d99c33ea2d86ec5ec6b8a4dd816ebba64404af",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -5991,6 +6105,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x73e0c0d45e048d25fc26fa3159b0aa04bfa4db98",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6037,6 +6152,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x16980b3b4a3f9d89e33311b5aa8f80303e5ca4f8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -6059,20 +6175,6 @@
       ]
     },
     {
-      "address": "0xe0a189C975e4928222978A74517442239a0b86ff",
-      "symbol": "KEYS",
-      "name": "Keys",
-      "decimals": 9,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xe0a189c975e4928222978a74517442239a0b86ff",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
       "address": "0x02e7F808990638E9e67E1f00313037EDe2362361",
       "symbol": "KIBSHI",
       "name": "KiboShib",
@@ -6081,6 +6183,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x02e7f808990638e9e67e1f00313037ede2362361",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6095,6 +6198,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa2b4c0af19cc16a6cfacce81f192b024d625817d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6109,6 +6213,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7866e48c74cbfb8183cd1a929cd9b95a7a5cb4f4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6186,6 +6291,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3af33bef05c2dcb3c7288b77fe1c8d2aeba4d789",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6242,6 +6348,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0ff6ffcfda92c53f615a4a75d982f399c989366b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -6256,6 +6363,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8236a87084f8b84306f72007f36f2618a5634494",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6302,6 +6410,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x27c70cd1946795b66be9d954418546998b546634",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -6317,6 +6426,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x80fb784b7ed66730e8b1dbd9820afd29931aab03",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6331,6 +6441,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xae697f994fc5ebc000f8e22ebffee04612f98a0d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -6385,6 +6496,21 @@
       ]
     },
     {
+      "address": "0x922D8563631B03C2c4cf817f4d18f6883AbA0109",
+      "symbol": "LOCK",
+      "name": "Houdini Swap",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x922d8563631b03c2c4cf817f4d18f6883aba0109",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x61E90A50137E1F645c9eF4a0d3A4f01477738406",
       "symbol": "LOKA",
       "name": "League of Kingdoms",
@@ -6408,6 +6534,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0000000000095413afc295d19edeb1ad7b71c952",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -6423,6 +6550,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf4d2888d29d722226fafa5d9b24f9164c092421e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -6533,6 +6661,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3b9be07d622accaed78f479bc0edabfd6397e320",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6547,6 +6676,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa393473d64d2f9f026b60b6df7859a689715d092",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -6562,6 +6692,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd2877702675e6ceb975b4a1dff9fb7baf4c91ea9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -6593,6 +6724,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa8b919680258d369114910511cc87595aec0be6d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -6607,6 +6739,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb0c7a3ba49c7a6eaba6cd4a96c55a1391070ac9a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -6638,6 +6771,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x95af4af910c28e8ece4512bfe46f1f33687424ce",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6652,6 +6786,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5a666c7d92e5fa7edcb6390e4efd6d0cdd69cf37",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -6715,6 +6850,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x24fcfc492c1393274b6bcd568ac9e225bec93584",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6729,6 +6865,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4a029f7bcf33acb03547d8fa7be840347973e24e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6759,6 +6896,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4e352cf164e64adcbad318c3a1e222e9eba4ce42",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -6820,6 +6958,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2ebd53d035150f328bd754d6dc66b99b0edb89aa",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6897,6 +7036,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb26631c6dda06ad89b93c71400d25692de89c068",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -6962,6 +7102,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9506d37f70eb4c3d79c398d326c871abbf10521d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -6976,6 +7117,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6b4c7a5e3f0b99fcd83e9c089bddd6c7fce5c611",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7006,6 +7148,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd3e4ba569045546d09cf021ecc5dfe42b1d7f6e4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7020,6 +7163,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf944e35f95e819e752f3ccb5faf40957d311e8c5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7066,6 +7210,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x28561b8a2360f463011c16b6cc0b0cbef8dbbcad",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7111,6 +7256,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8888801af4d980682e47f1a9036e589479e835c5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7138,6 +7284,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa3bed4e1c75d00fa6f4e5e6922db7261b5e9acd2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7151,11 +7298,9 @@
       "decimals": 8,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=1&address=0xf433089366899d83a9f26a773d59ec7ecf30355e",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "uniswap",
-        "defillama"
+        "curated"
       ]
     },
     {
@@ -7167,6 +7312,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2e1e15c44ffe4df6a0cb7371cd00d5028e571d14",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7245,6 +7391,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x72e364f2abdc788b7e918bc238b21f109cd634d7",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7272,6 +7419,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4cf89ca06ad997bc732dc876ed2a7f26a9e7f361",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7286,6 +7434,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xdb5c3c46e28b53a39c255aa39a411dd64e5fed9c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7315,6 +7464,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x85f17cf997934a597031b2e18a9ab6ebd4b9f6a4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7331,20 +7481,6 @@
       "sources": [
         "curated",
         "uniswap",
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0x3D1C949a761C11E4CC50c3aE6BdB0F24fD7A39DA",
-      "symbol": "NEURA",
-      "name": "Neurahub",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0x3d1c949a761c11e4cc50c3ae6bdb0f24fd7a39da",
-      "verified": true,
-      "sources": [
         "coingecko",
         "oneinch",
         "defillama"
@@ -7389,6 +7525,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb62132e35a6c13ee1ee0f84dc5d40bad8d815206",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7404,6 +7541,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x87d73e916d7057945c9bcd8cdd94e42a6f47f776",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7465,6 +7603,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe9a95d175a5f4c9369f3b74222402eb1b837693b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7479,6 +7618,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8ed97a637a790be1feff5e888d43629dc05408f6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7493,6 +7633,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf0d33beda4d734c72684b5f9abbebf715d0a7935",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7524,6 +7665,22 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3496b523e5c00a4b4150d6721320cddb234c3079",
       "verified": true,
       "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x926759A8EaEcFADb5D8bdC7A9C7B193C5085F507",
+      "symbol": "NURA",
+      "name": "Nura Labs",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x926759a8eaecfadb5d8bdc7a9c7b193c5085f507",
+      "verified": true,
+      "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7538,6 +7695,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x89bd2e7e388fab44ae88bef4e1ad12b4f1e0911c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7552,6 +7710,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2f109021afe75b949429fe30523ee7c0d5b27207",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7583,6 +7742,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x856c4efb76c1d1ae02e20ceb03a2a6a08b0b8dc3",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7614,6 +7774,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x383518188c0c6d7730d91b2c03a03c837814a899",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -7677,6 +7838,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x888888888889c00c67689029d7856aac1065ec11",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7691,6 +7853,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x80d55c03180349fff4a229102f62328220a96444",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7705,6 +7868,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4c11249814f11b9346808179cf06e71ac328c1b5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7720,6 +7884,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xff56cc6b1e6ded347aa0b7676c85ab0b3d08b0fa",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7746,6 +7911,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4f640f2529ee0cf119a2881485845fa8e61a782a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7777,6 +7943,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf1c9acdc66974dfb6decb12aa385b9cd01190e38",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7791,6 +7958,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2a8e1e676ec238d8a992307b495b45b3feaa5e86",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7805,6 +7973,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb4c6fedd984bc983b1a758d0875f1ea34f81a6af",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7819,6 +7988,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x21bfbda47a0b4b5b1248c767ee49f7caa9b23697",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7850,6 +8020,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x68037790a0229e9ce6eaa8a99ea92964106c4703",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7893,6 +8064,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5228a22e72ccc52d415ecfd199f99d0665e7733b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -7908,6 +8080,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa8b12cc90abf65191532a12bb5394a714a46d358",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7937,6 +8110,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3ffeea07a27fab7ad1df5297fa75e77a43cb5790",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -7998,6 +8172,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xeca82185adce47f39c684352b0439f030f860318",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8029,6 +8204,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6c5ba91642f10282b576d91922ae6448c9d52f4e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8043,6 +8219,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x429881672b9ae42b8eba0e26cd9c73711b891ca5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8058,6 +8235,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x2e44f3f609ff5aa4819b323fd74690f07c3607c4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8087,6 +8265,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3429d03c6f7521aec737a0bbf2e5ddcef2c3ae31",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8101,6 +8280,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8b39b70e39aa811b69365398e0aace9bee238aeb",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8116,6 +8296,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x72f020f8f3e8fd9382705723cd26380f8d0c66bb",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8130,6 +8311,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe3818504c1b32bf1557b16c238b2e01fd3149c17",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8177,6 +8359,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1796ae0b0fa4862485106a0de9b654efe301d0b2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8192,6 +8375,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x93ed3fbe21207ec2e8f2d3c3de6e058cb73bc04d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8207,6 +8391,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc50673edb3a7b94e8cad8a7d4e0cd68864e33edf",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8221,6 +8406,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x89ab32156e46f46d02ade3fecbe5fc4243b9aaed",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -8251,6 +8437,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xaa8330fb2b4d5d07abfe7a72262752a8505c6b37",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8265,6 +8452,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd478161c952357f05f0292b56012cd8457f1cfbf",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8329,6 +8517,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0cec1a9154ff802e7934fc916ed7ca50bde6844e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8375,6 +8564,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xec213f83defb583af3a000b1c0ada660b1902a0f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8405,6 +8595,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xda47862a83dac0c112ba89c6abc2159b95afd71c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8435,6 +8626,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x28d38df637db75533bd3f71426f3410a82041544",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8479,6 +8671,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcafe001067cdef266afb7eb5a286dcfd277f3de5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8491,9 +8684,12 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=1&address=0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006",
-      "verified": false,
+      "verified": true,
       "sources": [
-        "curated"
+        "curated",
+        "uniswap",
+        "coingecko",
+        "defillama"
       ]
     },
     {
@@ -8520,6 +8716,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc57d533c50bc22247d49a368880fb49a1caa39f7",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -8534,6 +8731,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd9a442856c234a39a81a089c06451ebaa4306a72",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8563,6 +8761,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0fd10b9899882a6f2fcb5c371e17e70fdee00c38",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -8577,6 +8776,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf418588522d5dd018b425e472991e52ebbeeeeee",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8592,6 +8792,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x04c154b66cb340f3ae24111cc767e0184ed00cc6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8651,6 +8852,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6e0dade58d2d89ebbe7afc384e3e4f15b70b14d8",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8721,6 +8923,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x44709a920fccf795fbc57baa433cc3dd53c44dbe",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8752,6 +8955,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe76c6c83af64e4c60245d8c7de953df673a7a33d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8766,6 +8970,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xeb953eda0dc65e3246f43dc8fa13f35623bdd5ed",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8780,6 +8985,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x33d0568941c0c64ff7e0fb4fba0b11bd37deed9f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -8828,6 +9034,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x50de6856358cc35f3a9a57eaaa34bd4cb707d2cd",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -8873,6 +9080,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4740735aa98dc8aa232bd049f8f0210458e7fca3",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8887,6 +9095,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x526526528f35ac738177003b8773b402b8df8143",
       "verified": true,
       "sources": [
+        "curated",
         "uniswap",
         "coingecko",
         "defillama"
@@ -8916,6 +9125,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xdd3b11ef34cd511a2da159034a05fcb94d806686",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -8947,6 +9157,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xeb4c2781e4eba804ce9a9803c67d0893436bb27d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -9010,6 +9221,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x57ab1e0003f623289cd798b1824be09a793e4bec",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9057,6 +9269,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa1d6df714f91debf4e0802a542e13067f31b8262",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9072,6 +9285,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xaf9f549774ecedbd0966c52f250acc548d3f36e5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9102,6 +9316,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9469d013805bffb7d3debe5e7839237e535ec483",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9228,6 +9443,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x16eccfdbb4ee1a85a33f3a9b21175cd7ae753db4",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9289,6 +9505,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc98d64da73a6616c42117b582e832812e7b8d57f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9303,6 +9520,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfae103dc9cf190ed75350761e95403b7b8afa6c0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9317,6 +9535,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x120a3879da835a5af037bb2d1456bebd6b54d4ba",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9333,34 +9552,6 @@
       "sources": [
         "curated",
         "uniswap",
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0x89d24A6b4CcB1B6fAA2625fE562bDD9a23260359",
-      "symbol": "SAI",
-      "name": "Sai",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
-      "address": "0x7C5A0CE9267ED19B22F8cae653F198e3E8daf098",
-      "symbol": "SAN",
-      "name": "Santiment Network",
-      "decimals": 18,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098",
-      "verified": true,
-      "sources": [
         "coingecko",
         "oneinch",
         "defillama"
@@ -9392,6 +9583,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x15e6e0d4ebeac120f9a97e71faa6a0235b85ed12",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9406,6 +9598,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0655977feb2f289a4ab78af67bab0d17aab84367",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9436,6 +9629,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x83f20f44975d03b1b09e64809b757c47f942beea",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9450,6 +9644,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x993864e43caa7f7f12953ad6feb1d1ca635b875f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9464,6 +9659,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5de8ab7e27f6e7a1fff3e5b337584aa43961beef",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9478,6 +9674,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa95c5ebb86e0de73b4fb8c47a45b792cfea28c23",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9492,6 +9689,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9506,6 +9704,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xbdf43ecadc5cef51b7d1772f722e40596bc1788b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9520,6 +9719,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8be3460a480c80728a8c4d7a5d5303c85ba7b3b9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9549,6 +9749,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfe2e637202056d30016725477c5da089ab0a043a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9563,6 +9764,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb753428af26e81097e7fd17f40c88aaa3e04902c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9578,6 +9780,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x12e2b8033420270db2f3b328e32370cb5b2ca134",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9590,11 +9793,9 @@
       "decimals": 18,
       "category": "Liquid Staking",
       "logoURI": "/api/token-logo?chainId=1&address=0xac3e018457b222d93114458476f3e3416abbe38f",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "coingecko",
-        "defillama"
+        "curated"
       ]
     },
     {
@@ -9606,6 +9807,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x232fb065d9d24c34708eedbf03724f2e95abe768",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9629,20 +9831,6 @@
       ]
     },
     {
-      "address": "0xa4Cf2aFD3B165975afFFBf7e487CDd40C894Ab6B",
-      "symbol": "SHIBAKEN",
-      "name": "Shibaken Finance",
-      "decimals": 0,
-      "category": "Other",
-      "logoURI": "/api/token-logo?chainId=1&address=0xa4cf2afd3b165975afffbf7e487cdd40c894ab6b",
-      "verified": true,
-      "sources": [
-        "coingecko",
-        "oneinch",
-        "defillama"
-      ]
-    },
-    {
       "address": "0xb0AC2b5a73da0e67A8e5489Ba922B3f8d582e058",
       "symbol": "SHIRO",
       "name": "Shiro Neko",
@@ -9651,6 +9839,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb0ac2b5a73da0e67a8e5489ba922b3f8d582e058",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9680,6 +9869,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xed0439eacf4c4965ae4613d77a5c2efe10e5f183",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9694,6 +9884,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd23ac27148af6a2f339bd82d0e3cff380b5093de",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9709,6 +9900,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x549020a9cb845220d66d3e9c6d9f9ef61c981102",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9738,6 +9930,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd38bb40815d2b0c2d2c866e0c72c5728ffc76dd9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9752,6 +9945,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x61dbbbb552dc893ab3aad09f289f811e67cef285",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9766,6 +9960,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x06a01a4d579479dd5d884ebf61a31727a3d8d442",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9830,6 +10025,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x72e9d9038ce484ee986fea183f8d8df93f9ada13",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9845,6 +10041,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcd7492db29e2ab436e819b249452ee1bbdf52214",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9924,6 +10121,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xe0b7ad7f8f26e2b00c8b47b5df370f15f90fcf48",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9938,6 +10136,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6b7774cb12ed7573a7586e7d0e62a2a563ddd3f0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -9952,6 +10151,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x3b484b82567a09e2588a13d54d032153f0c0aee0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -9967,6 +10167,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x86ed939b500e121c0c5f493f399084db596dad20",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10030,6 +10231,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0488401c3f535193fa8df029d9ffe615a06e74e6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10045,6 +10247,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x476c5e26a75bd202a9683ffd34359c0cc15be0ff",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10074,6 +10277,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0ae055097c6d159879521c384f1d2123d1f195e6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -10088,6 +10292,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8e6cd950ad6ba651f6dd608dc70e5886b1aa6b24",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10134,6 +10339,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4da27a545c0c5b758a6ba100e3a049001de870f5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10164,6 +10370,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x08c32b0726c5684024ea6e141c50ade9690bbdcc",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10194,6 +10401,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x990f341946a3fdb507ae7e52d17851b87168017c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10268,6 +10476,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc5d6a7b61d18afa11435a889557b068bb9f29930",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10282,6 +10491,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9d39a5de30e57443bff2a8307a4256c8797a3497",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10296,6 +10506,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10327,6 +10538,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xcc4304a31d09258b0029ea7fe63d032f52e44efe",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10342,6 +10554,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb4b9dc1c77bdbb135ea907fd5a08094d98883a35",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10402,6 +10615,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x48c3399719b582dd63eb5aadf12a40b4c3f52fa2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10480,6 +10694,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xb6ff96b8a8d214544ca0dbc9b33f7ad6503efd32",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -10584,6 +10799,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xa5f2211b9b8170f694421f2046281775e8468044",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10628,6 +10844,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xaaaf91d9b90df800df4f55c205fd6989c977e73a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -10642,6 +10859,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x667102bd3413bfeaa3dffb48fa8288819e480a88",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10715,6 +10933,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x77777feddddffc19ff86db637967013e6c6a116c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -10729,6 +10948,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1c9922314ed1415c95b9fd453c3818fd41867d0b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10856,6 +11076,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0000000000085d4780b73119b644ae5ecd22b376",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10886,6 +11107,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x8400d94a5cb0fa0d041a3788e395285d61c9ee5e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10901,6 +11123,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x249e38ea4102d0cf8264d3701f1a0e39c4f2dc3b",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -10915,6 +11138,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0202be363b8a4820f3f4de7faf5224ff05943ab1",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -10947,6 +11171,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x6fc13eace26590b80cccab1ba5d51890577d83b2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet"
@@ -10961,6 +11186,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xadb2437e6f65682b85f814fbc12fec0508a7b1d0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11008,6 +11234,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9ed8e7c9604790f7ec589f99b94361d8aab64e5e",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11023,6 +11250,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x226f7b842e0f0120b7e194d05432b3fd14773a9d",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "trustwallet",
         "defillama"
@@ -11037,6 +11265,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xd13c7342e1ef687c5ad21b27c2b65d772cab5c8c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11063,6 +11292,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1735db6ab5baa19ea55d0adceed7bcdc008b3136",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11077,6 +11307,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x73a15fed60bf67631dc6cd7bc5b6e8da8190acf5",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11125,6 +11356,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x5422374b27757da72d5265cc745ea906e0446634",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11139,6 +11371,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x4f8e5de400de08b164e7421b3ee387f461becd1a",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11168,6 +11401,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xfa2b947eec368f42195f24f36d2af29f7c24cec2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11197,6 +11431,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x59d9356e565ab3a36dd77763fc0d87feaf85508c",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11211,6 +11446,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xde17a000ba631c5d7c2bd9fb692efea52d90dee2",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "defillama"
@@ -11298,6 +11534,51 @@
       "core": true
     },
     {
+      "address": "0x098697bA3Fee4eA76294C5d6A466a4e3b3E95FE6",
+      "symbol": "USP",
+      "name": "USP Yield Optimized Stablecoin",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x66a1E37c9b0eAddca17d3662D6c05F4DECf3e110",
+      "symbol": "USR",
+      "name": "Resolv USR",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x66a1e37c9b0eaddca17d3662d6c05f4decf3e110",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xa47c8bf37f92aBed4A126BDA807A7b7498661acD",
+      "symbol": "UST",
+      "name": "Wrapped USTC",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xa47c8bf37f92abed4a126bda807a7b7498661acd",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0xC4441c2BE5d8fA8126822B9929CA0b81Ea0DE38E",
       "symbol": "USUAL",
       "name": "USUAL",
@@ -11309,6 +11590,36 @@
         "curated",
         "uniswap",
         "coingecko",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xa58a4f5c4Bb043d2CC1E170613B74e767c94189B",
+      "symbol": "UTU",
+      "name": "UTU Coin",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xa58a4f5c4bb043d2cc1e170613b74e767c94189b",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xe88f8313e61A97cEc1871EE37fBbe2a8bf3ed1E4",
+      "symbol": "VAL",
+      "name": "Sora Validator",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xe88f8313e61a97cec1871ee37fbbe2a8bf3ed1e4",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11328,6 +11639,36 @@
       ]
     },
     {
+      "address": "0x340D2bdE5Eb28c1eed91B2f790723E3B160613B7",
+      "symbol": "VEE",
+      "name": "BLOCKv",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x340d2bde5eb28c1eed91b2f790723e3b160613b7",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x249cA82617eC3DfB2589c4c17ab7EC9765350a18",
+      "symbol": "VERSE",
+      "name": "Verse",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x249ca82617ec3dfb2589c4c17ab7ec9765350a18",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x3C4B6E6e1eA3D4863700D7F76b36B7f3D3f13E3d",
       "symbol": "VGX",
       "name": "Voyager Token",
@@ -11340,6 +11681,21 @@
         "uniswap",
         "coingecko",
         "defillama"
+      ]
+    },
+    {
+      "address": "0x3D3D35bb9bEC23b06Ca00fe472b50E7A4c692C30",
+      "symbol": "VIDYA",
+      "name": "Vidya",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x3d3d35bb9bec23b06ca00fe472b50e7a4c692c30",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "trustwallet"
       ]
     },
     {
@@ -11359,6 +11715,51 @@
       ]
     },
     {
+      "address": "0x81f8f0bb1cB2A06649E51913A151F0E7Ef6FA321",
+      "symbol": "VITA",
+      "name": "VitaDAO",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x6b785a0322126826d8226d77e173d75DAfb84d11",
+      "symbol": "VLT",
+      "name": "Bankroll Vault",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x6b785a0322126826d8226d77e173d75dafb84d11",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x8C543AED163909142695f2d2aCd0D55791a9Edb9",
+      "symbol": "VLX",
+      "name": "VLX",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x8c543aed163909142695f2d2acd0d55791a9edb9",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0xF411903cbC70a74d22900a5DE66A2dda66507255",
       "symbol": "VRA",
       "name": "Verasity",
@@ -11367,6 +11768,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf411903cbc70a74d22900a5de66a2dda66507255",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11382,6 +11784,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1b40183efb4dd766f11bda7a7c3ad8982e998421",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11395,6 +11798,96 @@
       "decimals": 18,
       "category": "L2 & Infrastructure",
       "logoURI": "/api/token-logo?chainId=1&address=0xb0ffa8000886e57f86dd5264b9582b2ad87b2b91",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xC71Ea051a5F82c67ADcF634c36FFE6334793D24C",
+      "symbol": "waEthLidoGHO",
+      "name": "Wrapped Aave Ethereum Lido GHO",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xc71ea051a5f82c67adcf634c36ffe6334793d24c",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x0FE906e030a44eF24CA8c7dC7B7c53A6C4F00ce9",
+      "symbol": "waEthLidoWETH",
+      "name": "Wrapped Aave Ethereum Lido WETH",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x0fe906e030a44ef24ca8c7dc7b7c53a6c4f00ce9",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x775F661b0bD1739349b9A2A3EF60be277c5d2D29",
+      "symbol": "waEthLidowstETH",
+      "name": "Wrapped Aave Ethereum Lido wstETH",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x775f661b0bd1739349b9a2a3ef60be277c5d2d29",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xD4fa2D31b7968E448877f69A96DE69f5de8cD23E",
+      "symbol": "waEthUSDC",
+      "name": "Wrapped Aave Ethereum USDC",
+      "decimals": 6,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xd4fa2d31b7968e448877f69a96de69f5de8cd23e",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x7Bc3485026Ac48b6cf9BaF0A377477Fff5703Af8",
+      "symbol": "waEthUSDT",
+      "name": "Wrapped Aave Ethereum USDT",
+      "decimals": 6,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x7bc3485026ac48b6cf9baf0a377477fff5703af8",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x0bfc9d54Fc184518A81162F8fB99c2eACa081202",
+      "symbol": "waEthWETH",
+      "name": "Wrapped Aave Ethereum WETH",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x0bfc9d54fc184518a81162f8fb99c2eaca081202",
       "verified": true,
       "sources": [
         "curated",
@@ -11439,9 +11932,40 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7a2bc711e19ba6aff6ce8246c546e8c4b4944dfd",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xa2E3356610840701BDf5611a53974510Ae27E2e1",
+      "symbol": "wBETH",
+      "name": "Wrapped Beacon ETH",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xa2e3356610840701bdf5611a53974510ae27e2e1",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x418D75f65a02b3D53B2418FB8E1fe493759c7605",
+      "symbol": "WBNB",
+      "name": "Binance Coin (Wormhole)",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x418d75f65a02b3d53b2418fb8e1fe493759c7605",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11522,6 +12046,21 @@
       ]
     },
     {
+      "address": "0xccB365D2e11aE4D6d74715c680f56cf58bF4bF10",
+      "symbol": "WEPE",
+      "name": "Wall Street Pepe",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xccb365d2e11ae4d6d74715c680f56cf58bf4bf10",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
       "symbol": "WETH",
       "name": "Wrapped Ether",
@@ -11552,6 +12091,21 @@
       ]
     },
     {
+      "address": "0x5c147e74D63B1D31AA3Fd78Eb229B65161983B2b",
+      "symbol": "WFLOW",
+      "name": "Wrapped Flow",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x5c147e74d63b1d31aa3fd78eb229b65161983b2b",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x9355372396e3F6daF13359B7b607a3374cc638e0",
       "symbol": "WHALE",
       "name": "WHALE",
@@ -11560,9 +12114,40 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x9355372396e3f6daf13359b7b607a3374cc638e0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x5F0E628B693018f639D10e4A4F59BD4d8B2B6B44",
+      "symbol": "WHITE",
+      "name": "Whiteheart",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x5f0e628b693018f639d10e4a4f59bd4d8b2b6b44",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x2a3bFF78B79A009976EeA096a51A948a3dC00e34",
+      "symbol": "WILD",
+      "name": "Wilder World",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x2a3bff78b79a009976eea096a51a948a3dc00e34",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11575,6 +12160,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x66a0f676479cee1d7373f3dc2e2952778bff5bd6",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11613,6 +12199,51 @@
       ]
     },
     {
+      "address": "0xf203Ca1769ca8e9e8FE1DA9D147DB68B6c919817",
+      "symbol": "WNCG",
+      "name": "Wrapped NCG",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xf203ca1769ca8e9e8fe1da9d147db68b6c919817",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x0d438F3b5175Bebc262bF23753C1E53d03432bDE",
+      "symbol": "wNXM",
+      "name": "Wrapped NXM",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x0d438f3b5175bebc262bf23753c1e53d03432bde",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x8De39B057CC6522230AB19C0205080a8663331Ef",
+      "symbol": "wojak",
+      "name": "wojak",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x8de39b057cc6522230ab19c0205080a8663331ef",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x4691937a7508860F876c9c0a2a617E7d9E945D4B",
       "symbol": "WOO",
       "name": "WOO Network",
@@ -11626,6 +12257,51 @@
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x9f277eDFc463EBaA3D2a6274b01177697E910391",
+      "symbol": "WOOLLY",
+      "name": "Miniature Woolly Mammoth",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x9f277edfc463ebaa3d2a6274b01177697e910391",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xD2af830E8CBdFed6CC11Bab697bB25496ed6FA62",
+      "symbol": "WOUSD",
+      "name": "Wrapped OUSD",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xd2af830e8cbdfed6cc11bab697bb25496ed6fa62",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x34950Ff2b487d9E5282c5aB342d08A2f712eb79F",
+      "symbol": "WOZX",
+      "name": "Efforce",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x34950ff2b487d9e5282c5ab342d08a2f712eb79f",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11657,6 +12333,66 @@
       ]
     },
     {
+      "address": "0x77E06c9eCCf2E797fd462A92B6D7642EF85b0A44",
+      "symbol": "wTAO",
+      "name": "Wrapped TAO",
+      "decimals": 9,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x77e06c9eccf2e797fd462a92b6d7642ef85b0a44",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x39fBBABf11738317a448031930706cd3e612e1B9",
+      "symbol": "WXRP",
+      "name": "Wrapped XRP",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x39fbbabf11738317a448031930706cd3e612e1b9",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xa02120696c7B8fE16C09C749E4598819b2B0E915",
+      "symbol": "WXT",
+      "name": "WXT Token",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xa02120696c7b8fe16c09c749e4598819b2b0e915",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xb2e96a63479C2Edd2FD62b382c89D5CA79f572d3",
+      "symbol": "wZNN",
+      "name": "Zenon",
+      "decimals": 8,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xb2e96a63479c2edd2fd62b382c89d5ca79f572d3",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x1E4EDE388cbc9F4b5c79681B7f94d36a11ABEBC9",
       "symbol": "X2Y2",
       "name": "X2Y2",
@@ -11665,9 +12401,25 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x1e4ede388cbc9f4b5c79681b7f94d36a11abebc9",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x35e78b3982E87ecfD5b3f3265B601c046cDBe232",
+      "symbol": "XAI",
+      "name": "SideShift",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x35e78b3982e87ecfd5b3f3265b601c046cdbe232",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11712,6 +12464,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7659ce147d0e714454073a5dd7003544234b6aa0",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11735,6 +12488,66 @@
       ]
     },
     {
+      "address": "0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8",
+      "symbol": "XEN",
+      "name": "XEN Crypto",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x06450dee7fd2fb8e39061434babcfc05599a6fb8",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xe063F04f280c60aECa68b38341C2eEcBeC703ae2",
+      "symbol": "xETH",
+      "name": "f(x) Protocol Leveraged ETH",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xe063f04f280c60aeca68b38341c2eecbec703ae2",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x5BEfBB272290dD5b8521D4a938f6c4757742c430",
+      "symbol": "XFI",
+      "name": "Xfinance",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x5befbb272290dd5b8521d4a938f6c4757742c430",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x892A6f9dF0147e5f079b0993F486F9acA3c87881",
+      "symbol": "xFUND",
+      "name": "xFUND",
+      "decimals": 9,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x892a6f9df0147e5f079b0993f486f9aca3c87881",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x0f7F961648aE6Db43C75663aC7E5414Eb79b5704",
       "symbol": "XIO",
       "name": "Blockzero Labs",
@@ -11743,9 +12556,40 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x0f7f961648ae6db43c75663ac7e5414eb79b5704",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x3aaDA3e213aBf8529606924d8D1c55CbDc70Bf74",
+      "symbol": "XMON",
+      "name": "XMON",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x3aada3e213abf8529606924d8d1c55cbdc70bf74",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xD7EFB00d12C2c13131FD319336Fdf952525dA2af",
+      "symbol": "XPR",
+      "name": "XPR Network",
+      "decimals": 4,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xd7efb00d12c2c13131fd319336fdf952525da2af",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11758,6 +12602,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0x7de91b204c1c737bcee6f000aaa6569cf7061cb7",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11778,6 +12623,21 @@
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x8798249c2E607446EfB7Ad49eC89dD1865Ff4272",
+      "symbol": "xSUSHI",
+      "name": "xSUSHI",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x8798249c2e607446efb7ad49ec89dd1865ff4272",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11822,6 +12682,7 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xf4cd3d3fda8d7fd6c5a500203e38640a70bf9577",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
@@ -11878,6 +12739,21 @@
       ]
     },
     {
+      "address": "0x4274cD7277C7bb0806Bd5FE84b9aDAE466a8DA0a",
+      "symbol": "YUSD",
+      "name": "YUSD",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x4274cd7277c7bb0806bd5fe84b9adae466a8da0a",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0xA12CC123ba206d4031D1c7f6223D1C2Ec249f4f3",
       "symbol": "ZAMA",
       "name": "Zama",
@@ -11893,6 +12769,51 @@
       ]
     },
     {
+      "address": "0xb755506531786C8aC63B756BaB1ac387bACB0C04",
+      "symbol": "ZARP",
+      "name": "ZARP Stablecoin",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xb755506531786c8ac63b756bab1ac387bacb0c04",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB",
+      "symbol": "ZCHF",
+      "name": "Frankencoin",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xb58e61c3098d85632df34eecfb899a1ed80921cb",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xb9EF770B6A5e12E45983C5D80545258aA38F3B78",
+      "symbol": "ZCN",
+      "name": "Zus",
+      "decimals": 10,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xb9ef770b6a5e12e45983c5d80545258aa38f3b78",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "trustwallet",
+        "defillama"
+      ]
+    },
+    {
       "address": "0xC52C326331E9Ce41F04484d3B5E5648158028804",
       "symbol": "ZCX",
       "name": "Unizen",
@@ -11901,9 +12822,40 @@
       "logoURI": "/api/token-logo?chainId=1&address=0xc52c326331e9ce41f04484d3b5e5648158028804",
       "verified": true,
       "sources": [
+        "curated",
         "coingecko",
         "oneinch",
         "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x2eDf094dB69d6Dcd487f1B3dB9febE2eeC0dd4c5",
+      "symbol": "ZEE",
+      "name": "ZeroSwap",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x2edf094db69d6dcd487f1b3db9febe2eec0dd4c5",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0xdBB7a34Bf10169d6d2D0d02A6cbb436cF4381BFa",
+      "symbol": "ZENT",
+      "name": "Zentry",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xdbb7a34bf10169d6d2d0d02a6cbb436cf4381bfa",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11919,6 +12871,21 @@
         "curated",
         "uniswap",
         "coingecko",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x4D4574f50dd8B9dBe623cF329DCc78D76935E610",
+      "symbol": "ZEUS",
+      "name": "Zeus",
+      "decimals": 9,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x4d4574f50dd8b9dbe623cf329dcc78d76935e610",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
         "defillama"
       ]
     },
@@ -11953,6 +12920,21 @@
       ]
     },
     {
+      "address": "0xfd418e42783382E86Ae91e445406600Ba144D162",
+      "symbol": "ZRC",
+      "name": "Zircuit",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0xfd418e42783382e86ae91e445406600ba144d162",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
+      ]
+    },
+    {
       "address": "0x6985884C4392D348587B19cb9eAAf157F13271cd",
       "symbol": "ZRO",
       "name": "LayerZero",
@@ -11981,6 +12963,21 @@
         "uniswap",
         "coingecko",
         "oneinch",
+        "trustwallet",
+        "defillama"
+      ]
+    },
+    {
+      "address": "0x88ACDd2a6425c3FaAE4Bc9650Fd7E27e0Bebb7aB",
+      "symbol": "⚗️",
+      "name": "Alchemist",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x88acdd2a6425c3faae4bc9650fd7e27e0bebb7ab",
+      "verified": true,
+      "sources": [
+        "curated",
+        "coingecko",
         "trustwallet",
         "defillama"
       ]

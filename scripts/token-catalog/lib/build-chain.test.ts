@@ -15,7 +15,7 @@ const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
 const AL: Allowlist = { nativeEth: NATIVE, trustedListExempt: [], duplicateSymbolExempt: [] }
 
-function entry(source: SourceEntry['source'], address = WETH, symbol = 'WETH', decimals = 18): SourceEntry {
+function entry(source: SourceEntry['source'], address: string = WETH, symbol = 'WETH', decimals = 18): SourceEntry {
   return { chainId: 1, address: address as `0x${string}`, symbol, name: symbol, decimals, source }
 }
 
@@ -122,5 +122,23 @@ describe('buildChainCatalog — wiring', () => {
       fetchSources: [ok('uniswap', [entry('uniswap')]), ok('coingecko', [entry('coingecko')], HEALTHY)],
     }))
     expect(result.verdicts.some((v) => v.address.toLowerCase() === WETH.toLowerCase())).toBe(true)
+  })
+
+  it('a NEW candidate squatting a CORE ticker is rejected BEFORE the audit — the build survives', async () => {
+    // impostor "WETH" at a different address, 2 healthy sources — if it reached the audit
+    // set, the guard duplicate-symbol fatal would mark the CORE too and fail the build.
+    const impostor = [entry('uniswap', DAI, 'WETH'), entry('coingecko', DAI, 'WETH')]
+    const spy = vi.fn(cleanVerdicts)
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [impostor[0]]), ok('coingecko', [impostor[1]], new Map([[`1:${DAI.toLowerCase()}`, { priceUsd: 1, priceConfidence: 0.99 }]]))],
+      cores: [{ address: WETH as `0x${string}`, symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 }],
+      collectVerdicts: spy,
+    }))
+    expect(result.tokens.map((t) => t.address)).toEqual([WETH]) // core only, impostor gone
+    expect(result.tokens[0].core).toBe(true)
+    expect(result.report.rejections.some((r) => r.address === DAI && r.reason === 'symbol-conflict')).toBe(true)
+    // the impostor never reached the guard audit
+    const asked = spy.mock.calls[0][0].map((t: { address: string }) => t.address.toLowerCase())
+    expect(asked).not.toContain(DAI.toLowerCase())
   })
 })

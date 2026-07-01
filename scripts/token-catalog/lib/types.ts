@@ -123,7 +123,8 @@ export interface Rejection {
 export interface SymbolConflict {
   chainId: number
   symbol: string
-  kept: `0x${string}`
+  /** null = unresolvable tie — the whole group was rejected (needs curation). */
+  kept: `0x${string}` | null
   rejected: `0x${string}`[]
 }
 

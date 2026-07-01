@@ -193,6 +193,20 @@ describe('crossVerify — source-agreement rules', () => {
     expect(qualified).toHaveLength(0)
     expect(rejected[0].reason).toBe('insufficient-sources')
   })
+
+  it("'defillama' does NOT count as an agreement vote (near-automatic for any priced pool)", () => {
+    const seed = candidate({ sources: ['defillama', 'uniswap'] })
+    const { qualified, rejected } = crossVerify([seed], new Map([[key(seed), HEALTHY]]), new Set([key(seed)]), CFG)
+    expect(qualified).toHaveLength(0)
+    expect(rejected[0].reason).toBe('insufficient-sources')
+  })
+
+  it("'defillama' cannot be the 3rd source that clears the low-liquidity floor", () => {
+    const c = candidate({ sources: ['uniswap', 'coingecko', 'defillama'] })
+    const { qualified, rejected } = crossVerify([c], new Map([[key(c), LOWLIQ]]), new Set(), CFG)
+    expect(qualified).toHaveLength(0)
+    expect(rejected[0].reason).toBe('insufficient-sources-low-liquidity')
+  })
 })
 
 // ── resolveSymbolConflicts ────────────────────────────────────────────────
@@ -228,6 +242,17 @@ describe('resolveSymbolConflicts — same (chainId, symbol), different addresses
     const fewer = candidate({ address: DAI, sources: ['coingecko', 'oneinch'] })
     const { kept } = resolveSymbolConflicts([fewer, more], new Map(), CFG)
     expect(kept.map((c) => c.address)).toEqual([WETH])
+  })
+
+  it('a FULL tie (priority, votes, volume) rejects the WHOLE group — address order is grindable', () => {
+    // vanity 0x0000… address would win a lexicographic tiebreak — must not decide a ticker
+    const vanity = candidate({ address: '0x0000000000c5dc95539589fbD24BE07c6C14eCa4', sources: ['coingecko', 'trustwallet'] })
+    const victim = candidate({ address: WETH, sources: ['coingecko', 'oneinch'] })
+    const { kept, conflicts, rejected } = resolveSymbolConflicts([vanity, victim], new Map(), CFG)
+    expect(kept).toHaveLength(0)
+    expect(conflicts[0].kept).toBeNull()
+    expect(rejected).toHaveLength(2)
+    expect(rejected.every((r) => r.reason === 'symbol-conflict')).toBe(true)
   })
 })
 

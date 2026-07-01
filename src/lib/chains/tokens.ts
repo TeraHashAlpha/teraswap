@@ -92,9 +92,20 @@ const KNOWN_CATEGORIES = new Set<TokenCategory>([
   'Gold', 'Stocks', 'Other', 'Imported',
 ])
 
-function generatedCategory(t: GeneratedToken): TokenCategory {
-  return KNOWN_CATEGORIES.has(t.category as TokenCategory) ? (t.category as TokenCategory) : 'Other'
+// Pipeline category, treated as advisory: 'Other' means "no curated opinion", so we
+// return undefined and let the runtime inferCategory heuristic refine it (review finding:
+// trusting the pipeline's 'Other' verbatim collapsed the Base selector grouping).
+function generatedCategory(t: GeneratedToken): TokenCategory | undefined {
+  if (!KNOWN_CATEGORIES.has(t.category as TokenCategory) || t.category === 'Other') return undefined
+  return t.category as TokenCategory
 }
+
+// Case-insensitive symbol-set membership: the pipeline's consensus casing follows the
+// on-chain symbol (e.g. Base "Mog", not "MOG"), so curation sets must not be casing-bound
+// (review finding: the Mog chip silently dropped from the suggested set).
+const upper = (set: Set<string>) => new Set([...set].map((s) => s.toUpperCase()))
+const BASE_SUGGESTED_UPPER = upper(BASE_SUGGESTED_SYMBOLS)
+const BASE_POPULAR_UPPER = upper(BASE_POPULAR_SYMBOLS)
 
 // Full Base (8453) catalog — straight from the cross-verified generated catalog (which
 // includes the native-ETH sentinel row and CSP-'self' logoURIs: bundled core assets or
@@ -106,8 +117,8 @@ const BASE_FULL: ChainToken[] = GENERATED_TOKEN_CATALOG[8453].map((t): ChainToke
   name: t.name,
   decimals: t.decimals,
   logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
-  popular: BASE_POPULAR_SYMBOLS.has(t.symbol),
-  suggested: BASE_SUGGESTED_SYMBOLS.has(t.symbol),
+  popular: BASE_POPULAR_UPPER.has(t.symbol.toUpperCase()),
+  suggested: BASE_SUGGESTED_UPPER.has(t.symbol.toUpperCase()),
   verified: t.verified,
   sources: t.sources,
   category: generatedCategory(t),
@@ -203,7 +214,7 @@ const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
     name: t.name,
     decimals: t.decimals,
     logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
-    category: generatedCategory(t),
+    category: generatedCategory(t) ?? inferCategory(t.symbol),
     verified: t.verified,
     sources: t.sources,
   }))
@@ -254,8 +265,11 @@ export function getSearchCatalog(chainId: number): Token[] {
  */
 export function remapTokenToChain(token: Token | null, chainId: number): Token | null {
   if (!token) return token
+  // Case-insensitive symbol match: the pipeline's consensus casing follows the on-chain
+  // symbol per chain (mainnet 'MOG' ↔ Base 'Mog' are the same asset).
+  const sym = token.symbol.toLowerCase()
   const match = getChainTokenList(chainId).find(
-    (t) => t.symbol === token.symbol && t.address.toLowerCase() !== token.address.toLowerCase(),
+    (t) => t.symbol.toLowerCase() === sym && t.address.toLowerCase() !== token.address.toLowerCase(),
   )
   return match ?? token
 }

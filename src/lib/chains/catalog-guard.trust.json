@@ -41,7 +41,7 @@
    "symbol": "0xBTC",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "0xBTC",
    "decimals": 8
   },
@@ -53,16 +53,6 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "1INCH",
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
-   "address": "0xa4eF4b0B23C1fc81d3f9ecF93510e64f58A4A016",
-   "symbol": "1MIL",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": null,
-   "onchainSymbol": "1MIL",
    "decimals": 18
   },
   {
@@ -162,7 +152,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "ADX",
    "decimals": 18
   },
   {
@@ -181,7 +171,7 @@
    "symbol": "AEVO",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "AEVO",
    "decimals": 18
   },
@@ -301,7 +291,7 @@
    "symbol": "ALLO",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "ALLO",
    "decimals": 18
   },
@@ -342,7 +332,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "AMP",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -351,7 +341,7 @@
    "symbol": "AMPL",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "AMPL",
    "decimals": 9
   },
@@ -371,7 +361,7 @@
    "symbol": "ANKR",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "ANKR",
    "decimals": 18
   },
@@ -451,7 +441,7 @@
    "symbol": "APY",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "APY",
    "decimals": 18
   },
@@ -462,7 +452,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "ARB",
    "decimals": 18
   },
   {
@@ -562,7 +552,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ASTO",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -631,7 +621,7 @@
    "symbol": "AURA",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "AURA",
    "decimals": 18
   },
@@ -662,7 +652,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "AVA",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -867,16 +857,6 @@
   },
   {
    "chainId": 1,
-   "address": "0xf3dcbc6D72a4E1892f7917b7C43b74131Df8480e",
-   "symbol": "BDP",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "BDP",
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
    "address": "0x62D0A8458eD7719FDAF978fe5929C6D342B0bFcE",
    "symbol": "BEAM",
    "inTrustedList": true,
@@ -924,16 +904,6 @@
    "transferable": true,
    "onchainSymbol": "BEPRO",
    "decimals": 18
-  },
-  {
-   "chainId": 1,
-   "address": "0xDC349913d53b446485E98b76800b6254f43Df695",
-   "symbol": "BEZOGE",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": false,
-   "onchainSymbol": "BEZOGE",
-   "decimals": 9
   },
   {
    "chainId": 1,
@@ -1042,7 +1012,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "BLEND",
    "decimals": 18
   },
   {
@@ -1161,7 +1131,7 @@
    "symbol": "BONE",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "BONE",
    "decimals": 18
   },
@@ -1187,22 +1157,12 @@
   },
   {
    "chainId": 1,
-   "address": "0xBC19712FEB3a26080eBf6f2F7849b417FdD792CA",
-   "symbol": "BORING",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "BORING",
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
    "address": "0xC477D038d5420C6A9e0b031712f61c5120090de9",
    "symbol": "BOSON",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "BOSON",
    "decimals": 18
   },
   {
@@ -1361,7 +1321,7 @@
    "symbol": "CDCETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "CDCETH",
    "decimals": 18
   },
@@ -1512,7 +1472,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "CONV",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -1592,7 +1552,7 @@
    "inTrustedList": false,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "CQT",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -1621,7 +1581,7 @@
    "symbol": "CRPT",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "CRPT",
    "decimals": 18
   },
@@ -1652,7 +1612,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": false,
-   "onchainSymbol": null,
+   "onchainSymbol": "CSWAP",
    "decimals": 18
   },
   {
@@ -1841,8 +1801,8 @@
    "symbol": "DEUS",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
-   "onchainSymbol": null,
+   "transferable": true,
+   "onchainSymbol": "DEUS",
    "decimals": 18
   },
   {
@@ -1851,7 +1811,7 @@
    "symbol": "DEXE",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "DEXE",
    "decimals": 18
   },
@@ -1861,7 +1821,7 @@
    "symbol": "DEXT",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "DEXT",
    "decimals": 18
   },
@@ -1927,21 +1887,11 @@
   },
   {
    "chainId": 1,
-   "address": "0x9e5BD9D9fAd182ff0A93bA8085b664bcab00fA68",
-   "symbol": "DINGER",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": false,
-   "onchainSymbol": "DINGER",
-   "decimals": 9
-  },
-  {
-   "chainId": 1,
    "address": "0xbb1EE07d6c7BAeB702949904080eb61f5D5e7732",
    "symbol": "DINU",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "DINU",
    "decimals": 18
   },
@@ -1951,7 +1901,7 @@
    "symbol": "DIP",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "DIP",
    "decimals": 18
   },
@@ -2061,7 +2011,7 @@
    "symbol": "DREP",
    "inTrustedList": false,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "DREP",
    "decimals": 18
   },
@@ -2072,7 +2022,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "DRV",
    "decimals": 18
   },
   {
@@ -2117,22 +2067,12 @@
   },
   {
    "chainId": 1,
-   "address": "0xa52bfFAD02B1FE3f86A543a4e81962d3B3bB01A7",
-   "symbol": "DUCKER",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": false,
-   "onchainSymbol": "DUCKER",
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
    "address": "0x940a2dB1B7008B6C776d4faaCa729d6d4A4AA551",
    "symbol": "DUSK",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "DUSK",
    "decimals": 18
   },
   {
@@ -2172,7 +2112,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "DYP",
    "decimals": 18
   },
   {
@@ -2211,7 +2151,7 @@
    "symbol": "ELA",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "ELA",
    "decimals": 18
   },
@@ -2272,7 +2212,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ERA",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -2281,7 +2221,7 @@
    "symbol": "ERN",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "ERN",
    "decimals": 18
   },
@@ -2437,6 +2377,16 @@
   },
   {
    "chainId": 1,
+   "address": "0xC581b735A1688071A1746c968e0798D642EDE491",
+   "symbol": "EURT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": null,
+   "onchainSymbol": null,
+   "decimals": 6
+  },
+  {
+   "chainId": 1,
    "address": "0x39b8B6385416f4cA36a20319F70D28621895279D",
    "symbol": "EURe",
    "inTrustedList": true,
@@ -2472,7 +2422,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "FDUSD",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -2502,7 +2452,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "FF",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -2851,7 +2801,7 @@
    "symbol": "GNYerc20",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "GNYerc20",
    "decimals": 18
   },
@@ -2917,16 +2867,6 @@
   },
   {
    "chainId": 1,
-   "address": "0xe0B9a2C3E9f40CF74B2C7F591B2b0CCa055c3112",
-   "symbol": "GS",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "GS",
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
    "address": "0xDe30da39c46104798bB5aA3fe8B9e0e1F348163F",
    "symbol": "GTC",
    "inTrustedList": true,
@@ -2942,7 +2882,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "GUILD",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -2972,7 +2912,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": false,
-   "onchainSymbol": null,
+   "onchainSymbol": "GYEN",
    "decimals": 6
   },
   {
@@ -3041,7 +2981,7 @@
    "symbol": "HFT",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "HFT",
    "decimals": 18
   },
@@ -3121,7 +3061,7 @@
    "symbol": "HUNT",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "HUNT",
    "decimals": 18
   },
@@ -3151,7 +3091,7 @@
    "symbol": "ID",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "ID",
    "decimals": 18
   },
@@ -3172,7 +3112,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ILV",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -3211,7 +3151,7 @@
    "symbol": "INJ",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "INJ",
    "decimals": 18
   },
@@ -3352,7 +3292,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "K21",
    "decimals": 18
   },
   {
@@ -3404,16 +3344,6 @@
    "transferable": true,
    "onchainSymbol": "KEY",
    "decimals": 18
-  },
-  {
-   "chainId": 1,
-   "address": "0xe0a189C975e4928222978A74517442239a0b86ff",
-   "symbol": "KEYS",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": false,
-   "onchainSymbol": "KEYS",
-   "decimals": 9
   },
   {
    "chainId": 1,
@@ -3502,7 +3432,7 @@
    "inTrustedList": false,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "KUJI",
+   "onchainSymbol": null,
    "decimals": 6
   },
   {
@@ -3511,8 +3441,8 @@
    "symbol": "L3",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": null,
+   "transferable": null,
+   "onchainSymbol": "L3",
    "decimals": 18
   },
   {
@@ -3542,7 +3472,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "LBTC",
    "decimals": 8
   },
   {
@@ -3627,6 +3557,16 @@
   },
   {
    "chainId": 1,
+   "address": "0x922D8563631B03C2c4cf817f4d18f6883AbA0109",
+   "symbol": "LOCK",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "LOCK",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x61E90A50137E1F645c9eF4a0d3A4f01477738406",
    "symbol": "LOKA",
    "inTrustedList": true,
@@ -3651,7 +3591,7 @@
    "symbol": "LOOKS",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "LOOKS",
    "decimals": 18
   },
@@ -3692,7 +3632,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "LRDS",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -3701,7 +3641,7 @@
    "symbol": "LSETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": false,
+   "transferable": null,
    "onchainSymbol": "LsETH",
    "decimals": 18
   },
@@ -3732,7 +3672,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "LTX",
+   "onchainSymbol": null,
    "decimals": 8
   },
   {
@@ -3741,7 +3681,7 @@
    "symbol": "LUNA",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "LUNA",
    "decimals": 18
   },
@@ -3762,7 +3702,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "LYXe",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -3892,7 +3832,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "MDT",
    "decimals": 18
   },
   {
@@ -4091,7 +4031,7 @@
    "symbol": "MPH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "MPH",
    "decimals": 18
   },
@@ -4111,8 +4051,8 @@
    "symbol": "MTA",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "MTA",
+   "transferable": null,
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -4151,7 +4091,7 @@
    "symbol": "MUSD",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "mUSD",
    "decimals": 18
   },
@@ -4172,7 +4112,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "MV",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -4234,16 +4174,6 @@
    "transferable": true,
    "onchainSymbol": "NEAR",
    "decimals": 24
-  },
-  {
-   "chainId": 1,
-   "address": "0x3D1C949a761C11E4CC50c3aE6BdB0F24fD7A39DA",
-   "symbol": "NEURA",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "NEURA",
-   "decimals": 18
   },
   {
    "chainId": 1,
@@ -4322,7 +4252,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "NOW",
    "decimals": 8
   },
   {
@@ -4331,7 +4261,7 @@
    "symbol": "NPC",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "NPC",
    "decimals": 18
   },
@@ -4341,8 +4271,8 @@
    "symbol": "NTX",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
-   "onchainSymbol": null,
+   "transferable": true,
+   "onchainSymbol": "NTX",
    "decimals": 6
   },
   {
@@ -4363,6 +4293,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "NUM",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x926759A8EaEcFADb5D8bdC7A9C7B193C5085F507",
+   "symbol": "NURA",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "NURA",
    "decimals": 18
   },
   {
@@ -4471,7 +4411,7 @@
    "symbol": "OPIUM",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "OPIUM",
    "decimals": 18
   },
@@ -4551,7 +4491,7 @@
    "symbol": "OVPP",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": false,
    "onchainSymbol": "OVPP",
    "decimals": 9
   },
@@ -4591,7 +4531,7 @@
    "symbol": "PAX",
    "inTrustedList": false,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "PAX",
    "decimals": 18
   },
@@ -4632,7 +4572,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "PENDLE",
    "decimals": 18
   },
   {
@@ -4791,8 +4731,8 @@
    "symbol": "PNKSTR",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
-   "onchainSymbol": "PNKSTR",
+   "transferable": true,
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -4911,7 +4851,7 @@
    "symbol": "PRIME",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "PRIME",
    "decimals": 18
   },
@@ -5151,7 +5091,7 @@
    "symbol": "RAIL",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "RAIL",
    "decimals": 18
   },
@@ -5342,7 +5282,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "RGT",
    "decimals": 18
   },
   {
@@ -5442,7 +5382,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "RPL",
    "decimals": 18
   },
   {
@@ -5483,26 +5423,6 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "SAFE",
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
-   "address": "0x89d24A6b4CcB1B6fAA2625fE562bDD9a23260359",
-   "symbol": "SAI",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": null,
-   "decimals": 18
-  },
-  {
-   "chainId": 1,
-   "address": "0x7C5A0CE9267ED19B22F8cae653F198e3E8daf098",
-   "symbol": "SAN",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "SAN",
    "decimals": 18
   },
   {
@@ -5637,16 +5557,6 @@
   },
   {
    "chainId": 1,
-   "address": "0xa4Cf2aFD3B165975afFFBf7e487CDd40C894Ab6B",
-   "symbol": "SHIBAKEN",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": false,
-   "onchainSymbol": "SHIBAKEN",
-   "decimals": 0
-  },
-  {
-   "chainId": 1,
    "address": "0xb0AC2b5a73da0e67A8e5489Ba922B3f8d582e058",
    "symbol": "SHIRO",
    "inTrustedList": true,
@@ -5702,7 +5612,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "SIGN",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -5751,8 +5661,8 @@
    "symbol": "SLP",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
-   "onchainSymbol": null,
+   "transferable": true,
+   "onchainSymbol": "SLP",
    "decimals": 0
   },
   {
@@ -5932,7 +5842,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "STARL",
    "decimals": 18
   },
   {
@@ -5951,7 +5861,7 @@
    "symbol": "STORJ",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "STORJ",
    "decimals": 8
   },
@@ -5991,7 +5901,7 @@
    "symbol": "STX",
    "inTrustedList": false,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "STX",
    "decimals": 18
   },
@@ -6031,8 +5941,8 @@
    "symbol": "SWAP",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
-   "onchainSymbol": null,
+   "transferable": true,
+   "onchainSymbol": "SWAP",
    "decimals": 18
   },
   {
@@ -6122,7 +6032,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "SYNC",
    "decimals": 18
   },
   {
@@ -6192,7 +6102,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "THOR",
    "decimals": 18
   },
   {
@@ -6201,7 +6111,7 @@
    "symbol": "THQ",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "THQ",
    "decimals": 18
   },
@@ -6342,7 +6252,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "TRIBE",
    "decimals": 18
   },
   {
@@ -6361,7 +6271,7 @@
    "symbol": "TURBO",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "TURBO",
    "decimals": 18
   },
@@ -6391,7 +6301,7 @@
    "symbol": "UBT",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "UBT",
    "decimals": 8
   },
@@ -6592,7 +6502,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "USDN",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -6601,8 +6511,8 @@
    "symbol": "USDP",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": null,
+   "transferable": null,
+   "onchainSymbol": "USDP",
    "decimals": 18
   },
   {
@@ -6662,7 +6572,37 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "USDf",
+   "onchainSymbol": null,
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x098697bA3Fee4eA76294C5d6A466a4e3b3E95FE6",
+   "symbol": "USP",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "USP",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x66a1E37c9b0eAddca17d3662D6c05F4DECf3e110",
+   "symbol": "USR",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "USR",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xa47c8bf37f92aBed4A126BDA807A7b7498661acD",
+   "symbol": "UST",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "UST",
    "decimals": 18
   },
   {
@@ -6677,12 +6617,52 @@
   },
   {
    "chainId": 1,
+   "address": "0xa58a4f5c4Bb043d2CC1E170613B74e767c94189B",
+   "symbol": "UTU",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "UTU",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xe88f8313e61A97cEc1871EE37fBbe2a8bf3ed1E4",
+   "symbol": "VAL",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VAL",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x8DE5B80a0C1B02Fe4976851D030B36122dbb8624",
    "symbol": "VANRY",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "VANRY",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x340D2bdE5Eb28c1eed91B2f790723E3B160613B7",
+   "symbol": "VEE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VEE",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x249cA82617eC3DfB2589c4c17ab7EC9765350a18",
+   "symbol": "VERSE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VERSE",
    "decimals": 18
   },
   {
@@ -6697,12 +6677,52 @@
   },
   {
    "chainId": 1,
+   "address": "0x3D3D35bb9bEC23b06Ca00fe472b50E7A4c692C30",
+   "symbol": "VIDYA",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VIDYA",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x44ff8620b8cA30902395A7bD3F2407e1A091BF73",
    "symbol": "VIRTUAL",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "VIRTUAL",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x81f8f0bb1cB2A06649E51913A151F0E7Ef6FA321",
+   "symbol": "VITA",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VITA",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x6b785a0322126826d8226d77e173d75DAfb84d11",
+   "symbol": "VLT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VLT",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x8C543AED163909142695f2d2aCd0D55791a9Edb9",
+   "symbol": "VLX",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "VLX",
    "decimals": 18
   },
   {
@@ -6762,8 +6782,18 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "WAXE",
    "decimals": 8
+  },
+  {
+   "chainId": 1,
+   "address": "0x418D75f65a02b3D53B2418FB8E1fe493759c7605",
+   "symbol": "WBNB",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WBNB",
+   "decimals": 18
   },
   {
    "chainId": 1,
@@ -6807,12 +6837,22 @@
   },
   {
    "chainId": 1,
+   "address": "0xccB365D2e11aE4D6d74715c680f56cf58bF4bF10",
+   "symbol": "WEPE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": false,
+   "onchainSymbol": "WEPE",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
    "symbol": "WETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "WETH",
+   "transferable": null,
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -6827,6 +6867,16 @@
   },
   {
    "chainId": 1,
+   "address": "0x5c147e74D63B1D31AA3Fd78Eb229B65161983B2b",
+   "symbol": "WFLOW",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WFLOW",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x9355372396e3F6daF13359B7b607a3374cc638e0",
    "symbol": "WHALE",
    "inTrustedList": true,
@@ -6834,6 +6884,26 @@
    "transferable": true,
    "onchainSymbol": "WHALE",
    "decimals": 4
+  },
+  {
+   "chainId": 1,
+   "address": "0x5F0E628B693018f639D10e4A4F59BD4d8B2B6B44",
+   "symbol": "WHITE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WHITE",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x2a3bFF78B79A009976EeA096a51A948a3dC00e34",
+   "symbol": "WILD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WILD",
+   "decimals": 18
   },
   {
    "chainId": 1,
@@ -6862,7 +6932,17 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "WLFI",
+   "onchainSymbol": null,
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xf203Ca1769ca8e9e8FE1DA9D147DB68B6c919817",
+   "symbol": "WNCG",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WNCG",
    "decimals": 18
   },
   {
@@ -6877,12 +6957,62 @@
   },
   {
    "chainId": 1,
+   "address": "0x9f277eDFc463EBaA3D2a6274b01177697E910391",
+   "symbol": "WOOLLY",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": false,
+   "onchainSymbol": "WOOLLY",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xD2af830E8CBdFed6CC11Bab697bB25496ed6FA62",
+   "symbol": "WOUSD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": null,
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x34950Ff2b487d9E5282c5aB342d08A2f712eb79F",
+   "symbol": "WOZX",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WOZX",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x09B6a9E1DD102bD95B3DD5025bCa3540eBf77982",
    "symbol": "WRON",
    "inTrustedList": false,
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "WRON",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x39fBBABf11738317a448031930706cd3e612e1B9",
+   "symbol": "WXRP",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WXRP",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xa02120696c7B8fE16C09C749E4598819b2B0E915",
+   "symbol": "WXT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WXT",
    "decimals": 18
   },
   {
@@ -6897,12 +7027,22 @@
   },
   {
    "chainId": 1,
+   "address": "0x35e78b3982E87ecfD5b3f3265B601c046cDBe232",
+   "symbol": "XAI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "XAI",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0xCEDbEA37C8872c4171259Cdfd5255CB8923Cf8e7",
    "symbol": "XAN",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "XAN",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -6937,6 +7077,26 @@
   },
   {
    "chainId": 1,
+   "address": "0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8",
+   "symbol": "XEN",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "XEN",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x5BEfBB272290dD5b8521D4a938f6c4757742c430",
+   "symbol": "XFI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "XFI",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x0f7F961648aE6Db43C75663aC7E5414Eb79b5704",
    "symbol": "XIO",
    "inTrustedList": true,
@@ -6944,6 +7104,26 @@
    "transferable": true,
    "onchainSymbol": "XIO",
    "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x3aaDA3e213aBf8529606924d8D1c55CbDc70Bf74",
+   "symbol": "XMON",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "XMON",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xD7EFB00d12C2c13131FD319336Fdf952525dA2af",
+   "symbol": "XPR",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": null,
+   "onchainSymbol": "XPR",
+   "decimals": 4
   },
   {
    "chainId": 1,
@@ -7017,6 +7197,16 @@
   },
   {
    "chainId": 1,
+   "address": "0x4274cD7277C7bb0806Bd5FE84b9aDAE466a8DA0a",
+   "symbol": "YUSD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "YUSD",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0xf4CD3d3Fda8d7Fd6C5a500203e38640A70Bf9577",
    "symbol": "Yf-DAI",
    "inTrustedList": true,
@@ -7037,6 +7227,36 @@
   },
   {
    "chainId": 1,
+   "address": "0xb755506531786C8aC63B756BaB1ac387bACB0C04",
+   "symbol": "ZARP",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": null,
+   "onchainSymbol": "ZARP",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB",
+   "symbol": "ZCHF",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ZCHF",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xb9EF770B6A5e12E45983C5D80545258aA38F3B78",
+   "symbol": "ZCN",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ZCN",
+   "decimals": 10
+  },
+  {
+   "chainId": 1,
    "address": "0xC52C326331E9Ce41F04484d3B5E5648158028804",
    "symbol": "ZCX",
    "inTrustedList": true,
@@ -7044,6 +7264,36 @@
    "transferable": true,
    "onchainSymbol": "ZCX",
    "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x2eDf094dB69d6Dcd487f1B3dB9febE2eeC0dd4c5",
+   "symbol": "ZEE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ZEE",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xdBB7a34Bf10169d6d2D0d02A6cbb436cF4381BFa",
+   "symbol": "ZENT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ZENT",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x4D4574f50dd8B9dBe623cF329DCc78D76935E610",
+   "symbol": "ZEUS",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": false,
+   "onchainSymbol": "ZEUS",
+   "decimals": 9
   },
   {
    "chainId": 1,
@@ -7063,6 +7313,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "ZKP",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xfd418e42783382E86Ae91e445406600Ba144D162",
+   "symbol": "ZRC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ZRC",
    "decimals": 18
   },
   {
@@ -7122,7 +7382,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "aBUSD",
    "decimals": 18
   },
   {
@@ -7231,7 +7491,7 @@
    "symbol": "aEthLDO",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "aEthLDO",
    "decimals": 18
   },
@@ -7361,7 +7621,7 @@
    "symbol": "aEthrETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "aEthrETH",
    "decimals": 18
   },
@@ -7472,7 +7732,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "aUNI",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -7531,7 +7791,7 @@
    "symbol": "agETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": false,
+   "transferable": null,
    "onchainSymbol": "agETH",
    "decimals": 18
   },
@@ -7561,7 +7821,7 @@
    "symbol": "ankrETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "ankrETH",
    "decimals": 18
   },
@@ -7572,7 +7832,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "beraSTONE",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -7591,7 +7851,7 @@
    "symbol": "cUSDO",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "cUSDO",
    "decimals": 18
   },
@@ -7611,7 +7871,7 @@
    "symbol": "cbETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "cbETH",
    "decimals": 18
   },
@@ -7634,16 +7894,6 @@
    "transferable": true,
    "onchainSymbol": "cvxCRV",
    "decimals": 18
-  },
-  {
-   "chainId": 1,
-   "address": "0x8AEC4bbDcfB451aA289bfBD3C2F4E34A44ADa1be",
-   "symbol": "dogwifhat",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": false,
-   "onchainSymbol": "dogwifhat",
-   "decimals": 9
   },
   {
    "chainId": 1,
@@ -7791,7 +8041,7 @@
    "symbol": "pBTC35A",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "pBTC35A",
    "decimals": 18
   },
@@ -7871,7 +8121,7 @@
    "symbol": "sDAI",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "sDAI",
    "decimals": 18
   },
@@ -7891,7 +8141,7 @@
    "symbol": "sETH2",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "sETH2",
    "decimals": 18
   },
@@ -7961,7 +8211,7 @@
    "symbol": "stETH",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "stETH",
    "decimals": 18
   },
@@ -7997,6 +8247,106 @@
   },
   {
    "chainId": 1,
+   "address": "0xa2E3356610840701BDf5611a53974510Ae27E2e1",
+   "symbol": "wBETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "wBETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x0d438F3b5175Bebc262bF23753C1E53d03432bDE",
+   "symbol": "wNXM",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "wNXM",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x77E06c9eCCf2E797fd462A92B6D7642EF85b0A44",
+   "symbol": "wTAO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "wTAO",
+   "decimals": 9
+  },
+  {
+   "chainId": 1,
+   "address": "0xb2e96a63479C2Edd2FD62b382c89D5CA79f572d3",
+   "symbol": "wZNN",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "wZNN",
+   "decimals": 8
+  },
+  {
+   "chainId": 1,
+   "address": "0xC71Ea051a5F82c67ADcF634c36FFE6334793D24C",
+   "symbol": "waEthLidoGHO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "waEthLidoGHO",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x0FE906e030a44eF24CA8c7dC7B7c53A6C4F00ce9",
+   "symbol": "waEthLidoWETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "waEthLidoWETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x775F661b0bD1739349b9A2A3EF60be277c5d2D29",
+   "symbol": "waEthLidowstETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "waEthLidowstETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xD4fa2D31b7968E448877f69A96DE69f5de8cD23E",
+   "symbol": "waEthUSDC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "waEthUSDC",
+   "decimals": 6
+  },
+  {
+   "chainId": 1,
+   "address": "0x7Bc3485026Ac48b6cf9BaF0A377477Fff5703Af8",
+   "symbol": "waEthUSDT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "waEthUSDT",
+   "decimals": 6
+  },
+  {
+   "chainId": 1,
+   "address": "0x0bfc9d54Fc184518A81162F8fB99c2eACa081202",
+   "symbol": "waEthWETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "waEthWETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
    "symbol": "weETH",
    "inTrustedList": true,
@@ -8007,12 +8357,62 @@
   },
   {
    "chainId": 1,
+   "address": "0x8De39B057CC6522230AB19C0205080a8663331Ef",
+   "symbol": "wojak",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "wojak",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
    "symbol": "wstETH",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "wstETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0xe063F04f280c60aECa68b38341C2eEcBeC703ae2",
+   "symbol": "xETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "xETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x892A6f9dF0147e5f079b0993F486F9acA3c87881",
+   "symbol": "xFUND",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "xFUND",
+   "decimals": 9
+  },
+  {
+   "chainId": 1,
+   "address": "0x8798249c2E607446EfB7Ad49eC89dD1865Ff4272",
+   "symbol": "xSUSHI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "xSUSHI",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
+   "address": "0x88ACDd2a6425c3FaAE4Bc9650Fd7E27e0Bebb7aB",
+   "symbol": "⚗️",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "⚗️",
    "decimals": 18
   },
   {
@@ -8093,6 +8493,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "AJNA",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0x2F20Cf3466f80A5f7f532fCa553c8cbc9727FEf6",
+   "symbol": "AKUMA",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AKUMA",
    "decimals": 18
   },
   {
@@ -8203,6 +8613,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "AWE",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0x9B700B043e9587ddE9a0c29A9483e2F8FA450d54",
+   "symbol": "AXGT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AXGT",
    "decimals": 18
   },
   {
@@ -9437,6 +9857,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x38815A4455921667d673B4cb3d48F0383eE93400",
+   "symbol": "PSTAKE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "PSTAKE",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0x5c97D726bf5130AE15408cE32bc764e458320D2f",
    "symbol": "QUAI",
    "inTrustedList": false,
@@ -9733,6 +10163,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "SYND",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0xbd2DBb8eceA9743CA5B16423b4eAa26bDcfE5eD2",
+   "symbol": "SYNTH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "SYNTH",
    "decimals": 18
   },
   {

@@ -59,9 +59,16 @@ export function makeFetchers(chainId: number): ChainFetchers {
 
   const coingecko = async (): Promise<SourceFetchResult> => {
     const raw = await fetchJson(`https://tokens.coingecko.com/${platform}/all.json`)
-    const entries = parseTokenList(raw, chainId, 'coingecko')
-    cgSet = new Set(entries.map((t) => t.address.toLowerCase()))
-    return { source: 'coingecko', entries }
+    // The trusted-list set mirrors verdicts.ts cgAddressSet EXACTLY (every string address,
+    // no tokenlist validation) so tokens:sync and guard:refresh compute inTrustedList from
+    // identical semantics — the identity ENTRIES below still go through full validation.
+    const rawTokens = (raw as { tokens?: Array<{ address?: unknown }> })?.tokens
+    cgSet = new Set(
+      (Array.isArray(rawTokens) ? rawTokens : [])
+        .filter((t) => typeof t?.address === 'string')
+        .map((t) => (t.address as string).toLowerCase()),
+    )
+    return { source: 'coingecko', entries: parseTokenList(raw, chainId, 'coingecko') }
   }
 
   const oneinch = async (): Promise<SourceFetchResult> => {

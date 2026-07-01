@@ -22,7 +22,11 @@ import type {
 import { CoreTokenValidationError } from './types'
 import { PIPELINE_CONFIG } from './config'
 
-const NON_VOTING: ReadonlySet<SourceId> = new Set<SourceId>(['curated', 'native'])
+// Non-voting provenance markers. 'defillama' is deliberately here (review finding): its
+// identity row exists for ANY address with a priced pool — near-automatic precisely for
+// the thin/low-liquidity tokens the >=3-source floor targets — so it may never count as
+// an agreement vote. It remains in `sources` as provenance and supplies the market signal.
+const NON_VOTING: ReadonlySet<SourceId> = new Set<SourceId>(['curated', 'native', 'defillama'])
 
 function key(chainId: number, address: string): string {
   return `${chainId}:${address.toLowerCase()}`
@@ -109,9 +113,13 @@ export function isLowLiquidity(m: MarketSignal | undefined, cfg: PipelineConfig)
   return true
 }
 
-/** External-source agreement votes (curated/native provenance markers do not count). */
+/** External-source agreement votes (curated/native/defillama do not count — see NON_VOTING). */
+export function externalVoteCount(sources: SourceId[]): number {
+  return sources.filter((s) => !NON_VOTING.has(s)).length
+}
+
 function voteCount(c: Candidate): number {
-  return c.sources.filter((s) => !NON_VOTING.has(s)).length
+  return externalVoteCount(c.sources)
 }
 
 /**
@@ -151,8 +159,13 @@ export function crossVerify(
 
 /**
  * At most ONE address may hold a (chainId, symbol) slot. Winner = highest canonical
- * source priority, then more source votes, then higher 24h volume, then address order.
- * Losers are rejected + logged — NEVER merged into the winner.
+ * source priority, then more source votes, then higher 24h volume. Losers are rejected
+ * + logged — NEVER merged into the winner.
+ *
+ * A FULL tie (same priority, votes and volume) rejects the WHOLE group (review finding):
+ * the old address-order tiebreak was attacker-grindable — a vanity CREATE2 address that
+ * sorts first would win the ticker. An unresolvable symbol needs human curation, so we
+ * fail closed and log the conflict with kept:null.
  */
 export function resolveSymbolConflicts(
   candidates: Candidate[],
@@ -179,17 +192,26 @@ export function resolveSymbolConflicts(
       votes: voteCount(c),
       volume: market.get(key(c.chainId, c.address))?.volume24hUsd ?? 0,
     })
-    const ranked = [...group].sort((a, b) => {
+    const cmp = (a: Candidate, b: Candidate) => {
       const sa = score(a)
       const sb = score(b)
-      return (
-        sa.priority - sb.priority ||
-        sb.votes - sa.votes ||
-        sb.volume - sa.volume ||
-        (a.address < b.address ? -1 : 1)
-      )
-    })
+      return sa.priority - sb.priority || sb.votes - sa.votes || sb.volume - sa.volume
+    }
+    const ranked = [...group].sort((a, b) => cmp(a, b) || (a.address < b.address ? -1 : 1))
     const winner = ranked[0]
+    if (cmp(winner, ranked[1]) === 0) {
+      // unresolvable tie — fail closed, nobody gets the ticker
+      conflicts.push({
+        chainId: winner.chainId,
+        symbol: winner.symbol,
+        kept: null,
+        rejected: ranked.map((l) => l.address),
+      })
+      for (const l of ranked) {
+        rejected.push({ chainId: l.chainId, address: l.address, symbol: l.symbol, reason: 'symbol-conflict', detail: 'unresolvable tie — needs curation' })
+      }
+      continue
+    }
     winners.add(winner)
     const losers = ranked.slice(1)
     conflicts.push({

@@ -51,8 +51,10 @@ verified badge **real**: `verified: true` + `sources: [...]` persisted per token
    - `coingecko` — `tokens.coingecko.com/{ethereum,base}/all.json` (same lists the guard + logo route use).
    - `oneinch` — `tokens.1inch.io/v1.2/{1,8453}` (fallback v1.1).
    - `trustwallet` — `raw.githubusercontent.com/trustwallet/assets/.../blockchains/{ethereum,base}/tokenlist.json`.
-   - `defillama` — `coins.llama.fi/prices/current` (batched): identity vote when its symbol/decimals
-     agree, plus the price-confidence market signal.
+   - `defillama` — `coins.llama.fi/prices/current` (batched): the price-confidence MARKET signal and
+     provenance only — it is NON-VOTING for agreement (its identity row is near-automatic for any
+     priced pool, so it could otherwise hand the low-liquidity class its own third vote; adversarial
+     review finding, fixed).
    - Market data: CoinGecko 24h volume when resolvable (optional `COINGECKO_API_KEY`), DefiLlama
      price+confidence otherwise.
 3. **Inclusion + `verified: true` only if ALL of:**
@@ -77,9 +79,12 @@ verified badge **real**: `verified: true` + `sources: [...]` persisted per token
    DIFFERENT addresses for the same symbol are NEVER merged — each address stands alone on its own
    agreement count. If more than one address for the same `(chainId, symbol)` qualifies, keep the one
    with the highest canonical priority (`curated seed > superchain > uniswap > coingecko > oneinch >
-   trustwallet > defillama`; tie → more sources → higher volume) and reject the rest, logged as a
-   conflict (also keeps the duplicate-symbol guard green). Canonical/bridged preference (Superchain /
-   official) is expressed through that priority order.
+   trustwallet`; tie → more sources → higher volume) and reject the rest, logged as a conflict. A FULL
+   tie rejects the whole group (an address-order tiebreak would be vanity-grindable — review finding,
+   fixed; unresolvable tickers need curation). NEW candidates squatting a seed/core ticker are dropped
+   BEFORE the guard audit, so a core-ticker impostor can never fail the build via the guard's
+   duplicate-symbol fatal (review finding, fixed). Canonical/bridged preference (Superchain /
+   official) is expressed through the priority order.
 5. **Core-token allowlist:** fee/routing-critical tokens are ALWAYS included, pinned by address in
    config — mainnet: native ETH, WETH, USDC, USDT, DAI, WBTC; Base: native ETH, WETH, USDC, USDbC,
    DAI, cbETH, AERO (fee-usd fallback path). Cores are still on-chain-validated: a core failing

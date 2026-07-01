@@ -26,8 +26,10 @@ const FILES: Array<[number, { schemaVersion: number; chainId: number; counts: { 
   [8453, catalog8453],
 ]
 
-// External (agreement-counting) sources — 'curated'/'native' are provenance markers.
-const NON_VOTING = new Set(['curated', 'native'])
+// External (agreement-counting) sources — 'curated'/'native' are provenance markers and
+// 'defillama' is market-signal-only (its identity row is near-automatic for any priced
+// pool, so it never counts toward the agreement floor).
+const NON_VOTING = new Set(['curated', 'native', 'defillama'])
 
 describe.each(FILES)('token-catalog.%i.json — committed catalog invariants', (chainId, file) => {
   const tokens: GeneratedToken[] = GENERATED_TOKEN_CATALOG[chainId]

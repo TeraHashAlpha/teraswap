@@ -24,7 +24,7 @@ import type {
   SourceId,
 } from './types'
 import type { TokenIdentity } from './verdicts'
-import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog } from './verify'
+import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, externalVoteCount } from './verify'
 import { deriveGuardOutcomes } from './guard-gate'
 
 export interface ChainBuildDeps {
@@ -100,10 +100,9 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   // legitimately promote them). Everything else gets rejected by crossVerify regardless, and
   // a defillama price alone must not promote a single-list NEW token (price presence is
   // near-automatic for anything with a pool — too weak as a second identity source).
-  const externalVotes = (sources: SourceId[]) => sources.filter((s) => s !== 'curated' && s !== 'native').length
   if (deps.fetchMarket) {
     const marketTargets = candidates.filter(
-      (c) => externalVotes(c.sources) >= config.minSources || seeds.has(c.address.toLowerCase()),
+      (c) => externalVoteCount(c.sources) >= config.minSources || seeds.has(c.address.toLowerCase()),
     )
     try {
       const res = await deps.fetchMarket(marketTargets.map((c) => c.address))
@@ -129,6 +128,22 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   const { qualified, rejected } = crossVerify(merged, market, seedKeys, config)
   const conflictResult = resolveSymbolConflicts(qualified, market, config)
 
+  // 5a. protect curated symbols BEFORE the guard audit (review finding): a NEW candidate
+  // holding a seed/core ticker at a different address must lose here — if it reached the
+  // audit set, the guard's duplicate-symbol FATAL would mark BOTH sides, and a collision
+  // with a CORE ticker (e.g. a 2-list "USDC" impostor) would fail the whole build.
+  const protectedSym = new Map<string, string>() // symbolLower → owning addrLower
+  for (const s of seeds.values()) protectedSym.set(s.symbol.toLowerCase(), s.address.toLowerCase())
+  for (const c of cores) protectedSym.set(c.symbol.toLowerCase(), c.address.toLowerCase())
+  conflictResult.kept = conflictResult.kept.filter((c) => {
+    const owner = protectedSym.get(c.symbol.toLowerCase())
+    if (owner && owner !== c.address.toLowerCase()) {
+      conflictResult.rejected.push({ chainId, address: c.address, symbol: c.symbol, reason: 'symbol-conflict', detail: `symbol held by curated ${owner}` })
+      return false
+    }
+    return true
+  })
+
   // 5b. pre-guard growth pruning — don't on-chain-probe hundreds of NEW candidates the
   // maxNewTokensPerChain cap would discard anyway. Same ranking as the assemble cap
   // (volume desc, votes desc, symbol); pruned tokens are reported as capped (no silent caps).
@@ -143,7 +158,7 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     if (newOnes.length > cap) {
       const rank = (c: (typeof kept)[number]) => ({
         volume: market.get(`${chainId}:${c.address.toLowerCase()}`)?.volume24hUsd ?? 0,
-        votes: externalVotes(c.sources),
+        votes: externalVoteCount(c.sources),
       })
       const ranked = [...newOnes].sort((a, b) => {
         const ra = rank(a)
