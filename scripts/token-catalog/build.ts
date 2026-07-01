@@ -34,7 +34,7 @@ import type { SeedToken } from './lib/types'
 import { buildChainCatalog } from './lib/build-chain'
 import { makeFetchers, makeMarketFetcher } from './lib/fetch-sources'
 import { makeCategoryResolver } from './lib/category'
-import { applyCuratedCorrections, isCuratedRemoval, CURATED_BASE_SEEDS } from './lib/curated'
+import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS } from './lib/curated'
 import { collectVerdicts, writeTrustFixture, GUARD_CHAINS } from './lib/verdicts'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
@@ -69,13 +69,17 @@ function logoFor(chainId: number, address: string, symbol: string): string {
  *    loses its source agreement washes out instead of ratcheting in as a permanent ⚠ row
  *    (adversarial-review follow-up: without the baseline, one loose run would seed the
  *    next forever).
- *  Minus native ETH (core-handled) and curated removals.
+ *  Minus native ETH (core-handled). Every seed passes through correctSeed — the same
+ *  curated removals/remaps as source entries — so a remapped deprecated address (OHM v1,
+ *  KNC legacy) can never ride back in through the seed path [CHORE-OHM-KNC-REMAP].
  */
 function seedsFor(chainId: number): Map<string, SeedToken> {
   const seeds = new Map<string, SeedToken>()
-  const push = (s: SeedToken) => {
+  const push = (raw: SeedToken) => {
+    if (raw.address.toLowerCase() === NATIVE_ETH.toLowerCase()) return
+    const s = correctSeed(chainId, raw)
+    if (!s) return // curated removal
     const k = s.address.toLowerCase()
-    if (k === NATIVE_ETH.toLowerCase() || isCuratedRemoval(chainId, s.address)) return
     if (!seeds.has(k)) seeds.set(k, s)
   }
   if (chainId === 1) {
