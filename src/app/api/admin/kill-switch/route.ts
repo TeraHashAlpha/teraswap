@@ -22,6 +22,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { kv } from '@/lib/kv'
 import { forceDisable, getStatus } from '@/lib/source-state-machine'
 import { verifyBearerToken } from '@/lib/auth'
@@ -114,6 +115,9 @@ async function writeAuditEntry(entry: AuditEntry): Promise<void> {
 // ── Route handler ───────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
   // ① Rate limit
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
   if (isRateLimited(ip)) {

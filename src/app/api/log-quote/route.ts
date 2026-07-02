@@ -4,6 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabaseLogger } from '@/lib/supabase'
 import { trackQuoteFailure } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
+import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 
 /**
  * POST /api/log-quote
@@ -13,6 +15,18 @@ import { trackWalletAction } from '@/lib/wallet-activity-server'
  */
 export async function POST(req: NextRequest) {
   try {
+    // [AUDIT-W6 / W6-L-01 + W6-M-02] Body cap + shared per-IP log budget,
+    // BEFORE any parse or Supabase work.
+    const tooLarge = bodySizeGuard(req)
+    if (tooLarge) return tooLarge
+    const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded' },
+        { status: 429, headers: { 'X-RateLimit-Reset': String(rate.resetAt) } },
+      )
+    }
+
     const supabase = getSupabaseLogger()
     if (!supabase) {
       return NextResponse.json({ ok: true, skipped: true })

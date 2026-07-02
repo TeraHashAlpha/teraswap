@@ -23,6 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { verifyBearerToken } from '@/lib/auth'
 import { getDcaFreezeState, setDcaFreezeState } from '@/lib/dca-freeze'
 
@@ -56,6 +57,9 @@ function authorize(req: NextRequest): NextResponse | null {
 // ── POST: set freeze state ──────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
   // ① Auth (503 if unconfigured, 401 if bad token)
   const denied = authorize(req)
   if (denied) return denied

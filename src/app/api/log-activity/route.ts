@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 // [P114/M-03] Fire-and-forget batch insert → INSERT-only logger client.
 import { getSupabaseLogger } from '@/lib/supabase'
 import { getAllowedOrigin } from '@/lib/cors'
+import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 
 // CORS — restricted to teraswap.app, Vercel previews, and localhost (EXT-L-01).
 function corsHeaders(request: Request) {
@@ -39,6 +41,21 @@ function cap(s: unknown, max = MAX_STR): string | null {
  */
 export async function POST(req: Request) {
   const headers = corsHeaders(req)
+
+  // [AUDIT-W6 / W6-L-01] Oversized body → 413 (header-only, before any read).
+  const tooLarge = bodySizeGuard(req, undefined, headers)
+  if (tooLarge) return tooLarge
+
+  // [AUDIT-W6 / W6-M-02] Per-IP budget shared by all log-* routes, BEFORE
+  // any Supabase work (unbounded unauthenticated inserts were the finding).
+  const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded' },
+      { status: 429, headers: { ...headers, 'X-RateLimit-Reset': String(rate.resetAt) } },
+    )
+  }
+
   const supabase = getSupabaseLogger()
   if (!supabase) {
     return NextResponse.json({ ok: true }, { headers }) // silently succeed

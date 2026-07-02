@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { SequencerDownError } from '@/lib/chains/sequencer-check'
@@ -201,6 +202,9 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
 // Also support POST for larger payloads (future-proofing)
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+    const tooLarge = bodySizeGuard(req)
+    if (tooLarge) return tooLarge
     return await handleQuotePost(req)
   } catch (err) {
     return jsonServerError(err)

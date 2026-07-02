@@ -204,6 +204,27 @@ jobs:
       - name: Deployed-sources guard (source-integrity map + deprecated flat)
         run: node scripts/check-deployed-sources.mjs
 
+  api-hardening-guard:
+    # [AUDIT-W6] The full vitest suite is not run in CI (only single-file
+    # guards), so this pins the Wave-6 API hardening: (W6-M-01) reading a
+    # wallet's ACTIVE/PENDING conditional-order strategy requires the
+    # per-session read signature — 401 READ_AUTH_REQUIRED without it, terminal
+    # statuses stay public, the hook signs once per session and retries;
+    # (W6-M-02) log-* + POST /api/orders are per-IP rate-limited before any
+    # Supabase work — 429; (W6-L-01) every body route refuses oversized
+    # payloads via the shared bodySizeGuard — 413. log-swap's insert-shape
+    # suite rides along because that route now runs the ingestion guards.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: API hardening guard (read gate 401 / rate limit 429 / body cap 413)
+        run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:

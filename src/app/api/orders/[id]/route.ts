@@ -7,6 +7,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress } from 'viem'
 import { CANCEL_ORDER_TYPES, getOrderExecutorDomain } from '@/lib/order-engine/config'
+import {
+  verifyOrdersReadAccess,
+  PUBLIC_ORDER_STATUSES,
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+} from '@/lib/order-engine/read-auth'
+import { bodySizeGuard } from '@/lib/body-limit'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const SIGNATURE_RE = /^0x[0-9a-fA-F]+$/
@@ -43,6 +50,26 @@ export async function GET(
     return NextResponse.json({ error: 'Order not found' }, { status: 404 })
   }
 
+  // [AUDIT-W6 / W6-M-01] A row in a live (non-terminal) status still carries
+  // unexecuted strategy — same ownership proof as the list route. Terminal
+  // rows stay public (owner-decided boundary).
+  if (!PUBLIC_ORDER_STATUSES.has(data.status)) {
+    const auth = await verifyOrdersReadAccess({
+      wallet,
+      issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
+      signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
+    })
+    if (!auth.ok) {
+      return NextResponse.json(
+        {
+          error: `Reading an active order requires a wallet signature: ${auth.error}`,
+          code: 'READ_AUTH_REQUIRED',
+        },
+        { status: 401 },
+      )
+    }
+  }
+
   return NextResponse.json({ order: data })
 }
 
@@ -51,6 +78,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
+  // [W6-L-01] Oversized body → 413 before any read.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
+
   const supabase = getSupabase()
   if (!supabase) return NextResponse.json({ error: 'Not configured' }, { status: 503 })
 

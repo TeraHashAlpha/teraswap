@@ -37,6 +37,9 @@ export default function OrderDashboard() {
     cancelOrder, cancelAllOrders, removeOrder,
     pendingCancel, confirmCancel, clearPendingCancel,
     isLoading,
+    // [AUDIT-W6 / W6-M-01] Active orders are private — reading them takes one
+    // session signature. When the user rejected the prompt, offer a retry.
+    readAuthDenied, requestOrdersReadAuth,
   } = useOrderEngine()
 
   const [filter, setFilter] = useState<FilterType>('active')
@@ -79,6 +82,21 @@ export default function OrderDashboard() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* [W6-M-01] The read-signature prompt was rejected — active orders stay hidden until signed. */}
+      {readAuthDenied && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-cream-08 bg-surface-secondary/60 px-4 py-3 backdrop-blur-md">
+          <p className="text-xs text-cream-50">
+            Your active orders are private — sign a free message (no transaction) to view them.
+          </p>
+          <button
+            type="button"
+            onClick={() => void requestOrdersReadAuth?.()}
+            className="shrink-0 rounded-lg border border-cream-15 px-3 py-1.5 text-xs font-medium text-cream-90 transition-colors hover:bg-cream-08"
+          >
+            Sign to view
+          </button>
+        </div>
+      )}
       {/* [CANCEL-REVIEW] No cancel/invalidate executes until the user confirms this frozen plan. */}
       {pendingCancel && <OrderCancelReviewModal review={pendingCancel} onConfirm={confirmCancel} onCancel={clearPendingCancel} />}
       {/* Header row */}

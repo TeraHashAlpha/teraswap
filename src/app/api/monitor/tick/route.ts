@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { runMonitoringTick } from '@/lib/monitoring-loop'
 import { verifyBearerToken } from '@/lib/auth'
 
@@ -18,6 +19,9 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 30 // Allow up to 30s for all health checks
 
 export async function POST(req: NextRequest) {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
   // [API-C-01] Auth is mandatory — 503 if secret not configured
   const secret = process.env.MONITOR_CRON_SECRET
   if (!secret) {

@@ -10,6 +10,23 @@ export { OrderType, PriceCondition, ORDER_EIP712_TYPES } from './types'
 export type { OnChainOrder, AutonomousOrder, AutonomousOrderStatus, CreateOrderConfig, OrderEngineEvent } from './types'
 export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, fetchDCAExecutions, subscribeToOrders } from './supabase'
 export type { OrderRow, ExecutionRow } from './supabase'
+// [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.
+export {
+  buildOrdersReadTypedData,
+  verifyOrdersReadAccess,
+  ensureOrdersReadAuth,
+  retryOrdersReadAuth,
+  ordersReadHeaders,
+  getCachedOrdersReadAuth,
+  storeOrdersReadAuth,
+  ReadAuthRequiredError,
+  PUBLIC_ORDER_STATUSES,
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+  ORDERS_READ_TTL_MS,
+  ORDERS_READ_PURPOSE,
+} from './read-auth'
+export type { OrdersReadAuth } from './read-auth'
 // [CHORE-DCA-POSITIONS-DASHBOARD] Positions dashboard helpers (pure, unit-tested).
 export { nextBuyAtMs, isDue, formatHMS } from './dca-countdown'
 export { fillUsd, APPROX_PRICES } from './usd'
