@@ -9,7 +9,7 @@
  *   3. isKnownSwapSelector (KNOWN_SWAP_SELECTORS)
  *   4. validateCallDataRecipient
  *   5. validateFeeIntegrity
- *   6. minimumOutput computation (inline at useSwap.ts:329-338)
+ *   6. minimumOutput derivation (deriveMinimumOutput, src/lib/minimum-output.ts)
  *
  * CoW Protocol path (useSwap.ts:545-631): native ETH block, receiver check,
  * validTo cap.
@@ -29,7 +29,7 @@ import {
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { isNativeETH } from '@/lib/tokens'
 import type { Token } from '@/lib/tokens'
-import { safeBigInt } from '@/lib/utils'
+import { deriveMinimumOutput, UnusableQuoteError } from '@/lib/minimum-output'
 import {
   FEE_COLLECTOR_ADDRESS,
   FEE_COLLECTOR_V1_ADDRESS,
@@ -367,56 +367,53 @@ describe('A4b — fee integrity call-site guard [P156]', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════
-// A5 — minimumOutput computation edge cases
+// A5 — minimumOutput derivation edge cases [W2-L-01]
 // ───────────────────────────────────────────────────────────────
-// The real computation lives inline in src/hooks/useSwap.ts:329-338. We
-// replicate it as a pure helper so the edge cases can be pinned down in
-// a unit test without rendering the hook. If the production formula
-// changes, this helper must be updated to match.
+// The real derivation is the exported deriveMinimumOutput
+// (src/lib/minimum-output.ts) — shared by useSwap.ts, useSplitSwap.ts
+// and buildSimulationTx — tested here directly (no mirror). Since
+// W2-L-01, an unusable toAmount (malformed / zero / unparseable)
+// THROWS UnusableQuoteError — the swap is REFUSED — instead of the
+// old 10-L-01 fallback to minimumOutput = 0n, which silently disabled
+// the FeeCollector's on-chain InsufficientOutput check.
+// Takes slippage as a PERCENT (0.5 = 0.5%), exactly like the hooks.
 // ═══════════════════════════════════════════════════════════════
 
-function computeMinimumOutput(toAmount: string, slippageBps: number): bigint {
-  const swapToAmountBn = safeBigInt(toAmount)
-  const slippageBpsBn = BigInt(Math.max(0, Math.round(slippageBps)))
-  if (swapToAmountBn === null || slippageBpsBn >= 10_000n) return 0n
-  return (swapToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
-}
-
-describe('A5 — computeMinimumOutput (mirrors useSwap.ts:329-338)', () => {
+describe('A5 — deriveMinimumOutput (src/lib/minimum-output.ts) [W2-L-01]', () => {
   it('valid toAmount with 1% slippage → toAmount * 9900 / 10000', () => {
     // 1_000_000 * 9900 / 10000 = 990_000
-    expect(computeMinimumOutput('1000000', 100)).toBe(990_000n)
+    expect(deriveMinimumOutput('1000000', 1)).toBe(990_000n)
   })
 
-  it('toAmount = "abc" (non-numeric) → 0n (safeBigInt returns null)', () => {
+  it('toAmount = "abc" (non-numeric) → UnusableQuoteError (swap refused, NOT minOutput 0)', () => {
     const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(computeMinimumOutput('abc', 100)).toBe(0n)
+    expect(() => deriveMinimumOutput('abc', 1)).toThrow(UnusableQuoteError)
     consoleSpy.mockRestore()
   })
 
-  it('toAmount = "0" → 0n', () => {
-    expect(computeMinimumOutput('0', 100)).toBe(0n)
+  it('toAmount = "0" → UnusableQuoteError (a zero-output quote is not executable)', () => {
+    expect(() => deriveMinimumOutput('0', 1)).toThrow(UnusableQuoteError)
   })
 
-  it('toAmount = "" (empty string) → 0n (safeBigInt returns null)', () => {
-    expect(computeMinimumOutput('', 100)).toBe(0n)
+  it('toAmount = "" (empty string) → UnusableQuoteError', () => {
+    expect(() => deriveMinimumOutput('', 1)).toThrow(UnusableQuoteError)
   })
 
-  it('slippageBps = 10000 (100%) → 0n (defence: never accept zero output)', () => {
-    expect(computeMinimumOutput('1000000', 10_000)).toBe(0n)
+  it('slippage = 100% with a VALID toAmount → 0n (explicit user setting, unchanged)', () => {
+    expect(deriveMinimumOutput('1000000', 100)).toBe(0n)
   })
 
-  it('slippageBps = 9999 → toAmount * 1 / 10000 (NOT zero)', () => {
+  it('slippage = 99.99% → toAmount * 1 / 10000 (NOT zero)', () => {
     // 1_000_000 * 1 / 10000 = 100
-    expect(computeMinimumOutput('1000000', 9_999)).toBe(100n)
+    expect(deriveMinimumOutput('1000000', 99.99)).toBe(100n)
   })
 
-  it('slippageBps = 0 → toAmount unchanged', () => {
-    expect(computeMinimumOutput('1000000', 0)).toBe(1_000_000n)
+  it('slippage = 0% → toAmount unchanged', () => {
+    expect(deriveMinimumOutput('1000000', 0)).toBe(1_000_000n)
   })
 
-  it('negative slippageBps is clamped to 0 (Math.max guard)', () => {
-    expect(computeMinimumOutput('1000000', -50)).toBe(1_000_000n)
+  it('negative slippage is clamped to 0 (Math.max guard)', () => {
+    expect(deriveMinimumOutput('1000000', -0.5)).toBe(1_000_000n)
   })
 })
 

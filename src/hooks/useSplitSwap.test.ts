@@ -553,19 +553,25 @@ describe('useSplitSwap — reset()', () => {
   })
 })
 
-describe('useSplitSwap — safeBigInt guard [10-L-01]', () => {
-  it('defaults legMinOutput to 0 when toAmount is malformed', async () => {
-    // A toAmount that can't be parsed as bigint — the hook should
-    // still execute without throwing and the FeeCollector args should
-    // encode 0 as the minimumOutput.
+describe('useSplitSwap — unusable quote refusal [W2-L-01]', () => {
+  it('REFUSES a fee-routed leg whose toAmount is malformed — never encodes minimumOutput 0', async () => {
+    // [W2-L-01] Previously (10-L-01) a toAmount that can't be parsed as bigint
+    // fell back to legMinOutput = 0n and the leg still broadcast — silently
+    // disabling the FeeCollector's on-chain InsufficientOutput check for that
+    // leg. deriveMinimumOutput now throws UnusableQuoteError instead: the leg
+    // is skipped, nothing is signed, and the plan errors out.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockSwapFetch(() => makeQuote({ toAmount: 'not-a-number' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100, 'not-a-number'))
     await runSplit(result, route)
-    await waitFor(() => expect(result.current.status).toBe('success'))
-    // sendTransactionAsync was called — meaning encoding didn't throw
-    // and legMinOutput defaulted to 0n.
-    expect(mockSendTransactionAsync).toHaveBeenCalledOnce()
+    await waitFor(() => expect(result.current.status).toBe('error'))
+    // No wallet prompt was ever shown — the refusal happened pre-signature.
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+    expect(result.current.legs[0].status).toBe('error')
+    expect(result.current.plannedLegs[0]?.status).toBe('skipped')
+    expect(result.current.plannedLegs[0]?.error).toMatch(/unusable quote/i)
+    warnSpy.mockRestore()
   })
 })
 

@@ -17,7 +17,7 @@ import {
 } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase } from '@/lib/analytics'
-import { safeBigInt } from '@/lib/utils'
+import { deriveMinimumOutput } from '@/lib/minimum-output'
 import type { SplitRoute } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
@@ -257,7 +257,6 @@ export function useSplitSwap(
     const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut)
       ? ZERO_ADDRESS
       : (tokenOut.address as `0x${string}`)
-    const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
 
     const planned: PlannedLeg[] = []
 
@@ -352,14 +351,15 @@ export function useSplitSwap(
         // without a client-side revert guard (on-chain minimumOutput still protects the fill).
         const simulated = sim.simulated !== false
 
-        // [H-04] Per-leg FeeCollector minimumOutput derived from leg toAmount + user slippage.
-        // [10-L-01] A malformed leg toAmount disables the on-chain minimumOutput check for
-        // that leg rather than throwing during calldata encoding.
-        const legToAmountBn = safeBigInt(swapData.toAmount)
-        const legMinOutput =
-          legToAmountBn === null || slippageBpsBn >= 10_000n
-            ? 0n
-            : (legToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
+        // [H-04] Per-leg FeeCollector minimumOutput derived from leg toAmount + user
+        // slippage (shared helper, src/lib/minimum-output.ts).
+        // [W2-L-01] A malformed/zero leg toAmount now REFUSES the leg — the throw
+        // (UnusableQuoteError) lands in this loop's catch, marking the leg
+        // error/skipped — instead of the old 10-L-01 fallback to minimumOutput = 0n,
+        // which silently disabled the on-chain check for that leg.
+        const legMinOutput = routeViaFeeCollector
+          ? deriveMinimumOutput(swapData.toAmount, slippage)
+          : 0n
 
         // FREEZE the EXACT transaction that will broadcast (encode now, sign in confirmPlan).
         // This is byte-identical to what was just simulated.

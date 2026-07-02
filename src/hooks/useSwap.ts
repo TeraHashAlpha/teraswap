@@ -13,7 +13,7 @@ import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, C
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
-import { safeBigInt } from '@/lib/utils'
+import { deriveMinimumOutput } from '@/lib/minimum-output'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import type { CowOrderParams } from '@/lib/adapters/types'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -443,22 +443,20 @@ export function useSwap(
       const txValue = isNativeIn && apiValue === 0n ? apiAmountBn : apiValue
 
       // ── [H-04] Compute FeeCollector-enforced minimumOutput ──
-      // minimumOutput = swap toAmount * (10000 - slippageBps) / 10000.
-      // `slippage` is a percentage (0.5 = 0.5%), so slippageBps = slippage * 100.
-      // The contract snapshots the user's tokenOut balance pre-swap and reverts
-      // via InsufficientOutput(actual, minimum) if the net delta is below this.
-      // For ETH output, pass address(0); otherwise the ERC-20 output token address.
+      // minimumOutput = swap toAmount * (10000 - slippageBps) / 10000 (shared
+      // helper, src/lib/minimum-output.ts). The contract snapshots the user's
+      // tokenOut balance pre-swap and reverts via InsufficientOutput(actual,
+      // minimum) if the net delta is below this. For ETH output, pass
+      // address(0); otherwise the ERC-20 output token address.
+      // [W2-L-01] A malformed/zero swapData.toAmount on a fee-routed swap now
+      // REFUSES the swap (deriveMinimumOutput throws UnusableQuoteError → this
+      // try's catch → normal error + 9O fallback walk to the next source)
+      // instead of the old 10-L-01 fallback to minimumOutput = 0n, which
+      // silently disabled the on-chain InsufficientOutput check.
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
-      const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
-      // [10-L-01] Guard against a malformed swapData.toAmount from a
-      // misbehaving adapter. If parsing fails we send 0n minimum (i.e.
-      // disable the on-chain InsufficientOutput check for this swap)
-      // rather than crashing the swap flow — better degraded than dead.
-      const swapToAmountBn = safeBigInt(swapData.toAmount)
-      const minimumOutput =
-        swapToAmountBn === null || slippageBpsBn >= 10_000n
-          ? 0n
-          : (swapToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
+      const minimumOutput = routeViaFeeCollector
+        ? deriveMinimumOutput(swapData.toAmount, slippage)
+        : 0n
       const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut!)
         ? ZERO_ADDRESS
         : (tokenOut!.address as `0x${string}`)
