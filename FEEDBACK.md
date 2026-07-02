@@ -6051,3 +6051,87 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
 - Supabase real-time (`subscribeToOrders`) pushes row UPDATES to the anon-key channel filtered by wallet;
   it delivers order-status transitions (not initial strategy reads) and predates this change — flagging
   for a future wave: if RLS on the realtime channel is ever loosened, the read gate here does not cover it.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W5-I-02 (branch chore/audit-cleanup-lows)
+
+### W5-I-02 — dead `?? FEE_COLLECTOR_ADDRESS` fallback removed — FIXED
+- `useSwap.ts`: `buildFeeCollectorSwapArgs(routeViaFeeCollector, address, feeCollectorAddress ?? FEE_COLLECTOR_ADDRESS)`
+  → `feeCollectorAddress!`. The helper reads the 3rd arg ONLY on the `routeViaFeeCollector=true` branch,
+  where the guard `if (routeViaFeeCollector && !feeCollectorAddress) throw` already guarantees non-null; on
+  the false branch the arg is ignored entirely. So the fallback was unreachable — removed. `FEE_COLLECTOR_ADDRESS`
+  was imported solely for this dead path, so it was dropped from the `@/lib/constants` import too.
+- No behaviour change: typecheck clean, useSwap (23) + swap-validations (45) suites green.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W9-L-01
+
+### W9-L-01 — secure-storage fails closed instead of writing plaintext — FIXED
+- `src/lib/secure-storage.ts` `secureSet`: when `getKey()` returns null (Web Crypto unavailable OR the
+  per-wallet key not yet derived) it now **skips the write** instead of `localStorage.setItem(key, json)`
+  plaintext. Sensitive order/trade metadata is therefore never persisted in the clear. Still never throws.
+- **Boundary:** only the encrypted write path changed. Reads of LEGACY plaintext still work (backward
+  compatible — users don't lose pre-existing data). Non-sensitive prefs written on plain `localStorage`
+  elsewhere are untouched (this module is only used by `useOrderEngine` for orders and `analytics-tracker`
+  for trade history — both re-derivable / non-critical if the local cache is skipped).
+- **Impact in practice:** production is HTTPS so Web Crypto is always available; the fail-closed path is
+  effectively never hit by real users. It removes the plaintext-at-rest vector for the degenerate
+  (insecure-origin / pre-init) cases. Data loss risk is nil for orders (Supabase authoritative).
+- Tests: updated the old "falls back to plaintext" case to assert **nothing is written** + added
+  "pre-existing ciphertext untouched on a later skipped write" and "legacy plaintext still readable".
+  secure-storage (9) + analytics-tracker suites green; typecheck clean.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W7-L-01
+
+### W7-L-01 — systematic CoW fee-zeroing raises a revenue alert — FIXED
+- The fail-soft in `cow.ts` (`postCowQuoteWithFeeFallback`) is UNCHANGED — a partnerFee-schema rejection
+  still re-quotes fee-free so quoting never breaks. Added observability only.
+- New server-only `src/lib/cow-fee-monitor.ts`: a fixed-window KV counter (`teraswap:cow:fee-zero:count`,
+  15 min via INCR + first-write EXPIRE); once ≥ `COW_FEE_ZERO_ALERT_THRESHOLD` (5) zeroings land in the
+  window it raises ONE alert through the existing fan-out `emitTransitionAlert` (Telegram/Email/Discord —
+  the serverless equivalent of the keeper's #201 path), which itself dedups repeats. Fails OPEN on any
+  KV/alert error (monitoring must never break a quote).
+- **Threshold rationale:** an appData-schema rejection is our-appData-vs-CoW's-schema, i.e. systematic,
+  not per-user/transient — a handful in 15 min already means every CoW fill is dropping the fee, so a low
+  threshold is correct; the downstream dedup prevents spam.
+
+### Assumption reconciled (spec named `alert.js`)
+- The spec's FILES line said "alert.js" (the KEEPER's `contracts/order-engine/executor/alert.js`, the
+  #201 path). But CoW quoting + the fail-soft run in the **serverless Next.js** runtime, NOT the keeper
+  process — cow.ts cannot import the keeper package. So I reused the **serverless** alert path
+  (`src/lib/alert-wrapper.ts` → `alert-channels/*`), which is the same Telegram infra. No keeper file
+  changed (the fee-zeroing never happens in the keeper).
+
+### Client-bundle safety (why a guarded dynamic import)
+- `cow.ts` is also bundled client-side (useSwap imports `submitCowOrder`), so a static import of the
+  server-only monitor (KV + alert-wrapper) would pull server deps into the browser graph. The fail-soft
+  therefore calls it via `if (typeof window === 'undefined') void import('@/lib/cow-fee-monitor')…` —
+  a runtime-guarded, fire-and-forget dynamic import. Verified the whole alert graph is fetch-based
+  (Resend/Discord/Telegram over fetch, Upstash REST — no Node-only deps), and `npm run build` succeeds:
+  the lazy chunk builds for the browser target and is never loaded client-side.
+- `status`/`reason` are captured into consts BEFORE the fee-free retry reassigns `res`/`desc`.
+- Tests: `cow-fee-monitor.test.ts` (below/at/above threshold, first-event TTL, fail-open, reason cap);
+  `cow.test.ts` mocks the monitor to a no-op so its 15 existing tests make no real KV call.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W10-L-01
+
+### W10-L-01 — viem dedup — ASSESSED, LEFT AS ACCEPTED BLOAT (no override)
+- **Tree (`npm ls viem`):** the app + every wallet/wagmi/rainbowkit/reown/coinbase package resolve
+  `viem@2.47.4` (deduped). Exactly ONE app-side second copy: `viem@2.23.2` under
+  `@walletconnect/utils@2.21.1` (via `@wagmi/connectors@6.2.0` → `@walletconnect/ethereum-provider`).
+  (The executor sub-package's viem is separate and out of scope, as the spec noted.)
+- **Why it can't hoist:** `@walletconnect/utils@2.21.1` declares `"viem": "2.23.2"` — an **EXACT pin**
+  (verified in its package.json), not `^2.23.2`. That's precisely why npm materialised a nested
+  `node_modules/@walletconnect/utils/node_modules/viem@2.23.2` instead of deduping to 2.47.4.
+- **Assessment — do NOT force it:** an `overrides: { viem }` pin would push WC's utils from an
+  exact-pinned 2.23.2 across **24 minor versions** to 2.47.4. viem 2.x minors have shipped breaking
+  changes, and `@walletconnect/utils` uses viem for signing/encoding helpers on the **WalletConnect
+  connect/sign runtime path** — a break there surfaces only at runtime, which CI (build / typecheck /
+  unit / the single-file guards) does **not** exercise. The exact pin is a deliberate signal from WC.
+  Per the spec ("if it risks WC → do NOT force it, document the residual, leave as accepted bloat"),
+  this is the risk branch.
+- **Residual (accepted):** one duplicated viem in `node_modules`, reachable only through
+  `@walletconnect/utils` (loaded when a user picks WalletConnect). viem is tree-shaken and WC-utils
+  imports only a small slice, so the shipped-bundle delta is minor; the real cost is node_modules
+  duplication. No override added; no lockfile change.
+- **How it resolves on its own:** when `@wagmi/connectors` bumps `@walletconnect/*` to a release whose
+  `utils` advances/widens its viem pin to a range compatible with 2.47.x, npm will dedupe automatically —
+  no action needed. Re-check with `npm ls viem` after the next wagmi/WalletConnect upgrade.

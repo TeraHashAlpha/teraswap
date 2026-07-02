@@ -9,7 +9,7 @@ import { useActiveChainId } from '@/hooks/useChainId'
 import { parseUnits, formatUnits, encodeFunctionData, erc20Abi } from 'viem'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { validateFeeIntegrity, validateRouterAddress, usesFeeCollector, submitCowOrder, pollCowOrderStatus, type NormalizedQuote, type QuoteMeta } from '@/lib/api'
-import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI, FEE_BPS, FEE_NATIVE_SOURCES, type AggregatorName } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, COW_MAX_ORDER_DURATION_SEC, FEE_COLLECTOR_ABI, FEE_BPS, FEE_NATIVE_SOURCES, type AggregatorName } from '@/lib/constants'
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
@@ -315,9 +315,9 @@ export function useSwap(
       const routeViaFeeCollector = usesFeeCollector(source, chainId)
 
       // [P225] Resolve the FeeCollector address for the ACTIVE chain (mainnet
-      // === FEE_COLLECTOR_ADDRESS). Guard the null case defensively — the
-      // activation guard should keep us off an unconfigured chain, but never
-      // encode a call to the zero address.
+      // resolves to the canonical FeeCollector). Guard the null case defensively
+      // — the activation guard should keep us off an unconfigured chain, but
+      // never encode a call to the zero address.
       const feeCollectorAddress = getChainConfig(chainId).contracts.feeCollector
       if (routeViaFeeCollector && !feeCollectorAddress) {
         throw new Error(`Swaps via FeeCollector aren't available on chain ${chainId} yet.`)
@@ -338,7 +338,10 @@ export function useSwap(
       // (which forceApprove()s the router for the net amount). The user
       // wallet becomes the explicit recipient so output still lands there.
       // Helper extracted to src/lib/simulation.ts for unit testing.
-      const apiArgs = buildFeeCollectorSwapArgs(routeViaFeeCollector, address, feeCollectorAddress ?? FEE_COLLECTOR_ADDRESS)
+      // [W5-I-02] buildFeeCollectorSwapArgs only reads the FeeCollector address
+      // on the routeViaFeeCollector=true branch, where the throw above already
+      // guarantees it's non-null — so no `?? FEE_COLLECTOR_ADDRESS` fallback.
+      const apiArgs = buildFeeCollectorSwapArgs(routeViaFeeCollector, address, feeCollectorAddress!)
       const swapData = await fetchSwapViaApi(
         source,
         tokenIn.address,

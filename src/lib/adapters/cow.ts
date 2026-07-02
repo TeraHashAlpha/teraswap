@@ -149,6 +149,18 @@ async function postCowQuoteWithFeeFallback(
   if (isAppDataRejection(res.status, desc)) {
     // Never break CoW quoting over the fee — drop the partnerFee and retry once.
     console.warn(JSON.stringify({ event: 'cow_partner_fee_failsoft', status: res.status, reason: desc.slice(0, 200) }))
+    // [W7-L-01] Record the fee-zeroing so a SYSTEMATIC rate raises an alert
+    // (revenue leak: every CoW fill is dropping the 0.1% fee). Server-only —
+    // guarded + dynamic so the client bundle (which imports this file for
+    // submitCowOrder) never pulls KV/alert deps. Capture status/reason BEFORE
+    // the retry below reassigns res/desc. Fail-open (the .catch swallows all).
+    if (typeof window === 'undefined') {
+      const zeroedStatus = res.status
+      const zeroedReason = desc
+      void import('@/lib/cow-fee-monitor')
+        .then((m) => m.recordCowFeeZeroing(zeroedStatus, zeroedReason))
+        .catch(() => {})
+    }
     res = await post(buildCowAppData(false))
     if (res.ok) return res.json()
     err = await res.json().catch(() => ({}))
