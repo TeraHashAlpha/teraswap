@@ -6051,3 +6051,13 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
 - Supabase real-time (`subscribeToOrders`) pushes row UPDATES to the anon-key channel filtered by wallet;
   it delivers order-status transitions (not initial strategy reads) and predates this change — flagging
   for a future wave: if RLS on the realtime channel is ever loosened, the read gate here does not cover it.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W5-I-02 (branch chore/audit-cleanup-lows)
+
+### W5-I-02 — dead `?? FEE_COLLECTOR_ADDRESS` fallback removed — FIXED
+- `useSwap.ts`: `buildFeeCollectorSwapArgs(routeViaFeeCollector, address, feeCollectorAddress ?? FEE_COLLECTOR_ADDRESS)`
+  → `feeCollectorAddress!`. The helper reads the 3rd arg ONLY on the `routeViaFeeCollector=true` branch,
+  where the guard `if (routeViaFeeCollector && !feeCollectorAddress) throw` already guarantees non-null; on
+  the false branch the arg is ignored entirely. So the fallback was unreachable — removed. `FEE_COLLECTOR_ADDRESS`
+  was imported solely for this dead path, so it was dropped from the `@/lib/constants` import too.
+- No behaviour change: typecheck clean, useSwap (23) + swap-validations (45) suites green.
