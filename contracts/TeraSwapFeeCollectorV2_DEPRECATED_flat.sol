@@ -1,4 +1,31 @@
 // SPDX-License-Identifier: MIT
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⛔⛔⛔  DEPRECATED / NOT DEPLOYED — DO NOT AUDIT, DEPLOY, OR REFERENCE  ⛔⛔⛔
+// ═════════════════════════════════════════════════════════════════════════════
+//
+//  This flattened "V2" candidate was SUPERSEDED BEFORE DEPLOYMENT by
+//  contracts/TeraSwapFeeCollector.sol — the ACTUAL deployed FeeCollector on
+//  Ethereum mainnet (0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459) and Base
+//  (0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130).
+//
+//  This file is WEAKER than what is deployed:
+//    • it LACKS the minimumOutput / InsufficientOutput on-chain output floor
+//      (H-04) that both deployed FeeCollectors enforce, and
+//    • it contains admin functions (setAllowedSelector, transferAdmin) that
+//      DO NOT EXIST on-chain.
+//
+//  Auditing this file produced the wrong "V2 has no on-chain minimumOutput"
+//  reading (T-SAF 2026-07-01 W1-I-02), refuted on-chain by Wave 2 (W2-M-01).
+//
+//  Canonical address → source → compiler → code-hash map (always check first):
+//      docs/security/DEPLOYED-SOURCES.md
+//
+//  Kept only for git history (CLAUDE.md rule #4 — never delete files).
+//  CI enforces this banner + the non-deployed status via
+//  scripts/check-deployed-sources.mjs.
+// ═════════════════════════════════════════════════════════════════════════════
+//
 // TeraSwapFeeCollector V2 — Hardened per Pre-Audit Report (March 2026)
 // Fixes: CRITICAL-001, CRITICAL-002, HIGH-001, HIGH-002, MEDIUM-001, MEDIUM-002, LOW-001, LOW-002
 pragma solidity ^0.8.20;

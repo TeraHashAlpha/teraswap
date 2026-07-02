@@ -7,7 +7,9 @@
  * behaviour.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
+import { decodeFunctionData } from 'viem'
+import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_ABI } from '@/lib/constants'
+import { UnusableQuoteError } from '@/lib/minimum-output'
 import type { Token } from '@/lib/tokens'
 import type { NormalizedQuote } from '@/lib/api'
 
@@ -68,5 +70,38 @@ describe('swap-simulation — buildSimulationTx FeeCollector address [P225]', ()
   it('throws when the FeeCollector is null and the route is fee-collected', () => {
     mockGetChainConfig.mockReturnValue({ contracts: { feeCollector: null } })
     expect(() => buildSimulationTx(params({ chainId: 8453 }))).toThrow(/FeeCollector/i)
+  })
+})
+
+describe('swap-simulation — buildSimulationTx unusable quote [W2-L-01]', () => {
+  it('throws UnusableQuoteError on a malformed toAmount for a fee-routed swap (never minimumOutput 0)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const swapData = makeSwapData()
+    swapData.toAmount = 'not-a-number'
+    expect(() => buildSimulationTx(params({ swapData }))).toThrow(UnusableQuoteError)
+    warnSpy.mockRestore()
+  })
+
+  it('throws UnusableQuoteError on a zero toAmount for a fee-routed swap', () => {
+    const swapData = makeSwapData()
+    swapData.toAmount = '0'
+    expect(() => buildSimulationTx(params({ swapData }))).toThrow(UnusableQuoteError)
+  })
+
+  it('leaves direct (non-FeeCollector) routes untouched — adapter calldata forwarded unchanged', () => {
+    // Direct routes never take a minimumOutput argument; a malformed toAmount
+    // there is not a W2-L-01 refusal (the router's own amountOutMin governs).
+    const swapData = makeSwapData()
+    swapData.toAmount = 'not-a-number'
+    const tx = buildSimulationTx(params({ swapData, routeViaFeeCollector: false }))
+    expect(tx.data).toBe('0xabcdef')
+  })
+
+  it('a valid toAmount still encodes the real floor into swapTokenWithFee', () => {
+    // toAmount 1_000_000_000 at 0.5% slippage → minimumOutput 995_000_000.
+    const tx = buildSimulationTx(params())
+    const decoded = decodeFunctionData({ abi: FEE_COLLECTOR_ABI, data: tx.data })
+    expect(decoded.functionName).toBe('swapTokenWithFee')
+    expect(decoded.args?.[5]).toBe(995_000_000n)
   })
 })

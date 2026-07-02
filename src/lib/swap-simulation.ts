@@ -14,7 +14,7 @@ import { FEE_COLLECTOR_ABI } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { isNativeETH, type Token } from '@/lib/tokens'
-import { safeBigInt } from '@/lib/utils'
+import { deriveMinimumOutput } from '@/lib/minimum-output'
 import type { NormalizedQuote } from '@/lib/api'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
@@ -80,16 +80,14 @@ export function buildSimulationTx(params: SimulationParams): SimulationTx {
   // Callers guard `if (!swapData.tx) throw` before reaching simulation.
   const tx = swapData.tx!
 
-  // minimumOutput = toAmount * (10000 - slippageBps) / 10000.
-  // `slippage` is a percentage (0.5 = 0.5%), so slippageBps = slippage * 100.
-  // [10-L-01] A malformed toAmount disables the on-chain minimum (0n) rather
-  // than crashing calldata encoding — better degraded than dead.
-  const slippageBpsBn = BigInt(Math.max(0, Math.round(slippage * 100)))
-  const swapToAmountBn = safeBigInt(swapData.toAmount)
-  const minimumOutput =
-    swapToAmountBn === null || slippageBpsBn >= 10_000n
-      ? 0n
-      : (swapToAmountBn * (10_000n - slippageBpsBn)) / 10_000n
+  // minimumOutput = toAmount * (10000 - slippageBps) / 10000 (shared helper).
+  // [W2-L-01] A malformed/zero toAmount on a fee-routed swap now REFUSES the
+  // swap (deriveMinimumOutput throws UnusableQuoteError) instead of silently
+  // encoding minimumOutput = 0n — which disabled the FeeCollector's on-chain
+  // InsufficientOutput check. Direct routes never take a minimumOutput arg.
+  const minimumOutput = routeViaFeeCollector
+    ? deriveMinimumOutput(swapData.toAmount, slippage)
+    : 0n
   const tokenOutForFc: `0x${string}` = isNativeETH(tokenOut)
     ? ZERO_ADDRESS
     : (tokenOut.address as `0x${string}`)

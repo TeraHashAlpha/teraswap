@@ -5964,3 +5964,46 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
   lost a source vote to list churn; the wash-out mechanism will drop it next run unless it recovers.
 
 ### OWNER SIGN-OFF REQUIRED before merge (address curation = user-facing trust signal).
+
+## Feedback — AUDIT-W2-source-integrity (branch audit/w2-source-integrity)
+
+### W1-I-02 refutation closed (this prompt's provenance)
+- Wave 1 (T-SAF 2026-07-01) read `TeraSwapFeeCollectorV2_flat.sol` and concluded the live V2 had no
+  on-chain minimumOutput; Wave 2 refuted it on-chain (selector proof, W2-M-01). Root cause was
+  repo-level: a stale, weaker, never-deployed source masquerading as "V2". Closed here by the ⛔
+  banner + rename (`TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`), the canonical map
+  (`docs/security/DEPLOYED-SOURCES.md`) and the `deployed-sources-guard` CI job. Annotating W1's
+  findings table (I-02/I-04/L-01 superseded) stays with the Auditor — the campaign files are not in
+  this branch.
+
+### Discoveries during byte re-verification (beyond the prompt)
+- **Mainnet OrderExecutor `0xeFC3…f130` = source at commit `c22794c`** (byte-proven modulo
+  metadata/immutables). Everything after it — R12 progressive timelocks (`433b5d3`), the 48h
+  executor-change timelock (`9dc383d`), oracle configs, the receive() restriction (`617b51f`) — is
+  deployed on **Base only**. Reviewers must not assume the mainnet executor has the tip's admin surface.
+- **Base OrderExecutor `0x135B…2598` was never hashed by W0** (the frontend path had no Base
+  executor) — now baselined: `0x34ef10ab25a43c51` / 15,475 B, byte-proven vs the current tip.
+- **FeeCollector V1 byte-proven** vs `TeraSwapFeeCollector_flat.sol` at solc 0.8.20 / optimizer off /
+  no via-IR — so one `_flat.sol` (V1) IS a genuine deployed source while the other (V2) is not. A
+  blanket "*_flat.sol is never deployed" CI rule would therefore be wrong; the guard pins the specific
+  deprecated file instead.
+- **Mainnet FeeCollector V2 byte-exactness still open**: the on-chain CBOR trailer says solc 0.8.28
+  and via-IR is mandatory (the source does not compile without it), but every evm-version
+  (cancun/shanghai/paris/london) × optimizer-runs (1/200/1k/10k/1M) build mismatches by ~80 B — most
+  plausibly the Remix deploy resolved a different OpenZeppelin revision than the pinned submodule.
+  Not on Sourcify; the Etherscan v2 source API needs a key. Identity is still pinned by hash +
+  on-chain solc + 19/19 selector equality + W2's behavioral InsufficientOutput proof. Owner follow-up
+  recorded in DEPLOYED-SOURCES.md §Follow-ups.
+
+### Assumption that turned out wrong (prompt scope)
+- The prompt pointed at `api/swap` / `swap-build-retry.ts` / the quote parser for the minOut=0
+  fallback — the server never derives minimumOutput. The real sites were client-side: `useSwap.ts`,
+  `useSplitSwap.ts` (per-leg) and `swap-simulation.ts` (`buildSimulationTx`), exactly as W2-L-01's
+  finding table said. All three now share `deriveMinimumOutput()` (`src/lib/minimum-output.ts`).
+
+### Test gap (pre-existing, now closed)
+- `useSplitSwap.test.ts` pinned the old minOut-0 fallback as EXPECTED behaviour, and
+  `swap-validations.test.ts` A5 tested a hand-written mirror of the formula rather than the real
+  code — a production formula change would never have failed it. Both now exercise the real exported
+  helper, and none of the four touched test files were CI-gated before (the full vitest suite does
+  not run in CI) — now gated by the `minimum-output-guard` job.
