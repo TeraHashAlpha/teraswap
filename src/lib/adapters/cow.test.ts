@@ -8,6 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// [W7-L-01] The fail-soft branch fires a server-only, fire-and-forget dynamic
+// import of the fee-zeroing monitor (guarded by `typeof window === 'undefined'`,
+// true in this node-env suite). Mock it to a no-op so the tests never make a
+// real KV call — the monitor's own alert logic is covered by cow-fee-monitor.test.ts.
+vi.mock('@/lib/cow-fee-monitor', () => ({ recordCowFeeZeroing: vi.fn(async () => {}) }))
+
 import cowAdapter, { pollCowOrderStatus } from './cow'
 import { FEE_RECIPIENT, FEE_BPS, NATIVE_ETH } from '@/lib/constants'
 
