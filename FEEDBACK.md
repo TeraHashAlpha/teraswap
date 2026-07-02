@@ -6078,3 +6078,35 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
 - Tests: updated the old "falls back to plaintext" case to assert **nothing is written** + added
   "pre-existing ciphertext untouched on a later skipped write" and "legacy plaintext still readable".
   secure-storage (9) + analytics-tracker suites green; typecheck clean.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W7-L-01
+
+### W7-L-01 — systematic CoW fee-zeroing raises a revenue alert — FIXED
+- The fail-soft in `cow.ts` (`postCowQuoteWithFeeFallback`) is UNCHANGED — a partnerFee-schema rejection
+  still re-quotes fee-free so quoting never breaks. Added observability only.
+- New server-only `src/lib/cow-fee-monitor.ts`: a fixed-window KV counter (`teraswap:cow:fee-zero:count`,
+  15 min via INCR + first-write EXPIRE); once ≥ `COW_FEE_ZERO_ALERT_THRESHOLD` (5) zeroings land in the
+  window it raises ONE alert through the existing fan-out `emitTransitionAlert` (Telegram/Email/Discord —
+  the serverless equivalent of the keeper's #201 path), which itself dedups repeats. Fails OPEN on any
+  KV/alert error (monitoring must never break a quote).
+- **Threshold rationale:** an appData-schema rejection is our-appData-vs-CoW's-schema, i.e. systematic,
+  not per-user/transient — a handful in 15 min already means every CoW fill is dropping the fee, so a low
+  threshold is correct; the downstream dedup prevents spam.
+
+### Assumption reconciled (spec named `alert.js`)
+- The spec's FILES line said "alert.js" (the KEEPER's `contracts/order-engine/executor/alert.js`, the
+  #201 path). But CoW quoting + the fail-soft run in the **serverless Next.js** runtime, NOT the keeper
+  process — cow.ts cannot import the keeper package. So I reused the **serverless** alert path
+  (`src/lib/alert-wrapper.ts` → `alert-channels/*`), which is the same Telegram infra. No keeper file
+  changed (the fee-zeroing never happens in the keeper).
+
+### Client-bundle safety (why a guarded dynamic import)
+- `cow.ts` is also bundled client-side (useSwap imports `submitCowOrder`), so a static import of the
+  server-only monitor (KV + alert-wrapper) would pull server deps into the browser graph. The fail-soft
+  therefore calls it via `if (typeof window === 'undefined') void import('@/lib/cow-fee-monitor')…` —
+  a runtime-guarded, fire-and-forget dynamic import. Verified the whole alert graph is fetch-based
+  (Resend/Discord/Telegram over fetch, Upstash REST — no Node-only deps), and `npm run build` succeeds:
+  the lazy chunk builds for the browser target and is never loaded client-side.
+- `status`/`reason` are captured into consts BEFORE the fee-free retry reassigns `res`/`desc`.
+- Tests: `cow-fee-monitor.test.ts` (below/at/above threshold, first-event TTL, fail-open, reason cap);
+  `cow.test.ts` mocks the monitor to a no-op so its 15 existing tests make no real KV call.
