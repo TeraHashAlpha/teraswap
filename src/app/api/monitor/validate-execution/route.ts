@@ -25,6 +25,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { verifyBearerToken } from '@/lib/auth'
 import { validateExecution, type ValidateExecutionParams, type ExecutionValidation } from '@/lib/post-execution-validator'
 import { getSupabase } from '@/lib/supabase'
@@ -118,6 +119,9 @@ async function persistSurplus(txHash: string, surplusWei: string): Promise<void>
 export async function POST(
   req: NextRequest,
 ): Promise<NextResponse<ExecutionValidation | { error: string }>> {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge as NextResponse<{ error: string }>
   // Auth: require EXECUTOR_VALIDATION_SECRET
   const secret = process.env.EXECUTOR_VALIDATION_SECRET
   if (!secret) {

@@ -22,6 +22,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { randomBytes } from 'node:crypto'
 import { getSupabase } from '@/lib/supabase'
 import { verifyBearerToken } from '@/lib/auth'
@@ -77,6 +78,9 @@ function generatePlaintextKey(): string {
 // ── POST: create a new key ─────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
   if (!isAuthed(req)) return unauthorized()
   const supabase = getSupabase()
   if (!supabase) return supabaseUnavailable()

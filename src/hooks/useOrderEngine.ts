@@ -31,6 +31,9 @@ import {
   fetchActiveOrders,
   cancelOrderInSupabase,
   subscribeToOrders,
+  ensureOrdersReadAuth,
+  retryOrdersReadAuth,
+  ReadAuthRequiredError,
 } from '@/lib/order-engine'
 import type {
   OnChainOrder,
@@ -296,10 +299,38 @@ export function useOrderEngine() {
   const [latestEvent, setLatestEvent] = useState<OrderEngineEvent | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  // [AUDIT-W6 / W6-M-01] Active-order reads need one session signature. True
+  // when the user rejected the prompt — the UI offers an explicit retry
+  // (requestOrdersReadAuth) instead of popup-spamming.
+  const [readAuthDenied, setReadAuthDenied] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // [P200] Guard: don't persist the initial empty array before the async load
   // resolves — otherwise the save effect would clobber the encrypted store.
   const hasLoadedRef = useRef(false)
+
+  // [AUDIT-W6 / W6-M-01] Run an orders fetch; on the server's 401
+  // READ_AUTH_REQUIRED, sign the session read message ONCE (deduped +
+  // denial-remembered in read-auth.ts) and retry. Kept in a ref so the load
+  // and poll effects don't gain re-run dependencies.
+  const withReadAuthRef = useRef<(fetchFn: () => Promise<OrderRow[]>) => Promise<OrderRow[]>>(
+    async (fetchFn) => fetchFn(),
+  )
+  withReadAuthRef.current = async (fetchFn) => {
+    try {
+      return await fetchFn()
+    } catch (err) {
+      if (!(err instanceof ReadAuthRequiredError) || !address) throw err
+      const outcome = await ensureOrdersReadAuth(address, (typed) =>
+        signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0]),
+      )
+      if (outcome !== 'ok') {
+        setReadAuthDenied(true)
+        return []
+      }
+      setReadAuthDenied(false)
+      return fetchFn()
+    }
+  }
 
   // [P213/FULL-M-06] Local session nonce tracking. Two orders created before
   // wagmi re-fetches `nonces(user)` would otherwise read the same on-chain
@@ -383,7 +414,8 @@ export function useOrderEngine() {
 
       // 2. Refresh from Supabase (authoritative source).
       try {
-        const rows = await fetchUserOrders(address)
+        // [W6-M-01] May prompt for the one-per-session read signature.
+        const rows = await withReadAuthRef.current(() => fetchUserOrders(address))
         if (cancelled) return
         if (rows.length > 0) {
           const dismissed = getDismissedOrderIds()
@@ -445,7 +477,8 @@ export function useOrderEngine() {
     async function pollStatus() {
       if (!address) return
       try {
-        const rows = await fetchActiveOrders(address!)
+        // [W6-M-01] Uses the cached session signature; signs once if missing.
+        const rows = await withReadAuthRef.current(() => fetchActiveOrders(address!))
         if (rows.length === 0) return
 
         setOrders(prev => {
@@ -942,6 +975,27 @@ export function useOrderEngine() {
   const stopLossOrders = orders.filter(o => o.orderType === OrderType.STOP_LOSS)
   const dcaOrders = orders.filter(o => o.orderType === OrderType.DCA)
 
+  // [AUDIT-W6 / W6-M-01] Explicit user retry after a rejected read-signature
+  // prompt: forget the session denial, sign, and reload the list.
+  const requestOrdersReadAuth = useCallback(async () => {
+    if (!address) return
+    retryOrdersReadAuth(address)
+    const outcome = await ensureOrdersReadAuth(address, (typed) =>
+      signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0]),
+    )
+    if (outcome !== 'ok') return
+    setReadAuthDenied(false)
+    try {
+      const rows = await fetchUserOrders(address)
+      if (rows.length > 0) {
+        const dismissed = getDismissedOrderIds()
+        setOrders(rows.map(rowToOrder).filter(o => !dismissed.includes(o.id)))
+      }
+    } catch {
+      /* the poll will pick the list up on its next tick */
+    }
+  }, [address, signTypedDataAsync])
+
   return {
     orders,
     activeOrders,
@@ -952,6 +1006,9 @@ export function useOrderEngine() {
     latestEvent,
     isSubmitting,
     isLoading,
+    // [W6-M-01] Active-order reads are signature-gated; see requestOrdersReadAuth.
+    readAuthDenied,
+    requestOrdersReadAuth,
     currentNonce: currentNonce ? BigInt(currentNonce.toString()) : 0n,
     createOrder,
     // [SPRINT-9U U2] EIP-712 review gate

@@ -34,6 +34,7 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { encodeFunctionData } from 'viem'
 import {
   fetchMetaQuote,
@@ -398,6 +399,9 @@ function buildFeeCollectorTx(args: {
 // ── POST ──────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
   // 1. Halt — short-circuits before any auth/RPC work.
   if (await isSystemHalted()) {
     return jsonError(

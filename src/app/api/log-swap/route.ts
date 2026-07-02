@@ -6,6 +6,23 @@ import { getSupabase, getSupabaseLogger } from '@/lib/supabase'
 import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { computeTokenAmountUsd } from '@/lib/chainlink'
+import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { bodySizeGuard, clientIp } from '@/lib/body-limit'
+
+// [AUDIT-W6 / W6-M-02 + W6-L-01] Shared guards for both handlers: body cap +
+// the per-IP budget shared by all log-* routes, BEFORE any parse/DB work.
+async function ingestionGuards(req: NextRequest): Promise<NextResponse | null> {
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
+  const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded' },
+      { status: 429, headers: { 'X-RateLimit-Reset': String(rate.resetAt) } },
+    )
+  }
+  return null
+}
 
 /**
  * POST /api/log-swap
@@ -15,6 +32,9 @@ import { computeTokenAmountUsd } from '@/lib/chainlink'
  */
 export async function POST(req: NextRequest) {
   try {
+    const refused = await ingestionGuards(req)
+    if (refused) return refused
+
     // [P114/M-03] INSERT-only logger client. Falls back to service-role
     // when SUPABASE_LOGGER_KEY is unset (with a one-time warn in
     // supabase.ts), so this branch stays alive during the rollout
@@ -205,6 +225,9 @@ export async function POST(req: NextRequest) {
  */
 export async function PATCH(req: NextRequest) {
   try {
+    const refused = await ingestionGuards(req)
+    if (refused) return refused
+
     const supabase = getSupabase()
     if (!supabase) {
       console.warn('[log-swap] PATCH skipped — Supabase not configured')

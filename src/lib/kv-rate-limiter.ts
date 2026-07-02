@@ -33,6 +33,15 @@ export const QUOTE_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
 // calls almost immediately; 300/min leaves headroom while still blunting
 // abuse. The fallback (degraded mode) is ceil(300/2) = 150/min.
 export const RPC_RATE_LIMIT = { limit: 300, windowMs: 60_000 }
+// [AUDIT-W6 / W6-M-02] Unauthenticated ingestion + order creation.
+// The four log-* telemetry routes share ONE per-IP budget (key `log:<ip>`) —
+// 120/min covers a busy real session across all of them while bounding
+// spam / analytics-poisoning / Supabase-cost floods; degraded fallback 60/min.
+export const LOG_RATE_LIMIT = { limit: 120, windowMs: 60_000 }
+// Every order creation needs a fresh wallet signature, so 10/min/IP is
+// generous for humans while stopping self-signed spam loops (fallback 5/min).
+// Complements (does not replace) the per-wallet DB limit in the orders route.
+export const ORDER_CREATE_RATE_LIMIT = { limit: 10, windowMs: 60_000 }
 
 interface RateLimitResult {
   allowed: boolean

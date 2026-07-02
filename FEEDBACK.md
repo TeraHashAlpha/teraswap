@@ -6007,3 +6007,47 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
   code — a production formula change would never have failed it. Both now exercise the real exported
   helper, and none of the four touched test files were CI-gated before (the full vitest suite does
   not run in CI) — now gated by the `minimum-output-guard` job.
+
+## Feedback — AUDIT-W6-api-hardening (branch audit/w6-api-hardening)
+
+### W6-M-01 boundary (owner decision: GATE, applied)
+- **Gated:** any `GET /api/orders` read whose statuses include a LIVE order (`active`, `executing`,
+  `partially_filled`, no `status` param, or any unknown status — default-deny) and `GET /api/orders/[id]`
+  when the row is live. Proof = one SIWE-style EIP-712 session signature (`read-auth.ts`), verified with
+  the same `recoverTypedDataAddress` anchor as the write path; 24 h TTL, 5 min skew, wallet lowercased on
+  both sides so query-param casing can't break recovery.
+- **Deliberately still public:** terminal statuses (`executed/cancelled/expired/failed`), `/api/history`,
+  `/api/analytics/personal`, `orders/[id]/executions` — executed data, on-chain-public anyway (W6-I-01);
+  unchanged per the owner's boundary.
+- **Design note:** the "read token" is the signature itself (stateless) — no server secret to provision,
+  rotate, or leak; nothing stored server-side; the token can only READ the signer's own orders. If the
+  owner later wants short-lived opaque tokens, `ensureOrdersReadAuth`/`verifyOrdersReadAccess` are the two
+  seams to swap.
+- **Keeper unaffected:** the executor reads Supabase directly (contracts/order-engine/executor), never
+  `GET /api/orders`; `contracts/order-engine/api/orders.ts` is a pre-copy template, not runtime.
+
+### W6-M-02 limits (applied)
+- `log-*` (all four routes, incl. log-swap PATCH): ONE shared per-IP budget `log:<ip>` — 120/min via KV
+  sliding window (in-memory 60/min fallback when KV is down), enforced BEFORE any Supabase work → 429 JSON.
+- `POST /api/orders`: `orders:<ip>` — 10/min (every create needs a fresh wallet signature; humans never
+  approach this), BEFORE body parse/signature verify; complements the existing per-wallet DB limit
+  (`check_order_rate_limit`, 20 active/h) which a self-signing spammer could otherwise reach unmetered.
+
+### W6-L-01 caps (applied)
+- Shared `bodySizeGuard` (10 KB default = the swap route's existing cap) on: orders POST + [id] PATCH,
+  log-* POST/PATCH, quote POST, v1/swap, monitor/tick, monitor/validate-execution, telegram/webhook,
+  admin/{api-keys,dca-freeze,kill-switch}. `rpc` gets 256 KB — the app legitimately simulates eth_calls
+  with large calldata (useSwap allows up to 200 KB) and 10 KB would break pre-swap simulation.
+
+### Edge cases / discoveries
+- The UX cost of the gate is one wallet signature per session, prompted lazily on the FIRST orders fetch
+  (sign-on-401 → retry), deduped across concurrently-mounted panels; a rejection is remembered for the
+  session and surfaced as a "Sign to view" banner in OrderDashboard instead of popup spam.
+- `cancelOrderInSupabase` resolves the row id via `fetchUserOrders`, so cancelling also rides the cached
+  session signature — by the time a user can click cancel, the list is visible, so the auth is present.
+- Pre-existing test gap: `log-swap/route.test.ts` ran the route against the REAL kv-rate-limiter, whose
+  unconfigured Upstash client stalls ~4.5 s per call — masked before because the route had no limiter.
+  Stubbed (allowed) there; the 429/413 negative paths are pinned in `log-routes.hardening.test.ts`.
+- Supabase real-time (`subscribeToOrders`) pushes row UPDATES to the anon-key channel filtered by wallet;
+  it delivers order-status transitions (not initial strategy reads) and predates this change — flagging
+  for a future wave: if RLS on the realtime channel is ever loosened, the read gate here does not cover it.

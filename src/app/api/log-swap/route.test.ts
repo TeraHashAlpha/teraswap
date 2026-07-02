@@ -51,6 +51,19 @@ vi.mock('@/lib/security-tracker', () => ({
   trackOracleUnavailable: vi.fn(),
 }))
 
+// [AUDIT-W6 / W6-M-02] The route now rate-limits ingestion per IP before the
+// insert. Stub the limiter as "allowed" so these tests keep exercising the
+// insert-shape clamping only (the 429/413 paths are pinned by
+// src/app/api/log-routes.hardening.test.ts); the real KV client would stall
+// on its unconfigured endpoint in tests.
+vi.mock('@/lib/kv-rate-limiter', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')
+  return {
+    ...actual,
+    checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, resetAt: Date.now() + 60_000 })),
+  }
+})
+
 // ── Import route after mocks ───────────────────────────────
 
 import { POST } from './route'

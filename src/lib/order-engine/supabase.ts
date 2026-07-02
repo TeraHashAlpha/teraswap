@@ -7,6 +7,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { SUPABASE_ORDERS_TABLE, SUPABASE_EXECUTIONS_TABLE } from './config'
+import { ordersReadHeaders, ReadAuthRequiredError } from './read-auth'
 import type { AutonomousOrderStatus } from './types'
 
 // ── Client singleton ─────────────────────────────────────
@@ -152,13 +153,21 @@ export async function createOrderInSupabase(params: {
 }
 
 // ── Fetch user's orders (via API route — server-side Supabase) ──
+// [AUDIT-W6 / W6-M-01] Reads that include active orders require the session
+// read signature (read-auth.ts). Cached headers are attached when present; a
+// 401 READ_AUTH_REQUIRED throws ReadAuthRequiredError so useOrderEngine can
+// sign once per session and retry.
 export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
   try {
-    const res = await fetch(`/api/orders?wallet=${wallet}`)
+    const res = await fetch(`/api/orders?wallet=${wallet}`, {
+      headers: ordersReadHeaders(wallet) ?? undefined,
+    })
+    if (res.status === 401) throw new ReadAuthRequiredError()
     if (!res.ok) return []
     const json = await res.json()
     return json.orders ?? []
-  } catch {
+  } catch (err) {
+    if (err instanceof ReadAuthRequiredError) throw err
     console.error('[OrderEngine] fetchUserOrders failed')
     return []
   }
@@ -173,11 +182,16 @@ export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
 const POLL_STATUSES = 'active,executing,partially_filled,executed,failed,cancelled,expired'
 export async function fetchActiveOrders(wallet: string): Promise<OrderRow[]> {
   try {
-    const res = await fetch(`/api/orders?wallet=${wallet}&status=${POLL_STATUSES}`)
+    // [W6-M-01] The poll includes live statuses → same session signature.
+    const res = await fetch(`/api/orders?wallet=${wallet}&status=${POLL_STATUSES}`, {
+      headers: ordersReadHeaders(wallet) ?? undefined,
+    })
+    if (res.status === 401) throw new ReadAuthRequiredError()
     if (!res.ok) return []
     const json = await res.json()
     return json.orders ?? []
-  } catch {
+  } catch (err) {
+    if (err instanceof ReadAuthRequiredError) throw err
     console.error('[OrderEngine] fetchActiveOrders failed')
     return []
   }

@@ -24,6 +24,7 @@
  */
 
 import { NextResponse } from 'next/server'
+import { bodySizeGuard } from '@/lib/body-limit'
 import { kv } from '@/lib/kv'
 import { timingSafeEqual, createHash } from 'node:crypto'
 import {
@@ -744,6 +745,9 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
 // ── POST handler ───────────────────────────────────────
 
 export async function POST(req: Request): Promise<Response> {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
+  const tooLarge = bodySizeGuard(req)
+  if (tooLarge) return tooLarge
   // Verify webhook secret (constant-time)
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET
   if (!secret) {

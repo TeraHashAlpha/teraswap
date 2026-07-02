@@ -7,7 +7,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
 import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
+import {
+  verifyOrdersReadAccess,
+  PUBLIC_ORDER_STATUSES,
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+} from '@/lib/order-engine/read-auth'
 import { getDcaFreezeState } from '@/lib/dca-freeze'
+import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { NATIVE_ETH } from '@/lib/constants'
 
 // [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
@@ -49,6 +57,25 @@ function getSupabase() {
 // ── POST — Create order ────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
+    // [W6-L-01] Oversized body → 413 before any read (header-only check).
+    const tooLarge = bodySizeGuard(req)
+    if (tooLarge) return tooLarge
+
+    // [W6-M-02] Per-IP creation limit BEFORE body parse / signature work.
+    // Complements the per-wallet DB limit below (self-signed spam needs
+    // neither a new wallet nor a new signature to hammer this route).
+    const rate = await checkRateLimit(
+      `orders:${clientIp(req)}`,
+      ORDER_CREATE_RATE_LIMIT.limit,
+      ORDER_CREATE_RATE_LIMIT.windowMs,
+    )
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Try again in 60 seconds.' },
+        { status: 429, headers: { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': String(rate.resetAt) } },
+      )
+    }
+
     const body = await req.json()
     const supabase = getSupabase()
     if (!supabase) {
@@ -309,6 +336,35 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid or missing wallet' }, { status: 400 })
   }
 
+  // Support comma-separated statuses: ?status=active,executing,partially_filled
+  const statuses = (status ?? '').split(',').map(s => s.trim()).filter(Boolean)
+
+  // [AUDIT-W6 / W6-M-01] Reads that include ACTIVE/PENDING order strategy
+  // (targetPrice / amounts / type, pre-execution) require proof of wallet
+  // ownership — one lightweight session signature (read-auth.ts), same trust
+  // anchor as the write path. No status filter defaults to "everything",
+  // which includes live orders → protected. Unknown statuses are protected
+  // too (default-deny). Terminal-only reads stay public — the owner-decided
+  // boundary (on-chain history is public; matches /history + analytics).
+  const needsOwnershipProof =
+    statuses.length === 0 || statuses.some(s => !PUBLIC_ORDER_STATUSES.has(s))
+  if (needsOwnershipProof) {
+    const auth = await verifyOrdersReadAccess({
+      wallet,
+      issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
+      signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
+    })
+    if (!auth.ok) {
+      return NextResponse.json(
+        {
+          error: `Reading active orders requires a wallet signature: ${auth.error}`,
+          code: 'READ_AUTH_REQUIRED',
+        },
+        { status: 401 },
+      )
+    }
+  }
+
   const supabase = getSupabase()
   if (!supabase) {
     return NextResponse.json({ orders: [] })
@@ -321,14 +377,10 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: false })
     .limit(50)
 
-  if (status) {
-    // Support comma-separated statuses: ?status=active,executing,partially_filled
-    const statuses = status.split(',').map(s => s.trim()).filter(Boolean)
-    if (statuses.length === 1) {
-      query = query.eq('status', statuses[0])
-    } else if (statuses.length > 1) {
-      query = query.in('status', statuses)
-    }
+  if (statuses.length === 1) {
+    query = query.eq('status', statuses[0])
+  } else if (statuses.length > 1) {
+    query = query.in('status', statuses)
   }
 
   const { data, error } = await query

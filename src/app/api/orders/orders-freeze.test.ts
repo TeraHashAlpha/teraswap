@@ -58,6 +58,18 @@ vi.mock('@supabase/supabase-js', () => ({
   }),
 }))
 
+// [AUDIT-W6 / W6-M-02] POST /api/orders now rate-limits per IP before any
+// work. Stub the limiter as "allowed" — the 429/413 paths are pinned by
+// route.hardening.test.ts; the real KV client stalls on its unconfigured
+// endpoint in tests (and the in-memory fallback would 429 multi-POST suites).
+vi.mock('@/lib/kv-rate-limiter', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')
+  return {
+    ...actual,
+    checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, resetAt: Date.now() + 60_000 })),
+  }
+})
+
 import { POST } from './route'
 
 const WALLET = '0x1111111111111111111111111111111111111111'

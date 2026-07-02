@@ -302,7 +302,10 @@ describe('GET /api/orders/[id]', () => {
   })
 
   it('returns 200 { order } when the row is found, gating on the lowercased wallet', async () => {
-    const row = { id: ORDER_ID, wallet: WALLET.toLowerCase(), status: 'active' }
+    // [AUDIT-W6 / W6-M-01] Fixture uses a TERMINAL status: live rows now
+    // additionally require the session read signature (401 without it —
+    // pinned by route.hardening.test.ts). This test pins the wallet-scoping.
+    const row = { id: ORDER_ID, wallet: WALLET.toLowerCase(), status: 'executed' }
     singleResult = { data: row, error: null }
     const res = await GET(getReq(WALLET.toUpperCase().replace('0X', '0x')), ctx())
     expect(res.status).toBe(200)

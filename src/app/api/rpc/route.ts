@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { bodySizeGuard, RPC_MAX_BODY_BYTES } from '@/lib/body-limit'
 import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { getRpcUrlForChain } from '@/lib/adapters/shared'
@@ -44,6 +45,9 @@ const BLOCKED_METHODS = new Set([
 ])
 
 export async function POST(req: NextRequest) {
+  // [AUDIT-W6 / W6-L-01] Oversized body -> 413 (256 KB: large eth_call payloads pass).
+  const tooLarge = bodySizeGuard(req, RPC_MAX_BODY_BYTES)
+  if (tooLarge) return tooLarge
   // [B-06] Rate limiting by IP — persistent via Vercel KV
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
   const rateCheck = await checkRateLimit(`rpc:${ip}`, RPC_RATE_LIMIT.limit, RPC_RATE_LIMIT.windowMs)
