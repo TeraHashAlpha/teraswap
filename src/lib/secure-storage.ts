@@ -15,9 +15,14 @@
  *     orders belong to the wallet that created them.
  *   - The static SALT is acceptable because the wallet address is already
  *     unique per user; PBKDF2 stretches it to resist offline brute force.
- *   - When Web Crypto is unavailable (HTTP origin, ancient browser) the module
- *     degrades gracefully to plaintext rather than crashing — users never lose
- *     access to their data (see Sprint 39 rollback plan).
+ *   - [W9-L-01] When Web Crypto is unavailable (insecure origin, ancient
+ *     browser) or the per-wallet key can't be derived, the module FAILS CLOSED:
+ *     it SKIPS persistence rather than writing sensitive order/trade metadata as
+ *     plaintext (which any extension / XSS / shared-computer user could read).
+ *     The data is re-derivable — Supabase is the source of truth for orders — so
+ *     a missing local cache is strictly preferable to a plaintext-at-rest leak.
+ *     Reads of any legacy plaintext still work (backward compatible). Production
+ *     is HTTPS, so this fail-closed path is effectively never hit by real users.
  *   - SSR-safe: no `window`/`crypto` access at module load; every public
  *     method guards `typeof window`.
  *
@@ -76,7 +81,7 @@ function cryptoAvailable(): boolean {
   return !!(c && c.subtle)
 }
 
-const NO_CRYPTO_WARNING = '[SecureStorage] Web Crypto not available, falling back to plaintext'
+const NO_CRYPTO_WARNING = '[SecureStorage] Web Crypto not available'
 
 // ---------------------------------------------------------------------------
 // Base64 <-> bytes (manual loop avoids call-stack limits on large arrays and
@@ -165,8 +170,10 @@ export function isSecureStorageReady(): boolean {
 
 /**
  * Encrypt `value` (JSON-serialised) and write it to localStorage under `key`.
- * Falls back to plaintext when Web Crypto is unavailable. Never throws — quota
- * and serialisation errors are caught and logged.
+ * [W9-L-01] Fails CLOSED: when no per-wallet key can be derived (Web Crypto
+ * unavailable or not yet initialised) it SKIPS the write rather than persisting
+ * sensitive metadata as plaintext. Never throws — quota and serialisation
+ * errors are caught and logged.
  */
 export async function secureSet<T>(key: string, value: T): Promise<void> {
   if (!hasWindow()) return // SSR no-op
@@ -181,9 +188,11 @@ export async function secureSet<T>(key: string, value: T): Promise<void> {
   try {
     const cryptoKey = await getKey()
     if (!cryptoKey) {
-      // Plaintext fallback (crypto unavailable or not yet initialised).
-      if (!cryptoAvailable()) console.warn(NO_CRYPTO_WARNING)
-      localStorage.setItem(key, json)
+      // [W9-L-01] Fail CLOSED — no key means we cannot encrypt, so we SKIP the
+      // write rather than leaking sensitive order/trade metadata as plaintext.
+      // The data is re-derivable (Supabase is authoritative for orders), so a
+      // missing local cache beats a plaintext-at-rest leak. Never persists here.
+      if (!cryptoAvailable()) console.warn(`${NO_CRYPTO_WARNING} — skipping persistence (fail-closed)`)
       return
     }
     const c = getCrypto()!

@@ -6061,3 +6061,20 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
   the false branch the arg is ignored entirely. So the fallback was unreachable — removed. `FEE_COLLECTOR_ADDRESS`
   was imported solely for this dead path, so it was dropped from the `@/lib/constants` import too.
 - No behaviour change: typecheck clean, useSwap (23) + swap-validations (45) suites green.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W9-L-01
+
+### W9-L-01 — secure-storage fails closed instead of writing plaintext — FIXED
+- `src/lib/secure-storage.ts` `secureSet`: when `getKey()` returns null (Web Crypto unavailable OR the
+  per-wallet key not yet derived) it now **skips the write** instead of `localStorage.setItem(key, json)`
+  plaintext. Sensitive order/trade metadata is therefore never persisted in the clear. Still never throws.
+- **Boundary:** only the encrypted write path changed. Reads of LEGACY plaintext still work (backward
+  compatible — users don't lose pre-existing data). Non-sensitive prefs written on plain `localStorage`
+  elsewhere are untouched (this module is only used by `useOrderEngine` for orders and `analytics-tracker`
+  for trade history — both re-derivable / non-critical if the local cache is skipped).
+- **Impact in practice:** production is HTTPS so Web Crypto is always available; the fail-closed path is
+  effectively never hit by real users. It removes the plaintext-at-rest vector for the degenerate
+  (insecure-origin / pre-init) cases. Data loss risk is nil for orders (Supabase authoritative).
+- Tests: updated the old "falls back to plaintext" case to assert **nothing is written** + added
+  "pre-existing ciphertext untouched on a later skipped write" and "legacy plaintext still readable".
+  secure-storage (9) + analytics-tracker suites green; typecheck clean.
