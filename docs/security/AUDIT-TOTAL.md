@@ -832,3 +832,307 @@ re-executed in-session: **24/24**.
 |----|----------|-------------|
 | 201-L-01 | LOW | `setDcaFreezeState` (`dca-freeze.ts:106`) returns success without persisting when Supabase is unconfigured ⇒ admin freeze **falsely reports 200** though nothing was written (inconsistent with the upsert-error→503 path). Trade-off 5 ACCEPT-WITH-HARDENING: make the **write** path fail-closed (throw → 503). Remediation prompt in the report. Not user-exploitable; `pause()` remains the real stop. |
 | 201-I-01..06 | INFO | Fail-open reads (keep `pause()` authoritative; optional `FREEZE_FAILCLOSED`); per-cycle outflow false-neg (rolling window future); outflow false-pos on manual withdrawal; Telegram token in URL (only `err.message` logged today); lock-before-skip churn (optional pre-lock `order_type` check); in-memory new-DCA dedup re-alerts after restart. All non-blocking. |
+
+### T-SAF Campaign 2026-07-01 — Wave 1: Smart contracts
+
+**Verdict: APPROVED — 0C / 0H / 0M / 2L / 4I.** Report: `Audits/Campaign/2026-07-01/W1-contracts.md`.
+⚠ On-chain trust root (rules #2/#3). Read-only; `forge`/`slither` absent in sandbox → adversarial source
+read + live viem verification; **CI `test-contracts` (linux-x64) remains the authoritative executable
+gate**. Scope: FeeCollector V1 (`0x4dAE`), V2 (`0x47f2`), OrderExecutor (`0xeFC3`) + Base FeeCollector
+(`0xeFC3`), all on-chain-verified this run.
+
+| Check | Result |
+|-------|--------|
+| Router/selector whitelist chain-aware & on-chain | ✅ `whitelistedRouters` = per-deploy on-chain state; mainnet OE **V5=true/V6=false/1inchV6=true** re-confirmed; unknown router reverts. V2 per-router selector allowlist; OE binds full calldata via `routerDataHash` (non-DCA mandatory, MEDIUM-006). |
+| Access control (`admin()`; owner reverts) + timelocks | ✅ all state-changing fns admin-gated; on-chain `admin()`=`0x9A38…C73C` (all 3). OE timelocks admin 7d / router·executor·sweep 48h; sweep dest admin-only. ⚠ FeeCollector V2 `transferAdmin`/`setAllowedSelector` not timelocked → W1-L-01. |
+| EIP-712 replay-safe | ✅ OZ domain pins chainId+verifyingContract (no cross-chain replay); nonce/DCA-counter (no double-exec); `ORDER_TYPEHASH` matches struct. |
+| On-chain minOutput | OE ✅ enforced (balance-delta, `InsufficientOutput`); **FeeCollector V2 ✗ none** (delegated to router `amountOutMin`) → W1-I-02 packet correction. |
+| Fee-once (ETH+ERC20) | ✅ 0.1% once; ERC-20 balance-delta (fee-on-transfer safe); V2 `RouterTookTooMuch` bound. |
+| Reentrancy | ✅ `nonReentrant` + CEI on every value-moving path; `_inExecution` guards `receive()`. |
+| Recipient binding | ✅ OE force-delivers to `order.owner` on-chain; FeeCollector delegates to routerData (off-chain R1 gate) → W1-I-04 → verified in W2. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W1-L-01 | LOW | FeeCollector V2 `transferAdmin` (`:385`) + `setAllowedSelector` (`:191`) not timelocked (vs OE 7d/48h). Bounded (transient fees; msg.sender-funded swaps; sweep 48h+feeRecipient). Remediation prompt; contract change ⇒ Auditor re-pass (#2/#3). |
+| W1-L-02 | LOW | Single **EOA** admin `0x9A38…C73C` over FeeCollector V1/V2 + OrderExecutor, both chains. Centralization/key-mgmt; mitigated by OE timelocks + Admin→HW plan. Recommend Safe + HW. |
+| W1-I-01 | INFO | Legacy FeeCollector V1 (`0x4dAE`) lacks V2 selector allowlist + 48h sweep timelock (instant sweep→feeRecipient). Confirm no active routing/approvals to V1. |
+| W1-I-02 | INFO | FeeCollector V2 has **no on-chain minimumOutput** (P68 pending) — slippage delegated to router. W2/W3 must not assume FeeCollector self-checks output. |
+| W1-I-03 | INFO | Packet's **Base OrderExecutor `0x135B` not found in source nor on-chain-verified**; no Base `orderExecutor` wired (Base orders gated off). Confirm before W2/W8 depend on it. |
+| W1-I-04 | INFO | FeeCollector doesn't bind output recipient on-chain (off-chain R1 gate); verified in W2. |
+
+Refuted first-pass noise: DCA `routerDataHash==0` theft (minOut+owner-delivery+whitelist+nonReentrant);
+arbitrary sweep recipient (hardcoded); cross/same-chain replay (domain+nonce); settle reentrancy
+(nonReentrant+CEI). Dynamic Foundry/Slither deferred to CI (tools absent in sandbox).
+
+> **W1 correction (per W2, 2026-07-01):** W1 read `TeraSwapFeeCollectorV2_flat.sol`, which is **NOT the
+> deployed V2**. On-chain selector proof shows the deployed V2 (`0x47f2` + Base `0xeFC3`) matches
+> `contracts/TeraSwapFeeCollector.sol` and **enforces `minimumOutput` on the user's balance delta**.
+> Therefore **W1-I-02 is REFUTED**, **W1-I-04 largely resolved**, and **W1-L-01 is moot for the deployed
+> contract** (`transferAdmin`/`setAllowedSelector` absent on-chain). See W2 finding W2-M-01.
+
+### T-SAF Campaign 2026-07-01 — Wave 2: Fund-flow integrity
+
+**Verdict: APPROVED — 0C / 0H / 1M / 2L / 2I.** Report: `Audits/Campaign/2026-07-01/W2-fund-flow.md`.
+⚠ Fund-flow (rules #2/#3). Money invariant **holds on every FeeCollector-routed source × both chains** and
+is **stronger than the packet assumed** — deployed V2 enforces on-chain `minimumOutput` on the user's own
+balance delta (selector-verified both chains this run). Read-only; tests re-run: calldata-recipient 26/26
++ partner-fee-invariant 4/4 = **30/30**.
+
+| Check | Result |
+|-------|--------|
+| Recipient gating (output→user, all adapters, both chains) | ✅ `validateCallDataRecipient` fail-closed (unknown selector / decode error / nested multicall → `valid:false`); per-chain FeeCollector from registry; 6 decode groups cover the executable sources. |
+| Router/selector allowlist; unrecognized refused | ✅ SC-04 `isKnownSwapSelector` (server) + R1 `VALIDATED_SELECTORS` + `ROUTER_WHITELIST(_BY_CHAIN)` + on-chain `minimumOutput`; chain-correct routers (W0). |
+| `minimumOutput` non-downgradable floor | ✅ On-chain (deployed V2 both chains, balance-delta) + client-derived from user slippage (`useSwap.ts:458`); server can't set it independently; DefiLlama >$10k cross-check. Residual minOut=0-on-malformed → W2-L-01. |
+| Fee-once (0.1%, ETH+ERC20) | ✅ Partner XOR FeeCollector (`FEE_INCOMPATIBLE=[0x,cowswap,bebop]`); ERC-20 balance-delta; single `FEE_BPS=10`. |
+| FeeCollector routing + partner fees, no bypass | ✅ `fetchApproveSpender` correct per source/chain; no double/skip. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W2-M-01 | MED | `TeraSwapFeeCollectorV2_flat.sol` ≠ deployed V2 (selector-verified); deployed = `TeraSwapFeeCollector.sol`. Deployment/audit-integrity risk (a re-deploy/review could pick the weaker no-minOutput source; W1 was misled). **Not a live fund-flow defect — does NOT block prod.** Fix: remove/mark stale flat + add `DEPLOYED-SOURCES.md` (addr→source→solc→code-hash). |
+| W2-L-01 | LOW | minOut=0 fallback on malformed `toAmount` disables the on-chain output check per-leg (10-L-01 family) → griefing/stranding, not theft (R1 gate still binds recipient). Recommend refuse-on-unusable-quote / non-zero floor. |
+| W2-I-01 | INFO | Balancer/OpenOcean/native-Curve selectors absent from SC-04+R1 → fail-closed (refused) on execution → likely quote-only; confirm in W7. |
+| W2-I-02 | INFO | Group-F (Odos/Kyber/ParaSwap) recipient not extracted (trusted msg.sender) — now compensated on-chain by deployed V2 `minimumOutput`. |
+
+Negative-paths all refused (recipient=attacker, tampered selector, nested multicall, double-fee,
+per-chain router mismatch, minOut downgrade). Full calldata fuzz + `forge` deferred to CI.
+
+### T-SAF Campaign 2026-07-01 — Wave 3: Oracle & safety gates
+
+**Verdict: gates on PRODUCTION (`origin/main`) APPROVED — 0C / 0H.** Report:
+`Audits/Campaign/2026-07-01/W3-oracle-gates.md`. ⚠ **Campaign-process finding W3-H-01 (HIGH, grounding —
+NOT a product vuln).**
+
+> **W3-H-01 (grounding):** the audited working tree `docs/inc-2026-06-09` is **261 commits behind
+> `origin/main` (0 ahead)** and is **missing the E-2 quote + E2-I-01 swap-build sequencer gates that
+> production has** (`api.ts:107`, `api/swap:126` on main). W0–W2 *on-chain* findings are branch-independent
+> and stand; W1/W2 *frontend/API* conclusions must be re-verified on `main`. **Re-baseline the campaign on
+> `main` before continuing.** Not a production vulnerability — `main` carries all gates.
+
+Gate checks (graded against `main`):
+
+| Check | Result on `main` |
+|-------|------------------|
+| Chain-aware, no silent skip (1 AND 8453) | ✅ chainlink `rpcCall(chainId)`, defillama `chain` slug, `isSequencerUp(chainId)`, price-monitor client-per-chain. |
+| Per-feed staleness | ✅ `validateRoundData` fail-closed (answer≤0 / answeredInRound<roundId / startedAt≤0 / age>heartbeat×1.5). |
+| Deviating price refused | ✅ DefiLlama >8%-below-fair → 422 (non-overridable); Chainlink integrity + extreme-deviation hard-block; price-impact→consent (9J, rule-#9-safe). |
+| Depeg | ✅ market-vs-ER ≥block → block; leg integrity fail-closed, verdict fail-open (INV-8). |
+| DefiLlama >$10k fail-closed / <$10k fail-open | ✅ `HIGH_VALUE_THRESHOLD_USD=10_000`; unavailable/low-conf/error & >$10k → block; <$10k → fail-open. |
+| Sequencer on quote AND swap-build | ✅ on `main` (4 call sites: quote/swap-build/price-read/monitor); fail-safe down/grace/RPC-err→refuse. **✗ on audited branch → W3-H-01.** |
+| Feeds on-chain-verified | ✅ cbETH market agg `0x53fD…`/ER agg `0x4c78…` (v6, match code — closes W0 gap); sequencer `0xBCF8` identity only via latestRoundData (W3-I-01). |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W3-H-01 | HIGH (process) | Campaign audited a branch 261 commits behind `main`, missing prod sequencer gates. **Not a prod vuln.** Re-baseline on `main`; re-verify W1/W2 frontend-API items. |
+| W3-I-01 | INFO | Base sequencer feed `0xBCF8` has no `description()`/`aggregator()` (revert) — identity only via `latestRoundData` (answer 0=up, verified). |
+| W3-I-02 | INFO | J1 client price-gate consent for price-impact is rule-#9-safe (server DefiLlama −8% + on-chain minimumOutput unchanged). |
+
+**Campaign note:** W4+ must run against `origin/main`. On-chain-decisive findings (W0/W1/W2 feeds,
+contract bytecode, deployed minimumOutput) are branch-independent and remain valid.
+
+### T-SAF Campaign 2026-07-01 — RE-BASELINE + Wave 4: Chain-awareness
+
+**Re-baselined onto production:** audited SHA = `origin/main` **`cb0748de466c50c1749dfea53ad5c0424f6c0bf6`**
+(working-tree `docs/inc-2026-06-09` @ df00d35 is 261 behind → ignored; reads via `git show origin/main`).
+
+**W1/W2 re-confirmation on main:**
+- **W1-I-03 REFUTED on main** — Base OrderExecutor **wired + on-chain-verified**:
+  `ORDER_EXECUTOR_BY_CHAIN[8453]=0x135B339902Ea4E0fB4CF059961dc8856bA1D2598` (code 15475b, `admin=0x9A38…C73C`,
+  own per-chain `domainSeparator`, `whitelistedRouters` **V6=true/V5=false/1inch=true** — mirror of mainnet).
+- **W2-L-01 STANDS on main** (`useSwap.ts:457-461` minOut=0 on malformed toAmount).
+- W1-I-02/I-04/L-01 + W2-M-01 branch-independent (deployed bytecode) — unchanged.
+
+**Wave 4 verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Campaign/2026-07-01/W4-chain-awareness.md`.
+The #1 defect class (mainnet residue on a Base path) is **clean on production.**
+
+| Check | Result on `main` |
+|-------|------------------|
+| No mainnet assumption on Base paths | ✅ FeeCollector `getChainConfig(chainId).contracts.feeCollector` (P225, fail-closed), spender per-chain (P226), clients/feeds per-chain. |
+| Router selection = whitelisted on THAT chain | ✅ on-chain: mainnet OE Augustus V5(true)/V6(false); Base OE V6(true)/V5(false) — mirror; `routers.ts` 8453 Base-correct. |
+| `getPublicClientForChain` chain-aware | ✅ `VIEM_CHAINS={1:mainnet,8453:base}`; mainnet→IP-hiding client; unsupported→throw. |
+| `"1"!==1` coercion | ✅ `Number(chainId)` at all API boundaries; no mismatch reaches a gate. |
+| Activation gate + Base OE wiring | ✅ `isChainActive` gates; `getOrderExecutor(8453)=0x135B`, `(1)=0xeFC3`; null→fail-closed (H-05). |
+| Mainnet byte-identical vs W0 | ✅ mainnet OE/FeeCollector/feeds unchanged; Base wiring additive. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W4-I-01 | INFO | Stale `api.ts:540` comment says FeeCollector "still mainnet-pinned" — code is already chain-aware (P225/P226). Fix comment. |
+| W4-I-02 | INFO | Three router allowlists (frontend swap / spender set / on-chain OE) — chain-scoped + correct, drift risk. Recommend single per-chain source + parity test (frontend ⊆ on-chain OE whitelist per chain). |
+
+Negative-paths refused: V6-on-mainnet-order / V5-on-Base-order → `RouterNotWhitelisted`; no-FeeCollector chain
+→ throw; no-executor chain → `getOrderExecutorDomain` throws; `chainId="1"`→1. `forge` cross-chain-replay deferred to CI.
+
+### T-SAF Campaign 2026-07-01 — Wave 5: Signing-trust (on `origin/main` @ cb0748d)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Campaign/2026-07-01/W5-signing-trust.md`.
+Every wallet/keeper signature is over a **reviewed frozen payload**; *sent == signed* is explicit; replay
+blocked; admin Bearer constant-time + unlogged; approvals exact-amount.
+
+| Check | Result on `main` |
+|-------|------------------|
+| Review-gate on EVERY signing path; signed==reviewed | ✅ swap `confirmSwap` sends frozen `pendingSwap` (set after `validateRouterAddress`+R1 `validateCallDataRecipient`); CoW signs "EXACT frozen payload (no rebuild)"+9U freshness; order create one `signedChainId` const (sent==signed); cancel signs frozen nonce/reviewed rows. RPC proxy blocks all signing methods. |
+| Nonce → no same-chain replay | ✅ `order.nonce` single-use / DCA counter; `invalidateNonces` mass-cancel. |
+| Domain pins chainId+verifyingContract → no cross-chain replay | ✅ `getOrderExecutorDomain(chainId)` fail-closed; **on-chain re-confirmed distinct** domainSeparators: mainnet OE `0x335a0ec4…` vs Base OE `0x020a73f6…`. |
+| Admin Bearer constant-time, server-only, unlogged | ✅ `auth.ts:25` SHA-256+`timingSafeEqual`; no secret logged. |
+| Recipient binding output→owner | ✅ client R1 before freeze + server R1 + OrderExecutor on-chain delivery to `order.owner`. |
+| Approvals | ✅ `useOrderApproval` exact-amount, **never max-uint**, fail-closed on null/wrong spender. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W5-I-01 | INFO | Cancel EIP-712 `{id,action}` has no nonce/expiry — not exploitable (owner-signed, rowId-scoped, idempotent; on-chain void still nonce-based). |
+| W5-I-02 | INFO | `useSwap:341` `?? FEE_COLLECTOR_ADDRESS` mainnet fallback — safe (guarded by `:321` throw), defensive nit to remove. |
+
+Negative-paths refused: modified payload (frozen-then-sign), same/cross-chain replay (nonce + distinct
+domains), chain-switch mid-review (review cleared), forged Bearer, timing side-channel, recipient=attacker,
+expired CoW order, infinite approval. Live-signature/real-device deferred (human-only).
+
+### T-SAF Campaign 2026-07-01 — Wave 6: Backend/API (31+ routes) (on `origin/main` @ cb0748d)
+
+**Verdict: APPROVED — 0C / 0H / 2M / 1L / 2I.** Report: `Audits/Campaign/2026-07-01/W6-backend-api.md`.
+No auth bypass, no server-secret leak, no cross-user *mutation*, no HTML errors. Three backlog items are
+info-leak/DoS-class (no fund loss / no gate bypass) → don't block prod.
+
+| Check | Result on `main` |
+|-------|------------------|
+| Input validation | ✅ address/amount(`safeBigInt`)/slippage/chainId per route → 400 JSON. |
+| Authz | ✅ admin/monitor/dca-freeze `verifyBearerToken` (503/401); telegram/webhook constant-time secret; `v1/*` mainnet-only (400 non-1). |
+| Rate-limit before upstream | ✅ swap/quote/v1/portfolio/rpc/analytics; ⚠ absent on log-*/orders (W6-M-02). |
+| Errors JSON never HTML | ✅ try/catch → NextResponse.json/jsonError; `sanitizeUpstreamError`. |
+| No `NEXT_PUBLIC_` secret | ✅ only anon key (public); service-role server-only; nothing logged. |
+| RLS user isolation | ✅ **writes** signature-gated (recover==wallet + order.wallet, 401/403); ⚠ **reads** public-by-wallet-param (W6-M-01). |
+| Oversized body | ⚠ cap only on swap; others → Vercel ~4MB default (W6-L-01). |
+| chainId coercion / DefiLlama >$10k | ✅ `Number(chainId)`; swap 422 block (W3). |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W6-M-01 | MED | Unauthenticated `GET /api/orders?wallet=` (+history/analytics-personal) exposes a wallet's data incl. **pending order strategy** by address (service-role + unauth wallet param). Documented for analytics (13B-L-02); pending-order case is more sensitive. No fund loss; writes signature-gated. |
+| W6-M-02 | MED | `log-*` unauth + un-rate-limited → unbounded Supabase inserts (spam/poisoning/cost); `orders` POST un-rate-limited. Add per-IP checkRateLimit. |
+| W6-L-01 | LOW | Body-size cap only on `swap`; others rely on platform default. Add shared guard. |
+| W6-I-01/02 | INFO | Public-by-address read model is documented design; log-* silently-succeed on error (telemetry). |
+
+RLS red-team: cross-user order **cancel/create DENIED** (recover==wallet + order.wallet, 401/403); cross-user
+**read ALLOWED by design** (W6-M-01). Negative-paths refused: unauth admin→401, bad JSON→400, non-mainnet
+v1→400, DefiLlama+>$10k→422, forged webhook secret→reject. `semgrep`+per-route fuzz deferred to CI.
+
+### T-SAF Campaign 2026-07-01 — Wave 7: Aggregation adapters (12 sources) (on `origin/main` @ cb0748d)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 2L / 2I.** Report: `Audits/Campaign/2026-07-01/W7-adapters.md`.
+**No source can break the W2 money invariant** — every build result passes the source-agnostic fail-closed
+gates in `api/swap` (`isKnownSwapSelector:199` + `validateCallDataRecipient:217`), regardless of source or
+retry/fallback. Per-chain URLs correct; 0.1% fee once (partner XOR FeeCollector).
+
+| Check | Result on `main` |
+|-------|------------------|
+| Recipient gated per source (both chains) | ✅ adapters set `recipient ?? from`; R1 validates built calldata; Group-F msg.sender-trust compensated on-chain by deployed `minimumOutput` (W2). |
+| Selector/router allowlist; unrecognized refused | ✅ SC-04+R1 fail-closed. Balancer/OpenOcean/native-Curve selectors NOT allowlisted → SC-04 blocks execution (quote-only); Balancer also rejects non-whitelisted `data.to` (9G-G7). |
+| Per-chain base URLs | ✅ `getAdapterApiUrl(source,chainId)` per-chain (path/query/slug); Curve mainnet-only (null on Base); 0x per-chain endpoint. No Base quote hits a mainnet endpoint. |
+| Fee-once (partner XOR FeeCollector) | ✅ 0x `swapFeeBps`, CoW `partnerFee`, Bebop `fee` = FEE_BPS; others → FeeCollector; XOR (W2 4/4). ⚠ CoW fail-soft can zero it (W7-L-01). |
+| Retry/9O fallback safe | ✅ `withSwapBuildRetry` (transient-only); gates run on the final result regardless of source/fallback. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W7-L-01 | LOW | CoW partner-fee fail-soft retries fee-free on a partnerFee-schema rejection → 0.1% **zeroed** for that order (revenue loss, not user harm; not doubled). Add a metric/alert. |
+| W7-L-02 | LOW | Balancer/OpenOcean/native-Curve build txs but selectors aren't allowlisted → SC-04 blocks execution (safe/fail-closed); confirm quote-only or add recipient-extraction decoders. Cross-ref W2-I-01. |
+| W7-I-01/02 | INFO | Native Curve redundant (Curve liquidity settleable via Velora-Augustus); source-agnostic gate placement is the load-bearing A2 invariant. |
+
+Negative-paths refused: recipient=attacker→R1 400, unknown selector→SC-04 400, double-fee→XOR-impossible,
+Balancer non-whitelisted `data.to`→9G-G7 throw, mainnet-URL-on-Base→per-chain resolver, retry drop-guard→gates
+on final result. Hostile-fixture execution deferred to CI (R1 26/26 + partner-fee 4/4 unit-tested, W2).
+
+### T-SAF Campaign 2026-07-01 — Wave 8: Keeper / order-engine (A5) (on `origin/main` @ cb0748d)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 0L / 2I.** Report: `Audits/Campaign/2026-07-01/W8-keeper.md`.
+Keeper (KMS) compromise **bounded on-chain**; freeze delay-not-loss + single admin writer; **plaintext-key
+Base gap FIXED on main**. Keeper `node --test`: **127/127**.
+
+| Check | Result on `main` |
+|-------|------------------|
+| Keeper compromise bounded on-chain | ✅ keeper calls `executeOrder(orderStruct, userSig, routerData)` (`:1191`); contract forces owner-recipient + on-chain minimumOutput + whitelisted router (V5/V6). Can't misroute via the contract. |
+| Signs only reviewed payload | ✅ orderStruct+signature from Supabase order (user-signed); no re-target. |
+| Freeze delay-not-loss + single writer | ✅ keeper reads fail-open, skips DCA (leaves active), 403 new orders; **never writes circuit_breaker** (single admin writer, no auto-freeze); pause() nuclear. |
+| #246 retry idempotent / #248 defer≠settle | ✅ retry left-active + on-chain nonce/interval prevent double-exec; deviation-guard DEFERS (not a settle); record-execution confirmed-only idempotent. |
+| Fail-open reads vs pause() | ✅ correct split (201 ruling). |
+| Outflow detection | ✅ own-gas subtracted, 0.01 ETH threshold, non-blocking alert. |
+| Plaintext-key guard covers 1 AND 8453 | ✅ **FIXED**: `TESTNET_CHAIN_IDS` allowlist {Sepolia, Base-Sepolia}; Base 8453 → FATAL without KMS/Vault (unless explicit override). |
+| Observability non-blocking; secrets unlogged; cron authed | ✅ never-throw; only env-var *names* logged; Worker POSTs monitor/tick with `Bearer MONITOR_CRON_SECRET`. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W8-I-01 | INFO | `ALLOW_PLAINTEXT_KEY` escape hatch bypasses the prod plaintext-key refusal — never set in prod (ops; complete KMS/HW hardening). |
+| W8-I-02 | INFO | Outflow per-cycle (sub-threshold slow-drain evades; manual-withdrawal over-alerts) — advisory; rolling-window future. |
+
+Negative-paths bounded: misroute via executeOrder impossible (owner-delivery), forged order → sig-recover
+revert, re-exec → nonce/interval revert, keeper-writes-freeze → no path, plaintext-key-on-Base → FATAL,
+drifted DCA → deferred, unauth monitor/tick → 401. No remediation required (clean wave).
+
+### T-SAF Campaign 2026-07-01 — Wave 9: Wallet/frontend/session (A3) (on `origin/main` @ cb0748d)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 1L / 2I.** Report: `Audits/Campaign/2026-07-01/W9-frontend-session.md`.
+Single WC core + pinned qr + wagmi v2 (ADR-008); no `dangerouslySetInnerHTML`; AES-256-GCM secure storage;
+min-output binds client+server+on-chain.
+
+| Check | Result on `main` |
+|-------|------------------|
+| Single WC core / pinned qr / no wagmi-v3; session | ✅ lockfile: one `@walletconnect/core@2.21.1` (overrides), `qr@0.5.5`, wagmi 2.19.5 (v2); single config (no double-init); WalletSessionGuard 9Z-test-locked (1h idle, no premature disconnect). |
+| COOP/COEP headers | ✅ COOP `same-origin-allow-popups` + CORP + CSP + HSTS + X-Frame; COEP intentionally omitted (breaks wallet embeds, W9-I-01). |
+| Secure storage AES-256-GCM (FE-01) | ✅ PBKDF2 wallet-derived key, stores `{iv,ct}` (order/trade metadata only, never keys); plain-localStorage = non-sensitive prefs. ⚠ plaintext fallback when key unavailable (W9-L-01). |
+| Min-output/slippage client+server+on-chain | ✅ server slippage 0–15 (400 else); client can only tighten; minOut→0 still caught by DefiLlama −8% + router amountOutMin (no bad-price settle). |
+| Review modal = frozen payload | ✅ (W5) frozen-then-sign, no rebuild. |
+| XSS | ✅ no `dangerouslySetInnerHTML`; user strings React-escaped; `window.open` = fixed twitter base + encodeURIComponent + noopener; logoURI img-src safe; Telegram esc() server-side. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W9-L-01 | LOW | `secure-storage.ts:184` falls back to **plaintext** when the wallet-derived key is unavailable (crypto-absent / pre-derivation write). Prod (HTTPS + connected wallet) shouldn't fire it; a race/pre-connect write of order metadata would be plaintext (no keys/seeds ever stored). Buffer/refuse sensitive writes until key init. |
+| W9-I-01/02 | INFO | COEP intentionally omitted (dApp posture); client minOut=0 edge compensated by DefiLlama −8% + router amountOutMin (W2-L-01 cross-ref). |
+
+Negative-paths refused: dup WC core/wagmi-v3 → pinned; session double-init → single config; sensitive
+plaintext → AES-GCM (except W9-L-01 fallback); slippage>15 → 400; minOut→0 → server/router bind; XSS →
+React-escaped + no raw sink. Live browser/real-device deferred (human-only).
+
+### T-SAF Campaign 2026-07-01 — Wave 10: Supply chain / secrets / infra / CI (A6) (on `origin/main` @ cb0748d)
+
+**Verdict: APPROVED — 0C / 0H / 0M / 1L / 2I.** Report: `Audits/Campaign/2026-07-01/W10-supply-chain.md`.
+Critical wallet deps single-instance; overrides pin all risky advisories (empty allowlist, 0 high/critical);
+no `NEXT_PUBLIC_` secret; CI gate suite present + blocking; headers sane; Worker cron Bearer-authed.
+
+| Check | Result on `main` |
+|-------|------------------|
+| Single-instance critical deps | ✅ @walletconnect/core 1@2.21.1, @coinbase/wallet-sdk 1@4.3.6, qr 1@0.5.5; ⚠ viem 2 (app 2.47.4 + WC-utils 2.23.2 transitive) → W10-L-01 bundle-only. |
+| Overrides pin advisories; allowlist not masking | ✅ form-data/vite/ws/undici/hono pinned; `audit-allowlist.json` empty → audit-gate fails any unallowed high/critical; `.npmrc min-release-age=7` (lockfile-lint). |
+| No `NEXT_PUBLIC_` secret; not logged | ✅ only anon key + public addresses; server secrets server-only. |
+| CI gates present AND blocking | ✅ test-contracts (continue-on-error REMOVED, forge test); 8 guard jobs (audit-gate/catalog-address/fee-usd/dca-resilience/oracle-advisory/token-catalog/minimum-output/deployed-sources) + lockfile-lint + keeper-tests(127/127) + gitleaks (bare-hex EVM-key rule) + codeql. Only advisory-moderate step is continue-on-error. |
+| Signatures (#12) | ✅ main commits signed (SSH authored + PGP web-flow merges). |
+| Headers sane | ✅ CSP (img-src blob:+token CDNs, scoped connect-src, frame-ancestors none), COOP/CORP/HSTS/X-Frame; no wildcard defeat; COEP intentionally omitted. |
+| Worker cron authed | ✅ Bearer MONITOR_CRON_SECRET; unauth tick → 401. |
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| W10-L-01 | LOW | viem resolves to 2 instances (app 2.47.4 + `@walletconnect/utils` transitive 2.23.2) — bundle bloat, not a runtime bug; forcing one version risks breaking WC. Optional dedupe + WC-modal smoke test. |
+| W10-I-01/02 | INFO | Executor sub-package separate (viem 2.47.10, aws-kms); strong single-file CI guard strategy. |
+
+> **CORRECTION (per W10):** two prior campaign findings are **REMEDIATED on `main`** —
+> **W2-L-01** (`useSwap:458` `deriveMinimumOutput` throws `UnusableQuoteError` → refuse, not minOut=0;
+> `minimum-output-guard`) and **W2-M-01** (`docs/security/DEPLOYED-SOURCES.md` canonical map + `deployed-sources-guard`
+> + deprecated flat). My W4/RB.1 note ("W2-L-01 stands on main") is corrected — it is fixed.
+
+### T-SAF Campaign 2026-07-01 — Wave 11: Synthesis + CAMPAIGN VERDICT (on `origin/main` @ cb0748d)
+
+**CAMPAIGN VERDICT: APPROVED — 0 Critical / 0 High (product).** Master report:
+`Audits/Campaign/2026-07-01/MASTER-REPORT.md`. Full attack surface (3 contracts, 31+ routes, 15 gate/oracle
+libs, registry, 12 adapters, keeper, wallet/frontend, supply-chain/CI) on ETH mainnet + Base.
+
+- **No C/H product finding across all 11 waves.** The one HIGH (W3-H-01) was process/grounding — the campaign
+  initially read a branch 261 commits behind prod; resolved by re-baselining every wave onto `origin/main`.
+- **Cross-wave chain analysis: NO chain reaches user funds.** Every off-chain compromise (API/source/client/
+  keeper/dep) terminates at the on-chain guards (recipient=owner ∧ on-chain minimumOutput ∧ chain-correct
+  whitelisted router) — the proven terminal backstop. Only intentional asymmetry: order reads public / writes
+  signature-gated (W6-M-01, privacy, no funds).
+- **Coverage: §2 inventory = 100%** (each slice owned by a wave, no orphan); **§9 G1–G10 exercised-and-refuted**.
+- **On-main remediations during the campaign:** W2-L-01, W2-M-01 (PR #254), W8 plaintext-key Base gap; W1-I-02/I-03
+  refuted; W1-L-01 superseded.
+- **Open backlog: 2 MED + 6 LOW + INFO** (off-chain info-leak/DoS/reliability/hygiene), RICE-planned in the
+  master report. **Zero pending contract-source remediation.**
+
+Per-wave verdicts (all APPROVED): W1 2L/4I · W2 1M/2L/2I (M+1L now fixed) · W3 gates 0C/0H (+W3-H-01 process) ·
+W4 2I · W5 2I · W6 2M/1L/2I · W7 2L/2I · W8 0/2I · W9 1L/2I · W10 1L/2I. RICE plan: auto-fixable (W6-M-02,
+W9-L-01, W6-L-01, W4-I-02, W7-L-01, W4-I-01, W5-I-02, W10-L-01) · product-decision (W6-M-01, W7-L-02) ·
+governance (W1-L-02 admin→Safe/HW, W8-I-01).
