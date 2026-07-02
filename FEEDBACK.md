@@ -6110,3 +6110,28 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
 - `status`/`reason` are captured into consts BEFORE the fee-free retry reassigns `res`/`desc`.
 - Tests: `cow-fee-monitor.test.ts` (below/at/above threshold, first-event TTL, fail-open, reason cap);
   `cow.test.ts` mocks the monitor to a no-op so its 15 existing tests make no real KV call.
+
+## Feedback — AUDIT-CLEANUP-LOWS · W10-L-01
+
+### W10-L-01 — viem dedup — ASSESSED, LEFT AS ACCEPTED BLOAT (no override)
+- **Tree (`npm ls viem`):** the app + every wallet/wagmi/rainbowkit/reown/coinbase package resolve
+  `viem@2.47.4` (deduped). Exactly ONE app-side second copy: `viem@2.23.2` under
+  `@walletconnect/utils@2.21.1` (via `@wagmi/connectors@6.2.0` → `@walletconnect/ethereum-provider`).
+  (The executor sub-package's viem is separate and out of scope, as the spec noted.)
+- **Why it can't hoist:** `@walletconnect/utils@2.21.1` declares `"viem": "2.23.2"` — an **EXACT pin**
+  (verified in its package.json), not `^2.23.2`. That's precisely why npm materialised a nested
+  `node_modules/@walletconnect/utils/node_modules/viem@2.23.2` instead of deduping to 2.47.4.
+- **Assessment — do NOT force it:** an `overrides: { viem }` pin would push WC's utils from an
+  exact-pinned 2.23.2 across **24 minor versions** to 2.47.4. viem 2.x minors have shipped breaking
+  changes, and `@walletconnect/utils` uses viem for signing/encoding helpers on the **WalletConnect
+  connect/sign runtime path** — a break there surfaces only at runtime, which CI (build / typecheck /
+  unit / the single-file guards) does **not** exercise. The exact pin is a deliberate signal from WC.
+  Per the spec ("if it risks WC → do NOT force it, document the residual, leave as accepted bloat"),
+  this is the risk branch.
+- **Residual (accepted):** one duplicated viem in `node_modules`, reachable only through
+  `@walletconnect/utils` (loaded when a user picks WalletConnect). viem is tree-shaken and WC-utils
+  imports only a small slice, so the shipped-bundle delta is minor; the real cost is node_modules
+  duplication. No override added; no lockfile change.
+- **How it resolves on its own:** when `@wagmi/connectors` bumps `@walletconnect/*` to a release whose
+  `utils` advances/widens its viem pin to a range compatible with 2.47.x, npm will dedupe automatically —
+  no action needed. Re-check with `npm ls viem` after the next wagmi/WalletConnect upgrade.
