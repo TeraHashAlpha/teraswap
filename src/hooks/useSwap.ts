@@ -20,6 +20,7 @@ import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { shouldFallbackToNextSource } from '@/lib/swap-fallback'
+import { isExecutableSource } from '@/lib/executable-sources'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 
 // ── Price Guard error (DefiLlama server-side block) ──────
@@ -311,6 +312,14 @@ export function useSwap(
     })
 
     try {
+      // [CHORE-SUSHI-V7] Defense-in-depth: a quote-only source (not execution-
+      // wired on this chain — no SC-04 selector / R1 decoder / on-chain router
+      // whitelist) must never reach a wallet prompt. The SwapBox scoping should
+      // make this unreachable; throwing here lets the 9O walk continue to the
+      // ranked executable fallbacks if a caller slipped one through.
+      if (!isExecutableSource(source, chainId)) {
+        throw new Error(`${source} is quote-only on this network — it can't settle swaps yet.`)
+      }
       const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
       const routeViaFeeCollector = usesFeeCollector(source, chainId)
 

@@ -130,8 +130,8 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci --ignore-scripts=false
-      - name: Quote-source guard (OpenOcean units contract; Balancer disabled)
-        run: npx vitest run src/lib/adapters/openocean.test.ts src/lib/adapters/balancer-disabled.test.ts
+      - name: Quote-source guard (OpenOcean units; Balancer disabled; Sushi v7 sender + executable scoping)
+        run: npx vitest run src/lib/adapters/openocean.test.ts src/lib/adapters/balancer-disabled.test.ts src/lib/adapters/sushiswap.test.ts src/lib/executable-sources.test.ts
 
   dca-resilience-guard:
     # [chore/dca-resilience] The full vitest suite is not run in CI (only single-file
