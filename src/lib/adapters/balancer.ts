@@ -1,3 +1,21 @@
+/**
+ * ⚠ SUPERSEDED — DISABLED via DISABLED_SOURCES ('balancer') since
+ * CHORE-QUOTE-SOURCE-FIXES C2 (2026-07-03). Do NOT delete (repo rule #4).
+ *
+ * The v2 SOR order endpoint this adapter targets
+ * (`api-v3.balancer.fi/order/{chainId}`) returns **404** — the host now
+ * serves only `/`, `/graphql` and `/log` (verified live 2026-07-02, T-SAF
+ * W7-L-02 coverage check). The adapter has produced 0 production quotes
+ * ever; while enabled it only contributed errors to the quote fan-out.
+ *
+ * Re-enable path: rewrite fetchQuote/fetchSwapData against the Balancer v3
+ * GraphQL SOR (`POST https://api-v3.balancer.fi/graphql`, query
+ * `sorGetSwapPaths(chain, swapAmount, swapType, tokenIn, tokenOut)`), keep
+ * the [SPRINT-9G G7] fail-closed router-whitelist gate on the swap target,
+ * then remove the DISABLED_SOURCES entry. Note W7-L-02's verdict before
+ * investing: Balancer pools are already routed by the whitelisted
+ * aggregators (Kyber/Velora/…), so its unique-liquidity value is ~0.
+ */
 import { getAdapterApiUrl, getRouterWhitelist, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'

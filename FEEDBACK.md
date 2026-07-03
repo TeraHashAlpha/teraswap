@@ -6135,3 +6135,67 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
 - **How it resolves on its own:** when `@wagmi/connectors` bumps `@walletconnect/*` to a release whose
   `utils` advances/widens its viem pin to a range compatible with 2.47.x, npm will dedupe automatically —
   no action needed. Re-check with `npm ls viem` after the next wagmi/WalletConnect upgrade.
+
+## Feedback — CHORE-QUOTE-SOURCE-FIXES · C1 OpenOcean units (branch chore/quote-source-fixes)
+
+### Decision — FIX (preferred path), not DISABLED_SOURCES
+- Chose the units fix. The API contract was verified live twice (2026-07-02 probe + a
+  fractional-amount probe during implementation): request `amount` is HUMAN units (`amount=2.5`
+  WETH → `inAmount=2500000000000000000`), response `inAmount`/`outAmount` are RAW base units.
+  The integration is NOT brittle — the only defect was the unconverted request amount, so
+  disabling would have thrown away a healthy responder for no reason. Keeping it preserves
+  quorum breadth (more correct responders → the 3×-median outlier filter has a meaningful
+  median to defend).
+- Conversion is exact (BigInt div/mod, no float): `toHumanAmount()` in `openocean.ts`, applied
+  to BOTH `/quote` and `/swap` builds (same API contract; the prompt named ~:11 but the swap
+  path had the identical bug). Response `outAmount` is already base units → passes through
+  unconverted (a passthrough test pins this so nobody "fixes" it into a double conversion).
+
+### Edge case — `srcDecimals` is optional in QuoteParams
+- All real callers (fetchMetaQuote / fetchSwapFromSource) thread decimals, but the field is
+  optional; the adapter defaults to 18. For a 6-dec token a hypothetically MISSING decimals now
+  UNDER-scales the quote (10^12 too small → loses ranking, fail-safe direction) instead of the
+  pre-fix over-scaling (which WON ranking). Failure direction is now safe-by-construction.
+
+### Concern — n=2 outlier-filter blind spot is structural (backlog)
+- The root enabler remains: with exactly 2 valid quotes, `fetchMetaQuote`'s outlier filter
+  (3×-median; median of 2 = avg) has threshold ≥ 1.5× the max, so it can NEVER remove a
+  mis-scaled winner. Fixed for OpenOcean at the source, but any future adapter emitting a
+  mis-scaled `toAmount` re-opens the same displayed-price hole in 2-responder windows.
+  Suggest a follow-up prompt: sanity-band the winner against an independent reference
+  (Chainlink mid ± X%) before display when quorum < 3.
+
+### Test gap — CI runs no full vitest suite
+- Added `quote-source-guard` to ci.yml (house single-file-guard pattern, pinned action SHAs)
+  so the new `openocean.test.ts` actually gates PRs; without it the test would never run in CI.
+
+## Feedback — CHORE-QUOTE-SOURCE-FIXES · C2 Balancer disable (branch chore/quote-source-fixes)
+
+### Re-enable path (recorded per prompt)
+- Documented twice at the point of change: the `DISABLED_SOURCES.balancer` entry (constants.ts)
+  and the SUPERSEDED header in `balancer.ts`. Summary: the v2 SOR order endpoint
+  (`api-v3.balancer.fi/order/{chainId}`) is 404-dead (host serves only `/`, `/graphql`, `/log`;
+  verified live 2026-07-02); re-enabling requires rewriting fetchQuote/fetchSwapData against the
+  Balancer v3 GraphQL SOR (`POST /graphql`, `sorGetSwapPaths`), keeping the [SPRINT-9G G7]
+  fail-closed router-whitelist gate, then removing the DISABLED_SOURCES entry. W7-L-02 verdict
+  worth re-reading first: aggregators already route Balancer pools, unique liquidity ~0.
+
+### Assumption — "per chain" flattened to a global disable
+- The prompt asked for a per-chain disable, but `DISABLED_SOURCES` is a global flat map
+  (`Record<source, reason>`) and that is the ONLY mechanism api.ts consults. The dead endpoint is
+  one host serving both chains, so a global disable is behaviourally identical here; no per-chain
+  schema was invented for a source that is dead everywhere.
+
+### Confirmation — no 0/null candidate leaks into winner selection
+- Disabled sources are excluded BEFORE the fan-out (api.ts `allSources` filter), so they cannot
+  contribute a candidate at all (pinned by balancer-disabled.test.ts with a spy on the adapter).
+- Independently, winner selection was already null-safe for erroring sources: rejected promises,
+  `null` returns, and zero/non-numeric `toAmount` are all dropped before ranking
+  (api.ts quotes filter + classifyAdapterResult), and `fetchSwapFromSource` throws for a disabled
+  source rather than returning a candidate.
+
+### Observability note
+- `monitored-endpoints.ts` still hostname-monitors `api-v3.balancer.fi` — that host's root
+  serves 200, so the /status host check stays green and needs no change; the source simply stops
+  appearing in quote-level stats. If the Architect wants the status page to say "disabled"
+  explicitly, that is a separate small prompt (out of this one's scope).

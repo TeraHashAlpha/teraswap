@@ -174,7 +174,15 @@ export const FEE_INCOMPATIBLE_SOURCES: AggregatorName[] = [
 // Excluded from ALL quote and swap requests. Reversible by removing the entry.
 // cowswap re-enabled 2026-04-23 — post-mortem complete, RegistryLock confirmed.
 // See INC-2026-04-14-001 for context.
-export const DISABLED_SOURCES: Record<string, string> = {}
+export const DISABLED_SOURCES: Record<string, string> = {
+  // [CHORE-QUOTE-SOURCE-FIXES C2] The v2 SOR order endpoint the adapter calls
+  // (api-v3.balancer.fi/order/{chainId} — single host, so this covers both
+  // chains) returns 404 ('only /, /graphql and /log allowed'); 0 prod quotes
+  // ever (T-SAF W7-L-02, 2026-07-02). Re-enable ONLY after migrating
+  // src/lib/adapters/balancer.ts to the Balancer v3 GraphQL SOR
+  // (POST /graphql, sorGetSwapPaths).
+  balancer: 'SOR order endpoint dead (404) — re-enable requires migrating to the Balancer v3 GraphQL SOR (sorGetSwapPaths)',
+}
 
 // FeeCollector ABI (only the functions we call from the frontend)
 // [H-04] swapETHWithFee / swapTokenWithFee now take tokenOut + minimumOutput
