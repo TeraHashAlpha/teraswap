@@ -6254,3 +6254,43 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
 ### Test gap
 - quote-source-guard (ci.yml) extended with sushiswap.test.ts + executable-sources.test.ts; the
   QuoteBreakdown badge tests ride the existing fee-usd-guard job (same file).
+## Feedback — CHORE-QUOTE-QUORUM-HARDENING (2 commits)
+
+### Thresholds chosen (all explicit constants, documented in-module)
+- **Low-quorum display band: 500 bps (5%) winner-vs-runner-up**, env-overridable via
+  `LOW_QUORUM_MAX_DEVIATION_BPS`. Rationale: mirrors the existing `CROSS_QUOTE_WARN_THRESHOLD`
+  (0.05); legitimate 2-source spread on quotable pairs is <1%, while every observed mis-scale
+  (OpenOcean 10^6–10^18×) exceeds it by orders of magnitude. Boundary is inclusive (exactly 5%
+  passes). 1 responder is never dropped — only flagged `lowConfidence` (zero cross-check exists).
+- **Alert window: 6 h** (`SOURCE_HEALTH_ALERT_WINDOW_SECONDS`), one alert per source·kind per
+  window via KV SET NX+EX — the CoW fee-zero rate-limit shape, keyed per finding.
+- **Outlier (mis-scale) threshold: 10 display drops/window**; **drift: winRate < 0.25× baseline
+  over ≥20 quotes**. Baselines (`SOURCE_HEALTH_BASELINES`): kyberswap 55%, velora 30%, cowswap 2%,
+  uniswapv3 4% — from the Apr–Jul daily monitor history.
+
+### Decisions to review
+- **The known-silent five (1inch/0x/odos/sushiswap/bebop) and disabled balancer are NOT baselined**:
+  their causes are diagnosed and owner-actioned (W7-followup-silent-sources.md); paging every 6 h on
+  a known condition is noise. ADD each source to `SOURCE_HEALTH_BASELINES` the day its fix lands so
+  a relapse pages. openocean/curve also unbaselined (n≈2 trickle windows — no stable baseline).
+- **Edge not covered by the band (documented):** 2 responders BOTH mis-scaled by the same factor
+  agree with each other and pass any pairwise check — that residual needs an external reference
+  (the #248/#18 hooks below) and is accepted for display scope.
+
+### Reconciliation with existing sanity paths (no double-alerting)
+- **H5 `quorum-check.ts`** (discovered during implementation): periodic reference-pair cross-check
+  that can force-disable a source via the state machine. Complementary, not duplicative: H5 reads
+  the POST-filter `fetchMetaQuote` result, so quotes dropped by the 3×-median filter (or now the
+  low-quorum band) are invisible to it — the new display-drop KV counter is precisely the signal H5
+  cannot see. H5 alerts via state transitions; source-health alerts are informational
+  (`active→active`) keyed per source·kind.
+- **#248 DCA deviation guard**: keeper EXECUTION-time defer, alerts keeper-side about orders —
+  different layer, no overlap.
+- **#18/#247 oracle-less advisory**: client display advisory, never alerts.
+
+### Test gap (accepted)
+- `src/app/api/monitor/route.ts` has no route-level test file; the alerting logic is fully covered
+  in `source-health-monitor.test.ts` (14 tests) and the route wiring is a 6-line best-effort call.
+  `fetchMetaQuote`'s wiring of the band is likewise exercised indirectly (85 existing quote-route
+  tests stay green); a mocked-registry integration test would need a new adapter-mock harness —
+  flagged for the Architect if wanted.
