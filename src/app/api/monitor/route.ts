@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 import { safeCompare, isAllowedOrigin } from '@/lib/validation'
+import { checkSourceHealthAlerts, type SourceHealthFinding } from '@/lib/source-health-monitor'
 
 // API-HIGH-03: CORS restricted to app domain (was wildcard *)
 function corsHeaders(req: Request) {
@@ -249,6 +250,17 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => b.volumeUsd - a.volumeUsd)
 
+    // ── 2b. [CHORE-QUOTE-QUORUM / W7-L-02] Source-health alerting ──
+    // Detect silence/outlier/drift over this windowed snapshot and page (one
+    // rate-limited informational alert per source·kind per window). Best-effort:
+    // an alerting failure never breaks the monitor response.
+    let sourceHealthFindings: SourceHealthFinding[] = []
+    try {
+      sourceHealthFindings = await checkSourceHealthAlerts(
+        sourceHealthArr.map(s => ({ source: s.source, quoteCount: s.quoteCount, winCount: s.winCount })),
+      )
+    } catch { /* fail-open — findings stay empty */ }
+
     // ── 3. Security summary ──
     const securitySummary: Record<string, number> = {}
     const recentSecurity = securityEvents.slice(0, 100).map((e: Record<string, unknown>) => ({
@@ -444,6 +456,7 @@ export async function GET(req: Request) {
         last30d: periodStats(d30),
       },
       sourceHealth: sourceHealthArr,
+      sourceHealthFindings,
       security: {
         summary: securitySummary,
         recentEvents: recentSecurity,

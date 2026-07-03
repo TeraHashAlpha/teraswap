@@ -227,6 +227,25 @@ jobs:
       - name: Quote-quorum guard (garbage quote cannot win a 2-responder display)
         run: npx vitest run src/lib/quote-quorum.test.ts
 
+  source-health-guard:
+    # [CHORE-QUOTE-QUORUM / W7-L-02] The full vitest suite is not run in CI (only
+    # single-file guards), so this pins the source-health alerting: a baselined
+    # (historically-quoting) source going silent, a systematic display-outlier
+    # counter crossing threshold, or a win-rate collapse fires EXACTLY ONE
+    # rate-limited informational alert per source·kind per window through the
+    # emitTransitionAlert fan-out; KV failures fail OPEN (monitoring never breaks
+    # the monitor). Balancer/OpenOcean/Odos died invisibly before this existed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Source-health guard (silence/outlier/drift pages once per window)
+        run: npx vitest run src/lib/source-health-monitor.test.ts
+
   deployed-sources-guard:
     # [AUDIT-W2 / W2-M-01] Static deployed-source-of-truth gate: the canonical
     # addr → source → compiler → code-hash map (docs/security/DEPLOYED-SOURCES.md)

@@ -22,6 +22,17 @@ import {
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey } from './adapters/circuit-breaker'
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
 import { applyLowQuorumSanity, getLowQuorumMaxDeviationBps } from './quote-quorum'
+
+// [CHORE-QUOTE-QUORUM / W7-L-02] Count display demotions/drops per source so
+// the monitor's outlier detector can page on a systematic mis-scale (the
+// OpenOcean class). Server-only deps (KV) ⇒ window-guarded dynamic import,
+// fire-and-forget, fail-open — never blocks or breaks the quote path.
+function recordDisplayDrops(dropped: NormalizedQuote[]): void {
+  if (typeof window !== 'undefined' || dropped.length === 0) return
+  void import('./source-health-monitor')
+    .then(m => Promise.all(dropped.map(d => m.recordQuoteDisplayDrop(d.source))))
+    .catch(() => { /* observability is best-effort */ })
+}
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { isSequencerUp, SequencerDownError } from './chains/sequencer-check'
@@ -245,6 +256,7 @@ export async function fetchMetaQuote(
         sanity.demoted.map(d => `${d.source}=${d.toAmount}`).join(', ') +
         ` (band ${getLowQuorumMaxDeviationBps()} bps vs runner-up)`,
       )
+      recordDisplayDrops(sanity.demoted)
     }
   }
 
@@ -265,6 +277,13 @@ export async function fetchMetaQuote(
           return true
         }
       })
+      // [CHORE-QUOTE-QUORUM] Feed the source-health outlier detector: quotes
+      // the 3×-median filter drops here are invisible to H5's quorum-check
+      // (it reads the post-filter result), so this counter is the only
+      // systematic-mis-scale signal. Fire-and-forget, server-only, fail-open.
+      if (filtered.length < displayQuotes.length) {
+        recordDisplayDrops(displayQuotes.filter(q => !filtered.includes(q)))
+      }
 
       // ── Cross-quote validation ──
       const CROSS_QUOTE_WARN_THRESHOLD = 0.05
