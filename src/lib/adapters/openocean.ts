@@ -2,13 +2,31 @@ import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
+/**
+ * [CHORE-QUOTE-SOURCE-FIXES C1] The OpenOcean v4 API expects the sell
+ * `amount` in HUMAN (decimals-adjusted) units and returns amounts in RAW
+ * base units (contract verified live 2026-07-02; pinned in openocean.test.ts).
+ * Convert the internal base-unit string exactly (BigInt, no float) before
+ * sending; the response `outAmount` is already base units and must pass
+ * through unconverted. Sending base units here priced every quote for a
+ * trade 10^srcDecimals too large (10^6–10^18×) — garbage that could win the
+ * DISPLAYED best price in exactly-2-responder windows, where the 3×-median
+ * outlier filter cannot trigger.
+ */
+function toHumanAmount(baseUnits: string, decimals: number): string {
+  const scale = 10n ** BigInt(decimals)
+  const v = BigInt(baseUnits)
+  const frac = (v % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
+  return frac ? `${v / scale}.${frac}` : (v / scale).toString()
+}
+
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
+  const { src, dst, amount, srcDecimals = 18, chainId = DEFAULT_CHAIN_ID } = params
   const base = getAdapterApiUrl('openocean', chainId)
   const qs = new URLSearchParams({
     inTokenAddress: src,
     outTokenAddress: dst,
-    amount: amount,
+    amount: toHumanAmount(amount, srcDecimals),
     gasPrice: '30',
     slippage: '1',
   })
@@ -31,7 +49,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 }
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
-  const { src, dst, amount, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
+  const { src, dst, amount, srcDecimals = 18, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
   // [P101] OpenOcean's /swap endpoint does NOT support a split sender/
   // receiver — `account` is both signer and destination. Warn loudly when
   // a caller requested a distinct recipient so /v1/swap can detect the
@@ -46,7 +64,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   const qs = new URLSearchParams({
     inTokenAddress: src,
     outTokenAddress: dst,
-    amount: amount,
+    // [CHORE-QUOTE-SOURCE-FIXES C1] Same human-units contract as /quote.
+    amount: toHumanAmount(amount, srcDecimals),
     gasPrice: '30',
     slippage: String(slippage),
     account: from,

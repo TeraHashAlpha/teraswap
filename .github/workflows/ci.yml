@@ -113,6 +113,24 @@ jobs:
       - name: Platform-fee USD guard
         run: npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx
 
+  quote-source-guard:
+    # [CHORE-QUOTE-SOURCE-FIXES] The full vitest suite is not run in CI (only
+    # single-file guards), so this pins the displayed-quote units contract:
+    # the OpenOcean v4 API takes the sell amount in HUMAN units and answers in
+    # RAW base units — the adapter must convert the request (never send raw
+    # base units → 10^decimals-oversized garbage quotes) and pass the response
+    # through unconverted. Regression origin: T-SAF W7-L-02 coverage check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Quote-source guard (OpenOcean human-units request contract)
+        run: npx vitest run src/lib/adapters/openocean.test.ts
+
   dca-resilience-guard:
     # [chore/dca-resilience] The full vitest suite is not run in CI (only single-file
     # guards), so this pins the DCA-resilience UI regressions: (1) failedOrderReason
