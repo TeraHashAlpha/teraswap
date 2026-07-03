@@ -6168,3 +6168,34 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
 ### Test gap — CI runs no full vitest suite
 - Added `quote-source-guard` to ci.yml (house single-file-guard pattern, pinned action SHAs)
   so the new `openocean.test.ts` actually gates PRs; without it the test would never run in CI.
+
+## Feedback — CHORE-QUOTE-SOURCE-FIXES · C2 Balancer disable (branch chore/quote-source-fixes)
+
+### Re-enable path (recorded per prompt)
+- Documented twice at the point of change: the `DISABLED_SOURCES.balancer` entry (constants.ts)
+  and the SUPERSEDED header in `balancer.ts`. Summary: the v2 SOR order endpoint
+  (`api-v3.balancer.fi/order/{chainId}`) is 404-dead (host serves only `/`, `/graphql`, `/log`;
+  verified live 2026-07-02); re-enabling requires rewriting fetchQuote/fetchSwapData against the
+  Balancer v3 GraphQL SOR (`POST /graphql`, `sorGetSwapPaths`), keeping the [SPRINT-9G G7]
+  fail-closed router-whitelist gate, then removing the DISABLED_SOURCES entry. W7-L-02 verdict
+  worth re-reading first: aggregators already route Balancer pools, unique liquidity ~0.
+
+### Assumption — "per chain" flattened to a global disable
+- The prompt asked for a per-chain disable, but `DISABLED_SOURCES` is a global flat map
+  (`Record<source, reason>`) and that is the ONLY mechanism api.ts consults. The dead endpoint is
+  one host serving both chains, so a global disable is behaviourally identical here; no per-chain
+  schema was invented for a source that is dead everywhere.
+
+### Confirmation — no 0/null candidate leaks into winner selection
+- Disabled sources are excluded BEFORE the fan-out (api.ts `allSources` filter), so they cannot
+  contribute a candidate at all (pinned by balancer-disabled.test.ts with a spy on the adapter).
+- Independently, winner selection was already null-safe for erroring sources: rejected promises,
+  `null` returns, and zero/non-numeric `toAmount` are all dropped before ranking
+  (api.ts quotes filter + classifyAdapterResult), and `fetchSwapFromSource` throws for a disabled
+  source rather than returning a candidate.
+
+### Observability note
+- `monitored-endpoints.ts` still hostname-monitors `api-v3.balancer.fi` — that host's root
+  serves 200, so the /status host check stays green and needs no change; the source simply stops
+  appearing in quote-level stats. If the Architect wants the status page to say "disabled"
+  explicitly, that is a separate small prompt (out of this one's scope).
