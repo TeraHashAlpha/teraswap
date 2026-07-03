@@ -103,6 +103,10 @@ export interface MetaQuoteResult {
   crossQuoteDeviation?: number   // e.g. 0.05 = best is 5% above median
   /** True if best quote was flagged as suspicious vs the consensus */
   crossQuoteWarning?: boolean
+  /** [CHORE-QUOTE-QUORUM / W7-L-02] True when the displayed best could not be
+   *  cross-validated (<3 responders: lone quote, a demoted low-quorum winner,
+   *  or an unusable runner-up amount). Display metadata only. */
+  lowConfidence?: boolean
   /** [P94] Gasless recommendation overlay. Populated client-side after
    *  quotes return so the engine can use the freshest gas/ETH price.
    *  Server-side responses (e.g. v1/quote) populate it inline. */

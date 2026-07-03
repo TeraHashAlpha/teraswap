@@ -21,6 +21,7 @@ import {
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey } from './adapters/circuit-breaker'
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
+import { applyLowQuorumSanity, getLowQuorumMaxDeviationBps } from './quote-quorum'
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { isSequencerUp, SequencerDownError } from './chains/sequencer-check'
@@ -227,9 +228,29 @@ export async function fetchMetaQuote(
     }
   })
 
+  // ── [CHORE-QUOTE-QUORUM / W7-L-02] Low-quorum display sanity ──
+  // With <3 responders the 3×-median filter below cannot discriminate (n=2 ⇒
+  // threshold = 1.5×max), so bound the winner to the runner-up instead: a
+  // winner beyond the band is demoted from the DISPLAY (execution gates —
+  // SC-04 / R1 / on-chain minimumOutput — are untouched by design).
+  let displayQuotes = quotes
+  let lowConfidence: boolean | undefined
+  if (quotes.length < 3) {
+    const sanity = applyLowQuorumSanity(quotes)
+    displayQuotes = sanity.quotes
+    lowConfidence = sanity.lowConfidence || undefined
+    if (sanity.demoted.length > 0) {
+      console.warn(
+        `[quote-quorum] demoted low-quorum display outlier(s): ` +
+        sanity.demoted.map(d => `${d.source}=${d.toAmount}`).join(', ') +
+        ` (band ${getLowQuorumMaxDeviationBps()} bps vs runner-up)`,
+      )
+    }
+  }
+
   // ── Outlier detection ──
-  if (quotes.length >= 2) {
-    const amounts = quotes.map(q => { try { return BigInt(q.toAmount) } catch { return 0n } })
+  if (displayQuotes.length >= 2) {
+    const amounts = displayQuotes.map(q => { try { return BigInt(q.toAmount) } catch { return 0n } })
     const sorted = [...amounts].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     const mid = Math.floor(sorted.length / 2)
     const median = sorted.length % 2 === 0
@@ -237,7 +258,7 @@ export async function fetchMetaQuote(
       : sorted[mid]
     if (median > 0n) {
       const threshold = median * 3n
-      const filtered = quotes.filter(q => {
+      const filtered = displayQuotes.filter(q => {
         try {
           return BigInt(q.toAmount) <= threshold
         } catch {
@@ -267,6 +288,7 @@ export async function fetchMetaQuote(
           fetchedAt: Date.now(),
           crossQuoteDeviation,
           crossQuoteWarning,
+          lowConfidence,
         }
         setCachedQuote(cacheKey, result)
         return result
@@ -275,9 +297,10 @@ export async function fetchMetaQuote(
   }
 
   const result: MetaQuoteResult = {
-    best: quotes[0],
-    all: quotes,
+    best: displayQuotes[0],
+    all: displayQuotes,
     fetchedAt: Date.now(),
+    lowConfidence,
   }
   setCachedQuote(cacheKey, result)
   return result
