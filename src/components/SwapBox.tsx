@@ -15,7 +15,7 @@ import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
 import { useSwap, type SwapStatus } from '@/hooks/useSwap'
-import { orderFallbackSources } from '@/lib/swap-fallback'
+import { orderExecutableFallbacks, scopeToExecutable } from '@/lib/executable-sources'
 import { useApproval } from '@/hooks/useApproval'
 import Permit2EducationModal from '@/components/Permit2EducationModal'
 import TokenAddressBadge from '@/components/TokenAddressBadge'
@@ -148,9 +148,13 @@ export default function SwapBox() {
 
   // [LP-04 / P140] Smart MEV routing — logic extracted to
   // src/lib/mev-preference.ts for direct unit testing.
+  // [CHORE-SUSHI-V7] Executable scoping runs FIRST: the winner offered for
+  // execution must be settleable on this chain (quote-only sources — e.g.
+  // Sushi v7/RedSnwapper — stay visible in the list but never win the
+  // button), and the MEV threshold then compares against a settleable best.
   const { meta, smartMevApplied, mevExposedBest } = useMemo(
-    () => selectBestWithMevPreference(rawMeta ?? null, mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
-    [rawMeta, mevProtected],
+    () => selectBestWithMevPreference(scopeToExecutable(rawMeta ?? null, activeChainId), mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
+    [rawMeta, mevProtected, activeChainId],
   )
 
   // [SPRINT-9E] Re-resolve the selected tokens to the ACTIVE chain's addresses
@@ -245,7 +249,7 @@ export default function SwapBox() {
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
   const { splitResult, analyzing: splitAnalyzing, useSplit, toggleSplit } =
-    useSplitRoute(meta, tokenIn, tokenOut, amountIn, isConnected && isCorrectChain)
+    useSplitRoute(meta, tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, activeChainId)
 
   const {
     status: splitSwapStatus,
@@ -588,9 +592,9 @@ export default function SwapBox() {
     } else if (meta?.best.source) {
       // [SPRINT-9O Part B] Pass ranked fallbacks so a best route that reverts
       // pre-swap simulation auto-switches to the next working source.
-      executeSwap(meta.best.source, orderFallbackSources(meta, meta.best.source))
+      executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId))
     }
-  }, [approvalReady, approve, meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
+  }, [approvalReady, approve, meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId])
 
   const handleSwap = useCallback(() => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -615,9 +619,9 @@ export default function SwapBox() {
     } else if (meta?.best.source) {
       // [SPRINT-9O Part B] Pass ranked fallbacks so a best route that reverts
       // pre-swap simulation auto-switches to the next working source.
-      executeSwap(meta.best.source, orderFallbackSources(meta, meta.best.source))
+      executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId))
     }
-  }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive])
+  }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId])
 
   return (
     <>
@@ -735,7 +739,7 @@ export default function SwapBox() {
                   : '(MEV protected)'}
               </p>
             )}
-            <QuoteBreakdown meta={meta} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
+            <QuoteBreakdown meta={meta} chainId={activeChainId} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
           </div>
         )}
         {/* Quote loading skeleton */}

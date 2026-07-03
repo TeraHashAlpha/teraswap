@@ -6200,6 +6200,60 @@ OHM v1 (single thin pool), which is why it stays a non-voting source.
   appearing in quote-level stats. If the Architect wants the status page to say "disabled"
   explicitly, that is a separate small prompt (out of this one's scope).
 
+## Feedback — CHORE-SUSHI-V7-REDSNWAPPER-QUOTE-FIX (branch chore/sushi-v7-redsnwapper-quote-fix)
+
+### The (a)(b)(c) execution matrix (probed live + on-chain, 2026-07-03)
+
+RedSnwapper `0xAC4c6e212A361c968F1725b4d055b47E63F80b75` (same address both chains); v7 swap calldata
+selector `0x5f3bd1c8` = `snwap(address,uint256,address,address,uint256,address,bytes)` (openchain-verified).
+
+| Check | Mainnet (1) | Base (8453) |
+|---|---|---|
+| (a) selector `0x5f3bd1c8` in SC-04 `KNOWN_SWAP_SELECTORS` | ❌ | ❌ (list is chain-global) |
+| (b) R1 decoder in `VALIDATED_SELECTORS` (calldata-recipient.ts) | ❌ | ❌ (fail-closed, chain-agnostic) |
+| (c) on-chain `whitelistedRouters(RedSnwapper)` — FeeCollector | ❌ `0x47f2…7459` → false | ✅ `0xeFC3…f130` → true |
+| (c) on-chain `whitelistedRouters(RedSnwapper)` — OrderExecutor | ❌ `0xeFC3…f130` → false | ✅ `0x135B…2598` → true |
+
+(view calls `0x0f874a13` via public RPCs; control: mainnet FC(kyberswap router) → true, so the encoding
+is validated. The W7-followup report's "Base works today" claim covered only (c) + the FE routers.ts
+address whitelist — (a)/(b) were unchecked there and FAIL, which flips the branch decision below.)
+
+### Branch taken: #2 — quote-only on BOTH chains
+Base is NOT "fully wired" ((a)∧(b) fail everywhere; the goal's branch #1 precondition doesn't hold), so
+Sushi v7 is scoped quote-only on 1 AND 8453 via the new `src/lib/executable-sources.ts`
+(`QUOTE_ONLY_SOURCES_BY_CHAIN` + `scopeToExecutable` + `orderExecutableFallbacks`), consumed by SwapBox
+(best rebased before MEV preference), useSwap (defensive pre-wallet gate), useSplitRoute (leg
+eligibility), QuoteBreakdown ("Quote only" badge). SC-04 stays the terminal backstop, untouched.
+
+### Follow-up filed (fund-flow gated — do NOT do without Auditor re-pass, rules #2/#3)
+Executable Sushi-v7 support = ONE task, W7-L-02-decoder class: (1) R1 recipient decoder for `snwap`
+(recipient is arg #3, offset 2×32 — verify against the verified contract source, incl. the
+`snwapMultiple` variant if the API ever emits it); (2) SC-04 `KNOWN_SWAP_SELECTORS` + R1
+`VALIDATED_SELECTORS` entries for `0x5f3bd1c8`; (3) mainnet OWNER txs: FC `0x47f2…7459` +
+OE `0xeFC3…f130` `setRouterWhitelist(RedSnwapper, true)`; (4) `routers.ts`/`ROUTER_WHITELIST` mainnet
+sushiswap entry RouteProcessor4 → RedSnwapper (the FE whitelist still lists RouteProcessor4, which v7
+no longer returns — mainnet builds are double-blocked today: address + selector); (5) update
+`QUOTE_ONLY_SOURCES_BY_CHAIN` per chain + the invariant test in executable-sources.test.ts; (6) the
+keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whitelists it on-chain).
+
+### Edge cases beyond the prompt
+- **openocean + native-curve added to the same quote-only map**: identical failure class ((a)/(b) ❌,
+  W7-L-02 APPROVED verdict "leave quote-only"), and since #259 fixed OpenOcean's units its now-correct
+  quotes were WINNING the display and dead-ending into the SC-04 → 9O fallback papercut on every
+  attempt (observed in local verification). Scoping them is the display-level completion of W7-L-02.
+  Balancer needs no entry (fully disabled, #259).
+- **`sender` semantics**: v7 requires the param but the QUOTE is sender-independent (probed: FC, user,
+  zero address → byte-identical amounts). We send the chain's FeeCollector (the actual router caller
+  in the fee-routed flow), zero-address fallback on FC-less chains for quotes, user fallback for swap
+  builds. If the executable-support task lands, keeper/OE builds should pass sender=OrderExecutor.
+- **Pre-existing bug (not fixed here, out of scope): useSplitRoute's sub-amount /api/quote fetch omits
+  `chainId`** (useSplitRoute.ts ~:97) → on Base, split sub-quotes are MAINNET quotes. Split legs were
+  already unusable on Base for other reasons, but this should be fixed when split routing is next
+  touched.
+
+### Test gap
+- quote-source-guard (ci.yml) extended with sushiswap.test.ts + executable-sources.test.ts; the
+  QuoteBreakdown badge tests ride the existing fee-usd-guard job (same file).
 ## Feedback — CHORE-QUOTE-QUORUM-HARDENING (2 commits)
 
 ### Thresholds chosen (all explicit constants, documented in-module)

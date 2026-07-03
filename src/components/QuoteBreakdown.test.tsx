@@ -361,3 +361,42 @@ describe('QuoteBreakdown — platform fee USD (non-oracle fee token)', () => {
     expect(document.body.textContent).not.toMatch(/\(\$\d/)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [CHORE-SUSHI-V7] Quote-only scoping label — a source that cannot settle
+// on the active chain (no SC-04 selector / R1 decoder / on-chain router
+// whitelist, e.g. Sushi v7 via RedSnwapper) is shown in the compare list
+// for price context but labeled informational.
+// ─────────────────────────────────────────────────────────────
+describe('QuoteBreakdown — quote-only source label [CHORE-SUSHI-V7]', () => {
+  function compareMeta(sources: Array<[string, string]>): MetaQuoteResult {
+    const quotes = sources.map(([source, toAmount]) => ({
+      source, toAmount, estimatedGas: 0, gasUsd: 0, routes: [],
+    }))
+    return { best: quotes[0], all: quotes, fetchedAt: Date.now() } as MetaQuoteResult
+  }
+
+  it('labels sushiswap "Quote only" on mainnet (RedSnwapper not execution-wired)', () => {
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          meta: compareMeta([['kyberswap', '2990000000'], ['sushiswap', '3000000000']]),
+          chainId: 1,
+        })}
+      />,
+    )
+    expect(screen.getByText(/quote only/i)).toBeInTheDocument()
+  })
+
+  it('does not label executable sources', () => {
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          meta: compareMeta([['kyberswap', '2990000000'], ['velora', '2980000000']]),
+          chainId: 1,
+        })}
+      />,
+    )
+    expect(screen.queryByText(/quote only/i)).not.toBeInTheDocument()
+  })
+})

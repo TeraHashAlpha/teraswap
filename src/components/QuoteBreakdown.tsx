@@ -7,6 +7,8 @@ import type { PriceCheck } from '@/lib/chainlink'
 import type { ApprovalPlan } from '@/lib/approvals'
 import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { isFeeCollectorActive } from '@/lib/api'
+import { isExecutableSource } from '@/lib/executable-sources'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { swapNotionalUsd, feeUsd, formatFeeUsd } from '@/lib/fee-usd'
 import { safeBigInt } from '@/lib/utils'
@@ -45,6 +47,9 @@ interface Props {
   onRefresh?: () => void
   /** [P147] true while a refresh is on the wire — drives the spin state. */
   refreshing?: boolean
+  /** [CHORE-SUSHI-V7] Active chain — drives the per-chain "Quote only" label
+   *  for sources that cannot settle on this chain (executable-sources.ts). */
+  chainId?: number
 }
 
 function sourceLabel(source: AggregatorName): string {
@@ -66,7 +71,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 export default function QuoteBreakdown({
   meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, tokenInUsdPrice, tokenOutUsdPrice, approvalPlan, onEditSlippage, gasEstimate,
   smartMevApplied = false, mevExposedBest = false, onUseGasless,
-  onRefresh, refreshing = false,
+  onRefresh, refreshing = false, chainId = DEFAULT_CHAIN_ID,
 }: Props) {
   // [SPRINT-9Q Q2] Rate-direction toggle (display-only). Persisted for the session so the
   // chosen reading direction survives quote refreshes / remounts.
@@ -515,6 +520,11 @@ export default function QuoteBreakdown({
                   {qMeta?.isDirect && (
                     <span className="inline-flex items-center rounded bg-orange-500/20 px-1 py-0 text-[9px] font-bold text-orange-400" title="Direct on-chain swap — no API middleman">
                       Direct
+                    </span>
+                  )}
+                  {!isExecutableSource(q.source, chainId) && (
+                    <span className="inline-flex items-center rounded bg-cream-08 px-1 py-0 text-[9px] font-bold text-cream-35" title="Price shown for comparison — this source can't settle swaps on this network yet, so it is never used for execution.">
+                      Quote only
                     </span>
                   )}
                   {q.source === 'uniswapv3' && q.meta?.uniswapV3Fee != null && (

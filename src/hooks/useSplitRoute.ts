@@ -4,6 +4,8 @@ import type { MetaQuoteResult, NormalizedQuote } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import { fetchSplitQuotes, findBestSplit } from '@/lib/split-router'
 import { safeBigInt } from '@/lib/utils'
+import { isExecutableSource } from '@/lib/executable-sources'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import {
   type SplitQuoteResult,
   SPLIT_MIN_USD,
@@ -40,6 +42,13 @@ export function useSplitRoute(
   tokenOut: Token | null,
   amountIn: string,
   enabled: boolean,
+  // [CHORE-SUSHI-V7] Active chain — split legs EXECUTE per source, so a
+  // quote-only source on this chain (no SC-04 selector / R1 decoder /
+  // on-chain whitelist — e.g. Sushi v7/RedSnwapper) must not be offered as
+  // a leg: one such leg would fail the whole split at the client selector
+  // gate. Passed in (rather than read via wagmi) so the hook stays
+  // renderable without a provider; SwapBox supplies useActiveChainId().
+  chainId: number = DEFAULT_CHAIN_ID,
 ): UseSplitRouteResult {
   const [splitResult, setSplitResult] = useState<SplitQuoteResult | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
@@ -104,7 +113,7 @@ export function useSplitRoute(
             const res = await fetch(`/api/quote?${params}`)
             if (!res.ok) return []
             const subMeta: MetaQuoteResult = await res.json()
-            return subMeta.all.filter(q => SPLIT_ELIGIBLE_SOURCES.has(q.source))
+            return subMeta.all.filter(q => SPLIT_ELIGIBLE_SOURCES.has(q.source) && isExecutableSource(q.source, chainId))
           } catch {
             return []
           }
@@ -113,7 +122,8 @@ export function useSplitRoute(
         const quoteMap = await fetchSplitQuotes(
           fetchQuoteAtAmount,
           rawAmount,
-          currentMeta.all,
+          // [CHORE-SUSHI-V7] Seed only with legs that can settle on this chain.
+          currentMeta.all.filter(q => isExecutableSource(q.source, chainId)),
         )
 
         if (runId !== abortRef.current) return // stale
@@ -146,7 +156,7 @@ export function useSplitRoute(
     }
 
     analyze()
-  }, [meta?.fetchedAt, tokenIn?.address, tokenOut?.address, amountIn, enabled, tradeAboveThreshold])
+  }, [meta?.fetchedAt, tokenIn?.address, tokenOut?.address, amountIn, enabled, tradeAboveThreshold, chainId])
 
   return {
     splitResult,
