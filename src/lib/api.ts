@@ -21,6 +21,18 @@ import {
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey } from './adapters/circuit-breaker'
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
+import { applyLowQuorumSanity, getLowQuorumMaxDeviationBps } from './quote-quorum'
+
+// [CHORE-QUOTE-QUORUM / W7-L-02] Count display demotions/drops per source so
+// the monitor's outlier detector can page on a systematic mis-scale (the
+// OpenOcean class). Server-only deps (KV) ⇒ window-guarded dynamic import,
+// fire-and-forget, fail-open — never blocks or breaks the quote path.
+function recordDisplayDrops(dropped: NormalizedQuote[]): void {
+  if (typeof window !== 'undefined' || dropped.length === 0) return
+  void import('./source-health-monitor')
+    .then(m => Promise.all(dropped.map(d => m.recordQuoteDisplayDrop(d.source))))
+    .catch(() => { /* observability is best-effort */ })
+}
 import { isWhitelistedRouter, ROUTER_WHITELIST_BY_CHAIN } from './chains/routers'
 import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { isSequencerUp, SequencerDownError } from './chains/sequencer-check'
@@ -227,9 +239,30 @@ export async function fetchMetaQuote(
     }
   })
 
+  // ── [CHORE-QUOTE-QUORUM / W7-L-02] Low-quorum display sanity ──
+  // With <3 responders the 3×-median filter below cannot discriminate (n=2 ⇒
+  // threshold = 1.5×max), so bound the winner to the runner-up instead: a
+  // winner beyond the band is demoted from the DISPLAY (execution gates —
+  // SC-04 / R1 / on-chain minimumOutput — are untouched by design).
+  let displayQuotes = quotes
+  let lowConfidence: boolean | undefined
+  if (quotes.length < 3) {
+    const sanity = applyLowQuorumSanity(quotes)
+    displayQuotes = sanity.quotes
+    lowConfidence = sanity.lowConfidence || undefined
+    if (sanity.demoted.length > 0) {
+      console.warn(
+        `[quote-quorum] demoted low-quorum display outlier(s): ` +
+        sanity.demoted.map(d => `${d.source}=${d.toAmount}`).join(', ') +
+        ` (band ${getLowQuorumMaxDeviationBps()} bps vs runner-up)`,
+      )
+      recordDisplayDrops(sanity.demoted)
+    }
+  }
+
   // ── Outlier detection ──
-  if (quotes.length >= 2) {
-    const amounts = quotes.map(q => { try { return BigInt(q.toAmount) } catch { return 0n } })
+  if (displayQuotes.length >= 2) {
+    const amounts = displayQuotes.map(q => { try { return BigInt(q.toAmount) } catch { return 0n } })
     const sorted = [...amounts].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     const mid = Math.floor(sorted.length / 2)
     const median = sorted.length % 2 === 0
@@ -237,13 +270,20 @@ export async function fetchMetaQuote(
       : sorted[mid]
     if (median > 0n) {
       const threshold = median * 3n
-      const filtered = quotes.filter(q => {
+      const filtered = displayQuotes.filter(q => {
         try {
           return BigInt(q.toAmount) <= threshold
         } catch {
           return true
         }
       })
+      // [CHORE-QUOTE-QUORUM] Feed the source-health outlier detector: quotes
+      // the 3×-median filter drops here are invisible to H5's quorum-check
+      // (it reads the post-filter result), so this counter is the only
+      // systematic-mis-scale signal. Fire-and-forget, server-only, fail-open.
+      if (filtered.length < displayQuotes.length) {
+        recordDisplayDrops(displayQuotes.filter(q => !filtered.includes(q)))
+      }
 
       // ── Cross-quote validation ──
       const CROSS_QUOTE_WARN_THRESHOLD = 0.05
@@ -267,6 +307,7 @@ export async function fetchMetaQuote(
           fetchedAt: Date.now(),
           crossQuoteDeviation,
           crossQuoteWarning,
+          lowConfidence,
         }
         setCachedQuote(cacheKey, result)
         return result
@@ -275,9 +316,10 @@ export async function fetchMetaQuote(
   }
 
   const result: MetaQuoteResult = {
-    best: quotes[0],
-    all: quotes,
+    best: displayQuotes[0],
+    all: displayQuotes,
     fetchedAt: Date.now(),
+    lowConfidence,
   }
   setCachedQuote(cacheKey, result)
   return result
