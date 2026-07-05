@@ -6294,3 +6294,23 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   `fetchMetaQuote`'s wiring of the band is likewise exercised indirectly (85 existing quote-route
   tests stay green); a mocked-registry integration test would need a new adapter-mock harness —
   flagged for the Architect if wanted.
+
+## Feedback — INVESTIGATE-SPLITROUTE-CHAIN-AWARENESS (branch audit/splitroute-chain-awareness)
+
+### Severity: MEDIUM — display/feature-availability; NOT fund-flow. Follow-up fix prompt: WARRANTED.
+- Full triage: `Audits/Campaign/2026-07-01/W4-followup-splitroute-chain-awareness.md` (this branch,
+  PR #262). Root cause `useSplitRoute.ts:106-113` (sub-quote request omits `chainId` → server defaults
+  every adapter to mainnet); split best-execution silently dead on Base for most pairs; 14 same-address
+  catalog tokens can display mis-priced savings and execute suboptimal (but fully gated) leg ratios;
+  11 wasted rate-limited mainnet fan-outs per ≥$5k Base analysis. Execution safety intact — legs
+  re-build fresh chain-aware with fresh minimumOutput. No Auditor pass needed for the fix
+  (`CHORE-SPLITROUTE-CHAINID`: one-line conditional thread + URL-assertion tests).
+- **Independently replicated** (second read-only run, same baseline `b600a05`, separate session):
+  identical root-cause lines, the same 14-token collision set from the generated catalogs, and the
+  execution-integrity trace (fresh `/api/swap` builds with chainId at `useSplitSwap.ts:288`, fresh
+  `minimumOutput` at `:361`, chain-validated router/recipient/simulation). Additional live datapoint
+  for the collision niche: the hook's exact sub-leg request for **ETH→cbBTC 1.7** quotes **mainnet
+  venues** (uniswapv4/CurveV2/FluidDex; kyber path through mainnet USDC `0xa0b8…eb48`) without the
+  param vs **Base venues** (CurveV1StableNg ×3, PancakeV3, Base pools `0x0000efc4…`) with
+  `chainId=8453` — best outputs **~31 bps apart** on the same request, direction favouring Base. This
+  is the concrete mis-analysis magnitude a same-address pair feeds into `findBestSplit`.
