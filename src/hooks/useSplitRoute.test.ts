@@ -238,3 +238,69 @@ describe('useSplitRoute — robustness', () => {
     await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalledTimes(2))
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [CHORE-SPLITROUTE-CHAINID] Sub-quote fetch URL — chain awareness.
+//
+// The hook builds `fetchQuoteAtAmount` and hands it to fetchSplitQuotes;
+// the URL it constructs was NEVER asserted before, which is how the
+// chainId omission survived (triage: PR #262 — Base sub-legs were priced
+// on mainnet via /api/quote's P217 default, killing split routing on
+// Base). These tests capture the REAL closure through the module mock
+// and pin the request URL per chain:
+//   - Base (8453): the request MUST carry chainId=8453.
+//   - Mainnet: NO chainId param — P219 convention (mirrors useQuote's
+//     fetchMetaQuoteViaApi): mainnet requests stay byte-identical to the
+//     pre-multi-chain shape, and /api/quote's P217 default IS chain 1.
+// ─────────────────────────────────────────────────────────────
+describe('useSplitRoute — sub-quote fetch URL chain awareness [CHORE-SPLITROUTE-CHAINID]', () => {
+  async function captureSubQuoteUrl(chainId?: number): Promise<URL> {
+    const meta = makeMeta('10000000000') // 10k USDC out → above threshold
+    mockFindBestSplit.mockReturnValue(makeBestSplit(false))
+    renderHook(() =>
+      chainId === undefined
+        ? useSplitRoute(meta, ETH, USDC, '5', true)
+        : useSplitRoute(meta, ETH, USDC, '5', true, chainId),
+    )
+    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+    // First arg of fetchSplitQuotes is the hook's REAL fetchQuoteAtAmount.
+    const fetchQuoteAtAmount = mockFetchSplitQuotes.mock.calls[0][0] as (amount: string) => Promise<unknown>
+
+    const seen: URL[] = []
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (...args: unknown[]) => {
+      seen.push(new URL(String(args[0]), 'http://localhost'))
+      return new Response(JSON.stringify({ best: null, all: [], fetchedAt: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    try {
+      await fetchQuoteAtAmount('2500000000000000000')
+    } finally {
+      fetchSpy.mockRestore()
+    }
+    expect(seen.length).toBe(1)
+    return seen[0]
+  }
+
+  it('carries chainId=8453 when the active chain is Base', async () => {
+    const url = await captureSubQuoteUrl(8453)
+    expect(url.pathname).toBe('/api/quote')
+    expect(url.searchParams.get('chainId')).toBe('8453')
+    expect(url.searchParams.get('src')).toBe(ETH.address)
+    expect(url.searchParams.get('dst')).toBe(USDC.address)
+    expect(url.searchParams.get('amount')).toBe('2500000000000000000')
+  })
+
+  it('mainnet request stays byte-identical: no chainId param (P219; the P217 default IS chain 1)', async () => {
+    const url = await captureSubQuoteUrl(1)
+    expect(url.searchParams.has('chainId')).toBe(false)
+    expect(url.searchParams.get('srcDecimals')).toBe('18')
+    expect(url.searchParams.get('dstDecimals')).toBe('6')
+  })
+
+  it('defaults to the mainnet shape when the chainId param is omitted (back-compat)', async () => {
+    const url = await captureSubQuoteUrl(undefined)
+    expect(url.searchParams.has('chainId')).toBe(false)
+  })
+})

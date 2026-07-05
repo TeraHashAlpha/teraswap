@@ -110,6 +110,15 @@ export function useSplitRoute(
               srcDecimals: currentTokenIn.decimals.toString(),
               dstDecimals: currentTokenOut.decimals.toString(),
             })
+            // [CHORE-SPLITROUTE-CHAINID] Price sub-legs on the ACTIVE chain.
+            // Same P219 convention as useQuote (this endpoint's primary
+            // caller): append the param only off-mainnet so the mainnet
+            // request stays byte-identical — /api/quote's P217 default IS
+            // chain 1. Omitting this priced Base sub-legs on MAINNET (502s
+            // for Base-only addresses → split routing silently dead on Base;
+            // mainnet-priced analyses for same-address tokens). Triage:
+            // PR #262 (audit/splitroute-chain-awareness, W4-followup report).
+            if (chainId !== DEFAULT_CHAIN_ID) params.set('chainId', String(chainId))
             const res = await fetch(`/api/quote?${params}`)
             if (!res.ok) return []
             const subMeta: MetaQuoteResult = await res.json()
