@@ -6314,3 +6314,46 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   param vs **Base venues** (CurveV1StableNg ×3, PancakeV3, Base pools `0x0000efc4…`) with
   `chainId=8453` — best outputs **~31 bps apart** on the same request, direction favouring Base. This
   is the concrete mis-analysis magnitude a same-address pair feeds into `findBestSplit`.
+## Feedback — CHORE-SPLITROUTE-CHAINID (branch chore/splitroute-chainid)
+
+### Confirmed: Base split routing now FIRES (behaviour change — previously silently dead)
+- Live activation check (production /api/quote, read-only, driving the REAL `fetchSplitQuotes` +
+  `findBestSplit` with the fixed request shape, WETH→USDC 3 ETH on Base): **all 11 sub-percent
+  requests resolved (0 × 502)**, 5 sources populated sub-percent entries, and `findBestSplit`
+  **assembled a real split candidate set** (`isSplit: true`; improvement over single was 0 bps at
+  that moment's liquidity — the point is the machinery now HAS candidates; pre-fix it could never
+  assemble any). Collision-niche re-check: the ETH→cbBTC sub-leg with the param prices on **Base
+  venues** (aerodromeslipstream/PancakeswapV3/CurveV1StableNg — no FluidDex/mainnet fingerprints),
+  so the 14-token same-address niche no longer mis-prices.
+- **Wasted-request count → 0**: the 11 per-analysis sub-quote requests still exist by design, but
+  they are now productive Base quotes instead of doomed mainnet lookups. (The 11×/15s refresh
+  pressure vs the 30/min per-IP cap exists on EVERY chain and predates this fix — the damping idea
+  stays flagged from the triage; out of scope here.)
+
+### Assumption — mainnet URL shape follows P219, not a literal chainId=1 param
+- The prompt's test wording ("carries chainId … 1 on mainnet") was implemented as: Base carries
+  `chainId=8453`; mainnet carries **no param** — asserted as byte-identity. Rationale: this is the
+  established P219 convention of the SAME endpoint's primary caller (`useQuote`: "appended … only
+  for non-mainnet chains so the mainnet request is byte-identical"), and /api/quote's P217 default
+  IS chain 1, so the mainnet request resolves to chain 1 either way. An explicit `chainId=1` would
+  gratuitously diverge from the sibling call site and split the server quote-cache namespace for
+  identical mainnet requests. Two extra tests pin the mainnet/back-compat shape.
+
+### Test-harness note
+- `useSplitSwap.test.ts` gained a REGISTRY-level overridable `getChainConfig` mock (default: real
+  registry) because the Base fee-routed leg needs a deployed FeeCollector, which the test env lacks
+  (`NEXT_PUBLIC_BASE_FEE_COLLECTOR` unset → registry null), and `buildSimulationTx` resolves the FC
+  via a DIRECT `@/lib/chains/registry` import that a barrel-level mock does not intercept. The new
+  Base test pins the freshness end-to-end: `legMinOutput` = `deriveMinimumOutput(FRESH build
+  toAmount)` ≠ the stale analysis quote, decoded out of the actual signed `swapETHWithFee` calldata.
+
+### Multi-lens review (workflow) — 2 findings, both fixed pre-commit
+- A 3-lens adversarial review workflow (correctness / test-adequacy / constraint-compliance) over the
+  diff surfaced: (1) **vitest-4 mock-leak**: `restoreAllMocks` never resets `vi.fn()` implementations
+  (spy-only) and `clearAllMocks` keeps them, so the Base-FC `getChainConfig` override would have leaked
+  into any test appended after the new describe — fixed with an explicit `mockGetChainConfig.mockReset()`
+  in the shared beforeEach + corrected comment; (2) the hook comment referenced the triage report by a
+  file path that only exists on the unmerged #262 branch — now anchored to PR #262 itself. The
+  correctness lens also positively verified: `chainId` was already in the analyze-effect deps (no stale
+  closure), server quote-cache keys namespace by chainId, and coming-soon chains cannot reach the fetch
+  (SwapBox gates `enabled` on `isChainActive`).

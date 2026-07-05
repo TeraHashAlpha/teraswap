@@ -72,6 +72,29 @@ vi.mock('@/lib/calldata-recipient', () => ({
   validateCallDataRecipient: (...args: unknown[]) => mockValidateCallDataRecipient(...args),
 }))
 
+// [CHORE-SPLITROUTE-CHAINID] Overridable getChainConfig: real registry by
+// default; a test may inject an implementation (e.g. a Base config WITH a
+// FeeCollector — the test env has no NEXT_PUBLIC_BASE_FEE_COLLECTOR, so the
+// real Base entry is null and fee-routed Base legs would refuse). Mocked at
+// the REGISTRY level so both import paths are intercepted: the hook's
+// '@/lib/chains' barrel re-export AND buildSimulationTx's direct
+// '@/lib/chains/registry' import. NOTE: neither restoreAllMocks (spy-only on
+// vitest 4) nor clearAllMocks (keeps implementations) drops a vi.fn()
+// implementation — the shared beforeEach mockReset()s this one explicitly so
+// an override can never leak into later tests (which must see the REAL
+// registry, e.g. Base feeCollector = null).
+const mockGetChainConfig = vi.fn<(chainId: number) => unknown>()
+vi.mock('@/lib/chains/registry', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/chains/registry')>('@/lib/chains/registry')
+  return {
+    ...actual,
+    getChainConfig: (chainId: number) =>
+      mockGetChainConfig.getMockImplementation()
+        ? mockGetChainConfig(chainId)
+        : actual.getChainConfig(chainId),
+  }
+})
+
 vi.mock('@/lib/analytics', () => ({
   logSwapToSupabase: vi.fn(),
   updateSwapStatus: vi.fn(),
@@ -194,6 +217,10 @@ function mockSwapFetch(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // [CHORE-SPLITROUTE-CHAINID] vi.fn() implementations survive both
+  // clearAllMocks and (on vitest 4) restoreAllMocks — reset the registry
+  // override explicitly so it can never leak across tests.
+  mockGetChainConfig.mockReset()
   // [SPRINT-9G G6] The active chain now derives from useAccount().chain (via
   // useActiveChainId). Reset to the default (mainnet, no explicit chain) each
   // test so a per-test override can't leak — clearAllMocks keeps implementations.
@@ -728,5 +755,77 @@ describe('useSplitSwap — [SPRINT-9R audit] frozen-plan invalidation', () => {
     await act(async () => { await confirmDone })
     await waitFor(() => expect(result.current.status).toBe('success'))
     expect(mockSendTransactionAsync).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [CHORE-SPLITROUTE-CHAINID] Base split execution — chain-correct, FRESH
+// legMinOutput. The chainId fix makes Base split analysis live for the
+// first time, so this guards the newly-reachable execution path: a Base
+// fee-routed leg must (a) build via /api/swap with chainId 8453, (b)
+// derive legMinOutput from the FRESH build's toAmount (never the stale
+// analysis quote), and (c) encode that minimum into the actual
+// FeeCollector calldata that gets signed.
+// ─────────────────────────────────────────────────────────────
+describe('useSplitSwap — Base split legMinOutput freshness [CHORE-SPLITROUTE-CHAINID]', () => {
+  it('encodes deriveMinimumOutput(fresh toAmount) into the Base FeeCollector call', async () => {
+    const { deriveMinimumOutput } = await vi.importActual<typeof import('@/lib/minimum-output')>('@/lib/minimum-output')
+    const { FEE_COLLECTOR_ABI } = await vi.importActual<typeof import('@/lib/constants')>('@/lib/constants')
+    const { decodeFunctionData } = await vi.importActual<typeof import('viem')>('viem')
+    const actualChains = await vi.importActual<typeof import('@/lib/chains/registry')>('@/lib/chains/registry')
+
+    const BASE_FC = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130' as const
+    // Wallet on Base.
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
+    // Fee-routed leg + a Base config whose FeeCollector is deployed (prod
+    // shape; the test env registry has null).
+    mockUsesFeeCollector.mockReturnValue(true)
+    mockGetChainConfig.mockImplementation((chainId: number) => {
+      const cfg = actualChains.getChainConfig(chainId)
+      if (chainId !== 8453) return cfg
+      return { ...cfg, contracts: { ...cfg.contracts, feeCollector: BASE_FC } }
+    })
+
+    // FRESH build: toAmount differs from the (stale) analysis quote so the
+    // assertion can tell them apart.
+    const FRESH_OUT = '2000000000'  // 2,000 USDC from the fresh /api/swap build
+    const STALE_OUT = '1500000000'  // 1,500 USDC in the analysis-time leg quote
+    const bodies: Array<Record<string, unknown>> = []
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
+      bodies.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response(JSON.stringify(makeQuote({ toAmount: FRESH_OUT })), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const SLIPPAGE = 0.5
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', SLIPPAGE))
+    const route = makeSplitRoute(makeLeg('1inch', 100, STALE_OUT))
+    await runSplit(result, route)
+    await waitFor(() => expect(result.current.legs[0].status).not.toBe('fetching'))
+    expect(result.current.legs[0].error).toBeUndefined()
+    await waitFor(() => expect(result.current.legs[0]).toMatchObject({ status: 'success' }))
+    expect(result.current.status).toBe('success')
+
+    const expectedMin = deriveMinimumOutput(FRESH_OUT, SLIPPAGE)
+    expect(expectedMin).toBeGreaterThan(0n)
+    // Never derived from the stale analysis quote.
+    expect(expectedMin).not.toBe(deriveMinimumOutput(STALE_OUT, SLIPPAGE))
+
+    // (a) leg built on the active chain.
+    expect(bodies[0]).toHaveProperty('chainId', 8453)
+    // (b) the frozen (reviewed) plan carries the fresh-derived minimum.
+    expect(result.current.plannedLegs[0].legMinOutput).toBe(expectedMin)
+    // (c) the SIGNED tx targets the Base FeeCollector and encodes that minimum.
+    expect(mockSendTransactionAsync).toHaveBeenCalled()
+    const sent = mockSendTransactionAsync.mock.calls[0][0] as { to: string; data: `0x${string}` }
+    expect(sent.to.toLowerCase()).toBe(BASE_FC.toLowerCase())
+    const decoded = decodeFunctionData({ abi: FEE_COLLECTOR_ABI, data: sent.data })
+    expect(decoded.functionName).toBe('swapETHWithFee')
+    expect(decoded.args?.[3]).toBe(expectedMin)
   })
 })
