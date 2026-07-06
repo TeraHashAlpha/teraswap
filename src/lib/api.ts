@@ -239,11 +239,14 @@ export async function fetchMetaQuote(
     }
   })
 
-  // ── [CHORE-QUOTE-QUORUM / W7-L-02] Low-quorum display sanity ──
+  // ── [CHORE-QUOTE-QUORUM / W7-L-02] Low-quorum sanity band ──
   // With <3 responders the 3×-median filter below cannot discriminate (n=2 ⇒
-  // threshold = 1.5×max), so bound the winner to the runner-up instead: a
-  // winner beyond the band is demoted from the DISPLAY (execution gates —
-  // SC-04 / R1 / on-chain minimumOutput — are untouched by design).
+  // threshold = 1.5×max), so bound the winner to the runner-up instead.
+  // [CHORE-QUORUM-LOWCONFIDENCE-FIX] A winner beyond the band is demoted, so
+  // the runner-up becomes the PRESENTED best — i.e. the quote the user is
+  // steered to sign; this is execution-selection-adjacent, not merely
+  // cosmetic. The execution gates (SC-04 / R1 / on-chain minimumOutput) are
+  // untouched by design and still gate whatever quote is executed.
   let displayQuotes = quotes
   let lowConfidence: boolean | undefined
   if (quotes.length < 3) {

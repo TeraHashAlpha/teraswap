@@ -6459,3 +6459,75 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   was demonstrated. Align scoping when v1 goes multi-chain (S8).
 - Full deliverable: `Audits/Reviews/AZ-REVIEW-2026-07-06.md` (audited SHA, reconciliation table, reproduced
   claims, RICE ranking with fund-flow + rule tags, dependency-ordered plan, corrected mis-frames).
+## Feedback — CHORE-QUORUM-LOWCONFIDENCE-FIX (branch chore/quorum-lowconfidence-fix)
+
+### ⚠ Needs an Auditor pass (execution-selection-adjacent)
+- The #260 low-quorum demotion CHANGES which source is presented as best and therefore which quote
+  the user signs/executes. This chore only (1) corrected the mischaracterized "display-only"
+  headers, (2) rendered `lowConfidence`, (3) added adversarial characterization tests. **The
+  demotion algorithm, the 500 bps band, and all execution gates are untouched.** Auditor sign-off
+  required before merge (as the prompt scopes it: "Then → Auditor").
+
+### FLAGGED GAP (not patched, per prompt): low-ball demotion of an honest winner
+- Adversarial result: with 2 responders the band always demotes the WINNER, but the pairwise spread
+  carries no information about WHICH side is wrong. A source quoting >500 bps UNDER an honest
+  winner (test uses −6%) gets the honest quote demoted and is ITSELF presented as best — steering
+  the user to the worse quote. Pinned in `quote-quorum.test.ts` as
+  "(a) FLAGGED GAP (Auditor): …" — characterization, NOT endorsement.
+- Not silent, and bounded: every demotion sets `lowConfidence` (now rendered); on feeded pairs the
+  client Chainlink gate requires explicit informed consent from 2% deviation and hard-blocks beyond
+  the 25% consent ceiling (price-gate.ts); the server-side DefiLlama guard (422, "output too far
+  below fair value") cannot be overridden; and the executed fill is bounded by its own on-chain
+  minimumOutput. Residual exposure: pairs that are BOTH oracle-less and DefiLlama-less, under the
+  tiered unverified-swap USD limits, where the only signals are the (new) cue + oracle-less note.
+- Options for the Auditor (deliberately NOT implemented here): (i) flag-without-reorder when the
+  error direction is ambiguous (keep the winner, set `lowConfidence`, show both quotes); (ii) demote
+  only when an external reference (Chainlink/DefiLlama anchor) confirms the WINNER is the outlier;
+  (iii) accept as-is — the observed defect class (mis-scale UP, OpenOcean 10^6–10^18×) is fully
+  covered, and a low-ball attack needs a compromised source AND an unfeeded pair to escape consent.
+
+### Adversarial results (2-responder window; all pinned as tests)
+- (b) Inflated winner beyond the band (+6% and 100× mis-scale): demoted — never presented as best.
+- (b-residual) Premium WITHIN the band (+4.9%): presented as best — the designed limit of any
+  pairwise band; bounded by that quote's own slippage/minimumOutput. Accepted residual.
+- (a) Low-ball WITHIN the band (−4%): cannot demote an honest winner (not even flagged).
+- (a) Low-ball BEYOND the band (−6%): the FLAGGED GAP above.
+- Determinism: frozen input, 50 repeated calls → identical outcome, zero input mutation/reorder;
+  an exact 2-source tie is kept, unflagged, order-stable.
+
+### Render-vs-remove decision: RENDERED (prompt-preferred)
+- Informational cue in QuoteBreakdown's notice stack, matching the oracle-less note's house style
+  (bold lead, calm body, protection reassurance) but on the NEUTRAL cream palette — deliberately no
+  amber/red. Non-alarmism is pinned by test (cue container className must not match
+  danger/warning/amber/red).
+- Copy nuance: N = `meta.all.length` (the sources actually shown) and the copy reads "responded
+  with a usable quote" — in the demotion case 2 sources responded but only 1 was usable, so plain
+  "only 1 source responded" would be false and "2 sources" would overstate the validation. The
+  defensive unusable-runner-up branch (2 shown + flagged) reads slightly generously; it is
+  unreachable in practice (adapters pre-filter non-positive amounts) and was left as-is.
+- No new plumbing: `MetaQuoteResult.lowConfidence` already flowed server→client through /api/quote
+  → useQuote → QuoteBreakdown props — it was set but rendered nowhere (dead safety signal).
+
+### #248 reconciliation (deviation-guard.js — read-only, unchanged)
+- No conflict: #248 is a keeper-side execution-TIME defer gate for an already-pinned DCA router
+  (1% vs a fresh cross-agg best, fail-open, defers only within a bounded window, never re-routes);
+  the quorum band is a pre-signature presentation gate (5%, per interactive request). Different
+  layer, different time, no shared state, neither relies on the other.
+- Interaction worth the Auditor's eye: if a low-quorum demotion ever steered which router a user
+  PINNED into a DCA order, #248 partially back-stops each fill (defers a >1% drifted route within
+  the window, then executes anyway) — a bound, not a rescue.
+
+### Header corrections (requirement 1)
+- `quote-quorum.ts`: "DISPLAY-ONLY" paragraph replaced with the honest characterization —
+  presented-best steering, gates named (SC-04 `isKnownSwapSelector`, R1
+  `validateCallDataRecipient`, on-chain `minimumOutput` = terminal backstop, which guarantee
+  faithful execution OF the presented quote but cannot restore a demoted better one) — plus the
+  adversarial-asymmetry note and the #248 reconciliation.
+- Also corrected: `quote-quorum.test.ts` header ("display selection only"), the `api.ts` call-site
+  comment, and `adapters/types.ts` `lowConfidence` doc ("Display metadata only" → "never gates
+  execution; rendered as the cue").
+
+### Test flake observed (pre-existing, unrelated)
+- One full-suite run failed `src/hooks/useOrderEngine.test.ts:768` (waitFor on a second hook mount,
+  orders length 1 vs 0) under parallel load; it passes alone, passes on full-suite rerun, and passes
+  on an untouched origin/main tree. Not introduced by this chore — noting for CI-hygiene triage.
