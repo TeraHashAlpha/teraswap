@@ -38,8 +38,10 @@ const PINNED_DOMAIN = {
 /** Fixed order message covering all 15 fields with distinct, deterministic values. */
 const PINNED_MESSAGE = {
   owner: '0x1111111111111111111111111111111111111111',
-  tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-  tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+  // Public mainnet token addresses (WETH/USDC) — not secrets; the field names
+  // ('token…') trip gitleaks' generic-api-key keyword heuristic.
+  tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // gitleaks:allow
+  tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // gitleaks:allow
   amountIn: 1000000000000000000n,
   minAmountOut: 1700000000n,
   orderType: 0,
