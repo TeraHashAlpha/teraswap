@@ -6358,6 +6358,30 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   closure), server quote-cache keys namespace by chainId, and coming-soon chains cannot reach the fetch
   (SwapBox gates `enabled` on `isChainActive`).
 
+## Feedback — CHORE-EIP712-ORDER-TYPES-DEDUP (branch chore/eip712-order-types-dedup)
+
+### Identity verified FIRST (per the gate) — no drift, dedup path taken
+- Structural, order-sensitive comparison of `ORDER_EIP712_TYPES` (order-engine/types.ts:37) vs the inline
+  `ORDER_TYPES` (orders/route.ts:30): 15 identical fields, identical names/solidity-types/order.
+- Cryptographic proof: `hashTypedData` over a fixed 15-field order under the real mainnet domain produced
+  the SAME digest from both declarations (`0x16163a15…8097070`). Domain was already single-sourced on both
+  sides via `getOrderExecutorDomain(chainId)` — only the types literal was duplicated.
+- Had they drifted, this would have STOPPED here per the prompt (live signature-recovery bug → Auditor).
+
+### Change (behaviour-preserving, proven post==pre)
+- orders/route.ts now imports `ORDER_EIP712_TYPES` for `recoverTypedDataAddress`; inline duplicate removed.
+- New `src/lib/order-engine/types.test.ts` locks: (1) the exact 15-field schema with a readable diff,
+  (2) the typed-data digest of a fixed order under a literal domain (env-independent — the pinned digest
+  equals the one the removed duplicate produced, which IS the post==pre proof), (3) a sign→recover
+  roundtrip in the exact call shape the route uses. Test header documents the upgrade protocol (schema
+  change ⇒ update pins + bump domain/contract together).
+- CI: `api-hardening-guard` now runs types.test.ts (full suite is not run in CI). Full local suite:
+  186 files / 2399 tests green; typecheck + lint clean.
+
+### Note for the Auditor (awareness, no action needed)
+- Fund-flow-adjacent surface (order signature verification) but zero semantic change — same bytes, same
+  digest, now impossible to edit one-sidedly. The client side (useOrderEngine) already used the canonical
+  export; CANCEL_ORDER_TYPES was already single-sourced.
 ## Feedback — CHORE-P0-RESCUE-AUDIT-REPORTS (branch chore/rescue-audit-reports)
 
 ### Rescued file list — 28 (set grew by 1 during the rescue: the 07-06 Weekly landed while working)

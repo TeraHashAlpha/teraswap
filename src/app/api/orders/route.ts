@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
 import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
+import { ORDER_EIP712_TYPES } from '@/lib/order-engine/types'
 import {
   verifyOrdersReadAccess,
   PUBLIC_ORDER_STATUSES,
@@ -27,25 +28,13 @@ const MAX_ACTIVE_ORDERS = 20
 // [API-02] MIN_ORDER_AMOUNT (= contract's 10_000) is now imported from order-engine/config.ts —
 // [CHORE-DCA-PRELAUNCH-FIXES] single source of truth shared with the client pre-sign guard.
 
-const ORDER_TYPES = {
-  Order: [
-    { name: 'owner', type: 'address' },
-    { name: 'tokenIn', type: 'address' },
-    { name: 'tokenOut', type: 'address' },
-    { name: 'amountIn', type: 'uint256' },
-    { name: 'minAmountOut', type: 'uint256' },
-    { name: 'orderType', type: 'uint8' },
-    { name: 'condition', type: 'uint8' },
-    { name: 'targetPrice', type: 'uint256' },
-    { name: 'priceFeed', type: 'address' },
-    { name: 'expiry', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'router', type: 'address' },
-    { name: 'routerDataHash', type: 'bytes32' },  // [C-01]
-    { name: 'dcaInterval', type: 'uint256' },
-    { name: 'dcaTotal', type: 'uint256' },
-  ],
-}
+// [CHORE-EIP712-ORDER-TYPES-DEDUP] The Order schema is single-sourced from
+// order-engine/types.ts (ORDER_EIP712_TYPES) — the SAME object the client
+// signs with in useOrderEngine. It was previously re-declared inline here
+// (byte-identical, proven by digest comparison at dedup time); a one-sided
+// edit would have silently broken recoverTypedDataAddress with a 400
+// "Signature mismatch". Schema + digest are locked by
+// src/lib/order-engine/types.test.ts.
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -237,7 +226,7 @@ export async function POST(req: NextRequest) {
 
         const recovered = await recoverTypedDataAddress({
           domain,
-          types: ORDER_TYPES,
+          types: ORDER_EIP712_TYPES,
           primaryType: 'Order' as const,
           message,
           signature: body.signature as `0x${string}`,
