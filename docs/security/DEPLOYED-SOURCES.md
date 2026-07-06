@@ -49,6 +49,15 @@ CI enforces this section: `scripts/check-deployed-sources.mjs` (job `deployed-so
 the build if the deprecated flat loses its banner, reappears under the old name, is imported by any
 Solidity/TS/JS file, or is listed as a deployed source here.
 
+[CHORE-AZ-SECURITY-BATCH C4] The same guard also covers the **weak V1 flatten**
+(`contracts/TeraSwapFeeCollector_flat.sol`). Unlike the row above it IS a deployed source — the
+byte-proven source of the **frozen** mainnet V1 (`0x4dAE…58eD`) — but it is the OLD, WEAK
+FeeCollector (1-arg constructor; no admin/whitelist/timelock/`minimumOutput`; open `receive()`) and
+must **never be deployed again**: the guard fails if it loses its ⛔ DO-NOT-DEPLOY banner, is deleted
+(rule #4), is referenced by Solidity/TS/JS code, or if `contracts/DEPLOY.md` stops prescribing the
+canonical V2 recipe (`contracts/TeraSwapFeeCollector.sol`, solc 0.8.28, via-IR, 2-arg constructor)
+or mentions the V1 flat outside a ⛔ warning line.
+
 ## How to re-verify (any time)
 
 One-liner per contract (compare the printed hash with the table; metadata + immutables caveat above):

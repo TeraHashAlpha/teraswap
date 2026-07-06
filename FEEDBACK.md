@@ -6435,3 +6435,48 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   was demonstrated. Align scoping when v1 goes multi-chain (S8).
 - Full deliverable: `Audits/Reviews/AZ-REVIEW-2026-07-06.md` (audited SHA, reconciliation table, reproduced
   claims, RICE ranking with fund-flow + rule tags, dependency-ordered plan, corrected mis-frames).
+## Feedback — CHORE-AZ-SECURITY-BATCH · C4 flat banner / DEPLOY.md / guard (branch chore/flat-banner-deploy-guard)
+
+### Scope note — batch items delivered as separate branches, not one branch
+- The packet asks for four droppable commits on one `chore/az-security-batch` branch; in practice each
+  item is running as its own session/branch (C1 EIP-712 dedup is already in flight on
+  `chore/eip712-order-types-dedup`). This branch delivers **C4 only**. Per-item FEEDBACK verdicts for
+  C1 (EIP-712 identical-or-drifted + hash test), C2 (ignore-scripts confirmation) and C3 (stablecoin
+  per-chain set + gates changed) land with their own commits — nothing here touches those surfaces
+  (`.npmrc`/`--ignore-scripts` in ci.yml, the EIP-712 declarations, and every stablecoin list are
+  untouched on this branch).
+
+### Assumption corrected — the weak flat IS a deployed source (unlike the V2_DEPRECATED exemplar)
+- The prompt framed `TeraSwapFeeCollector_flat.sol` like `TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`
+  (stale, never deployed). Cross-checking `docs/security/DEPLOYED-SOURCES.md` (as the prompt required):
+  the V1 flat is the **byte-proven source of the FROZEN mainnet V1** (`0x4dAE…58eD`). Consequences:
+  the banner says "deployed-but-frozen — NEVER deploy again" (not "never deployed"), the file was NOT
+  renamed (a rename would break the canonical map row + `verify-deployed-sources.mjs`), and it keeps a
+  distinct banner marker (`DEPRECATED — DO NOT DEPLOY`) so the guard can pin each flat separately.
+
+### Verification — banner is bytecode-neutral (byte-proof intact)
+- The banner is comment-only. Proven: built the flat pre- and post-banner with the repo recipe and
+  byte-compared `deployedBytecode` with the CBOR metadata trailer stripped (the same convention the
+  byte-proofs use) — **identical** (2,414 B). The W2 byte-proof of the frozen V1 is unaffected.
+
+### Security concern found in passing (fixed) — DEPLOY.md told deployers to commit `.env.local`
+- The old guide's post-deploy step was `git add .env.local && git push origin main`. Replaced with
+  setting the env var in Vercel (`vercel env`) and an explicit "never commit `.env.local`" (rule #7
+  adjacent — env files must never enter git even when the value itself is public).
+
+### Guard extension — design notes
+- New checks (all negative-tested: banner strip, recipe-marker drift, non-⛔ flat mention, code
+  reference, file deletion — each fails the run; final state green): (4) V1 flat must exist (rule #4)
+  and keep its ⛔ banner; (5) `contracts/DEPLOY.md` must keep the canonical V2 recipe markers
+  (`contracts/TeraSwapFeeCollector.sol`, `0.8.28`, `via-IR`, `_admin`, `DEPLOYED-SOURCES.md`) and may
+  mention the V1 flat only on a line carrying ⛔; (6) the code-walk now also flags
+  `TeraSwapFeeCollector_flat` references (allowlist: the verify script + the flats themselves).
+- The `deployed-sources-guard` ci.yml comment deliberately avoids the literal flat filename — the
+  guard walks `.github/**/*.yml`, so the comment itself would trip check 6.
+
+### Edge case — stale Base section in DEPLOY.md
+- The "Base Deployment (Phase 2)" section still read as a pending deploy; the Base FeeCollector has
+  been live at `0xeFC3…f130` since 2026-06 (bootstrapped, byte-proven). Marked ✅ completed with
+  pointers to DEPLOYMENTS.md/DEPLOYED-SOURCES.md and kept as the reference checklist for the next
+  chain (rule #4 — nothing deleted). Its "Pre-activation code wiring" subsection is left as history;
+  current wiring status is tracked by the chain-awareness sprints, not this guide.

@@ -1,4 +1,30 @@
 // SPDX-License-Identifier: MIT
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  ⛔⛔⛔  DEPRECATED — DO NOT DEPLOY. V1 source, frozen on-chain.  ⛔⛔⛔
+// ═════════════════════════════════════════════════════════════════════════════
+//
+//  This flatten IS a deployed source — it is the byte-proven source of the
+//  FROZEN FeeCollector V1 on Ethereum mainnet
+//  (0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD — do NOT route to it) and is
+//  kept ONLY as that on-chain record (CLAUDE.md rule #4 — never delete).
+//
+//  NEVER deploy this file again. It is the OLD, WEAK FeeCollector:
+//    • 1-arg constructor — no admin, no onlyAdmin surface at all
+//    • no router whitelist, no 48h timelock, no pause()
+//    • no minimumOutput / InsufficientOutput output floor (H-04)
+//    • open receive() — accepts stray ETH from anyone at any time
+//
+//  The ONLY deployable FeeCollector source is contracts/TeraSwapFeeCollector.sol
+//  (deployed V2: mainnet 0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459, Base
+//  0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130). Deploy recipe:
+//  contracts/DEPLOY.md. Canonical address → source → compiler → code-hash map
+//  (always check first): docs/security/DEPLOYED-SOURCES.md.
+//
+//  CI enforces this banner + the DEPLOY.md recipe via
+//  scripts/check-deployed-sources.mjs (job: deployed-sources-guard).
+// ═════════════════════════════════════════════════════════════════════════════
+//
 // TeraSwapFeeCollector — flattened for Remix deployment
 // OpenZeppelin Contracts v5.0 (minimal excerpts)
 pragma solidity ^0.8.20;

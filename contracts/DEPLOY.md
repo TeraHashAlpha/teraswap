@@ -1,31 +1,63 @@
 # TeraSwapFeeCollector Deployment Guide
 
-## Contract: `TeraSwapFeeCollector.sol`
-Collects 0.1% (10 bps) fee on every swap routed through it.
+> **Source of truth first:** before ANY deploy, cross-check
+> [`docs/security/DEPLOYED-SOURCES.md`](../docs/security/DEPLOYED-SOURCES.md) — the canonical
+> address → source → compiler → code-hash map — and [`docs/DEPLOYMENTS.md`](../docs/DEPLOYMENTS.md)
+> (the ops record: roles, wallets, env). Deploys require an audit pass, 0C/0H (CLAUDE.md rule #3).
 
-## Deploy via Remix (easiest)
+## Contract: `contracts/TeraSwapFeeCollector.sol` — the ONLY deployable FeeCollector source
 
-1. Go to https://remix.ethereum.org
-2. Create file `TeraSwapFeeCollector.sol`, paste the contract code
-3. Install OpenZeppelin: In Remix, use the import remapping or paste OZ files
-4. Compile with Solidity 0.8.20+
-5. Deploy tab → Environment: "Injected Provider" (MetaMask)
-6. Constructor arg: `_feeRecipient` = `0x107F6eB7C3866c9cEf5860952066e185e9383ABA`
-7. Click Deploy → Confirm in MetaMask
-8. Copy the deployed contract address
+Collects 0.1% (10 bps, `FEE_BPS = 10`) on every swap routed through it. This is the deployed V2:
+admin + `onlyAdmin`, router whitelist behind a 48h timelock (`queueRouterChange` /
+`executeRouterChange`, one-shot `bootstrapRouters`), `pause()`, a per-swap `minimumOutput` floor
+(H-04, `InsufficientOutput`), and a `receive()` that rejects ETH outside a swap (`ETHNotAccepted`).
 
-## After Deployment
+> ⛔ Do **NOT** deploy `TeraSwapFeeCollector_flat.sol` — that flatten is the OLD, WEAK V1 (1-arg constructor; no admin/whitelist/timelock/minimumOutput; open `receive()`), kept only as the byte-proven source of the **frozen** mainnet V1 (`0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD`). It carries its own banner, and CI (`deployed-sources-guard`) fails if this guide or any code points at it as a deploy target again.
 
-Add to `.env.local`:
+## Compiler settings (the byte-proven recipe)
+
+Per `contracts/foundry.toml` — identical to the byte-proven Base deploy in DEPLOYED-SOURCES.md:
+
+- solc **0.8.28**
+- **via-IR: required** (the source does not compile without it)
+- optimizer **on**, runs **200**
+- EVM version **cancun**
+
+## Deploy via Foundry (recommended)
+
+```sh
+cd contracts && forge build   # sanity-check: compiles with the pinned settings above
+forge create TeraSwapFeeCollector.sol:TeraSwapFeeCollector \
+  --rpc-url <RPC_URL> \
+  --account <deployer> \
+  --constructor-args <_feeRecipient> <_admin> \
+  --verify --etherscan-api-key <KEY>
 ```
-NEXT_PUBLIC_FEE_COLLECTOR=0x<deployed_address>
-```
 
-Then redeploy to Vercel:
-```bash
-git add .env.local
-git push origin main
-```
+Constructor — **two** args, both required and non-zero (`ZeroAddress()` otherwise); canonical
+wallets live in `docs/DEPLOYMENTS.md`:
+
+- `_feeRecipient` = `0x107F6eB7C3866c9cEf5860952066e185e9383ABA` (receives the 0.1% fee)
+- `_admin` = `0x9A387f681a7674F10d255f5b2651EBc4c672C73C` (contract admin: whitelist/timelock/pause)
+
+Remix also works, but you MUST set solc 0.8.28 + **enable via-IR** + optimizer 200 in the compiler
+settings and use the repo's pinned OpenZeppelin submodule — a drifting OZ revision or compiler
+settings produce non-reproducible bytecode (that is exactly the mainnet-V2 byte-exactness
+follow-up recorded in DEPLOYED-SOURCES.md).
+
+## After deployment (in order)
+
+1. `bootstrapRouters([...])` from the admin wallet with the chain's router whitelist
+   (`src/lib/chains/routers.ts`) — **one-shot** (`AlreadyBootstrapped` after the first call);
+   every later change goes through the 48h timelock.
+2. Verify the source on the explorer, then check on-chain: `FEE_BPS() == 10`, `feeRecipient()`,
+   `admin()`, and `whitelistedRouters(router) == true` for each router.
+3. Record the deploy in `docs/DEPLOYMENTS.md` **and** add the address → source → compiler →
+   code-hash row to `docs/security/DEPLOYED-SOURCES.md` (then run
+   `node scripts/verify-deployed-sources.mjs`).
+4. Set the address env var (`NEXT_PUBLIC_FEE_COLLECTOR` / `NEXT_PUBLIC_BASE_FEE_COLLECTOR`) in the
+   Vercel environment (`vercel env`) — **never commit `.env.local`** — and, for a new chain,
+   update `src/lib/chains/registry.ts` (`contracts.feeCollector`).
 
 ## How It Works
 
@@ -35,13 +67,18 @@ git push origin main
 - **All other sources**: routed through FeeCollector automatically
 
 ## Estimated Gas Cost
-- Deploy: ~500,000 gas (~$5-15 depending on gas price)
+- Deploy: ~1.2–1.4M gas (V2 runtime is ~5.4 kB; the old "~500k" figure was the V1 flat)
 - ETH swap via FeeCollector: +~30,000 gas overhead
 - ERC-20 swap via FeeCollector: +~60,000 gas overhead
 
 ---
 
 ## Base Deployment (Phase 2)
+
+> ✅ **Completed 2026-06** — the Base FeeCollector is live at
+> `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` (bootstrapped; byte-proven in
+> DEPLOYED-SOURCES.md; see `docs/DEPLOYMENTS.md`). Kept below as the reference
+> checklist for the next chain deployment.
 
 > Code preparation done in Sprint 44. The steps below are the manual deployment
 > by TeraHash. Base stays "Coming Soon" in the UI until step 8 sets the address.
