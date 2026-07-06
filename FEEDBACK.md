@@ -6382,3 +6382,80 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
 - Fund-flow-adjacent surface (order signature verification) but zero semantic change — same bytes, same
   digest, now impossible to edit one-sidedly. The client side (useOrderEngine) already used the canonical
   export; CANCEL_ORDER_TYPES was already single-sourced.
+## Feedback — CHORE-P0-RESCUE-AUDIT-REPORTS (branch chore/rescue-audit-reports)
+
+### Rescued file list — 28 (set grew by 1 during the rescue: the 07-06 Weekly landed while working)
+- Audits/Daily/health-2026-06-{14,15,16,17,18,19,20,21,22,23,24,25,26,28,29,30}.md and
+  Audits/Daily/health-2026-07-{01,02,03,04,05,06}.md (22 — no 06-27, never generated)
+- Audits/Weekly/audit-2026-{06-15,06-22,06-29,07-06}.md (4)
+- Audits/Monthly/security-2026-07.md · Audits/Quarterly/review-2026-Q3.md
+- Verified absent from origin/main one-by-one (`git cat-file -e`). The 9 other untracked cadence files
+  (Dailies 06-06→06-13, Weekly 06-08) are byte-identical (sha256) to main's committed copies — no drift,
+  nothing rescued twice.
+
+### Secret scan — clean; one out-of-scope observation
+- gitleaks 8.30.1 with the repo `.gitleaks.toml` over the four cadence dirs + a regex battery over exactly
+  the 28 files: **0 findings in the rescued set → nothing excluded.**
+- Observation (pre-existing, NOT this PR): the same scan reports 43 hits (40 generic-api-key,
+  3 stripe-access-token) in cadence files **already tracked on main** — presumably CI-tolerated false
+  positives (CI runs gitleaks in git mode), but worth a one-time triage pass.
+
+### Generator: external (owner-level Claude scheduled tasks) — fix delivered in-repo + exact owner change
+- The generators are `~/.claude/scheduled-tasks/teraswap-{daily-health,weekly-audit,monthly-security,
+  quarterly-rotation}/SKILL.md` — outside the repo, hardcoding the working copy path, with **no
+  commit/push step** (the recurrence mechanism).
+- **Delivered:** `scripts/commit-audit-report.mjs` (tracked) — commits any new/modified cadence report to
+  the dedicated tracked branch `audits/cadence` and pushes, via a temp detached worktree (never switches
+  the operator's branch, never stashes/force-pushes, stages ONLY `Audits/{Daily,Weekly,Monthly,Quarterly}`,
+  inherits noreply + SSH signing). Runbook: `docs/Runbooks/AUDIT-CADENCE.md`.
+- **Verified end-to-end against the real working copy:** first run created `origin/audits/cadence`
+  (`bb2d931`, signature G, committer 256859133+TeraHashAlpha@users.noreply.github.com) with exactly the
+  28 files (the 9 identical overlaps no-op'd as designed); second run → idempotent no-op. The at-risk
+  reports therefore already exist on the remote TWICE (this PR branch + audits/cadence) as of today.
+- **Exact owner change (one line per SKILL.md, do not guess-edit performed):** append as the final step of
+  each of the four SKILL.md files:
+  `cd "/Users/tiagocruz/Desktop/Claude/dex-aggregator 2" && node scripts/commit-audit-report.mjs`
+  (full snippet in the runbook §2). Periodically merge `audits/cadence` → main via docs-only PR.
+
+### Defects found in the routines while locating them (owner should fix when editing — runbook §3)
+- `teraswap-monthly-security` and `teraswap-quarterly-rotation` curl **`teraswap.io`** for CSP checks —
+  wrong domain (canonical: `www.teraswap.app`; teraswap.io is not ours).
+- `teraswap-weekly-audit` runs **`npm audit fix`** (+build, +lockfile revert path) directly on the live
+  working copy — unreviewed dependency mutation; explains the modified package.json/lockfile on the dead
+  branch. Should be report-only (Dependabot + audit-gate cover fixes via PRs).
+- The daily's `/api/monitor` call reads a **stale local `MONITOR_SECRET`** (rotated on Vercel) → permanent
+  401 ⚠ noise in every Daily.
+
+### Owner action after this PR merges (documented, NOT performed)
+- `cd "/Users/tiagocruz/Desktop/Claude/dex-aggregator 2" && git checkout main && git pull` — and stop
+  working on `docs/inc-2026-06-09` (kept per rule #4; not deleted, not force-moved).
+## Feedback — REVIEW-AZ-REFRESH (branch docs/az-review-2026-07-06)
+
+### Which v1 findings were already FIXED on main: NONE — and that's provable, not sloppy
+- The v1 (2026-07-05) code review actually read commit `3613adc`, whose tree is byte-identical to the
+  audited `origin/main` HEAD `4524a97` (`rev-parse ^{tree}` both `5e15f32e…`). The prompt's premise that v1
+  audited the dead branch holds only for the P0 git-state evidence. Consequently the reconciliation produced
+  0×FIXED-on-main / 41×CONFIRMED-open / 5×PARTIAL — the PARTIALs correct v1's own statements, not code drift:
+  FE4 (Supabase-backed WalletHistory persists; only session list + approvals volatile), C3 (unpause IS tested
+  on FeeCollector; gap is OrderExecutor-only), C5 (.env example is a coherent Sepolia config; real issue =
+  mainnet ETH_USD_FEED default + documented tri-chain address reuse), S9 (on-chain-monitor is multichain since
+  E-4; only getChainlinkFeeds is mainnet-locked), O10 (.remember/ self-ignores; only .w0onchain.mjs loose).
+  Overlaps resolved: #260's source-health-monitor is a separate KV path (source-monitor read API still dead —
+  retire it); #263 fixed the splitroute chainId (now merged = the audited HEAD); AUDIT-W4 remains unimplemented;
+  the weak FeeCollector flat + DEPLOY.md were NOT touched by #254/#257 (only V2_DEPRECATED got the banner).
+
+### NEW findings at HEAD
+- **NEW-2 (confirmed 2/2 adversarial votes, #260 follow-up):** the low-quorum demotion reroutes the EXECUTED
+  source (meta.best drives executeSwap + fallbacks) despite quote-quorum.ts's "display-only" header, and the
+  `lowConfidence` flag is rendered by NO component (not even forwarded by /api/v1/quote). Execution gates
+  intact → execution-quality, not fund-safety; fix (render flag + demotion semantics) should get an Auditor
+  glance. RICE-ranked #13 in the review.
+- **NEW-1 (empirical):** the full vitest suite is not deterministically green — 1 flaky failure in 4 runs at
+  identical trees (identity uncaptured). Bakes the "deterministic vs flaky split" requirement into the single
+  `npm test` CI job before the money-path refactor.
+- **NEW-3 (refuted 2/2, recorded as LOW note):** "v1/swap auto-selects quote-only sources → on-chain-reverting
+  calldata" — the app/API scoping asymmetry is real (no isExecutableSource in /api/*), but the deployed FC
+  whitelists OpenOcean/Curve-NG on-chain (W7-followup §3) and SC-04/R1 are off-chain gates, so no revert path
+  was demonstrated. Align scoping when v1 goes multi-chain (S8).
+- Full deliverable: `Audits/Reviews/AZ-REVIEW-2026-07-06.md` (audited SHA, reconciliation table, reproduced
+  claims, RICE ranking with fund-flow + rule tags, dependency-ordered plan, corrected mis-frames).
