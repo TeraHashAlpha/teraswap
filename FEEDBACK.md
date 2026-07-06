@@ -6357,3 +6357,34 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   correctness lens also positively verified: `chainId` was already in the analyze-effect deps (no stale
   closure), server quote-cache keys namespace by chainId, and coming-soon chains cannot reach the fetch
   (SwapBox gates `enabled` on `isChainActive`).
+
+## Feedback — REVIEW-AZ-REFRESH (branch docs/az-review-2026-07-06)
+
+### Which v1 findings were already FIXED on main: NONE — and that's provable, not sloppy
+- The v1 (2026-07-05) code review actually read commit `3613adc`, whose tree is byte-identical to the
+  audited `origin/main` HEAD `4524a97` (`rev-parse ^{tree}` both `5e15f32e…`). The prompt's premise that v1
+  audited the dead branch holds only for the P0 git-state evidence. Consequently the reconciliation produced
+  0×FIXED-on-main / 41×CONFIRMED-open / 5×PARTIAL — the PARTIALs correct v1's own statements, not code drift:
+  FE4 (Supabase-backed WalletHistory persists; only session list + approvals volatile), C3 (unpause IS tested
+  on FeeCollector; gap is OrderExecutor-only), C5 (.env example is a coherent Sepolia config; real issue =
+  mainnet ETH_USD_FEED default + documented tri-chain address reuse), S9 (on-chain-monitor is multichain since
+  E-4; only getChainlinkFeeds is mainnet-locked), O10 (.remember/ self-ignores; only .w0onchain.mjs loose).
+  Overlaps resolved: #260's source-health-monitor is a separate KV path (source-monitor read API still dead —
+  retire it); #263 fixed the splitroute chainId (now merged = the audited HEAD); AUDIT-W4 remains unimplemented;
+  the weak FeeCollector flat + DEPLOY.md were NOT touched by #254/#257 (only V2_DEPRECATED got the banner).
+
+### NEW findings at HEAD
+- **NEW-2 (confirmed 2/2 adversarial votes, #260 follow-up):** the low-quorum demotion reroutes the EXECUTED
+  source (meta.best drives executeSwap + fallbacks) despite quote-quorum.ts's "display-only" header, and the
+  `lowConfidence` flag is rendered by NO component (not even forwarded by /api/v1/quote). Execution gates
+  intact → execution-quality, not fund-safety; fix (render flag + demotion semantics) should get an Auditor
+  glance. RICE-ranked #13 in the review.
+- **NEW-1 (empirical):** the full vitest suite is not deterministically green — 1 flaky failure in 4 runs at
+  identical trees (identity uncaptured). Bakes the "deterministic vs flaky split" requirement into the single
+  `npm test` CI job before the money-path refactor.
+- **NEW-3 (refuted 2/2, recorded as LOW note):** "v1/swap auto-selects quote-only sources → on-chain-reverting
+  calldata" — the app/API scoping asymmetry is real (no isExecutableSource in /api/*), but the deployed FC
+  whitelists OpenOcean/Curve-NG on-chain (W7-followup §3) and SC-04/R1 are off-chain gates, so no revert path
+  was demonstrated. Align scoping when v1 goes multi-chain (S8).
+- Full deliverable: `Audits/Reviews/AZ-REVIEW-2026-07-06.md` (audited SHA, reconciliation table, reproduced
+  claims, RICE ranking with fund-flow + rule tags, dependency-ordered plan, corrected mis-frames).
