@@ -82,3 +82,11 @@ ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:generic-
 ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-access-token:17
 ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-access-token:18
 14807a8db0b2cfef7d77eb297304cfd75236c52e:src/lib/sanitize-error.test.ts:stripe-access-token:30
+
+# [CHORE-EIP712-ORDER-TYPES-DEDUP] False positives in the EIP-712 fixture of
+# src/lib/order-engine/types.test.ts at commit 4d30d14: the flagged values are
+# the PUBLIC mainnet WETH/USDC contract addresses (field names 'tokenIn/Out'
+# trip the generic-api-key keyword heuristic). The tip carries gitleaks:allow
+# annotations; these fingerprints absolve the pre-annotation historical commit.
+4d30d14629ded572b9c8428beed3de97aafa00f1:src/lib/order-engine/types.test.ts:generic-api-key:41
+4d30d14629ded572b9c8428beed3de97aafa00f1:src/lib/order-engine/types.test.ts:generic-api-key:42
