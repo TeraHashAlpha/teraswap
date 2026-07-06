@@ -6357,3 +6357,51 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   correctness lens also positively verified: `chainId` was already in the analyze-effect deps (no stale
   closure), server quote-cache keys namespace by chainId, and coming-soon chains cannot reach the fetch
   (SwapBox gates `enabled` on `isChainActive`).
+
+## Feedback — CHORE-P0-RESCUE-AUDIT-REPORTS (branch chore/rescue-audit-reports)
+
+### Rescued file list — 28 (set grew by 1 during the rescue: the 07-06 Weekly landed while working)
+- Audits/Daily/health-2026-06-{14,15,16,17,18,19,20,21,22,23,24,25,26,28,29,30}.md and
+  Audits/Daily/health-2026-07-{01,02,03,04,05,06}.md (22 — no 06-27, never generated)
+- Audits/Weekly/audit-2026-{06-15,06-22,06-29,07-06}.md (4)
+- Audits/Monthly/security-2026-07.md · Audits/Quarterly/review-2026-Q3.md
+- Verified absent from origin/main one-by-one (`git cat-file -e`). The 9 other untracked cadence files
+  (Dailies 06-06→06-13, Weekly 06-08) are byte-identical (sha256) to main's committed copies — no drift,
+  nothing rescued twice.
+
+### Secret scan — clean; one out-of-scope observation
+- gitleaks 8.30.1 with the repo `.gitleaks.toml` over the four cadence dirs + a regex battery over exactly
+  the 28 files: **0 findings in the rescued set → nothing excluded.**
+- Observation (pre-existing, NOT this PR): the same scan reports 43 hits (40 generic-api-key,
+  3 stripe-access-token) in cadence files **already tracked on main** — presumably CI-tolerated false
+  positives (CI runs gitleaks in git mode), but worth a one-time triage pass.
+
+### Generator: external (owner-level Claude scheduled tasks) — fix delivered in-repo + exact owner change
+- The generators are `~/.claude/scheduled-tasks/teraswap-{daily-health,weekly-audit,monthly-security,
+  quarterly-rotation}/SKILL.md` — outside the repo, hardcoding the working copy path, with **no
+  commit/push step** (the recurrence mechanism).
+- **Delivered:** `scripts/commit-audit-report.mjs` (tracked) — commits any new/modified cadence report to
+  the dedicated tracked branch `audits/cadence` and pushes, via a temp detached worktree (never switches
+  the operator's branch, never stashes/force-pushes, stages ONLY `Audits/{Daily,Weekly,Monthly,Quarterly}`,
+  inherits noreply + SSH signing). Runbook: `docs/Runbooks/AUDIT-CADENCE.md`.
+- **Verified end-to-end against the real working copy:** first run created `origin/audits/cadence`
+  (`bb2d931`, signature G, committer 256859133+TeraHashAlpha@users.noreply.github.com) with exactly the
+  28 files (the 9 identical overlaps no-op'd as designed); second run → idempotent no-op. The at-risk
+  reports therefore already exist on the remote TWICE (this PR branch + audits/cadence) as of today.
+- **Exact owner change (one line per SKILL.md, do not guess-edit performed):** append as the final step of
+  each of the four SKILL.md files:
+  `cd "/Users/tiagocruz/Desktop/Claude/dex-aggregator 2" && node scripts/commit-audit-report.mjs`
+  (full snippet in the runbook §2). Periodically merge `audits/cadence` → main via docs-only PR.
+
+### Defects found in the routines while locating them (owner should fix when editing — runbook §3)
+- `teraswap-monthly-security` and `teraswap-quarterly-rotation` curl **`teraswap.io`** for CSP checks —
+  wrong domain (canonical: `www.teraswap.app`; teraswap.io is not ours).
+- `teraswap-weekly-audit` runs **`npm audit fix`** (+build, +lockfile revert path) directly on the live
+  working copy — unreviewed dependency mutation; explains the modified package.json/lockfile on the dead
+  branch. Should be report-only (Dependabot + audit-gate cover fixes via PRs).
+- The daily's `/api/monitor` call reads a **stale local `MONITOR_SECRET`** (rotated on Vercel) → permanent
+  401 ⚠ noise in every Daily.
+
+### Owner action after this PR merges (documented, NOT performed)
+- `cd "/Users/tiagocruz/Desktop/Claude/dex-aggregator 2" && git checkout main && git pull` — and stop
+  working on `docs/inc-2026-06-09` (kept per rule #4; not deleted, not force-moved).
