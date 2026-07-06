@@ -281,7 +281,7 @@ jobs:
           cache: "npm"
       - run: npm ci --ignore-scripts=false
       - name: API hardening guard (read gate 401 / rate limit 429 / body cap 413)
-        run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
+        run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/order-engine/types.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
 
   lockfile-lint:
     runs-on: ubuntu-latest
