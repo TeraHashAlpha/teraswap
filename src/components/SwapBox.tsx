@@ -39,6 +39,7 @@ import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNV
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
+import { isUsdStablecoin } from '@/lib/chains/stablecoins'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -111,13 +112,6 @@ export default function SwapBox() {
     })
   }, [])
 
-  // Recalculate auto-slippage when token pair changes
-  useEffect(() => {
-    if (isAutoSlippage && tokenIn && tokenOut) {
-      setSlippage(calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol))
-    }
-  }, [isAutoSlippage, tokenIn?.symbol, tokenOut?.symbol])
-
   // Raw amount without separators — used for all calculations
   const amountIn = stripSeparator(displayAmountIn)
 
@@ -134,6 +128,15 @@ export default function SwapBox() {
   // the chain the user is actually on; switching networks now re-reads the
   // correct balance instead of the stale connected-by-default (mainnet) one.
   const activeChainId = useActiveChainId()
+
+  // Recalculate auto-slippage when the token pair or chain changes.
+  // [CHORE-STABLECOIN-CONSTANT] Membership is chain-keyed now, so the active chain is an
+  // input (declared after activeChainId for that reason).
+  useEffect(() => {
+    if (isAutoSlippage && tokenIn && tokenOut) {
+      setSlippage(calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId))
+    }
+  }, [isAutoSlippage, tokenIn?.symbol, tokenOut?.symbol, activeChainId])
 
   const { data: balanceIn } = useBalance({
     address,
@@ -228,10 +231,10 @@ export default function SwapBox() {
         const outAmount = Number(formatUnits(outBig, tokenOut.decimals))
         const inAmount = Number(amountIn)
         if (inAmount <= 0 || outAmount <= 0) return { execIn: null, execOut: null }
-        const STABLE = ['USDC', 'USDT', 'DAI', 'USDbC']
+        // [CHORE-STABLECOIN-CONSTANT] ~$1 membership is chain-keyed (single source of truth).
         return {
-          execIn: STABLE.includes(tokenOut.symbol) ? outAmount / inAmount : null,
-          execOut: STABLE.includes(tokenIn.symbol) ? inAmount / outAmount : null,
+          execIn: isUsdStablecoin(tokenOut.symbol, activeChainId) ? outAmount / inAmount : null,
+          execOut: isUsdStablecoin(tokenIn.symbol, activeChainId) ? inAmount / outAmount : null,
         }
       })()
     : { execIn: null, execOut: null }
@@ -553,13 +556,14 @@ export default function SwapBox() {
   // Estimate USD value of the swap input (only reliable when input is a stablecoin or ETH)
   const estimatedInputUsd = useMemo(() => {
     if (!tokenIn || !amountIn || Number(amountIn) <= 0) return 0
-    if (['USDC', 'USDT', 'DAI', 'USDe'].includes(tokenIn.symbol)) return Number(amountIn)
+    // [CHORE-STABLECOIN-CONSTANT] ~$1 membership is chain-keyed (single source of truth).
+    if (isUsdStablecoin(tokenIn.symbol, activeChainId)) return Number(amountIn)
     // If we have a Chainlink price for the input token, use it
     if (priceCheck.chainlinkPrice != null) return Number(amountIn) * priceCheck.chainlinkPrice
     // For ETH without a loaded price yet, use a conservative estimate
     if (isNativeETH(tokenIn) || tokenIn.symbol === 'WETH') return Number(amountIn) * 2000
     return 0 // unknown — can't estimate
-  }, [tokenIn, amountIn, priceCheck.chainlinkPrice])
+  }, [tokenIn, amountIn, priceCheck.chainlinkPrice, activeChainId])
 
   const oracleUnavailable = pairCheck.oracleUnavailable
   const oracleWarnThreshold = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_WARN_USD
@@ -1067,7 +1071,7 @@ export default function SwapBox() {
         )}
 
         {/* Slippage Modal */}
-        {showSlippage && <SlippageModal value={slippage} onChange={setSlippage} onClose={() => setShowSlippage(false)} isAuto={isAutoSlippage} onAutoChange={setIsAutoSlippage} tokenInSymbol={tokenIn?.symbol} tokenOutSymbol={tokenOut?.symbol} />}
+        {showSlippage && <SlippageModal value={slippage} onChange={setSlippage} onClose={() => setShowSlippage(false)} isAuto={isAutoSlippage} onAutoChange={setIsAutoSlippage} tokenInSymbol={tokenIn?.symbol} tokenOutSymbol={tokenOut?.symbol} chainId={activeChainId} />}
       </div>
 
       {/* Active Approvals — below the swap box */}

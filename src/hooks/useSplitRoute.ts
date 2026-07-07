@@ -6,6 +6,7 @@ import { fetchSplitQuotes, findBestSplit } from '@/lib/split-router'
 import { safeBigInt } from '@/lib/utils'
 import { isExecutableSource } from '@/lib/executable-sources'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { isUsdStablecoin } from '@/lib/chains/stablecoins'
 import {
   type SplitQuoteResult,
   SPLIT_MIN_USD,
@@ -63,12 +64,13 @@ export function useSplitRoute(
     const outAmount = outBig !== null ? Number(formatUnits(outBig, tokenOut.decimals)) : 0
     const inAmount = Number(amountIn)
     if (inAmount <= 0) return null
-    // If output token is a stablecoin, output amount ≈ USD
-    if (['USDC', 'USDT', 'DAI', 'BOLD'].includes(tokenOut.symbol)) return outAmount
-    // If input token is a stablecoin, input amount ≈ USD
-    if (['USDC', 'USDT', 'DAI', 'BOLD'].includes(tokenIn.symbol)) return inAmount
+    // [CHORE-STABLECOIN-CONSTANT] ~$1 membership is chain-keyed (single source of truth).
+    // If output token is a stablecoin on this chain, output amount ≈ USD
+    if (isUsdStablecoin(tokenOut.symbol, chainId)) return outAmount
+    // If input token is a stablecoin on this chain, input amount ≈ USD
+    if (isUsdStablecoin(tokenIn.symbol, chainId)) return inAmount
     return null
-  }, [meta, tokenIn, tokenOut, amountIn])
+  }, [meta, tokenIn, tokenOut, amountIn, chainId])
 
   const tradeAboveThreshold = executionPriceUsd !== null && executionPriceUsd >= SPLIT_MIN_USD
 
