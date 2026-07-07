@@ -1136,3 +1136,25 @@ Per-wave verdicts (all APPROVED): W1 2L/4I · W2 1M/2L/2I (M+1L now fixed) · W3
 W4 2I · W5 2I · W6 2M/1L/2I · W7 2L/2I · W8 0/2I · W9 1L/2I · W10 1L/2I. RICE plan: auto-fixable (W6-M-02,
 W9-L-01, W6-L-01, W4-I-02, W7-L-01, W4-I-01, W5-I-02, W10-L-01) · product-decision (W6-M-01, W7-L-02) ·
 governance (W1-L-02 admin→Safe/HW, W8-I-01).
+
+### AUDIT NEW-2 — Low-quorum demotion / execution-selection (PR #272, 2026-07-02)
+
+**Verdict: APPROVED — cleared to merge. 0C / 0H; flagged gap = MEDIUM (NEW2-M-01), bounds HOLD.** Report:
+`Audits/Sprint/AUDIT-NEW2-QUORUM-EXECUTION-AUDIT.md`. Branch `chore/quorum-lowconfidence-fix` (UNMERGED),
+audited SHA `8514b68` (SSH-signed). Per the verdict rule, a flagged M with bounds holding + a remediation
+prompt does NOT block merge.
+
+- **NEW2-M-01 (MEDIUM, confirmed):** `applyLowQuorumSanity` (n=2) demotes the winner on a >500 bps pairwise
+  spread but can't tell which side lies → a low-ball source >5% under an honest winner forces the honest quote
+  demoted + the attacker's low quote presented (test `(a) FLAGGED GAP:186`). **Griefing / price-degradation,
+  NOT theft** (on-chain minimumOutput binds the fill; no funds to attacker).
+- **Bounds HOLD — no fund-loss path:** residual = ONLY oracle-less AND DefiLlama-less pairs, exactly 2
+  responders, capped <$10k (`UNVERIFIED_SWAP_BLOCK_USD`), minOut-bound, `lowConfidence`-cued. Chainlink consent
+  (≥3% block, 25% ceiling) + DefiLlama 422 catch feeded/DefiLlama pairs; SC-04+R1+minimumOutput terminal.
+- **This PR improves the state:** renders the previously-dead `lowConfidence` cue (React-escaped, non-alarmist),
+  corrects the "display-only" mischaracterization (names the gates), adds honest adversarial tests (deterministic;
+  NEW-1 flake reconciled via tie-stability). Composes with #248 (keeper-side, no conflict) / #18 (consent gate) /
+  #261 (executable-sources + SC-04 → quote-only can't be executable winner).
+- **Recommendation: Option 2** (external-reference-confirmed demotion + flag-without-reorder fallback for
+  oracle-less+DefiLlama-less) — concurs with the Architect; remediation prompt handed to the Code Agent.
+  Options 1 (loses mis-scale catch) / 3 (leaves the gap) rejected.
