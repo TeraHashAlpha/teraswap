@@ -251,15 +251,20 @@ jobs:
     # addr → source → compiler → code-hash map (docs/security/DEPLOYED-SOURCES.md)
     # must exist and stay consistent, the stale never-deployed FeeCollector flat
     # must keep its DEPRECATED name + banner and must never be referenced by code
-    # or listed as a deployed source. Dependency-free and offline (no npm ci); the
-    # on-chain half is scripts/verify-deployed-sources.mjs (manual/audit runs).
+    # or listed as a deployed source. [CHORE-AZ-SECURITY-BATCH C4] Also: the weak
+    # V1 flat (frozen on-chain; 1-arg ctor, no admin/whitelist/timelock/
+    # minimumOutput, open receive) must keep its ⛔ DO-NOT-DEPLOY banner and stay
+    # out of code, and contracts/DEPLOY.md must keep prescribing the canonical V2
+    # recipe (TeraSwapFeeCollector.sol, solc 0.8.28, via-IR, 2-arg ctor).
+    # Dependency-free and offline (no npm ci); the on-chain half is
+    # scripts/verify-deployed-sources.mjs (manual/audit runs).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
-      - name: Deployed-sources guard (source-integrity map + deprecated flat)
+      - name: Deployed-sources guard (map + deprecated/V1 flats + DEPLOY.md recipe)
         run: node scripts/check-deployed-sources.mjs
 
   api-hardening-guard:
