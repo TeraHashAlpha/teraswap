@@ -21,7 +21,7 @@ import {
 } from './adapters'
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey } from './adapters/circuit-breaker'
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
-import { applyLowQuorumSanity, getLowQuorumMaxDeviationBps } from './quote-quorum'
+import { applyLowQuorumSanityWithReference, getLowQuorumMaxDeviationBps } from './quote-quorum'
 
 // [CHORE-QUOTE-QUORUM / W7-L-02] Count display demotions/drops per source so
 // the monitor's outlier detector can page on a systematic mis-scale (the
@@ -239,22 +239,36 @@ export async function fetchMetaQuote(
     }
   })
 
-  // ── [CHORE-QUOTE-QUORUM / W7-L-02] Low-quorum display sanity ──
+  // ── [CHORE-QUOTE-QUORUM / W7-L-02] Low-quorum sanity band ──
   // With <3 responders the 3×-median filter below cannot discriminate (n=2 ⇒
-  // threshold = 1.5×max), so bound the winner to the runner-up instead: a
-  // winner beyond the band is demoted from the DISPLAY (execution gates —
-  // SC-04 / R1 / on-chain minimumOutput — are untouched by design).
+  // threshold = 1.5×max), so bound the winner to the runner-up instead.
+  // [CHORE-QUORUM-LOWCONFIDENCE-FIX] A demoted winner means the runner-up
+  // becomes the PRESENTED best — i.e. the quote the user is steered to sign;
+  // this is execution-selection-adjacent, not merely cosmetic. The execution
+  // gates (SC-04 / R1 / on-chain minimumOutput) are untouched by design and
+  // still gate whatever quote is executed.
+  // [CHORE-QUORUM-REFERENCE-CONFIRMED-DEMOTION / NEW2-M-01] The pairwise band
+  // alone cannot tell "winner too high" from "runner-up too low", so a band
+  // trip no longer demotes by itself: an external reference (the existing #18
+  // Chainlink / #248 DefiLlama plumbing, resolved lazily ONLY on a trip) must
+  // confirm the WINNER is the outlier. Reference confirms the winner → kept,
+  // a low-balling runner-up achieves nothing; no reference → lowConfidence
+  // flag without reordering.
   let displayQuotes = quotes
   let lowConfidence: boolean | undefined
   if (quotes.length < 3) {
-    const sanity = applyLowQuorumSanity(quotes)
+    const sanity = await applyLowQuorumSanityWithReference(quotes, {
+      src, dst, amount, srcDecimals, dstDecimals, chainId,
+    })
     displayQuotes = sanity.quotes
     lowConfidence = sanity.lowConfidence || undefined
     if (sanity.demoted.length > 0) {
       console.warn(
         `[quote-quorum] demoted low-quorum display outlier(s): ` +
         sanity.demoted.map(d => `${d.source}=${d.toAmount}`).join(', ') +
-        ` (band ${getLowQuorumMaxDeviationBps()} bps vs runner-up)`,
+        ` (band ${getLowQuorumMaxDeviationBps()} bps vs runner-up` +
+        (sanity.reference ? `; ${sanity.reference.source} reference confirmed the demotion` : '') +
+        ')',
       )
       recordDisplayDrops(sanity.demoted)
     }

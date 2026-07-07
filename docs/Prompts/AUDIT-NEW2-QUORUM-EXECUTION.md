@@ -1,109 +1,97 @@
-# AUDIT-NEW2-QUORUM-EXECUTION — Auditor sign-off of the low-quorum demotion (execution-selection-adjacent)
+# AUDIT-NEW2-QUORUM-EXECUTION — Auditor sign-off of the low-quorum demotion (a real gap was flagged)
 
-> **For:** Auditor (READ-ONLY — reviews, never edits; classifies findings C/H/M/L; 0C/0H = approved; produces
-> remediation prompts for the Code Agent, never patches). **Trigger:** run **after** `chore/quorum-lowconfidence-fix`
-> (NEW-2) merges to `origin/main`. **Why:** the A-Z review v2 (NEW-2) found the #260 low-quorum demotion **changes
-> which source is presented as best and therefore which the user executes** — so it is **execution-selection-adjacent**,
-> which the original `CHORE-QUOTE-QUORUM-HARDENING` under-scoped (shipped as "display-only", no Auditor). This closes
-> that gap.
+> **For:** Auditor (READ-ONLY — reviews, never edits; classifies C/H/M/L; produces remediation prompts for the Code
+> Agent, never patches). **Trigger:** the NEW-2 work is on **PR #272 (`chore/quorum-lowconfidence-fix`) — UNMERGED; it
+> stays unmerged until this sign-off.** **Why:** the A-Z review v2 found the #260 low-quorum demotion **changes which
+> source the user executes** (execution-selection-adjacent, under-scoped as "display-only"). During implementation the
+> Code Agent's **own adversarial tests flagged a real gap (not patched)** — this audit confirms, classifies, and bounds it.
+
+## The flagged gap (Code Agent, pinned `(a) FLAGGED GAP (Auditor)` in `quote-quorum.test.ts`)
+The 500bps demotion is **gameable ONE-WAY**: in a <3-responder window the band always demotes the *winner* when the
+top-two spread is >500bps, but a 2-point spread carries no information about **which** side is lying — so a source
+quoting **>500bps UNDER an honest winner** gets the honest quote **demoted** and the liar **presented as best**. Not
+patched; 3 remediation options in FEEDBACK: `flag-without-reorder` / `external-reference-confirmed demotion` /
+`accept-as-is`.
 
 ## Baseline (plan §0)
-Audit **`origin/main` HEAD** (fetch + assert; read via `git show origin/main:<path>` or a fresh worktree). **Record the
-audited SHA.** Ground on: #260 (`quote-quorum.ts`, the 500bps demotion + `lowConfidence`), NEW-2
-(`chore/quorum-lowconfidence-fix`), #248 (cross-agg deviation guard), #18 (oracle-less advisory), #261
-(`executable-sources` settleable-winner scoping), and the on-chain gates (SC-04 `isKnownSwapSelector`, R1
-`validateCallDataRecipient`, on-chain `minimumOutput`).
+Audit the **PR #272 head** (`chore/quorum-lowconfidence-fix`); fetch + **record the audited SHA**. Ground on #260
+(`quote-quorum.ts` 500bps demotion + `lowConfidence`), #248 (deviation guard), #18 (oracle-less advisory / Chainlink
+consent gate), #261 (`executable-sources`), and the gates (SC-04 `isKnownSwapSelector`, R1 `validateCallDataRecipient`,
+on-chain `minimumOutput`).
 
 ## Objective
-Prove the low-quorum demotion is **safe and non-gameable**, that its user-facing effects are honest, and that even a
-worst-case wrong demotion is **bounded by the execution gates to a display/price issue, never fund loss**.
+Confirm + classify the flagged gap, **verify the stated bounds actually hold (no fund-loss path)**, hunt any other gap,
+and recommend a remediation option — so NEW-2 can merge with the right fix.
 
-## Must-verify invariants (negative-path FIRST — each must hold)
-1. **Demotion is non-gameable (the crux).** In a **<3-responder** window, a manipulated / mis-scaled / attacker-supplied
-   quote **cannot**: (a) demote a genuinely-good winner so an attacker-controlled *worse* quote becomes the presented
-   "best"; nor (b) get promoted-and-presented-as-best itself. The 500bps band + demotion are **deterministic** and
-   applied to the correct pair (winner vs runner-up), with no ordering/rounding edge that flips the outcome.
-2. **Execution gates remain the terminal backstop.** Whatever the demotion selects, **SC-04 + R1 + on-chain
-   `minimumOutput`** still bind — a demoted/promoted quote can neither misroute funds (recipient≠owner / non-whitelisted
-   router fail-closed) nor settle below the on-chain floor. So a wrong demotion is at worst a **display/price** issue.
-3. **`lowConfidence` render is honest + safe.** It accurately reflects thin quorum, is **non-alarmist** (house style:
-   bold, not coloured-alarm), does **not** over/under-warn, and **cannot XSS** — the source count/name in the label is
-   React-escaped (tie W9); no `dangerouslySetInnerHTML`.
-4. **Characterization is accurate.** The `quote-quorum.ts` header no longer claims "display-only"; it correctly states
-   the execution-selection impact + names the gates as the backstop.
-5. **Composes with #248 / #18 without conflict.** The low-quorum sanity band, the cross-agg deviation guard (#248), and
-   the oracle-less advisory (#18) compose correctly — no double-demotion, no gap where one disables the other, no
-   contradictory user signals.
-6. **Composes with #261 executable-sources scoping.** The demotion operates on **settleable** quotes correctly — a
-   quote-only source cannot be demoted-into / promoted as the executable winner, and the "first settleable" rebase +
-   the low-quorum demotion do not steer the user to a non-settleable or worse quote.
-7. **The adversarial tests are sufficient.** The Code Agent's 2-source fixtures actually exercise the (a)/(b) gaming
-   vectors + the lone-responder + a quote-only-in-mix case, and are deterministic (no flakiness — reconcile with NEW-1).
+## Must-verify (negative-path first)
+1. **Confirm + classify the one-way gap** (C/H/M/L) with evidence; hunt any **other** gaming direction / rounding /
+   ordering edge the Code Agent's tests didn't cover.
+2. **Bounds hold — no fund-loss path.** Even under the gap: `lowConfidence` fires **and renders** (non-alarmist, no
+   XSS); the Chainlink consent gate catches **≥2% deviation** (hard block **>25%**); the DefiLlama guard is
+   **non-overridable**; on-chain **`minimumOutput`** bounds the fill; the **tiered USD limits** apply. Confirm the
+   **residual exposure = ONLY pairs that are oracle-less AND DefiLlama-less, under the USD limits** — nothing worse.
+3. **Execution gates terminal.** Whatever the demotion picks, SC-04 + R1 + on-chain `minimumOutput` still bind (no
+   misroute, no settle below floor) → worst case = **display/price, never fund loss**.
+4. **Characterization accurate** (header no longer "display-only"; names the gates). **Composes with #248/#18/#261** —
+   no double-demotion / gap / contradiction; a quote-only source can't be promoted as the executable winner. Tests
+   **deterministic** (reconcile the NEW-1 flake).
+5. **Assess the 3 options + recommend one.** *Architect leans **option 2** — external-reference-confirmed demotion
+   (only demote when Chainlink/DefiLlama confirms the winner is the outlier) + `flag-without-reorder` fallback for
+   oracle-less+DefiLlama-less pairs; ties to #18.*
 
-## Negative-path battery (each must be refused / bounded)
-2-source window with: a 10^n mis-scaled attacker quote · an attacker quote just *inside* the band · an attacker quote
-crafted to push a good quote *just over* 500bps so it's demoted · a lone responder · a quote-only source in the mix.
-For each: the user is not steered to a harmful/attacker-controlled outcome, and the execution gates bound the worst case.
-
-## Method
-Read `quote-quorum.ts` + the SwapBox/QuoteBreakdown render + the quorum tests on the audited SHA; trace the
-demotion/threshold logic and the winner→execution path; reconcile against #248/#18/#261; confirm the on-chain gates are
-untouched (diff is display-selection + UX + tests only). Re-run the quorum tests; assess whether the adversarial
-coverage is complete. On-chain reads via view calls only.
-
-## Exit criteria
-Demotion proven non-gameable + deterministic; execution gates confirmed terminal (worst case = display/price, not fund
-loss); `lowConfidence` honest/non-alarmist/no-XSS; characterization accurate; composes with #248/#18/#261; adversarial
-tests sufficient. **0C/0H = approved.** Any finding → severity (C/H/M/L) + a Code-Agent remediation prompt (Auditor does
-not patch).
+## Verdict rule
+A flagged **M/L does NOT block merge** if the bounds hold (no fund-loss path) **and** a remediation prompt is produced.
+Only a Critical/High unbounded fund path blocks.
 
 ## Deliverable
-A report: audited SHA, checks-run table, findings (Sev · `file:line` · disposition + evidence), negative-path results,
-the verdict (0C/0H bar), and the remediation-prompt list. SSH-signed commit, or left for the owner to commit if no
-signing key in the sandbox.
+A report: audited SHA, checks table, the gap's severity + evidence, the bounds-verification (the full chain of gates →
+fund-loss? no), any new finding, the options assessment + recommendation, the verdict, and the remediation-prompt
+handoff to the Code Agent. SSH-signed commit or left for the owner.
 
 ---
 
 ### `/goal` paste for the Auditor (≤4000)
 ```
 AUDIT-NEW2-QUORUM-EXECUTION per docs/Prompts/AUDIT-NEW2-QUORUM-EXECUTION.md.
-READ-ONLY — review only, never edit; classify findings C/H/M/L; 0C/0H = approved;
-produce Code-Agent remediation prompts for any finding (do NOT patch). Run AFTER
-chore/quorum-lowconfidence-fix (NEW-2) merges.
+READ-ONLY — review only, never edit; classify C/H/M/L; produce Code-Agent
+remediation prompts (do NOT patch).
 
-Baseline: audit origin/main HEAD (fetch+assert; read via `git show origin/main:
-<path>` or a fresh worktree); RECORD the audited SHA. Ground on #260 (quote-
-quorum.ts 500bps demotion + lowConfidence), NEW-2, #248 (deviation guard), #18
-(oracle-less advisory), #261 (executable-sources scoping), and the gates (SC-04,
-R1 validateCallDataRecipient, on-chain minimumOutput).
+Baseline: audit the PR #272 head (branch chore/quorum-lowconfidence-fix — UNMERGED;
+it stays unmerged until you sign off). Fetch + RECORD the audited SHA. Ground on
+#260 (quote-quorum.ts 500bps demotion + lowConfidence), #248 (deviation guard), #18
+(oracle-less advisory / Chainlink consent gate), #261 (executable-sources), gates
+(SC-04, R1 validateCallDataRecipient, on-chain minimumOutput).
 
-Why: NEW-2 found the #260 low-quorum demotion CHANGES which source is presented as
-best and therefore which the user executes — execution-selection-adjacent, which
-the original spec under-scoped as "display-only". Prove it's safe.
+CONTEXT: the Code Agent's own adversarial tests already FLAGGED a real gap (not
+patched, pinned as "(a) FLAGGED GAP (Auditor)" in quote-quorum.test.ts): the 500bps
+demotion is gameable ONE-WAY — a source quoting >500bps UNDER an honest winner
+forces the honest winner demoted and the liar presented as best (the band can't
+tell which side lies). FEEDBACK gives 3 options: flag-without-reorder /
+external-reference-confirmed demotion / accept-as-is.
 
-Prove (negative-path FIRST):
-1. Demotion non-gameable (crux): in a <3-responder window a manipulated/mis-scaled/
-   attacker quote can NOT (a) demote a genuinely-good winner so an attacker's WORSE
-   quote is presented best, nor (b) get promoted-as-best itself. 500bps band +
-   demotion deterministic, applied to winner-vs-runner-up, no rounding/ordering
-   edge that flips it.
-2. Execution gates terminal: whatever the demotion picks, SC-04 + R1 + on-chain
-   minimumOutput still bind -> no misroute, no settle below floor -> worst case is
-   display/price, never fund loss.
-3. lowConfidence render honest + non-alarmist (bold not coloured) + cannot XSS
-   (source count/name React-escaped; no dangerouslySetInnerHTML).
-4. Characterization accurate: quote-quorum.ts header no longer says "display-only";
-   states the execution-selection impact + the gate backstop.
-5. Composes with #248/#18: no double-demotion, no gap, no contradictory signals.
-6. Composes with #261: demotion works on SETTLEABLE quotes; a quote-only source
-   can't be promoted as executable winner; no steer to a non-settleable/worse quote.
-7. Adversarial 2-source tests sufficient + deterministic (reconcile NEW-1 flake).
+Do:
+1. INDEPENDENTLY CONFIRM the flagged one-way gap + CLASSIFY severity (C/H/M/L) with
+   evidence. Hunt any OTHER gaming direction / rounding / ordering edge not covered.
+2. VERIFY the claimed BOUNDS hold — even under the gap NO fund-loss path:
+   lowConfidence fires AND renders (non-alarmist, no XSS); Chainlink consent gate
+   catches >=2% deviation (hard block >25%); DefiLlama guard non-overridable;
+   on-chain minimumOutput bounds the fill; tiered USD limits apply. Confirm residual
+   exposure = ONLY pairs oracle-less AND DefiLlama-less, under the USD limits.
+3. EXECUTION GATES terminal: whatever the demotion picks, SC-04 + R1 + on-chain
+   minimumOutput still bind -> worst case = display/price, never fund loss.
+4. Characterization accurate (header no longer "display-only"; names the gates).
+   Composes with #248/#18/#261 (no double-demotion/gap/contradiction; a quote-only
+   source can't be promoted as executable winner). Tests deterministic (NEW-1 flake).
+5. ASSESS the 3 options + RECOMMEND one. Architect leans OPTION 2 =
+   external-reference-confirmed demotion (only demote when Chainlink/DefiLlama
+   confirms the winner is the outlier) + flag-without-reorder fallback for
+   oracle-less+DefiLlama-less pairs; ties to #18.
 
-Negative-path battery (each refused/bounded): 2-source window with a 10^n mis-
-scaled quote · an attacker quote inside the band · one crafted to push a good quote
-just over 500bps · a lone responder · a quote-only source in the mix.
+Verdict rule: a flagged M/L does NOT block merge if bounds hold (no fund-loss path)
+AND a remediation prompt is produced; only an unbounded C/H fund path blocks.
 
-Deliver a report: audited SHA, checks table, findings (Sev·file:line·disposition+
-evidence), negative-path results, verdict (0C/0H bar), remediation-prompt list.
-SSH-signed commit or left for owner.
+Deliver a report: audited SHA, checks table, the gap's severity + evidence, the
+bounds-verification (full chain of gates -> fund-loss? no), any new finding, the
+options assessment + recommendation, verdict, remediation-prompt handoff.
+SSH-signed or left for owner.
 ```
