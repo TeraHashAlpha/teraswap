@@ -6577,6 +6577,87 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   chain (rule #4 — nothing deleted). Its "Pre-activation code wiring" subsection is left as history;
   current wiring status is tracked by the chain-awareness sprints, not this guide.
 
+## Feedback — CHORE-RESCUE-PROMPT-SPECS (branch chore/rescue-prompt-specs)
+
+### Rescued set: 46 files, all docs-only, sourced from `docs/inc-2026-06-09` @ 315d3bc
+- **44 `docs/Prompts/*.md`** absent from origin/main (`git diff --name-status --diff-filter=A origin/main
+  docs/inc-2026-06-09 -- docs/Prompts/` — exact list below).
+- **`docs/security/TERASWAP-AUDIT-FRAMEWORK.md`** (T-SAF source of truth; `git cat-file -e origin/main:…` fails —
+  it was the ONLY `docs/security` addition on the snapshot).
+- **+1 not in the snapshot:** `docs/Prompts/CHORE-RESCUE-PROMPT-SPECS.md` — this chore's own spec existed ONLY as an
+  untracked working-copy file (the exact single-disk failure mode being fixed). Sourced from the on-disk file,
+  NOT reconstructed.
+
+- docs/Prompts/AUDIT-NEW2-QUORUM-EXECUTION.md
+- docs/Prompts/CHORE-ANALYTICS-DCA-EXECUTIONS.md
+- docs/Prompts/CHORE-AZ-SECURITY-BATCH.md
+- docs/Prompts/CHORE-CATEGORY-SCROLL-FIX.md
+- docs/Prompts/CHORE-DCA-APPROVAL-FLOW.md
+- docs/Prompts/CHORE-DCA-POSITIONS-DASHBOARD.md
+- docs/Prompts/CHORE-DCA-PRELAUNCH-FIXES.md
+- docs/Prompts/CHORE-DCA-RESILIENCE.md
+- docs/Prompts/CHORE-DCA-ROUTER-CHAINAWARE.md
+- docs/Prompts/CHORE-DCA-SWAPFAILED.md
+- docs/Prompts/CHORE-DCA-UX-FIXES.md
+- docs/Prompts/CHORE-DCA-UX-POLISH.md
+- docs/Prompts/CHORE-DCA-UX-TWEAKS.md
+- docs/Prompts/CHORE-DCA-WETH-INPUT.md
+- docs/Prompts/CHORE-DEPS-TRIAGE-JUN19.md
+- docs/Prompts/CHORE-DOCS-REFRESH.md
+- docs/Prompts/CHORE-FEEDBACK-MERGE-UNION.md
+- docs/Prompts/CHORE-KEEPER-CI.md
+- docs/Prompts/CHORE-KEEPER-RECORD-EXECUTIONS.md
+- docs/Prompts/CHORE-KEEPER-SWAP-CHAINID.md
+- docs/Prompts/CHORE-KEEPER-SWAP-PAYLOAD-FIX.md
+- docs/Prompts/CHORE-LIMIT-COW-WETH-CHAINAWARE.md
+- docs/Prompts/CHORE-MOBILE-UX-POLISH-2.md
+- docs/Prompts/CHORE-MOBILE-UX-POLISH.md
+- docs/Prompts/CHORE-ORACLE-LESS-ADVISORY.md
+- docs/Prompts/CHORE-ORDER-API-CHAIN-AWARE.md
+- docs/Prompts/CHORE-P0-RESCUE-AUDIT-REPORTS.md
+- docs/Prompts/CHORE-QUORUM-LOWCONFIDENCE-FIX.md
+- docs/Prompts/CHORE-QUOTE-QUORUM-HARDENING.md
+- docs/Prompts/CHORE-QUOTE-SOURCE-FIXES.md
+- docs/Prompts/CHORE-SPLITROUTE-CHAINID.md
+- docs/Prompts/CHORE-SUPPORT-CONTACT-EMAIL.md
+- docs/Prompts/CHORE-SUSHI-V7-REDSNWAPPER-QUOTE-FIX.md
+- docs/Prompts/CHORE-SWAP-FEE-USD-FIX.md
+- docs/Prompts/CHORE-TOKEN-LOGOS-COVERAGE.md
+- docs/Prompts/CHORE-TOKEN-LOGOS-FIX.md
+- docs/Prompts/CHORE-WALLET-LOGOS-FIX.md
+- docs/Prompts/INVESTIGATE-SILENT-SOURCES.md
+- docs/Prompts/INVESTIGATE-SPLITROUTE-CHAIN-AWARENESS.md
+- docs/Prompts/REVIEW-AZ-REFRESH.md
+- docs/Prompts/SPRINT-DCA-OBSERVABILITY-FREEZE.md
+- docs/Prompts/SPRINT-DCA-UNGATE.md
+- docs/Prompts/SPRINT-TOKEN-SELECTOR-UX.md
+- docs/Prompts/T-SAF-ARCHITECT-BRIEF.md
+
+### Secret scan: CLEAN — nothing excluded, nothing flagged
+- gitleaks **8.30.1** with the repo `.gitleaks.toml` + `.gitleaksignore`, staged-diff scan
+  (`gitleaks git --pre-commit --staged`): **0 leaks** across all 46 files (232 KB). The on-chain addresses present
+  (e.g. PAXG/XAUT anchors in SPRINT-RWA-GOLD) are public token addresses, as the prompt anticipated.
+
+### M set (10 files) — left untouched; NO snapshot version carries substance main lacks
+- Verdict: main's versions are the fuller committed rewrites — main is longer in **all 10** (e.g.
+  AUDIT-CLEANUP-LOWS 98 vs 47 lines, CHORE-DCA-DEVIATION-GUARD 190 vs 71); the snapshot holds the Architect's
+  earlier compact drafts of the same specs. 3 of 10 are pure main-supersets (snapshot adds 0 lines).
+- Spot-verified each mixed draft's distinctive substance exists on main (grep hit counts): W2 leg-quote
+  fail-closed on unparseable/malformed/zero (4); address-guard transferability/bytecode/duplicate-symbol checks
+  (5/5/6); catalog-cleanup LCX-class + AVT/FLUX/LIT (2/6); collisions-decimals FLUX + decimals() (5/16);
+  RWA-gold PAXG/XAUT (6); deviation-guard 1% threshold / window / defer semantics (4/33/24).
+- Dup nuance: `docs/Prompts/CHORE-QUORUM-LOWCONFIDENCE-FIX.md` is in this rescue AND in open PR #272 —
+  byte-identical blobs (`a289a9a`), so the add/add auto-resolves regardless of merge order.
+
+### Process fix (adopt going forward)
+- **Commit the Architect's prompt spec as part of each implementation PR** — the Code Agent copies it into
+  `docs/Prompts/` in the same signed commit (precedent: PR #272, and this PR for its own spec). Specs then never
+  live single-disk again; a periodic docs sweep remains as backstop, but per-PR keeps the spec and its
+  implementation reviewable together.
+
+### Merge-order note
+- This PR and open PR #272 both append `FEEDBACK.md` at the tail — whichever merges second needs a rebase
+  (GitHub ignores the `merge=union` attribute when computing PR mergeability; see the PR #271/#272 history).
 ## Feedback — CHORE-QUORUM-REFERENCE-CONFIRMED-DEMOTION (branch chore/quorum-reference-confirmed-demotion)
 
 ### ✅ Ready for Auditor re-confirm to close NEW2-M-01
