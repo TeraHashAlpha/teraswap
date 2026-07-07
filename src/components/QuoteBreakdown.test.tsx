@@ -400,3 +400,49 @@ describe('QuoteBreakdown — quote-only source label [CHORE-SUSHI-V7]', () => {
     expect(screen.queryByText(/quote only/i)).not.toBeInTheDocument()
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [CHORE-QUORUM-LOWCONFIDENCE-FIX] Thin-quorum signal — meta.lowConfidence
+// (set by the quote-quorum band when the displayed best could not be
+// cross-checked: <3 usable responders) must reach the user as an
+// INFORMATIONAL cue: bold lead, calm body, no alarm colouring (house style
+// of the oracle-less notice above). The flag was previously set but
+// rendered nowhere — a dead safety signal.
+// ─────────────────────────────────────────────────────────────
+describe('QuoteBreakdown — low-confidence quorum cue [CHORE-QUORUM-LOWCONFIDENCE-FIX]', () => {
+  it('renders the cue when meta.lowConfidence is set — singular copy for a single usable source', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: { ...makeMeta(), lowConfidence: true } })} />,
+    )
+    expect(screen.getByText('Low confidence')).toBeInTheDocument()
+    expect(screen.getByText(/only 1 source responded with a usable quote/i)).toBeInTheDocument()
+  })
+
+  it('uses plural copy when two quotes are displayed but could not be cross-validated', () => {
+    const base = makeMeta()
+    const runnerUp = { ...base.best, source: 'kyberswap' as const, toAmount: '2990000000' }
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({ meta: { ...base, all: [base.best, runnerUp], lowConfidence: true } })}
+      />,
+    )
+    expect(screen.getByText(/only 2 sources responded with a usable quote/i)).toBeInTheDocument()
+  })
+
+  it('renders NO cue when lowConfidence is absent (healthy quorum)', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps()} />)
+    expect(screen.queryByText('Low confidence')).toBeNull()
+  })
+
+  it('keeps the cue informational: bold lead, NO alarm colouring, and names the minimum-output backstop', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: { ...makeMeta(), lowConfidence: true } })} />,
+    )
+    const label = screen.getByText('Low confidence')
+    expect(label.className).toMatch(/font-semibold/)
+    const box = label.closest('div')!
+    // Non-alarmist by requirement: none of the danger/warn/amber alarm palettes.
+    expect(box.className).not.toMatch(/danger|warning|amber|red-/)
+    expect(box.textContent).toMatch(/minimum-output/i)
+  })
+})

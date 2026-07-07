@@ -188,6 +188,23 @@ export default function QuoteBreakdown({
         </div>
       )}
 
+      {/* [CHORE-QUORUM-LOWCONFIDENCE-FIX] Thin-quorum cue. meta.lowConfidence is set by
+          the quote-quorum band (src/lib/quote-quorum.ts) when the displayed best could
+          not be cross-checked: a lone responder, a demoted low-quorum outlier, or an
+          unusable runner-up amount. The flag used to be set but rendered nowhere — a
+          dead safety signal. Informational by design, NOT an alarm (house style of the
+          oracle notice above: bold lead, calm body, no alarm colour): the steered-to
+          quote is still bounded by the Chainlink price gate and its own on-chain
+          minimum-output. */}
+      {meta.lowConfidence && (
+        <div className="rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-xs text-cream-50">
+          <span className="font-semibold text-cream-80">Low confidence</span>
+          {' '}— only {meta.all.length} {meta.all.length === 1 ? 'source' : 'sources'} responded with a usable
+          quote, so this price couldn&apos;t be cross-checked. Your swap is still protected by the on-chain{' '}
+          <strong>minimum-output</strong> guarantee — double-check the rate looks right before swapping.
+        </div>
+      )}
+
       {/* [P95] Gasless recommendation card — surfaces when CoW is competitive
           enough to be the better deal. Two layouts: a prominent CTA when a
           non-CoW source is currently winning, a softer confirmation when CoW
