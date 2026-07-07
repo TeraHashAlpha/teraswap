@@ -12,6 +12,16 @@
  *      - still carries its ⛔ DEPRECATED / NOT DEPLOYED banner,
  *      - is never listed as a deployed source in the map section,
  *      - is never referenced by Solidity/TS/JS code (docs/audit history is fine).
+ *   4. [CHORE-AZ-SECURITY-BATCH C4] The weak V1 flat (the byte-proven source of
+ *      the FROZEN mainnet V1 — 1-arg ctor, no admin/whitelist/timelock/
+ *      minimumOutput, open receive()):
+ *      - still exists (rule #4 — never delete) and keeps its ⛔ DO NOT DEPLOY
+ *        banner,
+ *      - is never referenced by Solidity/TS/JS code as a source.
+ *   5. contracts/DEPLOY.md prescribes the canonical V2 recipe (source file,
+ *      solc 0.8.28, via-IR, 2-arg constructor, DEPLOYED-SOURCES cross-check)
+ *      and only ever mentions the V1 flat on a ⛔ warning line — so a stale/
+ *      weak deploy target can't slip back into the deploy guide.
  *
  * The on-chain half (hash pin + selector audit + byte-compare) is
  * scripts/verify-deployed-sources.mjs — run manually / per audit, not in CI
@@ -26,6 +36,11 @@ const DOC = 'docs/security/DEPLOYED-SOURCES.md'
 const DEPRECATED_FLAT = 'contracts/TeraSwapFeeCollectorV2_DEPRECATED_flat.sol'
 const OLD_FLAT_NAME = 'contracts/TeraSwapFeeCollectorV2_flat.sol'
 const BANNER_MARKER = 'DEPRECATED / NOT DEPLOYED'
+// [CHORE-AZ-SECURITY-BATCH C4] the weak V1 flat + the deploy guide it must stay out of
+const V1_FLAT = 'contracts/TeraSwapFeeCollector_flat.sol'
+const V1_BANNER_MARKER = 'DEPRECATED — DO NOT DEPLOY'
+const DEPLOY_DOC = 'contracts/DEPLOY.md'
+const CANONICAL_SOURCE = 'contracts/TeraSwapFeeCollector.sol'
 
 const DEPLOYED_ADDRESSES = [
   '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459', // FeeCollector V2 (mainnet)
@@ -66,12 +81,46 @@ if (!existsSync(DEPRECATED_FLAT)) {
   failures.push(`${DEPRECATED_FLAT} lost its "${BANNER_MARKER}" banner`)
 }
 
-// ── 4. Nothing in code references the stale flat as authoritative ──────────
+// ── 4. The weak V1 flat stays bannered (deployed-but-frozen; never redeploy) ─
+if (!existsSync(V1_FLAT)) {
+  failures.push(`${V1_FLAT} is missing — never delete it (rule #4), it is the byte-proven frozen-V1 source`)
+} else if (!readFileSync(V1_FLAT, 'utf8').includes(V1_BANNER_MARKER)) {
+  failures.push(`${V1_FLAT} lost its "${V1_BANNER_MARKER}" banner`)
+}
+
+// ── 5. DEPLOY.md prescribes the canonical V2 recipe, not the weak V1 ────────
+if (!existsSync(DEPLOY_DOC)) {
+  failures.push(`${DEPLOY_DOC} is missing — the deploy guide must exist and pin the canonical recipe`)
+} else {
+  const deployDoc = readFileSync(DEPLOY_DOC, 'utf8')
+  const requiredMarkers = [
+    [CANONICAL_SOURCE, 'the canonical deployable source'],
+    ['0.8.28', 'the pinned solc version'],
+    ['via-IR', 'the mandatory via-IR compiler setting'],
+    ['_admin', 'the 2-arg constructor (_feeRecipient, _admin)'],
+    ['DEPLOYED-SOURCES.md', 'the cross-check of the canonical source map'],
+  ]
+  for (const [marker, what] of requiredMarkers) {
+    if (!deployDoc.includes(marker)) {
+      failures.push(`${DEPLOY_DOC} no longer mentions "${marker}" (${what}) — the V2 recipe drifted`)
+    }
+  }
+  for (const [i, line] of deployDoc.split('\n').entries()) {
+    if (line.includes('TeraSwapFeeCollector_flat') && !line.includes('⛔')) {
+      failures.push(
+        `${DEPLOY_DOC}:${i + 1} mentions the weak V1 flat without a ⛔ warning — it must never reappear as a deploy target`,
+      )
+    }
+  }
+}
+
+// ── 6. Nothing in code references the stale flat as authoritative ──────────
 const SKIP_DIRS = new Set(['node_modules', 'out', 'out-mx', 'cache', 'lib', '.git', '.next', '__snapshots__'])
 const SELF_ALLOW = new Set([
   'scripts/check-deployed-sources.mjs',
-  'scripts/verify-deployed-sources.mjs',
+  'scripts/verify-deployed-sources.mjs', // byte-proves the frozen V1 against the flat — the one legit code reference
   DEPRECATED_FLAT,
+  V1_FLAT,
 ])
 const CODE_EXT = /\.(sol|ts|tsx|js|jsx|mjs|cjs|json|yml|yaml|toml)$/
 
@@ -93,6 +142,9 @@ for (const root of ['contracts', 'src', 'scripts', '.github', 'supabase', 'worke
     if (text.includes('TeraSwapFeeCollectorV2_flat') || text.includes('TeraSwapFeeCollectorV2_DEPRECATED_flat')) {
       failures.push(`${file} references the stale flat FeeCollector — it must never be treated as a source`)
     }
+    if (text.includes('TeraSwapFeeCollector_flat')) {
+      failures.push(`${file} references the weak V1 flat FeeCollector — the only deployable source is ${CANONICAL_SOURCE}`)
+    }
   }
 }
 
@@ -101,4 +153,6 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(1)
 }
-console.log('deployed-sources-guard OK — canonical map intact, stale flat stays deprecated')
+console.log(
+  'deployed-sources-guard OK — canonical map intact, stale flat stays deprecated, weak V1 flat stays bannered, DEPLOY.md stays on the V2 recipe',
+)
