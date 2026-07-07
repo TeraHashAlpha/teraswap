@@ -6662,3 +6662,45 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   plus the tie-stability test. The sanity stays BEFORE the 3×-median filter (single demotion
   authority at n<3). `applyLowQuorumSanityWithReference` (the lazy wiring `fetchMetaQuote` now
   consumes) is unit-tested end-to-end with the I/O fetchers mocked at the module boundary.
+## Feedback — INVESTIGATE-DCA-VISIBILITY-DATA (branch investigate/dca-visibility-data)
+
+### Verdict: FRONTEND-ONLY — the keeper recording does NOT need enriching
+- Full report: `Audits/Reviews/DCA-VISIBILITY-DATA-2026-07.md`. Every asked stat is computable from
+  existing `orders` + `order_executions` columns; P&L-vs-spot reuses the existing #18/#248 plumbing
+  (`/api/portfolio/prices` batch DefiLlama, or server-side `fetchChainlinkPriceRaw` /
+  `fetchDefiLlamaPrice`) — nothing new to build. Live-verified against production: the completed
+  Base test DCA (`5449dea0`, WETH→ETHFI, 5/5) has 5 confirmed fills with real event-decoded
+  per-fill amounts, fee (0.1% of input), gas_used, daily cadence. Two strictly-OPTIONAL keeper
+  nice-to-haves (not required by the asks): populate the existing `price_at_execution` column
+  (1-line — historical USD-at-fill only), record `effectiveGasPrice` (net-P&L-incl-gas only).
+- Stats compute paths (detail in report §3): avg buy price = Σin/Σout realized; total invested =
+  Σamount_in; total received = Σamount_out (NOT orders.amount_out — NULL, keeper never writes the
+  order-level summary cols); fills N/M + %complete = orders.dca_executed/dca_total; date range =
+  created_at→executed_at / fill MIN-MAX; next fill = last fill + dca_interval (already shipped in
+  the active-cards countdown); P&L vs spot = Σout×spot_out − Σin×spot_in.
+
+### Spec reconciliation (the 3 existing specs)
+- KEEPER-RECORD-EXECUTIONS: implemented & live (record-execution.js, idempotent by tx_hash,
+  event-decoded amounts; divergences documented — no per-row source/chainId/USD cols, derived via
+  the orders join). ANALYTICS-DCA-EXECUTIONS: implemented & live (/api/analytics union + swaps-first
+  tx_hash dedup — the blueprint for the History merge). DCA-POSITIONS-DASHBOARD: implemented for
+  ACTIVE positions (countdown/fills timeline); completed DCAs render only as compact flag-gated
+  history cards. **None covers ask #2 (History feed) or ask #3's aggregate stats** → new frontend
+  spec(s) needed; no contradictions. ⚠ All 3 spec files live only on origin/chore/rescue-prompt-specs
+  (unmerged) — not on main.
+
+### Completed(0) root cause — data reality, not a filter bug
+- Pipeline verified end-to-end (keeper 'executed' → API returns terminal rows → mapDbStatus
+  'executed'→'filled' → Completed tab filters 'filled'). The DB holds exactly ONE ever-completed
+  order, owned by the test wallet 0xd44d…962d (completed 2026-07-05); any other wallet truthfully
+  sees 0. Caveat: the Orders tab's initial all-statuses fetch needs the W6 read-auth signature —
+  declining it zeroes ALL tabs. History tab reads ONLY the `swaps` table → DCA fills structurally
+  invisible; recommend a server-side union in /api/history (analytics pattern) + a "DCA" badge.
+
+### Adjacent findings (backlog candidates, none changed)
+- Local .env.local Supabase keys are dead/rotated (live API 401s them) + its first var name is
+  mangled (`EXT_PUBLIC_ORDER_EXECUTOR_ADDRESS`, missing leading N) — local-only, prod (Vercel env)
+  unaffected; re-pull env before the next local DB task. `fetchDCAExecutions` is dead code (unused +
+  anon/RLS path returns empty without a Supabase-Auth JWT). `/api/orders/stats` omits the `failed`
+  bucket. `useSwapHistory` claims localStorage but has no persist middleware (session-only). Stale
+  memory corrected: the keeper IS running (daily fills 07-01→07-05).
