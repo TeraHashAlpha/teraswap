@@ -7112,3 +7112,42 @@ No fund-flow/contract change; no auth loosened. Threat model P3.
 - **P3b — quote-cache quantization:** `amount` bucketed to 4 significant figures before entering the cache key, so a scripted +1-wei increment now hits the same 3s cache entry instead of forcing an ~11-adapter fan-out per request. A genuinely different trade size still misses. The global KV-backed outbound throttle (per the threat model's bigger follow-up) is out of scope here.
 
 28 new tests across trusted-ip (8), rpc-cost-policy (11, pure) + rpc route (8), history route (+4), quote-cache (9) = 2558 total pass (1 pre-existing unrelated failed suite: `connect-modal-qr.test.ts`, missing `cuer/QrCode` dep in this worktree's node_modules — not touched by this chore). Typecheck clean on all edited/added files.
+## Feedback — CHORE-DCA-CUSTOM-PERIODS (branch chore/dca-custom-periods)
+
+**Spec source:** `docs/Prompts/CHORE-DCA-CUSTOM-PERIODS.md` did not exist in the repo/history/origin —
+implemented from the `/goal` command text (full spec), with the user's explicit go-ahead. Committing
+that text as the spec file in this PR per process.
+
+**Bounds found (read-only):**
+- Contract (`TeraSwapOrderExecutor.sol`): `dcaTotal>0` (`InvalidDCATotal`), `dcaInterval>0`
+  (`InvalidDCAInterval`), per-chunk floor `MIN_ORDER_AMOUNT=10_000` base units (pre-existing
+  guard, untouched). **No on-chain upper bound** on either.
+- Keeper (`executor.js`): `POLL_INTERVAL_MS=30_000` (30s) — the smallest custom interval (1h)
+  is 120× that, no precision issue.
+- **Order-creation API** (`api/orders/route.ts` + mirror in `contracts/order-engine/api/orders.ts`):
+  hard-rejects `expiry > now + 90d` (400). **This — not the contract, not the keeper — is the
+  real ceiling** for interval×buys (10d × 100 buys = 1000d, 11× over).
+
+**Design:** `DCA_MIN_CHUNK_USD` = `NEXT_PUBLIC_DCA_MIN_CHUNK_USD`, default **$5**, in
+`lib/order-engine/dca-custom.ts::getDcaMinChunkUsd`. Buffer for auto-derived expiry =
+`max(1h, 10% of interval)`. Both are product judgment calls (no existing precedent), flagged for
+Architect review.
+
+**Composition, not new gates:** Custom mode's auto-derived expiry is hard-capped at
+`MAX_EXPIRY_DAYS` (90d); when interval×buys alone exceeds that, the derived expiry lands below
+what the schedule needs, and the **pre-existing** `dcaScheduleFitsExpiry` gate (already wired,
+already tested for the preset path) blocks submit — no second hard-warn UI was built.
+
+**Dust guard fails open on unpriced tokens:** `fillUsd`/`APPROX_PRICES` only covers curated
+symbols (ETH/WETH/stables/majors). An imported/exotic DCA input token has no USD price → the
+min-chunk-USD guard no-ops (documented behavior, matches `fillUsd`'s existing posture elsewhere)
+— the contract's base-unit `MIN_ORDER_AMOUNT` floor remains the universal backstop regardless.
+
+**Not touched:** presets (`DCA_TOTAL_PRESETS`/`DCA_INTERVAL_PRESETS`/`EXPIRY_PRESETS`), contract,
+keeper, any gate. `.env.example` not updated (out of the read-only file scope) — the env var has
+a working default and no deploy step is required.
+
+**Tests:** `dca-custom.test.ts` (23, pure, TDD red→green) + 6 new `DCAPanel.test.tsx` integration
+cases (toggle, clamp-on-blur, dust-cap, dust-block, expiry-hard-warn, signed dcaInterval/dcaTotal
+match the clamped custom values). Full suite 2549/2549 green; typecheck/circular clean; 0
+lint-warning delta.

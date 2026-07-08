@@ -212,3 +212,100 @@ describe('DCAPanel — buys/interval presets [chore/dca-ux-tweaks]', () => {
     expect(screen.queryByTestId('confirm-review')).toBeNull()
   })
 })
+
+// [CHORE-DCA-CUSTOM-PERIODS] Custom interval/buys mode — Base only, frontend + order-creation
+// validation only (no contract/keeper/gate change). Pure clamp/guard math is unit-tested in
+// lib/order-engine/dca-custom.test.ts; these integration tests pin the UI wiring + the
+// signed-params invariant end-to-end (real useOrderEngine, only Supabase I/O mocked).
+describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
+  it('the Custom toggle swaps the buys/interval presets for numeric inputs, and back', () => {
+    renderWithProviders(<DCAPanel />)
+    expect(screen.getByRole('button', { name: '10' })).toBeInTheDocument() // preset default visible
+
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+    expect(screen.getByTestId('dca-custom-buys-input')).toBeInTheDocument()
+    expect(screen.getByTestId('dca-custom-interval-input')).toBeInTheDocument()
+    expect(screen.getByTestId('dca-custom-expiry-auto')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '10' })).toBeNull() // preset grid gone
+
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+    expect(screen.getByRole('button', { name: '10' })).toBeInTheDocument() // presets restored
+    expect(screen.queryByTestId('dca-custom-buys-input')).toBeNull()
+  })
+
+  it('clamps an out-of-range buys/interval value on blur', () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+
+    const buysInput = screen.getByTestId('dca-custom-buys-input') as HTMLInputElement
+    fireEvent.change(buysInput, { target: { value: '500' } })
+    fireEvent.blur(buysInput)
+    expect(buysInput.value).toBe('100') // DCA_CUSTOM_BUYS_MAX
+
+    const intervalInput = screen.getByTestId('dca-custom-interval-input') as HTMLInputElement
+    fireEvent.change(intervalInput, { target: { value: '0' } })
+    fireEvent.blur(intervalInput)
+    expect(intervalInput.value).toBe('1') // DCA_CUSTOM_INTERVAL_NUMBER_MIN
+  })
+
+  it('caps buys and warns when the requested count would produce a dust chunk', async () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+    // 0.01 WETH ≈ $35 total (APPROX_PRICES). 100 buys → $0.35/buy, under the $5 default floor.
+    // floor(35/5) = 7 buys clears it.
+    enterAmount('0.01')
+    const buysInput = screen.getByTestId('dca-custom-buys-input') as HTMLInputElement
+    fireEvent.change(buysInput, { target: { value: '100' } })
+
+    const warning = await screen.findByTestId('dca-min-chunk-warning')
+    expect(warning.textContent).toMatch(/capped to 7 buys/)
+  })
+
+  it('blocks submit (never signs) when the total is too small to clear the minimum even at 1 buy', async () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+    // 0.001 WETH ≈ $3.50 total — below the $5 default floor even for a single buy.
+    enterAmount('0.001')
+
+    const warning = await screen.findByTestId('dca-min-chunk-warning')
+    expect(warning.textContent).toMatch(/below the \$5 minimum/)
+
+    fireEvent.click(startDcaButton())
+    await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
+  })
+
+  it('auto-derives expiry from interval × buys, and the existing hard-warn fires when that exceeds MAX_EXPIRY_DAYS', async () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+    enterAmount('100') // large total ⇒ never dust-capped here, isolates the expiry guard
+
+    // 10 days × 100 buys = 1000 days, far past the 90-day server ceiling.
+    fireEvent.click(screen.getByTestId('dca-custom-interval-unit-days'))
+    fireEvent.change(screen.getByTestId('dca-custom-interval-input'), { target: { value: '10' } })
+    fireEvent.change(screen.getByTestId('dca-custom-buys-input'), { target: { value: '100' } })
+
+    expect(await screen.findByTestId('dca-expiry-block')).toBeInTheDocument()
+    fireEvent.click(startDcaButton())
+    await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
+  })
+
+  it('signs a valid Custom order with dcaInterval/dcaTotal exactly matching the clamped custom values (within contract bounds)', async () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('dca-custom-toggle'))
+    enterAmount('100')
+
+    fireEvent.click(screen.getByTestId('dca-custom-interval-unit-hours'))
+    fireEvent.change(screen.getByTestId('dca-custom-interval-input'), { target: { value: '2' } })
+    fireEvent.change(screen.getByTestId('dca-custom-buys-input'), { target: { value: '5' } })
+
+    fireEvent.click(startDcaButton())
+    fireEvent.click(await screen.findByTestId('confirm-review'))
+
+    await waitFor(() => expect(mockCreateOrderInSupabase).toHaveBeenCalledTimes(1))
+    const submitArg = mockCreateOrderInSupabase.mock.calls[0][0] as { dcaInterval: number; dcaTotal: number }
+    expect(submitArg.dcaInterval).toBe(2 * 3600) // 2h — mirrors the contract's dcaInterval > 0 guard
+    expect(submitArg.dcaTotal).toBe(5)           // mirrors the contract's dcaTotal > 0 guard
+  })
+})
