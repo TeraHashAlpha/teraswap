@@ -1158,3 +1158,52 @@ prompt does NOT block merge.
 - **Recommendation: Option 2** (external-reference-confirmed demotion + flag-without-reorder fallback for
   oracle-less+DefiLlama-less) — concurs with the Architect; remediation prompt handed to the Code Agent.
   Options 1 (loses mis-scale catch) / 3 (leaves the gap) rejected.
+
+### AUDIT NEW-2 M-01 RE-CONFIRM — reference-confirmed demotion (PR #275, 2026-07-02) — **NEW2-M-01 CLOSED**
+
+**Verdict: NEW2-M-01 CLOSED — 0C / 0H. PR #275 APPROVED to merge.** Report:
+`Audits/Sprint/AUDIT-NEW2-M01-RECONFIRM-AUDIT.md`. Branch `chore/quorum-reference-confirmed-demotion`, audited
+SHA `0b6264d` (SSH-signed). #275 implements the agreed Option 2 correctly.
+
+- **Gap CLOSED (all regimes, test-proven):** referenced pair + attacker >5% under an honest winner + reference
+  confirms winner → **winner KEPT, lowConfidence false** (the former `(a) FLAGGED GAP` test now asserts the
+  attack defeated); mis-scaled-high winner deviating from ref → **still demoted** (mis-scale preserved);
+  no-reference pair → **flag-without-reorder** (honest winner keeps the slot). Band trip resolves the reference
+  **lazily** (integrity-gated Chainlink via `validateRoundData`, else DefiLlama; same-methodology only → can't be
+  stale-wrong or gamed).
+- **Item A (double-defect: winner >band above ref AND runner-up >band below):** shipped demotes to the too-low
+  runner-up (flagged) — **ACCEPTED as bounded** (the reference gate that flagged it blocks the fill at execution:
+  Chainlink ≥3%/25% or DefiLlama 422 + on-chain minimumOutput → no fund loss). Optional defense-in-depth prompt
+  **NEW2-L-01** (confirm runner-up sane before presenting; else flag-without-reorder) — **non-blocking**.
+- **Item B (ref-confirmed → lowConfidence false):** **CORRECT/SAFE — ACCEPTED** (oracle-cross-validated is
+  strictly stronger; 1-responder/no-reference/demotion/both-below all still flag).
+- Gates terminal (SC-04/R1/minimumOutput untouched); composes with #248/#18/#261; deterministic; no new gaming.
+
+**Net:** NEW2-M-01 **CLOSED**. Open follow-up: NEW2-L-01 (optional item-A hardening, LOW, non-blocking).
+
+### AUDIT P1a — On-chain floor: Phase-0 keeper mitigation + ADR-013 (PR #279, 2026-07-08)
+
+**PART A verdict: APPROVED — 0C / 0H. PR #279 (Phase 0) may merge. PART B: ADR-013 APPROVED-TO-IMPLEMENT.**
+Report: `Audits/Sprint/AUDIT-P1A-ONCHAIN-FLOOR-AUDIT.md`. Branch `sprint/order-onchain-floor`, audited SHA
+`b764b1a` (SSH-signed). Addresses threat-model P1a (HIGH — DCA had no on-chain floor: 1-wei minOut +
+routerDataHash=0). Keeper `node --test`: **28/28**.
+
+| Check | Result |
+|-------|--------|
+| DCA fill < ref×(1−300bps) → REJECTED (delay, not force) | ✅ `order-floor.js decideFloor`; env-clamped [50,2000]; reject = skip+retry+page (no-op, funds stay). Chainlink ETH-leg else DefiLlama (5s cap). |
+| Silent public-mempool fallback removed | ✅ `submission-policy.js`: mainnet relay-required-else-**refuse** (fail-closed); explicit `ALLOW_PUBLIC_MEMPOOL` only. |
+| Base = sequencer-private (sound) | ✅ single sequencer, private mempool → third-party sandwich absent; residual (sequencer/cross-domain) covered by the oracle floor. Corrects the threat model's overstated "Base sandwichable". |
+| Phase 0 can't worsen safety | ✅ off-chain only; SC-04/R1/on-chain minimumOutput untouched; rejected fill = no-op; no ALLOW_PLAINTEXT_KEY change. |
+
+**Fail-open adjudication:** on reference failure (no Chainlink AND no DefiLlama) the fill is flagged-not-rejected
+(fail-OPEN). **ACCEPTED for Phase 0** — fail-closed would strand permanently-oracle-less DCAs + halt DCA on
+transient outages; residual is bounded (only exploitable with a concurrent keeper/route compromise; interim;
+ADR-013 §1 no-feed signed-absolute-min closes it on-chain). Refinement = **P1A-M-01 (MED, non-blocking)**:
+distinguish transient-outage-of-a-feeded-pair (→ delay) from genuinely no-feed (→ flag) + USD cap on fail-open fills.
+
+**ADR-013 (design, no code):** APPROVED-TO-IMPLEMENT. §1 signed `maxSlippageBps` (keeper-un-griefable) + Chainlink
+read at execution + REVERT (no 1-wei clamp, no dust) + no-feed signed-absolute-min; §2 routerDataHash (DCA bound by
+oracle floor, non-DCA real hash → closes P1c); §3 Permit2 bitmap nonce (closes P1b); deploy plan = v3 + mandatory
+Auditor pass + 48h timelock + dual-run migration + runbook. **Design notes for the v3 sprint (not blockers):**
+N1 feed-staleness stranding-recovery, N2 no-feed absolute-min UX derivation, N3 clamp `maxSlippageBps` on-chain,
+N4 decimals-safe fair-value math. INFO P1A-I-01: Phase-0 comments say ADR-011; the ADR is ADR-013.

@@ -10,6 +10,7 @@ import { chainlinkAggregatorAbi } from '@/lib/chainlink'
 import { failedOrderReason } from '@/lib/order-engine/failed-reason'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import ExecutionTimeline from './ExecutionTimeline'
+import DCAPositionStats from './dca/DCAPositionStats'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
 import { playTouchMP3 } from '@/lib/sounds'
 
@@ -394,6 +395,26 @@ function OrderCard({
               <span className="font-mono">{order.txHash.slice(0, 10)}...{order.txHash.slice(-8)}</span>
               <span>↗</span>
             </a>
+          )}
+
+          {/* [CHORE-DCA-VISIBILITY-AND-STATS #3] Per-position stats (DCA only):
+              cost basis / invested / received / % complete / P&L vs spot, all
+              from the recorded fills. Covers the Completed tab and any active DCA
+              in this Orders view. */}
+          {isDCA && (
+            <DCAPositionStats
+              orderId={order.id}
+              wallet={order.order.owner}
+              tokenIn={order.order.tokenIn as string}
+              tokenOut={order.order.tokenOut as string}
+              tokenInSymbol={order.tokenInSymbol}
+              tokenOutSymbol={order.tokenOutSymbol}
+              tokenInDecimals={order.tokenInDecimals}
+              tokenOutDecimals={order.tokenOutDecimals}
+              chainId={order.chainId ?? 1}
+              dcaTotal={order.dcaTotal}
+              enabled={expanded}
+            />
           )}
 
           {/* Execution Timeline — all order types (Limit/SL/TP/DCA) */}

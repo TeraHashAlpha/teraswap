@@ -6,7 +6,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { SUPABASE_ORDERS_TABLE, SUPABASE_EXECUTIONS_TABLE } from './config'
+import { SUPABASE_ORDERS_TABLE } from './config'
 import { ordersReadHeaders, ReadAuthRequiredError } from './read-auth'
 import type { AutonomousOrderStatus } from './types'
 
@@ -62,17 +62,6 @@ export interface OrderRow {
   error: string | null
   created_at: string
   executed_at: string | null
-}
-
-// ── Execution row type ───────────────────────────────────
-export interface ExecutionRow {
-  id: string
-  order_id: string
-  execution_number: number
-  amount_in: string
-  amount_out: string
-  tx_hash: string
-  created_at: string
 }
 
 // ── Create order (via server-side API — bypasses RLS) ────
@@ -237,24 +226,6 @@ export async function cancelOrderInSupabase(
     console.error('[OrderEngine] cancelOrder failed')
     return false
   }
-}
-
-// ── Fetch DCA executions ─────────────────────────────────
-export async function fetchDCAExecutions(orderId: string): Promise<ExecutionRow[]> {
-  const client = getClient()
-  if (!client) return []
-
-  const { data, error } = await client
-    .from(SUPABASE_EXECUTIONS_TABLE)
-    .select('*')
-    .eq('order_id', orderId)
-    .order('execution_number', { ascending: true })
-
-  if (error) {
-    console.error('[OrderEngine] Supabase executions fetch error:', error.message)
-    return []
-  }
-  return data ?? []
 }
 
 // ── Subscribe to order status changes ────────────────────
