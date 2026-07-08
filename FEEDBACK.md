@@ -7074,3 +7074,31 @@ All keeper, off-chain, fund-adjacent; no contract/on-chain change; Phase-0 rejec
 **USD-cap chosen: $250** per fill — small enough to bound worst-case loss on an un-oracle-bounded feedless fill, large enough not to block genuine small feedless DCA; Auditor-tunable via env.
 
 Keeper node:test: **173 pass** (28 new). `node --check executor.js` OK. Live end-to-end (a transient-outage DELAY / feedless-cap path exercised against real Supabase+RPC) needs a keeper deploy (pm2 restart) — ops step. **→ Auditor (signer/floor-adjacent).**
+
+## Feedback — CHORE-DEFILLAMA-ADAPTER
+
+**Event signature used:** `SwapWithFee(address,address,address,uint256,uint256,address,uint256)`
+(`user, router, tokenIn, totalAmount, feeAmount, tokenOut, outputAmount`), read directly from
+`contracts/TeraSwapFeeCollector.sol:60-68` — the SAME topic already hardcoded as
+`TOPICS.SwapWithFee` in `src/lib/on-chain-monitor.ts`, not a newly-derived one. Both deployed
+FeeCollectors run this exact contract source: mainnet `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459`,
+Base `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` (cross-checked against `src/lib/constants.ts` +
+multiple audit files referencing both addresses as "FeeCollector").
+
+**DefiLlama target path:** `dexs/teraswap/index.js` in a fork of `DefiLlama/dimension-adapters`
+(category `Aggregator`) — NOT the TVL repo. This repo's copy lives at
+`integrations/defillama/teraswap.js` for the record; its two `require(...)` helper paths need
+adjusting to the fork's current layout at PR time (they weren't cloned/verified here — this task
+was scoped read-only on the TeraSwap contracts, no external repo access).
+
+**Methodology (submission text, full copy in `integrations/defillama/PR-NOTE.md`):** volume =
+Σ`totalAmount` (pre-fee notional, priced in `tokenIn`); fees = Σ`feeAmount` (same token, no
+cross-token conversion); revenue = fees (TeraSwap keeps 100%, no fee-sharing). Both chains use the
+identical event/contract; only the deployment `start:` date/block per chain is a TODO placeholder
+(needs an Etherscan/Basescan "Contract Creation" lookup, out of scope for a read-only task).
+
+**Edge case:** `SwapWithFee`'s first 3 slots (`user, router, tokenIn`) are shared with the frozen
+V1 FeeCollector (`0x4dAEAf24…`, `src/lib/constants.ts:FEE_COLLECTOR_V1_ADDRESS`), but V1's event
+has a 5-arg signature (no `tokenOut`/`outputAmount` — see `TOPICS.SwapWithFeeV1` in
+`on-chain-monitor.ts`) and V1 is deprecated/no longer receiving swaps, so it's correctly excluded
+from this adapter (no double-counting risk either way — different topic0).
