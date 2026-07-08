@@ -4,6 +4,7 @@ import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { getRpcUrlForChain } from '@/lib/adapters/shared'
 import { trustedClientIp } from '@/lib/trusted-ip'
+import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, MAX_RPC_BATCH_SIZE } from '@/lib/rpc-cost-policy'
 
 /**
  * Privacy-preserving RPC proxy.
@@ -17,11 +18,19 @@ import { trustedClientIp } from '@/lib/trusted-ip'
  * keys — eth_sendTransaction, eth_sendRawTransaction, eth_sign,
  * eth_signTransaction, eth_signTypedData{,_v3,_v4}, personal_sign, and the
  * wallet_* family. Wagmi/viem call a wide and growing set of read methods
- * (eth_getBlockByNumber, eth_getStorageAt, eth_getProof, debug_*, trace_*,
- * net_version, web3_clientVersion, ...) — a whitelist devolves into
- * whack-a-mole. The proxy's job is to hide the user's IP and refuse to
- * relay transactions, not to police read methods. Rate limiting and
- * forwarding to the upstream RPC remain unchanged.
+ * (eth_getBlockByNumber, eth_getStorageAt, eth_getProof, net_version,
+ * web3_clientVersion, ...) — a whitelist devolves into whack-a-mole. The
+ * proxy's job is to hide the user's IP and refuse to relay transactions, not
+ * to police read methods.
+ *
+ * [CHORE-API-HARDENING-2 / P3c CONFIRMED] Cost-policy exception to that stance
+ * (rpc-cost-policy.ts): `debug_*`/`trace_*` are archive-grade queries with no
+ * legitimate use in this app's read surface (unlike the methods above, which
+ * ARE used) — proxying them to the paid upstream on the app's dime is pure
+ * amplification, so they're denied outright. An `eth_getLogs` numeric block
+ * range is CLAMPED (not rejected) so the call still works, just bounded. A
+ * request batch is capped at MAX_RPC_BATCH_SIZE. Rate limiting and forwarding
+ * otherwise remain unchanged.
  *
  * Smoke test:
  *   curl -X POST http://localhost:3000/api/rpc \
@@ -71,7 +80,15 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     // Support single and batch requests
-    const requests = Array.isArray(body) ? body : [body]
+    let requests = Array.isArray(body) ? body : [body]
+
+    // [CHORE-API-HARDENING-2 / P3c] Cap batch size before any per-request work.
+    if (exceedsBatchLimit(requests.length)) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32005, message: `Batch too large (max ${MAX_RPC_BATCH_SIZE} requests)` } },
+        { status: 400 },
+      )
+    }
 
     // Validate all methods
     for (const rpcReq of requests) {
@@ -88,7 +105,20 @@ export async function POST(req: NextRequest) {
           { status: 403 },
         )
       }
+
+      // [CHORE-API-HARDENING-2 / P3c] debug_*/trace_* archive queries — deny
+      // outright (no legitimate use in this app's read surface).
+      if (isExpensiveMethod(rpcReq.method)) {
+        return NextResponse.json(
+          { jsonrpc: '2.0', id: rpcReq.id, error: { code: -32601, message: `Method ${rpcReq.method} not allowed via proxy (archive query)` } },
+          { status: 403 },
+        )
+      }
     }
+
+    // [CHORE-API-HARDENING-2 / P3c] Clamp any oversized eth_getLogs block range
+    // (rewrites fromBlock so the call still succeeds, just bounded).
+    requests = requests.map((rpcReq: { method?: unknown; params?: unknown }) => clampGetLogsRange(rpcReq).request)
 
     // [SPRINT-9P] Resolve the target chain. Absent chainId → mainnet, so existing
     // callers (POST /api/rpc with no param) are byte-identical. Validated against
