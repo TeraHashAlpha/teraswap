@@ -126,8 +126,11 @@ describe('call sites resolve to the constant', () => {
   // SwapBox:231 + :556, useSplitRoute:67 + :69, chains/tokens.ts:163).
   const CALL_SITES: Array<{ file: string; helper: RegExp; minUses: number }> = [
     { file: 'src/components/SlippageModal.tsx', helper: /isUsdStablecoin\(/g, minUses: 2 },
-    // :231 uses it twice (tokenOut + tokenIn) and :556 once.
-    { file: 'src/components/SwapBox.tsx', helper: /isUsdStablecoin\(/g, minUses: 3 },
+    // The exec-price derivation uses it twice (tokenOut + tokenIn). The third historical
+    // use (the input-USD estimate) moved into lib/swap-usd-estimate.ts
+    // ([CHORE-ORACLE-VALUE-FAILCLOSED] max(in,out) estimate) — scanned below.
+    { file: 'src/components/SwapBox.tsx', helper: /isUsdStablecoin\(/g, minUses: 2 },
+    { file: 'src/lib/swap-usd-estimate.ts', helper: /isUsdStablecoin\(/g, minUses: 1 },
     { file: 'src/hooks/useSplitRoute.ts', helper: /isUsdStablecoin\(/g, minUses: 2 },
     { file: 'src/lib/chains/tokens.ts', helper: /isStablecoinCategorySymbol\(/g, minUses: 1 },
   ]

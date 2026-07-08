@@ -131,6 +131,24 @@ jobs:
       - name: Stablecoin constant guard
         run: npx vitest run src/lib/chains/stablecoins.test.ts src/components/SlippageModal.test.tsx
 
+  oracle-value-guard:
+    # [CHORE-ORACLE-VALUE-FAILCLOSED] Gate the fail-closed >$10k trade-value estimate
+    # (threat model PR #277, P2 MED confirmed): value = max(inputUsd, outputUsd) across
+    # DefiLlama + the server Chainlink path; a trade neither source can price on either
+    # side must BLOCK (422 `unpriceable`), never pass as "$0". The full vitest suite is
+    # not run in CI (only single-file guards), so this pins the server route branch and
+    # the client estimate helper.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Oracle value fail-closed guard
+        run: npx vitest run src/app/api/swap/route.test.ts src/lib/swap-usd-estimate.test.ts
+
   quote-source-guard:
     # [CHORE-QUOTE-SOURCE-FIXES] The full vitest suite is not run in CI (only
     # single-file guards), so this pins the displayed-quote source hygiene:

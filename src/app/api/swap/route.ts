@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { fetchSwapFromSource, usesFeeCollector } from '@/lib/api'
 import { AGGREGATOR_APIS, type AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
+import { computeTokenAmountUsd } from '@/lib/chainlink'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
@@ -244,20 +245,68 @@ export async function POST(req: NextRequest) {
       // mainnet 'ethereum' keeps the guard byte-identical; an unknown chainId
       // falls back to 'ethereum' rather than throwing. A Base swap now validates
       // Base prices instead of always-blocking (>$10k) / silently failing open.
+      const swapChainId = chainId != null ? Number(chainId) : DEFAULT_CHAIN_ID
       const llamaChain = (() => {
-        const cid = chainId != null ? Number(chainId) : DEFAULT_CHAIN_ID
-        try { return getChainConfig(cid).slug } catch { return 'ethereum' }
+        try { return getChainConfig(swapChainId).slug } catch { return 'ethereum' }
       })()
-      // [INT-01] Estimate swap value in USD for threshold-based blocking
+      // [INT-01 → CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Estimate swap value in USD for
+      // threshold-based blocking. Previously: INPUT token × DefiLlama only — an
+      // uncovered input priced the whole trade at $0 and every high-value branch below
+      // failed OPEN (the aToken-incident bypass: route size through a token DefiLlama
+      // cannot price). Now: max(inputUsd, outputUsd) across BOTH DefiLlama and the
+      // server Chainlink path (computeTokenAmountUsd — existing plumbing, no new
+      // oracle). The Chainlink legs run on mainnet only: computeTokenAmountUsd has no
+      // chainId and resolves mainnet feeds, so consulting it off-mainnet would look up
+      // foreign addresses in the wrong registry; other chains keep their chain-correct
+      // DefiLlama legs (slug-scoped above).
       let estimatedValueUsd = 0
+      let valuePriced = false
       try {
-        const tokenInPrice = await fetchDefiLlamaPrice(src, llamaChain)
-        if (tokenInPrice) {
-          const amountFloat = Number(amount) / 10 ** srcDecimals
-          estimatedValueUsd = amountFloat * tokenInPrice.price
+        const [llamaIn, llamaOut, linkIn, linkOut] = await Promise.all([
+          fetchDefiLlamaPrice(src, llamaChain).catch(() => null),
+          fetchDefiLlamaPrice(dst, llamaChain).catch(() => null),
+          swapChainId === DEFAULT_CHAIN_ID
+            ? computeTokenAmountUsd(src, amount).catch(() => null)
+            : Promise.resolve(null),
+          swapChainId === DEFAULT_CHAIN_ID
+            ? computeTokenAmountUsd(dst, result.toAmount as string).catch(() => null)
+            : Promise.resolve(null),
+        ])
+        const inFloat = Number(amount) / 10 ** srcDecimals
+        const outFloat = Number(result.toAmount) / 10 ** dstDecimals
+        const candidates = [
+          llamaIn ? inFloat * llamaIn.price : null,
+          llamaOut ? outFloat * llamaOut.price : null,
+          linkIn?.usd ?? null,
+          linkOut?.usd ?? null,
+        ].filter((v): v is number => v != null && Number.isFinite(v) && v > 0)
+        if (candidates.length > 0) {
+          valuePriced = true
+          estimatedValueUsd = Math.max(...candidates)
         }
       } catch {
-        // If price estimation fails, assume 0 → fail-open for threshold logic
+        // Each leg already degrades to null individually; a wholesale failure leaves
+        // the trade unpriced and the fail-CLOSED branch below fires.
+      }
+
+      // [CHORE-ORACLE-VALUE-FAILCLOSED] Neither side priced on either source → the
+      // high-value gate cannot size the trade, so it must FIRE, never silently pass.
+      // A USD "safe size ceiling" is unimplementable without a USD measure, so the
+      // conservative policy is a block. Only exotic↔exotic pairs (both tokens outside
+      // DefiLlama AND Chainlink coverage — exactly the thin/manipulable class behind
+      // the aToken incident) reach this; a trade with ANY priceable side gets a real
+      // max(in,out) estimate and the normal >$10k threshold (unchanged) downstream.
+      if (!valuePriced) {
+        console.warn('[PRICE-GUARD] Unpriceable trade (no DefiLlama/Chainlink coverage on either side) — failing closed')
+        return NextResponse.json(
+          {
+            error: 'Trade value cannot be verified: neither token has price coverage (DefiLlama or Chainlink). Unpriceable trades are blocked by high-value protection — use a pair with price coverage, or try again later.',
+            priceGuard: true,
+            blocked: true,
+            unpriceable: true,
+          },
+          { status: 422 },
+        )
       }
 
       try {

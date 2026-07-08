@@ -40,6 +40,7 @@ import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
+import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -553,21 +554,35 @@ export default function SwapBox() {
   const depegBlocking = depegHardBlocked || depegConsentBlocking
 
   // ── Security: block large swaps on tokens without Chainlink oracle ──
-  // Estimate USD value of the swap input (only reliable when input is a stablecoin or ETH)
-  const estimatedInputUsd = useMemo(() => {
-    if (!tokenIn || !amountIn || Number(amountIn) <= 0) return 0
-    // [CHORE-STABLECOIN-CONSTANT] ~$1 membership is chain-keyed (single source of truth).
-    if (isUsdStablecoin(tokenIn.symbol, activeChainId)) return Number(amountIn)
-    // If we have a Chainlink price for the input token, use it
-    if (priceCheck.chainlinkPrice != null) return Number(amountIn) * priceCheck.chainlinkPrice
-    // For ETH without a loaded price yet, use a conservative estimate
-    if (isNativeETH(tokenIn) || tokenIn.symbol === 'WETH') return Number(amountIn) * 2000
-    return 0 // unknown — can't estimate
-  }, [tokenIn, amountIn, priceCheck.chainlinkPrice, activeChainId])
+  // [CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Trade value = max(inputUsd, outputUsd) via
+  // the pure helper (chain-keyed stable ≈$1, Chainlink, conservative ETH≈$2k — per
+  // side). The old input-only estimate let an unpriceable INPUT hide a measurable
+  // trade ($0 → the >$10k gate never fired). Server /api/swap is the binding gate
+  // (fail-closed there too); this mirror is UX.
+  const estimatedSwap = useMemo(() => {
+    if (!tokenIn || !amountIn || Number(amountIn) <= 0) return { usd: 0, priced: false }
+    const outBig = meta?.best ? safeBigInt(meta.best.toAmount) : null
+    const amountOut = outBig !== null && tokenOut ? Number(formatUnits(outBig, tokenOut.decimals)) : null
+    return estimateSwapUsd({
+      tokenIn,
+      tokenOut,
+      amountIn: Number(amountIn),
+      amountOut,
+      chainlinkPriceIn: priceCheck.chainlinkPrice,
+      chainlinkPriceOut: tokenOutPriceCheck.chainlinkPrice,
+      chainId: activeChainId,
+    })
+  }, [tokenIn, tokenOut, amountIn, meta, priceCheck.chainlinkPrice, tokenOutPriceCheck.chainlinkPrice, activeChainId])
+  const estimatedSwapUsd = estimatedSwap.usd
 
   const oracleUnavailable = pairCheck.oracleUnavailable
-  const oracleWarnThreshold = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_WARN_USD
-  const oracleBlocked = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_BLOCK_USD
+  // [CHORE-ORACLE-VALUE-FAILCLOSED] NEITHER side priceable → high-risk: block with a
+  // factual notice (mirrors the server fail-closed policy) instead of estimating $0 and
+  // silently skipping the >$10k gate. Gated on a live quote so an empty form or a
+  // still-loading quote never flags.
+  const valueUnverifiable = oracleUnavailable && !estimatedSwap.priced && Number(amountIn) > 0 && !!meta?.best
+  const oracleWarnThreshold = oracleUnavailable && estimatedSwapUsd > UNVERIFIED_SWAP_WARN_USD
+  const oracleBlocked = oracleUnavailable && (estimatedSwapUsd > UNVERIFIED_SWAP_BLOCK_USD || valueUnverifiable)
   const anyBlocked = priceGateBlocked || oracleBlocked || depegBlocking
 
   const handleApproveAndSwap = useCallback(async () => {
@@ -582,7 +597,7 @@ export default function SwapBox() {
           metadata: {
             reason: priceGateBlocked ? `price_gate_${priceGate.reason}` : 'oracle_unavailable_large_swap',
             deviation: pairCheck.deviation,
-            estimatedUsd: estimatedInputUsd,
+            estimatedUsd: estimatedSwapUsd,
           },
         })
       }
@@ -611,7 +626,7 @@ export default function SwapBox() {
           metadata: {
             reason: priceGateBlocked ? `price_gate_${priceGate.reason}` : 'oracle_unavailable_large_swap',
             deviation: pairCheck.deviation,
-            estimatedUsd: estimatedInputUsd,
+            estimatedUsd: estimatedSwapUsd,
           },
         })
       }
@@ -901,11 +916,24 @@ export default function SwapBox() {
           <>
             {oracleBlocked ? (
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
-                This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
-                <span className="mt-1 block text-xs text-danger/80">
-                  This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
-                </span>
+                {valueUnverifiable ? (
+                  <>
+                    {/* [CHORE-ORACLE-VALUE-FAILCLOSED] Neither side priceable → factual, non-alarmist block notice. */}
+                    <span className="font-semibold">&#9888; Swap blocked — value cannot be verified.</span>{' '}
+                    Neither token has Chainlink or reference price coverage, so the USD value of this trade cannot be estimated. Unpriceable trades are blocked for safety.
+                    <span className="mt-1 block text-xs text-danger/80">
+                      Use a pair where at least one side has price coverage (a major token or a stablecoin), or try again later.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
+                    This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
+                    <span className="mt-1 block text-xs text-danger/80">
+                      This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
+                    </span>
+                  </>
+                )}
               </div>
             ) : oracleWarnThreshold ? (
               <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">

@@ -64,6 +64,14 @@ vi.mock('@/lib/defillama', () => ({
   HIGH_VALUE_THRESHOLD_USD: 10_000,
 }))
 
+// [CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Server Chainlink leg of the trade-value
+// estimate. Default prices the trade small-and-covered so every pre-existing branch
+// behaves as before; the fail-closed cases override to null / per-address values.
+const mockComputeTokenAmountUsd = vi.fn().mockResolvedValue({ usd: 2_950, price: 1, decimals: 6 })
+vi.mock('@/lib/chainlink', () => ({
+  computeTokenAmountUsd: (...args: unknown[]) => mockComputeTokenAmountUsd(...args),
+}))
+
 // [SPRINT-9G G4] Server-side activation gate. Default 'active' so chainId-bearing
 // tests (e.g. the G2 Base price-guard cases) proceed; per-test overrides drive
 // the unsupported/coming-soon branches.
@@ -136,6 +144,7 @@ beforeEach(() => {
   })
   mockValidateSwapPrice.mockClear().mockResolvedValue(null)
   mockFetchDefiLlamaPrice.mockClear().mockResolvedValue(null)
+  mockComputeTokenAmountUsd.mockClear().mockResolvedValue({ usd: 2_950, price: 1, decimals: 6 })
   mockGetChainStatus.mockClear().mockReturnValue('active')
   mockIsSequencerUp.mockClear().mockResolvedValue(true)
   mockGetPublicClientForChain.mockClear()
@@ -385,6 +394,10 @@ describe('POST /api/swap — happy path with oracle attached [P127]', () => {
 describe('POST /api/swap — chain-aware price guard [SPRINT-9G G2]', () => {
   it('derives the DefiLlama slug from chainId (Base 8453 → "base")', async () => {
     mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    // [CHORE-ORACLE-VALUE-FAILCLOSED] Price the trade so the (now fail-closed) value
+    // estimate lets the flow reach validateSwapPrice — this test pins slug derivation,
+    // not the pricing policy (off-mainnet has no Chainlink leg, so DefiLlama must hit).
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 3_000 })
     await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
     expect(mockFetchDefiLlamaPrice).toHaveBeenCalled()
     expect(mockFetchDefiLlamaPrice.mock.calls[0][1]).toBe('base')
@@ -426,6 +439,9 @@ describe('POST /api/swap — server-side activation gate [SPRINT-9G G4]', () => 
   it('allows an active chain (Base live) to proceed', async () => {
     mockGetChainStatus.mockReturnValue('active')
     mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    // [CHORE-ORACLE-VALUE-FAILCLOSED] Price the trade (fail-closed estimate would
+    // otherwise 422 an unpriceable Base pair before the 200 this gate test pins).
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 3_000 })
     const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
     expect(res.status).toBe(200)
   })
@@ -470,6 +486,9 @@ describe('POST /api/swap — Base sequencer gate on the swap-build path [E2-I-01
 
   it('proceeds normally on Base when the sequencer is up', async () => {
     mockFetchSwapFromSource.mockResolvedValue(VALID_SWAP_RESULT)
+    // [CHORE-ORACLE-VALUE-FAILCLOSED] Price the trade (fail-closed estimate would
+    // otherwise 422 an unpriceable Base pair before the 200 this gate test pins).
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 3_000 })
     const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
     expect(res.status).toBe(200)
     expect(mockIsSequencerUp).toHaveBeenCalledTimes(1)
@@ -485,5 +504,61 @@ describe('POST /api/swap — Base sequencer gate on the swap-build path [E2-I-01
     // No isSequencerUp call, no per-chain client construction for either form.
     expect(mockIsSequencerUp).not.toHaveBeenCalled()
     expect(mockGetPublicClientForChain).not.toHaveBeenCalled()
+  })
+})
+
+// [CHORE-ORACLE-VALUE-FAILCLOSED] Threat model PR #277 P2 (MED, confirmed): the >$10k
+// gate estimated trade value from the INPUT token via DefiLlama only — an uncovered
+// input token → estimate 0 → every high-value branch below silently failed OPEN (the
+// aToken-incident bypass). The estimate is now max(inputUsd, outputUsd) across BOTH
+// DefiLlama and the server Chainlink path, and a trade that prices on NEITHER source
+// on EITHER side fails CLOSED (422 `unpriceable`) instead of passing as "$0".
+describe('POST /api/swap — fail-closed trade value [CHORE-ORACLE-VALUE-FAILCLOSED]', () => {
+  const WETH = VALID_BASE.src
+  const USDC = VALID_BASE.dst
+
+  it('blocks (422, unpriceable) when neither token prices on DefiLlama nor Chainlink', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockFetchDefiLlamaPrice.mockResolvedValue(null) // both sides uncovered
+    mockComputeTokenAmountUsd.mockResolvedValue(null) // both sides uncovered
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.priceGuard).toBe(true)
+    expect(body.blocked).toBe(true)
+    expect(body.unpriceable).toBe(true)
+    // The policy is a block, not a silent pass — validateSwapPrice is never even reached.
+    expect(mockValidateSwapPrice).not.toHaveBeenCalled()
+  })
+
+  it('prices the OUTPUT side when the input is uncovered (the P2 bypass, DefiLlama leg)', async () => {
+    // 3 000 USDC out (6 dp) at $5 → $15 000; the input token prices nowhere.
+    mockFetchSwapFromSource.mockResolvedValueOnce({ ...VALID_SWAP_RESULT, toAmount: '3000000000' })
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    mockFetchDefiLlamaPrice.mockImplementation(async (addr: unknown) =>
+      addr === USDC ? { price: 5 } : null)
+    await POST(makeRequest({ source: '1inch', ...VALID_BASE, srcDecimals: 18, dstDecimals: 6 }))
+    expect(mockValidateSwapPrice).toHaveBeenCalled()
+    expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(15_000)
+  })
+
+  it('takes max(inputUsd, outputUsd) when both sides price', async () => {
+    // Input: 1 WETH at $20 000; output: 3 000 USDC at $5 = $15 000 → max is the input.
+    mockFetchSwapFromSource.mockResolvedValueOnce({ ...VALID_SWAP_RESULT, toAmount: '3000000000' })
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    mockFetchDefiLlamaPrice.mockImplementation(async (addr: unknown) =>
+      addr === WETH ? { price: 20_000 } : { price: 5 })
+    await POST(makeRequest({ source: '1inch', ...VALID_BASE, srcDecimals: 18, dstDecimals: 6 }))
+    expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(20_000)
+  })
+
+  it('falls back to the server Chainlink path when DefiLlama misses both sides', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockImplementation(async (addr: unknown) =>
+      addr === WETH ? { usd: 12_000, price: 12_000, decimals: 18 } : null)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(200) // priced via Chainlink → NOT the unpriceable block
+    expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(12_000)
   })
 })
