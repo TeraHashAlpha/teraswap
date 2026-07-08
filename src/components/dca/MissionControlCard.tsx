@@ -19,6 +19,7 @@ import CountdownCenter from './CountdownCenter'
 import OrbitStatRow from './OrbitStatRow'
 import TokenPairLogos from './TokenPairLogos'
 import DCAFillsTimeline from './DCAFillsTimeline'
+import DCAPositionStats from './DCAPositionStats'
 
 const PULSE_THRESHOLD_MS = 60_000
 
@@ -145,6 +146,24 @@ export default function MissionControlCard({
       {/* Quiet facts */}
       <div className="relative mt-2">
         <OrbitStatRow order={order} />
+      </div>
+
+      {/* [CHORE-DCA-VISIBILITY-AND-STATS #3] Per-position stats + P&L vs spot,
+          reusing the fills already fetched above (no extra request). */}
+      <div className="relative mt-2">
+        <DCAPositionStats
+          orderId={order.id}
+          wallet={order.order.owner}
+          tokenIn={order.order.tokenIn as string}
+          tokenOut={order.order.tokenOut as string}
+          tokenInSymbol={order.tokenInSymbol}
+          tokenOutSymbol={order.tokenOutSymbol}
+          tokenInDecimals={order.tokenInDecimals}
+          tokenOutDecimals={order.tokenOutDecimals}
+          chainId={chainId}
+          dcaTotal={order.dcaTotal}
+          fills={executions}
+        />
       </div>
 
       {/* Fills */}
