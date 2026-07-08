@@ -28,8 +28,12 @@ let fillEqCalls: Array<[unknown, unknown]> = []
 
 function makeBuilder(table: string, result: unknown) {
   const builder: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'range', 'limit', 'in', 'gte']) {
+  for (const m of ['select', 'order', 'limit', 'in', 'gte']) {
     builder[m] = () => builder
+  }
+  builder.range = (from: number, to: number) => {
+    if (table === 'swaps') capturedRange = [from, to]
+    return builder
   }
   builder.eq = (col: unknown, val: unknown) => {
     if (table === 'order_executions') fillEqCalls.push([col, val])
@@ -45,6 +49,18 @@ vi.mock('@supabase/supabase-js', () => ({
       makeBuilder(table, table === 'swaps' ? swapsResult : fillsResult),
   }),
 }))
+
+// [CHORE-API-HARDENING-2 / P3d] The route is now rate-limited; default to
+// allowed so the pre-existing tests are unaffected. Rate-limit-specific tests
+// override this per-test.
+const checkRateLimitMock = vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: 1_000 })
+vi.mock('@/lib/kv-rate-limiter', () => ({
+  checkRateLimit: (...a: unknown[]) => checkRateLimitMock(...a),
+}))
+
+// Captures the .range(offset, offset+limit-1) call so a test can assert the
+// clamped offset actually reached the query.
+let capturedRange: [number, number] | null = null
 
 import { GET, mapSwapRow, mapFillRow, mergeHistory, type HistoryItem } from './route'
 
@@ -127,6 +143,8 @@ beforeEach(() => {
   swapsResult = { data: [swapRow()], error: null, count: 1 }
   fillsResult = { data: [fillRow()], error: null }
   fillEqCalls = []
+  capturedRange = null
+  checkRateLimitMock.mockReset().mockResolvedValue({ allowed: true, remaining: 29, resetAt: 1_000 })
 })
 
 // ── Pure merge/dedup/mapping ────────────────────────────────────────────────
@@ -233,5 +251,35 @@ describe('GET /api/history — DCA fills are W6-gated [CHORE-DCA-VISIBILITY-AND-
   it('rejects a missing wallet param', async () => {
     const res = await GET(getReq('limit=50'))
     expect(res.status).toBe(400)
+  })
+})
+
+// ── P3d: rate limit + offset cap [CHORE-API-HARDENING-2] ────────────────────
+describe('GET /api/history — rate limit + offset cap (P3d)', () => {
+  it('is rate-limited per wallet (429 with Retry headers when exceeded)', async () => {
+    checkRateLimitMock.mockResolvedValue({ allowed: false, remaining: 0, resetAt: 123_456 })
+    const res = await GET(getReq(`wallet=${WALLET}`))
+    expect(res.status).toBe(429)
+    expect(res.headers.get('X-RateLimit-Remaining')).toBe('0')
+    expect(checkRateLimitMock).toHaveBeenCalledWith(`history:${WALLET.toLowerCase()}`, 30, 60_000)
+  })
+
+  it('clamps an oversized offset to the cap instead of scanning unbounded', async () => {
+    const res = await GET(getReq(`wallet=${WALLET}&offset=999999999`))
+    expect(res.status).toBe(200)
+    expect(capturedRange).not.toBeNull()
+    const [from] = capturedRange!
+    expect(from).toBe(2_000) // MAX_OFFSET
+  })
+
+  it('rejects a negative offset by clamping to 0', async () => {
+    const res = await GET(getReq(`wallet=${WALLET}&offset=-50`))
+    expect(res.status).toBe(200)
+    expect(capturedRange![0]).toBe(0)
+  })
+
+  it('passes a normal offset through unchanged', async () => {
+    await GET(getReq(`wallet=${WALLET}&offset=40&limit=20`))
+    expect(capturedRange).toEqual([40, 59])
   })
 })
