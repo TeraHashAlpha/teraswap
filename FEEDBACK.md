@@ -6923,3 +6923,68 @@ for the unverified-swap gate, split threshold, or auto-slippage.
 - Deleted `fetchDCAExecutions` (recon-flagged: no caller, and its anon-key + RLS path returned []
   anyway) and, with it, the now-unused `ExecutionRow` type + `SUPABASE_EXECUTIONS_TABLE` import + both
   re-exports. `order_executions` is read server-side (service role) via `/api/orders/:id/executions`.
+## Feedback — SPRINT-ORDER-ONCHAIN-FLOOR (branch sprint/order-onchain-floor)
+
+### ⚠ Needs an Auditor pass (fund-flow / execution-selection)
+Closes threat-model P1a (HIGH): DCA's on-chain minOut is a 1-wei no-op, so the only floor was a flat
+0.5% self-referential keeper slippage. This sprint = Phase 0 (keeper-only, no redeploy) + Phase 1 (ADR
+only, NO contract deploy/change). Auditor sign-off required before merge and before any v3 deploy.
+
+### Phase 0 mechanism (implemented, keeper-only, off-chain)
+- **`order-floor.js` (pure, 19 tests):** `computeReferenceExpectedOut` derives fair-value output from an
+  INDEPENDENT reference (precision-safe BigInt: USD prices scaled to 8dp, 1e8 factors cancel);
+  `decideFloor` REJECTS a DCA fill whose built output < reference × (1 − maxSlippage). Default band
+  `DCA_ORACLE_FLOOR_BPS=300` (3%), clamped [50,2000], env-tunable. A reject DELAYS the fill (unlock +
+  retry next cycle) and NEVER force-executes — delay ≫ drain; it is NOT a failure (no orderRetries, no
+  'failed', no failure-alert), mirroring the deviation DEFER but without the window-end execute.
+- **Reference fetch `fetchReferencePriceUsd` (executor.js, fail-safe I/O):** Chainlink-first for the ETH
+  leg (reuses the trusted on-chain `readEthUsd`/`ETH_USD_FEED`), else DefiLlama current price by
+  chain:address (the #18/#248 price source; slugs ethereum/base). ANY miss (unmapped chain, no coverage,
+  HTTP/parse/timeout) ⇒ null ⇒ the pair is treated as "no reference" ⇒ the fill is FLAGGED (info alert),
+  never falsely rejected. A reference outage can only drop DCA to the flagged path, never halt it.
+- **No-reference pairs:** `decideFloor` returns `ok:true, flagged:true` — the fill proceeds on the
+  aggregator's own flat calldata minReturn (not blind, not 1-wei) and is surfaced to ops. Honest interim:
+  no keeper-side check can catch a self-consistent bad quote without an external anchor; the terminal fix
+  for these pairs is the on-chain signed floor (ADR-013).
+- **Reconciliation with #248:** the deviation guard (soft DEFER within a window, then execute-anyway) is
+  UNCHANGED and runs after the floor gate. The floor is the HARD safety gate (never execute below it);
+  #248 is execution-QUALITY timing. Both fail-open on a missing reference; they do not conflict.
+- **Scoping decision (Chainlink-first):** implemented Chainlink-first only for the ETH leg via the one
+  feed the keeper already trusts (ETH_USD_FEED), DefiLlama for the rest — rather than duplicating a full
+  keeper-side Chainlink feed map (wrong feed addresses would be a NEW fund risk). Faithful to
+  "Chainlink first, else DefiLlama" for the common ETH quote leg; per-feed Chainlink at execution is the
+  ADR's on-chain design. Flagged for the Architect if a wider keeper feed map is wanted sooner.
+
+### Base MEV-protect finding (Phase 0 step 2)
+- **`submission-policy.js` (pure, 9 tests) + fail-closed wiring:** replaced the SILENT
+  `FLASHBOTS_RPC ? flashbots : walletClient` public-mempool fallback. Now: Base/OP-stack (8453) →
+  `sequencer-private` (submits normally); Ethereum mainnet (1) / unknown prod chain → REQUIRES a private
+  relay or the explicit `ALLOW_PUBLIC_MEMPOOL=true` override, else the fill is REFUSED (unlock+retry).
+  Applies to ALL order types, not just DCA.
+- **Investigation result:** the threat model assumed "Base has no Flashbots → sandwichable". In fact
+  **Base (OP-stack) routes txs to a single sequencer whose mempool is PRIVATE** (no public pending-tx
+  gossip), so the classic retail public-mempool sandwich vector is largely ABSENT on Base today — there
+  is no Flashbots-equivalent and none is needed. Residual Base MEV is sequencer-level/backrunning, bounded
+  by the new oracle floor. So on Base the interim = private sequencer mempool + oracle floor; the
+  fail-closed relay requirement hardens mainnet (where DCA is not currently live).
+
+### Phase 1 ADR summary
+- **`docs/ADR/ADR-013-order-onchain-floor.md` (Proposed).** NOTE: the prompt said ADR-011, but
+  `ADR-011-feecollector-augustus-whitelist.md` (and 012) already exist — used the next free number
+  **ADR-013** per the no-collision convention (flagged, not silently overwritten).
+- Designs OrderExecutor **v3** (deployed executor is not upgradeable): (1) real per-chunk floor from a
+  Chainlink read at execution within a SIGNED `maxSlippageBps`, replacing `if(minOut==0)minOut=1` with a
+  REVERT (+ signed absolute-min fallback for no-feed pairs); (2) resolve routerDataHash (recommend:
+  dynamic calldata backed by the oracle floor for DCA, real hash for non-DCA); (3) Permit2-style
+  unordered/bitmap nonce as a PREREQUISITE to re-wiring Limit/SL/TP (fixes P1b — sequential nonce blocks
+  a stop-loss — and P1c — non-DCA routerDataHash=0 reverts). Covers deploy + 48h timelock + keeper/
+  frontend migration + Auditor pass + deploy runbook. NOT implemented/deployed this sprint.
+
+### Tests / verification
+- Keeper node:test suite: **155 pass** (28 new: order-floor 19 + submission-policy 9), auto-gated by
+  keeper-tests.yml (`node --test` auto-discovers *.test.mjs). RED proven by moving the module aside
+  (import fails) then GREEN on restore; submission-policy written test-first. `node --check executor.js`
+  parses. Live keeper verification (a sub-floor fill actually rejected end-to-end) requires Supabase+RPC+
+  signer and a pm2 restart on the EC2 host — an ops deploy step, not runnable in CI/local.
+- No contract deployed/changed; recipient/router/on-chain gates untouched; no ALLOW_PLAINTEXT_KEY; no
+  wagmi-v3.
