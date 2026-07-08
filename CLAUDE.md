@@ -60,7 +60,7 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 - **Backend:** Next.js API Routes on Vercel (serverless), Upstash Redis (@upstash/redis) for rate limiting + state
 - **Blockchain:** Solidity 0.8.28, Foundry, OrderExecutor v2 + FeeCollector on Ethereum Mainnet, Chainlink oracles (29 feeds)
 - **Monitoring:** Cloudflare Worker cron → POST tick, GitHub Actions watchdog, Telegram alerts (@teraswap_monitor_bot), Sentry
-- **Infra:** Vercel (deploy), Supabase (PostgreSQL + RLS + real-time), Cloudflare (DNS + Worker), GitHub Actions CI (6 jobs)
+- **Infra:** Vercel (deploy), Supabase (PostgreSQL + RLS + real-time), Cloudflare (DNS + Worker), GitHub Actions CI (8 jobs)
 
 ---
 
@@ -69,7 +69,12 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 1. **NEVER edit source files directly** (Architect/Auditor) — always produce a prompt for the Code Agent.
 2. **NEVER approve changes to contracts or fund flows** without checking open audit findings in `docs/security/AUDIT-TOTAL.md`.
 3. **NEVER deploy without audit pass** (0C/0H). Sprint must be APPROVED before merge.
-4. **NEVER delete files** — git history preserves everything. Mark as superseded/deprecated instead.
+4. **NEVER delete files** — git history preserves everything. Mark as superseded/deprecated **or** move to
+   `archive/<original-path>/` (mirroring the file's original location, e.g. `docs/Prompts/FOO.md` →
+   `archive/docs/Prompts/FOO.md`), preserving content and history. Use `archive/` when a file is fully retired
+   (no longer referenced anywhere) but still worth preserving verbatim — e.g. a superseded FEEDBACK.md, a removed
+   prompt packet, a dead runbook. Use superseded/deprecated marking in place when the file is still linked from
+   the index or referenced by ID (ADRs, incidents). Either way, nothing is ever deleted.
 5. **NEVER ignore open findings** — check `docs/security/AUDIT-TOTAL.md` and the latest sprint packet before starting work.
 6. **NEVER create ADRs or incidents outside conventions** — use the naming, format, and location defined above.
 7. **NEVER hardcode secrets or API keys** — all via env vars, no `NEXT_PUBLIC_` for server-only secrets.
