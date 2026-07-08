@@ -68,7 +68,7 @@ import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS 
 import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
-import { computeFreezeScore, scoreTier } from "./freeze-score.js"
+import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
 import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
 import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
@@ -108,6 +108,17 @@ import {
   dcaDueSec,
   decideDcaExecution,
 } from "./deviation-guard.js"
+
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] Oracle-bounded per-fill floor for DCA:
+// reject a fill whose built output is below an INDEPENDENT fair-value reference
+// (Chainlink/DefiLlama), closing the "on-chain minOut is 1 wei for DCA" gap that
+// let a compromised keeper / loose calldata drain a chunk to dust. Pure gate;
+// the reference is fetched by fetchReferencePriceUsd below. See order-floor.js.
+import { computeReferenceExpectedOut, decideFloor, getFloorMaxSlippageBps } from "./order-floor.js"
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Fail-closed submission policy: never
+// SILENTLY fall back to the public mempool on a public-mempool chain. See
+// submission-policy.js (Base's sequencer mempool is private → submits normally).
+import { resolveSubmissionPolicy } from "./submission-policy.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -151,6 +162,30 @@ const TESTNET_CHAIN_IDS = new Set([11155111 /* Sepolia */, 84532 /* Base Sepolia
 
 // [B-02] Flashbots Protect RPC -- prevents MEV/sandwich attacks on executor txs
 const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
+
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Explicit, documented override to
+// permit PUBLIC-mempool submission on a public-mempool chain (e.g. Ethereum
+// mainnet) with no private relay. Default OFF → the keeper fail-CLOSES rather
+// than silently sandwiching a fill (mirrors ALLOW_PLAINTEXT_KEY). Base and other
+// OP-stack chains use their private sequencer mempool and need no override.
+const ALLOW_PUBLIC_MEMPOOL = process.env.ALLOW_PUBLIC_MEMPOOL === "true"
+
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] DefiLlama chain slugs for the keeper-side
+// fair-value reference (the #18/#248 price plumbing, keeper-side). Only chains we
+// actually run DCA on need an entry; an unmapped chain ⇒ no DefiLlama reference
+// ⇒ the fill is flagged (not blindly filled), never falsely rejected.
+const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base" }
+
+// ETH/WETH (and the native-ETH sentinel) per chain — these legs are priced from
+// the trusted on-chain Chainlink ETH/USD feed (readEthUsd) FIRST, before falling
+// back to DefiLlama, honouring "Chainlink first, else DefiLlama".
+const ETH_PRICED_ADDRESSES = new Set(
+  [
+    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // native-ETH sentinel
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH mainnet
+    "0x4200000000000000000000000000000000000006", // WETH Base
+  ].map((a) => a.toLowerCase()),
+)
 
 // [DCA-OBS] Freeze-observability env vars (all OPTIONAL, safe defaults; alerting
 // is non-blocking and only fires when Telegram is configured via alert.js).
@@ -647,6 +682,48 @@ async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, d
   }
 }
 
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] Fair-value USD price for one leg, used to
+// build the oracle-bounded DCA floor. "Chainlink first, else DefiLlama":
+//   - ETH/WETH (and native-ETH) → the trusted on-chain Chainlink ETH/USD feed
+//     the keeper already reads (readEthUsd, chain-appropriate via ETH_USD_FEED).
+//   - everything else → DefiLlama current price by chain:address (the #18/#248
+//     price source), 8-dp-friendly float.
+// Fully FAIL-SAFE: any miss (unmapped chain, no coverage, HTTP/parse error,
+// timeout) ⇒ null. A null makes the floor gate treat the pair as "no reference"
+// (the fill is FLAGGED, never falsely rejected) — a reference outage can never
+// halt DCA, only drop it to the flagged path. Never throws.
+async function fetchReferencePriceUsd(token, chainId, publicClient) {
+  try {
+    if (!token || typeof token !== "string") return null
+    const addr = token.toLowerCase()
+
+    // Chainlink-first for the ETH leg (most common DCA quote leg).
+    if (ETH_PRICED_ADDRESSES.has(addr)) {
+      const eth = await readEthUsd(publicClient)
+      if (eth != null) return eth
+      // else fall through to DefiLlama (e.g. ETH_USD_FEED not configured on this chain)
+    }
+
+    const slug = DEFILLAMA_CHAIN_SLUG[Number(chainId)]
+    if (!slug) return null // unmapped chain ⇒ no reference (flagged fill, not a false reject)
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a cycle
+    try {
+      const res = await fetch(`https://coins.llama.fi/prices/current/${slug}:${token}`, { signal: controller.signal })
+      if (!res.ok) return null
+      const json = await res.json()
+      const price = json?.coins?.[`${slug}:${token}`]?.price
+      const num = Number(price)
+      return Number.isFinite(num) && num > 0 ? num : null
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return null // fail-safe: any error ⇒ no reference ⇒ flagged (never a false reject)
+  }
+}
+
 // ---- Logging -----------------------------------------------------------
 
 function log(msg) {
@@ -1102,6 +1179,74 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // alert. DCA still buys regardless of market price — this guards execution
       // QUALITY, not market timing.
       if (isDca) {
+        // ── Oracle-bounded per-fill floor ── [SPRINT-ORDER-ONCHAIN-FLOOR / P1a]
+        // DCA's on-chain minOut is a 1-wei no-op (minAmountOut=1 → clamp), so the
+        // keeper verifies the built output against an INDEPENDENT fair-value
+        // reference (Chainlink for ETH, else DefiLlama) and REJECTS a fill grossly
+        // below reference × (1 − maxSlippage). This closes the drain-to-dust tail a
+        // compromised keeper / loose calldata / manipulated quote could exploit.
+        // A rejected fill is DELAYED (retried next cycle), never failed and never
+        // force-executed — delay ≫ drain. No reference for the pair ⇒ FLAGGED (not
+        // blind, not falsely rejected). Reference fetch is fully fail-safe.
+        const [refPriceIn, refPriceOut] = await Promise.all([
+          fetchReferencePriceUsd(orderStruct.tokenIn, CHAIN_ID, publicClient),
+          fetchReferencePriceUsd(orderStruct.tokenOut, CHAIN_ID, publicClient),
+        ])
+        const referenceExpectedOut = computeReferenceExpectedOut({
+          netAmountIn: netAmount,
+          srcDecimals,
+          dstDecimals,
+          priceInUsd: refPriceIn,
+          priceOutUsd: refPriceOut,
+        })
+        const hasReference = referenceExpectedOut !== null && swapData.toAmount != null
+        const floorDecision = decideFloor({
+          builtExpectedOut: swapData.toAmount,
+          referenceExpectedOut,
+          maxSlippageBps: getFloorMaxSlippageBps(),
+          hasReference,
+        })
+        if (!floorDecision.ok) {
+          log(
+            `  Order ${dbOrder.id.slice(0, 8)}... DCA FLOOR BREACH -- ${floorDecision.reason} (built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}) -- refusing to fill, retry next cycle`,
+          )
+          // Fund-adjacent: a built output grossly below fair value. Page (warn) so
+          // ops can investigate (attack / thin liquidity / route-builder bug).
+          try {
+            await alertOps(
+              {
+                kind: "dca-floor-breach",
+                detail: `Order ${dbOrder.id} DCA fill rejected by oracle floor: ${floorDecision.reason}; built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}`,
+              },
+              TIER_WARN_THRESHOLD,
+            )
+          } catch {}
+          // DELAY, never drain. Like the deviation DEFER this is NOT a failure (no
+          // orderRetries, no 'failed', no failure alert) — but UNLIKE the window-end
+          // deviation path it NEVER executes-anyway: we must never fill below floor.
+          await updateOrderStatus(dbOrder.id, "active")
+          skipped++
+          continue
+        }
+        if (floorDecision.flagged) {
+          // No fair-value reference (oracle-less + DefiLlama-less pair): proceed on
+          // the aggregator's own flat calldata minReturn, but surface it (info) so
+          // an un-oracle-bounded fill is never silent. The terminal fix for these
+          // pairs is the on-chain signed floor in ADR-011.
+          log(
+            `  Order ${dbOrder.id.slice(0, 8)}... DCA fill NOT oracle-bounded (${floorDecision.reason}) -- proceeding on flat calldata floor`,
+          )
+          try {
+            await alertOps(
+              {
+                kind: "dca-floor-unverified",
+                detail: `Order ${dbOrder.id} DCA fill has no fair-value reference (${orderStruct.tokenIn} -> ${orderStruct.tokenOut} on chain ${CHAIN_ID}); relying on flat calldata floor`,
+              },
+              0,
+            )
+          } catch {}
+        }
+
         const dueSec = dcaDueSec(dbOrder)
         const bestOut = await fetchBestQuote(
           orderStruct.tokenIn,
@@ -1184,9 +1329,35 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // Send transaction!
       log(`  Executing order ${dbOrder.id.slice(0, 8)}... (${dbOrder.order_type}, tier: ${gasTier.tier})`)
 
-      // [B-02] Use Flashbots Protect RPC if configured (prevents MEV/sandwich attacks)
-      const txWalletClient = FLASHBOTS_RPC ? flashbotsWalletClient : walletClient
-      const txPublicClient = FLASHBOTS_RPC ? flashbotsPublicClient : publicClient
+      // [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Fail-closed submission policy.
+      // Previously this SILENTLY fell back to the public mempool when
+      // FLASHBOTS_RPC was unset — sandwichable on a public-mempool chain. Now the
+      // choice is explicit: Base/OP-stack submit via their private sequencer
+      // mempool; a public-mempool chain (mainnet) REQUIRES a private relay (or the
+      // explicit ALLOW_PUBLIC_MEMPOOL override) or the fill is refused this cycle.
+      const submission = resolveSubmissionPolicy({
+        chainId: CHAIN_ID,
+        hasPrivateRelay: !!FLASHBOTS_RPC,
+        allowPublicOverride: ALLOW_PUBLIC_MEMPOOL,
+      })
+      if (!submission.ok) {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... submission REFUSED -- ${submission.reason}`)
+        try {
+          await alertOps(
+            { kind: "submission-blocked", detail: `Order ${dbOrder.id} not submitted: ${submission.reason}` },
+            TIER_WARN_THRESHOLD,
+          )
+        } catch {}
+        await updateOrderStatus(dbOrder.id, "active") // unlock; retry when a relay is configured
+        skipped++
+        continue
+      }
+      // [B-02] Route through the private relay only when the policy resolved to it;
+      // 'sequencer-private' (Base) and the explicit 'public' override both use the
+      // default clients (Base's sequencer mempool is itself private).
+      const usePrivateRelay = submission.mode === "private"
+      const txWalletClient = usePrivateRelay ? flashbotsWalletClient : walletClient
+      const txPublicClient = usePrivateRelay ? flashbotsPublicClient : publicClient
 
       const txHash = await txWalletClient.writeContract({
         address: CONTRACT_ADDRESS,
