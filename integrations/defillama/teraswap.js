@@ -63,10 +63,8 @@ const SWAP_WITH_FEE_EVENT =
   'event SwapWithFee(address indexed user, address indexed router, address tokenIn, uint256 totalAmount, uint256 feeAmount, address tokenOut, uint256 outputAmount)'
 
 // FEE_BPS = 10, BPS_DENOMINATOR = 10_000 on-chain (contracts/TeraSwapFeeCollector.sol) — 0.1%.
-// Not used directly (feeAmount is read straight off each event, exact per-tx),
-// kept here as a comment-level cross-check for the methodology paragraph.
-const FEE_BPS = 10
-const BPS_DENOMINATOR = 10_000
+// Not used directly (feeAmount is read straight off each event, exact per-tx) — see the
+// methodology paragraph below for the same cross-check in prose form.
 
 const FEE_COLLECTOR_BY_CHAIN = {
   [CHAIN.ETHEREUM]: '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459',
@@ -74,11 +72,9 @@ const FEE_COLLECTOR_BY_CHAIN = {
 }
 
 /**
- * @param {*} _fromTimestamp unused — FetchOptions carries the resolved range
- * @param {*} _toTimestamp unused
- * @param {FetchOptions} options dimension-adapters FetchOptions: { chain, getLogs, createBalances, ... }
+ * @param {FetchOptions} options dimension-adapters v2 FetchOptions: { chain, getLogs, createBalances, ... }
  */
-const fetch = async (_fromTimestamp, _toTimestamp, options) => {
+const fetch = async (options) => {
   const target = FEE_COLLECTOR_BY_CHAIN[options.chain]
   if (!target) throw new Error(`No FeeCollector configured for chain ${options.chain}`)
 
@@ -97,8 +93,8 @@ const fetch = async (_fromTimestamp, _toTimestamp, options) => {
     // taken out of totalAmount before the swap is forwarded) — a single
     // createBalances().add(tokenIn, amount) call prices each correctly via
     // DefiLlama's own price resolution, no manual USD conversion here.
-    dailyVolume.add(log.tokenIn, log.totalAmount)
-    dailyFees.add(log.tokenIn, log.feeAmount)
+    dailyVolume.add(log.tokenIn, log.totalAmount, 'swap')
+    dailyFees.add(log.tokenIn, log.feeAmount, 'swap')
   }
 
   // TeraSwap takes no cut of its own 0.1% fee for anyone else — 100% is
@@ -123,11 +119,19 @@ const adapter = {
       start: 1780099200,
     },
   },
+  // Every event source reads on-chain logs via options.getLogs — required explicitly for
+  // every version:2 adapter (not inferred from fetch's body).
+  pullHourly: true,
   methodology: {
     Volume:
       'Sum of totalAmount (the pre-fee swap notional a user commits, in tokenIn) from every SwapWithFee event emitted by the TeraSwapFeeCollector proxy — the single contract every TeraSwap swap routes fee-collection through before being forwarded to the underlying DEX router.',
     Fees: 'A flat 0.1% (10 bps) fee taken by the FeeCollector on every swap, read directly from the feeAmount field of each SwapWithFee event (no estimation — the exact on-chain value).',
     Revenue: "100% of Fees. TeraSwap does not share the 0.1% fee with routers, LPs, or any third party — it is pure protocol revenue collected before the swap is forwarded.",
+  },
+  breakdownMethodology: {
+    Volume: { swap: 'Every SwapWithFee event\'s totalAmount, priced in tokenIn.' },
+    Fees: { swap: 'Every SwapWithFee event\'s feeAmount, priced in tokenIn.' },
+    Revenue: { swap: 'Same as Fees — 100% of the collected fee is protocol revenue.' },
   },
 }
 
