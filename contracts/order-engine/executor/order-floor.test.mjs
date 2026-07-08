@@ -18,6 +18,10 @@ import {
   DCA_ORACLE_FLOOR_BPS,
   DCA_ORACLE_FLOOR_BPS_MIN,
   DCA_ORACLE_FLOOR_BPS_MAX,
+  classifyReference,
+  decideFailOpen,
+  getFailOpenMaxUsd,
+  DCA_FAIL_OPEN_MAX_USD,
 } from "./order-floor.js"
 
 afterEach(() => {
@@ -167,5 +171,72 @@ describe("getFloorMaxSlippageBps — env override, clamped", () => {
   test("falls back to default on a non-numeric override", () => {
     process.env.DCA_ORACLE_FLOOR_BPS = "banana"
     assert.equal(getFloorMaxSlippageBps(), DCA_ORACLE_FLOOR_BPS)
+  })
+})
+
+// [CHORE-KEEPER-HARDENING / P1A-M-01] Tighten the fail-open path: a TRANSIENT
+// reference outage on a feed-having pair DELAYS (not fail-open); a genuinely
+// feedless pair flags but only for small fills (USD notional cap).
+describe("classifyReference — transient beats feedless beats ok", () => {
+  test("both legs ok ⇒ ok", () => {
+    assert.equal(classifyReference({ inStatus: "ok", outStatus: "ok" }), "ok")
+  })
+  test("any transient leg ⇒ transient (a feed exists but is momentarily down)", () => {
+    assert.equal(classifyReference({ inStatus: "ok", outStatus: "transient" }), "transient")
+    assert.equal(classifyReference({ inStatus: "transient", outStatus: "feedless" }), "transient")
+  })
+  test("no transient, at least one feedless ⇒ feedless", () => {
+    assert.equal(classifyReference({ inStatus: "ok", outStatus: "feedless" }), "feedless")
+    assert.equal(classifyReference({ inStatus: "feedless", outStatus: "feedless" }), "feedless")
+  })
+})
+
+describe("decideFailOpen — delay transient, cap feedless by USD notional", () => {
+  const cap = 250
+  test("TRANSIENT outage of a feed-having pair ⇒ DELAY (never fail-open)", () => {
+    const d = decideFailOpen({ referenceStatus: "transient", notionalUsd: 10, maxFailOpenUsd: cap })
+    assert.equal(d.ok, false)
+    assert.equal(d.action, "delay")
+  })
+  test("feedless small fill within the USD cap ⇒ fill-flagged", () => {
+    const d = decideFailOpen({ referenceStatus: "feedless", notionalUsd: 100, maxFailOpenUsd: cap })
+    assert.equal(d.ok, true)
+    assert.equal(d.action, "fill-flagged")
+    assert.equal(d.flagged, true)
+  })
+  test("feedless fill ABOVE the USD cap ⇒ DELAY", () => {
+    const d = decideFailOpen({ referenceStatus: "feedless", notionalUsd: 100000, maxFailOpenUsd: cap })
+    assert.equal(d.ok, false)
+    assert.equal(d.action, "delay")
+  })
+  test("feedless but notional unsizable (no priced leg) ⇒ DELAY (don't fill blind)", () => {
+    const d = decideFailOpen({ referenceStatus: "feedless", notionalUsd: null, maxFailOpenUsd: cap })
+    assert.equal(d.ok, false)
+    assert.equal(d.action, "delay")
+  })
+  test("boundary: notional exactly at the cap fills (inclusive)", () => {
+    const d = decideFailOpen({ referenceStatus: "feedless", notionalUsd: cap, maxFailOpenUsd: cap })
+    assert.equal(d.ok, true)
+  })
+})
+
+describe("getFailOpenMaxUsd — env override, clamped, default 250", () => {
+  test("defaults to 250", () => {
+    assert.equal(DCA_FAIL_OPEN_MAX_USD, 250)
+    assert.equal(getFailOpenMaxUsd(), 250)
+  })
+  test("honours a valid override and clamps to [0, 100000]", () => {
+    process.env.DCA_FAIL_OPEN_MAX_USD = "500"
+    assert.equal(getFailOpenMaxUsd(), 500)
+    process.env.DCA_FAIL_OPEN_MAX_USD = "-1"
+    assert.equal(getFailOpenMaxUsd(), 0)
+    process.env.DCA_FAIL_OPEN_MAX_USD = "999999999"
+    assert.equal(getFailOpenMaxUsd(), 100000)
+    delete process.env.DCA_FAIL_OPEN_MAX_USD
+  })
+  test("falls back to the default on a non-numeric override", () => {
+    process.env.DCA_FAIL_OPEN_MAX_USD = "banana"
+    assert.equal(getFailOpenMaxUsd(), DCA_FAIL_OPEN_MAX_USD)
+    delete process.env.DCA_FAIL_OPEN_MAX_USD
   })
 })

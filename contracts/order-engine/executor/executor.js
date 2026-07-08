@@ -114,7 +114,14 @@ import {
 // (Chainlink/DefiLlama), closing the "on-chain minOut is 1 wei for DCA" gap that
 // let a compromised keeper / loose calldata drain a chunk to dust. Pure gate;
 // the reference is fetched by fetchReferencePriceUsd below. See order-floor.js.
-import { computeReferenceExpectedOut, decideFloor, getFloorMaxSlippageBps } from "./order-floor.js"
+import {
+  computeReferenceExpectedOut,
+  decideFloor,
+  getFloorMaxSlippageBps,
+  classifyReference,
+  decideFailOpen,
+  getFailOpenMaxUsd,
+} from "./order-floor.js"
 // [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
 // count as a managed signer (else it suppresses the plaintext-key FATAL).
 import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
@@ -707,35 +714,60 @@ async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, d
 // timeout) ⇒ null. A null makes the floor gate treat the pair as "no reference"
 // (the fill is FLAGGED, never falsely rejected) — a reference outage can never
 // halt DCA, only drop it to the flagged path. Never throws.
+// [CHORE-KEEPER-HARDENING / P1A-M-01] Returns a DISCRIMINATED result so the floor
+// gate can tell a TRANSIENT outage of a feed-having pair (delay the fill) from a
+// pair with genuinely NO feed (fail-open, capped):
+//   { price: number }                 -- a usable fair-value price
+//   { price: null, transient: true }  -- a feed EXISTS but is momentarily down
+//                                        (RPC/HTTP/timeout/5xx/429) -> DELAY
+//   { price: null, transient: false } -- genuinely no feed for this pair on this
+//                                        chain (unmapped chain / DefiLlama 200-but-
+//                                        -absent / 4xx) -> feedless (capped fail-open)
 async function fetchReferencePriceUsd(token, chainId, publicClient) {
   try {
-    if (!token || typeof token !== "string") return null
+    if (!token || typeof token !== "string") return { price: null, transient: false }
     const addr = token.toLowerCase()
+    const ethPriced = ETH_PRICED_ADDRESSES.has(addr)
 
     // Chainlink-first for the ETH leg (most common DCA quote leg).
-    if (ETH_PRICED_ADDRESSES.has(addr)) {
+    if (ethPriced) {
       const eth = await readEthUsd(publicClient)
-      if (eth != null) return eth
-      // else fall through to DefiLlama (e.g. ETH_USD_FEED not configured on this chain)
+      if (eth != null) return { price: eth, transient: false }
+      // else fall through to DefiLlama; if that also misses we know a feed EXISTS
+      // (ETH always has one), so the miss is TRANSIENT, not feedless.
     }
 
     const slug = DEFILLAMA_CHAIN_SLUG[Number(chainId)]
-    if (!slug) return null // unmapped chain ⇒ no reference (flagged fill, not a false reject)
+    if (!slug) {
+      // Unmapped chain: no keeper feed config. For the ETH leg a feed still exists
+      // (transient); otherwise genuinely feedless.
+      return { price: null, transient: ethPriced }
+    }
 
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a cycle
     try {
       const res = await fetch(`https://coins.llama.fi/prices/current/${slug}:${token}`, { signal: controller.signal })
-      if (!res.ok) return null
+      if (!res.ok) {
+        // 5xx / 429 ⇒ transient; a 4xx (absent) ⇒ feedless. ETH leg: always transient.
+        const transient = ethPriced || res.status >= 500 || res.status === 429
+        return { price: null, transient }
+      }
       const json = await res.json()
       const price = json?.coins?.[`${slug}:${token}`]?.price
       const num = Number(price)
-      return Number.isFinite(num) && num > 0 ? num : null
+      if (Number.isFinite(num) && num > 0) return { price: num, transient: false }
+      // 200 but no price: DefiLlama authoritatively doesn't cover it ⇒ feedless
+      // (unless it's the ETH leg, which must have a feed ⇒ transient).
+      return { price: null, transient: ethPriced }
+    } catch {
+      // network / timeout / parse error ⇒ transient (a feed may well exist)
+      return { price: null, transient: true }
     } finally {
       clearTimeout(timer)
     }
   } catch {
-    return null // fail-safe: any error ⇒ no reference ⇒ flagged (never a false reject)
+    return { price: null, transient: true } // fail-safe: unknown error ⇒ delay, don't fail-open
   }
 }
 
@@ -1194,68 +1226,97 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // alert. DCA still buys regardless of market price — this guards execution
       // QUALITY, not market timing.
       if (isDca) {
-        // ── Oracle-bounded per-fill floor ── [SPRINT-ORDER-ONCHAIN-FLOOR / P1a]
-        // DCA's on-chain minOut is a 1-wei no-op (minAmountOut=1 → clamp), so the
-        // keeper verifies the built output against an INDEPENDENT fair-value
-        // reference (Chainlink for ETH, else DefiLlama) and REJECTS a fill grossly
-        // below reference × (1 − maxSlippage). This closes the drain-to-dust tail a
-        // compromised keeper / loose calldata / manipulated quote could exploit.
-        // A rejected fill is DELAYED (retried next cycle), never failed and never
-        // force-executed — delay ≫ drain. No reference for the pair ⇒ FLAGGED (not
-        // blind, not falsely rejected). Reference fetch is fully fail-safe.
-        const [refPriceIn, refPriceOut] = await Promise.all([
+        // ── Oracle-bounded per-fill floor ── [SPRINT-ORDER-ONCHAIN-FLOOR / P1a
+        // + CHORE-KEEPER-HARDENING / P1A-M-01]. DCA's on-chain minOut is a 1-wei
+        // no-op, so the keeper verifies the built output against an INDEPENDENT
+        // fair-value reference (Chainlink for ETH, else DefiLlama).
+        //   - both legs priced → REJECT a fill grossly below reference ×
+        //     (1 − maxSlippage) (drain-to-dust tail); a reject DELAYS (retry next
+        //     cycle), never fails and never force-executes — delay ≫ drain.
+        //   - a TRANSIENT reference outage on a feed-having pair → DELAY (do NOT
+        //     fail-open on a momentary blip).
+        //   - a genuinely FEEDLESS pair → proceed FLAGGED, but only for a SMALL
+        //     fill within the USD notional cap; larger/unsizable → DELAY.
+        // Reference fetch is fully fail-safe (any unknown error ⇒ transient ⇒ delay).
+        const [refIn, refOut] = await Promise.all([
           fetchReferencePriceUsd(orderStruct.tokenIn, CHAIN_ID, publicClient),
           fetchReferencePriceUsd(orderStruct.tokenOut, CHAIN_ID, publicClient),
         ])
-        const referenceExpectedOut = computeReferenceExpectedOut({
-          netAmountIn: netAmount,
-          srcDecimals,
-          dstDecimals,
-          priceInUsd: refPriceIn,
-          priceOutUsd: refPriceOut,
-        })
-        const hasReference = referenceExpectedOut !== null && swapData.toAmount != null
-        const floorDecision = decideFloor({
-          builtExpectedOut: swapData.toAmount,
-          referenceExpectedOut,
-          maxSlippageBps: getFloorMaxSlippageBps(),
-          hasReference,
-        })
-        if (!floorDecision.ok) {
-          log(
-            `  Order ${dbOrder.id.slice(0, 8)}... DCA FLOOR BREACH -- ${floorDecision.reason} (built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}) -- refusing to fill, retry next cycle`,
-          )
-          // Fund-adjacent: a built output grossly below fair value. Page (warn) so
-          // ops can investigate (attack / thin liquidity / route-builder bug).
-          try {
-            await alertOps(
-              {
-                kind: "dca-floor-breach",
-                detail: `Order ${dbOrder.id} DCA fill rejected by oracle floor: ${floorDecision.reason}; built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}`,
-              },
-              TIER_WARN_THRESHOLD,
+        const bothPriced = refIn.price != null && refOut.price != null && swapData.toAmount != null
+        if (bothPriced) {
+          const referenceExpectedOut = computeReferenceExpectedOut({
+            netAmountIn: netAmount,
+            srcDecimals,
+            dstDecimals,
+            priceInUsd: refIn.price,
+            priceOutUsd: refOut.price,
+          })
+          const floorDecision = decideFloor({
+            builtExpectedOut: swapData.toAmount,
+            referenceExpectedOut,
+            maxSlippageBps: getFloorMaxSlippageBps(),
+            hasReference: true,
+          })
+          if (!floorDecision.ok) {
+            log(
+              `  Order ${dbOrder.id.slice(0, 8)}... DCA FLOOR BREACH -- ${floorDecision.reason} (built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}) -- refusing to fill, retry next cycle`,
             )
-          } catch {}
-          // DELAY, never drain. Like the deviation DEFER this is NOT a failure (no
-          // orderRetries, no 'failed', no failure alert) — but UNLIKE the window-end
-          // deviation path it NEVER executes-anyway: we must never fill below floor.
-          await updateOrderStatus(dbOrder.id, "active")
-          skipped++
-          continue
-        }
-        if (floorDecision.flagged) {
-          // No fair-value reference (oracle-less + DefiLlama-less pair): proceed on
-          // the aggregator's own flat calldata minReturn, but surface it (info) so
-          // an un-oracle-bounded fill is never silent. The terminal fix for these
-          // pairs is the on-chain signed floor in ADR-011.
-          log(
-            `  Order ${dbOrder.id.slice(0, 8)}... DCA fill NOT oracle-bounded (${floorDecision.reason}) -- proceeding on flat calldata floor`,
-          )
+            // Fund-adjacent: built output grossly below fair value. Page (warn).
+            try {
+              await alertOps(
+                {
+                  kind: "dca-floor-breach",
+                  detail: `Order ${dbOrder.id} DCA fill rejected by oracle floor: ${floorDecision.reason}; built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}`,
+                },
+                TIER_WARN_THRESHOLD,
+              )
+            } catch {}
+            // DELAY, never drain. NOT a failure (no orderRetries/'failed'/failure
+            // alert); and UNLIKE the deviation window-end path, NEVER executes-anyway.
+            await updateOrderStatus(dbOrder.id, "active")
+            skipped++
+            continue
+          }
+          // else oracle-bounded pass → fall through to the deviation gate + execute.
+        } else {
+          // Not both priced: split TRANSIENT (delay) vs FEEDLESS (capped fail-open).
+          const statusOf = (r) => (r.price != null ? "ok" : r.transient ? "transient" : "feedless")
+          const referenceStatus = classifyReference({ inStatus: statusOf(refIn), outStatus: statusOf(refOut) })
+          // Size the fail-open fill from whichever leg IS priced (for the USD cap).
+          let notionalUsd = null
+          if (refIn.price != null) {
+            notionalUsd = (Number(netAmount) / 10 ** srcDecimals) * refIn.price
+          } else if (refOut.price != null && swapData.toAmount != null) {
+            notionalUsd = (Number(swapData.toAmount) / 10 ** dstDecimals) * refOut.price
+          }
+          const failOpen = decideFailOpen({
+            referenceStatus,
+            notionalUsd,
+            maxFailOpenUsd: getFailOpenMaxUsd(),
+          })
+          if (!failOpen.ok) {
+            // Transient outage, or a feedless fill above the cap / unsizable ⇒ DELAY.
+            // Not a breach → info alert; unlock + retry next cycle (never fill blind).
+            log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill DELAYED -- ${failOpen.reason}`)
+            try {
+              await alertOps(
+                { kind: "dca-floor-delay", detail: `Order ${dbOrder.id} DCA fill delayed: ${failOpen.reason}` },
+                0,
+              )
+            } catch {}
+            await updateOrderStatus(dbOrder.id, "active")
+            skipped++
+            continue
+          }
+          // Small feedless fill within the USD cap: proceed on the aggregator's own
+          // flat calldata minReturn, surfaced (info) so it is never silent. Terminal
+          // fix for feedless pairs is the on-chain signed floor (ADR-013).
+          log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill NOT oracle-bounded -- ${failOpen.reason}`)
           try {
             await alertOps(
               {
                 kind: "dca-floor-unverified",
-                detail: `Order ${dbOrder.id} DCA fill has no fair-value reference (${orderStruct.tokenIn} -> ${orderStruct.tokenOut} on chain ${CHAIN_ID}); relying on flat calldata floor`,
+                detail: `Order ${dbOrder.id} DCA fill has no fair-value reference (${orderStruct.tokenIn} -> ${orderStruct.tokenOut} on chain ${CHAIN_ID}); ${failOpen.reason}`,
               },
               0,
             )
