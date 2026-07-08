@@ -18,7 +18,7 @@
 //
 // Interim (off-chain, Phase 0). The terminal on-chain floor (a Chainlink read at
 // execution within a SIGNED bound, replacing the 1-wei clamp with a revert) is
-// designed in ADR-011 and is a separate gated deploy — this keeper gate cuts the
+// designed in ADR-013 and is a separate gated deploy — this keeper gate cuts the
 // live exposure now without a redeploy.
 //
 // Pure + never-throwing (mirrors deviation-guard.js / retry-policy.js): no I/O,
@@ -137,7 +137,7 @@ export function decideFloor({ builtExpectedOut, referenceExpectedOut, maxSlippag
   // the quote against fair value, so we do not claim to. Do not fill BLIND — the
   // aggregator calldata still carries its own (flat) minReturn — but FLAG the fill
   // so ops can see it wasn't oracle-bounded. The terminal fix is the on-chain
-  // signed floor (ADR-011); no keeper-side check can catch a self-consistent bad
+  // signed floor (ADR-013); no keeper-side check can catch a self-consistent bad
   // quote without an external anchor.
   if (!hasReference || referenceExpectedOut === null || referenceExpectedOut <= 0n) {
     return {
@@ -173,4 +173,68 @@ export function decideFloor({ builtExpectedOut, referenceExpectedOut, maxSlippag
       ? "oracle-bounded: built output >= reference floor"
       : "oracle floor breached: built output < reference × (1 − maxSlippage) — refusing to fill",
   }
+}
+
+// ── [CHORE-KEEPER-HARDENING / P1A-M-01] Bounded fail-open ────────────────────
+// decideFloor's "no reference ⇒ fill flagged" is fail-OPEN. That is right for a
+// pair with genuinely NO feed, but wrong for a TRANSIENT outage of a pair that
+// DOES have a feed (a momentary Chainlink RPC / DefiLlama blip should DELAY the
+// fill, not wave it through unbounded). And even a feedless fail-open fill should
+// be bounded to SMALL notionals. This splits the two cases and adds a USD cap.
+
+/** Default USD notional cap for a fail-open (feedless) fill — only small fills
+ *  proceed unbounded; larger ones delay. Auditor-tunable; clamped [0, 100000]
+ *  (0 = never fail-open). */
+export const DCA_FAIL_OPEN_MAX_USD = 250
+export const DCA_FAIL_OPEN_MAX_USD_MIN = 0
+export const DCA_FAIL_OPEN_MAX_USD_MAX = 100_000
+
+/** The active fail-open cap: `DCA_FAIL_OPEN_MAX_USD` env override clamped to
+ *  [MIN, MAX], else the 250 default. */
+export function getFailOpenMaxUsd() {
+  const raw = process.env.DCA_FAIL_OPEN_MAX_USD
+  if (!raw) return DCA_FAIL_OPEN_MAX_USD
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed)) return DCA_FAIL_OPEN_MAX_USD
+  if (parsed < DCA_FAIL_OPEN_MAX_USD_MIN) return DCA_FAIL_OPEN_MAX_USD_MIN
+  if (parsed > DCA_FAIL_OPEN_MAX_USD_MAX) return DCA_FAIL_OPEN_MAX_USD_MAX
+  return parsed
+}
+
+/**
+ * Combine the two legs' reference statuses into one. A TRANSIENT leg means a feed
+ * EXISTS but is momentarily unavailable ⇒ the whole pair is transient (delay). A
+ * FEEDLESS leg (with neither transient) ⇒ feedless (fail-open, capped).
+ * @param {{ inStatus: 'ok'|'transient'|'feedless', outStatus: 'ok'|'transient'|'feedless' }} p
+ * @returns {'ok'|'transient'|'feedless'}
+ */
+export function classifyReference({ inStatus, outStatus }) {
+  if (inStatus === "transient" || outStatus === "transient") return "transient"
+  if (inStatus === "ok" && outStatus === "ok") return "ok"
+  return "feedless"
+}
+
+/**
+ * Decide what to do when the oracle floor could NOT be applied (not both legs
+ * priced). Transient ⇒ DELAY (retry next cycle, never fill unbounded). Feedless ⇒
+ * proceed only for a small fill within the USD cap; otherwise DELAY. An unsizable
+ * feedless fill (no priced leg) ⇒ DELAY (never fill blind).
+ * @param {{ referenceStatus: 'transient'|'feedless'|'ok', notionalUsd: number|null, maxFailOpenUsd: number }} p
+ * @returns {{ ok: boolean, action: 'delay'|'fill-flagged', flagged: boolean, reason: string }}
+ */
+export function decideFailOpen({ referenceStatus, notionalUsd, maxFailOpenUsd }) {
+  if (referenceStatus === "transient") {
+    return { ok: false, action: "delay", flagged: false, reason: "transient reference outage on a feed-having pair — delaying (not fail-open)" }
+  }
+  // feedless (or an unexpected status — fail safe to delay)
+  if (referenceStatus !== "feedless") {
+    return { ok: false, action: "delay", flagged: false, reason: `unexpected reference status '${referenceStatus}' — delaying` }
+  }
+  if (notionalUsd === null || !Number.isFinite(notionalUsd)) {
+    return { ok: false, action: "delay", flagged: false, reason: "feedless pair, notional unsizable — delaying (never fill blind)" }
+  }
+  if (notionalUsd <= maxFailOpenUsd) {
+    return { ok: true, action: "fill-flagged", flagged: true, reason: `feedless pair, small fill ($${notionalUsd.toFixed(2)} <= $${maxFailOpenUsd} cap) — proceeding flagged` }
+  }
+  return { ok: false, action: "delay", flagged: false, reason: `feedless pair above the $${maxFailOpenUsd} fail-open cap ($${notionalUsd.toFixed(2)}) — delaying` }
 }

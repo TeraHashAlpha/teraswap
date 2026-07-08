@@ -7062,3 +7062,15 @@ only, NO contract deploy/change). Auditor sign-off required before merge and bef
   signer and a pm2 restart on the EC2 host — an ops deploy step, not runnable in CI/local.
 - No contract deployed/changed; recipient/router/on-chain gates untouched; no ALLOW_PLAINTEXT_KEY; no
   wagmi-v3.
+
+## Feedback — CHORE-KEEPER-HARDENING (branch chore/keeper-hardening) — 3 commits, → Auditor
+
+All keeper, off-chain, fund-adjacent; no contract/on-chain change; Phase-0 reject/submission behaviour + on-chain gates intact; no ALLOW_PLAINTEXT_KEY.
+
+- **P5a (HIGH) — Vault stub throws:** `signer-guard.js` (`VAULT_WIRED=false`) makes a configured-but-unwired `VAULT_ADDR` count as NO managed signer. `kms-signer.js` Vault branch now THROWS instead of falling through to `privateKeyToAccount`; `validateConfig` no longer lets `VAULT_ADDR` suppress the plaintext-key FATAL and logs the resolved signer kind at startup. (7 tests.)
+- **P1A-M-01 (MEDIUM) — bounded fail-open:** `fetchReferencePriceUsd` now returns `{price, transient}`. A TRANSIENT outage of a feed-having pair (network/timeout/5xx/429, or ETH leg unreadable) → **DELAY** (retry next cycle). A genuinely FEEDLESS pair → proceed **flagged** only within a **USD notional cap = $250** (`DCA_FAIL_OPEN_MAX_USD`, clamped [0,100000]); larger/unsizable → DELAY. Oracle `[50,2000]` bps band untouched. (11 tests.)
+- **P1A-I-01 (INFO) — ADR ref:** Phase-0 comments `ADR-011` → **ADR-013** (011 is the FeeCollector/Augustus ADR).
+
+**USD-cap chosen: $250** per fill — small enough to bound worst-case loss on an un-oracle-bounded feedless fill, large enough not to block genuine small feedless DCA; Auditor-tunable via env.
+
+Keeper node:test: **173 pass** (28 new). `node --check executor.js` OK. Live end-to-end (a transient-outage DELAY / feedless-cap path exercised against real Supabase+RPC) needs a keeper deploy (pm2 restart) — ops step. **→ Auditor (signer/floor-adjacent).**
