@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
 
       - name: Rebuild token catalogs (multi-source cross-verify + guard)
         # The GUARD_RPC_* secrets are OPTIONAL overrides. They are exported only when

@@ -37,10 +37,12 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      # Scripts ON (like ci.yml): the harness build (globalSetup) needs esbuild's
-      # platform binary + the local tailwind CLI, which are set up by install scripts.
+      # [CHORE-REVERT-IGNORE-SCRIPTS] Verified: esbuild's platform binary and the tailwind CLI
+      # both work with install scripts ignored (esbuild resolves its platform binary via
+      # optionalDependencies, no postinstall needed at this version) — the prior "scripts ON"
+      # comment was stale, mirroring ci.yml's nonexistent-Prisma justification.
       - name: Install deps
-        run: npm ci --ignore-scripts=false
+        run: npm ci
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Run real-render Playwright tests (category-chips)
