@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { isUsdStablecoin } from '@/lib/chains/stablecoins'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
 interface Props {
   value: number
@@ -10,21 +12,25 @@ interface Props {
   onAutoChange: (auto: boolean) => void
   tokenInSymbol?: string
   tokenOutSymbol?: string
+  /** [CHORE-STABLECOIN-CONSTANT] Stable membership is chain-keyed — the active chain decides. */
+  chainId?: number
 }
 
 const PRESETS = [0.1, 0.5, 1.0, 3.0]
 
 // ── Smart auto-slippage logic ──
-// Determines optimal slippage based on token pair characteristics
-const STABLECOINS = ['USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'PYUSD', 'USDe', 'USDS', 'BOLD']
+// Determines optimal slippage based on token pair characteristics.
+// [CHORE-STABLECOIN-CONSTANT] Stablecoin membership comes from the chain-keyed single
+// source of truth (lib/chains/stablecoins); MAJOR/MEME stay local — they are volatility
+// heuristics for this modal, not ~$1 sets.
 const MAJOR_TOKENS = ['ETH', 'WETH', 'WBTC', 'cbBTC', 'wstETH', 'cbETH', 'weETH', 'rsETH']
 const MEMECOINS = ['PEPE', 'SHIB', 'FLOKI', 'TURBO', 'MOG']
 
-export function calculateAutoSlippage(tokenIn?: string, tokenOut?: string): number {
+export function calculateAutoSlippage(tokenIn?: string, tokenOut?: string, chainId: number = DEFAULT_CHAIN_ID): number {
   if (!tokenIn || !tokenOut) return 0.5
 
-  const inIsStable = STABLECOINS.includes(tokenIn)
-  const outIsStable = STABLECOINS.includes(tokenOut)
+  const inIsStable = isUsdStablecoin(tokenIn, chainId)
+  const outIsStable = isUsdStablecoin(tokenOut, chainId)
   const inIsMajor = MAJOR_TOKENS.includes(tokenIn)
   const outIsMajor = MAJOR_TOKENS.includes(tokenOut)
   const inIsMeme = MEMECOINS.includes(tokenIn)
@@ -46,9 +52,9 @@ export function calculateAutoSlippage(tokenIn?: string, tokenOut?: string): numb
   return 0.5
 }
 
-export default function SlippageModal({ value, onChange, onClose, isAuto, onAutoChange, tokenInSymbol, tokenOutSymbol }: Props) {
+export default function SlippageModal({ value, onChange, onClose, isAuto, onAutoChange, tokenInSymbol, tokenOutSymbol, chainId = DEFAULT_CHAIN_ID }: Props) {
   const [custom, setCustom] = useState('')
-  const autoValue = calculateAutoSlippage(tokenInSymbol, tokenOutSymbol)
+  const autoValue = calculateAutoSlippage(tokenInSymbol, tokenOutSymbol, chainId)
 
   function selectPreset(p: number) {
     onAutoChange(false)

@@ -6785,3 +6785,94 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   anon/RLS path returns empty without a Supabase-Auth JWT). `/api/orders/stats` omits the `failed`
   bucket. `useSwapHistory` claims localStorage but has no persist middleware (session-only). Stale
   memory corrected: the keeper IS running (daily fills 07-01→07-05).
+
+## Feedback — CHORE-STABLECOIN-CONSTANT (branch chore/stablecoin-constant)
+
+### The 6 sites and their historical memberships (AZ FE5 — verified verbatim on main @ a717427)
+1. `SlippageModal.tsx:19` — `[USDC, USDT, DAI, FRAX, LUSD, PYUSD, USDe, USDS, BOLD]` (auto-slippage recommendation; chain-blind)
+2. `SwapBox.tsx:231` — `[USDC, USDT, DAI, USDbC]` (execution-price derivation feeding the Chainlink deviation gate; chain-blind)
+3. `SwapBox.tsx:556` — `[USDC, USDT, DAI, USDe]` (input-USD estimate feeding the unverified-swap $1k warn / $10k block; chain-blind)
+4. `useSplitRoute.ts:67` — `[USDC, USDT, DAI, BOLD]` (split-routing USD threshold, output side; chain-blind)
+5. `useSplitRoute.ts:69` — same list (input side)
+6. `chains/tokens.ts:163` — `[USDC, USDT, DAI, USDbC, USDe, FRAX, LUSD, EURC]` (`inferCategory` 'Stablecoin' fallback; chain-blind)
+
+6 sites / 5 distinct memberships — no two gates agreed; USDbC was ~$1 for the deviation gate but not
+for the unverified-swap gate, split threshold, or auto-slippage.
+
+### Canonical per-chain set (new `src/lib/chains/stablecoins.ts`, enforced by `stablecoins.test.ts`)
+- **Mainnet (1):** `USDC, USDT, DAI, FRAX, LUSD, PYUSD, USDe, USDS, GHO, crvUSD, BOLD` — exactly the
+  curated `DEFAULT_TOKENS` 'Stablecoin' category (a drift-guard test pins set equality, so adding a
+  curated stable without touching the constant — or vice versa — fails CI loudly).
+- **Base (8453):** `USDC, USDbC, USDT, DAI` — the curated suggested USD stables. **USDbC is ~$1 on
+  Base in every gate now** (the AZ headline inconsistency).
+- **EURC:** EUR-pegged (trades at EUR/USD FX, not $1) → 'Stablecoin' *UI category* only
+  (`STABLECOIN_CATEGORY_EXTRAS`), never in a USD set. The old chains/tokens list conflated the two
+  semantics; the constant separates them.
+- **Unknown chains:** empty set — fail-closed, no ~$1 assumption anywhere.
+- **Exact-casing symbol match preserved** (same as all 6 historical sites): an imported lookalike
+  named `usdc` gains no ~$1 trust.
+- Membership rule: **curated stables only.** Long-tail catalog stables (Base LUSD/USDS/crvUSD;
+  mainnet TUSD/USDP/FDUSD/…) stay untrusted for ~$1 purposes — the same trust boundary the
+  historical gate lists drew, now documented. Yield-accruing lookalikes (sUSDe, sDAI) are pinned OUT
+  by test — they are NOT ~$1 and must never enter the USD sets.
+
+### Gates whose behaviour changes (and why the new value is correct)
+- **Auto-slippage (SlippageModal + SwapBox effect; now chain-keyed via `chainId` prop/param,
+  default mainnet for back-compat):**
+  - Mainnet + GHO, crvUSD → 0.1%/0.3% stable treatment. Correct: both are curated ~$1 stables the
+    old list simply missed (they postdate it).
+  - Base + USDbC → USDbC/USDC now 0.1% (was 0.5% default). Correct: bridged USDC ≈ $1 on Base.
+  - Base − FRAX/PYUSD/USDe/BOLD (not in the Base catalog at all — reachable only via custom import)
+    and − LUSD/USDS (Base long-tail only): 0.5% default instead of 0.1/0.3%. Correct and safer: a
+    thin bridged long-tail pool at 0.1% slippage mostly produces failed swaps, and custom-import
+    symbols should never get trust by name. This is the ONLY membership loss with a real user-visible
+    surface today (Base long-tail LUSD/USDS pairs get a wider default) — deliberate, not silent.
+- **Chainlink deviation gate feed (`execIn`/`execOut` derivation, SwapBox):**
+  - Mainnet + FRAX, LUSD, PYUSD, USDe, USDS, GHO, crvUSD, BOLD → selling/buying ANY curated stable
+    now derives a USD execution price and runs the deviation check (more oracle coverage; each is
+    ~$1 well inside the gate's warn/block bands). − USDbC on mainnet is a no-op (no such mainnet
+    token).
+  - Base: no change — the old list `[USDC, USDT, DAI, USDbC]` equals the Base canon exactly.
+- **Unverified-swap gate estimate (`estimatedInputUsd`, SwapBox; `activeChainId` added to the
+  `useMemo` deps):**
+  - Mainnet + FRAX, LUSD, PYUSD, USDS, GHO, crvUSD, BOLD → inputs from these stables now produce a
+    real USD estimate, so the $1k-warn/$10k-block for oracle-less pairs can actually fire
+    (previously PYUSD/USDS/GHO/crvUSD/BOLD inputs estimated $0 — the gate was blind). Strictly
+    stronger protection.
+  - Base + USDbC (gate now works for USDbC inputs); − USDe on Base (not a Base catalog token —
+    custom imports no longer get $1 by name; the estimate falls through to the Chainlink branch).
+- **Split-routing threshold (useSplitRoute; `chainId` added to the `useMemo` deps):**
+  - Mainnet + FRAX, LUSD, PYUSD, USDe, USDS, GHO, crvUSD → ≥$5k trades in/out of these now get
+    split analysis. Correct: the estimate is only a threshold input, and these are ~$1.
+  - Base + USDbC (split analysis now reachable for USDbC-denominated trades); − BOLD on Base
+    (mainnet-only token; the old chain-blind list applied it everywhere).
+- **Category fallback (chains/tokens `inferCategory`, now chain-keyed):** zero observable catalog
+  delta today — every genuine stable in both generated catalogs already carries pipeline category
+  'Stablecoin', so the fallback only fires for pipeline-'Other' tokens. Mainnet fallback additionally
+  recognises PYUSD/USDS/GHO/crvUSD/BOLD; EURC keeps the category via the extras map; USDbC leaving
+  the MAINNET fallback is a no-op (no mainnet USDbC exists).
+
+### Flagged — intentional/unclear exclusions NOT silently absorbed
+1. **`LimitOrderPanel.tsx:30` + `ConditionalOrderPanel.tsx:30`** carry two MORE copies of the
+   9-symbol list (`STABLECOIN_SYMBOLS`). Both components are documented L2-parking
+   (`[CHORE-ORDER-EXEC-PREP B]`, unwired from `page.tsx`, rule #4 — AZ FE6), which is why AZ counted
+   6 sites, not 8. Left byte-identical here; they should be wired to the constant when unparked.
+2. **`src/lib/order-engine/usd.ts` `APPROX_PRICES`** is a semantic sibling ($1 entries for
+   USDC/USDT/DAI/FRAX/LUSD/SUSD/CRVUSD/GHO/PYUSD) but a different beast: an approximate PRICE table
+   (incl. non-stables) shared with the analytics route (#228) under the "do not fabricate USD" rule.
+   Deliberately untouched (analytics parity). Gap worth a follow-up: it lacks USDbC/USDe/USDS/BOLD,
+   so Base USDbC DCA fills render "—" in the dashboard today.
+3. **Symbol-based membership (pre-existing):** all gates match by symbol, so a custom-imported token
+   NAMED like a stable passes ~$1 gates on the chain where that symbol is canon. Unchanged by this
+   chore (and narrowed on the wrong-chain axis: e.g. an imported "USDbC" on mainnet no longer gets
+   $1). Moving to address-based membership is a product/security decision for the Architect —
+   noting, not deciding, here.
+4. **`quorum-check.ts` "stablecoin pair"** detection is threshold-based (`maxDeviationPercent <= 2`
+   from reference-pair config), not symbol-list-based — verified NOT a 7th list; untouched.
+
+### Test gap closed
+- Neither `SlippageModal.test.tsx` nor any stable-membership behaviour was CI-gated (CI runs
+  single-file guard jobs, no full suite). New `stablecoin-constant-guard` job gates
+  `stablecoins.test.ts` (canon + drift-guards + call-site resolution scans) +
+  `SlippageModal.test.tsx`; the new chain-membership cases in `useSplitRoute.test.ts` ride the
+  existing `quote-source-guard`.

@@ -113,6 +113,24 @@ jobs:
       - name: Platform-fee USD guard
         run: npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx
 
+  stablecoin-constant-guard:
+    # [CHORE-STABLECOIN-CONSTANT] Gate the chain-keyed stablecoin single source of truth
+    # (AZ review FE5: 6 divergent inline lists — USDbC counted as ~$1 in one gate but not
+    # another). The full vitest suite is not run in CI (only single-file guards), so this
+    # pins: the canonical per-chain USD (~$1) membership + its catalog drift-guards, EURC
+    # (EUR-pegged) staying category-only, every historical call site resolving to the
+    # constant, and the chain-keyed auto-slippage behaviour.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: Stablecoin constant guard
+        run: npx vitest run src/lib/chains/stablecoins.test.ts src/components/SlippageModal.test.tsx
+
   quote-source-guard:
     # [CHORE-QUOTE-SOURCE-FIXES] The full vitest suite is not run in CI (only
     # single-file guards), so this pins the displayed-quote source hygiene:

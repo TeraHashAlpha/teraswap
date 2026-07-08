@@ -29,6 +29,7 @@
 import { DEFAULT_TOKENS, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
 import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
+import { isStablecoinCategorySymbol } from './stablecoins'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -158,9 +159,10 @@ export function getChainToken(address: string, chainId: number): ChainToken | nu
   return (CHAIN_TOKENS[chainId] ?? []).find((t) => t.address.toLowerCase() === addr) ?? null
 }
 
-function inferCategory(symbol: string): TokenCategory {
+function inferCategory(symbol: string, chainId: number): TokenCategory {
   if (symbol === 'ETH' || symbol === 'WETH') return 'Native'
-  if (['USDC', 'USDT', 'DAI', 'USDbC', 'USDe', 'FRAX', 'LUSD', 'EURC'].includes(symbol)) return 'Stablecoin'
+  // [CHORE-STABLECOIN-CONSTANT] Chain-keyed membership (USD stables ∪ EUR-pegged extras).
+  if (isStablecoinCategorySymbol(symbol, chainId)) return 'Stablecoin'
   if (symbol === 'cbETH' || symbol === 'wstETH' || symbol === 'rETH') return 'Liquid Staking'
   if (symbol.includes('BTC')) return 'Wrapped BTC'
   // [SPRINT-9Y] light grouping for the curated Base suggested view (cosmetic only).
@@ -177,18 +179,19 @@ function inferCategory(symbol: string): TokenCategory {
  */
 export function getChainTokenList(chainId: number): Token[] {
   if (chainId === 1) return DEFAULT_TOKENS
-  return (CHAIN_TOKENS[chainId] ?? []).map(chainTokenToToken)
+  return (CHAIN_TOKENS[chainId] ?? []).map((t) => chainTokenToToken(t, chainId))
 }
 
 // [SPRINT-9Y] Map a ChainToken to the rich Token the selector renders.
-function chainTokenToToken(t: ChainToken): Token {
+// [CHORE-STABLECOIN-CONSTANT] Carries the chainId so the category fallback is chain-keyed.
+function chainTokenToToken(t: ChainToken, chainId: number): Token {
   return {
     address: t.address,
     symbol: t.symbol,
     name: t.name,
     decimals: t.decimals,
     logoURI: t.logoURI,
-    category: t.category ?? inferCategory(t.symbol),
+    category: t.category ?? inferCategory(t.symbol, chainId),
     verified: t.verified,
     sources: t.sources,
   }
@@ -214,7 +217,7 @@ const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
     name: t.name,
     decimals: t.decimals,
     logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
-    category: generatedCategory(t) ?? inferCategory(t.symbol),
+    category: generatedCategory(t) ?? inferCategory(t.symbol, 1),
     verified: t.verified,
     sources: t.sources,
   }))
@@ -228,7 +231,7 @@ const MAINNET_CURATED: Token[] = DEFAULT_TOKENS.map((t) => {
 
 // Precomputed full catalogs (stable references → cheap memoisation downstream).
 const MAINNET_FULL: Token[] = [...MAINNET_CURATED, ...MAINNET_LONGTAIL]
-const BASE_FULL_TOKENS: Token[] = BASE_FULL.map(chainTokenToToken)
+const BASE_FULL_TOKENS: Token[] = BASE_FULL.map((t) => chainTokenToToken(t, 8453))
 
 /**
  * [SPRINT-9Y] The FULL pinned catalog for a chain (curated + long tail), as Token[].
