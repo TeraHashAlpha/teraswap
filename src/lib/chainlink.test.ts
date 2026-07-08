@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, fetchHistoricalPrice, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, fetchErc20Decimals, computeTokenAmountUsd, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
 import { getComposedFeed, getExchangeRatePair } from './chains/chainlink-feeds'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
@@ -378,6 +378,29 @@ describe('chainlink — chain-aware RPC routing [SPRINT-9G G1]', () => {
     await fetchChainlinkPriceRaw(NATIVE_ETH, 1)
     expect(urls.length).toBeGreaterThan(0)
     for (const u of urls) expect(u).toBe(getRpcUrlForChain(1))
+  })
+
+  // [CHORE-API-SMALL-FIXES] fetchErc20Decimals/computeTokenAmountUsd previously
+  // had no chainId param and always hit the mainnet RPC for the decimals() call —
+  // querying a Base token address against mainnet, which either errors or (worse)
+  // silently resolves an unrelated mainnet contract at the same address. Both now
+  // thread chainId through to rpcCall, matching the price-leg routing above.
+  it('fetchErc20Decimals(tokenAddress, 8453) reads decimals via the Base RPC, not mainnet', async () => {
+    const urls = captureRpc()
+    await fetchErc20Decimals(BASE_WETH, 8453)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(u).toBe(getRpcUrlForChain(8453))
+  })
+
+  it('computeTokenAmountUsd(tokenAddress, amount, 8453) prices the Base WETH/USD feed on the Base RPC', async () => {
+    const urls = captureRpc()
+    // captureRpc's decimals() stub answers 8 for BOTH the feed and the ERC20 token
+    // (same 4-byte selector), so 1 token unit = 10^8 raw here.
+    const result = await computeTokenAmountUsd(BASE_WETH, (1n * 10n ** 8n).toString(), 8453)
+    expect(result).not.toBeNull()
+    expect(result!.usd).toBeCloseTo(3000, 5) // 1 WETH * $3000 (captureRpc's fixed price answer)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(u).toBe(getRpcUrlForChain(8453))
   })
 })
 
