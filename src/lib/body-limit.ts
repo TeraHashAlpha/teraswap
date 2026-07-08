@@ -8,6 +8,7 @@
  * validation still bound what a request can do downstream).
  */
 import { NextResponse } from 'next/server'
+import { trustedClientIp } from './trusted-ip'
 
 /** Default cap for JSON API bodies — matches the swap route's 10 KB. */
 export const DEFAULT_MAX_BODY_BYTES = 10_000
@@ -17,14 +18,11 @@ export const DEFAULT_MAX_BODY_BYTES = 10_000
  *  but finitely. */
 export const RPC_MAX_BODY_BYTES = 262_144 // 256 KB
 
-/** Per-IP extraction shared by the new rate-limit call sites (same derivation
- *  the swap route uses). */
+/** Per-IP extraction shared by rate-limit call sites.
+ *  [CHORE-API-HARDENING-2 / P3a] Delegates to trustedClientIp — the left-most
+ *  x-forwarded-for token is attacker-controlled on Vercel; see trusted-ip.ts. */
 export function clientIp(req: Request): string {
-  return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('x-real-ip') ||
-    'unknown'
-  )
+  return trustedClientIp(req)
 }
 
 /**

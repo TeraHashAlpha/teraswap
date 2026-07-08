@@ -7074,3 +7074,14 @@ All keeper, off-chain, fund-adjacent; no contract/on-chain change; Phase-0 rejec
 **USD-cap chosen: $250** per fill — small enough to bound worst-case loss on an un-oracle-bounded feedless fill, large enough not to block genuine small feedless DCA; Auditor-tunable via env.
 
 Keeper node:test: **173 pass** (28 new). `node --check executor.js` OK. Live end-to-end (a transient-outage DELAY / feedless-cap path exercised against real Supabase+RPC) needs a keeper deploy (pm2 restart) — ops step. **→ Auditor (signer/floor-adjacent).**
+
+## Feedback — CHORE-API-HARDENING-2 (branch chore/api-hardening-2) — 5 commits, no Auditor
+
+No fund-flow/contract change; no auth loosened. Threat model P3.
+
+- **P3a — trusted-IP helper (confirmed):** `trusted-ip.ts` prefers `x-vercel-forwarded-for` (platform-set, unspoofable), else `x-real-ip`, else the RIGHT-most `x-forwarded-for` entry — never the client-controlled left-most token. Applied at all 4 call sites (`quote`, `swap`, `rpc`, `body-limit.clientIp`). Fixed one pre-existing test in `orders/route.hardening.test.ts` that pinned the old (vulnerable) left-most behaviour as "correct" — updated + added an adversarial case.
+- **P3c — `/api/rpc` cost policy (confirmed):** `debug_*`/`trace_*` denied outright (no legitimate use in the app's read surface); `eth_getLogs` numeric block ranges CLAMPED to 2000 blocks (rewrites `fromBlock`, keeps the call working) rather than rejected; batch capped at 25. Tag-based ranges (`latest`) pass through — can't bound cheaply without a chain-tip lookup.
+- **P3d — `/api/history` hardening:** added the 30/min-per-wallet rate limit it lacked (siblings `/api/orders`, `/api/analytics/export` already had one); `count:'exact'` → `'estimated'` (avoids a full table scan); offset clamped to `[0, 2000]`. The existing W6 read-auth boundary (swaps public-by-address, DCA fills gated by signature) is an explicit prior design decision — left untouched, not "loosened."
+- **P3b — quote-cache quantization:** `amount` bucketed to 4 significant figures before entering the cache key, so a scripted +1-wei increment now hits the same 3s cache entry instead of forcing an ~11-adapter fan-out per request. A genuinely different trade size still misses. The global KV-backed outbound throttle (per the threat model's bigger follow-up) is out of scope here.
+
+28 new tests across trusted-ip (8), rpc-cost-policy (11, pure) + rpc route (8), history route (+4), quote-cache (9) = 2558 total pass (1 pre-existing unrelated failed suite: `connect-modal-qr.test.ts`, missing `cuer/QrCode` dep in this worktree's node_modules — not touched by this chore). Typecheck clean on all edited/added files.
