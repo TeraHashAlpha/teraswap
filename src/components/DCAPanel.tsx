@@ -18,6 +18,18 @@ import {
   getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
   dcaScheduleFitsExpiry,
+  fillUsd,
+  DCA_CUSTOM_BUYS_MIN,
+  DCA_CUSTOM_BUYS_MAX,
+  DCA_CUSTOM_INTERVAL_NUMBER_MIN,
+  DCA_CUSTOM_INTERVAL_NUMBER_MAX,
+  clampCustomBuys,
+  clampCustomIntervalNumber,
+  customIntervalSeconds,
+  deriveCustomExpirySeconds,
+  getDcaMinChunkUsd,
+  applyDcaMinChunkGuard,
+  type DcaCustomIntervalUnit,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
@@ -275,6 +287,21 @@ function CreateDCAForm({
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [slippage, setSlippage] = useState('0.5')
 
+  // [CHORE-DCA-CUSTOM-PERIODS] Custom buys/interval — off by default (presets unchanged).
+  const [customMode, setCustomMode] = useState(false)
+  const [customBuysRaw, setCustomBuysRaw] = useState(10)
+  const [customIntervalNumRaw, setCustomIntervalNumRaw] = useState(1)
+  const [customIntervalUnit, setCustomIntervalUnit] = useState<DcaCustomIntervalUnit>('days')
+  // Displayed/derived values are ALWAYS clamped — an in-flight keystroke (e.g. "1" while
+  // typing "15") can never leave the clamp, so nothing invalid is ever computed downstream
+  // even if the input's onBlur hasn't fired yet.
+  const customBuysClamped = clampCustomBuys(customBuysRaw)
+  const customIntervalNumClamped = clampCustomIntervalNumber(customIntervalNumRaw)
+  const customInterval = {
+    label: `${customIntervalNumClamped}${customIntervalUnit === 'hours' ? 'h' : 'd'}`,
+    seconds: customIntervalSeconds(customIntervalNumRaw, customIntervalUnit),
+  }
+
   // [CHORE-DCA-UX-FIXES] Bug 3a: routability gate state. `hasImported` flags an imported/unverified
   // token on either side (the keeper has no curated route for thin tokens); `routeBlock` holds the
   // block reason after a failed pre-check; `checkingRoute` disables submit while the quote runs.
@@ -307,9 +334,39 @@ function CreateDCAForm({
     return () => clearTimeout(t)
   }, [tokenOut, chainId])
 
-  const parts = DCA_TOTAL_PRESETS[partsIdx]
-  const interval = DCA_INTERVAL_PRESETS[intervalIdx]
-  const expiry = EXPIRY_PRESETS[expiryIdx]
+  // [CHORE-DCA-CUSTOM-PERIODS req.2 min-chunk] Total spend in USD (APPROX_PRICES-priced
+  // tokens only — null for anything unpriced, e.g. an imported token). Feeds the SC-02 dust
+  // guard below; fails OPEN when unpriced (same posture fillUsd uses everywhere else), so the
+  // per-chunk MIN_ORDER_AMOUNT base-unit floor (useOrderEngine.createOrder, untouched) stays
+  // the universal backstop regardless of pricing.
+  const totalUsd = useMemo(() => {
+    if (!totalDisplay || !tokenIn) return null
+    try {
+      return fillUsd(parseUnits(totalDisplay, tokenIn.decimals).toString(), tokenIn.decimals, tokenIn.symbol)
+    } catch {
+      return null
+    }
+  }, [totalDisplay, tokenIn])
+  const dcaMinChunkUsd = useMemo(() => getDcaMinChunkUsd(), [])
+  const minChunkGuard = useMemo(
+    () => customMode
+      ? applyDcaMinChunkGuard({ totalUsd, requestedBuys: customBuysClamped, minChunkUsd: dcaMinChunkUsd })
+      : { buys: customBuysClamped, warning: null as string | null, blocked: false },
+    [customMode, totalUsd, customBuysClamped, dcaMinChunkUsd],
+  )
+
+  const parts = customMode ? minChunkGuard.buys : DCA_TOTAL_PRESETS[partsIdx]
+  const interval = customMode ? customInterval : DCA_INTERVAL_PRESETS[intervalIdx]
+  // [CHORE-DCA-CUSTOM-PERIODS req.2 expiry coherence] Custom mode auto-derives expiry
+  // (interval*buys + buffer, capped at MAX_EXPIRY_DAYS) instead of a preset — see
+  // deriveCustomExpirySeconds for why an over-long schedule naturally trips the EXISTING
+  // scheduleFit gate below rather than needing a second hard-warn.
+  const expiry = useMemo(() => {
+    if (!customMode) return EXPIRY_PRESETS[expiryIdx]
+    const seconds = deriveCustomExpirySeconds({ intervalSeconds: interval.seconds, buys: parts })
+    const label = seconds < 86_400 ? `${Math.round(seconds / 3600)}h` : `${(seconds / 86_400).toFixed(1)}d`
+    return { label, seconds }
+  }, [customMode, expiryIdx, interval.seconds, parts])
 
   // [CHORE-DCA-UX-POLISH] Balance line text: the resolved `formatted` string + symbol, or "—" while
   // disconnected / before any balance (catalog or direct read) has resolved. The raw bigint
@@ -368,7 +425,7 @@ function CreateDCAForm({
     [interval, parts, expiry],
   )
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
@@ -376,6 +433,9 @@ function CreateDCAForm({
     // schedule can't complete before it expires. canCreate already gates the
     // button, but this also blocks any programmatic call.
     if (!scheduleFit.fits) return
+    // [CHORE-DCA-CUSTOM-PERIODS] Hard guard (defense-in-depth): never sign a dust DCA
+    // (total too small to clear the per-buy minimum even at 1 buy).
+    if (minChunkGuard.blocked) return
     setRouteBlock(null)
     startWaitingSound()
 
@@ -566,26 +626,67 @@ function CreateDCAForm({
         )}
       </div>
 
-      {/* Number of parts */}
-      <div className="mb-3">
-        <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
+      {/* [CHORE-DCA-CUSTOM-PERIODS] Custom toggle — switches buys + interval + expiry into
+          custom-input mode together (they're coupled by the min-chunk/expiry guardrails).
+          Preset behaviour (below, when off) is unchanged. */}
+      <div className="mb-3 flex items-center justify-between">
+        <label className="block text-[11px] font-medium uppercase tracking-wider text-cream-35">
           Number of Buys
         </label>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          {DCA_TOTAL_PRESETS.map((n, idx) => (
-            <button
-              key={n}
-              onClick={() => { setPartsIdx(idx); playClick() }}
-              className={`flex min-h-[44px] items-center justify-center rounded-lg border text-[13px] font-semibold transition-all ${
-                partsIdx === idx
-                  ? 'border-cream-gold bg-cream-gold/10 text-cream'
-                  : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
+        <button
+          type="button"
+          onClick={() => { setCustomMode(!customMode); playClick() }}
+          data-testid="dca-custom-toggle"
+          className="min-h-[44px] text-[11px] font-medium text-cream-35 underline decoration-cream-15 underline-offset-2 hover:text-cream-50"
+        >
+          {customMode ? 'Use presets' : 'Custom'}
+        </button>
+      </div>
+
+      {/* Number of parts */}
+      <div className="mb-3">
+        {customMode ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={DCA_CUSTOM_BUYS_MIN}
+              max={DCA_CUSTOM_BUYS_MAX}
+              value={customBuysRaw}
+              onChange={e => setCustomBuysRaw(Number(e.target.value))}
+              onBlur={() => setCustomBuysRaw(clampCustomBuys(customBuysRaw))}
+              data-testid="dca-custom-buys-input"
+              className="w-24 rounded-lg border border-cream-08 bg-surface-primary px-3 py-2.5 text-sm text-cream outline-none focus:border-cream-35"
+            />
+            <span className="text-[12px] text-cream-35">buys ({DCA_CUSTOM_BUYS_MIN}–{DCA_CUSTOM_BUYS_MAX})</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            {DCA_TOTAL_PRESETS.map((n, idx) => (
+              <button
+                key={n}
+                onClick={() => { setPartsIdx(idx); playClick() }}
+                className={`flex min-h-[44px] items-center justify-center rounded-lg border text-[13px] font-semibold transition-all ${
+                  partsIdx === idx
+                    ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                    : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* [CHORE-DCA-CUSTOM-PERIODS req.2 min-chunk] SC-02 dust guard — non-alarmist (amber)
+            when auto-capped, red + submit-blocking when even 1 buy would be dust. */}
+        {customMode && minChunkGuard.warning && (
+          <p
+            className={`mt-1 text-[11px] ${minChunkGuard.blocked ? 'text-red-400' : 'text-amber-300'}`}
+            data-testid="dca-min-chunk-warning"
+          >
+            {minChunkGuard.warning}
+          </p>
+        )}
       </div>
 
       {/* Interval */}
@@ -593,46 +694,87 @@ function CreateDCAForm({
         <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
           Interval
         </label>
-        <div className="flex gap-2 flex-wrap">
-          {DCA_INTERVAL_PRESETS.map((iv, idx) => (
-            <button
-              key={iv.seconds}
-              onClick={() => { setIntervalIdx(idx); playClick() }}
-              className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
-                intervalIdx === idx
-                  ? 'border-cream-gold bg-cream-gold/10 text-cream'
-                  : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
-              }`}
-            >
-              {iv.label}
-            </button>
-          ))}
-        </div>
+        {customMode ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={DCA_CUSTOM_INTERVAL_NUMBER_MIN}
+              max={DCA_CUSTOM_INTERVAL_NUMBER_MAX}
+              value={customIntervalNumRaw}
+              onChange={e => setCustomIntervalNumRaw(Number(e.target.value))}
+              onBlur={() => setCustomIntervalNumRaw(clampCustomIntervalNumber(customIntervalNumRaw))}
+              data-testid="dca-custom-interval-input"
+              className="w-20 rounded-lg border border-cream-08 bg-surface-primary px-3 py-2.5 text-sm text-cream outline-none focus:border-cream-35"
+            />
+            {(['hours', 'days'] as const).map(u => (
+              <button
+                key={u}
+                type="button"
+                onClick={() => { setCustomIntervalUnit(u); playClick() }}
+                data-testid={`dca-custom-interval-unit-${u}`}
+                className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
+                  customIntervalUnit === u
+                    ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                    : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
+                }`}
+              >
+                {u === 'hours' ? 'Hours' : 'Days'}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex gap-2 flex-wrap">
+            {DCA_INTERVAL_PRESETS.map((iv, idx) => (
+              <button
+                key={iv.seconds}
+                onClick={() => { setIntervalIdx(idx); playClick() }}
+                className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
+                  intervalIdx === idx
+                    ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                    : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
+                }`}
+              >
+                {iv.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* [CHORE-DCA-UX-POLISH] Order expiry — always visible (moved out of Advanced), alongside
-          Number of Buys / Interval. State/values/behaviour unchanged; only the render moved. */}
+          Number of Buys / Interval. State/values/behaviour unchanged for the preset path; only
+          the render moved. [CHORE-DCA-CUSTOM-PERIODS] Custom mode auto-derives expiry instead of
+          offering presets — see deriveCustomExpirySeconds. */}
       <div className="mb-4">
         <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
           Order expiry
         </label>
-        <div className="flex gap-2 flex-wrap">
-          {EXPIRY_PRESETS.map((e, idx) => (
-            <button
-              key={e.seconds}
-              onClick={() => { setExpiryIdx(idx); playClick() }}
-              className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
-                expiryIdx === idx
-                  ? 'border-cream-gold bg-cream-gold/10 text-cream'
-                  : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
-              }`}
-            >
-              {e.label}
-            </button>
-          ))}
-        </div>
-        {/* [chore/dca-resilience] Creation guard: interval × buys can't complete
-            before this expiry → block submit (canCreate) and explain the fix. */}
+        {customMode ? (
+          <p className="text-[12px] text-cream-50" data-testid="dca-custom-expiry-auto">
+            Auto: <span className="font-medium text-cream">{expiry.label}</span> ({parts} × {interval.label} + buffer)
+          </p>
+        ) : (
+          <div className="flex gap-2 flex-wrap">
+            {EXPIRY_PRESETS.map((e, idx) => (
+              <button
+                key={e.seconds}
+                onClick={() => { setExpiryIdx(idx); playClick() }}
+                className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
+                  expiryIdx === idx
+                    ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                    : 'border-cream-08 text-cream-35 hover:border-cream-15 hover:text-cream-50'
+                }`}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* [chore/dca-resilience] Creation guard: interval × buys can't complete before this
+            expiry → block submit (canCreate) and explain the fix. Also fires in Custom mode
+            when interval*buys alone exceeds MAX_EXPIRY_DAYS (deriveCustomExpirySeconds caps
+            the auto-derived expiry, so it lands below what the schedule needs). */}
         {!scheduleFit.fits && (
           <p className="mt-2 text-[11px] text-red-400" data-testid="dca-expiry-block">
             {scheduleFit.reason}

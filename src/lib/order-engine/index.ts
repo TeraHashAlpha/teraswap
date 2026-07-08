@@ -34,3 +34,20 @@ export { sourceForRouter, routeLabel, ROUTER_TO_SOURCE } from './route-source'
 export { failedOrderReason, DEFAULT_FAILED_REASON, FAILURE_REASON_LABELS } from './failed-reason'
 export { dcaScheduleFitsExpiry } from './dca-creation-guard'
 export type { DcaScheduleFit } from './dca-creation-guard'
+// [CHORE-DCA-CUSTOM-PERIODS] Custom interval/buys mode: input clamps, auto-derived expiry
+// (capped at MAX_EXPIRY_DAYS), the SC-02 min-chunk dust guard, and the summary line.
+export {
+  DCA_CUSTOM_BUYS_MIN,
+  DCA_CUSTOM_BUYS_MAX,
+  DCA_CUSTOM_INTERVAL_NUMBER_MIN,
+  DCA_CUSTOM_INTERVAL_NUMBER_MAX,
+  DCA_MIN_CHUNK_USD_DEFAULT,
+  clampCustomBuys,
+  clampCustomIntervalNumber,
+  customIntervalSeconds,
+  deriveCustomExpirySeconds,
+  getDcaMinChunkUsd,
+  applyDcaMinChunkGuard,
+  customDcaSummary,
+} from './dca-custom'
+export type { DcaCustomIntervalUnit, DcaMinChunkResult } from './dca-custom'
