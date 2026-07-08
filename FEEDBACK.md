@@ -6876,3 +6876,78 @@ for the unverified-swap gate, split threshold, or auto-slippage.
   `stablecoins.test.ts` (canon + drift-guards + call-site resolution scans) +
   `SlippageModal.test.tsx`; the new chain-membership cases in `useSplitRoute.test.ts` ride the
   existing `quote-source-guard`.
+
+## Feedback — CHORE-ORACLE-VALUE-FAILCLOSED (branch chore/oracle-value-failclosed) — FLAG FOR AUDITOR (gate-adjacent)
+
+### The policy (explicit, both layers; threshold UNCHANGED at $10k)
+- **Value estimate** = `max(inputUsd, outputUsd)`:
+  - **Server (binding, `api/swap/route.ts`):** four legs in parallel — DefiLlama(src), DefiLlama(dst)
+    (both chain-slug-scoped, as before) + the server Chainlink path `computeTokenAmountUsd(src|dst)`
+    (existing plumbing, no new oracle). Any leg failing degrades to null.
+  - **Client (UX mirror, `SwapBox.tsx` via new pure `src/lib/swap-usd-estimate.ts`):** per side —
+    chain-keyed USD-stable ≈$1 ([[stablecoins]] canon), the side's Chainlink hook price, the
+    conservative ETH/WETH≈$2k INT-01 fallback (all values/thresholds unchanged). The output side
+    uses the quote's `toAmount` + `tokenOutPriceCheck`, which already existed.
+- **Neither side prices on either source → fail CLOSED:**
+  - Server: **422 `{ priceGuard, blocked, unpriceable: true }`** before `validateSwapPrice` — the
+    gate FIRES instead of passing with $0. This applies to ALL unpriceable trades, not only ">$10k",
+    because a USD "safe size ceiling" is unimplementable without a USD measure — with zero price
+    coverage the size is unknowable, so the conservative branch is a block. Only exotic↔exotic pairs
+    (both tokens outside DefiLlama AND Chainlink — exactly the aToken-incident class) can reach it;
+    one priceable side always yields a real estimate and the normal unchanged >$10k threshold.
+  - Client: `priced: false` + oracle-unavailable + live quote → `oracleBlocked` (same button gate as
+    the >$10k branch) + a factual, non-alarmist notice ("value cannot be verified… blocked for
+    safety"). Server remains the binding control.
+- **Below $10k, priced trades are UNCHANGED** (fail-open small-swap behaviour in
+  `validateSwapPrice` is untouched); above $10k all existing high-value branches now see an honest
+  estimate instead of $0.
+
+### Behaviour changes (why correct)
+- An **uncovered-input trade with a measurable output** (e.g. exotic → USDC $50k) now carries
+  estimatedValueUsd = outputUsd, so the existing missing-price/low-confidence/error high-value
+  branches in `validateSwapPrice` fire — this was the P2 bypass (input-only estimate → $0).
+- **max(in,out) can only raise the estimate** vs the old input-only figure → strictly more
+  conservative; no gate got looser.
+- **Unpriceable (both sides) trades are now blocked at ANY size** on the server (were: silently
+  allowed at any size). Collateral: tiny legit exotic↔exotic swaps are blocked too — accepted
+  trade-off (per spec "the gate must FIRE"); DefiLlama covers pool-priced long tail, so reach is
+  minimal. Auditor should consciously ratify this "block-all-unpriceable" reading vs a size-capped
+  alternative (which would need a non-USD size measure that does not exist).
+
+### Bounds / flagged (not silently absorbed)
+1. **Server Chainlink legs are mainnet-only:** `computeTokenAmountUsd` takes no chainId and
+   resolves the mainnet feed registry; consulting it off-mainnet would look up foreign addresses in
+   the wrong registry (cross-chain address collisions). Off-mainnet keeps its chain-correct
+   DefiLlama legs (slug-scoped). Follow-up worth a small chore: thread chainId through
+   `computeTokenAmountUsd`/`fetchErc20Decimals`/`rpcCall` (fetchChainlinkPriceRaw already accepts
+   one) so Base gains the Chainlink legs too.
+2. **Client mirror has no DefiLlama leg pre-swap:** the quote route attaches no DefiLlama data, so
+   the client uses every source it actually has (stable/Chainlink/ETH, both sides). "DefiLlama
+   where available" = server-only today; adding oracle prices to /api/quote would be a separate
+   surface change.
+3. **P1a cross-reference (NOT fixed here, per spec):** `minimumOutput` derives from the quote's own
+   `toAmount`, so it cannot bound a self-consistent bad quote — that is the on-chain-floor class
+   (`SPRINT-ORDER-ONCHAIN-FLOOR`). This chore narrows the blast radius (a garbage quote on a
+   >$10k-measurable trade now hits an honest high-value gate) but does NOT close P1a.
+4. **Latency:** the estimate now runs 2 DefiLlama fetches + (mainnet) 2 Chainlink RPC reads, all in
+   one `Promise.all` — wall-clock ≈ the slowest single leg, vs 1 serial fetch before;
+   `validateSwapPrice` unchanged.
+5. **Test fixture updates (gate test file — each intent-preserving, Auditor please eyeball):** three
+   Base-chainId tests (G2 slug derivation, G4 activation-gate 200, E2-I-01 sequencer-up 200) ran with
+   the old implicit fail-open (DefiLlama null → estimate $0 → pass). Under fail-closed, an unpriced
+   Base pair 422s, so each now sets a priced DefiLlama fixture (`{ price: 3000 }`) — the behaviours
+   they pin (slug, activation, sequencer) are orthogonal to pricing and their assertions are
+   unchanged.
+
+### Tests / CI
+- `swap-usd-estimate.test.ts` (14): per-side pricing, max(in,out), chain-keyed USDbC, fail-closed
+  `{ usd: 0, priced: false }` contract. `route.test.ts` +4: unpriceable → 422 `unpriceable` (and
+  `validateSwapPrice` never reached), output-side pricing (the bypass), max(in,out), Chainlink-only
+  fallback. TDD red observed before implementation. New `oracle-value-guard` ci.yml job pins both
+  files (the swap route test file was previously NOT gated by any CI job).
+
+### Guard update from #278 (documented, not silent)
+- `stablecoins.test.ts` call-site scan: SwapBox `isUsdStablecoin` minUses 3 → 2, because the
+  input-USD-estimate use moved into `lib/swap-usd-estimate.ts`; that helper is now itself added to
+  the scanned call-site list (>=1 use + import + no inline list), so the single-source invariant is
+  net-unchanged (SwapBox exec-price ×2 + helper ×1).
