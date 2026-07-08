@@ -6,6 +6,19 @@ import {
   ORDERS_READ_HEADER_ISSUED,
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
+import { checkRateLimit } from '@/lib/kv-rate-limiter'
+
+// [CHORE-API-HARDENING-2 / P3d] Per-wallet rate limit — this route had NONE,
+// unlike its /api/orders and /api/analytics/export siblings. Generous enough for
+// normal polling (a wallet history view re-fetches occasionally), tight enough to
+// bound scripted enumeration of arbitrary wallets.
+const HISTORY_RATE_LIMIT = { limit: 30, windowMs: 60_000 } // 30 req/min per wallet
+
+// [CHORE-API-HARDENING-2 / P3d] Cap how deep a caller can page. An OFFSET scan is
+// O(offset) in Postgres regardless of index, so an unbounded offset is a DB-load
+// amplifier; 2000 is far beyond any real pagination UI ever reaches (20 pages at
+// the 100-row max limit).
+const MAX_OFFSET = 2_000
 
 /**
  * GET /api/history?wallet=0x...&limit=50
@@ -36,7 +49,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const wallet = searchParams.get('wallet')?.toLowerCase()
   const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100)
-  const offset = Number(searchParams.get('offset') ?? '0')
+  // [CHORE-API-HARDENING-2 / P3d] Clamp offset — an unbounded OFFSET is an
+  // O(offset) DB-load amplifier regardless of index.
+  const offset = Math.min(Math.max(Number(searchParams.get('offset') ?? '0'), 0), MAX_OFFSET)
 
   if (!wallet || !isValidAddress(`0x${wallet.replace('0x', '')}`)) {
     return NextResponse.json(
@@ -45,10 +60,32 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // [CHORE-API-HARDENING-2 / P3d] Per-wallet rate limit — this endpoint had none,
+  // letting a caller enumerate arbitrary wallets and page unbounded. Fail-open on
+  // a KV error/timeout (read-only price/history info, same posture as the
+  // sibling read routes) — checkRateLimit itself fails open on KV errors.
+  const rateCheck = await checkRateLimit(`history:${wallet}`, HISTORY_RATE_LIMIT.limit, HISTORY_RATE_LIMIT.windowMs)
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Try again in a minute.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
+    )
+  }
+
   try {
+    // [CHORE-API-HARDENING-2 / P3d] 'estimated' (exact for low counts, planned/
+    // statistics-based for high counts) instead of 'exact' — avoids a full
+    // COUNT(*) table scan on every request while staying accurate for the common
+    // case (a wallet with a modest swap history).
     const { data: swapRows, error, count } = await supabase
       .from('swaps')
-      .select('*', { count: 'exact' })
+      .select('*', { count: 'estimated' })
       .eq('wallet', wallet)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
