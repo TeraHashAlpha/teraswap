@@ -16,9 +16,8 @@ the `DefiLlama-Adapters` TVL repo.
    `require(...)` paths at the top (`../helpers/chains`, `../adapter.type`) to whatever that
    repo's helper/SDK layout is at PR time — they move occasionally; the adapter logic itself
    (event, fields, chains, methodology) does not need to change.
-3. Fill in the two `start:` TODOs with the actual FeeCollector deployment date/block per chain
-   (Etherscan/Basescan "Contract Creation" tx of `0x47f2…7459` / `0xeFC3…f130` — left as a
-   placeholder here since this task was scoped read-only on the contracts).
+3. `start:` is already filled in with the FeeCollector deployment timestamps per chain — mainnet
+   `0x47f2…7459` 2026-05-08 UTC (`1778198400`), Base `0xeFC3…f130` 2026-05-30 UTC (`1780099200`).
 4. Run the DefiLlama repo's local test harness for the new adapter (`npm test -- teraswap`, per
    their CONTRIBUTING guide) to confirm it returns non-zero volume for a known historical day.
 5. Open a PR against `DefiLlama/dimension-adapters` with the methodology paragraph below.

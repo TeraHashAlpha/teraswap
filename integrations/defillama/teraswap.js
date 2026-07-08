@@ -114,17 +114,13 @@ const adapter = {
   adapter: {
     [CHAIN.ETHEREUM]: {
       fetch,
-      // TODO(PR author): set to the FeeCollector V2 deployment block/date on
-      // mainnet (Etherscan "Contract Creation" tx of 0x47f2…7459) — deliberately
-      // left as a placeholder here since this file is read-only w.r.t. the
-      // contracts and wasn't authorized to make an external RPC/explorer call.
-      start: '2026-01-01',
+      // FeeCollector V2 (0x47f2…7459) deployment on mainnet — 2026-05-08 UTC.
+      start: 1778198400,
     },
     [CHAIN.BASE]: {
       fetch,
-      // TODO(PR author): set to the FeeCollector deployment block/date on Base
-      // (Basescan "Contract Creation" tx of 0xeFC3…f130).
-      start: '2026-01-01',
+      // FeeCollector deployment on Base (0xeFC3…f130) — 2026-05-30 UTC.
+      start: 1780099200,
     },
   },
   methodology: {
