@@ -7151,3 +7151,22 @@ a working default and no deploy step is required.
 cases (toggle, clamp-on-blur, dust-cap, dust-block, expiry-hard-warn, signed dcaInterval/dcaTotal
 match the clamped custom values). Full suite 2549/2549 green; typecheck/circular clean; 0
 lint-warning delta.
+
+## Feedback — CHORE-API-SMALL-FIXES (`79bd6ec`, `5a2802f`)
+
+### Query fix
+- `/api/orders/stats` `recentExecutions24h` queried non-existent `order_executions.wallet`
+  / `.executed_at` columns (real schema: `created_at`, `order_id`, `tx_hash` — wallet only
+  via `orders`). Fixed via `orders!inner(wallet)` join + `created_at`, same pattern as
+  `/api/history`. Tests added (`route.test.ts`).
+
+### Base Chainlink availability (Auditor note, commit `5a2802f`)
+- `computeTokenAmountUsd`/`fetchErc20Decimals` had no `chainId` param and always hit
+  mainnet RPC — on Base this meant the >$10k value gate's Chainlink leg was hard-skipped
+  entirely (guarded by `swapChainId === DEFAULT_CHAIN_ID` in `swap/route.ts`), not just
+  "unavailable". Threaded `chainId` through to the already chain-aware
+  `fetchChainlinkPriceRaw`/`rpcCall`. Base Chainlink feeds ARE available for WETH/ETH-USD,
+  USDC/USD, DAI/USD (`CHAINLINK_FEEDS_BY_CHAIN[8453]`); cbETH/USDbC remain unmapped
+  (deliberate — no safe feed) and still fall back to the existing DefiLlama leg via
+  `max(in,out)`. No new addresses invented, threshold/gate logic unchanged — **this
+  strictly tightens P2 fail-closed coverage on Base** and should be ratified alongside it.
