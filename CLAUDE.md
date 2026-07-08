@@ -2,7 +2,7 @@
 
 Ethereum Mainnet meta-aggregator — 11 liquidity sources, conditional orders (Limit/SL/TP/DCA), MEV protection via CoW Protocol, gasless approvals via Permit2. Smart contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor v2 (Solidity 0.8.28, Foundry).
 
-**State:** Phase 1 complete. Sprint 9B in progress (FeeCollector V2 minimumOutput — P68 mainnet deploy pending). 423 TS + 19 Foundry tests passing.
+**State:** Phase 1 complete. Sprint 9B in progress (FeeCollector V2 minimumOutput — P68 mainnet deploy pending); parallel `CHORE-*` stream running post-9B (stablecoin canon, fail-closed oracle gate, DCA visibility/custom periods, DefiLlama adapter). 2587 TS + 74 Foundry tests passing. 8 CI workflows (`ci`, `codeql`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`).
 
 ---
 
@@ -110,9 +110,14 @@ The Architect reviews FEEDBACK.md after each sprint and triages items into the b
 
 ---
 
-## Current state (updated 2026-04-27)
+## Current state (updated 2026-07-08)
 
 - **Sprint 9B:** 2/3 done — P66 (contract) + P67 (frontend) shipped. P68 (mainnet deploy) pending.
+- **Parallel `CHORE-*` stream (post-9B, pre-P68):** stablecoin canon (PR #278), fail-closed oracle >$10k gate
+  (PR #280), DCA visibility/stats (PR #281), DCA custom periods (PR #286), DefiLlama adapter — combined P2/keeper
+  audit APPROVED 0C/0H.
 - **Open findings:** 0C/0H from internal audits. External analysis: 4H closed, 5M/4L in backlog (Sprint 9C+).
 - **Next milestones:** P68 deploy → Sprint 9A/9B auditor review → Sprint 9C (frontend integration tests, M-01).
 - **Known tech debt:** SC-02 (DCA dust), FE-01 (localStorage → Web Crypto V2), npm audit (1H/13M).
+- **Test/CI reality (2026-07-08):** 2587 TS tests + 74 Foundry tests passing. 8 CI workflows: `ci`, `codeql`, `e2e`,
+  `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`.

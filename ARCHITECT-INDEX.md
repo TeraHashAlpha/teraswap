@@ -1,6 +1,6 @@
 # TeraSwap — Architect Artifact Index
 
-**Purpose:** single entry point to every architectural document in this workspace. Maintained by the Architect role. Last updated: 2026-04-15 (Sprint 5A closed).
+**Purpose:** single entry point to every architectural document in this workspace. Maintained by the Architect role. Last updated: 2026-07-08 (Sprint 9B in progress; post-9B `CHORE-*` stream APPROVED 0C/0H).
 
 If you're looking for implementation code, see `src/`, `contracts/`, `scripts/`. If you're looking for *why* something is built the way it is, start here.
 
@@ -20,6 +20,11 @@ Location: `docs/ADR/`
 | [ADR-006](docs/ADR/ADR-006-positive-slippage-sharing.md) | Positive Slippage Sharing on Non-CoW Routes | Proposed (2026-05-12) | Share positive slippage (mev_savings_actual) with users on non-CoW routes; depends on FeeCollector V2 + H-04 minimumOutput (P66–P68). |
 | [ADR-007](docs/ADR/ADR-007-morpho-vault-curator.md) | TeraSwap as Morpho Vault Curator | Proposed (2026-05-18) | Phase 4 protocol play — curate Morpho vaults using surplus data from ADR-006. Depends on P68 deploy + multi-chain. |
 | [ADR-008](docs/ADR/ADR-008-wagmi-v3-migration.md) | Wagmi v3 Migration | Proposed | Defer until RainbowKit v3 compat |
+| [ADR-009](docs/ADR/ADR-009-multi-chain-architecture.md) | Multi-chain architecture | Accepted | Chain-aware reads/writes across mainnet + Base (routers, feeds, order signing, splitroute). |
+| [ADR-010](docs/ADR/ADR-010-bebop-rfq-source.md) | Bebop RFQ source | Accepted | Add Bebop as an RFQ liquidity source alongside CoW/1inch/0x. |
+| [ADR-011](docs/ADR/ADR-011-feecollector-augustus-whitelist.md) | FeeCollector Augustus whitelist | Accepted | Whitelist Velora Augustus V5/V6/V6.2 routers on-chain in FeeCollector V2. |
+| [ADR-012](docs/ADR/ADR-012-avoid-transitive-copyleft-deps.md) | Avoid transitive copyleft deps | Accepted | Dependency policy: reject transitive copyleft (GPL-family) licenses in the supply chain. |
+| [ADR-013](docs/ADR/ADR-013-order-onchain-floor.md) | Order on-chain floor | Accepted | On-chain minimum order-amount floor for conditional orders (SC-hardening). |
 
 New ADRs go in `docs/ADR/` with filename `ADR-NNN-short-slug.md`. Update the table above.
 
@@ -36,6 +41,9 @@ Location: `Audits/Incidents/`
 | [INC-2026-04-15-001](Audits/Incidents/2026-04-15-001-vercel-cron-hobby-rejected.md) | 2026-04-15 | Vercel Hobby tier silently rejecting per-minute cron | S2 | Sprint 5A blocked ~24h, no user impact |
 | [INC-2026-04-15-002](Audits/Incidents/2026-04-15-002-c01-inmemory-state.md) | 2026-04-15 | C-01: monitoring state lost between lambda invocations | S2 | None (caught by auditor before reaching prod) |
 | [INC-2026-04-19-001](Audits/Incidents/2026-04-19-001-vercel-breach-env-exposure.md) | 2026-04-19 | Vercel platform breach — non-sensitive env vars exposed | **S1 (Critical)** | HIGH — non-sensitive env vars assumed compromised, site taken offline |
+| [INC-2026-05-31-001](Audits/Incidents/INC-2026-05-31-001.md) | 2026-05-31 | `/api/quote` 502 on all chains after Sprint 9C/9D deploy | High | RESOLVED — fixed via PR #118 |
+| [INC-2026-06-03-001](Audits/Incidents/INC-2026-06-03-001.md) | 2026-06-03 | WalletConnect prod outage (no wallet could connect) | High | Fixed (SPRINT-9K) |
+| [INC-2026-06-09-001](Audits/Incidents/INC-2026-06-09-001.md) | 2026-06-09 | Connect-modal crash in prod (`qr@0.6.0` breaking change) | High | Mitigated by rollback, fixed via PR #156 |
 
 Reactivation criteria for disabled sources live inside the incident report (§4.3 of INC-2026-04-14-001 for `cowswap`).
 Rotation runbook for INC-2026-04-19-001: [`docs/Runbooks/vercel-breach-rotation.md`](docs/Runbooks/vercel-breach-rotation.md).
@@ -67,7 +75,12 @@ Extracted prompt packets (long-lived, not sprint-bound):
 - [`docs/Prompts/SPRINT-8.md`](docs/Prompts/SPRINT-8.md) — **Sprint 8: @vercel/kv → @upstash/redis migration (Prompts 59–62)** — COMPLETE + APPROVED (2026-04-22). 4/4 prompts shipped. 0 findings.
 - [`docs/Prompts/SPRINT-9A.md`](docs/Prompts/SPRINT-9A.md) — **Sprint 9A: Quick-win security fixes (Prompts 63–65)** — COMPLETE (2026-04-23). 3/3 findings closed (H-01, H-02, H-03). Pending auditor review.
 
-- [`docs/Prompts/SPRINT-9B.md`](docs/Prompts/SPRINT-9B.md) — **Sprint 9B: FeeCollector minimumOutput validation (Prompts 66–68)** — PLANNED. Closes H-04 (contract redeploy required).
+- [`docs/Prompts/SPRINT-9B.md`](docs/Prompts/SPRINT-9B.md) — **Sprint 9B: FeeCollector minimumOutput validation (Prompts 66–68)** — 2/3 done (P66 contract, P67 frontend shipped); P68 mainnet deploy pending. Closes H-04.
+- Sprints 9C–9Z, `SPRINT-DCA-*`, `SPRINT-ORDER-*`, `SPRINT-RWA-GOLD.md`, `SPRINT-TOKEN-SELECTOR-UX.md` — see `docs/Prompts/` (all COMPLETE unless noted in-file).
+- **Post-9B `CHORE-*` stream** (parallel to P68, not sprint-numbered — see `docs/Prompts/CHORE-*.md`): stablecoin canon
+  (PR #278), fail-closed oracle >$10k gate (PR #280), quorum low-confidence fix (PR #272/#275), DCA visibility/stats
+  (PR #281), DCA custom periods (PR #286), DefiLlama adapter, AZ security batch. Combined P2/keeper hardening audit —
+  **APPROVED 0C/0H** (see `docs/security/`).
 
 Individual historical prompts: **removed 2026-04-17** (18 files, superseded by consolidated packets above). Git history preserves audit trail.
 
