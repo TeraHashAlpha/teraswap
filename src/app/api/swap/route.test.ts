@@ -561,4 +561,18 @@ describe('POST /api/swap — fail-closed trade value [CHORE-ORACLE-VALUE-FAILCLO
     expect(res.status).toBe(200) // priced via Chainlink → NOT the unpriceable block
     expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(12_000)
   })
+
+  // [CHORE-API-SMALL-FIXES] computeTokenAmountUsd is now chain-aware, so the value
+  // gate must consult it on non-mainnet chains too (previously hard-skipped unless
+  // swapChainId === DEFAULT_CHAIN_ID, silently losing the Chainlink leg on Base).
+  it('consults the Chainlink leg on Base (8453) too, passing the active chainId through', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockClear().mockImplementation(async (addr: unknown) =>
+      addr === WETH ? { usd: 11_000, price: 11_000, decimals: 18 } : null)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, chainId: 8453 }))
+    expect(res.status).toBe(200)
+    expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(11_000)
+    expect(mockComputeTokenAmountUsd).toHaveBeenCalledWith(WETH, VALID_BASE.amount, 8453)
+  })
 })

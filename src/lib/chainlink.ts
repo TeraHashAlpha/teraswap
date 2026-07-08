@@ -464,10 +464,13 @@ const ERC20_DECIMALS_ABI = [
  * decimals() or return garbage. Callers should treat null as "decimals
  * unknown, skip server-side USD computation".
  */
-export async function fetchErc20Decimals(tokenAddress: string): Promise<number | null> {
+export async function fetchErc20Decimals(
+  tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
+): Promise<number | null> {
   try {
     const data = encodeFunctionData({ abi: ERC20_DECIMALS_ABI, functionName: 'decimals' })
-    const result = await rpcCall(tokenAddress, data)
+    const result = await rpcCall(tokenAddress, data, chainId)
     if (!result || result === '0x') return null
     const decoded = decodeFunctionResult({
       abi: ERC20_DECIMALS_ABI,
@@ -496,13 +499,14 @@ export async function fetchErc20Decimals(tokenAddress: string): Promise<number |
 export async function computeTokenAmountUsd(
   tokenAddress: string,
   rawAmountWei: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<{ usd: number; price: number; decimals: number } | null> {
   if (!tokenAddress || !rawAmountWei) return null
 
   // Parallelise the two RPC calls — they're independent.
   const [priceResult, decimals] = await Promise.all([
-    fetchChainlinkPriceRaw(tokenAddress).catch(() => null),
-    fetchErc20Decimals(tokenAddress).catch(() => null),
+    fetchChainlinkPriceRaw(tokenAddress, chainId).catch(() => null),
+    fetchErc20Decimals(tokenAddress, chainId).catch(() => null),
   ])
 
   if (!priceResult) return null

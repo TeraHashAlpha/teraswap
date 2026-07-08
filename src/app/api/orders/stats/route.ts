@@ -56,15 +56,16 @@ export async function GET(req: NextRequest) {
         .then(r => r.count ?? 0),
     ])
 
-    // Get recent executions count (last 24h)
+    // Get recent executions count (last 24h). order_executions has no `wallet`
+    // or `executed_at` column — timestamp is `created_at`, wallet is via join to orders.
     const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString()
     let execQuery = supabase
       .from('order_executions')
-      .select('*', { count: 'exact', head: true })
-      .gte('executed_at', oneDayAgo)
+      .select('*, orders!inner(wallet)', { count: 'exact', head: true })
+      .gte('created_at', oneDayAgo)
     // If wallet filter provided, only count executions for that wallet's orders
     if (wallet) {
-      execQuery = execQuery.eq('wallet', wallet.toLowerCase())
+      execQuery = execQuery.eq('orders.wallet', wallet.toLowerCase())
     }
     const { count: recentExecutions } = await execQuery
 

@@ -255,22 +255,20 @@ export async function POST(req: NextRequest) {
       // failed OPEN (the aToken-incident bypass: route size through a token DefiLlama
       // cannot price). Now: max(inputUsd, outputUsd) across BOTH DefiLlama and the
       // server Chainlink path (computeTokenAmountUsd — existing plumbing, no new
-      // oracle). The Chainlink legs run on mainnet only: computeTokenAmountUsd has no
-      // chainId and resolves mainnet feeds, so consulting it off-mainnet would look up
-      // foreign addresses in the wrong registry; other chains keep their chain-correct
-      // DefiLlama legs (slug-scoped above).
+      // oracle). [CHORE-API-SMALL-FIXES] computeTokenAmountUsd is now chain-aware
+      // (threads chainId to the price + decimals RPC calls), so non-mainnet chains
+      // consult their own Chainlink feed config (CHAINLINK_FEEDS_BY_CHAIN) instead of
+      // skipping straight to DefiLlama. On Base only WETH/USDC/DAI are mapped today —
+      // getChainlinkFeed returns null for everything else, so those legs still fall
+      // back to the chain-correct DefiLlama leg above (max(in,out) unchanged).
       let estimatedValueUsd = 0
       let valuePriced = false
       try {
         const [llamaIn, llamaOut, linkIn, linkOut] = await Promise.all([
           fetchDefiLlamaPrice(src, llamaChain).catch(() => null),
           fetchDefiLlamaPrice(dst, llamaChain).catch(() => null),
-          swapChainId === DEFAULT_CHAIN_ID
-            ? computeTokenAmountUsd(src, amount).catch(() => null)
-            : Promise.resolve(null),
-          swapChainId === DEFAULT_CHAIN_ID
-            ? computeTokenAmountUsd(dst, result.toAmount as string).catch(() => null)
-            : Promise.resolve(null),
+          computeTokenAmountUsd(src, amount, swapChainId).catch(() => null),
+          computeTokenAmountUsd(dst, result.toAmount as string, swapChainId).catch(() => null),
         ])
         const inFloat = Number(amount) / 10 ** srcDecimals
         const outFloat = Number(result.toAmount) / 10 ** dstDecimals
