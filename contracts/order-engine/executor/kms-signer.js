@@ -50,6 +50,8 @@ import {
 } from "viem"
 import { toAccount, publicKeyToAddress } from "viem/accounts"
 import { privateKeyToAccount } from "viem/accounts"
+// [CHORE-KEEPER-HARDENING / P5a] Fail-closed on a configured-but-unwired Vault.
+import { shouldRefuseUnwiredVault } from "./signer-guard.js"
 
 // ---- AWS KMS Account (viem toAccount pattern) --------------------------
 
@@ -214,10 +216,14 @@ export async function createExecutorAccount() {
     return account
   }
 
-  if (vaultAddr) {
-    console.log("[C-02] Vault signer configured but not yet implemented")
-    console.log("[C-02] Falling back to plaintext key -- implement Vault integration for production")
-    // TODO: Implement HashiCorp Vault Transit signer
+  if (vaultAddr && shouldRefuseUnwiredVault(true)) {
+    // [CHORE-KEEPER-HARDENING / P5a] The Vault Transit signer is NOT implemented.
+    // Refuse to silently fall through to a plaintext key (which would run a
+    // plaintext mainnet key while the operator believes Vault protects it).
+    // TODO: implement HashiCorp Vault Transit signer, then flip VAULT_WIRED.
+    throw new Error(
+      "[C-02] VAULT_ADDR is set but the Vault signer is not implemented (VAULT_WIRED=false) -- refusing to fall through to a plaintext key. Unset VAULT_ADDR, or use KMS_KEY_ID, or implement the Vault path.",
+    )
   }
 
   if (privateKey) {

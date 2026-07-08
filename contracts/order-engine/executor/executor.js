@@ -115,6 +115,9 @@ import {
 // let a compromised keeper / loose calldata drain a chunk to dust. Pure gate;
 // the reference is fetched by fetchReferencePriceUsd below. See order-floor.js.
 import { computeReferenceExpectedOut, decideFloor, getFloorMaxSlippageBps } from "./order-floor.js"
+// [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
+// count as a managed signer (else it suppresses the plaintext-key FATAL).
+import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
 // [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Fail-closed submission policy: never
 // SILENTLY fall back to the public mempool on a public-mempool chain. See
 // submission-policy.js (Base's sequencer mempool is private → submits normally).
@@ -274,18 +277,22 @@ function validateConfig() {
     process.exit(1)
   }
 
-  // [C-02/B-01] Validate that at least one signing method is configured
+  // [C-02/B-01] Validate that at least one signing method is configured.
+  // [CHORE-KEEPER-HARDENING / P5a] An unwired VAULT_ADDR does NOT count as a
+  // managed signer (signer-guard.VAULT_WIRED=false), so it can neither satisfy
+  // "a signer exists" on its own nor suppress the plaintext-key FATAL below.
   const hasKms = !!process.env.KMS_KEY_ID
   const hasVault = !!process.env.VAULT_ADDR
   const hasKey = !!PRIVATE_KEY
+  const signerKind = resolveSignerKind({ hasKms, hasVaultConfigured: hasVault, hasKey })
 
-  if (!hasKms && !hasVault && !hasKey) {
-    console.error("FATAL: No signing method configured.")
-    console.error("   Set KMS_KEY_ID (recommended), VAULT_ADDR, or EXECUTOR_PRIVATE_KEY")
+  if (signerKind === "none") {
+    console.error("FATAL: No usable signing method configured.")
+    console.error("   Set KMS_KEY_ID (recommended) or EXECUTOR_PRIVATE_KEY (VAULT_ADDR is not yet wired).")
     process.exit(1)
   }
 
-  if (hasKey && !hasKms && !hasVault) {
+  if (hasKey && !hasKms && !vaultCountsAsManagedSigner(hasVault)) {
     // [EX-01 / CHORE-EXECUTOR-KEY-GUARD] A plaintext EXECUTOR_PRIVATE_KEY controls real funds on any
     // PRODUCTION chain, so it is FATAL on every chain that is NOT an explicit testnet (mainnet 1, Base
     // 8453, and any future prod chain). Prefer KMS_KEY_ID (AWS KMS) / VAULT_ADDR (HashiCorp Vault).
@@ -302,6 +309,14 @@ function validateConfig() {
       process.exit(1)
     }
   }
+
+  // [CHORE-KEEPER-HARDENING / P5a] Startup assertion: surface the RESOLVED signer
+  // kind so a plaintext-behind-VAULT_ADDR downgrade can never be silent. Anything
+  // unsafe on a production chain has already been FATAL'd above (fail-closed).
+  console.log(
+    `[C-02] Resolved signer: ${signerKind}` +
+      (signerKind === "plaintext" ? " (plaintext key -- prefer KMS on production)" : ""),
+  )
 }
 
 // ---- ABI (JSON format for viem) ----------------------------------------
