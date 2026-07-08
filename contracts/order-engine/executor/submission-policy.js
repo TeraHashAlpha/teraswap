@@ -22,7 +22,7 @@
 //     fine for dev; no relay required.
 //
 // Base having a private sequencer mempool (vs the threat model's assumption of a
-// naked public mempool) is documented in FEEDBACK.md and ADR-011.
+// naked public mempool) is documented in FEEDBACK.md and ADR-013.
 
 /** OP-stack chains whose sequencer mempool is private (no public tx gossip). */
 export const SEQUENCER_PRIVATE_CHAIN_IDS = new Set([8453 /* Base */])

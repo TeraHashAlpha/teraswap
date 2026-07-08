@@ -18,7 +18,7 @@
 //
 // Interim (off-chain, Phase 0). The terminal on-chain floor (a Chainlink read at
 // execution within a SIGNED bound, replacing the 1-wei clamp with a revert) is
-// designed in ADR-011 and is a separate gated deploy — this keeper gate cuts the
+// designed in ADR-013 and is a separate gated deploy — this keeper gate cuts the
 // live exposure now without a redeploy.
 //
 // Pure + never-throwing (mirrors deviation-guard.js / retry-policy.js): no I/O,
@@ -137,7 +137,7 @@ export function decideFloor({ builtExpectedOut, referenceExpectedOut, maxSlippag
   // the quote against fair value, so we do not claim to. Do not fill BLIND — the
   // aggregator calldata still carries its own (flat) minReturn — but FLAG the fill
   // so ops can see it wasn't oracle-bounded. The terminal fix is the on-chain
-  // signed floor (ADR-011); no keeper-side check can catch a self-consistent bad
+  // signed floor (ADR-013); no keeper-side check can catch a self-consistent bad
   // quote without an external anchor.
   if (!hasReference || referenceExpectedOut === null || referenceExpectedOut <= 0n) {
     return {
