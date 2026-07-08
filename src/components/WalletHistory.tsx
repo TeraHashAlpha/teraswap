@@ -4,10 +4,15 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAccount } from 'wagmi'
 import { formatUnits } from 'viem'
 import { explorerTxUrl } from '@/lib/chains/tokens'
+import { ordersReadHeaders } from '@/lib/order-engine/read-auth'
 
+// [CHORE-DCA-VISIBILITY-AND-STATS #2] The feed now merges instant swaps with the
+// wallet's keeper-executed DCA fills (order_executions). `kind` discriminates the
+// two; the dca_fill-only fields reference the parent conditional-order position.
 interface SwapRecord {
+  kind?: 'swap' | 'dca_fill'
   id: string
-  wallet: string
+  wallet?: string
   tx_hash: string | null
   source: string
   token_in_symbol: string
@@ -15,14 +20,20 @@ interface SwapRecord {
   amount_in: string
   amount_out: string
   amount_in_usd: number | null
-  amount_out_usd: number | null
+  amount_out_usd?: number | null
   status: string
-  fee_collected: boolean
-  fee_amount: string | null
-  slippage: number
-  mev_protected: boolean
+  fee_collected?: boolean
+  fee_amount?: string | null
+  slippage?: number
+  mev_protected?: boolean
   created_at: string
   chain_id: number
+  // dca_fill only:
+  order_id?: string | null
+  order_type?: string
+  execution_number?: number | null
+  dca_total?: number | null
+  dca_executed?: number | null
 }
 
 function shortenHash(hash: string): string {
@@ -117,7 +128,13 @@ export default function WalletHistory() {
     setError(null)
 
     try {
-      const res = await fetch(`/api/history?wallet=${address}&limit=50`)
+      // [CHORE-DCA-VISIBILITY-AND-STATS #2] Attach the per-session read signature
+      // when this session already holds one (signed once for the Orders tab).
+      // Present ⇒ the server merges this wallet's DCA fills into the feed; absent
+      // ⇒ instant swaps only, exactly as before. Never prompts from here.
+      const res = await fetch(`/api/history?wallet=${address}&limit=50`, {
+        headers: ordersReadHeaders(address) ?? undefined,
+      })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const json = await res.json()
 
@@ -152,7 +169,7 @@ export default function WalletHistory() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-cream-65">
-          Swap History
+          History
           {total > 0 && <span className="ml-1.5 text-xs font-normal text-cream-35">({total})</span>}
         </h3>
         <div className="flex items-center gap-2">
@@ -198,7 +215,7 @@ export default function WalletHistory() {
       {/* Empty state */}
       {!loading && swaps.length === 0 && !error && (
         <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-6 text-center">
-          <p className="text-sm text-cream-35">No swaps yet — your trades will appear here</p>
+          <p className="text-sm text-cream-35">No activity yet — your swaps and DCA fills will appear here</p>
         </div>
       )}
 
@@ -210,10 +227,10 @@ export default function WalletHistory() {
               key={swap.id || swap.tx_hash || swap.created_at}
               className="flex items-center justify-between rounded-xl border border-cream-08 bg-surface-tertiary px-3 py-2.5 transition hover:border-cream-15"
             >
-              {/* Left: swap info */}
+              {/* Left: swap / DCA-fill info */}
               <div className="flex items-center gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cream-08 text-xs font-bold text-cream-50">
-                  ⇄
+                  {swap.kind === 'dca_fill' ? '⟳' : '⇄'}
                 </div>
                 <div>
                   <div className="flex items-center gap-2 text-xs">
@@ -224,10 +241,29 @@ export default function WalletHistory() {
                     <span className="font-semibold text-cream-65">
                       {formatHumanAmount(swap.amount_out, swap.token_out_symbol)} {swap.token_out_symbol}
                     </span>
+                    {swap.kind === 'dca_fill' && (
+                      <span
+                        className="rounded bg-cream-gold/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-cream-gold"
+                        title="Automated DCA fill executed by the TeraSwap keeper"
+                      >
+                        DCA
+                      </span>
+                    )}
                     {statusBadge(swap.status)}
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 text-[11px] text-cream-35">
-                    <span>via {sourceLabel(swap.source)}</span>
+                    {swap.kind === 'dca_fill' ? (
+                      <span>
+                        {swap.execution_number != null && swap.dca_total != null
+                          ? `Fill #${swap.execution_number} of ${swap.dca_total}`
+                          : 'DCA fill'}
+                        {swap.order_id && (
+                          <span className="text-cream-20"> · position …{swap.order_id.slice(-6)}</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span>via {sourceLabel(swap.source)}</span>
+                    )}
                     {swap.amount_in_usd != null && (
                       <span>≈ ${Number(swap.amount_in_usd).toFixed(2)}</span>
                     )}
@@ -258,7 +294,7 @@ export default function WalletHistory() {
       {/* Footer */}
       {swaps.length > 0 && (
         <p className="text-center text-[10px] text-cream-20">
-          Showing {swaps.length} of {total} swaps on TeraSwap
+          Showing {swaps.length} of {total} records on TeraSwap
         </p>
       )}
     </div>

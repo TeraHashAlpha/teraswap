@@ -8,8 +8,8 @@ export { ORDER_EXECUTOR_ABI } from './abi'
 export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT } from './config'
 export { OrderType, PriceCondition, ORDER_EIP712_TYPES } from './types'
 export type { OnChainOrder, AutonomousOrder, AutonomousOrderStatus, CreateOrderConfig, OrderEngineEvent } from './types'
-export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, fetchDCAExecutions, subscribeToOrders } from './supabase'
-export type { OrderRow, ExecutionRow } from './supabase'
+export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, subscribeToOrders } from './supabase'
+export type { OrderRow } from './supabase'
 // [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.
 export {
   buildOrdersReadTypedData,

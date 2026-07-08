@@ -306,6 +306,27 @@ jobs:
       - name: API hardening guard (read gate 401 / rate limit 429 / body cap 413)
         run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/order-engine/types.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
 
+  dca-visibility-guard:
+    # [CHORE-DCA-VISIBILITY-AND-STATS] The full vitest suite is not run in CI (only
+    # single-file guards), so this pins the DCA visibility surface:
+    #   #2 /api/history merges the wallet's CONFIRMED order_executions fills with the
+    #      swaps table (swaps-first tx_hash dedup, reused from /api/analytics) and the
+    #      fills are W6-gated — surfaced ONLY with a valid per-session read signature,
+    #      never another wallet's, never an active DCA's running strategy.
+    #   #3 src/lib/dca/position-stats.ts computes cost-basis / invested / received /
+    #      %-complete / P&L-vs-spot purely from the fills; the golden completed DCA
+    #      0x5449dea0 (WETH→ETHFI, 5/5) reconciles exactly, P&L uses a live price.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts=false
+      - name: DCA visibility guard (history union + W6 gate + position stats)
+        run: npx vitest run src/app/api/history/route.test.ts src/lib/dca/position-stats.test.ts
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:

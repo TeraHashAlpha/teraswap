@@ -6876,6 +6876,53 @@ for the unverified-swap gate, split threshold, or auto-slippage.
   `stablecoins.test.ts` (canon + drift-guards + call-site resolution scans) +
   `SlippageModal.test.tsx`; the new chain-membership cases in `useSplitRoute.test.ts` ride the
   existing `quote-source-guard`.
+
+## Feedback — CHORE-DCA-VISIBILITY-AND-STATS (commits 35d46bf History + this commit stats)
+
+### Stat formulas (as implemented — for the Architect's record)
+- All realized stats are computed from the fills (`order_executions.amount_in` / `amount_out`,
+  the ACTUAL event-decoded per-fill amounts), NOT from `orders`-level summary columns (which the
+  keeper never writes) and NOT from `price_at_execution` (all-NULL on live data — ignored):
+  - **total invested** = Σ`amount_in` (input token); **total received** = Σ`amount_out` (output token);
+  - **avg buy price / cost basis** = totalInvested ÷ totalReceived (INPUT per OUTPUT, decimals-aware);
+  - **fills executed** = count of confirmed fills actually summed; **planned** = `max(dca_total, executed)`;
+  - **% complete** = round(executed / planned × 100);
+  - **date range** = min→max `created_at` over the confirmed fills.
+- **P&L vs spot** = totalReceived × spot(tokenOut) − totalInvested × spot(tokenIn), in USD. Non-alarmist:
+  a loss is a calm neutral cue (`direction: 'down'` → cream), never red. Returns null (no P&L shown)
+  when either token is unpriceable — no fabricated figure.
+
+### Reused / price source
+- The History merge (#2) reuses the **exact swaps-first `tx_hash` dedup** proven in `/api/analytics`
+  (`computeDashboard`): swaps first so a tx in both tables resolves to the swap row. The fills fetch is
+  the analytics `fetchConfirmedExecutions` shape but **wallet-scoped** via `orders!inner(...)` +
+  `.eq('orders.wallet', wallet)` (order_executions has no `wallet` column — the join carries it).
+- **P&L price source** = `/api/portfolio/prices` (DefiLlama batch, server-side, cached, chain-aware).
+  Base (8453) is a portfolio-supported chain, so DCA (Base-only) prices resolve; unsupported chains are
+  skipped client-side (no pointless 400).
+
+### Concern (pre-existing, out of scope — flagged not fixed)
+- `/api/orders/stats` `recentExecutions24h` queries `order_executions.eq('wallet', …)` and
+  `.gte('executed_at', …)`, but per the recon `order_executions` has **neither a `wallet` nor an
+  `executed_at` column** (only `created_at`; wallet lives on the parent order). So the wallet-scoped
+  branch and the 24h window are querying non-existent columns — that count is unreliable/likely-0 today.
+  Left untouched (the chore only added the missing `failed` bucket); worth a dedicated fix (join on
+  `orders.wallet` + use `created_at`).
+
+### Edge case
+- Expanded DCA card in Orders→Completed fetches `/api/orders/:id/executions` **twice** (once by the
+  existing `ExecutionTimeline`, once by the new `DCAPositionStats` self-fetch). Harmless (indexed
+  point-query, expand-triggered), but a future refactor could lift the fetch into `OrderCard` and pass
+  the fills to both. The active DCA dashboard (`MissionControlCard`) already avoids this — it passes its
+  existing `useOrderExecutions` fills into `DCAPositionStats` (`fills` prop → self-fetch disabled).
+- P&L prices by token ADDRESS via DefiLlama; a DCA whose output is the native-ETH sentinel (not WETH)
+  would be unpriceable → P&L simply hidden. DCA outputs are ERC-20 in practice (input must be WETH), so
+  not hit today; note for when native-ETH output DCAs appear.
+
+### Removed dead code
+- Deleted `fetchDCAExecutions` (recon-flagged: no caller, and its anon-key + RLS path returned []
+  anyway) and, with it, the now-unused `ExecutionRow` type + `SUPABASE_EXECUTIONS_TABLE` import + both
+  re-exports. `order_executions` is read server-side (service role) via `/api/orders/:id/executions`.
 ## Feedback — SPRINT-ORDER-ONCHAIN-FLOOR (branch sprint/order-onchain-floor)
 
 ### ⚠ Needs an Auditor pass (fund-flow / execution-selection)
