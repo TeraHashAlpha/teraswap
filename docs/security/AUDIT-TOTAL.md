@@ -1207,3 +1207,22 @@ oracle floor, non-DCA real hash → closes P1c); §3 Permit2 bitmap nonce (close
 Auditor pass + 48h timelock + dual-run migration + runbook. **Design notes for the v3 sprint (not blockers):**
 N1 feed-staleness stranding-recovery, N2 no-feed absolute-min UX derivation, N3 clamp `maxSlippageBps` on-chain,
 N4 decimals-safe fair-value math. INFO P1A-I-01: Phase-0 comments say ADR-011; the ADR is ADR-013.
+
+### AUDIT P2 + keeper — value gate (#280) + keeper hardening (#282), combined (2026-07-08)
+
+**Verdict: both APPROVED — 0C / 0H. #280 and #282 may each merge.** Report:
+`Audits/Sprint/AUDIT-P2-KEEPER-COMBINED-AUDIT.md`. SHAs: **#280 `337ed98`** (`chore/oracle-value-failclosed`),
+**#282 `87687ce`** (`chore/keeper-hardening`, 4 commits). Both signed, off-chain/server-side, on-chain gates untouched.
+
+- **#280 (TM-P2) CLOSED:** the >$10k value gate fails **CLOSED** — value = `max(inputUsd,outputUsd)` across DefiLlama
+  + server Chainlink (`computeTokenAmountUsd`, mainnet-gated), both legs; **unpriceable → 422 `{unpriceable:true}`**, not
+  the old `$0` (aToken bypass closed) — mirrored client-side (`swap-usd-estimate.ts`, blocks on `!priced`).
+  **Block-all-unpriceable RATIFIED** (narrow — only exotic↔exotic; sound for a permissionless aggregator). No regression
+  (small priceable swaps unchanged; 3 Base fixtures pricing-orthogonal; no new oracle).
+- **#282 (TM-P5a) CLOSED:** the Vault stub **THROWS** (`kms-signer.js:224`); `signer-guard.js VAULT_WIRED=false` →
+  `validateConfig` no longer counts a configured-but-unwired Vault as a managed signer → **a plaintext mainnet key
+  cannot run silently** (fail-closed, no residual bypass); `ALLOW_PLAINTEXT_KEY`/testnet guard unchanged.
+- **#282 (P1A-M-01) CLOSED:** transient-vs-feedless split — DefiLlama 5xx/429/ETH-leg ⇒ **transient ⇒ DELAY**; 4xx/200-no-price
+  ⇒ **feedless ⇒ fill only ≤ `DCA_FAIL_OPEN_MAX_USD` ($250), else DELAY**; unsizable ⇒ DELAY. **Un-gameable** (DefiLlama
+  "absent" is authoritative; forcing transient → DELAY = safe). `[50,2000]` floor band intact. **P1A-I-01** ADR refs fixed.
+- Keeper `node --test`: **46/46**. Findings: **0C/0H/0M/0L** (INFO only). No remediation prompt required.
