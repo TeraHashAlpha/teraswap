@@ -3,6 +3,7 @@ import { bodySizeGuard, RPC_MAX_BODY_BYTES } from '@/lib/body-limit'
 import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { getRpcUrlForChain } from '@/lib/adapters/shared'
+import { trustedClientIp } from '@/lib/trusted-ip'
 
 /**
  * Privacy-preserving RPC proxy.
@@ -49,7 +50,8 @@ export async function POST(req: NextRequest) {
   const tooLarge = bodySizeGuard(req, RPC_MAX_BODY_BYTES)
   if (tooLarge) return tooLarge
   // [B-06] Rate limiting by IP — persistent via Vercel KV
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  // [CHORE-API-HARDENING-2 / P3a] Trusted IP — see trusted-ip.ts.
+  const ip = trustedClientIp(req)
   const rateCheck = await checkRateLimit(`rpc:${ip}`, RPC_RATE_LIMIT.limit, RPC_RATE_LIMIT.windowMs)
   if (!rateCheck.allowed) {
     return NextResponse.json(
