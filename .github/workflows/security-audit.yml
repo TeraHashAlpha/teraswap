@@ -30,7 +30,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts=false
+        run: npm ci
 
       - name: Check for high/critical vulnerabilities (allowlist-aware)
         # Allowlist-aware gate: fails on any high/critical NOT in audit-allowlist.json

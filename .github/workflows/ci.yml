@@ -2,22 +2,19 @@
 # Build runs after lint + typecheck + audit + lockfile-lint pass.
 # Contract tests run independently (Foundry/Forge).
 #
-# ── SECURITY NOTE (M-01) ─────────────────────────────────────────────
-# We run `npm ci --ignore-scripts=false` intentionally because our
-# postinstall hook runs `prisma generate` (required for the build).
-# This means npm lifecycle scripts ARE executed during CI installs.
+# ── SECURITY NOTE (CHORE-REVERT-IGNORE-SCRIPTS) ───────────────────────
+# `npm ci` honours the repo-root .npmrc `ignore-scripts=true` — install
+# lifecycle scripts (preinstall/install/postinstall) do NOT run. This was
+# previously overridden with `--ignore-scripts=false`, justified by a
+# Prisma `postinstall` that does not actually exist (0 occurrences in
+# package-lock.json; no `prisma` dependency, no postinstall script in
+# package.json). Reverted (threat model P5d / AZ review) to close the
+# unnecessary supply-chain surface.
 #
-# Mitigations:
-#   1. lockfile-lint job validates that all resolved URLs point to the
-#      official npm registry over HTTPS and that integrity hashes match.
-#   2. Dependabot keeps dependencies up-to-date, reducing the window
-#      for supply-chain attacks via compromised transitive packages.
-#   3. npm audit (high/critical gate) catches known-vulnerable packages.
-#   4. .npmrc min-release-age=7d refuses packages published < 7 days,
-#      blocking zero-day supply chain attacks (e.g. Mini Shai-Hulud).
-#
-# If you remove the prisma dependency, switch back to plain `npm ci`
-# (which defaults to --ignore-scripts=true in CI).
+# If a future dependency genuinely needs an install script, do NOT
+# blanket-revert this — scope `npm_config_ignore_scripts=false` (or an
+# npm `--foreground-scripts`/per-package override) to just that install
+# step and document why in FEEDBACK.
 # ─────────────────────────────────────────────────────────────────────
 
 name: "CI"
@@ -44,7 +41,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Lint (warnings only — React Compiler rules are advisory)
         run: npx next lint --max-warnings 200 || true
 
@@ -56,7 +53,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - run: npm run typecheck
       # [INC-2026-05-31-001] Fail on any NEW circular import — a cycle can yield
       # undefined exports in the Next prod bundle that unit tests don't catch.
@@ -71,7 +68,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Security audit (high/critical, allowlist-aware)
         # Fails on any high/critical NOT in audit-allowlist.json. The allowlist holds
         # only fixes blocked by .npmrc min-release-age=7 (each with a dated TODO). See
@@ -93,7 +90,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Catalog address guard
         run: npx vitest run src/lib/chains/catalog-address-guard.test.ts
 
@@ -109,7 +106,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Platform-fee USD guard
         run: npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx
 
@@ -127,7 +124,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Stablecoin constant guard
         run: npx vitest run src/lib/chains/stablecoins.test.ts src/components/SlippageModal.test.tsx
 
@@ -145,7 +142,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Oracle value fail-closed guard
         run: npx vitest run src/app/api/swap/route.test.ts src/lib/swap-usd-estimate.test.ts
 
@@ -165,7 +162,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Quote-source guard (OpenOcean units; Balancer disabled; Sushi v7 sender + executable scoping; split sub-quote chainId)
         run: npx vitest run src/lib/adapters/openocean.test.ts src/lib/adapters/balancer-disabled.test.ts src/lib/adapters/sushiswap.test.ts src/lib/executable-sources.test.ts src/hooks/useSplitRoute.test.ts
 
@@ -184,7 +181,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: DCA resilience guard (failure reasons + creation guard)
         run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel.routability.test.tsx
 
@@ -201,7 +198,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Oracle-less advisory guard (detection + fail-open)
         run: npx vitest run src/lib/order-engine/oracle-coverage.test.ts src/lib/order-engine/check-oracle.test.ts
 
@@ -221,7 +218,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Token-catalog pipeline guard (cross-verify logic + committed catalog invariants)
         run: npx vitest run scripts/token-catalog/lib/verify.test.ts scripts/token-catalog/lib/guard-gate.test.ts scripts/token-catalog/lib/build-chain.test.ts scripts/token-catalog/lib/sources.test.ts scripts/token-catalog/lib/category.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts src/lib/chains/tokens.test.ts
 
@@ -240,7 +237,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Minimum-output guard (unusable quote → refusal, never minOutput 0)
         run: npx vitest run src/lib/minimum-output.test.ts src/lib/swap-simulation.test.ts src/hooks/__tests__/swap-validations.test.ts src/hooks/useSplitSwap.test.ts
 
@@ -259,7 +256,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Quote-quorum guard (garbage quote cannot win a 2-responder display)
         run: npx vitest run src/lib/quote-quorum.test.ts
 
@@ -278,7 +275,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Source-health guard (silence/outlier/drift pages once per window)
         run: npx vitest run src/lib/source-health-monitor.test.ts
 
@@ -320,7 +317,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: API hardening guard (read gate 401 / rate limit 429 / body cap 413)
         run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/order-engine/types.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
 
@@ -341,7 +338,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: DCA visibility guard (history union + W6 gate + position stats)
         run: npx vitest run src/app/api/history/route.test.ts src/lib/dca/position-stats.test.ts
 
@@ -391,5 +388,5 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - run: npm run build
