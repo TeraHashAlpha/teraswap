@@ -303,6 +303,10 @@ async function fetchCurveSwap(
 // the "mainnet-priced quote on Base" class of bug this sprint fixes).
 // TODO(future sprint): add Base Curve pools + CurveRouterNG (Basescan: "Curve.fi:
 // Router" 0x4f37A9d177470499A2dD084621020b023fcffc1F) to support curve on Base.
+// TODO(future sprint): add Arbitrum Curve pools + CurveRouterNG — router address
+// 0xf0d4C12e3C5589b1de35eaF85B163Cc23827e854 (docs/Reports/ARBITRUM-READINESS.md,
+// registered inert in chains/routers.ts by SPRINT-46-ARBITRUM-CONFIG). This
+// mainnet-only check already fail-closes 42161 with zero code change.
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   if ((params.chainId ?? DEFAULT_CHAIN_ID) !== DEFAULT_CHAIN_ID) return null
   return fetchCurveQuote(params.src, params.dst, params.amount)

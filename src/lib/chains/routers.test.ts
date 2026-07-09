@@ -60,6 +60,28 @@ describe('chains/routers [P222]', () => {
     expect(WHITELISTED_ROUTERS['0x'].address.toLowerCase()).toBe(mainnet['0x'].toLowerCase())
   })
 
+  it('[SPRINT-46-ARBITRUM-CONFIG] the Arbitrum whitelist has all 12 primary routers registered', () => {
+    expect(Object.keys(ROUTER_WHITELIST_BY_CHAIN[42161]).length).toBe(12)
+  })
+
+  it('[SPRINT-46-ARBITRUM-CONFIG] Arbitrum whitelist is INERT while feeCollector is null (dark launch)', async () => {
+    // Config-only: the addresses exist in the map, but the chain is not active, so
+    // nothing on the live swap path can reach isWhitelistedRouter(_, 42161) yet.
+    const { isChainActive } = await import('./activation')
+    expect(isChainActive(42161)).toBe(false)
+    // The whitelist function itself still resolves correctly (used by the future activation
+    // sprint + these tests) — inertness comes from isChainActive gating the swap path, not
+    // from this function refusing to answer.
+    expect(getRouterWhitelist(42161).length).toBeGreaterThan(0)
+  })
+
+  it('[SPRINT-46-ARBITRUM-CONFIG] Velora/Augustus V6.2 is the same canonical address on 1/8453/42161', () => {
+    const v6_2 = '0x6a000f20005980200259b80c5102003040001068'
+    expect(ROUTER_WHITELIST_BY_CHAIN[1].velora.toLowerCase()).toBe(v6_2)
+    expect(ROUTER_WHITELIST_BY_CHAIN[8453].velora.toLowerCase()).toBe(v6_2)
+    expect(ROUTER_WHITELIST_BY_CHAIN[42161].velora.toLowerCase()).toBe(v6_2)
+  })
+
   it('isWhitelistedRouter validates per chain', () => {
     // 0x v2 AllowanceHolder is a Base router, not a mainnet one.
     const baseOnly = '0x0000000000001fF3684f28c67538d4D072C22734'

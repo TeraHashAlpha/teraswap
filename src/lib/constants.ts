@@ -84,6 +84,8 @@ const COW_API_URLS: Record<number, string> = {
   1: 'https://api.cow.fi/mainnet/api/v1',
   100: 'https://api.cow.fi/xdai/api/v1',
   8453: 'https://api.cow.fi/base/api/v1', // [P217] Base L2
+  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum One — CONFIG-ONLY, dark until chain activation.
+  42161: 'https://api.cow.fi/arbitrum/api/v1',
 }
 export function getCowApiBase(chainId: number): string {
   return COW_API_URLS[chainId] || COW_API_URLS[1]

@@ -71,6 +71,43 @@ export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${strin
     // [ADR-010] Bebop JamSettlement (tx.to) — same address on every EVM chain.
     bebop: BEBOP_JAM_SETTLEMENT,
   },
+  // ── Arbitrum One (42161) [SPRINT-46-ARBITRUM-CONFIG] — CONFIG-ONLY, dark launch. Every address
+  // sourced verbatim from docs/Reports/ARBITRUM-READINESS.md. Inert while contracts.feeCollector
+  // is null (this whitelist is only consulted on an ACTIVE chain's swap path) — see registry.ts.
+  42161: {
+    // [FEEDBACK] AggregationRouterV6 — the report did not re-verify this specific address for
+    // 42161 (its 1inch section notes "no router whitelist needed", API-internal routing only).
+    // Value ASSUMED from the deterministic cross-chain pattern already confirmed for mainnet +
+    // Base (identical address both places) — RE-VERIFY on Arbiscan before the activation sprint.
+    '1inch': '0x111111125421cA6dc452d289314280a0f8842A65',
+    // 0x v2 AllowanceHolder — report-verified, same address as Base.
+    '0x': '0x0000000000001fF3684f28c67538d4D072C22734',
+    // Velora/ParaSwap Augustus V6.2 — report-verified on-chain, canonical cross-chain address.
+    velora: '0x6A000F20005980200259B80c5102003040001068',
+    // Odos Router V2 on Arbitrum — report-verified.
+    odos: '0x19cEeAd7105607Cd444F5ad10dd51356436095a1',
+    // KyberSwap MetaAggregationRouterV2 — report: "same as mainnet (deterministic)".
+    kyberswap: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
+    // CoW VaultRelayer — cross-chain deterministic, report-verified.
+    cowswap: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    // [FEEDBACK] OpenOcean Exchange Proxy — same caveat as 1inch above: the report confirmed API
+    // support for 42161 but did not give a distinct router line. Value ASSUMED from the
+    // deterministic cross-chain address already confirmed for mainnet + Base — RE-VERIFY before
+    // activation.
+    openocean: '0x6352a56caadC4F1E25CD6c75970Fa768A3304e64',
+    // SushiSwap RouteProcessor5 on Arbitrum — report-verified.
+    sushiswap: '0x54F0fF7bF862325b855B0481b8E493ec5C7Cbbc7',
+    // Balancer V2 Vault — same canonical CREATE2 address as mainnet/Base (report body). Globally
+    // disabled via DISABLED_SOURCES.balancer regardless of chain (W7-L-02) — see FEEDBACK.
+    balancer: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    // Uniswap SwapRouter02 on Arbitrum — report-verified.
+    uniswapv3: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+    // Curve stableswap router on Arbitrum — report-verified. Inert: the curve adapter is
+    // mainnet-only fail-closed today (fetchQuote returns null off chainId 1) — see curve.ts.
+    curve: '0xf0d4C12e3C5589b1de35eaF85B163Cc23827e854',
+    // [ADR-010] Bebop JamSettlement (tx.to) — same address on every EVM chain.
+    bebop: BEBOP_JAM_SETTLEMENT,
+  },
 }
 
 // [ADR-010] Bebop JAM trusted spenders for the chains where Bebop is enabled
@@ -80,6 +117,9 @@ export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${strin
 const BEBOP_SPENDERS_BY_CHAIN: Record<number, string[]> = {
   1: [BEBOP_JAM_SETTLEMENT.toLowerCase(), BEBOP_BALANCE_MANAGER.toLowerCase()],
   8453: [BEBOP_JAM_SETTLEMENT.toLowerCase(), BEBOP_BALANCE_MANAGER.toLowerCase()],
+  // [SPRINT-46-ARBITRUM-CONFIG] Report: JAM settlement is "deterministic, same on all chains" —
+  // the Balance Manager follows the same cross-chain deploy pattern. Inert while 42161 is dark.
+  42161: [BEBOP_JAM_SETTLEMENT.toLowerCase(), BEBOP_BALANCE_MANAGER.toLowerCase()],
 }
 
 /**

@@ -22,7 +22,10 @@ const allowlist = allowlistJson as unknown as Allowlist
 // NOTE: custom/imported tokens (getSearchCatalog ∪ getCustomTokens) are intentionally OUT of scope —
 // they are inherently untrusted and the UI marks them ⚠ (verified=false); the guard's contract is the
 // CURATED catalog (getFullCatalog).
-const CHAINS = [1, 8453] as const
+// [SPRINT-46-ARBITRUM-CONFIG] 42161 registered CONFIG-ONLY / dark — its curated catalog
+// (CHAIN_TOKENS[42161]) is deliberately absent, so getFullCatalog(42161) is [] and this audit
+// is trivially clean. Populating a real Arbitrum catalog is activation-sprint scope.
+const CHAINS = [1, 8453, 42161] as const
 
 describe('catalog-address-guard — live catalog is clean', () => {
   it('audits every registry-supported chain (no unaudited-chain drift)', () => {
