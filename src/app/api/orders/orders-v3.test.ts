@@ -51,8 +51,10 @@ vi.mock('@/lib/defillama', () => ({
   validateSwapPrice: vi.fn(),
 }))
 const mockComputeTokenAmountUsd = vi.fn()
+const mockFetchErc20Decimals = vi.fn()
 vi.mock('@/lib/chainlink', () => ({
   computeTokenAmountUsd: (...args: unknown[]) => mockComputeTokenAmountUsd(...args),
+  fetchErc20Decimals: (...args: unknown[]) => mockFetchErc20Decimals(...args),
 }))
 
 import { POST } from './route'
@@ -80,6 +82,8 @@ beforeEach(() => {
   // Default: the output token prices comfortably above the dust floor via DefiLlama.
   mockFetchDefiLlamaPrice.mockResolvedValue({ price: 1, symbol: 'USDC', timestamp: 0, confidence: 1 })
   mockComputeTokenAmountUsd.mockResolvedValue(null)
+  // [SPRINT-V3-P3 / M-01] Default: the on-chain read agrees with v3Body()'s tokenOutDecimals: 18.
+  mockFetchErc20Decimals.mockResolvedValue(18)
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -213,6 +217,65 @@ describe('POST /api/orders — v3 USD dust floor (I-01/L-01 closure)', () => {
     mockComputeTokenAmountUsd.mockResolvedValue(null)
     const { status } = await post(body)
     expect(status).toBe(201)
+  })
+})
+
+describe('POST /api/orders — v3 M-01 fix: on-chain decimals + min-combine [SPRINT-V3-P3]', () => {
+  it('the audit exploit: spoofed HIGH tokenOutDecimals on a DefiLlama-priced/no-feed token is REJECTED', async () => {
+    // Real on-chain decimals = 18 (a normal ERC-20); no Chainlink feed (no-feed class); DefiLlama
+    // prices it at $1. The client claims tokenOutDecimals=30 to manipulate the USD conversion.
+    mockFetchErc20Decimals.mockResolvedValue(18)
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 1, symbol: 'X', timestamp: 0, confidence: 1 })
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    const { status, json } = await post(v3Body({ tokenOutDecimals: 30 }))
+    expect(status).toBe(422)
+    expect(json.error).toMatch(/tokenOutDecimals mismatch/)
+    expect(json.error).toMatch(/claimed 30/)
+    expect(json.error).toMatch(/on-chain reports 18/)
+  })
+
+  it('spoofed LOW tokenOutDecimals (the inflate-value direction) is equally rejected', async () => {
+    mockFetchErc20Decimals.mockResolvedValue(18)
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 1, symbol: 'X', timestamp: 0, confidence: 1 })
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    const { status, json } = await post(v3Body({ tokenOutDecimals: 6 }))
+    expect(status).toBe(422)
+    expect(json.error).toMatch(/tokenOutDecimals mismatch/)
+  })
+
+  it('a correct (non-spoofed) tokenOutDecimals passes the decimals check', async () => {
+    mockFetchErc20Decimals.mockResolvedValue(18)
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 1, symbol: 'X', timestamp: 0, confidence: 1 })
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    const { status } = await post(v3Body({ tokenOutDecimals: 18 }))
+    expect(status).toBe(201)
+  })
+
+  it('on-chain decimals cannot be read at all → 422 fail-closed (never falls back to the client value)', async () => {
+    mockFetchErc20Decimals.mockResolvedValue(null)
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 1, symbol: 'X', timestamp: 0, confidence: 1 })
+    const { status, json } = await post(v3Body())
+    expect(status).toBe(422)
+    expect(json.unpriceable).toBe(true)
+  })
+
+  it('min-combine: a generous DefiLlama estimate cannot rescue a dust order when Chainlink prices it low', async () => {
+    mockFetchErc20Decimals.mockResolvedValue(18)
+    // DefiLlama optimistic: $100 (well above the $5 floor).
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 100, symbol: 'X', timestamp: 0, confidence: 1 })
+    // Server Chainlink: the SAME raw amount is worth only $0.001 (genuinely dust).
+    mockComputeTokenAmountUsd.mockResolvedValue({ usd: 0.001, price: 0.00001, decimals: 18 })
+    const { status, json } = await post(v3Body({ minAmountOut: (1n * 10n ** 18n).toString() }))
+    expect(status).toBe(400)
+    expect(json.error).toMatch(/below the \$5/)
+  })
+
+  it('min-combine: BOTH legs must clear the floor — the lower of the two decides, not the higher', async () => {
+    mockFetchErc20Decimals.mockResolvedValue(18)
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 6, symbol: 'X', timestamp: 0, confidence: 1 })  // $6/unit
+    mockComputeTokenAmountUsd.mockResolvedValue({ usd: 6, price: 6, decimals: 18 })  // also $6
+    const { status } = await post(v3Body({ minAmountOut: (1n * 10n ** 18n).toString() }))
+    expect(status).toBe(201) // both legs clear $5
   })
 })
 

@@ -101,3 +101,11 @@ ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-a
 # (slash-separated mixed-case phrase) trips the generic-api-key entropy heuristic. Not a secret;
 # verbatim sprint spec text committed per the sprint's own convention (Architect prompt archive).
 689e70f40a1761ff86e0db119c56b152a4e76c48:docs/Prompts/SPRINT-V3-P2-SIGNING-KEEPER.md:generic-api-key:44
+
+# [SPRINT-V3-P3] Same PUBLIC mainnet WETH/USDC contract addresses as the SPRINT-V3-P2 entries
+# above, now also embedded in the v3-cancel test fixtures (order_data.tokenIn/tokenOut field
+# names trip the same generic-api-key keyword heuristic). Not a secret.
+7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.v3.test.ts:generic-api-key:204
+7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.v3.test.ts:generic-api-key:205
+7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.test.ts:generic-api-key:407
+7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.test.ts:generic-api-key:408

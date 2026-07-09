@@ -4,7 +4,9 @@
  * Re-exports everything the frontend needs.
  */
 
-export { ORDER_EXECUTOR_ABI } from './abi'
+export { ORDER_EXECUTOR_ABI,
+  // [SPRINT-V3-P3] cancel/invalidate write path only (cancelOrder, invalidateUnorderedNonces).
+  ORDER_EXECUTOR_V3_ABI } from './abi'
 export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
   // [SPRINT-V3-P2] v3 config — fail-closed while ORDER_EXECUTOR_V3_BY_CHAIN[chainId] is null.
   ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3, getOrderExecutorV3Domain } from './config'
@@ -15,6 +17,9 @@ export type { OnChainOrder, AutonomousOrder, AutonomousOrderStatus, CreateOrderC
 // [SPRINT-V3-P2] Pure absolute-min derivation (signing-side floor, ADR-013 §1 I-01/L-01 closure).
 export { deriveAbsoluteMinAmountOut, computeReferenceExpectedOutTs, deriveSigningMinAmountOut } from './v3-min-derivation'
 export type { MinAmountOutSource, DeriveSigningMinParams, DeriveSigningMinResult } from './v3-min-derivation'
+// [SPRINT-V3-P3] Pure Permit2-style bitmap math for v3 mass-cancel (invalidateUnorderedNonces).
+export { bitmapPositions, computeInvalidationBatches, isNonceInBatch } from './v3-nonce-bitmap'
+export type { BitmapPosition, InvalidationBatch } from './v3-nonce-bitmap'
 export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, subscribeToOrders } from './supabase'
 export type { OrderRow } from './supabase'
 // [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.

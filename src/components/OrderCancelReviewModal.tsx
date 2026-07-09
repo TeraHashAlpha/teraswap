@@ -91,10 +91,14 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
                 <span className="text-cream-50">Orders affected</span>
                 <span className="font-medium text-cream" data-testid="invalidate-count">{review.affectedOrders.length}</span>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-cream-50">New invalidation nonce</span>
-                <span className="font-mono text-cream-65" data-testid="invalidate-nonce">{review.newNonce.toString()}</span>
-              </div>
+              {/* [SPRINT-V3-P3] newNonce is null when there are no v2 orders to invalidate
+                  (a v3-only cancel-all) — the v2 invalidateNonces() call is skipped entirely. */}
+              {review.newNonce !== null && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-cream-50">New invalidation nonce</span>
+                  <span className="font-mono text-cream-65" data-testid="invalidate-nonce">{review.newNonce.toString()}</span>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 {review.affectedOrders.map((o) => (

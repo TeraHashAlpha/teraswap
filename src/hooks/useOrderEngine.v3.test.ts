@@ -195,8 +195,31 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
     expect('maxSlippageBps' in insertArg.orderData).toBe(false)
   })
 
-  it('cancelOrder REFUSES a v3 order instead of sending it through the v2 cancel path', async () => {
-    mockFetchUserOrders.mockResolvedValue([makeRow({ order_data: { maxSlippageBps: 300 } })])
+  // [SPRINT-V3-P3] v3 cancel is now wired — a v3 order on a chain WHERE v3 IS configured
+  // freezes for review (and confirms) exactly like a v2 order, targeting the v3 executor+ABI.
+  // The full order_data shape mirrors what useOrderEngine.confirmOrder actually persists for a
+  // v3 order (see the "persists maxSlippageBps..." test above).
+  const V3_ORDER_DATA = {
+    owner: ADDRESS,
+    tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    amountIn: '1000000000000000000',
+    minAmountOut: '2900000000',
+    maxSlippageBps: 300,
+    orderType: 2, // DCA
+    condition: 0,
+    targetPrice: '0',
+    priceFeed: '0x0000000000000000000000000000000000000000',
+    expiry: '9999999999',
+    nonce: '0',
+    router: '0x111111125421ca6dc452d289314280a0f8842a65',
+    routerDataHash: '0x' + '00'.repeat(32),
+    dcaInterval: '3600',
+    dcaTotal: '3',
+  }
+
+  it('cancelOrder freezes a v3 order for review when v3 IS configured on this chain', async () => {
+    mockFetchUserOrders.mockResolvedValue([makeRow({ order_data: V3_ORDER_DATA })])
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
@@ -205,18 +228,39 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
     expect(order).toBeDefined()
     await act(async () => { await result.current.cancelOrder(order.id) })
 
-    // No on-chain write, no pending-cancel review was ever frozen for it.
-    expect(mockWriteContractAsync).not.toHaveBeenCalled()
-    expect(result.current.pendingCancel).toBeNull()
-    expect(result.current.latestEvent).toEqual(
-      expect.objectContaining({ type: 'order_error', orderId: order.id }),
-    )
+    expect(mockWriteContractAsync).not.toHaveBeenCalled() // Phase A only freezes, no tx yet
+    expect(result.current.pendingCancel).not.toBeNull()
+    if (result.current.pendingCancel?.action === 'cancel') {
+      expect(result.current.pendingCancel.isV3).toBe(true)
+      expect(result.current.pendingCancel.orderStruct.maxSlippageBps).toBe(300)
+    } else {
+      throw new Error('expected a cancel review')
+    }
   })
 
-  it('cancelAllOrders excludes v3 orders from the affected set (v2-only invalidateNonces)', async () => {
+  it('confirmCancel sends a v3 cancel to the V3 executor + ABI, never v2', async () => {
+    mockFetchUserOrders.mockResolvedValue([makeRow({ order_data: V3_ORDER_DATA })])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    const order = result.current.orders[0]
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    await act(async () => { await result.current.confirmCancel() })
+
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
+    const callArg = mockWriteContractAsync.mock.calls[0][0] as { address: string; functionName: string }
+    expect(callArg.address).toBe(V3_ADDRESS)
+    expect(callArg.functionName).toBe('cancelOrder')
+  })
+
+  // [SPRINT-V3-P3] v3 mass-cancel is now wired. A v3 DCA order (the only wired v3 order type)
+  // goes through invalidateUnorderedNonces' SIBLING path — individual cancelOrder() calls, since
+  // the contract explicitly skips the bitmap for DCA — not the v2 sequential invalidateNonces.
+  it('cancelAllOrders routes v2 -> invalidateNonces, v3 DCA -> individual cancelOrder() (mixed portfolio)', async () => {
     mockFetchUserOrders.mockResolvedValue([
       makeRow({ id: 'r-v2', order_hash: '0x' + '01'.repeat(32), order_data: {} }),
-      makeRow({ id: 'r-v3', order_hash: '0x' + '02'.repeat(32), order_data: { maxSlippageBps: 300 } }),
+      makeRow({ id: 'r-v3', order_hash: '0x' + '02'.repeat(32), order_data: { ...V3_ORDER_DATA, nonce: '7' } }),
     ])
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
@@ -227,11 +271,54 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
 
     expect(result.current.pendingCancel).not.toBeNull()
     if (result.current.pendingCancel?.action === 'invalidate') {
-      const ids = result.current.pendingCancel.affectedOrders.map((o) => o.id)
+      const p = result.current.pendingCancel
+      const ids = p.affectedOrders.map((o) => o.id)
       expect(ids).toContain('r-v2')
-      expect(ids).not.toContain('r-v3')
+      expect(ids).toContain('r-v3')
+      expect(p.v2AffectedOrders.map((o) => o.id)).toEqual(['r-v2'])
+      expect(p.v3Batches).toEqual([]) // DCA never populates the bitmap batches
+      expect(p.v3DcaOrders).toHaveLength(1)
+      expect(p.v3DcaOrders[0].order.id).toBe('r-v3')
+      expect(p.v3DcaOrders[0].orderStruct.nonce).toBe(7n)
+      expect(p.newNonce).not.toBeNull() // v2 order present -> sequential invalidation still queued
     } else {
       throw new Error('expected an invalidate review')
     }
+
+    await act(async () => { await result.current.confirmCancel() })
+
+    const calls = mockWriteContractAsync.mock.calls.map((c) => (c[0] as { functionName: string }).functionName)
+    expect(calls).toContain('invalidateNonces')
+    expect(calls).toContain('cancelOrder')
+    expect(calls).not.toContain('invalidateUnorderedNonces') // no non-DCA v3 orders in this portfolio
+  })
+
+  it('cancelAllOrders batches v3 NON-DCA orders via invalidateUnorderedNonces (bitmap), not individual cancels', async () => {
+    const limitOrderData = { ...V3_ORDER_DATA, orderType: 0, nonce: '10', routerDataHash: '0x' + 'ab'.repeat(32) }
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r-v3-limit', order_hash: '0x' + '03'.repeat(32), order_type: 'limit', order_data: limitOrderData }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    await act(async () => { await result.current.cancelAllOrders() })
+    expect(result.current.pendingCancel).not.toBeNull()
+    if (result.current.pendingCancel?.action === 'invalidate') {
+      const p = result.current.pendingCancel
+      expect(p.v3DcaOrders).toEqual([])
+      expect(p.v3Batches).toHaveLength(1)
+      expect(p.v3Batches[0].wordPos).toBe(0n) // nonce 10 -> word 0
+      expect(p.v3Batches[0].mask).toBe(1n << 10n)
+      expect(p.newNonce).toBeNull() // no v2 orders in this portfolio
+    } else {
+      throw new Error('expected an invalidate review')
+    }
+
+    await act(async () => { await result.current.confirmCancel() })
+    const calls = mockWriteContractAsync.mock.calls.map((c) => (c[0] as { functionName: string }).functionName)
+    expect(calls).toContain('invalidateUnorderedNonces')
+    expect(calls).not.toContain('invalidateNonces')
+    expect(calls).not.toContain('cancelOrder')
   })
 })
