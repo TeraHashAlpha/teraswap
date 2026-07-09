@@ -308,6 +308,7 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     error ProposalExpired();        // [SC-H-01]
     error TimelockNotExpired();     // [SC-H-01]
     error ETHNotAccepted();         // [SC-L]
+    error OracleValueZero();        // [ADR-013 N4 / AUDIT-V3-P1 L-01] live feed computed a zero fair value
 
     // ══════════════════════════════════════════════════════════════════
     //  CONSTRUCTOR
@@ -539,6 +540,11 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         (uint256 fairOut, bool hasFeed) = _fairValueOut(order.tokenIn, order.tokenOut, netAmount);
         uint256 floorOut = scaledMin;
         if (hasFeed) {
+            // [ADR-013 N4 / AUDIT-V3-P1 L-01] A live (fresh, sequencer-ok) feed that computes a ZERO
+            // fair value is an oracle-integrity failure, not a pricing opinion — revert rather than
+            // silently downgrade to the weaker signed min. Genuine no-feed/stale/sequencer-down pairs
+            // return hasFeed=false and skip this block, so the scaled signed min still applies verbatim.
+            if (fairOut == 0) revert OracleValueZero();
             uint256 oracleFloor = Math.mulDiv(
                 fairOut,
                 BPS_DENOMINATOR - order.maxSlippageBps,
