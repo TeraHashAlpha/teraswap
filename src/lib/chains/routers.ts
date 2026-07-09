@@ -75,10 +75,9 @@ export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${strin
   // sourced verbatim from docs/Reports/ARBITRUM-READINESS.md. Inert while contracts.feeCollector
   // is null (this whitelist is only consulted on an ACTIVE chain's swap path) — see registry.ts.
   42161: {
-    // [FEEDBACK] AggregationRouterV6 — the report did not re-verify this specific address for
-    // 42161 (its 1inch section notes "no router whitelist needed", API-internal routing only).
-    // Value ASSUMED from the deterministic cross-chain pattern already confirmed for mainnet +
-    // Base (identical address both places) — RE-VERIFY on Arbiscan before the activation sprint.
+    // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] AggregationRouterV6 — RE-VERIFIED (was assumed): confirmed
+    // on-chain (48,590 B) and bytecode-diffed vs the mainnet deployment at the same address — 98.35%
+    // identical, only diff is the embedded native-WETH constant. See ARBITRUM-ROUTER-VERIFICATION.md.
     '1inch': '0x111111125421cA6dc452d289314280a0f8842A65',
     // 0x v2 AllowanceHolder — report-verified, same address as Base.
     '0x': '0x0000000000001fF3684f28c67538d4D072C22734',
@@ -90,20 +89,29 @@ export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${strin
     kyberswap: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
     // CoW VaultRelayer — cross-chain deterministic, report-verified.
     cowswap: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
-    // [FEEDBACK] OpenOcean Exchange Proxy — same caveat as 1inch above: the report confirmed API
-    // support for 42161 but did not give a distinct router line. Value ASSUMED from the
-    // deterministic cross-chain address already confirmed for mainnet + Base — RE-VERIFY before
-    // activation.
+    // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] OpenOcean Exchange — RE-VERIFIED (was assumed): a live
+    // POST to open-api.openocean.finance/v4/42161/swap returned this EXACT address as tx.to — direct
+    // evidence from the adapter's real execution path. See ARBITRUM-ROUTER-VERIFICATION.md.
     openocean: '0x6352a56caadC4F1E25CD6c75970Fa768A3304e64',
-    // SushiSwap RouteProcessor5 on Arbitrum — report-verified.
-    sushiswap: '0x54F0fF7bF862325b855B0481b8E493ec5C7Cbbc7',
+    // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] SushiSwap: the report's assumed "RouteProcessor5" address
+    // has NO CODE on Arbitrum (eth_getCode → empty). Sushi's live api.sushi.com/swap/v7/42161 returns
+    // this address (RedSnwapper) as tx.to — same address already configured for Base — confirmed
+    // deployed (9,958 B). See docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md.
+    sushiswap: '0xAC4c6e212A361c968F1725b4d055b47E63F80b75',
     // Balancer V2 Vault — same canonical CREATE2 address as mainnet/Base (report body). Globally
     // disabled via DISABLED_SOURCES.balancer regardless of chain (W7-L-02) — see FEEDBACK.
     balancer: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
-    // Uniswap SwapRouter02 on Arbitrum — report-verified.
-    uniswapv3: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-    // Curve stableswap router on Arbitrum — report-verified. Inert: the curve adapter is
-    // mainnet-only fail-closed today (fetchQuote returns null off chainId 1) — see curve.ts.
+    // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Uniswap SwapRouter02 — the report's value
+    // (0xE592427A…) is the ORIGINAL SwapRouter (V1), a different contract (confirmed: 24,142 B vs
+    // SwapRouter02's 48,996 B). Our adapter's calldata (multicall(deadline, data) wrapping a
+    // deadline-less exactInputSingle params tuple) is the SwapRouter02 calling convention. Corrected
+    // to the same address as mainnet (part of Uniswap's original synchronized multi-chain deploy).
+    // See docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md.
+    uniswapv3: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+    // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Curve stableswap router — the report's value has NO CODE
+    // on Arbitrum (eth_getCode → empty); no verified official replacement found this pass (flagged,
+    // not guessed — see the report). Inert either way: the curve adapter is mainnet-only fail-closed
+    // today (fetchQuote returns null off chainId 1) — see curve.ts.
     curve: '0xf0d4C12e3C5589b1de35eaF85B163Cc23827e854',
     // [ADR-010] Bebop JamSettlement (tx.to) — same address on every EVM chain.
     bebop: BEBOP_JAM_SETTLEMENT,

@@ -37,12 +37,18 @@ const UNISWAP_V3_BY_CHAIN: Record<number, UniswapV3Contracts> = {
     // Basescan: "Uniswap V3: Swap Router02" (also whitelisted in chains/routers.ts)
     swapRouter02: '0x2626664c2603336E57B271c5C0b26F421741e481',
   },
-  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum One (42161) — addresses sourced verbatim from
-  // docs/Reports/ARBITRUM-READINESS.md. Inert while contracts.feeCollector is null (dark launch).
+  // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum One (42161) — CORRECTED from the Sprint-46 recon
+  // values, all three of which resolved to EMPTY on-chain code (no contract deployed) or, for
+  // swapRouter02, the wrong contract entirely (the original V1 SwapRouter, not SwapRouter02 — see
+  // docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md for the full method + evidence). All three
+  // corrected values are confirmed via eth_getCode against the public Arbitrum RPC and are the SAME
+  // addresses as the mainnet deployment (Arbitrum was part of Uniswap's original synchronized
+  // multi-chain deploy; only Base has its own distinct addresses). Inert while
+  // contracts.feeCollector is null (dark launch).
   42161: {
-    quoterV2: '0xb27308F9f90D7314fB6D5dB7159750d37D2c3cEe',
-    factory: '0x1f98431C8Ad98523631ae4a59F267346ea31564E',
-    swapRouter02: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+    quoterV2: UNISWAP_QUOTER_V2, // same address as mainnet, confirmed deployed on Arbitrum
+    factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', // same address as mainnet, confirmed deployed
+    swapRouter02: UNISWAP_SWAP_ROUTER_02, // same address as mainnet, confirmed deployed (48,996 B)
   },
 }
 
