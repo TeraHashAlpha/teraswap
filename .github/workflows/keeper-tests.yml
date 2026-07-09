@@ -51,7 +51,8 @@ jobs:
       - name: Install keeper deps
         run: npm ci --ignore-scripts
       # `node --test` auto-discovers *.test.mjs in this directory (it skips
-      # node_modules) — freeze-score.test.mjs + alert.test.mjs = 18 tests.
-      # A non-zero exit on any failing test fails the job, and thus the PR.
+      # node_modules) — freeze-score.test.mjs + alert.test.mjs + [SPRINT-V3-P2]
+      # executor-routing.test.mjs = 25 tests. A non-zero exit on any failing
+      # test fails the job, and thus the PR.
       - name: Run keeper node:test suite
         run: node --test

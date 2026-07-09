@@ -129,6 +129,8 @@ import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js
 // SILENTLY fall back to the public mempool on a public-mempool chain. See
 // submission-policy.js (Base's sequencer mempool is private → submits normally).
 import { resolveSubmissionPolicy } from "./submission-policy.js"
+// [SPRINT-V3-P2 / ADR-013 §1] Dual-executor (v2/v3) selection per order — pure, unit-tested.
+import { resolveExecutorRouting } from "./executor-routing.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -161,6 +163,11 @@ const PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
+// [SPRINT-V3-P2 / ADR-013] v3 executor for the chain THIS keeper instance serves (CHAIN_ID).
+// Unset/empty = v3 DISABLED — any order whose order_data carries maxSlippageBps (a v3-signed
+// order) is SKIPPED + FLAGGED, never mis-routed to the v2 contract (see the dual-executor
+// routing block in executeCycle). v2 orders are completely unaffected either way.
+const V3_CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_V3_ADDRESS || ""
 const FEE_COLLECTOR_ADDRESS = process.env.FEE_COLLECTOR_ADDRESS || ""
 const API_URL = process.env.TERASWAP_API_URL || ""
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
@@ -376,6 +383,80 @@ const ORDER_EXECUTOR_ABI = [
           { name: "tokenOut", type: "address" },
           { name: "amountIn", type: "uint256" },
           { name: "minAmountOut", type: "uint256" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "routerDataHash", type: "bytes32" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+      { name: "routerData", type: "bytes" },
+    ],
+    outputs: [],
+  },
+]
+
+// [SPRINT-V3-P2 / ADR-013 §1] v3 ABI subset — the ONLY struct difference from v2 is
+// maxSlippageBps (uint16) inserted right after minAmountOut, mirroring
+// contracts/order-engine/TeraSwapOrderExecutorV3.sol's Order struct field-for-field (audited SHA
+// 954c415). Selected per-order by the dual-executor routing in executeCycle — never used for a
+// v2 order.
+const ORDER_EXECUTOR_V3_ABI = [
+  {
+    name: "canExecute",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "maxSlippageBps", type: "uint16" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "routerDataHash", type: "bytes32" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [
+      { name: "canExec", type: "bool" },
+      { name: "reason", type: "string" },
+    ],
+  },
+  {
+    name: "executeOrder",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "maxSlippageBps", type: "uint16" },
           { name: "orderType", type: "uint8" },
           { name: "condition", type: "uint8" },
           { name: "targetPrice", type: "uint256" },
@@ -1110,6 +1191,36 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         continue
       }
 
+      // [SPRINT-V3-P2 / ADR-013 §1] Dual-executor routing: a v3-signed order carries
+      // maxSlippageBps in its order_data (the frontend only sets it once v3 is configured for
+      // the signing chain — useOrderEngine.ts). Select the CONTRACT + ABI for THIS order
+      // independently of every other order in the batch: v2 orders (the overwhelming majority
+      // until migration) keep executing against v2 exactly as before; a v3 order executes ONLY
+      // when THIS keeper's V3_CONTRACT_ADDRESS is configured for its chain — otherwise it is
+      // SKIPPED + FLAGGED (left active, retried later), NEVER mis-routed to v2 (wrong typehash
+      // -> the v2 contract would either revert or, worse, silently ignore the intended
+      // maxSlippageBps bound entirely).
+      const routing = resolveExecutorRouting({
+        orderData: od,
+        v2Address: CONTRACT_ADDRESS,
+        v2Abi: ORDER_EXECUTOR_ABI,
+        v3Address: V3_CONTRACT_ADDRESS,
+        v3Abi: ORDER_EXECUTOR_V3_ABI,
+      })
+      if (!routing.ok) {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... -- ${routing.reason}`)
+        try {
+          await alertOps(
+            { kind: "submission-blocked", detail: `v3 order ${dbOrder.id} received but ORDER_EXECUTOR_V3_ADDRESS is unset for chain ${CHAIN_ID} -- v3 not deployed/configured here yet` },
+            TIER_WARN_THRESHOLD,
+          )
+        } catch {}
+        await updateOrderStatus(dbOrder.id, "active") // unlock; retried once v3 is configured
+        skipped++
+        continue
+      }
+      const { isV3, execAddress, execAbi } = routing
+
       // Use order_data directly -- it has the exact values that were EIP-712 signed
       const orderStruct = {
         owner: getAddress(od.owner),                         // checksum address
@@ -1117,6 +1228,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         tokenOut: getAddress(od.tokenOut),
         amountIn: BigInt(od.amountIn),                       // uint256
         minAmountOut: BigInt(od.minAmountOut),
+        // [ADR-013 §1] Present ONLY for a v3 order — omitted entirely for v2 so the v2 tuple
+        // shape (and its ABI-encoding) stays byte-identical to before this sprint.
+        ...(isV3 ? { maxSlippageBps: Number(od.maxSlippageBps) } : {}),
         orderType: Number(od.orderType),                     // uint8
         condition: Number(od.condition),                     // uint8
         targetPrice: BigInt(od.targetPrice),                 // uint256
@@ -1129,7 +1243,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         dcaTotal: BigInt(od.dcaTotal),                       // uint256
       }
 
-      log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}`)
+      log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}, executor=${isV3 ? 'v3' : 'v2'}`)
 
       // Debug: read current Chainlink price
       try {
@@ -1144,10 +1258,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
       }
 
-      // Check via contract
+      // Check via contract [SPRINT-V3-P2] execAddress/execAbi resolved per-order above.
       const [canExec, reason] = await publicClient.readContract({
-        address: CONTRACT_ADDRESS,
-        abi: ORDER_EXECUTOR_ABI,
+        address: execAddress,
+        abi: execAbi,
         functionName: "canExecute",
         args: [orderStruct, dbOrder.signature],
       })
@@ -1181,7 +1295,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         orderStruct.tokenIn,
         orderStruct.tokenOut,
         netAmount,
-        CONTRACT_ADDRESS,
+        execAddress, // [SPRINT-V3-P2] the contract that will actually hold + swap the funds
         CHAIN_ID, // keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
         srcDecimals,
         dstDecimals,
@@ -1436,8 +1550,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       const txPublicClient = usePrivateRelay ? flashbotsPublicClient : publicClient
 
       const txHash = await txWalletClient.writeContract({
-        address: CONTRACT_ADDRESS,
-        abi: ORDER_EXECUTOR_ABI,
+        address: execAddress,
+        abi: execAbi,
         functionName: "executeOrder",
         args: [orderStruct, dbOrder.signature, swapData.data],
         maxFeePerGas: gasTier.maxFeePerGas,
@@ -1506,7 +1620,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // are decoded from the on-chain OrderExecuted event (authoritative); analytics (#228)
         // values the chunk from the parent order, so no USD is written here. Failures are
         // surfaced, not swallowed (the original silent-400 bug that left the table empty).
-        const decoded = decodeOrderExecuted(receipt.logs, CONTRACT_ADDRESS)
+        const decoded = decodeOrderExecuted(receipt.logs, execAddress)
         if (!decoded) {
           log(`  WARNING: OrderExecuted event not found in tx ${txHash.slice(0, 10)}... — recording with fallback amounts`)
         }
@@ -1711,7 +1825,10 @@ async function main() {
   log(`Executor wallet: ${account.address}`)
   log(`Chain: ${CHAIN_ID}`)
   log(`Balance: ${formatEther(balance)} ETH`)
-  log(`Contract: ${CONTRACT_ADDRESS}`)
+  log(`Contract (v2): ${CONTRACT_ADDRESS}`)
+  // [SPRINT-V3-P2] Loud about v3 state at boot: either the configured address, or an explicit
+  // "disabled" so a v3 order silently piling up (skip+flag every cycle) is diagnosable from logs.
+  log(`Contract (v3): ${V3_CONTRACT_ADDRESS || "not configured -- v3 orders will be skipped + flagged"}`)
   log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
   log(`Max batch: ${MAX_BATCH}`)
   log(`Gas tiers: NORMAL ≤${GAS_TIER_NORMAL}gwei | ELEVATED ≤${GAS_TIER_ELEVATED}gwei | URGENT ≤${GAS_TIER_URGENT}gwei | >URGENT → SKIP`)
@@ -1737,6 +1854,11 @@ async function main() {
   ]
   if (FEE_COLLECTOR_ADDRESS) {
     watchedContracts.push({ address: FEE_COLLECTOR_ADDRESS, label: 'FeeCollector' })
+  }
+  // [SPRINT-V3-P2] Admin-event monitoring parity for v3, once configured (timelock queue/execute,
+  // pause/unpause, router/oracle-config changes are the same event shapes as v2).
+  if (V3_CONTRACT_ADDRESS) {
+    watchedContracts.push({ address: V3_CONTRACT_ADDRESS, label: 'OrderExecutorV3' })
   }
   startEventWatcher(publicClient, watchedContracts, monitor)
 
