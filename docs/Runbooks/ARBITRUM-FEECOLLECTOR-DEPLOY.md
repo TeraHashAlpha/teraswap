@@ -10,8 +10,8 @@ Adapted from `docs/Runbooks/BASE-ACTIVATION.md` (Phase A/C) + `docs/Runbooks/BAS
 (the Foundry deploy pattern), Foundry-based rather than Remix.
 
 **Fund-flow-adjacent.** Do NOT execute any on-chain step until: **(a)** the joint Sprint 46+47 Auditor
-pass has returned **0C/0H** on this diff, and **(b)** `docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md` has
-been accepted. The router whitelist below is an **input to check against the report at deploy time**, not
+pass has returned **0C/0H** on this diff, and **(b)** `docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md`
+(the full address set — supersedes-not-deletes the earlier router-only report) has been accepted. The router whitelist below is an **input to check against the report at deploy time**, not
 a value to trust blindly from this file — addresses can be redeployed/rugged between report-writing and
 deploy-day; re-run `eth_getCode` on each before bootstrapping (Step 4).
 
@@ -29,6 +29,19 @@ deploy-day; re-run `eth_getCode` on each before bootstrapping (Step 4).
 
 ## 1. Pre-flight checks
 
+> **[CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] HARD GATE — run this FIRST, before anything else in this
+> section.** AUDIT-ARBITRUM-46-47 found 9 `CHAIN_CONFIGS[42161]` addresses with zero on-chain code
+> (hand-transcribed hex drift) that had gone undetected through an entire prior sprint. Do not deploy
+> against a config that hasn't been re-verified at a fresh block on THIS day:
+> ```bash
+> node scripts/verify-arbitrum-addresses.mjs
+> ```
+> Must exit 0 and re-write `docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json` with a fresh block number. If
+> it fails (any address without code, wrong symbol/description, or stale feed data), **stop** — do not
+> proceed to deploy on a config the script can't currently verify. This check supersedes the older
+> "re-run eth_getCode for every router address" note below (this script does that, plus tokens, feeds,
+> and the sequencer, in one reproducible run) — kept for the record but the script is the actual gate.
+
 ```bash
 cd "contracts"
 forge build                 # compiles clean
@@ -36,9 +49,10 @@ forge test --match-path 'test/*.t.sol' -vvv   # FeeCollector suite green
 ```
 
 - Confirm **joint Sprint 46+47 Auditor pass = 0C/0H** on this diff — record the SHA it was run against.
-- Confirm `docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md` is accepted (no open FEEDBACK items blocking).
+- Confirm `docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md` is accepted (no open FEEDBACK items blocking).
 - Re-run `eth_getCode` against `https://arb1.arbitrum.io/rpc` for every router address you're about to
   bootstrap (Step 4) — do not trust the report's addresses as still-valid without a same-day re-check.
+  (Superseded by the manifest-verification run above, which covers this automatically.)
 - Deployer has Arbitrum ETH for gas; keystore unlocked; Arbiscan API key ready.
 
 ## 2. Deploy FeeCollector on Arbitrum (forge create)
@@ -83,7 +97,7 @@ contract or verification matched the wrong source file. Do not proceed to Step 4
 `bootstrapRouters(address[] routers)` whitelists in a single tx and can only run **once**
 (`bootstrapped` flag). Routers must be deployed contracts (checks `extcodesize`).
 
-**Router set — CHECK each against `docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md` AND a fresh
+**Router set — CHECK each against `docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md` AND a fresh
 `eth_getCode` before running this. Do not copy this list blind — it is a snapshot, not a live source:**
 
 ```

@@ -1,5 +1,11 @@
 # Arbitrum One (42161) Router Verification Report
 
+> **[CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] SUPERSEDED (not deleted, per rule #4):** this report's
+> router-set findings are still valid and are carried forward as-is. For the FULL address set (this
+> report's routers + the 9 additional tokens/feeds/sequencer findings from AUDIT-ARBITRUM-46-47),
+> see **`docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md`**, which extends this report rather than
+> replacing it.
+
 **Date:** 2026-07-09
 **Branch:** `sprint/47-arbitrum-activation-prep`
 **Scope:** On-chain re-verification of every router/spender address `ROUTER_WHITELIST_BY_CHAIN[42161]` and
