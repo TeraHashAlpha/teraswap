@@ -73,13 +73,18 @@ function makeCancelReview(): Extract<PendingCancelReview, { action: 'cancel' }> 
 }
 
 function makeInvalidateReview(): Extract<PendingCancelReview, { action: 'invalidate' }> {
+  const v2AffectedOrders = [
+    makeOrder({ id: 'o1', tokenInSymbol: 'WETH', tokenOutSymbol: 'USDC' }),
+    makeOrder({ id: 'o2', tokenInSymbol: 'DAI', tokenOutSymbol: 'WETH', orderType: OrderType.DCA }),
+  ]
   return {
     action: 'invalidate',
     newNonce: 6n,
-    affectedOrders: [
-      makeOrder({ id: 'o1', tokenInSymbol: 'WETH', tokenOutSymbol: 'USDC' }),
-      makeOrder({ id: 'o2', tokenInSymbol: 'DAI', tokenOutSymbol: 'WETH', orderType: OrderType.DCA }),
-    ],
+    v2AffectedOrders,
+    // [SPRINT-V3-P3] this fixture is a v2-only cancel-all (existing suite, byte-identical).
+    v3Batches: [],
+    v3DcaOrders: [],
+    affectedOrders: v2AffectedOrders,
     chainId: 8453,
     account: ACCOUNT,
   }

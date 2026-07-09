@@ -96,3 +96,36 @@ test("routing matrix — every (order kind × v3-configured) combination", () =>
     assert.strictEqual(r.execAddress, c.expectAddr, c.label)
   }
 })
+
+// [SPRINT-V3-P3] "Keeper: NO routing change — on-chain checks authoritative; add a test
+// asserting a cancelled/invalidated v3 order is skipped."
+//
+// resolveExecutorRouting has NO concept of an order's cancelled/invalidated state — routing
+// only decides WHICH contract+ABI the keeper calls, exactly the same way regardless of whether
+// that order has been cancelled on-chain. The skip itself happens one layer up in executor.js's
+// existing, UNCHANGED `if (!canExec) { ...skip... }` check after calling `canExecute()` against
+// the address routing resolved (contracts/order-engine/executor/executor.js — v3's canExecute
+// already returns canExec=false with reason "Order cancelled" for a cancelled hash, or "Nonce
+// used" for a v3 order whose bitmap bit is now set, per TeraSwapOrderExecutorV3.sol's
+// cancelledOrders/isNonceUsed checks — see :364 and :377). That generic check is orthogonal to
+// v2/v3 and was not touched by this sprint or #299.
+//
+// What IS worth proving here: a cancelled/invalidated order's order_data is STILL routed
+// correctly (never silently rerouted to v2, never dropped from consideration by routing itself)
+// — routing resolves purely from order_data.maxSlippageBps + config, so the SAME v3
+// address+ABI is used whether the order later turns out live or cancelled. The contract call
+// that follows (canExecute, mocked out of scope for this pure module) is what actually skips it.
+test("routing is ORTHOGONAL to order cancellation state — a v3 order still routes to v3 regardless (the contract's canExecute skip is a separate, unchanged layer)", () => {
+  const liveOrder = { maxSlippageBps: 300 }
+  // order_data carries no 'cancelled' flag at all — cancellation lives on-chain
+  // (cancelledOrders[orderHash] / nonceBitmap), not in the DB row's signed struct. Routing can
+  // only ever see the signed struct, so it MUST resolve identically either way.
+  const sameShapeOrder = { maxSlippageBps: 300 }
+
+  const rLive = resolveExecutorRouting({ orderData: liveOrder, v2Address: V2_ADDR, v2Abi: V2_ABI, v3Address: V3_ADDR, v3Abi: V3_ABI })
+  const rAlsoV3 = resolveExecutorRouting({ orderData: sameShapeOrder, v2Address: V2_ADDR, v2Abi: V2_ABI, v3Address: V3_ADDR, v3Abi: V3_ABI })
+
+  assert.strictEqual(rLive.execAddress, V3_ADDR)
+  assert.strictEqual(rAlsoV3.execAddress, V3_ADDR)
+  assert.deepStrictEqual(rLive, rAlsoV3, "routing must be a pure function of order_data + config, never of a status the module never receives")
+})

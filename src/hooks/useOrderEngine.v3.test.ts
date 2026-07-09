@@ -254,10 +254,13 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
     expect(callArg.functionName).toBe('cancelOrder')
   })
 
-  it('cancelAllOrders excludes v3 orders from the affected set (v2-only invalidateNonces)', async () => {
+  // [SPRINT-V3-P3] v3 mass-cancel is now wired. A v3 DCA order (the only wired v3 order type)
+  // goes through invalidateUnorderedNonces' SIBLING path — individual cancelOrder() calls, since
+  // the contract explicitly skips the bitmap for DCA — not the v2 sequential invalidateNonces.
+  it('cancelAllOrders routes v2 -> invalidateNonces, v3 DCA -> individual cancelOrder() (mixed portfolio)', async () => {
     mockFetchUserOrders.mockResolvedValue([
       makeRow({ id: 'r-v2', order_hash: '0x' + '01'.repeat(32), order_data: {} }),
-      makeRow({ id: 'r-v3', order_hash: '0x' + '02'.repeat(32), order_data: { maxSlippageBps: 300 } }),
+      makeRow({ id: 'r-v3', order_hash: '0x' + '02'.repeat(32), order_data: { ...V3_ORDER_DATA, nonce: '7' } }),
     ])
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
@@ -268,11 +271,54 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
 
     expect(result.current.pendingCancel).not.toBeNull()
     if (result.current.pendingCancel?.action === 'invalidate') {
-      const ids = result.current.pendingCancel.affectedOrders.map((o) => o.id)
+      const p = result.current.pendingCancel
+      const ids = p.affectedOrders.map((o) => o.id)
       expect(ids).toContain('r-v2')
-      expect(ids).not.toContain('r-v3')
+      expect(ids).toContain('r-v3')
+      expect(p.v2AffectedOrders.map((o) => o.id)).toEqual(['r-v2'])
+      expect(p.v3Batches).toEqual([]) // DCA never populates the bitmap batches
+      expect(p.v3DcaOrders).toHaveLength(1)
+      expect(p.v3DcaOrders[0].order.id).toBe('r-v3')
+      expect(p.v3DcaOrders[0].orderStruct.nonce).toBe(7n)
+      expect(p.newNonce).not.toBeNull() // v2 order present -> sequential invalidation still queued
     } else {
       throw new Error('expected an invalidate review')
     }
+
+    await act(async () => { await result.current.confirmCancel() })
+
+    const calls = mockWriteContractAsync.mock.calls.map((c) => (c[0] as { functionName: string }).functionName)
+    expect(calls).toContain('invalidateNonces')
+    expect(calls).toContain('cancelOrder')
+    expect(calls).not.toContain('invalidateUnorderedNonces') // no non-DCA v3 orders in this portfolio
+  })
+
+  it('cancelAllOrders batches v3 NON-DCA orders via invalidateUnorderedNonces (bitmap), not individual cancels', async () => {
+    const limitOrderData = { ...V3_ORDER_DATA, orderType: 0, nonce: '10', routerDataHash: '0x' + 'ab'.repeat(32) }
+    mockFetchUserOrders.mockResolvedValue([
+      makeRow({ id: 'r-v3-limit', order_hash: '0x' + '03'.repeat(32), order_type: 'limit', order_data: limitOrderData }),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    await act(async () => { await result.current.cancelAllOrders() })
+    expect(result.current.pendingCancel).not.toBeNull()
+    if (result.current.pendingCancel?.action === 'invalidate') {
+      const p = result.current.pendingCancel
+      expect(p.v3DcaOrders).toEqual([])
+      expect(p.v3Batches).toHaveLength(1)
+      expect(p.v3Batches[0].wordPos).toBe(0n) // nonce 10 -> word 0
+      expect(p.v3Batches[0].mask).toBe(1n << 10n)
+      expect(p.newNonce).toBeNull() // no v2 orders in this portfolio
+    } else {
+      throw new Error('expected an invalidate review')
+    }
+
+    await act(async () => { await result.current.confirmCancel() })
+    const calls = mockWriteContractAsync.mock.calls.map((c) => (c[0] as { functionName: string }).functionName)
+    expect(calls).toContain('invalidateUnorderedNonces')
+    expect(calls).not.toContain('invalidateNonces')
+    expect(calls).not.toContain('cancelOrder')
   })
 })
