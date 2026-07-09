@@ -25,6 +25,10 @@ export const USD_STABLECOINS_BY_CHAIN: Record<number, readonly string[]> = {
   1: ['USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'PYUSD', 'USDe', 'USDS', 'GHO', 'crvUSD', 'BOLD'],
   // Base — curated suggested USD stables; USDbC (bridged USDC) IS ~$1 here, and only here.
   8453: ['USDC', 'USDbC', 'USDT', 'DAI'],
+  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum — NATIVE USDC only (curation decision, mirrors the
+  // report's flag). USDC.e (bridged) is deliberately excluded from v1's token catalog entirely
+  // (registry.ts), so it can't reach this gate anyway; CONFIG-ONLY / dark until activation.
+  42161: ['USDC', 'USDT', 'DAI'],
 }
 
 /** EUR-pegged (fiat, non-USD) stables per chain: 'Stablecoin' UI category, never ~$1. */

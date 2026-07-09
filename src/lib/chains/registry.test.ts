@@ -40,6 +40,38 @@ describe('chains/registry [P216]', () => {
   })
 })
 
+describe('chains/registry — Arbitrum One (42161) [SPRINT-46-ARBITRUM-CONFIG, dark launch]', () => {
+  it('is registered with feeCollector HARD-null (no env override, unlike Base)', () => {
+    const c = getChainConfig(42161)
+    expect(c.chainId).toBe(42161)
+    expect(c.slug).toBe('arbitrum')
+    expect(c.gasModel).toBe('arbitrum')
+    expect(c.contracts.feeCollector).toBeNull()
+  })
+
+  it('shares the canonical CREATE2 Permit2 + CoW VaultRelayer addresses', () => {
+    const c = getChainConfig(42161)
+    expect(c.contracts.permit2).toBe('0x000000000022D473030F116dDEE9F6B43aC78BA3')
+    expect(c.contracts.cowVaultRelayer).toBe('0xC92E8bdf79f0507f65a392b0ab4667716BFE0110')
+  })
+
+  it('has a report-verified sequencer uptime feed (L2, like Base)', () => {
+    expect(getChainConfig(42161).sequencerUptimeFeed).toBe(
+      '0xFdB631f5eE196f5C5AA41F952B0282f59B2Eff9E',
+    )
+  })
+
+  it('token set is native-USDC-only — no USDC.e', () => {
+    const { tokens } = getChainConfig(42161)
+    expect(tokens.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831')
+    expect(Object.values(tokens)).not.toContain('0xFF970A61A04b1cA14834A43f5dE4533eBDDB5F86') // USDC.e
+  })
+
+  it('getSupportedChainIds includes 42161', () => {
+    expect(getSupportedChainIds()).toContain(42161)
+  })
+})
+
 describe('getWrappedNative — chain-aware wrapped-native [SPRINT-9W]', () => {
   const MAINNET_WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
   const BASE_WETH = '0x4200000000000000000000000000000000000006'
