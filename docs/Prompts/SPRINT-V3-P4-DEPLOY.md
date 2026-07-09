@@ -81,3 +81,33 @@ Files: NEW docs/Runbooks/V3-EXECUTOR-DEPLOY.md + scripts under contracts/order-e
 
 Expected: PR open, CI green (push + report). FEEDBACK <=1 screen: runbook step list, verifier assertion list, any Base-deploy blocker discovered.
 ```
+
+---
+
+## Pre-deploy audit amendments (AUDIT-V3-PREDEPLOY, 2026-07-09)
+
+The mandatory pre-deploy Auditor pass (ADR-013 deploy step 2, covering PR #301's delta + this runbook/
+scripts + final repo state) returned 4 findings, all doc/script-only, applied on this same branch/PR
+(`sprint/v3-p4-deploy` / #302) without a new audit round:
+
+- **M-A** — `VerifyOrderExecutorV3.s.sol`'s `run()` didn't check the immutables `feeRecipient()`/`WETH()`.
+  Added, as env-named caller-supplied inputs (never embedded), non-zero exit on mismatch.
+- **M-B** — Runbook §6 Rollback had a self-contradictory step sequence for the post-first-order case ("unset
+  the same two env vars" immediately followed by "do not touch" one of them). Rewritten around one explicit
+  stated invariant: rollback stops NEW v3 signing, never abandons an EXISTING v3 order — the keeper's
+  `ORDER_EXECUTOR_V3_ADDRESS` is never unset as part of rollback.
+- **M-C** — The router whitelist wasn't pinned to an exact set (placeholders / a single example address).
+  Pinned consistently to the exact 2-router `/api/swap`-served set on Base (Velora Augustus V6 + Uniswap
+  SwapRouter02) across the input table, re-verify step, bootstrap command, and verifier invocation; the
+  verifier gained a `deniedRouters` candidate deny-list check, plus a manual on-chain event-scan step for
+  the fully exhaustive "nothing else whitelisted" proof (a mapping isn't enumerable in a single read).
+- **L-A** — Cutover set the frontend signing env before the keeper env, opening a transient window where a
+  signed v3 order could exist before the keeper knew how to route it. Reordered: keeper env first.
+
+**INFO (recorded, not a blocker):** v3's admin is the same EOA as v2's (parity, not a regression) — every
+admin action is bounded by the contract's own 48h/7d timelocks regardless. The broader admin-key custody
+upgrade (EOA → Gnosis Safe / hardware wallet, tracked as **W1-L-02**) applies to v3 the same way it already
+applies to v2 and FeeCollector, and is explicitly **Fase 4** scope, not a v3 deploy blocker.
+
+**Status:** DEPLOY-AUTHORIZED, conditional on all 4 amendments being present in the merged PR (they are, as
+of this note) — see the ADR-013 status note for the formal record.
