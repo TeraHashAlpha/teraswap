@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 // Chainlink AggregatorV3Interface (inlined to avoid heavy dependency)
 interface AggregatorV3Interface {
     function decimals() external view returns (uint8);
@@ -142,12 +143,21 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     ///         uint16 alone would allow 65535 bps (655%); this caps the on-chain floor to <= 5% loss.
     uint16 public constant MAX_ORDER_SLIPPAGE_BPS = 500;
 
+    /// @notice [ADR-013 N1] Chainlink L2 sequencer-uptime grace period. After the sequencer comes
+    ///         back up, feeds may report stale data for a short window; ignore reads within grace.
+    uint256 public constant SEQUENCER_GRACE_PERIOD = 3600; // 1 hour (Chainlink-recommended)
+
     // ══════════════════════════════════════════════════════════════════
     //  IMMUTABLES
     // ══════════════════════════════════════════════════════════════════
 
     address public immutable feeRecipient;
     address public immutable WETH; // [H-02] WETH address for ETH output handling
+
+    /// @notice [ADR-013 N1] Chainlink L2 sequencer-uptime feed (Base). address(0) on L1 mainnet
+    ///         (no sequencer). When set, a down/just-recovered sequencer forces NO-FEED semantics
+    ///         so the executor never trusts a Chainlink read behind a stalled sequencer.
+    address public immutable sequencerUptimeFeed;
 
     // ══════════════════════════════════════════════════════════════════
     //  STATE
@@ -207,6 +217,17 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     }
     mapping(address => OracleConfig) public oracleConfigs;
 
+    // [ADR-013 §1/N4] Per-token USD fair-value feed config (the on-chain floor oracle).
+    // Registered via the 48h timelock only (closes P6: v2's setOracleConfig was instant).
+    struct TokenUsdFeed {
+        address feed;         // Chainlink token/USD AggregatorV3
+        uint8 feedDecimals;   // feed.decimals() cached at config time (8 or 18)
+        uint8 tokenDecimals;  // ERC-20 decimals of the token (6/8/18)
+        uint256 maxStaleness; // seconds (0 = global MAX_STALENESS)
+        bool registered;      // whether this token has a fair-value feed
+    }
+    mapping(address => TokenUsdFeed) public tokenUsdFeeds;
+
     // ══════════════════════════════════════════════════════════════════
     //  EVENTS
     // ══════════════════════════════════════════════════════════════════
@@ -239,6 +260,8 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     event Unpaused(address indexed admin);
     event OracleConfigured(address indexed feed, uint8 decimals, uint256 maxStaleness, int256 minPrice, int256 maxPrice);
     event SweepQueued(bytes32 indexed actionId, address token);
+    // [ADR-013 §1] Fair-value USD feed registered/updated (via timelock)
+    event TokenUsdFeedConfigured(address indexed token, address indexed feed, uint8 feedDecimals, uint8 tokenDecimals, uint256 maxStaleness);
 
     // ══════════════════════════════════════════════════════════════════
     //  ERRORS
@@ -295,10 +318,14 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     ///      Bumping the version from "2" isolates v3 signatures from the deployed v2 contract.
     ///      Changing them post-deploy would invalidate all existing signatures — intentional for a
     ///      non-upgradeable contract.
+    /// @param _sequencerUptimeFeed Chainlink L2 sequencer-uptime feed (Base). Pass address(0) on L1
+    ///        mainnet — there is no sequencer to gate on, and fair-value reads proceed on feed
+    ///        integrity alone.
     constructor(
         address _feeRecipient,
         address _admin,
-        address _weth
+        address _weth,
+        address _sequencerUptimeFeed
     ) EIP712("TeraSwapOrderExecutor", "3") {
         if (_feeRecipient == address(0) || _admin == address(0) || _weth == address(0)) {
             revert ZeroAddress();
@@ -306,6 +333,7 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         feeRecipient = _feeRecipient;
         admin = _admin;
         WETH = _weth;
+        sequencerUptimeFeed = _sequencerUptimeFeed; // address(0) allowed (mainnet)
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -883,8 +911,153 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    //  FAIR-VALUE ORACLE CONFIG — TIMELOCKED [ADR-013 §1 / P6]
+    // ══════════════════════════════════════════════════════════════════
+
+    /// @notice Queue a token → USD fair-value feed registration (48h delay).
+    /// @dev [ADR-013/P6] Timelocked — the fair-value feed decides the on-chain output floor, so it
+    ///      must not be changeable instantly (v2's setOracleConfig was, which was the P6 finding).
+    ///      This is the ONLY admin surface v3 adds beyond v2's; the slippage cap is a constant.
+    /// @param token The ERC-20 whose USD price this feed provides.
+    /// @param feed The Chainlink token/USD AggregatorV3 address.
+    /// @param tokenDecimals The ERC-20 decimals of `token` (6/8/18).
+    /// @param maxStaleness Max seconds since last update (0 = global MAX_STALENESS).
+    function queueTokenUsdFeed(
+        address token,
+        address feed,
+        uint8 tokenDecimals,
+        uint256 maxStaleness
+    ) external {
+        if (msg.sender != admin) revert NotAdmin();
+        if (token == address(0) || feed == address(0)) revert ZeroAddress();
+
+        bytes32 actionHash = keccak256(abi.encode("setTokenUsdFeed", token, feed, tokenDecimals, maxStaleness));
+        bytes32 actionId = keccak256(abi.encode(actionHash, block.timestamp));
+
+        if (timelockActions[actionId].exists) revert TimelockAlreadyQueued();
+
+        timelockActions[actionId] = TimelockAction({
+            actionHash: actionHash,
+            readyAt: block.timestamp + TIMELOCK_ORACLE_CHANGE,
+            exists: true
+        });
+
+        emit TimelockQueued(actionId, actionHash, block.timestamp + TIMELOCK_ORACLE_CHANGE);
+    }
+
+    /// @notice Execute a queued token → USD fair-value feed registration after the timelock.
+    function executeTokenUsdFeed(
+        bytes32 actionId,
+        address token,
+        address feed,
+        uint8 tokenDecimals,
+        uint256 maxStaleness
+    ) external {
+        if (msg.sender != admin) revert NotAdmin();
+
+        TimelockAction storage action = timelockActions[actionId];
+        if (!action.exists) revert TimelockNotQueued();
+        if (block.timestamp < action.readyAt) revert TimelockNotReady();
+        if (block.timestamp > action.readyAt + TIMELOCK_GRACE) revert TimelockExpired();
+
+        bytes32 expectedHash = keccak256(abi.encode("setTokenUsdFeed", token, feed, tokenDecimals, maxStaleness));
+        if (action.actionHash != expectedHash) revert TimelockHashMismatch();
+
+        delete timelockActions[actionId];
+
+        // Validate the feed at execution time (mirrors setOracleConfig sanity checks).
+        uint8 feedDecimals = AggregatorV3Interface(feed).decimals();
+        require(feedDecimals == 8 || feedDecimals == 18, "Unexpected feed decimals");
+        require(tokenDecimals >= 1 && tokenDecimals <= 18, "Unexpected token decimals");
+        (, int256 testPrice, , uint256 testUpdatedAt, ) = AggregatorV3Interface(feed).latestRoundData();
+        require(testPrice > 0, "Feed returns invalid price");
+        require(block.timestamp - testUpdatedAt < 86400, "Feed seems dead (>24h stale)");
+
+        tokenUsdFeeds[token] = TokenUsdFeed({
+            feed: feed,
+            feedDecimals: feedDecimals,
+            tokenDecimals: tokenDecimals,
+            maxStaleness: maxStaleness,
+            registered: true
+        });
+
+        emit TimelockExecuted(actionId, "setTokenUsdFeed", abi.encode(token, feed, tokenDecimals, maxStaleness));
+        emit TokenUsdFeedConfigured(token, feed, feedDecimals, tokenDecimals, maxStaleness);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     //  INTERNAL
     // ══════════════════════════════════════════════════════════════════
+
+    /// @dev [ADR-013 N1] True unless a configured L2 sequencer-uptime feed reports the sequencer
+    ///      down or within the post-recovery grace window. address(0) feed (mainnet) ⇒ always up.
+    function _sequencerUp() internal view returns (bool) {
+        address seq = sequencerUptimeFeed;
+        if (seq == address(0)) return true;
+        (, int256 answer, uint256 startedAt, , ) = AggregatorV3Interface(seq).latestRoundData();
+        // Chainlink L2 sequencer feed: answer 0 = up, 1 = down.
+        if (answer != 0) return false;
+        if (startedAt == 0) return false; // invalid / not-yet-started round
+        if (block.timestamp - startedAt <= SEQUENCER_GRACE_PERIOD) return false; // still in grace
+        return true;
+    }
+
+    /// @dev [ADR-013 N1] Read a token's USD price from its configured feed with full integrity
+    ///      checks. Returns ok=false (⇒ NO-FEED) when unregistered, non-positive, stale, or the
+    ///      round is incomplete — the caller must then fall back to the signed absolute min, never
+    ///      fill blind.
+    function _readFeedUsd(address token) internal view returns (uint256 price, uint8 feedDec, bool ok) {
+        TokenUsdFeed memory cfg = tokenUsdFeeds[token];
+        if (!cfg.registered) return (0, 0, false);
+        (
+            uint80 roundId,
+            int256 answer,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = AggregatorV3Interface(cfg.feed).latestRoundData();
+        if (answer <= 0) return (0, 0, false);
+        uint256 staleness = cfg.maxStaleness > 0 ? cfg.maxStaleness : MAX_STALENESS;
+        if (block.timestamp - updatedAt > staleness) return (0, 0, false);
+        if (answeredInRound < roundId) return (0, 0, false);
+        return (uint256(answer), cfg.feedDecimals, true);
+    }
+
+    /// @dev [ADR-013 §1/N4] Decimals-safe fair-value output for `amountIn` of tokenIn → tokenOut,
+    ///      priced through each leg's USD feed. Uses OZ Math.mulDiv (full-precision 512-bit
+    ///      intermediate) so 6/8/18-decimal tokens × 8/18-decimal feeds never overflow or round
+    ///      the intermediate. Returns hasFeed=false when the sequencer is down or either leg lacks
+    ///      a valid/fresh feed — the caller then enforces the signed absolute min only.
+    ///
+    ///      fairOut_raw = amountIn_raw × (pIn/10^decIn) / (pOut/10^decOut) × 10^tOut / 10^tIn
+    ///      computed as: usdValue18 = amountIn × pIn18 / 10^tIn ; fairOut = usdValue18 × 10^tOut / pOut18
+    ///      where pX18 = pX × 10^(18 − decX) normalises both USD prices to 18 decimals.
+    function _fairValueOut(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn
+    ) internal view returns (uint256 fairOut, bool hasFeed) {
+        if (amountIn == 0) return (0, false);
+        if (!_sequencerUp()) return (0, false);
+
+        (uint256 pIn, uint8 decIn, bool okIn) = _readFeedUsd(tokenIn);
+        (uint256 pOut, uint8 decOut, bool okOut) = _readFeedUsd(tokenOut);
+        if (!okIn || !okOut) return (0, false);
+
+        uint8 tIn = tokenUsdFeeds[tokenIn].tokenDecimals;
+        uint8 tOut = tokenUsdFeeds[tokenOut].tokenDecimals;
+
+        // Normalise both USD prices to 18 decimals (decIn/decOut ∈ {8,18} ⇒ exponent ∈ {0,10}).
+        uint256 pIn18 = pIn * (10 ** (18 - decIn));
+        uint256 pOut18 = pOut * (10 ** (18 - decOut));
+        if (pOut18 == 0) return (0, false);
+
+        // usdValue18 = realAmountIn × realPriceIn, at 18-decimal USD scale.
+        uint256 usdValue18 = Math.mulDiv(amountIn, pIn18, 10 ** tIn);
+        // fairOut_raw = (usdValue18 / realPriceOut) × 10^tOut.
+        fairOut = Math.mulDiv(usdValue18, 10 ** tOut, pOut18);
+        return (fairOut, true);
+    }
 
     /// @dev Validates that current Chainlink price meets the order's price condition.
     function _checkPriceCondition(
