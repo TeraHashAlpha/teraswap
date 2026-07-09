@@ -22,7 +22,7 @@ import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { NATIVE_ETH } from '@/lib/constants'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
-import { computeTokenAmountUsd } from '@/lib/chainlink'
+import { computeTokenAmountUsd, fetchErc20Decimals } from '@/lib/chainlink'
 import { getChainConfig } from '@/lib/chains/registry'
 
 // [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
@@ -301,24 +301,55 @@ export async function POST(req: NextRequest) {
     // contract. Prices the tokenOut leg (DefiLlama + server Chainlink, same plumbing /api/swap's
     // >$10k gate uses); unpriceable on BOTH sources fails CLOSED (mirrors that gate's posture) —
     // never trust the client's own derivation.
+    //
+    // [SPRINT-V3-P3 / M-01] The decimals used to convert body.minAmountOut into a human token
+    // amount MUST come from the chain, never from body.tokenOutDecimals: a client that inflates
+    // (or deflates) its claimed decimals shifts the computed USD value by a power of 10 and can
+    // make a genuinely-dust minAmountOut look economically meaningful (or vice versa) to this
+    // gate — the exact bypass the audit flagged. fetchErc20Decimals reads decimals() on-chain via
+    // RPC; a client value that disagrees is a malformed/malicious order, rejected outright (422),
+    // not silently corrected or merely warned about. If the on-chain read itself fails, the floor
+    // cannot be computed with any authority at all — fail closed exactly like the unpriceable
+    // branch below (never fall back to the untrusted client figure).
     if (isV3Order) {
       const dustFloorUsd = getDcaMinChunkUsd()
       const llamaChain = (() => {
         try { return getChainConfig(chainId).slug } catch { return 'ethereum' }
       })()
+
+      const onChainDecimals = await fetchErc20Decimals(body.tokenOut, chainId).catch(() => null)
+      if (onChainDecimals === null) {
+        return NextResponse.json(
+          {
+            error: 'Order value cannot be verified: could not read tokenOut decimals on-chain. Unpriceable v3 orders are blocked.',
+            unpriceable: true,
+          },
+          { status: 422 },
+        )
+      }
+      if (body.tokenOutDecimals !== undefined && body.tokenOutDecimals !== null && Number(body.tokenOutDecimals) !== onChainDecimals) {
+        return NextResponse.json(
+          { error: `tokenOutDecimals mismatch: client claimed ${body.tokenOutDecimals}, on-chain reports ${onChainDecimals}` },
+          { status: 422 },
+        )
+      }
+
       let minOutUsd: number | null = null
       try {
-        const dstDecimals = Number(body.tokenOutDecimals ?? 18)
         const [llama, link] = await Promise.all([
           fetchDefiLlamaPrice(body.tokenOut, llamaChain).catch(() => null),
           computeTokenAmountUsd(body.tokenOut, String(body.minAmountOut), chainId).catch(() => null),
         ])
-        const minOutFloat = Number(body.minAmountOut) / 10 ** dstDecimals
+        // [M-01] onChainDecimals — the RPC-verified value — not the client-supplied figure.
+        const minOutFloat = Number(body.minAmountOut) / 10 ** onChainDecimals
         const candidates = [
           llama && Number.isFinite(minOutFloat) ? minOutFloat * llama.price : null,
           link?.usd ?? null,
         ].filter((v): v is number => v != null && Number.isFinite(v) && v >= 0)
-        if (candidates.length > 0) minOutUsd = Math.max(...candidates)
+        // [M-01] min-combine: the floor gate must be the HARDEST of the two independent
+        // estimates to pass, not the easiest — max() let a manipulated/optimistic single leg
+        // wave a dust order through whenever the other leg happened to price it generously.
+        if (candidates.length > 0) minOutUsd = Math.min(...candidates)
       } catch {
         // Each leg already degrades to null individually; a wholesale failure leaves minOutUsd
         // null and the fail-CLOSED branch below fires.
