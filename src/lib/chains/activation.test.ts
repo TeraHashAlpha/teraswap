@@ -25,4 +25,11 @@ describe('chains/activation [P223]', () => {
     expect(getFeeIncompatibleSources(1)).toEqual(['0x', 'cowswap', 'bebop'])
     expect(getFeeIncompatibleSources(8453)).toEqual(['0x', 'cowswap', 'bebop'])
   })
+
+  it('[SPRINT-46-ARBITRUM-CONFIG] Arbitrum (42161) is coming-soon (feeCollector hard-null, dark launch)', () => {
+    expect(isChainActive(42161)).toBe(false)
+    expect(getChainStatus(42161)).toBe('coming-soon')
+    // Unlisted → falls back to the mainnet fee-incompatible set (existing unknown-chain behavior).
+    expect(getFeeIncompatibleSources(42161)).toEqual(['0x', 'cowswap', 'bebop'])
+  })
 })
