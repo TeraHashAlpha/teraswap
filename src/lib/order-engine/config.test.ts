@@ -33,6 +33,9 @@ import {
   MIN_ORDER_AMOUNT,
   DCA_TOTAL_PRESETS,
   DCA_INTERVAL_PRESETS,
+  ORDER_EXECUTOR_V3_BY_CHAIN,
+  getOrderExecutorV3,
+  getOrderExecutorV3Domain,
 } from './config'
 
 // Byte-identical, checksummed mainnet-behaviour constants (must match config.ts exactly).
@@ -236,5 +239,88 @@ describe('DCA presets [chore/dca-ux-tweaks]', () => {
 
   it('every interval is ≥ the server minimum (60s)', () => {
     for (const p of DCA_INTERVAL_PRESETS) expect(p.seconds).toBeGreaterThanOrEqual(60)
+  })
+})
+
+// ── [SPRINT-V3-P2] v3 config — fail-closed while unconfigured ──────────────────────────────
+describe('getOrderExecutorV3 — fail-closed while v3 is not deployed', () => {
+  it('mainnet (1) and Base (8453) are both null — v3 is not deployed anywhere yet', () => {
+    expect(getOrderExecutorV3(1)).toBeNull()
+    expect(getOrderExecutorV3(8453)).toBeNull()
+  })
+
+  it('ORDER_EXECUTOR_V3_BY_CHAIN has no non-null entries by default', () => {
+    expect(Object.values(ORDER_EXECUTOR_V3_BY_CHAIN).every((v) => v === null)).toBe(true)
+  })
+
+  it.each([0, 999999, -1, 42161])('unwired/unknown chain %i is also null', (chainId) => {
+    expect(getOrderExecutorV3(chainId)).toBeNull()
+  })
+
+  it('getOrderExecutorV3Domain THROWS while unconfigured — callers must check getOrderExecutorV3 first', () => {
+    expect(() => getOrderExecutorV3Domain(1)).toThrow(/No OrderExecutorV3 deployed on chain 1/)
+    expect(() => getOrderExecutorV3Domain(8453)).toThrow(/No OrderExecutorV3 deployed on chain 8453/)
+  })
+
+  it('v3 does not inherit v2 configuration — a wired v2 chain does NOT imply a wired v3 chain', () => {
+    // Mainnet + Base both have real v2 executors (asserted above), yet v3 stays null on both —
+    // "v3 enabled" must be an explicit address, never derived from v2's presence.
+    expect(getOrderExecutor(1)).not.toBeNull()
+    expect(getOrderExecutor(8453)).not.toBeNull()
+    expect(getOrderExecutorV3(1)).toBeNull()
+    expect(getOrderExecutorV3(8453)).toBeNull()
+  })
+})
+
+describe('getOrderExecutorV3Domain — once configured (env override)', () => {
+  const V3_MAINNET = '0x3333333333333333333333333333333333333333'
+  const V3_BASE = '0x4444444444444444444444444444444444444444'
+
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE
+    vi.resetModules()
+  })
+
+  it('resolves version "3" + the configured verifyingContract once an address is set', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    vi.resetModules()
+    const fresh = await import('./config')
+    expect(fresh.getOrderExecutorV3(1)).toBe(V3_MAINNET)
+    expect(fresh.getOrderExecutorV3Domain(1)).toEqual({
+      name: 'TeraSwapOrderExecutor',
+      version: '3',
+      chainId: 1,
+      verifyingContract: V3_MAINNET,
+    })
+    // Base is unaffected — configuring mainnet's v3 address doesn't enable Base.
+    expect(fresh.getOrderExecutorV3(8453)).toBeNull()
+  })
+
+  it('the v3 domain version ("3") differs from the v2 domain version ("2") on the same chain', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    vi.resetModules()
+    const fresh = await import('./config')
+    const v2Domain = fresh.getOrderExecutorDomain(1)
+    const v3Domain = fresh.getOrderExecutorV3Domain(1)
+    expect(v2Domain.version).toBe('2')
+    expect(v3Domain.version).toBe('3')
+    expect(v2Domain.verifyingContract).not.toBe(v3Domain.verifyingContract)
+  })
+
+  it('throws when the SAME v3 address is configured on two chains (config-typo guard)', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = V3_MAINNET
+    vi.resetModules()
+    await expect(import('./config')).rejects.toThrow(/the same v3 address is configured on two chains/)
+  })
+
+  it('accepts distinct addresses per chain without error', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = V3_BASE
+    vi.resetModules()
+    const fresh = await import('./config')
+    expect(fresh.getOrderExecutorV3(1)).toBe(V3_MAINNET)
+    expect(fresh.getOrderExecutorV3(8453)).toBe(V3_BASE)
   })
 })

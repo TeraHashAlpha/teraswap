@@ -5,9 +5,15 @@
  */
 
 export { ORDER_EXECUTOR_ABI } from './abi'
-export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT } from './config'
-export { OrderType, PriceCondition, ORDER_EIP712_TYPES } from './types'
+export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
+  // [SPRINT-V3-P2] v3 config — fail-closed while ORDER_EXECUTOR_V3_BY_CHAIN[chainId] is null.
+  ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3, getOrderExecutorV3Domain } from './config'
+export { OrderType, PriceCondition, ORDER_EIP712_TYPES,
+  // [SPRINT-V3-P2 / ADR-013 §1]
+  ORDER_V3_EIP712_TYPES, ORDER_V3_TYPE_STRING, MAX_ORDER_SLIPPAGE_BPS, DEFAULT_MAX_SLIPPAGE_BPS } from './types'
 export type { OnChainOrder, AutonomousOrder, AutonomousOrderStatus, CreateOrderConfig, OrderEngineEvent } from './types'
+// [SPRINT-V3-P2] Pure absolute-min derivation (signing-side floor, ADR-013 §1 I-01/L-01 closure).
+export { deriveAbsoluteMinAmountOut, computeReferenceExpectedOutTs } from './v3-min-derivation'
 export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, subscribeToOrders } from './supabase'
 export type { OrderRow } from './supabase'
 // [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.
