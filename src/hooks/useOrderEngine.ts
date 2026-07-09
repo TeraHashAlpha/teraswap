@@ -839,6 +839,10 @@ export function useOrderEngine() {
         tokenOutSymbol: config.tokenOut.symbol,
         tokenInDecimals,
         tokenOutDecimals: config.tokenOut.decimals,
+        // [SPRINT-V3-P2] The route uses THIS top-level field (not orderData.maxSlippageBps) to
+        // decide the v2/v3 verification path — must match order.maxSlippageBps exactly (the M-07
+        // cross-check above already asserts orderData.maxSlippageBps === this value).
+        maxSlippageBps: order.maxSlippageBps,
       })
 
       const orderHash = row?.order_hash ?? computedHash

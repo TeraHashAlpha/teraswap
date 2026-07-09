@@ -6,8 +6,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
-import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
-import { ORDER_EIP712_TYPES } from '@/lib/order-engine/types'
+import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT,
+  // [SPRINT-V3-P2] v3 — fail-closed while getOrderExecutorV3(chainId) is null.
+  getOrderExecutorV3, getOrderExecutorV3Domain } from '@/lib/order-engine/config'
+import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
+import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 import {
   verifyOrdersReadAccess,
   PUBLIC_ORDER_STATUSES,
@@ -18,6 +21,9 @@ import { getDcaFreezeState } from '@/lib/dca-freeze'
 import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { NATIVE_ETH } from '@/lib/constants'
+import { fetchDefiLlamaPrice } from '@/lib/defillama'
+import { computeTokenAmountUsd } from '@/lib/chainlink'
+import { getChainConfig } from '@/lib/chains/registry'
 
 // [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
 const CONDITIONAL_ORDER_TYPES = new Set(['limit', 'stop_loss', 'dca'])
@@ -201,22 +207,49 @@ export async function POST(req: NextRequest) {
     if (typeof chainId !== 'number' || !Number.isInteger(chainId)) {
       return NextResponse.json({ error: 'Invalid chainId' }, { status: 400 })
     }
-    const executorAddress = getOrderExecutor(chainId)
+
+    // [SPRINT-V3-P2 / ADR-013 §1] A v3 order is one the client signed with maxSlippageBps set
+    // (the frontend only sets it once getOrderExecutorV3(chainId) is configured — see
+    // useOrderEngine.ts). Server-side detection is INDEPENDENT of client intent: presence of a
+    // numeric top-level body.maxSlippageBps is the sole discriminator, and everything downstream
+    // (executor resolution, domain, typed-data schema, extra validation) branches on it. Never
+    // trust the client's claim that this is/isn't v3 beyond this one typed field — the recovered
+    // signer check below is what actually proves the order was signed under the claimed schema.
+    const isV3Order = typeof body.maxSlippageBps === 'number'
+
+    if (isV3Order) {
+      // [ADR-013 §1/N3] Mirrors the contract's immutable MAX_ORDER_SLIPPAGE_BPS cap — reject
+      // absent/zero/out-of-range before any signature work (closes I-01 off-chain).
+      if (!Number.isFinite(body.maxSlippageBps) || body.maxSlippageBps <= 0 || body.maxSlippageBps > MAX_ORDER_SLIPPAGE_BPS) {
+        return NextResponse.json(
+          { error: `maxSlippageBps must be > 0 and <= ${MAX_ORDER_SLIPPAGE_BPS}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // [SPRINT-V3-P2] Executor resolution branches on isV3Order — a v3 order on a chain with no
+    // v3 executor configured is rejected here, fail-closed, exactly like the v2 unwired-chain
+    // case below. A v2 order is completely unaffected (identical to before this sprint).
+    const executorAddress = isV3Order ? getOrderExecutorV3(chainId) : getOrderExecutor(chainId)
     if (!executorAddress) {
       return NextResponse.json(
-        { error: `Conditional orders are not yet available on chain ${chainId}` },
+        { error: `${isV3Order ? 'v3 c' : 'C'}onditional orders are not yet available on chain ${chainId}` },
         { status: 400 },
       )
     }
     {
       try {
-        const domain = getOrderExecutorDomain(chainId)
+        const domain = isV3Order ? getOrderExecutorV3Domain(chainId) : getOrderExecutorDomain(chainId)
         const orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
         const conditionEnum = body.priceCondition === 'above' ? 0 : 1
 
         const message = {
           owner: body.wallet, tokenIn: body.tokenIn, tokenOut: body.tokenOut,
           amountIn: body.amountIn, minAmountOut: body.minAmountOut,
+          // [ADR-013 §1] Only present in the v3 schema — omitted entirely for a v2 message so the
+          // v2 typed-data encoding stays byte-identical to before this sprint.
+          ...(isV3Order ? { maxSlippageBps: body.maxSlippageBps } : {}),
           orderType: orderTypeEnum, condition: conditionEnum,
           targetPrice: body.targetPrice, priceFeed: body.priceFeed,
           expiry: body.expiry, nonce: body.nonce, router: body.router,
@@ -226,7 +259,7 @@ export async function POST(req: NextRequest) {
 
         const recovered = await recoverTypedDataAddress({
           domain,
-          types: ORDER_EIP712_TYPES,
+          types: isV3Order ? ORDER_V3_EIP712_TYPES : ORDER_EIP712_TYPES,
           primaryType: 'Order' as const,
           message,
           signature: body.signature as `0x${string}`,
@@ -250,9 +283,62 @@ export async function POST(req: NextRequest) {
       if (String(od.amountIn) !== String(body.amountIn)) mismatchFields.push('amountIn')
       if (String(od.minAmountOut) !== String(body.minAmountOut)) mismatchFields.push('minAmountOut')
       if (od.router?.toLowerCase() !== body.router?.toLowerCase()) mismatchFields.push('router')
+      // [SPRINT-V3-P2] Only checked for a v3 order — od.maxSlippageBps is absent entirely on v2.
+      if (isV3Order && Number(od.maxSlippageBps) !== Number(body.maxSlippageBps)) mismatchFields.push('maxSlippageBps')
       if (mismatchFields.length > 0) {
         return NextResponse.json(
           { error: `order_data mismatch on fields: ${mismatchFields.join(', ')}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // [SPRINT-V3-P2 / ADR-013 §1, I-01+L-01 off-chain closure] USD dust floor for v3 orders only
+    // — v2's minAmountOut is meaningless (always '1', the on-chain clamp made it a no-op), so
+    // there is nothing to dust-check there. A v3 order's minAmountOut is the SIGNED absolute
+    // floor the contract enforces verbatim on no-feed pairs — a dust-sized signed min is exactly
+    // as unprotective as the old 1-wei clamp, so reject it here rather than let it reach the
+    // contract. Prices the tokenOut leg (DefiLlama + server Chainlink, same plumbing /api/swap's
+    // >$10k gate uses); unpriceable on BOTH sources fails CLOSED (mirrors that gate's posture) —
+    // never trust the client's own derivation.
+    if (isV3Order) {
+      const dustFloorUsd = getDcaMinChunkUsd()
+      const llamaChain = (() => {
+        try { return getChainConfig(chainId).slug } catch { return 'ethereum' }
+      })()
+      let minOutUsd: number | null = null
+      try {
+        const dstDecimals = Number(body.tokenOutDecimals ?? 18)
+        const [llama, link] = await Promise.all([
+          fetchDefiLlamaPrice(body.tokenOut, llamaChain).catch(() => null),
+          computeTokenAmountUsd(body.tokenOut, String(body.minAmountOut), chainId).catch(() => null),
+        ])
+        const minOutFloat = Number(body.minAmountOut) / 10 ** dstDecimals
+        const candidates = [
+          llama && Number.isFinite(minOutFloat) ? minOutFloat * llama.price : null,
+          link?.usd ?? null,
+        ].filter((v): v is number => v != null && Number.isFinite(v) && v >= 0)
+        if (candidates.length > 0) minOutUsd = Math.max(...candidates)
+      } catch {
+        // Each leg already degrades to null individually; a wholesale failure leaves minOutUsd
+        // null and the fail-CLOSED branch below fires.
+      }
+
+      if (minOutUsd === null) {
+        return NextResponse.json(
+          {
+            error: 'Order value cannot be verified: no price coverage (DefiLlama or Chainlink) for the output token. Unpriceable v3 orders are blocked.',
+            unpriceable: true,
+          },
+          { status: 422 },
+        )
+      }
+      if (minOutUsd < dustFloorUsd) {
+        return NextResponse.json(
+          {
+            error: `minAmountOut is below the $${dustFloorUsd} minimum ($${minOutUsd.toFixed(4)}) — the signed floor must be economically meaningful, not dust.`,
+            minimumUsd: dustFloorUsd,
+          },
           { status: 400 },
         )
       }

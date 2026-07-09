@@ -93,6 +93,9 @@ export async function createOrderInSupabase(params: {
   tokenOutSymbol: string
   tokenInDecimals: number
   tokenOutDecimals: number
+  // [SPRINT-V3-P2 / ADR-013 §1] Present ONLY for a v3-signed order — the server uses this exact
+  // top-level field (not orderData.maxSlippageBps) to decide the v2/v3 verification path.
+  maxSlippageBps?: number
 }): Promise<OrderRow | null> {
   // Submitting order via API
 
@@ -124,6 +127,8 @@ export async function createOrderInSupabase(params: {
         orderData: params.orderData,
         tokenInDecimals: params.tokenInDecimals,
         tokenOutDecimals: params.tokenOutDecimals,
+        // [SPRINT-V3-P2] Omitted entirely (undefined ⇒ dropped by JSON.stringify) for a v2 order.
+        ...(params.maxSlippageBps !== undefined ? { maxSlippageBps: params.maxSlippageBps } : {}),
       }),
     })
 
