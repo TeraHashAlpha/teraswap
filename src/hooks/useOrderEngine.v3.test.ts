@@ -195,8 +195,31 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
     expect('maxSlippageBps' in insertArg.orderData).toBe(false)
   })
 
-  it('cancelOrder REFUSES a v3 order instead of sending it through the v2 cancel path', async () => {
-    mockFetchUserOrders.mockResolvedValue([makeRow({ order_data: { maxSlippageBps: 300 } })])
+  // [SPRINT-V3-P3] v3 cancel is now wired — a v3 order on a chain WHERE v3 IS configured
+  // freezes for review (and confirms) exactly like a v2 order, targeting the v3 executor+ABI.
+  // The full order_data shape mirrors what useOrderEngine.confirmOrder actually persists for a
+  // v3 order (see the "persists maxSlippageBps..." test above).
+  const V3_ORDER_DATA = {
+    owner: ADDRESS,
+    tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    amountIn: '1000000000000000000',
+    minAmountOut: '2900000000',
+    maxSlippageBps: 300,
+    orderType: 2, // DCA
+    condition: 0,
+    targetPrice: '0',
+    priceFeed: '0x0000000000000000000000000000000000000000',
+    expiry: '9999999999',
+    nonce: '0',
+    router: '0x111111125421ca6dc452d289314280a0f8842a65',
+    routerDataHash: '0x' + '00'.repeat(32),
+    dcaInterval: '3600',
+    dcaTotal: '3',
+  }
+
+  it('cancelOrder freezes a v3 order for review when v3 IS configured on this chain', async () => {
+    mockFetchUserOrders.mockResolvedValue([makeRow({ order_data: V3_ORDER_DATA })])
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
@@ -205,12 +228,30 @@ describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
     expect(order).toBeDefined()
     await act(async () => { await result.current.cancelOrder(order.id) })
 
-    // No on-chain write, no pending-cancel review was ever frozen for it.
-    expect(mockWriteContractAsync).not.toHaveBeenCalled()
-    expect(result.current.pendingCancel).toBeNull()
-    expect(result.current.latestEvent).toEqual(
-      expect.objectContaining({ type: 'order_error', orderId: order.id }),
-    )
+    expect(mockWriteContractAsync).not.toHaveBeenCalled() // Phase A only freezes, no tx yet
+    expect(result.current.pendingCancel).not.toBeNull()
+    if (result.current.pendingCancel?.action === 'cancel') {
+      expect(result.current.pendingCancel.isV3).toBe(true)
+      expect(result.current.pendingCancel.orderStruct.maxSlippageBps).toBe(300)
+    } else {
+      throw new Error('expected a cancel review')
+    }
+  })
+
+  it('confirmCancel sends a v3 cancel to the V3 executor + ABI, never v2', async () => {
+    mockFetchUserOrders.mockResolvedValue([makeRow({ order_data: V3_ORDER_DATA })])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    const order = result.current.orders[0]
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    await act(async () => { await result.current.confirmCancel() })
+
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
+    const callArg = mockWriteContractAsync.mock.calls[0][0] as { address: string; functionName: string }
+    expect(callArg.address).toBe(V3_ADDRESS)
+    expect(callArg.functionName).toBe('cancelOrder')
   })
 
   it('cancelAllOrders excludes v3 orders from the affected set (v2-only invalidateNonces)', async () => {

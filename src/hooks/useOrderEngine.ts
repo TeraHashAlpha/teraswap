@@ -38,6 +38,8 @@ import {
   getOrderExecutorV3,
   getOrderExecutorV3Domain,
   ORDER_V3_EIP712_TYPES,
+  // [SPRINT-V3-P3] v3 cancel/invalidate — fail-closed while getOrderExecutorV3(chainId) is null.
+  ORDER_EXECUTOR_V3_ABI,
 } from '@/lib/order-engine'
 import type {
   OnChainOrder,
@@ -328,6 +330,9 @@ export type PendingCancelReview =
       orderId: string
       order: AutonomousOrder
       orderStruct: OnChainOrder
+      // [SPRINT-V3-P3] Which executor + ABI confirmCancel must target — computed once at freeze
+      // time from orderStruct.maxSlippageBps, never re-derived at confirm time.
+      isV3: boolean
       chainId: number
       account: `0x${string}`
     }
@@ -886,19 +891,18 @@ export function useOrderEngine() {
     const order = orders.find(o => o.id === orderId)
     if (!order) return
 
-    // [SPRINT-V3-P2] v3 cancel/invalidate wiring is OUT OF SCOPE for this sprint (flagged in
-    // FEEDBACK — deferred to a follow-up). This hook's on-chain cancelOrder/invalidateNonces calls
-    // still target the v2 executor+ABI unconditionally below; sending a v3 order's struct there
-    // would compute the WRONG hash (different typehash) and either no-op against v2 or, worse,
-    // leave the Supabase row marked cancelled while the real v3 order stays live on-chain. Refuse
-    // explicitly rather than silently mis-cancelling. Unreachable today (v3 is fail-closed
-    // everywhere, so no v3 order can exist), but must not regress once v3 is deployed without
-    // this wiring being extended first.
-    if (order.order.maxSlippageBps !== undefined) {
+    // [SPRINT-V3-P2 -> SPRINT-V3-P3] v3 cancel is now wired (below), targeting the v3
+    // executor+ABI so the on-chain cancelOrder() hash matches what was actually signed. The
+    // refuse-guard STAYS for a chain whose v3 address is null: without a real v3 contract to
+    // send the tx to, sending a v3 order's struct to v2's cancelOrder would compute the WRONG
+    // hash (different typehash) and either no-op or, worse, leave the Supabase row marked
+    // cancelled while the real (elsewhere-configured) v3 order stays live on-chain.
+    const isV3 = order.order.maxSlippageBps !== undefined
+    if (isV3 && !orderExecutorV3) {
       setLatestEvent({
         type: 'order_error',
         orderId,
-        error: 'Cancelling v3 orders is not yet supported in this build — contact support.',
+        error: `v3 conditional orders are not yet available on chain ${chainId} — this order cannot be cancelled here.`,
       })
       return
     }
@@ -914,6 +918,9 @@ export function useOrderEngine() {
         tokenOut: o.tokenOut,
         amountIn: BigInt(o.amountIn.toString()),
         minAmountOut: BigInt(o.minAmountOut.toString()),
+        // [SPRINT-V3-P3] Must round-trip EXACTLY what was signed — cancelOrder() hashes the full
+        // struct, so a v3 order missing this field would hash to something the contract never saw.
+        ...(isV3 ? { maxSlippageBps: Number(o.maxSlippageBps) } : {}),
         orderType: Number(o.orderType),
         condition: Number(o.condition),
         targetPrice: BigInt(o.targetPrice.toString()),
@@ -929,12 +936,12 @@ export function useOrderEngine() {
       // Re-calling cancelOrder overwrites the frozen plan → re-review. chainId is the ACTIVE
       // chain (chain-agnostic — ready for the Base order engine), captured for the confirm-time
       // re-check.
-      setPendingCancel({ action: 'cancel', orderId, order, orderStruct, chainId, account: address })
+      setPendingCancel({ action: 'cancel', orderId, order, orderStruct, isV3, chainId, account: address })
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel failed'
       setLatestEvent({ type: 'order_error', orderId, error: errorMsg })
     }
-  }, [address, orders, chainId])
+  }, [address, orders, chainId, orderExecutorV3])
 
   // ── [CANCEL-REVIEW] Cancel ALL = Phase A: FREEZE the invalidate plan for review (NO tx) ──
   const cancelAllOrders = useCallback(async () => {
@@ -978,13 +985,23 @@ export function useOrderEngine() {
     }
 
     if (p.action === 'cancel') {
-      const { orderId, order, orderStruct } = p
+      const { orderId, order, orderStruct, isV3 } = p
+      // [SPRINT-V3-P3] Re-check at confirm time (chain may have changed since the freeze —
+      // the [9R defense] chainId guard above already covers the common case, this is
+      // belt-and-suspenders for a v3 order specifically). Never send a v3 struct to v2's
+      // cancelOrder — different typehash, would either no-op or hash-mismatch.
+      if (isV3 && !orderExecutorV3) {
+        setLatestEvent({ type: 'order_error', orderId, error: `v3 conditional orders are not yet available on chain ${chainId}.` })
+        return
+      }
+      const cancelExecAddress = isV3 ? orderExecutorV3! : orderExecutor
+      const cancelExecAbi = isV3 ? ORDER_EXECUTOR_V3_ABI : ORDER_EXECUTOR_ABI
       try {
         // Cancel on-chain — contract verifies msg.sender == order.owner, then marks hash as
         // cancelled. Sends the FROZEN struct the user just reviewed, 1:1.
         await writeContractAsync({
-          address: orderExecutor,
-          abi: ORDER_EXECUTOR_ABI,
+          address: cancelExecAddress,
+          abi: cancelExecAbi,
           functionName: 'cancelOrder',
           args: [orderStruct],
         })
@@ -1060,7 +1077,7 @@ export function useOrderEngine() {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel all failed'
       setLatestEvent({ type: 'order_error', orderId: 'all', error: errorMsg })
     }
-  }, [pendingCancel, address, chainId, orderExecutor, writeContractAsync, signTypedDataAsync])
+  }, [pendingCancel, address, chainId, orderExecutor, orderExecutorV3, writeContractAsync, signTypedDataAsync])
 
   // [CANCEL-REVIEW] Dismiss a pending cancel review without executing (modal "Keep order(s)").
   const clearPendingCancel = useCallback(() => setPendingCancel(null), [])

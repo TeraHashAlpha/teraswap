@@ -194,3 +194,60 @@ export const ORDER_EXECUTOR_ABI = [
     type: 'event',
   },
 ] as const
+
+/**
+ * [SPRINT-V3-P3] TeraSwapOrderExecutorV3 — ABI subset for the cancel/invalidate write path
+ * ONLY (cancelOrder, invalidateUnorderedNonces). The v3 Order tuple mirrors
+ * TeraSwapOrderExecutorV3.sol's struct field-for-field (audited SHA 954c415): identical to v2's
+ * tuple with `maxSlippageBps` (uint16) inserted right after `minAmountOut`. No read/execute
+ * functions here — signing (ORDER_V3_EIP712_TYPES) and execution (keeper's
+ * executor-routing.js/executor.js) already have their own v3 ABIs; this one exists purely so the
+ * frontend can cancel a v3 order without touching the v2 ABI/contract.
+ */
+export const ORDER_EXECUTOR_V3_ABI = [
+  {
+    inputs: [
+      { components: [
+        { name: 'owner', type: 'address' },
+        { name: 'tokenIn', type: 'address' },
+        { name: 'tokenOut', type: 'address' },
+        { name: 'amountIn', type: 'uint256' },
+        { name: 'minAmountOut', type: 'uint256' },
+        { name: 'maxSlippageBps', type: 'uint16' },
+        { name: 'orderType', type: 'uint8' },
+        { name: 'condition', type: 'uint8' },
+        { name: 'targetPrice', type: 'uint256' },
+        { name: 'priceFeed', type: 'address' },
+        { name: 'expiry', type: 'uint256' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'router', type: 'address' },
+        { name: 'routerDataHash', type: 'bytes32' },
+        { name: 'dcaInterval', type: 'uint256' },
+        { name: 'dcaTotal', type: 'uint256' },
+      ], name: 'order', type: 'tuple' },
+    ],
+    name: 'cancelOrder',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'wordPos', type: 'uint256' },
+      { name: 'mask', type: 'uint256' },
+    ],
+    name: 'invalidateUnorderedNonces',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'orderHash', type: 'bytes32' },
+      { indexed: true, name: 'owner', type: 'address' },
+    ],
+    name: 'OrderCancelled',
+    type: 'event',
+  },
+] as const
