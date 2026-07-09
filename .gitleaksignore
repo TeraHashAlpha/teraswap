@@ -90,3 +90,14 @@ ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-a
 # annotations; these fingerprints absolve the pre-annotation historical commit.
 4d30d14629ded572b9c8428beed3de97aafa00f1:src/lib/order-engine/types.test.ts:generic-api-key:41
 4d30d14629ded572b9c8428beed3de97aafa00f1:src/lib/order-engine/types.test.ts:generic-api-key:42
+
+# [SPRINT-V3-P2] src/hooks/useOrderEngine.v3.test.ts — same PUBLIC mainnet WETH/USDC contract
+# addresses as the types.test.ts fixture above (order-hash test fixture, order_data.token_in/
+# token_out field names trip the same generic-api-key keyword heuristic). Not a secret.
+7daed92d5a875fde8109d903502c22bf243462c8:src/hooks/useOrderEngine.v3.test.ts:generic-api-key:88
+7daed92d5a875fde8109d903502c22bf243462c8:src/hooks/useOrderEngine.v3.test.ts:generic-api-key:89
+
+# [SPRINT-V3-P2] docs/Prompts/SPRINT-V3-P2-SIGNING-KEEPER.md — spec prose "dust/unpriceable/cap"
+# (slash-separated mixed-case phrase) trips the generic-api-key entropy heuristic. Not a secret;
+# verbatim sprint spec text committed per the sprint's own convention (Architect prompt archive).
+689e70f40a1761ff86e0db119c56b152a4e76c48:docs/Prompts/SPRINT-V3-P2-SIGNING-KEEPER.md:generic-api-key:44
