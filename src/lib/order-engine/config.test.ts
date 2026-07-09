@@ -62,6 +62,15 @@ describe('getOrderExecutor — fail-closed on unwired chains', () => {
     expect(getOrderExecutor(42161)).toBeNull()
   })
 
+  // [SPRINT-46-ARBITRUM-CONFIG] 42161 stopped being a purely hypothetical "unwired chain"
+  // fixture the moment CHAIN_CONFIGS[42161] was registered (chains/registry.ts) — it is now a
+  // REAL, resolvable ChainConfig. This pins that registering the chain-config layer did NOT
+  // also (accidentally or otherwise) wire an OrderExecutor: ORDER_EXECUTOR_BY_CHAIN has no
+  // 42161 key, so the config-only registry change carries zero order/DCA surface with it.
+  it('registering CHAIN_CONFIGS[42161] did not wire an OrderExecutor — no key in the map', () => {
+    expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_BY_CHAIN, 42161)).toBe(false)
+  })
+
   // Edge chainIds: 0 (falsy — must not be confused with "no key"), a huge unknown id,
   // and a negative id. All are unwired and must fail-closed to null.
   it.each([0, 999999, -1])('chain %i is unwired → null', (chainId) => {

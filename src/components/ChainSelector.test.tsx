@@ -28,3 +28,21 @@ describe('[9Y] ChainSelector — chain logos', () => {
     expect(document.querySelector('img')).toBeNull()
   })
 })
+
+describe('[SPRINT-46-ARBITRUM-CONFIG] ChainSelector — Arbitrum registered dark (feeCollector null)', () => {
+  // [CORRECTION] The dark-launch premise is NOT "absent from the chain selector" — this
+  // component lists every registry-driven chain unconditionally (getSupportedChainIds().map)
+  // and shows a "Soon" badge for any feeCollector === null entry. That IS the existing Base
+  // pre-activation pattern this sprint mirrors exactly; Arbitrum appearing with a "Soon" badge
+  // here is expected, unchanged behavior — not a UI activation. Quotes/swaps stay blocked
+  // downstream by isChainActive(42161) === false regardless of what this list renders.
+  it('Arbitrum appears with a "Soon" badge (generic icon, no crash) — same pattern as Base', () => {
+    renderWithProviders(<ChainSelector />)
+    fireEvent.click(screen.getByLabelText(/network/i))
+    expect(screen.getByTestId('chain-icon-42161')).toBeInTheDocument()
+    const options = screen.getAllByRole('option')
+    const arbitrumOption = options.find((o) => /arbitrum/i.test(o.textContent ?? ''))
+    expect(arbitrumOption).toBeDefined()
+    expect(arbitrumOption?.textContent).toMatch(/soon/i)
+  })
+})

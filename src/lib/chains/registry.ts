@@ -94,9 +94,54 @@ const BASE: ChainConfig = {
   },
 }
 
+// [SPRINT-46-ARBITRUM-CONFIG] Arbitrum One — CONFIG-ONLY, SHIPS DARK. Every address/feed/slug
+// below is sourced verbatim from docs/Reports/ARBITRUM-READINESS.md (the recon report, on main)
+// — none are re-derived here. `contracts.feeCollector` is hard-null (no env override) so this
+// chain is fail-closed exactly like Base pre-activation: isChainActive(42161) === false →
+// "Coming Soon" / not offered on the chain selector, no quotes servable, no orders/DCA surface
+// (order-engine's ORDER_EXECUTOR_BY_CHAIN has no 42161 entry — see order-engine/config.test.ts).
+// Flip live ONLY after the FeeCollector deploy + activation-sprint checklist, same as Base.
+const ARBITRUM: ChainConfig = {
+  chainId: 42161,
+  name: 'Arbitrum One',
+  slug: 'arbitrum',
+  nativeCurrency: {
+    symbol: 'ETH',
+    decimals: 18,
+    // Arbitrum-native WETH (report-verified on-chain read).
+    wrappedAddress: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+  },
+  contracts: {
+    // Deliberately hard-null (no env override, unlike Base's env-driven slot) — no Arbitrum
+    // FeeCollector is deployed yet. Setting this requires a real contract deploy first.
+    feeCollector: null,
+    permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3', // same CREATE2 address as mainnet/Base
+    cowVaultRelayer: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110', // cross-chain deterministic
+  },
+  rpc: {
+    // env var name reserved; empty default keeps Arbitrum inactive until wired up (Base pattern).
+    primary: process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || '',
+    fallbacks: ['https://arb1.arbitrum.io/rpc'],
+  },
+  blockExplorer: 'https://arbiscan.io',
+  gasModel: 'arbitrum',
+  // Report-verified: 0xfdB631... answers latestRoundData (0 = up), 60s heartbeat.
+  sequencerUptimeFeed: '0xFdB631f5eE196f5C5AA41F952B0282f59B2Eff9E',
+  tokens: {
+    WETH: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    // [CURATION] USDC NATIVE only — USDC.e (bridged, 0xFF970A61A0…B5F86) deliberately excluded
+    // from v1 per the report's flag. Do not add USDC.e without an explicit Architect decision.
+    USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    USDT: '0xFd086b2F39B6b86fEe29f27E8f6be40e7F2E7D2b',
+    DAI: '0xda10009754f1dF9137293aed5d6DD0dB0Bb075e9',
+    WBTC: '0x2F2a2440D2f12C0cDdE18Fe9AEf0cc0d6cF3FC30',
+  },
+}
+
 export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1: ETHEREUM_MAINNET,
   8453: BASE,
+  42161: ARBITRUM,
 }
 
 /** Resolve a chain config. Throws on an unsupported chain. */

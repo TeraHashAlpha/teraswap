@@ -37,6 +37,13 @@ const UNISWAP_V3_BY_CHAIN: Record<number, UniswapV3Contracts> = {
     // Basescan: "Uniswap V3: Swap Router02" (also whitelisted in chains/routers.ts)
     swapRouter02: '0x2626664c2603336E57B271c5C0b26F421741e481',
   },
+  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum One (42161) — addresses sourced verbatim from
+  // docs/Reports/ARBITRUM-READINESS.md. Inert while contracts.feeCollector is null (dark launch).
+  42161: {
+    quoterV2: '0xb27308F9f90D7314fB6D5dB7159750d37D2c3cEe',
+    factory: '0x1f98431C8Ad98523631ae4a59F267346ea31564E',
+    swapRouter02: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  },
 }
 
 /** Resolve the Uniswap V3 contracts for a chain, or `null` if V3 isn't configured there. */

@@ -86,6 +86,19 @@ describe('dca-launch — isDcaLive (Base-only gate)', () => {
     expect(isDcaLive(42161)).toBe(false)
   })
 
+  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum went from a purely hypothetical "unwired chain" test
+  // fixture to a REAL registered ChainConfig (chains/registry.ts CHAIN_CONFIGS[42161]) — this
+  // pins the BASE_CHAIN_ID pin still excludes it even in the most favorable mock state (chain
+  // reports active + an executor mock WOULD resolve non-null for it). The isDcaLive() gate
+  // itself received ZERO code changes this sprint; this proves the pin alone is sufficient.
+  it('flag ON + Arbitrum reported active + a (mocked) executor exists ⇒ still NOT live — the BASE_CHAIN_ID pin alone blocks it', () => {
+    process.env.NEXT_PUBLIC_DCA_ENABLED = 'true'
+    isChainActiveMock.mockReturnValue(true)
+    getOrderExecutorMock.mockReturnValue('0x000000000000000000000000000000000000dEaD')
+    expect(isDcaLive(42161)).toBe(false)
+    expect(BASE_CHAIN_ID).toBe(8453) // sanity: the pin target never silently widened to 42161
+  })
+
   it('flag ON + on Base but Base inactive (feeCollector unset) ⇒ not live', () => {
     process.env.NEXT_PUBLIC_DCA_ENABLED = 'true'
     isChainActiveMock.mockReturnValue(false)

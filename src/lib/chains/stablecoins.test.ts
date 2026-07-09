@@ -37,6 +37,11 @@ describe('USD_STABLECOINS_BY_CHAIN — canonical per-chain membership', () => {
     expect([...USD_STABLECOINS_BY_CHAIN[8453]].sort()).toEqual([...BASE_CANON].sort())
   })
 
+  it('[SPRINT-46-ARBITRUM-CONFIG] Arbitrum (42161) is USDC/USDT/DAI — no USDC.e (curation decision)', () => {
+    expect([...USD_STABLECOINS_BY_CHAIN[42161]].sort()).toEqual(['DAI', 'USDC', 'USDT'])
+    expect(USD_STABLECOINS_BY_CHAIN[42161]).not.toContain('USDC.e')
+  })
+
   it('has no duplicate symbols in any chain set', () => {
     for (const [chainId, set] of Object.entries(USD_STABLECOINS_BY_CHAIN)) {
       expect(new Set(set).size, `chain ${chainId}`).toBe(set.length)
