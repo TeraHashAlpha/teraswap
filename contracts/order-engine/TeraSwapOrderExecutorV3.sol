@@ -163,11 +163,11 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     //  STATE
     // ══════════════════════════════════════════════════════════════════
 
-    /// @notice Per-user nonce (increments after each non-DCA execution)
-    mapping(address => uint256) public nonces;
-
-    /// @notice [H-03] Mass nonce invalidation — all orders with nonce < this value are void
-    mapping(address => uint256) public invalidatedNonces;
+    /// @notice [ADR-013 §3/P1b] Permit2-style unordered nonce bitmap: owner => wordPos => 256-bit
+    ///         word. Each non-DCA order consumes one bit; any order is independently executable and
+    ///         invalidatable in any order, so a never-triggering low-nonce order can no longer block
+    ///         a higher-nonce stop-loss (the sequential-nonce lockout is gone).
+    mapping(address => mapping(uint256 => uint256)) public nonceBitmap;
 
     /// @notice Cancelled order hashes
     mapping(bytes32 => bool) public cancelledOrders;
@@ -244,7 +244,8 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     );
 
     event OrderCancelled(bytes32 indexed orderHash, address indexed owner);
-    event NoncesInvalidated(address indexed owner, uint256 newNonce);
+    // [ADR-013 §3] Permit2-style mass-cancel: OR `mask` into the owner's bitmap word.
+    event UnorderedNonceInvalidation(address indexed owner, uint256 wordPos, uint256 mask);
     event RouterWhitelisted(address indexed router, bool status);
     event TimelockQueued(bytes32 indexed actionId, bytes32 actionHash, uint256 readyAt);
     // [Audit L-02] Enhanced with action type and data for monitoring
@@ -270,8 +271,7 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     error InvalidSignature();
     error OrderExpired();
     error OrderCancelledError();
-    error OrderAlreadyExecuted();
-    error NonceBelowInvalidation();
+    error InvalidNonce();           // [ADR-013 §3] bitmap nonce already used / invalidated
     error PriceConditionNotMet();
     error StalePriceFeed();
     error IncompleteRound();
@@ -297,7 +297,6 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     error TimelockExpired();
     error OrderTooSmall();
     error NotExecutor();
-    error NonceTooHigh();
     error DCAChunkTooSmall();
     error RouterDataMismatch();
     error RouterDataRequired();     // [ADR-013 §2/P1c] non-DCA order carried ZeroHash routerDataHash
@@ -372,14 +371,10 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         // 5. [H-01] Check router is whitelisted
         if (!whitelistedRouters[order.router]) return (false, "Router not whitelisted");
 
-        // 6. [H-03] Check nonce invalidation
-        if (order.nonce < invalidatedNonces[order.owner]) {
-            return (false, "Nonce invalidated");
-        }
-
-        // 7. Check nonce (non-DCA orders: single execution)
-        if (order.orderType != OrderType.DCA && nonces[order.owner] != order.nonce) {
-            return (false, "Nonce mismatch");
+        // 6. [ADR-013 §3] Check the unordered bitmap nonce (non-DCA orders: single execution).
+        //    DCA orders don't consume the bitmap — they gate on dcaExecutions (checked below).
+        if (order.orderType != OrderType.DCA && isNonceUsed(order.owner, order.nonce)) {
+            return (false, "Nonce used");
         }
 
         // 8. DCA checks
@@ -474,9 +469,6 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         // output constraint, recipient is always order.owner, nonReentrant blocks compound attacks,
         // and the router must be whitelisted.
 
-        // ── [H-03] Check nonce invalidation ──
-        if (order.nonce < invalidatedNonces[order.owner]) revert NonceBelowInvalidation();
-
         // ── Nonce / DCA checks ──
         uint256 executeAmount;
 
@@ -501,7 +493,9 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
                 executeAmount = order.amountIn - previouslyExecuted;
             }
         } else {
-            if (nonces[order.owner] != order.nonce) revert OrderAlreadyExecuted();
+            // [ADR-013 §3] Consume the unordered nonce BEFORE any external call (CEI). Reverts
+            // InvalidNonce if the bit was already set (replayed order or user-invalidated).
+            _useUnorderedNonce(order.owner, order.nonce);
             executeAmount = order.amountIn;
         }
 
@@ -579,12 +573,11 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         uint256 tokenOutBalance = IERC20(order.tokenOut).balanceOf(address(this)) - tokenOutBefore;
         uint256 ethReceived = address(this).balance - ethBefore;
 
-        // ── [Audit CEI] Update state BEFORE external calls (Checks-Effects-Interactions) ──
+        // ── [Audit CEI] Update DCA counters BEFORE output delivery. The non-DCA nonce was already
+        //    consumed above (bitmap), before the swap. ──
         if (order.orderType == OrderType.DCA) {
             dcaExecutions[orderHash]++;
             dcaLastExecution[orderHash] = block.timestamp;
-        } else {
-            nonces[order.owner]++;
         }
 
         // ── [ADR-013 §1] Verify output meets the floor; deliver to order.owner (R1 unchanged) ──
@@ -641,18 +634,36 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         emit OrderCancelled(orderHash, msg.sender);
     }
 
-    /// @notice [H-03] Invalidate all orders with nonce < newNonce (mass cancel)
-    function invalidateNonces(uint256 newNonce) external {
-        require(newNonce > invalidatedNonces[msg.sender], "Must increase");
-        // [Audit M-04] Upper bound: cannot jump more than 1000 nonces ahead
-        if (newNonce > nonces[msg.sender] + 1000) revert NonceTooHigh();
-        invalidatedNonces[msg.sender] = newNonce;
-        emit NoncesInvalidated(msg.sender, newNonce);
+    /// @notice [ADR-013 §3] Permit2-style mass-cancel: invalidate any subset of a bitmap word by
+    ///         OR-ing `mask` into `nonceBitmap[msg.sender][wordPos]`. Set bits can never be cleared,
+    ///         so this only ever cancels orders — it cannot re-enable a used nonce. One word covers
+    ///         256 nonces; `mask = type(uint256).max` cancels a whole word at once.
+    /// @param wordPos The bitmap word (nonce >> 8).
+    /// @param mask Bits to set (each set bit invalidates the corresponding nonce in the word).
+    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external {
+        nonceBitmap[msg.sender][wordPos] |= mask;
+        emit UnorderedNonceInvalidation(msg.sender, wordPos, mask);
     }
 
-    /// @notice Get the current nonce for a user
-    function getNonce(address user) external view returns (uint256) {
-        return nonces[user];
+    /// @notice Split a nonce into its (wordPos, bitPos) bitmap coordinates.
+    function bitmapPositions(uint256 nonce) public pure returns (uint256 wordPos, uint256 bitPos) {
+        wordPos = nonce >> 8;
+        bitPos = nonce & 0xff;
+    }
+
+    /// @notice Whether a non-DCA nonce has been consumed or invalidated for `owner`.
+    function isNonceUsed(address owner, uint256 nonce) public view returns (bool) {
+        (uint256 wordPos, uint256 bitPos) = bitmapPositions(nonce);
+        return nonceBitmap[owner][wordPos] & (1 << bitPos) != 0;
+    }
+
+    /// @dev [ADR-013 §3] Consume an unordered nonce: flip its bit and revert if it was already set.
+    ///      Canonical Permit2 pattern (xor-then-check).
+    function _useUnorderedNonce(address from, uint256 nonce) internal {
+        (uint256 wordPos, uint256 bitPos) = bitmapPositions(nonce);
+        uint256 bit = 1 << bitPos;
+        uint256 flipped = nonceBitmap[from][wordPos] ^= bit;
+        if (flipped & bit == 0) revert InvalidNonce();
     }
 
     // ══════════════════════════════════════════════════════════════════
