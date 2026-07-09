@@ -7,6 +7,12 @@ Base has only the **FeeCollector** at `0xeFC3…f130`; there is **no OrderExecut
 **Owner-executed** (on-chain). Architect prepared this; Code Agent does the post-deploy wire-up (Step 8).
 Same Foundry + keystore setup you used for the Augustus governance.
 
+> **v3 successor:** this contract (v2) is superseded by the audited, non-upgradeable
+> `TeraSwapOrderExecutorV3` (ADR-013 §1–§3 — real on-chain output floor, resolved `routerDataHash`, Permit2
+> nonce bitmap). Deploying v3 does **not** replace v2 in place — it's a new address running alongside v2
+> until v2's outstanding orders drain. See `docs/Runbooks/V3-EXECUTOR-DEPLOY.md` for the v3 deploy runbook
+> (mirrors this document's structure + router/bootstrap pattern).
+
 ---
 
 ## 0. Required inputs / decisions (fill BEFORE starting)
