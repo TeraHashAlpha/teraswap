@@ -529,9 +529,25 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
             scaledMin = order.minAmountOut;
         }
         if (scaledMin == 0) revert InvalidMinOutput();
-        // Commit 1: floor is the signed absolute min. The Chainlink oracle floor
-        // (max(oracleFloor, scaledMin)) is layered in by the fair-value commit (ADR-013 §1 full).
+
+        // [ADR-013 §1] Effective floor = max(oracleFloor, scaledMin).
+        //  - Feeded pair: oracleFloor = fairValue(netAmount) × (10_000 − maxSlippageBps) / 10_000.
+        //    The user's signed absolute min still applies as a lower bound (max), so a generous
+        //    keeper quote can never fill below EITHER the oracle bound or the user's own minimum.
+        //  - No-feed / stale / sequencer-down pair: hasFeed=false ⇒ the scaled signed absolute min
+        //    is the sole floor, enforced verbatim (owner decision 2026-07-09). scaledMin==0 already
+        //    reverted above, so there is never a zero floor and never a blind fill.
+        // Priced on netAmount — the amount actually routed after the on-chain fee.
+        (uint256 fairOut, bool hasFeed) = _fairValueOut(order.tokenIn, order.tokenOut, netAmount);
         uint256 floorOut = scaledMin;
+        if (hasFeed) {
+            uint256 oracleFloor = Math.mulDiv(
+                fairOut,
+                BPS_DENOMINATOR - order.maxSlippageBps,
+                BPS_DENOMINATOR
+            );
+            if (oracleFloor > floorOut) floorOut = oracleFloor;
+        }
 
         // ── Pull tokens from user ──
         IERC20(order.tokenIn).safeTransferFrom(order.owner, address(this), executeAmount);
