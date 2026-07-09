@@ -300,6 +300,7 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
     error NonceTooHigh();
     error DCAChunkTooSmall();
     error RouterDataMismatch();
+    error RouterDataRequired();     // [ADR-013 §2/P1c] non-DCA order carried ZeroHash routerDataHash
     error InvalidDCATotal();        // [Audit L-04]
     error InvalidDCAInterval();     // [Audit L-04]
     error NotAContract();           // [Audit L-05]
@@ -459,16 +460,19 @@ contract TeraSwapOrderExecutorV3 is ReentrancyGuard, EIP712 {
         // ── [H-01] Router is from signed data, verify it's whitelisted ──
         if (!whitelistedRouters[order.router]) revert RouterNotWhitelisted();
 
-        // ── [C-01 / ADR-013 §2] Verify routerData matches the hash signed by the user ──
-        // [MEDIUM-006] Non-DCA orders MUST commit to specific routerData (no bytes32(0) bypass)
+        // ── [C-01 / ADR-013 §2 option (b) / P1c] routerDataHash resolution ──
+        // Non-DCA (Limit/SL/TP) orders pin the route at trigger and MUST commit to a real
+        // routerDataHash: a ZeroHash reverts RouterDataRequired (the P1c landmine — v2's non-DCA
+        // ZeroHash path was structurally unexecutable), a wrong hash reverts RouterDataMismatch.
         if (order.orderType != OrderType.DCA) {
-            if (order.routerDataHash == bytes32(0)) revert RouterDataMismatch();
+            if (order.routerDataHash == bytes32(0)) revert RouterDataRequired();
             if (keccak256(routerData) != order.routerDataHash) revert RouterDataMismatch();
         }
-        // DCA orders: routerDataHash bypass (bytes32(0)) is safe because the ADR-013 §1 oracle
-        // floor (or the scaled signed absolute min for no-feed pairs) is the binding output
-        // constraint, recipient is always order.owner, nonReentrant blocks compound attacks, and the
-        // router must be whitelisted.
+        // DCA keeps dynamic, keeper-built calldata (the route isn't known at signing, and a pinned
+        // stale route would break recurring fills). Its ZeroHash bypass is safe because the ADR-013
+        // §1 oracle floor (or the scaled signed absolute min for no-feed pairs) is now the binding
+        // output constraint, recipient is always order.owner, nonReentrant blocks compound attacks,
+        // and the router must be whitelisted.
 
         // ── [H-03] Check nonce invalidation ──
         if (order.nonce < invalidatedNonces[order.owner]) revert NonceBelowInvalidation();
