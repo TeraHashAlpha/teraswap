@@ -134,16 +134,37 @@ const ARBITRUM: ChainConfig = {
   },
   blockExplorer: 'https://arbiscan.io',
   gasModel: 'arbitrum',
-  // Report-verified: 0xfdB631... answers latestRoundData (0 = up), 60s heartbeat.
-  sequencerUptimeFeed: '0xFdB631f5eE196f5C5AA41F952B0282f59B2Eff9E',
+  // [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] AUDIT-ARBITRUM-46-47 HIGH: the recon value
+  // (0xFdB631f5eE196f5C5AA41F952B0282f59B2Eff9E) had ZERO on-chain code — a hand-transcribed
+  // hex drift (note the matching prefix, diverging suffix vs the real feed below). Corrected via
+  // scripts/verify-arbitrum-addresses.mjs — resolved from Chainlink's official reference-data
+  // directory (ENS-named "l2-sequencer-uptime-status-feed" path), on-chain verified on two
+  // independent Arbitrum RPCs: description() = "L2 Sequencer Uptime Status Feed", decimals() = 0,
+  // latestRoundData() uptime semantics sane. See docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json.
+  sequencerUptimeFeed: '0xFdB631F5EE196F0ed6FAa767959853A9F217697D',
   tokens: {
     WETH: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
     // [CURATION] USDC NATIVE only — USDC.e (bridged, 0xFF970A61A0…B5F86) deliberately excluded
     // from v1 per the report's flag. Do not add USDC.e without an explicit Architect decision.
     USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    USDT: '0xFd086b2F39B6b86fEe29f27E8f6be40e7F2E7D2b',
-    DAI: '0xda10009754f1dF9137293aed5d6DD0dB0Bb075e9',
-    WBTC: '0x2F2a2440D2f12C0cDdE18Fe9AEf0cc0d6cF3FC30',
+    // [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] AUDIT-ARBITRUM-46-47 HIGH: recon value
+    // (0xFd086b2F39B6b86fEe29f27E8f6be40e7F2E7D2b) had ZERO on-chain code. Corrected via
+    // scripts/verify-arbitrum-addresses.mjs; verified on two independent RPCs (eth_getCode +
+    // decimals()===6). NOTE: on-chain symbol() reads "USD₮0" — this is Tether's newer LayerZero
+    // omnichain USDT standard, confirmed (via GeckoTerminal's live top-volume pools) as the
+    // dominant USDT-pegged token on Arbitrum by trading volume today. The config key stays `USDT`
+    // for continuity with mainnet/Base; see docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md.
+    USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+    // [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] AUDIT-ARBITRUM-46-47 HIGH: recon value
+    // (0xda10009754f1dF9137293aed5d6DD0dB0Bb075e9) had ZERO on-chain code. Corrected via
+    // scripts/verify-arbitrum-addresses.mjs; verified on two independent RPCs (symbol()="DAI",
+    // decimals()===18), cross-referenced against 3 independent public token lists.
+    DAI: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',
+    // [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] AUDIT-ARBITRUM-46-47 HIGH: recon value
+    // (0x2F2a2440D2f12C0cDdE18Fe9AEf0cc0d6cF3FC30) had ZERO on-chain code. Corrected via
+    // scripts/verify-arbitrum-addresses.mjs; verified on two independent RPCs (symbol()="WBTC",
+    // decimals()===8), cross-referenced against 3 independent public token lists.
+    WBTC: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
   },
 }
 

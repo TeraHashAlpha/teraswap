@@ -36,22 +36,29 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
     //  • USDbC (0xd9aA…b6CA): no Chainlink feed exists on Base (absent from the directory).
     //  Both correctly fall through to null → multi-source compare + on-chain minimumOutput.
   },
-  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum (42161) — 7 core feeds, addresses sourced verbatim from
-  // docs/Reports/ARBITRUM-READINESS.md (on-chain verified during the recon). Keyed by Arbitrum
-  // token address (lowercased). CONFIG-ONLY / dark: unreachable while contracts.feeCollector is
-  // null (isChainActive(42161) === false), same inert-until-activation posture as every other
-  // per-chain map here.
+  // [SPRINT-46-ARBITRUM-CONFIG → CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] Arbitrum (42161) — 5 core
+  // feeds. AUDIT-ARBITRUM-46-47 HIGH: ALL 5 recon-sourced feed addresses had ZERO on-chain code
+  // (hand-transcribed hex drift — each shares a prefix with, but diverges from, the real feed).
+  // Corrected via scripts/verify-arbitrum-addresses.mjs: resolved from Chainlink's official
+  // reference-data directory (the ENS-named canonical path per pair, e.g. "eth-usd" — NOT the
+  // "-svr"/"-shared-svr" sibling entries also present there), verified on two independent
+  // Arbitrum RPCs (description() matches the pair, decimals()===8, fresh latestRoundData(),
+  // answer>0). Keyed by Arbitrum token address (lowercased) — the token addresses were ALSO
+  // corrected in registry.ts for USDT/DAI/WBTC, so the map keys changed too. CONFIG-ONLY / dark:
+  // unreachable while contracts.feeCollector is null (isChainActive(42161) === false). See
+  // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json + ARBITRUM-ADDRESS-VERIFICATION.md.
   42161: {
     // WETH → ETH/USD
-    '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': '0x639Fe6ab55C921f74e7fac19EEcf32fd97d80027',
+    '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': '0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612',
     // USDC (native) → USDC/USD
-    '0xaf88d065e77c8cc2239327c5edb3a432268e5831': '0x50834F3e0744f40f628f86e6388f2a4f9a81147f',
-    // DAI → DAI/USD
-    '0xda10009754f1df9137293aed5d6dd0db0bb075e9': '0xc5C8E77B397E3A2B92f72841640bc7F7eF440DA7',
-    // USDT → USDT/USD
-    '0xfd086b2f39b6b86fee29f27e8f6be40e7f2e7d2b': '0x3f3f5dF88dC9F13eAFAa42Efb9A3c236f4B3E305',
-    // WBTC → WBTC/USD (report's dedicated WBTC feed — NOT the BTC/USD index feed)
-    '0x2f2a2440d2f12c0cdde18fe9aef0cc0d6cf3fc30': '0xd0C7101eACbB49F3Debb3C340BB2F48c36e341c5',
+    '0xaf88d065e77c8cc2239327c5edb3a432268e5831': '0x50834F3163758fcC1Df9973b6e91f0F0F0434aD3',
+    // DAI → DAI/USD (key updated to the CORRECTED DAI token address, see registry.ts)
+    '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1': '0xc5C8E77B397E531B8EC06BFb0048328B30E9eCfB',
+    // USDT → USDT/USD (key updated to the CORRECTED USDT token address, see registry.ts)
+    '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': '0x3f3f5dF88dC9F13eac63DF89EC16ef6e7E25DdE7',
+    // WBTC → WBTC/USD (key updated to the CORRECTED WBTC token address, see registry.ts;
+    // dedicated WBTC feed — NOT the BTC/USD index feed)
+    '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f': '0xd0C7101eACbB49F3deCcCc166d238410D6D46d57',
   },
 }
 
@@ -103,12 +110,15 @@ const FEED_HEARTBEAT_SEC: Record<string, number> = {
   '0x591e79239a7d679378ec8c847e5038150364c78f': 86400,  // DAI/USD  (24 h)
   '0x806b4ac04501c29769051e42783cf04dce41440b': 86400,  // cbETH/ETH MARKET feed (24 h — V2 base leg; see 9V-M-01 note below)
   '0x868a501e68f3d1e89cfc0d22f6b22e8dabce5f04': 86400,  // cbETH/ETH Exchange-Rate feed (24 h — 9W depeg breaker leg)
-  // ── Arbitrum (42161) [SPRINT-46-ARBITRUM-CONFIG] — from docs/Reports/ARBITRUM-READINESS.md ──
-  '0x639fe6ab55c921f74e7fac19eecf32fd97d80027': 3600,   // ETH/USD  (~1 h)
-  '0x50834f3e0744f40f628f86e6388f2a4f9a81147f': 86400,  // USDC/USD (~24 h)
-  '0xc5c8e77b397e3a2b92f72841640bc7f7ef440da7': 86400,  // DAI/USD  (~24 h)
-  '0x3f3f5df88dc9f13eafaa42efb9a3c236f4b3e305': 86400,  // USDT/USD (~24 h)
-  '0xd0c7101eacbb49f3debb3c340bb2f48c36e341c5': 86400,  // WBTC/USD (~24 h)
+  // ── Arbitrum (42161) [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] — keys are the CORRECTED feed
+  // addresses (see the CHAINLINK_FEEDS_BY_CHAIN[42161] block above); heartbeats are the exact
+  // `heartbeat` field from Chainlink's official reference-data directory for each feed's
+  // canonical ENS-named entry (not the untrusted recon report's rounded ~1h/~24h estimates).
+  '0x639fe6ab55c921f74e7fac1ee960c0b6293ba612': 1755,  // ETH/USD
+  '0x50834f3163758fcc1df9973b6e91f0f0f0434ad3': 255,   // USDC/USD
+  '0xc5c8e77b397e531b8ec06bfb0048328b30e9ecfb': 86400, // DAI/USD
+  '0x3f3f5df88dc9f13eac63df89ec16ef6e7e25dde7': 255,   // USDT/USD
+  '0xd0c7101eacbb49f3decccc166d238410d6d46d57': 86400, // WBTC/USD
 }
 
 /** [SPRINT-9V V1] Heartbeat (seconds) for a feed PROXY address, or null when unknown. */
