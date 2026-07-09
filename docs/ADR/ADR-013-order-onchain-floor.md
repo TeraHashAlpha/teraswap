@@ -1,7 +1,9 @@
 # ADR-013 — On-chain per-chunk output floor for conditional orders (OrderExecutor v3)
 
-- **Status:** Proposed
-- **Date:** 2026-07-08
+- **Status:** Accepted (Auditor **APPROVED-TO-IMPLEMENT** 2026-07-07, combined pass 0C/0H/0M/0L; implemented in `SPRINT-V3-P1-EXECUTOR-CONTRACT`). Not yet deployed — the deploy + 48h timelock + migration + runbook remain the separate gated V3-P4 step.
+- **Date:** 2026-07-08 (accepted 2026-07-09)
+- **Owner decisions (2026-07-09):** (1) **scope = full §1–§3** — one immutable v3 deploy closes P1a and unblocks P1b/P1c; (2) **no-feed pairs ALLOWED** with a signed absolute `minAmountOut` backstop (signing-side min derivation + `/api/orders` dust rejection are the follow-up V3-P2); (3) **`MAX_ORDER_SLIPPAGE_BPS = 500`, an immutable constant with NO setter.**
+- **Implementation note (v3, 2026-07-09):** the on-chain fair-value oracle config (token → USD feed) is **timelocked** (48h queue/execute), closing the P6 instant-`setOracleConfig` finding; feed integrity reuses the existing pattern (answer>0, staleness, `answeredInRound >= roundId`) plus a Base L2 sequencer-uptime + 1h grace check, all failing safe to NO-FEED semantics; the floor is `max(oracleFloor, scaledMinAmountOut)`; the 1-wei clamp is removed (revert path only); non-DCA orders require a real `routerDataHash` (`RouterDataRequired`); nonces are a Permit2-style unordered bitmap. 45 Foundry tests.
 - **Related:** threat model `Audits/Reviews/THREAT-MODEL-2026-07-07.md` (P1a HIGH, P1b/P1c latent), `docs/Prompts/SPRINT-ORDER-ONCHAIN-FLOOR.md`, `contracts/order-engine/TeraSwapOrderExecutor.sol` (:419-423 DCA routerDataHash bypass, :505-509 minOut clamp, :528 output check, :460/:524 sequential nonce), `contracts/order-engine/executor/order-floor.js` + `submission-policy.js` (the Phase-0 keeper mitigation this ADR is the terminal fix for), ADR-011 (FeeCollector/Augustus whitelist — the on-chain gate model), the `#248` deviation guard and `#18` oracle-less advisory (price plumbing reused keeper-side).
 - **Supersedes/deploy target:** a new **OrderExecutor v3** (the deployed executor is **not upgradeable**).
 - **NOTE on numbering:** SPRINT-ORDER-ONCHAIN-FLOOR proposed "ADR-011"; that number is already taken by `ADR-011-feecollector-augustus-whitelist.md` (and 012 by the copyleft ADR), so this is **ADR-013**. Flagged in FEEDBACK.
