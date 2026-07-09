@@ -129,11 +129,15 @@ cast send $OE_V3_BASE \
   cd contracts/order-engine
   forge script script/VerifyOrderExecutorV3.s.sol:VerifyOrderExecutorV3 \
     --rpc-url https://mainnet.base.org \
-    --sig "run(address,address,address,address,uint256)" \
-    $OE_V3_BASE $ADMIN 0x6A000F20005980200259B80c5102003040001068 $SEQUENCER_UPTIME_FEED 8453
+    --sig "run(address,address,address[],address,uint256)" \
+    $OE_V3_BASE $ADMIN "[0x6A000F20005980200259B80c5102003040001068]" $SEQUENCER_UPTIME_FEED 8453
   ```
-  (Router arg = the re-verified Augustus V6 address from §2 Step 1 — the verifier CHECKS the whitelist
-  contains exactly this address and nothing else; it never assumes the address is correct.)
+  (Router arg = every router this deploy's bootstrap whitelisted, including the re-verified Augustus V6
+  address from §2 Step 1 — pass the FULL set you actually bootstrapped with in §2 Step 3, not just one. The
+  verifier checks each expected address IS whitelisted; it does not — and cannot, from a single read —
+  prove no OTHER address is also whitelisted, since `whitelistedRouters` is a mapping, not enumerable
+  on-chain. If you need that guarantee, cross-check the `Bootstrap`/`RouterWhitelisted` event log for this
+  contract address shows exactly the routers you intended, nothing more.)
 
 ## 4. Oracle config (timelocked — DO NOT skip, DO NOT rush)
 
@@ -159,8 +163,16 @@ at execution (ADR-013 §1). This is the **only** admin surface v3 adds over v2, 
      <actionId> <token> <chainlinkFeed> <tokenDecimals> <maxStalenessSeconds-or-0> \
      --rpc-url https://mainnet.base.org --account <your-keystore>
    ```
-4. **Re-run the verifier script** (§3) — it asserts each configured feed answers with a fresh round and the
-   expected decimals. It must pass before §5.
+4. **Run the verifier's oracle checkpoint** for EACH token just configured — must pass before §5:
+   ```bash
+   forge script script/VerifyOrderExecutorV3.s.sol:VerifyOrderExecutorV3 \
+     --rpc-url https://mainnet.base.org \
+     --sig "checkOracleFeed(address,address,uint256)" \
+     $OE_V3_BASE <token> <maxStalenessSeconds-you-queued-or-300-if-you-passed-0>
+   ```
+   Asserts the feed is registered, its live `decimals()` still matches what was recorded (catches a feed
+   redeployed behind the same address since registration), and it answers positively within the staleness
+   window.
 
 ## 5. Cutover
 
