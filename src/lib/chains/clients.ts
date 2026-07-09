@@ -7,13 +7,19 @@
  * chain's configured RPC (falling back to viem's default public RPC).
  */
 import { createPublicClient, fallback, http, type Chain, type PublicClient } from 'viem'
-import { mainnet, base } from 'viem/chains'
+import { mainnet, base, arbitrum } from 'viem/chains'
 import { getPrivateClient } from '@/lib/rpc'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 
+// [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum was registered in chains/registry.ts (Sprint 46)
+// but had NO entry here — createPublicClient({chain: undefined, ...}) would have built a client
+// with no chain object, silently dropping chain-typed metadata (e.g. the `chain.id` the sequencer
+// gate / simulation callers read). Ported alongside the env-driven feeCollector so the simulation
+// path is genuinely ready the moment Arbitrum activates, not just reachable.
 const VIEM_CHAINS: Record<number, Chain> = {
   1: mainnet,
   8453: base,
+  42161: arbitrum,
 }
 
 // Cache one client per non-mainnet chain (mainnet uses getPrivateClient, which

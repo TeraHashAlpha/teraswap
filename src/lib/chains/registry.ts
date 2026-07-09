@@ -94,13 +94,16 @@ const BASE: ChainConfig = {
   },
 }
 
-// [SPRINT-46-ARBITRUM-CONFIG] Arbitrum One — CONFIG-ONLY, SHIPS DARK. Every address/feed/slug
-// below is sourced verbatim from docs/Reports/ARBITRUM-READINESS.md (the recon report, on main)
-// — none are re-derived here. `contracts.feeCollector` is hard-null (no env override) so this
-// chain is fail-closed exactly like Base pre-activation: isChainActive(42161) === false →
-// "Coming Soon" / not offered on the chain selector, no quotes servable, no orders/DCA surface
-// (order-engine's ORDER_EXECUTOR_BY_CHAIN has no 42161 entry — see order-engine/config.test.ts).
-// Flip live ONLY after the FeeCollector deploy + activation-sprint checklist, same as Base.
+// [SPRINT-46-ARBITRUM-CONFIG → SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum One. Every
+// address/feed/slug below is sourced from docs/Reports/ARBITRUM-READINESS.md + on-chain
+// re-verification in docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md.
+// `contracts.feeCollector` is now ENV-DRIVEN (the Base Sprint-44/45 pattern) rather than
+// hard-null: unset ⇒ exactly today's dark behavior (isChainActive(42161) === false →
+// "Coming Soon" / not offered on the chain selector, no quotes servable, no orders/DCA surface —
+// order-engine's ORDER_EXECUTOR_BY_CHAIN has no 42161 entry regardless, see
+// order-engine/config.test.ts). Setting NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR after a real deploy
+// (docs/Runbooks/ARBITRUM-FEECOLLECTOR-DEPLOY.md) is the ONLY way to flip this chain live — no
+// code change required at go-live, same as Base.
 const ARBITRUM: ChainConfig = {
   chainId: 42161,
   name: 'Arbitrum One',
@@ -112,9 +115,15 @@ const ARBITRUM: ChainConfig = {
     wrappedAddress: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
   },
   contracts: {
-    // Deliberately hard-null (no env override, unlike Base's env-driven slot) — no Arbitrum
-    // FeeCollector is deployed yet. Setting this requires a real contract deploy first.
-    feeCollector: null,
+    // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Env-driven, null default (Base Sprint-45 pattern).
+    // `|| null` (not `??`) so an empty env value ("NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR=" in
+    // .env*) is treated as unset rather than falsely activating Arbitrum with a blank address.
+    // No hardcoded fallback: a wrong default would route Arbitrum swap fees to a contract that
+    // is not the FeeCollector. Set only after the Arbitrum mainnet deploy + post-deploy
+    // checklist (docs/Runbooks/ARBITRUM-FEECOLLECTOR-DEPLOY.md).
+    feeCollector: (process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR || null) as
+      | `0x${string}`
+      | null,
     permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3', // same CREATE2 address as mainnet/Base
     cowVaultRelayer: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110', // cross-chain deterministic
   },

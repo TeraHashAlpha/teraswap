@@ -41,7 +41,7 @@ describe('chains/registry [P216]', () => {
 })
 
 describe('chains/registry — Arbitrum One (42161) [SPRINT-46-ARBITRUM-CONFIG, dark launch]', () => {
-  it('is registered with feeCollector HARD-null (no env override, unlike Base)', () => {
+  it('is registered with feeCollector null when the env var is unset [SPRINT-47-ARBITRUM-ACTIVATION-PREP: now env-driven, was hard-null]', () => {
     const c = getChainConfig(42161)
     expect(c.chainId).toBe(42161)
     expect(c.slug).toBe('arbitrum')
@@ -113,5 +113,36 @@ describe('chains/registry — Base env-driven FeeCollector [Sprint 45]', () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_FEE_COLLECTOR', '')
     const { getChainConfig: freshGetChainConfig } = await import('./registry')
     expect(freshGetChainConfig(8453).contracts.feeCollector).toBeNull()
+  })
+})
+
+describe('chains/registry — Arbitrum env-driven FeeCollector [SPRINT-47-ARBITRUM-ACTIVATION-PREP]', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('resolves Arbitrum feeCollector from NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR when set', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(42161).contracts.feeCollector).toBe(
+      '0x000000000000000000000000000000000000dEaD',
+    )
+  })
+
+  it('falls back to null (not any hardcoded address) when the env var is unset — exactly today\'s dark behavior', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(42161).contracts.feeCollector).toBeNull()
+  })
+
+  it('setting Arbitrum feeCollector does not affect Base or mainnet (per-chain isolation)', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(8453).contracts.feeCollector).toBeNull()
+    expect(freshGetChainConfig(1).contracts.feeCollector).toMatch(/^0x[0-9a-fA-F]{40}$/)
   })
 })
