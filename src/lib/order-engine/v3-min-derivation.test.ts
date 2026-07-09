@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeReferenceExpectedOutTs, deriveAbsoluteMinAmountOut } from './v3-min-derivation'
+import { computeReferenceExpectedOutTs, deriveAbsoluteMinAmountOut, deriveSigningMinAmountOut } from './v3-min-derivation'
 
 describe('computeReferenceExpectedOutTs', () => {
   it('computes fair value for equal-decimal 1:1 tokens', () => {
@@ -120,5 +120,90 @@ describe('deriveAbsoluteMinAmountOut', () => {
       priceInUsd: 1, priceOutUsd: 1, maxSlippageBps: 10_000,
     })
     expect(min).toBeNull()
+  })
+})
+
+describe('deriveSigningMinAmountOut', () => {
+  const base = {
+    amountIn: 10n ** 18n,
+    srcDecimals: 18,
+    dstDecimals: 18,
+    maxSlippageBps: 300,
+  }
+
+  it('uses Chainlink for both legs when available — source "chainlink"', () => {
+    const r = deriveSigningMinAmountOut({
+      ...base,
+      chainlinkPriceIn: 2000, chainlinkPriceOut: 1,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+      approxPriceIn: null, approxPriceOut: null,
+    })
+    expect(r.hasFeed).toBe(true)
+    expect(r.source).toBe('chainlink')
+    expect(r.minAmountOut).toBeGreaterThan(0n)
+  })
+
+  it('falls back to DefiLlama for a leg Chainlink misses — still "hasFeed"', () => {
+    const r = deriveSigningMinAmountOut({
+      ...base,
+      chainlinkPriceIn: 2000, chainlinkPriceOut: null,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: 1,
+      approxPriceIn: null, approxPriceOut: null,
+    })
+    expect(r.hasFeed).toBe(true)
+    expect(r.source).toBe('defillama')
+  })
+
+  it('falls back to the approx price table as the last priced tier', () => {
+    const r = deriveSigningMinAmountOut({
+      ...base,
+      chainlinkPriceIn: 2000, chainlinkPriceOut: null,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+      approxPriceIn: null, approxPriceOut: 1,
+    })
+    expect(r.hasFeed).toBe(true)
+    expect(r.source).toBe('approx')
+  })
+
+  it('no price on either leg from any tier ⇒ fixed non-zero fallback, hasFeed=false', () => {
+    const r = deriveSigningMinAmountOut({
+      ...base,
+      chainlinkPriceIn: null, chainlinkPriceOut: null,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+      approxPriceIn: null, approxPriceOut: null,
+    })
+    expect(r.hasFeed).toBe(false)
+    expect(r.source).toBe('fallback')
+    expect(r.minAmountOut).toBeGreaterThan(0n)
+    // Never the 1-wei footgun.
+    expect(r.minAmountOut).not.toBe(1n)
+  })
+
+  it('fallback floor scales with tokenOut decimals and is never zero even for tiny decimals', () => {
+    const r6 = deriveSigningMinAmountOut({
+      ...base, dstDecimals: 6,
+      chainlinkPriceIn: null, chainlinkPriceOut: null,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+      approxPriceIn: null, approxPriceOut: null,
+    })
+    expect(r6.minAmountOut).toBeGreaterThan(0n)
+    const r2 = deriveSigningMinAmountOut({
+      ...base, dstDecimals: 2,
+      chainlinkPriceIn: null, chainlinkPriceOut: null,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+      approxPriceIn: null, approxPriceOut: null,
+    })
+    expect(r2.minAmountOut).toBeGreaterThanOrEqual(1n)
+  })
+
+  it('one priced leg + one totally unpriced leg still falls back (never derives from one side)', () => {
+    const r = deriveSigningMinAmountOut({
+      ...base,
+      chainlinkPriceIn: 2000, chainlinkPriceOut: null,
+      defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+      approxPriceIn: null, approxPriceOut: null,
+    })
+    expect(r.hasFeed).toBe(false)
+    expect(r.source).toBe('fallback')
   })
 })

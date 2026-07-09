@@ -24,6 +24,11 @@ vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))
+// [SPRINT-V3-P2] see DCAPanel.routability.test.tsx — stub useChainlinkPrice directly rather than
+// expanding this file's minimal wagmi mock with useReadContract.
+vi.mock('@/hooks/useChainlinkPrice', () => ({
+  useChainlinkPrice: () => ({ chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }),
+}))
 
 vi.mock('@/hooks/useTokenBalances', () => ({
   useTokenBalances: () => useTokenBalancesMock(),

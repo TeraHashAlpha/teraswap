@@ -157,6 +157,11 @@ export interface CreateOrderConfig {
   router: string                // whitelisted DEX router
   /** Keccak256 hash of the router calldata (ZeroHash for DCA since calldata varies) */
   routerDataHash?: `0x${string}`
+  // [SPRINT-V3-P2] Present ONLY when this order should sign against v3 (the caller already
+  // checked getOrderExecutorV3(chainId) !== null). undefined ⇒ v2 order, byte-identical to
+  // today. useOrderEngine uses its presence (not a separate flag) as the v2/v3 discriminator,
+  // matching OnChainOrder.maxSlippageBps.
+  maxSlippageBps?: number
   // DCA-specific
   dcaInterval?: number          // seconds between executions
   dcaTotal?: number             // total number of executions

@@ -102,3 +102,86 @@ export function deriveAbsoluteMinAmountOut(p: DeriveAbsoluteMinParams): bigint |
   const min = (fairOut * (10_000n - bps)) / 10_000n
   return min > 0n ? min : null
 }
+
+// ── Signing-time source selection (Chainlink first, else DefiLlama, else a fixed
+// non-price fallback) — the "same plumbing as the keeper floor" the sprint spec calls for,
+// plus the ADR-013 owner-approved no-feed UX (a real, non-1-wei fixed min + decay warning). ──
+
+export type MinAmountOutSource = 'chainlink' | 'defillama' | 'approx' | 'fallback'
+
+export interface DeriveSigningMinParams {
+  amountIn: bigint | number | string
+  srcDecimals: number
+  dstDecimals: number
+  maxSlippageBps: number
+  /** Chainlink price for each leg (from useChainlinkPrice), null if no feed. */
+  chainlinkPriceIn: number | null
+  chainlinkPriceOut: number | null
+  /** DefiLlama price for each leg (fetched only when Chainlink is null), null if unpriced. */
+  defiLlamaPriceIn: number | null
+  defiLlamaPriceOut: number | null
+  /** Last-resort approximate price table lookups (e.g. lib/order-engine/usd.ts APPROX_PRICES),
+   *  keyed the same way as the caller's table — pass null when the symbol isn't covered. */
+  approxPriceIn: number | null
+  approxPriceOut: number | null
+}
+
+export interface DeriveSigningMinResult {
+  minAmountOut: bigint
+  /** false ⇒ neither Chainlink nor DefiLlama priced BOTH legs — the fixed 'fallback' floor was
+   *  used (or 'approx' partially bridged it). The caller MUST show the ADR-013 decay warning
+   *  whenever source !== 'chainlink' — a stale fixed min loses meaning over a long DCA. */
+  hasFeed: boolean
+  source: MinAmountOutSource
+}
+
+/** First non-null price across (chainlink, defillama, approx), plus which tier it came from. */
+function pickPrice(
+  chainlink: number | null,
+  defillama: number | null,
+  approx: number | null,
+): { price: number | null; source: MinAmountOutSource } {
+  if (chainlink != null) return { price: chainlink, source: 'chainlink' }
+  if (defillama != null) return { price: defillama, source: 'defillama' }
+  if (approx != null) return { price: approx, source: 'approx' }
+  return { price: null, source: 'fallback' }
+}
+
+/**
+ * Full signing-time derivation: try Chainlink for both legs, else DefiLlama, else the
+ * approximate price table. If EITHER leg still has no price, fall back to a small, deliberately
+ * non-price, non-zero absolute minimum (never 1 wei) scaled to tokenOut's decimals — a real
+ * on-chain floor, but one the ADR-013 decay warning must accompany (fixed forever, never
+ * re-derived: price appreciation strands the order below reachable slippage, depreciation makes
+ * the floor economically weak).
+ */
+export function deriveSigningMinAmountOut(p: DeriveSigningMinParams): DeriveSigningMinResult {
+  const inPick = pickPrice(p.chainlinkPriceIn, p.defiLlamaPriceIn, p.approxPriceIn)
+  const outPick = pickPrice(p.chainlinkPriceOut, p.defiLlamaPriceOut, p.approxPriceOut)
+
+  if (inPick.price !== null && outPick.price !== null) {
+    const derived = deriveAbsoluteMinAmountOut({
+      amountIn: p.amountIn,
+      srcDecimals: p.srcDecimals,
+      dstDecimals: p.dstDecimals,
+      priceInUsd: inPick.price,
+      priceOutUsd: outPick.price,
+      maxSlippageBps: p.maxSlippageBps,
+    })
+    if (derived !== null) {
+      // 'chainlink' only when BOTH legs used Chainlink; a mixed chainlink+defillama/approx pair
+      // is still priced (real derivation, not the fixed fallback) but isn't the strongest tier.
+      const source: MinAmountOutSource =
+        inPick.source === 'chainlink' && outPick.source === 'chainlink' ? 'chainlink' : outPick.source
+      return { minAmountOut: derived, hasFeed: true, source }
+    }
+  }
+
+  // No-feed path (owner decision, ADR-013): a fixed, deliberately non-1-wei floor. Scaled to
+  // ~0.0001 whole tokenOut units — small enough to virtually always be clearable, but strictly
+  // positive so the v3 contract's InvalidMinOutput (scaled-to-zero) never fires on it, and it is
+  // NOT a magic "1" — the decay warning documents that this floor is not economically meaningful.
+  const decimalsFloor = Math.max(p.dstDecimals - 4, 0)
+  const fallback = 10n ** BigInt(decimalsFloor)
+  return { minAmountOut: fallback, hasFeed: false, source: 'fallback' }
+}

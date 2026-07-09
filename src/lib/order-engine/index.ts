@@ -13,7 +13,8 @@ export { OrderType, PriceCondition, ORDER_EIP712_TYPES,
   ORDER_V3_EIP712_TYPES, ORDER_V3_TYPE_STRING, MAX_ORDER_SLIPPAGE_BPS, DEFAULT_MAX_SLIPPAGE_BPS } from './types'
 export type { OnChainOrder, AutonomousOrder, AutonomousOrderStatus, CreateOrderConfig, OrderEngineEvent } from './types'
 // [SPRINT-V3-P2] Pure absolute-min derivation (signing-side floor, ADR-013 §1 I-01/L-01 closure).
-export { deriveAbsoluteMinAmountOut, computeReferenceExpectedOutTs } from './v3-min-derivation'
+export { deriveAbsoluteMinAmountOut, computeReferenceExpectedOutTs, deriveSigningMinAmountOut } from './v3-min-derivation'
+export type { MinAmountOutSource, DeriveSigningMinParams, DeriveSigningMinResult } from './v3-min-derivation'
 export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, subscribeToOrders } from './supabase'
 export type { OrderRow } from './supabase'
 // [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.

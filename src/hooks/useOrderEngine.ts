@@ -34,6 +34,10 @@ import {
   ensureOrdersReadAuth,
   retryOrdersReadAuth,
   ReadAuthRequiredError,
+  // [SPRINT-V3-P2] v3 signing — fail-closed while getOrderExecutorV3(chainId) is null.
+  getOrderExecutorV3,
+  getOrderExecutorV3Domain,
+  ORDER_V3_EIP712_TYPES,
 } from '@/lib/order-engine'
 import type {
   OnChainOrder,
@@ -73,8 +77,61 @@ const ORDER_HASH_PARAMS = [
   { type: 'uint256' as const },
 ]
 
-/** Pure client-side computation — no RPC call needed */
+// [SPRINT-V3-P2 / ADR-013 §1] v3 adds maxSlippageBps (uint16) right after minAmountOut — mirrors
+// contracts/order-engine/TeraSwapOrderExecutorV3.sol's ORDER_TYPEHASH field-for-field (pinned in
+// lib/order-engine/types.test.ts against the .sol source). A v3 order is one whose
+// order.maxSlippageBps is defined; a v2 order never sets it.
+const ORDER_V3_TYPEHASH = keccak256(toBytes(
+  'Order(address owner,address tokenIn,address tokenOut,uint256 amountIn,' +
+  'uint256 minAmountOut,uint16 maxSlippageBps,uint8 orderType,uint8 condition,' +
+  'uint256 targetPrice,address priceFeed,uint256 expiry,uint256 nonce,address router,' +
+  'bytes32 routerDataHash,uint256 dcaInterval,uint256 dcaTotal)'
+))
+
+const ORDER_V3_HASH_PARAMS = [
+  { type: 'bytes32' as const },
+  { type: 'address' as const },
+  { type: 'address' as const },
+  { type: 'address' as const },
+  { type: 'uint256' as const },
+  { type: 'uint256' as const },
+  { type: 'uint16' as const },   // maxSlippageBps [ADR-013 §1]
+  { type: 'uint8' as const },
+  { type: 'uint8' as const },
+  { type: 'uint256' as const },
+  { type: 'address' as const },
+  { type: 'uint256' as const },
+  { type: 'uint256' as const },
+  { type: 'address' as const },
+  { type: 'bytes32' as const },
+  { type: 'uint256' as const },
+  { type: 'uint256' as const },
+]
+
+/** Pure client-side computation — no RPC call needed. Dispatches to the v3 typehash/params when
+ *  order.maxSlippageBps is defined, else the v2 path (byte-identical to before). */
 function computeOrderHash(order: OnChainOrder): `0x${string}` {
+  if (order.maxSlippageBps !== undefined) {
+    return keccak256(encodeAbiParameters(ORDER_V3_HASH_PARAMS, [
+      ORDER_V3_TYPEHASH,
+      order.owner,
+      order.tokenIn,
+      order.tokenOut,
+      BigInt(order.amountIn.toString()),
+      BigInt(order.minAmountOut.toString()),
+      order.maxSlippageBps,
+      Number(order.orderType),
+      Number(order.condition),
+      BigInt(order.targetPrice.toString()),
+      order.priceFeed,
+      BigInt(order.expiry.toString()),
+      BigInt(order.nonce.toString()),
+      order.router,
+      order.routerDataHash,
+      BigInt(order.dcaInterval.toString()),
+      BigInt(order.dcaTotal.toString()),
+    ]))
+  }
   return keccak256(encodeAbiParameters(ORDER_HASH_PARAMS, [
     ORDER_TYPEHASH,
     order.owner,
@@ -288,6 +345,11 @@ export function useOrderEngine() {
   // [CHORE-ORDER-EXEC-PREP A] Resolve the OrderExecutor for the connected chain. null = no executor
   // deployed there (e.g. Base today) → order creation / signing / on-chain reads are fail-closed.
   const orderExecutor = getOrderExecutor(chainId)
+  // [SPRINT-V3-P2] v3 executor for the connected chain. null on every chain today (v3 is not
+  // deployed) — createOrder/confirmOrder only take the v3 signing branch when this is non-null
+  // AND the caller's config explicitly requested it (maxSlippageBps set); otherwise the v2 path
+  // below is exercised exactly as before.
+  const orderExecutorV3 = getOrderExecutorV3(chainId)
   const { signTypedDataAsync } = useSignTypedData()
   const { writeContractAsync } = useWriteContract()
 
@@ -559,6 +621,11 @@ export function useOrderEngine() {
     const nonce = getNextNonce()
     const expiry = BigInt(Math.floor(Date.now() / 1000) + config.expirySeconds)
 
+    // [SPRINT-V3-P2] v3 signing requires BOTH the caller opting in (config.maxSlippageBps set —
+    // DCAPanel only does this after deriving a real absolute min) AND the connected chain actually
+    // having a v3 executor configured. Either missing ⇒ fall back to the v2 struct, unchanged.
+    const signV3 = config.maxSlippageBps !== undefined && orderExecutorV3 !== null
+
     // Build on-chain order struct
     const order: OnChainOrder = {
       owner: address,
@@ -566,6 +633,7 @@ export function useOrderEngine() {
       tokenOut: config.tokenOut.address as `0x${string}`,
       amountIn: BigInt(config.amountIn),
       minAmountOut: BigInt(config.minAmountOut),
+      ...(signV3 ? { maxSlippageBps: config.maxSlippageBps } : {}),
       orderType: config.orderType,
       condition: config.condition,
       targetPrice: BigInt(config.targetPrice),
@@ -665,33 +733,57 @@ export function useOrderEngine() {
       // chainId makes the sent == signed invariant explicit — a future refactor cannot let them
       // diverge.
       const signedChainId = chainId
+      // [SPRINT-V3-P2] order.maxSlippageBps defined ⇒ this order was built for v3 (createOrder
+      // already gated that on orderExecutorV3 !== null) — sign with the v3 domain (version "3")
+      // and typed-data schema so it can never verify against v2, and vice-versa. v2 orders take
+      // the exact path they always have (getOrderExecutorDomain, ORDER_EIP712_TYPES).
+      const isV3Order = order.maxSlippageBps !== undefined
       // [CHORE-ORDER-EXEC-PREP A] EIP-712 domain via the per-chain resolver. Mainnet (chainId 1) is
       // byte-identical to the previous inline domain; it throws on a chain with no executor — but the
       // fail-closed guard above already returned for that case, so this is reached only when valid.
-      const domain = getOrderExecutorDomain(signedChainId)
+      const domain = isV3Order ? getOrderExecutorV3Domain(signedChainId) : getOrderExecutorDomain(signedChainId)
 
       // Sign the FROZEN order
       const signature = await signTypedDataAsync({
         domain,
-        types: ORDER_EIP712_TYPES,
+        types: isV3Order ? ORDER_V3_EIP712_TYPES : ORDER_EIP712_TYPES,
         primaryType: 'Order',
-        message: {
-          owner: order.owner,
-          tokenIn: order.tokenIn,
-          tokenOut: order.tokenOut,
-          amountIn: order.amountIn,
-          minAmountOut: order.minAmountOut,
-          orderType: order.orderType,
-          condition: order.condition,
-          targetPrice: order.targetPrice,
-          priceFeed: order.priceFeed,
-          expiry: order.expiry,
-          nonce: order.nonce,
-          router: order.router,
-          routerDataHash: order.routerDataHash,  // [C-01]
-          dcaInterval: order.dcaInterval,
-          dcaTotal: order.dcaTotal,
-        },
+        message: isV3Order
+          ? {
+              owner: order.owner,
+              tokenIn: order.tokenIn,
+              tokenOut: order.tokenOut,
+              amountIn: order.amountIn,
+              minAmountOut: order.minAmountOut,
+              maxSlippageBps: order.maxSlippageBps!,
+              orderType: order.orderType,
+              condition: order.condition,
+              targetPrice: order.targetPrice,
+              priceFeed: order.priceFeed,
+              expiry: order.expiry,
+              nonce: order.nonce,
+              router: order.router,
+              routerDataHash: order.routerDataHash,
+              dcaInterval: order.dcaInterval,
+              dcaTotal: order.dcaTotal,
+            }
+          : {
+              owner: order.owner,
+              tokenIn: order.tokenIn,
+              tokenOut: order.tokenOut,
+              amountIn: order.amountIn,
+              minAmountOut: order.minAmountOut,
+              orderType: order.orderType,
+              condition: order.condition,
+              targetPrice: order.targetPrice,
+              priceFeed: order.priceFeed,
+              expiry: order.expiry,
+              nonce: order.nonce,
+              router: order.router,
+              routerDataHash: order.routerDataHash,  // [C-01]
+              dcaInterval: order.dcaInterval,
+              dcaTotal: order.dcaTotal,
+            },
       })
 
       // Submit to Supabase
@@ -729,6 +821,9 @@ export function useOrderEngine() {
           tokenOut: order.tokenOut,
           amountIn: order.amountIn.toString(),
           minAmountOut: order.minAmountOut.toString(),
+          // [SPRINT-V3-P2] Persisted ONLY for a v3 order — its presence in the stored order_data
+          // JSON is what the keeper uses to route v2 vs v3 (dual-executor migration, commit 4).
+          ...(order.maxSlippageBps !== undefined ? { maxSlippageBps: order.maxSlippageBps } : {}),
           orderType: order.orderType,
           condition: order.condition,
           targetPrice: order.targetPrice.toString(),
@@ -787,6 +882,23 @@ export function useOrderEngine() {
     const order = orders.find(o => o.id === orderId)
     if (!order) return
 
+    // [SPRINT-V3-P2] v3 cancel/invalidate wiring is OUT OF SCOPE for this sprint (flagged in
+    // FEEDBACK — deferred to a follow-up). This hook's on-chain cancelOrder/invalidateNonces calls
+    // still target the v2 executor+ABI unconditionally below; sending a v3 order's struct there
+    // would compute the WRONG hash (different typehash) and either no-op against v2 or, worse,
+    // leave the Supabase row marked cancelled while the real v3 order stays live on-chain. Refuse
+    // explicitly rather than silently mis-cancelling. Unreachable today (v3 is fail-closed
+    // everywhere, so no v3 order can exist), but must not regress once v3 is deployed without
+    // this wiring being extended first.
+    if (order.order.maxSlippageBps !== undefined) {
+      setLatestEvent({
+        type: 'order_error',
+        orderId,
+        error: 'Cancelling v3 orders is not yet supported in this build — contact support.',
+      })
+      return
+    }
+
     try {
       // Reconstruct the order struct with proper BigInt types (may be strings from localStorage).
       // This FROZEN struct is the exact cancelOrder() tx argument confirmCancel sends 1:1 — the
@@ -829,8 +941,13 @@ export function useOrderEngine() {
     // FROZEN here — confirmCancel sends exactly this value (no recompute after review).
     const newNonce = (nonce > invalidated ? nonce : invalidated) + 1n
 
+    // [SPRINT-V3-P2] invalidateNonces() is a v2-only on-chain call (and v3's bitmap nonce isn't
+    // even consumed by DCA — see the contract). Exclude v3 orders so cancel-all never marks a
+    // still-live v3 order 'cancelled' in Supabase without actually invalidating it on-chain
+    // (mirrors the single-order guard above). Unreachable today (v3 fail-closed everywhere).
     const affectedOrders = orders.filter(o =>
-      o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled'
+      (o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled') &&
+      o.order.maxSlippageBps === undefined
     )
 
     setPendingCancel({ action: 'invalidate', newNonce, affectedOrders, chainId, account: address })

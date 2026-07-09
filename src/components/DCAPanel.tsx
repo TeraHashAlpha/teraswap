@@ -19,6 +19,7 @@ import {
   MIN_ORDER_AMOUNT,
   dcaScheduleFitsExpiry,
   fillUsd,
+  APPROX_PRICES,
   DCA_CUSTOM_BUYS_MIN,
   DCA_CUSTOM_BUYS_MAX,
   DCA_CUSTOM_INTERVAL_NUMBER_MIN,
@@ -29,14 +30,21 @@ import {
   deriveCustomExpirySeconds,
   getDcaMinChunkUsd,
   applyDcaMinChunkGuard,
+  // [SPRINT-V3-P2 / ADR-013 §1] v3 signing — fail-closed while getOrderExecutorV3(chainId) is null.
+  getOrderExecutorV3,
+  MAX_ORDER_SLIPPAGE_BPS,
+  DEFAULT_MAX_SLIPPAGE_BPS,
+  deriveSigningMinAmountOut,
   type DcaCustomIntervalUnit,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
-import { getWrappedNative } from '@/lib/chains/registry'
+import { getWrappedNative, getChainConfig } from '@/lib/chains/registry'
 import { findChainToken } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
+import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
+import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { quickFillRaw, perChunkRaw } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
 import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
@@ -334,6 +342,59 @@ function CreateDCAForm({
     return () => clearTimeout(t)
   }, [tokenOut, chainId])
 
+  // ── [SPRINT-V3-P2 / ADR-013 §1] v3 signing derivation — fail-closed, inert while unconfigured ──
+  // v3Enabled is ONLY true once a real per-chain OrderExecutorV3 address is configured
+  // (getOrderExecutorV3). It is null on every chain today, so every hook below still runs (Rules
+  // of Hooks — always called) but is a no-op: minAmountOut stays the existing '1' v2 path in
+  // handleSubmit until v3Enabled flips true on a real deployment.
+  const v3Enabled = getOrderExecutorV3(chainId) !== null
+  const [maxSlippageBps, setMaxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
+
+  // Chainlink first (same hook the swap UI already uses for oracle display).
+  const chainlinkPriceIn = useChainlinkPrice(tokenIn?.address, null).chainlinkPrice
+  const chainlinkPriceOut = useChainlinkPrice(tokenOut?.address, null).chainlinkPrice
+
+  // DefiLlama fallback ONLY when v3 is enabled and Chainlink missed a leg — never fetched on the
+  // (current, everywhere) v2 path, so this adds zero network traffic today.
+  const [llamaPriceIn, setLlamaPriceIn] = useState<number | null>(null)
+  const [llamaPriceOut, setLlamaPriceOut] = useState<number | null>(null)
+  useEffect(() => {
+    if (!v3Enabled) { setLlamaPriceIn(null); setLlamaPriceOut(null); return }
+    let cancelled = false
+    const slug = (() => { try { return getChainConfig(chainId).slug } catch { return 'ethereum' } })()
+    if (chainlinkPriceIn == null && tokenIn) {
+      fetchDefiLlamaPrice(tokenIn.address, slug).then(p => { if (!cancelled) setLlamaPriceIn(p?.price ?? null) }).catch(() => { if (!cancelled) setLlamaPriceIn(null) })
+    } else {
+      setLlamaPriceIn(null)
+    }
+    if (chainlinkPriceOut == null && tokenOut) {
+      fetchDefiLlamaPrice(tokenOut.address, slug).then(p => { if (!cancelled) setLlamaPriceOut(p?.price ?? null) }).catch(() => { if (!cancelled) setLlamaPriceOut(null) })
+    } else {
+      setLlamaPriceOut(null)
+    }
+    return () => { cancelled = true }
+  }, [v3Enabled, tokenIn, tokenOut, chainlinkPriceIn, chainlinkPriceOut, chainId])
+
+  // Live preview of the amount that WOULD be signed, for the "derived floor" display.
+  const liveAmountInRaw = useMemo(() => {
+    if (!v3Enabled || !tokenIn || !totalDisplay) return null
+    try { return parseUnits(totalDisplay, tokenIn.decimals) } catch { return null }
+  }, [v3Enabled, tokenIn, totalDisplay])
+
+  const signingMin = useMemo(() => {
+    if (!v3Enabled || !tokenIn || !tokenOut || liveAmountInRaw == null || liveAmountInRaw <= 0n) return null
+    return deriveSigningMinAmountOut({
+      amountIn: liveAmountInRaw,
+      srcDecimals: tokenIn.decimals,
+      dstDecimals: tokenOut.decimals,
+      maxSlippageBps,
+      chainlinkPriceIn, chainlinkPriceOut,
+      defiLlamaPriceIn: llamaPriceIn, defiLlamaPriceOut: llamaPriceOut,
+      approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
+      approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
+    })
+  }, [v3Enabled, tokenIn, tokenOut, liveAmountInRaw, maxSlippageBps, chainlinkPriceIn, chainlinkPriceOut, llamaPriceIn, llamaPriceOut])
+
   // [CHORE-DCA-CUSTOM-PERIODS req.2 min-chunk] Total spend in USD (APPROX_PRICES-priced
   // tokens only — null for anything unpriced, e.g. an imported token). Feeds the SC-02 dust
   // guard below; fails OPEN when unpriced (same posture fillUsd uses everywhere else), so the
@@ -486,9 +547,32 @@ function CreateDCAForm({
       }
     }
 
-    // minAmountOut = 1 wei for DCA — cannot be 0 (contract reverts with InvalidMinOutput).
-    // Actual slippage protection is handled per-fill by the executor's swap route.
-    const minAmountOut = '1'
+    // [SPRINT-V3-P2 / ADR-013 §1] v3 signing: derive a REAL absolute minAmountOut (never '1')
+    // from the reference price × (1 − maxSlippageBps), same formula the keeper's oracle floor
+    // uses. Falls back to a fixed non-zero, non-price floor (still never '1') when no reference
+    // price exists on either side — the ADR-013 owner-approved no-feed UX. v2 (v3Enabled=false,
+    // the case on every chain today) is completely unchanged: minAmountOut = '1', no
+    // maxSlippageBps field, byte-identical to before this sprint.
+    let minAmountOut: string
+    let maxSlippageBpsForConfig: number | undefined
+    if (v3Enabled) {
+      const derivation = deriveSigningMinAmountOut({
+        amountIn: BigInt(amountIn),
+        srcDecimals: tokenIn.decimals,
+        dstDecimals: tokenOut.decimals,
+        maxSlippageBps,
+        chainlinkPriceIn, chainlinkPriceOut,
+        defiLlamaPriceIn: llamaPriceIn, defiLlamaPriceOut: llamaPriceOut,
+        approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
+        approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
+      })
+      minAmountOut = derivation.minAmountOut.toString()
+      maxSlippageBpsForConfig = maxSlippageBps
+    } else {
+      // minAmountOut = 1 wei for DCA — cannot be 0 (contract reverts with InvalidMinOutput).
+      // Actual slippage protection is handled per-fill by the executor's swap route.
+      minAmountOut = '1'
+    }
 
     // DCA uses priceFeed = address(0) — the contract skips the Chainlink price check
     // entirely, executing on schedule at any price. This avoids MAX_STALENESS rejections
@@ -500,6 +584,7 @@ function CreateDCAForm({
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
       amountIn,
       minAmountOut,
+      ...(maxSlippageBpsForConfig !== undefined ? { maxSlippageBps: maxSlippageBpsForConfig } : {}),
       orderType: OrderType.DCA,
       condition: PriceCondition.ABOVE, // Unused when priceFeed = address(0)
       targetPrice: '0', // Unused when priceFeed = address(0)
@@ -838,6 +923,43 @@ function CreateDCAForm({
               ))}
             </div>
           </div>
+
+          {/* [SPRINT-V3-P2 / ADR-013 §1] v3 max-slippage + derived floor — rendered ONLY once a
+              real per-chain OrderExecutorV3 is configured (v3Enabled). Inert/hidden on every
+              chain today; nothing here changes the v2 flow above. */}
+          {v3Enabled && (
+            <div className="rounded-xl border border-cream-08 bg-surface-primary p-3">
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
+                Max output slippage (per fill)
+              </label>
+              <div className="flex gap-2">
+                {[100, 300, 500].map(bps => (
+                  <button
+                    key={bps}
+                    onClick={() => setMaxSlippageBps(Math.min(bps, MAX_ORDER_SLIPPAGE_BPS))}
+                    className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
+                      maxSlippageBps === bps
+                        ? 'border-cream-gold bg-cream-gold/10 text-cream'
+                        : 'border-cream-08 text-cream-35 hover:text-cream-50'
+                    }`}
+                  >
+                    {(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%
+                  </button>
+                ))}
+              </div>
+              {signingMin != null && tokenOut && (
+                <p className="mt-2 text-[11px] text-cream-35">
+                  Signed floor per order: ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol}
+                  {!signingMin.hasFeed && (
+                    <span className="ml-1 text-amber-300">
+                      (no price reference for this pair — fixed floor, not price-derived; it may
+                      strand the order if price rises, or offer weak protection if it falls)
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
