@@ -348,6 +348,14 @@ contract TeraSwapOrderExecutorV3Test is Test {
         return abi.encodePacked(r, s, v);
     }
 
+    /// @dev Sign against an arbitrary executor's domain (for the sequencer / fuzz executors,
+    ///      each of which has its own verifyingContract and therefore its own domain separator).
+    function _signFor(V3Harness ex, TeraSwapOrderExecutorV3.Order memory o) internal view returns (bytes memory) {
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", ex.domainSeparator(), _hash(o)));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
     function _net(uint256 amountIn) internal pure returns (uint256) {
         return amountIn - (amountIn * 10) / 10_000;
     }
@@ -533,6 +541,30 @@ contract TeraSwapOrderExecutorV3Test is Test {
         assertGe(tokenOut.balanceOf(user), 300e18);
     }
 
+    // [AUDIT-V3-P1 L-01] A LIVE (fresh, sequencer-ok) feed that computes a ZERO fair value is an
+    // oracle-integrity failure — executeOrder must revert OracleValueZero, never silently fall
+    // through to the weaker signed min (ADR-013 N4). Here a dust input (MIN_ORDER_AMOUNT wei of an
+    // 18-dec token) priced against a $100,000 tokenOut makes _fairValueOut round fairOut down to 0
+    // while both legs remain live (hasFeed=true).
+    function test_floor_liveFeedZeroFairValue_reverts() public {
+        feedIn = new MockUsdFeed(8, 1e8);   // tokenIn  = $1
+        feedOut = new MockUsdFeed(8, 1e13); // tokenOut = $100,000
+        _registerFeed(feedIn, address(tokenIn), 18);
+        _registerFeed(feedOut, address(tokenOut), 18);
+
+        // Sanity: the helper confirms a live feed (hasFeed=true) that computes exactly 0.
+        (uint256 fair, bool has) = executor.fairValueOut(address(tokenIn), address(tokenOut), _net(10_000));
+        assertTrue(has, "feed is live");
+        assertEq(fair, 0, "fair value rounds to zero");
+
+        TeraSwapOrderExecutorV3.Order memory o = _order();
+        o.amountIn = 10_000;    // == MIN_ORDER_AMOUNT (dust vs a $100k tokenOut)
+        o.minAmountOut = 1;     // clears the scaledMin==0 guard; would have been the silent floor
+        o.expiry = block.timestamp + EXPIRY_DELTA;
+        vm.expectRevert(TeraSwapOrderExecutorV3.OracleValueZero.selector);
+        executor.executeOrder(o, _sign(o), hex"01");
+    }
+
     // ── sequencer (Base) ─────────────────────────────────────────────
 
     function _deploySequencerExecutor(int256 seqAnswer, uint256 seqStartedAt)
@@ -596,6 +628,87 @@ contract TeraSwapOrderExecutorV3Test is Test {
         ex.executeTokenUsdFeed(actionId, token, address(feed), tokenDec, FEED_STALENESS);
     }
 
+    // ── sequencer scenarios, END-TO-END through executeOrder [AUDIT-V3-P1 L-02] ──────
+    // The helper-level tests above assert _fairValueOut's hasFeed flag; these assert the FLOOR
+    // CONSEQUENCE end-to-end. A down / within-grace / invalid-round sequencer forces NO-FEED, so an
+    // output BELOW the oracle floor (~949e18) but >= the signed min (400e18) still FILLS (signed-min
+    // fallback). Only an up-past-grace sequencer makes the oracle floor bind and revert a sub-floor
+    // fill. SEQ_SUBFLOOR_OUT (500e18) sits between the two bounds so the same output flips outcome.
+    uint256 constant SEQ_SIGNED_MIN = 400e18;
+    uint256 constant SEQ_SUBFLOOR_OUT = 500e18; // < oracle floor (~949e18), >= signed min
+
+    /// @dev Deploy a sequencer executor with both legs feeded ($1/$1) and the user approved on it.
+    ///      Leaves the sequencer UP (past grace); each test overrides seq state for its scenario.
+    function _seqExecutorReady() internal returns (V3Harness ex, MockSequencerFeed seq) {
+        (ex, seq) = _deploySequencerExecutor(0, 1);
+        _registerFeedOn(ex, new MockUsdFeed(8, 1e8), address(tokenIn), 18);
+        _registerFeedOn(ex, new MockUsdFeed(8, 1e8), address(tokenOut), 18);
+        vm.prank(user);
+        tokenIn.approve(address(ex), type(uint256).max);
+    }
+
+    function _seqOrder() internal view returns (TeraSwapOrderExecutorV3.Order memory o) {
+        o = _order();
+        o.minAmountOut = SEQ_SIGNED_MIN;
+        o.expiry = block.timestamp + EXPIRY_DELTA;
+    }
+
+    function test_e2e_sequencerDown_fallsBackToSignedMin() public {
+        (V3Harness ex, MockSequencerFeed seq) = _seqExecutorReady();
+        seq.set(1, block.timestamp - 2 hours); // DOWN => NO-FEED => signed-min floor
+        TeraSwapOrderExecutorV3.Order memory o = _seqOrder();
+        router.setOutput(SEQ_SUBFLOOR_OUT); // below oracle floor, >= signed min
+        uint256 before = tokenOut.balanceOf(user);
+        ex.executeOrder(o, _signFor(ex, o), hex"01");
+        assertGe(tokenOut.balanceOf(user) - before, SEQ_SIGNED_MIN, "signed-min fallback filled");
+    }
+
+    function test_e2e_sequencerWithinGrace_fallsBackToSignedMin() public {
+        (V3Harness ex, MockSequencerFeed seq) = _seqExecutorReady();
+        seq.set(0, block.timestamp - 100); // up 100s < 3600s grace => NO-FEED
+        TeraSwapOrderExecutorV3.Order memory o = _seqOrder();
+        router.setOutput(SEQ_SUBFLOOR_OUT);
+        uint256 before = tokenOut.balanceOf(user);
+        ex.executeOrder(o, _signFor(ex, o), hex"01");
+        assertGe(tokenOut.balanceOf(user) - before, SEQ_SIGNED_MIN, "within-grace fallback filled");
+    }
+
+    function test_e2e_sequencerInvalidRound_fallsBackToSignedMin() public {
+        (V3Harness ex, MockSequencerFeed seq) = _seqExecutorReady();
+        seq.set(0, 0); // startedAt == 0 (round not started) => NO-FEED
+        TeraSwapOrderExecutorV3.Order memory o = _seqOrder();
+        router.setOutput(SEQ_SUBFLOOR_OUT);
+        uint256 before = tokenOut.balanceOf(user);
+        ex.executeOrder(o, _signFor(ex, o), hex"01");
+        assertGe(tokenOut.balanceOf(user) - before, SEQ_SIGNED_MIN, "invalid-round fallback filled");
+    }
+
+    function test_e2e_sequencerUpPastGrace_oracleFloorBinds() public {
+        (V3Harness ex, MockSequencerFeed seq) = _seqExecutorReady();
+        seq.set(0, block.timestamp - 2 hours); // UP, past grace => oracle floor binds
+
+        (uint256 fair, bool has) = ex.fairValueOut(address(tokenIn), address(tokenOut), _net(AMOUNT_IN));
+        assertTrue(has, "up past grace => feeded");
+        uint256 oracleFloor = (fair * (10_000 - SLIP)) / 10_000;
+        assertGt(oracleFloor, SEQ_SUBFLOOR_OUT, "sub-floor output is genuinely below the oracle floor");
+
+        TeraSwapOrderExecutorV3.Order memory o = _seqOrder();
+        // Pre-sign BEFORE vm.expectRevert: _signFor reads ex.domainSeparator() (an external call),
+        // which would otherwise become the call expectRevert watches instead of executeOrder.
+        bytes memory sig = _signFor(ex, o);
+
+        // The SAME output that filled under NO-FEED now reverts — the oracle floor is enforced.
+        router.setOutput(SEQ_SUBFLOOR_OUT);
+        vm.expectRevert(TeraSwapOrderExecutorV3.InsufficientOutput.selector);
+        ex.executeOrder(o, sig, hex"01");
+
+        // ...and an at-floor output clears.
+        router.setOutput(oracleFloor);
+        uint256 before = tokenOut.balanceOf(user);
+        ex.executeOrder(o, sig, hex"01");
+        assertGe(tokenOut.balanceOf(user) - before, oracleFloor, "oracle floor filled at boundary");
+    }
+
     // ── decimals fuzz (6/8/18 legs × 8/18 feed) ─────────────────────
 
     function testFuzz_fairValue_decimals(uint8 tSeed, uint8 tOutSeed, bool feedIn18, bool feedOut18, uint256 amt) public {
@@ -628,6 +741,78 @@ contract TeraSwapOrderExecutorV3Test is Test {
             // allow ±1 token rounding across the decimal normalisations
             assertApproxEqAbs(fairReal, expectedReal, 1, "fair value within rounding");
         }
+    }
+
+    // [AUDIT-V3-P1 L-02] Same 6/8/18 × 8/18 matrix, but END-TO-END through executeOrder: the audit
+    // flagged that the decimals coverage exercised only the _fairValueOut helper, not the floor the
+    // contract actually enforces. This drives a full fill for each combo and asserts the oracle floor
+    // binds — a sub-floor router output reverts InsufficientOutput, an at-floor output clears and is
+    // delivered to the owner — proving the decimal normalisation is correct at the security boundary.
+    /// forge-config: default.fuzz.runs = 32
+    function testFuzz_executeOrder_decimalsEnforceFloor(
+        uint8 tSeed, uint8 tOutSeed, bool feedIn18, bool feedOut18, uint256 amt
+    ) public {
+        uint8[3] memory opts = [6, 8, 18];
+        uint8 tInDec = opts[tSeed % 3];
+        uint8 tOutDec = opts[tOutSeed % 3];
+        uint8 fInDec = feedIn18 ? 18 : 8;
+        uint8 fOutDec = feedOut18 ? 18 : 8;
+
+        MockERC20 tIn = new MockERC20("FIn", "FI", tInDec);
+        MockERC20 tOut = new MockERC20("FOut", "FO", tOutDec);
+        MockUsdFeed fIn = new MockUsdFeed(fInDec, int256(1 * 10 ** uint256(fInDec)));   // $1
+        MockUsdFeed fOut = new MockUsdFeed(fOutDec, int256(3 * 10 ** uint256(fOutDec))); // $3
+
+        // Fresh executor so the fuzzed router is whitelistable via bootstrap (no timelock per run).
+        V3Harness ex = new V3Harness(feeRecipient, admin, address(weth), address(0));
+        MockRouter rt = new MockRouter(tOut, 0);
+        rt.setInputToken(tIn);
+        address[] memory routers = new address[](1);
+        routers[0] = address(rt);
+        address[] memory execs = new address[](1);
+        execs[0] = address(this);
+        vm.prank(admin);
+        ex.bootstrap(routers, execs);
+
+        _registerFeedOn(ex, fIn, address(tIn), tInDec);
+        _registerFeedOn(ex, fOut, address(tOut), tOutDec);
+
+        // >= 1 whole tokenIn (avoids the L-01 fairOut==0 dust edge), up to 1e9 tokens.
+        amt = bound(amt, 10 ** uint256(tInDec), 1_000_000_000 * 10 ** uint256(tInDec));
+
+        uint256 net = amt - (amt * 10) / 10_000;
+        (uint256 fair, bool has) = ex.fairValueOut(address(tIn), address(tOut), net);
+        assertTrue(has, "both legs feeded");
+        assertGt(fair, 0, "no rounding-to-zero for >= 1 token");
+        uint256 oracleFloor = (fair * (10_000 - SLIP)) / 10_000;
+        vm.assume(oracleFloor > 1);
+
+        tIn.mint(user, amt);
+        vm.prank(user);
+        tIn.approve(address(ex), type(uint256).max);
+
+        TeraSwapOrderExecutorV3.Order memory o = _order();
+        o.tokenIn = address(tIn);
+        o.tokenOut = address(tOut);
+        o.amountIn = amt;
+        o.minAmountOut = 1;                 // oracle floor dominates the max()
+        o.router = address(rt);
+        o.routerDataHash = keccak256(hex"01");
+        o.expiry = block.timestamp + EXPIRY_DELTA;
+
+        // Pre-sign BEFORE vm.expectRevert (see _signFor note above).
+        bytes memory sig = _signFor(ex, o);
+
+        // Sub-floor output reverts end-to-end...
+        rt.setOutput(oracleFloor - 1);
+        vm.expectRevert(TeraSwapOrderExecutorV3.InsufficientOutput.selector);
+        ex.executeOrder(o, sig, hex"01");
+
+        // ...and an at-floor output clears, delivering >= floor to the owner.
+        rt.setOutput(oracleFloor);
+        uint256 before = tOut.balanceOf(user);
+        ex.executeOrder(o, sig, hex"01");
+        assertGe(tOut.balanceOf(user) - before, oracleFloor, "floor enforced end-to-end");
     }
 
     // ══════════════════════════════════════════════════════════════
