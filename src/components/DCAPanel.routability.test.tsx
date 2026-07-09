@@ -20,6 +20,13 @@ vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))
+// [SPRINT-V3-P2] CreateDCAForm now calls useChainlinkPrice (v3 signing derivation, inert while
+// getOrderExecutorV3 is null everywhere). It internally uses wagmi's useReadContract, which this
+// file's minimal wagmi mock doesn't provide — stub the hook directly instead of expanding the
+// wagmi mock (these tests don't exercise v3 pricing).
+vi.mock('@/hooks/useChainlinkPrice', () => ({
+  useChainlinkPrice: () => ({ chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }),
+}))
 vi.mock('@/hooks/useTokenBalances', () => ({ useTokenBalances: () => ({ balances: new Map(), isLoading: false, isError: false }) }))
 vi.mock('@/hooks/useTokenBalance', () => ({
   useTokenBalance: () => ({ raw: 1_000000000000000000000n, hasValue: true, formatted: '1000', isLoading: false, isError: false }),

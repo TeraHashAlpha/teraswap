@@ -22,9 +22,9 @@
  * signatures produced under the old schema must not verify under the new one.
  */
 import { describe, it, expect } from 'vitest'
-import { hashTypedData, recoverTypedDataAddress } from 'viem'
+import { hashTypedData, recoverTypedDataAddress, keccak256, toBytes } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { ORDER_EIP712_TYPES } from './types'
+import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, ORDER_V3_TYPE_STRING, MAX_ORDER_SLIPPAGE_BPS, DEFAULT_MAX_SLIPPAGE_BPS } from './types'
 import { getOrderExecutorDomain } from './config'
 
 /** Fixed domain — written literally so the pin cannot drift via env overrides. */
@@ -111,5 +111,102 @@ describe('ORDER_EIP712_TYPES — single-source schema lock [CHORE-EIP712-ORDER-T
       signature,
     })
     expect(recovered.toLowerCase()).toBe(account.address.toLowerCase())
+  })
+})
+
+// ── [SPRINT-V3-P2 / ADR-013 §1] v3 schema — struct/ABI parity with the audited contract ────
+// The contract is FROZEN + audit-approved (SHA 954c415). These pins make ANY future drift
+// between the TS schema here and contracts/order-engine/TeraSwapOrderExecutorV3.sol's
+// ORDER_TYPEHASH loud — a mismatch would make recoverTypedDataAddress disagree with the
+// contract's on-chain signer recovery (escalate as a P1 finding per the sprint spec).
+describe('ORDER_V3_EIP712_TYPES — v3 schema lock [ADR-013 §1]', () => {
+  // Verbatim copy of TeraSwapOrderExecutorV3.sol:120-125 ORDER_TYPEHASH source string.
+  const CONTRACT_TYPE_STRING =
+    'Order(address owner,address tokenIn,address tokenOut,uint256 amountIn,' +
+    'uint256 minAmountOut,uint16 maxSlippageBps,uint8 orderType,uint8 condition,' +
+    'uint256 targetPrice,address priceFeed,uint256 expiry,uint256 nonce,address router,' +
+    'bytes32 routerDataHash,uint256 dcaInterval,uint256 dcaTotal)'
+
+  it('ORDER_V3_TYPE_STRING matches the .sol ORDER_TYPEHASH source byte-for-byte', () => {
+    expect(ORDER_V3_TYPE_STRING).toBe(CONTRACT_TYPE_STRING)
+  })
+
+  it('the 16-field v3 schema is v2 + maxSlippageBps(uint16) inserted right after minAmountOut', () => {
+    expect(ORDER_V3_EIP712_TYPES.Order).toEqual([
+      { name: 'owner', type: 'address' },
+      { name: 'tokenIn', type: 'address' },
+      { name: 'tokenOut', type: 'address' },
+      { name: 'amountIn', type: 'uint256' },
+      { name: 'minAmountOut', type: 'uint256' },
+      { name: 'maxSlippageBps', type: 'uint16' },
+      { name: 'orderType', type: 'uint8' },
+      { name: 'condition', type: 'uint8' },
+      { name: 'targetPrice', type: 'uint256' },
+      { name: 'priceFeed', type: 'address' },
+      { name: 'expiry', type: 'uint256' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'router', type: 'address' },
+      { name: 'routerDataHash', type: 'bytes32' },
+      { name: 'dcaInterval', type: 'uint256' },
+      { name: 'dcaTotal', type: 'uint256' },
+    ])
+  })
+
+  it('the TS type-array reconstructs to the exact pinned type string (structural, not just eyeballed)', () => {
+    const reconstructed = `Order(${ORDER_V3_EIP712_TYPES.Order.map(f => `${f.type} ${f.name}`).join(',')})`
+    expect(reconstructed).toBe(ORDER_V3_TYPE_STRING)
+  })
+
+  it('ORDER_TYPEHASH (keccak256 of the type string) is a deterministic, non-empty hash', () => {
+    // Not compared against a live contract read (no RPC in unit tests) — this pins that our
+    // string produces a stable typehash, and the byte-for-byte string pin above is what proves
+    // parity with the .sol source.
+    const typehash = keccak256(toBytes(ORDER_V3_TYPE_STRING))
+    expect(typehash).toMatch(/^0x[0-9a-f]{64}$/)
+  })
+
+  it('v3 sign→recover roundtrip works with maxSlippageBps included', async () => {
+    const account = privateKeyToAccount(`0x${'22'.repeat(32)}`)
+    const domain = {
+      name: 'TeraSwapOrderExecutor' as const,
+      version: '3' as const,
+      chainId: 1,
+      verifyingContract: '0x2222222222222222222222222222222222222222' as const,
+    }
+    const message = { ...PINNED_MESSAGE, owner: account.address, maxSlippageBps: 300 }
+    const signature = await account.signTypedData({
+      domain, types: ORDER_V3_EIP712_TYPES, primaryType: 'Order', message,
+    })
+    const recovered = await recoverTypedDataAddress({
+      domain, types: ORDER_V3_EIP712_TYPES, primaryType: 'Order', message, signature,
+    })
+    expect(recovered.toLowerCase()).toBe(account.address.toLowerCase())
+  })
+
+  it('a v2 signature over the SAME message content does not recover under the v3 schema+domain', async () => {
+    // Proves the two schemas are cryptographically distinct — a v2 signature can never be
+    // replayed as a valid v3 order (different typehash AND different domain version).
+    const account = privateKeyToAccount(`0x${'22'.repeat(32)}`)
+    const v2Domain = { ...PINNED_DOMAIN, verifyingContract: '0x2222222222222222222222222222222222222222' as const }
+    const v2Message = { ...PINNED_MESSAGE, owner: account.address }
+    const v2Signature = await account.signTypedData({
+      domain: v2Domain, types: ORDER_EIP712_TYPES, primaryType: 'Order', message: v2Message,
+    })
+
+    const v3Domain = { name: 'TeraSwapOrderExecutor' as const, version: '3' as const, chainId: 1, verifyingContract: v2Domain.verifyingContract }
+    const v3Message = { ...v2Message, maxSlippageBps: 300 }
+    const recovered = await recoverTypedDataAddress({
+      domain: v3Domain, types: ORDER_V3_EIP712_TYPES, primaryType: 'Order', message: v3Message, signature: v2Signature,
+    })
+    expect(recovered.toLowerCase()).not.toBe(account.address.toLowerCase())
+  })
+
+  it('MAX_ORDER_SLIPPAGE_BPS mirrors the immutable contract constant (500)', () => {
+    expect(MAX_ORDER_SLIPPAGE_BPS).toBe(500)
+  })
+
+  it('DEFAULT_MAX_SLIPPAGE_BPS (300) is within the contract cap', () => {
+    expect(DEFAULT_MAX_SLIPPAGE_BPS).toBeGreaterThan(0)
+    expect(DEFAULT_MAX_SLIPPAGE_BPS).toBeLessThanOrEqual(MAX_ORDER_SLIPPAGE_BPS)
   })
 })
