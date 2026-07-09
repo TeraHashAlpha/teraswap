@@ -44,11 +44,19 @@ interface IOrderExecutorV3 {
  * Usage (see the runbook for the full invocation with real values):
  *   forge script script/VerifyOrderExecutorV3.s.sol:VerifyOrderExecutorV3 \
  *     --rpc-url <chain rpc> \
- *     --sig "run(address,address,address[],address,uint256)" \
- *     <executor> <expectedAdmin> "[<expectedRouter1>,...]" <expectedSequencerFeed> <expectedChainId>
+ *     --sig "run(address,address,address,address,address[],address[],address,uint256)" \
+ *     <executor> <expectedAdmin> <expectedFeeRecipient> <expectedWeth> \
+ *     "[<expectedRouter1>,...]" "[<deniedRouter1>,...]" <expectedSequencerFeed> <expectedChainId>
  *
  * A second entrypoint, checkOracleFeed, is provided for the post-oracle-config checkpoint (run once per
  * configured token — see the runbook §4).
+ *
+ * [AUDIT-V3-PREDEPLOY M-C] `deniedRouters` is a caller-supplied CANDIDATE list of routers that must NOT be
+ * whitelisted (e.g. every other router TeraSwap uses elsewhere — v2's broader Base set, mainnet routers,
+ * intent/RFQ venues). It is not an exhaustive "nothing else in the universe" proof — `whitelistedRouters`
+ * is a mapping, not enumerable on-chain — but it does catch the realistic failure mode (bootstrapping with
+ * an extra/wrong router by mistake). For a fully exhaustive check, cross-reference the on-chain
+ * Bootstrap/RouterWhitelisted event log (see the runbook §3's event-scan step).
  */
 contract VerifyOrderExecutorV3 is Script {
     // EIP-712 domain typehash (standard, matches OZ's EIP712 base the contract inherits).
@@ -58,22 +66,31 @@ contract VerifyOrderExecutorV3 is Script {
     string internal constant DOMAIN_VERSION = "3";
     uint16 internal constant EXPECTED_MAX_SLIPPAGE_BPS = 500;
 
-    /// @notice Core post-deploy checks: owner/admin, immutable cap, router whitelist, sequencer feed,
-    ///         init/pause state, EIP-712 domain. Run after §2 (Deploy) and again after §3 (Verify) —
-    ///         idempotent, no state changes.
+    /// @notice Core post-deploy checks: owner/admin, immutables (feeRecipient/WETH), immutable cap, router
+    ///         whitelist (expected present + denied absent), sequencer feed, init/pause state, EIP-712
+    ///         domain. Run after §2 (Deploy) and again after §3 (Verify) — idempotent, no state changes.
     /// @param executor The deployed TeraSwapOrderExecutorV3 address.
     /// @param expectedAdmin The admin address the runbook says this deploy should have (§0 input).
+    /// @param expectedFeeRecipient [AUDIT-V3-PREDEPLOY M-A] The feeRecipient the runbook says this deploy
+    ///        should have (§0 input) — an immutable, unrecoverable if deployed wrong.
+    /// @param expectedWeth [AUDIT-V3-PREDEPLOY M-A] The canonical WETH for this chain (§0 input) — an
+    ///        immutable; a wrong value here silently breaks every WETH-output order's H-02 ETH-unwrap path.
     /// @param expectedRouters EVERY router this deploy's bootstrap should have whitelisted — checked
-    ///        individually. This script does NOT enumerate "every other address is false" (that requires
-    ///        an off-chain event scan of the Bootstrap/RouterWhitelisted events, a manual runbook step,
-    ///        not a single on-chain read) — it only confirms the EXPECTED set is present.
+    ///        individually.
+    /// @param deniedRouters [AUDIT-V3-PREDEPLOY M-C] Routers that must NOT be whitelisted — a candidate
+    ///        deny-list (e.g. v2's broader Base router set, mainnet-only routers). Not exhaustive — see the
+    ///        contract-level doc comment above for why, and the runbook §3 event-scan step for the
+    ///        exhaustive check. May be empty (skips this check) but the runbook should always pass one.
     /// @param expectedSequencerFeed The Chainlink L2 sequencer-uptime feed the runbook says this chain
     ///        should use (address(0) for mainnet).
     /// @param expectedChainId The chain this deploy is supposed to be on.
     function run(
         address executor,
         address expectedAdmin,
+        address expectedFeeRecipient,
+        address expectedWeth,
         address[] calldata expectedRouters,
+        address[] calldata deniedRouters,
         address expectedSequencerFeed,
         uint256 expectedChainId
     ) external view {
@@ -85,6 +102,12 @@ contract VerifyOrderExecutorV3 is Script {
         require(oe.admin() == expectedAdmin, "VERIFY FAIL: admin() != expectedAdmin");
         console2.log("[OK] admin ==", expectedAdmin);
 
+        // [AUDIT-V3-PREDEPLOY M-A] Immutables — set once at construction, unrecoverable if wrong.
+        require(oe.feeRecipient() == expectedFeeRecipient, "VERIFY FAIL: feeRecipient() != expectedFeeRecipient");
+        console2.log("[OK] feeRecipient ==", expectedFeeRecipient);
+        require(oe.WETH() == expectedWeth, "VERIFY FAIL: WETH() != expectedWeth");
+        console2.log("[OK] WETH ==", expectedWeth);
+
         require(oe.MAX_ORDER_SLIPPAGE_BPS() == EXPECTED_MAX_SLIPPAGE_BPS, "VERIFY FAIL: MAX_ORDER_SLIPPAGE_BPS != 500");
         console2.log("[OK] MAX_ORDER_SLIPPAGE_BPS == 500 (compile-time constant, no setter)");
 
@@ -93,6 +116,12 @@ contract VerifyOrderExecutorV3 is Script {
             console2.log("[OK] router whitelisted:", expectedRouters[i]);
         }
         require(expectedRouters.length > 0, "VERIFY FAIL: no expected routers supplied - refusing to pass trivially");
+
+        // [AUDIT-V3-PREDEPLOY M-C] Deny-list: none of these candidate routers may be whitelisted.
+        for (uint256 i = 0; i < deniedRouters.length; i++) {
+            require(!oe.whitelistedRouters(deniedRouters[i]), "VERIFY FAIL: a DENIED router is whitelisted - bootstrap included an unexpected router");
+            console2.log("[OK] router correctly NOT whitelisted:", deniedRouters[i]);
+        }
 
         require(oe.sequencerUptimeFeed() == expectedSequencerFeed, "VERIFY FAIL: sequencerUptimeFeed != expected");
         console2.log("[OK] sequencerUptimeFeed ==", expectedSequencerFeed);

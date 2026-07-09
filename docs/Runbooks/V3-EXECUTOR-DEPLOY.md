@@ -33,7 +33,7 @@ contract deploy before.
 | `_weth` (Base) | `0x4200000000000000000000000000000000000006` | Base canonical WETH |
 | `_sequencerUptimeFeed` (Base) | `0xBCF85224fc0756B9Fa45aA7892530B47e10b6433` | Chainlink Base L2 sequencer-uptime feed (`src/lib/chains/registry.ts`). **Mainnet: pass `address(0)`** — no sequencer, per the contract's own doc comment. |
 | **Keeper / executor address** | `<current Base keeper signing address>` | Read it, don't assume: whichever address is whitelisted as executor on the LIVE v2 Base contract today (KMS-derived per `AWS-KMS-EXECUTOR-SETUP.md`, not necessarily `0xd7F9…` from the original bootstrap doc — `cast call $OE_V2_BASE "whitelistedExecutors(address)(bool)" <addr>` to confirm before reusing it here). **Must hold Base ETH.** Runtime key must live in KMS/Vault — plaintext refused (CHORE-EXECUTOR-KEY-GUARD; the deploy script below refuses too, see §2). |
-| **Router to whitelist (bootstrap)** | see §2 Step 2 — **Base Augustus V6, address RE-VERIFIED on-chain at deploy time** (§2 Step 1) | v3-P1 is signing-flow parity with v2 for DCA; bootstrap with the SAME router set v2 uses on Base today (`docs/Runbooks/BASE-ORDEREXECUTOR-DEPLOY.md` §3) unless the owner wants a narrower initial set. |
+| **Routers to whitelist (bootstrap)** | **EXACTLY the 2-router set `/api/swap` actually serves on Base** (`src/lib/order-engine/config.ts::BASE_ROUTERS`) — Velora Augustus V6 `0x6A000F20005980200259B80c5102003040001068` + Uniswap SwapRouter02 `0x2626664c2603336E57B271c5C0b26F421741e481`, both **RE-VERIFIED on-chain at deploy time** (§2 Step 1) | **[AUDIT-V3-PREDEPLOY M-C]** v3's whitelist is deliberately NARROWER than v2's original 10-router Base bootstrap (`BASE-ORDEREXECUTOR-DEPLOY.md` §3) — bootstrapping a router the frontend can't actually route through would silently strand any order that committed to it. Do not widen this set without also confirming `/api/swap` can serve it. |
 | Deployer wallet | `<your keystore account>` | must hold Base ETH for gas; becomes deployer (new nonce → NEW address, not the v2 address) |
 | BaseScan API key | `<for --verify>` | source verification |
 | **v2 Base OrderExecutor (for the pre-flight snapshot)** | `0x135B339902Ea4E0fB4CF059961dc8856bA1D2598` | `docs/DEPLOYMENTS.md` |
@@ -69,17 +69,20 @@ refusal mirrors the keeper's own key-guard posture — a deploy is exactly the k
 should never sign on a production chain). It also asserts `block.chainid` matches the `EXPECTED_CHAIN_ID` env
 var before broadcasting, so a misconfigured `--rpc-url` can't silently deploy to the wrong chain.
 
-### Step 1 — RE-VERIFY the router address on-chain (the Sprint-46 lesson: labels lie)
+### Step 1 — RE-VERIFY BOTH router addresses on-chain (the Sprint-46 lesson: labels lie)
 `SPRINT-46-ARBITRUM-CONFIG` and the FeeCollector mislabel (`docs/DEPLOYMENTS.md` — BaseScan shows the Base
 FeeCollector as "TeraSwapOrderExecutor") both confirm: **never trust a block-explorer label or a doc
-citation for a router address without an on-chain check at deploy time.** Before bootstrapping:
+citation for a router address without an on-chain check at deploy time.** Before bootstrapping, re-verify
+**both** of the exactly-2 routers from §0 — Velora Augustus V6 AND Uniswap SwapRouter02:
 ```bash
-# Confirm the Base Augustus V6 address is still a live contract with the expected bytecode size/selector.
-cast code 0x6A000F20005980200259B80c5102003040001068 --rpc-url https://mainnet.base.org | wc -c   # non-trivial, not "0x"
-# Cross-check against the SAME address already whitelisted + actively used on the LIVE v2 Base contract:
+# Confirm each address is still a live contract with non-trivial bytecode.
+cast code 0x6A000F20005980200259B80c5102003040001068 --rpc-url https://mainnet.base.org | wc -c   # Augustus V6 — non-trivial, not "0x"
+cast code 0x2626664c2603336E57B271c5C0b26F421741e481 --rpc-url https://mainnet.base.org | wc -c   # SwapRouter02 — non-trivial, not "0x"
+# Cross-check both against the SAME addresses already whitelisted + actively used on the LIVE v2 Base contract:
 cast call 0x135B339902Ea4E0fB4CF059961dc8856bA1D2598 "whitelistedRouters(address)(bool)" 0x6A000F20005980200259B80c5102003040001068 --rpc-url https://mainnet.base.org   # true
+cast call 0x135B339902Ea4E0fB4CF059961dc8856bA1D2598 "whitelistedRouters(address)(bool)" 0x2626664c2603336E57B271c5C0b26F421741e481 --rpc-url https://mainnet.base.org   # true
 ```
-Record both outputs here (paste the `cast code` byte length and the whitelist bool) before proceeding —
+Record all four outputs here (paste each `cast code` byte length and whitelist bool) before proceeding —
 this IS the "record the check" the pre-deploy gate requires: `_______________`.
 
 ### Step 2 — Deploy
@@ -100,12 +103,13 @@ Save the deployed address → `export OE_V3_BASE=0x...`. **Confirm it differs fr
 deployer nonce guarantees this, but check — an address collision here would mean something is badly wrong).
 
 ### Step 3 — Bootstrap (one-shot, `onlyAdmin`)
-Same router set as v2's Base bootstrap (`BASE-ORDEREXECUTOR-DEPLOY.md` §3) unless the owner narrows it —
-record the decision. Bootstrap ALSO whitelists the keeper executor address (from §0) in the same tx:
+**[AUDIT-V3-PREDEPLOY M-C]** EXACTLY the 2-router set `/api/swap` serves on Base (§0) — **not** v2's
+broader 10-router Base bootstrap (`BASE-ORDEREXECUTOR-DEPLOY.md` §3). Bootstrap ALSO whitelists the keeper
+executor address (from §0) in the same tx:
 ```bash
 cast send $OE_V3_BASE \
   "bootstrap(address[],address[])" \
-  "[<router1>,<router2>,...]" \
+  "[0x6A000F20005980200259B80c5102003040001068,0x2626664c2603336E57B271c5C0b26F421741e481]" \
   "[<keeper executor address from §0>]" \
   --rpc-url https://mainnet.base.org --account <your-keystore>
 ```
@@ -124,20 +128,43 @@ cast send $OE_V3_BASE \
     ticket / re-submit source via the "Verify & Publish" flow with the exact compiler settings from
     `foundry.toml` (solc 0.8.28, `via_ir = true`, optimizer 200 runs). Record ticket/status here:
     `_______________`.
-- [ ] Run the read-only verifier script (§ below) — **must pass before proceeding to §4**:
+- [ ] Run the read-only verifier script (§ below) — **must pass before proceeding to §4**. **[AUDIT-V3-PREDEPLOY
+  M-A]** now also checks the immutables `feeRecipient()`/`WETH()`; **[M-C]** now also asserts the whitelist is
+  EXACTLY the 2-router served set (expected present, a deny-list of known other routers absent):
   ```bash
   cd contracts/order-engine
   forge script script/VerifyOrderExecutorV3.s.sol:VerifyOrderExecutorV3 \
     --rpc-url https://mainnet.base.org \
-    --sig "run(address,address,address[],address,uint256)" \
-    $OE_V3_BASE $ADMIN "[0x6A000F20005980200259B80c5102003040001068]" $SEQUENCER_UPTIME_FEED 8453
+    --sig "run(address,address,address,address,address[],address[],address,uint256)" \
+    $OE_V3_BASE $ADMIN $FEE_RECIPIENT $WETH_ADDRESS \
+    "[0x6A000F20005980200259B80c5102003040001068,0x2626664c2603336E57B271c5C0b26F421741e481]" \
+    "[0x111111125421cA6dc452d289314280a0f8842A65,0x0000000000001fF3684f28c67538d4D072C22734,0x19cEeAd7105607Cd444F5ad10dd51356436095a1,0x6131B5fae19EA4f9D964eAc0408E4408b66337b5,0x6352a56caadC4F1E25CD6c75970Fa768A3304e64,0xAC4c6e212A361c968F1725b4d055b47E63F80b75,0xBA12222222228d8Ba445958a75a0704d566BF2C8,0x4f37A9d177470499A2dD084621020b023fcffc1F]" \
+    $SEQUENCER_UPTIME_FEED 8453
   ```
-  (Router arg = every router this deploy's bootstrap whitelisted, including the re-verified Augustus V6
-  address from §2 Step 1 — pass the FULL set you actually bootstrapped with in §2 Step 3, not just one. The
-  verifier checks each expected address IS whitelisted; it does not — and cannot, from a single read —
-  prove no OTHER address is also whitelisted, since `whitelistedRouters` is a mapping, not enumerable
-  on-chain. If you need that guarantee, cross-check the `Bootstrap`/`RouterWhitelisted` event log for this
-  contract address shows exactly the routers you intended, nothing more.)
+  - **First array (`expectedRouters`)** = EXACTLY the 2-router served set from §0/§2 Step 3 — Augustus V6 +
+    SwapRouter02. Anything else here is wrong; do not widen it to match v2's set.
+  - **Second array (`deniedRouters`)** = v2's OTHER Base bootstrap routers (1inch, 0x v2, Odos, KyberSwap,
+    OpenOcean, SushiSwap, Balancer, Curve — `BASE-ORDEREXECUTOR-DEPLOY.md` §3) that v3 must NOT have
+    inherited. This is a candidate deny-list, not exhaustive — `whitelistedRouters` is a mapping, not
+    enumerable on-chain, so this only catches routers you thought to name.
+  - **Event-scan step (exhaustive check, run once, record the result):** cross-check the on-chain
+    `Bootstrap`/`RouterWhitelisted` event log for `$OE_V3_BASE` shows EXACTLY the 2 intended routers and
+    nothing more — the deny-list above can only ever be as complete as the candidates you supply, this is
+    the actual exhaustive proof:
+    ```bash
+    cast logs --rpc-url https://mainnet.base.org --address $OE_V3_BASE \
+      --from-block <deploy-block> --to-block latest \
+      "Bootstrap(address)"
+    cast logs --rpc-url https://mainnet.base.org --address $OE_V3_BASE \
+      --from-block <deploy-block> --to-block latest \
+      "RouterWhitelisted(address,bool)"
+    ```
+    Confirm the union of both logs' router addresses is exactly `{Augustus V6, SwapRouter02}` — any other
+    address appearing (from either event) is an unexpected whitelist addition and must be investigated
+    before proceeding. Record the result here: `_______________`. Re-run this event-scan at any FUTURE
+    checkpoint too (e.g. after a `queueRouterChange`/`executeRouterChange`), not just at initial deploy — the
+    deny-list check above only runs when you explicitly invoke the verifier, the event log is the durable
+    record.
 
 ## 4. Oracle config (timelocked — DO NOT skip, DO NOT rush)
 
@@ -176,18 +203,26 @@ at execution (ADR-013 §1). This is the **only** admin surface v3 adds over v2, 
 
 ## 5. Cutover
 
-1. **Vercel (frontend):** set for the Base environment —
-   ```
-   NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = $OE_V3_BASE
-   ```
-   (name only, per `src/lib/order-engine/config.ts::ORDER_EXECUTOR_V3_BY_CHAIN` — do NOT set the mainnet
-   variant `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS` unless deploying mainnet too, § below.)
-2. **Keeper env (`.env.executor`):** set —
+**[AUDIT-V3-PREDEPLOY L-A] Order matters — keeper FIRST, frontend SECOND.** Setting the frontend signing env
+before the keeper is live for v3 opens a window where a user can sign+submit a real v3 order that the keeper
+doesn't yet know how to route — `resolveExecutorRouting` (PR #299) skip+flags it every cycle until the
+keeper env catches up (the order sits stuck "active", not lost, but needlessly delayed and generates
+spurious `alertOps` noise). Setting the keeper first eliminates that window entirely: a keeper with
+`ORDER_EXECUTOR_V3_ADDRESS` set simply has nothing to route yet (no v3 orders can exist until the frontend
+env is also set), so there's no wrong state to be in.
+
+1. **Keeper env (`.env.executor`):** set —
    ```
    ORDER_EXECUTOR_V3_ADDRESS = $OE_V3_BASE
    ```
    Restart the keeper process; confirm the startup log line `Contract (v3): $OE_V3_BASE` (not "not
    configured").
+2. **Vercel (frontend):** set for the Base environment —
+   ```
+   NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = $OE_V3_BASE
+   ```
+   (name only, per `src/lib/order-engine/config.ts::ORDER_EXECUTOR_V3_BY_CHAIN` — do NOT set the mainnet
+   variant `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS` unless deploying mainnet too, § below.)
 3. **Effect of setting both:** `getOrderExecutorV3(8453)` stops returning `null` → DCAPanel starts deriving
    real `minAmountOut` + signing v3 orders (PR #299) for Base; the keeper's `resolveExecutorRouting` (PR
    #299) starts routing v3-signed orders to `$OE_V3_BASE` instead of skip+flagging them. **v2 stops
@@ -211,20 +246,31 @@ at execution (ADR-013 §1). This is the **only** admin surface v3 adds over v2, 
 
 ## 6. Rollback
 
-- **Before any real v3 order exists** (i.e., you're rolling back during/immediately after §5 before the e2e
-  smoke's Create step, or the smoke test itself failed at Create): simply **unset**
-  `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE` in Vercel and `ORDER_EXECUTOR_V3_ADDRESS` in the keeper env,
-  redeploy/restart. `getOrderExecutorV3(8453)` returns to `null` → DCAPanel fails closed back to v2-only
-  signing (byte-identical to pre-cutover) and the keeper skip+flags any stray v3 order_data it somehow still
-  sees. **This is safe and reversible with zero on-chain cleanup** — no v3 order was ever signed.
-- **After a real v3 order exists** (any point past a successful Create in the e2e smoke, or real user orders
-  have since been created): you CANNOT un-sign an order a user already holds. Rollback instead means:
-  1. Unset the same two env vars → **stops NEW v3 signing** (DCAPanel reverts to v2 for all new orders).
-  2. The keeper KEEPS executing and cancelling every EXISTING v3 order against `$OE_V3_BASE` — do not touch
-     `ORDER_EXECUTOR_V3_ADDRESS` in the keeper env, only the frontend signing switch. Existing v3 orders must
-     still be servable (executed, cancelled, or left to expire) or users are stuck holding unexecutable
-     signed orders — the entire point of PR #301 was to make sure this manual-drain path exists.
-  3. **Incident record**: append (never overwrite) an `INC-YYYY-MM-DD-NNN` file under `Audits/Incidents/`
+**[AUDIT-V3-PREDEPLOY M-B] The invariant, stated once and unambiguously: rollback stops NEW v3 signing —
+it never abandons an EXISTING v3 order.** Every rollback path below unsets ONLY the frontend signing env
+(`NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE`). The keeper's `ORDER_EXECUTOR_V3_ADDRESS` is **never** unset
+as part of rollback — the keeper must keep it forever, for as long as ANY v3 order can still exist (i.e.,
+at minimum until v2's — sorry, v3's — outstanding orders have fully drained per §7), because unsetting it
+would make `resolveExecutorRouting` skip+flag every EXISTING v3 order instead of executing/cancelling it,
+stranding it unservable. This holds identically whether or not a real v3 order exists yet — there is no
+"before/after" branch on which env var to touch, only on what ELSE the rollback requires (an incident
+record, once a real order exists):
+
+1. **Unset `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE` in Vercel only.** `getOrderExecutorV3(8453)` returns
+   to `null` in the frontend → DCAPanel fails closed back to v2-only signing (byte-identical to
+   pre-cutover). **Do NOT unset `ORDER_EXECUTOR_V3_ADDRESS` in the keeper env** — see the invariant above.
+2. Redeploy the frontend / confirm the new env value is live. New DCA orders sign against v2 again
+   immediately.
+3. **If NO real v3 order was ever signed yet** (rolling back during/immediately after §5 before the e2e
+   smoke's Create step, or the smoke test failed at Create): step 1–2 alone is the complete rollback — the
+   keeper's `ORDER_EXECUTOR_V3_ADDRESS` staying set is harmless (nothing v3 exists for it to route yet).
+   **Zero on-chain cleanup needed.**
+4. **If a real v3 order exists** (any point past a successful Create in the e2e smoke, or real user orders
+   have since been created): you CANNOT un-sign an order a user already holds. Steps 1–2 already stopped
+   new v3 signing; the keeper (env untouched) keeps executing/cancelling every EXISTING v3 order against
+   `$OE_V3_BASE` exactly as before — this is the entire point of PR #301's cancel-support prerequisite: a
+   manual-drain path must exist for orders already committed. Additionally:
+   - **Incident record**: append (never overwrite) an `INC-YYYY-MM-DD-NNN` file under `Audits/Incidents/`
      documenting the trigger, the exact rollback timestamp, and the outstanding v3 order count at rollback
      time (same snapshot method as §1). This is a CLAUDE.md convention (rule: incidents are append-only,
      one file per incident) — do not skip it even for a clean/uneventful rollback.
@@ -251,7 +297,7 @@ above:
 | | Base (this runbook) | Mainnet (deferred) |
 |---|---|---|
 | `_sequencerUptimeFeed` | `0xBCF85224fc0756B9Fa45aA7892530B47e10b6433` | `address(0)` — L1 has no sequencer |
-| Router to whitelist | Base Augustus V6 `0x6A000F…1068` | mainnet Augustus **V5** `0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57` (ADR-011 — mainnet uses V5, NOT V6; re-verify on-chain at deploy time exactly as §2 Step 1, do not assume the Base address carries over) |
+| Routers to whitelist | EXACTLY 2 — Base Augustus V6 `0x6A000F…1068` + Uniswap SwapRouter02 `0x2626…41e481` (the `/api/swap`-served set, `BASE_ROUTERS`) | **[M-C principle applies here too]** EXACTLY whatever `MAINNET_ROUTERS`/the mainnet default in `src/lib/order-engine/config.ts` actually serves via `/api/swap` at deploy time — do NOT assume it's a straight V6→V5 swap of the same 2-router shape; mainnet's served set may differ in size/composition (currently 1inch/0x/Augustus **V5** `0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57`/Uniswap V3 SwapRouter — ADR-011: mainnet uses V5, NOT V6). Re-verify EVERY router on-chain at deploy time exactly as §2 Step 1, do not assume any Base address carries over. |
 | Submission relay | Base's private sequencer mempool (no extra config) | **Flashbots Protect RPC required** (`FLASHBOTS_RPC_URL` in the keeper env) — mainnet is a public mempool, `submission-policy.js` fail-closes without it (`ALLOW_PUBLIC_MEMPOOL` override exists but is explicitly discouraged, see `order-floor.js`'s header) |
 | `_feeRecipient`/`_admin`/`_weth` | Base values (§0) | mainnet values — `0x107F…`/`0x9A38…`/mainnet WETH `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` (same recipient/admin as Base per `docs/DEPLOYMENTS.md`, different WETH) |
 | Env var names | `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE` / keeper's `ORDER_EXECUTOR_V3_ADDRESS` on the mainnet keeper instance | `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS` (no `_BASE` suffix — mainnet is chain 1's slot in `ORDER_EXECUTOR_V3_BY_CHAIN`) |
