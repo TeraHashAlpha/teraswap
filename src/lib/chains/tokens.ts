@@ -30,6 +30,7 @@ import { DEFAULT_TOKENS, getCustomTokens, type Token, type TokenCategory } from 
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
 import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
 import { isStablecoinCategorySymbol } from './stablecoins'
+import { ARBITRUM_CATALOG } from './arbitrum-catalog'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -60,7 +61,7 @@ export const SEARCH_RESULT_LIMIT = 80
 // [token-selector-ux] Core brand logos bundled into public/tokens/ (validated, 100%
 // reliable, no 404). The brand mark is identical across chains, so map BY SYMBOL — a
 // core token on ANY chain catalog here points to its local file instead of a remote CDN.
-const CORE_LOCAL_LOGO: Record<string, string> = {
+export const CORE_LOCAL_LOGO: Record<string, string> = {
   ETH: '/tokens/eth.png',
   WETH: '/tokens/weth.png',
   USDC: '/tokens/usdc.png',
@@ -139,11 +140,29 @@ function toChainToken(t: Token): ChainToken {
   }
 }
 
+// [CHORE-47C-ARBITRUM-CATALOG] Launch catalog: 5 Chainlink-feed-covered manifest tokens
+// (WETH, USDC, USDT, DAI, WBTC — owner decision, L-01 adjudication). Addresses/decimals come
+// from arbitrum-catalog.ts (generated from the manifest, zero hex here). Reuses the same
+// bundled local logo assets mainnet/Base already use for these majors (CORE_LOCAL_LOGO,
+// coverage/fallback pattern) — no new logo assets. Chain stays DARK (feeCollector env unset);
+// populating this catalog is additive only, see arbitrum-catalog.ts for the full rationale.
+const ARBITRUM_FULL: ChainToken[] = ARBITRUM_CATALOG.map((t): ChainToken => ({
+  address: t.address,
+  symbol: t.key,
+  name: t.name,
+  decimals: t.decimals,
+  logoURI: CORE_LOCAL_LOGO[t.key] ?? '',
+  popular: true,
+  suggested: true,
+  category: t.key === 'WETH' ? 'Native' : isStablecoinCategorySymbol(t.key, 42161) ? 'Stablecoin' : t.key === 'WBTC' ? 'Wrapped BTC' : undefined,
+}))
+
 export const CHAIN_TOKENS: Record<number, ChainToken[]> = {
   1: DEFAULT_TOKENS.map(toChainToken),
   // [SPRINT-9Y] Base default view = the curated "Suggested" subset of the full
   // catalog. The long tail stays reachable via getSearchCatalog / getFullCatalog.
   8453: BASE_FULL.filter((t) => t.suggested),
+  42161: ARBITRUM_FULL,
 }
 
 /** Popular tokens for a chain (falls back to the whole list if none flagged). */

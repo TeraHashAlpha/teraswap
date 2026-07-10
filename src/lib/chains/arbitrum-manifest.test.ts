@@ -21,6 +21,7 @@ import { getChainConfig } from './registry'
 import { CHAINLINK_FEEDS_BY_CHAIN } from './chainlink-feeds'
 import { ROUTER_WHITELIST_BY_CHAIN } from './routers'
 import { getUniswapV3Contracts } from './uniswap-v3'
+import { CHAIN_TOKENS } from './tokens'
 
 const MANIFEST_PATH = join(process.cwd(), 'docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json')
 
@@ -95,5 +96,33 @@ describe('Arbitrum (42161) — FULL address manifest guard [CHORE-47B-ARBITRUM-A
     const live = resolveLive(entry)
     expect(live, `no live value resolved for ${entry.category}/${entry.key}`).not.toBeNull()
     expect(live!.toLowerCase()).toBe(entry.address.toLowerCase())
+  })
+})
+
+// [CHORE-47C-ARBITRUM-CATALOG] The token CATALOG (CHAIN_TOKENS[42161] / tokens.ts) is a
+// SEPARATE structure from the raw registry token map (chain42161.tokens, already diffed above)
+// — the catalog is what the UI's token selector actually renders. A hand-edit here would drift
+// silently from the manifest without the guard above catching it, so it gets diffed too.
+describe('Arbitrum (42161) — CATALOG addresses match the manifest [CHORE-47C-ARBITRUM-CATALOG]', () => {
+  const manifest = loadManifest()
+  const catalogTokenEntries = manifest.entries.filter(
+    (e) => e.category === 'token' && ['WETH', 'USDC', 'USDT', 'DAI', 'WBTC'].includes(e.key),
+  )
+
+  it('the manifest has all 5 launch-catalog token entries', () => {
+    expect(catalogTokenEntries).toHaveLength(5)
+  })
+
+  it.each(catalogTokenEntries.map((e) => [e.key, e] as const))(
+    'catalog token %s matches the manifest address',
+    (_key, entry) => {
+      const catalogEntry = CHAIN_TOKENS[42161]?.find((t) => t.symbol === entry.key)
+      expect(catalogEntry, `catalog is missing token ${entry.key}`).toBeDefined()
+      expect(catalogEntry!.address.toLowerCase()).toBe(entry.address.toLowerCase())
+    },
+  )
+
+  it('the catalog is EXACTLY the 5-token launch set — a 6th token requires updating this test', () => {
+    expect(CHAIN_TOKENS[42161]).toHaveLength(5)
   })
 })
