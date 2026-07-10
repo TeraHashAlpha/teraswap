@@ -22,9 +22,13 @@ const allowlist = allowlistJson as unknown as Allowlist
 // NOTE: custom/imported tokens (getSearchCatalog ∪ getCustomTokens) are intentionally OUT of scope —
 // they are inherently untrusted and the UI marks them ⚠ (verified=false); the guard's contract is the
 // CURATED catalog (getFullCatalog).
-// [SPRINT-46-ARBITRUM-CONFIG] 42161 registered CONFIG-ONLY / dark — its curated catalog
-// (CHAIN_TOKENS[42161]) is deliberately absent, so getFullCatalog(42161) is [] and this audit
-// is trivially clean. Populating a real Arbitrum catalog is activation-sprint scope.
+// [SPRINT-46-ARBITRUM-CONFIG → CHORE-47C-ARBITRUM-CATALOG] 42161 is registered but still dark
+// (feeCollector env unset, isChainActive(42161) === false). Its curated catalog
+// (CHAIN_TOKENS[42161]) is now populated with the 5 Chainlink-feed-covered launch tokens
+// (closes AUDIT-ARBITRUM-46-47 M-01) — verdicts for all 5 are cached in catalog-guard.trust.json
+// (chainId 42161 rows, generated alongside the catalog from the address manifest) and the USDT
+// on-chain/catalog symbol mismatch (USD₮0 vs USDT) is pinned in catalog-guard.allowlist.json's
+// symbolMismatchExempt. Populating the catalog does NOT activate the chain.
 const CHAINS = [1, 8453, 42161] as const
 
 describe('catalog-address-guard — live catalog is clean', () => {
