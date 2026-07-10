@@ -41,7 +41,7 @@ describe('chains/registry [P216]', () => {
 })
 
 describe('chains/registry — Arbitrum One (42161) [SPRINT-46-ARBITRUM-CONFIG, dark launch]', () => {
-  it('is registered with feeCollector HARD-null (no env override, unlike Base)', () => {
+  it('is registered with feeCollector null when the env var is unset [SPRINT-47-ARBITRUM-ACTIVATION-PREP: now env-driven, was hard-null]', () => {
     const c = getChainConfig(42161)
     expect(c.chainId).toBe(42161)
     expect(c.slug).toBe('arbitrum')
@@ -55,8 +55,15 @@ describe('chains/registry — Arbitrum One (42161) [SPRINT-46-ARBITRUM-CONFIG, d
     expect(c.contracts.cowVaultRelayer).toBe('0xC92E8bdf79f0507f65a392b0ab4667716BFE0110')
   })
 
-  it('has a report-verified sequencer uptime feed (L2, like Base)', () => {
+  // [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] AUDIT-ARBITRUM-46-47 HIGH: the recon value had ZERO
+  // on-chain code. Corrected via scripts/verify-arbitrum-addresses.mjs (Chainlink's official
+  // reference-data directory, on-chain verified on two independent RPCs).
+  it('has a manifest-verified sequencer uptime feed (L2, like Base) — CORRECTED address', () => {
     expect(getChainConfig(42161).sequencerUptimeFeed).toBe(
+      '0xFdB631F5EE196F0ed6FAa767959853A9F217697D',
+    )
+    // Regression guard: must never revert to the broken recon value.
+    expect(getChainConfig(42161).sequencerUptimeFeed).not.toBe(
       '0xFdB631f5eE196f5C5AA41F952B0282f59B2Eff9E',
     )
   })
@@ -65,6 +72,22 @@ describe('chains/registry — Arbitrum One (42161) [SPRINT-46-ARBITRUM-CONFIG, d
     const { tokens } = getChainConfig(42161)
     expect(tokens.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831')
     expect(Object.values(tokens)).not.toContain('0xFF970A61A04b1cA14834A43f5dE4533eBDDB5F86') // USDC.e
+  })
+
+  // [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] AUDIT-ARBITRUM-46-47 HIGH: USDT/DAI/WBTC recon
+  // values all had ZERO on-chain code. Corrected via scripts/verify-arbitrum-addresses.mjs.
+  it('USDT/DAI/WBTC are the CORRECTED addresses, never the broken recon values', () => {
+    const { tokens } = getChainConfig(42161)
+    expect(tokens.USDT).toBe('0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9')
+    expect(tokens.DAI).toBe('0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1')
+    expect(tokens.WBTC).toBe('0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f')
+    const broken = [
+      '0xFd086b2F39B6b86fEe29f27E8f6be40e7F2E7D2b', // old USDT
+      '0xda10009754f1dF9137293aed5d6DD0dB0Bb075e9', // old DAI
+      '0x2F2a2440D2f12C0cDdE18Fe9AEf0cc0d6cF3FC30', // old WBTC
+    ]
+    const current = Object.values(tokens).map((a) => a.toLowerCase())
+    for (const b of broken) expect(current).not.toContain(b.toLowerCase())
   })
 
   it('getSupportedChainIds includes 42161', () => {
@@ -113,5 +136,36 @@ describe('chains/registry — Base env-driven FeeCollector [Sprint 45]', () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_FEE_COLLECTOR', '')
     const { getChainConfig: freshGetChainConfig } = await import('./registry')
     expect(freshGetChainConfig(8453).contracts.feeCollector).toBeNull()
+  })
+})
+
+describe('chains/registry — Arbitrum env-driven FeeCollector [SPRINT-47-ARBITRUM-ACTIVATION-PREP]', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('resolves Arbitrum feeCollector from NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR when set', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(42161).contracts.feeCollector).toBe(
+      '0x000000000000000000000000000000000000dEaD',
+    )
+  })
+
+  it('falls back to null (not any hardcoded address) when the env var is unset — exactly today\'s dark behavior', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(42161).contracts.feeCollector).toBeNull()
+  })
+
+  it('setting Arbitrum feeCollector does not affect Base or mainnet (per-chain isolation)', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    const { getChainConfig: freshGetChainConfig } = await import('./registry')
+    expect(freshGetChainConfig(8453).contracts.feeCollector).toBeNull()
+    expect(freshGetChainConfig(1).contracts.feeCollector).toMatch(/^0x[0-9a-fA-F]{40}$/)
   })
 })

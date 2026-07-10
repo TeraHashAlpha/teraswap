@@ -43,6 +43,13 @@ const FEE_INCOMPATIBLE_BY_CHAIN: Record<number, readonly string[]> = {
   // FeeCollector-incompatible, same as mainnet. [ADR-010] keeps 'bebop' here so
   // it is never routed through the Base FeeCollector once that is deployed.
   8453: ['0x', 'cowswap', 'bebop'],
+  // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum (42161): identical structural
+  // incompatibilities (0x AllowanceHolder pull-model, CoW intent-based, Bebop JAM) — these are
+  // protocol properties of the SOURCE, not the chain, so the set is the same as mainnet/Base.
+  // Pinned explicitly (was previously falling through to FEE_INCOMPATIBLE_SOURCES via the `??`
+  // default below) so Arbitrum's behavior doesn't silently drift if that constant ever changes
+  // for an unrelated reason.
+  42161: ['0x', 'cowswap', 'bebop'],
 }
 
 export function getFeeIncompatibleSources(chainId: number): string[] {
