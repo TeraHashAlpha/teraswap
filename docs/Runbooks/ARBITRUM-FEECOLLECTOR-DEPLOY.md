@@ -140,6 +140,27 @@ cast call $FC_ARB "whitelistedRouters(address)(bool)" 0xE592427A0AEce92De3Edee1F
 
 If any check fails → **do not proceed**. Investigate before touching the env vars.
 
+## 5b. [CHORE-47C-ARBITRUM-CATALOG] Catalog populated + guard green
+
+Before the Preview smoke in Step 6 can run a real WETH→USDC quote, the token selector needs a
+populated catalog — confirm CHORE-47C-ARBITRUM-CATALOG is merged (`CHAIN_TOKENS[42161]` has the
+5-token launch set: WETH, USDC, USDT, DAI, WBTC) and its guard is green:
+
+```bash
+npx vitest run src/lib/chains/arbitrum-catalog.test.ts src/lib/chains/arbitrum-manifest.test.ts src/lib/chains/catalog-address-guard.test.ts
+```
+
+All must pass. If the catalog is still empty (`CHAIN_TOKENS[42161]` has no tokens), the token
+selector has nothing to show on Arbitrum and Step 6's smoke test cannot run — merge
+CHORE-47C-ARBITRUM-CATALOG first.
+
+**USDT0 label nuance for whoever runs the smoke test:** the catalog's `USDT` entry resolves
+on-chain to `symbol() = "USD₮0"` (Tether's newer LayerZero omnichain standard — confirmed as the
+dominant USDT-pegged token on Arbitrum by trading volume, see
+`docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md`). If a wallet or block explorer shows "USD₮0"
+instead of "USDT" during the smoke test, that is expected — it is the correct token, not a
+misconfiguration.
+
 ---
 
 ## 6. PREVIEW GATE — Vercel Preview only (not production)
