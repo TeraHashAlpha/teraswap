@@ -20,6 +20,27 @@ paths = [
   # the default ruleset.
   '''scripts/token-lists/''',
   '''src/lib/chains/token-catalog\.generated\.ts''',
+  # [CHORE-HYGIENE-2] Address manifests are generated JSON snapshots of PUBLIC on-chain contract
+  # addresses (e.g. Arbitrum readiness catalog). Same false-positive class as the token lists
+  # above (40-hex addresses, not credentials). Scoped to docs/Reports/ JSON manifests only.
+  '''docs/Reports/.*\.json''',
+  # [CHORE-HYGIENE-2] Canonical deployments doc — every address in it is a PUBLIC, already-verified
+  # on-chain contract/wallet address (that's the point of the file), not a credential source.
+  '''docs/DEPLOYMENTS\.md''',
+]
+
+# [CHORE-HYGIENE-2] 40-hex checksummed EVM ADDRESS false-positive class — closes the recurring
+# generic-api-key false-positive on public constants scattered across ordinary test files (WETH/
+# USDC token addresses hardcoded in *.test.ts, e.g. src/hooks/useOrderEngine.test.ts,
+# src/lib/post-execution-validator.test.ts — false-positived across 3 PRs on 2026-07-09/10). Path
+# allowlisting doesn't scale here since these constants live throughout the tree, not in a
+# dedicated fixture dir. regexTarget="secret" scopes this to ONLY the extracted secret value
+# matching the address SHAPE (20 bytes, `0x` + exactly 40 hex chars) — it does NOT widen to
+# 64-hex values (private keys, EIP-712 typehashes, tx/block hashes), so the existing per-line
+# typehash suppressions and the bare-64-hex private-key rule below keep their full coverage.
+regexTarget = "secret"
+regexes = [
+  '''^0x[0-9a-fA-F]{40}$''',
 ]
 
 # [CHORE-POLISH-4 P1] Bare 64-hex EVM private key — keyword-proximity variant.
