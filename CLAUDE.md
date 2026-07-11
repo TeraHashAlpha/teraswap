@@ -83,6 +83,8 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 10. **NEVER put marketing files in this repo** — use `dex-aggregator 2.marketing/` to avoid leaking strategy via git.
 11. **NEVER push without CI green** — lint, typecheck, test, audit must pass. Admin bypass only for documented emergencies.
 12. **NEVER commit without a GPG/SSH signature** — every commit on every branch must be cryptographically signed; `main` rejects unsigned commits at branch protection. Setup: `docs/Runbooks/SIGNED-COMMITS.md`.
+13. **NEVER invoke credential helpers or read the keychain** (`git credential-*`, `security find-*`) for any purpose; if an action needs auth the session lacks, report the manual step and stop. Why: two agent sessions independently reached for the macOS keychain, one nearly self-merging a PR (keychain near-miss, 2026-07-09).
+14. **NEVER treat "PR open" as a goal's exit condition** — exit condition = branch pushed + CI green + compare link reported. The OWNER opens and merges PRs, always. Why: a stop-hook deadlocked 9 cycles requiring "PR open" when PR creation is owner-manual (stop-hook deadlock, 2026-07-09).
 
 ---
 
