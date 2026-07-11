@@ -97,8 +97,8 @@ NEVER invoke credential helpers or read the keychain (git credential-*, security
 ## Do NOT                  (explicit guardrails — the "never" list)
 ## Files affected (read ONLY these)   (the allow-list that scopes the agent)
 ## Expected output         (branch name, SSH-signed, push+report-not-poll, tests, FEEDBACK <= 1 screen)
-   Exit condition = branch pushed + CI green + compare link reported. The OWNER opens and merges PRs — PR
-   creation is never an exit condition.
+   Exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the
+   PR and must be green before merge — PR creation is never the agent's job.
 ## Quality criteria        (the acceptance bar)
 
 ---
