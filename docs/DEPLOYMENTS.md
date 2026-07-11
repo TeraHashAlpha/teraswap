@@ -31,12 +31,12 @@ canonical record; if code/docs/env disagree, this (re-verified on-chain) wins.
 NEXT_PUBLIC_FEE_COLLECTOR        = 0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459   # mainnet V2 (minimumOutput) — NOT V1 0x4dAE…
 NEXT_PUBLIC_BASE_FEE_COLLECTOR   = 0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130   # Base FeeCollector (enables Base instant swaps)
 NEXT_PUBLIC_FEE_RECIPIENT        = 0x107F6eB7C3866c9cEf5860952066e185e9383ABA
-NEXT_PUBLIC_ORDER_EXECUTOR       = 0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130   # mainnet OrderExecutor — NOT Sepolia 0xa298…
+NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS = 0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130   # mainnet OrderExecutor — NOT Sepolia 0xa298…
 NEXT_PUBLIC_ADMIN_WALLET         = <wallet used to access /admin>               # FE admin-panel gating only
 ```
 
 (Vercel currently matches the swap-critical values — confirmed by owner. Repo `.env.production`/`.env.local`
-are STALE: they point `NEXT_PUBLIC_FEE_COLLECTOR` at V1 and `NEXT_PUBLIC_ORDER_EXECUTOR` at the Sepolia
+are STALE: they point `NEXT_PUBLIC_FEE_COLLECTOR` at V1 and `NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS` at the Sepolia
 address — align them to avoid future confusion, low priority since Vercel is authoritative.)
 
 ## Open follow-ups
