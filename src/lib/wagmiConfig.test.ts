@@ -12,6 +12,7 @@
  *   - exactly one WalletConnect connector is registered.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { getSupportedChainIds } from './chains/registry'
 
 type WagmiConfigModule = typeof import('./wagmiConfig')
 let config: WagmiConfigModule['config']
@@ -106,5 +107,20 @@ describe('wagmiConfig — explicit mobile-friendly wallet list [SPRINT-9Z]', () 
     expect(rkIds).toEqual(
       expect.arrayContaining(['rabby', 'metaMask', 'coinbase', 'walletConnect', 'ledger', 'injected']),
     )
+  })
+})
+
+describe('wagmiConfig — chain/registry parity guard [CHORE-WAGMI-ARBITRUM]', () => {
+  // The bug: wagmiConfig.ts hardcoded `chains: [mainnet, base]` while the chain
+  // registry (getSupportedChainIds) already listed 42161 (Arbitrum) — the
+  // ChainSelector let users PICK Arbitrum, but switchChain(42161) silently
+  // failed because wagmi's config never registered that chain. This test pins
+  // the two lists together so they can never silently diverge again: any chain
+  // added to (or removed from) the registry MUST be reflected in wagmiConfig's
+  // `chains` array in the same PR, or this fails.
+  it('registers exactly the same chain ids as the chain registry', () => {
+    const wagmiChainIds = config.chains.map((c) => c.id).sort((a, b) => a - b)
+    const registryChainIds = getSupportedChainIds().sort((a, b) => a - b)
+    expect(wagmiChainIds).toEqual(registryChainIds)
   })
 })
