@@ -7,7 +7,7 @@ import {
   ledgerWallet,
   injectedWallet,
 } from '@rainbow-me/rainbowkit/wallets'
-import { mainnet, base } from 'wagmi/chains'
+import { mainnet, base, arbitrum } from 'wagmi/chains'
 import { http, fallback } from 'wagmi'
 
 // ── RPC Configuration with Fallback ──────────────────────
@@ -100,12 +100,16 @@ export const WALLET_GROUPS = [
 export const config = getDefaultConfig({
   ...WALLETCONNECT_METADATA,
   projectId: walletConnectProjectId,
-  chains: [mainnet, base],
+  chains: [mainnet, base, arbitrum],
   wallets: WALLET_GROUPS,
   transports: {
     [mainnet.id]: buildMainnetTransport(),
     [base.id]: fallback([
       http(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', { timeout: 10_000 }),
+    ]),
+    [arbitrum.id]: fallback([
+      http(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', { timeout: 10_000 }),
+      http('https://arb1.arbitrum.io/rpc'),
     ]),
   },
   ssr: true,
