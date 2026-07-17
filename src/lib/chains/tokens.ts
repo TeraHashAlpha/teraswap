@@ -146,6 +146,8 @@ function toChainToken(t: Token): ChainToken {
 // bundled local logo assets mainnet/Base already use for these majors (CORE_LOCAL_LOGO,
 // coverage/fallback pattern) — no new logo assets. Chain stays DARK (feeCollector env unset);
 // populating this catalog is additive only, see arbitrum-catalog.ts for the full rationale.
+// [CHORE-ARBITRUM-UI-POLISH] `verified` carries through from the manifest-sourced catalog
+// (arbitrum-catalog.generated.ts) the same way BASE_FULL carries the pipeline's `verified`.
 const ARBITRUM_FULL: ChainToken[] = ARBITRUM_CATALOG.map((t): ChainToken => ({
   address: t.address,
   symbol: t.key,
@@ -154,6 +156,8 @@ const ARBITRUM_FULL: ChainToken[] = ARBITRUM_CATALOG.map((t): ChainToken => ({
   logoURI: CORE_LOCAL_LOGO[t.key] ?? '',
   popular: true,
   suggested: true,
+  verified: t.verified,
+  sources: ['manifest'],
   category: t.key === 'WETH' ? 'Native' : isStablecoinCategorySymbol(t.key, 42161) ? 'Stablecoin' : t.key === 'WBTC' ? 'Wrapped BTC' : undefined,
 }))
 
@@ -222,6 +226,28 @@ const GENERATED_BY_ADDR: Record<number, Map<string, GeneratedToken>> = Object.fr
   Object.entries(GENERATED_TOKEN_CATALOG).map(([cid, list]) => [
     Number(cid),
     new Map(list.map((t) => [t.address.toLowerCase(), t])),
+  ]),
+)
+
+// [CHORE-ARBITRUM-UI-POLISH] Arbitrum (42161) has no generated pipeline catalog yet (no
+// token-catalog.42161.json), so isVerifiedToken's lookup above found nothing and the 5
+// manifest-verified launch tokens rendered the "unverified" ⚠ badge despite being
+// on-chain checked (docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json). Seed the SAME lookup map
+// this function already reads from the manifest-sourced catalog — isVerifiedToken's logic
+// is unchanged; it simply now has data for chain 42161 too.
+GENERATED_BY_ADDR[42161] = new Map(
+  ARBITRUM_FULL.map((t) => [
+    t.address.toLowerCase(),
+    {
+      address: t.address,
+      symbol: t.symbol,
+      name: t.name,
+      decimals: t.decimals,
+      logoURI: t.logoURI,
+      category: t.category ?? 'Other',
+      verified: t.verified === true,
+      sources: t.sources ?? [],
+    },
   ]),
 )
 

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { explorerTxUrl } from '@/lib/chains/tokens'
+import { formatDisplay } from '@/lib/format'
 
 export default function SwapHistory() {
   const { records } = useSwapHistory()
@@ -17,7 +18,7 @@ export default function SwapHistory() {
         className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-cream-65 hover:text-cream"
       >
         <span>Recent swaps ({records.length})</span>
-        <span className="text-xs">{expanded ? '&#9650;' : '&#9660;'}</span>
+        <span className="text-xs">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {expanded && (
@@ -30,12 +31,12 @@ export default function SwapHistory() {
               <div>
                 <span className="text-cream-35">{rec.date}</span>
                 <span className="mx-2 text-cream">
-                  {rec.amountIn} {rec.tokenIn} &#8594; {rec.amountOut} {rec.tokenOut}
+                  {formatDisplay(rec.amountIn)} {rec.tokenIn} → {formatDisplay(rec.amountOut)} {rec.tokenOut}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <span className={rec.status === 'confirmed' ? 'text-success' : rec.status === 'failed' ? 'text-danger' : 'text-warning'}>
-                  {rec.status === 'confirmed' ? '&#10003;' : rec.status === 'failed' ? '&#10007;' : '&#8987;'}
+                  {rec.status === 'confirmed' ? '✓' : rec.status === 'failed' ? '✗' : '⏳'}
                 </span>
                 <a href={explorerTxUrl(rec.txHash, rec.chainId ?? 1)} target="_blank" rel="noopener noreferrer" className="text-cream-65 hover:text-cream hover:underline">
                   Explorer

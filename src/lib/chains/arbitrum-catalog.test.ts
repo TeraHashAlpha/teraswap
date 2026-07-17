@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { CHAIN_TOKENS, getPopularTokens, getChainToken, getChainTokenList } from './tokens'
+import { CHAIN_TOKENS, getPopularTokens, getChainToken, getChainTokenList, isVerifiedToken } from './tokens'
 import { isChainActive } from './activation'
 import { ARBITRUM_CATALOG } from './arbitrum-catalog'
 import { ARBITRUM_MANIFEST_TOKENS } from './arbitrum-catalog.generated'
@@ -82,5 +82,20 @@ describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
   it('mainnet + Base catalogs are unaffected (byte-identical)', () => {
     expect(CHAIN_TOKENS[1].length).toBeGreaterThan(0)
     expect(CHAIN_TOKENS[8453].length).toBeGreaterThan(0)
+  })
+
+  // [CHORE-ARBITRUM-UI-POLISH] All 5 launch tokens are on-chain checked (manifest `ok: true`
+  // on both RPCs) — they must render the ✓ badge, not the "unverified" ⚠ warning.
+  it('all 5 launch tokens are verified (manifest on-chain checked, not the unverified ⚠ state)', () => {
+    for (const symbol of LAUNCH_SYMBOLS) {
+      const entry = CHAIN_TOKENS[42161].find((t) => t.symbol === symbol)!
+      expect(entry.verified, `${symbol} should be verified`).toBe(true)
+    }
+  })
+
+  it('isVerifiedToken(address, 42161) is true for every launch-token address (drives the badge)', () => {
+    for (const t of ARBITRUM_CATALOG) {
+      expect(isVerifiedToken(t.address, 42161), `${t.key} should resolve verified via isVerifiedToken`).toBe(true)
+    }
   })
 })
