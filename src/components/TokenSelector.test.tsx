@@ -174,6 +174,45 @@ describe('[9Y] TokenSelector — expanded catalog + chain-scoped long-tail searc
   })
 })
 
+describe('[CHORE-CATALOG-REUSD-COLLISION] mainnet reUSD ticker collision — both entries surface distinguishably', () => {
+  function openAndSearch(value: string) {
+    fireEvent.click(screen.getByText('Select'))
+    fireEvent.change(screen.getByPlaceholderText(/search name, symbol/i), { target: { value } })
+  }
+
+  it('searching "reUSD" on mainnet surfaces BOTH Resupply USD and Re Protocol reUSD', () => {
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openAndSearch('reUSD')
+    expect(screen.getByText('Resupply USD')).toBeInTheDocument()
+    expect(screen.getByText('Re Protocol Deposit Token')).toBeInTheDocument()
+    // Two distinct rows share the "reUSD" symbol — labels distinguish them by name, not symbol alone.
+    expect(screen.getAllByText('reUSD').length).toBe(2)
+  })
+
+  it('selecting the Re Protocol row calls onSelect with its distinct address (not Resupply\'s)', () => {
+    const onSelect = vi.fn()
+    renderWithProviders(<TokenSelector selected={null} onSelect={onSelect} />)
+    openAndSearch('reUSD')
+    fireEvent.click(screen.getByText('Re Protocol Deposit Token'))
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    const picked = onSelect.mock.calls[0][0]
+    expect(picked.symbol).toBe('reUSD')
+    expect(picked.name).toBe('Re Protocol Deposit Token')
+    expect(picked.address.toLowerCase()).toBe('0x5086bf358635b81d8c47c66d1c8b9e567db70c72')
+    expect(picked.address.toLowerCase()).not.toBe('0x57ab1e0003f623289cd798b1824be09a793e4bec')
+  })
+
+  it('selecting the Resupply row calls onSelect with the untouched Resupply address', () => {
+    const onSelect = vi.fn()
+    renderWithProviders(<TokenSelector selected={null} onSelect={onSelect} />)
+    openAndSearch('reUSD')
+    fireEvent.click(screen.getByText('Resupply USD'))
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    const picked = onSelect.mock.calls[0][0]
+    expect(picked.address.toLowerCase()).toBe('0x57ab1e0003f623289cd798b1824be09a793e4bec')
+  })
+})
+
 describe('[token-selector-ux P1] TokenLogo renders (no blank circle)', () => {
   it('renders a logo image for a selected token in the trigger', () => {
     const token = {

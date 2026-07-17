@@ -20,6 +20,7 @@ import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.ge
 import { CORE_TOKENS } from '../../../scripts/token-catalog/lib/config'
 import catalog1 from '@/config/generated/token-catalog.1.json'
 import catalog8453 from '@/config/generated/token-catalog.8453.json'
+import allowlist from './catalog-guard.allowlist.json'
 
 const FILES: Array<[number, { schemaVersion: number; chainId: number; counts: { included: number; verified: number } }]> = [
   [1, catalog1],
@@ -51,11 +52,30 @@ describe.each(FILES)('token-catalog.%i.json — committed catalog invariants', (
     }
   })
 
-  it('has no duplicate address and no duplicate symbol (anti-spoofing)', () => {
+  it('has no duplicate address and no duplicate symbol (anti-spoofing), except CONSCIOUSLY exempted ticker collisions', () => {
     const addrs = tokens.map((t) => t.address.toLowerCase())
     expect(new Set(addrs).size).toBe(addrs.length)
-    const symbols = tokens.map((t) => t.symbol.toLowerCase())
-    expect(new Set(symbols).size).toBe(symbols.length)
+
+    // Mirrors the catalog guard's duplicateSymbolExempt (src/lib/chains/catalog-guard.allowlist.json):
+    // a duplicate symbol is only allowed when EVERY colliding address on this chain is explicitly
+    // exempted for that symbol — e.g. CHORE-CATALOG-REUSD-COLLISION (two distinct real mainnet
+    // projects both named "reUSD"). A non-exempted duplicate still fails this test.
+    const exemptAddrsBySymbol = new Map<string, Set<string>>()
+    for (const e of allowlist.duplicateSymbolExempt) {
+      if (e.chainId === chainId) exemptAddrsBySymbol.set(e.symbol.toUpperCase(), new Set(e.addresses.map((a) => a.toLowerCase())))
+    }
+    const bySymbol = new Map<string, GeneratedToken[]>()
+    for (const t of tokens) {
+      const s = t.symbol.toUpperCase()
+      if (!bySymbol.has(s)) bySymbol.set(s, [])
+      bySymbol.get(s)!.push(t)
+    }
+    for (const [symbol, group] of bySymbol) {
+      if (group.length <= 1) continue
+      const exempt = exemptAddrsBySymbol.get(symbol)
+      const fullyExempt = !!exempt && group.every((t) => exempt.has(t.address.toLowerCase()))
+      expect(fullyExempt, `symbol "${symbol}" appears ${group.length}x on chain ${chainId} (${group.map((t) => t.address).join(', ')}) — not fully covered by duplicateSymbolExempt`).toBe(true)
+    }
   })
 
   it('every core token is present, verified and flagged core (outage cannot drop them)', () => {

@@ -266,5 +266,15 @@
     }
   ],
   "knownDeprecated": [],
-  "duplicateSymbolExempt": []
+  "duplicateSymbolExempt": [
+    {
+      "chainId": 1,
+      "symbol": "REUSD",
+      "addresses": [
+        "0x57aB1E0003F623289CD798B1824Be09a793e4Bec",
+        "0x5086bf358635B81D8C47C66d1C8b9E567Db70c72"
+      ],
+      "reason": "CHORE-CATALOG-REUSD-COLLISION: two DISTINCT real mainnet projects share the \"reUSD\" ticker — Resupply USD (0x57aB1E...) and Re Protocol reUSD (0x5086bf..., on-chain name \"Re Protocol Deposit Token\", verified via scripts/verify-mainnet-reusd-collision.mjs). Kept as separate catalog entries, disambiguated by display name; pattern mirrors the symbolMismatchExempt USDT0 entry on 42161 above."
+    }
+  ]
 }
