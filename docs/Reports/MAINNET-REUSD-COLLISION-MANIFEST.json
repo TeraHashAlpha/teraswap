@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-07-17T11:26:15.056Z",
+  "rpcs": [
+    "https://ethereum-rpc.publicnode.com",
+    "https://eth.drpc.org"
+  ],
+  "entries": [
+    {
+      "category": "token",
+      "key": "reUSD (Re Protocol)",
+      "address": "0x5086bf358635B81D8C47C66d1C8b9E567Db70c72",
+      "ok": true,
+      "detail": "symbol=\"reUSD\", name contains \"Re Protocol\", decimals read (not assumed) on both RPCs",
+      "perRpc": [
+        {
+          "rpc": "https://ethereum-rpc.publicnode.com",
+          "codeLen": 268,
+          "symbol": "reUSD",
+          "name": "Re Protocol Deposit Token",
+          "decimals": 18
+        },
+        {
+          "rpc": "https://eth.drpc.org",
+          "codeLen": 268,
+          "symbol": "reUSD",
+          "name": "Re Protocol Deposit Token",
+          "decimals": 18
+        }
+      ]
+    }
+  ],
+  "blocks": {
+    "https://ethereum-rpc.publicnode.com": "0x185e4e1",
+    "https://eth.drpc.org": "0x185e4e1"
+  }
+}
