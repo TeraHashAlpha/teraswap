@@ -1681,6 +1681,12 @@
    "decimals": 18
   },
   {
+   "address": "0x5086bf358635B81D8C47C66d1C8b9E567Db70c72",
+   "symbol": "reUSD",
+   "name": "Re Protocol Deposit Token",
+   "decimals": 18
+  },
+  {
    "address": "0x557B933a7C2c45672B610F8954A3deB39a51A8Ca",
    "symbol": "REVV",
    "name": "REVV",

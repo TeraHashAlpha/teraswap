@@ -18,7 +18,7 @@
     "uniswap"
   ],
   "counts": {
-    "included": 842,
+    "included": 843,
     "verified": 815
   },
   "tokens": [
@@ -9208,6 +9208,18 @@
         "coingecko",
         "oneinch",
         "defillama"
+      ]
+    },
+    {
+      "address": "0x5086bf358635B81D8C47C66d1C8b9E567Db70c72",
+      "symbol": "reUSD",
+      "name": "Re Protocol Deposit Token",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=1&address=0x5086bf358635b81d8c47c66d1c8b9e567db70c72",
+      "verified": false,
+      "sources": [
+        "curated"
       ]
     },
     {

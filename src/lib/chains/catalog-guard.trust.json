@@ -8078,6 +8078,16 @@
   },
   {
    "chainId": 1,
+   "address": "0x5086bf358635B81D8C47C66d1C8b9E567Db70c72",
+   "symbol": "reUSD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "reUSD",
+   "decimals": 18
+  },
+  {
+   "chainId": 1,
    "address": "0x57aB1E0003F623289CD798B1824Be09a793e4Bec",
    "symbol": "reUSD",
    "inTrustedList": true,
