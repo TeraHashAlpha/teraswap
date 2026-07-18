@@ -511,6 +511,13 @@ export default function SwapBox() {
     setPriceCheckStale(true)
     setAcceptedDeviation(null)
     setAcceptedDepeg(null) // [SPRINT-9W-oracle]
+    // [BUG-SWAP-APPROVE-STALE-SUCCESS] Same reset as handleAmountChange (typed
+    // input) — without it a stale swapStatus/splitSwapStatus 'success' from a
+    // PRIOR (smaller) amount survives into the new approve→swap cycle, and
+    // once the new amount's approval confirms the button flips straight to
+    // "Swap complete" without a swap tx ever being sent.
+    if (swapStatus !== 'idle') resetSwap()
+    if (splitSwapStatus !== 'idle') resetSplitSwap()
   }
 
   // Clear the stale flag whenever a fresh quote (`meta`) resolves — at that
