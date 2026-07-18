@@ -31,7 +31,6 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   const { switchChain, isPending } = useSwitchChain()
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   const chains = useMemo(() => getSupportedChainIds().map((id) => getChainConfig(id)), [])
   const active = chains.find((c) => c.chainId === activeChainId) ?? chains[0]
@@ -61,16 +60,6 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [variant])
 
-  useEffect(() => {
-    // Focus the search input whenever the popover opens (autofocus). Resetting
-    // query/highlighted happens imperatively in openMenu(), not here — this
-    // effect only synchronizes focus with the external DOM.
-    if (open && variant !== 'full') {
-      const t = window.setTimeout(() => inputRef.current?.focus(), 0)
-      return () => window.clearTimeout(t)
-    }
-  }, [open, variant])
-
   function openMenu() {
     setQuery('')
     setHighlighted(initialHighlight())
@@ -88,7 +77,7 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   }
 
   function selectChain(chainId: number) {
-    if (!isSelectable(chainId) || isPending) return
+    if (!isSelectable(chainId) || chainId === activeChainId || isPending) return
     switchChain({ chainId })
     if (variant !== 'full') setOpen(false)
   }
@@ -139,12 +128,12 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
             role="option"
             aria-selected={isActive}
             aria-disabled={comingSoon}
-            disabled={comingSoon || isPending}
+            disabled={comingSoon || isActive || isPending}
             onMouseEnter={() => setHighlighted(i)}
             onClick={() => selectChain(c.chainId)}
             className={`flex h-10 w-full items-center gap-2.5 px-3 text-left text-sm transition ${
-              comingSoon ? 'cursor-not-allowed text-cream-35 opacity-50' : 'text-cream-65 hover:text-cream'
-            } ${isHighlighted && !comingSoon ? 'bg-cream-08 text-cream' : ''} disabled:cursor-not-allowed`}
+              comingSoon ? 'cursor-not-allowed text-cream-35 opacity-50' : isActive ? 'text-cream' : 'text-cream-65 hover:text-cream'
+            } ${isHighlighted && !comingSoon && !isActive ? 'bg-cream-08 text-cream' : ''} disabled:cursor-not-allowed`}
           >
             <ChainIcon chainId={c.chainId} className="h-6 w-6 shrink-0 rounded-full" />
             <span className="flex-1 truncate">{c.name}</span>
@@ -182,8 +171,8 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
           <path d="m17 17-3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
         <input
-          ref={inputRef}
           type="text"
+          autoFocus
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onInputKeyDown}
