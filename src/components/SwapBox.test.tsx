@@ -663,6 +663,40 @@ describe('SwapBox — stale success reset on quick-fill amount change [BUG-SWAP-
 
     expect(resetSwapSpy).toHaveBeenCalled()
   })
+
+  // Regression guards for the other reset paths (already correct pre-fix,
+  // pinned here so a future change can't silently drop them).
+  it('typing a new amount after a completed swap also resets the swap state', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success', txHash: '0xPREVIOUS_SWAP_TX', errorMessage: null, cowOrderUid: null,
+      priceGuardBlocked: false, priceGuardDeviation: 0, simulationPassed: true,
+      pendingSwap: null, mevSurplusActualWei: null,
+      execute: vi.fn(), confirmSwap: vi.fn(), reset: resetSwapSpy,
+    })
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '5' } }) })
+
+    expect(resetSwapSpy).toHaveBeenCalled()
+  })
+
+  it('selecting a different tokenOut after a completed swap also resets the swap state', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success', txHash: '0xPREVIOUS_SWAP_TX', errorMessage: null, cowOrderUid: null,
+      priceGuardBlocked: false, priceGuardDeviation: 0, simulationPassed: true,
+      pendingSwap: null, mevSurplusActualWei: null,
+      execute: vi.fn(), confirmSwap: vi.fn(), reset: resetSwapSpy,
+    })
+    renderWithProviders(<SwapBox />)
+    const selectors = screen.getAllByTestId('token-selector')
+    // Second selector is tokenOut (mocked to select WBTC on click, see the
+    // ./TokenSelector mock above).
+    await act(async () => { fireEvent.click(selectors[1]) })
+
+    expect(resetSwapSpy).toHaveBeenCalled()
+  })
 })
 
 describe('SwapBox — [SPRINT-9R R2] Review modal renders the frozen pendingSwap (not live quote)', () => {
