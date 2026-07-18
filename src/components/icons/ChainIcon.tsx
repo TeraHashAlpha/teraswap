@@ -4,6 +4,8 @@
  * unknown chain. Decorative (aria-hidden): the adjacent chain name carries the
  * accessible label.
  */
+import { useId } from 'react'
+
 interface Props {
   chainId: number
   className?: string
@@ -54,15 +56,31 @@ function BaseMark() {
   )
 }
 
-// Arbitrum mark — official navy disc with the lighter arrow glyph.
+// Arbitrum mark — official navy disc + the two-part arrow glyph (the white
+// diagonal bar + the blue chevron). Geometry is Arbitrum's real official
+// artwork — the exact path data ecosystem tooling ships (@rainbow-me/
+// rainbowkit's bundled per-chain network-switcher icon for Arbitrum),
+// uniformly rescaled (not freehanded) from its source 40x40/r17.5 circle onto
+// our 32x32/r16 full-bleed circle, then svgo-optimized. Clipped to our circle
+// (the source paths overflow a plain square bounding box) with a per-instance
+// clipPath id (useId) so multiple renders on one page never collide.
 function ArbitrumMark() {
+  const clipId = useId()
   return (
     <>
+      <defs>
+        <clipPath id={clipId}>
+          <circle cx="16" cy="16" r="16" />
+        </clipPath>
+      </defs>
       <circle cx="16" cy="16" r="16" fill="#213147" />
-      <path fill="#12AAFF" d="M15.06 6.4 8.3 18.03l2.53 4.36 6.76-11.64z" />
-      <path fill="#9DCCED" d="m17.6 10.75-3.16 5.45 3.24 5.58 3.15-5.44z" />
-      <path fill="#12AAFF" d="M20.02 6.4h-3.19l7.85 13.53h3.2z" />
-      <path fill="#213147" d="m11.71 24.5-1.4-2.41H6.9l1.4 2.41z" />
+      <g clipPath={`url(#${clipId})`}>
+        <path fill="#28a0f0" d="m22.284 31.718-6.172-9.705 3.458-5.866L27.5 28.651zm6.631-4.024 3.174-5.29-8.446-13.187-3.017 5.116z" />
+        <path
+          fill="#fff"
+          d="m-1.81 34.574-4.011-2.308-.305-1.089L7.833 9.495c.952-1.556 3.03-2.057 4.957-2.03l2.263.06-16.864 27.049Zm24.557-27.05-5.963.023-21.721 35.882 4.48 3.2 5.813-9.69 1.282-2.174z"
+        />
+      </g>
     </>
   )
 }
