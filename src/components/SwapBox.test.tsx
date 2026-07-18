@@ -601,6 +601,70 @@ describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────
+// [BUG-SWAP-APPROVE-STALE-SUCCESS] Repro: after a completed swap, growing the
+// amount via the 50%/MAX quick-fill buttons must reset the PREVIOUS swap's
+// success state — same as typing a new amount already does (handleAmountChange
+// calls resetSwap()). Before the fix, handleSetAmount (used by 50%/MAX) never
+// called resetSwap()/resetSplitSwap(), so a stale status:'success' from the
+// low-amount swap survived into the new approve→swap cycle. Once the new
+// (larger) amount's approval confirmed, SwapButton's swapStatus === 'success'
+// branch fired again with NO new swap ever sent — the exact prod repro.
+// ─────────────────────────────────────────────────────────────
+describe('SwapBox — stale success reset on quick-fill amount change [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+  it('clicking MAX after a completed swap resets the swap state (ready to swap again, not stale success)', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success', // stale success left over from the PREVIOUS (small-amount) swap
+      txHash: '0xPREVIOUS_SWAP_TX',
+      errorMessage: null,
+      cowOrderUid: null,
+      priceGuardBlocked: false,
+      priceGuardDeviation: 0,
+      simulationPassed: true,
+      pendingSwap: null,
+      mevSurplusActualWei: null,
+      execute: vi.fn(),
+      confirmSwap: vi.fn(),
+      reset: resetSwapSpy,
+    })
+    const { container, getByText } = renderWithProviders(<SwapBox />)
+
+    // User clicks the MAX quick-fill button to swap a larger amount of the same token.
+    await act(async () => { fireEvent.click(getByText('MAX')) })
+
+    // The stale 'success' state from the prior swap MUST be reset — a fresh
+    // approve→swap cycle for the new amount must never inherit the old success.
+    expect(resetSwapSpy).toHaveBeenCalled()
+
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
+    expect(input!.value).not.toBe('')
+  })
+
+  it('clicking 50% after a completed swap also resets the swap state', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success',
+      txHash: '0xPREVIOUS_SWAP_TX',
+      errorMessage: null,
+      cowOrderUid: null,
+      priceGuardBlocked: false,
+      priceGuardDeviation: 0,
+      simulationPassed: true,
+      pendingSwap: null,
+      mevSurplusActualWei: null,
+      execute: vi.fn(),
+      confirmSwap: vi.fn(),
+      reset: resetSwapSpy,
+    })
+    const { getByText } = renderWithProviders(<SwapBox />)
+
+    await act(async () => { fireEvent.click(getByText('50%')) })
+
+    expect(resetSwapSpy).toHaveBeenCalled()
+  })
+})
+
 describe('SwapBox — [SPRINT-9R R2] Review modal renders the frozen pendingSwap (not live quote)', () => {
   const FROZEN_PENDING = {
     source: 'uniswapv3', // a post-fallback target source ≠ any live "best"
