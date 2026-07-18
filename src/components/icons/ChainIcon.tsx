@@ -1,6 +1,6 @@
 /**
- * [SPRINT-9Y] Bundled, inline SVG chain logos (Ethereum, Base) for the chain
- * selector — never an external fetch. Falls back to a neutral mark for an
+ * [SPRINT-9Y] Bundled, inline SVG chain logos (Ethereum, Base, Arbitrum) for the
+ * chain selector — never an external fetch. Falls back to a neutral mark for an
  * unknown chain. Decorative (aria-hidden): the adjacent chain name carries the
  * accessible label.
  */
@@ -18,7 +18,7 @@ export default function ChainIcon({ chainId, className = 'h-4 w-4' }: Props) {
       aria-hidden="true"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {chainId === 1 ? <EthereumMark /> : chainId === 8453 ? <BaseMark /> : <GenericMark />}
+      {chainId === 1 ? <EthereumMark /> : chainId === 8453 ? <BaseMark /> : chainId === 42161 ? <ArbitrumMark /> : <GenericMark />}
     </svg>
   )
 }
@@ -50,6 +50,19 @@ function BaseMark() {
         fill="#0052FF"
         d="M15.9994 32C24.8369 32 32 24.8366 32 16C32 7.16344 24.8369 0 15.9994 0C7.61673 0 0.745683 6.4452 0 14.6361H21.1718V17.3639H0C0.745683 25.5548 7.61673 32 15.9994 32Z"
       />
+    </>
+  )
+}
+
+// Arbitrum mark — official navy disc with the lighter arrow glyph.
+function ArbitrumMark() {
+  return (
+    <>
+      <circle cx="16" cy="16" r="16" fill="#213147" />
+      <path fill="#12AAFF" d="M15.06 6.4 8.3 18.03l2.53 4.36 6.76-11.64z" />
+      <path fill="#9DCCED" d="m17.6 10.75-3.16 5.45 3.24 5.58 3.15-5.44z" />
+      <path fill="#12AAFF" d="M20.02 6.4h-3.19l7.85 13.53h3.2z" />
+      <path fill="#213147" d="m11.71 24.5-1.4-2.41H6.9l1.4 2.41z" />
     </>
   )
 }
