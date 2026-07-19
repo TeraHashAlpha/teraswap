@@ -27,6 +27,11 @@ let permit2TokenAllowance: bigint | undefined = undefined
 let directAllowance: bigint | undefined = undefined
 let noncesData: bigint | undefined = undefined
 let noncesError = false
+// [BUG-SWAP-APPROVE-STALE-SUCCESS] Controllable receipt confirmation so tests
+// can drive the exact-approve tx to "confirmed" and assert what status it
+// lands on. Shared by both useWaitForTransactionReceipt() call sites (permit2
+// + exact-approve) — tests only drive one path per case, so this is safe.
+let approveTxConfirmed = false
 
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: '0x1111111111111111111111111111111111111111' })),
@@ -50,12 +55,12 @@ vi.mock('wagmi', () => ({
   }),
   useWriteContract: vi.fn(() => ({
     writeContract: vi.fn(),
-    data: undefined,
+    data: '0xapprovetxhash',
     error: null,
     reset: vi.fn(),
   })),
   useWaitForTransactionReceipt: vi.fn(() => ({
-    isSuccess: false,
+    isSuccess: approveTxConfirmed,
     isError: false,
   })),
   useSignTypedData: vi.fn(() => ({
@@ -99,6 +104,7 @@ beforeEach(() => {
   directAllowance = undefined
   noncesData = undefined
   noncesError = false
+  approveTxConfirmed = false
 })
 
 describe('useApproval', () => {
@@ -220,5 +226,36 @@ describe('useApproval — [SPRINT-9Q] chain-pinned allowance reads', () => {
     const ids = allowanceCallChainIds()
     expect(ids.length).toBeGreaterThan(0)
     for (const id of ids) expect(id).toBe(8453)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [BUG-SWAP-APPROVE-STALE-SUCCESS] An approve confirmation must land on
+// 'ready' (button = "Swap") and NEVER on a swap-success-shaped state. This
+// hook's status union has no 'success' member at all — the stale-success bug
+// was never approve() reporting a false success; it was the SEPARATE useSwap
+// hook's OWN status surviving stale in SwapBox across an approve cycle (see
+// SwapBox.test.tsx). This pins the invariant on the approval side: a
+// confirmed exact-approve tx transitions this hook to 'ready', full stop.
+// ─────────────────────────────────────────────────────────────
+describe('useApproval — approve confirmation never yields a "success" state [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+  it("a confirmed exact-approve receipt lands the hook on 'ready', not any success-shaped status", () => {
+    directAllowance = 0n
+    const { result, rerender } = renderHook(() => useApproval(USDC, '1000', SPENDER))
+    expect(result.current.status).toBe('idle')
+
+    // Simulate the user clicking approve (drives status -> 'approving_permit2').
+    result.current.approve()
+    rerender()
+    expect(result.current.status).toBe('approving_permit2')
+
+    // The approve tx confirms on-chain.
+    approveTxConfirmed = true
+    rerender()
+
+    expect(result.current.status).toBe('ready')
+    // The ApprovalStatus union has no 'success' member — this asserts the
+    // actual landed value isn't some stray string that slipped past the type.
+    expect(result.current.status).not.toBe('success')
   })
 })

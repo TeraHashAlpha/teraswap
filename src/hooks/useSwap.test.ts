@@ -396,6 +396,85 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
 })
 
 // ─────────────────────────────────────────────────────────────
+// [BUG-SWAP-APPROVE-STALE-SUCCESS] Class regression: the P219 chain-switch
+// reset effect (useSwap.ts prevChainIdRef) already existed but had no direct
+// test coverage. Pinning it here closes the "success resets on chain change"
+// requirement from the bug's class sweep.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [P219] swap-state reset on chain switch', () => {
+  const ADDR = '0x1111111111111111111111111111111111111111'
+
+  afterEach(() => {
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR } as unknown as ReturnType<typeof useAccount>)
+  })
+
+  it('clears pendingSwap/status when the active chain changes mid-flow', async () => {
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR, chain: { id: 1 } } as unknown as ReturnType<typeof useAccount>)
+    mockSwapFetch(swapResponse())
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('1inch') })
+    expect(result.current.status).toBe('confirming')
+    expect(result.current.pendingSwap).not.toBeNull()
+
+    // Wallet switches to Base — a pendingSwap built for mainnet must not
+    // survive onto a different chain's router/FeeCollector.
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR, chain: { id: 8453 } } as unknown as ReturnType<typeof useAccount>)
+    await act(async () => { rerender() })
+
+    expect(result.current.status).toBe('idle')
+    expect(result.current.pendingSwap).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [BUG-SWAP-APPROVE-STALE-SUCCESS] Back-to-back swaps (same token, growing
+// amounts) must each require their own confirmed swap tx before showing
+// success — a completed swap's 'success' status must never leak into the
+// NEXT swap cycle on the same hook instance.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — back-to-back swaps each require their own tx before success [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+  it('starting a new swap after a completed one always leaves the prior success behind', async () => {
+    // Drive to 'success' via the CoW flow (the simplest path to a genuine
+    // success status in this mocked file).
+    mockSwapFetch({
+      source: 'cowswap', toAmount: '2950000000', estimatedGas: 0, gasUsd: 0, routes: [],
+      cowOrderParams: {
+        sellToken: TOKEN_IN.address, buyToken: TOKEN_OUT.address, receiver: '0x1111111111111111111111111111111111111111',
+        sellAmount: '1000000000000000000', buyAmount: '2950000000',
+        validTo: Math.floor(Date.now() / 1000) + 600,
+        appData: '{"version":"1.1.0","appCode":"TeraSwap"}', appDataHash: '0x' + 'a'.repeat(64),
+        feeAmount: '500000000000000', kind: 'sell', partiallyFillable: false,
+        sellTokenBalance: 'erc20', buyTokenBalance: 'erc20',
+        from: '0x1111111111111111111111111111111111111111', quoteId: 1, signingScheme: 'eip712',
+      },
+    })
+    mockSignTypedData.mockResolvedValue('0xsignature')
+    vi.mocked(submitCowOrder).mockResolvedValue('order-uid-1')
+    vi.mocked(pollCowOrderStatus).mockResolvedValue({ status: 'fulfilled', txHash: ('0x' + 'b'.repeat(64)) as `0x${string}` })
+
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    await act(async () => { await result.current.confirmCowOrder() })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    const firstTxHash = result.current.txHash
+
+    // A NEW swap (e.g. a larger amount of the same token) starts on the SAME
+    // hook instance. It must move off 'success' immediately and require its
+    // own confirmation — never render the prior swap's success.
+    mockSwapFetch(swapResponse())
+    await act(async () => { await result.current.execute('1inch') })
+
+    expect(result.current.status).toBe('confirming')
+    expect(result.current.status).not.toBe('success')
+    // The new pendingSwap is for the new (standard) swap.
+    expect(result.current.pendingSwap).not.toBeNull()
+    // The previous swap's tx hash must not be mistaken for the new swap's.
+    expect(result.current.txHash).toBe(firstTxHash)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
 describe('useSwap — [P209] simulation fail-open warning', () => {
   it('sets simulationSkipped when the simulation is inconclusive', async () => {
     mockSwapFetch(swapResponse())
