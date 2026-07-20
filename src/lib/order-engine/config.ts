@@ -82,6 +82,22 @@ export function getOrderExecutorV3(chainId: number): `0x${string}` | null {
 }
 
 /**
+ * [BUG-DCA-APPROVE-SPENDER-V3] Resolve the executor a caller must trust for a given order, using
+ * the EXACT branch the signing path (useOrderEngine confirmOrder) uses: `order.maxSlippageBps !==
+ * undefined` ⇒ v3, else v2. This is the SINGLE SOURCE OF TRUTH for "who is the spender/verifying
+ * contract for this order" — callers that need to independently resolve the executor (e.g. the
+ * pre-sign ERC-20 approval gate) MUST go through this function instead of re-deriving the v2/v3
+ * branch themselves, so the approve() spender and the EIP-712 verifyingContract can never diverge
+ * by construction. (Divergence bug: the approval flow called getOrderExecutor(chainId) directly —
+ * always v2 — while signing correctly branched to v3, so a v3 DCA order's funds were approved to
+ * the v2 executor and the v3 executor was left at zero allowance; the keeper then skipped every
+ * cycle with "Insufficient allowance".)
+ */
+export function resolveSigningExecutor(chainId: number, isV3Order: boolean): `0x${string}` | null {
+  return isV3Order ? getOrderExecutorV3(chainId) : getOrderExecutor(chainId)
+}
+
+/**
  * [SPRINT-V3-P2] v3 EIP-712 domain: version "3" (vs v2's "2"), so a v2 signature can never be
  * replayed against v3 and vice-versa — mirrors the contract's EIP712("TeraSwapOrderExecutor","3")
  * constructor. Throws when v3 has no address on this chain — callers MUST check
