@@ -39,3 +39,16 @@ either. `npm install` regenerated `package-lock.json` — no other dependency ch
 `@eslint/eslintrc`) that predates this branch (reproduced on unmodified `origin/main`) — out of
 scope per this goal's explicit "touch ONLY brace-expansion" constraint; left untouched, flagged in
 FEEDBACK for separate triage.
+
+## Amendment (2026-07-21)
+
+Architect-approved scope extension: resolve js-yaml GHSA-52cp-r559-cp3m in this same branch.
+`js-yaml@4.2.0` (dev-only, via `@eslint/eslintrc`) pinned to `js-yaml": "4.3.0"` (released
+2026-06-26, 25 days old — past the 7-day `min-release-age`, no allowlist entry needed); `^4.1.1`
+range satisfied. `npm run lint` confirms eslint tooling still works under 4.3.0.
+
+Two NEW, unrelated advisories (axios GHSA-gcfj-64vw-6mp9, tar GHSA-23hp-3jrh-7fpw /
+GHSA-8x88-c5mf-7j5w) appeared in `npm audit` after this fix — absent from yesterday's baseline
+audit-gate run, so genuinely new since then, not introduced by this branch's overrides. Out of
+scope for this amendment (js-yaml only); audit-gate is therefore NOT fully 0-blocking. Flagged for
+a separate chore.
