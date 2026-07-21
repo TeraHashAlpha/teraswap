@@ -60,6 +60,10 @@ export function getOrderExecutorDomain(chainId: number) {
 export const ORDER_EXECUTOR_V3_BY_CHAIN: Record<number, `0x${string}` | null> = {
   1: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS || null) as `0x${string}` | null,
   8453: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE || null) as `0x${string}` | null,
+  // [SPRINT-48-ARBITRUM-DCA-PREP] Shipped DARK — no OrderExecutorV3 is deployed on Arbitrum yet.
+  // Exact Base pattern: unset env ⇒ null ⇒ v3 signing stays disabled here, byte-identical to
+  // before this entry existed.
+  42161: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM || null) as `0x${string}` | null,
 }
 
 // Invariant: "no two chains share a verifyingContract" — catches a config typo where the
