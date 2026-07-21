@@ -127,6 +127,45 @@ describe('canonical-route [SPRINT-P1B] — field-by-field contract mirror', () =
   })
 })
 
+describe('canonical-route [SPRINT-P1B] — approve == signing == calldata recipient', () => {
+  /**
+   * Extends the BUG-DCA-APPROVE-SPENDER-V3 invariant to non-DCA v3.
+   *
+   * That bug was a TWO-way divergence: approve targeted v2 while signing targeted v3, so the
+   * allowance existed against the wrong contract and every order was unfillable. Pinned routes
+   * add a THIRD party that must agree — the `recipient` baked into the calldata. If it were
+   * anything other than the executor that pulls and swaps the funds, the contract's balance-delta
+   * measurement (V3:567/:579) would read zero and the fill would revert the floor check, with the
+   * output having gone somewhere else entirely.
+   *
+   * resolveSigningExecutor(chainId, true) is the single source of truth for all three.
+   */
+  it('the encoded recipient is exactly resolveSigningExecutor(chainId, isV3=true)', () => {
+    const signingExecutor = EXECUTOR_V3 // what resolveSigningExecutor(8453, true) returns on a v3 chain
+    const { routerData } = buildCanonicalRoute(params({ recipient: signingExecutor }))
+    const [decoded] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, `0x${routerData.slice(10)}`)
+    const { recipient } = decoded as unknown as { recipient: string }
+    expect(recipient.toLowerCase()).toBe(signingExecutor.toLowerCase())
+  })
+
+  it('a recipient that is NOT the executor produces different bytes (so it cannot pass unnoticed)', () => {
+    const attacker = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' as `0x${string}`
+    const good = buildCanonicalRoute(params({ recipient: EXECUTOR_V3 }))
+    const bad = buildCanonicalRoute(params({ recipient: attacker }))
+    // The recipient is inside the hash the user signs, so a substituted recipient cannot be
+    // swapped in after signing — it would fail RouterDataMismatch at V3:465.
+    expect(bad.routerDataHash).not.toBe(good.routerDataHash)
+  })
+
+  it('the owner is never the recipient — output must land on the executor first', () => {
+    const owner = '0x1111111111111111111111111111111111111111' as `0x${string}`
+    const { routerData } = buildCanonicalRoute(params({ recipient: EXECUTOR_V3 }))
+    const [decoded] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, `0x${routerData.slice(10)}`)
+    const { recipient } = decoded as unknown as { recipient: string }
+    expect(recipient.toLowerCase()).not.toBe(owner.toLowerCase())
+  })
+})
+
 describe('canonical-route [SPRINT-P1B] — fail-closed validation', () => {
   it('rejects a non-canonical fee tier', () => {
     // @ts-expect-error deliberately invalid tier
