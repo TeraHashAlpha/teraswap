@@ -156,6 +156,30 @@ describe('OrderCancelReviewModal [BUG-MASS-CANCEL-DCA-ONCHAIN] — mixed batch (
     // for this shape — DCA orders are cancelled by their own cancelOrder() call, not the nonce.
     expect(body).not.toMatch(/cancels every order above at once/i)
   })
+
+  it('all-DCA batch: 0 nonce txs, N cancelOrder calls, no nonce mention', () => {
+    const dcaOrder1 = makeOrder({ id: 'dca1', orderType: OrderType.DCA })
+    const dcaOrder2 = makeOrder({ id: 'dca2', orderType: OrderType.DCA })
+    const review: Extract<PendingCancelReview, { action: 'invalidate' }> = {
+      action: 'invalidate',
+      newNonce: null,
+      v2AffectedOrders: [],
+      v3Batches: [],
+      v3DcaOrders: [
+        { order: dcaOrder1, orderStruct: makeStruct({ nonce: 4n }) },
+        { order: dcaOrder2, orderStruct: makeStruct({ nonce: 5n }) },
+      ],
+      affectedOrders: [dcaOrder1, dcaOrder2],
+      chainId: 8453,
+      account: ACCOUNT,
+    }
+    renderWithProviders(<OrderCancelReviewModal review={review} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId('invalidate-nonce')).toBeNull()
+    const summary = screen.getByTestId('invalidate-tx-summary').textContent || ''
+    expect(summary).toMatch(/2 total/)
+    expect(summary).toMatch(/2 cancelOrder/i)
+    expect(summary).not.toMatch(/nonce invalidation/i)
+  })
 })
 
 describe('OrderCancelReviewModal [CANCEL-REVIEW] — invalidate-all', () => {
