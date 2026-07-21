@@ -96,6 +96,10 @@ export async function createOrderInSupabase(params: {
   // [SPRINT-V3-P2 / ADR-013 §1] Present ONLY for a v3-signed order — the server uses this exact
   // top-level field (not orderData.maxSlippageBps) to decide the v2/v3 verification path.
   maxSlippageBps?: number
+  // [SPRINT-P1B] The keccak256 the user actually SIGNED into the struct. MUST be sent for a pinned
+  // route: the server rebuilds the EIP-712 message for recovery and falls back to ZeroHash when
+  // this is absent, so omitting it would fail recovery with "Signature mismatch".
+  routerDataHash?: `0x${string}`
 }): Promise<OrderRow | null> {
   // Submitting order via API
 
@@ -129,6 +133,10 @@ export async function createOrderInSupabase(params: {
         tokenOutDecimals: params.tokenOutDecimals,
         // [SPRINT-V3-P2] Omitted entirely (undefined ⇒ dropped by JSON.stringify) for a v2 order.
         ...(params.maxSlippageBps !== undefined ? { maxSlippageBps: params.maxSlippageBps } : {}),
+        // [SPRINT-P1B] Omitted for DCA (the server's ZeroHash fallback is then correct, matching
+        // what was signed). Sent verbatim for a pinned non-DCA route so recovery uses the SIGNED
+        // hash, and so the server can cross-check it against orderData.routerData.
+        ...(params.routerDataHash !== undefined ? { routerDataHash: params.routerDataHash } : {}),
       }),
     })
 

@@ -70,6 +70,34 @@ export const CANONICAL_FEE_TIERS = [100, 500, 3000, 10000] as const
 export type CanonicalFeeTier = (typeof CANONICAL_FEE_TIERS)[number]
 
 /**
+ * Default pinned tier: 0.05%. On Base the deep majors (WETH/USDC, cbETH/WETH) live in the 500
+ * tier, so it is the highest-liquidity default for the pairs P1b enables.
+ */
+export const DEFAULT_CANONICAL_FEE_TIER: CanonicalFeeTier = 500
+
+/** Stable-vs-stable pairs concentrate in the 0.01% tier. */
+export const STABLE_CANONICAL_FEE_TIER: CanonicalFeeTier = 100
+
+/**
+ * Choose the pool tier to pin, from STATIC token metadata only.
+ *
+ * Deliberately NOT quote-derived: calling a quoter would reintroduce exactly the time-varying
+ * input this whole design removes (and the tier is committed into `routerDataHash`, so it must be
+ * reproducible from the signed order alone). The trade-off is explicit in ADR-014 — we accept a
+ * possibly-suboptimal tier because the on-chain floor `max(oracleFloor, minAmountOut)` bounds the
+ * downside regardless, and a pinned tier that turns out thin fails SAFE (the swap reverts and the
+ * order simply stays open) rather than filling badly.
+ */
+export function pickCanonicalFeeTier(p: {
+  tokenInIsStable: boolean
+  tokenOutIsStable: boolean
+}): CanonicalFeeTier {
+  return p.tokenInIsStable && p.tokenOutIsStable
+    ? STABLE_CANONICAL_FEE_TIER
+    : DEFAULT_CANONICAL_FEE_TIER
+}
+
+/**
  * Mirror of TeraSwapOrderExecutorV3.sol's fee constants (:131-132). These are Solidity
  * `constant`s compiled into the immutable bytecode — there is no setter, so replicating them
  * here cannot drift. `types.test.ts`-style drift guarding is covered by the unit tests.

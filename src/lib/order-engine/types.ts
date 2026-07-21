@@ -157,6 +157,13 @@ export interface CreateOrderConfig {
   router: string                // whitelisted DEX router
   /** Keccak256 hash of the router calldata (ZeroHash for DCA since calldata varies) */
   routerDataHash?: `0x${string}`
+  /**
+   * [SPRINT-P1B / ADR-014 option (a)] The FULL pinned router calldata for a non-DCA v3 order.
+   * Persisted to Supabase (`order_data.routerData`) and replayed VERBATIM by the keeper at
+   * trigger — the contract requires `keccak256(routerData) == routerDataHash`
+   * (TeraSwapOrderExecutorV3.sol:465). Undefined for DCA (calldata is keeper-built per chunk).
+   */
+  routerData?: `0x${string}`
   // [SPRINT-V3-P2] Present ONLY when this order should sign against v3 (the caller already
   // checked getOrderExecutorV3(chainId) !== null). undefined ⇒ v2 order, byte-identical to
   // today. useOrderEngine uses its presence (not a separate flag) as the v2/v3 discriminator,

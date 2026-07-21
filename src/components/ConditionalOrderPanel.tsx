@@ -15,6 +15,16 @@ import {
   EXPIRY_PRESETS,
   getDefaultRouter,
   getChainlinkFeeds,
+  // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing for Take-Profit.
+  getOrderExecutorV3,
+  getCanonicalRouteRouter,
+  buildCanonicalRoute,
+  isLimitLive,
+  STOP_LOSS_DEFERRED_REASON,
+  DEFAULT_MAX_SLIPPAGE_BPS,
+  checkMinOutEconomicFloor,
+  DEFAULT_CANONICAL_FEE_TIER,
+  pickCanonicalFeeTier,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
@@ -154,7 +164,20 @@ function CreateConditionalForm({
   const { isConnected } = useAccount()
   const chainId = useChainId()
 
-  const [orderType, setOrderType] = useState<ConditionalOrderType>('stop_loss')
+  // [SPRINT-P1B / ADR-014] Take-Profit is the ONLY creatable conditional type. Stop-Loss is
+  // deferred to the v4 executor (owner decision 2026-07-22): under ADR-014 option (a) a pinned
+  // route can revert at trigger on a dislocated pool, and for an SL "did not fill during a crash"
+  // IS the loss — an inverted failure mode Limit/TP tolerate but SL does not. The default flips to
+  // take_profit so the form is usable; handleSubmit ALSO hard-blocks SL (defence in depth), and
+  // /api/orders rejects it server-side with the same reason.
+  const [orderType, setOrderType] = useState<ConditionalOrderType>('take_profit')
+  // [SPRINT-P1B] Blocking reason surfaced before approve/sign (SL deferral, dust floor, route
+  // build failure) — never a thrown error, which would leave the panel in a waiting state.
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing is live only behind the full launch gate
+  // (flag + Base + v3 executor + canonical router). Fail-closed everywhere else.
+  const v3Live = isLimitLive(chainId)
+  const [maxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
   const [tokenIn, setTokenIn] = useState<Token>(DEFAULT_TOKENS[0])   // ETH
   const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
   const [amount, setAmount] = useState('')
@@ -197,12 +220,22 @@ function CreateConditionalForm({
 
   const handleSubmit = async () => {
     if (!amount || !triggerPrice || !isConnected) return
+
+    // ── [SPRINT-P1B / ADR-014] Stop-Loss hard block (defence in depth) ──
+    // The toggle is already disabled, but a stale state or a future refactor must never be able to
+    // create an SL. The API rejects it too, with this same reason.
+    if (orderType === 'stop_loss') {
+      setSubmitError(STOP_LOSS_DEFERRED_REASON)
+      return
+    }
+
     startWaitingSound()
 
     let amountIn: string
     try {
       amountIn = parseUnits(amount, tokenIn.decimals).toString()
     } catch {
+      stopWaitingSound()
       return // Invalid input (e.g. too many decimals)
     }
     const triggerPriceFloat = parseFloat(triggerPrice)
@@ -210,14 +243,11 @@ function CreateConditionalForm({
     // Target price in Chainlink 8-decimal format
     const targetPrice8dec = Math.round(triggerPriceFloat * 1e8).toString()
 
-    // Condition: SL → triggers when price drops BELOW target, TP → triggers when ABOVE
-    const condition = orderType === 'stop_loss'
-      ? PriceCondition.BELOW
-      : PriceCondition.ABOVE
+    // Take-Profit triggers when the price rises ABOVE the target.
+    const condition = PriceCondition.ABOVE
 
-    // Min amount out: for SL accept 5% slippage (urgent exit), for TP accept 2%
+    // ── Expected output at the user's TARGET price ──
     // [BUGFIX] Use BigInt arithmetic to avoid precision loss beyond 2^53
-    const slippageBps = orderType === 'stop_loss' ? 95n : 98n // 95% or 98% of expected
     const amountInBn = BigInt(amountIn)
     const priceBn = BigInt(Math.round(triggerPriceFloat * 1e18))
     const expectedOutRaw = amountInBn * priceBn / BigInt(1e18)
@@ -228,14 +258,39 @@ function CreateConditionalForm({
       : decDiff < 0
         ? expectedOutRaw / BigInt(10 ** Math.abs(decDiff))
         : expectedOutRaw
-    const minAmountOut = (expectedOutAdjusted * slippageBps / 100n).toString()
+
+    // [SPRINT-P1B / ADR-013 §1] On v3 the signed floor is derived from the user's target price and
+    // the signed slippage bound: minAmountOut = expectedAtTarget × (1 − maxSlippageBps/10_000).
+    // The BINDING on-chain floor stays max(oracleFloor, minAmountOut) (V3:532-554) — this value is
+    // the user's own absolute lower bound, not the whole protection.
+    const minAmountOutBn = v3Live
+      ? (expectedOutAdjusted * BigInt(10_000 - maxSlippageBps)) / 10_000n
+      : (expectedOutAdjusted * 98n) / 100n // v2 legacy path, unchanged
+    const minAmountOut = minAmountOutBn.toString()
 
     const priceFeed = findPriceFeed(tokenIn, chainId)
     if (!priceFeed) {
-      throw new Error(`No Chainlink price feed available for ${tokenIn.symbol}. Select a supported token.`)
+      stopWaitingSound()
+      setSubmitError(`No Chainlink price feed available for ${tokenIn.symbol}. Select a supported token.`)
+      return
     }
 
-    const config: CreateOrderConfig = {
+    // ── [SPRINT-P1B] $5 economic-floor pre-flight, BEFORE approve ──
+    // The approve button only exists inside the review modal that createOrder mounts, so "before
+    // approve" means before onSubmit. Without this the user approves + signs and then eats a 400
+    // from the server's authoritative dust gate.
+    const floorCheck = checkMinOutEconomicFloor({
+      minAmountOut: minAmountOutBn,
+      tokenOutDecimals: tokenOut.decimals,
+      tokenOutUsdPrice: isStablecoin(tokenOut) ? 1 : null,
+    })
+    if (floorCheck.blocked) {
+      stopWaitingSound()
+      setSubmitError(floorCheck.reason)
+      return
+    }
+
+    let config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
       amountIn,
@@ -248,6 +303,46 @@ function CreateConditionalForm({
       router: getDefaultRouter(chainId).address,
     }
 
+    // ── [SPRINT-P1B / ADR-014 (a)] v3 pinned canonical route ──
+    // Non-DCA on v3 REQUIRES a real routerDataHash (V3:463-465), so the route is pinned here at
+    // signing and replayed verbatim by the keeper. Only taken when the launch gate is fully open;
+    // otherwise the order stays on the v2 shape (which the executor cannot fill — hence the gate).
+    if (v3Live) {
+      const canonicalRouter = getCanonicalRouteRouter(chainId)
+      const executorV3 = getOrderExecutorV3(chainId)
+      if (!canonicalRouter || !executorV3) {
+        stopWaitingSound()
+        setSubmitError('Conditional orders are unavailable on this network right now.')
+        return
+      }
+      try {
+        const route = buildCanonicalRoute({
+          tokenIn: tokenIn.address as `0x${string}`,
+          tokenOut: tokenOut.address as `0x${string}`,
+          amountIn: amountInBn,
+          minAmountOut: minAmountOutBn,
+          feeTier: pickCanonicalFeeTier({
+            tokenInIsStable: isStablecoin(tokenIn),
+            tokenOutIsStable: isStablecoin(tokenOut),
+          }),
+          router: canonicalRouter.address,
+          recipient: executorV3,
+        })
+        config = {
+          ...config,
+          router: route.router,
+          routerDataHash: route.routerDataHash,
+          routerData: route.routerData,
+          maxSlippageBps,
+        }
+      } catch (err) {
+        stopWaitingSound()
+        setSubmitError(err instanceof Error ? err.message : 'Could not build the swap route for this pair.')
+        return
+      }
+    }
+
+    setSubmitError(null)
     await onSubmit(config)
     setAmount('')
     setTriggerPrice('')
@@ -299,15 +394,17 @@ function CreateConditionalForm({
     <div className="rounded-2xl border border-cream-08 bg-surface-secondary p-4">
       {/* SL / TP toggle */}
       <div className="mb-4 flex gap-1 rounded-lg border border-cream-08 bg-surface-tertiary p-0.5">
+        {/* [SPRINT-P1B / ADR-014] Stop-Loss is deferred to the v4 executor — disabled, never
+            selectable. Kept visible (not deleted) so the deferral is explicit to the user rather
+            than silently missing. */}
         <button
-          onClick={() => { setOrderType('stop_loss'); setTriggerPrice(''); playClick() }}
-          className={`flex-1 rounded-md py-2 text-[12px] font-semibold transition ${
-            orderType === 'stop_loss'
-              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-              : 'text-cream-50 hover:text-cream border border-transparent'
-          }`}
+          type="button"
+          disabled
+          data-testid="sltp-stop-loss-disabled"
+          title={`${STOP_LOSS_DEFERRED_REASON} — a pinned route can fail to fill in a fast market, and for a stop-loss that is the loss.`}
+          className="flex-1 cursor-not-allowed rounded-md border border-transparent py-2 text-[12px] font-semibold text-cream-35 opacity-50"
         >
-          Stop Loss
+          Stop Loss · Soon
         </button>
         <button
           onClick={() => { setOrderType('take_profit'); setTriggerPrice(''); playClick() }}
@@ -488,6 +585,29 @@ function CreateConditionalForm({
               ? `Set Stop Loss at $${triggerPrice || '—'}`
               : `Set Take Profit at $${triggerPrice || '—'}`}
         </button>
+      )}
+
+      {/* [SPRINT-P1B] Pre-approve blocking reason (SL deferral / dust floor / route build). */}
+      {submitError && (
+        <div
+          data-testid="conditional-submit-error"
+          className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300"
+        >
+          {submitError}
+        </div>
+      )}
+
+      {/* [SPRINT-P1B / ADR-014 (a)] Honest liveness copy — a pinned route is not a fill guarantee. */}
+      {v3Live && (
+        <div
+          data-testid="pinned-route-liveness-note"
+          className="mt-2 rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-[10px] text-cream-50"
+        >
+          This order executes when your price is met <strong className="text-cream-65">if the pinned
+          route is viable</strong> at that moment; otherwise it stays open until it expires. The
+          route is fixed when you sign, so it cannot be front-run by a changed quote — but it also
+          cannot re-route around a pool that has dried up.
+        </div>
       )}
 
       {/* Info badge */}
