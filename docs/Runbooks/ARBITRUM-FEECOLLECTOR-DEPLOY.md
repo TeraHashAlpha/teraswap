@@ -220,6 +220,14 @@ No code change is required for rollback — it is purely an env-var unset, exact
 - **Source-health dashboard:** add 42161 to whatever dashboard/alerting already watches Base's per-source
   health (quorum breaches, response-time regressions) using the Step 6 baseline as the initial reference.
 
+## Production deployment lessons (post-flip)
+
+**Smoke runs — domain-specific gotcha:** production smoke runs MUST execute only on the real domain
+(`teraswap.app`). Vercel preview deployments (`*.vercel.app` origins) are not in the Alchemy allowlist, so
+on-chain reads (oracle-feed validation, portfolio discovery, etc.) fail silently, causing failures with the
+symptom `'Chainlink oracle data outdated (0h old)'`. Always run final validation against the production
+domain, never against a preview URL.
+
 ---
 
 ## Safety notes

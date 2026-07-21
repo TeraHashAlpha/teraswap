@@ -317,6 +317,14 @@ structure and substitute the table above.
   satisfy (PR #301) — do not execute §2 (Deploy) if #301 is not merged and confirmed live (gate condition 1
   + 3 in the preamble).
 
+## Production deployment lessons (post-cutover)
+
+**Smoke runs — domain-specific gotcha:** production smoke runs MUST execute only on the real domain
+(`teraswap.app`). Vercel preview deployments (`*.vercel.app` origins) are not in the Alchemy allowlist, so
+on-chain reads (oracle-feed validation, etc.) fail silently, causing the oracle gate to fail-closed with the
+symptom `'Chainlink oracle data outdated (0h old)'`. Always run final validation against the production
+domain, never against a preview URL.
+
 ## Cross-reference
 - `docs/Runbooks/BASE-ORDEREXECUTOR-DEPLOY.md` — the v2 Base deploy this mirrors (router set, bootstrap
   pattern, mislabel precedent).
