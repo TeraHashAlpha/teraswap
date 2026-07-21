@@ -116,6 +116,72 @@ describe('OrderCancelReviewModal [CANCEL-REVIEW] — single-order cancel', () =>
   })
 })
 
+function makeMixedInvalidateReview(): Extract<PendingCancelReview, { action: 'invalidate' }> {
+  // [BUG-MASS-CANCEL-DCA-ONCHAIN] A batch containing v3 DCA orders — these are NEVER covered by
+  // invalidateUnorderedNonces (the contract's DCA branch skips the bitmap check entirely), so
+  // confirmCancel sends one individual cancelOrder() per DCA order PLUS the nonce tx(es) for
+  // everything else. The modal must say so instead of claiming a single blanket nonce invalidation.
+  const v2AffectedOrders = [makeOrder({ id: 'o1', tokenInSymbol: 'WETH', tokenOutSymbol: 'USDC' })]
+  const dcaOrder1 = makeOrder({ id: 'dca1', orderType: OrderType.DCA, tokenInSymbol: 'DAI', tokenOutSymbol: 'WETH' })
+  const dcaOrder2 = makeOrder({ id: 'dca2', orderType: OrderType.DCA, tokenInSymbol: 'USDC', tokenOutSymbol: 'WETH' })
+  return {
+    action: 'invalidate',
+    newNonce: 6n,
+    v2AffectedOrders,
+    v3Batches: [],
+    v3DcaOrders: [
+      { order: dcaOrder1, orderStruct: makeStruct({ nonce: 4n }) },
+      { order: dcaOrder2, orderStruct: makeStruct({ nonce: 5n }) },
+    ],
+    affectedOrders: [v2AffectedOrders[0], dcaOrder1, dcaOrder2],
+    chainId: 8453,
+    account: ACCOUNT,
+  }
+}
+
+describe('OrderCancelReviewModal [BUG-MASS-CANCEL-DCA-ONCHAIN] — mixed batch (v2/non-DCA nonce + v3 DCA individual cancels)', () => {
+  it('states the real transaction breakdown instead of "one transaction" when DCA orders are present', () => {
+    renderWithProviders(<OrderCancelReviewModal review={makeMixedInvalidateReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    // 1 nonce invalidation tx (v2) + 2 individual cancelOrder txs (the DCA orders) = 3 total.
+    const summary = screen.getByTestId('invalidate-tx-summary').textContent || ''
+    expect(summary).toMatch(/3/)
+    expect(summary).toMatch(/2.*cancelOrder|cancelOrder.*2/i)
+    expect(summary).not.toMatch(/^\s*$/)
+  })
+
+  it('never claims the nonce invalidation cancels the DCA orders too', () => {
+    renderWithProviders(<OrderCancelReviewModal review={makeMixedInvalidateReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    const body = screen.getByTestId('cancel-review-body').textContent || ''
+    // The old blanket claim ("cancels every order above at once" via the nonce alone) is false
+    // for this shape — DCA orders are cancelled by their own cancelOrder() call, not the nonce.
+    expect(body).not.toMatch(/cancels every order above at once/i)
+  })
+
+  it('all-DCA batch: 0 nonce txs, N cancelOrder calls, no nonce mention', () => {
+    const dcaOrder1 = makeOrder({ id: 'dca1', orderType: OrderType.DCA })
+    const dcaOrder2 = makeOrder({ id: 'dca2', orderType: OrderType.DCA })
+    const review: Extract<PendingCancelReview, { action: 'invalidate' }> = {
+      action: 'invalidate',
+      newNonce: null,
+      v2AffectedOrders: [],
+      v3Batches: [],
+      v3DcaOrders: [
+        { order: dcaOrder1, orderStruct: makeStruct({ nonce: 4n }) },
+        { order: dcaOrder2, orderStruct: makeStruct({ nonce: 5n }) },
+      ],
+      affectedOrders: [dcaOrder1, dcaOrder2],
+      chainId: 8453,
+      account: ACCOUNT,
+    }
+    renderWithProviders(<OrderCancelReviewModal review={review} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId('invalidate-nonce')).toBeNull()
+    const summary = screen.getByTestId('invalidate-tx-summary').textContent || ''
+    expect(summary).toMatch(/2 total/)
+    expect(summary).toMatch(/2 cancelOrder/i)
+    expect(summary).not.toMatch(/nonce invalidation/i)
+  })
+})
+
 describe('OrderCancelReviewModal [CANCEL-REVIEW] — invalidate-all', () => {
   it('renders the frozen invalidation nonce and every affected order', () => {
     renderWithProviders(<OrderCancelReviewModal review={makeInvalidateReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)

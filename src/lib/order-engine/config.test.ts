@@ -333,3 +333,52 @@ describe('getOrderExecutorV3Domain — once configured (env override)', () => {
     expect(fresh.getOrderExecutorV3(8453)).toBe(V3_BASE)
   })
 })
+
+// ── [SPRINT-48-ARBITRUM-DCA-PREP] Arbitrum (42161) v3 plumbing — shipped DARK ───────────────
+describe('getOrderExecutorV3 — Arbitrum (42161) dark-state regression', () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
+    vi.resetModules()
+  })
+
+  it('unset NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM ⇒ 42161 resolves null, byte-identical to before this entry existed', () => {
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
+    expect(getOrderExecutorV3(42161)).toBeNull()
+    expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBeNull()
+  })
+
+  it('42161 IS a key in ORDER_EXECUTOR_V3_BY_CHAIN (unlike v2, which has no 42161 entry at all)', () => {
+    expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_V3_BY_CHAIN, 42161)).toBe(true)
+    expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_BY_CHAIN, 42161)).toBe(false)
+  })
+
+  it('getOrderExecutorV3Domain(42161) throws while unconfigured', () => {
+    expect(() => getOrderExecutorV3Domain(42161)).toThrow(/No OrderExecutorV3 deployed on chain 42161/)
+  })
+
+  it('setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM wires 42161 without disturbing mainnet/Base', async () => {
+    const V3_ARBITRUM = '0x5555555555555555555555555555555555555555'
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM = V3_ARBITRUM
+    vi.resetModules()
+    const fresh = await import('./config')
+    expect(fresh.getOrderExecutorV3(42161)).toBe(V3_ARBITRUM)
+    expect(fresh.getOrderExecutorV3Domain(42161)).toEqual({
+      name: 'TeraSwapOrderExecutor',
+      version: '3',
+      chainId: 42161,
+      verifyingContract: V3_ARBITRUM,
+    })
+    // Exact Base pattern: an unrelated chain's env var never implicitly wires another chain.
+    expect(fresh.getOrderExecutorV3(1)).toBeNull()
+    expect(fresh.getOrderExecutorV3(8453)).toBeNull()
+  })
+
+  it('the same-address-on-two-chains typo guard also catches Arbitrum reusing another chain\'s v3 address', async () => {
+    const SHARED = '0x6666666666666666666666666666666666666666'
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = SHARED
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM = SHARED
+    vi.resetModules()
+    await expect(import('./config')).rejects.toThrow(/the same v3 address is configured on two chains/)
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE
+  })
+})

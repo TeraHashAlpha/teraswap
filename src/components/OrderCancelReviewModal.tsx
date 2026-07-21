@@ -28,6 +28,16 @@ function orderTypeLabel(o: AutonomousOrder): string {
 
 export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: Props) {
   const isInvalidate = review.action === 'invalidate'
+  // [BUG-MASS-CANCEL-DCA-ONCHAIN] The nonce invalidation NEVER covers v3 DCA orders (the contract's
+  // DCA branch skips the bitmap check entirely — TeraSwapOrderExecutorV3.sol executeOrder ~L453 vs
+  // ~L499) — confirmCancel sends one on-chain cancelOrder() per DCA order in addition to whichever
+  // nonce tx(es) cover everything else. Compute the REAL tx count so the copy never overstates a
+  // single blanket invalidation.
+  const nonceTxCount = review.action === 'invalidate'
+    ? (review.newNonce !== null ? 1 : 0) + review.v3Batches.length
+    : 0
+  const cancelTxCount = review.action === 'invalidate' ? review.v3DcaOrders.length : 0
+  const totalTxCount = nonceTxCount + cancelTxCount
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Review order cancellation">
@@ -42,7 +52,11 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
           </h2>
           <p className="mt-0.5 text-xs text-cream-50">
             {isInvalidate ? (
-              <>You&apos;re about to <strong>invalidate your order nonce on-chain</strong> (one transaction), cancelling every active order below, plus one removal signature per order. Verify the exact plan.</>
+              cancelTxCount > 0 ? (
+                <>You&apos;re about to send <strong>{totalTxCount} on-chain transactions</strong> ({nonceTxCount > 0 ? `${nonceTxCount} nonce invalidation${nonceTxCount > 1 ? 's' : ''} + ` : ''}{cancelTxCount} individual cancelOrder call{cancelTxCount > 1 ? 's' : ''} for the DCA orders below), plus one removal signature per order. Your wallet will prompt {totalTxCount} times. Verify the exact plan.</>
+              ) : (
+                <>You&apos;re about to <strong>invalidate your order nonce on-chain</strong> (one transaction), cancelling every active order below, plus one removal signature per order. Verify the exact plan.</>
+              )
             ) : (
               <>You&apos;re about to <strong>cancel this order on-chain</strong> (one transaction) plus sign one removal message (EIP-712). Verify the exact order being cancelled.</>
             )}
@@ -91,6 +105,16 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
                 <span className="text-cream-50">Orders affected</span>
                 <span className="font-medium text-cream" data-testid="invalidate-count">{review.affectedOrders.length}</span>
               </div>
+              {/* [BUG-MASS-CANCEL-DCA-ONCHAIN] Real tx breakdown — DCA orders never ride the nonce
+                  invalidation, so state the actual per-tx-type count instead of implying one tx. */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-cream-50">On-chain transactions</span>
+                <span className="font-medium text-cream" data-testid="invalidate-tx-summary">
+                  {totalTxCount} total
+                  {nonceTxCount > 0 ? ` (${nonceTxCount} nonce invalidation${nonceTxCount > 1 ? 's' : ''})` : ''}
+                  {cancelTxCount > 0 ? ` (${cancelTxCount} cancelOrder call${cancelTxCount > 1 ? 's' : ''} — DCA orders)` : ''}
+                </span>
+              </div>
               {/* [SPRINT-V3-P3] newNonce is null when there are no v2 orders to invalidate
                   (a v3-only cancel-all) — the v2 invalidateNonces() call is skipped entirely. */}
               {review.newNonce !== null && (
@@ -110,8 +134,14 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
               </div>
 
               <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
-                Invalidating the nonce on-chain cancels every order above at once — orders signed with a
-                lower nonce can never execute afterwards. No funds move.
+                {cancelTxCount > 0 ? (
+                  <>Non-DCA orders above are cancelled by the nonce invalidation; each DCA order needs its
+                  own on-chain cancelOrder call (the contract never checks the nonce for DCA) — expect{' '}
+                  {totalTxCount} wallet prompts. No funds move.</>
+                ) : (
+                  <>Invalidating the nonce on-chain cancels every order above at once — orders signed with a
+                  lower nonce can never execute afterwards. No funds move.</>
+                )}
               </div>
             </>
           )}

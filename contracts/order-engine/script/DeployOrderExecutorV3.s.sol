@@ -24,6 +24,11 @@ import "../TeraSwapOrderExecutorV3.sol";
  * deploy path — a deploy tx is exactly the kind of high-stakes signature a plaintext key should never
  * produce on a production chain) unless explicitly overridden via ALLOW_PLAINTEXT_KEY /
  * ALLOW_PLAINTEXT_KEY_MAINNET, mirroring the keeper's own env-var names.
+ *
+ * [SPRINT-48-ARBITRUM-DCA-PREP] Confirmed chain-agnostic as-is — every constructor input above is
+ * already read from an env var by name (no Base literal to remove); reused verbatim for the Arbitrum
+ * deploy (docs/Runbooks/ARBITRUM-V3-EXECUTOR-DEPLOY.md §2) by passing EXPECTED_CHAIN_ID=42161 and
+ * Arbitrum's own FEE_RECIPIENT/ADMIN/WETH_ADDRESS/SEQUENCER_UPTIME_FEED.
  */
 contract DeployOrderExecutorV3 is Script {
     function run() external returns (TeraSwapOrderExecutorV3 executor) {
