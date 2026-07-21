@@ -171,6 +171,46 @@ describe('[CHORE-CHAIN-SELECTOR-UX] search popover — filter, ARIA, keyboard, E
   })
 })
 
+describe('[CHORE-MOBILE-SELECTOR-POLISH] coarse-pointer autofocus + centered mobile modal', () => {
+  function mockPointer(coarse: boolean) {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)' ? coarse : false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+  }
+
+  it('autofocuses the search input on desktop (fine pointer)', () => {
+    mockPointer(false)
+    renderWithProviders(<ChainSelector />)
+    const input = openSelector()
+    expect(input).toHaveFocus()
+  })
+
+  it('does NOT autofocus the search input on a coarse (touch) pointer', () => {
+    mockPointer(true)
+    renderWithProviders(<ChainSelector />)
+    const input = openSelector()
+    expect(input).not.toHaveFocus()
+  })
+
+  it('renders a centered-modal container class for the popover', () => {
+    renderWithProviders(<ChainSelector />)
+    const input = openSelector()
+    const modalWrapper = input.closest('[role="presentation"]')?.parentElement
+    expect(modalWrapper?.className).toMatch(/flex items-center justify-center/)
+    expect(input.closest('[role="presentation"]')?.className).toMatch(/max-w-sm/)
+    expect(input.closest('[role="presentation"]')?.className).toMatch(/rounded-2xl/)
+  })
+
+  it('has a close affordance button in the mobile modal', () => {
+    renderWithProviders(<ChainSelector />)
+    openSelector()
+    expect(screen.getByLabelText(/close network picker/i)).toBeInTheDocument()
+  })
+})
+
 describe('[BUG-MOBILE-CHAIN-SELECTOR] trigger visibility', () => {
   it('the trigger has no viewport-hiding class (regression: was `hidden sm:block` on the whole component)', () => {
     renderWithProviders(<ChainSelector />)

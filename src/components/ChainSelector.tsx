@@ -39,8 +39,35 @@ interface ChainSelectorProps {
   variant?: 'compact' | 'full'
 }
 
+/**
+ * [CHORE-MOBILE-SELECTOR-POLISH] `(pointer: coarse)` is true for touch input
+ * (phones/tablets) regardless of viewport width, so this is the signal for
+ * "don't autofocus" rather than the `sm` breakpoint alone — a touch device
+ * in a narrow window and a mouse-driven narrow desktop window behave
+ * differently for keyboard pop-up purposes. Defaults to `false` (desktop,
+ * autofocus on) when `matchMedia` is unavailable (SSR, older jsdom) so
+ * existing desktop behavior/tests are unaffected.
+ */
+function matchesCoarsePointer(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(pointer: coarse)').matches
+}
+
+function useIsCoarsePointer(): boolean {
+  const [isCoarse, setIsCoarse] = useState(matchesCoarsePointer)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const mq = window.matchMedia('(pointer: coarse)')
+    const onChange = (e: MediaQueryListEvent) => setIsCoarse(e.matches)
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [])
+  return isCoarse
+}
+
 export default function ChainSelector({ variant = 'compact' }: ChainSelectorProps) {
   const { isConnected } = useAccount()
+  const isCoarsePointer = useIsCoarsePointer()
   const activeChainId = useActiveChainId()
   const { switchChain, isPending } = useSwitchChain()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -176,12 +203,9 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   const panel = (
     <div
       role="presentation"
-      className="z-50 w-full overflow-hidden rounded-t-2xl border border-cream-15 shadow-2xl shadow-black/40 sm:w-64 sm:rounded-xl sm:border-cream-08 sm:shadow-none"
+      className="z-50 w-full max-w-sm overflow-hidden rounded-2xl border border-cream-15 shadow-2xl shadow-black/40 sm:w-64 sm:max-w-none sm:rounded-xl sm:border-cream-08 sm:shadow-none"
       style={{ backgroundColor: 'var(--header-blur)' }}
     >
-      {/* Drag pill — mobile bottom-sheet affordance */}
-      <div className="mx-auto mb-1 mt-2 h-1 w-10 rounded-full bg-cream-15 sm:hidden" />
-
       <div className="flex items-center gap-2 border-b border-cream-08 px-3 py-2">
         <svg
           aria-hidden="true"
@@ -195,7 +219,7 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
         </svg>
         <input
           type="text"
-          autoFocus
+          autoFocus={variant === 'full' || !isCoarsePointer}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onInputKeyDown}
@@ -208,6 +232,16 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
           aria-activedescendant={filtered[highlighted] ? `chain-option-${filtered[highlighted].chainId}` : undefined}
           className="w-full bg-transparent text-base text-cream placeholder:text-cream-35 focus:outline-none sm:text-sm"
         />
+        {variant !== 'full' && (
+          <button
+            type="button"
+            onClick={closeAndRefocus}
+            aria-label="Close network picker"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-cream-35 transition hover:text-cream sm:hidden"
+          >
+            <span aria-hidden="true">✕</span>
+          </button>
+        )}
       </div>
       {list}
     </div>
@@ -241,12 +275,14 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
 
       {open && (
         <>
-          {/* Mobile-only backdrop for the bottom sheet */}
+          {/* Mobile-only backdrop — the popover itself is a centered modal
+              below `sm` (owner call, [CHORE-MOBILE-SELECTOR-POLISH]),
+              a positioned popover from `sm` up (desktop, unchanged). */}
           <div
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm sm:hidden"
             onClick={closeAndRefocus}
           />
-          <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:animate-fade-slide-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-slide-in sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:flex-none sm:p-0 sm:block">
             {panel}
           </div>
         </>
