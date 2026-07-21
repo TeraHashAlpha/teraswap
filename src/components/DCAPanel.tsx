@@ -35,6 +35,9 @@ import {
   MAX_ORDER_SLIPPAGE_BPS,
   DEFAULT_MAX_SLIPPAGE_BPS,
   deriveSigningMinAmountOut,
+  // [CHORE-DCA-BUDGET-UX] Display/derivation only — feeds the EXISTING maxSlippageBps above.
+  budgetUsdToBps,
+  bpsToBudgetUsd,
   type DcaCustomIntervalUnit,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig } from '@/lib/order-engine'
@@ -349,6 +352,13 @@ function CreateDCAForm({
   // handleSubmit until v3Enabled flips true on a real deployment.
   const v3Enabled = getOrderExecutorV3(chainId) !== null
   const [maxSlippageBps, setMaxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
+  // [CHORE-DCA-BUDGET-UX] "Max execution cost" ($, whole DCA) — pure display/derivation over the
+  // EXISTING maxSlippageBps above; no new signed field. `budgetTouched` tracks whether the user
+  // has edited the $ field directly (vs. the bps preset buttons) so the two controls stay in
+  // sync without fighting each other: untouched ⇒ shown value tracks DEFAULT_MAX_SLIPPAGE_BPS as
+  // totalUsd changes; touched ⇒ the user's own $ figure drives maxSlippageBps.
+  const [budgetUsdInput, setBudgetUsdInput] = useState('')
+  const [budgetTouched, setBudgetTouched] = useState(false)
 
   // Chainlink first (same hook the swap UI already uses for oracle display).
   const chainlinkPriceIn = useChainlinkPrice(tokenIn?.address, null).chainlinkPrice
@@ -408,6 +418,35 @@ function CreateDCAForm({
       return null
     }
   }, [totalDisplay, tokenIn])
+
+  // [CHORE-DCA-BUDGET-UX] Display-only 0.1% protocol fee, for the "includes the $F protocol fee"
+  // breakdown line — mirrors the on-chain FEE_BPS immutable; not imported (no config export
+  // change in this chore), a local display constant only.
+  const PROTOCOL_FEE_BPS = 10
+  // Default $ shown when the user hasn't touched the budget field — tracks DEFAULT_MAX_SLIPPAGE_BPS
+  // as totalUsd changes (null when unpriced, same fail-open posture as totalUsd itself).
+  const defaultBudgetUsd = useMemo(
+    () => (totalUsd != null ? bpsToBudgetUsd(totalUsd, DEFAULT_MAX_SLIPPAGE_BPS) : null),
+    [totalUsd],
+  )
+  const budgetClampedAtMax = useMemo(() => {
+    if (!budgetTouched || totalUsd == null) return false
+    const parsed = Number(budgetUsdInput)
+    if (!Number.isFinite(parsed)) return false
+    return budgetUsdToBps(totalUsd, parsed) === MAX_ORDER_SLIPPAGE_BPS && (parsed / totalUsd) * 10_000 > MAX_ORDER_SLIPPAGE_BPS
+  }, [budgetTouched, budgetUsdInput, totalUsd])
+  // Re-derive maxSlippageBps whenever the user's $ budget or the priced total changes — only
+  // while the $ field is the active control (budgetTouched); the bps preset buttons remain the
+  // ground truth otherwise, exactly as before this chore.
+  useEffect(() => {
+    if (!budgetTouched || totalUsd == null) return
+    const parsed = Number(budgetUsdInput)
+    const bps = budgetUsdToBps(totalUsd, parsed)
+    if (bps != null) setMaxSlippageBps(bps)
+  }, [budgetTouched, budgetUsdInput, totalUsd])
+  const budgetDisplayUsd = budgetTouched ? Number(budgetUsdInput) || 0 : (defaultBudgetUsd ?? 0)
+  const budgetFeeUsd = totalUsd != null ? (totalUsd * PROTOCOL_FEE_BPS) / 10_000 : null
+
   const dcaMinChunkUsd = useMemo(() => getDcaMinChunkUsd(), [])
   const minChunkGuard = useMemo(
     () => customMode
@@ -770,6 +809,13 @@ function CreateDCAForm({
             data-testid="dca-min-chunk-warning"
           >
             {minChunkGuard.warning}
+            {/* [CHORE-DCA-BUDGET-UX] Clarify this is a SEPARATE floor from the $ execution-cost
+                budget above — only shown once the user has actually set one. */}
+            {v3Enabled && budgetTouched && (
+              <span className="block text-cream-35">
+                This per-buy minimum is separate from your Max execution cost budget above.
+              </span>
+            )}
           </p>
         )}
       </div>
@@ -936,7 +982,10 @@ function CreateDCAForm({
                 {[100, 300, 500].map(bps => (
                   <button
                     key={bps}
-                    onClick={() => setMaxSlippageBps(Math.min(bps, MAX_ORDER_SLIPPAGE_BPS))}
+                    onClick={() => {
+                      setBudgetTouched(false) // presets take back control of maxSlippageBps
+                      setMaxSlippageBps(Math.min(bps, MAX_ORDER_SLIPPAGE_BPS))
+                    }}
                     className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition-all ${
                       maxSlippageBps === bps
                         ? 'border-cream-gold bg-cream-gold/10 text-cream'
@@ -956,6 +1005,44 @@ function CreateDCAForm({
                       strand the order if price rises, or offer weak protection if it falls)
                     </span>
                   )}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* [CHORE-DCA-BUDGET-UX] "Max execution cost" ($, whole DCA) — pure UX sugar over the
+              SAME maxSlippageBps signed above; no new signed field. Hidden in v2 mode (no v3
+              executor), same gating as the bps block. */}
+          {v3Enabled && (
+            <div className="rounded-xl border border-cream-08 bg-surface-primary p-3">
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-cream-35">
+                Max execution cost
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-cream-35">$</span>
+                <input
+                  data-testid="dca-budget-usd-input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder={defaultBudgetUsd != null ? defaultBudgetUsd.toFixed(2) : ''}
+                  value={budgetTouched ? budgetUsdInput : ''}
+                  onChange={e => {
+                    setBudgetTouched(true)
+                    setBudgetUsdInput(e.target.value)
+                  }}
+                  className="min-h-[44px] w-28 rounded-lg border border-cream-08 bg-surface-secondary px-2 text-[13px] text-cream focus:border-cream-gold focus:outline-none"
+                />
+                <span className="text-[11px] text-cream-35">for the whole DCA</span>
+              </div>
+              {totalUsd != null && budgetFeeUsd != null && (
+                <p className="mt-2 text-[11px] text-cream-35">
+                  up to ${budgetDisplayUsd.toFixed(2)} total — includes the ${budgetFeeUsd.toFixed(2)} protocol fee (0.1%)
+                </p>
+              )}
+              {budgetClampedAtMax && (
+                <p data-testid="dca-budget-clamp-warning" className="mt-1 text-[11px] text-amber-300">
+                  That budget exceeds the {(MAX_ORDER_SLIPPAGE_BPS / 100).toFixed(0)}% on-chain cap — clamped to {(MAX_ORDER_SLIPPAGE_BPS / 100).toFixed(0)}%.
                 </p>
               )}
             </div>
