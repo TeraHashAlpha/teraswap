@@ -652,13 +652,14 @@ export default function SwapBox() {
   return (
     <>
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] rounded-2xl border border-cream-08 bg-surface-secondary/85 px-3 py-4 shadow-xl shadow-black/20 backdrop-blur-lg sm:max-w-[460px] sm:p-5">
-        {/* [CHORE-POLISH P6] Active-chain indicator — bundled SVG logo (Ethereum/Base),
+        {/* [CHORE-POLISH P6] Active-chain indicator — bundled SVG logo (Ethereum/Base/Arbitrum),
             never an external fetch. Mirrors the chain selector; decorative icon, the
-            adjacent name carries the label. */}
+            adjacent name carries the label. Icon + name both key off activeChainId via the
+            single chain registry (chainName, see getChainConfig above) — no divergent lookup. */}
         <div className="mb-3 flex items-center gap-1.5">
           <ChainIcon chainId={activeChainId} className="h-4 w-4 shrink-0" />
           <span className="text-[11px] font-semibold uppercase tracking-[1px] text-cream-35">
-            {activeChainId === 8453 ? 'Base' : 'Ethereum'}
+            {chainName}
           </span>
         </div>
         {/* Sell */}

@@ -231,6 +231,30 @@ describe('SwapBox — active-chain logo [CHORE-POLISH P6]', () => {
   })
 })
 
+describe('SwapBox — active-chain badge NAME [BUG-SWAPCARD-CHAIN-LABEL]', () => {
+  it('shows "Ethereum" for chainId 1, paired with the matching icon', () => {
+    mockChainId = 1
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-1')).toBeInTheDocument()
+    expect(screen.getByText('Ethereum')).toBeInTheDocument()
+  })
+
+  it('shows "Base" for chainId 8453, paired with the matching icon', () => {
+    mockChainId = 8453
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-8453')).toBeInTheDocument()
+    expect(screen.getByText('Base')).toBeInTheDocument()
+  })
+
+  it('shows "Arbitrum One" (not "Ethereum") for chainId 42161, paired with the matching icon', () => {
+    mockChainId = 42161
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-42161')).toBeInTheDocument()
+    expect(screen.getByText('Arbitrum One')).toBeInTheDocument()
+    expect(screen.queryByText('Ethereum')).not.toBeInTheDocument()
+  })
+})
+
 describe('SwapBox — renders', () => {
   it('mounts with default ETH → USDC tokens (no crash)', () => {
     renderWithProviders(<SwapBox />)
