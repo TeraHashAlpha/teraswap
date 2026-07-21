@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react'
-import { useSwitchChain } from 'wagmi'
+import { useAccount, useSwitchChain } from 'wagmi'
 import { getSupportedChainIds, getChainConfig } from '@/lib/chains'
 import { useActiveChainId } from '@/hooks/useChainId'
 import ChainIcon from './icons/ChainIcon'
@@ -21,21 +21,37 @@ import ChainIcon from './icons/ChainIcon'
  * (no trigger button) for embedding directly in a form/panel — unused today
  * (the sweep for CHORE-CHAIN-SELECTOR-UX found only the Header usage) but
  * kept as the documented extension point the spec asks for.
+ *
+ * [BUG-MOBILE-CHAIN-SELECTOR] The trigger button used to render
+ * `hidden sm:block` on its wrapping div — hiding it unconditionally below the
+ * `sm` breakpoint regardless of wallet connection, which is why it was
+ * missing from the mobile header entirely. Now always visible: an icon-only
+ * circle below `sm`, icon+name from `sm` up (same single button both ways).
+ * The popover becomes a bottom sheet below `sm`; desktop's positioned panel
+ * is unchanged. Selecting a chain while disconnected updates
+ * `disconnectedChainId` (local state) instead of calling wagmi's
+ * `switchChain` — there's no wallet chain to switch to when there's no
+ * wallet. There is no app-wide "selected chain" store yet, so this only
+ * drives what this trigger/list displays, not quoting/routing (those stay
+ * on the existing wallet-derived `useActiveChainId()` default).
  */
 interface ChainSelectorProps {
   variant?: 'compact' | 'full'
 }
 
 export default function ChainSelector({ variant = 'compact' }: ChainSelectorProps) {
+  const { isConnected } = useAccount()
   const activeChainId = useActiveChainId()
   const { switchChain, isPending } = useSwitchChain()
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const [disconnectedChainId, setDisconnectedChainId] = useState<number | null>(null)
+  const displayChainId = isConnected ? activeChainId : (disconnectedChainId ?? activeChainId)
 
   const chains = useMemo(() => getSupportedChainIds().map((id) => getChainConfig(id)), [])
-  const active = chains.find((c) => c.chainId === activeChainId) ?? chains[0]
+  const active = chains.find((c) => c.chainId === displayChainId) ?? chains[0]
   const initialHighlight = () => {
-    const idx = chains.findIndex((c) => c.chainId === activeChainId)
+    const idx = chains.findIndex((c) => c.chainId === displayChainId)
     return idx >= 0 ? idx : 0
   }
 
@@ -77,8 +93,12 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   }
 
   function selectChain(chainId: number) {
-    if (!isSelectable(chainId) || chainId === activeChainId || isPending) return
-    switchChain({ chainId })
+    if (!isSelectable(chainId) || chainId === displayChainId || isPending) return
+    if (isConnected) {
+      switchChain({ chainId })
+    } else {
+      setDisconnectedChainId(chainId)
+    }
     if (variant !== 'full') setOpen(false)
   }
 
@@ -111,14 +131,14 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
       id={listboxId}
       role="listbox"
       aria-label="Networks"
-      className="max-h-72 overflow-y-auto py-1"
+      className="max-h-[50dvh] overflow-y-auto overscroll-contain py-1 sm:max-h-72"
     >
       {filtered.length === 0 && (
         <div className="px-3 py-6 text-center text-xs text-cream-35">No networks found</div>
       )}
       {filtered.map((c, i) => {
         const comingSoon = c.contracts.feeCollector === null
-        const isActive = c.chainId === activeChainId
+        const isActive = c.chainId === displayChainId
         const isHighlighted = i === highlighted
         return (
           <button
@@ -131,7 +151,7 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
             disabled={comingSoon || isActive || isPending}
             onMouseEnter={() => setHighlighted(i)}
             onClick={() => selectChain(c.chainId)}
-            className={`flex h-10 w-full items-center gap-2.5 px-3 text-left text-sm transition ${
+            className={`flex min-h-[44px] w-full items-center gap-2.5 px-3 text-left text-sm transition sm:h-10 sm:min-h-0 ${
               comingSoon ? 'cursor-not-allowed text-cream-35 opacity-50' : isActive ? 'text-cream' : 'text-cream-65 hover:text-cream'
             } ${isHighlighted && !comingSoon && !isActive ? 'bg-cream-08 text-cream' : ''} disabled:cursor-not-allowed`}
           >
@@ -156,9 +176,12 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   const panel = (
     <div
       role="presentation"
-      className="z-50 w-64 overflow-hidden rounded-xl border border-cream-08 backdrop-blur-2xl"
+      className="z-50 w-full overflow-hidden rounded-t-2xl border border-cream-15 shadow-2xl shadow-black/40 sm:w-64 sm:rounded-xl sm:border-cream-08 sm:shadow-none"
       style={{ backgroundColor: 'var(--header-blur)' }}
     >
+      {/* Drag pill — mobile bottom-sheet affordance */}
+      <div className="mx-auto mb-1 mt-2 h-1 w-10 rounded-full bg-cream-15 sm:hidden" />
+
       <div className="flex items-center gap-2 border-b border-cream-08 px-3 py-2">
         <svg
           aria-hidden="true"
@@ -183,7 +206,7 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={filtered[highlighted] ? `chain-option-${filtered[highlighted].chainId}` : undefined}
-          className="w-full bg-transparent text-sm text-cream placeholder:text-cream-35 focus:outline-none"
+          className="w-full bg-transparent text-base text-cream placeholder:text-cream-35 focus:outline-none sm:text-sm"
         />
       </div>
       {list}
@@ -195,7 +218,10 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   }
 
   return (
-    <div ref={containerRef} className="relative hidden sm:block">
+    <div ref={containerRef} className="relative">
+      {/* One trigger, two looks: icon-only circle below `sm` (compact, always
+          visible — this is what #310 was missing on mobile), icon+name pill
+          from `sm` up (desktop, unchanged). */}
       <button
         ref={triggerRef}
         type="button"
@@ -206,14 +232,25 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Network: ${active.name}`}
-        className="flex items-center gap-1.5 rounded-full border border-cream-15 px-3 py-1.5 text-xs font-medium text-cream-65 transition hover:border-cream-35 hover:text-cream"
+        className="flex h-11 w-11 items-center justify-center gap-1.5 rounded-full border border-cream-15 text-cream-65 transition hover:border-cream-35 hover:text-cream sm:h-auto sm:w-auto sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium"
       >
         <ChainIcon chainId={active.chainId} className="h-4 w-4 shrink-0" />
-        {active.name}
-        <span aria-hidden="true" className="text-cream-35">▾</span>
+        <span className="hidden sm:inline">{active.name}</span>
+        <span aria-hidden="true" className="hidden text-cream-35 sm:inline">▾</span>
       </button>
 
-      {open && <div className="absolute right-0 mt-2">{panel}</div>}
+      {open && (
+        <>
+          {/* Mobile-only backdrop for the bottom sheet */}
+          <div
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm sm:hidden"
+            onClick={closeAndRefocus}
+          />
+          <div className="fixed inset-x-0 bottom-0 z-50 animate-slide-up sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:animate-fade-slide-in">
+            {panel}
+          </div>
+        </>
+      )}
     </div>
   )
 }
