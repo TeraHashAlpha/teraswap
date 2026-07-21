@@ -5,6 +5,9 @@
  * [CHORE-CHAIN-SELECTOR-UX] Relay/Uniswap-style search popover: search input
  * filters, keyboard nav (arrows/Enter/Esc), ARIA listbox/option semantics,
  * comingSoon rows are disabled (click never calls switchChain).
+ * [BUG-MOBILE-CHAIN-SELECTOR] trigger reachable on mobile + with/without a
+ * connected wallet; disconnected selection updates the display without
+ * invoking wagmi's switchChain.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -12,8 +15,10 @@ const switchChainMock = vi.fn()
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChain: switchChainMock, isPending: false }),
-  useAccount: vi.fn(() => ({ chain: { id: 1, name: 'mainnet' } })),
+  useAccount: vi.fn(() => ({ isConnected: true, chain: { id: 1, name: 'mainnet' } })),
 }))
+
+import { useAccount } from 'wagmi'
 
 // Base's feeCollector is env-driven (NEXT_PUBLIC_BASE_FEE_COLLECTOR) and unset in the test
 // environment, so Base is comingSoon here exactly like Arbitrum — leaving no SECOND live chain
@@ -42,6 +47,7 @@ function openSelector() {
 
 beforeEach(() => {
   switchChainMock.mockClear()
+  vi.mocked(useAccount).mockReturnValue({ isConnected: true, chain: { id: 1, name: 'mainnet' } } as ReturnType<typeof useAccount>)
 })
 
 describe('[9Y] ChainSelector — chain logos', () => {
@@ -162,5 +168,58 @@ describe('[CHORE-CHAIN-SELECTOR-UX] search popover — filter, ARIA, keyboard, E
     fireEvent.keyDown(input, { key: 'Enter' })
     // Ethereum (already active) is disabled in the option button, so no switch fires.
     expect(switchChainMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('[BUG-MOBILE-CHAIN-SELECTOR] trigger visibility', () => {
+  it('the trigger has no viewport-hiding class (regression: was `hidden sm:block` on the whole component)', () => {
+    renderWithProviders(<ChainSelector />)
+    const trigger = screen.getByLabelText(/network/i)
+    expect(trigger.className).not.toMatch(/\bhidden\b/)
+    // the old bug hid the entire wrapping div below `sm` — walk up and confirm
+    // no ancestor up to the component root carries a bare `hidden` class either.
+    let node: HTMLElement | null = trigger.parentElement
+    while (node) {
+      expect(node.className).not.toMatch(/\bhidden\b/)
+      node = node.parentElement
+    }
+  })
+
+  it('the trigger renders when the wallet is disconnected', () => {
+    vi.mocked(useAccount).mockReturnValue({ isConnected: false, chain: undefined } as ReturnType<typeof useAccount>)
+    renderWithProviders(<ChainSelector />)
+    expect(screen.getByLabelText(/network/i)).toBeInTheDocument()
+  })
+})
+
+describe('[BUG-MOBILE-CHAIN-SELECTOR] disconnected vs connected selection', () => {
+  it('selecting a chain while disconnected updates the trigger WITHOUT calling switchChain', () => {
+    vi.mocked(useAccount).mockReturnValue({ isConnected: false, chain: undefined } as ReturnType<typeof useAccount>)
+    renderWithProviders(<ChainSelector />)
+    openSelector()
+    const baseOption = screen.getAllByRole('option').find((o) => /base/i.test(o.textContent ?? ''))!
+    fireEvent.click(baseOption)
+
+    expect(switchChainMock).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Network: Base')).toBeInTheDocument()
+  })
+
+  it('selecting a chain while connected calls switchChain (existing behavior, unchanged)', () => {
+    renderWithProviders(<ChainSelector />)
+    openSelector()
+    const baseOption = screen.getAllByRole('option').find((o) => /base/i.test(o.textContent ?? ''))!
+    fireEvent.click(baseOption)
+
+    expect(switchChainMock).toHaveBeenCalledWith({ chainId: 8453 })
+  })
+
+  it('the comingSoon Arbitrum row stays non-selectable while disconnected too', () => {
+    vi.mocked(useAccount).mockReturnValue({ isConnected: false, chain: undefined } as ReturnType<typeof useAccount>)
+    renderWithProviders(<ChainSelector />)
+    openSelector()
+    const arbitrumOption = screen.getAllByRole('option').find((o) => /arbitrum/i.test(o.textContent ?? ''))!
+    fireEvent.click(arbitrumOption)
+    expect(switchChainMock).not.toHaveBeenCalled()
+    expect(screen.getByLabelText(/network: ethereum/i)).toBeInTheDocument()
   })
 })
