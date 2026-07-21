@@ -54,3 +54,57 @@ errors). Only pre-existing unrelated failure: `connect-modal-qr` (`cuer` import,
 - The pinned-route API gate is scoped to `isV3Order` so the legacy **v2 non-DCA path is byte-identical**
   (it remains separately unexecutable — threat-model P1c — which this sprint does not change).
 - `NEXT_PUBLIC_LIMIT_ENABLED` is the kill-switch; everything is fail-closed while unset.
+
+---
+
+## Amendment — CodeQL "user-controlled bypass" (9 HIGH)
+
+**Headline: the 9 alerts are all false positives — but investigating them uncovered a real,
+exploitable bypass that CodeQL did NOT flag.** Fixed in `94a10a2`.
+
+### The real defect (not among the 9)
+Policy gates keyed on raw request strings while the EIP-712 message derived its enums from the same
+strings through a **lossy, silently-defaulting** mapping (`=== 'above' ? 0 : 1`, `... : 2`). Unknown
+values fell through to BELOW/DCA instead of being refused, letting a caller desync the **policy view**
+from the **signed view** by casing alone.
+
+**Proven exploit** (verified by reverting the fix and re-running: pre-fix returned **`201 Created`**):
+`{orderType:'stop_loss', priceCondition:'BELOW'}` failed the `=== 'below'` Stop-Loss gate — bypassing
+the v4 deferral — while still encoding `condition = 1 (BELOW)` into the signed struct, i.e. a real,
+executable on-chain stop-loss. Same class: `orderType:'DCA'` skipped the DCA interval/chunk minimums
+**and the freeze circuit-breaker** while signing a genuine DCA (enum 2); an unknown `orderType` skipped
+the native-ETH input gate.
+
+**Fix / trusted invariant.** Strict total-with-rejection parsing up front (`Map` lookups, so inherited
+keys like `constructor` cannot match); unknown/non-string values refused before any gate reads them. The
+string→enum relation is now **bijective**, every gate branches on the **enum**, and the row persists the
+**canonical label**. The SL gate **moved after signature recovery** and keys on the enums in the verified
+message — so it refuses the order that would actually execute on-chain.
+
+### Per-alert verdicts (line numbers as scanned, commit `f853d78`)
+| # | Line | Guard | Verdict | Trusted invariant it rests on |
+|---|---|---|---|---|
+| 1–2 | 109 | `!body.signature \|\| !body.orderHash` | **FP** | ECDSA recovery == `body.wallet`; presence check only |
+| 3–4 | 116 | `!body.amountIn \|\| === '0'` | **FP** | signature-bound + on-chain `MIN_ORDER_AMOUNT`/`OrderTooSmall` |
+| 5–6 | 193 | `priceFeed` format | **FP** | signature-bound + on-chain `_checkPriceCondition` (staleness/round/config) |
+| 7 | 350 | `body.orderType !== 'dca'` | **TRUE POSITIVE — FIXED** | now `orderTypeEnum !== ORDER_TYPE_DCA` from the strict parse |
+| 8 | 353 | `!routerDataHash \|\| === zeroHash` | **FP** | `routerDataHash` is in the verified EIP-712 message; contract re-enforces `RouterDataRequired` |
+| 9 | 363 | `!storedRouterData` | **FP** | precondition to `verifyRouterDataHash`, which compares unsigned bytes against the **SIGNED** hash |
+
+Each FP carries an inline `// codeql[js/user-controlled-bypass]` naming its invariant — no blanket
+dismissal.
+
+### Tests
+10 negative tests (casing variants, unknown values, non-string coercion, prototype keys, canonical
+persistence, post-verification ordering). **All 8 exploit tests confirmed RED against the pre-fix code**
+— they are not vacuous. Suite **2841 green**; tsc clean; eslint at the main baseline.
+
+### ⚠️ Verification caveat for the Auditor
+There is **no CodeQL CLI in this environment**, so I could not run `security-extended` locally and
+**cannot myself certify "0 high"** — that must be confirmed by the CI run on this branch. Note also that
+inline `// codeql[...]` suppressions are not honoured by every GitHub code-scanning configuration; if the
+6 FP alerts persist after this push, they need UI dismissal citing the invariants above (the comments
+document the justification either way). The **true positive at line 350 is genuinely fixed**, not
+suppressed.
+
+`sharp` untouched (separate chore), as instructed.
