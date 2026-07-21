@@ -26,12 +26,19 @@
  * Fail-closed: when no executor is deployed on the chain (getOrderExecutor → null) it reports
  * needsApproval=false and isApproved=false, so the modal renders no Approve button against a
  * null/wrong spender (and confirmOrder's own fail-closed guard surfaces the error).
+ *
+ * [BUG-DCA-APPROVE-SPENDER-V3] v3/v2 executor choice: the spender is resolved via
+ * resolveSigningExecutor(chainId, isV3Order) — the SAME single-source-of-truth function the
+ * signing path's v2/v3 branch mirrors (order.maxSlippageBps !== undefined ⇒ v3). Callers MUST pass
+ * the frozen order's isV3Order (never re-derive it independently), or the approval spender and the
+ * EIP-712 verifyingContract can diverge again. `isV3Order` defaults to false so every existing v2
+ * call site (byte-identical spender = getOrderExecutor(chainId)) is unaffected.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi } from 'viem'
-import { getOrderExecutor } from '@/lib/order-engine'
+import { resolveSigningExecutor } from '@/lib/order-engine'
 
 export type OrderApprovalStatus = 'idle' | 'approving' | 'confirming' | 'ready' | 'error'
 
@@ -53,17 +60,20 @@ export interface UseOrderApprovalResult {
 }
 
 /**
- * @param tokenIn  The FROZEN order's input token (already chain-resolved WETH for native ETH).
- * @param amountIn The FULL signed total the executor will pull cumulatively (order.amountIn).
- * @param chainId  The chain the order was frozen/signed under (drives spender + allowance read).
+ * @param tokenIn    The FROZEN order's input token (already chain-resolved WETH for native ETH).
+ * @param amountIn   The FULL signed total the executor will pull cumulatively (order.amountIn).
+ * @param chainId    The chain the order was frozen/signed under (drives spender + allowance read).
+ * @param isV3Order  Whether the FROZEN order was built for v3 (order.maxSlippageBps !== undefined —
+ *                    the exact predicate the signing path uses). Defaults to false (v2, unchanged).
  */
 export function useOrderApproval(
   tokenIn: `0x${string}` | undefined,
   amountIn: bigint | undefined,
   chainId: number,
+  isV3Order: boolean = false,
 ): UseOrderApprovalResult {
   const { address } = useAccount()
-  const spender = getOrderExecutor(chainId)
+  const spender = resolveSigningExecutor(chainId, isV3Order)
   const [status, setStatus] = useState<OrderApprovalStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
