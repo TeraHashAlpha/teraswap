@@ -70,7 +70,7 @@ import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
 import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
-import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
+import { decodeSwapFailed, extractRevertData, decodeExecutorMarketRevert } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes); [FIX-P1B-M01] the executor's own market reverts
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
 // + parent-order status transition (pure, unit-tested in record-execution.test.mjs).
 import {
@@ -132,7 +132,7 @@ import { resolveSubmissionPolicy } from "./submission-policy.js"
 // [SPRINT-V3-P2 / ADR-013 §1] Dual-executor (v2/v3) selection per order — pure, unit-tested.
 import { resolveExecutorRouting } from "./executor-routing.js"
 // [SPRINT-P1B / ADR-014 (a)] Pinned-route replay for non-DCA v3 orders (Limit / Take-Profit).
-import { resolvePinnedRouterData, planPinnedRouteRevert } from "./pinned-route.js"
+import { resolvePinnedRouterData, planPinnedRouteRevert, isMarketRevert } from "./pinned-route.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -1704,13 +1704,25 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // classifyFailure below so a permanent cause (allowance/balance/nonce) is
       // failed-with-reason immediately rather than retried to the cap.
       let swapReason = null
+      // [FIX-P1B-M01] Set ONLY when the revert is one of the executor's OWN market/route errors
+      // (InsufficientOutput / PriceConditionNotMet) — never for permanent-cause errors, which are
+      // deliberately absent from decodeExecutorMarketRevert's table and must keep falling through
+      // to the unchanged failure-ladder classification below.
+      let executorErrorName = null
       try {
-        const sf = decodeSwapFailed(extractRevertData(err))
+        const revertData = extractRevertData(err)
+        const sf = decodeSwapFailed(revertData)
         if (sf) {
           swapReason = sf.reason
           // dbOrder (loop var) is in catch scope; orderStruct is not (declared in the try).
           const failedRouter = dbOrder.router ?? (dbOrder.order_data || {}).router ?? "?"
           console.error(`  Order ${dbOrder.id.slice(0, 8)}... SwapFailed → ${sf.reason} (router=${failedRouter}, inner=${sf.innerHex})`)
+        } else {
+          const marketErr = decodeExecutorMarketRevert(revertData)
+          if (marketErr) {
+            executorErrorName = marketErr.name
+            console.error(`  Order ${dbOrder.id.slice(0, 8)}... ${marketErr.name} (executor revert — output below the signed/oracle floor, or the price condition slipped back before the tx landed)`)
+          }
         }
       } catch { /* never let diagnostics mask the original error */ }
       console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
@@ -1727,11 +1739,16 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // exactly why Stop-Loss was deferred to v4). Routing this through handleExecutionFailure
       // would mark it 'failed' and permanently kill a still-valid order. We do surface it: a
       // route that keeps reverting is a liveness signal, so ops gets paged at the threshold.
-      if (dbOrder.order_type !== "dca" && swapReason) {
+      // [FIX-P1B-M01] Branch on the CLASSIFICATION (SwapFailed OR the executor's own market
+      // errors), not on swapReason truthiness alone — swapReason is null for InsufficientOutput
+      // (the router call itself succeeded; the executor's OWN post-swap floor check reverted), so
+      // gating on it alone let the common triggered-TP dislocation fall through to 'failed'.
+      if (dbOrder.order_type !== "dca" && isMarketRevert({ swapReason, executorErrorName })) {
         const prior = pinnedRouteReverts.get(dbOrder.id) || 0
         const consecutiveReverts = prior + 1
         pinnedRouteReverts.set(dbOrder.id, consecutiveReverts)
         const plan = planPinnedRouteRevert({ consecutiveReverts })
+        const observedReason = swapReason || executorErrorName
         log(`  Order ${dbOrder.id.slice(0, 8)}... ${plan.reason}`)
         if (plan.alert) {
           try {
@@ -1740,7 +1757,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
                 kind: "pinned-route-revert",
                 detail:
                   `Order ${dbOrder.id} (${dbOrder.order_type}) pinned route reverted ` +
-                  `${consecutiveReverts}x consecutively: ${swapReason}. The order remains ACTIVE ` +
+                  `${consecutiveReverts}x consecutively: ${observedReason}. The order remains ACTIVE ` +
                   `and will retry until expiry — the pinned pool may be dislocated.`,
               },
               TIER_WARN_THRESHOLD,
