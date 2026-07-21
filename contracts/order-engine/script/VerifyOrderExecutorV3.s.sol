@@ -57,6 +57,11 @@ interface IOrderExecutorV3 {
  * is a mapping, not enumerable on-chain — but it does catch the realistic failure mode (bootstrapping with
  * an extra/wrong router by mistake). For a fully exhaustive check, cross-reference the on-chain
  * Bootstrap/RouterWhitelisted event log (see the runbook §3's event-scan step).
+ *
+ * [SPRINT-48-ARBITRUM-DCA-PREP] Confirmed chain-agnostic as-is — every "should be X" value is already a
+ * caller-supplied argument (no Base literal embedded); reused verbatim for Arbitrum verification
+ * (docs/Runbooks/ARBITRUM-V3-EXECUTOR-DEPLOY.md §3) by passing Arbitrum's own executor/admin/
+ * feeRecipient/WETH/router/sequencer-feed/chainId arguments.
  */
 contract VerifyOrderExecutorV3 is Script {
     // EIP-712 domain typehash (standard, matches OZ's EIP712 base the contract inherits).
