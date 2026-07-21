@@ -131,6 +131,8 @@ import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js
 import { resolveSubmissionPolicy } from "./submission-policy.js"
 // [SPRINT-V3-P2 / ADR-013 §1] Dual-executor (v2/v3) selection per order — pure, unit-tested.
 import { resolveExecutorRouting } from "./executor-routing.js"
+// [SPRINT-P1B / ADR-014 (a)] Pinned-route replay for non-DCA v3 orders (Limit / Take-Profit).
+import { resolvePinnedRouterData, planPinnedRouteRevert } from "./pinned-route.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -249,6 +251,10 @@ const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "720
 // count resets to 0 on any successful execution. In-memory only (resets on keeper
 // restart — see FEEDBACK).
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }
+// [SPRINT-P1B / ADR-014 (a)] orderId -> consecutive pinned-route reverts. Tracked separately from
+// orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
+// order stays fillable until expiry. Cleared on any successful fill.
+const pinnedRouteReverts = new Map()
 
 // [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
 //   seenDcaOrderIds          -- DCA order ids already announced via alertNewDcaPosition.
@@ -1291,39 +1297,74 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         execCount: Number(dbOrder.dca_executed || 0),
         isDca,
       })
-      const swapData = await fetchSwapRoute(
-        orderStruct.tokenIn,
-        orderStruct.tokenOut,
-        netAmount,
-        execAddress, // [SPRINT-V3-P2] the contract that will actually hold + swap the funds
-        CHAIN_ID, // keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
-        srcDecimals,
-        dstDecimals,
-        orderStruct.router,
-      )
+      // ── [SPRINT-P1B / ADR-014 (a)] Pinned route for non-DCA ───────────────────────────────
+      // A non-DCA order committed to EXACT calldata at signing (V3:463-465). The keeper must
+      // REPLAY those bytes verbatim and must NEVER rebuild a route: a rebuilt route hashes
+      // differently and reverts RouterDataMismatch essentially always. (That was the latent
+      // defect in the previous shape -- it hashed freshly-built calldata against the signed
+      // hash, which could only match by luck.) DCA is unaffected and still builds per-chunk
+      // calldata against its ZeroHash bypass.
+      const pinned = resolvePinnedRouterData({
+        orderType: dbOrder.order_type,
+        orderData: dbOrder.order_data,
+        signedRouterDataHash: orderStruct.routerDataHash,
+      })
 
-      if (!swapData) {
-        // [chore/dca-resilience] No route THIS cycle is transient: keep the order
-        // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
-        // consecutive misses does this fail with no_route_after_retries (+alert).
-        log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
-        await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
-        skipped++
-        continue
-      }
-
-      // [C-01] Verify routerData hash for non-DCA orders.
-      // DCA orders use ZeroHash as routerDataHash since calldata varies per execution --
-      // the contract now skips the hash check when routerDataHash == bytes32(0).
-      // IMPORTANT: Do NOT modify orderStruct.routerDataHash -- it must match the
-      // original signed value or EIP-712 signature verification will fail.
-      if (orderStruct.routerDataHash !== zeroHash) {
-        const actualRouterDataHash = keccak256(swapData.data)
-        if (actualRouterDataHash !== orderStruct.routerDataHash) {
-          log(`  Order ${dbOrder.id.slice(0, 8)}... routerData hash mismatch, skipping`)
+      let swapData
+      if (pinned.pinned) {
+        if (!pinned.ok) {
+          // Refuse rather than burn gas on a guaranteed revert. Leave the order ACTIVE: this is
+          // a data problem (or the P1c ZeroHash landmine), not a market outcome.
+          log(`  Order ${dbOrder.id.slice(0, 8)}... pinned route unusable -- ${pinned.reason}`)
+          try {
+            await alertOps(
+              { kind: "pinned-route-unusable", detail: `Order ${dbOrder.id}: ${pinned.reason}` },
+              TIER_WARN_THRESHOLD,
+            )
+          } catch {}
           await updateOrderStatus(dbOrder.id, "active") // Unlock
           skipped++
           continue
+        }
+        // toAmount is null by design: a pinned route is quote-free, so there is no expected-out
+        // to compare. Only the DCA-gated blocks below read toAmount and they are unreachable
+        // for a pinned order, so this keeps fetchSwapRoute's return shape.
+        swapData = { data: pinned.routerData, toAmount: null }
+        log(`  Order ${dbOrder.id.slice(0, 8)}... replaying pinned route (${pinned.routerData.slice(0, 10)}...)`)
+      } else {
+        swapData = await fetchSwapRoute(
+          orderStruct.tokenIn,
+          orderStruct.tokenOut,
+          netAmount,
+          execAddress, // [SPRINT-V3-P2] the contract that will actually hold + swap the funds
+          CHAIN_ID, // keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
+          srcDecimals,
+          dstDecimals,
+          orderStruct.router,
+        )
+
+        if (!swapData) {
+          // [chore/dca-resilience] No route THIS cycle is transient: keep the order
+          // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
+          // consecutive misses does this fail with no_route_after_retries (+alert).
+          log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
+          await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
+          skipped++
+          continue
+        }
+
+        // [C-01] Verify routerData hash for keeper-built routes. DCA signs ZeroHash (the
+        // contract skips the check), so this stays as defence in depth on the built path.
+        // IMPORTANT: Do NOT modify orderStruct.routerDataHash -- it must match the original
+        // signed value or EIP-712 signature verification will fail.
+        if (orderStruct.routerDataHash !== zeroHash) {
+          const actualRouterDataHash = keccak256(swapData.data)
+          if (actualRouterDataHash !== orderStruct.routerDataHash) {
+            log(`  Order ${dbOrder.id.slice(0, 8)}... routerData hash mismatch, skipping`)
+            await updateOrderStatus(dbOrder.id, "active") // Unlock
+            skipped++
+            continue
+          }
         }
       }
 
@@ -1580,6 +1621,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [chore/dca-resilience] ...and resets THIS order's transient-miss count,
         // so a later isolated miss starts fresh (consecutive, not cumulative).
         orderRetries.delete(dbOrder.id)
+        // [SPRINT-P1B] A fill also clears the pinned-route revert streak (consecutive, not
+        // cumulative) so the ops alert only fires on a genuinely stuck route.
+        pinnedRouteReverts.delete(dbOrder.id)
 
         const now = new Date().toISOString()
 
@@ -1675,6 +1719,40 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       consecutiveExecFailures++
       stats.totalErrors++
       stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
+
+      // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route revert is NOT an order failure ──────────
+      // Under option (a) the route is fixed at signing, so a thin/dislocated pool at trigger
+      // makes the swap revert. The correct outcome is: leave the order ACTIVE so it can fill
+      // on any later cycle within its expiry (for a Limit/TP "did not fill" is acceptable —
+      // exactly why Stop-Loss was deferred to v4). Routing this through handleExecutionFailure
+      // would mark it 'failed' and permanently kill a still-valid order. We do surface it: a
+      // route that keeps reverting is a liveness signal, so ops gets paged at the threshold.
+      if (dbOrder.order_type !== "dca" && swapReason) {
+        const prior = pinnedRouteReverts.get(dbOrder.id) || 0
+        const consecutiveReverts = prior + 1
+        pinnedRouteReverts.set(dbOrder.id, consecutiveReverts)
+        const plan = planPinnedRouteRevert({ consecutiveReverts })
+        log(`  Order ${dbOrder.id.slice(0, 8)}... ${plan.reason}`)
+        if (plan.alert) {
+          try {
+            await alertOps(
+              {
+                kind: "pinned-route-revert",
+                detail:
+                  `Order ${dbOrder.id} (${dbOrder.order_type}) pinned route reverted ` +
+                  `${consecutiveReverts}x consecutively: ${swapReason}. The order remains ACTIVE ` +
+                  `and will retry until expiry — the pinned pool may be dislocated.`,
+              },
+              TIER_WARN_THRESHOLD,
+            )
+          } catch {}
+        }
+        // Reuse the existing per-order backoff (the cycle's retry-skip reads exactly this map),
+        // so a persistently-reverting order doesn't re-estimate gas every poll.
+        orderRetries.set(dbOrder.id, { count: consecutiveReverts, lastAttempt: Date.now() })
+        await updateOrderStatus(dbOrder.id, "active") // stays fillable
+        continue
+      }
 
       // [chore/dca-resilience] Classify transient vs permanent and decide retry
       // (keep active) vs fail-with-specific-reason — replaces the old blunt
