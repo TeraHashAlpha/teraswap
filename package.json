@@ -83,7 +83,13 @@
     "@next/swc-win32-x64-msvc": "16.2.6"
   },
   "overrides": {
-    "axios": "1.16.0",
+    "brace-expansion": "1.1.16",
+    "minimatch@10.2.5": {
+      "brace-expansion": "5.0.7"
+    },
+    "js-yaml": "4.3.0",
+    "axios": "1.18.1",
+    "tar": "7.5.20",
     "next": {
       "postcss": ">=8.5.10"
     },
