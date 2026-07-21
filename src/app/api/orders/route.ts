@@ -33,6 +33,36 @@ import { getChainConfig } from '@/lib/chains/registry'
 // [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
 const CONDITIONAL_ORDER_TYPES = new Set(['limit', 'stop_loss', 'dca'])
 
+// ── [SPRINT-P1B-SEC] Strict discriminator parsing (CodeQL: user-controlled bypass) ───────────
+// The order type and price condition are the discriminators every policy gate in this route keys
+// on (Stop-Loss deferral, DCA validation, the pinned-route requirement, the native-ETH gate).
+// They previously reached those gates as RAW request strings, while the EIP-712 message derived
+// its enums from the same strings through a LOSSY, silently-defaulting mapping:
+//
+//     orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
+//     conditionEnum = body.priceCondition === 'above' ? 0 : 1
+//
+// Anything unrecognised fell through to DCA / BELOW instead of being rejected. That let a caller
+// desync the POLICY view from the SIGNED view with nothing more than different casing — e.g.
+// `priceCondition: 'BELOW'` failed the `=== 'below'` Stop-Loss gate while still encoding
+// condition = 1 (BELOW) into the signed struct, producing a real, executable on-chain stop-loss
+// that the deferral policy was supposed to refuse.
+//
+// These maps are total-with-rejection: an unknown value yields undefined and is refused up front,
+// so the string→enum relation is bijective and the policy view can no longer disagree with the
+// signed view. Map (not an object literal) so inherited keys like `constructor` cannot match.
+const ORDER_TYPE_ENUM = new Map<string, 0 | 1 | 2>([['limit', 0], ['stop_loss', 1], ['dca', 2]])
+const PRICE_CONDITION_ENUM = new Map<string, 0 | 1>([['above', 0], ['below', 1]])
+
+/** Canonical enum values — the ONLY thing policy gates may branch on. */
+const ORDER_TYPE_STOP_LOSS = 1
+const ORDER_TYPE_DCA = 2
+const CONDITION_BELOW = 1
+
+/** Inverse maps, so the persisted row is derived from the enum rather than the raw request text. */
+const ORDER_TYPE_LABEL = ['limit', 'stop_loss', 'dca'] as const
+const PRICE_CONDITION_LABEL = ['above', 'below'] as const
+
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
 const MAX_ACTIVE_ORDERS = 20
@@ -89,6 +119,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── [SPRINT-P1B-SEC] Parse the discriminators STRICTLY, before any gate reads them ────────
+    // Everything downstream branches on these enums, never on the raw strings, so a request field
+    // can no longer steer a policy decision away from what the signature will bind.
+    if (typeof body.orderType !== 'string' || !ORDER_TYPE_ENUM.has(body.orderType)) {
+      return NextResponse.json(
+        { error: `Invalid orderType — must be one of: ${[...ORDER_TYPE_ENUM.keys()].join(', ')}` },
+        { status: 400 },
+      )
+    }
+    if (typeof body.priceCondition !== 'string' || !PRICE_CONDITION_ENUM.has(body.priceCondition)) {
+      return NextResponse.json(
+        { error: `Invalid priceCondition — must be one of: ${[...PRICE_CONDITION_ENUM.keys()].join(', ')}` },
+        { status: 400 },
+      )
+    }
+    const orderTypeEnum = ORDER_TYPE_ENUM.get(body.orderType)!
+    const conditionEnum = PRICE_CONDITION_ENUM.get(body.priceCondition)!
+    // Canonical spellings, derived FROM the enum — never the caller's original casing.
+    const orderTypeLabel = ORDER_TYPE_LABEL[orderTypeEnum]
+    const priceConditionLabel = PRICE_CONDITION_LABEL[conditionEnum]
+
     // [CHORE-DCA-WETH-INPUT] Fail-closed: a conditional order's INPUT (spend token) must be an
     // ERC-20 (WETH), never native ETH. The OrderExecutor pulls tokenIn via Permit2/transferFrom,
     // which the native sentinel can't satisfy, so reject it here (case-insensitive — the sentinel
@@ -96,7 +147,7 @@ export async function POST(req: NextRequest) {
     // delivery). Placed after the address loop (tokenIn is now a known-valid hex string) and before
     // any signature/DB work. Instant-swap is a different route and is unaffected.
     if (
-      CONDITIONAL_ORDER_TYPES.has(body.orderType) &&
+      CONDITIONAL_ORDER_TYPES.has(orderTypeLabel) &&
       typeof body.tokenIn === 'string' &&
       body.tokenIn.toLowerCase() === NATIVE_ETH.toLowerCase()
     ) {
@@ -106,6 +157,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // codeql[js/user-controlled-bypass] — presence precondition only; the security decision is the
+    // ECDSA recovery at the EIP-712 block below (recovered address must equal body.wallet).
     if (!body.signature || !body.orderHash) {
       return NextResponse.json({ error: 'Missing signature or orderHash' }, { status: 400 })
     }
@@ -113,6 +166,8 @@ export async function POST(req: NextRequest) {
     if (typeof body.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(body.signature)) {
       return NextResponse.json({ error: 'Invalid signature format' }, { status: 400 })
     }
+    // codeql[js/user-controlled-bypass] — amountIn is bound by the EIP-712 signature and re-enforced
+    // on-chain (MIN_ORDER_AMOUNT / OrderTooSmall); this is a fast-fail, not the security boundary.
     if (!body.amountIn || body.amountIn === '0') {
       return NextResponse.json({ error: 'amountIn must be positive' }, { status: 400 })
     }
@@ -142,7 +197,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate DCA fields
-    if (body.orderType === 'dca') {
+    // [SPRINT-P1B-SEC] Keyed on the canonical enum: a raw-string compare here let `orderType:'DCA'`
+    // skip the interval/chunk minimums AND the freeze circuit-breaker while still encoding a real
+    // DCA (enum 2) into the signed struct.
+    if (orderTypeEnum === ORDER_TYPE_DCA) {
       if (!body.dcaInterval || body.dcaInterval < 60) {
         return NextResponse.json({ error: 'DCA interval must be ≥ 60s' }, { status: 400 })
       }
@@ -190,36 +248,14 @@ export async function POST(req: NextRequest) {
     // Validate priceFeed — must be a valid address.
     // DCA orders may use address(0) to skip price condition (execute at any price on schedule).
     const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
+    // codeql[js/user-controlled-bypass] — format check on a signature-bound field; the binding
+    // decision is the contract's own _checkPriceCondition (staleness, round integrity, feed config).
     if (!body.priceFeed || !body.priceFeed.startsWith('0x') || body.priceFeed.length !== 42) {
       return NextResponse.json({ error: 'Invalid or missing Chainlink price feed address' }, { status: 400 })
     }
     // Non-DCA orders must have a real price feed (not zero address)
-    if (body.orderType !== 'dca' && body.priceFeed === ZERO_ADDR) {
+    if (orderTypeEnum !== ORDER_TYPE_DCA && body.priceFeed === ZERO_ADDR) {
       return NextResponse.json({ error: 'Limit/Stop-Loss orders require a Chainlink price feed' }, { status: 400 })
-    }
-
-    // ── [SPRINT-P1B / ADR-014] Stop-Loss is deferred to the v4 executor ──────────────────────
-    // Owner decision 2026-07-22. Under ADR-014 option (a) the route is pinned at signing, so a
-    // dislocated pool at trigger makes the fill revert and the order simply stays open. For a
-    // Limit/TP that is an acceptable outcome; for a Stop-Loss "did not fill during a crash" IS
-    // the loss — an inverted failure mode. SL therefore waits for v4.
-    //
-    // NOTE on the discriminator: the contract uses OrderType.STOP_LOSS (enum 1) for BOTH SL and
-    // Take-Profit, so orderType alone cannot separate them. The condition can: a stop_loss order
-    // triggering when price falls BELOW target is an SL; ABOVE is a Take-Profit. Gate on that
-    // exact shape so TP keeps working.
-    if (body.orderType === 'stop_loss' && body.priceCondition === 'below') {
-      return NextResponse.json(
-        {
-          error: STOP_LOSS_DEFERRED_REASON,
-          detail:
-            'A stop-loss needs a route that can still fill in a fast market. The current executor ' +
-            'pins the route when you sign, which cannot be guaranteed to fill during a crash — so ' +
-            'stop-loss orders are held back until the v4 executor ships. Take-Profit and Limit ' +
-            'orders are unaffected.',
-        },
-        { status: 400 },
-      )
     }
 
     // [CHORE-ORDER-API-CHAIN-AWARE] Derive the verification chain from the SIGNED order (body.chainId)
@@ -270,9 +306,9 @@ export async function POST(req: NextRequest) {
     {
       try {
         const domain = isV3Order ? getOrderExecutorV3Domain(chainId) : getOrderExecutorDomain(chainId)
-        const orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
-        const conditionEnum = body.priceCondition === 'above' ? 0 : 1
-
+        // [SPRINT-P1B-SEC] Enums come from the strict parse above — the same values every policy
+        // gate uses. Previously re-derived here by a lossy mapping, which is what allowed the
+        // policy view and the signed view to disagree.
         const message = {
           owner: body.wallet, tokenIn: body.tokenIn, tokenOut: body.tokenOut,
           amountIn: body.amountIn, minAmountOut: body.minAmountOut,
@@ -300,6 +336,36 @@ export async function POST(req: NextRequest) {
         const msg = err instanceof Error ? err.message : 'unknown'
         return NextResponse.json({ error: `Signature verification failed: ${msg}` }, { status: 400 })
       }
+    }
+
+    // ── [SPRINT-P1B / ADR-014] Stop-Loss is deferred to the v4 executor ──────────────────────
+    // Owner decision 2026-07-22. Under ADR-014 option (a) the route is pinned at signing, so a
+    // dislocated pool at trigger makes the fill revert and the order simply stays open. For a
+    // Limit/TP that is an acceptable outcome; for a Stop-Loss "did not fill during a crash" IS
+    // the loss — an inverted failure mode. SL therefore waits for v4.
+    //
+    // NOTE on the discriminator: the contract uses OrderType.STOP_LOSS (enum 1) for BOTH SL and
+    // Take-Profit, so orderType alone cannot separate them. The condition can: a stop_loss order
+    // triggering when price falls BELOW target is an SL; ABOVE is a Take-Profit.
+    //
+    // [SPRINT-P1B-SEC] Placed AFTER signature recovery and keyed on the ENUMS that were encoded
+    // into the verified message — not on `body.orderType` / `body.priceCondition`. Recovery has
+    // now proven the wallet signed a struct carrying exactly these enum values, so refusing on
+    // them refuses the order that would actually execute on-chain. Deciding this from the raw
+    // request strings (as it did before) allowed a casing desync — `priceCondition: 'BELOW'`
+    // slipped past `=== 'below'` while still encoding condition = 1 into the signed struct.
+    if (orderTypeEnum === ORDER_TYPE_STOP_LOSS && conditionEnum === CONDITION_BELOW) {
+      return NextResponse.json(
+        {
+          error: STOP_LOSS_DEFERRED_REASON,
+          detail:
+            'A stop-loss needs a route that can still fill in a fast market. The current executor ' +
+            'pins the route when you sign, which cannot be guaranteed to fill during a crash — so ' +
+            'stop-loss orders are held back until the v4 executor ships. Take-Profit and Limit ' +
+            'orders are unaffected.',
+        },
+        { status: 400 },
+      )
     }
 
     // [Audit M-07] Cross-validate order_data blob against top-level fields
@@ -347,9 +413,11 @@ export async function POST(req: NextRequest) {
     // Scoped to v3 specifically: v3 is where pinned routes exist and where the executor enforces
     // the hash. The legacy v2 non-DCA path is left byte-identical (it is separately unexecutable
     // — threat-model P1c — but that is not this sprint's to change).
-    if (isV3Order && body.orderType !== 'dca') {
+    if (isV3Order && orderTypeEnum !== ORDER_TYPE_DCA) {
       const storedRouterData = body.orderData?.routerData
 
+      // codeql[js/user-controlled-bypass] — routerDataHash is part of the EIP-712 message just
+      // verified, so this reads a signature-bound value; the contract re-enforces RouterDataRequired.
       if (!body.routerDataHash || body.routerDataHash === zeroHash) {
         return NextResponse.json(
           {
@@ -360,6 +428,8 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         )
       }
+      // codeql[js/user-controlled-bypass] — presence precondition for the cryptographic check on the
+      // next lines: verifyRouterDataHash compares these unsigned bytes against the SIGNED hash.
       if (!storedRouterData) {
         return NextResponse.json(
           { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
@@ -479,7 +549,7 @@ export async function POST(req: NextRequest) {
       .from('orders')
       .insert({
         wallet: body.wallet.toLowerCase(),
-        order_type: body.orderType,
+        order_type: orderTypeLabel,
         token_in: body.tokenIn.toLowerCase(),
         token_in_symbol: body.tokenInSymbol,
         token_out: body.tokenOut.toLowerCase(),
@@ -488,7 +558,7 @@ export async function POST(req: NextRequest) {
         min_amount_out: body.minAmountOut,
         target_price: body.targetPrice,
         price_feed: body.priceFeed?.toLowerCase() || '',
-        price_condition: body.priceCondition,
+        price_condition: priceConditionLabel,
         expiry: body.expiry,
         nonce: body.nonce,
         signature: body.signature,

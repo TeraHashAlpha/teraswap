@@ -253,3 +253,91 @@ describe('POST /api/orders [SPRINT-P1B] — pinned-route integrity (non-DCA)', (
     expect(String(json.error)).toMatch(/signature/i)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// [SPRINT-P1B-SEC] CodeQL "User-controlled bypass of security check" — negative tests.
+//
+// Root cause (one defect, nine alerts): policy gates keyed on the RAW request strings while the
+// EIP-712 message derived its enums from the same strings through a LOSSY, silently-defaulting
+// mapping (`=== 'above' ? 0 : 1`, `... : 2`). Unrecognised values fell through to BELOW / DCA
+// instead of being refused, so a caller could desync the POLICY view from the SIGNED view with
+// nothing but different casing.
+//
+// Every test below sends a tampered discriminator and asserts the security decision does NOT flip.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe('POST /api/orders [SPRINT-P1B-SEC] — tampered discriminators cannot flip a security decision', () => {
+  it('EXPLOIT (SL deferral): priceCondition "BELOW" cannot smuggle a stop-loss past the gate', async () => {
+    // Pre-fix: 'BELOW' !== 'below' ⇒ gate bypassed, yet conditionEnum fell through to 1 (BELOW),
+    // so the SIGNED struct was a real, executable on-chain stop-loss.
+    const { status, json } = await post(tpBody({ orderType: 'stop_loss', priceCondition: 'BELOW' }))
+    expect(status).toBe(400)
+    // Refused as an invalid discriminator — it never reaches the signed struct at all.
+    expect(String(json.error)).toMatch(/Invalid priceCondition/i)
+  })
+
+  it('EXPLOIT (SL deferral): mixed-case "Below" is likewise refused', async () => {
+    const { status } = await post(tpBody({ orderType: 'stop_loss', priceCondition: 'Below' }))
+    expect(status).toBe(400)
+  })
+
+  it('EXPLOIT (SL deferral): an unknown condition cannot default into BELOW', async () => {
+    // Pre-fix `=== 'above' ? 0 : 1` mapped ANY unknown value to BELOW.
+    for (const bad of ['xyz', '', 'ABOVE ', 'bel0w']) {
+      const { status, json } = await post(tpBody({ orderType: 'stop_loss', priceCondition: bad }))
+      expect(status).toBe(400)
+      expect(String(json.error)).toMatch(/Invalid priceCondition/i)
+    }
+  })
+
+  it('EXPLOIT (DCA gates): orderType "DCA" cannot skip DCA validation while signing a DCA struct', async () => {
+    // Pre-fix: `body.orderType === 'dca'` was false for 'DCA', skipping the interval/chunk
+    // minimums AND the freeze circuit-breaker, while orderTypeEnum fell through to 2 (a real DCA).
+    const { status, json } = await post(tpBody({ orderType: 'DCA', priceCondition: 'above' }))
+    expect(status).toBe(400)
+    expect(String(json.error)).toMatch(/Invalid orderType/i)
+  })
+
+  it('EXPLOIT (native-ETH gate): an unknown orderType cannot skip the ERC-20 input requirement', async () => {
+    const { status, json } = await post(tpBody({ orderType: 'Limit' }))
+    expect(status).toBe(400)
+    expect(String(json.error)).toMatch(/Invalid orderType/i)
+  })
+
+  it('non-string discriminators are refused, not coerced', async () => {
+    for (const bad of [null, 1, true, { toString: () => 'below' }, ['below']]) {
+      const { status } = await post(tpBody({ priceCondition: bad }))
+      expect(status).toBe(400)
+    }
+  })
+
+  it('inherited Object keys cannot match the enum maps (Map, not object-literal lookup)', async () => {
+    for (const bad of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      const { status, json } = await post(tpBody({ orderType: bad }))
+      expect(status).toBe(400)
+      expect(String(json.error)).toMatch(/Invalid orderType/i)
+    }
+  })
+
+  it('the SL decision is made AFTER signature verification (a bad signature is refused first)', async () => {
+    // Proves the gate now rests on enums that recovery has already bound to the wallet, rather
+    // than on pre-verification request text.
+    mockRecover.mockResolvedValue('0x000000000000000000000000000000000000dEaD')
+    const { status, json } = await post(tpBody({ orderType: 'stop_loss', priceCondition: 'below' }))
+    expect(status).toBe(400)
+    expect(String(json.error)).toMatch(/signature/i)
+    expect(String(json.error)).not.toMatch(/v4 executor/i)
+  })
+
+  it('the persisted row is the CANONICAL label, never the caller-supplied casing', async () => {
+    await post(tpBody({ orderType: 'stop_loss', priceCondition: 'above' }))
+    const calls = mockInsert.mock.calls as unknown as Array<[Record<string, unknown>]>
+    const row = calls[0][0]
+    expect(row.order_type).toBe('stop_loss')
+    expect(row.price_condition).toBe('above')
+  })
+
+  it('valid canonical discriminators still pass end-to-end (no false rejection)', async () => {
+    expect((await post(tpBody({ orderType: 'stop_loss', priceCondition: 'above' }))).status).toBe(201)
+    expect((await post(tpBody({ orderType: 'limit', priceCondition: 'above' }))).status).toBe(201)
+  })
+})
