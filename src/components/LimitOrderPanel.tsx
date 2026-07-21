@@ -15,6 +15,14 @@ import {
   EXPIRY_PRESETS,
   getDefaultRouter,
   getChainlinkFeeds,
+  // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing for Limit orders.
+  getOrderExecutorV3,
+  getCanonicalRouteRouter,
+  buildCanonicalRoute,
+  isLimitLive,
+  DEFAULT_MAX_SLIPPAGE_BPS,
+  checkMinOutEconomicFloor,
+  pickCanonicalFeeTier,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
@@ -169,6 +177,11 @@ function CreateLimitForm({
   const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
   const [amount, setAmount] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(2) // 7 days default
+  // [SPRINT-P1B] Blocking reason surfaced before approve/sign (dust floor, route build, no feed).
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing behind the full launch gate; fail-closed.
+  const v3Live = isLimitLive(chainId)
+  const [maxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
 
   // ── Price state ──────────────────────────────────────────
   const [targetPrice, setTargetPrice] = useState('')
@@ -338,16 +351,37 @@ function CreateLimitForm({
       : decDiff < 0
         ? expectedOutRaw / BigInt(10 ** Math.abs(decDiff))
         : expectedOutRaw
-    // Apply 2% slippage: multiply by 98, divide by 100
-    const minAmountOut = (expectedOutAdjusted * 98n / 100n).toString()
+    // [SPRINT-P1B / ADR-013 §1] On v3 the signed floor comes from the user's target price and the
+    // signed slippage bound; the BINDING on-chain floor stays max(oracleFloor, minAmountOut)
+    // (TeraSwapOrderExecutorV3.sol:532-554). v2 keeps the legacy flat 2%.
+    const minAmountOutBn = v3Live
+      ? (expectedOutAdjusted * BigInt(10_000 - maxSlippageBps)) / 10_000n
+      : (expectedOutAdjusted * 98n) / 100n
+    const minAmountOut = minAmountOutBn.toString()
 
     const feedToken = sellIsStable ? tokenOut : tokenIn
     const priceFeed = findPriceFeed(feedToken, chainId)
     if (!priceFeed) {
-      throw new Error(`No Chainlink price feed available for ${feedToken.symbol}. Select a supported token.`)
+      stopWaitingSound()
+      setSubmitError(`No Chainlink price feed available for ${feedToken.symbol}. Select a supported token.`)
+      return
     }
 
-    const config: CreateOrderConfig = {
+    // ── [SPRINT-P1B] $5 economic-floor pre-flight, BEFORE approve ──
+    // Must run before onSubmit: the approve button only exists inside the review modal that
+    // createOrder mounts, so failing later would cost the user an approve tx + a signature.
+    const floorCheck = checkMinOutEconomicFloor({
+      minAmountOut: minAmountOutBn,
+      tokenOutDecimals: tokenOut.decimals,
+      tokenOutUsdPrice: isStablecoin(tokenOut) ? 1 : null,
+    })
+    if (floorCheck.blocked) {
+      stopWaitingSound()
+      setSubmitError(floorCheck.reason)
+      return
+    }
+
+    let config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
       amountIn,
@@ -360,6 +394,45 @@ function CreateLimitForm({
       router: getDefaultRouter(chainId).address,
     }
 
+    // ── [SPRINT-P1B / ADR-014 (a)] v3 pinned canonical route ──
+    // Non-DCA on v3 REQUIRES a real routerDataHash (V3:463-465). The route is pinned here at
+    // signing (quote-free, so it stays valid until expiry) and replayed verbatim by the keeper.
+    if (v3Live) {
+      const canonicalRouter = getCanonicalRouteRouter(chainId)
+      const executorV3 = getOrderExecutorV3(chainId)
+      if (!canonicalRouter || !executorV3) {
+        stopWaitingSound()
+        setSubmitError('Limit orders are unavailable on this network right now.')
+        return
+      }
+      try {
+        const route = buildCanonicalRoute({
+          tokenIn: tokenIn.address as `0x${string}`,
+          tokenOut: tokenOut.address as `0x${string}`,
+          amountIn: amountInBn,
+          minAmountOut: minAmountOutBn,
+          feeTier: pickCanonicalFeeTier({
+            tokenInIsStable: isStablecoin(tokenIn),
+            tokenOutIsStable: isStablecoin(tokenOut),
+          }),
+          router: canonicalRouter.address,
+          recipient: executorV3,
+        })
+        config = {
+          ...config,
+          router: route.router,
+          routerDataHash: route.routerDataHash,
+          routerData: route.routerData,
+          maxSlippageBps,
+        }
+      } catch (err) {
+        stopWaitingSound()
+        setSubmitError(err instanceof Error ? err.message : 'Could not build the swap route for this pair.')
+        return
+      }
+    }
+
+    setSubmitError(null)
     await onSubmit(config)
     setAmount('')
   }
@@ -545,6 +618,29 @@ function CreateLimitForm({
         >
           {isSubmitting ? 'Signing order...' : 'Place Limit Order'}
         </button>
+      )}
+
+      {/* [SPRINT-P1B] Pre-approve blocking reason (dust floor / route build / missing feed). */}
+      {submitError && (
+        <div
+          data-testid="limit-submit-error"
+          className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300"
+        >
+          {submitError}
+        </div>
+      )}
+
+      {/* [SPRINT-P1B / ADR-014 (a)] Honest liveness copy — a pinned route is not a fill guarantee. */}
+      {v3Live && (
+        <div
+          data-testid="pinned-route-liveness-note"
+          className="mt-2 rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-[10px] text-cream-50"
+        >
+          This order executes when your price is met <strong className="text-cream-65">if the pinned
+          route is viable</strong> at that moment; otherwise it stays open until it expires. The
+          route is fixed when you sign, so a changed quote cannot alter it — but it also cannot
+          re-route around a pool that has dried up.
+        </div>
       )}
 
       {/* Info badge */}

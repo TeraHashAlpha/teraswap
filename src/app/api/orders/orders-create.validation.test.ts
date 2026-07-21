@@ -452,10 +452,21 @@ describe('POST /api/orders — per-chain EIP-712 domain binding (#184, CHORE-ORD
     expect(json.error).toBe('Signature verification failed: bad sig')
   })
 
-  it('orderType enum + condition enum are encoded into the recovered message', async () => {
-    await post(validBody({ orderType: 'stop_loss', priceCondition: 'below' }))
+  // [SPRINT-P1B] This was one assertion over a stop_loss+BELOW body. That exact shape is now
+  // refused before signature recovery (Stop-Loss is deferred to the v4 executor — ADR-014), so
+  // the same enum coverage is split across the two shapes that remain creatable:
+  //   orderType 1 ⇐ stop_loss+ABOVE (a Take-Profit); condition 1 ⇐ limit+BELOW (a limit buy).
+  it('orderType enum is encoded into the recovered message (stop_loss/TP → 1)', async () => {
+    await post(validBody({ orderType: 'stop_loss', priceCondition: 'above' }))
     const arg = mockRecover.mock.calls[0][0] as { message: { orderType: number; condition: number } }
     expect(arg.message.orderType).toBe(1) // stop_loss → 1
+    expect(arg.message.condition).toBe(0) // above → 0
+  })
+
+  it('condition enum is encoded into the recovered message (below → 1)', async () => {
+    await post(validBody({ orderType: 'limit', priceCondition: 'below' }))
+    const arg = mockRecover.mock.calls[0][0] as { message: { orderType: number; condition: number } }
+    expect(arg.message.orderType).toBe(0) // limit → 0
     expect(arg.message.condition).toBe(1) // below → 1
   })
 })

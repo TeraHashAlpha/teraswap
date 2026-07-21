@@ -9,7 +9,20 @@ export { ORDER_EXECUTOR_ABI,
   ORDER_EXECUTOR_V3_ABI } from './abi'
 export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
   // [SPRINT-V3-P2] v3 config — fail-closed while ORDER_EXECUTOR_V3_BY_CHAIN[chainId] is null.
-  ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3, getOrderExecutorV3Domain, resolveSigningExecutor } from './config'
+  ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3, getOrderExecutorV3Domain, resolveSigningExecutor,
+  // [SPRINT-P1B / ADR-014 (a)] Pinned canonical-route router selection (never widens the whitelist).
+  CANONICAL_ROUTE_ROUTER_KEY, getCanonicalRouteRouter, isWhitelistedRouter } from './config'
+// [SPRINT-P1B / ADR-014 (a)] Deterministic quote-free pinned route for non-DCA v3 orders.
+export { buildCanonicalRoute, verifyRouterDataHash, computeNetAmountIn, CANONICAL_FEE_TIERS,
+  SWAPROUTER02_EXACT_INPUT_SINGLE_SELECTOR, EXACT_INPUT_SINGLE_PARAMS, ORDER_FEE_BPS,
+  ORDER_BPS_DENOMINATOR, DEFAULT_CANONICAL_FEE_TIER, STABLE_CANONICAL_FEE_TIER,
+  pickCanonicalFeeTier } from './canonical-route'
+export type { CanonicalRoute, CanonicalFeeTier, BuildCanonicalRouteParams } from './canonical-route'
+// [SPRINT-P1B] Client-side mirror of the server's $5 dust floor, run BEFORE approve.
+export { checkMinOutEconomicFloor } from './economic-floor'
+export type { MinOutFloorParams, MinOutFloorResult } from './economic-floor'
+// [SPRINT-P1B] Limit/TP launch gate + the Stop-Loss deferral reason (deferred to v4).
+export { isLimitLaunchEnabled, isLimitLive, LIMIT_TP_CHAIN_ID, STOP_LOSS_DEFERRED_REASON } from './limit-launch'
 export { OrderType, PriceCondition, ORDER_EIP712_TYPES,
   // [SPRINT-V3-P2 / ADR-013 §1]
   ORDER_V3_EIP712_TYPES, ORDER_V3_TYPE_STRING, MAX_ORDER_SLIPPAGE_BPS, DEFAULT_MAX_SLIPPAGE_BPS } from './types'

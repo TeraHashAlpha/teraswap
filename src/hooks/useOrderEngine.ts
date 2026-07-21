@@ -883,6 +883,11 @@ export function useOrderEngine() {
           nonce: order.nonce.toString(),
           router: order.router,
           routerDataHash: order.routerDataHash,  // [C-01]
+          // [SPRINT-P1B / ADR-014 (a)] The FULL pinned calldata for a non-DCA v3 order. The keeper
+          // replays these bytes VERBATIM at trigger — it never rebuilds a route, because the
+          // contract requires keccak256(routerData) == routerDataHash (V3:465). Absent for DCA,
+          // whose calldata is keeper-built per chunk against the ZeroHash bypass.
+          ...(config.routerData !== undefined ? { routerData: config.routerData } : {}),
           dcaInterval: order.dcaInterval.toString(),
           dcaTotal: order.dcaTotal.toString(),
         },
@@ -894,6 +899,9 @@ export function useOrderEngine() {
         // decide the v2/v3 verification path — must match order.maxSlippageBps exactly (the M-07
         // cross-check above already asserts orderData.maxSlippageBps === this value).
         maxSlippageBps: order.maxSlippageBps,
+        // [SPRINT-P1B] Send the SIGNED hash so the server recovers against it. Without this the
+        // server falls back to ZeroHash and a pinned-route order 400s on "Signature mismatch".
+        routerDataHash: order.routerDataHash,
       })
 
       const orderHash = row?.order_hash ?? computedHash

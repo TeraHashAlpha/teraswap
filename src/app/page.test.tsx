@@ -13,8 +13,10 @@
  *   - live + Base                    ⇒ DCA tab enabled, no pill, renders DCAPanel
  *   - flag on + mainnet (not live)   ⇒ DCA tab disabled + "Soon" pill (not offered)
  *
- * Limit / SL·TP are already removed from the nav (CHORE-ORDER-EXEC-PREP B) and
- * MUST stay removed — guarded below.
+ * [SPRINT-P1B / ADR-014 (a)] Limit / SL·TP are back in the nav, gated by isLimitLive exactly the
+ * way DCA is gated by isDcaLive. They were unwired by CHORE-ORDER-EXEC-PREP B while non-DCA was
+ * structurally unexecutable (threat-model P1c); the pinned-route model makes them executable.
+ * Guarded below: gated-off ⇒ "Soon" teaser (never a mountable panel), gated-on ⇒ live panel.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -22,9 +24,12 @@ import type { ReactNode } from 'react'
 
 const useChainIdMock = vi.fn(() => 8453)
 const isDcaLiveMock = vi.fn<(chainId: number) => boolean>()
+const isLimitLiveMock = vi.fn<(chainId: number) => boolean>()
 
 vi.mock('wagmi', () => ({ useChainId: () => useChainIdMock() }))
 vi.mock('@/lib/dca-launch', () => ({ isDcaLive: (id: number) => isDcaLiveMock(id) }))
+// [SPRINT-P1B] Only the launch gate is needed from the order-engine barrel here.
+vi.mock('@/lib/order-engine', () => ({ isLimitLive: (id: number) => isLimitLiveMock(id) }))
 vi.mock('@/lib/sounds', () => ({ playTouchMP3: vi.fn() }))
 
 // Stub every heavy child so Home mounts in jsdom without canvas / RPC / providers.
@@ -45,6 +50,8 @@ vi.mock('@/components/SwapErrorBoundary', () => ({
 vi.mock('@/components/HelpButton', () => ({ default: () => null }))
 vi.mock('@/components/NotificationBanner', () => ({ default: () => null }))
 vi.mock('@/components/DCAPanel', () => ({ default: () => <div data-testid="dca-panel">DCA Panel</div> }))
+vi.mock('@/components/LimitOrderPanel', () => ({ default: () => <div data-testid="limit-panel">Limit Panel</div> }))
+vi.mock('@/components/ConditionalOrderPanel', () => ({ default: () => <div data-testid="sltp-panel">SL/TP Panel</div> }))
 vi.mock('@/components/AnalyticsDashboard', () => ({ default: () => null }))
 vi.mock('@/components/OrderDashboard', () => ({ default: () => null }))
 vi.mock('@/components/WalletHistory', () => ({ default: () => null }))
@@ -79,6 +86,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   useChainIdMock.mockReturnValue(8453)
   isDcaLiveMock.mockReturnValue(false)
+  // [SPRINT-P1B] Fail-closed default, matching the real gate with the flag unset.
+  isLimitLiveMock.mockReturnValue(false)
 })
 
 describe('Home — DCA tab gating', () => {
@@ -114,11 +123,49 @@ describe('Home — DCA tab gating', () => {
     expect(within(tab).getByText('Soon')).toBeInTheDocument()
   })
 
-  it('Limit & SL/TP stay removed from the nav — no such tabs, even when DCA is live', () => {
-    isDcaLiveMock.mockImplementation((id) => id === 8453)
+  // ── [SPRINT-P1B / ADR-014 (a)] Limit + SL/TP gating ──────────────────────────────────────
+  const limitTab = () => tabButtons().find(b => /Limit/i.test(b.textContent ?? ''))!
+  const sltpTab = () => tabButtons().find(b => /SL\s*\/\s*TP/i.test(b.textContent ?? ''))!
+
+  it('Limit & SL/TP tabs exist again, but stay "Soon" while the limit gate is closed', () => {
+    isLimitLiveMock.mockReturnValue(false)
     renderSwapView()
-    const labels = tabButtons().map(b => b.textContent ?? '')
-    expect(labels.some(l => /Limit/i.test(l))).toBe(false)
-    expect(labels.some(l => /SL\s*\/\s*TP/i.test(l))).toBe(false)
+    expect(limitTab()).toBeDisabled()
+    expect(within(limitTab()).getByText('Soon')).toBeInTheDocument()
+    expect(sltpTab()).toBeDisabled()
+    expect(within(sltpTab()).getByText('Soon')).toBeInTheDocument()
+  })
+
+  it('limit gate closed ⇒ selecting Limit can never mount the panel (teaser only)', () => {
+    isLimitLiveMock.mockReturnValue(false)
+    renderSwapView()
+    fireEvent.click(limitTab())
+    expect(screen.queryByTestId('limit-panel')).not.toBeInTheDocument()
+  })
+
+  it('limit gate open ⇒ Limit tab is enabled and mounts LimitOrderPanel', async () => {
+    isLimitLiveMock.mockImplementation((id) => id === 8453)
+    renderSwapView()
+    expect(isLimitLiveMock).toHaveBeenCalledWith(8453)
+    expect(limitTab()).toBeEnabled()
+    fireEvent.click(limitTab())
+    // next/dynamic mounts asynchronously — mirrors the DCA panel assertion above.
+    expect(await screen.findByTestId('limit-panel')).toBeInTheDocument()
+    expect(screen.queryByText(/Coming Soon on L2/i)).toBeNull()
+  })
+
+  it('limit gate open ⇒ SL/TP tab mounts the (Take-Profit-only) ConditionalOrderPanel', async () => {
+    isLimitLiveMock.mockImplementation((id) => id === 8453)
+    renderSwapView()
+    fireEvent.click(sltpTab())
+    expect(await screen.findByTestId('sltp-panel')).toBeInTheDocument()
+  })
+
+  it('limit gate consults the CONNECTED chain — mainnet stays gated even with the flag on', () => {
+    useChainIdMock.mockReturnValue(1)
+    isLimitLiveMock.mockImplementation((id) => id === 8453)
+    renderSwapView()
+    expect(isLimitLiveMock).toHaveBeenCalledWith(1)
+    expect(limitTab()).toBeDisabled()
   })
 })

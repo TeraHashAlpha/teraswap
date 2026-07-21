@@ -221,6 +221,36 @@ export function getDefaultRouter(chainId: number): RouterEntry {
   return routers[key] ?? MAINNET_ROUTERS['1inch']
 }
 
+/**
+ * [SPRINT-P1B / ADR-014 option (a)] The router key used for PINNED canonical routes (non-DCA
+ * Limit/Take-Profit on v3). Deliberately NOT `getDefaultRouter` — that resolves to Augustus V6 on
+ * Base, whose calldata embeds quoted amounts and deadlines and therefore cannot be pinned at
+ * signing. Only a canonical Uniswap V3 route is quote-free (see canonical-route.ts).
+ */
+export const CANONICAL_ROUTE_ROUTER_KEY = 'uniswapV3'
+
+/**
+ * Resolve the SwapRouter02 entry a pinned route must commit to, or null when this chain has no
+ * canonical router in its whitelisted set.
+ *
+ * Fail-closed by construction: the entry is looked up FROM the chain's already-whitelisted router
+ * map, so this can never widen the whitelist — it can only select a router the executor already
+ * accepts.
+ */
+export function getCanonicalRouteRouter(chainId: number): RouterEntry | null {
+  const routers = getWhitelistedRouters(chainId)
+  return routers[CANONICAL_ROUTE_ROUTER_KEY] ?? null
+}
+
+/**
+ * True when `router` is a member of this chain's whitelisted set. Used as an assertion before
+ * signing a pinned route — never as a way to add a router.
+ */
+export function isWhitelistedRouter(chainId: number, router: string): boolean {
+  const routers = getWhitelistedRouters(chainId)
+  return Object.values(routers).some(r => r.address.toLowerCase() === router.toLowerCase())
+}
+
 // Legacy export for backward compatibility (mainnet default)
 export const WHITELISTED_ROUTERS = MAINNET_ROUTERS
 
