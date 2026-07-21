@@ -88,7 +88,8 @@
       "brace-expansion": "5.0.7"
     },
     "js-yaml": "4.3.0",
-    "axios": "1.16.0",
+    "axios": "1.18.1",
+    "tar": "7.5.20",
     "next": {
       "postcss": ">=8.5.10"
     },

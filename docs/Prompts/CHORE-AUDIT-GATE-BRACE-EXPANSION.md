@@ -52,3 +52,30 @@ GHSA-8x88-c5mf-7j5w) appeared in `npm audit` after this fix — absent from yest
 audit-gate run, so genuinely new since then, not introduced by this branch's overrides. Out of
 scope for this amendment (js-yaml only); audit-gate is therefore NOT fully 0-blocking. Flagged for
 a separate chore.
+
+## Amendment 2 (2026-07-21)
+
+Advisory wave: axios HIGH (GHSA-gcfj-64vw-6mp9) and tar CRITICAL/HIGH (GHSA-23hp-3jrh-7fpw,
+GHSA-8x88-c5mf-7j5w) now block the gate. Both resolved via `overrides` (patches >7 days old, case
+2a — no allowlist needed):
+
+| Advisory | Package | Path | Prod/Dev | Resolution | Note |
+|---|---|---|---|---|---|
+| GHSA-gcfj-64vw-6mp9 (HIGH) | axios | wagmi→@wagmi/connectors→@base-org/account→@coinbase/cdp-sdk | Production (bundled, client-side wallet SDK) | pin `1.18.1` (rel. 2026-06-22, 29d old) | Node-HTTP-adapter-only bug; not directly imported in `src/`, but pinned regardless since patch was cheaply available — no allowlist needed |
+| GHSA-23hp-3jrh-7fpw (CRITICAL) | tar | @capacitor/cli | Dev/build-only (mobile CLI, never imported in `src/`) | pin `7.5.20` (rel. 2026-07-12, 9d old) | satisfies both this and the HIGH below |
+| GHSA-8x88-c5mf-7j5w (HIGH) | tar | @capacitor/cli | Dev/build-only | pin `7.5.20` | same pin as above |
+
+`node scripts/audit-gate.mjs` → 0 blocking. Full suite (2783/2783) + tsc + eslint green.
+`next build` was attempted but fails identically on unmodified `origin/main` too (Turbopack
+`TurbopackInternalError: reading dir "/Users/tiagocruz/Desktop" — Operation not permitted`) — a
+sandbox filesystem-permission issue unrelated to these dependency pins, verified via `git stash`
+A/B on this exact worktree.
+
+**Incident note:** mid-validation, this worktree's `git stash`/`git stash pop` interacted with the
+REPO-GLOBAL stash stack (shared across all worktrees of this repo) and briefly pulled in an
+unrelated `ChainSelector.tsx`/`ChainSelector.test.tsx` WIP from a concurrent session. It was
+immediately identified (diff didn't match this branch's scope) and pushed back onto the stash
+stack with a clearly labeled rescue message before any further changes — no other session's work
+was lost, and nothing from that WIP was committed here. Future sessions in this repo should avoid
+bare `git stash`/`git stash pop` (prefer git stash with a descriptive -m and targeted stash@{N}
+pop) given concurrent worktree usage.
