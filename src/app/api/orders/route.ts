@@ -8,7 +8,12 @@ import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
 import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT,
   // [SPRINT-V3-P2] v3 — fail-closed while getOrderExecutorV3(chainId) is null.
-  getOrderExecutorV3, getOrderExecutorV3Domain } from '@/lib/order-engine/config'
+  getOrderExecutorV3, getOrderExecutorV3Domain,
+  // [SPRINT-P1B] Served-router assertion for pinned non-DCA routes (never widens the whitelist).
+  isWhitelistedRouter } from '@/lib/order-engine/config'
+// [SPRINT-P1B / ADR-014 (a)] Pinned-calldata hash verification + the SL deferral reason.
+import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
+import { STOP_LOSS_DEFERRED_REASON } from '@/lib/order-engine/limit-launch'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 import {
@@ -193,6 +198,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Limit/Stop-Loss orders require a Chainlink price feed' }, { status: 400 })
     }
 
+    // ── [SPRINT-P1B / ADR-014] Stop-Loss is deferred to the v4 executor ──────────────────────
+    // Owner decision 2026-07-22. Under ADR-014 option (a) the route is pinned at signing, so a
+    // dislocated pool at trigger makes the fill revert and the order simply stays open. For a
+    // Limit/TP that is an acceptable outcome; for a Stop-Loss "did not fill during a crash" IS
+    // the loss — an inverted failure mode. SL therefore waits for v4.
+    //
+    // NOTE on the discriminator: the contract uses OrderType.STOP_LOSS (enum 1) for BOTH SL and
+    // Take-Profit, so orderType alone cannot separate them. The condition can: a stop_loss order
+    // triggering when price falls BELOW target is an SL; ABOVE is a Take-Profit. Gate on that
+    // exact shape so TP keeps working.
+    if (body.orderType === 'stop_loss' && body.priceCondition === 'below') {
+      return NextResponse.json(
+        {
+          error: STOP_LOSS_DEFERRED_REASON,
+          detail:
+            'A stop-loss needs a route that can still fill in a fast market. The current executor ' +
+            'pins the route when you sign, which cannot be guaranteed to fill during a crash — so ' +
+            'stop-loss orders are held back until the v4 executor ships. Take-Profit and Limit ' +
+            'orders are unaffected.',
+        },
+        { status: 400 },
+      )
+    }
+
     // [CHORE-ORDER-API-CHAIN-AWARE] Derive the verification chain from the SIGNED order (body.chainId)
     // — the SAME chainId the frontend put in the EIP-712 domain when it signed (getOrderExecutorDomain
     // on the client). The server no longer reads process.env.CHAIN_ID for verification, so a single
@@ -285,9 +314,69 @@ export async function POST(req: NextRequest) {
       if (od.router?.toLowerCase() !== body.router?.toLowerCase()) mismatchFields.push('router')
       // [SPRINT-V3-P2] Only checked for a v3 order — od.maxSlippageBps is absent entirely on v2.
       if (isV3Order && Number(od.maxSlippageBps) !== Number(body.maxSlippageBps)) mismatchFields.push('maxSlippageBps')
+      // [SPRINT-P1B] The pinned calldata's hash must match the hash the user SIGNED. Checked
+      // inside the M-07 block because it is the same class of guarantee: order_data must not be
+      // able to disagree with the signed struct.
+      //
+      // Only for a REAL hash: ZeroHash is the DCA/legacy shape, where order_data legitimately
+      // omits routerDataHash entirely (and `'0x00..00'` is a truthy string, so a bare truthiness
+      // check here would false-positive on every such order).
+      if (
+        body.routerDataHash &&
+        body.routerDataHash !== zeroHash &&
+        od.routerDataHash?.toLowerCase() !== body.routerDataHash.toLowerCase()
+      ) {
+        mismatchFields.push('routerDataHash')
+      }
       if (mismatchFields.length > 0) {
         return NextResponse.json(
           { error: `order_data mismatch on fields: ${mismatchFields.join(', ')}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route integrity for non-DCA orders ─────────────────
+    // Runs AFTER signature recovery on purpose: recovery has already proven the user signed
+    // exactly `body.routerDataHash`, so verifying the stored calldata against it proves the
+    // stored bytes are the ones that will satisfy the contract at :465. Doing this before
+    // recovery would only compare two attacker-supplied values.
+    //
+    // The keeper replays these bytes verbatim and never rebuilds a route, so calldata that does
+    // not match here would produce an order that can never fill. Reject at creation instead.
+    // Scoped to v3 specifically: v3 is where pinned routes exist and where the executor enforces
+    // the hash. The legacy v2 non-DCA path is left byte-identical (it is separately unexecutable
+    // — threat-model P1c — but that is not this sprint's to change).
+    if (isV3Order && body.orderType !== 'dca') {
+      const storedRouterData = body.orderData?.routerData
+
+      if (!body.routerDataHash || body.routerDataHash === zeroHash) {
+        return NextResponse.json(
+          {
+            error:
+              'Non-DCA orders must commit to a real routerDataHash — the executor rejects ZeroHash ' +
+              '(RouterDataRequired), so such an order could never execute.',
+          },
+          { status: 400 },
+        )
+      }
+      if (!storedRouterData) {
+        return NextResponse.json(
+          { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
+          { status: 400 },
+        )
+      }
+      if (!verifyRouterDataHash(storedRouterData, body.routerDataHash)) {
+        return NextResponse.json(
+          { error: 'orderData.routerData does not hash to the signed routerDataHash' },
+          { status: 400 },
+        )
+      }
+      // The committed router must be one this chain actually serves. Never widens the executor's
+      // on-chain whitelist — it only refuses a router we could not execute against.
+      if (!isWhitelistedRouter(chainId, body.router)) {
+        return NextResponse.json(
+          { error: `Router ${body.router} is not served on chain ${chainId}` },
           { status: 400 },
         )
       }

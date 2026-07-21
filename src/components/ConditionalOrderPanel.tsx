@@ -23,7 +23,6 @@ import {
   STOP_LOSS_DEFERRED_REASON,
   DEFAULT_MAX_SLIPPAGE_BPS,
   checkMinOutEconomicFloor,
-  DEFAULT_CANONICAL_FEE_TIER,
   pickCanonicalFeeTier,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
