@@ -63,3 +63,6 @@ export {
   customDcaSummary,
 } from './dca-custom'
 export type { DcaCustomIntervalUnit, DcaMinChunkResult } from './dca-custom'
+// [CHORE-DCA-BUDGET-UX] $ <-> bps mapping for the DCA "max execution cost" UX (display/derivation
+// only — no signed-struct change; maxSlippageBps itself is unchanged/pre-existing).
+export { budgetUsdToBps, bpsToBudgetUsd, MIN_FLOOR_BPS, DEFAULT_MAX_BPS } from './budget-slippage'
