@@ -160,6 +160,34 @@ describe('SettlementReceiptModal', () => {
     expect(buildSettlementReceiptMock).not.toHaveBeenCalled()
   })
 
+  it('ACCURACY INVARIANT: forwards only txHash/executionNumber/createdAt to the resolver — never the Supabase amount_in/amount_out/fee_amount columns, even when the API response includes them', async () => {
+    // The REAL /api/orders/:id/executions endpoint returns amount_in/amount_out/fee_amount
+    // alongside tx_hash — this fixture deliberately sets a WRONG fee_amount to prove the modal
+    // never reads it: only txHash/executionNumber/createdAt may reach buildSettlementReceipt.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        executions: [
+          {
+            execution_number: 1,
+            tx_hash: '0xfill1',
+            created_at: '2026-01-01T00:00:00Z',
+            amount_in: '999999999', // decoy — must not be forwarded
+            amount_out: '1', // decoy — must not be forwarded
+            fee_amount: '123456789', // decoy — must not be forwarded
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch
+    buildSettlementReceiptMock.mockResolvedValue(makeReceipt())
+
+    render(<SettlementReceiptModal order={makeOrder()} onClose={() => {}} />)
+    await waitFor(() => expect(buildSettlementReceiptMock).toHaveBeenCalledTimes(1))
+
+    const callArgs = buildSettlementReceiptMock.mock.calls[0][0] as { fills: unknown[] }
+    expect(callArgs.fills).toEqual([{ executionNumber: 1, txHash: '0xfill1', createdAt: '2026-01-01T00:00:00Z' }])
+  })
+
   it('never renders "free" or "gasless" anywhere (transparency brand copy tone)', async () => {
     buildSettlementReceiptMock.mockResolvedValue(makeReceipt())
     const { container } = render(<SettlementReceiptModal order={makeOrder()} onClose={() => {}} />)
