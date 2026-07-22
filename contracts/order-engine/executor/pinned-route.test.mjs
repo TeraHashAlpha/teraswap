@@ -18,6 +18,7 @@ import { keccak256 } from "viem"
 import {
   resolvePinnedRouterData,
   planPinnedRouteRevert,
+  isMarketRevert,
   MAX_CONSECUTIVE_ROUTE_REVERTS,
   ZERO_HASH,
 } from "./pinned-route.js"
@@ -174,4 +175,34 @@ describe("matrix — every (orderType, hash, storedData) combination", () => {
       assert.equal(r.ok, want.ok)
     })
   }
+})
+
+// ── [FIX-P1B-M01] isMarketRevert — the classification the M-01 fix hinges on ────────────────
+describe("isMarketRevert — SwapFailed OR the executor's own market errors, never permanent causes", () => {
+  test("SwapFailed (a decoded swapReason) is a market revert", () => {
+    assert.equal(isMarketRevert({ swapReason: "ERC20: transfer amount exceeds allowance" }), true)
+  })
+
+  test("InsufficientOutput is a market revert (the M-01 bug: this was previously missed)", () => {
+    assert.equal(isMarketRevert({ executorErrorName: "InsufficientOutput" }), true)
+  })
+
+  test("PriceConditionNotMet is a market revert", () => {
+    assert.equal(isMarketRevert({ executorErrorName: "PriceConditionNotMet" }), true)
+  })
+
+  test("a permanent-cause executor error name is NOT a market revert", () => {
+    for (const name of ["OrderExpired", "RouterNotWhitelisted", "InsufficientBalance", "InvalidNonce"]) {
+      assert.equal(isMarketRevert({ executorErrorName: name }), false, `${name} must not be market`)
+    }
+  })
+
+  test("neither swapReason nor executorErrorName set ⇒ not a market revert (undecoded / RPC error)", () => {
+    assert.equal(isMarketRevert({}), false)
+    assert.equal(isMarketRevert(), false)
+  })
+
+  test("swapReason takes precedence even if executorErrorName is somehow also set", () => {
+    assert.equal(isMarketRevert({ swapReason: "x", executorErrorName: "OrderExpired" }), true)
+  })
 })

@@ -101,6 +101,37 @@ export function resolvePinnedRouterData({ orderType, orderData, signedRouterData
   return { pinned: true, ok: true, routerData: stored, reason: "pinned route verified against the signed hash" }
 }
 
+// [FIX-P1B-M01] Executor errors that mean "the market/route wasn't right at THIS moment" — the
+// pinned route itself is still valid and should be retried, never routed to the failure ladder.
+// Deliberately NOT the executor's permanent-cause errors (OrderExpired, OrderCancelledError,
+// InvalidNonce, RouterNotWhitelisted, InsufficientBalance/Allowance, RouterDataMismatch/Required)
+// — those keep falling through to handleExecutionFailure exactly as before this fix.
+export const MARKET_REVERT_ERROR_NAMES = new Set(["InsufficientOutput", "PriceConditionNotMet"])
+
+/**
+ * Decide whether an observed non-DCA-v3 revert is a MARKET/ROUTE revert (stay active, count
+ * toward the pinned-route-revert streak) or something else (fall through to the existing
+ * permanent-cause classification, unchanged).
+ *
+ * Bug this replaces: gating on `swapReason` truthiness alone only caught a ROUTER revert wrapped
+ * in `SwapFailed(bytes)`. The executor's OWN `InsufficientOutput()` — the common case for a
+ * triggered order whose pinned pool has moved (output lands in [signedMin, oracleFloor)) — never
+ * wraps as SwapFailed (the router call itself succeeded), so it fell through to the failure
+ * ladder and the order was marked 'failed' after MAX_CYCLE_FAILURES cycles instead of staying
+ * active until expiry.
+ *
+ * @param {object} p
+ * @param {string|null} [p.swapReason] set when the revert was SwapFailed(bytes) (decodeSwapFailed)
+ * @param {string|null} [p.executorErrorName] set when the revert was one of the executor's OWN
+ *   no-arg custom errors (decodeExecutorMarketRevert) — null for anything undecoded/permanent
+ * @returns {boolean}
+ */
+export function isMarketRevert({ swapReason = null, executorErrorName = null } = {}) {
+  if (swapReason) return true
+  if (executorErrorName && MARKET_REVERT_ERROR_NAMES.has(executorErrorName)) return true
+  return false
+}
+
 /**
  * Decide what to do after a pinned route reverted at trigger.
  *
