@@ -7,10 +7,12 @@
  * hardcoded mainnet Etherscan URL. Active orders use the richer MissionControlCard.
  */
 
+import { useState } from 'react'
 import { formatUnits } from 'viem'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { failedOrderReason } from '@/lib/order-engine'
 import { explorerTxUrl } from '@/lib/chains/tokens'
+import SettlementReceiptModal, { isReceiptEligible } from './SettlementReceiptModal'
 
 export default function DCAOrderCard({
   order,
@@ -21,6 +23,11 @@ export default function DCAOrderCard({
   onCancel?: () => void
   onRemove?: () => void
 }) {
+  // [FEAT-DCA-SETTLEMENT-RECEIPT] "View receipt" is offered only once a position reaches a terminal
+  // state the receipt can actually be built for (completed/cancelled) — expired/error positions have
+  // no settlement to show.
+  const [showReceipt, setShowReceipt] = useState(false)
+  const receiptEligible = isReceiptEligible(order.status)
   const progress = order.dcaTotal > 0 ? order.dcaExecuted / order.dcaTotal : 0
   const isActive = order.status === 'active' || order.status === 'executing' || order.status === 'partially_filled'
 
@@ -121,6 +128,17 @@ export default function DCAOrderCard({
           View on explorer ↗
         </a>
       )}
+
+      {/* [FEAT-DCA-SETTLEMENT-RECEIPT] Exact realized costs for a completed/cancelled position. */}
+      {receiptEligible && (
+        <button
+          onClick={() => setShowReceipt(true)}
+          className="ml-3 inline-flex min-h-[44px] items-center text-xs text-cream-gold hover:underline"
+        >
+          View receipt
+        </button>
+      )}
+      {showReceipt && <SettlementReceiptModal order={order} onClose={() => setShowReceipt(false)} />}
     </div>
   )
 }
