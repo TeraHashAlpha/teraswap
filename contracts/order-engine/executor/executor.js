@@ -56,7 +56,6 @@ import {
   getContract,
   getAddress,
   keccak256,
-  parseGwei,
   formatUnits,
   formatEther,
   zeroHash,
@@ -133,6 +132,9 @@ import { resolveSubmissionPolicy } from "./submission-policy.js"
 import { resolveExecutorRouting } from "./executor-routing.js"
 // [SPRINT-P1B / ADR-014 (a)] Pinned-route replay for non-DCA v3 orders (Limit / Take-Profit).
 import { resolvePinnedRouterData, planPinnedRouteRevert, isMarketRevert } from "./pinned-route.js"
+// [FIX-KEEPER-GAS-TIER-BASE] Per-chain gas-tier resolution — mainnet byte-identical, Base gets
+// its own calibrated regime instead of the mainnet-scaled defaults.
+import { getGasTierConfig, resolveGasTier as resolveGasTierForChain, assertTierOrdering } from "./gas-tier.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -224,21 +226,11 @@ const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
 // ── Gas Strategy Tiers ──────────────────────────────────────
-// Defaults preserve 100 gwei ceiling but add tiered filtering: NORMAL ≤30, ELEVATED ≤80, URGENT ≤100.
-// Orders below ceiling but above their tier threshold may be deferred — this is intentional.
-const GAS_TIER_NORMAL   = parseInt(process.env.GAS_TIER_NORMAL_GWEI   || "30")
-const GAS_TIER_ELEVATED = parseInt(process.env.GAS_TIER_ELEVATED_GWEI || "80")
-const GAS_TIER_URGENT   = parseInt(process.env.GAS_TIER_URGENT_GWEI   || "100")
-
-// EIP-1559 priority fees per tier (in gwei)
-const PRIORITY_FEE_NORMAL   = parseFloat(process.env.GAS_PRIORITY_NORMAL_GWEI   || "1.5")
-const PRIORITY_FEE_ELEVATED = parseFloat(process.env.GAS_PRIORITY_ELEVATED_GWEI || "2.5")
-const PRIORITY_FEE_URGENT   = parseFloat(process.env.GAS_PRIORITY_URGENT_GWEI   || "4")
-
-// Base fee multipliers per tier
-const BASEFEE_MULT_NORMAL   = parseFloat(process.env.GAS_BASEFEE_MULT_NORMAL   || "2")
-const BASEFEE_MULT_ELEVATED = parseFloat(process.env.GAS_BASEFEE_MULT_ELEVATED || "2.5")
-const BASEFEE_MULT_URGENT   = parseFloat(process.env.GAS_BASEFEE_MULT_URGENT   || "3")
+// [FIX-KEEPER-GAS-TIER-BASE] Per-chain now (gas-tier.js) — mainnet keeps its original hardcoded
+// values (30/80/100 gwei thresholds, 1.5/2.5/4 gwei priority, 2/2.5/3 base-fee multipliers,
+// same unsuffixed env vars); Base (8453) gets its own regime derived from
+// FILL-ECONOMICS-CALIBRATION.md's measured ~0.005-0.006 gwei live floor. Orders below ceiling but
+// above their tier threshold may be deferred — this is intentional (see resolveGasTier below).
 
 // Urgency thresholds
 const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "7200") // 2 hours
@@ -906,46 +898,25 @@ function classifyOrderUrgency(dbOrder, orderStruct) {
 }
 
 /**
- * Determine if an order should execute at the current gas price,
- * and return EIP-1559 parameters if so.
+ * Determine if an order should execute at the current gas price, and return EIP-1559 parameters
+ * if so. [FIX-KEEPER-GAS-TIER-BASE] Thin wrapper over gas-tier.js's pure, per-chain
+ * resolveGasTier — this file's CHAIN_ID selects mainnet's original tiers or Base's calibrated
+ * ones. Deferring (execute:false) is UNCHANGED behavior: the call site below unlocks the order
+ * back to 'active' and retries next cycle — never routes through handleExecutionFailure, so a
+ * gas-price defer can never mark an order 'failed' (consistent with the M-01 pinned-route-revert
+ * pattern of "market/timing conditions aren't wrong, just not right yet").
  * @param {bigint} currentGasPrice
  * @param {bigint} baseFee
  * @param {"URGENT" | "ELEVATED" | "NORMAL"} urgency
  * @returns {{ execute: boolean, tier: string, maxFeePerGas?: bigint, maxPriorityFeePerGas?: bigint }}
  */
 function resolveGasTier(currentGasPrice, baseFee, urgency) {
-  const gasPriceGwei = Number(formatUnits(currentGasPrice, 9))
-
-  if (gasPriceGwei > GAS_TIER_URGENT) {
-    return { execute: false, tier: "SKIP" }
-  }
-
-  if (gasPriceGwei > GAS_TIER_ELEVATED) {
-    if (urgency !== "URGENT") return { execute: false, tier: "URGENT_ONLY" }
-    const priority = parseGwei(String(PRIORITY_FEE_URGENT))
-    return {
-      execute: true, tier: "URGENT_ONLY",
-      maxPriorityFeePerGas: priority,
-      maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_URGENT)) / 1n + priority,
-    }
-  }
-
-  if (gasPriceGwei > GAS_TIER_NORMAL) {
-    if (urgency === "NORMAL") return { execute: false, tier: "ELEVATED" }
-    const priority = parseGwei(String(PRIORITY_FEE_ELEVATED))
-    return {
-      execute: true, tier: "ELEVATED",
-      maxPriorityFeePerGas: priority,
-      maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_ELEVATED)) / 1n + priority,
-    }
-  }
-
-  const priority = parseGwei(String(PRIORITY_FEE_NORMAL))
-  return {
-    execute: true, tier: "NORMAL",
-    maxPriorityFeePerGas: priority,
-    maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_NORMAL)) / 1n + priority,
-  }
+  return resolveGasTierForChain({
+    chainId: CHAIN_ID,
+    currentGasPriceWei: currentGasPrice,
+    baseFeeWei: baseFee,
+    urgency,
+  })
 }
 
 // ---- Freeze-observability helpers (all NON-BLOCKING / fail-safe) --------
@@ -1549,6 +1520,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
       log(`  Gas: ${formatUnits(gasPrice, 9)} gwei | baseFee: ${formatUnits(baseFee, 9)} gwei | urgency: ${urgency} | tier: ${gasTier.tier}`)
 
+      // [FIX-KEEPER-GAS-TIER-BASE / calibration rec 3] Cost-above-tier is a DEFER signal, never a
+      // failure: unlock back to 'active' and retry a later cycle. This never touches
+      // orderRetries or handleExecutionFailure, so a gas-price defer can never accumulate toward
+      // MAX_CYCLE_FAILURES or mark an order 'failed' — the same "not wrong, just not yet" shape
+      // as the M-01 pinned-route-revert handling.
       if (!gasTier.execute) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... skipped by gas tier (${gasTier.tier}, urgency: ${urgency})`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
@@ -1869,12 +1845,9 @@ function startHealthServer() {
 async function main() {
   validateConfig()
 
-  // Validate gas tier ordering
-  if (GAS_TIER_NORMAL >= GAS_TIER_ELEVATED || GAS_TIER_ELEVATED >= GAS_TIER_URGENT) {
-    throw new Error(
-      `Invalid gas tier ordering: NORMAL(${GAS_TIER_NORMAL}) < ELEVATED(${GAS_TIER_ELEVATED}) < URGENT(${GAS_TIER_URGENT}) required`
-    )
-  }
+  // [FIX-KEEPER-GAS-TIER-BASE] Validate THIS chain's gas tier ordering (mainnet or Base — each
+  // keeper instance runs a single CHAIN_ID, so only that chain's config need hold at boot).
+  assertTierOrdering(CHAIN_ID)
 
   console.log("")
   console.log("+===========================================+")
@@ -1926,8 +1899,10 @@ async function main() {
   log(`Contract (v3): ${V3_CONTRACT_ADDRESS || "not configured -- v3 orders will be skipped + flagged"}`)
   log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
   log(`Max batch: ${MAX_BATCH}`)
-  log(`Gas tiers: NORMAL ≤${GAS_TIER_NORMAL}gwei | ELEVATED ≤${GAS_TIER_ELEVATED}gwei | URGENT ≤${GAS_TIER_URGENT}gwei | >URGENT → SKIP`)
-  log(`Priority fees: NORMAL ${PRIORITY_FEE_NORMAL}gwei | ELEVATED ${PRIORITY_FEE_ELEVATED}gwei | URGENT ${PRIORITY_FEE_URGENT}gwei`)
+  // [FIX-KEEPER-GAS-TIER-BASE] Log THIS chain's resolved config, not a hardcoded mainnet one.
+  const gasTierCfg = getGasTierConfig(CHAIN_ID)
+  log(`Gas tiers (chain ${CHAIN_ID}): NORMAL ≤${gasTierCfg.thresholdsGwei.NORMAL}gwei | ELEVATED ≤${gasTierCfg.thresholdsGwei.ELEVATED}gwei | URGENT ≤${gasTierCfg.thresholdsGwei.URGENT}gwei | >URGENT → SKIP`)
+  log(`Priority fees (chain ${CHAIN_ID}): NORMAL ${gasTierCfg.priorityFeeGwei.NORMAL}gwei | ELEVATED ${gasTierCfg.priorityFeeGwei.ELEVATED}gwei | URGENT ${gasTierCfg.priorityFeeGwei.URGENT}gwei`)
   console.log("")
 
   if (balance === 0n) {
