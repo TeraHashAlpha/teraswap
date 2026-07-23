@@ -57,6 +57,28 @@ Actions, no custom server, no rewrites, no middleware). This does not change the
 not on a case-by-case exploitability bet — it is recorded here only as the honest risk context for
 why the practical exposure window between now and 2026-07-28 is assessed as effectively zero.
 
+## Verification (since no dependency changed, this confirms the baseline this chore leaves untouched)
+
+Since `next` was not bumped (see Finding above), verification confirms the repo is exactly as
+healthy as `main` — no regression introduced by this branch:
+
+- **`npx vitest run`** — 214 test files / 2916 tests, **all green**.
+- **`npx tsc --noEmit`** — clean, zero errors.
+- **`npm run lint`** — 0 errors (121 pre-existing warnings, unrelated to this chore).
+- **`next build`** — **fails**, but reproduces byte-for-byte identically on unmodified `main`
+  (verified directly: `cd` to the outer repo checkout and re-ran `npx next build` there — same
+  `TurbopackInternalError: reading dir "/Users/tiagocruz/Desktop" ... Operation not permitted (os
+  error 1)`). Root cause is local-machine/environment, not code or dependency related: Next infers
+  the workspace root from a stray `/Users/tiagocruz/package-lock.json` (an unrelated file at the
+  home-directory level, dated well before this session) and Turbopack then tries to read
+  `~/Desktop`, which this sandboxed process is denied by macOS at the OS level regardless of
+  `next`'s version. Confirmed with `--webpack` too — different (also pre-existing, also unrelated)
+  failure downstream, not a clean pass either, since the webpack path isn't `next.config.js`'s
+  documented current build path. **Fixing the root cause (`turbopack.root`/`outputFileTracingRoot`
+  in `next.config.js`, or removing the stray home-dir lockfile) is out of this chore's scope**
+  (`next.config.*` is read-only here, and the stray lockfile is outside the repo entirely) — and
+  irrelevant to Vercel's actual build environment, which has neither of these local artifacts.
+
 ## Do NOT
 
 Allowlist these advisories (legitimate framework security fixes, not allowlist candidates); touch any
