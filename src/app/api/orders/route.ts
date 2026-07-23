@@ -515,15 +515,92 @@ export async function POST(req: NextRequest) {
       }
 
       if (minOutUsd === null) {
-        return NextResponse.json(
-          {
-            error: 'Order value cannot be verified: no price coverage (DefiLlama or Chainlink) for the output token. Unpriceable v3 orders are blocked.',
-            unpriceable: true,
-          },
-          { status: 422 },
-        )
-      }
-      if (minOutUsd < dustFloorUsd) {
+        // ── [FIX-DCA-NOFEED-CONSENT] No-feed OUTPUT — value the INPUT instead ──────────────
+        // Owner decision 2026-07-23: a no-price-feed output token (e.g. ETHFI) no longer hard
+        // blocks a DCA. Scoped to DCA only (orderType===dca) — Limit/TP behavior for an
+        // unpriceable output is UNCHANGED (still blocked below), since the owner's decision was
+        // framed specifically around DCA and this repo has not separately reviewed relaxing it
+        // for the trigger-condition order types.
+        //
+        // The per-CHUNK input (never the whole-order total) is what actually changes hands each
+        // fill, so that is what must clear the dust floor — WETH/USDC (the only DCA inputs today)
+        // are always feed-covered, so this leg is expected to price in the overwhelming majority
+        // of cases; the "both no-feed" branch below exists only for a theoretical future input.
+        if (orderTypeEnum !== ORDER_TYPE_DCA) {
+          return NextResponse.json(
+            {
+              error: 'Order value cannot be verified: no price coverage (DefiLlama or Chainlink) for the output token. Unpriceable v3 orders are blocked.',
+              unpriceable: true,
+            },
+            { status: 422 },
+          )
+        }
+
+        const dcaTotalForChunk = Number(body.dcaTotal) > 0 ? BigInt(body.dcaTotal) : 1n
+        const perChunkInputRaw = BigInt(body.amountIn) / dcaTotalForChunk
+
+        const onChainInputDecimals = await fetchErc20Decimals(body.tokenIn, chainId).catch(() => null)
+        if (onChainInputDecimals === null) {
+          return NextResponse.json(
+            {
+              error: 'Order value cannot be verified: could not read tokenIn decimals on-chain, and the output token has no price coverage. Unpriceable v3 orders are blocked.',
+              unpriceable: true,
+            },
+            { status: 422 },
+          )
+        }
+
+        let inputUsd: number | null = null
+        try {
+          const [llamaIn, linkIn] = await Promise.all([
+            fetchDefiLlamaPrice(body.tokenIn, llamaChain).catch(() => null),
+            computeTokenAmountUsd(body.tokenIn, perChunkInputRaw.toString(), chainId).catch(() => null),
+          ])
+          const perChunkInputFloat = Number(perChunkInputRaw) / 10 ** onChainInputDecimals
+          const inputCandidates = [
+            llamaIn && Number.isFinite(perChunkInputFloat) ? perChunkInputFloat * llamaIn.price : null,
+            linkIn?.usd ?? null,
+          ].filter((v): v is number => v != null && Number.isFinite(v) && v >= 0)
+          if (inputCandidates.length > 0) inputUsd = Math.min(...inputCandidates)
+        } catch {
+          // Falls through to the null (unpriceable) branch below, same posture as the output leg.
+        }
+
+        if (inputUsd === null) {
+          // Neither leg can be assessed — the rare "both no-feed" case. Block clearly.
+          return NextResponse.json(
+            {
+              error: 'Order value cannot be verified: neither the output token nor the input token has price coverage (DefiLlama or Chainlink). Unpriceable v3 orders are blocked.',
+              unpriceable: true,
+            },
+            { status: 422 },
+          )
+        }
+        if (inputUsd < dustFloorUsd) {
+          return NextResponse.json(
+            {
+              error: `The input amount per buy is below the $${dustFloorUsd} minimum ($${inputUsd.toFixed(4)}) — the order must be economically meaningful, not dust.`,
+              minimumUsd: dustFloorUsd,
+            },
+            { status: 400 },
+          )
+        }
+        // [FIX-DCA-NOFEED-CONSENT] The output can't be USD-valued, so the ONE thing we can and
+        // MUST still verify is that the signed minAmountOut is a real, non-zero floor — never
+        // the 1-wei/zero no-op the v2 clamp used to permit. This does not (and cannot) prove the
+        // value is "quote-derived", only that it is not degenerate; the on-chain
+        // max(oracleFloor, minAmountOut) check remains the terminal backstop regardless.
+        if (BigInt(body.minAmountOut) <= 0n) {
+          return NextResponse.json(
+            { error: 'minAmountOut must be a real, non-zero signed floor for a no-feed output token.' },
+            { status: 400 },
+          )
+        }
+        // Allowed: input-side value clears the dust floor and the signed min is non-degenerate.
+        // The frontend is responsible for having shown the no-feed consent modal before this
+        // request was ever sent (see DCAPanel + NoFeedConsentModal) — the API cannot verify
+        // "did the user see the modal" and does not attempt to; it only enforces the bounds.
+      } else if (minOutUsd < dustFloorUsd) {
         return NextResponse.json(
           {
             error: `minAmountOut is below the $${dustFloorUsd} minimum ($${minOutUsd.toFixed(4)}) — the signed floor must be economically meaningful, not dust.`,

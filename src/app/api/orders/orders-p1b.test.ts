@@ -341,3 +341,16 @@ describe('POST /api/orders [SPRINT-P1B-SEC] — tampered discriminators cannot f
     expect((await post(tpBody({ orderType: 'limit', priceCondition: 'above' }))).status).toBe(201)
   })
 })
+
+// ── [FIX-DCA-NOFEED-CONSENT] Non-DCA (Limit/TP) is UNCHANGED by the DCA no-feed relaxation ──
+describe('POST /api/orders [FIX-DCA-NOFEED-CONSENT] — non-DCA no-feed output stays hard-blocked', () => {
+  it('a Take-Profit (non-DCA) with a no-feed output is still 422 unpriceable — never falls to input-valuation', async () => {
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    const { status, json } = await post(tpBody())
+    expect(status).toBe(422)
+    expect(json.unpriceable).toBe(true)
+    // Must be the ORIGINAL output-unpriceable message, not the new "neither input nor output" one.
+    expect(String(json.error)).toMatch(/output token/i)
+  })
+})
