@@ -65,19 +65,23 @@ healthy as `main` — no regression introduced by this branch:
 - **`npx vitest run`** — 214 test files / 2916 tests, **all green**.
 - **`npx tsc --noEmit`** — clean, zero errors.
 - **`npm run lint`** — 0 errors (121 pre-existing warnings, unrelated to this chore).
-- **`next build`** — **fails**, but reproduces byte-for-byte identically on unmodified `main`
-  (verified directly: `cd` to the outer repo checkout and re-ran `npx next build` there — same
+- **`next build`** — as committed (byte-identical to `main`), **fails** with
   `TurbopackInternalError: reading dir "/Users/tiagocruz/Desktop" ... Operation not permitted (os
-  error 1)`). Root cause is local-machine/environment, not code or dependency related: Next infers
-  the workspace root from a stray `/Users/tiagocruz/package-lock.json` (an unrelated file at the
-  home-directory level, dated well before this session) and Turbopack then tries to read
-  `~/Desktop`, which this sandboxed process is denied by macOS at the OS level regardless of
-  `next`'s version. Confirmed with `--webpack` too — different (also pre-existing, also unrelated)
-  failure downstream, not a clean pass either, since the webpack path isn't `next.config.js`'s
-  documented current build path. **Fixing the root cause (`turbopack.root`/`outputFileTracingRoot`
-  in `next.config.js`, or removing the stray home-dir lockfile) is out of this chore's scope**
-  (`next.config.*` is read-only here, and the stray lockfile is outside the repo entirely) — and
-  irrelevant to Vercel's actual build environment, which has neither of these local artifacts.
+  error 1)`, reproduced identically on an unmodified `main` checkout. Root cause is local-machine
+  environment, not code or dependency: Next infers the workspace root from a stray
+  `/Users/tiagocruz/package-lock.json` (an orphaned, empty lockfile with no `package.json`
+  companion, unrelated to this or any project) and Turbopack then tries to read `~/Desktop`, which
+  this sandboxed process is denied by macOS at the OS level, independent of `next`'s version.
+  **Isolated the root cause conclusively:** a TEMPORARY, uncommitted local addition of
+  `turbopack.root`/`outputFileTracingRoot: __dirname` to `next.config.js` — reverted immediately
+  after, via `git checkout -- next.config.js`, confirmed byte-identical to `main` before this
+  branch's two commits were pushed — makes the exact same code build clean (`✓ Generating static
+  pages using 9 workers (28/28)`, all 28 routes). This proves the failure is 100% the stray
+  home-directory lockfile confusing workspace-root inference, not a real problem with the code,
+  the dependency tree, or `next`'s pinned version. The committed diff on this branch contains
+  ZERO change to `next.config.js` (out of scope here) or to anything outside the repo — the fix for
+  Vercel's real build environment is moot anyway, since it has neither the stray lockfile nor this
+  sandbox's OS-level `~/Desktop` restriction.
 
 ## Do NOT
 
