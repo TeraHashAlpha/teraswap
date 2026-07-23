@@ -23,7 +23,10 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.6.1",
-    "viem": "2.47.10"
+    "viem": "2.55.1"
+  },
+  "overrides": {
+    "ws": "8.21.1"
   },
   "type": "module"
 }
