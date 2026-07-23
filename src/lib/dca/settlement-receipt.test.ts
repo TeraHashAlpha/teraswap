@@ -16,6 +16,7 @@ import {
   fetchFillReceipt,
   buildSettlementReceipt,
   _clearSettlementReceiptCache,
+  computeAggregationValueRaw,
   type FillReceipt,
   type ReceiptClient,
   type FetchedReceiptLike,
@@ -146,6 +147,9 @@ describe('computeSettlementTotals', () => {
     effectivePrice: null,
     protocolFeeRaw: '0',
     networkCostWeiRaw: '0',
+    nextBestOutRaw: null,
+    nextBestSource: null,
+    aggregationValueRaw: null,
     ...overrides,
   })
 
@@ -170,6 +174,7 @@ describe('computeSettlementTotals', () => {
       avgPrice: null,
       totalProtocolFeeRaw: '0',
       totalNetworkCostWeiRaw: '0',
+      totalAggregationValueRaw: null,
     })
   })
 })
@@ -188,6 +193,9 @@ describe('computeEstimateComparison', () => {
           effectivePrice: null,
           protocolFeeRaw: '2000', // 0.2% of 1_000_000
           networkCostWeiRaw: '0',
+          nextBestOutRaw: null,
+          nextBestSource: null,
+          aggregationValueRaw: null,
         },
       ],
       { tokenInDecimals: 6, tokenOutDecimals: 6 },
@@ -387,5 +395,98 @@ describe('buildSettlementReceipt', () => {
     await buildSettlementReceipt(params)
     await buildSettlementReceipt(params)
     expect(calls).toBe(1)
+  })
+})
+
+// ── [CHORE-DCA-AGGREGATION-VALUE] Aggregation value: best route vs next-best source ──
+describe('computeAggregationValueRaw — gross-vs-gross, always >= 0, honest on missing data', () => {
+  it('is the exact difference when our output beats the runner-up', () => {
+    expect(computeAggregationValueRaw('1000', '950')).toBe('50')
+  })
+
+  it('is "0" (never negative) when our output is BELOW the runner-up — clamped, not fabricated', () => {
+    // The deviation guard bounds this to a small window, but nothing guarantees our committed
+    // route beats every single quote every single round; clamp rather than show a demoralizing
+    // (or dishonest-looking) negative "value".
+    expect(computeAggregationValueRaw('900', '950')).toBe('0')
+  })
+
+  it('is "0" when exactly equal', () => {
+    expect(computeAggregationValueRaw('1000', '1000')).toBe('0')
+  })
+
+  it('is null when there was no runner-up at all (single-source round) — never a fabricated number', () => {
+    expect(computeAggregationValueRaw('1000', null)).toBeNull()
+  })
+
+  it('is null on malformed input (never throws)', () => {
+    expect(computeAggregationValueRaw('1000', 'not-a-number')).toBeNull()
+    expect(computeAggregationValueRaw('not-a-number', '950')).toBeNull()
+  })
+})
+
+describe('fetchFillReceipt — threads next_best_out/source through verbatim (no on-chain derivation)', () => {
+  it('carries nextBestOutRaw/nextBestSource and computes aggregationValueRaw when present', async () => {
+    const log = makeOrderExecutedLog({ amountIn: 100n, amountOut: 1000n, fee: 1n })
+    const client: ReceiptClient = {
+      getTransactionReceipt: async () => ({ gasUsed: 1n, effectiveGasPrice: 1n, blockNumber: 1n, logs: [log] }),
+      getBlock: async () => ({ timestamp: 1n }),
+    }
+    const fill = await fetchFillReceipt(client, {
+      chainId: 8453, txHash: '0xf1', executionNumber: 1,
+      tokenInDecimals: 18, tokenOutDecimals: 18,
+      executorAddresses: [EXECUTOR_ADDRESS],
+      nextBestOutRaw: '900', nextBestSource: '1inch',
+    })
+    expect(fill?.nextBestOutRaw).toBe('900')
+    expect(fill?.nextBestSource).toBe('1inch')
+    expect(fill?.aggregationValueRaw).toBe('100') // 1000 - 900
+  })
+
+  it('is null/null/null when no runner-up was recorded for this fill', async () => {
+    const log = makeOrderExecutedLog({ amountIn: 100n, amountOut: 1000n, fee: 1n })
+    const client: ReceiptClient = {
+      getTransactionReceipt: async () => ({ gasUsed: 1n, effectiveGasPrice: 1n, blockNumber: 1n, logs: [log] }),
+      getBlock: async () => ({ timestamp: 1n }),
+    }
+    const fill = await fetchFillReceipt(client, {
+      chainId: 8453, txHash: '0xf1', executionNumber: 1,
+      tokenInDecimals: 18, tokenOutDecimals: 18,
+      executorAddresses: [EXECUTOR_ADDRESS],
+    })
+    expect(fill?.nextBestOutRaw).toBeNull()
+    expect(fill?.nextBestSource).toBeNull()
+    expect(fill?.aggregationValueRaw).toBeNull()
+  })
+})
+
+describe('computeSettlementTotals — total aggregation value, honest when no fill has data', () => {
+  const base = {
+    executionNumber: 1, txHash: '0xf', txUrl: '', timestamp: null,
+    amountInRaw: '100', amountOutRaw: '1000', effectivePrice: null,
+    protocolFeeRaw: '1', networkCostWeiRaw: '0',
+  }
+
+  it('sums aggregation value across fills that have it, ignoring fills that don\'t', () => {
+    const fills: FillReceipt[] = [
+      { ...base, nextBestOutRaw: '900', nextBestSource: '1inch', aggregationValueRaw: '100' },
+      { ...base, nextBestOutRaw: null, nextBestSource: null, aggregationValueRaw: null },
+      { ...base, nextBestOutRaw: '950', nextBestSource: '0x', aggregationValueRaw: '50' },
+    ]
+    const totals = computeSettlementTotals(fills, { tokenInDecimals: 18, tokenOutDecimals: 18 })
+    expect(totals.totalAggregationValueRaw).toBe('150')
+  })
+
+  it('is null (not "0") when NO fill has any comparison data — honest "—", not a fabricated zero', () => {
+    const fills: FillReceipt[] = [
+      { ...base, nextBestOutRaw: null, nextBestSource: null, aggregationValueRaw: null },
+    ]
+    const totals = computeSettlementTotals(fills, { tokenInDecimals: 18, tokenOutDecimals: 18 })
+    expect(totals.totalAggregationValueRaw).toBeNull()
+  })
+
+  it('is null for an empty fills array', () => {
+    const totals = computeSettlementTotals([], { tokenInDecimals: 18, tokenOutDecimals: 18 })
+    expect(totals.totalAggregationValueRaw).toBeNull()
   })
 })

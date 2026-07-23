@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { formatUnits } from 'viem'
 import type { AutonomousOrder } from '@/lib/order-engine'
+import { getWhitelistedRouters } from '@/lib/order-engine'
 import {
   buildSettlementReceipt,
   type SettlementReceipt,
@@ -43,6 +44,17 @@ function fmtBps(bps: number | null): string {
   return `${(bps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
 }
 
+// [CHORE-DCA-AGGREGATION-VALUE] "Our route"'s label — resolved from the ORDER's own committed
+// router address against the chain's whitelisted-router registry (no new column: the router is
+// fixed per order at signing time, same value for every one of its fills). Falls back to a plain
+// generic label rather than a blank when the address isn't in the registry (never fabricated).
+function resolveBestRouteLabel(router: string | null | undefined, chainId: number): string {
+  if (!router) return 'our route'
+  const routers = getWhitelistedRouters(chainId)
+  const match = Object.values(routers).find((r) => r.address.toLowerCase() === router.toLowerCase())
+  return match?.label ?? 'our route'
+}
+
 function fmtTimestamp(ms: number | null): string {
   if (ms == null) return '—'
   const d = new Date(ms)
@@ -51,7 +63,7 @@ function fmtTimestamp(ms: number | null): string {
 }
 
 /** Plain-text export — the only "share" affordance this slice ships (no PDF/export libs). */
-function receiptToText(receipt: SettlementReceipt): string {
+function receiptToText(receipt: SettlementReceipt, bestRouteLabel: string): string {
   const lines: string[] = []
   lines.push(`TeraSwap DCA settlement receipt — ${receipt.tokenInSymbol} -> ${receipt.tokenOutSymbol}`)
   lines.push(`Status: ${receipt.status}`)
@@ -62,15 +74,27 @@ function receiptToText(receipt: SettlementReceipt): string {
   lines.push(`Average price: ${fmtPrice(receipt.totals.avgPrice, receipt.tokenInSymbol, receipt.tokenOutSymbol)}`)
   lines.push(`Total protocol fee: ${fmtToken(receipt.totals.totalProtocolFeeRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)}`)
   lines.push(`Total network cost: ${fmtEth(receipt.totals.totalNetworkCostWeiRaw)} (${receipt.networkCostLabel})`)
+  lines.push(
+    `Aggregation value: ${
+      receipt.totals.totalAggregationValueRaw == null
+        ? '—'
+        : `+${fmtToken(receipt.totals.totalAggregationValueRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}`
+    }`,
+  )
   lines.push('')
   lines.push(`Your signed budget: ${fmtBps(receipt.estimate.maxSlippageBps)}`)
   lines.push(`Realized protocol-fee cost: ${fmtBps(receipt.estimate.realizedFeeBps)}`)
   lines.push('')
   lines.push('Fills:')
   for (const f of receipt.fills) {
+    const agg =
+      f.nextBestOutRaw == null
+        ? 'Aggregation value: —'
+        : `Best route: ${bestRouteLabel} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}. Next-best: ${f.nextBestSource} -> ${fmtToken(f.nextBestOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}. Aggregation value: +${fmtToken(f.aggregationValueRaw ?? '0', receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.`
     lines.push(
       `  #${f.executionNumber} ${fmtTimestamp(f.timestamp)} — ${fmtToken(f.amountInRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}, fee ${fmtToken(f.protocolFeeRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)}, ${f.txUrl}`,
     )
+    lines.push(`    ${agg}`)
   }
   return lines.join('\n')
 }
@@ -79,6 +103,10 @@ interface FetchedFill {
   execution_number: number
   tx_hash: string | null
   created_at?: string | null
+  // [CHORE-DCA-AGGREGATION-VALUE] Additive keeper telemetry — absent on any fill recorded before
+  // this feature shipped, or when no runner-up existed that quote round.
+  next_best_out?: string | null
+  next_best_source?: string | null
 }
 
 interface Props {
@@ -133,7 +161,13 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
           maxSlippageBps: order.order?.maxSlippageBps ?? null,
           fills: fills
             .filter((f) => !!f.tx_hash)
-            .map((f) => ({ executionNumber: f.execution_number, txHash: f.tx_hash as string, createdAt: f.created_at })),
+            .map((f) => ({
+              executionNumber: f.execution_number,
+              txHash: f.tx_hash as string,
+              createdAt: f.created_at,
+              nextBestOutRaw: f.next_best_out ?? null,
+              nextBestSource: f.next_best_source ?? null,
+            })),
         })
         if (!cancelled) setReceipt(built)
       } catch {
@@ -148,7 +182,12 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
     }
   }, [order, address, settlementStatus])
 
-  const shareText = useMemo(() => (receipt ? receiptToText(receipt) : ''), [receipt])
+  // [CHORE-DCA-AGGREGATION-VALUE] Resolved once — same committed router for every fill in the order.
+  const bestRouteLabel = useMemo(
+    () => resolveBestRouteLabel(order.order?.router, order.chainId ?? 1),
+    [order.order?.router, order.chainId],
+  )
+  const shareText = useMemo(() => (receipt ? receiptToText(receipt, bestRouteLabel) : ''), [receipt, bestRouteLabel])
 
   async function handleCopy() {
     try {
@@ -205,6 +244,23 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
                 <p className="pt-1 text-[11px] text-cream-35">{receipt.networkCostLabel}</p>
               </div>
 
+              {/* [CHORE-DCA-AGGREGATION-VALUE] Total aggregation value — plain, non-alarmist,
+                  traceable. "—" (never a fabricated number) when no fill in this position had a
+                  runner-up to compare against. */}
+              <div className="rounded-xl border border-cream-08 bg-surface-primary p-3" data-testid="settlement-aggregation-value-total">
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-cream-35">Aggregation value</span>
+                  <span className="text-cream">
+                    {receipt.totals.totalAggregationValueRaw == null
+                      ? '—'
+                      : `+${fmtToken(receipt.totals.totalAggregationValueRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}`}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-cream-35">
+                  What our routing delivered vs. the next-best quoted source, across every fill.
+                </p>
+              </div>
+
               {/* vs upfront estimate */}
               <div className="rounded-xl border border-cream-08 bg-surface-primary p-3" data-testid="settlement-estimate-comparison">
                 <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-cream-35">vs your upfront estimate</p>
@@ -241,6 +297,19 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
                         <a href={f.txUrl} target="_blank" rel="noopener noreferrer" className="text-cream-gold hover:underline">
                           View tx ↗
                         </a>
+                      </div>
+                      {/* [CHORE-DCA-AGGREGATION-VALUE] "—" (no claim) when this fill has no
+                          runner-up recorded — never a fabricated number. */}
+                      <div className="mt-1 text-cream-35" data-testid="fill-aggregation-value">
+                        {f.nextBestOutRaw == null ? (
+                          <span>Aggregation value: —</span>
+                        ) : (
+                          <span>
+                            Best route: {bestRouteLabel} → {fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.{' '}
+                            Next-best: {f.nextBestSource} → {fmtToken(f.nextBestOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.{' '}
+                            Aggregation value: +{fmtToken(f.aggregationValueRaw ?? '0', receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
