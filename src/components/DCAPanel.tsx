@@ -8,6 +8,9 @@ import TokenSelector from './TokenSelector'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
 import OrderReviewModal from './OrderReviewModal'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
+// [FIX-DCA-NOFEED-CONSENT] Plain-language consent gate for a no-price-feed output token.
+import NoFeedConsentModal from './NoFeedConsentModal'
+import { getChainlinkFeed } from '@/lib/chains/chainlink-feeds'
 import {
   OrderType,
   PriceCondition,
@@ -249,6 +252,19 @@ function CreateDCAForm({
   const [tokenOut, setTokenOut] = useState<Token | null>(
     DEFAULT_TOKENS.find(t => t.symbol === 'ETH') ?? null
   )
+
+  // [FIX-DCA-NOFEED-CONSENT] Whether the OUTPUT token has no Chainlink feed on this chain — the
+  // single signal that gates the consent modal. Feed-covered tokens never trigger it.
+  const noFeedOutput = useMemo(
+    () => !!tokenOut && getChainlinkFeed(tokenOut.address, chainId) === null,
+    [tokenOut, chainId],
+  )
+  const [showNoFeedModal, setShowNoFeedModal] = useState(false)
+  // Tracks WHICH token address consent was last given for (not a bare boolean), so switching to a
+  // different output token — or simply comparing against the currently selected one — naturally
+  // requires asking again, with no separate reset effect needed.
+  const [noFeedConsentGivenFor, setNoFeedConsentGivenFor] = useState<string | null>(null)
+  const noFeedConsentGiven = !!tokenOut && noFeedConsentGivenFor === tokenOut.address
 
   // [CHORE-DCA-WETH-INPUT] Keep the spend token pinned to the active chain's WETH. Also
   // recovers if the input ever became native ETH (it can't via the selector, which hides
@@ -598,6 +614,32 @@ function CreateDCAForm({
 
     await onSubmit(config)
     setTotalDisplay('')
+    // [FIX-DCA-NOFEED-CONSENT] Consent is per-creation — require it again for the NEXT order,
+    // even against the same still-selected no-feed token.
+    setNoFeedConsentGivenFor(null)
+  }
+
+  // [FIX-DCA-NOFEED-CONSENT] Gate BEFORE signing: a no-feed output token must show the consent
+  // modal and get an explicit Accept before handleCreate ever runs. Feed-covered tokens skip this
+  // entirely — byte-identical to the pre-existing submit path.
+  async function handleCreateClick() {
+    if (!canCreate) return
+    if (noFeedOutput && !noFeedConsentGiven) {
+      setShowNoFeedModal(true)
+      return
+    }
+    await handleCreate()
+  }
+
+  function handleNoFeedAccept() {
+    setShowNoFeedModal(false)
+    setNoFeedConsentGivenFor(tokenOut?.address ?? null)
+    void handleCreate()
+  }
+
+  function handleNoFeedReject() {
+    setShowNoFeedModal(false)
+    // Nothing signed, nothing submitted — the user is simply back on the panel.
   }
 
   return (
@@ -980,7 +1022,8 @@ function CreateDCAForm({
         <button
           disabled={!canCreate}
           // [BUGFIX] await async handleCreate to catch errors properly
-          onClick={async () => { playTouchMP3(); await handleCreate() }}
+          // [FIX-DCA-NOFEED-CONSENT] Routes through the consent gate first.
+          onClick={async () => { playTouchMP3(); await handleCreateClick() }}
           className={`w-full rounded-xl py-3 text-[14px] font-bold uppercase tracking-wider transition-all ${
             canCreate
               ? 'bg-gradient-to-r from-gold to-gold-light text-[#080B10] hover:brightness-110 active:scale-[0.98]'
@@ -1001,6 +1044,14 @@ function CreateDCAForm({
           }
         </button>
       )}
+
+      {/* [FIX-DCA-NOFEED-CONSENT] Only ever shown for a no-feed OUTPUT token, before signing. */}
+      <NoFeedConsentModal
+        open={showNoFeedModal}
+        tokenSymbol={tokenOut?.symbol || 'this token'}
+        onAccept={handleNoFeedAccept}
+        onReject={handleNoFeedReject}
+      />
     </div>
   )
 }
