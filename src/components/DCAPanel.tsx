@@ -35,6 +35,8 @@ import {
   MAX_ORDER_SLIPPAGE_BPS,
   DEFAULT_MAX_SLIPPAGE_BPS,
   deriveSigningMinAmountOut,
+  // [CHORE-DCA-COST-PREVIEW] Per-buy fee + network-cost preview (display only).
+  computeDcaCostPreview,
   type DcaCustomIntervalUnit,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig } from '@/lib/order-engine'
@@ -469,6 +471,14 @@ function CreateDCAForm({
     return (total / parts).toFixed(tokenIn?.decimals === 6 ? 2 : 6)
   }, [totalDisplay, parts, tokenIn])
 
+  // [CHORE-DCA-COST-PREVIEW] Per-buy fee + network-cost preview — null (hidden) whenever the
+  // whole-DCA total can't be priced (totalUsd is null/unpriced, same fail-open posture as the
+  // min-chunk guard above) or there's no buy count yet.
+  const costPreview = useMemo(() => {
+    if (totalUsd == null || !parts || parts <= 0) return null
+    return computeDcaCostPreview({ perChunkNotionalUsd: totalUsd / parts })
+  }, [totalUsd, parts])
+
   const totalDuration = useMemo(() => {
     if (!parts || parts <= 0) return ''
     const totalSec = parts * interval.seconds
@@ -887,6 +897,16 @@ function CreateDCAForm({
             <span>Expires</span>
             <span className="text-cream font-medium">{expiry.label}</span>
           </div>
+          {/* [CHORE-DCA-COST-PREVIEW] Transparency-brand invariant: never claim "free"/"gasless" —
+              name who pays. Hidden entirely when the total can't be priced (costPreview null). */}
+          {costPreview && (
+            <div className="mt-1 flex justify-between text-cream-50" data-testid="dca-cost-preview">
+              <span>Per buy cost</span>
+              <span className="text-cream font-medium">
+                0.1% protocol fee (~${costPreview.feeUsd.toFixed(2)}) + network cost (~${costPreview.networkCostUsd.toFixed(2)}, {costPreview.coverageLabel})
+              </span>
+            </div>
+          )}
           <div className="mt-2 border-t border-cream-08 pt-2 text-[11px] text-cream-35">
             Each buy routes through 11 DEX sources via 1inch aggregation.
             Orders execute autonomously — no browser needed.
