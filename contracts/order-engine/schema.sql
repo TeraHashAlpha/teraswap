@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS order_executions (
   fee_amount  TEXT NOT NULL,
   gas_used    TEXT,
   price_at_execution TEXT,                             -- Chainlink price when executed
+  -- [CHORE-DCA-AGGREGATION-VALUE] Additive, nullable, forward-only — the runner-up (second-best)
+  -- source captured alongside this fill (same quote round as the fill's own aggregator pick).
+  -- NULL = no comparison available (single-source round, fetch failure, or a pre-migration row).
+  -- See supabase/migrations/20260723231005_dca_aggregation_value.sql.
+  next_best_out TEXT,
+  next_best_source TEXT,
   status      TEXT NOT NULL DEFAULT 'confirmed'
               CHECK (status IN ('confirmed', 'failed', 'pending'))
 );

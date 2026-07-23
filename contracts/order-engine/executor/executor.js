@@ -765,19 +765,35 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
 // committed route has drifted. It NEVER changes which router the fill uses. Fully
 // fail-open: any missing config / error / timeout / missing field ⇒ null ⇒ the
 // gate executes (we never block a DCA on our own uncertainty). Never throws.
+//
+// [CHORE-DCA-AGGREGATION-VALUE] Also returns the RUNNER-UP (second-best source)
+// from this SAME response — one HTTP call, one quote round, so the runner-up is
+// guaranteed to be from the identical round as `bestOut` (never a second,
+// possibly-stale fetch). `all` is sorted best-first (src/lib/api.ts's
+// fetchMetaQuote), so the runner-up is simply `all[1]`. `nextBestOut`/
+// `nextBestSource` are null (never fabricated) when fewer than 2 sources quoted
+// this round or the field is malformed — purely additive telemetry for the
+// settlement receipt, never a routing input; the deviation-guard's existing
+// `bestOut` behavior is unchanged byte-for-byte.
 async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, dstDecimals) {
-  if (!API_URL) return null
+  if (!API_URL) return { bestOut: null, nextBestOut: null, nextBestSource: null }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a poll cycle
   try {
     const path = buildQuotePath({ tokenIn, tokenOut, amount: String(amount), srcDecimals, dstDecimals, chainId })
     const res = await fetch(`${API_URL}${path}`, { signal: controller.signal })
-    if (!res.ok) return null
+    if (!res.ok) return { bestOut: null, nextBestOut: null, nextBestSource: null }
     const json = await res.json()
     const best = json?.best?.toAmount
-    return best != null ? String(best) : null
+    const runnerUp = Array.isArray(json?.all) ? json.all[1] : null
+    const hasRunnerUp = runnerUp && runnerUp.toAmount != null && runnerUp.source
+    return {
+      bestOut: best != null ? String(best) : null,
+      nextBestOut: hasRunnerUp ? String(runnerUp.toAmount) : null,
+      nextBestSource: hasRunnerUp ? String(runnerUp.source) : null,
+    }
   } catch {
-    return null // fail-open: timeout / network / parse error ⇒ no reference
+    return { bestOut: null, nextBestOut: null, nextBestSource: null } // fail-open: timeout/network/parse error
   } finally {
     clearTimeout(timer)
   }
@@ -1262,6 +1278,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // SIGNED order.router (executeOrder approves + calls exactly that router). All
       // swap params come from orderStruct (the EIP-712-signed order), not the DB row.
       const isDca = dbOrder.order_type === "dca"
+      // [CHORE-DCA-AGGREGATION-VALUE] Populated (best-effort) inside the deviation-guard block
+      // below when it runs; read later at the POST-execution recording site, after the fill has
+      // already confirmed. Stays null when the guard doesn't run (non-DCA) or the quote round
+      // yields no comparison — additive telemetry only, never consulted for routing/execution.
+      let dcaNextBestOut = null
+      let dcaNextBestSource = null
       const netAmount = computeNetChunkAmount({
         amountIn: orderStruct.amountIn,
         dcaTotal: Number(orderStruct.dcaTotal),
@@ -1450,7 +1472,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         }
 
         const dueSec = dcaDueSec(dbOrder)
-        const bestOut = await fetchBestQuote(
+        const { bestOut, nextBestOut, nextBestSource } = await fetchBestQuote(
           orderStruct.tokenIn,
           orderStruct.tokenOut,
           netAmount,
@@ -1458,6 +1480,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           srcDecimals,
           dstDecimals,
         )
+        // [CHORE-DCA-AGGREGATION-VALUE] Stash for the POST-execution recording site below —
+        // read-only telemetry, never consulted by the deviation guard itself (which uses only
+        // `bestOut`, unchanged from before this chore).
+        dcaNextBestOut = nextBestOut
+        dcaNextBestSource = nextBestSource
         // Reference is only usable when BOTH sides are present; otherwise fail-open.
         const referenceAvailable = bestOut != null && swapData.toAmount != null
         const deviation = referenceAvailable
@@ -1644,7 +1671,14 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         if (!decoded) {
           log(`  WARNING: OrderExecuted event not found in tx ${txHash.slice(0, 10)}... — recording with fallback amounts`)
         }
-        const execRow = buildExecutionRow({ dbOrder, txHash, receipt, decoded })
+        // [CHORE-DCA-AGGREGATION-VALUE] Additive, best-effort — dcaNextBestOut/Source are null
+        // for non-DCA fills, a single-source quote round, or any quote-fetch failure; either way
+        // buildExecutionRow only sets the columns when non-null, so they stay NULL in the row.
+        const execRow = buildExecutionRow({
+          dbOrder, txHash, receipt, decoded,
+          nextBestOut: dcaNextBestOut,
+          nextBestSource: dcaNextBestSource,
+        })
         const rec = await recordExecutionRow(supabaseFetch, execRow)
         if (rec.recorded) {
           log(`  Recorded execution #${execRow.execution_number} for order ${dbOrder.id.slice(0, 8)}...`)

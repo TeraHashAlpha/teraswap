@@ -118,7 +118,19 @@ export function perChunkAmountIn(dbOrder) {
 // the event can't be decoded, amount_in falls back to the per-chunk computation
 // and amount_out/fee default to "0" (never fabricated). Does NOT include the
 // phantom `executed_at` column that caused the original insert to 400.
-export function buildExecutionRow({ dbOrder, txHash, receipt, decoded, executionNumber, priceAtExecution }) {
+//
+// [CHORE-DCA-AGGREGATION-VALUE] `nextBestOut`/`nextBestSource` are ADDITIVE,
+// nullable telemetry (the runner-up source/amount from the SAME unconstrained
+// quote round the deviation guard already fetches, captured in executor.js
+// POST-execution) — purely for the settlement receipt's "aggregation value"
+// line, never a routing/execution input. Both columns are OMITTED from the row
+// entirely (not written as explicit NULL) unless BOTH are present together —
+// an amount without its source label (or vice versa) is a malformed pair and
+// is dropped rather than persisted half-formed.
+export function buildExecutionRow({
+  dbOrder, txHash, receipt, decoded, executionNumber, priceAtExecution,
+  nextBestOut, nextBestSource,
+}) {
   const execNum = executionNumber ?? executionNumberFor(dbOrder)
   const amountIn = decoded?.amountIn ?? perChunkAmountIn(dbOrder)
   const amountOut = decoded?.amountOut ?? "0"
@@ -134,6 +146,10 @@ export function buildExecutionRow({ dbOrder, txHash, receipt, decoded, execution
     status: "confirmed",
   }
   if (priceAtExecution != null) row.price_at_execution = String(priceAtExecution)
+  if (nextBestOut != null && nextBestSource != null) {
+    row.next_best_out = String(nextBestOut)
+    row.next_best_source = String(nextBestSource)
+  }
   return row
 }
 
@@ -160,11 +176,22 @@ export async function recordExecutionRow(supabaseFetch, row) {
     // the bug we are fixing, so favor recording.
   }
 
-  const res = await supabaseFetch("order_executions", {
-    method: "POST",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify(row),
-  })
+  // [CHORE-DCA-AGGREGATION-VALUE] Found while proving "recording never blocks a fill": this POST
+  // was the one call in this function NOT wrapped in try/catch — a hard network failure (as
+  // opposed to a non-ok HTTP response, already handled below) would have THROWN out of
+  // recordExecutionRow and into executor.js's unguarded call site, right after a real, confirmed,
+  // already-executed fill. Caught here so every failure mode resolves to {recorded:false,...},
+  // matching the idempotency check's posture above.
+  let res
+  try {
+    res = await supabaseFetch("order_executions", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(row),
+    })
+  } catch (err) {
+    return { recorded: false, error: err instanceof Error ? err.message : String(err) }
+  }
   if (!res || !res.ok) {
     let detail = ""
     try {
