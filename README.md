@@ -1,15 +1,15 @@
 <h1 align="center">TeraSwap</h1>
 <p align="center">
-  <strong>A security-first DEX meta-aggregator for Ethereum &amp; Base.</strong><br>
-  Best-execution routing across 11 liquidity sources, on-chain conditional orders,
-  MEV-protected settlement, and gasless approvals.
+  <strong>A security-first DEX meta-aggregator for Ethereum, Base &amp; Arbitrum.</strong><br>
+  Best-execution routing across 12 liquidity sources, on-chain conditional orders,
+  MEV-protected settlement, and one-time approvals.
 </p>
 <p align="center">
-  <img alt="Networks" src="https://img.shields.io/badge/networks-Ethereum%20%2B%20Base-627EEA">
+  <img alt="Networks" src="https://img.shields.io/badge/networks-Ethereum%20%2B%20Base%20%2B%20Arbitrum-627EEA">
   <img alt="Contracts" src="https://img.shields.io/badge/Solidity-0.8.28-363636?logo=solidity">
   <img alt="Frontend" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-1600%2B%20passing-3fb950">
-  <img alt="Oracles" src="https://img.shields.io/badge/Chainlink-29%20feeds-375BD2?logo=chainlink">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-2900%2B%20passing-3fb950">
+  <img alt="Oracles" src="https://img.shields.io/badge/Chainlink-validated%20%2F%203%20chains-375BD2?logo=chainlink">
 </p>
 
 What is TeraSwap?
@@ -17,8 +17,8 @@ What is TeraSwap?
 TeraSwap is a meta-aggregator: instead of routing through a single DEX or a single aggregator, it
 queries many liquidity sources in parallel, validates every quote against independent price oracles, and
 settles through the venue that gives the user the best net outcome after gas and fees. It runs on
-Ethereum Mainnet and Base, and layers on order types and protections that most swap interfaces
-don't offer.
+Ethereum Mainnet, Base, and Arbitrum, and layers on order types and protections that most swap
+interfaces don't offer.
 
 The guiding principle is simple: a swap should never execute on bad data, and the user should always
 see what they're signing.
@@ -26,22 +26,42 @@ see what they're signing.
 Highlights
 
 
-Best-execution routing across 11 liquidity sources — aggregators (0x, 1inch, ParaSwap/Velora),
-AMMs (Uniswap V3, Curve), and intent/RFQ venues (CoW Protocol), among others.
-On-chain conditional orders — Limit, Stop-Loss, Take-Profit, and DCA, executed by an audited
-on-chain order engine.
+Best-execution routing across 12 integrated liquidity sources — aggregators (0x, 1inch,
+ParaSwap/Velora, KyberSwap, OpenOcean, Odos), AMMs (Uniswap V3, Curve, Balancer, SushiSwap), and
+intent/RFQ venues (CoW Protocol, Bebop).
+On-chain conditional orders — DCA is **live on Base**, executed autonomously by an audited on-chain
+order engine and Chainlink-triggered keeper. Limit, Stop-Loss, and Take-Profit orders are **coming
+soon**.
 MEV protection — sensitive flow can settle through CoW Protocol's batch auctions to neutralise
 sandwich and front-running risk.
-Gasless approvals via Permit2 — sign once, skip the separate approval transaction.
-Oracle-validated quotes — every swap is cross-checked against Chainlink feeds (29 feeds) before it
-can execute. No single price source is ever trusted on its own.
-Clear signing (ERC-7730) — hardware-wallet users see human-readable swap details instead of raw
-calldata.
+One-time approvals via Permit2 — approve a token once on-chain, then authorise every swap after
+with a signature instead of a separate approval transaction. No infinite approvals, ever.
+Oracle-validated quotes — every swap is cross-checked against Chainlink feeds before it can execute
+(29 feeds on Ethereum Mainnet alone, more on Base and Arbitrum). No single price source is ever
+trusted on its own.
+Clear signing (ERC-7730) — a Ledger-registry descriptor for human-readable swap details is prepared
+and lint-clean; upstream registry submission is in progress.
 
 
 Architecture
 
-#mermaid-r80f-r1{font-family:"Anthropic Sans",system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px;fill:#E5E5E5;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#mermaid-r80f-r1 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#mermaid-r80f-r1 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#mermaid-r80f-r1 .error-icon{fill:#CC785C;}#mermaid-r80f-r1 .error-text{fill:#3387a3;stroke:#3387a3;}#mermaid-r80f-r1 .edge-thickness-normal{stroke-width:1px;}#mermaid-r80f-r1 .edge-thickness-thick{stroke-width:3.5px;}#mermaid-r80f-r1 .edge-pattern-solid{stroke-dasharray:0;}#mermaid-r80f-r1 .edge-thickness-invisible{stroke-width:0;fill:none;}#mermaid-r80f-r1 .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-r80f-r1 .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-r80f-r1 .marker{fill:#A1A1A1;stroke:#A1A1A1;}#mermaid-r80f-r1 .marker.cross{stroke:#A1A1A1;}#mermaid-r80f-r1 svg{font-family:"Anthropic Sans",system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px;}#mermaid-r80f-r1 p{margin:0;}#mermaid-r80f-r1 .label{font-family:"Anthropic Sans",system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#E5E5E5;}#mermaid-r80f-r1 .cluster-label text{fill:#3387a3;}#mermaid-r80f-r1 .cluster-label span{color:#3387a3;}#mermaid-r80f-r1 .cluster-label span p{background-color:transparent;}#mermaid-r80f-r1 .label text,#mermaid-r80f-r1 span{fill:#E5E5E5;color:#E5E5E5;}#mermaid-r80f-r1 .node rect,#mermaid-r80f-r1 .node circle,#mermaid-r80f-r1 .node ellipse,#mermaid-r80f-r1 .node polygon,#mermaid-r80f-r1 .node path{fill:transparent;stroke:#A1A1A1;stroke-width:1px;}#mermaid-r80f-r1 .rough-node .label text,#mermaid-r80f-r1 .node .label text,#mermaid-r80f-r1 .image-shape .label,#mermaid-r80f-r1 .icon-shape .label{text-anchor:middle;}#mermaid-r80f-r1 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#mermaid-r80f-r1 .rough-node .label,#mermaid-r80f-r1 .node .label,#mermaid-r80f-r1 .image-shape .label,#mermaid-r80f-r1 .icon-shape .label{text-align:center;}#mermaid-r80f-r1 .node.clickable{cursor:pointer;}#mermaid-r80f-r1 .root .anchor path{fill:#A1A1A1!important;stroke-width:0;stroke:#A1A1A1;}#mermaid-r80f-r1 .arrowheadPath{fill:#0b0b0b;}#mermaid-r80f-r1 .edgePath .path{stroke:#A1A1A1;stroke-width:1px;}#mermaid-r80f-r1 .flowchart-link{stroke:#A1A1A1;fill:none;}#mermaid-r80f-r1 .edgeLabel{background-color:transparent;text-align:center;}#mermaid-r80f-r1 .edgeLabel p{background-color:transparent;}#mermaid-r80f-r1 .edgeLabel rect{opacity:0.5;background-color:transparent;fill:transparent;}#mermaid-r80f-r1 .labelBkg{background-color:rgba(0, 0, 0, 0.5);}#mermaid-r80f-r1 .cluster rect{fill:#CC785C;stroke:hsl(15, 12.3364485981%, 48.0392156863%);stroke-width:1px;}#mermaid-r80f-r1 .cluster text{fill:#3387a3;}#mermaid-r80f-r1 .cluster span{color:#3387a3;}#mermaid-r80f-r1 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"Anthropic Sans",system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:12px;background:#CC785C;border:1px solid hsl(15, 12.3364485981%, 48.0392156863%);border-radius:2px;pointer-events:none;z-index:100;}#mermaid-r80f-r1 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#E5E5E5;}#mermaid-r80f-r1 rect.text{fill:none;stroke-width:0;}#mermaid-r80f-r1 .icon-shape,#mermaid-r80f-r1 .image-shape{background-color:transparent;text-align:center;}#mermaid-r80f-r1 .icon-shape p,#mermaid-r80f-r1 .image-shape p{background-color:transparent;padding:2px;}#mermaid-r80f-r1 .icon-shape .label rect,#mermaid-r80f-r1 .image-shape .label rect{opacity:0.5;background-color:transparent;fill:transparent;}#mermaid-r80f-r1 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#mermaid-r80f-r1 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#mermaid-r80f-r1 .node .neo-node{stroke:#A1A1A1;}#mermaid-r80f-r1 [data-look="neo"].node rect,#mermaid-r80f-r1 [data-look="neo"].cluster rect,#mermaid-r80f-r1 [data-look="neo"].node polygon{stroke:url(#mermaid-r80f-r1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mermaid-r80f-r1 [data-look="neo"].node path{stroke:url(#mermaid-r80f-r1-gradient);stroke-width:1px;}#mermaid-r80f-r1 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mermaid-r80f-r1 [data-look="neo"].node .neo-line path{stroke:#A1A1A1;filter:none;}#mermaid-r80f-r1 [data-look="neo"].node circle{stroke:url(#mermaid-r80f-r1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mermaid-r80f-r1 [data-look="neo"].node circle .state-start{fill:#000000;}#mermaid-r80f-r1 [data-look="neo"].icon-shape .icon{fill:url(#mermaid-r80f-r1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mermaid-r80f-r1 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#mermaid-r80f-r1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mermaid-r80f-r1 :root{--mermaid-font-family:"Anthropic Sans",system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}quote requestvalidatedUser / WalletNext.js FrontendAPI Routes / VercelRouting EngineAggregators0x · 1inch · ParaSwapAMMsUniswap V3 · CurveIntent / RFQCoW · othersOracle GateChainlink · staleness ·depegSmart ContractsFeeCollectorOrderExecutor v2MonitoringCloudflare Worker ·watchdog · alerts
+```mermaid
+flowchart LR
+    User["User / Wallet"] -->|quote request| FE["Next.js Frontend"]
+    FE --> API["API Routes / Vercel"]
+    API --> Router["Routing Engine"]
+
+    Router --> Agg["Aggregators\n0x . 1inch . ParaSwap . KyberSwap"]
+    Router --> AMM["AMMs\nUniswap V3 . Curve . Balancer . Sushi"]
+    Router --> Intent["Intent / RFQ\nCoW . Bebop"]
+
+    Agg --> Oracle["Oracle Gate\nChainlink . staleness . depeg"]
+    AMM --> Oracle
+    Intent --> Oracle
+
+    Oracle -->|validated| Contracts["Smart Contracts\nFeeCollector . OrderExecutor"]
+    Contracts --> Monitor["Monitoring\nCloudflare Worker . watchdog . alerts"]
+```
 
 A request is priced across all sources, every candidate quote passes an oracle gate (Chainlink
 validation, per-feed staleness, stablecoin depeg detection, and on L2 a sequencer-uptime check), and only
@@ -68,32 +88,41 @@ Continuous monitoring — cron health ticks, an external watchdog, and a kill-sw
 
 Tech Stack
 
-LayerTechnologiesFrontendNext.js 16, React 18, TypeScript 5.5, Tailwind CSS, Wagmi, Viem, RainbowKit, ZustandBackendNext.js API Routes (Vercel serverless), Upstash Redis, Supabase (PostgreSQL + RLS)ContractsSolidity 0.8.28, Foundry, Chainlink price feedsInfraVercel, Cloudflare (DNS + Worker cron), GitHub Actions CI
+| Layer | Technologies |
+|---|---|
+| Frontend | Next.js 16, React 18, TypeScript 5.5, Tailwind CSS, Wagmi, Viem, RainbowKit, Zustand |
+| Backend | Next.js API Routes (Vercel serverless), Upstash Redis, Supabase (PostgreSQL + RLS) |
+| Contracts | Solidity 0.8.28, Foundry, Chainlink price feeds |
+| Infra | Vercel, Cloudflare (DNS + Worker cron), GitHub Actions CI |
 
 Smart Contracts
 
+⚠️ Verify every address on the relevant block explorer before interacting. See
+[`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md) for the canonical, on-chain-verified record — the same
+contract address can be a different contract on a different chain (documented gotcha, see that file).
 
-⚠️ Verify every address on the relevant block explorer before interacting.
+| Contract | Network | Address |
+|---|---|---|
+| FeeCollector V2 (instant swaps) | Ethereum Mainnet | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` |
+| FeeCollector (instant swaps) | Base | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
+| FeeCollector (instant swaps) | Arbitrum One | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
+| OrderExecutor v2 (conditional orders) | Ethereum Mainnet | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
+| OrderExecutor V3 (conditional orders, DCA live) | Base | `0x686b4f812291F4De238E59ED00BA6dD6129e60a0` |
 
-
-
-ContractNetworkAddress
-FeeCollector V2 Ethereum Mainnet 0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459
-OrderExecutor v2 Base 0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130
-
-All contracts are MIT-licensed, source-verified, and developed/tested with Foundry (87 contract tests).
+All contracts are MIT-licensed, source-verified, and developed/tested with Foundry (119 contract tests).
 
 Quality
 
 
-1,600+ automated TypeScript tests plus a Foundry contract suite.
+2,900+ automated TypeScript tests plus a Foundry contract suite (119 tests).
 CI gates on lint, typecheck, full test suite, contract tests, build, and secret scanning — every PR.
 Recurring internal and external security reviews; findings tracked to closure.
 
 
 Status
 
-Live on Ethereum Mainnet and Base. Actively developed.
+Live on Ethereum Mainnet, Base, and Arbitrum. DCA orders are live on Base; Limit, Stop-Loss, and
+Take-Profit are in development. Actively developed.
 
 Disclaimer
 
