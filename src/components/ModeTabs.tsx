@@ -1,22 +1,32 @@
 'use client'
 
 /**
- * [chore/mobile-ux-polish] ModeTabs — the in-app mode navigation (Swap / Portfolio / DCA / Orders /
- * History / Analytics), extracted from page.tsx and made GENUINELY scrollable on mobile.
+ * [chore/mobile-ux-polish, chore/nav-tabs-no-clip] ModeTabs — the in-app mode navigation (Swap /
+ * Portfolio / DCA / Orders / History / Analytics), extracted from page.tsx and made GENUINELY
+ * scrollable at EVERY viewport width — no breakpoint switches to a force-shrink layout.
  *
- * ROOT CAUSE of the mobile bug (verified in real Chromium @375px): the old inline tab bar gave each
- * button `flex-1`, so the 6 tabs SHARED the capped container width and squished to ~54px / ~38px-tall
- * with 11px labels — `overflow-x-auto` never had anything to scroll, the static `.tab-bar-fade` mask
- * permanently dimmed the last tab, and there was no drag/wheel input. Tabs were cramped, sub-44px, and
- * the right-most ("Analytics") was visually clipped.
+ * ROOT CAUSE of the original mobile bug (verified in real Chromium @375px): the old inline tab bar
+ * gave each button `flex-1`, so the tabs SHARED the capped container width and squished to ~54px /
+ * ~38px-tall with 11px labels — `overflow-x-auto` never had anything to scroll, the static
+ * `.tab-bar-fade` mask permanently dimmed the last tab, and there was no drag/wheel input. Tabs were
+ * cramped, sub-44px, and the right-most ("Analytics") was visually clipped.
  *
- * FIX (mirrors the proven CategoryChips scroller — touch/trackpad unchanged, now mouse-usable too):
- *   • `shrink-0` tabs in a `flex-nowrap` row that genuinely overflows → real horizontal scroll;
+ * [chore/nav-tabs-no-clip] The FIRST fix below re-introduced the SAME squeeze at `sm:` only
+ * (`sm:flex-1` inside a fixed `sm:max-w-[540px]` container) — sized for the tab set at the time, it
+ * clipped again ("Analytics" -> "Analy") the moment the label set grew wider than 540px worth of
+ * equal shares. The fix now applies the SAME natural-width + scroll strategy at every breakpoint,
+ * so there is no width threshold at which clipping can recur:
+ *   • `shrink-0` + `whitespace-nowrap` tabs in a `flex-nowrap` row — every tab always renders at its
+ *     full natural label width, at any viewport, never force-shrunk below it;
+ *   • the outer container hugs that natural total width (`sm:w-fit`) instead of stretching/shrinking
+ *     to a fixed pixel value, so desktop auto-widens to fit however many tabs are passed in;
+ *   • if the tab set is ever wider than the viewport allows (mobile, or a future longer tab list),
+ *     the row falls back to genuine horizontal scroll — same mechanism, same fades, same drag input,
+ *     at every size, rather than two different behaviours per breakpoint;
  *   • each tab `min-h-[44px]` (≥44px tap target) and `text-[13px]` labels (≥12px readable);
  *   • drag-to-scroll (pointer) + vertical-wheel→horizontal (native non-passive) for mouse users;
  *   • dynamic edge-fades toggled by scroll position (replaces the misleading static mask);
  *   • the active tab auto-scrolls into view so a selected off-screen tab is never hidden.
- * Desktop is unchanged: on `sm:` the row fits without overflowing, so it simply doesn't scroll.
  */
 
 import { useRef, useState, useEffect, useCallback } from 'react'
@@ -96,7 +106,7 @@ export default function ModeTabs({ tabs, active, onSelect }: Props) {
   }, [updateFades])
 
   return (
-    <div className="sticky top-0 z-40 mb-4 w-full max-w-[calc(100vw-1.5rem)] sm:max-w-[540px]">
+    <div className="sticky top-0 z-40 mb-4 w-full max-w-[calc(100vw-1.5rem)] sm:w-fit">
       {/* `relative` wrapper for the absolute edge-fades; the sticky lives on the OUTER element above
           so its containing block is the tall page column (the fades are out-of-flow and would zero
           out sticky travel if sticky sat here). */}
@@ -133,7 +143,7 @@ export default function ModeTabs({ tabs, active, onSelect }: Props) {
                 if (comingSoon) return
                 onSelect(mode)
               }}
-              className={`flex min-h-[44px] shrink-0 snap-start items-center justify-center whitespace-nowrap rounded-lg px-4 text-[13px] font-semibold transition-all sm:flex-1 sm:px-2 ${
+              className={`flex min-h-[44px] shrink-0 snap-start items-center justify-center whitespace-nowrap rounded-lg px-4 text-[13px] font-semibold transition-all ${
                 comingSoon
                   ? 'cursor-not-allowed text-cream-35 opacity-50'
                   : isActive
