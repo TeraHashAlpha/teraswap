@@ -39,9 +39,11 @@
  *
  * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
  *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
- *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec. Defaults per
- *                                  chain (42161 -> the Arbitrum feed); every other chain keeps
- *                                  the mainnet feed default.
+ *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec. Unset ⇒ resolved
+ *                                  for CHAIN_ID from eth-usd-feed.js (1 / 8453 / 42161), which
+ *                                  mirrors src/lib/chains/chainlink-feeds.ts. A chain with no
+ *                                  known aggregator disables the Chainlink read (fail-closed) —
+ *                                  never another chain's feed.
  *   LOW_GAS_USD_THRESHOLD       -- (optional) USD gas-value below which a low-gas alert fires (default 5)
  *   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -- (optional) Telegram alert sink (see alert.js)
  *
@@ -138,6 +140,10 @@ import { resolvePinnedRouterData, planPinnedRouteRevert, isMarketRevert } from "
 // [FIX-KEEPER-GAS-TIER-BASE] Per-chain gas-tier resolution — mainnet byte-identical, Base gets
 // its own calibrated regime instead of the mainnet-scaled defaults.
 import { getGasTierConfig, resolveGasTier as resolveGasTierForChain, assertTierOrdering } from "./gas-tier.js"
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware ETH/USD aggregator resolution — fail-closed
+// (unknown chain ⇒ no feed ⇒ no read) so the ETH leg of the DCA floor reference can never be
+// priced off another chain's aggregator.
+import { resolveEthUsdFeed } from "./eth-usd-feed.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -226,25 +232,22 @@ const ETH_PRICED_ADDRESSES = new Set(
 //   OUTFLOW_THRESHOLD_ETH  -- ETH leaving the executor wallet beyond own gas spend
 //                             that counts as a "full alarm" unexplained outflow.
 //                             Default 0.01 ETH. Drives the DOMINANT freeze signal.
-//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals) used to
-//                             value the wallet's ETH for the low-gas signal.
-//                             Default = mainnet ETH/USD feed.
+//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals). Values the
+//                             wallet's ETH for the low-gas signal AND prices the ETH
+//                             leg of the DCA oracle-floor reference. Unset ⇒ resolved
+//                             per chain (eth-usd-feed.js); unknown chain ⇒ no read.
 //   LOW_GAS_USD_THRESHOLD  -- USD value of the wallet's ETH below which we emit a
 //                             low-gas alert. Default 5 (matches freeze-score GAS_LOW_USD).
 const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0.01")
-// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] Per-chain ETH/USD aggregator DEFAULTS. Chainlink deploys
-// each feed at a different address per chain, so the historical mainnet-only default reads a
-// contract with no code on any other chain (readEthUsd returns null -> the ETH leg silently loses
-// its Chainlink-first price). Only 42161 is listed: chains 1 and 8453 have NO entry, so they fall
-// through to the unchanged mainnet default exactly as before this sprint (Base's correct feed
-// stays an operator ETH_USD_FEED concern — changing it is out of this sprint's scope). An explicit
-// ETH_USD_FEED still wins everywhere. Address from docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json
-// (feed:ETH/USD, description "ETH / USD", 8 decimals), pinned by arbitrum-plumbing.test.mjs.
-const ETH_USD_FEED_BY_CHAIN = {
-  42161: "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", // Arbitrum One ETH/USD
-}
-const ETH_USD_FEED =
-  process.env.ETH_USD_FEED || ETH_USD_FEED_BY_CHAIN[CHAIN_ID] || "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware, FAIL-CLOSED ETH/USD aggregator resolution
+// (eth-usd-feed.js, pinned to the app's chainlink-feeds.ts by a drift test). Replaces the previous
+// "|| <mainnet address>" tail, which handed EVERY unlisted chain a codeless address — this is not
+// only the low-gas alert: readEthUsd feeds fetchReferencePriceUsd, i.e. the ETH leg of the DCA
+// Phase-0 oracle floor. An explicit ETH_USD_FEED still overrides, verbatim and first. A chain with
+// no known aggregator now resolves to NULL (readEthUsd skips the read; the existing DefiLlama /
+// no-reference fallback is untouched) rather than to another chain's feed.
+const ETH_USD_FEED_RESOLUTION = resolveEthUsdFeed({ chainId: CHAIN_ID, envFeed: process.env.ETH_USD_FEED })
+const ETH_USD_FEED = ETH_USD_FEED_RESOLUTION.feed
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
 
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
@@ -696,10 +699,26 @@ async function readFreezeFlag() {
   }
 }
 
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Warn ONCE per process when this keeper's chain has no
+// known ETH/USD aggregator — the condition is static for the run, and readEthUsd is called every
+// cycle plus once per ETH leg, so repeating it would drown the log it needs to stand out in.
+let ethUsdFeedMissingWarned = false
+
 // [DCA-OBS] Read ETH/USD from the Chainlink aggregator (8 decimals). Returns a
 // Number USD price, or null if the feed read fails (non-fatal; low-gas signal is
 // simply skipped that cycle). Never throws.
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] A null feed (unknown chain, ETH_USD_FEED unset) returns
+// null WITHOUT a read — fail-closed. Callers are unchanged: the low-gas signal skips that cycle,
+// and fetchReferencePriceUsd falls through to its existing DefiLlama path (and, for the ETH leg,
+// classifies a miss as TRANSIENT, so the fill is delayed/flagged rather than filled unbounded).
 async function readEthUsd(publicClient) {
+  if (!ETH_USD_FEED) {
+    if (!ethUsdFeedMissingWarned) {
+      ethUsdFeedMissingWarned = true
+      log(`  WARNING: no ETH/USD Chainlink read possible -- ${ETH_USD_FEED_RESOLUTION.reason}`)
+    }
+    return null
+  }
   try {
     const [, answer] = await publicClient.readContract({
       address: getAddress(ETH_USD_FEED),
@@ -1957,6 +1976,13 @@ async function main() {
   // [SPRINT-V3-P2] Loud about v3 state at boot: either the configured address, or an explicit
   // "disabled" so a v3 order silently piling up (skip+flag every cycle) is diagnosable from logs.
   log(`Contract (v3): ${V3_CONTRACT_ADDRESS || "not configured -- v3 orders will be skipped + flagged"}`)
+  // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Loud about the resolved aggregator at boot: this feed
+  // prices the ETH leg of the DCA oracle-floor reference, so "which address, and why that one"
+  // must be diagnosable from the log rather than inferred from the chain id.
+  log(
+    `ETH/USD feed: ${ETH_USD_FEED ?? "NONE -- Chainlink reads disabled"} ` +
+      `[${ETH_USD_FEED_RESOLUTION.source}] ${ETH_USD_FEED_RESOLUTION.reason}`,
+  )
   log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
   log(`Max batch: ${MAX_BATCH}`)
   // [FIX-KEEPER-GAS-TIER-BASE] Log THIS chain's resolved config, not a hardcoded mainnet one.

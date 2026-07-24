@@ -26,6 +26,7 @@ import { sourceForRouter } from "./swap-route.js"
 import { resolveExecutorRouting } from "./executor-routing.js"
 import { resolveGasTier, getGasTierConfig, assertTierOrdering, ARBITRUM_CHAIN_ID } from "./gas-tier.js"
 import { resolveSubmissionPolicy } from "./submission-policy.js"
+import { resolveEthUsdFeed } from "./eth-usd-feed.js"
 
 const ARBITRUM_ONE = 42161
 
@@ -95,28 +96,32 @@ describe("oracle floor resolves for 42161", () => {
     assert.ok(containsAddress(ethPricedBlock[1], MANIFEST.WETH), "Arbitrum WETH must be INSIDE ETH_PRICED_ADDRESSES")
   })
 
+  // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] The per-chain ETH/USD map moved out of executor.js into
+  // the pure eth-usd-feed.js module (drift-guarded against src/lib/chains/chainlink-feeds.ts), so
+  // these assert the resolved VALUE rather than an executor.js literal — a stronger check than the
+  // source-regex they replace. eth-usd-feed.test.mjs owns the env-override / fail-closed cases.
   test("the 42161 ETH/USD aggregator default is the manifest's Arbitrum feed, not the mainnet one", () => {
-    const feedBlock = executorSource.match(/const ETH_USD_FEED_BY_CHAIN = \{([\s\S]*?)\}/)
-    assert.ok(feedBlock, "could not locate ETH_USD_FEED_BY_CHAIN")
-    assert.ok(
-      containsAddress(feedBlock[1], MANIFEST["ETH/USD"]),
+    const resolved = resolveEthUsdFeed({ chainId: ARBITRUM_ONE, envFeed: undefined })
+    assert.equal(resolved.source, "chain-default")
+    assert.equal(
+      resolved.feed.toLowerCase(),
+      MANIFEST["ETH/USD"].toLowerCase(),
       `the 42161 ETH/USD default must be the manifest's ${MANIFEST["ETH/USD"]}`,
     )
-    assert.match(feedBlock[1], /42161:/)
   })
 
   test("an explicit ETH_USD_FEED env var still wins over the per-chain default", () => {
-    assert.match(
-      executorSource,
-      /process\.env\.ETH_USD_FEED \|\|\s*ETH_USD_FEED_BY_CHAIN\[CHAIN_ID\] \|\|/,
-    )
+    const custom = "0x1234567890abcdef1234567890abcdef12345678"
+    const resolved = resolveEthUsdFeed({ chainId: ARBITRUM_ONE, envFeed: custom })
+    assert.equal(resolved.feed, custom)
+    assert.equal(resolved.source, "env")
   })
 
-  test("BYTE-IDENTICAL 1/8453: neither chain has a per-chain feed entry, so both keep the mainnet default", () => {
-    const feedBlock = executorSource.match(/const ETH_USD_FEED_BY_CHAIN = \{([\s\S]*?)\}/)[1]
-    assert.ok(!/(^|[^0-9])1:/.test(feedBlock), "chain 1 must have no entry (it already defaults to its own feed)")
-    assert.ok(!/8453:/.test(feedBlock), "chain 8453 must have no entry — changing Base's default is out of scope")
-    assert.match(executorSource, /"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"/)
+  test("42161's aggregator is distinct from mainnet's and Base's (a shared address would mean drift)", () => {
+    const arb = resolveEthUsdFeed({ chainId: ARBITRUM_ONE, envFeed: undefined }).feed.toLowerCase()
+    for (const other of [1, 8453]) {
+      assert.notEqual(arb, resolveEthUsdFeed({ chainId: other, envFeed: undefined }).feed.toLowerCase())
+    }
   })
 })
 
