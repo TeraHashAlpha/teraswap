@@ -16,6 +16,8 @@
 
 export const MAINNET_CHAIN_ID = 1
 export const BASE_CHAIN_ID = 8453
+/** [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] Arbitrum One — a second CHAIN_ID this keeper can serve. */
+export const ARBITRUM_CHAIN_ID = 42161
 
 function num(envVar, fallback) {
   const raw = process.env[envVar]
@@ -89,9 +91,62 @@ function baseConfig() {
   }
 }
 
+/**
+ * Arbitrum One (42161) — [SPRINT-KEEPER-MULTICHAIN-ARBITRUM]. `_ARBITRUM`-suffixed env vars
+ * mirror the `_BASE` convention above, so an operator can retune without a redeploy.
+ *
+ * ⚠️ PENDING REAL-FILL CALIBRATION. Base's numbers came from FILL-ECONOMICS-CALIBRATION.md, which
+ * measured two REAL OE_V3 fills. There is no Arbitrum executor deployed yet (this sprint ships
+ * DARK), so there are ZERO real Arbitrum fills to calibrate against — the values below are derived
+ * from Arbitrum Nitro's published fee mechanics, NOT from measurement. Re-derive them from the
+ * first real fills exactly as the Base note was, and treat them as provisional until then.
+ *
+ * Derivation (documented so a future recalibration has the reasoning, not just numbers):
+ *   - Priority fees (0.001 / 0.005 / 0.01 gwei) — effectively ~0, and deliberately so. Nitro's
+ *     sequencer orders transactions FIRST-COME-FIRST-SERVED: there is no priority auction, so a
+ *     tip buys NO inclusion advantage (unlike mainnet, and unlike even Base's small margin). The
+ *     values are kept strictly ABOVE zero only so a node/RPC that rejects a literal-zero
+ *     maxPriorityFeePerGas still accepts the tx — paying ~0.001 gwei on Arbitrum's ~0.01 gwei
+ *     floor is a rounding error, whereas a rejected tx would defer the fill. Ratios (1 : 5 : 10)
+ *     keep the same escalating shape as mainnet (1 : 1.67 : 2.67) and Base (1 : 2.5 : 5).
+ *   - Thresholds (0.1 / 0.5 / 1.0 gwei): ArbOS enforces a 0.01 gwei L2 base-fee FLOOR, and quiet
+ *     Arbitrum sits on it, so the floor is a full 10x BELOW NORMAL — a quiet-market fill always
+ *     resolves NORMAL, never SKIP. They are still real ceilings rather than decorative: Arbitrum's
+ *     congestion spikes are sub-gwei, so ELEVATED/URGENT/SKIP genuinely trigger under load —
+ *     the exact failure mode the Base note calls out for mainnet's 30/80/100 gwei on an L2
+ *     (thresholds so far above the regime that every order silently resolves NORMAL).
+ *   - Base-fee multipliers (2 / 2.5 / 3): unchanged from mainnet and Base. These are RELATIVE
+ *     multipliers on an already-tiny L2 baseFee, so keeping them conservative costs ~nothing and
+ *     absorbs the intra-block base-fee drift Nitro's rapid blocks produce.
+ *
+ * Deferral semantics are IDENTICAL to Base/mainnet: resolveGasTier only ever returns
+ * execute:false, which the executor.js call site treats as "leave the order active, retry next
+ * cycle". Gas price alone can never fail an order on Arbitrum either.
+ */
+function arbitrumConfig() {
+  return {
+    thresholdsGwei: {
+      NORMAL: num("GAS_TIER_NORMAL_GWEI_ARBITRUM", 0.1),
+      ELEVATED: num("GAS_TIER_ELEVATED_GWEI_ARBITRUM", 0.5),
+      URGENT: num("GAS_TIER_URGENT_GWEI_ARBITRUM", 1),
+    },
+    priorityFeeGwei: {
+      NORMAL: num("GAS_PRIORITY_NORMAL_GWEI_ARBITRUM", 0.001),
+      ELEVATED: num("GAS_PRIORITY_ELEVATED_GWEI_ARBITRUM", 0.005),
+      URGENT: num("GAS_PRIORITY_URGENT_GWEI_ARBITRUM", 0.01),
+    },
+    baseFeeMult: {
+      NORMAL: num("GAS_BASEFEE_MULT_NORMAL_ARBITRUM", 2),
+      ELEVATED: num("GAS_BASEFEE_MULT_ELEVATED_ARBITRUM", 2.5),
+      URGENT: num("GAS_BASEFEE_MULT_URGENT_ARBITRUM", 3),
+    },
+  }
+}
+
 const CONFIG_FACTORY_BY_CHAIN = {
   [MAINNET_CHAIN_ID]: mainnetConfig,
   [BASE_CHAIN_ID]: baseConfig,
+  [ARBITRUM_CHAIN_ID]: arbitrumConfig,
 }
 
 /**
