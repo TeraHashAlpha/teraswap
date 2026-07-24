@@ -1,0 +1,328 @@
+# [CHORE-DAILY-HEALTH-REPORT-GHA] Scheduled daily production health report.
+#
+# WHY: the health-report generator ran as an owner-level sandboxed scheduled task with NO SSH
+# signing key configured. Every run's PERSIST step ("node scripts/commit-audit-report.mjs")
+# therefore failed with "fatal: either user.signingkey or gpg.ssh.defaultKeyCommand needs to be
+# configured" — ~20 reports were generated on disk and never committed (see the "Erro na
+# persistência" section of any recent Audits/Daily/health-*.md). It also checked local env vars
+# (MONITOR_SECRET, SUPABASE_SERVICE_ROLE_KEY) that are simply unset in that sandbox, producing a
+# permanent false "unreachable/unconfigured" warning even though production is fine.
+#
+# This workflow replaces BOTH: it runs on GitHub's infrastructure (no local signing key needed —
+# see the PERSIST step below for exactly why that lets it push without one), and it checks
+# PRODUCTION directly (via the live site + the public /api/health self-report), which closes the
+# local-env check-gap by construction: a real misconfiguration in prod shows up as a real FAIL,
+# not as this workflow's own env being unset.
+#
+# PERSIST STEP DESIGN: this does NOT commit to `main` and does NOT open a PR. `main` requires
+# signed commits at branch protection (CLAUDE.md rule #12) and a plain `git commit` from an
+# Actions runner is not cryptographically signed — it would be rejected the same way the sandbox
+# was blocked, just server-side instead of client-side. Reports already have a dedicated home that
+# does not enforce that: the `audits/cadence` branch (see scripts/commit-audit-report.mjs, which
+# pushes there via a temp detached worktree so a report commit never touches whatever branch the
+# operator has checked out). This workflow mirrors that same temp-worktree approach, so
+# `audits/cadence` keeps behaving exactly as it does for every OTHER cadence report, regardless of
+# whether it was written by this Action or by an operator running the script by hand. No PR, no
+# Auditor gate — see the PR body for this chore for the Auditor note (CI/infra, not fund-flow).
+#
+# SECRETS THIS WORKFLOW NEEDS (Settings → Secrets and variables → Actions → New repository
+# secret). Exact names, read only via `env:` and never interpolated into a `run:` string or
+# echoed/set -x'd — GitHub auto-masks a registered secret's value in logs ONLY when it reaches the
+# log through a real value, so the discipline of never printing it is what actually protects it:
+#   MONITOR_SECRET      -- same value as the MONITOR_SECRET Vercel prod env var. Sent as
+#                           `Authorization: Bearer` to GET /api/monitor.
+#   HEALTH_RPC_URL_BASE -- a Base mainnet JSON-RPC URL, used ONLY for a read-only eth_getBalance
+#                           call. Deliberately a SEPARATE secret from any RPC URL the app or keeper
+#                           use in production — this workflow does not need write/signing access
+#                           and should never share a key with something that does.
+#   KEEPER_ADDRESS_BASE -- the Base keeper wallet's address (public on-chain — not sensitive, but
+#                           kept alongside the other two as a repo secret for one-place ops config;
+#                           swap to a repo VARIABLE later if that split is preferred).
+#
+# Triggers are schedule/workflow_dispatch only — no untrusted input is ever interpolated into a
+# run: command (the ${{ }}-in-run injection class the security-guidance hook warns about does not
+# apply here: nothing in this workflow reads PR titles, issue bodies, or any other attacker-editable
+# GitHub event field).
+
+name: "Daily health report"
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # 08:00 UTC daily — adjust to the owner's preferred reporting hour
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-health-report
+  cancel-in-progress: false
+
+env:
+  SITE_URL: "https://www.teraswap.app"
+  # Thresholds mirror the convention already established in recent Audits/Daily/health-*.md
+  # reports (e.g. health-2026-07-24.md: "abaixo do threshold de aviso 0.01 ETH; acima do crítico
+  # 0.002 ETH"). NOT derived from freeze-score.js's GAS_LOW_USD/GAS_CRITICAL_USD — those are
+  # USD-denominated inputs to the keeper's own auto-freeze urgency SCORE (a different signal, for
+  # a different consumer); these are ETH-denominated and specific to this human-facing report.
+  GAS_WARNING_ETH: "0.01"
+  GAS_CRITICAL_ETH: "0.002"
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0 # full history — the Git Activity check needs `git log --since`
+
+      - name: Compute report date
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Check site + API + SSL (public, unauthenticated)
+        id: site
+        run: |
+          set -euo pipefail
+
+          site_out=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" --max-time 15 "$SITE_URL" || echo "000 0")
+          echo "site_code=$(echo "$site_out" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "site_time=$(echo "$site_out" | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+          api_out=$(curl -s -o /dev/null -w "%{http_code} %{time_total}" --max-time 15 "$SITE_URL/api/health" || echo "000 0")
+          echo "api_code=$(echo "$api_out" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "api_time=$(echo "$api_out" | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+          # /api/health's public branch returns 200 (status:"OK") when isSupabaseEnabled() is true
+          # in PRODUCTION, 503 (status:"DEGRADED") otherwise — this IS the prod secret-set status
+          # this workflow reports, and it is real prod state, not this runner's own (unset) env.
+
+          host=$(echo "$SITE_URL" | sed -E 's#https?://##; s#/.*##')
+          end_date=$(echo | timeout 10 openssl s_client -servername "$host" -connect "$host:443" 2>/dev/null \
+            | openssl x509 -noout -enddate 2>/dev/null | sed 's/notAfter=//' || echo "")
+          if [ -n "$end_date" ]; then
+            end_epoch=$(date -u -d "$end_date" +%s 2>/dev/null || echo 0)
+            now_epoch=$(date -u +%s)
+            days_left=$(( (end_epoch - now_epoch) / 86400 ))
+            echo "ssl_end=$end_date" >> "$GITHUB_OUTPUT"
+            echo "ssl_days=$days_left" >> "$GITHUB_OUTPUT"
+          else
+            echo "ssl_end=" >> "$GITHUB_OUTPUT"
+            echo "ssl_days=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check protected monitor endpoint
+        id: monitor
+        env:
+          MONITOR_SECRET: ${{ secrets.MONITOR_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MONITOR_SECRET:-}" ]; then
+            echo "code=NOSECRET" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+            -H "Authorization: Bearer ${MONITOR_SECRET}" \
+            "$SITE_URL/api/monitor" || echo "000")
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Check keeper gas balance on Base
+        id: gas
+        env:
+          RPC_URL: ${{ secrets.HEALTH_RPC_URL_BASE }}
+          KEEPER_ADDRESS: ${{ secrets.KEEPER_ADDRESS_BASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RPC_URL:-}" ] || [ -z "${KEEPER_ADDRESS:-}" ]; then
+            echo "status=NOSECRET" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # eth_getBalance is a read-only RPC call — no key, no signing, nothing sent on-chain.
+          resp=$(curl -s --max-time 15 -X POST "$RPC_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"${KEEPER_ADDRESS}\",\"latest\"],\"id\":1}" \
+            || echo "")
+          hex=$(node -e "try{const r=JSON.parse(process.argv[1]);process.stdout.write(r.result||'')}catch{process.stdout.write('')}" "$resp")
+          if [ -z "$hex" ]; then
+            echo "status=RPCFAIL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          eth=$(node -e "
+            const wei = BigInt(process.argv[1]);
+            const whole = wei / 1000000000000000000n;
+            const frac = (wei % 1000000000000000000n).toString().padStart(18, '0').slice(0, 6);
+            process.stdout.write(\`\${whole}.\${frac}\`);
+          " "$hex")
+          echo "eth=$eth" >> "$GITHUB_OUTPUT"
+          echo "status=OK" >> "$GITHUB_OUTPUT"
+
+      - name: Git activity (last 24h on origin/main)
+        id: git
+        run: |
+          count=$(git log origin/main --since="24 hours ago" --oneline | wc -l | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Compose report
+        id: compose
+        # [correctness] Overall-status classification originally lived in a bash `A || B || C && D`
+        # one-liner. Bash's AND-OR list is a strict left-to-right short-circuit CHAIN, not
+        # `(A||B||C) && D` — e.g. with A=true (site down) and D=false (gas not critical), the chain
+        # still evaluates D last and reports OK, silently swallowing the site-down CRITICAL. Doing
+        # this in Node instead gets normal boolean semantics for free and is far easier to read.
+        env:
+          REPORT_DATE: ${{ steps.date.outputs.date }}
+          SITE_CODE: ${{ steps.site.outputs.site_code }}
+          SITE_TIME: ${{ steps.site.outputs.site_time }}
+          API_CODE: ${{ steps.site.outputs.api_code }}
+          API_TIME: ${{ steps.site.outputs.api_time }}
+          SSL_END: ${{ steps.site.outputs.ssl_end }}
+          SSL_DAYS: ${{ steps.site.outputs.ssl_days }}
+          MONITOR_CODE: ${{ steps.monitor.outputs.code }}
+          GAS_STATUS: ${{ steps.gas.outputs.status }}
+          GAS_ETH: ${{ steps.gas.outputs.eth }}
+          GAS_WARNING_ETH: ${{ env.GAS_WARNING_ETH }}
+          GAS_CRITICAL_ETH: ${{ env.GAS_CRITICAL_ETH }}
+          GIT_COUNT: ${{ steps.git.outputs.count }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/compose-report.mjs <<'NODE_EOF'
+          import { writeFileSync } from 'node:fs'
+
+          const e = process.env
+          const lines = []
+          const requiresAttention = []
+          let severity = 0 // 0=ok 1=warning 2=critical
+          const bump = (n) => { if (n > severity) severity = n }
+
+          const siteOk = e.SITE_CODE === '200'
+          bump(siteOk ? 0 : 2)
+
+          const apiOk = e.API_CODE === '200'
+          bump(apiOk ? 0 : 2)
+
+          const sslDays = e.SSL_DAYS ? Number(e.SSL_DAYS) : null
+          const sslKnown = sslDays !== null && Number.isFinite(sslDays)
+          const sslOk = sslKnown && sslDays > 14
+          bump(sslKnown ? (sslOk ? 0 : 1) : 1)
+
+          let monitorLine = '⚠️ | Skipped — MONITOR_SECRET repo secret not set'
+          if (e.MONITOR_CODE === '200') {
+            monitorLine = '✅ | HTTP 200'
+          } else if (e.MONITOR_CODE && e.MONITOR_CODE !== 'NOSECRET') {
+            monitorLine = `⚠️ | HTTP ${e.MONITOR_CODE}`
+            bump(1)
+          } else if (e.MONITOR_CODE !== 'NOSECRET') {
+            bump(1) // empty/unset code from a failed curl, not the deliberate NOSECRET skip
+          }
+
+          let gasLine = '⚠️ | Skipped — HEALTH_RPC_URL_BASE / KEEPER_ADDRESS_BASE repo secrets not set'
+          let gasBelowWarn = false
+          if (e.GAS_STATUS === 'RPCFAIL') {
+            gasLine = '⚠️ | RPC call failed'
+            bump(1)
+          } else if (e.GAS_STATUS === 'OK') {
+            const gasEth = Number(e.GAS_ETH)
+            const warnEth = Number(e.GAS_WARNING_ETH)
+            const critEth = Number(e.GAS_CRITICAL_ETH)
+            const belowCrit = gasEth < critEth
+            gasBelowWarn = gasEth < warnEth
+            if (belowCrit) {
+              gasLine = `🔴 | ${e.GAS_ETH} ETH on Base — BELOW critical threshold (${e.GAS_CRITICAL_ETH} ETH). Keeper may soon be unable to pay gas.`
+              bump(2)
+            } else if (gasBelowWarn) {
+              gasLine = `⚠️ | ${e.GAS_ETH} ETH on Base — below warning threshold (${e.GAS_WARNING_ETH} ETH); above critical (${e.GAS_CRITICAL_ETH} ETH).`
+              bump(1)
+            } else {
+              gasLine = `✅ | ${e.GAS_ETH} ETH on Base`
+            }
+          }
+
+          const overall = severity === 2 ? '🔴 CRITICAL' : severity === 1 ? '🟡 WARNING' : '🟢 OK'
+
+          // Every ⚠️/❌ table row gets a corresponding bullet here — a WARNING/CRITICAL report
+          // with an empty "Requires Attention" (because only the NOSECRET/gas-warning/SSL cases
+          // were covered) defeats the point of the report: a reader scans this section first.
+          if (!siteOk) {
+            requiresAttention.push(`Site returned HTTP ${e.SITE_CODE} instead of 200 — teraswap.app may be down or unreachable.`)
+          }
+          if (!apiOk) {
+            requiresAttention.push(`/api/health returned HTTP ${e.API_CODE} instead of 200 — production Supabase env vars may be unset or Supabase itself may be down.`)
+          }
+          if (e.MONITOR_CODE === 'NOSECRET') {
+            requiresAttention.push('MONITOR_SECRET repo secret is not set — the Monitor check is skipped every run. Add it in Settings → Secrets.')
+          } else if (e.MONITOR_CODE !== '200') {
+            requiresAttention.push(`/api/monitor returned HTTP ${e.MONITOR_CODE || '(no response)'} — check MONITOR_SECRET still matches the Vercel prod env var, or that the endpoint is reachable.`)
+          }
+          if (e.GAS_STATUS === 'NOSECRET') {
+            requiresAttention.push('HEALTH_RPC_URL_BASE / KEEPER_ADDRESS_BASE repo secrets are not set — the keeper gas check is skipped every run.')
+          } else if (e.GAS_STATUS === 'RPCFAIL') {
+            requiresAttention.push('The Base RPC call for the keeper gas balance failed — check HEALTH_RPC_URL_BASE is a working endpoint.')
+          } else if (e.GAS_STATUS === 'OK' && gasBelowWarn) {
+            requiresAttention.push(`Keeper gas on Base is ${e.GAS_ETH} ETH — below the ${e.GAS_WARNING_ETH} ETH warning threshold. Top up before it reaches the ${e.GAS_CRITICAL_ETH} ETH critical floor.`)
+          }
+          if (!sslKnown) {
+            requiresAttention.push('Could not read the SSL certificate expiry — verify the site is serving a valid certificate.')
+          } else if (sslDays <= 14) {
+            requiresAttention.push(`SSL certificate expires in ~${sslDays} days — renew soon.`)
+          }
+
+          lines.push(`# TeraSwap Daily Health Report — ${e.REPORT_DATE}`, '')
+          lines.push(`**Overall Status:** ${overall}`, '')
+          lines.push('_Generated by the `daily-health-report` GitHub Action (checks run against production, not a local sandbox)._', '')
+          lines.push('## Results', '')
+          lines.push('| Check | Status | Details |', '|-------|--------|---------|')
+          lines.push(`| Site (www.teraswap.app) | ${siteOk ? '✅' : '❌'} | HTTP ${e.SITE_CODE}, ${e.SITE_TIME}s |`)
+          lines.push(`| API Health (/api/health) | ${apiOk ? '✅' : '❌'} | HTTP ${e.API_CODE}, ${e.API_TIME}s — 200 means prod Supabase env vars ARE set; 503 means they are NOT |`)
+          lines.push(
+            sslKnown
+              ? `| SSL Certificate | ${sslOk ? '✅' : '⚠️'} | Expires ${e.SSL_END} (~${sslDays} days) |`
+              : '| SSL Certificate | ⚠️ | Could not read certificate expiry |',
+          )
+          lines.push(`| Monitor (/api/monitor) | ${monitorLine} |`)
+          lines.push(`| Keeper gas (Base) | ${gasLine} |`)
+          lines.push(`| Git Activity (origin/main) | ℹ️ | ${e.GIT_COUNT} commits in the last 24h |`, '')
+          lines.push('## Actions Taken')
+          lines.push('None — this workflow only reads (curl + a read-only eth_getBalance RPC call); it never writes to any endpoint.', '')
+          lines.push('## Requires Attention')
+          lines.push(...(requiresAttention.length ? requiresAttention.map((s) => `- ${s}`) : ['Nothing outstanding.']))
+
+          writeFileSync(process.env.OUT_PATH, lines.join('\n') + '\n')
+          NODE_EOF
+
+          out="/tmp/health-${REPORT_DATE}.md"
+          OUT_PATH="$out" node /tmp/compose-report.mjs
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+          cat "$out"
+
+      - name: Persist report to the audits/cadence branch (no PR — same target as commit-audit-report.mjs)
+        env:
+          REPORT_DATE: ${{ steps.date.outputs.date }}
+          REPORT_PATH: ${{ steps.compose.outputs.path }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          BASE="origin/main"
+          if git fetch origin audits/cadence 2>/dev/null; then
+            BASE="origin/audits/cadence"
+          fi
+
+          # Detached temp worktree, mirroring scripts/commit-audit-report.mjs, so this commit can
+          # never pick up unrelated drift between main and audits/cadence — only the one new file.
+          WT="$(mktemp -d)"
+          git worktree add --detach "$WT" "$BASE"
+          trap 'git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"' EXIT
+
+          mkdir -p "$WT/Audits/Daily"
+          cp "$REPORT_PATH" "$WT/Audits/Daily/health-${REPORT_DATE}.md"
+
+          # `git -C "$WT"` throughout — never `cd` into the worktree — so the trap's cleanup can
+          # remove it unconditionally without the shell's own cwd being inside the path it deletes.
+          git -C "$WT" add "Audits/Daily/health-${REPORT_DATE}.md"
+          if git -C "$WT" diff --cached --quiet; then
+            echo "report already on audits/cadence — nothing to commit"
+            exit 0
+          fi
+          git -C "$WT" commit -m "docs(audits): daily health report ${REPORT_DATE} [auto]"
+          git -C "$WT" push origin "HEAD:refs/heads/audits/cadence"
