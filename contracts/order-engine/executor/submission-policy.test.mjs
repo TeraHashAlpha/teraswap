@@ -15,13 +15,90 @@
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 
-import { resolveSubmissionPolicy } from "./submission-policy.js"
+import { resolveSubmissionPolicy, SEQUENCER_PRIVATE_CHAIN_IDS } from "./submission-policy.js"
 
 describe("resolveSubmissionPolicy — Base (private sequencer mempool)", () => {
   test("Base mainnet (8453) with no relay submits via the private sequencer mempool", () => {
     const d = resolveSubmissionPolicy({ chainId: 8453, hasPrivateRelay: false, allowPublicOverride: false })
     assert.equal(d.ok, true)
     assert.equal(d.mode, "sequencer-private")
+  })
+})
+
+// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] Arbitrum One is Nitro/ArbOS, not OP-stack, but shares the
+// property this gate cares about: ONE centralized sequencer, no public pending-tx gossip, no
+// Flashbots-equivalent relay. Nitro orders first-come-first-served, so there is not even a
+// tip-reordering surface. It must therefore submit NORMALLY (sequencer-private) and must NEVER be
+// classified as a public-mempool chain.
+describe("resolveSubmissionPolicy — Arbitrum One (42161, Nitro sequencer)", () => {
+  test("42161 with no relay submits via the private sequencer mempool — same class as Base", () => {
+    const d = resolveSubmissionPolicy({ chainId: 42161, hasPrivateRelay: false, allowPublicOverride: false })
+    assert.equal(d.ok, true)
+    assert.equal(d.mode, "sequencer-private")
+  })
+
+  test("42161 is NEVER a public-mempool path — no MEV exposure, under any relay/override combo", () => {
+    for (const hasPrivateRelay of [true, false]) {
+      for (const allowPublicOverride of [true, false]) {
+        const d = resolveSubmissionPolicy({ chainId: 42161, hasPrivateRelay, allowPublicOverride })
+        assert.notEqual(d.mode, "public", `relay=${hasPrivateRelay} override=${allowPublicOverride} must not be public`)
+        assert.equal(d.mode, "sequencer-private")
+        assert.equal(d.ok, true)
+      }
+    }
+  })
+
+  test("REGRESSION: 42161 never fail-closes for want of a relay (the pre-sprint unknown-chain path)", () => {
+    // Before this sprint 42161 fell through to "unknown production chain ⇒ public-mempool", so a
+    // keeper with no FLASHBOTS_RPC_URL would have REFUSED every Arbitrum fill.
+    const d = resolveSubmissionPolicy({ chainId: 42161, hasPrivateRelay: false, allowPublicOverride: false })
+    assert.equal(d.ok, true, "an Arbitrum keeper must not need a relay it cannot have")
+    assert.match(d.reason, /Arbitrum Nitro/)
+  })
+
+  test("a string chainId '42161' is coerced (env-shaped input never throws)", () => {
+    const d = resolveSubmissionPolicy({ chainId: "42161", hasPrivateRelay: false, allowPublicOverride: false })
+    assert.equal(d.ok, true)
+    assert.equal(d.mode, "sequencer-private")
+  })
+
+  test("42161 is a member of the exported SEQUENCER_PRIVATE_CHAIN_IDS set", () => {
+    assert.ok(SEQUENCER_PRIVATE_CHAIN_IDS.has(42161))
+    assert.ok(SEQUENCER_PRIVATE_CHAIN_IDS.has(8453), "Base must still be a member")
+  })
+})
+
+describe("[SPRINT-KEEPER-MULTICHAIN-ARBITRUM] adding 42161 left chains 1 and 8453 BYTE-IDENTICAL", () => {
+  test("Base's decision object is unchanged down to the reason string", () => {
+    assert.deepEqual(
+      resolveSubmissionPolicy({ chainId: 8453, hasPrivateRelay: false, allowPublicOverride: false }),
+      {
+        mode: "sequencer-private",
+        ok: true,
+        reason:
+          "chain 8453: OP-stack sequencer mempool is private (no public pending-tx gossip) — classic sandwich vector absent; oracle floor covers residual",
+      },
+    )
+  })
+
+  test("mainnet (1) still fail-closes without a relay, and still uses one when present", () => {
+    assert.deepEqual(resolveSubmissionPolicy({ chainId: 1, hasPrivateRelay: false, allowPublicOverride: false }), {
+      mode: "public",
+      ok: false,
+      reason:
+        "chain 1: public-mempool chain with no private relay and no ALLOW_PUBLIC_MEMPOOL override — refusing to submit (fail-closed)",
+    })
+    assert.deepEqual(resolveSubmissionPolicy({ chainId: 1, hasPrivateRelay: true, allowPublicOverride: false }), {
+      mode: "private",
+      ok: true,
+      reason: "chain 1: submitting via configured private relay",
+    })
+  })
+
+  test("an unknown production chain is STILL treated as public-mempool (42161 was carved out explicitly, not by widening the fallback)", () => {
+    const d = resolveSubmissionPolicy({ chainId: 42170, hasPrivateRelay: false, allowPublicOverride: false })
+    assert.equal(d.ok, false)
+    assert.equal(d.mode, "public")
   })
 })
 

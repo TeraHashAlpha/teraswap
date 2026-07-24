@@ -1587,8 +1587,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         continue
       }
       // [B-02] Route through the private relay only when the policy resolved to it;
-      // 'sequencer-private' (Base) and the explicit 'public' override both use the
-      // default clients (Base's sequencer mempool is itself private).
+      // 'sequencer-private' (Base 8453, Arbitrum One 42161) and the explicit 'public'
+      // override both use the default clients (those chains' sequencer mempools are
+      // themselves private, and neither has a Flashbots-equivalent relay to route to).
       const usePrivateRelay = submission.mode === "private"
       const txWalletClient = usePrivateRelay ? flashbotsWalletClient : walletClient
       const txPublicClient = usePrivateRelay ? flashbotsPublicClient : publicClient
