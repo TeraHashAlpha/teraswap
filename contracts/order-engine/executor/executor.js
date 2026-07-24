@@ -34,11 +34,14 @@
  *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
  *   ORDER_EXECUTOR_ADDRESS      -- Deployed contract address
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
- *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet)
+ *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet). One keeper
+ *                                  INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum One).
  *
  * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
  *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
- *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec (default mainnet feed)
+ *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec. Defaults per
+ *                                  chain (42161 -> the Arbitrum feed); every other chain keeps
+ *                                  the mainnet feed default.
  *   LOW_GAS_USD_THRESHOLD       -- (optional) USD gas-value below which a low-gas alert fires (default 5)
  *   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -- (optional) Telegram alert sink (see alert.js)
  *
@@ -195,7 +198,11 @@ const ALLOW_PUBLIC_MEMPOOL = process.env.ALLOW_PUBLIC_MEMPOOL === "true"
 // fair-value reference (the #18/#248 price plumbing, keeper-side). Only chains we
 // actually run DCA on need an entry; an unmapped chain ⇒ no DefiLlama reference
 // ⇒ the fill is flagged (not blindly filled), never falsely rejected.
-const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base" }
+// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] 42161 -> "arbitrum" matches the app-side slug in
+// src/lib/chains/registry.ts (ethereum / base / arbitrum). Without the entry a 42161 keeper
+// would hit the "unmapped chain" branch below: every non-ETH leg would read as FEEDLESS, so
+// the oracle floor could never be applied and fills would fall to the capped fail-open path.
+const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base", 42161: "arbitrum" }
 
 // ETH/WETH (and the native-ETH sentinel) per chain — these legs are priced from
 // the trusted on-chain Chainlink ETH/USD feed (readEthUsd) FIRST, before falling
@@ -205,6 +212,12 @@ const ETH_PRICED_ADDRESSES = new Set(
     "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // native-ETH sentinel
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH mainnet
     "0x4200000000000000000000000000000000000006", // WETH Base
+    // [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] WETH Arbitrum One — Arbitrum does NOT reuse the
+    // OP-stack predeploy above, so without this entry the WETH leg of every Arbitrum DCA
+    // would skip Chainlink and fall straight to DefiLlama. Sourced from
+    // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json (token:WETH), pinned by
+    // arbitrum-plumbing.test.mjs.
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH Arbitrum One
   ].map((a) => a.toLowerCase()),
 )
 
@@ -219,7 +232,19 @@ const ETH_PRICED_ADDRESSES = new Set(
 //   LOW_GAS_USD_THRESHOLD  -- USD value of the wallet's ETH below which we emit a
 //                             low-gas alert. Default 5 (matches freeze-score GAS_LOW_USD).
 const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0.01")
-const ETH_USD_FEED = process.env.ETH_USD_FEED || "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
+// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] Per-chain ETH/USD aggregator DEFAULTS. Chainlink deploys
+// each feed at a different address per chain, so the historical mainnet-only default reads a
+// contract with no code on any other chain (readEthUsd returns null -> the ETH leg silently loses
+// its Chainlink-first price). Only 42161 is listed: chains 1 and 8453 have NO entry, so they fall
+// through to the unchanged mainnet default exactly as before this sprint (Base's correct feed
+// stays an operator ETH_USD_FEED concern — changing it is out of this sprint's scope). An explicit
+// ETH_USD_FEED still wins everywhere. Address from docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json
+// (feed:ETH/USD, description "ETH / USD", 8 decimals), pinned by arbitrum-plumbing.test.mjs.
+const ETH_USD_FEED_BY_CHAIN = {
+  42161: "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", // Arbitrum One ETH/USD
+}
+const ETH_USD_FEED =
+  process.env.ETH_USD_FEED || ETH_USD_FEED_BY_CHAIN[CHAIN_ID] || "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
 
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
@@ -1587,8 +1612,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         continue
       }
       // [B-02] Route through the private relay only when the policy resolved to it;
-      // 'sequencer-private' (Base) and the explicit 'public' override both use the
-      // default clients (Base's sequencer mempool is itself private).
+      // 'sequencer-private' (Base 8453, Arbitrum One 42161) and the explicit 'public'
+      // override both use the default clients (those chains' sequencer mempools are
+      // themselves private, and neither has a Flashbots-equivalent relay to route to).
       const usePrivateRelay = submission.mode === "private"
       const txWalletClient = usePrivateRelay ? flashbotsWalletClient : walletClient
       const txPublicClient = usePrivateRelay ? flashbotsPublicClient : publicClient
