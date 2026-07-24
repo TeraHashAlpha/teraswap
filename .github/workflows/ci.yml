@@ -279,6 +279,26 @@ jobs:
       - name: Source-health guard (silence/outlier/drift pages once per window)
         run: npx vitest run src/lib/source-health-monitor.test.ts
 
+  client-ip-trust-guard:
+    # [FIX-CLIENT-IP-CLOUDFLARE-AWARE] trustedClientIp is the shared IP-TRUST PRIMITIVE behind
+    # every per-IP limiter (rpc / quote / swap / log, via kv-rate-limiter) — and it had NO guard
+    # job at all, so the P3a anti-spoof tests never ran in CI. This pins both halves of the trust
+    # model: (a) P3a — a client-prepended left-most x-forwarded-for is ignored when the
+    # platform-set header is present; (b) the Cloudflare gate — CF-Connecting-IP is honoured ONLY
+    # when the connecting peer is inside Cloudflare's published ranges, so a direct-to-origin
+    # attacker cannot nominate their own client IP, and a malformed value never reaches a Redis
+    # rate-limit key. A refactor that widens either one now fails the PR instead of shipping.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Client-IP trust guard (P3a anti-spoof + Cloudflare CF-Connecting-IP gate)
+        run: npx vitest run src/lib/trusted-ip.test.ts src/lib/cloudflare-ips.test.ts
+
   deployed-sources-guard:
     # [AUDIT-W2 / W2-M-01] Static deployed-source-of-truth gate: the canonical
     # addr → source → compiler → code-hash map (docs/security/DEPLOYED-SOURCES.md)
