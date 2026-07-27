@@ -48,7 +48,7 @@ import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
-import { quickFillRaw, perChunkRaw } from '@/lib/dca-quick-fill'
+import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
 import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
 import DCADashboard from './dca/DCADashboard'
@@ -478,6 +478,28 @@ function CreateDCAForm({
     }
   }, [totalDisplay, tokenIn, parts])
 
+  // [fix/dca-min-buy-copy] Human/USD-readable per-buy floor hint — the SAME formatter the
+  // useOrderEngine.createOrder toast uses, so the inline warning and the toast never drift.
+  // priceUsd reuses the SAME price source as totalUsd above (APPROX_PRICES via fillUsd),
+  // failing OPEN to token-units-only copy (no fabricated USD) when the symbol is unpriced.
+  const minBuyMessage = useMemo(() => {
+    if (!underMin || !totalDisplay || !tokenIn || !parts) return null
+    try {
+      const totalRaw = parseUnits(totalDisplay, tokenIn.decimals)
+      const priceUsd = APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null
+      return formatMinBuyMessage({
+        minBuyRaw: MIN_ORDER_AMOUNT,
+        decimals: tokenIn.decimals,
+        symbol: tokenIn.symbol,
+        totalRaw,
+        requestedBuys: parts,
+        priceUsd,
+      }).text
+    } catch {
+      return null
+    }
+  }, [underMin, totalDisplay, tokenIn, parts])
+
   // Derived values
   const perPart = useMemo(() => {
     const total = Number(totalDisplay)
@@ -694,12 +716,11 @@ function CreateDCAForm({
           </div>
         </div>
         {/* [CHORE-DCA-UX-POLISH] Re-validate the per-chunk MIN_ORDER_AMOUNT floor and surface the
-            SAME hint copy the submit-time guard uses (useOrderEngine.ts). The hard block stays in
-            createOrder — this is an inline advisory after a preset/manual fill lands under-floor. */}
-        {underMin && (
-          <p className="mt-1 text-[11px] text-amber-300">
-            Each DCA buy must be at least {Number(MIN_ORDER_AMOUNT).toLocaleString()} base units (the on-chain minimum). Increase the total amount or reduce the number of buys.
-          </p>
+            SAME hint copy the submit-time guard uses (useOrderEngine.ts, via formatMinBuyMessage —
+            [fix/dca-min-buy-copy]). The hard block stays in createOrder — this is an inline
+            advisory after a preset/manual fill lands under-floor. */}
+        {minBuyMessage && (
+          <p className="mt-1 text-[11px] text-amber-300">{minBuyMessage}</p>
         )}
         {/* [CHORE-DCA-WETH-INPUT] Advisory hint when the wallet holds native ETH but no WETH. */}
         {hasNativeOnly && (

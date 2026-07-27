@@ -205,7 +205,10 @@ describe('DCAPanel — buys/interval presets [chore/dca-ux-tweaks]', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '30' }))
 
-    expect(await screen.findByText(/on-chain minimum/i)).toBeInTheDocument()
+    // [fix/dca-min-buy-copy] Human/USD-readable, actionable copy — not raw base units.
+    const hint = await screen.findByText(/on-chain minimum/i)
+    expect(hint.textContent).toMatch(/0\.00000000000001 WETH \(~\$0\.0000\)/) // token-unit floor + approx USD
+    expect(hint.textContent).toMatch(/Lower to 20 buys/) // floor(200,000 / 10,000) = 20 — computed from THIS total
     fireEvent.click(startDcaButton())
     // Under-floor ⇒ never frozen for review, never signed.
     await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
