@@ -218,7 +218,11 @@ describe('DCAPanel spend step — per-chunk MIN re-validation', () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(pctButton('100%'))
     expect(amountInput()).toHaveValue('0.00000000000005')
-    expect(screen.getByText(/on-chain minimum/i)).toBeInTheDocument()
+    // [fix/dca-min-buy-copy] Human/USD floor label + a concrete fix computed from this total
+    // (floor(50,000 / 10,000) = 5 max buys), not raw base units.
+    const hint = screen.getByText(/on-chain minimum/i)
+    expect(hint.textContent).toMatch(/0\.00000000000001 WETH \(~\$0\.0000\)/)
+    expect(hint.textContent).toMatch(/Lower to 5 buys/)
   })
 
   it('shows no min hint for a healthy preset fill', () => {
