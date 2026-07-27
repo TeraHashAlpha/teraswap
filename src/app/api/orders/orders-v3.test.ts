@@ -100,9 +100,9 @@ function v3Body(overrides: Record<string, unknown> = {}) {
     signature: SIG,
     orderHash: '0x' + 'ab'.repeat(32),
     amountIn: '1000000000000000000',
-    // 100 raw units of an 18dp token @ $1 ⇒ way below $1 — DustFloor default is $5 (see below
+    // 100 raw units of an 18dp token @ $1 ⇒ way below $1 — DustFloor default is $1 (see below
     // per-test overrides for the "clears the floor" case).
-    minAmountOut: (100n * 10n ** 18n).toString(), // $100 worth at $1/token — clears $5 default
+    minAmountOut: (100n * 10n ** 18n).toString(), // $100 worth at $1/token — clears $1 default
     tokenOutDecimals: 18,
     orderType: 'dca',
     priceCondition: 'above',
@@ -189,12 +189,12 @@ describe('POST /api/orders — v3 USD dust floor (I-01/L-01 closure)', () => {
     expect(json.unpriceable).toBe(true)
   })
 
-  it('priced but below the dust floor ($5 default) → 400', async () => {
+  it('priced but below the dust floor ($1 default) → 400', async () => {
     mockFetchDefiLlamaPrice.mockResolvedValue({ price: 1, symbol: 'X', timestamp: 0, confidence: 1 })
     // 1 raw unit of an 18dp token @ $1 ≈ $0 (dust).
     const { status, json } = await post(v3Body({ minAmountOut: '1' }))
     expect(status).toBe(400)
-    expect(json.error).toMatch(/below the \$5/)
+    expect(json.error).toMatch(/below the \$1/)
   })
 
   it('priced comfortably above the dust floor via DefiLlama → passes', async () => {
@@ -261,13 +261,13 @@ describe('POST /api/orders — v3 M-01 fix: on-chain decimals + min-combine [SPR
 
   it('min-combine: a generous DefiLlama estimate cannot rescue a dust order when Chainlink prices it low', async () => {
     mockFetchErc20Decimals.mockResolvedValue(18)
-    // DefiLlama optimistic: $100 (well above the $5 floor).
+    // DefiLlama optimistic: $100 (well above the $1 floor).
     mockFetchDefiLlamaPrice.mockResolvedValue({ price: 100, symbol: 'X', timestamp: 0, confidence: 1 })
     // Server Chainlink: the SAME raw amount is worth only $0.001 (genuinely dust).
     mockComputeTokenAmountUsd.mockResolvedValue({ usd: 0.001, price: 0.00001, decimals: 18 })
     const { status, json } = await post(v3Body({ minAmountOut: (1n * 10n ** 18n).toString() }))
     expect(status).toBe(400)
-    expect(json.error).toMatch(/below the \$5/)
+    expect(json.error).toMatch(/below the \$1/)
   })
 
   it('min-combine: BOTH legs must clear the floor — the lower of the two decides, not the higher', async () => {
@@ -275,7 +275,7 @@ describe('POST /api/orders — v3 M-01 fix: on-chain decimals + min-combine [SPR
     mockFetchDefiLlamaPrice.mockResolvedValue({ price: 6, symbol: 'X', timestamp: 0, confidence: 1 })  // $6/unit
     mockComputeTokenAmountUsd.mockResolvedValue({ usd: 6, price: 6, decimals: 18 })  // also $6
     const { status } = await post(v3Body({ minAmountOut: (1n * 10n ** 18n).toString() }))
-    expect(status).toBe(201) // both legs clear $5
+    expect(status).toBe(201) // both legs clear $1
   })
 })
 
@@ -324,10 +324,10 @@ describe('POST /api/orders — DCA no-feed output relaxation (FIX-DCA-NOFEED-CON
     })
   }
 
-  it('no-feed output + per-chunk input >= $5 (via DefiLlama on tokenIn) → 201, allowed', async () => {
+  it('no-feed output + per-chunk input >= $1 (via DefiLlama on tokenIn) → 201, allowed', async () => {
     // Output (tokenOut / ETHFI-like): no coverage at all.
     // Input (tokenIn / WETH-like): DefiLlama prices it. 0.1 WETH-equivalent chunk @ $3500/unit
-    // (18dp) ≈ $350/chunk — comfortably above $5.
+    // (18dp) ≈ $350/chunk — comfortably above $1.
     mockFetchDefiLlamaPrice.mockImplementation((token: string) =>
       token === TOKEN_IN
         ? Promise.resolve({ price: 3500, symbol: 'WETH', timestamp: 0, confidence: 1 })
@@ -338,7 +338,7 @@ describe('POST /api/orders — DCA no-feed output relaxation (FIX-DCA-NOFEED-CON
     expect(status).toBe(201)
   })
 
-  it('no-feed output + per-chunk input >= $5 (via server Chainlink on tokenIn) → 201, allowed', async () => {
+  it('no-feed output + per-chunk input >= $1 (via server Chainlink on tokenIn) → 201, allowed', async () => {
     mockFetchDefiLlamaPrice.mockResolvedValue(null)
     mockComputeTokenAmountUsd.mockImplementation((token: string) =>
       token === TOKEN_IN ? Promise.resolve({ usd: 350, price: 3500, decimals: 18 }) : Promise.resolve(null),
@@ -348,7 +348,7 @@ describe('POST /api/orders — DCA no-feed output relaxation (FIX-DCA-NOFEED-CON
   })
 
 
-  it('no-feed output + per-chunk input < $5 → 400 dust, no modal-bypassable path', async () => {
+  it('no-feed output + per-chunk input < $1 → 400 dust, no modal-bypassable path', async () => {
     // Input priced, but the chunk is tiny: 0.1 WETH-equivalent @ $1/unit = $0.1/chunk.
     mockFetchDefiLlamaPrice.mockImplementation((token: string) =>
       token === TOKEN_IN
@@ -358,7 +358,7 @@ describe('POST /api/orders — DCA no-feed output relaxation (FIX-DCA-NOFEED-CON
     mockComputeTokenAmountUsd.mockResolvedValue(null)
     const { status, json } = await post(dcaBody())
     expect(status).toBe(400)
-    expect(json.error).toMatch(/below the \$5/)
+    expect(json.error).toMatch(/below the \$1/)
   })
 
   it('both input AND output no-feed → 422, blocked clearly (the rare case)', async () => {

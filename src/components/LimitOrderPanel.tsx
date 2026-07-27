@@ -367,7 +367,7 @@ function CreateLimitForm({
       return
     }
 
-    // ── [SPRINT-P1B] $5 economic-floor pre-flight, BEFORE approve ──
+    // ── [SPRINT-P1B] $1 economic-floor pre-flight, BEFORE approve ──
     // Must run before onSubmit: the approve button only exists inside the review modal that
     // createOrder mounts, so failing later would cost the user an approve tx + a signature.
     const floorCheck = checkMinOutEconomicFloor({

@@ -18,7 +18,7 @@ export { buildCanonicalRoute, verifyRouterDataHash, computeNetAmountIn, CANONICA
   ORDER_BPS_DENOMINATOR, DEFAULT_CANONICAL_FEE_TIER, STABLE_CANONICAL_FEE_TIER,
   pickCanonicalFeeTier } from './canonical-route'
 export type { CanonicalRoute, CanonicalFeeTier, BuildCanonicalRouteParams } from './canonical-route'
-// [SPRINT-P1B] Client-side mirror of the server's $5 dust floor, run BEFORE approve.
+// [SPRINT-P1B] Client-side mirror of the server's $1 dust floor, run BEFORE approve.
 export { checkMinOutEconomicFloor } from './economic-floor'
 export type { MinOutFloorParams, MinOutFloorResult } from './economic-floor'
 // [SPRINT-P1B] Limit/TP launch gate + the Stop-Loss deferral reason (deferred to v4).

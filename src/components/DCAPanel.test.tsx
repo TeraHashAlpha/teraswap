@@ -251,24 +251,24 @@ describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
   it('caps buys and warns when the requested count would produce a dust chunk', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('dca-custom-toggle'))
-    // 0.01 WETH ≈ $35 total (APPROX_PRICES). 100 buys → $0.35/buy, under the $5 default floor.
-    // floor(35/5) = 7 buys clears it.
+    // 0.01 WETH ≈ $35 total (APPROX_PRICES). 100 buys → $0.35/buy, under the $1 default floor.
+    // floor(35/1) = 35 buys clears it.
     enterAmount('0.01')
     const buysInput = screen.getByTestId('dca-custom-buys-input') as HTMLInputElement
     fireEvent.change(buysInput, { target: { value: '100' } })
 
     const warning = await screen.findByTestId('dca-min-chunk-warning')
-    expect(warning.textContent).toMatch(/capped to 7 buys/)
+    expect(warning.textContent).toMatch(/capped to 35 buys/)
   })
 
   it('blocks submit (never signs) when the total is too small to clear the minimum even at 1 buy', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('dca-custom-toggle'))
-    // 0.001 WETH ≈ $3.50 total — below the $5 default floor even for a single buy.
-    enterAmount('0.001')
+    // 0.0001 WETH ≈ $0.35 total — below the $1 default floor even for a single buy.
+    enterAmount('0.0001')
 
     const warning = await screen.findByTestId('dca-min-chunk-warning')
-    expect(warning.textContent).toMatch(/below the \$5 minimum/)
+    expect(warning.textContent).toMatch(/below the \$1 minimum/)
 
     fireEvent.click(startDcaButton())
     await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
