@@ -11,6 +11,15 @@
  * cadence report to the dedicated tracked branch `audits/cadence` and pushes —
  * WITHOUT touching the operator's checked-out branch (temp detached worktree).
  *
+ * [CHORE-DAILY-HEALTH-REPORT-GHA] The DAILY health report specifically no longer depends on this
+ * script: `.github/workflows/daily-health-report.yml` now generates AND persists it end to end on
+ * a schedule, on GitHub's infrastructure, so it needs no local SSH signing key (the recurring
+ * failure this whole script exists to route around — see any Audits/Daily/health-*.md before that
+ * workflow shipped for the "fatal: either user.signingkey..." error every sandboxed run hit) and
+ * checks PRODUCTION directly rather than a sandbox's unset local env vars. This script remains the
+ * PRIMARY persistence path for Weekly/Monthly/Quarterly reports (not yet moved to a scheduled
+ * Action) and stays available for a manually-run or ad hoc Daily report.
+ *
  * Usage (appended to each generator SKILL.md as its final step):
  *   node scripts/commit-audit-report.mjs
  *
