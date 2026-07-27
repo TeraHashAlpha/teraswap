@@ -274,7 +274,7 @@ function CreateConditionalForm({
       return
     }
 
-    // ── [SPRINT-P1B] $5 economic-floor pre-flight, BEFORE approve ──
+    // ── [SPRINT-P1B] $1 economic-floor pre-flight, BEFORE approve ──
     // The approve button only exists inside the review modal that createOrder mounts, so "before
     // approve" means before onSubmit. Without this the user approves + signs and then eats a 400
     // from the server's authoritative dust gate.

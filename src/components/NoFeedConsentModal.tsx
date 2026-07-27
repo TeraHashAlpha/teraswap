@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 
 /**
  * [FIX-DCA-NOFEED-CONSENT] Shown BEFORE signing whenever a DCA's output token has no Chainlink
- * price feed (getChainlinkFeed(tokenOut, chainId) === null) — the frontend/API $5 pre-flight can
+ * price feed (getChainlinkFeed(tokenOut, chainId) === null) — the frontend/API $1 pre-flight can
  * no longer USD-value that leg, so the owner's decision is to ALLOW it, gated by explicit,
  * plain-language consent instead of a silent relaxation. Feed-covered tokens NEVER see this.
  *
