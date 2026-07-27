@@ -175,6 +175,19 @@ describe('SwapButton', () => {
     expect(screen.getByRole('button')).toHaveTextContent(/no oracle/i)
   })
 
+  // [FIX-ORACLE-FAIL-CLOSED] Without this case the new branch can be deleted with the whole suite
+  // still green, and the copy silently falls through to 'Oracle data unsafe — swap blocked' — an
+  // assertion about the DATA that we specifically have not established. The distinction between
+  // "the oracle says something bad" and "the oracle said nothing" is the entire point of the fix.
+  it("price-blocked reason='depeg-unverified' → blocked, worded as a retry and NOT as a depeg", () => {
+    render(<SwapButton {...baseProps} priceBlocked blockReason="depeg-unverified" />)
+    const btn = screen.getByRole('button')
+    expect(btn).toHaveTextContent(/verifying price/i)
+    expect(btn).toBeDisabled()
+    expect(btn).not.toHaveTextContent(/depegged/i)
+    expect(btn).not.toHaveTextContent(/unsafe/i)
+  })
+
   it('shows "Approve & Swap" when approval is not yet ready', () => {
     render(<SwapButton {...baseProps} approvalReady={false} />)
     const btn = screen.getByRole('button')

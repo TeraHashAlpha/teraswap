@@ -1,9 +1,10 @@
 /**
  * [SPRINT-9W-oracle] Unit tests for the cbETH depeg circuit-breaker verdict + the per-leg round
- * validator. The thresholds (2% consent / 10% block) and fail-open behaviour are the security core.
+ * validator. The thresholds (2% consent / 10% block) and the fail-CLOSED behaviour are the security
+ * core. [FIX-ORACLE-FAIL-CLOSED] "fail-open" in the original version of this header was the bug.
  */
 import { describe, it, expect } from 'vitest'
-import { evaluateDepeg, priceFromValidRound } from './depeg-gate'
+import { evaluateDepeg, priceFromValidRound, PENDING, UNVERIFIED } from './depeg-gate'
 import { DEPEG_DIVERGENCE_WARN, DEPEG_DIVERGENCE_BLOCK, DEPEG_CONSENT_TOLERANCE } from './constants'
 
 describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
@@ -44,12 +45,40 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
     expect(evaluateDepeg(1 + DEPEG_DIVERGENCE_BLOCK - 0.0001, 1.0, 'cbETH').mode).toBe('consent') // 9.99%
   })
 
-  it('FAIL-OPEN: a null / non-positive leg → ok (a feed outage is NOT a depeg → no false block)', () => {
-    expect(evaluateDepeg(null, 1.0, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(1.0, null, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(0, 1.0, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(1.0, 0, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(-1, 1.0, 'cbETH').mode).toBe('ok')
+  // [FIX-ORACLE-FAIL-CLOSED] This test previously asserted the OPPOSITE — that a null/non-positive
+  // leg returned 'ok'. That was the fail-open hole: a feed outage silently passed the swap through
+  // as though the peg had been verified. It is retained (not deleted) and inverted, because the old
+  // contract is exactly what must never come back.
+  it('FAIL-CLOSED: a null / non-positive leg → unverified (we could not check → block, do not pass)', () => {
+    expect(evaluateDepeg(null, 1.0, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(1.0, null, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(0, 1.0, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(1.0, 0, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(-1, 1.0, 'cbETH').mode).toBe('unverified')
+  })
+
+  it('unverified copy says we could not CHECK — never that the asset is depegged', () => {
+    const r = evaluateDepeg(null, 1.0, 'cbETH')
+    expect(r.message).toContain("couldn't verify")
+    expect(r.message).toContain('cbETH')
+    expect(r.message).not.toMatch(/depeg/i)
+    expect(r.message).not.toMatch(/manipulation/i)
+    // No divergence was measured, so none is claimed.
+    expect(r.divergence).toBe(0)
+  })
+
+  it('unverified without a symbol (unresolved chain) still reads as a retry, not a verdict', () => {
+    const r = UNVERIFIED('')
+    expect(r.mode).toBe('unverified')
+    expect(r.message).toContain("couldn't verify")
+    expect(r.message).not.toMatch(/depeg/i)
+  })
+
+  it('PENDING is frictionless and distinct from UNVERIFIED — an in-flight read is not a failure', () => {
+    const p = PENDING('cbETH')
+    expect(p.mode).toBe('pending')
+    expect(p.message).toBeNull()          // nothing scary on a first render
+    expect(p.mode).not.toBe('unverified') // and never conflated with a real failure
   })
 
   it('tolerance constant exists for the consent auto-revoke (used by SwapBox)', () => {
