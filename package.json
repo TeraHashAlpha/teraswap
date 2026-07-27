@@ -97,7 +97,8 @@
     "@walletconnect/sign-client": "2.21.1",
     "@walletconnect/universal-provider": "2.21.1",
     "qr": "0.5.5",
-    "hono": "4.12.25",
+    "hono": "4.12.27",
+    "@babel/core": "7.29.6",
     "@walletconnect/jsonrpc-ws-connection": {
       "ws": "7.5.11"
     },
