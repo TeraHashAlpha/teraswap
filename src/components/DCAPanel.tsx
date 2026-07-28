@@ -56,8 +56,12 @@ import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startW
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import { NATIVE_ETH } from '@/lib/constants'
+import { NATIVE_ETH, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import BetaDisclaimer from './BetaDisclaimer'
+// [FEAT-DEPEG-GATE-ORDER-CREATION] The same, twice-audited cbETH depeg circuit-breaker SwapBox
+// uses — wired here so a multi-day autonomous DCA cannot be started into a depegged/unverifiable
+// pair with zero signal. Read-only reuse: neither the hook nor its thresholds are modified.
+import { useDepegCheck } from '@/hooks/useDepegCheck'
 
 // ── Map token symbols to Chainlink feeds ─────────────────
 // Returns empty string if no feed found — callers must check before submitting.
@@ -425,6 +429,20 @@ function CreateDCAForm({
     }
   }, [totalDisplay, tokenIn])
 
+  // [FEAT-DEPEG-GATE-ORDER-CREATION] Same hook, same semantics as SwapBox: 'ok' when the pair has
+  // no registered exchange-rate feed (the common case — creation proceeds), 'consent'/'block' when
+  // checked and off-peg, 'unverified' when the check applies but could not be run, 'pending' while
+  // in flight. Consent (like SwapBox's) is reset on a chain switch — a new chain is a new trade.
+  const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
+  const [acceptedDepeg, setAcceptedDepeg] = useState<number | null>(null)
+  useEffect(() => { setAcceptedDepeg(null) }, [chainId])
+  const depegConsentNeeded = depegCheck.mode === 'consent'
+  const depegAccepted = acceptedDepeg != null && depegCheck.divergence <= acceptedDepeg + DEPEG_CONSENT_TOLERANCE
+  const depegConsentBlocking = depegConsentNeeded && !depegAccepted
+  const depegHardBlocked = depegCheck.mode === 'block'
+  const depegUnverified = depegCheck.mode === 'unverified'
+  const depegBlocking = depegHardBlocked || depegConsentBlocking || depegUnverified
+
   const dcaMinChunkUsd = useMemo(() => getDcaMinChunkUsd(), [])
   const minChunkGuard = useMemo(
     () => customMode
@@ -525,7 +543,7 @@ function CreateDCAForm({
     [interval, parts, expiry],
   )
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
@@ -536,6 +554,10 @@ function CreateDCAForm({
     // [CHORE-DCA-CUSTOM-PERIODS] Hard guard (defense-in-depth): never sign a dust DCA
     // (total too small to clear the per-buy minimum even at 1 buy).
     if (minChunkGuard.blocked) return
+    // [FEAT-DEPEG-GATE-ORDER-CREATION] Hard guard (defense-in-depth): never sign a DCA into a
+    // depegged or unverifiable pair. canCreate already gates the button; this also blocks any
+    // programmatic call.
+    if (depegBlocking) return
     setRouteBlock(null)
     startWaitingSound()
 
@@ -774,6 +796,48 @@ function CreateDCAForm({
           </p>
         )}
       </div>
+
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] cbETH depeg HARD block — mirrors SwapBox's copy so the same
+          event reads identically wherever a user encounters it. No click-through: a 30-day autonomous
+          DCA into a depegged asset is exactly the case this gate exists to stop. */}
+      {depegHardBlocked && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-depeg-block">
+          <span className="font-semibold">&#9888; DCA blocked — {depegCheck.symbol} depeg.</span>{' '}
+          {depegCheck.message}
+          <span className="mt-1 block text-xs text-danger/80">
+            The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+          </span>
+        </div>
+      )}
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] The depeg check applies to this pair but could NOT be run —
+          same posture and copy as SwapBox: blocks, but never claims a depeg when the truth is we
+          could not check. Gated on a real amount so it never flashes on the default, inert form. */}
+      {depegUnverified && tokenIn && tokenOut && Number(totalDisplay) > 0 && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-depeg-unverified">
+          <span className="font-semibold">&#9888; DCA paused — price not verified.</span>{' '}
+          {depegCheck.message}
+          <span className="mt-1 block text-xs text-danger/80">
+            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+          </span>
+        </div>
+      )}
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] Informed consent — 2–10% off the exchange rate. Mirrors
+          SwapBox's checkbox exactly: the user must explicitly accept, and consent auto-revokes if
+          the divergence worsens beyond accepted+tolerance. */}
+      {depegConsentNeeded && (
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" data-testid="dca-depeg-consent">
+          <span className="font-semibold">&#9888; Possible depeg:</span> {depegCheck.message}
+          <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
+            <input
+              type="checkbox"
+              checked={depegAccepted}
+              onChange={(e) => setAcceptedDepeg(e.target.checked ? depegCheck.divergence : null)}
+              className="h-5 w-5 accent-warning"
+            />
+            I understand {depegCheck.symbol} may be depegged and want to proceed.
+          </label>
+        </div>
+      )}
 
       {/* [CHORE-DCA-CUSTOM-PERIODS] Custom toggle — switches buys + interval + expiry into
           custom-input mode together (they're coupled by the min-chunk/expiry guardrails).
