@@ -67,6 +67,42 @@ export const UNVERIFIED = (symbol: string): DepegCheck => ({
 })
 
 /**
+ * [FIX-DEPEG-RETRY-WINDOW / M-01] The subset of a TanStack/wagmi read result this gate needs in
+ * order to decide whether a read has ever failed. Structural, so it accepts a `useReadContract`
+ * result directly without importing wagmi into this pure module.
+ */
+export interface ReadFailureSignals {
+  /** Attempts failed within the CURRENT fetch. Reset to 0 on every new fetch. */
+  failureCount?: number | undefined
+  /** Times this query has committed an error. Monotonic for the life of the cache entry. */
+  errorUpdateCount?: number | undefined
+}
+
+/**
+ * [FIX-DEPEG-RETRY-WINDOW / M-01] Has this read failed at least once? Used to decide whether an
+ * in-flight state may present as PENDING (frictionless) or must present as UNVERIFIED (blocking).
+ *
+ * BOTH counters are required, and this is the whole substance of the M-01 fix:
+ *
+ *  - `failureCount` (query-core's `fetchFailureCount`) rises across a retry sequence, but
+ *    `fetchState()` resets it to 0 on EVERY new fetch (`query.js:346-356`). It is the only failure
+ *    signal during the FIRST retry sequence, before any error has been committed to query state —
+ *    and it is useless one poll later.
+ *  - `errorUpdateCount` is incremented ONLY by the 'error' action (`query.js:318`) and appears
+ *    nowhere in `fetchState`. The library never resets it for the life of the cache entry, so it is
+ *    the memory that SURVIVES the 30s `refetchInterval` poll.
+ *
+ * Relying on `failureCount` alone was the M-01 defect: for a query that has never succeeded
+ * (`data === undefined`), each poll's 'fetch' action resets `fetchFailureCount` to 0 AND rewinds
+ * `status` to 'pending', so the hook briefly saw `isLoading: true, failureCount: 0, isError: false`
+ * — indistinguishable from a first render — and re-opened the gate for ~0.3-1.3s every 30s, during
+ * exactly the outage the gate exists to catch.
+ */
+export function hasReadFailed(read: ReadFailureSignals): boolean {
+  return (read.failureCount ?? 0) > 0 || (read.errorUpdateCount ?? 0) > 0
+}
+
+/**
  * Pure depeg verdict from a token's MARKET price vs its EXCHANGE RATE (both already integrity +
  * staleness validated by the caller, and both in the SAME unit — each normalised by its own feed
  * decimals before being passed in).
