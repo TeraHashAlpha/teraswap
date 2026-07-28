@@ -68,8 +68,30 @@ vi.mock('@/lib/analytics-tracker', () => ({
   trackTrade: vi.fn(),
 }))
 
-import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
+import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
 import LimitOrderPanel from './LimitOrderPanel'
+
+/**
+ * [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] `fireEvent.click` on a disabled button never
+ * reaches its `onClick` — React checks its OWN rendered `disabled` prop before dispatching a
+ * click-type synthetic event, independent of the underlying DOM attribute/property (confirmed:
+ * even manually clearing `button.disabled` on the live node does not help, since React's
+ * suppression reads its own fiber-cached props, not the DOM). A test that only does
+ * `fireEvent.click(disabledButton)` therefore proves the button is disabled, never that the
+ * production handler's own guard is what blocks — the DOM never lets it run at all.
+ *
+ * This reads React's per-fiber props directly off the DOM node (the `__reactProps$*` key React
+ * itself attaches) and invokes the real `onClick` prop — the exact closure the component
+ * rendered, over that render's actual state — bypassing React's disabled-suppression without
+ * touching the component under test. Test-only reflection, not a production change.
+ */
+function clickBypassingDisabled(el: HTMLElement): unknown {
+  const propsKey = Object.keys(el).find(k => k.startsWith('__reactProps$'))
+  if (!propsKey) throw new Error('React props key not found on element')
+  const onClick = (el as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick
+  if (!onClick) throw new Error('Element has no onClick prop')
+  return onClick({})
+}
 
 function defaultEngine() {
   return {
@@ -215,6 +237,26 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
 
     fireEvent.click(submitButton())
     await Promise.resolve()
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+
+  // [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] The test above only pins the DISABLED ATTRIBUTE
+  // (fireEvent.click on a disabled button never reaches onClick — see clickBypassingDisabled's
+  // doc comment). This one genuinely runs the production onClick handler with depegBlocking=true,
+  // proving handleSubmit's own `if (depegBlocking) { setSubmitError(...); return }` guard — not
+  // merely the button state — is what stops an order.
+  it('[L-1] the production handler itself refuses to submit while blocked — not merely the disabled attribute', async () => {
+    useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
+    const createOrder = vi.fn()
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    const btn = submitButton()
+    expect(btn).toBeDisabled() // sanity: still the same blocked state as the test above
+
+    await act(async () => { await clickBypassingDisabled(btn) })
+
     expect(createOrder).not.toHaveBeenCalled()
   })
 })
