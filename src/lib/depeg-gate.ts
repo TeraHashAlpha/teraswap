@@ -12,14 +12,28 @@
  * block at BLOCK, mirroring the 9J band shape.
  *
  * IMPORTANT (rule #9): this does NOT change the swap-price reference (still the market feed, 9V).
- * It is fail-open: if EITHER feed is stale/invalid the caller passes null here and the verdict is
- * 'ok' (a feed outage is NOT a depeg — fall back to the existing no-oracle calm warning +
- * multi-source path; do not hard-block). The 9G round-integrity + 9V per-feed staleness checks are
- * applied to each leg BEFORE this (see priceFromValidRound) and are not loosened.
+ *
+ * [FIX-ORACLE-FAIL-CLOSED] It is FAIL-CLOSED. Previously, if either feed was stale/invalid the
+ * caller passed null here and the verdict was 'ok' — the swap proceeded as though the peg had been
+ * verified when in truth it had not been checked at all. A guard that cannot verify must block, not
+ * pass. An unverifiable leg now yields 'unverified', which BLOCKS exactly as 'block' does but
+ * carries DIFFERENT copy: a user must never be told an asset is depegged when the truth is that we
+ * could not check. The 9G round-integrity + 9V per-feed staleness checks are applied to each leg
+ * BEFORE this (see priceFromValidRound) and are not loosened.
+ *
+ * Note the distinction the hook draws and this module cannot: a token with NO exchange-rate pair is
+ * NOT unverified — the depeg check simply does not apply to it (the overwhelmingly common case), and
+ * that stays frictionless. Only a token that HAS a pair, whose feeds we then failed to read, is
+ * unverified. See useDepegCheck.
  */
 import { DEPEG_DIVERGENCE_WARN, DEPEG_DIVERGENCE_BLOCK } from './constants'
 
-export type DepegMode = 'ok' | 'consent' | 'block'
+/**
+ * [FIX-ORACLE-FAIL-CLOSED] 'pending' and 'unverified' are deliberately distinct states, not one
+ * "no answer" bucket: in-flight is a normal first render and must stay frictionless, while
+ * "we tried and failed" must block. Collapsing them is precisely the fail-open hole this fixes.
+ */
+export type DepegMode = 'ok' | 'consent' | 'block' | 'unverified' | 'pending'
 
 export interface DepegCheck {
   mode: DepegMode
@@ -33,19 +47,42 @@ export interface DepegCheck {
 const OK = (symbol: string, divergence = 0): DepegCheck => ({ mode: 'ok', divergence, symbol, message: null })
 
 /**
+ * [FIX-ORACLE-FAIL-CLOSED] The reads are still in flight — a normal first render, NOT a failure.
+ * Frictionless (no message) exactly as before, so an initial render never shows a scary error.
+ */
+export const PENDING = (symbol: string): DepegCheck => ({ mode: 'pending', divergence: 0, symbol, message: null })
+
+/**
+ * [FIX-ORACLE-FAIL-CLOSED] We tried to verify the peg and could not — read error, revert, a missing
+ * feed on a registered pair, failed round integrity, or data past the per-feed staleness ceiling.
+ * BLOCKS like 'block', but says "we couldn't check", never "the asset is depegged".
+ */
+export const UNVERIFIED = (symbol: string): DepegCheck => ({
+  mode: 'unverified',
+  divergence: 0,
+  symbol,
+  message: symbol
+    ? `We couldn't verify ${symbol}'s price right now — try again in a moment.`
+    : `We couldn't verify this price right now — try again in a moment.`,
+})
+
+/**
  * Pure depeg verdict from a token's MARKET price vs its EXCHANGE RATE (both already integrity +
  * staleness validated by the caller, and both in the SAME unit — each normalised by its own feed
- * decimals before being passed in). Fail-open: a null/non-positive input → 'ok' (no verdict), so a
- * feed outage never produces a false depeg block.
+ * decimals before being passed in).
+ *
+ * [FIX-ORACLE-FAIL-CLOSED] Fail-CLOSED: a null/non-positive leg means the peg could not be checked,
+ * so the verdict is 'unverified' (blocking) rather than the old 'ok' (silently passing). Callers
+ * must not route an in-flight read through here — pass PENDING instead (see useDepegCheck).
  */
 export function evaluateDepeg(
   marketPrice: number | null,
   exchangeRate: number | null,
   symbol: string,
 ): DepegCheck {
-  // Fail-open: either leg missing/invalid → no divergence verdict (feed outage ≠ depeg).
+  // Fail-CLOSED: either leg missing/invalid → we could not verify the peg → block, do not pass.
   if (marketPrice == null || exchangeRate == null || marketPrice <= 0 || exchangeRate <= 0) {
-    return OK(symbol)
+    return UNVERIFIED(symbol)
   }
 
   const divergence = Math.abs(marketPrice - exchangeRate) / exchangeRate
