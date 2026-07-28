@@ -63,6 +63,24 @@ describe('evaluatePriceGate [SPRINT-9J J1]', () => {
     expect(gate.mode).toBe('ok')
   })
 
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] An UNREADABLE feed is both `oracleUnavailable` (so the tiered
+  // USD gate engages) and `oracleIntegrityFailed` (so this gate hard-blocks at every trade size).
+  // The test above pins that a genuinely NO-FEED token still defers; this one pins that a feed we
+  // could not READ does not get the same free pass. The ordering inside evaluatePriceGate is what
+  // separates them — under the original ordering the unavailable branch matched first and a
+  // sub-threshold swap on an unreadable oracle would still have gone through.
+  it('an UNREADABLE feed (unavailable AND integrity-failed) hard-blocks, at every trade size', () => {
+    const gate = evaluatePriceGate(pc({
+      oracleUnavailable: true,
+      oracleIntegrityFailed: true,
+      oracleReadFailed: true,
+      level: 'warn',
+      chainlinkPrice: null,
+    }))
+    expect(gate.mode).toBe('block')
+    expect(gate.reason).toBe('oracle-integrity')
+  })
+
   it('integrity failure takes precedence even if a deviation is also present', () => {
     const gate = evaluatePriceGate(pc({ deviation: 0.04, level: 'danger', oracleIntegrityFailed: true }))
     expect(gate.mode).toBe('block')

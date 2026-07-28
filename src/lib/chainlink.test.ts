@@ -420,6 +420,13 @@ describe('evaluatePairOracle [SPRINT-9S S2]', () => {
   const integrity = (): PriceCheck => ({
     chainlinkPrice: 3000, executionPrice: null, deviation: 0, level: 'warn', message: 'stale', oracleUnavailable: false, oracleIntegrityFailed: true,
   })
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that EXISTS but could not be read: unavailable (tiered
+  // USD gate) + integrity-failed (hard block) + readFailed (so copy says "could not be read").
+  const unreadable = (): PriceCheck => ({
+    chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'warn',
+    message: 'Chainlink price feed could not be read. Price not verified.',
+    oracleUnavailable: true, oracleIntegrityFailed: true, oracleReadFailed: true,
+  })
 
   it('produces an IDENTICAL verdict for ETH→USDC and USDC→ETH (direction-agnostic)', () => {
     // ETH→USDC: the deviation sits on the INPUT (ETH) side; USDC out is neutral.
@@ -458,6 +465,31 @@ describe('evaluatePairOracle [SPRINT-9S S2]', () => {
   it('propagates an oracle-integrity failure on EITHER side (hard-block signal preserved)', () => {
     expect(evaluatePairOracle(integrity(), none(), 'ETH', 'USDC').oracleIntegrityFailed).toBe(true)
     expect(evaluatePairOracle(none(), integrity(), 'USDC', 'ETH').oracleIntegrityFailed).toBe(true)
+  })
+
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] An unreadable leg must keep BOTH its hard-block signal and its
+  // honest framing when merged into the pair verdict. This branch previously hardcoded
+  // `oracleIntegrityFailed: false`, which would have discarded the hard block at the pair level —
+  // reopening, one layer up, exactly the hole the hook fix closes.
+  it('an UNREADABLE leg keeps oracleIntegrityFailed at the pair level (hard block survives)', () => {
+    expect(evaluatePairOracle(unreadable(), none(), 'ETH', 'USDC').oracleIntegrityFailed).toBe(true)
+    expect(evaluatePairOracle(none(), unreadable(), 'USDC', 'ETH').oracleIntegrityFailed).toBe(true)
+  })
+
+  it('an UNREADABLE leg is NOT listed as a token with no feed (copy must not claim that)', () => {
+    const r = evaluatePairOracle(unreadable(), none(), 'ETH', 'USDC')
+    expect(r.oracleUnavailable).toBe(true)     // tiered USD gate still engages
+    expect(r.oracleReadFailed).toBe(true)      // ...but as a read failure
+    expect(r.oracleMissingSymbols).toEqual([]) // ETH is NOT missing a feed — it exists, we failed to read it
+    expect(r.message).toMatch(/could not be read/i)
+  })
+
+  it('a genuinely missing feed is unchanged — still named, still not an integrity failure', () => {
+    const r = evaluatePairOracle(missing(), none(), 'EXOTIC', 'ETH')
+    expect(r.oracleUnavailable).toBe(true)
+    expect(r.oracleIntegrityFailed).toBe(false)
+    expect(r.oracleReadFailed).toBe(false)
+    expect(r.oracleMissingSymbols).toEqual(['EXOTIC'])
   })
 
   it('is a safe drop-in: combine(check, check) preserves that check\'s gate verdict', () => {

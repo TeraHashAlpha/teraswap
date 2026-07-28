@@ -61,7 +61,12 @@ export interface PriceCheck {
   deviation: number              // % de desvio (0.02 = 2%)
   level: PriceWarningLevel
   message: string | null
-  oracleUnavailable: boolean     // true when no Chainlink feed exists for this pair
+  oracleUnavailable: boolean     // true when no usable Chainlink price is available for this pair
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] true when a feed IS configured but could not be READ (RPC error,
+  // revert, no usable round, unresolved chain) — as opposed to a token that simply has no feed.
+  // Both set oracleUnavailable; only this one means "the oracle exists and we failed to reach it",
+  // which the UI must say instead of the (false) "this token has no Chainlink price feed".
+  oracleReadFailed?: boolean
   // [SPRINT-9J J1] true when the deviation/warn signal is an ORACLE-INTEGRITY
   // failure (stale round, answeredInRound<roundId, answer<=0) rather than a
   // price-impact deviation. Integrity failures are a genuine oracle-safety
@@ -135,20 +140,37 @@ export function evaluatePairOracle(
   inSymbol: string,
   outSymbol: string,
 ): PriceCheck {
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] `oracleUnavailable` now has TWO causes that must not be
+  // flattened into one another: a token with no feed configured at all, and a token whose feed
+  // exists but could not be READ. Only the former belongs in oracleMissingSymbols — that list
+  // drives copy that names the token as having "no Chainlink oracle", which is simply false during
+  // an outage. A leg is counted as missing only when it is unavailable AND did not fail a read.
   const missing: string[] = []
-  if (inCheck.oracleUnavailable) missing.push(inSymbol)
-  if (outCheck.oracleUnavailable) missing.push(outSymbol)
+  if (inCheck.oracleUnavailable && !inCheck.oracleReadFailed) missing.push(inSymbol)
+  if (outCheck.oracleUnavailable && !outCheck.oracleReadFailed) missing.push(outSymbol)
 
-  if (missing.length > 0) {
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] A read failure on EITHER leg must survive to the pair verdict.
+  // This branch used to hardcode `oracleIntegrityFailed: false`, which would have discarded the
+  // hard-block signal from an unreadable leg the moment it reached the pair level — reopening, at
+  // the pair level, exactly the hole the hook fix closes.
+  const readFailed = !!inCheck.oracleReadFailed || !!outCheck.oracleReadFailed
+
+  if (missing.length > 0 || readFailed) {
     // A genuinely unfeeded token (e.g. an exotic import) → ONE calm warning naming it.
     return {
       chainlinkPrice: inCheck.chainlinkPrice ?? outCheck.chainlinkPrice ?? null,
       executionPrice: inCheck.executionPrice ?? outCheck.executionPrice ?? null,
       deviation: 0,
       level: 'warn',
-      message: null, // copy supplied by the UI from oracleMissingSymbols
+      // Normally the copy is supplied by the UI from oracleMissingSymbols. For a read failure that
+      // framing would be false, so the failing leg's own message ("could not be read") is carried
+      // through for the UI to show instead.
+      message: readFailed ? (inCheck.oracleReadFailed ? inCheck.message : outCheck.message) : null,
       oracleUnavailable: true,
-      oracleIntegrityFailed: false,
+      // Preserved from the legs rather than hardcoded — false in the pre-existing no-feed case
+      // (neither leg sets it), true when a leg could not be read, which is what hard-blocks.
+      oracleIntegrityFailed: !!inCheck.oracleIntegrityFailed || !!outCheck.oracleIntegrityFailed,
+      oracleReadFailed: readFailed,
       oracleMissingSymbols: missing,
     }
   }
