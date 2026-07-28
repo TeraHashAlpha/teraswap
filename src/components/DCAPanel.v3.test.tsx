@@ -32,6 +32,12 @@ vi.mock('wagmi', () => ({
   useBalance: () => ({ data: undefined, isLoading: false, isError: false }),
   useReadContracts: () => ({ data: [], isLoading: false, isError: false }),
 }))
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Stubbed directly (same precedent as DCAPanel.routability.test.tsx)
+// rather than driving the real hook through mockReadContractImpl + a `.chain`-less useAccountMock —
+// this suite tests v3 signing, not depeg behaviour, so a static 'ok' keeps every test unaffected.
+vi.mock('@/hooks/useDepegCheck', () => ({
+  useDepegCheck: () => ({ mode: 'ok', divergence: 0, symbol: '', message: null }),
+}))
 
 vi.mock('@/lib/order-engine', async () => {
   const actual = await vi.importActual<typeof import('@/lib/order-engine')>('@/lib/order-engine')

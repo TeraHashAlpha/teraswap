@@ -29,6 +29,12 @@ vi.mock('wagmi', () => ({
 vi.mock('@/hooks/useChainlinkPrice', () => ({
   useChainlinkPrice: () => ({ chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }),
 }))
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Same precedent as useChainlinkPrice above — stub directly
+// rather than expanding this file's minimal wagmi mock with useReadContract. This suite doesn't
+// exercise depeg behaviour, so a static 'ok' (no exchange-rate pair) keeps every test unaffected.
+vi.mock('@/hooks/useDepegCheck', () => ({
+  useDepegCheck: () => ({ mode: 'ok', divergence: 0, symbol: '', message: null }),
+}))
 
 vi.mock('@/hooks/useTokenBalances', () => ({
   useTokenBalances: () => useTokenBalancesMock(),
