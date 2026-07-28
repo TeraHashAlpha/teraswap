@@ -28,10 +28,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // for the wrong reason (the hook falls through to the !dataComplete branch and reaches UNVERIFIED
 // anyway), so the isError guard survives deletion and the tests pin nothing. `errored()` below
 // therefore keeps stale-but-present data, which is what the real library does.
-type ReadResult = { data?: unknown; isError?: boolean; isLoading?: boolean; failureCount?: number }
+type ReadResult = {
+  data?: unknown
+  isError?: boolean
+  isLoading?: boolean
+  failureCount?: number
+  errorUpdateCount?: number
+}
 let reads: Record<string, ReadResult> = {}
 const readKey = (address: string | undefined, fn: string) => `${(address ?? '').toLowerCase()}:${fn}`
-const EMPTY: ReadResult = { data: undefined, isError: false, isLoading: false, failureCount: 0 }
+const EMPTY: ReadResult = {
+  data: undefined, isError: false, isLoading: false, failureCount: 0, errorUpdateCount: 0,
+}
 
 vi.mock('wagmi', () => ({
   useAccount: () => ({ isConnected: mockIsConnected }),
@@ -84,7 +92,8 @@ function healthyReads(marketAnswer = 10n ** 18n, erAnswer = 10n ** 18n) {
  * `isError` is true. Passing `data: undefined` here would let the isError guard be deleted without
  * a single test failing — the whole point of these cases.
  */
-const errored = (lastGood: unknown = round(10n ** 18n)) => ({ data: lastGood, isError: true, failureCount: 4 })
+const errored = (lastGood: unknown = round(10n ** 18n)) =>
+  ({ data: lastGood, isError: true, failureCount: 4, errorUpdateCount: 1 })
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -141,6 +150,107 @@ describe('useDepegCheck — in-flight is pending, not a block', () => {
       [readKey(ER, 'decimals')]: { isLoading: true, data: undefined },
     }
     expect(run().mode).toBe('pending')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// [FIX-DEPEG-RETRY-WINDOW / M-01] The independent audit's runtime reproduction, made permanent.
+//
+// The 30s refetchInterval (added so 'unverified' could not latch) defeated the failureCount guard:
+// for a query that has NEVER succeeded, query-core's 'fetch' action applies fetchState(), which
+// resets fetchFailureCount to 0 and — because data === undefined — also rewinds error/status to
+// 'pending'. The hook then saw {isLoading: true, failureCount: 0, isError: false}, i.e. exactly a
+// first render, and re-opened the gate for ~0.3-1.3s on every poll during the outage it exists to
+// catch. These cases drive the REAL observer state sequence, one entry per emitted result.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe('useDepegCheck — M-01: the poll must never re-open the gate', () => {
+  /** Apply one observer-result shape to ALL four reads (they share a query config, so they move together). */
+  const allFour = (r: ReadResult) => ({
+    [readKey(MARKET, 'latestRoundData')]: r,
+    [readKey(MARKET, 'decimals')]: r,
+    [readKey(ER, 'latestRoundData')]: r,
+    [readKey(ER, 'decimals')]: r,
+  })
+
+  // The exact sequence query-core emits for a never-succeeded query under a sustained outage, taken
+  // from the audit's runtime trace. `data` stays undefined throughout — nothing ever succeeded.
+  const OUTAGE_SEQUENCE: { label: string; state: ReadResult; mustBlock: boolean }[] = [
+    { label: 'first fetch in flight (no history yet)',
+      state: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 0 }, mustBlock: false },
+    { label: 'retry 1 (fetchFailureCount rising, no error committed)',
+      state: { isLoading: true, isError: false, failureCount: 1, errorUpdateCount: 0 }, mustBlock: true },
+    { label: 'retry 2',
+      state: { isLoading: true, isError: false, failureCount: 2, errorUpdateCount: 0 }, mustBlock: true },
+    { label: 'retries exhausted → error committed',
+      state: { isLoading: false, isError: true, failureCount: 3, errorUpdateCount: 1 }, mustBlock: true },
+    { label: 'POLL 1 fires → fetchState wipes failureCount AND rewinds status to pending',
+      state: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 1 }, mustBlock: true },
+    { label: 'poll 1 retries',
+      state: { isLoading: true, isError: false, failureCount: 1, errorUpdateCount: 1 }, mustBlock: true },
+    { label: 'poll 1 errors',
+      state: { isLoading: false, isError: true, failureCount: 3, errorUpdateCount: 2 }, mustBlock: true },
+    { label: 'POLL 2 fires → counters wiped again',
+      state: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 2 }, mustBlock: true },
+    { label: 'POLL 3 fires (outage sustained)',
+      state: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 3 }, mustBlock: true },
+  ]
+
+  it('stays blocked across EVERY step of a sustained outage — no pending window after the first failure', () => {
+    for (const step of OUTAGE_SEQUENCE) {
+      reads = allFour(step.state)
+      const mode = run().mode
+      if (step.mustBlock) {
+        expect(mode, `must BLOCK at: ${step.label}`).toBe('unverified')
+      } else {
+        expect(mode, `must stay frictionless at: ${step.label}`).toBe('pending')
+      }
+    }
+  })
+
+  it('the exact regressed frame — failureCount reset to 0 mid-poll — blocks on errorUpdateCount alone', () => {
+    // This single frame is the bug. Before the fix it returned 'pending' (gate open); the ONLY thing
+    // distinguishing it from a genuine first render is errorUpdateCount, which query-core never resets.
+    reads = allFour({ isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 1 })
+    expect(run().mode).toBe('unverified')
+  })
+
+  it('one still-failing leg is enough — the gate does not need all four to have failed', () => {
+    reads = {
+      ...allFour({ isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 0 }),
+      [readKey(ER, 'latestRoundData')]: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 1 },
+    }
+    expect(run().mode).toBe('unverified')
+  })
+
+  it('RECOVERY: a completed successful read reopens the gate, even with error history on record', () => {
+    // errorUpdateCount stays > 0 forever (monotonic), so recovery must be driven by DATA arriving,
+    // not by the failure memory clearing. All four legs now carry good data despite past errors.
+    reads = {
+      [readKey(MARKET, 'latestRoundData')]: { data: round(10n ** 18n), errorUpdateCount: 3, failureCount: 0 },
+      [readKey(MARKET, 'decimals')]: { data: 18, errorUpdateCount: 3, failureCount: 0 },
+      [readKey(ER, 'latestRoundData')]: { data: round(10n ** 18n), errorUpdateCount: 3, failureCount: 0 },
+      [readKey(ER, 'decimals')]: { data: 18, errorUpdateCount: 3, failureCount: 0 },
+    }
+    expect(run().mode).toBe('ok')
+  })
+
+  it('RECOVERY still yields a real verdict, not a rubber stamp — a depeg in the recovered data blocks', () => {
+    reads = {
+      [readKey(MARKET, 'latestRoundData')]: { data: round(112n * 10n ** 16n), errorUpdateCount: 2 },
+      [readKey(MARKET, 'decimals')]: { data: 18, errorUpdateCount: 2 },
+      [readKey(ER, 'latestRoundData')]: { data: round(10n ** 18n), errorUpdateCount: 2 },
+      [readKey(ER, 'decimals')]: { data: 18, errorUpdateCount: 2 },
+    }
+    const r = run()
+    expect(r.mode).toBe('block')
+    expect(r.message).toMatch(/depeg/i)
+  })
+
+  it('a genuine fresh mount with zero history is still frictionless (no first-render regression)', () => {
+    reads = allFour({ isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 0 })
+    const r = run()
+    expect(r.mode).toBe('pending')
+    expect(r.message).toBeNull()
   })
 })
 

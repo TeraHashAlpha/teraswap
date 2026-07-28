@@ -4,7 +4,7 @@
  * core. [FIX-ORACLE-FAIL-CLOSED] "fail-open" in the original version of this header was the bug.
  */
 import { describe, it, expect } from 'vitest'
-import { evaluateDepeg, priceFromValidRound, PENDING, UNVERIFIED } from './depeg-gate'
+import { evaluateDepeg, priceFromValidRound, hasReadFailed, PENDING, UNVERIFIED } from './depeg-gate'
 import { DEPEG_DIVERGENCE_WARN, DEPEG_DIVERGENCE_BLOCK, DEPEG_CONSENT_TOLERANCE } from './constants'
 
 describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
@@ -83,6 +83,38 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
 
   it('tolerance constant exists for the consent auto-revoke (used by SwapBox)', () => {
     expect(DEPEG_CONSENT_TOLERANCE).toBe(0.005)
+  })
+})
+
+// [FIX-DEPEG-RETRY-WINDOW / M-01] The failure memory that decides whether an in-flight read may be
+// treated as a frictionless first render. Unit-tested here, away from React, because it is the whole
+// substance of the M-01 fix: `failureCount` alone is resettable by the library and let the gate
+// re-open once per 30s poll.
+describe('hasReadFailed [FIX-DEPEG-RETRY-WINDOW / M-01]', () => {
+  it('a read with no failure history has not failed (first-ever load stays frictionless)', () => {
+    expect(hasReadFailed({})).toBe(false)
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 0 })).toBe(false)
+    expect(hasReadFailed({ failureCount: undefined, errorUpdateCount: undefined })).toBe(false)
+  })
+
+  it('mid-retry (failureCount > 0, no error committed yet) counts as failed', () => {
+    // The first retry sequence: query-core increments fetchFailureCount but has not dispatched
+    // 'error', so errorUpdateCount is still 0. failureCount is the ONLY signal in this window.
+    expect(hasReadFailed({ failureCount: 2, errorUpdateCount: 0 })).toBe(true)
+  })
+
+  it('THE M-01 CASE: post-error refetch (failureCount reset to 0) still counts as failed', () => {
+    // query-core's `fetchState` resets fetchFailureCount to 0 on every new fetch and — when
+    // data === undefined — also rewinds error/status. errorUpdateCount is the only survivor, and
+    // relying on failureCount alone is exactly what re-opened the gate every 30s.
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 1 })).toBe(true)
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 7 })).toBe(true)
+  })
+
+  it('is monotonic in practice — a later successful FETCH does not clear the error history', () => {
+    // errorUpdateCount is never decremented by query-core (only ++ on the 'error' action), so the
+    // predicate stays true. Recovery is signalled by DATA arriving, never by this going false.
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 3 })).toBe(true)
   })
 })
 

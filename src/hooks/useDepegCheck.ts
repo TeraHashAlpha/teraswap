@@ -1,7 +1,7 @@
 import { useAccount, useReadContract } from 'wagmi'
 import { chainlinkAggregatorAbi, getFeedStalenessSec } from '@/lib/chainlink'
 import { getExchangeRatePair } from '@/lib/chains/chainlink-feeds'
-import { evaluateDepeg, priceFromValidRound, PENDING, UNVERIFIED, type DepegCheck } from '@/lib/depeg-gate'
+import { evaluateDepeg, priceFromValidRound, hasReadFailed, PENDING, UNVERIFIED, type DepegCheck } from '@/lib/depeg-gate'
 import { useResolvedChainId } from './useChainId'
 
 /**
@@ -101,13 +101,20 @@ export function useDepegCheck(
     // it true for the WHOLE retry sequence, so a read that has already failed twice and is sitting
     // in backoff still reports isLoading — and treating that as 'pending' would leave the gate
     // silently inactive for the entire backoff window, which is the very hole this fix closes.
-    // `failureCount > 0` means we have already tried and failed: that is failing, not loading.
+    //
+    // [FIX-DEPEG-RETRY-WINDOW / M-01] The burden of proof is INVERTED here. PENDING (frictionless)
+    // is not the default for "no data yet" — it is granted ONLY to a read that has never failed. Any
+    // read with failure history presents as UNVERIFIED for as long as it has no data, however
+    // 'pending'-looking the library's own flags are. Checking `failureCount` alone was not enough:
+    // the 30s poll resets it to 0 and rewinds `status` to 'pending', so the gate re-opened once per
+    // cycle. `hasReadFailed` adds `errorUpdateCount`, which query-core never resets — see its docs.
     const anyFailure =
-      (market.failureCount ?? 0) > 0 || (marketDec.failureCount ?? 0) > 0 ||
-      (er.failureCount ?? 0) > 0 || (erDec.failureCount ?? 0) > 0
+      hasReadFailed(market) || hasReadFailed(marketDec) || hasReadFailed(er) || hasReadFailed(erDec)
     const inFlight =
       (market.isLoading || marketDec.isLoading || er.isLoading || erDec.isLoading) && !anyFailure
     // Genuinely first-flight → pending (frictionless). Failing, or settled-but-empty → blocked.
+    // Recovery is NOT via this branch: only a completed successful read (all four `data` present)
+    // reaches the evaluation below, which is what "only success reopens the gate" means mechanically.
     return inFlight ? PENDING(pair.symbol) : UNVERIFIED(pair.symbol)
   }
 
