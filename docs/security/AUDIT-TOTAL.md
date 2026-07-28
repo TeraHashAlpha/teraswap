@@ -1451,3 +1451,18 @@ as if the peg had been verified.
   (`useDepegCheck.ts:89`) is defensive and currently unreachable; the feedback doc says "24 cases" where the
   new test file has 22. One candidate finding DISMISSED on verification (unconfigured-chain banner — the
   claimed banner never renders). Report + append left for owner's SSH-signed batch.
+
+### AUDIT-DEPEG-GATE-ORDER-CREATION — APPROVED 0C/0H (2L) (2026-07-28)
+
+**Verdict: APPROVED — 0C/0H/2L. `feat/depeg-gate-order-creation` (merged as `78a8301`).** Independent Auditor
+pass (separate session) extending the depeg gate from `SwapBox` to conditional-order creation — DCA, Limit,
+and SL/TP panels — closing coverage gap L-03 flagged in the prior `AUDIT-ORACLE-FAIL-CLOSED` pass.
+
+- **L-1:** the forced-click tests added for the DCA/Limit/SL-TP panels prove the submit button is rendered
+  `disabled` when the depeg gate is active, not that the in-handler depeg guard itself fires — jsdom
+  suppresses click events on disabled buttons, so the handler-level check is never actually exercised by
+  these tests. Not a live bypass today (the disabled attribute alone blocks submission), but the guard's own
+  logic is unverified by this suite. Remediation in progress on branch `fix/depeg-gate-handler-test-coverage`.
+- **L-2:** depeg consent acceptance is keyed by chain, not by token pair. Unreachable today — only one
+  registered pair exists — but must be fixed before a second pair is registered, otherwise accepting the
+  divergence banner on one pair could silently carry over consent to an unrelated pair on the same chain.
