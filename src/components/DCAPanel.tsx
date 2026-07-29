@@ -47,6 +47,10 @@ import { findChainToken } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
+// [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] The SAME classifier the swap flow gates on. Imported
+// read-only — no second, parallel price decision is written in this component.
+import { evaluatePriceGate, type PriceGateReason } from '@/lib/price-gate'
+import type { PriceCheck } from '@/lib/chainlink'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
@@ -76,6 +80,48 @@ function findPriceFeed(token: Token, chainId: number): string {
 // the 403), so we detect that error and switch the form into a calm paused state instead of
 // surfacing a raw failure, disabling submit so the user isn't bounced again.
 const DCA_PAUSED_RE = /temporarily paused/i
+
+// ── [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] DCA oracle gate ───
+/**
+ * This panel used to read `useChainlinkPrice(...).chainlinkPrice` and DISCARD both
+ * `oracleIntegrityFailed` and `oracleReadFailed` — the same fail-open class already closed in the
+ * swap flow. The discarded verdict was not cosmetic here: that price is the reference
+ * `deriveSigningMinAmountOut` derives the per-buy `minAmountOut` floor from, so a feed we could not
+ * verify became a floor the user then SIGNED — and, for the stale / `answeredInRound < roundId`
+ * cases, `chainlinkPrice` comes back POPULATED alongside `oracleIntegrityFailed: true`, so the bad
+ * number was used directly rather than merely leaving a gap.
+ *
+ * The decision is NOT re-implemented. Each leg is classified by the same `evaluatePriceGate` the
+ * swap flow uses; this function only (a) aggregates the two legs — a DCA reference price is the
+ * RATIO priceIn/priceOut, so either leg failing poisons it — and (b) carries the failing leg's own
+ * message up, since `useChainlinkPrice` already writes precise per-case copy.
+ *
+ * Reachability, stated because it bounds what the UI must say: both legs are read with
+ * `executionPriceUsd = null`, so `useChainlinkPrice` never reaches `evaluateDeviation` and never
+ * returns a warn/danger DEVIATION level. Only `'block'/'oracle-integrity'` and `'ok'` are reachable
+ * today. `'extreme-deviation'` and `'consent'` are still routed correctly rather than assumed away:
+ * if a future change gives this call site a real execution price, an extreme deviation must block
+ * under its OWN reason (so the UI says "price moved", not "we could not verify"), and informed
+ * consent must not silently harden into an unexplainable block.
+ */
+export interface DcaOracleGate {
+  /** true ⇒ no DCA order may be created, AND no non-oracle price may substitute for the feed. */
+  blocked: boolean
+  /** Which `evaluatePriceGate` reason blocked — the UI branches on this for accurate copy. */
+  reason: PriceGateReason
+  /** The failing leg's own message; null when nothing blocked. */
+  detail: string | null
+}
+
+export function evaluateDcaOracleGate(spend: PriceCheck, buy: PriceCheck): DcaOracleGate {
+  for (const check of [spend, buy]) {
+    const gate = evaluatePriceGate(check)
+    if (gate.mode === 'block') {
+      return { blocked: true, reason: gate.reason, detail: check.message }
+    }
+  }
+  return { blocked: false, reason: 'none', detail: null }
+}
 
 // ══════════════════════════════════════════════════════════
 //  DCA PANEL — Autonomous DCA via TeraSwapOrderExecutor v2
@@ -371,15 +417,42 @@ function CreateDCAForm({
   const [maxSlippageBps, setMaxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
 
   // Chainlink first (same hook the swap UI already uses for oracle display).
-  const chainlinkPriceIn = useChainlinkPrice(tokenIn?.address, null).chainlinkPrice
-  const chainlinkPriceOut = useChainlinkPrice(tokenOut?.address, null).chainlinkPrice
+  // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] The FULL PriceCheck is kept now — `.chainlinkPrice` alone
+  // silently dropped the oracleIntegrityFailed / oracleReadFailed verdict on the floor.
+  const oracleSpend = useChainlinkPrice(tokenIn?.address, null)
+  const oracleBuy = useChainlinkPrice(tokenOut?.address, null)
+  const chainlinkPriceIn = oracleSpend.chainlinkPrice
+  const chainlinkPriceOut = oracleBuy.chainlinkPrice
+
+  const oracleGate = evaluateDcaOracleGate(oracleSpend, oracleBuy)
+  // Armed exactly where the oracle price is LOAD-BEARING — i.e. where the v3 derivation consumes
+  // it. On the v2 path `minAmountOut` is the literal '1' and `priceFeed` is address(0), so the two
+  // reads above feed nothing at all; blocking creation there would cost availability on every
+  // ETH/USD RPC blip and buy no safety. This is NOT a narrowing in production: DCAPanel is only
+  // ever rendered behind `isDcaLive(chainId)` (page.tsx), which itself requires
+  // `getOrderExecutorV3(chainId) !== null` — the SAME condition as v3Enabled. Wherever a user can
+  // reach this panel at all, this gate is armed; the v2 branch below is reachable only from tests.
+  const oracleBlocked = v3Enabled && oracleGate.blocked
+  // THE TRAP. This is the ONLY permission the non-oracle price sources may read. A Chainlink
+  // integrity failure must not be rescued by DefiLlama, nor by the hardcoded APPROX_PRICES table
+  // that sits behind it inside deriveSigningMinAmountOut. Falling back after the oracle refused
+  // would launder a fail-closed state into a fail-open one — strictly worse than having no gate,
+  // because the resulting floor would then LOOK price-derived while resting on a source the oracle
+  // check never covered. Every consumer of a non-oracle price below is gated on this one bit: the
+  // DefiLlama fetch effect, the `signingMin` preview, and `handleCreate`'s v3 derivation.
+  const oracleFallbackAllowed = !oracleBlocked
 
   // DefiLlama fallback ONLY when v3 is enabled and Chainlink missed a leg — never fetched on the
   // (current, everywhere) v2 path, so this adds zero network traffic today.
   const [llamaPriceIn, setLlamaPriceIn] = useState<number | null>(null)
   const [llamaPriceOut, setLlamaPriceOut] = useState<number | null>(null)
   useEffect(() => {
-    if (!v3Enabled) { setLlamaPriceIn(null); setLlamaPriceOut(null); return }
+    // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Second clause is the trap-closer: while the oracle gate
+    // blocks, DefiLlama is never even ASKED, and any price it returned earlier in the session is
+    // cleared — so a feed that degrades mid-session cannot leave a stale non-oracle price behind to
+    // feed the derivation. A no-feed token is NOT this case: `evaluatePriceGate` returns 'ok' for
+    // `oracleUnavailable`, so the fallback stays fully available where it is legitimate.
+    if (!v3Enabled || !oracleFallbackAllowed) { setLlamaPriceIn(null); setLlamaPriceOut(null); return }
     let cancelled = false
     const slug = (() => { try { return getChainConfig(chainId).slug } catch { return 'ethereum' } })()
     if (chainlinkPriceIn == null && tokenIn) {
@@ -393,7 +466,7 @@ function CreateDCAForm({
       setLlamaPriceOut(null)
     }
     return () => { cancelled = true }
-  }, [v3Enabled, tokenIn, tokenOut, chainlinkPriceIn, chainlinkPriceOut, chainId])
+  }, [v3Enabled, oracleFallbackAllowed, tokenIn, tokenOut, chainlinkPriceIn, chainlinkPriceOut, chainId])
 
   // Live preview of the amount that WOULD be signed, for the "derived floor" display.
   const liveAmountInRaw = useMemo(() => {
@@ -402,7 +475,11 @@ function CreateDCAForm({
   }, [v3Enabled, tokenIn, totalDisplay])
 
   const signingMin = useMemo(() => {
-    if (!v3Enabled || !tokenIn || !tokenOut || liveAmountInRaw == null || liveAmountInRaw <= 0n) return null
+    // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] No floor is PREVIEWED on a blocked oracle either. Without
+    // this the panel would still render a confident "Signed floor per order: ≥ X" derived from
+    // APPROX_PRICES (the last tier inside deriveSigningMinAmountOut, which needs no live source at
+    // all) while creation is blocked — showing the user a number we just refused to stand behind.
+    if (!v3Enabled || oracleBlocked || !tokenIn || !tokenOut || liveAmountInRaw == null || liveAmountInRaw <= 0n) return null
     return deriveSigningMinAmountOut({
       amountIn: liveAmountInRaw,
       srcDecimals: tokenIn.decimals,
@@ -413,7 +490,7 @@ function CreateDCAForm({
       approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
       approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
     })
-  }, [v3Enabled, tokenIn, tokenOut, liveAmountInRaw, maxSlippageBps, chainlinkPriceIn, chainlinkPriceOut, llamaPriceIn, llamaPriceOut])
+  }, [v3Enabled, oracleBlocked, tokenIn, tokenOut, liveAmountInRaw, maxSlippageBps, chainlinkPriceIn, chainlinkPriceOut, llamaPriceIn, llamaPriceOut])
 
   // [CHORE-DCA-CUSTOM-PERIODS req.2 min-chunk] Total spend in USD (APPROX_PRICES-priced
   // tokens only — null for anything unpriced, e.g. an imported token). Feeds the SC-02 dust
@@ -543,7 +620,7 @@ function CreateDCAForm({
     [interval, parts, expiry],
   )
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking && !oracleBlocked
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
@@ -558,6 +635,11 @@ function CreateDCAForm({
     // depegged or unverifiable pair. canCreate already gates the button; this also blocks any
     // programmatic call.
     if (depegBlocking) return
+    // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Hard guard (defense-in-depth), same shape as the three
+    // above: never sign a DCA whose per-buy floor would be derived from a price the oracle refused
+    // to vouch for. canCreate already gates the button; this is what blocks a forced or programmatic
+    // call, and it is what stops the v3 derivation below from reading llama/APPROX prices.
+    if (oracleBlocked) return
     setRouteBlock(null)
     startWaitingSound()
 
@@ -836,6 +918,35 @@ function CreateDCAForm({
             />
             I understand {depegCheck.symbol} may be depegged and want to proceed.
           </label>
+        </div>
+      )}
+
+      {/* [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] The oracle block, surfaced with a reason that matches
+          what actually happened. `oracle-integrity` is OUR side — a feed we could not read, or one
+          whose identity/round did not verify — so the copy says exactly that and explicitly
+          disclaims any finding about the token. It deliberately does NOT reuse the depeg banner's
+          manipulation language: dressing our own feed outage or misconfiguration up as suspected
+          manipulation would be a false accusation against the asset. `extreme-deviation` is the
+          opposite case (a healthy feed the price has run away from) and gets its own copy. */}
+      {oracleBlocked && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-oracle-block">
+          {oracleGate.reason === 'extreme-deviation' ? (
+            <>
+              <span className="font-semibold">&#9888; DCA blocked — price moved too far from the oracle.</span>{' '}
+              {oracleGate.detail}
+              <span className="mt-1 block text-xs text-danger/80">
+                The quoted rate and the Chainlink reference price disagree by more than we allow. This is about the price, not about the feed — it clears when they reconverge.
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">&#9888; DCA blocked — price could not be verified.</span>{' '}
+              {oracleGate.detail}
+              <span className="mt-1 block text-xs text-danger/80">
+                This is a problem on our side with the Chainlink price feed for this pair — not a finding about {tokenOut?.symbol ?? 'this token'}, and not a sign the price moved. Every buy is signed against a minimum-output floor derived from that reference price, so we will not create an order on a price we could not verify. It clears once the feed returns good data.
+              </span>
+            </>
+          )}
         </div>
       )}
 
