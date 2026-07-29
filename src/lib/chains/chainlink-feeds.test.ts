@@ -12,7 +12,12 @@ import {
   getChainlinkFeed,
   getFeedHeartbeatSec,
   getFeedStalenessSec,
+  getFeedExpectation,
+  getComposedFeed,
+  resolveFeed,
+  type ResolvedFeed,
 } from './chainlink-feeds'
+import { CHAINLINK_FEEDS, CHAINLINK_ETH_USD } from '../constants'
 
 const ARBITRUM_TOKENS = {
   WETH: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
@@ -97,5 +102,113 @@ describe('chainlink-feeds — Arbitrum (42161) [CHORE-47B-ARBITRUM-ADDRESS-REMED
     expect(getChainlinkFeed('0x4200000000000000000000000000000000000006', 8453)).toBe(
       '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
     )
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [ADR-018] Feed self-identification registry.
+// ─────────────────────────────────────────────────────────────
+describe('FEED_EXPECTATIONS / getFeedExpectation [ADR-018]', () => {
+  it('every address in CHAINLINK_FEEDS (mainnet) + CHAINLINK_ETH_USD has a declared expectation', () => {
+    expect(getFeedExpectation(CHAINLINK_ETH_USD)).not.toBeNull()
+    for (const [token, feed] of Object.entries(CHAINLINK_FEEDS)) {
+      expect(getFeedExpectation(feed), `mainnet ${token} → ${feed}`).not.toBeNull()
+    }
+  })
+
+  it('every address in CHAINLINK_FEEDS_BY_CHAIN (Base + Arbitrum) has a declared expectation', () => {
+    for (const [chainId, feeds] of Object.entries(CHAINLINK_FEEDS_BY_CHAIN)) {
+      for (const [token, feed] of Object.entries(feeds)) {
+        expect(getFeedExpectation(feed), `chain ${chainId} ${token} → ${feed}`).not.toBeNull()
+      }
+    }
+  })
+
+  it('resolves case-insensitively, same convention as getChainlinkFeed/getFeedHeartbeatSec', () => {
+    const lower = getFeedExpectation(CHAINLINK_ETH_USD.toLowerCase())
+    const mixed = getFeedExpectation(CHAINLINK_ETH_USD)
+    expect(lower).toEqual(mixed)
+  })
+
+  it('an address with no declared expectation → null (fail closed, not a thrown error at call time)', () => {
+    expect(getFeedExpectation('0x000000000000000000000000000000000000dEaD')).toBeNull()
+  })
+
+  // [ADR-018] The 7 mainnet entries a sibling on-chain verification pass found defective. The
+  // expectation recorded here is the CORRECT identity for the pair the key claims — deliberately
+  // NOT what the current (wrong) address actually returns — so each fails closed against its own
+  // bug. This test pins the intent, not a live on-chain read (that's the whole point: it must fail
+  // WITHOUT needing a network call).
+  it('the 7 known-defective mainnet entries are recorded as their CORRECT pair (Chainlink "X / USD" @ 8dp convention)', () => {
+    const WBTC_USD_ADDR = '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c' // currently the BTC/USD index feed
+    const GRT_USD_ADDR = '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1'  // currently GRT/ETH
+    const LDO_USD_ADDR = '0x4e844125952D32AcdF339BE976c98E22F6F318dB'  // currently LDO/ETH
+    const SHIB_USD_ADDR = '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61' // currently SHIB/ETH
+    const APE_USD_ADDR = '0xD10aBbC76679a20055E167BB80A24ac851b37571'  // currently no code
+    const PEPE_USD_ADDR = '0x02DE28aB3C28A5B1E8236B1069a211b7494F0f35' // currently no code
+    const PAXG_USD_ADDR = '0x9B97304EA12EFed0FAd976FBeCAad46016bf269e' // currently a dead proxy
+
+    expect(getFeedExpectation(WBTC_USD_ADDR)).toEqual({ description: 'WBTC / USD', decimals: 8 })
+    expect(getFeedExpectation(GRT_USD_ADDR)).toEqual({ description: 'GRT / USD', decimals: 8 })
+    expect(getFeedExpectation(LDO_USD_ADDR)).toEqual({ description: 'LDO / USD', decimals: 8 })
+    expect(getFeedExpectation(SHIB_USD_ADDR)).toEqual({ description: 'SHIB / USD', decimals: 8 })
+    expect(getFeedExpectation(APE_USD_ADDR)).toEqual({ description: 'APE / USD', decimals: 8 })
+    expect(getFeedExpectation(PEPE_USD_ADDR)).toEqual({ description: 'PEPE / USD', decimals: 8 })
+    expect(getFeedExpectation(PAXG_USD_ADDR)).toEqual({ description: 'PAXG / USD', decimals: 8 })
+  })
+})
+
+describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => {
+  it('a direct-feed token resolves to kind:"single" with its declared identity attached', () => {
+    const resolved = resolveFeed('0x4200000000000000000000000000000000000006', 8453) // Base WETH
+    expect(resolved).not.toBeNull()
+    expect(resolved!.kind).toBe('single')
+    if (resolved!.kind === 'single') {
+      expect(resolved!.leg.address.toLowerCase()).toBe('0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70')
+      expect(resolved!.leg.expectedDescription).toBe('ETH / USD')
+      expect(resolved!.leg.expectedDecimals).toBe(8)
+    }
+  })
+
+  it('a composed-only token (Base cbETH) resolves to kind:"composed" with BOTH legs\' identities attached', () => {
+    const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+    const composed = getComposedFeed(CBETH, 8453)
+    expect(composed).not.toBeNull()
+
+    const resolved = resolveFeed(CBETH, 8453)
+    expect(resolved).not.toBeNull()
+    expect(resolved!.kind).toBe('composed')
+    if (resolved!.kind === 'composed') {
+      expect(resolved!.base.address.toLowerCase()).toBe(composed!.base.toLowerCase())
+      expect(resolved!.base.expectedDescription).toBe('CBETH / ETH')
+      expect(resolved!.base.expectedDecimals).toBe(18)
+      expect(resolved!.quote.address.toLowerCase()).toBe(composed!.quote.toLowerCase())
+      expect(resolved!.quote.expectedDescription).toBe('ETH / USD')
+      expect(resolved!.quote.expectedDecimals).toBe(8)
+    }
+  })
+
+  it('a token with neither a direct nor composed feed → null', () => {
+    expect(resolveFeed('0x000000000000000000000000000000000000dEaD', 1)).toBeNull()
+  })
+
+  it('the kind discriminant is exhaustive at compile time — a switch with a never-typed default compiles', () => {
+    // This is a compile-time assertion disguised as a runtime one: if ResolvedFeed ever grows a
+    // third variant, the `exhaustive: never` assignment below fails to TYPECHECK (not just to run),
+    // so `npm run typecheck` catches it before any test does.
+    const classify = (r: ResolvedFeed): string => {
+      switch (r.kind) {
+        case 'single':
+          return 'single'
+        case 'composed':
+          return 'composed'
+        default: {
+          const exhaustive: never = r
+          return exhaustive
+        }
+      }
+    }
+    const resolved = resolveFeed('0x4200000000000000000000000000000000000006', 8453)!
+    expect(classify(resolved)).toBe('single')
   })
 })
