@@ -1,5 +1,5 @@
 import { useAccount, useReadContract } from 'wagmi'
-import { getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluateDeviation, type PriceCheck } from '@/lib/chainlink'
+import { getChainlinkFeed, getFeedStalenessSec, getFeedExpectation, chainlinkAggregatorAbi, evaluateDeviation, type PriceCheck } from '@/lib/chainlink'
 import { hasReadFailed } from '@/lib/depeg-gate'
 import { useResolvedChainId } from './useChainId'
 
@@ -40,6 +40,18 @@ import { useResolvedChainId } from './useChainId'
  *    ("This token has no Chainlink price feed") is simply false for an outage, and telling a user
  *    that is its own kind of lie — the same distinction the depeg gate draws between "depegged" and
  *    "could not check".
+ *
+ * [ADR-018] The read above assumed the address WAS the pair the config claims — nothing asked the
+ * feed. A sibling verification pass found 7 mainnet feeds whose description() contradicts their
+ * config key; 6 fail loudly (no code / dead proxy / wrong denomination, all already caught above as
+ * UNREADABLE or an invalid/stale round) but WBTC/USD silently reads the BTC/USD index feed and PASSES
+ * every check above, because decimals happen to match (8) and the round is genuinely fresh and valid.
+ * This hook now also reads description() and compares BOTH description and decimals against
+ * FEED_EXPECTATIONS before trusting `answer` — a mismatch on either is folded into the SAME
+ * oracle-integrity-failed branch as the stale/invalid-round checks below (never a soft warning).
+ * NOTE: this hook still has no composed-feed capability (cbETH-style base×quote) — that gap
+ * pre-dates and is untouched by this change; composed tokens remain a "no feed" (`oracleUnavailable`)
+ * verdict here exactly as before.
  */
 
 /** Neutral, frictionless verdict — a first render or a case with nothing to guard. */
@@ -107,6 +119,16 @@ export function useChainlinkPrice(
     query,
   })
 
+  // [ADR-018] Self-identification: the feed's own description() must be checked before its answer
+  // is trusted, same as decimals() above.
+  const desc = useReadContract({
+    address: feedAddress!,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'description',
+    chainId,
+    query,
+  })
+
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] Chain unresolved. Disconnected is NOT a failure — there is no
   // swap to guard and no chain to guard it on, so stay neutral (identical to the frictionless first
   // render this hook has always had for a disconnected visitor). CONNECTED with an unresolvable
@@ -137,6 +159,7 @@ export function useChainlinkPrice(
 
   const roundData = round.data
   const feedDecimals = dec.data
+  const feedDescription = desc.data
 
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] A read we could not complete means the price is UNVERIFIED. This
   // is the branch the whole fix turns on: it previously collapsed into the "not loaded yet" case and
@@ -146,23 +169,43 @@ export function useChainlinkPrice(
   // RETAINS the last successful `data` when a *refetch* fails, so with the 30s poll added above an
   // `isError` short-circuit placed ahead of this check would hard-block the entire app on any
   // transient RPC blip — while holding a round the oracle itself timestamps as fresh, and which the
-  // staleness ladder below would happily verify. (decimals() is immutable and still re-polled, so
-  // that variant blocked on a value we already hold and that can never change.) Failing closed on
-  // "no usable data" and letting the per-feed staleness ceiling judge retained data is both safer
-  // and self-correcting: if the outage outlives the feed's heartbeat×1.5 window, `ageSeconds` grows
-  // past it and the integrity branch below blocks anyway.
-  if (!roundData || feedDecimals === undefined) {
+  // staleness ladder below would happily verify. (decimals()/description() are immutable and still
+  // re-polled, so that variant blocked on values we already hold and that can never change.) Failing
+  // closed on "no usable data" and letting the per-feed staleness ceiling judge retained data is both
+  // safer and self-correcting: if the outage outlives the feed's heartbeat×1.5 window, `ageSeconds`
+  // grows past it and the integrity branch below blocks anyway.
+  if (!roundData || feedDecimals === undefined || feedDescription === undefined) {
     // The burden of proof is INVERTED here: neutral is granted ONLY to a read with no failure
     // history. `isLoading` alone is not a safe test — TanStack keeps it true across an entire retry
     // sequence, and resets `failureCount` to 0 on every new fetch, so a sustained outage would keep
     // re-presenting as a pristine first render once per poll. That was M-01; `hasReadFailed`
     // combines failureCount (the in-retry window) with errorUpdateCount (the post-poll window, which
     // the library never resets) precisely so that hole stays shut here too.
-    const anyFailure = round.isError || dec.isError || hasReadFailed(round) || hasReadFailed(dec)
-    const inFlight = (round.isLoading || dec.isLoading) && !anyFailure
+    const anyFailure = round.isError || dec.isError || desc.isError || hasReadFailed(round) || hasReadFailed(dec) || hasReadFailed(desc)
+    const inFlight = (round.isLoading || dec.isLoading || desc.isLoading) && !anyFailure
     return inFlight
       ? NEUTRAL(executionPriceUsd)
       : UNREADABLE(executionPriceUsd, 'Chainlink price feed could not be read. Price not verified.')
+  }
+
+  // [ADR-018 invariant (c)] Self-identification: the feed's own description()/decimals() must match
+  // what FEED_EXPECTATIONS declares for this address BEFORE the answer below is trusted. This is
+  // checked first — ahead of even the answer<=0 guard — because a mismatch means the feed cannot be
+  // trusted regardless of what its round data says. A feed with no declared expectation at all (should
+  // be unreachable given the ADR-018 import-time completeness assert, but checked defensively) fails
+  // the same way. This is the check that catches WBTC/USD silently reading the BTC/USD index feed:
+  // its round data is genuinely fresh and valid, so every guard below it would otherwise pass.
+  const expectation = getFeedExpectation(feedAddress)
+  if (!expectation || feedDescription !== expectation.description || Number(feedDecimals) !== expectation.decimals) {
+    return {
+      chainlinkPrice: null,
+      executionPrice: executionPriceUsd,
+      deviation: 0,
+      level: 'warn',
+      message: 'Chainlink feed identity does not match the configured pair. Price not verified.',
+      oracleUnavailable: false,
+      oracleIntegrityFailed: true,
+    }
   }
 
   // Parse Chainlink answer

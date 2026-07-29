@@ -4,7 +4,7 @@ import {
   PRICE_DEVIATION_BLOCK,
   CHAINLINK_MAX_STALENESS_SEC,
 } from './constants'
-import { getChainlinkFeed, getFeedStalenessSec, getComposedFeed } from './chains/chainlink-feeds'
+import { getChainlinkFeed, getFeedStalenessSec, getFeedExpectation, resolveFeed } from './chains/chainlink-feeds'
 import { isSequencerUp } from './chains/sequencer-check'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
 import { getPublicClientForChain } from './chains/clients'
@@ -13,7 +13,8 @@ import { getRpcUrlForChain } from './adapters/shared'
 // [P218] getChainlinkFeed moved to the per-chain registry; re-export so
 // existing `import { getChainlinkFeed } from '@/lib/chainlink'` keeps working.
 // [SPRINT-9V V1] getFeedStalenessSec likewise re-exported for the UI hook.
-export { getChainlinkFeed, getFeedStalenessSec } from './chains/chainlink-feeds'
+// [ADR-018] getFeedExpectation re-exported for useChainlinkPrice.ts's identity check.
+export { getChainlinkFeed, getFeedStalenessSec, getFeedExpectation } from './chains/chainlink-feeds'
 
 // ── Chainlink AggregatorV3 ABI (minimal) ─────────────────
 export const chainlinkAggregatorAbi = [
@@ -47,6 +48,15 @@ export const chainlinkAggregatorAbi = [
     inputs: [],
     name: 'decimals',
     outputs: [{ name: '', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  // [ADR-018] Self-identification: every feed proxy exposes its own pair string. Read and compared
+  // against FEED_EXPECTATIONS before any answer from that feed is trusted.
+  {
+    inputs: [],
+    name: 'description',
+    outputs: [{ name: '', type: 'string' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -251,25 +261,82 @@ async function rpcCall(to: string, data: string, chainId: number = DEFAULT_CHAIN
 }
 
 /**
- * [SPRINT-9V V2] Read + fully validate ONE Chainlink feed (decimals + latestRoundData + the 9G
- * round-integrity gate + per-feed staleness). Returns the decimal-normalised price or null. The
- * sequencer gate is the CALLER's responsibility (done once per fetch, before any leg is read).
+ * [ADR-018] Per-(chainId,address) cache of a feed's on-chain description()/decimals(). Both are
+ * immutable for the lifetime of a proxy (Chainlink rotates the underlying aggregator behind the
+ * SAME proxy address on an upgrade — description/decimals stay fixed across that rotation), so
+ * caching for the process lifetime avoids re-reading them on every 30s poll / DCA tick without
+ * ever risking a stale IDENTITY (only the price itself is re-read every time).
  */
-async function fetchSingleFeedRaw(
+const feedIdentityCache = new Map<string, { description: string; decimals: number }>()
+
+/** [ADR-018] Test-only reset — mirrors _clearSequencerCache in sequencer-check.ts. Production code
+ *  never calls this; the cache is intentionally process-lifetime elsewhere. */
+export function _clearFeedIdentityCache(): void {
+  feedIdentityCache.clear()
+}
+
+/** [ADR-018] Read a feed's on-chain description() + decimals(), cached for the process lifetime. */
+async function fetchFeedIdentity(
   feed: `0x${string}`,
   chainId: number,
-): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
-  // Fetch decimals
-  const decData = encodeFunctionData({
+): Promise<{ description: string; decimals: number }> {
+  const cacheKey = `${chainId}:${feed.toLowerCase()}`
+  const cached = feedIdentityCache.get(cacheKey)
+  if (cached) return cached
+
+  const descData = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'description' })
+  const descResult = await rpcCall(feed, descData, chainId)
+  const description = decodeFunctionResult({
     abi: chainlinkAggregatorAbi,
-    functionName: 'decimals',
-  })
+    functionName: 'description',
+    data: descResult as `0x${string}`,
+  }) as string
+
+  const decData = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'decimals' })
   const decResult = await rpcCall(feed, decData, chainId)
   const decimals = Number(decodeFunctionResult({
     abi: chainlinkAggregatorAbi,
     functionName: 'decimals',
     data: decResult as `0x${string}`,
   }))
+
+  const identity = { description, decimals }
+  feedIdentityCache.set(cacheKey, identity)
+  return identity
+}
+
+/**
+ * [SPRINT-9V V2 / ADR-018] Read + fully validate ONE Chainlink feed: self-identification (description
+ * + decimals against FEED_EXPECTATIONS — MUST match before the answer is trusted) + latestRoundData +
+ * the 9G round-integrity gate + per-feed staleness. Returns the decimal-normalised price or null. The
+ * sequencer gate is the CALLER's responsibility (done once per fetch, before any leg is read).
+ *
+ * [ADR-018 invariant (b)/(c)] Config (FEED_EXPECTATIONS) is never trusted on its own and never
+ * substituted for an on-chain value — it is only ever compared against what the feed itself reports.
+ * The price below is always computed from `identity.decimals` (the ON-CHAIN reading), never from the
+ * config's expectedDecimals, even on a passing match. A feed with no declared expectation at all
+ * fails closed (null) rather than being read un-checked.
+ */
+async function fetchSingleFeedRaw(
+  feed: `0x${string}`,
+  chainId: number,
+): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
+  const expectation = getFeedExpectation(feed)
+  if (!expectation) return null // [ADR-018] no declared identity → cannot self-identify → fail closed
+
+  // [pre-existing contract, pinned by TEST-H-01] rpcCall failures (no code / revert / transport
+  // error) are NOT swallowed here — they propagate as a rejected promise exactly like the
+  // decimals()/latestRoundData() calls below always have. Callers are responsible for `.catch()`
+  // (e.g. computeTokenAmountUsd). Only a REACHABLE feed whose identity does not match is a null.
+  const identity = await fetchFeedIdentity(feed, chainId)
+
+  // [ADR-018 invariant (c)] A description or decimals mismatch is an integrity failure, never a
+  // warning — treated identically to the existing round-integrity failures below (null, no partial
+  // trust). This is the check that catches WBTC/USD silently reading the BTC/USD index feed: the
+  // round below would otherwise validate cleanly and pass.
+  if (identity.description !== expectation.description || identity.decimals !== expectation.decimals) {
+    return null
+  }
 
   // Fetch latestRoundData
   const lrdData = encodeFunctionData({
@@ -293,9 +360,10 @@ async function fetchSingleFeedRaw(
   // (unchanged for mainnet). The round-INTEGRITY guards inside validateRoundData are untouched.
   if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, getFeedStalenessSec(feed, CHAINLINK_MAX_STALENESS_SEC))) return null
 
-  // Decimals handled exactly per-leg: normalise by THIS feed's own on-chain decimals before any
-  // composition multiplies the resulting numbers (cbETH/ETH 18 dp vs ETH/USD 8 dp).
-  const price = Number(answer) / 10 ** decimals
+  // Decimals handled exactly per-leg: normalise by THIS feed's own ON-CHAIN decimals (identity.decimals,
+  // never the config's expectedDecimals) before any composition multiplies the resulting numbers
+  // (cbETH/ETH 18 dp vs ETH/USD 8 dp).
+  const price = Number(answer) / 10 ** identity.decimals
   return { price, updatedAt: Number(updatedAt), roundId }
 }
 
@@ -303,19 +371,22 @@ async function fetchSingleFeedRaw(
  * Fetch current Chainlink USD price for a token via direct RPC (non-hook).
  * Returns price as a number (e.g. 2850.42) or null if no feed exists.
  *
- * [SPRINT-9V V2] If the token has no DIRECT USD feed but a COMPOSED one (e.g. Base cbETH →
- * cbETH/ETH × ETH/USD), both legs are read and validated INDEPENDENTLY; the product is returned
- * only when BOTH pass — either leg invalid/stale → null (no partial pricing), exactly like a
- * missing direct feed, so the existing calm no-oracle + multi-source fallback kicks in.
+ * [SPRINT-9V V2 / ADR-018] If the token has no DIRECT USD feed but a COMPOSED one (e.g. Base cbETH →
+ * cbETH/ETH × ETH/USD), both legs are read and validated INDEPENDENTLY (self-identification +
+ * integrity + staleness, via fetchSingleFeedRaw); the product is returned only when BOTH pass —
+ * either leg invalid/stale/misidentified → null (no partial pricing), exactly like a missing direct
+ * feed, so the existing calm no-oracle + multi-source fallback kicks in.
+ *
+ * [ADR-018] Dispatches on resolveFeed's `kind` discriminant — the `default` arm's `never` assignment
+ * makes the single/composed split exhaustive at compile time: a third ResolvedFeed shape added later
+ * fails the build here until handled, rather than silently falling through unread.
  */
 export async function fetchChainlinkPriceRaw(
   tokenAddress: string,
   chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
-  const feed = getChainlinkFeed(tokenAddress, chainId)
-  // Composed feeds are consulted ONLY when no direct USD feed exists (mainnet → null → unchanged).
-  const composed = feed ? null : getComposedFeed(tokenAddress, chainId)
-  if (!feed && !composed) return null
+  const resolved = resolveFeed(tokenAddress, chainId)
+  if (!resolved) return null
 
   // [P218] L2 sequencer-uptime gate — never price on a down/recovering
   // sequencer. Mainnet (DEFAULT_CHAIN_ID) has no sequencer feed and skips this,
@@ -328,20 +399,29 @@ export async function fetchChainlinkPriceRaw(
     }
   }
 
-  if (feed) {
-    return fetchSingleFeedRaw(feed, chainId)
-  }
+  switch (resolved.kind) {
+    case 'single':
+      return fetchSingleFeedRaw(resolved.leg.address, chainId)
 
-  // [SPRINT-9V V2] Composed: token/USD = base(token/ETH) × quote(ETH/USD). BOTH legs must pass
-  // integrity + per-feed staleness; either invalid → unavailable (no partial pricing).
-  const base = await fetchSingleFeedRaw(composed!.base, chainId)
-  if (!base) return null
-  const quote = await fetchSingleFeedRaw(composed!.quote, chainId)
-  if (!quote) return null
-  return {
-    price: base.price * quote.price,
-    updatedAt: Math.min(base.updatedAt, quote.updatedAt), // as fresh as the STALEST leg (conservative)
-    roundId: base.roundId, // representative (base leg); composition has no single round
+    case 'composed': {
+      // [SPRINT-9V V2] Composed: token/USD = base(token/ETH) × quote(ETH/USD). BOTH legs must pass
+      // self-identification + integrity + per-feed staleness; either invalid → unavailable (no
+      // partial pricing).
+      const base = await fetchSingleFeedRaw(resolved.base.address, chainId)
+      if (!base) return null
+      const quote = await fetchSingleFeedRaw(resolved.quote.address, chainId)
+      if (!quote) return null
+      return {
+        price: base.price * quote.price,
+        updatedAt: Math.min(base.updatedAt, quote.updatedAt), // as fresh as the STALEST leg (conservative)
+        roundId: base.roundId, // representative (base leg); composition has no single round
+      }
+    }
+
+    default: {
+      const exhaustive: never = resolved
+      return exhaustive
+    }
   }
 }
 

@@ -34,6 +34,10 @@ type ReadResult = {
 }
 let mockRoundData: unknown = undefined
 let mockDecimals: number | undefined = undefined
+// [ADR-018] Defaults to 'ETH / USD' — the REAL, correct description() for both FEED and
+// BASE_ETH_USD below, which is what every pre-existing happy-path test in this file mocks. Tests
+// that want to exercise the new identity-mismatch branch set this explicitly to something else.
+let mockDescription: string | undefined = 'ETH / USD'
 /** Per-functionName overrides for the full observer shape; falls back to the data-only defaults. */
 let mockReadOverride: Record<string, ReadResult> = {}
 const EMPTY_READ: ReadResult = {
@@ -47,6 +51,7 @@ vi.mock('wagmi', () => ({
     if (override) return { ...EMPTY_READ, ...override }
     if (opts.functionName === 'latestRoundData') return { ...EMPTY_READ, data: mockRoundData }
     if (opts.functionName === 'decimals') return { ...EMPTY_READ, data: mockDecimals }
+    if (opts.functionName === 'description') return { ...EMPTY_READ, data: mockDescription }
     return EMPTY_READ
   }),
 }))
@@ -107,6 +112,7 @@ describe('useChainlinkPrice', () => {
     vi.clearAllMocks()
     mockRoundData = undefined
     mockDecimals = undefined
+    mockDescription = 'ETH / USD'
     mockReadOverride = {}
     mockChainId = 1
     mockIsConnected = true
@@ -247,6 +253,7 @@ describe('useChainlinkPrice — chain-aware feed resolution [SPRINT-9E]', () => 
     vi.clearAllMocks()
     mockRoundData = undefined
     mockDecimals = undefined
+    mockDescription = 'ETH / USD'
     mockReadOverride = {}
     mockChainId = 1
     mockIsConnected = true
@@ -308,6 +315,7 @@ describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an
     vi.clearAllMocks()
     mockRoundData = undefined
     mockDecimals = undefined
+    mockDescription = 'ETH / USD'
     mockReadOverride = {}
     mockChainId = 1
     mockIsConnected = true
@@ -498,6 +506,75 @@ describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an
     mockReadOverride = {
       latestRoundData: { isLoading: true, failureCount: 0, errorUpdateCount: 1 },
       decimals: { isLoading: true, failureCount: 0, errorUpdateCount: 1 },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleUnavailable).toBe(true)
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// [ADR-018] Feed self-identification. FEED's real declared identity (in FEED_EXPECTATIONS) is
+// "ETH / USD" @ 8dp — the module-level mockDescription default. Each case here isolates ONE field
+// as the mismatch while the round itself is genuinely fresh and valid, mirroring the WBTC/USD
+// scenario ADR-018 exists to catch: a reachable, well-formed answer for the WRONG feed.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe('useChainlinkPrice — [ADR-018] feed self-identification', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRoundData = undefined
+    mockDecimals = undefined
+    mockDescription = 'ETH / USD'
+    mockReadOverride = {}
+    mockChainId = 1
+    mockIsConnected = true
+    mockGetChainlinkFeed.mockReturnValue(FEED)
+  })
+
+  it('description mismatch → oracleIntegrityFailed, even with matching decimals and a fresh valid round', () => {
+    mockRoundData = roundData({ answer: 2_000_00000000n })
+    mockDecimals = 8 // matches — isolates description as the mismatch
+    mockDescription = 'BTC / USD' // the WBTC-shaped bug: wrong pair, otherwise well-formed
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+    expect(result.current.chainlinkPrice).toBeNull()
+    expect(result.current.message).toMatch(/identity/i)
+  })
+
+  it('decimals mismatch → oracleIntegrityFailed, even with matching description and a fresh valid round', () => {
+    mockRoundData = roundData({ answer: 2_000_00000000n })
+    mockDecimals = 18 // FEED is declared 8dp — isolates decimals as the mismatch
+    mockDescription = 'ETH / USD' // matches
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+    expect(result.current.chainlinkPrice).toBeNull()
+  })
+
+  it('a HEALTHY read with matching description AND decimals is unaffected (no new friction)', () => {
+    mockRoundData = roundData({ answer: 2_000_00000000n })
+    mockDecimals = 8
+    mockDescription = 'ETH / USD'
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+    expect(result.current.chainlinkPrice).toBe(2000)
+  })
+
+  it('description not yet loaded (still undefined) is treated as not-ready, same as round/decimals', () => {
+    mockReadOverride = {
+      latestRoundData: { data: roundData({}) },
+      decimals: { data: 8 },
+      description: { data: undefined, isLoading: true, failureCount: 0, errorUpdateCount: 0 },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
+    expect(result.current.level).toBe('none') // in-flight, no failure history → neutral, not a block
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+  })
+
+  it('description read ERROR with no usable value → unavailable AND integrity-failed (same as a round/decimals read error)', () => {
+    mockReadOverride = {
+      latestRoundData: { data: roundData({}) },
+      decimals: { data: 8 },
+      description: { data: undefined, isError: true, failureCount: 4, errorUpdateCount: 1 },
     }
     const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
     expect(result.current.oracleUnavailable).toBe(true)
