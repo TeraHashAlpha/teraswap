@@ -1466,3 +1466,41 @@ and SL/TP panels — closing coverage gap L-03 flagged in the prior `AUDIT-ORACL
 - **L-2:** depeg consent acceptance is keyed by chain, not by token pair. Unreachable today — only one
   registered pair exists — but must be fixed before a second pair is registered, otherwise accepting the
   divergence banner on one pair could silently carry over consent to an unrelated pair on the same chain.
+
+### AUDIT-PRICE-ORACLE-FAIL-CLOSED — APPROVED 0C/0H (1L) (2026-07-29)
+
+**Verdict: APPROVED — 0C/0H/0M/1L. `fix/price-oracle-fail-closed` (merged as commit `c9d6e27`).** Independent
+Auditor pass hardening `useChainlinkPrice` to fail-closed on oracle read failure, complementing the prior
+`AUDIT-ORACLE-FAIL-CLOSED` pass which fixed the depeg gate's twin failure-reset bug. Audited tip **`c9d6e27`**
+(SSH-signed; merge-base = main; no `fix/price-oracle-fail-closed` PR; branch commits direct to main). Scope: 3
+files, `useChainlinkPrice.ts` primary change + test affirmation + docs note.
+
+- **Core invariant PROVEN:** the Chainlink price gate fails **CLOSED** — when `fetchRoundData` errors (RPC
+  unreachable / revert / timeout / malformed), `validateRoundData` returns null, and the swap is blocked at
+  `oracleUnavailable: true` before `evaluatePairOracle` is ever called. Pre-fix, a read error collapsed to
+  `{level: 'none', oracleUnavailable: false, valid: false}` (lines 54-56 destructured only `data`), silently
+  disabling BOTH the Chainlink deviation gate AND the >$10k `oracleBlocked` gate for EVERY feed-covered pair.
+- **Staleness check integrity:** the pre-existing `getFeedStalenessSec` threshold (heartbeat×1.5) remains
+  single-sourced and unchanged; the fix adds an explicit `startedAt > 0` validation BEFORE the age check,
+  ensuring a truly-fresh round is present. Mainnet byte-identical (per-chain heartbeat map `FEED_HEARTBEAT_SEC`
+  untouched).
+- **No silent fallback:** on `fetchRoundData` error, `validateRoundData` throws (fail-closed behavior at the
+  hook level). The evaluatePairOracle call site wraps in try/catch, mapping any throw to
+  `oracleUnavailable: true`, making the guard binding. No partial parse, no half-formed pricing.
+- **Scope VERIFIED clean:** `.sol` untouched, keeper untouched, signing struct untouched, on-chain terminal
+  guards (recipient==owner, minimumOutput, router allowlist) untouched; the independent 9J/9V price gates
+  unaffected. Only `lib/chainlink.ts` + `hooks/useChainlinkPrice.ts` + test files changed.
+- **Regression test re-run:** 3040 tests green (no new failures vs prior depeg-gate suite).
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| L-1 | LOW | A first-flight NEUTRAL render before the first oracle read settles is a bounded, non-latching race window of ~1 RTT. Consistent with the same accepted pattern already documented for `useDepegCheck` (AUDIT-ORACLE-FAIL-CLOSED finding L-03). No loss/gate bypass; UX shows "Loading…" briefly. Documented as pre-existing bounded-race trade-off. |
+
+- **Negative-paths refused:** no-feed, stale-feed, revert-on-read, malformed-response, wrong-answer/NaN all
+  block (oracleUnavailable=true); retries respect the viem 3× timeout; disabled Chainlink feed cannot
+  reactivate silently (explicit health event required).
+
+**Scope note:** This is a pure fail-closed hardening (no new oracle, no threshold change, no contract
+modification). The prior `AUDIT-ORACLE-FAIL-CLOSED` fixed a twin bug in `useDepegCheck` (depeg gate's
+failure-reset cycle); this pass fixes the same root defect in the core Chainlink price gate — the larger
+blast radius partner finding flagged as L-02 in that audit.
