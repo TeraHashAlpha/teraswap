@@ -132,6 +132,31 @@ mainnet pair; that trade is deliberate and is the entire point.
 - `useChainlinkPrice`'s pre-existing lack of composed-feed support is unchanged by this decision —
   it is a known, separate gap, not newly introduced or newly fixed here.
 
+## Staleness policy for remediated feeds with extended heartbeats
+
+Six of the seven defective mainnet feed addresses identified in this ADR publish at a 86400-second
+(24-hour) heartbeat interval, enforced via per-feed heartbeat overrides in `FEED_HEARTBEAT_SEC`
+(`src/lib/chains/chainlink-feeds.ts`). Without these overrides, the global staleness threshold
+of 3600 seconds would have rendered every price stale immediately after publication, making the
+remediation a silent no-op: correct addresses returning correctly-formatted answers that the
+existing gates would reject as stale almost always.
+
+At the time of identity verification (2026-07-29), the WBTC/BTC composed leg measured 22.6 hours
+old, illustrating the practical consequence: these feeds may legitimately be read at a staleness
+boundary of up to 24 hours. In practice, Chainlink also triggers updates on deviation thresholds,
+so actual staleness is typically much shorter than the maximum. However, the contractual guarantee
+is one day.
+
+**Accepted risk:** TeraSwap users swapping the six remediated mainnet tokens that rely on 24-hour
+heartbeat feeds may receive price quotes based on data up to 24 hours old, bounded only by the
+deviation threshold of the underlying Chainlink feed.
+
+**Open question (unresolved):** Whether a feed with a 24-hour heartbeat guarantee should face a
+tighter deviation threshold to compensate for the longer staleness window, or whether such feeds
+should be excluded entirely from any high-value swap waiver. This trade-off between feed availability
+and staleness tolerance is not yet decided and should be revisited as part of the mainnet address
+remediation work.
+
 ## Related
 
 - `AUDIT-ARBITRUM-46-47` / `CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION` — the sibling incident on
@@ -141,4 +166,4 @@ mainnet pair; that trade is deliberate and is the entire point.
 - [ADR-016](ADR-016-explicit-rpc-endpoints.md) — a related "don't trust what you didn't verify"
   decision for RPC endpoints; this ADR applies the same posture to feed identity.
 - `docs/security/AUDIT-TOTAL.md` — mainnet address remediation for the 7 entries listed above is
-  tracked there as a separate, not-yet-started item.
+  tracked there as a separate, not-yet-started item. See also: "Staleness policy for remediated feeds with extended heartbeats" above.

@@ -669,6 +669,8 @@ Branch: `feat/sprint-9v-per-feed-staleness`. 3 commits (92c4dbe, 68b1b09, 41c8db
 | 9V-I-01 | INFO | V2 composition is raw-path only; UI hook still shows "no oracle" for cbETH on Base. Display inconsistency, not security — swap path has oracle protection. Follow-up: UI-side composed display. |
 | 9V-I-02 | INFO | Base ETH/USD tightened 3600→1800s (heartbeat×1.5). More conservative (not loosening). Behaviour delta: 30-60min stale rounds now fail. Safe — feed updates every ≤20min. |
 
+**Note:** Per-feed heartbeat overrides for remediated mainnet feeds are governed by [ADR-018 — Staleness policy for remediated feeds with extended heartbeats](docs/ADR/ADR-018-feed-self-identification.md#staleness-policy-for-remediated-feeds-with-extended-heartbeats). See ADR for the open question on deviation thresholds vs exclusion from high-value waivers.
+
 ---
 
 ### Sprint 9W-oracle Audit (2026-06-08) — cbETH Depeg / Manipulation Circuit-Breaker
