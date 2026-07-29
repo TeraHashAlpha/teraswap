@@ -306,6 +306,35 @@ async function fetchFeedIdentity(
 }
 
 /**
+ * [ADR-018 / L-1] Read a feed's on-chain identity AND enforce it against FEED_EXPECTATIONS.
+ * Returns the VERIFIED on-chain identity, or null when the feed has no declared expectation or
+ * self-reports something else. Extracted so every read path — the live gate (fetchSingleFeedRaw)
+ * and the historical walk (fetchHistoricalPrice) — enforces the check through ONE implementation
+ * rather than each re-deriving it (invariant (e): no fallback path may bypass the check).
+ *
+ * Read failures (no code / revert / transport) propagate as a rejection rather than becoming null;
+ * only a REACHABLE feed whose identity does not match is a null. That distinction is the
+ * pre-existing contract pinned by TEST-H-01 and is preserved here.
+ */
+async function resolveVerifiedIdentity(
+  feed: `0x${string}`,
+  chainId: number,
+): Promise<{ description: string; decimals: number } | null> {
+  const expectation = getFeedExpectation(feed)
+  if (!expectation) return null // no declared identity → cannot self-identify → fail closed
+
+  const identity = await fetchFeedIdentity(feed, chainId)
+
+  // [ADR-018 invariant (c)] A description or decimals mismatch is an integrity failure, never a
+  // warning. This is the check that catches a feed which is reachable, fresh and internally
+  // consistent but is simply the WRONG feed — e.g. WBTC/USD reading the BTC/USD index feed.
+  if (identity.description !== expectation.description || identity.decimals !== expectation.decimals) {
+    return null
+  }
+  return identity
+}
+
+/**
  * [SPRINT-9V V2 / ADR-018] Read + fully validate ONE Chainlink feed: self-identification (description
  * + decimals against FEED_EXPECTATIONS — MUST match before the answer is trusted) + latestRoundData +
  * the 9G round-integrity gate + per-feed staleness. Returns the decimal-normalised price or null. The
@@ -321,22 +350,10 @@ async function fetchSingleFeedRaw(
   feed: `0x${string}`,
   chainId: number,
 ): Promise<{ price: number; updatedAt: number; roundId: bigint } | null> {
-  const expectation = getFeedExpectation(feed)
-  if (!expectation) return null // [ADR-018] no declared identity → cannot self-identify → fail closed
-
-  // [pre-existing contract, pinned by TEST-H-01] rpcCall failures (no code / revert / transport
-  // error) are NOT swallowed here — they propagate as a rejected promise exactly like the
-  // decimals()/latestRoundData() calls below always have. Callers are responsible for `.catch()`
-  // (e.g. computeTokenAmountUsd). Only a REACHABLE feed whose identity does not match is a null.
-  const identity = await fetchFeedIdentity(feed, chainId)
-
-  // [ADR-018 invariant (c)] A description or decimals mismatch is an integrity failure, never a
-  // warning — treated identically to the existing round-integrity failures below (null, no partial
-  // trust). This is the check that catches WBTC/USD silently reading the BTC/USD index feed: the
-  // round below would otherwise validate cleanly and pass.
-  if (identity.description !== expectation.description || identity.decimals !== expectation.decimals) {
-    return null
-  }
+  // [ADR-018] Self-identify BEFORE the answer is read or trusted. Shared with fetchHistoricalPrice
+  // so both paths enforce one implementation. rpcCall failures propagate (TEST-H-01 contract).
+  const identity = await resolveVerifiedIdentity(feed, chainId)
+  if (!identity) return null
 
   // Fetch latestRoundData
   const lrdData = encodeFunctionData({
@@ -433,6 +450,22 @@ export async function fetchChainlinkPriceRaw(
  * Max 20 RPC calls to avoid excessive usage.
  *
  * Returns price at the round closest to targetAge, or null if unavailable.
+ *
+ * [ADR-018 / audit L-1] This walk reads raw `answer`s from getRoundData and normalises them by a
+ * separately-read decimals(), which bypassed the identity gate. It is now routed through the SAME
+ * resolveVerifiedIdentity check as the live path, and normalises by that VERIFIED decimals — so
+ * there is no read path in this module that can price a feed without first confirming what it is
+ * (ADR-018 invariant (e)).
+ *
+ * L-1 was "delete OR gate"; gating was chosen. The function is exported and covered by tests, so
+ * gating is the smaller and lower-risk diff than removing it, it aligns with the repo's
+ * preserve-don't-delete convention, it removes a redundant decimals() RPC call by reusing the
+ * cached identity, and — decisively — any future consumer inherits the guard automatically,
+ * whereas deleting it invites a later re-implementation that reintroduces the ungated pattern.
+ *
+ * NOTE: only DIRECT feeds are supported here (getChainlinkFeed). A composed token (mainnet
+ * GRT/LDO/SHIB/WBTC, Base cbETH) returns null — historical composition is not implemented, and
+ * returning null is the correct fail-closed answer rather than a single-leg half price.
  */
 export async function fetchHistoricalPrice(
   tokenAddress: string,
@@ -465,17 +498,12 @@ export async function fetchHistoricalPrice(
     let calls = 0
     const maxCalls = 16
 
-    // Fetch decimals once
-    const decData = encodeFunctionData({
-      abi: chainlinkAggregatorAbi,
-      functionName: 'decimals',
-    })
-    const decResult = await rpcCall(feed, decData, chainId)
-    const decimals = Number(decodeFunctionResult({
-      abi: chainlinkAggregatorAbi,
-      functionName: 'decimals',
-      data: decResult as `0x${string}`,
-    }))
+    // [ADR-018 / L-1] Identity-gated decimals. Replaces a bare decimals() read that trusted
+    // whatever the address returned. Cached, so this is normally free after the
+    // fetchChainlinkPriceRaw call above already warmed it — one fewer RPC round-trip than before.
+    const identity = await resolveVerifiedIdentity(feed, chainId)
+    if (!identity) return null
+    const decimals = identity.decimals
 
     while (low <= high && calls < maxCalls) {
       const mid = (low + high) / 2n

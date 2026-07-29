@@ -127,6 +127,21 @@ const FEED_HEARTBEAT_SEC: Record<string, number> = {
   '0xc5c8e77b397e531b8ec06bfb0048328b30e9ecfb': 86400, // DAI/USD
   '0x3f3f5df88dc9f13eac63df89ec16ef6e7e25dde7': 255,   // USDT/USD
   '0xd0c7101eacbb49f3decccc166d238410d6d46d57': 86400, // WBTC/USD
+  // ── Ethereum mainnet (1) [FIX-MAINNET-FEED-REMEDIATION] ──
+  // The header above says mainnet feeds are deliberately omitted because the 1h global matches
+  // mainnet MAJORS' ~1h heartbeat. That reasoning holds for ETH/USD, BTC/USD and the stablecoins
+  // (all 3600s, still omitted, still on the global) — but NOT for these long-tail feeds, which
+  // Chainlink publishes at a 86400s (24h) heartbeat. Judged against the 3600s global they read as
+  // permanently stale: at the time of writing WBTC/BTC was 22.6h old, GRT/ETH 17.4h, APE/USD 10.5h
+  // — every one of them >1h, so the remediation would have shipped feeds that resolve to null
+  // ~always. Values are the exact `heartbeat` field from Chainlink's official reference-data
+  // directory (feeds-mainnet.json, 2026-07-29); ×1.5 ⇒ a 36h ceiling.
+  '0x17d054ecac33d91f7340645341efb5de9009f1c1': 86400, // GRT/ETH   (composed base leg)
+  '0x4e844125952d32acdf339be976c98e22f6f318db': 86400, // LDO/ETH   (composed base leg)
+  '0x8dd1cd88f43af196ae478e91b9f5e4ac69a97c61': 86400, // SHIB/ETH  (composed base leg)
+  '0xfdfd9c85ad200c506cf9e21f1fd8dd01932fbb23': 86400, // WBTC/BTC  (composed base leg)
+  '0xd10abbc76679a20055e167bb80a24ac851b37056': 86400, // APE/USD   (direct)
+  '0x9944d86ceb9160af5c5feb251fd671923323f8c3': 86400, // PAXG/USD  (direct)
 }
 
 /** [SPRINT-9V V1] Heartbeat (seconds) for a feed PROXY address, or null when unknown. */
@@ -162,9 +177,53 @@ export interface ComposedFeed {
  * validated INDEPENDENTLY (integrity + per-feed staleness); either leg invalid → the whole
  * composition is unavailable (NO partial pricing) → caller falls back to the existing calm
  * no-oracle path (multi-source compare + on-chain minimumOutput). Keyed by token address
- * (lowercased). MAINNET has none (untouched).
+ * (lowercased).
+ *
+ * [FIX-MAINNET-FEED-REMEDIATION] Mainnet is no longer empty. The general form is
+ * token/USD = base × quote, where base need not be ETH-denominated — WBTC composes through BTC
+ * (WBTC/BTC × BTC/USD), which is what makes a WBTC-vs-BTC depeg visible instead of invisible.
  */
 const COMPOSED_FEEDS_BY_CHAIN: Record<number, Record<string, ComposedFeed>> = {
+  // ── Ethereum mainnet (1) [FIX-MAINNET-FEED-REMEDIATION] ──
+  // Four tokens whose configured "…/USD" address was never a USD feed. Every address below is
+  // sourced from Chainlink's official reference-data directory (feeds-mainnet.json, fetched
+  // 2026-07-29, canonical ENS-named entry per pair) AND confirmed on-chain via description() +
+  // decimals() on two independent RPCs (ethereum-rpc.publicnode.com, eth.drpc.org).
+  //
+  // Three of the four (GRT/LDO/SHIB) reuse the EXACT address already in config — it was always a
+  // valid /ETH feed, merely read as though it were USD. No address changes for those; only the
+  // interpretation does. Arithmetic cross-check on GRT: composed 7.8257e-6 ETH × $1901.44 =
+  // $0.014880 vs the independent direct GRT/USD feed's $0.014991 — 0.74% apart, confirming the
+  // composition is denominated correctly.
+  1: {
+    // GRT (0xc944…44a7): "GRT / ETH" 18dp × "ETH / USD" 8dp
+    '0xc944e90c64b2c07662a292be6244bdf05cda44a7': {
+      base: '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1',
+      quote: CHAINLINK_ETH_USD,
+    },
+    // LDO (0x5a98…1b32): "LDO / ETH" 18dp × "ETH / USD" 8dp
+    '0x5a98fcbea516cf06857215779fd812ca3bef1b32': {
+      base: '0x4e844125952D32AcdF339BE976c98E22F6F318dB',
+      quote: CHAINLINK_ETH_USD,
+    },
+    // SHIB (0x95ad…c4ce): "SHIB / ETH" 18dp × "ETH / USD" 8dp
+    '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce': {
+      base: '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61',
+      quote: CHAINLINK_ETH_USD,
+    },
+    // WBTC (0x2260…c599): "WBTC / BTC" 8dp × "BTC / USD" 8dp. NOT ETH-denominated — this is the
+    // entry the whole ADR-018 investigation started from. 0xF4030086… (the quote leg) is the
+    // canonical BTC index feed and was previously mapped as if it were WBTC/USD, so a WBTC
+    // depeg was structurally invisible: the guard compared BTC's price to WBTC's execution
+    // price and a depeg moves both together. Pricing WBTC through an explicit WBTC/BTC leg
+    // makes the peg itself an input, so a discount now shows up as a real deviation.
+    //   • base  WBTC/BTC 0xfdFD9C85… — "WBTC / BTC" 8dp (NEW address; reads 1.00025 at time of writing)
+    //   • quote BTC/USD  0xF4030086… — "BTC / USD"  8dp (the address formerly mis-keyed as WBTC/USD)
+    '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': {
+      base: '0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23',
+      quote: '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c',
+    },
+  },
   // ── Base (8453) ──
   8453: {
     // cbETH (0x2Ae3…0DEc22): composed cbETH/USD = cbETH/ETH × ETH/USD.
@@ -286,27 +345,33 @@ const FEED_EXPECTATIONS: Record<string, FeedExpectation> = {
   '0xb9e1e3a9feff48998e45fa90847ed4d467e8bcfd': { description: 'FRAX / USD', decimals: 8 },
   '0x3d7ae7e594f2f2091ad8798313450130d0aba3a0': { description: 'LUSD / USD', decimals: 8 },
   // Blue chips
-  // [ADR-018] WBTC/USD — CURRENTLY MISCONFIGURED (points at the BTC/USD index feed, which reads
-  // "BTC / USD" not "WBTC / USD"). Expectation set to the CORRECT WBTC/USD identity so the mismatch
-  // is caught; this is the intended new hard block (ADR-018 §6), not a bug in this table.
-  '0xf4030086522a5beea4988f8ca5b36dbc97bee88c': { description: 'WBTC / USD', decimals: 8 },
+  // [FIX-MAINNET-FEED-REMEDIATION] 0xF4030086… is the canonical BTC/USD index feed and now serves as
+  // the QUOTE leg of composed WBTC/USD. Under ADR-018 it was declared "WBTC / USD" so it would fail
+  // closed against its own misuse; now that it is used AS BTC/USD, the expectation is corrected to
+  // the identity it actually (and always did) self-report on-chain: "BTC / USD" @ 8dp.
+  '0xf4030086522a5beea4988f8ca5b36dbc97bee88c': { description: 'BTC / USD', decimals: 8 },
+  // [FIX-MAINNET-FEED-REMEDIATION] WBTC/BTC — the new composed BASE leg. On-chain verified.
+  '0xfdfd9c85ad200c506cf9e21f1fd8dd01932fbb23': { description: 'WBTC / BTC', decimals: 8 },
   '0x2c1d072e956affc0d435cb7ac38ef18d24d9127c': { description: 'LINK / USD', decimals: 8 },
   '0x553303d460ee0afb37edff9be42922d8ff63220e': { description: 'UNI / USD', decimals: 8 },
   '0x547a514d5e3769680ce22b2361c10ea13619e8a9': { description: 'AAVE / USD', decimals: 8 },
   '0xdbd020caef83efd542f4de03e3cf0c28a4428bd5': { description: 'COMP / USD', decimals: 8 },
   '0xec1d1b3b0443256cc3860e24a46f108e699484aa': { description: 'MKR / USD', decimals: 8 },
   '0xdc3ea94cd0ac27d9a86c180091e7f78c683d3699': { description: 'SNX / USD', decimals: 8 },
-  // [ADR-018] GRT/USD — CURRENTLY MISCONFIGURED (points at the GRT/ETH feed, "GRT / ETH" 18dp).
-  '0x17d054ecac33d91f7340645341efb5de9009f1c1': { description: 'GRT / USD', decimals: 8 },
+  // [FIX-MAINNET-FEED-REMEDIATION] GRT/ETH — same address as before, now used as the composed BASE
+  // leg and declared as the identity it genuinely self-reports on-chain.
+  '0x17d054ecac33d91f7340645341efb5de9009f1c1': { description: 'GRT / ETH', decimals: 18 },
   // DeFi governance
   '0xcd627aa160a6fa45eb793d19ef54f5062f20f33f': { description: 'CRV / USD', decimals: 8 },
   '0xa027702dbb89fbd58938e4324ac03b58d812b0e1': { description: 'YFI / USD', decimals: 8 },
   '0xdf2917806e30300537aeb49a7663062f4d1f2b5f': { description: 'BAL / USD', decimals: 8 },
   '0xcc70f09a6cc17553b2e31954cd36e4a2d89501f7': { description: 'SUSHI / USD', decimals: 8 },
-  // [ADR-018] LDO/USD — CURRENTLY MISCONFIGURED (points at the LDO/ETH feed, "LDO / ETH" 18dp).
-  '0x4e844125952d32acdf339be976c98e22f6f318db': { description: 'LDO / USD', decimals: 8 },
-  // [ADR-018] APE/USD — CURRENTLY MISCONFIGURED (address has NO on-chain code).
-  '0xd10abbc76679a20055e167bb80a24ac851b37571': { description: 'APE / USD', decimals: 8 },
+  // [FIX-MAINNET-FEED-REMEDIATION] LDO/ETH — same address, now the composed BASE leg, declared as
+  // the identity it genuinely self-reports on-chain.
+  '0x4e844125952d32acdf339be976c98e22f6f318db': { description: 'LDO / ETH', decimals: 18 },
+  // [FIX-MAINNET-FEED-REMEDIATION] APE/USD — address CORRECTED to the real proxy (…b37056; the old
+  // …b37571 was hex drift with zero on-chain code and is now gone from the config entirely).
+  '0xd10abbc76679a20055e167bb80a24ac851b37056': { description: 'APE / USD', decimals: 8 },
   // LSDs & others
   '0x7bac85a8a13a4bcd8abb3eb7d6b4d632c5a57676': { description: 'MATIC / USD', decimals: 8 },
   '0x5c00128d4d1c2f4f652c267d7bcdd7ac99c16e16': { description: 'ENS / USD', decimals: 8 },
@@ -316,15 +381,19 @@ const FEED_EXPECTATIONS: Record<string, FeedExpectation> = {
   // Liquid staking (on-chain description() is upper-case "STETH / USD", not "stETH / USD")
   '0xcfe54b5cd566ab89272946f602d76ea879cab4a8': { description: 'STETH / USD', decimals: 8 },
   // Meme / popular
-  // [ADR-018] SHIB/USD — CURRENTLY MISCONFIGURED (points at the SHIB/ETH feed, "SHIB / ETH" 18dp).
-  '0x8dd1cd88f43af196ae478e91b9f5e4ac69a97c61': { description: 'SHIB / USD', decimals: 8 },
-  // [ADR-018] PEPE/USD — CURRENTLY MISCONFIGURED (address has NO on-chain code).
+  // [FIX-MAINNET-FEED-REMEDIATION] SHIB/ETH — same address, now the composed BASE leg, declared as
+  // the identity it genuinely self-reports on-chain.
+  '0x8dd1cd88f43af196ae478e91b9f5e4ac69a97c61': { description: 'SHIB / ETH', decimals: 18 },
+  // [ADR-018 / FIX-MAINNET-FEED-REMEDIATION] PEPE/USD — STILL MISCONFIGURED, DELIBERATELY. The
+  // address has zero on-chain code and Chainlink publishes no PEPE feed of any denomination on
+  // mainnet, so there is nothing correct to point it at. Left blocking (UNRESOLVED): the expectation
+  // stays the identity a real PEPE/USD feed WOULD report, which this dead address can never match.
   '0x02de28ab3c28a5b1e8236b1069a211b7494f0f35': { description: 'PEPE / USD', decimals: 8 },
   // Commodities
-  // [ADR-018] PAXG/USD — CURRENTLY MISCONFIGURED (a live proxy whose aggregator() is address(0);
-  // every read reverts before description() is even reachable, so this entry is never actually
-  // compared — declared anyway so the table stays complete and self-documenting).
-  '0x9b97304ea12efed0fad976fbecaad46016bf269e': { description: 'PAXG / USD', decimals: 8 },
+  // [FIX-MAINNET-FEED-REMEDIATION] PAXG/USD — address CORRECTED to the live proxy (0x9944D86C…);
+  // the old 0x9B97304E… is a retired deployment whose aggregator() is address(0) (all reads revert)
+  // and is now gone from the config entirely.
+  '0x9944d86ceb9160af5c5feb251fd671923323f8c3': { description: 'PAXG / USD', decimals: 8 },
 
   // ── Base (8453) ──
   '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70': { description: 'ETH / USD', decimals: 8 },

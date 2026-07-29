@@ -1504,3 +1504,81 @@ files, `useChainlinkPrice.ts` primary change + test affirmation + docs note.
 modification). The prior `AUDIT-ORACLE-FAIL-CLOSED` fixed a twin bug in `useDepegCheck` (depeg gate's
 failure-reset cycle); this pass fixes the same root defect in the core Chainlink price gate — the larger
 blast radius partner finding flagged as L-02 in that audit.
+
+### FINDING-MAINNET-FEED-IDENTITY — 7 mainnet Chainlink feeds misconfigured (2026-07-29)
+
+**Severity: HIGH (1 silent, 6 loud). Status: 6 REMEDIATED / 1 UNRESOLVED-by-design.** Recorded by the
+implementing agent as a defect report, NOT as an audit verdict — this entry is not self-certification and
+an independent Auditor pass is still owed. Guard shipped in `fix/feed-denomination-guard` (ADR-018,
+merged `29d8923`); config remediation in `fix/mainnet-feed-remediation`.
+
+**Defect.** An on-chain verification sweep of all 40 configured feed addresses across chains 1/8453/42161
+(`description()`, `decimals()`, `latestRoundData()`, `aggregator()`, two independent RPCs per chain) found
+7 mainnet entries whose on-chain identity contradicts the config key. Base (5/5) and Arbitrum (5/5) were
+clean.
+
+| Entry | Configured address | On-chain reality | Failure mode |
+|-------|-------------------|------------------|--------------|
+| WBTC/USD | `0xF4030086…BeE88c` | `"BTC / USD"` 8dp | **SILENT** — passed every guard |
+| GRT/USD | `0x17D054EC…9F1C1` | `"GRT / ETH"` 18dp | loud (mis-denominated ~10³×) |
+| LDO/USD | `0x4e844125…F318dB` | `"LDO / ETH"` 18dp | loud |
+| SHIB/USD | `0x8dD1CD88…97C61` | `"SHIB / ETH"` 18dp | loud |
+| APE/USD | `0xD10aBbC7…b37571` | zero on-chain code | loud |
+| PEPE/USD | `0x02DE28aB…F0f35` | zero on-chain code | loud |
+| PAXG/USD | `0x9B97304E…bf269e` | live proxy, `aggregator()==0`, all reads revert | loud |
+
+**Root cause.** The config *asserted* what each address was and the read path never asked the feed. Six
+failures were caught only incidentally — by a read error or by a deviation so large it tripped the
+`extreme-deviation` ceiling — not by any check of feed identity. WBTC/USD demonstrates why that is not a
+safety net: it is the canonical BTC index feed, `decimals()` also happens to be 8, its rounds are genuinely
+fresh and valid, and WBTC trades near BTC parity — so it produced a real, well-formed, plausible answer for
+the wrong pair and **passed silently at every trade size**. Worse, a WBTC-vs-BTC depeg was structurally
+invisible: the deviation gate compared BTC's oracle price against WBTC's execution price, and a depeg moves
+both in the same direction, closing the very gap the gate watches for. APE/USD was hand-transcribed hex
+drift (`…b37571` vs the real `…b37056` — same 36-char prefix), the identical failure mode as
+`AUDIT-ARBITRUM-46-47`, which is evidence this is a recurring process defect and not a one-off typo.
+
+**Mechanism fix — ADR-018 (`docs/ADR/ADR-018-feed-self-identification.md`).** A feed must self-identify
+before its answer is used. `FEED_EXPECTATIONS` declares each address's required `description()`/`decimals()`;
+both read paths (`fetchSingleFeedRaw`, `useChainlinkPrice`) read and compare on-chain identity before
+trusting `answer`, folding any mismatch into the existing `oracleIntegrityFailed` hard block. Config is
+compared against the chain, never substituted for it — the price is always normalised by the **on-chain**
+decimals. An import-time completeness assertion fails the build if a feed is ever added without a declared
+identity. Audit finding **L-1** (`fetchHistoricalPrice` read a raw answer outside the gate) was closed by
+routing it through the same shared `resolveVerifiedIdentity` check rather than deleting it, so no read path
+in the module can price a feed without confirming what it is.
+
+**Config remediation.** Every address below was sourced from Chainlink's official reference-data directory
+(`feeds-mainnet.json`, canonical ENS-named entry per pair) **and** confirmed on-chain on two independent RPCs.
+No address was taken from memory or inferred from a pattern.
+
+- **GRT, LDO, SHIB** — addresses UNCHANGED (they were always valid `/ETH` feeds, merely read as USD); each
+  converted to a composed entry `token/ETH × ETH/USD`. Arithmetic cross-check on GRT: composed
+  `7.8257e-6 × $1901.44 = $0.014880` vs the independent direct GRT/USD feed's `$0.014991` — 0.74% apart.
+- **WBTC** — now composed `WBTC/BTC × BTC/USD`. The BTC index feed is retained as the *quote* leg and
+  honestly relabelled `"BTC / USD"`; the new `WBTC/BTC` base leg (`0xfdFD9C85…FBB23`) makes the peg itself a
+  priced input, so a WBTC discount is now visible instead of cancelling out.
+- **APE** — address corrected to `0xD10aBbC7…b37056`; **PAXG** — corrected to `0x9944D86C…23f8C3`. Both
+  direct `/USD`, both verified. The two dead addresses are removed from the registry entirely, so neither can
+  be silently resurrected (an address with no declared expectation fails closed).
+- **PEPE — UNRESOLVED, left blocking deliberately.** Chainlink publishes no PEPE feed of any denomination on
+  mainnet (zero matches across all 316 directory entries). There is no correct address to substitute, so
+  nothing was changed; fail-closed is the correct end state and PEPE prices via the DefiLlama/multi-source
+  path meanwhile.
+
+**Companion defect found during remediation.** Six of the remediated feeds publish at an 86400s heartbeat,
+far beyond the 3600s mainnet global staleness ceiling (observed ages at verification: WBTC/BTC 22.6h,
+GRT/ETH 17.4h, APE/USD 10.5h). Without explicit `FEED_HEARTBEAT_SEC` entries the remediation would have
+shipped feeds that resolve to `null` essentially always — a silent no-op wearing the appearance of a fix.
+Heartbeats were added from the directory's own `heartbeat` field and are regression-pinned.
+
+**Known residual gaps (for the Auditor, not resolved here).**
+1. `useChainlinkPrice` has **no composed-feed support**. The four newly-composed mainnet tokens therefore
+   resolve to "no feed" in the swap UI — the calm `oracleUnavailable` path plus the tiered >$10k gate — rather
+   than a verified price. Strictly better than the pre-remediation state (a hard block on a silently wrong
+   price), but not parity with the server/DCA path, which does get the correct composed USD price.
+2. A **direct GRT/USD feed exists** (`0x86cF33a4…65A5d2`, verified `"GRT / USD"` 8dp). Composition was used
+   per the remediation's explicit "reuse existing addresses" constraint; adopting the direct feed would halve
+   the reads and remove a compounding-staleness leg, and is worth a follow-up.
+3. `description()` cannot distinguish a canonical feed from an SVR/shared-SVR sibling (identical strings);
+   proving canonical-path selection still requires the reference-data directory.

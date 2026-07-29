@@ -816,3 +816,132 @@ describe('fetchChainlinkPriceRaw — [ADR-018] feed self-identification', () => 
     })
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [FIX-MAINNET-FEED-REMEDIATION] The 7 defective mainnet feeds, post-remediation.
+//
+// Per token: (a) the read now resolves to a PLAUSIBLE USD price, and (b) it still fails closed the
+// moment a leg's description is mutated — proving the price is flowing THROUGH the ADR-018 guard
+// rather than around it. Answers below are the real on-chain values read on 2026-07-29, so the
+// expected USD figures are the genuine arithmetic, not invented round numbers.
+// ─────────────────────────────────────────────────────────────
+describe('[FIX-MAINNET-FEED-REMEDIATION] remediated mainnet feeds', () => {
+  const ETH_USD = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+  const BTC_USD = '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c'
+  // Tokens
+  const GRT = '0xc944e90c64B2c07662A292be6244BDf05Cda44a7'
+  const LDO = '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32'
+  const SHIB = '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE'
+  const WBTC = '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'
+  const APE = '0x4d224452801ACEd8B2F0aeBE155379bb5D594381'
+  const PAXG = '0x45804880De22913dAFE09f4980848ECE6EcbAf78'
+  const PEPE = '0x6982508145454Ce325dDbE47a25d4ec3d2311933'
+  // Feed legs
+  const GRT_ETH = '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1'
+  const LDO_ETH = '0x4e844125952D32AcdF339BE976c98E22F6F318dB'
+  const SHIB_ETH = '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61'
+  const WBTC_BTC = '0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23'
+  const APE_USD = '0xD10aBbC76679a20055E167BB80A24ac851b37056'
+  const PAXG_USD = '0x9944D86CEB9160aF5C5feB251FD671923323f8C3'
+
+  // Real on-chain answers (2026-07-29). ETH/USD 1901.44; BTC/USD 63947.76010359.
+  const ETH_USD_ANSWER = 190_144_000_000n
+  const BTC_USD_ANSWER = 6_394_776_010_359n
+  const ethUsdLeg = (now: bigint) => ({ decimals: 8, roundId: 20n, answer: ETH_USD_ANSWER, updatedAt: now - 400n, answeredInRound: 20n })
+  const btcUsdLeg = (now: bigint) => ({ decimals: 8, roundId: 21n, answer: BTC_USD_ANSWER, updatedAt: now - 100n, answeredInRound: 21n })
+
+  // token, base leg addr, base decimals, real base answer, quote leg addr, quote leg factory,
+  // expected composed USD, and how precise the assertion can be.
+  const COMPOSED = [
+    { name: 'GRT', token: GRT, baseAddr: GRT_ETH, baseDec: 18, baseAnswer: 7_825_700_951_025n, quoteAddr: ETH_USD, quote: ethUsdLeg, usd: 0.01488, prec: 4, trueDesc: 'GRT / ETH' },
+    { name: 'LDO', token: LDO, baseAddr: LDO_ETH, baseDec: 18, baseAnswer: 187_700_448_474_460n, quoteAddr: ETH_USD, quote: ethUsdLeg, usd: 0.35688, prec: 3, trueDesc: 'LDO / ETH' },
+    { name: 'SHIB', token: SHIB, baseAddr: SHIB_ETH, baseDec: 18, baseAnswer: 2_471_866_650n, quoteAddr: ETH_USD, quote: ethUsdLeg, usd: 4.6997e-6, prec: 8, trueDesc: 'SHIB / ETH' },
+    { name: 'WBTC', token: WBTC, baseAddr: WBTC_BTC, baseDec: 8, baseAnswer: 100_024_980n, quoteAddr: BTC_USD, quote: btcUsdLeg, usd: 63963.73, prec: 0, trueDesc: 'WBTC / BTC' },
+  ]
+
+  for (const c of COMPOSED) {
+    it(`${c.name} resolves to a plausible USD price via composition (was mis-denominated before)`, async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [c.baseAddr]: { decimals: c.baseDec, roundId: 10n, answer: c.baseAnswer, updatedAt: now - 3_600n, answeredInRound: 10n },
+        [c.quoteAddr]: c.quote(now),
+      })
+      const r = await fetchChainlinkPriceRaw(c.token, 1)
+      expect(r, `${c.name} must resolve`).not.toBeNull()
+      expect(r!.price).toBeCloseTo(c.usd, c.prec)
+      // The stalest leg governs freshness (conservative).
+      expect(r!.updatedAt).toBe(Number(now - 3_600n))
+    })
+
+    it(`${c.name} still fails closed when the BASE leg's description is mutated`, async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [c.baseAddr]: {
+          decimals: c.baseDec, roundId: 10n, answer: c.baseAnswer, updatedAt: now - 3_600n, answeredInRound: 10n,
+          descriptionOverride: `${c.trueDesc} (tampered)`,
+        },
+        [c.quoteAddr]: c.quote(now),
+      })
+      expect(await fetchChainlinkPriceRaw(c.token, 1)).toBeNull()
+    })
+
+    it(`${c.name} still fails closed when the QUOTE leg's description is mutated`, async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [c.baseAddr]: { decimals: c.baseDec, roundId: 10n, answer: c.baseAnswer, updatedAt: now - 3_600n, answeredInRound: 10n },
+        [c.quoteAddr]: { ...c.quote(now), descriptionOverride: 'SOMETHING / ELSE' },
+      })
+      expect(await fetchChainlinkPriceRaw(c.token, 1)).toBeNull()
+    })
+  }
+
+  // Direct (single-leg) remediations: APE and PAXG.
+  const DIRECT = [
+    { name: 'APE', token: APE, feed: APE_USD, answer: 14_384_986n, usd: 0.14384986, prec: 6 },
+    { name: 'PAXG', token: PAXG, feed: PAXG_USD, answer: 409_000_818_404n, usd: 4090.00818404, prec: 2 },
+  ]
+  for (const d of DIRECT) {
+    it(`${d.name} resolves to a plausible USD price on its CORRECTED address`, async () => {
+      mockChainlinkRpc({ decimals: 8, roundId: 5n, answer: d.answer, updatedAt: nowSec() - 600n, answeredInRound: 5n })
+      const r = await fetchChainlinkPriceRaw(d.token, 1)
+      expect(r, `${d.name} must resolve`).not.toBeNull()
+      expect(r!.price).toBeCloseTo(d.usd, d.prec)
+    })
+
+    it(`${d.name} still fails closed when its description is mutated`, async () => {
+      mockChainlinkRpc({
+        decimals: 8, roundId: 5n, answer: d.answer, updatedAt: nowSec() - 600n, answeredInRound: 5n,
+        descriptionOverride: 'TAMPERED / USD',
+      })
+      expect(await fetchChainlinkPriceRaw(d.token, 1)).toBeNull()
+    })
+  }
+
+  it('PEPE remains UNRESOLVED — no Chainlink feed exists, so it stays blocked even on a "valid" round', async () => {
+    // Even if the dead address somehow answered with a perfectly well-formed round, its description
+    // cannot match, so the guard holds. This is the intended end state, not an oversight.
+    mockChainlinkRpc({
+      decimals: 8, roundId: 5n, answer: 1_000_000n, updatedAt: nowSec(), answeredInRound: 5n,
+      descriptionOverride: 'NOT A REAL PEPE FEED',
+    })
+    expect(await fetchChainlinkPriceRaw(PEPE, 1)).toBeNull()
+  })
+
+  it('the long-tail 24h heartbeat is honoured: a 20h-old base leg is VALID, a 37h-old one is stale', async () => {
+    // Guards the heartbeat entries added alongside this remediation. Under the bare 1h mainnet
+    // global, the 20h case would be null and the whole remediation would silently be a no-op.
+    const now = nowSec()
+    mockComposedRpc({
+      [GRT_ETH]: { decimals: 18, roundId: 10n, answer: 7_825_700_951_025n, updatedAt: now - 72_000n, answeredInRound: 10n }, // 20h
+      [ETH_USD]: ethUsdLeg(now),
+    })
+    expect(await fetchChainlinkPriceRaw(GRT, 1), '20h-old base leg must be VALID under the 36h ceiling').not.toBeNull()
+
+    _clearFeedIdentityCache()
+    mockComposedRpc({
+      [GRT_ETH]: { decimals: 18, roundId: 10n, answer: 7_825_700_951_025n, updatedAt: now - 133_200n, answeredInRound: 10n }, // 37h > 36h
+      [ETH_USD]: ethUsdLeg(now),
+    })
+    expect(await fetchChainlinkPriceRaw(GRT, 1)).toBeNull()
+  })
+})
