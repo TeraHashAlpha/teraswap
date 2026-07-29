@@ -134,27 +134,59 @@ describe('FEED_EXPECTATIONS / getFeedExpectation [ADR-018]', () => {
     expect(getFeedExpectation('0x000000000000000000000000000000000000dEaD')).toBeNull()
   })
 
-  // [ADR-018] The 7 mainnet entries a sibling on-chain verification pass found defective. The
-  // expectation recorded here is the CORRECT identity for the pair the key claims — deliberately
-  // NOT what the current (wrong) address actually returns — so each fails closed against its own
-  // bug. This test pins the intent, not a live on-chain read (that's the whole point: it must fail
-  // WITHOUT needing a network call).
-  it('the 7 known-defective mainnet entries are recorded as their CORRECT pair (Chainlink "X / USD" @ 8dp convention)', () => {
-    const WBTC_USD_ADDR = '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c' // currently the BTC/USD index feed
-    const GRT_USD_ADDR = '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1'  // currently GRT/ETH
-    const LDO_USD_ADDR = '0x4e844125952D32AcdF339BE976c98E22F6F318dB'  // currently LDO/ETH
-    const SHIB_USD_ADDR = '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61' // currently SHIB/ETH
-    const APE_USD_ADDR = '0xD10aBbC76679a20055E167BB80A24ac851b37571'  // currently no code
-    const PEPE_USD_ADDR = '0x02DE28aB3C28A5B1E8236B1069a211b7494F0f35' // currently no code
-    const PAXG_USD_ADDR = '0x9B97304EA12EFed0FAd976FBeCAad46016bf269e' // currently a dead proxy
+  // [FIX-MAINNET-FEED-REMEDIATION] Supersedes the ADR-018-era test that pinned all 7 defective
+  // entries as "X / USD" @8dp so they would fail closed. Six are now remediated, so their declared
+  // identity is the one the address GENUINELY self-reports on-chain (verified 2026-07-29 on two
+  // independent RPCs). Every value below is a READ value, not a convention-derived guess — which is
+  // the whole point of ADR-018 invariant (b).
+  it('remediated mainnet feeds declare the identity their address actually self-reports on-chain', () => {
+    // Composed BASE legs — same addresses as before, ETH-denominated at 18dp (never USD).
+    expect(getFeedExpectation('0x17D054ECAC33D91F7340645341eFB5DE9009F1C1')).toEqual({ description: 'GRT / ETH', decimals: 18 })
+    expect(getFeedExpectation('0x4e844125952D32AcdF339BE976c98E22F6F318dB')).toEqual({ description: 'LDO / ETH', decimals: 18 })
+    expect(getFeedExpectation('0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61')).toEqual({ description: 'SHIB / ETH', decimals: 18 })
+    // WBTC composition: a NEW WBTC/BTC base leg × the BTC index feed, now honestly labelled.
+    expect(getFeedExpectation('0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23')).toEqual({ description: 'WBTC / BTC', decimals: 8 })
+    expect(getFeedExpectation('0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c')).toEqual({ description: 'BTC / USD', decimals: 8 })
+    // Corrected DIRECT feeds.
+    expect(getFeedExpectation('0xD10aBbC76679a20055E167BB80A24ac851b37056')).toEqual({ description: 'APE / USD', decimals: 8 })
+    expect(getFeedExpectation('0x9944D86CEB9160aF5C5feB251FD671923323f8C3')).toEqual({ description: 'PAXG / USD', decimals: 8 })
+  })
 
-    expect(getFeedExpectation(WBTC_USD_ADDR)).toEqual({ description: 'WBTC / USD', decimals: 8 })
-    expect(getFeedExpectation(GRT_USD_ADDR)).toEqual({ description: 'GRT / USD', decimals: 8 })
-    expect(getFeedExpectation(LDO_USD_ADDR)).toEqual({ description: 'LDO / USD', decimals: 8 })
-    expect(getFeedExpectation(SHIB_USD_ADDR)).toEqual({ description: 'SHIB / USD', decimals: 8 })
-    expect(getFeedExpectation(APE_USD_ADDR)).toEqual({ description: 'APE / USD', decimals: 8 })
-    expect(getFeedExpectation(PEPE_USD_ADDR)).toEqual({ description: 'PEPE / USD', decimals: 8 })
-    expect(getFeedExpectation(PAXG_USD_ADDR)).toEqual({ description: 'PAXG / USD', decimals: 8 })
+  it('the dead pre-remediation addresses are GONE from the registry entirely (cannot be resurrected silently)', () => {
+    // APE …b37571 (hex drift, zero code) and PAXG 0x9B97304E… (retired proxy, aggregator()==0) were
+    // replaced, not merely relabelled. An address with no expectation fails closed at read time, so
+    // even if one crept back into a feed map it could never be priced.
+    expect(getFeedExpectation('0xD10aBbC76679a20055E167BB80A24ac851b37571')).toBeNull()
+    expect(getFeedExpectation('0x9B97304EA12EFed0FAd976FBeCAad46016bf269e')).toBeNull()
+  })
+
+  it('PEPE stays UNRESOLVED and therefore still fails closed (no Chainlink PEPE feed exists on mainnet)', () => {
+    // Chainlink publishes no PEPE feed of any denomination on mainnet, so there is nothing correct
+    // to point this at. The expectation is what a real PEPE/USD feed would report; the configured
+    // address has zero on-chain code and can never match it. Blocking is the intended end state.
+    expect(getFeedExpectation('0x02DE28aB3C28A5B1E8236B1069a211b7494F0f35')).toEqual({ description: 'PEPE / USD', decimals: 8 })
+  })
+
+  // [FIX-MAINNET-FEED-REMEDIATION] The six remediated feeds publish at a 86400s heartbeat, far
+  // beyond the 3600s mainnet global. Without an explicit heartbeat they would be judged stale
+  // essentially always (observed ages when verified: WBTC/BTC 22.6h, GRT/ETH 17.4h, APE/USD 10.5h),
+  // silently reducing the remediation to "still returns null". This pins the fix.
+  it('every remediated long-tail mainnet feed has a heartbeat entry (else it reads permanently stale)', () => {
+    for (const feed of [
+      '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1', // GRT/ETH
+      '0x4e844125952D32AcdF339BE976c98E22F6F318dB', // LDO/ETH
+      '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61', // SHIB/ETH
+      '0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23', // WBTC/BTC
+      '0xD10aBbC76679a20055E167BB80A24ac851b37056', // APE/USD
+      '0x9944D86CEB9160aF5C5feB251FD671923323f8C3', // PAXG/USD
+    ]) {
+      expect(getFeedHeartbeatSec(feed), feed).toBe(86400)
+      // heartbeat x1.5 = 36h ceiling, comfortably above the observed ~23h worst case.
+      expect(getFeedStalenessSec(feed, 3600), feed).toBe(129600)
+    }
+    // The fast-updating quote legs stay on the global (unchanged, still correct at 1h).
+    expect(getFeedHeartbeatSec(CHAINLINK_ETH_USD)).toBeNull()
+    expect(getFeedHeartbeatSec('0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c')).toBeNull()
   })
 })
 
@@ -190,6 +222,58 @@ describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => 
 
   it('a token with neither a direct nor composed feed → null', () => {
     expect(resolveFeed('0x000000000000000000000000000000000000dEaD', 1)).toBeNull()
+  })
+
+  // [FIX-MAINNET-FEED-REMEDIATION] The four remediated mainnet tokens must resolve as COMPOSED —
+  // if any of them were left in the direct map, resolveFeed would return it as 'single' and the
+  // composed entry would be dead config that never runs.
+  it('the four remediated mainnet tokens resolve to kind:"composed" with both legs self-identifying', () => {
+    const CASES = [
+      { token: '0xc944e90c64b2c07662a292be6244bdf05cda44a7', base: 'GRT / ETH', baseDec: 18, quote: 'ETH / USD' },
+      { token: '0x5a98fcbea516cf06857215779fd812ca3bef1b32', base: 'LDO / ETH', baseDec: 18, quote: 'ETH / USD' },
+      { token: '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce', base: 'SHIB / ETH', baseDec: 18, quote: 'ETH / USD' },
+      { token: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', base: 'WBTC / BTC', baseDec: 8, quote: 'BTC / USD' },
+    ]
+    for (const c of CASES) {
+      // Must NOT be resolvable as a direct feed any more — that is what routes it to composition.
+      expect(getChainlinkFeed(c.token, 1), c.base).toBeNull()
+      const r = resolveFeed(c.token, 1)
+      expect(r, c.base).not.toBeNull()
+      expect(r!.kind, c.base).toBe('composed')
+      if (r!.kind === 'composed') {
+        expect(r!.base.expectedDescription).toBe(c.base)
+        expect(r!.base.expectedDecimals).toBe(c.baseDec)
+        expect(r!.quote.expectedDescription).toBe(c.quote)
+        expect(r!.quote.expectedDecimals).toBe(8)
+      }
+    }
+  })
+
+  it('WBTC composes through BTC, not ETH — the peg itself is an input, so a WBTC depeg is visible', () => {
+    const r = resolveFeed('0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', 1)!
+    expect(r.kind).toBe('composed')
+    if (r.kind === 'composed') {
+      // The quote leg is the BTC index feed that WBTC/USD used to point at directly. Pricing
+      // WBTC as (WBTC/BTC x BTC/USD) rather than as BTC/USD is the entire remediation for WBTC.
+      expect(r.quote.address.toLowerCase()).toBe('0xf4030086522a5beea4988f8ca5b36dbc97bee88c')
+      expect(r.base.expectedDescription).toBe('WBTC / BTC')
+      expect(r.quote.expectedDescription).not.toBe('WBTC / USD')
+    }
+  })
+
+  it('APE and PAXG resolve to kind:"single" on their CORRECTED addresses', () => {
+    const ape = resolveFeed('0x4d224452801aced8b2f0aebe155379bb5d594381', 1)!
+    expect(ape.kind).toBe('single')
+    if (ape.kind === 'single') {
+      expect(ape.leg.address.toLowerCase()).toBe('0xd10abbc76679a20055e167bb80a24ac851b37056')
+      expect(ape.leg.expectedDescription).toBe('APE / USD')
+    }
+    const paxg = resolveFeed('0x45804880de22913dafe09f4980848ece6ecbaf78', 1)!
+    expect(paxg.kind).toBe('single')
+    if (paxg.kind === 'single') {
+      expect(paxg.leg.address.toLowerCase()).toBe('0x9944d86ceb9160af5c5feb251fd671923323f8c3')
+      expect(paxg.leg.expectedDescription).toBe('PAXG / USD')
+    }
   })
 
   it('the kind discriminant is exhaustive at compile time — a switch with a never-typed default compiles', () => {

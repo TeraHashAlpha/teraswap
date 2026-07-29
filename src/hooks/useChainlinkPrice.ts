@@ -1,5 +1,14 @@
 import { useAccount, useReadContract } from 'wagmi'
-import { getChainlinkFeed, getFeedStalenessSec, getFeedExpectation, chainlinkAggregatorAbi, evaluateDeviation, type PriceCheck } from '@/lib/chainlink'
+import {
+  chainlinkAggregatorAbi,
+  evaluateDeviation,
+  evaluateFeedLeg,
+  composeFeedLegs,
+  type FeedLegFailure,
+  type FeedLegVerdict,
+  type PriceCheck,
+} from '@/lib/chainlink'
+import { resolveFeed, type FeedLeg } from '@/lib/chains/chainlink-feeds'
 import { hasReadFailed } from '@/lib/depeg-gate'
 import { useResolvedChainId } from './useChainId'
 
@@ -49,9 +58,27 @@ import { useResolvedChainId } from './useChainId'
  * This hook now also reads description() and compares BOTH description and decimals against
  * FEED_EXPECTATIONS before trusting `answer` — a mismatch on either is folded into the SAME
  * oracle-integrity-failed branch as the stale/invalid-round checks below (never a soft warning).
- * NOTE: this hook still has no composed-feed capability (cbETH-style base×quote) — that gap
- * pre-dates and is untouched by this change; composed tokens remain a "no feed" (`oracleUnavailable`)
- * verdict here exactly as before.
+ *
+ * [FIX-HOOK-COMPOSED-FEEDS] COMPOSED-FEED SUPPORT — closing a fail-OPEN regression.
+ *
+ * This hook used to resolve feeds with a bare `getChainlinkFeed` (direct map only). When
+ * FIX-MAINNET-FEED-REMEDIATION converted mainnet GRT/LDO/SHIB/WBTC to composed entries — and
+ * therefore removed them from the direct map — this hook stopped finding them at all and fell into
+ * the "no feed configured" branch: `oracleUnavailable: true` WITHOUT `oracleIntegrityFailed`. That is
+ * the one combination `evaluatePriceGate` deliberately WAIVES (mode 'ok'), so four mainnet tokens
+ * became swappable with zero Chainlink validation at any size, and WBTC in particular went from a
+ * 0–3% blind band to no oracle check whatsoever. A fix that narrows one hole and opens a wider one
+ * is a net regression, which is what this closes.
+ *
+ * The hook now resolves through `resolveFeed` — the SAME resolver the server/DCA path uses — and
+ * reads both legs of a composition (3 contract reads per leg, leg B disabled for a single feed so
+ * the Rules of Hooks are satisfied with a fixed call count). Per-leg identity, integrity and
+ * staleness, plus the composition itself, all run through the SHARED pure helpers in
+ * `@/lib/chainlink` (evaluateFeedLeg / composeFeedLegs) rather than a second copy of the rules here.
+ *
+ * A leg that is READ but fails identity/integrity/staleness yields `oracleIntegrityFailed: true` with
+ * `oracleUnavailable: false` — a hard block at every trade size, never the waived branch. Only a
+ * token with genuinely NO configured feed (resolveFeed → null) is `oracleUnavailable`.
  */
 
 /** Neutral, frictionless verdict — a first render or a case with nothing to guard. */
@@ -79,6 +106,34 @@ const UNREADABLE = (executionPriceUsd: number | null, message: string): PriceChe
   oracleReadFailed: true,
 })
 
+/**
+ * [FIX-HOOK-COMPOSED-FEEDS] A leg was READ but did not survive validation. Always a hard block
+ * (`oracleIntegrityFailed`) and deliberately NOT `oracleUnavailable` — the feed exists and we read
+ * it, so this must never land in the branch `evaluatePriceGate` waives.
+ */
+const LEG_FAILED = (
+  executionPriceUsd: number | null,
+  verdict: Extract<FeedLegVerdict, { ok: false }>,
+  chainlinkPrice: number | null,
+): PriceCheck => ({
+  chainlinkPrice,
+  executionPrice: executionPriceUsd,
+  deviation: 0,
+  level: 'warn',
+  message: LEG_FAILURE_COPY[verdict.reason](verdict.ageSeconds),
+  oracleUnavailable: false,
+  oracleIntegrityFailed: true,
+})
+
+/** Per-reason copy. Wording preserved from the pre-composition branches so existing UX is unchanged. */
+const LEG_FAILURE_COPY: Record<FeedLegFailure, (ageSeconds: number) => string> = {
+  identity: () => 'Chainlink feed identity does not match the configured pair. Price not verified.',
+  'invalid-answer': () => 'Chainlink oracle returned invalid price.',
+  'stale-round': () => 'Chainlink oracle data is stale (answeredInRound < roundId). Verify price manually.',
+  'incomplete-round': () => 'Chainlink oracle round is incomplete. Verify price manually.',
+  outdated: (age) => `Chainlink oracle data outdated (${Math.floor(age / 3600)}h old). Verify price manually.`,
+}
+
 export function useChainlinkPrice(
   tokenAddress: string | undefined,
   executionPriceUsd: number | null,
@@ -91,42 +146,78 @@ export function useChainlinkPrice(
   const chainId = useResolvedChainId()
   const { isConnected } = useAccount()
 
-  // Only resolve a feed once the chain is known — getChainlinkFeed defaults its chainId parameter
-  // to mainnet, so passing an unresolved chain through would silently reintroduce the mainnet
-  // assumption this hook just removed.
-  const feedAddress = chainId != null && tokenAddress ? getChainlinkFeed(tokenAddress, chainId) : null
-  const enabled = !!feedAddress
+  // [FIX-HOOK-COMPOSED-FEEDS] Resolve through the SAME resolver the server path uses, so a token is
+  // never "configured" for one path and invisible to the other. Only once the chain is known —
+  // resolveFeed defaults its chainId parameter to mainnet, so passing an unresolved chain through
+  // would silently reintroduce the mainnet assumption this hook removed.
+  const resolved = chainId != null && tokenAddress ? resolveFeed(tokenAddress, chainId) : null
+
+  // Leg A is the single feed or the composition's base; leg B exists only for a composition. Both
+  // read slots are ALWAYS declared (Rules of Hooks: fixed call count) — leg B is simply disabled
+  // when there is nothing to read.
+  const legA: FeedLeg | null = resolved
+    ? (resolved.kind === 'single' ? resolved.leg : resolved.base)
+    : null
+  const legB: FeedLeg | null = resolved && resolved.kind === 'composed' ? resolved.quote : null
 
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] refetchInterval mirrors useDepegCheck and the sibling read hooks.
   // It is not cosmetic: a query that settles into `error` is not retried by TanStack on its own, so
   // without a poll an UNREADABLE verdict would latch for the whole session view. Only fires when a
   // feed is actually configured, so no-feed tokens still issue zero reads.
-  const query = { enabled, refetchInterval: enabled ? 30_000 : undefined }
+  const queryA = { enabled: !!legA, refetchInterval: legA ? 30_000 : undefined }
+  const queryB = { enabled: !!legB, refetchInterval: legB ? 30_000 : undefined }
 
   const round = useReadContract({
-    address: feedAddress!,
+    address: legA?.address as `0x${string}`,
     abi: chainlinkAggregatorAbi,
     functionName: 'latestRoundData',
     chainId,
-    query,
+    query: queryA,
   })
 
   const dec = useReadContract({
-    address: feedAddress!,
+    address: legA?.address as `0x${string}`,
     abi: chainlinkAggregatorAbi,
     functionName: 'decimals',
     chainId,
-    query,
+    query: queryA,
   })
 
   // [ADR-018] Self-identification: the feed's own description() must be checked before its answer
   // is trusted, same as decimals() above.
   const desc = useReadContract({
-    address: feedAddress!,
+    address: legA?.address as `0x${string}`,
     abi: chainlinkAggregatorAbi,
     functionName: 'description',
     chainId,
-    query,
+    query: queryA,
+  })
+
+  // [FIX-HOOK-COMPOSED-FEEDS] Leg B — the composition's quote leg (e.g. ETH/USD for GRT/ETH, or
+  // BTC/USD for WBTC/BTC). Disabled entirely for a single feed, so a direct-feed token issues the
+  // exact same three reads it always did.
+  const roundB = useReadContract({
+    address: legB?.address as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'latestRoundData',
+    chainId,
+    query: queryB,
+  })
+
+  const decB = useReadContract({
+    address: legB?.address as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'decimals',
+    chainId,
+    query: queryB,
+  })
+
+  const descB = useReadContract({
+    address: legB?.address as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'description',
+    chainId,
+    query: queryB,
   })
 
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] Chain unresolved. Disconnected is NOT a failure — there is no
@@ -145,7 +236,9 @@ export function useChainlinkPrice(
   // After the $50M aEthUSDT→aEthAAVE incident, unverified tokens MUST show a warning.
   // NOTE: this is the "no feed configured" case — a permanent property of the token, distinct from
   // the UNREADABLE case below (a configured feed we failed to read). oracleReadFailed stays unset.
-  if (!feedAddress) {
+  // [FIX-HOOK-COMPOSED-FEEDS] Keyed on resolveFeed, so a COMPOSED token can no longer land here:
+  // this branch is now reachable only for a token with genuinely no configured feed of either shape.
+  if (!legA) {
     const isReal = !!tokenAddress
     return {
       chainlinkPrice: null,
@@ -174,77 +267,64 @@ export function useChainlinkPrice(
   // closed on "no usable data" and letting the per-feed staleness ceiling judge retained data is both
   // safer and self-correcting: if the outage outlives the feed's heartbeat×1.5 window, `ageSeconds`
   // grows past it and the integrity branch below blocks anyway.
-  if (!roundData || feedDecimals === undefined || feedDescription === undefined) {
+  // [FIX-HOOK-COMPOSED-FEEDS] Readiness is judged across EVERY leg in play. A composition with one
+  // leg loaded and the other still missing is NOT priceable — treating it as ready would be exactly
+  // the partial pricing ADR-018 invariant (d) forbids.
+  const legBPending = !!legB && (roundB.data === undefined || decB.data === undefined || descB.data === undefined)
+  if (!roundData || feedDecimals === undefined || feedDescription === undefined || legBPending) {
     // The burden of proof is INVERTED here: neutral is granted ONLY to a read with no failure
     // history. `isLoading` alone is not a safe test — TanStack keeps it true across an entire retry
     // sequence, and resets `failureCount` to 0 on every new fetch, so a sustained outage would keep
     // re-presenting as a pristine first render once per poll. That was M-01; `hasReadFailed`
     // combines failureCount (the in-retry window) with errorUpdateCount (the post-poll window, which
     // the library never resets) precisely so that hole stays shut here too.
-    const anyFailure = round.isError || dec.isError || desc.isError || hasReadFailed(round) || hasReadFailed(dec) || hasReadFailed(desc)
-    const inFlight = (round.isLoading || dec.isLoading || desc.isLoading) && !anyFailure
+    const reads = legB ? [round, dec, desc, roundB, decB, descB] : [round, dec, desc]
+    const anyFailure = reads.some((r) => r.isError || hasReadFailed(r))
+    const inFlight = reads.some((r) => r.isLoading) && !anyFailure
     return inFlight
       ? NEUTRAL(executionPriceUsd)
       : UNREADABLE(executionPriceUsd, 'Chainlink price feed could not be read. Price not verified.')
   }
 
-  // [ADR-018 invariant (c)] Self-identification: the feed's own description()/decimals() must match
-  // what FEED_EXPECTATIONS declares for this address BEFORE the answer below is trusted. This is
-  // checked first — ahead of even the answer<=0 guard — because a mismatch means the feed cannot be
-  // trusted regardless of what its round data says. A feed with no declared expectation at all (should
-  // be unreachable given the ADR-018 import-time completeness assert, but checked defensively) fails
-  // the same way. This is the check that catches WBTC/USD silently reading the BTC/USD index feed:
-  // its round data is genuinely fresh and valid, so every guard below it would otherwise pass.
-  const expectation = getFeedExpectation(feedAddress)
-  if (!expectation || feedDescription !== expectation.description || Number(feedDecimals) !== expectation.decimals) {
-    return {
-      chainlinkPrice: null,
-      executionPrice: executionPriceUsd,
-      deviation: 0,
-      level: 'warn',
-      message: 'Chainlink feed identity does not match the configured pair. Price not verified.',
-      oracleUnavailable: false,
-      oracleIntegrityFailed: true,
-    }
+  // [ADR-018 / FIX-HOOK-COMPOSED-FEEDS] Validate leg A through the SHARED evaluator: identity
+  // (description + decimals vs FEED_EXPECTATIONS) → round integrity → per-feed staleness, in that
+  // order. Identity is checked FIRST — ahead of even the answer<=0 guard — because a mismatch means
+  // the feed cannot be trusted regardless of what its round data says. This is the check that catches
+  // a feed whose round is genuinely fresh and valid but which is simply the WRONG feed.
+  // The 90_000 (25h) global fallback is this hook's pre-existing one, preserved.
+  const [roundId, answer, startedAt, updatedAt, answeredInRound] = roundData
+  const verdictA = evaluateFeedLeg({
+    feed: legA.address,
+    description: feedDescription as string,
+    decimals: Number(feedDecimals),
+    roundId, answer, startedAt, updatedAt, answeredInRound,
+    globalStalenessSec: 90_000,
+  })
+  if (!verdictA.ok) {
+    // Surface a price alongside the block only when the leg's own numbers were internally coherent
+    // (i.e. it failed on freshness/round-sequence, not on identity or a non-positive answer) — and
+    // never for a composition, where one leg's price is not a token price. Mirrors the pre-existing
+    // per-branch behaviour of showing chainlinkPrice for stale/outdated but null for identity/invalid.
+    const showPrice =
+      !legB && (verdictA.reason === 'stale-round' || verdictA.reason === 'outdated' || verdictA.reason === 'incomplete-round')
+    return LEG_FAILED(executionPriceUsd, verdictA, showPrice ? Number(answer) / 10 ** Number(feedDecimals) : null)
   }
 
-  // Parse Chainlink answer
-  const [roundId, answer, , updatedAt, answeredInRound] = roundData
-  const chainlinkPrice = Number(answer) / 10 ** Number(feedDecimals)
-
-  // Security: invalid price
-  // [SPRINT-9J J1] oracleIntegrityFailed → genuine oracle-safety event (hard block).
-  if (Number(answer) <= 0) {
-    return { chainlinkPrice: null, executionPrice: executionPriceUsd, deviation: 0, level: 'warn', message: 'Chainlink oracle returned invalid price.', oracleUnavailable: false, oracleIntegrityFailed: true }
-  }
-
-  // Security: answeredInRound must equal roundId (data from current round)
-  if (answeredInRound < roundId) {
-    return {
-      chainlinkPrice,
-      executionPrice: executionPriceUsd,
-      deviation: 0,
-      level: 'warn',
-      message: 'Chainlink oracle data is stale (answeredInRound < roundId). Verify price manually.',
-      oracleUnavailable: false,
-      oracleIntegrityFailed: true,
-    }
-  }
-
-  // [SPRINT-9V V1] Per-feed staleness — heartbeat×1.5 for a feed with a known heartbeat (shared with
-  // the raw gate so both AGREE), else the 90_000 (25h) global this hook used before (mainnet
-  // byte-identical; unknown feeds fail-conservative). The 9G round-integrity checks above are unchanged.
-  const ageSeconds = Math.floor(Date.now() / 1000) - Number(updatedAt)
-  if (ageSeconds > getFeedStalenessSec(feedAddress, 90_000)) {
-    return {
-      chainlinkPrice,
-      executionPrice: executionPriceUsd,
-      deviation: 0,
-      level: 'warn',
-      message: `Chainlink oracle data outdated (${Math.floor(ageSeconds / 3600)}h old). Verify price manually.`,
-      oracleUnavailable: false,
-      oracleIntegrityFailed: true,
-    }
+  // Single feed → leg A's price IS the token price. Composed → validate leg B independently and
+  // multiply. Either leg failing fails the WHOLE read (no partial pricing).
+  let chainlinkPrice = verdictA.price
+  if (legB) {
+    const [rIdB, ansB, startB, updB, airB] = roundB.data as readonly [bigint, bigint, bigint, bigint, bigint]
+    const verdictB = evaluateFeedLeg({
+      feed: legB.address,
+      description: descB.data as string,
+      decimals: Number(decB.data),
+      roundId: rIdB, answer: ansB, startedAt: startB, updatedAt: updB, answeredInRound: airB,
+      globalStalenessSec: 90_000,
+    })
+    if (!verdictB.ok) return LEG_FAILED(executionPriceUsd, verdictB, null)
+    // [ADR-018 invariant (d)] Shared composition — price = base × quote, freshness = the older leg.
+    chainlinkPrice = composeFeedLegs(verdictA, verdictB).price
   }
 
   // No execution price to compare → just return chainlink price
