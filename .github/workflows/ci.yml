@@ -174,6 +174,12 @@ jobs:
     # human messages instead of the generic "swap route unavailable"; (2) the DCA create
     # form blocks a schedule that can't finish before expiry (interval × buys > expiry).
     # The keeper-side policy (retry-policy.test.mjs) is gated by keeper-tests.yml.
+    # [CHORE-CI-TEST-DISCOVERY] DCAPanel.*.test.tsx is discovered by shell glob, not
+    # enumerated by name — a hard-coded single file (DCAPanel.routability.test.tsx) let
+    # DCAPanel.v3.test.tsx and DCAPanel.failed/.nofeed-consent/.ux-polish/.test.tsx run
+    # untested in CI with no workflow signal. A new DCAPanel.*.test.tsx file is covered
+    # automatically. src/components/ holds test files for many unrelated components, so
+    # the glob is scoped to the DCAPanel* prefix, not the whole directory.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -182,8 +188,8 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: DCA resilience guard (failure reasons + creation guard)
-        run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel.routability.test.tsx
+      - name: DCA resilience guard (failure reasons + creation guard + all DCAPanel suites)
+        run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel*.test.tsx
 
   oracle-advisory-guard:
     # [chore/oracle-less-advisory] Pins the oracle-coverage detection behind the
@@ -211,6 +217,12 @@ jobs:
     # of the COMMITTED generated catalogs (schema, EIP-55, cores present+verified, no
     # duplicate address/symbol, verified⇒sources, CSP-safe 'self' logo URLs) and the
     # pinned per-chain majors. NO network — pure logic + committed JSON.
+    # [CHORE-CI-TEST-DISCOVERY] scripts/token-catalog/lib/*.test.ts is discovered by
+    # shell glob, not enumerated by name — the enumerated list had silently missed
+    # curated.test.ts (never ran in CI). That directory holds only this pipeline's own
+    # test files, so the glob is unambiguous. src/lib/chains/ is a large shared directory
+    # with many test files pinned by other unrelated guard jobs, so those 3 files stay
+    # individually listed — a directory glob there would silently widen this job's scope.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -220,7 +232,7 @@ jobs:
           cache: "npm"
       - run: npm ci
       - name: Token-catalog pipeline guard (cross-verify logic + committed catalog invariants)
-        run: npx vitest run scripts/token-catalog/lib/verify.test.ts scripts/token-catalog/lib/guard-gate.test.ts scripts/token-catalog/lib/build-chain.test.ts scripts/token-catalog/lib/sources.test.ts scripts/token-catalog/lib/category.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts src/lib/chains/tokens.test.ts
+        run: npx vitest run scripts/token-catalog/lib/*.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts src/lib/chains/tokens.test.ts
 
   minimum-output-guard:
     # [AUDIT-W2 / W2-L-01] The full vitest suite is not run in CI (only single-file
