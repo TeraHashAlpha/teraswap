@@ -861,7 +861,13 @@ export default function SwapBox() {
         {/* [SPRINT-9J J1] Oracle-INTEGRITY failure (stale / invalid / incomplete
             round): the oracle itself can't be trusted → HARD block, no override.
             Stale-gated so it doesn't flash on in-flight quote data. */}
-        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && (
+        {/* [FIX-PRICE-ORACLE-FAIL-CLOSED] Also gated on a live trade (hasAmount && meta), matching
+            the oracleUnavailable banner below. Since an unreadable feed now raises an integrity
+            failure, this banner became reachable on an EMPTY form — and permanently so for a wallet
+            on an unsupported chain, where the chain never resolves. The BLOCK itself is unaffected
+            (anyBlocked still disables the button); only the red banner waits until there is an
+            actual quote to block, which is the convention every sibling banner here already uses. */}
+        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && hasAmount && meta && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked — oracle data unsafe.</span>{' '}
             {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
