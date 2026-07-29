@@ -464,6 +464,32 @@ export function resolveFeed(
   return { kind: 'composed', base, quote }
 }
 
+/**
+ * [FIX-HOOK-COMPOSED-FEEDS] Every (chainId, token) pair that has a configured price source of ANY
+ * shape, single or composed. Exists so a structural test can enumerate the whole registry and assert
+ * that each configured token actually resolves through the consuming code path — the check that
+ * catches a token being configured for one path and invisible to another. It is derived from the
+ * registries themselves, so a feed added later is covered automatically with no test edit.
+ */
+export function listConfiguredFeedTokens(): Array<{
+  chainId: number
+  token: string
+  kind: 'single' | 'composed'
+}> {
+  const out: Array<{ chainId: number; token: string; kind: 'single' | 'composed' }> = []
+  for (const [chainIdStr, feeds] of Object.entries(CHAINLINK_FEEDS_BY_CHAIN)) {
+    for (const token of Object.keys(feeds)) {
+      out.push({ chainId: Number(chainIdStr), token, kind: 'single' })
+    }
+  }
+  for (const [chainIdStr, composed] of Object.entries(COMPOSED_FEEDS_BY_CHAIN)) {
+    for (const token of Object.keys(composed)) {
+      out.push({ chainId: Number(chainIdStr), token, kind: 'composed' })
+    }
+  }
+  return out
+}
+
 // [ADR-018 invariant (a)] Completeness assert, run once at module load: every address the registry
 // can ever hand out (direct, composed base, composed quote) must have a declared self-identification
 // expectation. A future feed added to CHAINLINK_FEEDS / CHAINLINK_FEEDS_BY_CHAIN / COMPOSED_FEEDS_BY_
