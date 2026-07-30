@@ -39,3 +39,41 @@ the Auditor's environment differs in something I cannot see from here.
 `JSON.stringify` throws on a BigInt (a malformed `ORDER_TYPEHASH` of `1n` turned a refusal into a
 `TypeError`), and `errText` leaked the keyed RPC URL for any non-viem error. Both fixed
 (`describeValue`, `redactUrls`).
+
+---
+
+## Redaction follow-up (defect A + B)
+
+### CodeQL at `chain-verify.test.mjs:514` is a false positive — left untouched
+`assert.doesNotMatch(err.message, /alchemy\.com/)`. `js/incomplete-url-substring-sanitization`
+assumes a match means ACCEPT, so an unanchored host lets `evil.com/alchemy.com` through a whitelist.
+Both premises are inverted here: the subject is a refusal sentence, not a URL, and the assertion is
+negative — unanchored is the *strictest* form an absence check can take, and `^…$` would gut it. The
+two obvious rewrites are no better: `.includes("alchemy.com")` is flagged by the same query, and
+anchoring silently weakens the test. **This needs an owner decision — dismiss as false positive or
+add an inline suppression. The CodeQL job on #381 stays red until then.** My new assertions use
+sentinels with no dots and no TLD shape, so they add no further findings.
+
+### `err.value` is NOT redacted, and a caller that logs it leaks
+Redaction covers emitted strings (`errText`, `describeValue`). `ChainVerificationError.value` carries
+the RAW answer for structured logging and is pinned that way by the identity tests
+(`assert.equal(err.value, wrong)`), so it can hold an unredacted RPC URL. `executor.js` logs only
+`err.message` today, so nothing leaks — but any future Sentry/Telegram hook that serialises the whole
+error will. Either redact at the sink or make `value` a redacted accessor; not done here because it
+would change what the tests pin.
+
+### `errText` never reads `.cause`
+A URL that exists only in a nested cause cannot leak — and also cannot inform. An undici
+`fetch failed` whose real reason is one level down renders as three words. Deliberate (unchanged
+semantics), but it is why the boot-refusal line is sometimes thinner than the failure deserves.
+
+### Over-redaction has a readability cost, accepted on purpose
+Inside redacted text only, a dotted token followed by `/` or `:` goes whole — so `chain-verify.js:120`
+and a `12:30` timestamp are eaten. Version-shaped numbers (`viem 2.47.10`, `1.5 gwei`) survive, which
+is the case that actually mattered. Losing a host costs a lookup; losing a key costs a rotation.
+
+### The M01–M20 table was not in this file
+Only the commit body for `c91488b` summarised it ("20 rows … all 20 RED"); the rows themselves were
+never written down. I reconstructed them 1:1 from the module's guards and added M21–M27 for this
+change. The runner is now reproducible rather than a claim. **27/27 RED, no survivors**, baseline and
+restore both 406/0/0, `git diff` empty after. Worth committing the runner if this repeats.

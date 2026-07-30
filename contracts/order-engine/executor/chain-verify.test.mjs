@@ -526,6 +526,223 @@ describe("chain-verify — a refusal never prints an RPC URL", () => {
   })
 })
 
+// ── Secret hygiene, exhaustively [defect B — the Auditor defeated the first pattern] ─────────
+//
+// Two escapes, one family. The first pattern excluded `]` from the URL body, so
+// `http://[2001:db8::1]:8545/v2/<key>` matched only as far as the opening bracket and left
+// `]:8545/v2/<key>` sitting in the refusal; and it required a `://`, so a schemeless
+// `rpc-provider.example/v2/<key>` — the shape a proxy error or a config echo prints — was not
+// redacted at all. Both come from the same mistake: trusting the secret to arrive in one canonical
+// shape.
+//
+// THIS TABLE IS THE SPEC. One row per shape a secret can arrive in, each carrying its OWN sentinel
+// so a row that quietly stops exercising its shape cannot be masked by a neighbour's pass. Every
+// row is driven through EVERY site that renders text into a FATAL line — the three `errText` sites
+// (one per RPC read) and the five `describeValue` sites (one per malformed answer or malformed
+// config value) — because "errText is redacted" was never the contract. The contract is that no
+// secret survives into any emitted string.
+describe("chain-verify — no secret survives a refusal, whatever shape it arrives in", () => {
+  const HOST = "rpc-provider.example"
+
+  const ROWS = [
+    {
+      name: "https, key in the query string",
+      secret: "S01qkey5f3a7c",
+      text: `HTTP request failed: https://${HOST}/v2?apiKey=S01qkey5f3a7c returned 503`,
+    },
+    {
+      name: "https, key in the userinfo",
+      secret: "S02userinfo4b1e",
+      text: `connect failed to https://ops:S02userinfo4b1e@${HOST}/v2`,
+    },
+    {
+      name: "a wss endpoint",
+      secret: "S03wss77d2ab",
+      text: `socket closed: wss://${HOST}/ws/S03wss77d2ab`,
+    },
+    {
+      name: "an UPPERCASE scheme",
+      secret: "S04UPPERC0DE",
+      text: `HTTPS://RPC-PROVIDER.EXAMPLE/V2/S04UPPERC0DE is unreachable`,
+    },
+    {
+      // The exact input the Auditor used: the old pattern stopped at `]` and left the rest.
+      name: "an IPv6 literal host with a port and a path",
+      secret: "S05ipv6be1147",
+      text: `getaddrinfo failed for http://[2001:db8::1]:8545/v2/S05ipv6be1147`,
+    },
+    {
+      // The Auditor's second input: no scheme at all, so there is no `://` to anchor on.
+      name: "a schemeless host/path",
+      secret: "S06schemeless1a2b",
+      text: `proxy rejected ${HOST}/v2/S06schemeless1a2b`,
+    },
+    {
+      name: "host:port/path with no scheme",
+      secret: "S07hostport3c4d",
+      text: `upstream 127.0.0.1:8545/v2/S07hostport3c4d refused the connection`,
+    },
+    {
+      name: "a URL followed by trailing punctuation",
+      secret: "S08trailing5e6f",
+      text: `see https://${HOST}/v2/S08trailing5e6f.`,
+    },
+    {
+      name: "a URL inside a longer sentence",
+      secret: "S09sentence7a8b",
+      text: `the keeper could not reach https://${HOST}/v2/S09sentence7a8b because the provider returned 429, retrying`,
+    },
+    {
+      name: "a multi-line message with the URL on its own line",
+      secret: "S10multiline9c0d",
+      text: `request failed\n  url: https://${HOST}/v2/S10multiline9c0d\n  status: 503`,
+    },
+    {
+      // `.cause` is never rendered by errText, so it cannot leak through the cause chain — but the
+      // realistic undici/viem shape ALSO copies the failing URL into the outer message, which is
+      // the half that redaction has to catch. Both halves carry the sentinel here.
+      name: "a nested error cause chain",
+      secret: "S11cause2d4e",
+      text: `fetch failed for https://${HOST}/v2/S11cause2d4e`,
+      deliver: (text) => new Error(text, { cause: new Error(`connect ECONNREFUSED ${text}`) }),
+    },
+    {
+      // Not an Error at all: `errText` falls through to String(err), which is the branch a thrown
+      // string or a rejected non-Error value from a transport shim lands in.
+      name: "a non-Error thrown value",
+      secret: "S12nonerror2f3a",
+      text: `boom: https://${HOST}/v2/S12nonerror2f3a`,
+      deliver: (text) => text,
+    },
+    {
+      // No URL anywhere. Key material is a secret on its own — a provider key, a session token, a
+      // raw private key echoed back by a shim — and a URL-shaped redactor never sees it.
+      name: "a bare 64-hex-char token with no URL around it",
+      secret: "a1b2c3d4e5f60718".repeat(4),
+      text: `provider rejected the request with token ${"a1b2c3d4e5f60718".repeat(4)}`,
+    },
+  ]
+
+  /** Reject with the row's payload — an Error by default, or however the row says to deliver it. */
+  const rejectWith = (row) => () =>
+    Promise.reject(row.deliver ? row.deliver(row.text) : new Error(row.text))
+
+  const verify = (over) =>
+    verifyChainBinding({
+      provider: fakeProvider(),
+      chainId: 1,
+      contracts: v2Only,
+      ...FAST,
+      attempts: 1,
+      ...over,
+    })
+
+  const only = (over) => [{ label: "ORDER_EXECUTOR_ADDRESS (v2)", address: V2_ADDRESS, ...over }]
+
+  // Every site in chain-verify.js that puts caller- or RPC-supplied text into a FATAL message.
+  const SINKS = [
+    {
+      name: "errText — eth_chainId transport failure",
+      check: "chainId",
+      run: (row) => verify({ provider: fakeProvider({ chainId: rejectWith(row) }) }),
+    },
+    {
+      name: "errText — eth_getCode transport failure",
+      check: "code",
+      run: (row) => verify({ provider: fakeProvider({ code: rejectWith(row) }) }),
+    },
+    {
+      name: "errText — ORDER_TYPEHASH() transport failure",
+      check: "identity",
+      run: (row) => verify({ provider: fakeProvider({ typehash: rejectWith(row) }) }),
+    },
+    {
+      name: "describeValue — malformed eth_chainId answer",
+      check: "chainId",
+      run: (row) => verify({ provider: fakeProvider({ chainId: row.text }) }),
+    },
+    {
+      name: "describeValue — malformed eth_getCode answer",
+      check: "code",
+      run: (row) => verify({ provider: fakeProvider({ code: row.text }) }),
+    },
+    {
+      name: "describeValue — malformed ORDER_TYPEHASH answer",
+      check: "identity",
+      run: (row) => verify({ provider: fakeProvider({ typehash: row.text }) }),
+    },
+    {
+      name: "describeValue — malformed executor address in config",
+      check: "address",
+      run: (row) =>
+        verify({ contracts: only({ address: row.text, expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2 }) }),
+    },
+    {
+      name: "describeValue — malformed expectedOrderTypehash in config",
+      check: "config",
+      run: (row) => verify({ contracts: only({ expectedOrderTypehash: row.text }) }),
+    },
+  ]
+
+  for (const row of ROWS) {
+    test(`no sentinel survives — ${row.name}`, async () => {
+      // The redactor itself, first: a row that the pattern cannot handle should say so here rather
+      // than through eight downstream failures.
+      assert.ok(
+        !redactUrls(row.text).includes(row.secret),
+        `redactUrls left the secret in: ${redactUrls(row.text)}`,
+      )
+
+      for (const sink of SINKS) {
+        const err = await refuses(sink.run(row))
+        assert.equal(err.check, sink.check, `${sink.name} refused with the wrong check`)
+        // NOTE — `err.message` only. `err.check`/`err.chainId` are fixed labels, and `err.value`
+        // deliberately carries the RAW answer for structured logging (pinned by the identity tests
+        // above, which assert err.value === the wrong typehash). So `value` is NOT redacted and a
+        // caller that logs it leaks — see the feedback doc. The contract redaction owns is the
+        // emitted string, which is what an operator pastes into a ticket.
+        assert.ok(
+          !err.message.includes(row.secret),
+          `${sink.name} leaked the secret into a FATAL line:\n${err.message}`,
+        )
+      }
+    })
+  }
+
+  test("redaction does not eat what an operator actually needs to read", () => {
+    // Over-redaction is the intended bias, but not at the price of every number in the line.
+    assert.equal(redactUrls("viem 2.47.10 timed out after 30ms"), "viem 2.47.10 timed out after 30ms")
+    assert.equal(redactUrls("ECONNREFUSED"), "ECONNREFUSED")
+    assert.equal(redactUrls("execution reverted"), "execution reverted")
+    // The address and the two typehashes reach a refusal DIRECTLY, never through redactUrls —
+    // pinned by the identity-mismatch test above. This asserts the other half: were one ever
+    // routed through here, redaction would take it, so the direct path must stay direct.
+    assert.ok(redactUrls(EXPECTED_ORDER_TYPEHASH_V2).includes("<redacted-secret>"))
+  })
+
+  // A boot gate that can be made to spin on its own log line is a denial-of-service, not a fix.
+  // Every quantifier in the pattern set is either bounded or a single greedy pass over a negated
+  // class with nothing after it to backtrack into; these are the inputs that would expose it if
+  // that ever stopped being true.
+  test("the pattern set is linear — 10k-char pathological inputs stay under 50ms", () => {
+    const EVIL = [
+      ["an unterminated scheme body", "https://" + "a".repeat(10_000)],
+      ["labels that never reach a TLD", ("a".repeat(64) + ".").repeat(160)],
+      ["a host that never reaches a port", "a".repeat(10_000) + "!"],
+      ["an endless port", "127.0.0.1:" + "1".repeat(10_000)],
+      ["an endless hex run", "0x" + "a".repeat(10_000)],
+      ["alternating dots and dashes", "a-.".repeat(3_400)],
+      ["nothing that can match at all", "é".repeat(10_000)],
+    ]
+    for (const [label, input] of EVIL) {
+      const started = performance.now()
+      redactUrls(input)
+      const elapsed = performance.now() - started
+      assert.ok(elapsed < 50, `${label}: redactUrls took ${elapsed.toFixed(1)}ms on ${input.length} chars`)
+    }
+  })
+})
+
 describe("chain-verify — retries are bounded and terminate in refusal", () => {
   test("a transient failure is retried and the boot proceeds once it clears", async () => {
     let n = 0
@@ -814,7 +1031,7 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
    * Boot the real keeper against a scripted RPC. Returns its exit code, stderr and the ORDERED
    * list of RPC methods it actually called.
    */
-  async function bootExecutor({ chainId, code, typehash }) {
+  async function bootExecutor({ chainId, code, typehash, rpcPath = "", dead = false }) {
     const seen = []
     const server = createServer((req, res) => {
       let body = ""
@@ -861,7 +1078,10 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
       env: {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
-        RPC_URL: `http://127.0.0.1:${port}`,
+        // `dead` points the keeper at a closed port so the transport error — viem's own, not a
+        // fake — is what reaches the refusal line. `rpcPath` puts a key where a real provider URL
+        // carries one (…/v2/<key>); the double answers on any path.
+        RPC_URL: `http://127.0.0.1:${dead ? 1 : port}${rpcPath}`,
         CHAIN_ID: String(TEST_CHAIN),
         ORDER_EXECUTOR_ADDRESS: V2_ADDRESS,
         SUPABASE_URL: "http://127.0.0.1:9/unused",
@@ -939,4 +1159,44 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
       assert.match(boot.stdout, /ORDER_TYPEHASH .* matches/)
     },
   )
+
+  // The last call site: executor.js's own catch block, which prints err.message and then names the
+  // RPC. Everything above proves the module redacts; this proves the REAL boot emits nothing else.
+  // RPC_URL here carries a key exactly where a provider URL does, and the assertion is on the
+  // process's whole output — stdout and stderr — not on a string the module handed back.
+  const KEYED_PATH = "/v2/S13bootkey7f21e3"
+  const BOOT_SENTINEL = "S13bootkey7f21e3"
+
+  test("a refusal never prints the key in RPC_URL", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({
+      chainId: 1, // ≠ TEST_CHAIN ⇒ refuses at the first gate read
+      code: SOME_CODE,
+      typehash: EXPECTED_ORDER_TYPEHASH_V2,
+      rpcPath: KEYED_PATH,
+    })
+    assert.equal(boot.exitCode, 1, boot.stderr)
+    assert.match(boot.stderr, /Refusing to boot/)
+    assert.ok(!boot.stderr.includes(BOOT_SENTINEL), `key leaked to stderr:\n${boot.stderr}`)
+    assert.ok(!boot.stdout.includes(BOOT_SENTINEL), `key leaked to stdout:\n${boot.stdout}`)
+    // The host is deliberately KEPT — an operator needs to know which endpoint was refused. It is
+    // the path, the query and the userinfo that carry keys, and `new URL(…).host` drops all three.
+    assert.match(boot.stderr, /RPC host=127\.0\.0\.1:\d+/)
+  })
+
+  test("an unreachable RPC refuses without printing the key", { timeout: 60_000 }, async () => {
+    // No fake error object anywhere in this one: the keeper talks to a closed port, so the text
+    // that reaches the refusal is whatever viem/undici actually produced for a real ECONNREFUSED.
+    const boot = await bootExecutor({
+      chainId: TEST_CHAIN,
+      code: SOME_CODE,
+      typehash: EXPECTED_ORDER_TYPEHASH_V2,
+      rpcPath: KEYED_PATH,
+      dead: true,
+    })
+    assert.equal(boot.exitCode, 1, boot.stderr)
+    assert.match(boot.stderr, /could not read eth_chainId/)
+    assert.ok(!boot.stderr.includes(BOOT_SENTINEL), `key leaked to stderr:\n${boot.stderr}`)
+    assert.ok(!boot.stdout.includes(BOOT_SENTINEL), `key leaked to stdout:\n${boot.stdout}`)
+    assert.ok(!boot.seen.includes("eth_getBalance"), "the signer/balance step ran despite a refusal")
+  })
 })

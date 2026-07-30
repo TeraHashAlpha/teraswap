@@ -144,16 +144,56 @@ async function callWithRetry(run, { attempts, retryDelayMs, timeoutMs, sleep }) 
 
 /**
  * A refusal line is the text an operator pastes into a ticket, and RPC_URL routinely carries the
- * provider API key in its path (…/v2/<key>). Transport errors quote the URL they failed on, so
- * every string that reaches a message goes through here first. Redaction is EXPLICIT — relying on
- * viem populating `shortMessage` (which omits the URL) is not a control: a plain Error, an
- * AggregateError, a proxy/undici failure or a future viem version all fall through to `.message`,
- * which does carry it.
+ * provider API key in its path (…/v2/<key>) or its userinfo (https://ops:<key>@host). Transport
+ * errors quote the URL they failed on, so every string that reaches a message goes through here
+ * first. Redaction is EXPLICIT — relying on viem populating `shortMessage` (which omits the URL) is
+ * not a control: a plain Error, an AggregateError, a proxy/undici failure or a future viem version
+ * all fall through to `.message`, which does carry it.
+ *
+ * ANCHORING, deliberately: nothing is anchored to ^/$ because the input is an arbitrary error
+ * message, not a URL — the secret sits mid-sentence, at a line end, or on its own line of a
+ * multi-line message, and anchoring would redact only a message that IS a bare URL while missing
+ * every real transport error, which is prose WITH a URL inside; each pattern is instead anchored on
+ * a structural landmark that cannot be dropped without ceasing to be an endpoint (`://`, an
+ * explicit `:port`, or a dot-separated label chain ending in an alphabetic TLD).
+ *
+ * OVER-REDACTION IS THE INTENDED BIAS. Losing a host from a log line costs an operator one lookup;
+ * leaking the key costs a rotation. So `[` and `]` are inside the URL body (the previous pattern
+ * excluded `]`, stopped dead at the closing bracket of an IPv6 literal and left `]:8545/v2/<key>`
+ * in the line), a schemeless `host/path` is taken, and anything hanging off a matched host goes
+ * with it. The one thing deliberately NOT taken is a bare dotted number — `viem 2.47.10`, `1.5
+ * gwei` — which has no TLD, no port and no path, and is what an operator actually needs to read.
+ *
+ * EVERY quantifier is bounded, or is a single greedy pass over a negated class with nothing after
+ * it. There is no nested/ambiguous repetition anywhere, so matching is linear in the input — a
+ * redactor that backtracks catastrophically inside a boot gate is a denial-of-service, not a fix.
  */
-const URL_LIKE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\],]+/gi
+const URL_TAIL = "[^\\s\"'<>(),]*"
+
+const URL_LIKE = [
+  // 1. Anything with an explicit scheme — http, https, ws, wss, a custom transport scheme, any
+  //    case. Userinfo lives inside the tail, so `https://ops:<key>@host` goes whole.
+  new RegExp(`[a-z][a-z0-9+.-]{0,30}://${URL_TAIL}`, "gi"),
+  // 2. A schemeless authority with an explicit port: `127.0.0.1:8545/v2/<key>`, `localhost:8545/…`,
+  //    `[2001:db8::1]:8545/…`. Pattern 1 never sees these — there is no `://` to anchor on.
+  new RegExp(`(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5}${URL_TAIL}`, "gi"),
+  // 3. A schemeless dotted host with an alphabetic TLD, plus whatever hangs off it:
+  //    `rpc-provider.example/v2/<key>`. The TLD requirement is the whole reason `2.47.10` survives.
+  new RegExp(`\\b(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}\\b(?:[:/]${URL_TAIL})?`, "gi"),
+]
+
+/**
+ * A long hex run is key material — a provider key, a session token, a raw private key — and it is a
+ * secret with or without a URL around it. Addresses (40 nibbles) and the ORDER_TYPEHASH values (64)
+ * are interpolated into refusals DIRECTLY, never through here, precisely so an identity mismatch
+ * still prints both hashes for the operator; only RPC-supplied and error-supplied text is redacted.
+ */
+const HEX_SECRET = /\b(?:0x)?[0-9a-f]{32,}\b/gi
 
 export function redactUrls(text) {
-  return String(text).replace(URL_LIKE, "<redacted-url>")
+  let out = String(text)
+  for (const pattern of URL_LIKE) out = out.replace(pattern, "<redacted-url>")
+  return out.replace(HEX_SECRET, "<redacted-secret>")
 }
 
 const errText = (err) => redactUrls((err && err.shortMessage) || (err && err.message) || String(err))
