@@ -10,7 +10,9 @@ import OrderReviewModal from './OrderReviewModal'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
 // [FIX-DCA-NOFEED-CONSENT] Plain-language consent gate for a no-price-feed output token.
 import NoFeedConsentModal from './NoFeedConsentModal'
-import { getChainlinkFeed } from '@/lib/chains/chainlink-feeds'
+// [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED L-2] resolveFeed, NOT getChainlinkFeed — see
+// outputHasNoResolvableFeed below for why the direct-only lookup was wrong post-ADR-018.
+import { resolveFeed } from '@/lib/chains/chainlink-feeds'
 import {
   OrderType,
   PriceCondition,
@@ -121,6 +123,29 @@ export function evaluateDcaOracleGate(spend: PriceCheck, buy: PriceCheck): DcaOr
     }
   }
   return { blocked: false, reason: 'none', detail: null }
+}
+
+/**
+ * [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED L-2] Does the OUTPUT token have NO price source of any shape on
+ * this chain? This is the single signal behind the "this token has no Chainlink price feed" consent
+ * modal, and it must answer the same question `useChainlinkPrice` answers — otherwise the panel
+ * demands consent for a missing feed while the hook is pricing the token perfectly well, and the
+ * signing floor the user is being warned about is in fact oracle-derived.
+ *
+ * It used to call `getChainlinkFeed`, which only knows DIRECT token/USD feeds. Post-ADR-018 a token
+ * may instead resolve COMPOSED (base × quote) — Base cbETH is exactly that: no direct cbETH/USD
+ * entry, but a verified cbETH/ETH × ETH/USD pair that the hook reads and that
+ * `deriveSigningMinAmountOut` derives the per-buy floor from. The direct-only lookup returned null
+ * for it, so cbETH fired a "no feed" consent modal that was simply false.
+ *
+ * `resolveFeed` is the SAME resolver the hook uses, so the two cannot disagree. The safe direction is
+ * preserved and is in fact stricter: `resolveFeed` returns null both when nothing is configured AND
+ * when a configured leg has no declared FEED_EXPECTATIONS identity (it fails closed rather than
+ * trusting an address with no declared identity) — either way this returns true and the user still
+ * reaches the consent modal. No threshold, source, or fallback is introduced here.
+ */
+export function outputHasNoResolvableFeed(token: Token | null, chainId: number): boolean {
+  return !!token && resolveFeed(token.address, chainId) === null
 }
 
 // ══════════════════════════════════════════════════════════
@@ -305,8 +330,9 @@ function CreateDCAForm({
 
   // [FIX-DCA-NOFEED-CONSENT] Whether the OUTPUT token has no Chainlink feed on this chain — the
   // single signal that gates the consent modal. Feed-covered tokens never trigger it.
+  // [L-2] Resolved via the hook's own resolver, so a COMPOSED feed counts as having a feed.
   const noFeedOutput = useMemo(
-    () => !!tokenOut && getChainlinkFeed(tokenOut.address, chainId) === null,
+    () => outputHasNoResolvableFeed(tokenOut, chainId),
     [tokenOut, chainId],
   )
   const [showNoFeedModal, setShowNoFeedModal] = useState(false)

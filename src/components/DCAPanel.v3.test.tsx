@@ -20,15 +20,17 @@ const mockFetchActiveOrders = vi.fn()
 const mockCancelOrderInSupabase = vi.fn()
 const mockSubscribeToOrders = vi.fn()
 const mockFetchDefiLlamaPrice = vi.fn()
-// [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Feed RESOLUTION is now controllable, so this suite can put the
-// oracle in a deliberate state instead of inheriting one. Default: the real Base ETH/USD feed (both
-// DCA legs — WETH and native ETH — genuinely resolve to it on Base). Returning null models the
-// "this token has no Chainlink feed at all" case, which is oracleUnavailable WITHOUT
+// [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Feed RESOLUTION is controllable, so this suite can put the
+// oracle in a deliberate state instead of inheriting one. Default (set in beforeEach): the REAL
+// resolver — both DCA legs, WETH and native ETH, genuinely resolve to Base ETH/USD. Returning null
+// models the "this token has no price source at all" case, which is oracleUnavailable WITHOUT
 // oracleIntegrityFailed, and therefore legitimately still allowed to price via DefiLlama.
-const mockGetChainlinkFeed = vi.fn<() => string | null>()
+type ResolveFeedFn = (token: string, chainId?: number) => unknown
+// null ⇒ use the REAL resolver. Read lazily inside the mock wrapper (never assigned at factory time,
+// which would hit the temporal-dead-zone: this factory runs during module init, via '@/lib/chains').
+let resolveFeedOverride: ResolveFeedFn | null = null
 
 const V3_ADDRESS = '0x3333333333333333333333333333333333333333'
-const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
 
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
@@ -69,14 +71,24 @@ vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
 }))
 
-// [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Only feed RESOLUTION is stubbed — getFeedExpectation and
-// getFeedStalenessSec stay real, so the round data below is judged against the genuine ADR-018
-// expectation ('ETH / USD', 8 dp) and the genuine 20-min Base heartbeat. Note DCAPanel's own
-// `noFeedOutput` check imports from '@/lib/chains/chainlink-feeds' (a different path), so it is
-// deliberately unaffected by this stub and keeps its real behaviour.
-vi.mock('@/lib/chainlink', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/chainlink')>('@/lib/chainlink')
-  return { ...actual, getChainlinkFeed: () => mockGetChainlinkFeed() }
+/**
+ * Feed RESOLUTION is stubbed at `resolveFeed` — the resolver `useChainlinkPrice` actually consults
+ * (ADR-018 / #370). It defaults to the REAL implementation, so getFeedExpectation, getFeedStalenessSec
+ * and the whole identity ladder stay genuine: the round data below is judged against the real
+ * ('ETH / USD', 8 dp) expectation and the real 20-min Base heartbeat. Returning null models "this
+ * token has no price source at all".
+ *
+ * This replaces a stub of `getChainlinkFeed` in '@/lib/chainlink', which #370 made INERT: the hook no
+ * longer resolves through it, so `mockGetChainlinkFeed.mockReturnValue(null)` silently stopped
+ * producing the no-feed state and the one test that depends on that premise had become vacuous.
+ */
+vi.mock('@/lib/chains/chainlink-feeds', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/chains/chainlink-feeds')>('@/lib/chains/chainlink-feeds')
+  return {
+    ...actual,
+    resolveFeed: (t: string, c?: number) =>
+      resolveFeedOverride ? resolveFeedOverride(t, c) : actual.resolveFeed(t, c),
+  }
 })
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -141,7 +153,7 @@ beforeEach(() => {
   // so the mocked account is now actually on Base rather than chain-less.
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: 8453 } })
   useChainIdMock.mockReturnValue(8453)
-  mockGetChainlinkFeed.mockReturnValue(BASE_ETH_USD_FEED)
+  resolveFeedOverride = null // default: the REAL resolver decides
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
   mockRefetchNonce.mockResolvedValue({ data: 5n })
@@ -208,7 +220,7 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     // no Chainlink feed at all ⇒ oracleUnavailable, integrity NOT failed ⇒ evaluatePriceGate 'ok'),
     // not an unreadable feed. This doubles as the regression guard that the new gate does not block
     // feedless tokens — the ordinary DCA case for imported/thin assets.
-    mockGetChainlinkFeed.mockReturnValue(null)
+    resolveFeedOverride = () => null // no price source of any shape for either leg
     mockFetchDefiLlamaPrice.mockResolvedValue(null) // no DefiLlama coverage either
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -220,6 +232,10 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     // The default WETH/ETH pair is APPROX_PRICES-covered, so this should NOT show the decay
     // warning (source='approx', not 'fallback').
     expect(screen.queryByText(/no price reference for this pair/i)).toBeNull()
+    // Self-verifying premise: the no-feed state must genuinely have been produced, i.e. the legitimate
+    // DefiLlama fallback WAS reached (and returned nothing). Without this the test silently passes if
+    // the resolver stub ever stops taking effect again — exactly how it went vacuous on the #370 rebase.
+    expect(mockFetchDefiLlamaPrice).toHaveBeenCalled()
   })
 
   it('a sub-floor per-execution amount is still blocked client-side before any v3 derivation runs', async () => {

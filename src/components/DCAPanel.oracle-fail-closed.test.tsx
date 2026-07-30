@@ -23,7 +23,7 @@ const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockRefetchNonce = vi.fn<() => Promise<unknown>>()
 const mockReadContractImpl = vi.fn<
-  (opts: { functionName: string }) => {
+  (opts: { address?: string; functionName: string }) => {
     data: unknown
     isLoading: boolean
     isError?: boolean
@@ -39,20 +39,25 @@ const mockFetchActiveOrders = vi.fn()
 const mockCancelOrderInSupabase = vi.fn()
 const mockSubscribeToOrders = vi.fn()
 const mockFetchDefiLlamaPrice = vi.fn()
-const mockGetChainlinkFeed = vi.fn<() => string | null>()
 
 const V3_ADDRESS = '0x3333333333333333333333333333333333333333'
-// The real Base ETH/USD feed. Both DCA legs resolve here on Base: tokenIn defaults to Base WETH,
-// and native ETH (the tokenOut default) is mapped to the chain's wrapped-native by getChainlinkFeed.
+// The real Base ETH/USD feed. Both DEFAULT DCA legs resolve here on Base: tokenIn defaults to Base
+// WETH, and native ETH (the tokenOut default) is mapped to the chain's wrapped-native.
 // Its genuine FEED_EXPECTATIONS entry is { description: 'ETH / USD', decimals: 8 } (ADR-018).
 const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+// [L-2] The base leg of Base cbETH's COMPOSED feed (cbETH/USD = cbETH/ETH × ETH/USD). Its genuine
+// FEED_EXPECTATIONS entry is { description: 'CBETH / ETH', decimals: 18 } — a DIFFERENT identity and
+// a DIFFERENT decimal count from the quote leg, which is why the per-address mock below exists: a
+// single flat description/decimals pair would make the composed base leg fail identity verification
+// and the L-2 test would then pass or fail for a reason that has nothing to do with L-2.
+const BASE_CBETH_ETH_FEED = '0x806b4Ac04501c29769051e42783cF04dCE41440b'
 
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),
   useWriteContract: () => ({ writeContractAsync: mockWriteContractAsync }),
-  useReadContract: (opts: { functionName: string }) => mockReadContractImpl(opts),
+  useReadContract: (opts: { address?: string; functionName: string }) => mockReadContractImpl(opts),
   useBalance: () => ({ data: undefined, isLoading: false, isError: false }),
   useReadContracts: () => ({ data: [], isLoading: false, isError: false }),
 }))
@@ -90,15 +95,6 @@ vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
 }))
 
-// Only feed RESOLUTION is stubbed. getFeedExpectation and getFeedStalenessSec stay REAL, so the
-// round data below is judged against the genuine ADR-018 expectation for this address and the
-// genuine 20-minute Base heartbeat — the integrity failures asserted here are produced by the real
-// ladder in useChainlinkPrice, not by a hand-written verdict.
-vi.mock('@/lib/chainlink', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/chainlink')>('@/lib/chainlink')
-  return { ...actual, getChainlinkFeed: () => mockGetChainlinkFeed() }
-})
-
 vi.mock('@rainbow-me/rainbowkit', () => ({
   ConnectButton: () => <button data-testid="rk-connect">Connect</button>,
 }))
@@ -108,10 +104,32 @@ vi.mock('@/lib/sounds', () => ({
 }))
 vi.mock('@/lib/analytics-tracker', () => ({ trackTrade: vi.fn() }))
 vi.mock('@/hooks/useOrderNotifications', () => ({ useOrderNotifications: vi.fn() }))
+/**
+ * The OUTPUT token must be selectable now: both new tests below turn on which token is being bought
+ * (a COMPOSED-feed one for L-2, a genuinely feedless one for L-1), and neither state is reachable
+ * from the default WETH → ETH pair. The panel renders two TokenSelectors and only the SPEND one
+ * passes `hideNativeInput`, so that prop is what distinguishes them — the same prop the panel
+ * already relies on, not a test-only hook added to production code.
+ */
 vi.mock('@/components/TokenSelector', () => ({
-  default: ({ selected }: { selected: { symbol?: string } | null }) => (
-    <div data-testid="token-selector">{selected?.symbol ?? 'Select'}</div>
-  ),
+  default: ({
+    selected, onSelect, hideNativeInput,
+  }: { selected: { symbol?: string } | null; onSelect: (t: unknown) => void; hideNativeInput?: boolean }) => {
+    const side = hideNativeInput ? 'in' : 'out'
+    return (
+      <div data-testid={`token-selector-${side}`}>
+        {selected?.symbol ?? 'Select'}
+        <button
+          data-testid={`pick-composed-${side}`}
+          onClick={() => onSelect(CBETH_BASE)}
+        >pick-composed</button>
+        <button
+          data-testid={`pick-feedless-${side}`}
+          onClick={() => onSelect(FEEDLESS_TOKEN)}
+        >pick-feedless</button>
+      </div>
+    )
+  },
 }))
 vi.mock('@/components/BetaDisclaimer', () => ({ default: () => <div data-testid="beta-disclaimer" /> }))
 vi.mock('./OrderReviewModal', () => ({
@@ -120,14 +138,58 @@ vi.mock('./OrderReviewModal', () => ({
   ),
 }))
 vi.mock('./OrderCancelReviewModal', () => ({ default: () => null }))
+/**
+ * [L-1] Stubbed for its CONTROLS, not its copy. `handleNoFeedAccept` is the one caller that reaches
+ * `handleCreate` without going through the button's own click handler, so it is the only surface from
+ * which the in-handler guards can be exercised at all. Rendering only while `open` keeps the stub
+ * honest about the real modal's gating.
+ */
+vi.mock('./NoFeedConsentModal', () => ({
+  default: ({ open, onAccept, onReject }: { open: boolean; onAccept: () => void; onReject: () => void }) =>
+    open ? (
+      <div data-testid="nofeed-modal">
+        <button data-testid="nofeed-accept" onClick={onAccept}>accept</button>
+        <button data-testid="nofeed-reject" onClick={onReject}>reject</button>
+      </div>
+    ) : null,
+}))
 
 import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import { PRICE_IMPACT_CONSENT_CEILING } from '@/lib/constants'
 import type { PriceCheck } from '@/lib/chainlink'
-import DCAPanel, { evaluateDcaOracleGate } from './DCAPanel'
+import DCAPanel, { evaluateDcaOracleGate, outputHasNoResolvableFeed } from './DCAPanel'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = '0x' + 'cc'.repeat(65)
+
+/**
+ * [L-2] Base cbETH — the token the whole Low is about. Address is the literal
+ * COMPOSED_FEEDS_BY_CHAIN[8453] registry key, so this fixture cannot drift from the registry it is
+ * asserting against. It has NO direct cbETH/USD feed on Base (deliberately — a cbETH/ETH feed
+ * dropped into the USD-keyed map would read ~1.08 as "$1.08") and DOES have a verified composed one.
+ */
+const CBETH_BASE = {
+  address: '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22',
+  symbol: 'cbETH',
+  decimals: 18,
+  name: 'Coinbase Wrapped Staked ETH',
+  chainId: 8453,
+}
+/** Base WETH — a DIRECT-feed token, the control for the L-2 predicate. */
+const WETH_BASE_ADDRESS = '0x4200000000000000000000000000000000000006'
+/**
+ * A token with no price source of ANY shape. Deliberately synthetic rather than a real feedless Base
+ * asset (USDbC): the property under test is "absent from every feed registry", and a synthetic
+ * address holds that property permanently — a real token could acquire a feed later and silently
+ * turn both tests below vacuous.
+ */
+const FEEDLESS_TOKEN = {
+  address: '0x00000000000000000000000000000000deadfeed',
+  symbol: 'NOFEED',
+  decimals: 18,
+  name: 'No Feed Token',
+  chainId: 8453,
+}
 
 function enterAmount(value: string) {
   fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value } })
@@ -137,6 +199,14 @@ function startDcaButton(): HTMLButtonElement {
 }
 function openAdvanced() {
   fireEvent.click(screen.getByText(/Advanced settings/i))
+}
+/** Buy Base cbETH — a token whose only price source is a COMPOSED feed. */
+function pickComposedOutput() {
+  fireEvent.click(screen.getByTestId('pick-composed-out'))
+}
+/** Buy a token with no price source of any shape. */
+function pickFeedlessOutput() {
+  fireEvent.click(screen.getByTestId('pick-feedless-out'))
 }
 
 /**
@@ -164,17 +234,44 @@ function healthyRound() {
   return [1n, 2000_00000000n, now - 60n, now - 60n, 1n]
 }
 
+/** Healthy cbETH/ETH round: ~1.08 ETH at the feed's real 18 decimals. */
+function healthyCbethEthRound() {
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  return [1n, 1_080000000000000000n, now - 60n, now - 60n, 1n]
+}
+
+/**
+ * The default read table, keyed BY FEED ADDRESS. Each feed answers with its own genuine ADR-018
+ * identity, so a composed token's two legs verify independently exactly as they do in production —
+ * the quote leg as 'ETH / USD' at 8 dp, the base leg as 'CBETH / ETH' at 18 dp. `override` replaces
+ * the answer for whichever feed a test wants to put into a failure state, leaving the others healthy.
+ */
+function feedReads(override?: (addr: string, fn: string) => { data: unknown; isError?: boolean } | undefined) {
+  return ({ address, functionName }: { address?: string; functionName: string }) => {
+    if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
+    const addr = (address ?? '').toLowerCase()
+    const forced = override?.(addr, functionName)
+    if (forced) return { ...forced, isLoading: false, refetch: mockRefetchNonce }
+    if (addr === BASE_CBETH_ETH_FEED.toLowerCase()) {
+      if (functionName === 'latestRoundData') return { data: healthyCbethEthRound(), isLoading: false, refetch: mockRefetchNonce }
+      if (functionName === 'decimals') return { data: 18, isLoading: false, refetch: mockRefetchNonce }
+      if (functionName === 'description') return { data: 'CBETH / ETH', isLoading: false, refetch: mockRefetchNonce }
+    }
+    if (functionName === 'latestRoundData') return { data: healthyRound(), isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'description') return { data: 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
+    return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
+  }
+}
+
 /**
  * Reads that never yield a usable round → UNREADABLE → oracleReadFailed (and, by design,
  * oracleUnavailable + oracleIntegrityFailed with it). `isError` is what separates this from a
  * genuine first render, which must stay neutral and frictionless.
  */
 function mockReadFailure() {
-  mockReadContractImpl.mockImplementation(({ functionName }) => {
-    if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
-    return { data: undefined, isLoading: false, isError: true, refetch: mockRefetchNonce }
-  })
+  mockReadContractImpl.mockImplementation(feedReads(() => ({ data: undefined, isError: true })))
 }
 
 /**
@@ -185,33 +282,27 @@ function mockReadFailure() {
  * state asserted twice.
  */
 function mockIdentityMismatch() {
-  mockReadContractImpl.mockImplementation(({ functionName }) => {
-    if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'latestRoundData') return { data: healthyRound(), isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'description') return { data: 'BTC / USD', isLoading: false, refetch: mockRefetchNonce }
-    return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
-  })
+  // Scoped to the ETH/USD feed — the one both DEFAULT legs resolve to, and the SPEND leg's feed under
+  // every pair used here. Everything else stays healthy, so a block can only come from this feed.
+  mockReadContractImpl.mockImplementation(
+    feedReads((addr, fn) =>
+      addr === BASE_ETH_USD_FEED.toLowerCase() && fn === 'description'
+        ? { data: 'BTC / USD' }
+        : undefined,
+    ),
+  )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: 8453 } })
   useChainIdMock.mockReturnValue(8453)
-  mockGetChainlinkFeed.mockReturnValue(BASE_ETH_USD_FEED)
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
   mockRefetchNonce.mockResolvedValue({ data: 5n })
-  // Default: a healthy, verified feed — so any block below is caused by the state the test sets up.
-  mockReadContractImpl.mockImplementation(({ functionName }) => {
-    if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'latestRoundData') return { data: healthyRound(), isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'description') return { data: 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
-    return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
-  })
+  // Default: every feed healthy and self-identifying correctly — so any block below is caused by the
+  // state the test sets up, never by the baseline.
+  mockReadContractImpl.mockImplementation(feedReads())
   mockFetchUserOrders.mockResolvedValue([])
   mockFetchActiveOrders.mockResolvedValue([])
   mockCreateOrderInSupabase.mockResolvedValue({ order_hash: '0x' + 'aa'.repeat(32) })
@@ -318,13 +409,114 @@ describe('DCAPanel — oracle fail-closed: no non-oracle source may rescue an in
     // oracleUnavailable without oracleIntegrityFailed ⇒ evaluatePriceGate 'ok'. This is the ordinary
     // DCA case for imported/thin assets and must keep working; a gate that blocked it would be a
     // serious availability regression dressed up as a safety fix.
-    mockGetChainlinkFeed.mockReturnValue(null)
+    //
+    // The feedless state is produced by BUYING a token that is genuinely absent from every feed
+    // registry, not by stubbing a resolver: post-#370 `useChainlinkPrice` resolves through
+    // `resolveFeed`, so the old `mockGetChainlinkFeed.mockReturnValue(null)` no longer reached the
+    // hook's resolution at all and this test had gone red on the rebase. Same assertions, real
+    // registry deciding. This is also what keeps THE TRAP's `not.toHaveBeenCalled()` non-vacuous:
+    // the very same mock demonstrably fires here.
     renderWithProviders(<DCAPanel />)
+    pickFeedlessOutput()
     enterAmount('100')
 
     await waitFor(() => expect(mockFetchDefiLlamaPrice).toHaveBeenCalled())
     expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
     expect(startDcaButton()).not.toBeDisabled()
+  })
+})
+
+// ── [L-2] A composed feed IS a feed ──
+
+describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedless', () => {
+  it('outputHasNoResolvableFeed is false for Base cbETH, whose only source is composed', () => {
+    // The regression this pins, stated as the predicate: `getChainlinkFeed(cbETH, 8453)` is null
+    // (there is no direct cbETH/USD entry, by design), so the old direct-only check answered "no
+    // feed" — while the hook was pricing cbETH from a verified cbETH/ETH × ETH/USD pair and the
+    // signing floor was being derived from it. Real registry, no stubs.
+    expect(outputHasNoResolvableFeed(CBETH_BASE as never, 8453)).toBe(false)
+  })
+
+  it('stays TRUE for a token with no source of any shape — the safe direction is not inverted', () => {
+    expect(outputHasNoResolvableFeed(FEEDLESS_TOKEN as never, 8453)).toBe(true)
+  })
+
+  it('is false for a DIRECT-feed token (control) and false for no token at all', () => {
+    expect(outputHasNoResolvableFeed({ address: WETH_BASE_ADDRESS } as never, 8453)).toBe(false)
+    expect(outputHasNoResolvableFeed(null, 8453)).toBe(false)
+  })
+
+  it('so buying cbETH goes straight to review — no "no price feed" consent modal', async () => {
+    // End-to-end counterpart to the predicate test: with both composed legs verifying against their
+    // own genuine ADR-018 identities, creation must reach the review modal directly. Before the fix
+    // `noFeedOutput` was true here, so the click was intercepted by the consent modal and
+    // `confirm-review` never rendered — this test times out on the pre-fix component.
+    renderWithProviders(<DCAPanel />)
+    pickComposedOutput()
+    enterAmount('100')
+
+    await waitFor(() => expect(screen.getByTestId('token-selector-out').textContent).toMatch(/cbETH/))
+    expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
+
+    fireEvent.click(startDcaButton())
+    expect(await screen.findByTestId('confirm-review')).toBeInTheDocument()
+    expect(screen.queryByTestId('nofeed-modal')).toBeNull()
+  })
+})
+
+// ── [L-1] The in-handler guard, reached through the one caller that can reach it ──
+
+describe('DCAPanel — L-1: the consent-accept path cannot sign over a blocked oracle', () => {
+  /**
+   * `handleNoFeedAccept` calls `handleCreate()` directly — it is the ONLY caller that does not go
+   * through the Start-DCA button's own handler, and therefore the only surface from which
+   * `handleCreate`'s in-handler guards are reachable at all. The scenario is a real one rather than a
+   * contrivance: a feedless output token opens the consent modal while the SPEND feed is healthy, the
+   * spend feed then degrades mid-session (these reads re-poll), and the user accepts a modal that was
+   * opened under the earlier, healthy verdict. Nothing about the modal tells them the oracle moved.
+   */
+  async function openConsentThenDegrade() {
+    renderWithProviders(<DCAPanel />)
+    pickFeedlessOutput()
+    enterAmount('100')
+    await waitFor(() => expect(screen.getByTestId('token-selector-out').textContent).toMatch(/NOFEED/))
+    // Healthy so far: not blocked, and the button is live.
+    expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
+    fireEvent.click(startDcaButton())
+    expect(await screen.findByTestId('nofeed-modal')).toBeInTheDocument()
+
+    // Mid-session degradation of the SPEND feed, then a re-render so the hooks re-read it.
+    mockIdentityMismatch()
+    enterAmount('100.5')
+    await waitFor(() => expect(screen.getByTestId('dca-oracle-block')).toBeInTheDocument())
+    // The modal is still open over a now-blocked render — this is the exact window the guard covers.
+    expect(screen.getByTestId('nofeed-modal')).toBeInTheDocument()
+  }
+
+  it('accepting the consent modal after the spend feed degrades signs nothing', async () => {
+    await openConsentThenDegrade()
+
+    await act(async () => { fireEvent.click(screen.getByTestId('nofeed-accept')) })
+
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
+  })
+
+  it('NON-VACUITY — the same accept path DOES sign while the oracle stays verified', async () => {
+    // Without this, the test above would pass just as well if `handleNoFeedAccept` were broken, or if
+    // the accept button were never wired at all.
+    renderWithProviders(<DCAPanel />)
+    pickFeedlessOutput()
+    enterAmount('100')
+    await waitFor(() => expect(screen.getByTestId('token-selector-out').textContent).toMatch(/NOFEED/))
+
+    fireEvent.click(startDcaButton())
+    expect(await screen.findByTestId('nofeed-modal')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('nofeed-accept'))
+
+    fireEvent.click(await screen.findByTestId('confirm-review'))
+    await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))
   })
 })
 
