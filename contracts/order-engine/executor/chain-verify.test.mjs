@@ -12,11 +12,17 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { createServer } from "node:http"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import {
   verifyChainBinding,
   createRpcProbe,
+  redactUrls,
   ChainVerificationError,
   ORDER_TYPEHASH_ABI,
   ORDER_TYPEHASH_V2_SIGNATURE,
@@ -106,9 +112,17 @@ describe("chain-verify — ORDER_TYPEHASH expectations (ADR-018 self-identificat
     )
   })
 
-  test("v3 expectation is distinct from v2 — a v2/v3 address swap cannot pass", () => {
+  // Pinned to the literal, exactly as v2 is. notEqual(v2) + a shape check is not a pin: it would
+  // survive any edit to the v3 type string that still produced some other bytes32.
+  test("v3 expectation is the literal keccak of the v3 Order type string", () => {
+    assert.equal(
+      EXPECTED_ORDER_TYPEHASH_V3,
+      "0xfc939b7409c57e9f4898a3d99474d4ac4900eadc353ab145624aa7cc7204cbc0",
+    )
+  })
+
+  test("v3 is distinct from v2 — a v2/v3 address swap cannot pass", () => {
     assert.notEqual(EXPECTED_ORDER_TYPEHASH_V3, EXPECTED_ORDER_TYPEHASH_V2)
-    assert.match(EXPECTED_ORDER_TYPEHASH_V3, /^0x[0-9a-f]{64}$/)
   })
 
   test("the type strings mirror the contracts: v3 = v2 + uint16 maxSlippageBps after minAmountOut", () => {
@@ -301,16 +315,59 @@ describe("chain-verify — check 3: the contract must self-identify", () => {
     })
   }
 
-  test("an entry with no expectation is code-checked but not identity-checked", async () => {
+  // [Auditor Low-1] An entry without an expectation used to silently degrade to code-existence
+  // only — the weaker assurance this module exists to replace, and invisible because the happy
+  // path still resolved. Identity is now mandatory, and the refusal happens before any RPC.
+  test("an entry with NO expectedOrderTypehash → refuses, and never touches the network", async () => {
     const provider = fakeProvider()
-    const result = await verifyChainBinding({
-      provider,
-      chainId: 1,
-      contracts: [{ label: "FeeCollector", address: V2_ADDRESS }],
-      ...FAST,
+    const err = await refuses(
+      verifyChainBinding({
+        provider,
+        chainId: 1,
+        contracts: [{ label: "ORDER_EXECUTOR_ADDRESS (v2)", address: V2_ADDRESS }],
+        ...FAST,
+      }),
+    )
+    assert.equal(err.check, "config")
+    assert.match(err.message, /no usable expectedOrderTypehash/)
+    assert.match(err.message, /chain 1\b/)
+    assert.equal(provider.calls.length, 0)
+  })
+
+  for (const [label, value] of [
+    ["empty string", ""],
+    ["null", null],
+    ["not a bytes32", "0xdeadbeef"],
+    ["missing 0x", "4c8bd2ee0e4c450f7c9ded5a85150c64e0e4bb10b1961d80fa93e463f11c9be5"],
+  ]) {
+    test(`a malformed expectedOrderTypehash (${label}) → refuses`, async () => {
+      const err = await refuses(
+        verifyChainBinding({
+          provider: fakeProvider(),
+          chainId: 1,
+          contracts: [{ label: "v2", address: V2_ADDRESS, expectedOrderTypehash: value }],
+          ...FAST,
+        }),
+      )
+      assert.equal(err.check, "config")
     })
-    assert.equal(result.contracts[0].orderTypehash, null)
-    assert.equal(provider.calls.filter((c) => c.method === "readContract").length, 0)
+  }
+
+  test("a second entry missing its expectation is caught before the FIRST entry is read", async () => {
+    const provider = fakeProvider()
+    const err = await refuses(
+      verifyChainBinding({
+        provider,
+        chainId: 1,
+        contracts: [
+          { label: "v2", address: V2_ADDRESS, expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2 },
+          { label: "v3", address: V3_ADDRESS },
+        ],
+        ...FAST,
+      }),
+    )
+    assert.equal(err.check, "config")
+    assert.equal(provider.calls.length, 0, "a config error must not cost a network round trip")
   })
 })
 
@@ -351,34 +408,121 @@ describe("chain-verify — RPC throwing refuses the boot (never warn-and-continu
 })
 
 describe("chain-verify — RPC timing out refuses the boot", () => {
-  // Explicit per-test timeouts: without the module's own timeout these would HANG forever rather
-  // than fail, so the mutation "make withTimeout a passthrough" must show up as RED, not as a
-  // suite that never finishes.
-  test("eth_chainId never answers → refuses", { timeout: 5_000 }, async () => {
-    const provider = fakeProvider({ chainId: HANGS })
-    const err = await refuses(
-      verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
-    )
-    assert.equal(err.check, "chainId")
-    assert.match(err.message, /timed out after 30ms/)
+  // [Auditor] These three used to KILL THE FILE. A HANGS provider never settles, and the module's
+  // timeout timer was .unref()'d, so on a runner that holds no handle of its own the event loop
+  // drained mid-test: node:test cancelled every remaining test in the file (26 of them) and the
+  // "376 passed" I reported was an artifact of my runner, not evidence.
+  //
+  // Two independent fixes, deliberately not one:
+  //   (a) the module's timer is no longer unref'd — a boot gate must reach a verdict (see the
+  //       subprocess test at the bottom of this file, which proves that with nothing else alive);
+  //   (b) each test here holds its OWN ref'd handle for its lifetime, so this suite can never
+  //       again silently vanish if (a) regresses — it fails loudly instead. The explicit per-test
+  //       timeout is the third backstop: a hang becomes a failure, never a cancellation cascade.
+  // The keep-alive is SELF-LIMITING (≈6s, comfortably past the 5s per-test timeout below). If the
+  // module's timeout is ever removed entirely, the test body never settles and its `finally` never
+  // runs — an unbounded handle would then hang the whole runner instead of failing this one test.
+  const held = (fn) => async () => {
+    let ticks = 0
+    const handle = setInterval(() => {
+      if (++ticks > 12) clearInterval(handle)
+    }, 500)
+    try {
+      await fn()
+    } finally {
+      clearInterval(handle)
+    }
+  }
+
+  test(
+    "eth_chainId never answers → refuses",
+    { timeout: 5_000 },
+    held(async () => {
+      const provider = fakeProvider({ chainId: HANGS })
+      const err = await refuses(
+        verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
+      )
+      assert.equal(err.check, "chainId")
+      assert.match(err.message, /timed out after 30ms/)
+    }),
+  )
+
+  test(
+    "eth_getCode never answers → refuses",
+    { timeout: 5_000 },
+    held(async () => {
+      const provider = fakeProvider({ code: HANGS })
+      const err = await refuses(
+        verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
+      )
+      assert.equal(err.check, "code")
+      assert.match(err.message, /timed out after 30ms/)
+    }),
+  )
+
+  test(
+    "ORDER_TYPEHASH() never answers → refuses",
+    { timeout: 5_000 },
+    held(async () => {
+      const provider = fakeProvider({ typehash: HANGS })
+      const err = await refuses(
+        verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
+      )
+      assert.equal(err.check, "identity")
+      assert.match(err.message, /timed out after 30ms/)
+    }),
+  )
+
+  test(
+    "a hang on EVERY attempt still terminates in refusal, not in a hung boot",
+    { timeout: 5_000 },
+    held(async () => {
+      const provider = fakeProvider({ chainId: HANGS })
+      const err = await refuses(
+        verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 3 }),
+      )
+      assert.match(err.message, /after 3 attempt\(s\)/)
+    }),
+  )
+})
+
+// ── Secret hygiene in refusal messages [Auditor Low-4] ───────────────────────────────────────
+
+describe("chain-verify — a refusal never prints an RPC URL", () => {
+  const KEYED_URL = "https://eth-mainnet.g.alchemy.com/v2/FAKE_KEY_abc123XYZ"
+
+  test("redactUrls replaces a URL wherever it appears", () => {
+    assert.equal(redactUrls(`fetch failed for ${KEYED_URL} (503)`), "fetch failed for <redacted-url> (503)")
+    assert.equal(redactUrls("no url here"), "no url here")
   })
 
-  test("eth_getCode never answers → refuses", { timeout: 5_000 }, async () => {
-    const provider = fakeProvider({ code: HANGS })
-    const err = await refuses(
-      verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
-    )
-    assert.equal(err.check, "code")
-    assert.match(err.message, /timed out after 30ms/)
-  })
+  // A PLAIN Error — not a viem error — is the case that mattered: viem populates `shortMessage`
+  // (which omits the URL), so relying on that was relying on the error's provenance. undici,
+  // a proxy, an AggregateError or a future viem all arrive as `.message` with the URL in it.
+  for (const [slot, expectedCheck] of [
+    ["chainId", "chainId"],
+    ["code", "code"],
+    ["typehash", "identity"],
+  ]) {
+    test(`a plain Error carrying the keyed URL is redacted in the ${slot} refusal`, async () => {
+      const provider = fakeProvider({ [slot]: THROWS(`request to ${KEYED_URL} failed`) })
+      const err = await refuses(
+        verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
+      )
+      assert.equal(err.check, expectedCheck)
+      assert.doesNotMatch(err.message, /FAKE_KEY_abc123XYZ/)
+      assert.doesNotMatch(err.message, /alchemy\.com/)
+      assert.match(err.message, /<redacted-url>/)
+    })
+  }
 
-  test("ORDER_TYPEHASH() never answers → refuses", { timeout: 5_000 }, async () => {
-    const provider = fakeProvider({ typehash: HANGS })
+  test("a malformed answer that IS a URL is redacted too", async () => {
+    const provider = fakeProvider({ chainId: KEYED_URL })
     const err = await refuses(
       verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
     )
-    assert.equal(err.check, "identity")
-    assert.match(err.message, /timed out after 30ms/)
+    assert.doesNotMatch(err.message, /FAKE_KEY_abc123XYZ/)
+    assert.match(err.message, /<redacted-url>/)
   })
 })
 
@@ -580,43 +724,219 @@ describe("chain-verify — createRpcProbe adapts a viem client onto the injected
 
 // ── Wiring: the gate must actually run, before any work ──────────────────────────────────────
 
-describe("chain-verify — executor.js boots through the gate", () => {
-  const executorSource = readFileSync(new URL("./executor.js", import.meta.url), "utf-8")
+// ── The refusal must survive being the only thing alive ──────────────────────────────────────
+//
+// This is the regression test for the defect that hid the Auditor's 26 cancelled tests. In-process
+// tests cannot catch it: the test runner itself keeps the event loop alive, so an unref'd timeout
+// still fires and everything looks fine. Here the gate runs in a subprocess with NOTHING else
+// pending — exactly its position in main(), before the health server, the monitor and the poll
+// interval exist. With an unref'd timer the loop drains and Node exits with a bare "unsettled
+// top-level await" and no verdict at all; the operator sees a keeper that vanished, not a refusal.
+describe("chain-verify — a hung RPC still produces a REFUSAL, not a silent exit", () => {
+  test("verifyChainBinding alone on the event loop reaches its verdict", { timeout: 60_000 }, async () => {
+    const moduleHref = new URL("./chain-verify.js", import.meta.url).href
+    const script = `
+      const { verifyChainBinding, EXPECTED_ORDER_TYPEHASH_V2 } = await import(${JSON.stringify(moduleHref)})
+      const hangingProvider = {
+        getChainId: () => new Promise(() => {}),
+        getCode: async () => "0x60806040",
+        readContract: async () => EXPECTED_ORDER_TYPEHASH_V2,
+      }
+      try {
+        await verifyChainBinding({
+          provider: hangingProvider,
+          chainId: 1,
+          contracts: [{ label: "v2", address: ${JSON.stringify(V2_ADDRESS)}, expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2 }],
+          attempts: 1,
+          timeoutMs: 200,
+        })
+        console.log("VERDICT:none")
+        process.exit(0)
+      } catch (err) {
+        console.log("VERDICT:" + err.check + ":" + err.message)
+        process.exit(9)
+      }
+    `
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (c) => (stdout += c))
+    child.stderr.on("data", (c) => (stderr += c))
+    const exitCode = await new Promise((resolve) => {
+      const kill = setTimeout(() => {
+        child.kill("SIGKILL")
+        resolve("TIMED_OUT")
+      }, 20_000)
+      child.on("exit", (c) => {
+        clearTimeout(kill)
+        resolve(c)
+      })
+    })
 
-  test("main() awaits verifyChainBinding with the configured chain and executor addresses", () => {
-    assert.match(executorSource, /await verifyChainBinding\(\{/)
-    assert.match(executorSource, /provider: createRpcProbe\(publicClient\)/)
-    assert.match(executorSource, /chainId: CHAIN_ID/)
-    assert.match(executorSource, /address: CONTRACT_ADDRESS/)
-    assert.match(executorSource, /expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2/)
+    assert.equal(
+      exitCode,
+      9,
+      `the gate must REFUSE, not exit quietly. exit=${exitCode}\nstdout=${stdout}\nstderr=${stderr}`,
+    )
+    assert.match(stdout, /VERDICT:chainId:/)
+    assert.match(stdout, /timed out after 200ms/)
+    assert.doesNotMatch(stderr, /unsettled top-level await/)
+  })
+})
+
+// ── The real boot, observed [replaces the old source-text pin] ───────────────────────────────
+//
+// The previous version of this block read executor.js as TEXT and asserted on substrings and
+// their index order. That is not a test of behaviour: the Auditor swapped
+// `await verifyChainBinding({` for `await Promise.resolve({` — the gate never ran — and the
+// regexes were untouched by a mutation that would have been caught, and the file's own indexOf
+// ordering still "passed". Deleted.
+//
+// This drives the ACTUAL executor.js as a subprocess against a JSON-RPC double we control, and
+// observes two things the source text cannot tell us: what the boot ASKS the chain, and how far
+// it GETS. `eth_getBalance` is the first RPC issued after the signer is created, so "the gate ran
+// before the signer exists" is directly observable: on any refusal it must never appear, and on a
+// clean verification it must appear only AFTER all three gate reads. No module is mocked — the
+// seam is the RPC endpoint, which is what the keeper genuinely talks to.
+describe("chain-verify — the real executor.js boot, observed through its RPC", () => {
+  const EXECUTOR = fileURLToPath(new URL("./executor.js", import.meta.url))
+  // Sepolia: a member of TESTNET_CHAIN_IDS, so validateConfig's plaintext-key guard warns instead
+  // of exiting — the boot reaches the gate, which is what is under test.
+  const TEST_CHAIN = 11155111
+  // Hardhat's well-known account #0 key: a public test fixture, never used on any real chain.
+  const DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  const WRONG_TYPEHASH = "0x" + "11".repeat(32)
+  const SOME_CODE = "0x60806040" + "00".repeat(64)
+
+  /**
+   * Boot the real keeper against a scripted RPC. Returns its exit code, stderr and the ORDERED
+   * list of RPC methods it actually called.
+   */
+  async function bootExecutor({ chainId, code, typehash }) {
+    const seen = []
+    const server = createServer((req, res) => {
+      let body = ""
+      req.on("data", (c) => (body += c))
+      req.on("end", () => {
+        let payload
+        try {
+          payload = JSON.parse(body)
+        } catch {
+          res.writeHead(400).end("{}")
+          return
+        }
+        const answer = (call) => {
+          seen.push(call.method)
+          switch (call.method) {
+            case "eth_chainId":
+              return { jsonrpc: "2.0", id: call.id, result: `0x${chainId.toString(16)}` }
+            case "eth_getCode":
+              return { jsonrpc: "2.0", id: call.id, result: code }
+            case "eth_call":
+              return { jsonrpc: "2.0", id: call.id, result: typehash }
+            default:
+              // Everything past the gate (eth_getBalance first) errors, so the child exits on its
+              // own instead of going on to bind the health/metrics ports.
+              return {
+                jsonrpc: "2.0",
+                id: call.id,
+                error: { code: -32000, message: `test double: ${call.method} not served` },
+              }
+          }
+        }
+        const out = Array.isArray(payload) ? payload.map(answer) : answer(payload)
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out))
+      })
+    })
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const { port } = server.address()
+
+    const child = spawn(process.execPath, [EXECUTOR], {
+      // A throwaway cwd so executor.js's loadEnv(process.cwd() + "/.env.executor") finds nothing.
+      cwd: mkdtempSync(join(tmpdir(), "keeper-boot-")),
+      // Built from scratch, not inherited: no ambient KMS_KEY_ID / VAULT_ADDR / TELEGRAM_* /
+      // ORDER_EXECUTOR_V3_ADDRESS can change what this boot does.
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        RPC_URL: `http://127.0.0.1:${port}`,
+        CHAIN_ID: String(TEST_CHAIN),
+        ORDER_EXECUTOR_ADDRESS: V2_ADDRESS,
+        SUPABASE_URL: "http://127.0.0.1:9/unused",
+        SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
+        EXECUTOR_PRIVATE_KEY: DEV_KEY,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (c) => (stdout += c))
+    child.stderr.on("data", (c) => (stderr += c))
+
+    const exitCode = await new Promise((resolve) => {
+      const kill = setTimeout(() => {
+        child.kill("SIGKILL")
+        resolve("TIMED_OUT")
+      }, 25_000)
+      child.on("exit", (c) => {
+        clearTimeout(kill)
+        resolve(c)
+      })
+    })
+    await new Promise((resolve) => server.close(resolve))
+    return { exitCode, stdout, stderr, seen }
+  }
+
+  test("chain mismatch → the boot REFUSES and the signer is never reached", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({ chainId: 1, code: SOME_CODE, typehash: EXPECTED_ORDER_TYPEHASH_V2 })
+    assert.equal(boot.exitCode, 1, `expected a non-zero exit, got ${boot.exitCode}\n${boot.stderr}`)
+    assert.match(boot.stderr, /RPC\/chain mismatch/)
+    assert.match(boot.stderr, /CHAIN_ID=11155111/)
+    assert.match(boot.stderr, /Refusing to boot/)
+    assert.ok(boot.seen.includes("eth_chainId"), "the boot never asked the chain who it is")
+    // The whole point: nothing past the gate happened.
+    assert.ok(!boot.seen.includes("eth_getCode"), "a chain mismatch must short-circuit")
+    assert.ok(!boot.seen.includes("eth_getBalance"), "the signer/balance step ran despite a refusal")
   })
 
-  test("a configured v3 executor is verified too, with the v3 expectation", () => {
-    assert.match(executorSource, /address: V3_CONTRACT_ADDRESS/)
-    assert.match(executorSource, /expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3/)
+  test("codeless executor address → the boot REFUSES", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({ chainId: TEST_CHAIN, code: "0x", typehash: EXPECTED_ORDER_TYPEHASH_V2 })
+    assert.equal(boot.exitCode, 1, boot.stderr)
+    assert.match(boot.stderr, /no contract code/)
+    assert.ok(boot.seen.includes("eth_getCode"))
+    assert.ok(!boot.seen.includes("eth_getBalance"), "the signer/balance step ran despite a refusal")
   })
 
-  test("the gate runs BEFORE the signer, the health server, the watcher and the first cycle", () => {
-    const gate = executorSource.indexOf("await verifyChainBinding({")
-    assert.ok(gate > 0, "verifyChainBinding is not called from executor.js")
-    for (const after of [
-      "await createExecutorAccount()",
-      "startHealthServer()",
-      "startEventWatcher(",
-      "await executeCycle(",
-    ]) {
-      assert.ok(
-        executorSource.indexOf(after, gate) > gate,
-        `${after} must come after the chain-verification gate`,
-      )
-    }
+  test("wrong ORDER_TYPEHASH → the boot REFUSES", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({ chainId: TEST_CHAIN, code: SOME_CODE, typehash: WRONG_TYPEHASH })
+    assert.equal(boot.exitCode, 1, boot.stderr)
+    assert.match(boot.stderr, /contract identity mismatch/)
+    assert.ok(boot.seen.includes("eth_call"), "the boot never asked the contract what it is")
+    assert.ok(!boot.seen.includes("eth_getBalance"), "the signer/balance step ran despite a refusal")
   })
 
-  test("the failure branch exits non-zero — there is no warn-and-continue", () => {
-    const gate = executorSource.indexOf("await verifyChainBinding({")
-    const window = executorSource.slice(gate, gate + 2_000)
-    assert.match(window, /catch \(err\)/)
-    assert.match(window, /process\.exit\(1\)/)
-    assert.doesNotMatch(window, /console\.warn/)
-  })
+  test(
+    "a verified binding → the gate's three reads happen, and BEFORE the signer's",
+    { timeout: 60_000 },
+    async () => {
+      const boot = await bootExecutor({
+        chainId: TEST_CHAIN,
+        code: SOME_CODE,
+        typehash: EXPECTED_ORDER_TYPEHASH_V2,
+      })
+      for (const method of ["eth_chainId", "eth_getCode", "eth_call", "eth_getBalance"]) {
+        assert.ok(boot.seen.includes(method), `boot never issued ${method}; saw ${boot.seen.join(", ")}`)
+      }
+      const balanceAt = boot.seen.indexOf("eth_getBalance")
+      for (const gateRead of ["eth_chainId", "eth_getCode", "eth_call"]) {
+        assert.ok(
+          boot.seen.indexOf(gateRead) < balanceAt,
+          `${gateRead} must be issued before the signer's eth_getBalance`,
+        )
+      }
+      assert.match(boot.stdout, /ORDER_TYPEHASH .* matches/)
+    },
+  )
 })

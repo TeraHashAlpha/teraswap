@@ -105,11 +105,14 @@ export class ChainVerificationError extends Error {
   }
 }
 
-const defaultSleep = (ms) =>
-  new Promise((resolve) => {
-    const t = setTimeout(resolve, ms)
-    if (typeof t.unref === "function") t.unref()
-  })
+// NOTE — these timers are deliberately NOT .unref()'d. An earlier revision unref'd both, which
+// looked harmless and was a FAIL-OPEN: when the gate is the only thing on the event loop (it runs
+// before the health server, the monitor and the poll interval exist) and the RPC accepts the
+// connection then goes silent, an unref'd timeout means Node drains the loop and the process dies
+// with a bare "unsettled top-level await" — exit without ever printing the refusal. A boot gate
+// must reach a verdict, so it holds the loop open until it does. Pinned by the subprocess test in
+// chain-verify.test.mjs, which runs the gate with nothing else alive.
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * Reject if `run()` has not settled within timeoutMs. An RPC that accepts the connection and then
@@ -121,7 +124,6 @@ function withTimeout(run, timeoutMs) {
   let timer
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs)
-    if (typeof timer.unref === "function") timer.unref()
   })
   return Promise.race([Promise.resolve().then(run), timeout]).finally(() => clearTimeout(timer))
 }
@@ -140,20 +142,35 @@ async function callWithRetry(run, { attempts, retryDelayMs, timeoutMs, sleep }) 
   throw lastErr
 }
 
-const errText = (err) => (err && err.shortMessage) || (err && err.message) || String(err)
+/**
+ * A refusal line is the text an operator pastes into a ticket, and RPC_URL routinely carries the
+ * provider API key in its path (…/v2/<key>). Transport errors quote the URL they failed on, so
+ * every string that reaches a message goes through here first. Redaction is EXPLICIT — relying on
+ * viem populating `shortMessage` (which omits the URL) is not a control: a plain Error, an
+ * AggregateError, a proxy/undici failure or a future viem version all fall through to `.message`,
+ * which does carry it.
+ */
+const URL_LIKE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\],]+/gi
+
+export function redactUrls(text) {
+  return String(text).replace(URL_LIKE, "<redacted-url>")
+}
+
+const errText = (err) => redactUrls((err && err.shortMessage) || (err && err.message) || String(err))
 
 /**
  * Render an unexpected RPC answer for an error message. Deliberately NOT bare JSON.stringify:
  * a BigInt throws there, which would turn a refusal into a confusing TypeError from inside the
- * very code path whose job is to refuse clearly.
+ * very code path whose job is to refuse clearly. Redacted for the same reason as errText — a
+ * malformed answer can itself be a URL string.
  */
 function describeValue(value) {
   if (typeof value === "bigint") return `${value}n`
   try {
     const json = JSON.stringify(value)
-    return json === undefined ? String(value) : json
+    return redactUrls(json === undefined ? String(value) : json)
   } catch {
-    return String(value)
+    return redactUrls(String(value))
   }
 }
 
@@ -254,6 +271,30 @@ export async function verifyChainBinding({
       { check: "config", chainId: expectedChainId, value: contracts ?? null },
     )
   }
+  // Every entry must be FULLY specified before the network is touched. `expectedOrderTypehash` is
+  // REQUIRED, not optional: an entry without one would quietly degrade to "there is some code at
+  // this address", which is precisely the assurance level this module exists to replace — and the
+  // degradation would be invisible, because the happy path still resolves.
+  for (const entry of contracts) {
+    const label = (entry && entry.label) || "executor"
+    const address = entry && entry.address
+    if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      throw new ChainVerificationError(
+        `FATAL: ${label} is not a valid address (${describeValue(address ?? null)}) on chain ` +
+          `${expectedChainId} — refusing to boot`,
+        { check: "address", chainId: expectedChainId, value: address ?? null },
+      )
+    }
+    const expected = entry.expectedOrderTypehash
+    if (typeof expected !== "string" || !BYTES32.test(expected)) {
+      throw new ChainVerificationError(
+        `FATAL: ${label} ${address} on chain ${expectedChainId} has no usable ` +
+          `expectedOrderTypehash (${describeValue(expected ?? null)}) — identity verification is ` +
+          `mandatory, a contract that is never asked what it is cannot be verified. Refusing to boot.`,
+        { check: "config", chainId: expectedChainId, value: expected ?? null },
+      )
+    }
+  }
   const retry = { attempts: Math.max(1, attempts), retryDelayMs, timeoutMs, sleep }
 
   // ── Check 1: the RPC must BE the chain we were configured for ──
@@ -288,15 +329,8 @@ export async function verifyChainBinding({
   // ── Checks 2 + 3, per configured executor ──
   const verified = []
   for (const entry of contracts) {
-    const label = (entry && entry.label) || "executor"
-    const address = entry && entry.address
-    if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
-      throw new ChainVerificationError(
-        `FATAL: ${label} is not a valid address (${describeValue(address ?? null)}) on chain ` +
-          `${expectedChainId} — refusing to boot`,
-        { check: "address", chainId: expectedChainId, value: address ?? null },
-      )
-    }
+    const label = entry.label || "executor"
+    const address = entry.address
 
     // Check 2: there must be a contract there, on THIS chain.
     let code
@@ -327,49 +361,47 @@ export async function verifyChainBinding({
     const codeSize = (code.length - 2) / 2
     log(`[chain-verify] ${label} ${address} — ${codeSize} bytes of code on chain ${expectedChainId}`)
 
-    // Check 3: the contract must say what it is, and it must be what we expect.
-    const expectedTypehash = entry && entry.expectedOrderTypehash
-    if (expectedTypehash) {
-      let typehash
-      try {
-        typehash = await callWithRetry(
-          () =>
-            provider.readContract({
-              address,
-              abi: ORDER_TYPEHASH_ABI,
-              functionName: "ORDER_TYPEHASH",
-            }),
-          retry,
-        )
-      } catch (err) {
-        throw new ChainVerificationError(
-          `FATAL: could not read ORDER_TYPEHASH() from ${label} ${address} on chain ` +
-            `${expectedChainId} after ${retry.attempts} attempt(s): ${errText(err)} — the address ` +
-            `may not be a TeraSwapOrderExecutor at all. Refusing to boot.`,
-          { check: "identity", chainId: expectedChainId, value: address },
-        )
-      }
-      if (typeof typehash !== "string" || !BYTES32.test(typehash)) {
-        throw new ChainVerificationError(
-          `FATAL: ${label} ${address} on chain ${expectedChainId} returned a malformed ` +
-            `ORDER_TYPEHASH (${describeValue(typehash)}) — refusing to boot`,
-          { check: "identity", chainId: expectedChainId, value: typehash },
-        )
-      }
-      if (typehash.toLowerCase() !== expectedTypehash.toLowerCase()) {
-        throw new ChainVerificationError(
-          `FATAL: contract identity mismatch — ${label} ${address} on chain ${expectedChainId} ` +
-            `reports ORDER_TYPEHASH ${typehash}, expected ${expectedTypehash}. The configured ` +
-            `address is not the executor whose Order struct this keeper encodes calldata for. ` +
-            `Refusing to boot.`,
-          { check: "identity", chainId: expectedChainId, value: typehash },
-        )
-      }
-      log(`[chain-verify] ${label} ${address} — ORDER_TYPEHASH ${typehash} matches`)
-      verified.push({ label, address, codeSize, orderTypehash: typehash })
-    } else {
-      verified.push({ label, address, codeSize, orderTypehash: null })
+    // Check 3: the contract must say what it is, and it must be what we expect. Unconditional —
+    // `expectedOrderTypehash` was already proven present by the upfront entry validation, so there
+    // is no branch here in which an entry gets away with code-existence only.
+    const expectedTypehash = entry.expectedOrderTypehash
+    let typehash
+    try {
+      typehash = await callWithRetry(
+        () =>
+          provider.readContract({
+            address,
+            abi: ORDER_TYPEHASH_ABI,
+            functionName: "ORDER_TYPEHASH",
+          }),
+        retry,
+      )
+    } catch (err) {
+      throw new ChainVerificationError(
+        `FATAL: could not read ORDER_TYPEHASH() from ${label} ${address} on chain ` +
+          `${expectedChainId} after ${retry.attempts} attempt(s): ${errText(err)} — the address ` +
+          `may not be a TeraSwapOrderExecutor at all. Refusing to boot.`,
+        { check: "identity", chainId: expectedChainId, value: address },
+      )
     }
+    if (typeof typehash !== "string" || !BYTES32.test(typehash)) {
+      throw new ChainVerificationError(
+        `FATAL: ${label} ${address} on chain ${expectedChainId} returned a malformed ` +
+          `ORDER_TYPEHASH (${describeValue(typehash)}) — refusing to boot`,
+        { check: "identity", chainId: expectedChainId, value: typehash },
+      )
+    }
+    if (typehash.toLowerCase() !== expectedTypehash.toLowerCase()) {
+      throw new ChainVerificationError(
+        `FATAL: contract identity mismatch — ${label} ${address} on chain ${expectedChainId} ` +
+          `reports ORDER_TYPEHASH ${typehash}, expected ${expectedTypehash}. The configured ` +
+          `address is not the executor whose Order struct this keeper encodes calldata for. ` +
+          `Refusing to boot.`,
+        { check: "identity", chainId: expectedChainId, value: typehash },
+      )
+    }
+    log(`[chain-verify] ${label} ${address} — ORDER_TYPEHASH ${typehash} matches`)
+    verified.push({ label, address, codeSize, orderTypehash: typehash })
   }
 
   return { chainId: expectedChainId, contracts: verified }
