@@ -374,6 +374,30 @@ jobs:
       - name: DCA visibility guard (history union + W6 gate + position stats)
         run: npx vitest run src/app/api/history/route.test.ts src/lib/dca/position-stats.test.ts
 
+  full-suite:
+    # [CHORE-CI-FULL-SUITE-JOB] Additive alongside the 14 per-file guard jobs above, not a
+    # replacement for them (those stay as separately-named PR checks). This job runs the
+    # WHOLE vitest suite with no file arguments and no globs — discovery comes entirely from
+    # vitest.config.ts's own `include`, so a new test file anywhere in the repo is picked up
+    # automatically with no workflow edit, closing the gap the per-file guards leave: 164 of
+    # 220 test files (measured 2026-07-30, CI=true, no .env.local, all green, zero flake
+    # across two back-to-back runs) are reachable from NONE of them today.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Full test suite + coverage floor
+        run: |
+          CI=true npx vitest run --reporter=verbose --reporter=json --outputFile=/tmp/vitest-report.json
+          # [CHORE-CI-FULL-SUITE-JOB] Lowering 220 is a deliberate act requiring a stated reason
+          # (e.g. a test file was intentionally deleted or merged into another) — raising it
+          # needs no edit here, since adding test files only grows testResults.length.
+          node -e "const r=require('/tmp/vitest-report.json'); const n=r.testResults.length; const floor=220; if(n<floor){console.error('Coverage floor breached: '+n+' test files executed (floor '+floor+')'); process.exit(1)} console.log('Coverage floor OK: '+n+' test files (floor '+floor+')')"
+
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
