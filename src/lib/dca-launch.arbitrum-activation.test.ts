@@ -80,3 +80,77 @@ describe('order-engine isolation on Arbitrum — REAL activated state (not mocke
     expect(isChainActive(8453)).toBe(false) // Base's own env var still unset
   })
 })
+
+// [CHORE-ARBITRUM-ACTIVATION-SWITCH-PROOF] The block above proves the dark state end-to-end
+// (real modules, no mocks). This block proves the ACTUAL switch about to be flipped: with all
+// four of isDcaLive's AND-terms driven through real env + the real registry/order-engine (never
+// mocking isChainActive/getOrderExecutorV3 themselves — a mock is a bet the consumer keeps
+// calling it the same way; stubbing the env underneath the real modules verifies the whole chain
+// including that plumbing, not just isDcaLive's own boolean algebra). One positive (all four
+// true) + three negatives that isolate one term each via real env. The fourth term (v3-wired) is
+// already isolated with real modules by the first test in the block above
+// ('activating Arbitrum … does NOT make DCA live there') — not duplicated here.
+describe('dca-launch — the real Arbitrum activation switch (real modules, env-driven)', () => {
+  it('ALL FOUR real conditions satisfied (flag + allowlist + active + v3-wired) ⇒ isDcaLive(42161) is true', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', '0x00000000000000000000000000000000BEEF01')
+
+    const { isChainActive } = await import('@/lib/chains')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { isDcaLive } = await import('./dca-launch')
+
+    // Sanity: both real dependencies genuinely resolved true/non-null before asserting the gate.
+    expect(isChainActive(42161)).toBe(true)
+    expect(getOrderExecutorV3(42161)).not.toBeNull()
+    expect(isDcaLive(42161)).toBe(true)
+  })
+
+  it('condition 1 (launch flag) falsified — both Arbitrum env vars real, flag left unset ⇒ false', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', '0x00000000000000000000000000000000BEEF01')
+    // NEXT_PUBLIC_DCA_ENABLED deliberately left unset — the only falsified term.
+
+    const { isChainActive } = await import('@/lib/chains')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { isDcaLive } = await import('./dca-launch')
+
+    expect(isChainActive(42161)).toBe(true)
+    expect(getOrderExecutorV3(42161)).not.toBeNull()
+    expect(isDcaLive(42161)).toBe(false)
+  })
+
+  it('condition 3 (chain active / FeeCollector) falsified — flag on + v3 wired, FeeCollector env left unset ⇒ false', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', '0x00000000000000000000000000000000BEEF01')
+    // NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR deliberately left unset — the only falsified term.
+
+    const { isChainActive } = await import('@/lib/chains')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { isDcaLive } = await import('./dca-launch')
+
+    expect(isChainActive(42161)).toBe(false)
+    expect(getOrderExecutorV3(42161)).not.toBeNull()
+    expect(isDcaLive(42161)).toBe(false)
+  })
+
+  it('condition 2 (DCA_CHAINS allowlist) falsified — mainnet has its own real active+v3-wired state but is absent from the allowlist ⇒ false', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
+    // Mainnet's own real v3 slot (not an Arbitrum var) — proves the allowlist, not wiring, blocks it.
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS', '0x00000000000000000000000000000000BEEF02')
+
+    const { isChainActive } = await import('@/lib/chains')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { isDcaLive, DCA_CHAINS } = await import('./dca-launch')
+
+    // Sanity: mainnet's own dependencies genuinely resolve true/non-null (real modules).
+    expect(isChainActive(1)).toBe(true)
+    expect(getOrderExecutorV3(1)).not.toBeNull()
+    expect(DCA_CHAINS.includes(1)).toBe(false)
+    expect(isDcaLive(1)).toBe(false)
+  })
+})
