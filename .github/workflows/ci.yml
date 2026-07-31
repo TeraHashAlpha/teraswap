@@ -42,8 +42,8 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: Lint (warnings only — React Compiler rules are advisory)
-        run: npx next lint --max-warnings 200 || true
+      - name: Lint
+        run: npm run lint
 
   typecheck:
     runs-on: ubuntu-latest
