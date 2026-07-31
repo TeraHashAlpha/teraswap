@@ -179,7 +179,19 @@ export default function QuoteBreakdown({
 
       {/* [SPRINT-9S S2] Oracle unavailable — ONE calm, specific notice naming the token(s)
           actually missing a feed, and stating the swap is still protected. */}
-      {priceCheck.oracleUnavailable && (
+      {/* [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that exists but could not be READ is also
+          `oracleUnavailable`, but the "No Chainlink oracle for X" framing below would be false for
+          it — the oracle is there, we could not reach it, and that is a transient the user should
+          be told to retry rather than a permanent property of their token. Same distinction the
+          depeg gate draws between "depegged" and "could not check". */}
+      {priceCheck.oracleUnavailable && priceCheck.oracleReadFailed && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300" data-testid="oracle-read-failed-notice">
+          <span className="font-semibold">&#9888; Price not verified</span> — the Chainlink feed could not be read right now.
+          {' '}This is not a problem with the token: we simply could not reach the oracle, so this price has not been
+          independently verified. It clears as soon as the feed responds.
+        </div>
+      )}
+      {priceCheck.oracleUnavailable && !priceCheck.oracleReadFailed && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300">
           <span className="font-semibold">&#9888; No Chainlink oracle</span> for{' '}
           {(priceCheck.oracleMissingSymbols?.length ? priceCheck.oracleMissingSymbols : [tokenIn.symbol]).join(' / ')}.
@@ -346,11 +358,16 @@ export default function QuoteBreakdown({
           <span
             className="text-cream-35"
             title={
-              priceCheck.oracleUnavailable
-                ? `⚠ No Chainlink oracle for ${tokenIn.symbol} — price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
-                : priceCheck.chainlinkPrice != null
-                  ? `✓ Verified by Chainlink ($${priceCheck.chainlinkPrice.toFixed(2)})`
-                  : undefined
+              // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed we could not READ is also oracleUnavailable,
+              // but claiming the token "has no Chainlink oracle" is false for an outage — the same
+              // lie this fix removes from the notice above.
+              priceCheck.oracleReadFailed
+                ? `⚠ Chainlink feed could not be read — price NOT independently verified. This is a temporary feed/network problem, not a property of ${tokenIn.symbol}.`
+                : priceCheck.oracleUnavailable
+                  ? `⚠ No Chainlink oracle for ${tokenIn.symbol} — price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
+                  : priceCheck.chainlinkPrice != null
+                    ? `✓ Verified by Chainlink ($${priceCheck.chainlinkPrice.toFixed(2)})`
+                    : undefined
             }
           >
             Rate {priceCheck.oracleUnavailable && <span className="text-amber-400">&#9888;</span>}

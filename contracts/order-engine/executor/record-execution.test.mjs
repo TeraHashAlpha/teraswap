@@ -231,6 +231,58 @@ describe("buildExecutionRow — schema-valid row (all NOT-NULL cols, no phantom 
   })
 })
 
+// ---- [CHORE-DCA-AGGREGATION-VALUE] next_best_out / next_best_source ----
+
+describe("buildExecutionRow — additive next_best_out/next_best_source (CHORE-DCA-AGGREGATION-VALUE)", () => {
+  const dbOrder = { id: "order-uuid", order_type: "dca", dca_executed: 0, dca_total: 3, amount_in: "3000" }
+  const receipt = { status: "success", gasUsed: 21000n, logs: [] }
+  const decoded = { amountIn: "1000", amountOut: "2000", fee: "1" }
+
+  test("sets both columns when a runner-up was captured", () => {
+    const row = buildExecutionRow({
+      dbOrder, txHash: "0xfeed", receipt, decoded,
+      nextBestOut: "1950", nextBestSource: "1inch",
+    })
+    assert.equal(row.next_best_out, "1950")
+    assert.equal(row.next_best_source, "1inch")
+  })
+
+  test("omits both columns (never writes null explicitly, never fabricates) when no runner-up existed", () => {
+    const row = buildExecutionRow({
+      dbOrder, txHash: "0xfeed", receipt, decoded,
+      nextBestOut: null, nextBestSource: null,
+    })
+    assert.equal("next_best_out" in row, false)
+    assert.equal("next_best_source" in row, false)
+  })
+
+  test("omits both columns when the params are absent entirely (non-DCA fills never pass them)", () => {
+    const row = buildExecutionRow({ dbOrder, txHash: "0xfeed", receipt, decoded })
+    assert.equal("next_best_out" in row, false)
+    assert.equal("next_best_source" in row, false)
+  })
+
+  test("a present nextBestOut with a missing nextBestSource (malformed pair) sets NEITHER column", () => {
+    // Defence in depth: never persist an amount without its source label, or vice versa.
+    const row = buildExecutionRow({
+      dbOrder, txHash: "0xfeed", receipt, decoded,
+      nextBestOut: "1950", nextBestSource: null,
+    })
+    assert.equal("next_best_out" in row, false)
+    assert.equal("next_best_source" in row, false)
+  })
+
+  test("does not disturb any existing NOT-NULL column", () => {
+    const row = buildExecutionRow({
+      dbOrder, txHash: "0xfeed", receipt, decoded,
+      nextBestOut: "1950", nextBestSource: "1inch",
+    })
+    assert.equal(row.order_id, "order-uuid")
+    assert.equal(row.amount_out, "2000")
+    assert.equal(row.status, "confirmed")
+  })
+})
+
 // ---- recordExecutionRow — idempotent insert ----------------------------
 
 describe("recordExecutionRow — idempotent (keyed by tx_hash), checks res.ok", () => {
@@ -276,5 +328,22 @@ describe("recordExecutionRow — idempotent (keyed by tx_hash), checks res.ok", 
     const result = await recordExecutionRow(supabaseFetch, row)
     assert.equal(result.recorded, false)
     assert.ok(result.error, "expected an error to be reported, not swallowed")
+  })
+
+  // [CHORE-DCA-AGGREGATION-VALUE] The fill has ALREADY been confirmed on-chain by the time
+  // executor.js calls recordExecutionRow (it runs in the post-execution block, after
+  // `executed++`'s preceding tx-success branch) — recording is best-effort telemetry, and
+  // executor.js's call site does NOT wrap it in try/catch. The only way a write failure could
+  // ever affect a fill is if this function THREW instead of resolving with an error object; it
+  // must not, on any failure mode.
+  test("a hard network failure (fetch rejects) resolves, never throws — proves recording can never crash/block a confirmed fill", async () => {
+    async function throwingSupabaseFetch() {
+      throw new Error("ECONNRESET")
+    }
+    let result
+    await assert.doesNotReject(async () => {
+      result = await recordExecutionRow(throwingSupabaseFetch, row)
+    })
+    assert.equal(result.recorded, false)
   })
 })

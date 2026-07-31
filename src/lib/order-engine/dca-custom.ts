@@ -78,7 +78,7 @@ export function deriveCustomExpirySeconds(opts: {
 }
 
 /** Default USD floor per DCA buy when NEXT_PUBLIC_DCA_MIN_CHUNK_USD isn't set. */
-export const DCA_MIN_CHUNK_USD_DEFAULT = 5
+export const DCA_MIN_CHUNK_USD_DEFAULT = 1
 
 /** Reads the env override (inlined at build time by Next.js); falls back to the default. */
 export function getDcaMinChunkUsd(): number {

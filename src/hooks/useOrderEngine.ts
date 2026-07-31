@@ -41,6 +41,8 @@ import {
   // [SPRINT-V3-P3] v3 cancel/invalidate — fail-closed while getOrderExecutorV3(chainId) is null.
   ORDER_EXECUTOR_V3_ABI,
   computeInvalidationBatches,
+  // [fix/dca-min-buy-copy] Same price source the form already uses (DCAPanel's totalUsd/fillUsd).
+  APPROX_PRICES,
 } from '@/lib/order-engine'
 import type {
   OnChainOrder,
@@ -50,6 +52,7 @@ import type {
   OrderEngineEvent,
   OrderRow,
 } from '@/lib/order-engine'
+import { formatMinBuyMessage, formatMinBuyUnit } from '@/lib/dca-quick-fill'
 import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getWrappedNative } from '@/lib/chains/registry'
@@ -646,12 +649,23 @@ export function useOrderEngine() {
     const perExecution = BigInt(config.amountIn) / BigInt(config.dcaTotal ?? 1)
     if (perExecution < MIN_ORDER_AMOUNT) {
       const isDca = (config.dcaTotal ?? 1) > 1
+      // [fix/dca-min-buy-copy] Human/USD-readable copy instead of raw base units — the SAME
+      // formatter DCAPanel's inline warning uses, so the toast and the inline hint never drift.
+      const priceUsd = APPROX_PRICES[(config.tokenIn.symbol || '').toUpperCase()] ?? null
+      const error = isDca
+        ? formatMinBuyMessage({
+            minBuyRaw: MIN_ORDER_AMOUNT,
+            decimals: config.tokenIn.decimals,
+            symbol: config.tokenIn.symbol,
+            totalRaw: BigInt(config.amountIn),
+            requestedBuys: config.dcaTotal ?? 1,
+            priceUsd,
+          }).text
+        : `Order amount must be at least ${formatMinBuyUnit(MIN_ORDER_AMOUNT, config.tokenIn.decimals, config.tokenIn.symbol, priceUsd)} — the on-chain minimum.`
       setLatestEvent({
         type: 'order_error',
         orderId: crypto.randomUUID(),
-        error: isDca
-          ? `Each DCA buy must be at least ${Number(MIN_ORDER_AMOUNT).toLocaleString()} base units (the on-chain minimum). Increase the total amount or reduce the number of buys.`
-          : `Order amount must be at least ${Number(MIN_ORDER_AMOUNT).toLocaleString()} base units (the on-chain minimum).`,
+        error,
       })
       return
     }

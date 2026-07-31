@@ -28,8 +28,12 @@ interface Props {
    *  [SPRINT-9W-oracle]:
    *  - 'depeg-consent' → asset trading 2–10% off its exchange rate; recoverable
    *    via the depeg consent checkbox (warning, like price-impact)
-   *  - 'depeg-block'   → asset ≥10% off its exchange rate (depeg/manipulation); hard block */
-  blockReason?: 'price-impact' | 'oracle-stale' | 'extreme' | 'oracle' | 'depeg-consent' | 'depeg-block'
+   *  - 'depeg-block'   → asset ≥10% off its exchange rate (depeg/manipulation); hard block
+   *  [FIX-ORACLE-FAIL-CLOSED]:
+   *  - 'depeg-unverified' → the depeg check applies but could not be run (feed read error/revert,
+   *    stale round, unresolved chain). Blocks, but must NOT be worded as a depeg — we could not
+   *    check, which is a different claim. Clears itself on the next successful read. */
+  blockReason?: 'price-impact' | 'oracle-stale' | 'extreme' | 'oracle' | 'depeg-consent' | 'depeg-block' | 'depeg-unverified'
   onApprove: () => void
   onSwap: () => void
 }
@@ -69,18 +73,19 @@ export default function SwapButton({
       // [SPRINT-9J J1] 'price-impact' is recoverable via the consent checkbox —
       // surface that instead of an indefinite "waiting" block. Integrity / no-oracle
       // blocks stay hard errors.
-      const msg = blockReason === 'price-impact'
-        ? 'Confirm price impact to swap'
-        : blockReason === 'depeg-consent'
-          ? 'Confirm depeg risk to swap'
-          : blockReason === 'depeg-block'
-            ? 'Asset depegged — swap blocked'
-            : blockReason === 'oracle'
-              ? 'No oracle — swap blocked'
-              : blockReason === 'extreme'
-                ? 'Price deviation too high — blocked'
-                : 'Oracle data unsafe — swap blocked'
+      const msg =
+        blockReason === 'price-impact' ? 'Confirm price impact to swap'
+        : blockReason === 'depeg-consent' ? 'Confirm depeg risk to swap'
+        : blockReason === 'depeg-block' ? 'Asset depegged — swap blocked'
+        // [FIX-ORACLE-FAIL-CLOSED] Transient and self-clearing, so the copy points at a retry —
+        // and pointedly does NOT say "depegged", which would be a claim we have not verified.
+        : blockReason === 'depeg-unverified' ? 'Verifying price — try again shortly'
+        : blockReason === 'oracle' ? 'No oracle — swap blocked'
+        : blockReason === 'extreme' ? 'Price deviation too high — blocked'
+        : 'Oracle data unsafe — swap blocked'
       // 'price-impact' & 'depeg-consent' are recoverable (checkbox) → warning; the rest are hard.
+      // 'depeg-unverified' is NOT click-through-able (nothing for the user to accept — the feeds
+      // simply have to answer), so it stays a hard block despite being temporary.
       const recoverable = blockReason === 'price-impact' || blockReason === 'depeg-consent'
       return { text: msg, disabled: true, onClick: () => {}, variant: recoverable ? 'warning' : 'error' }
     }

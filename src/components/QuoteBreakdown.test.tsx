@@ -159,6 +159,41 @@ describe('QuoteBreakdown — render', () => {
     )
     expect(screen.getByText(/no chainlink oracle/i)).toBeInTheDocument()
   })
+
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that exists but could not be READ is also
+  // oracleUnavailable — but saying the token "has no Chainlink oracle" is false during an outage.
+  // The two notices must not be interchangeable.
+  it('a READ FAILURE says the feed could not be read — never that the token has no oracle', () => {
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          priceCheck: { ...idlePriceCheck, oracleUnavailable: true, oracleReadFailed: true },
+        })}
+      />,
+    )
+    const notice = screen.getByTestId('oracle-read-failed-notice')
+    expect(notice.textContent).toMatch(/could not be read/i)
+    // The no-feed notice must NOT also render — one verdict, one message.
+    expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+  })
+
+  it('the Rate tooltip likewise distinguishes a read failure from a missing feed', () => {
+    const { rerender } = renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          priceCheck: { ...idlePriceCheck, oracleUnavailable: true, oracleReadFailed: true },
+        })}
+      />,
+    )
+    expect(screen.getByText(/^Rate/).getAttribute('title')).toMatch(/could not be read/i)
+
+    rerender(
+      <QuoteBreakdown
+        {...makeProps({ priceCheck: { ...idlePriceCheck, oracleUnavailable: true } })}
+      />,
+    )
+    expect(screen.getByText(/^Rate/).getAttribute('title')).toMatch(/No Chainlink oracle/i)
+  })
 })
 
 describe('QuoteBreakdown — safeBigInt guard [10-L-01]', () => {

@@ -16,6 +16,16 @@ const useConnectModalMock = vi.fn(() => ({ openConnectModal: vi.fn() }))
 const fetchCurrentPriceMock = vi.fn()
 const useOrderNotificationsMock = vi.fn()
 
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Mocked directly, mirroring SwapBox.test.tsx's own pattern for
+// testing consumers of this hook — the hook's internals are exhaustively covered elsewhere
+// (useDepegCheck.test.ts/depeg-gate.test.ts) and are not re-tested here.
+const useDepegCheckMock = vi.fn()
+vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => useDepegCheckMock(...a) }))
+const DEPEG_OK = { mode: 'ok' as const, divergence: 0, symbol: '', message: null }
+const DEPEG_CONSENT = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.' }
+const DEPEG_BLOCK = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.' }
+const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now — try again in a moment." }
+
 vi.mock('@/hooks/useOrderEngine', () => ({
   useOrderEngine: () => useOrderEngineMock(),
 }))
@@ -58,8 +68,30 @@ vi.mock('@/lib/analytics-tracker', () => ({
   trackTrade: vi.fn(),
 }))
 
-import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
+import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
 import LimitOrderPanel from './LimitOrderPanel'
+
+/**
+ * [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] `fireEvent.click` on a disabled button never
+ * reaches its `onClick` — React checks its OWN rendered `disabled` prop before dispatching a
+ * click-type synthetic event, independent of the underlying DOM attribute/property (confirmed:
+ * even manually clearing `button.disabled` on the live node does not help, since React's
+ * suppression reads its own fiber-cached props, not the DOM). A test that only does
+ * `fireEvent.click(disabledButton)` therefore proves the button is disabled, never that the
+ * production handler's own guard is what blocks — the DOM never lets it run at all.
+ *
+ * This reads React's per-fiber props directly off the DOM node (the `__reactProps$*` key React
+ * itself attaches) and invokes the real `onClick` prop — the exact closure the component
+ * rendered, over that render's actual state — bypassing React's disabled-suppression without
+ * touching the component under test. Test-only reflection, not a production change.
+ */
+function clickBypassingDisabled(el: HTMLElement): unknown {
+  const propsKey = Object.keys(el).find(k => k.startsWith('__reactProps$'))
+  if (!propsKey) throw new Error('React props key not found on element')
+  const onClick = (el as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick
+  if (!onClick) throw new Error('Element has no onClick prop')
+  return onClick({})
+}
 
 function defaultEngine() {
   return {
@@ -88,6 +120,7 @@ beforeEach(() => {
     isConnected: true,
   })
   fetchCurrentPriceMock.mockResolvedValue('0')
+  useDepegCheckMock.mockReturnValue(DEPEG_OK)
 })
 
 describe('LimitOrderPanel — tabs', () => {
@@ -131,5 +164,99 @@ describe('LimitOrderPanel — beta disclaimer', () => {
   it('renders the beta disclaimer regardless of tab', () => {
     renderWithProviders(<LimitOrderPanel />)
     expect(screen.getByTestId('beta-disclaimer')).toBeInTheDocument()
+  })
+})
+
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Extends the twice-audited cbETH depeg circuit-breaker to Limit
+// order creation. useDepegCheck is mocked (as SwapBox.test.tsx does) — only the panel's WIRING is
+// under test here, not the hook's own internals.
+describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
+  function submitButton(): HTMLButtonElement {
+    return screen.getByRole('button', { name: /place limit order/i }) as HTMLButtonElement
+  }
+  // The price input's placeholder is 'Loading...' until the mount-time fetchCurrentPrice effect
+  // resolves, so the field must be found with an async query (findByPlaceholderText) rather than a
+  // synchronous one — otherwise this races the effect and throws intermittently.
+  async function enterAmountAndPrice() {
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '1' } })
+    fireEvent.change(await screen.findByPlaceholderText('0.0'), { target: { value: '2000' } })
+  }
+
+  it('a token pair with NO registered exchange-rate feed never blocks creation (the default ETH/USDC)', async () => {
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+    expect(screen.queryByTestId('limit-depeg-block')).toBeNull()
+    expect(screen.queryByTestId('limit-depeg-unverified')).toBeNull()
+    expect(submitButton()).not.toBeDisabled()
+  })
+
+  it('a HARD depeg (mode: block) disables submit and shows depeg copy', async () => {
+    useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    const banner = screen.getByTestId('limit-depeg-block')
+    expect(banner.textContent).toMatch(/cbETH depeg/)
+    expect(submitButton()).toBeDisabled()
+  })
+
+  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy — never claims a depeg', async () => {
+    useDepegCheckMock.mockReturnValue(DEPEG_UNVERIFIED)
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    const banner = screen.getByTestId('limit-depeg-unverified')
+    expect(banner.textContent).toMatch(/price not verified/i)
+    expect(banner.textContent).not.toMatch(/depeg\./)
+    expect(submitButton()).toBeDisabled()
+  })
+
+  it('a healthy read (mode: ok, real pair) does NOT block submit', async () => {
+    useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0.003, symbol: 'cbETH', message: null })
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+    expect(submitButton()).not.toBeDisabled()
+  })
+
+  it('informed consent (mode: consent) blocks until accepted, then unblocks — mirrors SwapBox exactly', async () => {
+    useDepegCheckMock.mockReturnValue(DEPEG_CONSENT)
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    expect(submitButton()).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(submitButton()).not.toBeDisabled()
+  })
+
+  it('a blocked submit never calls createOrder — defense-in-depth guard fires even on a forced click', async () => {
+    useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
+    const createOrder = vi.fn()
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    fireEvent.click(submitButton())
+    await Promise.resolve()
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+
+  // [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] The test above only pins the DISABLED ATTRIBUTE
+  // (fireEvent.click on a disabled button never reaches onClick — see clickBypassingDisabled's
+  // doc comment). This one genuinely runs the production onClick handler with depegBlocking=true,
+  // proving handleSubmit's own `if (depegBlocking) { setSubmitError(...); return }` guard — not
+  // merely the button state — is what stops an order.
+  it('[L-1] the production handler itself refuses to submit while blocked — not merely the disabled attribute', async () => {
+    useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
+    const createOrder = vi.fn()
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    const btn = submitButton()
+    expect(btn).toBeDisabled() // sanity: still the same blocked state as the test above
+
+    await act(async () => { await clickBypassingDisabled(btn) })
+
+    expect(createOrder).not.toHaveBeenCalled()
   })
 })

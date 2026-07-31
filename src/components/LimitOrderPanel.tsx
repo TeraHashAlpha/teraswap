@@ -29,9 +29,13 @@ import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startW
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { ETHERSCAN_TX, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import TokenSelector from './TokenSelector'
 import BetaDisclaimer from './BetaDisclaimer'
+// [FEAT-DEPEG-GATE-ORDER-CREATION] The same, twice-audited cbETH depeg circuit-breaker SwapBox
+// uses — wired here so a Limit order cannot be created against a depegged/unverifiable pair with
+// zero signal. Read-only reuse: neither the hook nor its thresholds are modified.
+import { useDepegCheck } from '@/hooks/useDepegCheck'
 
 // ── Stablecoin detection ─────────────────────────────────
 const STABLECOIN_SYMBOLS = new Set([
@@ -183,6 +187,18 @@ function CreateLimitForm({
   const v3Live = isLimitLive(chainId)
   const [maxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
 
+  // [FEAT-DEPEG-GATE-ORDER-CREATION] Same hook, same semantics as SwapBox — see DCAPanel.tsx for
+  // the full mode-by-mode rationale. Consent resets on a chain switch (a new chain is a new trade).
+  const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
+  const [acceptedDepeg, setAcceptedDepeg] = useState<number | null>(null)
+  useEffect(() => { setAcceptedDepeg(null) }, [chainId])
+  const depegConsentNeeded = depegCheck.mode === 'consent'
+  const depegAccepted = acceptedDepeg != null && depegCheck.divergence <= acceptedDepeg + DEPEG_CONSENT_TOLERANCE
+  const depegConsentBlocking = depegConsentNeeded && !depegAccepted
+  const depegHardBlocked = depegCheck.mode === 'block'
+  const depegUnverified = depegCheck.mode === 'unverified'
+  const depegBlocking = depegHardBlocked || depegConsentBlocking || depegUnverified
+
   // ── Price state ──────────────────────────────────────────
   const [targetPrice, setTargetPrice] = useState('')
   const [displayPriceInput, setDisplayPriceInput] = useState('')
@@ -317,6 +333,16 @@ function CreateLimitForm({
 
   const handleSubmit = async () => {
     if (!amount || !targetPrice || !isConnected) return
+
+    // [FEAT-DEPEG-GATE-ORDER-CREATION] Hard guard (defense-in-depth): never sign a Limit order
+    // against a depegged or unverifiable pair. The submit button is already disabled on this same
+    // condition; this also blocks any programmatic call. Message is sourced straight from the
+    // depeg gate, so the reason a user sees on submit matches the live banner above verbatim.
+    if (depegBlocking) {
+      setSubmitError(depegCheck.message ?? 'This pair could not be verified against its exchange rate.')
+      return
+    }
+
     startWaitingSound()
 
     let amountIn: string
@@ -367,7 +393,7 @@ function CreateLimitForm({
       return
     }
 
-    // ── [SPRINT-P1B] $5 economic-floor pre-flight, BEFORE approve ──
+    // ── [SPRINT-P1B] $1 economic-floor pre-flight, BEFORE approve ──
     // Must run before onSubmit: the approve button only exists inside the review modal that
     // createOrder mounts, so failing later would cost the user an approve tx + a signature.
     const floorCheck = checkMinOutEconomicFloor({
@@ -522,6 +548,46 @@ function CreateLimitForm({
         </div>
       </div>
 
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] cbETH depeg HARD block — mirrors SwapBox's copy so the
+          same event reads identically wherever a user encounters it. No click-through. */}
+      {depegHardBlocked && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="limit-depeg-block">
+          <span className="font-semibold">&#9888; Order blocked — {depegCheck.symbol} depeg.</span>{' '}
+          {depegCheck.message}
+          <span className="mt-1 block text-xs text-danger/80">
+            The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+          </span>
+        </div>
+      )}
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] The depeg check applies but could NOT be run — same
+          posture and copy as SwapBox: blocks, but never claims a depeg when the truth is we could
+          not check. */}
+      {depegUnverified && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="limit-depeg-unverified">
+          <span className="font-semibold">&#9888; Order paused — price not verified.</span>{' '}
+          {depegCheck.message}
+          <span className="mt-1 block text-xs text-danger/80">
+            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+          </span>
+        </div>
+      )}
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] Informed consent — 2–10% off the exchange rate, same
+          checkbox shape as SwapBox. */}
+      {depegConsentNeeded && (
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" data-testid="limit-depeg-consent">
+          <span className="font-semibold">&#9888; Possible depeg:</span> {depegCheck.message}
+          <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
+            <input
+              type="checkbox"
+              checked={depegAccepted}
+              onChange={(e) => setAcceptedDepeg(e.target.checked ? depegCheck.divergence : null)}
+              className="h-5 w-5 accent-warning"
+            />
+            I understand {depegCheck.symbol} may be depegged and want to proceed.
+          </label>
+        </div>
+      )}
+
       {/* Target price */}
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between">
@@ -609,9 +675,9 @@ function CreateLimitForm({
         <button
           // [BUGFIX] await async handleSubmit to catch errors properly
           onClick={async () => { playTouchMP3(); await handleSubmit() }}
-          disabled={isSubmitting || !amount || !targetPrice}
+          disabled={isSubmitting || !amount || !targetPrice || depegBlocking}
           className={`w-full rounded-xl py-3 text-sm font-bold transition-all ${
-            isSubmitting || !amount || !targetPrice
+            isSubmitting || !amount || !targetPrice || depegBlocking
               ? 'cursor-not-allowed bg-cream-08 text-cream-35'
               : 'bg-cream-gold text-[#080B10] hover:brightness-110 active:scale-[0.98]'
           }`}

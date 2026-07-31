@@ -248,7 +248,8 @@ export default function SwapBox() {
   // warns naming whichever side lacks a feed. Drives the price gate + the QuoteBreakdown notice.
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
   // [SPRINT-9W-oracle] cbETH depeg circuit-breaker verdict (market-vs-ER divergence). mode 'ok'
-  // when neither token has an exchange-rate pair, or when either feed is stale (fail-open).
+  // when neither token has an exchange-rate pair (the check does not apply — the common case).
+  // [FIX-ORACLE-FAIL-CLOSED] A stale/failed feed is NO LONGER 'ok': it is 'unverified' and blocks.
   const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
@@ -552,13 +553,20 @@ export default function SwapBox() {
 
   // [SPRINT-9W-oracle] cbETH depeg circuit-breaker — a SECOND, independent verdict. Mirrors the 9J
   // consent state machine: WARN..BLOCK band → informed consent (auto-revokes if divergence worsens
-  // past accepted+tolerance); ≥BLOCK → hard block (no click-through). 'ok' (incl. a stale feed)
-  // adds no friction. The swap-price reference is unchanged.
+  // past accepted+tolerance); ≥BLOCK → hard block (no click-through). 'ok' adds no friction. The
+  // swap-price reference is unchanged.
+  //
+  // [FIX-ORACLE-FAIL-CLOSED] 'unverified' — we tried to check the peg and could not (read error,
+  // revert, stale feed, unresolved chain) — is now a HARD block too. It used to arrive here as 'ok'
+  // and add no friction, which meant a feed outage silently disabled this safety gate. It is kept
+  // separate from depegHardBlocked because the two must never share copy: telling a user their asset
+  // is depegged when the truth is "we couldn't check" is its own kind of lie.
   const depegConsentNeeded = depegCheck.mode === 'consent'
   const depegAccepted = acceptedDepeg != null && depegCheck.divergence <= acceptedDepeg + DEPEG_CONSENT_TOLERANCE
   const depegConsentBlocking = depegConsentNeeded && !depegAccepted
   const depegHardBlocked = depegCheck.mode === 'block'
-  const depegBlocking = depegHardBlocked || depegConsentBlocking
+  const depegUnverified = depegCheck.mode === 'unverified'
+  const depegBlocking = depegHardBlocked || depegConsentBlocking || depegUnverified
 
   // ── Security: block large swaps on tokens without Chainlink oracle ──
   // [CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Trade value = max(inputUsd, outputUsd) via
@@ -853,7 +861,13 @@ export default function SwapBox() {
         {/* [SPRINT-9J J1] Oracle-INTEGRITY failure (stale / invalid / incomplete
             round): the oracle itself can't be trusted → HARD block, no override.
             Stale-gated so it doesn't flash on in-flight quote data. */}
-        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && (
+        {/* [FIX-PRICE-ORACLE-FAIL-CLOSED] Also gated on a live trade (hasAmount && meta), matching
+            the oracleUnavailable banner below. Since an unreadable feed now raises an integrity
+            failure, this banner became reachable on an EMPTY form — and permanently so for a wallet
+            on an unsupported chain, where the chain never resolves. The BLOCK itself is unaffected
+            (anyBlocked still disables the button); only the red banner waits until there is an
+            actual quote to block, which is the convention every sibling banner here already uses. */}
+        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && hasAmount && meta && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked — oracle data unsafe.</span>{' '}
             {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
@@ -900,6 +914,21 @@ export default function SwapBox() {
             {depegCheck.message}
             <span className="mt-1 block text-xs text-danger/80">
               The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+            </span>
+          </div>
+        )}
+        {/* [FIX-ORACLE-FAIL-CLOSED] The depeg check applies to this pair but could NOT be run —
+            feed read error/revert, stale round, or an unresolved chain. Blocks like a depeg, but
+            says so honestly: we could not check, which is NOT the same claim as "it is depegged".
+            Recoverable by its nature (the next successful read clears it), so it is worded as a
+            retry rather than a verdict, and gated on a live quote so it never flashes on an empty
+            form or a first render. */}
+        {depegUnverified && hasAmount && meta && !priceCheckStale && (
+          <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <span className="font-semibold">&#9888; Swap paused — price not verified.</span>{' '}
+            {depegCheck.message}
+            <span className="mt-1 block text-xs text-danger/80">
+              We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the swap through on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
             </span>
           </div>
         )}
@@ -977,7 +1006,7 @@ export default function SwapBox() {
             "Switch to Ethereum", and the banner + handler guard cover the rest —
             so mixing !chainActive into priceBlocked only created a blockReason
             mismatch with no observable effect. */}
-        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={depegHardBlocked ? 'depeg-block' : isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : depegConsentBlocking ? 'depeg-consent' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={depegHardBlocked ? 'depeg-block' : isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : depegUnverified ? 'depeg-unverified' : depegConsentBlocking ? 'depeg-consent' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* [P95] Subtle gasless nudge — shown below the swap button when a
             non-CoW route is currently selected but the engine has flagged

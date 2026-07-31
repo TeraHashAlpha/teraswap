@@ -137,6 +137,17 @@ export interface FillReceipt {
   /** Exact — from the on-chain `OrderExecuted` event's `fee` field. Never recomputed. */
   protocolFeeRaw: string
   networkCostWeiRaw: string
+  /** [CHORE-DCA-AGGREGATION-VALUE] Runner-up (second-best) source's gross output, raw token
+   *  units — passed through verbatim from the keeper's `order_executions.next_best_out`
+   *  (additive telemetry, no on-chain event carries it). Null = no comparison available for
+   *  this fill (single-source quote round, a fetch failure, or a pre-migration row) — render
+   *  "—", never a fabricated number. */
+  nextBestOutRaw: string | null
+  /** The runner-up's aggregator name (e.g. "1inch"), or null alongside `nextBestOutRaw`. */
+  nextBestSource: string | null
+  /** max(0, amountOutRaw - nextBestOutRaw), or null when nextBestOutRaw is null. Clamped at 0
+   *  (never negative) — see computeAggregationValueRaw's own doc for why. */
+  aggregationValueRaw: string | null
 }
 
 export interface SettlementTotals {
@@ -145,6 +156,32 @@ export interface SettlementTotals {
   avgPrice: number | null
   totalProtocolFeeRaw: string
   totalNetworkCostWeiRaw: string
+  /** [CHORE-DCA-AGGREGATION-VALUE] Sum of every fill's `aggregationValueRaw` that had one — null
+   *  (not "0") when NO fill in the position has any comparison data at all, so the UI can render
+   *  an honest "—" rather than a fabricated total of zero. */
+  totalAggregationValueRaw: string | null
+}
+
+/**
+ * [CHORE-DCA-AGGREGATION-VALUE] The "aggregation value" TeraSwap's routing delivered for one
+ * fill: our executed output vs the next-best source's output from the same quote round,
+ * gross-vs-gross. Clamped at 0 rather than allowed negative: the deviation guard bounds how far
+ * the committed route can drift, but nothing guarantees it beats literally every quote every
+ * round, and a negative "value" would be both dishonest-looking and needlessly demoralizing —
+ * "no measurable value this round" (0) is the accurate, honest statement in that case. Null
+ * (never 0) when there was no runner-up to compare against at all.
+ */
+export function computeAggregationValueRaw(
+  amountOutRaw: string,
+  nextBestOutRaw: string | null,
+): string | null {
+  if (nextBestOutRaw == null) return null
+  try {
+    const diff = BigInt(amountOutRaw) - BigInt(nextBestOutRaw)
+    return diff > 0n ? diff.toString() : '0'
+  } catch {
+    return null
+  }
 }
 
 /** Sums are pure BigInt arithmetic over already-resolved `FillReceipt`s — no chain access, fully
@@ -157,11 +194,17 @@ export function computeSettlementTotals(
   let receivedRaw = 0n
   let feeRaw = 0n
   let networkCostRaw = 0n
+  let aggregationValueRaw = 0n
+  let anyAggregationValue = false
   for (const f of fills) {
     investedRaw += BigInt(f.amountInRaw)
     receivedRaw += BigInt(f.amountOutRaw)
     feeRaw += BigInt(f.protocolFeeRaw)
     networkCostRaw += BigInt(f.networkCostWeiRaw)
+    if (f.aggregationValueRaw != null) {
+      anyAggregationValue = true
+      aggregationValueRaw += BigInt(f.aggregationValueRaw)
+    }
   }
   const invested = Number(formatUnits(investedRaw, opts.tokenInDecimals))
   const received = Number(formatUnits(receivedRaw, opts.tokenOutDecimals))
@@ -171,6 +214,7 @@ export function computeSettlementTotals(
     avgPrice: received > 0 ? invested / received : null,
     totalProtocolFeeRaw: feeRaw.toString(),
     totalNetworkCostWeiRaw: networkCostRaw.toString(),
+    totalAggregationValueRaw: anyAggregationValue ? aggregationValueRaw.toString() : null,
   }
 }
 
@@ -217,6 +261,12 @@ export interface FillSource {
   /** Supabase `created_at`/`executed_at` — used ONLY as a timestamp fallback if the on-chain block
    *  read fails; never used for any amount/fee figure. */
   createdAt?: string | null
+  /** [CHORE-DCA-AGGREGATION-VALUE] Passed through verbatim from `order_executions.next_best_out`/
+   *  `next_best_source` — additive keeper telemetry with no on-chain event to decode, so (unlike
+   *  every amount/fee figure above) this is trusted from Supabase directly. Absent/null on any
+   *  fill recorded before this feature shipped, or with no runner-up that round. */
+  nextBestOutRaw?: string | null
+  nextBestSource?: string | null
 }
 
 /** Minimal receipt shape this module actually reads — a subset of viem's real `TransactionReceipt`
@@ -254,6 +304,9 @@ export async function fetchFillReceipt(
     tokenOutDecimals: number
     executorAddresses: readonly string[]
     fallbackTimestampMs?: number | null
+    /** [CHORE-DCA-AGGREGATION-VALUE] Threaded straight through — no on-chain event carries these. */
+    nextBestOutRaw?: string | null
+    nextBestSource?: string | null
   },
 ): Promise<FillReceipt | null> {
   const receipt = await client.getTransactionReceipt({ hash: params.txHash as Hex })
@@ -275,6 +328,9 @@ export async function fetchFillReceipt(
     // Keep the Supabase fallback (or null) — a stale/unavailable block read must not blank the fill.
   }
 
+  const nextBestOutRaw = params.nextBestOutRaw ?? null
+  const nextBestSource = params.nextBestSource ?? null
+
   return {
     executionNumber: params.executionNumber,
     txHash: params.txHash,
@@ -285,6 +341,9 @@ export async function fetchFillReceipt(
     effectivePrice: computeEffectivePrice(decoded.amountIn, decoded.amountOut, params.tokenInDecimals, params.tokenOutDecimals),
     protocolFeeRaw: decoded.fee.toString(),
     networkCostWeiRaw: networkCostWei.toString(),
+    nextBestOutRaw,
+    nextBestSource,
+    aggregationValueRaw: computeAggregationValueRaw(decoded.amountOut.toString(), nextBestOutRaw),
   }
 }
 
@@ -338,6 +397,8 @@ export async function buildSettlementReceipt(params: BuildSettlementReceiptParam
         tokenOutDecimals: params.tokenOutDecimals,
         executorAddresses,
         fallbackTimestampMs: f.createdAt ? Date.parse(f.createdAt) : null,
+        nextBestOutRaw: f.nextBestOutRaw ?? null,
+        nextBestSource: f.nextBestSource ?? null,
       }),
     ),
   )

@@ -34,11 +34,23 @@
  *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
  *   ORDER_EXECUTOR_ADDRESS      -- Deployed contract address
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
- *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet)
+ *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet). One keeper
+ *                                  INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum One).
+ *
+ * BOOT REFUSAL [FIX-KEEPER-BOOT-CHAIN-VERIFICATION]: before any work, main() asks the chain to
+ * confirm this config (chain-verify.js) — eth_chainId must equal CHAIN_ID, the executor address
+ * must hold code THERE, and the contract must self-identify via ORDER_TYPEHASH(). A mismatch, an
+ * unreachable/slow RPC or a malformed answer exits non-zero after a bounded retry; the keeper never
+ * warns and continues. "Keeper won't start" with a FATAL chain-verify line is that gate, not a bug:
+ * fix RPC_URL / CHAIN_ID / ORDER_EXECUTOR_ADDRESS so they describe the same chain.
  *
  * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
  *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
- *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec (default mainnet feed)
+ *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec. Unset ⇒ resolved
+ *                                  for CHAIN_ID from eth-usd-feed.js (1 / 8453 / 42161), which
+ *                                  mirrors src/lib/chains/chainlink-feeds.ts. A chain with no
+ *                                  known aggregator disables the Chainlink read (fail-closed) —
+ *                                  never another chain's feed.
  *   LOW_GAS_USD_THRESHOLD       -- (optional) USD gas-value below which a low-gas alert fires (default 5)
  *   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -- (optional) Telegram alert sink (see alert.js)
  *
@@ -135,6 +147,21 @@ import { resolvePinnedRouterData, planPinnedRouteRevert, isMarketRevert } from "
 // [FIX-KEEPER-GAS-TIER-BASE] Per-chain gas-tier resolution — mainnet byte-identical, Base gets
 // its own calibrated regime instead of the mainnet-scaled defaults.
 import { getGasTierConfig, resolveGasTier as resolveGasTierForChain, assertTierOrdering } from "./gas-tier.js"
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware ETH/USD aggregator resolution — fail-closed
+// (unknown chain ⇒ no feed ⇒ no read) so the ETH leg of the DCA floor reference can never be
+// priced off another chain's aggregator.
+import { resolveEthUsdFeed } from "./eth-usd-feed.js"
+// [FIX-KEEPER-BOOT-CHAIN-VERIFICATION] Boot-time, FAIL-CLOSED verification that the RPC really IS
+// CHAIN_ID and that the configured executor address is a deployed TeraSwapOrderExecutor there
+// (eth_chainId + eth_getCode + an ORDER_TYPEHASH() self-identification read, ADR-018's pattern).
+// validateConfig only checks the address is PRESENT — presence is not identity, and the same
+// deployer/nonce lands on the same address on every chain.
+import {
+  verifyChainBinding,
+  createRpcProbe,
+  EXPECTED_ORDER_TYPEHASH_V2,
+  EXPECTED_ORDER_TYPEHASH_V3,
+} from "./chain-verify.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -195,7 +222,11 @@ const ALLOW_PUBLIC_MEMPOOL = process.env.ALLOW_PUBLIC_MEMPOOL === "true"
 // fair-value reference (the #18/#248 price plumbing, keeper-side). Only chains we
 // actually run DCA on need an entry; an unmapped chain ⇒ no DefiLlama reference
 // ⇒ the fill is flagged (not blindly filled), never falsely rejected.
-const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base" }
+// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] 42161 -> "arbitrum" matches the app-side slug in
+// src/lib/chains/registry.ts (ethereum / base / arbitrum). Without the entry a 42161 keeper
+// would hit the "unmapped chain" branch below: every non-ETH leg would read as FEEDLESS, so
+// the oracle floor could never be applied and fills would fall to the capped fail-open path.
+const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base", 42161: "arbitrum" }
 
 // ETH/WETH (and the native-ETH sentinel) per chain — these legs are priced from
 // the trusted on-chain Chainlink ETH/USD feed (readEthUsd) FIRST, before falling
@@ -205,6 +236,12 @@ const ETH_PRICED_ADDRESSES = new Set(
     "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // native-ETH sentinel
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH mainnet
     "0x4200000000000000000000000000000000000006", // WETH Base
+    // [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] WETH Arbitrum One — Arbitrum does NOT reuse the
+    // OP-stack predeploy above, so without this entry the WETH leg of every Arbitrum DCA
+    // would skip Chainlink and fall straight to DefiLlama. Sourced from
+    // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json (token:WETH), pinned by
+    // arbitrum-plumbing.test.mjs.
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH Arbitrum One
   ].map((a) => a.toLowerCase()),
 )
 
@@ -213,13 +250,22 @@ const ETH_PRICED_ADDRESSES = new Set(
 //   OUTFLOW_THRESHOLD_ETH  -- ETH leaving the executor wallet beyond own gas spend
 //                             that counts as a "full alarm" unexplained outflow.
 //                             Default 0.01 ETH. Drives the DOMINANT freeze signal.
-//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals) used to
-//                             value the wallet's ETH for the low-gas signal.
-//                             Default = mainnet ETH/USD feed.
+//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals). Values the
+//                             wallet's ETH for the low-gas signal AND prices the ETH
+//                             leg of the DCA oracle-floor reference. Unset ⇒ resolved
+//                             per chain (eth-usd-feed.js); unknown chain ⇒ no read.
 //   LOW_GAS_USD_THRESHOLD  -- USD value of the wallet's ETH below which we emit a
 //                             low-gas alert. Default 5 (matches freeze-score GAS_LOW_USD).
 const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0.01")
-const ETH_USD_FEED = process.env.ETH_USD_FEED || "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware, FAIL-CLOSED ETH/USD aggregator resolution
+// (eth-usd-feed.js, pinned to the app's chainlink-feeds.ts by a drift test). Replaces the previous
+// "|| <mainnet address>" tail, which handed EVERY unlisted chain a codeless address — this is not
+// only the low-gas alert: readEthUsd feeds fetchReferencePriceUsd, i.e. the ETH leg of the DCA
+// Phase-0 oracle floor. An explicit ETH_USD_FEED still overrides, verbatim and first. A chain with
+// no known aggregator now resolves to NULL (readEthUsd skips the read; the existing DefiLlama /
+// no-reference fallback is untouched) rather than to another chain's feed.
+const ETH_USD_FEED_RESOLUTION = resolveEthUsdFeed({ chainId: CHAIN_ID, envFeed: process.env.ETH_USD_FEED })
+const ETH_USD_FEED = ETH_USD_FEED_RESOLUTION.feed
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
 
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
@@ -671,10 +717,26 @@ async function readFreezeFlag() {
   }
 }
 
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Warn ONCE per process when this keeper's chain has no
+// known ETH/USD aggregator — the condition is static for the run, and readEthUsd is called every
+// cycle plus once per ETH leg, so repeating it would drown the log it needs to stand out in.
+let ethUsdFeedMissingWarned = false
+
 // [DCA-OBS] Read ETH/USD from the Chainlink aggregator (8 decimals). Returns a
 // Number USD price, or null if the feed read fails (non-fatal; low-gas signal is
 // simply skipped that cycle). Never throws.
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] A null feed (unknown chain, ETH_USD_FEED unset) returns
+// null WITHOUT a read — fail-closed. Callers are unchanged: the low-gas signal skips that cycle,
+// and fetchReferencePriceUsd falls through to its existing DefiLlama path (and, for the ETH leg,
+// classifies a miss as TRANSIENT, so the fill is delayed/flagged rather than filled unbounded).
 async function readEthUsd(publicClient) {
+  if (!ETH_USD_FEED) {
+    if (!ethUsdFeedMissingWarned) {
+      ethUsdFeedMissingWarned = true
+      log(`  WARNING: no ETH/USD Chainlink read possible -- ${ETH_USD_FEED_RESOLUTION.reason}`)
+    }
+    return null
+  }
   try {
     const [, answer] = await publicClient.readContract({
       address: getAddress(ETH_USD_FEED),
@@ -765,19 +827,35 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
 // committed route has drifted. It NEVER changes which router the fill uses. Fully
 // fail-open: any missing config / error / timeout / missing field ⇒ null ⇒ the
 // gate executes (we never block a DCA on our own uncertainty). Never throws.
+//
+// [CHORE-DCA-AGGREGATION-VALUE] Also returns the RUNNER-UP (second-best source)
+// from this SAME response — one HTTP call, one quote round, so the runner-up is
+// guaranteed to be from the identical round as `bestOut` (never a second,
+// possibly-stale fetch). `all` is sorted best-first (src/lib/api.ts's
+// fetchMetaQuote), so the runner-up is simply `all[1]`. `nextBestOut`/
+// `nextBestSource` are null (never fabricated) when fewer than 2 sources quoted
+// this round or the field is malformed — purely additive telemetry for the
+// settlement receipt, never a routing input; the deviation-guard's existing
+// `bestOut` behavior is unchanged byte-for-byte.
 async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, dstDecimals) {
-  if (!API_URL) return null
+  if (!API_URL) return { bestOut: null, nextBestOut: null, nextBestSource: null }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a poll cycle
   try {
     const path = buildQuotePath({ tokenIn, tokenOut, amount: String(amount), srcDecimals, dstDecimals, chainId })
     const res = await fetch(`${API_URL}${path}`, { signal: controller.signal })
-    if (!res.ok) return null
+    if (!res.ok) return { bestOut: null, nextBestOut: null, nextBestSource: null }
     const json = await res.json()
     const best = json?.best?.toAmount
-    return best != null ? String(best) : null
+    const runnerUp = Array.isArray(json?.all) ? json.all[1] : null
+    const hasRunnerUp = runnerUp && runnerUp.toAmount != null && runnerUp.source
+    return {
+      bestOut: best != null ? String(best) : null,
+      nextBestOut: hasRunnerUp ? String(runnerUp.toAmount) : null,
+      nextBestSource: hasRunnerUp ? String(runnerUp.source) : null,
+    }
   } catch {
-    return null // fail-open: timeout / network / parse error ⇒ no reference
+    return { bestOut: null, nextBestOut: null, nextBestSource: null } // fail-open: timeout/network/parse error
   } finally {
     clearTimeout(timer)
   }
@@ -1262,6 +1340,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // SIGNED order.router (executeOrder approves + calls exactly that router). All
       // swap params come from orderStruct (the EIP-712-signed order), not the DB row.
       const isDca = dbOrder.order_type === "dca"
+      // [CHORE-DCA-AGGREGATION-VALUE] Populated (best-effort) inside the deviation-guard block
+      // below when it runs; read later at the POST-execution recording site, after the fill has
+      // already confirmed. Stays null when the guard doesn't run (non-DCA) or the quote round
+      // yields no comparison — additive telemetry only, never consulted for routing/execution.
+      let dcaNextBestOut = null
+      let dcaNextBestSource = null
       const netAmount = computeNetChunkAmount({
         amountIn: orderStruct.amountIn,
         dcaTotal: Number(orderStruct.dcaTotal),
@@ -1450,7 +1534,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         }
 
         const dueSec = dcaDueSec(dbOrder)
-        const bestOut = await fetchBestQuote(
+        const { bestOut, nextBestOut, nextBestSource } = await fetchBestQuote(
           orderStruct.tokenIn,
           orderStruct.tokenOut,
           netAmount,
@@ -1458,6 +1542,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           srcDecimals,
           dstDecimals,
         )
+        // [CHORE-DCA-AGGREGATION-VALUE] Stash for the POST-execution recording site below —
+        // read-only telemetry, never consulted by the deviation guard itself (which uses only
+        // `bestOut`, unchanged from before this chore).
+        dcaNextBestOut = nextBestOut
+        dcaNextBestSource = nextBestSource
         // Reference is only usable when BOTH sides are present; otherwise fail-open.
         const referenceAvailable = bestOut != null && swapData.toAmount != null
         const deviation = referenceAvailable
@@ -1560,8 +1649,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         continue
       }
       // [B-02] Route through the private relay only when the policy resolved to it;
-      // 'sequencer-private' (Base) and the explicit 'public' override both use the
-      // default clients (Base's sequencer mempool is itself private).
+      // 'sequencer-private' (Base 8453, Arbitrum One 42161) and the explicit 'public'
+      // override both use the default clients (those chains' sequencer mempools are
+      // themselves private, and neither has a Flashbots-equivalent relay to route to).
       const usePrivateRelay = submission.mode === "private"
       const txWalletClient = usePrivateRelay ? flashbotsWalletClient : walletClient
       const txPublicClient = usePrivateRelay ? flashbotsPublicClient : publicClient
@@ -1644,7 +1734,14 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         if (!decoded) {
           log(`  WARNING: OrderExecuted event not found in tx ${txHash.slice(0, 10)}... — recording with fallback amounts`)
         }
-        const execRow = buildExecutionRow({ dbOrder, txHash, receipt, decoded })
+        // [CHORE-DCA-AGGREGATION-VALUE] Additive, best-effort — dcaNextBestOut/Source are null
+        // for non-DCA fills, a single-source quote round, or any quote-fetch failure; either way
+        // buildExecutionRow only sets the columns when non-null, so they stay NULL in the row.
+        const execRow = buildExecutionRow({
+          dbOrder, txHash, receipt, decoded,
+          nextBestOut: dcaNextBestOut,
+          nextBestSource: dcaNextBestSource,
+        })
         const rec = await recordExecutionRow(supabaseFetch, execRow)
         if (rec.recorded) {
           log(`  Recorded execution #${execRow.execution_number} for order ${dbOrder.id.slice(0, 8)}...`)
@@ -1862,6 +1959,54 @@ async function main() {
     transport: http(RPC_URL),
   })
 
+  // [FIX-KEEPER-BOOT-CHAIN-VERIFICATION] ASK THE CHAIN before doing any work. Everything above is
+  // config asserting what an address is; this is the first and only point where the keeper
+  // verifies it against reality — the RPC's own chain id, real bytecode at the executor address on
+  // THAT chain, and the contract self-identifying via ORDER_TYPEHASH() as the exact Order struct
+  // this process encodes calldata for. Runs before the signer, the health server, the event
+  // watcher and the first cycle, so a mis-bound keeper never touches an order. Any failure —
+  // mismatch, empty code, unreachable RPC, timeout, malformed answer — exits non-zero after a
+  // bounded retry; there is deliberately no warn-and-continue branch.
+  try {
+    await verifyChainBinding({
+      provider: createRpcProbe(publicClient),
+      chainId: CHAIN_ID,
+      contracts: [
+        {
+          label: "ORDER_EXECUTOR_ADDRESS (v2)",
+          address: CONTRACT_ADDRESS,
+          expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
+        },
+        // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
+        // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
+        // with the v3 typehash, which also catches a v2/v3 address swap in the env.
+        ...(V3_CONTRACT_ADDRESS
+          ? [
+              {
+                label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
+                address: V3_CONTRACT_ADDRESS,
+                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
+              },
+            ]
+          : []),
+      ],
+      log,
+    })
+  } catch (err) {
+    console.error(err.message)
+    // Name the RPC by HOST only — an RPC_URL routinely carries the provider API key in its path,
+    // and a boot-refusal log is exactly the text an operator pastes into a ticket.
+    let rpcHost = "unparseable RPC_URL"
+    try {
+      rpcHost = new URL(RPC_URL).host
+    } catch {}
+    console.error(
+      `   Refusing to boot: the keeper will not execute orders against an unverified chain/contract ` +
+        `binding (CHAIN_ID=${CHAIN_ID}, RPC host=${rpcHost}).`,
+    )
+    process.exit(1)
+  }
+
   // [C-02/B-01] Use KMS/Vault account if configured, otherwise plaintext key
   const account = await createExecutorAccount()
 
@@ -1897,6 +2042,13 @@ async function main() {
   // [SPRINT-V3-P2] Loud about v3 state at boot: either the configured address, or an explicit
   // "disabled" so a v3 order silently piling up (skip+flag every cycle) is diagnosable from logs.
   log(`Contract (v3): ${V3_CONTRACT_ADDRESS || "not configured -- v3 orders will be skipped + flagged"}`)
+  // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Loud about the resolved aggregator at boot: this feed
+  // prices the ETH leg of the DCA oracle-floor reference, so "which address, and why that one"
+  // must be diagnosable from the log rather than inferred from the chain id.
+  log(
+    `ETH/USD feed: ${ETH_USD_FEED ?? "NONE -- Chainlink reads disabled"} ` +
+      `[${ETH_USD_FEED_RESOLUTION.source}] ${ETH_USD_FEED_RESOLUTION.reason}`,
+  )
   log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
   log(`Max batch: ${MAX_BATCH}`)
   // [FIX-KEEPER-GAS-TIER-BASE] Log THIS chain's resolved config, not a hardcoded mainnet one.
