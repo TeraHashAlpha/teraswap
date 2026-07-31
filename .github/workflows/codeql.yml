@@ -40,6 +40,6 @@ jobs:
         uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.x (v4.36.0 annotated-tag target)
 
       - name: Perform Analysis
-        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.x (v4.36.0 annotated-tag target)
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.x (v4.36.0 annotated-tag target)
         with:
           category: "/language:${{ matrix.language }}"
