@@ -10,11 +10,11 @@
 // is a required ARGUMENT — if the production call site stops routing through the port, it breaks
 // loudly instead of quietly verifying nothing.
 
-import { test, describe } from "node:test"
+import { test, describe, after } from "node:test"
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import { createServer } from "node:http"
-import { mkdtempSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -1036,6 +1036,20 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
   const WRONG_TYPEHASH = "0x" + "11".repeat(32)
   const SOME_CODE = "0x60806040" + "00".repeat(64)
 
+  // bootExecutor's mkdtempSync cwd is never used past the boot it belongs to — swept once after
+  // this describe block finishes rather than one-by-one, so a mid-test rmSync failure can never
+  // interfere with a still-running assertion.
+  const bootCwds = []
+  after(() => {
+    for (const dir of bootCwds) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // best-effort cleanup only — never let a stale/already-gone temp dir fail the suite
+      }
+    }
+  })
+
   /**
    * Boot the real keeper against a scripted RPC. Returns its exit code, stderr and the ORDERED
    * list of RPC methods it actually called.
@@ -1079,9 +1093,12 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
     const { port } = server.address()
 
+    // A throwaway cwd so executor.js's loadEnv(process.cwd() + "/.env.executor") finds nothing.
+    const bootCwd = mkdtempSync(join(tmpdir(), "keeper-boot-"))
+    bootCwds.push(bootCwd)
+
     const child = spawn(process.execPath, [EXECUTOR], {
-      // A throwaway cwd so executor.js's loadEnv(process.cwd() + "/.env.executor") finds nothing.
-      cwd: mkdtempSync(join(tmpdir(), "keeper-boot-")),
+      cwd: bootCwd,
       // Built from scratch, not inherited: no ambient KMS_KEY_ID / VAULT_ADDR / TELEGRAM_* /
       // ORDER_EXECUTOR_V3_ADDRESS can change what this boot does.
       env: {
