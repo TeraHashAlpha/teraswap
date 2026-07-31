@@ -28,3 +28,7 @@ updates:
       interval: "weekly"
     labels:
       - "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
