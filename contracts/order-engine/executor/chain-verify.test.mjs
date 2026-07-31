@@ -733,23 +733,62 @@ describe("chain-verify — no secret survives a refusal, whatever shape it arriv
   // Every quantifier in the pattern set is either bounded or a single greedy pass over a negated
   // class with nothing after it to backtrack into; these are the inputs that would expose it if
   // that ever stopped being true.
-  test("the pattern set is linear — 10k-char pathological inputs stay under 50ms", () => {
-    const EVIL = [
-      ["an unterminated scheme body", "https://" + "a".repeat(10_000)],
-      ["labels that never reach a TLD", ("a".repeat(64) + ".").repeat(160)],
-      ["a host that never reaches a port", "a".repeat(10_000) + "!"],
-      ["an endless port", "127.0.0.1:" + "1".repeat(10_000)],
-      ["an endless hex run", "0x" + "a".repeat(10_000)],
-      ["alternating dots and dashes", "a-.".repeat(3_400)],
-      ["nothing that can match at all", "é".repeat(10_000)],
-    ]
-    for (const [label, input] of EVIL) {
+  //
+  // This asserts LINEARITY itself, not a wall-clock proxy for it: for each pathological shape we
+  // measure redactUrls at a base size and at 10x that size and assert the RATIO of the two times
+  // stays bounded. A ratio is hardware-independent — a slower or more loaded runner scales both
+  // measurements together, so the ratio is unaffected, where an absolute-ms budget is not.
+  // A linear implementation gives ~10x on a 10x input; quadratic backtracking gives ~100x;
+  // catastrophic backtracking gives far more than that. RATIO_BOUND = 30 sits with margin on both
+  // sides of the ~10x/~100x split: high enough that constant-factor overhead (allocation, GC, JIT
+  // warmup) on an ideal linear pass never trips it, low enough that nothing quadratic-or-worse can
+  // sneak under it.
+  //
+  // Each measurement takes the MINIMUM across several repetitions, never the mean — scheduler
+  // noise (a GC pause, a context switch) only ever ADDS time, so the minimum is the one statistic
+  // noise cannot inflate. Each repetition itself times a small batch of calls and divides by the
+  // batch size, which keeps the per-call time well above timer-resolution noise even for inputs
+  // fast enough that a single call would measure as 0ms.
+  const RATIO_BOUND = 30
+  function timeMinOf(input, { batches = 5, callsPerBatch = 10 } = {}) {
+    let min = Infinity
+    for (let b = 0; b < batches; b++) {
       const started = performance.now()
-      redactUrls(input)
-      const elapsed = performance.now() - started
-      assert.ok(elapsed < 50, `${label}: redactUrls took ${elapsed.toFixed(1)}ms on ${input.length} chars`)
+      for (let c = 0; c < callsPerBatch; c++) redactUrls(input)
+      const perCall = (performance.now() - started) / callsPerBatch
+      if (perCall < min) min = perCall
     }
-  })
+    return min
+  }
+
+  test(
+    "the pattern set is linear — time on a 10x-larger pathological input stays within RATIO_BOUND",
+    { timeout: 10_000 }, // one loose absolute ceiling, order of seconds, purely to catch a true hang
+    () => {
+      const EVIL = [
+        ["an unterminated scheme body", (n) => "https://" + "a".repeat(n), 1_000],
+        ["labels that never reach a TLD", (n) => ("a".repeat(64) + ".").repeat(n), 16],
+        ["a host that never reaches a port", (n) => "a".repeat(n) + "!", 1_000],
+        ["an endless port", (n) => "127.0.0.1:" + "1".repeat(n), 1_000],
+        ["an endless hex run", (n) => "0x" + "a".repeat(n), 1_000],
+        ["alternating dots and dashes", (n) => "a-.".repeat(n), 340],
+        ["nothing that can match at all", (n) => "é".repeat(n), 1_000],
+      ]
+      for (const [label, make, base] of EVIL) {
+        const small = make(base)
+        const large = make(base * 10)
+        // The 0.001 floor only guards divide-by-zero; batching keeps it from firing in practice.
+        const tSmall = Math.max(timeMinOf(small), 0.001)
+        const tLarge = timeMinOf(large)
+        const ratio = tLarge / tSmall
+        assert.ok(
+          ratio < RATIO_BOUND,
+          `${label}: 10x the input took ${ratio.toFixed(1)}x as long ` +
+            `(${tSmall.toFixed(4)}ms -> ${tLarge.toFixed(4)}ms) — exceeds RATIO_BOUND=${RATIO_BOUND}, looks superlinear`,
+        )
+      }
+    },
+  )
 })
 
 describe("chain-verify — retries are bounded and terminate in refusal", () => {
