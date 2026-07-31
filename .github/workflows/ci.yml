@@ -413,6 +413,26 @@ jobs:
           grep -q 'min-release-age' .npmrc || (echo "ERROR: .npmrc missing min-release-age" && exit 1)
           grep -q 'registry=https://registry.npmjs.org/' .npmrc || (echo "ERROR: .npmrc missing registry pin" && exit 1)
 
+  keeper-suite:
+    # [CI-KEEPER-SUITE-REQUIRED] The fund-moving executor layer (contracts/order-engine/executor)
+    # had no CI gate at all — its 406-test node:test suite only ran when a human remembered to run
+    # it locally. No path filter: this is meant to become a required check, and a required check
+    # behind paths:/paths-ignore: never reports on PRs that miss the filter, permanently blocking
+    # them from merging.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install keeper dependencies
+        working-directory: contracts/order-engine/executor
+        run: npm ci
+      - name: Keeper test suite
+        working-directory: contracts/order-engine/executor
+        run: node --test
+
   test-contracts:
     # [CHORE-TEST-CONTRACTS-REAL-GATE] continue-on-error REMOVED: the suite is now
     # green (OrderExecutor 68/68 + FeeCollector 19/19), so a red contract suite MUST
