@@ -51,12 +51,20 @@ export interface PriceGateResult {
 export function evaluatePriceGate(check: PriceCheck): PriceGateResult {
   const deviation = check.deviation
 
-  if (check.oracleUnavailable) {
-    return { mode: 'ok', reason: 'none', deviation }
-  }
-
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] Integrity is tested BEFORE unavailability, and the order is
+  // load-bearing. A feed we could not READ is now both `oracleUnavailable` (so the tiered USD gate
+  // engages) and `oracleIntegrityFailed` (so this gate hard-blocks at every trade size). Under the
+  // original ordering the unavailable branch matched first and returned 'ok', which would have left
+  // a sub-threshold swap on an unreadable oracle passing — weaker than before that fix, not
+  // stronger. This reorder is a no-op for the pre-existing no-feed case: a genuinely unfeeded token
+  // never sets oracleIntegrityFailed (useChainlinkPrice leaves it unset; evaluatePairOracle sets it
+  // from the legs, false when none failed), so it still falls through to the branch below.
   if (check.oracleIntegrityFailed) {
     return { mode: 'block', reason: 'oracle-integrity', deviation }
+  }
+
+  if (check.oracleUnavailable) {
+    return { mode: 'ok', reason: 'none', deviation }
   }
 
   if (check.level === 'danger' || check.level === 'warn') {

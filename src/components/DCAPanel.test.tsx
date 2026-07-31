@@ -28,6 +28,14 @@ const mockFetchActiveOrders = vi.fn()
 const mockCancelOrderInSupabase = vi.fn()
 const mockSubscribeToOrders = vi.fn()
 
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Mocked directly, mirroring SwapBox.test.tsx's own pattern for
+// testing consumers of this hook — the hook's internals (wagmi reads, TanStack failure-memory,
+// staleness) are exhaustively covered in useDepegCheck.test.ts/depeg-gate.test.ts and are not
+// re-tested here. Default 'ok' (no exchange-rate pair) keeps every pre-existing test byte-identical.
+const useDepegCheckMock = vi.fn()
+vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => useDepegCheckMock(...a) }))
+const DEPEG_OK = { mode: 'ok' as const, divergence: 0, symbol: '', message: null }
+
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
@@ -83,9 +91,31 @@ vi.mock('./OrderReviewModal', () => ({
 }))
 vi.mock('./OrderCancelReviewModal', () => ({ default: () => null }))
 
-import { renderWithProviders, screen, fireEvent, waitFor } from '@/test-utils/render'
+import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import DCAPanel from './DCAPanel'
 import { getOrderExecutor } from '@/lib/order-engine'
+
+/**
+ * [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] `fireEvent.click` on a disabled button never
+ * reaches its `onClick` — React checks its OWN rendered `disabled` prop before dispatching a
+ * click-type synthetic event, independent of the underlying DOM attribute/property (confirmed:
+ * even manually clearing `button.disabled` on the live node does not help, since React's
+ * suppression reads its own fiber-cached props, not the DOM). A test that only does
+ * `fireEvent.click(disabledButton)` therefore proves the button is disabled, never that the
+ * production handler's own guard is what blocks — the DOM never lets it run at all.
+ *
+ * This reads React's per-fiber props directly off the DOM node (the `__reactProps$*` key React
+ * itself attaches) and invokes the real `onClick` prop — the exact closure the component
+ * rendered, over that render's actual state — bypassing React's disabled-suppression without
+ * touching the component under test. Test-only reflection, not a production change.
+ */
+function clickBypassingDisabled(el: HTMLElement): unknown {
+  const propsKey = Object.keys(el).find(k => k.startsWith('__reactProps$'))
+  if (!propsKey) throw new Error('React props key not found on element')
+  const onClick = (el as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick
+  if (!onClick) throw new Error('Element has no onClick prop')
+  return onClick({})
+}
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = '0x' + 'cc'.repeat(65)
@@ -105,6 +135,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true })
   useChainIdMock.mockReturnValue(8453) // Base
+  useDepegCheckMock.mockReturnValue(DEPEG_OK)
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
   mockRefetchNonce.mockResolvedValue({ data: 5n })
@@ -205,7 +236,10 @@ describe('DCAPanel — buys/interval presets [chore/dca-ux-tweaks]', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '30' }))
 
-    expect(await screen.findByText(/on-chain minimum/i)).toBeInTheDocument()
+    // [fix/dca-min-buy-copy] Human/USD-readable, actionable copy — not raw base units.
+    const hint = await screen.findByText(/on-chain minimum/i)
+    expect(hint.textContent).toMatch(/0\.00000000000001 WETH \(~\$0\.0000\)/) // token-unit floor + approx USD
+    expect(hint.textContent).toMatch(/Lower to 20 buys/) // floor(200,000 / 10,000) = 20 — computed from THIS total
     fireEvent.click(startDcaButton())
     // Under-floor ⇒ never frozen for review, never signed.
     await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
@@ -251,24 +285,24 @@ describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
   it('caps buys and warns when the requested count would produce a dust chunk', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('dca-custom-toggle'))
-    // 0.01 WETH ≈ $35 total (APPROX_PRICES). 100 buys → $0.35/buy, under the $5 default floor.
-    // floor(35/5) = 7 buys clears it.
+    // 0.01 WETH ≈ $35 total (APPROX_PRICES). 100 buys → $0.35/buy, under the $1 default floor.
+    // floor(35/1) = 35 buys clears it.
     enterAmount('0.01')
     const buysInput = screen.getByTestId('dca-custom-buys-input') as HTMLInputElement
     fireEvent.change(buysInput, { target: { value: '100' } })
 
     const warning = await screen.findByTestId('dca-min-chunk-warning')
-    expect(warning.textContent).toMatch(/capped to 7 buys/)
+    expect(warning.textContent).toMatch(/capped to 35 buys/)
   })
 
   it('blocks submit (never signs) when the total is too small to clear the minimum even at 1 buy', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('dca-custom-toggle'))
-    // 0.001 WETH ≈ $3.50 total — below the $5 default floor even for a single buy.
-    enterAmount('0.001')
+    // 0.0001 WETH ≈ $0.35 total — below the $1 default floor even for a single buy.
+    enterAmount('0.0001')
 
     const warning = await screen.findByTestId('dca-min-chunk-warning')
-    expect(warning.textContent).toMatch(/below the \$5 minimum/)
+    expect(warning.textContent).toMatch(/below the \$1 minimum/)
 
     fireEvent.click(startDcaButton())
     await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
@@ -307,5 +341,105 @@ describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
     const submitArg = mockCreateOrderInSupabase.mock.calls[0][0] as { dcaInterval: number; dcaTotal: number }
     expect(submitArg.dcaInterval).toBe(2 * 3600) // 2h — mirrors the contract's dcaInterval > 0 guard
     expect(submitArg.dcaTotal).toBe(5)           // mirrors the contract's dcaTotal > 0 guard
+  })
+})
+
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Extends the twice-audited cbETH depeg circuit-breaker
+// (fix/oracle-fail-closed, fix/depeg-gate-retry-window) to DCA order creation — a user must not be
+// able to start a 30-day autonomous DCA into a depegged or oracle-unverified asset with zero
+// signal. useDepegCheck is mocked (as SwapBox.test.tsx does), so the hook's own internals are not
+// re-tested here — only that the panel wires block/unverified/consent/no-pair correctly into
+// canCreate, and that submit never reaches the sign step while blocked.
+describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
+  it('a token with NO registered exchange-rate pair (the default WETH/ETH) never blocks creation', async () => {
+    // useDepegCheckMock already defaults to DEPEG_OK in beforeEach — this pins that the default,
+    // un-configured pair is genuinely frictionless, matching the app-wide "no pair ⇒ ok" invariant.
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+    expect(screen.queryByTestId('dca-depeg-block')).toBeNull()
+    expect(screen.queryByTestId('dca-depeg-unverified')).toBeNull()
+    expect(startDcaButton()).not.toBeDisabled()
+  })
+
+  it('a HARD depeg (mode: block) disables submit, shows depeg copy, and blocks even a forced click', async () => {
+    useDepegCheckMock.mockReturnValue({
+      mode: 'block', divergence: 0.12, symbol: 'cbETH',
+      message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.',
+    })
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+
+    const banner = await screen.findByTestId('dca-depeg-block')
+    expect(banner.textContent).toMatch(/cbETH depeg/)
+    expect(startDcaButton()).toBeDisabled()
+
+    fireEvent.click(startDcaButton())
+    await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
+  })
+
+  // [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] The test above only pins the DISABLED ATTRIBUTE
+  // (fireEvent.click on a disabled button never reaches onClick — see clickBypassingDisabled's
+  // doc comment). This one genuinely runs the production onClick handler with depegBlocking=true,
+  // proving the handler itself — not merely the button state — is what stops an order.
+  it('[L-1] the production handler itself refuses to create an order while blocked — not merely the disabled attribute', async () => {
+    useDepegCheckMock.mockReturnValue({
+      mode: 'block', divergence: 0.12, symbol: 'cbETH',
+      message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.',
+    })
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+
+    const btn = startDcaButton()
+    expect(btn).toBeDisabled() // sanity: still the same blocked state as the test above
+
+    await act(async () => { await clickBypassingDisabled(btn) })
+
+    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
+    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
+  })
+
+  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy — never claims a depeg', async () => {
+    useDepegCheckMock.mockReturnValue({
+      mode: 'unverified', divergence: 0, symbol: 'cbETH',
+      message: "We couldn't verify cbETH's price right now — try again in a moment.",
+    })
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+
+    const banner = await screen.findByTestId('dca-depeg-unverified')
+    expect(banner.textContent).toMatch(/price not verified/i)
+    expect(banner.textContent).not.toMatch(/depeg\./) // never asserts a depeg finding
+    expect(startDcaButton()).toBeDisabled()
+
+    fireEvent.click(startDcaButton())
+    await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())
+    expect(screen.queryByTestId('confirm-review')).toBeNull()
+  })
+
+  it('a healthy read (mode: ok, real pair) does NOT block — creation proceeds to review/sign', async () => {
+    useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0.003, symbol: 'cbETH', message: null })
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+
+    expect(startDcaButton()).not.toBeDisabled()
+    fireEvent.click(startDcaButton())
+    fireEvent.click(await screen.findByTestId('confirm-review'))
+    await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))
+  })
+
+  it('informed consent (mode: consent) blocks until accepted, then unblocks — mirrors SwapBox exactly', async () => {
+    useDepegCheckMock.mockReturnValue({
+      mode: 'consent', divergence: 0.05, symbol: 'cbETH',
+      message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.',
+    })
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+
+    expect(startDcaButton()).toBeDisabled()
+    const checkbox = await screen.findByRole('checkbox')
+    fireEvent.click(checkbox)
+    expect(startDcaButton()).not.toBeDisabled()
   })
 })

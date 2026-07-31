@@ -2,7 +2,7 @@
  * [SPRINT-P1B] Client-side mirror of the server's v3 USD dust floor, run BEFORE approve.
  *
  * `/api/orders` rejects any v3 order whose signed `minAmountOut` is worth less than
- * `getDcaMinChunkUsd()` (default $5) — `src/app/api/orders/route.ts:296-376`. That check is
+ * `getDcaMinChunkUsd()` (default $1) — `src/app/api/orders/route.ts:296-376`. That check is
  * authoritative and stays authoritative; this helper exists only so the user learns about the
  * problem BEFORE spending an approve transaction and a signature on an order the server will 400.
  *
@@ -59,7 +59,7 @@ export function checkMinOutEconomicFloor(p: MinOutFloorParams): MinOutFloorResul
   }
 
   // Base units → whole tokens as a Number. minAmountOut is a floor (not a balance), so the
-  // precision loss of Number here is immaterial relative to a $5 threshold.
+  // precision loss of Number here is immaterial relative to a $1 threshold.
   const whole = Number(p.minAmountOut) / 10 ** p.tokenOutDecimals
   if (!Number.isFinite(whole)) {
     return { blocked: false, minOutUsd: null, floorUsd, reason: null }

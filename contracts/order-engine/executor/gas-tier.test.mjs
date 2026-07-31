@@ -17,8 +17,10 @@ import assert from "node:assert/strict"
 import {
   getGasTierConfig,
   resolveGasTier,
+  assertTierOrdering,
   MAINNET_CHAIN_ID,
   BASE_CHAIN_ID,
+  ARBITRUM_CHAIN_ID,
 } from "./gas-tier.js"
 
 const ENV_KEYS = [
@@ -28,6 +30,9 @@ const ENV_KEYS = [
   "GAS_TIER_NORMAL_GWEI_BASE", "GAS_TIER_ELEVATED_GWEI_BASE", "GAS_TIER_URGENT_GWEI_BASE",
   "GAS_PRIORITY_NORMAL_GWEI_BASE", "GAS_PRIORITY_ELEVATED_GWEI_BASE", "GAS_PRIORITY_URGENT_GWEI_BASE",
   "GAS_BASEFEE_MULT_NORMAL_BASE", "GAS_BASEFEE_MULT_ELEVATED_BASE", "GAS_BASEFEE_MULT_URGENT_BASE",
+  "GAS_TIER_NORMAL_GWEI_ARBITRUM", "GAS_TIER_ELEVATED_GWEI_ARBITRUM", "GAS_TIER_URGENT_GWEI_ARBITRUM",
+  "GAS_PRIORITY_NORMAL_GWEI_ARBITRUM", "GAS_PRIORITY_ELEVATED_GWEI_ARBITRUM", "GAS_PRIORITY_URGENT_GWEI_ARBITRUM",
+  "GAS_BASEFEE_MULT_NORMAL_ARBITRUM", "GAS_BASEFEE_MULT_ELEVATED_ARBITRUM", "GAS_BASEFEE_MULT_URGENT_ARBITRUM",
 ]
 let savedEnv
 beforeEach(() => {
@@ -110,11 +115,188 @@ describe("getGasTierConfig — Base (8453) is derived from the calibration, far 
   })
 })
 
-describe("getGasTierConfig — unknown chains fail closed to mainnet (never to Base's low values)", () => {
+describe("getGasTierConfig — Arbitrum One (42161) [SPRINT-KEEPER-MULTICHAIN-ARBITRUM]", () => {
+  test("priority fees are effectively ~0 — Nitro's sequencer is FCFS, a tip buys no inclusion", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    // Well under even Base's already-reduced 0.02 gwei NORMAL, and ~1500x under mainnet's 1.5.
+    assert.ok(cfg.priorityFeeGwei.NORMAL < 0.01, "Arbitrum NORMAL priority must be ~0, not a Base-scale tip")
+    assert.ok(cfg.priorityFeeGwei.URGENT <= 0.01, "even URGENT must stay ~0 — there is no priority auction on Nitro")
+  })
+
+  test("priority fees stay strictly ABOVE zero (a literal-0 tip risks node rejection ⇒ deferred fill)", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    for (const k of ["NORMAL", "ELEVATED", "URGENT"]) {
+      assert.ok(cfg.priorityFeeGwei[k] > 0, `${k} priority must be > 0`)
+    }
+  })
+
+  test("REGRESSION: Arbitrum never inherits mainnet's 1.5 gwei priority fee (the Base overpayment bug, again)", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    assert.notEqual(cfg.priorityFeeGwei.NORMAL, 1.5)
+    assert.notEqual(cfg.thresholdsGwei.NORMAL, 30)
+  })
+
+  test("thresholds sit ABOVE ArbOS's 0.01 gwei base-fee floor — a quiet-market fill resolves NORMAL, never SKIP", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    const ARBOS_MIN_BASE_FEE_GWEI = 0.01
+    assert.ok(
+      ARBOS_MIN_BASE_FEE_GWEI < cfg.thresholdsGwei.NORMAL,
+      "the ArbOS floor must resolve to NORMAL — otherwise the keeper would SKIP every quiet-market fill",
+    )
+  })
+
+  test("thresholds stay far BELOW mainnet's — mainnet's 30/80/100 gwei on an L2 would disable the gates entirely", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    assert.ok(cfg.thresholdsGwei.URGENT < 30, "the whole Arbitrum band must sit under mainnet's NORMAL threshold")
+  })
+
+  test("tier ordering is strictly increasing (assertTierOrdering passes at boot for 42161)", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    assert.ok(cfg.thresholdsGwei.NORMAL < cfg.thresholdsGwei.ELEVATED)
+    assert.ok(cfg.thresholdsGwei.ELEVATED < cfg.thresholdsGwei.URGENT)
+    assert.doesNotThrow(() => assertTierOrdering(ARBITRUM_CHAIN_ID))
+  })
+
+  test("base-fee multipliers are the conservative 2/2.5/3 shared with mainnet and Base", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    assert.equal(cfg.baseFeeMult.NORMAL, 2)
+    assert.equal(cfg.baseFeeMult.ELEVATED, 2.5)
+    assert.equal(cfg.baseFeeMult.URGENT, 3)
+  })
+
+  test("is independently overridable via _ARBITRUM-suffixed env vars", () => {
+    process.env.GAS_PRIORITY_NORMAL_GWEI_ARBITRUM = "0.007"
+    process.env.GAS_TIER_URGENT_GWEI_ARBITRUM = "2.5"
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    assert.equal(cfg.priorityFeeGwei.NORMAL, 0.007)
+    assert.equal(cfg.thresholdsGwei.URGENT, 2.5)
+  })
+
+  test("overriding Arbitrum env vars leaves mainnet AND Base untouched (independent per-chain)", () => {
+    process.env.GAS_PRIORITY_NORMAL_GWEI_ARBITRUM = "0.007"
+    process.env.GAS_TIER_NORMAL_GWEI_ARBITRUM = "9"
+    assert.equal(getGasTierConfig(MAINNET_CHAIN_ID).priorityFeeGwei.NORMAL, 1.5)
+    assert.equal(getGasTierConfig(MAINNET_CHAIN_ID).thresholdsGwei.NORMAL, 30)
+    assert.equal(getGasTierConfig(BASE_CHAIN_ID).priorityFeeGwei.NORMAL, 0.02)
+    assert.equal(getGasTierConfig(BASE_CHAIN_ID).thresholdsGwei.NORMAL, 0.05)
+  })
+})
+
+describe("resolveGasTier — Arbitrum at Nitro's real fee regime", () => {
+  test("at the ArbOS 0.01 gwei floor: executes NORMAL at the Arbitrum ~0 priority fee", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    const r = resolveGasTier({
+      chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(0.01), baseFeeWei: gwei(0.01), urgency: "NORMAL",
+    })
+    assert.equal(r.execute, true)
+    assert.equal(r.tier, "NORMAL")
+    assert.equal(r.maxPriorityFeePerGas, gwei(cfg.priorityFeeGwei.NORMAL))
+    assert.equal(r.maxFeePerGas, gwei(0.01) * 2n + gwei(cfg.priorityFeeGwei.NORMAL))
+  })
+
+  test("maxFeePerGas is baseFee × the tier multiplier + the (tiny) priority fee", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    const r = resolveGasTier({
+      chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(0.02), baseFeeWei: gwei(0.015), urgency: "NORMAL",
+    })
+    assert.equal(r.maxFeePerGas, gwei(0.015) * 2n + gwei(cfg.priorityFeeGwei.NORMAL))
+  })
+
+  test("a mainnet-scale gas price (30 gwei) on Arbitrum resolves to SKIP (thresholds are real ceilings)", () => {
+    const r = resolveGasTier({
+      chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(30), baseFeeWei: gwei(25), urgency: "URGENT",
+    })
+    assert.equal(r.execute, false)
+    assert.equal(r.tier, "SKIP")
+  })
+
+  test("DEFER-NEVER-FAIL: every band only ever returns execute:false — identical semantics to Base", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    const midElevated = (cfg.thresholdsGwei.NORMAL + cfg.thresholdsGwei.ELEVATED) / 2
+    const midUrgent = (cfg.thresholdsGwei.ELEVATED + cfg.thresholdsGwei.URGENT) / 2
+
+    const elevated = resolveGasTier({
+      chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(midElevated), baseFeeWei: gwei(midElevated * 0.8), urgency: "NORMAL",
+    })
+    assert.equal(elevated.execute, false)
+    assert.equal(elevated.tier, "ELEVATED")
+
+    const urgentOnly = resolveGasTier({
+      chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(midUrgent), baseFeeWei: gwei(midUrgent * 0.8), urgency: "NORMAL",
+    })
+    assert.equal(urgentOnly.execute, false)
+    assert.equal(urgentOnly.tier, "URGENT_ONLY")
+
+    // Same bands as Base's shape: URGENT urgency clears the URGENT_ONLY band.
+    const urgentClears = resolveGasTier({
+      chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(midUrgent), baseFeeWei: gwei(midUrgent * 0.8), urgency: "URGENT",
+    })
+    assert.equal(urgentClears.execute, true)
+    assert.equal(urgentClears.maxPriorityFeePerGas, gwei(cfg.priorityFeeGwei.URGENT))
+  })
+
+  test("REGRESSION: no Arbitrum tier ever resolves above the Arbitrum URGENT priority ceiling", () => {
+    const cfg = getGasTierConfig(ARBITRUM_CHAIN_ID)
+    const ceilingWei = gwei(cfg.priorityFeeGwei.URGENT)
+    for (const urgency of ["NORMAL", "ELEVATED", "URGENT"]) {
+      for (const priceGwei of [0.01, 0.05, 0.2, 0.9]) {
+        const r = resolveGasTier({
+          chainId: ARBITRUM_CHAIN_ID, currentGasPriceWei: gwei(priceGwei), baseFeeWei: gwei(priceGwei * 0.8), urgency,
+        })
+        if (r.execute) {
+          assert.ok(
+            r.maxPriorityFeePerGas <= ceilingWei,
+            `urgency=${urgency} price=${priceGwei}gwei priority=${r.maxPriorityFeePerGas} exceeds Arbitrum ceiling ${ceilingWei}`,
+          )
+        }
+      }
+    }
+  })
+})
+
+describe("getGasTierConfig — unknown chains fail closed to mainnet (never to Base's/Arbitrum's low values)", () => {
   test("an unconfigured chain resolves to the mainnet config — safe (higher gas), never stuck", () => {
-    const cfg = getGasTierConfig(42161) // Arbitrum — no gas-tier entry yet
+    // Was 42161 before [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] gave Arbitrum its own entry; Optimism
+    // (10) is the stand-in for "a production chain this keeper has no gas model for yet".
+    const cfg = getGasTierConfig(10)
     assert.equal(cfg.priorityFeeGwei.NORMAL, 1.5)
     assert.equal(cfg.thresholdsGwei.NORMAL, 30)
+  })
+})
+
+describe("[SPRINT-KEEPER-MULTICHAIN-ARBITRUM] adding 42161 left chains 1 and 8453 BYTE-IDENTICAL", () => {
+  // Full-config snapshots of the two live chains, spelled out as literals so any future
+  // per-chain addition that perturbs mainnet or Base fails here rather than in production.
+  test("mainnet (1) config is exactly the pre-Arbitrum config", () => {
+    assert.deepEqual(getGasTierConfig(MAINNET_CHAIN_ID), {
+      thresholdsGwei: { NORMAL: 30, ELEVATED: 80, URGENT: 100 },
+      priorityFeeGwei: { NORMAL: 1.5, ELEVATED: 2.5, URGENT: 4 },
+      baseFeeMult: { NORMAL: 2, ELEVATED: 2.5, URGENT: 3 },
+    })
+  })
+
+  test("Base (8453) config is exactly the pre-Arbitrum config", () => {
+    assert.deepEqual(getGasTierConfig(BASE_CHAIN_ID), {
+      thresholdsGwei: { NORMAL: 0.05, ELEVATED: 0.15, URGENT: 0.3 },
+      priorityFeeGwei: { NORMAL: 0.02, ELEVATED: 0.05, URGENT: 0.1 },
+      baseFeeMult: { NORMAL: 2, ELEVATED: 2.5, URGENT: 3 },
+    })
+  })
+
+  test("_ARBITRUM env overrides never leak into the 1/8453 resolved tiers", () => {
+    process.env.GAS_PRIORITY_URGENT_GWEI_ARBITRUM = "0.5"
+    process.env.GAS_BASEFEE_MULT_NORMAL_ARBITRUM = "9"
+    const mainnet = resolveGasTier({
+      chainId: MAINNET_CHAIN_ID, currentGasPriceWei: gwei(20), baseFeeWei: gwei(15), urgency: "NORMAL",
+    })
+    assert.equal(mainnet.maxPriorityFeePerGas, gwei(1.5))
+    assert.equal(mainnet.maxFeePerGas, gwei(15) * 2n + gwei(1.5))
+
+    const base = resolveGasTier({
+      chainId: BASE_CHAIN_ID, currentGasPriceWei: gwei(0.006), baseFeeWei: gwei(0.005), urgency: "NORMAL",
+    })
+    assert.equal(base.maxPriorityFeePerGas, gwei(0.02))
+    assert.equal(base.maxFeePerGas, gwei(0.005) * 2n + gwei(0.02))
   })
 })
 

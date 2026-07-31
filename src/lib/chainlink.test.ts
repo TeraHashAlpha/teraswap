@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
-import { fetchChainlinkPriceRaw, fetchHistoricalPrice, fetchErc20Decimals, computeTokenAmountUsd, getChainlinkFeed, getFeedStalenessSec, chainlinkAggregatorAbi, evaluatePairOracle, type PriceCheck } from './chainlink'
+import { fetchChainlinkPriceRaw, fetchHistoricalPrice, fetchErc20Decimals, computeTokenAmountUsd, getChainlinkFeed, getFeedStalenessSec, getFeedExpectation, chainlinkAggregatorAbi, evaluatePairOracle, _clearFeedIdentityCache, type PriceCheck } from './chainlink'
 import { getComposedFeed, getExchangeRatePair } from './chains/chainlink-feeds'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
@@ -34,6 +34,19 @@ vi.mock('@/lib/chains/sequencer-check', () => ({
 const DECIMALS_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'decimals' }).slice(0, 10)
 const LATEST_ROUND_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'latestRoundData' }).slice(0, 10)
 const GET_ROUND_DATA_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'getRoundData', args: [1n] }).slice(0, 10)
+const DESCRIPTION_SELECTOR = encodeFunctionData({ abi: chainlinkAggregatorAbi, functionName: 'description' }).slice(0, 10)
+
+/**
+ * [ADR-018] Every fetchSingleFeedRaw call now reads description() before latestRoundData()/decimals().
+ * These mocks answer it TRUTHFULLY by default — looking up the real FEED_EXPECTATIONS entry for
+ * whichever address is under test — so every pre-existing "happy path" test (which exercises real,
+ * correctly-configured addresses) keeps passing unmodified. A test that wants to exercise the
+ * mismatch branch passes an explicit `descriptionOverride` in its RoundConfig instead.
+ */
+function describeSelectorResult(to: string, override?: string): `0x${string}` {
+  const description = override ?? getFeedExpectation(to)?.description ?? ''
+  return encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'description', result: description })
+}
 
 interface RoundConfig {
   decimals: number
@@ -42,12 +55,16 @@ interface RoundConfig {
   startedAt?: bigint
   updatedAt: bigint
   answeredInRound: bigint
+  /** [ADR-018] Force description() to return something other than the real expectation, to
+   *  exercise the identity-mismatch branch. Omit to answer truthfully (the default happy path). */
+  descriptionOverride?: string
 }
 
-/** Stub global fetch so rpcCall() returns the configured round/decimals. */
+/** Stub global fetch so rpcCall() returns the configured round/decimals/description. */
 function mockChainlinkRpc(cfg: RoundConfig) {
   const fetchMock = vi.fn(async (_url: unknown, init: { body?: string }) => {
     const body = JSON.parse(init.body as string)
+    const to: string = body.params[0].to
     const data: string = body.params[0].data
     const selector = data.slice(0, 10).toLowerCase()
 
@@ -58,6 +75,8 @@ function mockChainlinkRpc(cfg: RoundConfig) {
         functionName: 'decimals',
         result: cfg.decimals,
       })
+    } else if (selector === DESCRIPTION_SELECTOR) {
+      result = describeSelectorResult(to, cfg.descriptionOverride)
     } else if (selector === LATEST_ROUND_SELECTOR) {
       result = encodeFunctionResult({
         abi: chainlinkAggregatorAbi,
@@ -78,6 +97,11 @@ const nowSec = () => BigInt(Math.floor(Date.now() / 1000))
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  // [ADR-018] The feed identity cache is intentionally process-lifetime in production (identity is
+  // immutable), but that means it MUST be cleared between tests, or a later test reusing the same
+  // address inherits an earlier test's cached (possibly different, possibly mismatched) identity
+  // instead of hitting its own mock.
+  _clearFeedIdentityCache()
 })
 
 describe('chainlink — fetchChainlinkPriceRaw [TEST-H-01]', () => {
@@ -197,7 +221,13 @@ describe('chainlink — fetchChainlinkPriceRaw [TEST-H-01]', () => {
     expect(result!.price).toBeCloseTo(2850.42, 2)
   })
 
-  it('correctly decodes an 18-decimal feed', async () => {
+  // [ADR-018] This used to mock NATIVE_ETH's feed reporting 18 decimals to test the exponent math
+  // generically — but NATIVE_ETH's declared identity is now "ETH / USD" @ 8dp, so an 18dp answer
+  // from that address is exactly the decimals-mismatch case ADR-018 exists to block, not something
+  // fetchChainlinkPriceRaw should ever decode as a price. 18dp decode math is still exercised (as
+  // part of the real 18dp legs in this config, cbETH's composed base leg) by the "[SPRINT-9V V2]
+  // composed cbETH/USD" suite below (`1.08 × 3000 = 3240`, `1.1344 × 1681.30 ≈ 1907.27`).
+  it('an 18-decimal answer from a feed DECLARED 8dp is a decimals mismatch → null [ADR-018]', async () => {
     const now = nowSec()
     mockChainlinkRpc({
       decimals: 18,
@@ -206,8 +236,7 @@ describe('chainlink — fetchChainlinkPriceRaw [TEST-H-01]', () => {
       updatedAt: now,
       answeredInRound: 7n,
     })
-    const result = await fetchChainlinkPriceRaw(NATIVE_ETH)
-    expect(result!.price).toBeCloseTo(1.23, 2)
+    expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).toBeNull()
   })
 })
 
@@ -227,12 +256,17 @@ function mockHistoricalRpc(getRound: {
   const now = nowSec()
   const fetchMock = vi.fn(async (_url: unknown, init: { body?: string }) => {
     const body = JSON.parse(init.body as string)
+    const to: string = body.params[0].to
     const data: string = body.params[0].data
     const selector = data.slice(0, 10).toLowerCase()
 
     let result: `0x${string}`
     if (selector === DECIMALS_SELECTOR) {
       result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: 8 })
+    } else if (selector === DESCRIPTION_SELECTOR) {
+      // [ADR-018] fetchHistoricalPrice's first step is fetchChainlinkPriceRaw, which now
+      // self-identifies before returning the "current round" this search anchors on.
+      result = describeSelectorResult(to)
     } else if (selector === LATEST_ROUND_SELECTOR) {
       // Valid, fresh latest round → fetchChainlinkPriceRaw (called first) succeeds.
       result = encodeFunctionResult({
@@ -337,10 +371,13 @@ describe('chainlink — chain-aware RPC routing [SPRINT-9G G1]', () => {
     const fetchMock = vi.fn(async (url: unknown, init: { body?: string }) => {
       urls.push(String(url))
       const body = JSON.parse(init.body as string)
+      const to: string = body.params[0].to
       const selector = (body.params[0].data as string).slice(0, 10).toLowerCase()
       let result: `0x${string}`
       if (selector === DECIMALS_SELECTOR) {
         result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: 8 })
+      } else if (selector === DESCRIPTION_SELECTOR) {
+        result = describeSelectorResult(to)
       } else if (selector === LATEST_ROUND_SELECTOR) {
         result = encodeFunctionResult({
           abi: chainlinkAggregatorAbi,
@@ -420,6 +457,13 @@ describe('evaluatePairOracle [SPRINT-9S S2]', () => {
   const integrity = (): PriceCheck => ({
     chainlinkPrice: 3000, executionPrice: null, deviation: 0, level: 'warn', message: 'stale', oracleUnavailable: false, oracleIntegrityFailed: true,
   })
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that EXISTS but could not be read: unavailable (tiered
+  // USD gate) + integrity-failed (hard block) + readFailed (so copy says "could not be read").
+  const unreadable = (): PriceCheck => ({
+    chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'warn',
+    message: 'Chainlink price feed could not be read. Price not verified.',
+    oracleUnavailable: true, oracleIntegrityFailed: true, oracleReadFailed: true,
+  })
 
   it('produces an IDENTICAL verdict for ETH→USDC and USDC→ETH (direction-agnostic)', () => {
     // ETH→USDC: the deviation sits on the INPUT (ETH) side; USDC out is neutral.
@@ -458,6 +502,31 @@ describe('evaluatePairOracle [SPRINT-9S S2]', () => {
   it('propagates an oracle-integrity failure on EITHER side (hard-block signal preserved)', () => {
     expect(evaluatePairOracle(integrity(), none(), 'ETH', 'USDC').oracleIntegrityFailed).toBe(true)
     expect(evaluatePairOracle(none(), integrity(), 'USDC', 'ETH').oracleIntegrityFailed).toBe(true)
+  })
+
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] An unreadable leg must keep BOTH its hard-block signal and its
+  // honest framing when merged into the pair verdict. This branch previously hardcoded
+  // `oracleIntegrityFailed: false`, which would have discarded the hard block at the pair level —
+  // reopening, one layer up, exactly the hole the hook fix closes.
+  it('an UNREADABLE leg keeps oracleIntegrityFailed at the pair level (hard block survives)', () => {
+    expect(evaluatePairOracle(unreadable(), none(), 'ETH', 'USDC').oracleIntegrityFailed).toBe(true)
+    expect(evaluatePairOracle(none(), unreadable(), 'USDC', 'ETH').oracleIntegrityFailed).toBe(true)
+  })
+
+  it('an UNREADABLE leg is NOT listed as a token with no feed (copy must not claim that)', () => {
+    const r = evaluatePairOracle(unreadable(), none(), 'ETH', 'USDC')
+    expect(r.oracleUnavailable).toBe(true)     // tiered USD gate still engages
+    expect(r.oracleReadFailed).toBe(true)      // ...but as a read failure
+    expect(r.oracleMissingSymbols).toEqual([]) // ETH is NOT missing a feed — it exists, we failed to read it
+    expect(r.message).toMatch(/could not be read/i)
+  })
+
+  it('a genuinely missing feed is unchanged — still named, still not an integrity failure', () => {
+    const r = evaluatePairOracle(missing(), none(), 'EXOTIC', 'ETH')
+    expect(r.oracleUnavailable).toBe(true)
+    expect(r.oracleIntegrityFailed).toBe(false)
+    expect(r.oracleReadFailed).toBe(false)
+    expect(r.oracleMissingSymbols).toEqual(['EXOTIC'])
   })
 
   it('is a safe drop-in: combine(check, check) preserves that check\'s gate verdict', () => {
@@ -521,7 +590,9 @@ describe('[SPRINT-9V V1] raw gate uses per-feed staleness on Base USDC/USD (24h 
   })
 })
 
-/** [SPRINT-9V V2] Stub fetch with a DIFFERENT round per feed address (composed legs). */
+/** [SPRINT-9V V2 / ADR-018] Stub fetch with a DIFFERENT round (+ optional description override) per
+ *  feed address (composed legs). description() defaults to the real FEED_EXPECTATIONS entry for
+ *  each leg address unless a test sets `descriptionOverride`. */
 function mockComposedRpc(legs: Record<string, RoundConfig>) {
   const lower: Record<string, RoundConfig> = {}
   for (const [k, v] of Object.entries(legs)) lower[k.toLowerCase()] = v
@@ -534,6 +605,8 @@ function mockComposedRpc(legs: Record<string, RoundConfig>) {
     let result: `0x${string}`
     if (selector === DECIMALS_SELECTOR) {
       result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: cfg.decimals })
+    } else if (selector === DESCRIPTION_SELECTOR) {
+      result = describeSelectorResult(to, cfg.descriptionOverride)
     } else if (selector === LATEST_ROUND_SELECTOR) {
       result = encodeFunctionResult({
         abi: chainlinkAggregatorAbi,
@@ -639,5 +712,236 @@ describe('getExchangeRatePair [SPRINT-9W-oracle]', () => {
     expect(getExchangeRatePair('0x4200000000000000000000000000000000000006', 8453)).toBeNull() // Base WETH
     expect(getExchangeRatePair(CBETH, 1)).toBeNull()  // mainnet has no exchange-rate pairs
     expect(getExchangeRatePair(CBETH)).toBeNull()     // default chain = mainnet
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [ADR-018] Feed self-identification — the check that catches WBTC/USD silently reading the
+// BTC/USD index feed. Every case here is a feed that is REACHABLE and returns a GENUINELY valid,
+// fresh round — the only thing wrong is that description()/decimals() contradict the config key.
+// ─────────────────────────────────────────────────────────────
+describe('fetchChainlinkPriceRaw — [ADR-018] feed self-identification', () => {
+  it('description mismatch → integrity failure (null), even with a fresh valid round', async () => {
+    mockChainlinkRpc({
+      decimals: 8, // matches expectation — decimals alone would pass
+      roundId: 1n,
+      answer: 100_000_000n,
+      updatedAt: nowSec(),
+      answeredInRound: 1n,
+      descriptionOverride: 'BTC / USD', // NATIVE_ETH is declared "ETH / USD" — this is the WBTC-shaped bug
+    })
+    expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).toBeNull()
+  })
+
+  it('decimals mismatch → integrity failure (null), even with a matching description', async () => {
+    mockChainlinkRpc({
+      decimals: 18, // NATIVE_ETH is declared 8dp
+      roundId: 1n,
+      answer: 1_000_000_000_000_000_000n,
+      updatedAt: nowSec(),
+      answeredInRound: 1n,
+      // descriptionOverride omitted → answers truthfully with "ETH / USD", isolating decimals as
+      // the ONLY mismatched field.
+    })
+    expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).toBeNull()
+  })
+
+  it('a feed with NO declared expectation fails closed, distinct from a mismatch', async () => {
+    // getComposedFeed/getChainlinkFeed never hand out an address absent from FEED_EXPECTATIONS in
+    // production (the import-time assert guarantees it), but fetchSingleFeedRaw's own defensive
+    // check is exercised directly here via a token with genuinely no configured feed at all.
+    const NO_FEED_TOKEN = '0x000000000000000000000000000000000000dEaD'
+    expect(await fetchChainlinkPriceRaw(NO_FEED_TOKEN)).toBeNull()
+  })
+
+  describe('composed leg self-identification', () => {
+    const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+    const CBETH_ETH = '0x806b4Ac04501c29769051e42783cF04dCE41440b' // base leg, declared "CBETH / ETH" 18dp
+    const ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'    // quote leg, declared "ETH / USD" 8dp
+
+    it('base leg description mismatch fails the WHOLE composed read, even though the quote leg is fine', async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [CBETH_ETH]: {
+          decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 3_600n, answeredInRound: 10n,
+          descriptionOverride: 'wrong / pair', // base leg misidentifies
+        },
+        [ETH_USD]: { decimals: 8, roundId: 20n, answer: 300_000_000_000n, updatedAt: now - 600n, answeredInRound: 20n },
+      })
+      expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+    })
+
+    it('quote leg decimals mismatch fails the WHOLE composed read, even though the base leg is fine', async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [CBETH_ETH]: { decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now - 3_600n, answeredInRound: 10n },
+        [ETH_USD]: {
+          decimals: 6, // quote leg is declared 8dp — mismatch
+          roundId: 20n, answer: 300_000_000n, updatedAt: now - 600n, answeredInRound: 20n,
+        },
+      })
+      expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+    })
+  })
+
+  describe('identity cache does not mask a per-address difference', () => {
+    const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+    const CBETH_ETH = '0x806b4Ac04501c29769051e42783cF04dCE41440b'
+    const ETH_USD = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+
+    it('caches identity per (chainId, address) — a passing read for one address does not let a DIFFERENT mismatched address through', async () => {
+      const now = nowSec()
+      // First: NATIVE_ETH's real mainnet ETH/USD feed reads correctly and caches its identity.
+      mockChainlinkRpc({ decimals: 8, roundId: 1n, answer: 300_000_000_000n, updatedAt: now, answeredInRound: 1n })
+      expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).not.toBeNull()
+
+      // Second, same test (cache NOT cleared mid-test — only afterEach clears it): a DIFFERENT
+      // address (Base's cbETH/ETH leg, wrong chain too) with a genuinely mismatched description.
+      // If the cache were keyed on description alone, or shared across addresses, this could
+      // wrongly inherit NATIVE_ETH's cached "pass" — it must not.
+      mockComposedRpc({
+        [CBETH_ETH]: {
+          decimals: 18, roundId: 10n, answer: 1_080_000_000_000_000_000n, updatedAt: now, answeredInRound: 10n,
+          descriptionOverride: 'ETH / USD', // deliberately WRONG for this address (should be "CBETH / ETH")
+        },
+        [ETH_USD]: { decimals: 8, roundId: 20n, answer: 300_000_000_000n, updatedAt: now, answeredInRound: 20n },
+      })
+      expect(await fetchChainlinkPriceRaw(CBETH, 8453)).toBeNull()
+    })
+
+    it('re-reads a cold cache correctly after being cleared (sanity on the test harness itself)', async () => {
+      _clearFeedIdentityCache()
+      mockChainlinkRpc({ decimals: 8, roundId: 1n, answer: 300_000_000_000n, updatedAt: nowSec(), answeredInRound: 1n })
+      expect(await fetchChainlinkPriceRaw(NATIVE_ETH)).not.toBeNull()
+    })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [FIX-MAINNET-FEED-REMEDIATION] The 7 defective mainnet feeds, post-remediation.
+//
+// Per token: (a) the read now resolves to a PLAUSIBLE USD price, and (b) it still fails closed the
+// moment a leg's description is mutated — proving the price is flowing THROUGH the ADR-018 guard
+// rather than around it. Answers below are the real on-chain values read on 2026-07-29, so the
+// expected USD figures are the genuine arithmetic, not invented round numbers.
+// ─────────────────────────────────────────────────────────────
+describe('[FIX-MAINNET-FEED-REMEDIATION] remediated mainnet feeds', () => {
+  const ETH_USD = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+  const BTC_USD = '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c'
+  // Tokens
+  const GRT = '0xc944e90c64B2c07662A292be6244BDf05Cda44a7'
+  const LDO = '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32'
+  const SHIB = '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE'
+  const WBTC = '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'
+  const APE = '0x4d224452801ACEd8B2F0aeBE155379bb5D594381'
+  const PAXG = '0x45804880De22913dAFE09f4980848ECE6EcbAf78'
+  const PEPE = '0x6982508145454Ce325dDbE47a25d4ec3d2311933'
+  // Feed legs
+  const GRT_ETH = '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1'
+  const LDO_ETH = '0x4e844125952D32AcdF339BE976c98E22F6F318dB'
+  const SHIB_ETH = '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61'
+  const WBTC_BTC = '0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23'
+  const APE_USD = '0xD10aBbC76679a20055E167BB80A24ac851b37056'
+  const PAXG_USD = '0x9944D86CEB9160aF5C5feB251FD671923323f8C3'
+
+  // Real on-chain answers (2026-07-29). ETH/USD 1901.44; BTC/USD 63947.76010359.
+  const ETH_USD_ANSWER = 190_144_000_000n
+  const BTC_USD_ANSWER = 6_394_776_010_359n
+  const ethUsdLeg = (now: bigint) => ({ decimals: 8, roundId: 20n, answer: ETH_USD_ANSWER, updatedAt: now - 400n, answeredInRound: 20n })
+  const btcUsdLeg = (now: bigint) => ({ decimals: 8, roundId: 21n, answer: BTC_USD_ANSWER, updatedAt: now - 100n, answeredInRound: 21n })
+
+  // token, base leg addr, base decimals, real base answer, quote leg addr, quote leg factory,
+  // expected composed USD, and how precise the assertion can be.
+  const COMPOSED = [
+    { name: 'GRT', token: GRT, baseAddr: GRT_ETH, baseDec: 18, baseAnswer: 7_825_700_951_025n, quoteAddr: ETH_USD, quote: ethUsdLeg, usd: 0.01488, prec: 4, trueDesc: 'GRT / ETH' },
+    { name: 'LDO', token: LDO, baseAddr: LDO_ETH, baseDec: 18, baseAnswer: 187_700_448_474_460n, quoteAddr: ETH_USD, quote: ethUsdLeg, usd: 0.35688, prec: 3, trueDesc: 'LDO / ETH' },
+    { name: 'SHIB', token: SHIB, baseAddr: SHIB_ETH, baseDec: 18, baseAnswer: 2_471_866_650n, quoteAddr: ETH_USD, quote: ethUsdLeg, usd: 4.6997e-6, prec: 8, trueDesc: 'SHIB / ETH' },
+    { name: 'WBTC', token: WBTC, baseAddr: WBTC_BTC, baseDec: 8, baseAnswer: 100_024_980n, quoteAddr: BTC_USD, quote: btcUsdLeg, usd: 63963.73, prec: 0, trueDesc: 'WBTC / BTC' },
+  ]
+
+  for (const c of COMPOSED) {
+    it(`${c.name} resolves to a plausible USD price via composition (was mis-denominated before)`, async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [c.baseAddr]: { decimals: c.baseDec, roundId: 10n, answer: c.baseAnswer, updatedAt: now - 3_600n, answeredInRound: 10n },
+        [c.quoteAddr]: c.quote(now),
+      })
+      const r = await fetchChainlinkPriceRaw(c.token, 1)
+      expect(r, `${c.name} must resolve`).not.toBeNull()
+      expect(r!.price).toBeCloseTo(c.usd, c.prec)
+      // The stalest leg governs freshness (conservative).
+      expect(r!.updatedAt).toBe(Number(now - 3_600n))
+    })
+
+    it(`${c.name} still fails closed when the BASE leg's description is mutated`, async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [c.baseAddr]: {
+          decimals: c.baseDec, roundId: 10n, answer: c.baseAnswer, updatedAt: now - 3_600n, answeredInRound: 10n,
+          descriptionOverride: `${c.trueDesc} (tampered)`,
+        },
+        [c.quoteAddr]: c.quote(now),
+      })
+      expect(await fetchChainlinkPriceRaw(c.token, 1)).toBeNull()
+    })
+
+    it(`${c.name} still fails closed when the QUOTE leg's description is mutated`, async () => {
+      const now = nowSec()
+      mockComposedRpc({
+        [c.baseAddr]: { decimals: c.baseDec, roundId: 10n, answer: c.baseAnswer, updatedAt: now - 3_600n, answeredInRound: 10n },
+        [c.quoteAddr]: { ...c.quote(now), descriptionOverride: 'SOMETHING / ELSE' },
+      })
+      expect(await fetchChainlinkPriceRaw(c.token, 1)).toBeNull()
+    })
+  }
+
+  // Direct (single-leg) remediations: APE and PAXG.
+  const DIRECT = [
+    { name: 'APE', token: APE, feed: APE_USD, answer: 14_384_986n, usd: 0.14384986, prec: 6 },
+    { name: 'PAXG', token: PAXG, feed: PAXG_USD, answer: 409_000_818_404n, usd: 4090.00818404, prec: 2 },
+  ]
+  for (const d of DIRECT) {
+    it(`${d.name} resolves to a plausible USD price on its CORRECTED address`, async () => {
+      mockChainlinkRpc({ decimals: 8, roundId: 5n, answer: d.answer, updatedAt: nowSec() - 600n, answeredInRound: 5n })
+      const r = await fetchChainlinkPriceRaw(d.token, 1)
+      expect(r, `${d.name} must resolve`).not.toBeNull()
+      expect(r!.price).toBeCloseTo(d.usd, d.prec)
+    })
+
+    it(`${d.name} still fails closed when its description is mutated`, async () => {
+      mockChainlinkRpc({
+        decimals: 8, roundId: 5n, answer: d.answer, updatedAt: nowSec() - 600n, answeredInRound: 5n,
+        descriptionOverride: 'TAMPERED / USD',
+      })
+      expect(await fetchChainlinkPriceRaw(d.token, 1)).toBeNull()
+    })
+  }
+
+  it('PEPE remains UNRESOLVED — no Chainlink feed exists, so it stays blocked even on a "valid" round', async () => {
+    // Even if the dead address somehow answered with a perfectly well-formed round, its description
+    // cannot match, so the guard holds. This is the intended end state, not an oversight.
+    mockChainlinkRpc({
+      decimals: 8, roundId: 5n, answer: 1_000_000n, updatedAt: nowSec(), answeredInRound: 5n,
+      descriptionOverride: 'NOT A REAL PEPE FEED',
+    })
+    expect(await fetchChainlinkPriceRaw(PEPE, 1)).toBeNull()
+  })
+
+  it('the long-tail 24h heartbeat is honoured: a 20h-old base leg is VALID, a 37h-old one is stale', async () => {
+    // Guards the heartbeat entries added alongside this remediation. Under the bare 1h mainnet
+    // global, the 20h case would be null and the whole remediation would silently be a no-op.
+    const now = nowSec()
+    mockComposedRpc({
+      [GRT_ETH]: { decimals: 18, roundId: 10n, answer: 7_825_700_951_025n, updatedAt: now - 72_000n, answeredInRound: 10n }, // 20h
+      [ETH_USD]: ethUsdLeg(now),
+    })
+    expect(await fetchChainlinkPriceRaw(GRT, 1), '20h-old base leg must be VALID under the 36h ceiling').not.toBeNull()
+
+    _clearFeedIdentityCache()
+    mockComposedRpc({
+      [GRT_ETH]: { decimals: 18, roundId: 10n, answer: 7_825_700_951_025n, updatedAt: now - 133_200n, answeredInRound: 10n }, // 37h > 36h
+      [ETH_USD]: ethUsdLeg(now),
+    })
+    expect(await fetchChainlinkPriceRaw(GRT, 1)).toBeNull()
   })
 })

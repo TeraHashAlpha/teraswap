@@ -68,6 +68,9 @@ function makeReceipt(overrides: Partial<SettlementReceipt> = {}): SettlementRece
         effectivePrice: 2,
         protocolFeeRaw: '2000',
         networkCostWeiRaw: '100000000000000',
+        nextBestOutRaw: null,
+        nextBestSource: null,
+        aggregationValueRaw: null,
       },
     ],
     totals: {
@@ -76,6 +79,7 @@ function makeReceipt(overrides: Partial<SettlementReceipt> = {}): SettlementRece
       avgPrice: 2,
       totalProtocolFeeRaw: '2000',
       totalNetworkCostWeiRaw: '100000000000000',
+      totalAggregationValueRaw: null,
     },
     estimate: { maxSlippageBps: 300, realizedFeeBps: 20 },
     networkCostLabel: 'Network cost — covered by TeraSwap',
@@ -142,6 +146,7 @@ describe('SettlementReceiptModal', () => {
           totalInvestedRaw: '0',
           totalReceivedRaw: '0',
           avgPrice: null,
+          totalAggregationValueRaw: null,
           totalProtocolFeeRaw: '0',
           totalNetworkCostWeiRaw: '0',
         },
@@ -185,7 +190,10 @@ describe('SettlementReceiptModal', () => {
     await waitFor(() => expect(buildSettlementReceiptMock).toHaveBeenCalledTimes(1))
 
     const callArgs = buildSettlementReceiptMock.mock.calls[0][0] as { fills: unknown[] }
-    expect(callArgs.fills).toEqual([{ executionNumber: 1, txHash: '0xfill1', createdAt: '2026-01-01T00:00:00Z' }])
+    expect(callArgs.fills).toEqual([{
+      executionNumber: 1, txHash: '0xfill1', createdAt: '2026-01-01T00:00:00Z',
+      nextBestOutRaw: null, nextBestSource: null,
+    }])
   })
 
   it('never renders "free" or "gasless" anywhere (transparency brand copy tone)', async () => {
@@ -195,5 +203,105 @@ describe('SettlementReceiptModal', () => {
     const text = container.textContent?.toLowerCase() ?? ''
     expect(text).not.toContain('free')
     expect(text).not.toContain('gasless')
+  })
+})
+
+// ── [CHORE-DCA-AGGREGATION-VALUE] "Aggregation value" line — per-fill + total ──────────────
+describe('SettlementReceiptModal [CHORE-DCA-AGGREGATION-VALUE] — aggregation value', () => {
+  it('renders the per-fill line with exact delta math when a runner-up was recorded', async () => {
+    buildSettlementReceiptMock.mockResolvedValue(
+      makeReceipt({
+        fills: [
+          {
+            executionNumber: 1,
+            txHash: '0xfill1',
+            txUrl: 'https://basescan.org/tx/0xfill1',
+            timestamp: 1_700_000_000_000,
+            amountInRaw: '1000000',
+            amountOutRaw: '500000000000000000', // 0.5 WETH
+            effectivePrice: 2,
+            protocolFeeRaw: '2000',
+            networkCostWeiRaw: '100000000000000',
+            nextBestOutRaw: '480000000000000000', // 0.48 WETH — runner-up
+            nextBestSource: '1inch',
+            aggregationValueRaw: '20000000000000000', // exact delta: 0.02 WETH
+          },
+        ],
+        totals: {
+          totalInvestedRaw: '1000000',
+          totalReceivedRaw: '500000000000000000',
+          avgPrice: 2,
+          totalProtocolFeeRaw: '2000',
+          totalNetworkCostWeiRaw: '100000000000000',
+          totalAggregationValueRaw: '20000000000000000',
+        },
+      }),
+    )
+    render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
+
+    const line = await screen.findByTestId('fill-aggregation-value')
+    expect(line.textContent).toMatch(/Next-best: 1inch/)
+    expect(line.textContent).toMatch(/Aggregation value: \+0[.,]02 WETH/)
+    // Fee stays on its own, separate line — never folded into the aggregation-value text.
+    expect(line.textContent).not.toMatch(/Fee/)
+  })
+
+  it('shows "—" for a fill with no runner-up recorded (no claim, never fabricated)', async () => {
+    buildSettlementReceiptMock.mockResolvedValue(makeReceipt()) // default fixture: nextBestOutRaw null
+    render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
+
+    const line = await screen.findByTestId('fill-aggregation-value')
+    expect(line.textContent?.trim()).toBe('Aggregation value: —')
+  })
+
+  it('total "Aggregation value" line shows "—" when no fill in the position has comparison data', async () => {
+    buildSettlementReceiptMock.mockResolvedValue(makeReceipt()) // totalAggregationValueRaw: null
+    render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
+
+    const total = await screen.findByTestId('settlement-aggregation-value-total')
+    expect(total.textContent).toMatch(/—/)
+  })
+
+  it('total "Aggregation value" line renders the summed delta when present', async () => {
+    buildSettlementReceiptMock.mockResolvedValue(
+      makeReceipt({
+        totals: {
+          totalInvestedRaw: '1000000',
+          totalReceivedRaw: '500000000000000000',
+          avgPrice: 2,
+          totalProtocolFeeRaw: '2000',
+          totalNetworkCostWeiRaw: '100000000000000',
+          totalAggregationValueRaw: '20000000000000000', // 0.02 WETH
+        },
+      }),
+    )
+    render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
+
+    const total = await screen.findByTestId('settlement-aggregation-value-total')
+    expect(total.textContent).toMatch(/\+0[.,]02 WETH/)
+  })
+
+  it('never claims "free", never states a guaranteed/absolute savings claim, never names an external competitor', async () => {
+    buildSettlementReceiptMock.mockResolvedValue(
+      makeReceipt({
+        fills: [
+          {
+            executionNumber: 1, txHash: '0xfill1', txUrl: 'https://basescan.org/tx/0xfill1',
+            timestamp: 1_700_000_000_000, amountInRaw: '1000000', amountOutRaw: '500000000000000000',
+            effectivePrice: 2, protocolFeeRaw: '2000', networkCostWeiRaw: '100000000000000',
+            nextBestOutRaw: '480000000000000000', nextBestSource: '1inch',
+            aggregationValueRaw: '20000000000000000',
+          },
+        ],
+      }),
+    )
+    render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
+    await screen.findByTestId('fill-aggregation-value')
+
+    const body = screen.getByTestId('settlement-receipt-body').textContent ?? ''
+    expect(body.toLowerCase()).not.toMatch(/\bfree\b|gasless/)
+    expect(body.toLowerCase()).not.toMatch(/guaranteed|always saves|1inch\.io|paraswap\.io|uniswap\.org/i)
+    // Naming the WINNING source by its keeper-recorded label ("1inch") is fine — that IS the data;
+    // the denylist above targets marketing-style named-competitor comparisons, not this.
   })
 })
