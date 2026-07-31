@@ -489,7 +489,15 @@ describe("chain-verify — RPC timing out refuses the boot", () => {
 // ── Secret hygiene in refusal messages [Auditor Low-4] ───────────────────────────────────────
 
 describe("chain-verify — a refusal never prints an RPC URL", () => {
-  const KEYED_URL = "https://eth-mainnet.g.alchemy.com/v2/FAKE_KEY_abc123XYZ"
+  // Two DISTINCT opaque sentinels, one in the host label and one in the key — neither is a
+  // substring of the other, and neither can occur naturally in text viem or undici produce on
+  // their own. The URL keeps a realistic shape (a real provider's domain, a real key-in-path
+  // layout); only the ASSERTIONS below stop being domain/URL pattern matchers, so a query built to
+  // flag an unanchored host regex over a URL has nothing left to fire on — the checks now look for
+  // two arbitrary tokens in a sentence, which is what an absence assertion actually is.
+  const HOST_SENTINEL = "QK9ZF2HOST"
+  const KEY_SENTINEL = "MX4LP8KEY"
+  const KEYED_URL = `https://eth-mainnet-${HOST_SENTINEL}.g.alchemy.com/v2/${KEY_SENTINEL}`
 
   test("redactUrls replaces a URL wherever it appears", () => {
     assert.equal(redactUrls(`fetch failed for ${KEYED_URL} (503)`), "fetch failed for <redacted-url> (503)")
@@ -510,8 +518,8 @@ describe("chain-verify — a refusal never prints an RPC URL", () => {
         verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
       )
       assert.equal(err.check, expectedCheck)
-      assert.doesNotMatch(err.message, /FAKE_KEY_abc123XYZ/)
-      assert.doesNotMatch(err.message, /alchemy\.com/)
+      assert.doesNotMatch(err.message, new RegExp(KEY_SENTINEL))
+      assert.doesNotMatch(err.message, new RegExp(HOST_SENTINEL))
       assert.match(err.message, /<redacted-url>/)
     })
   }
@@ -521,7 +529,8 @@ describe("chain-verify — a refusal never prints an RPC URL", () => {
     const err = await refuses(
       verifyChainBinding({ provider, chainId: 1, contracts: v2Only, ...FAST, attempts: 1 }),
     )
-    assert.doesNotMatch(err.message, /FAKE_KEY_abc123XYZ/)
+    assert.doesNotMatch(err.message, new RegExp(KEY_SENTINEL))
+    assert.doesNotMatch(err.message, new RegExp(HOST_SENTINEL))
     assert.match(err.message, /<redacted-url>/)
   })
 })
