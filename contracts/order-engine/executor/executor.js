@@ -37,6 +37,13 @@
  *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet). One keeper
  *                                  INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum One).
  *
+ * BOOT REFUSAL [FIX-KEEPER-BOOT-CHAIN-VERIFICATION]: before any work, main() asks the chain to
+ * confirm this config (chain-verify.js) — eth_chainId must equal CHAIN_ID, the executor address
+ * must hold code THERE, and the contract must self-identify via ORDER_TYPEHASH(). A mismatch, an
+ * unreachable/slow RPC or a malformed answer exits non-zero after a bounded retry; the keeper never
+ * warns and continues. "Keeper won't start" with a FATAL chain-verify line is that gate, not a bug:
+ * fix RPC_URL / CHAIN_ID / ORDER_EXECUTOR_ADDRESS so they describe the same chain.
+ *
  * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
  *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
  *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec. Unset ⇒ resolved
@@ -144,6 +151,17 @@ import { getGasTierConfig, resolveGasTier as resolveGasTierForChain, assertTierO
 // (unknown chain ⇒ no feed ⇒ no read) so the ETH leg of the DCA floor reference can never be
 // priced off another chain's aggregator.
 import { resolveEthUsdFeed } from "./eth-usd-feed.js"
+// [FIX-KEEPER-BOOT-CHAIN-VERIFICATION] Boot-time, FAIL-CLOSED verification that the RPC really IS
+// CHAIN_ID and that the configured executor address is a deployed TeraSwapOrderExecutor there
+// (eth_chainId + eth_getCode + an ORDER_TYPEHASH() self-identification read, ADR-018's pattern).
+// validateConfig only checks the address is PRESENT — presence is not identity, and the same
+// deployer/nonce lands on the same address on every chain.
+import {
+  verifyChainBinding,
+  createRpcProbe,
+  EXPECTED_ORDER_TYPEHASH_V2,
+  EXPECTED_ORDER_TYPEHASH_V3,
+} from "./chain-verify.js"
 
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
@@ -1940,6 +1958,54 @@ async function main() {
     chain,
     transport: http(RPC_URL),
   })
+
+  // [FIX-KEEPER-BOOT-CHAIN-VERIFICATION] ASK THE CHAIN before doing any work. Everything above is
+  // config asserting what an address is; this is the first and only point where the keeper
+  // verifies it against reality — the RPC's own chain id, real bytecode at the executor address on
+  // THAT chain, and the contract self-identifying via ORDER_TYPEHASH() as the exact Order struct
+  // this process encodes calldata for. Runs before the signer, the health server, the event
+  // watcher and the first cycle, so a mis-bound keeper never touches an order. Any failure —
+  // mismatch, empty code, unreachable RPC, timeout, malformed answer — exits non-zero after a
+  // bounded retry; there is deliberately no warn-and-continue branch.
+  try {
+    await verifyChainBinding({
+      provider: createRpcProbe(publicClient),
+      chainId: CHAIN_ID,
+      contracts: [
+        {
+          label: "ORDER_EXECUTOR_ADDRESS (v2)",
+          address: CONTRACT_ADDRESS,
+          expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
+        },
+        // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
+        // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
+        // with the v3 typehash, which also catches a v2/v3 address swap in the env.
+        ...(V3_CONTRACT_ADDRESS
+          ? [
+              {
+                label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
+                address: V3_CONTRACT_ADDRESS,
+                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
+              },
+            ]
+          : []),
+      ],
+      log,
+    })
+  } catch (err) {
+    console.error(err.message)
+    // Name the RPC by HOST only — an RPC_URL routinely carries the provider API key in its path,
+    // and a boot-refusal log is exactly the text an operator pastes into a ticket.
+    let rpcHost = "unparseable RPC_URL"
+    try {
+      rpcHost = new URL(RPC_URL).host
+    } catch {}
+    console.error(
+      `   Refusing to boot: the keeper will not execute orders against an unverified chain/contract ` +
+        `binding (CHAIN_ID=${CHAIN_ID}, RPC host=${rpcHost}).`,
+    )
+    process.exit(1)
+  }
 
   // [C-02/B-01] Use KMS/Vault account if configured, otherwise plaintext key
   const account = await createExecutorAccount()
