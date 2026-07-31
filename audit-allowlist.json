@@ -11,23 +11,9 @@
     "`overrides` in package.json (form-data 4.0.6, vite 8.0.16, undici 7.28.0). npm audit reports 0",
     "high/critical. The committed lockfile pins those versions, so `npm ci`/`npm install` install them",
     "cleanly while .npmrc keeps min-release-age=7 for all other (future) dependency resolution.",
-    "STATUS 2026-07-27: added brace-expansion GHSA-mh99-v99m-4gvg — fix 5.0.8 blocked by",
-    "min-release-age=7 until ~2026-07-30 (verified: `npm install --package-lock-only` with the",
-    "override bumped to 5.0.8 fails ETARGET, 'No matching version found ... with a date before",
-    "20/07/2026'). TODO: replace with an `overrides` pin once it ages in."
+    "STATUS 2026-07-31: brace-expansion GHSA-mh99-v99m-4gvg entry removed — fix 5.0.8 aged in on",
+    "2026-07-30, now pinned via `overrides` in package.json (\"brace-expansion\": \"5.0.8\" and",
+    "\"minimatch@10.2.5\": { \"brace-expansion\": \"5.0.8\" }). npm audit reports 0 high/critical."
   ],
-  "allow": [
-    {
-      "id": "GHSA-mh99-v99m-4gvg",
-      "package": "brace-expansion",
-      "severity": "high",
-      "vulnerableRange": "<=5.0.7",
-      "installed": "1.1.16 (via @eslint/eslintrc -> minimatch@3.1.5) and 5.0.7 (via glob@13.0.6/@typescript-eslint/typescript-estree -> minimatch@10.2.5, both existing package.json overrides)",
-      "fixedIn": "5.0.8",
-      "fixPublished": "2026-07-23",
-      "ageInOn": "2026-07-30",
-      "runtimePath": "DEV/BUILD-TOOLING ONLY, all 3 dependency paths verified via `npm ls --all`: (1) @eslint/eslintrc -> minimatch@3.1.5 (ESLint config resolution, lint-time); (2) eslint-config-next -> typescript-eslint -> @typescript-eslint/typescript-estree -> minimatch@10.2.5 (TS-ESLint parsing, lint-time); (3) @capacitor/cli -> rimraf -> glob@13.0.6 -> minimatch@10.2.5 (Capacitor mobile CLI — only a type-only `import type` reference from capacitor.config.ts, erased at compile time, never bundled/executed in the Next.js server or client runtime). All three process glob patterns from repo-committed config files (eslint config, tsconfig, capacitor.config), never from an HTTP request body or other external/user-supplied input, so the DoS (attacker-controlled expansion pattern) is not reachable in production.",
-      "reason": "Fix 5.0.8 is blocked by .npmrc min-release-age=7 until ~2026-07-30 (published 2026-07-23, only 4 days old). TODO: replace this entry with `overrides` pins \"brace-expansion\": \"5.0.8\" and `\"minimatch@10.2.5\": { \"brace-expansion\": \"5.0.8\" }` once it ages in."
-    }
-  ]
+  "allow": []
 }

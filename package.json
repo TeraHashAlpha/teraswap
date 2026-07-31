@@ -83,9 +83,9 @@
     "@next/swc-win32-x64-msvc": "16.2.6"
   },
   "overrides": {
-    "brace-expansion": "1.1.16",
+    "brace-expansion": "5.0.8",
     "minimatch@10.2.5": {
-      "brace-expansion": "5.0.7"
+      "brace-expansion": "5.0.8"
     },
     "js-yaml": "4.3.0",
     "axios": "1.18.1",
