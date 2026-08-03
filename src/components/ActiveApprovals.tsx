@@ -93,7 +93,7 @@ function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (
 
 export default function ActiveApprovals() {
   const { address } = useAccount()
-  const { approvals, markRevoked, getActionable } = useActiveApprovals()
+  const { approvals: _approvals, markRevoked, getActionable } = useActiveApprovals()
   const actionable = getActionable()
 
   // Don't render at all if no actionable approvals

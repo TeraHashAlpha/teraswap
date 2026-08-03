@@ -70,7 +70,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 
 export default function QuoteBreakdown({
   meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, tokenInUsdPrice, tokenOutUsdPrice, approvalPlan, onEditSlippage, gasEstimate,
-  smartMevApplied = false, mevExposedBest = false, onUseGasless,
+  smartMevApplied = false, mevExposedBest: _mevExposedBest = false, onUseGasless,
   onRefresh, refreshing = false, chainId = DEFAULT_CHAIN_ID,
 }: Props) {
   // [SPRINT-9Q Q2] Rate-direction toggle (display-only). Persisted for the session so the

@@ -270,7 +270,7 @@ const MAINNET_FEEDS: Record<string, FeedEntry> = {
 // [H-01] Sepolia Chainlink feeds removed for mainnet deployment.
 
 /** Get Chainlink feeds for a given chainId */
-export function getChainlinkFeeds(chainId: number): Record<string, FeedEntry> {
+export function getChainlinkFeeds(_chainId: number): Record<string, FeedEntry> {
   // Only mainnet feeds supported in production
   return MAINNET_FEEDS
 }

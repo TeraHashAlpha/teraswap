@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
         'X-RateLimit-Reset': String(rateCheck.resetAt),
       },
     })
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal proxy error' } },
       { status: 500 },

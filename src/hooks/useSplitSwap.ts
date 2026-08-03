@@ -461,7 +461,7 @@ export function useSplitSwap(
     setStatus('executing')
 
     let successCount = 0
-    let errorCount = 0
+    let _errorCount = 0
 
     try {
     for (let i = 0; i < plannedLegs.length; i++) {
@@ -500,13 +500,13 @@ export function useSplitSwap(
           })
         } else {
           updateLeg(i, { status: 'error', error: receipt === 'reverted' ? 'Transaction reverted' : 'Confirmation timeout' })
-          errorCount++
+          _errorCount++
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
         const isUserReject = msg.toLowerCase().includes('user rejected') || msg.toLowerCase().includes('user denied')
         updateLeg(i, { status: 'error', error: isUserReject ? 'Rejected in wallet' : msg.slice(0, 100) })
-        errorCount++
+        _errorCount++
         // If the user rejected, abort the remaining legs.
         if (isUserReject) {
           setErrorMessage('Transaction rejected in wallet.')

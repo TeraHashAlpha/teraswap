@@ -15,7 +15,7 @@ import * as dns from 'node:dns/promises'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as readline from 'node:readline'
-import { MONITORED_ENDPOINTS, type MonitoredEndpoint } from '../src/lib/monitored-endpoints'
+import { MONITORED_ENDPOINTS } from '../src/lib/monitored-endpoints'
 
 // ── Types ───────────────────────────────────────────────
 

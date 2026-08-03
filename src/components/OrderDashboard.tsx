@@ -34,7 +34,7 @@ type FilterType = 'active' | 'completed' | 'cancelled'
 export default function OrderDashboard() {
   const { address } = useAccount()
   const {
-    orders, activeOrders, historyOrders,
+    orders, activeOrders, historyOrders: _historyOrders,
     cancelOrder, cancelAllOrders, removeOrder,
     pendingCancel, confirmCancel, clearPendingCancel,
     isLoading,
