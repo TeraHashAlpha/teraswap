@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useAccount, useBalance, useReadContracts } from 'wagmi'
-import { formatUnits, erc20Abi } from 'viem'
+import { useAccount, useBalance } from 'wagmi'
+import { formatUnits } from 'viem'
 import { DEFAULT_TOKENS, isNativeETH, type Token, type TokenCategory } from '@/lib/tokens'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -76,7 +76,7 @@ function logo1inch(address: string): string {
   return `https://tokens.1inch.io/${address.toLowerCase()}.png`
 }
 
-interface RawBalance {
+interface _RawBalance {
   raw: bigint
   formatted: string
 }

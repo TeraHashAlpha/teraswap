@@ -45,7 +45,7 @@ const ATTACKER_ADDR = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 // 1inch AggregationRouter v6 — a known whitelisted router
 const ROUTER_1INCH_V6 = '0x111111125421ca6dc452d289314280a0f8842a65'
 // 0x Exchange Proxy
-const ROUTER_0X = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
+const _ROUTER_0X = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
 
 // Build Uniswap V3 exactInputSingle (selector 0x04e45aaf, Group C of
 // VALIDATED_SELECTORS — single tuple, no dynamic types) with a specific

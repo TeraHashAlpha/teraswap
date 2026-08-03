@@ -71,7 +71,7 @@ import { useDepegCheck } from '@/hooks/useDepegCheck'
 
 // ── Map token symbols to Chainlink feeds ─────────────────
 // Returns empty string if no feed found — callers must check before submitting.
-function findPriceFeed(token: Token, chainId: number): string {
+function _findPriceFeed(token: Token, chainId: number): string {
   const feeds = getChainlinkFeeds(chainId)
   const key = `${token.symbol}/USD`
   return feeds[key]?.address ?? ''
@@ -154,11 +154,11 @@ export function outputHasNoResolvableFeed(token: Token | null, chainId: number):
 
 export default function DCAPanel() {
   const { address, isConnected } = useAccount()
-  const chainId = useChainId()
+  const _chainId = useChainId()
   const {
     dcaOrders,
-    activeOrders,
-    historyOrders,
+    activeOrders: _activeOrders,
+    historyOrders: _historyOrders,
     latestEvent,
     isSubmitting,
     createOrder,

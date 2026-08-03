@@ -121,7 +121,7 @@ export function useApproval(
     writeContract: writeApprovePermit2,
     data: approvePermit2Hash,
     error: approvePermit2Error,
-    reset: resetApprovePermit2,
+    reset: _resetApprovePermit2,
   } = useWriteContract()
 
   const { isSuccess: permit2ApproveConfirmed } = useWaitForTransactionReceipt({
@@ -133,7 +133,7 @@ export function useApproval(
     writeContract: writeExactApprove,
     data: exactApproveHash,
     error: exactApproveError,
-    reset: resetExactApprove,
+    reset: _resetExactApprove,
   } = useWriteContract()
 
   const { isSuccess: exactApproveConfirmed } = useWaitForTransactionReceipt({

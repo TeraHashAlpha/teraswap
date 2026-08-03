@@ -14,7 +14,6 @@ import {
   isSystemHalted,
   clearHalt,
   _constants,
-  type CircuitBreakerResult,
 } from './circuit-breaker'
 import type { SourceStatus } from './source-state-machine'
 

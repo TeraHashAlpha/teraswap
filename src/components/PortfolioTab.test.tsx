@@ -45,7 +45,7 @@ import PortfolioTab from './PortfolioTab'
 
 // ─── Fixtures / helpers ──────────────────────────────────
 
-function token(opts: Partial<Token> & Pick<Token, 'symbol' | 'address'>): Token {
+function _token(opts: Partial<Token> & Pick<Token, 'symbol' | 'address'>): Token {
   return {
     name: opts.symbol,
     decimals: 18,

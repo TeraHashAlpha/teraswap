@@ -312,7 +312,7 @@ export function playSwapSuccess() {
 
     // ── Layer 3: Harmonic chord (major triad) ──
     const chordFreqs = [220, 277, 330, 440] // A3, C#4, E4, A4
-    chordFreqs.forEach((freq, i) => {
+    chordFreqs.forEach((freq, _i) => {
       const osc = ctx.createOscillator()
       osc.type = 'sine'
       osc.frequency.setValueAtTime(freq, t + 0.1)

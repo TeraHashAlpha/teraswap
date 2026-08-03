@@ -920,7 +920,7 @@ describe('Telegram webhook', () => {
   describe('alert inline keyboard (buildAlertKeyboard)', () => {
     it('attaches 3 buttons for degraded transition', async () => {
       // Import the real function (not the mocked one)
-      const { buildAlertKeyboard } = await import('@/lib/alert-channels/telegram')
+      const { buildAlertKeyboard: _buildAlertKeyboard } = await import('@/lib/alert-channels/telegram')
       // Since we mocked the module, we need to test via the actual implementation
       // Instead, we test that parseCallbackData can parse the expected callback_data formats
       const activateData = parseCallbackData('activate:cowswap')

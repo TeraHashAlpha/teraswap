@@ -29,13 +29,13 @@ vi.mock('wagmi', () => ({
 // useEthGasCost: returns a fresh `estimate` function on each render.
 // The hotfix captures it via ref so doFetch identity stays stable —
 // the test that pins HF-L-01 fact #1 verifies exactly this.
-let estimateCallCount = 0
+let _estimateCallCount = 0
 vi.mock('./useEthGasCost', () => ({
   useEthGasCost: vi.fn(() => ({
     ethPrice: 2000,
     gasPriceGwei: 20,
     estimate: () => {
-      estimateCallCount++
+      _estimateCallCount++
       return { eth: 0.001, usd: 2 }
     },
   })),
@@ -97,7 +97,7 @@ const VALID_RESPONSE = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  estimateCallCount = 0
+  _estimateCallCount = 0
 })
 
 afterEach(() => {

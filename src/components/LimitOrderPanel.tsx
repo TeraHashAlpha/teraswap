@@ -68,7 +68,7 @@ export default function LimitOrderPanel() {
   const [tab, setTab] = useState<'create' | 'orders'>('create')
   const { limitOrders, latestEvent, isSubmitting, createOrder, pendingOrder, confirmOrder, clearPendingOrder, cancelOrder, cancelAllOrders, removeOrder, pendingCancel, confirmCancel, clearPendingCancel } = useOrderEngine()
   const { address } = useAccount()
-  const chainId = useChainId()
+  const _chainId = useChainId()
 
   const { toast } = useToast()
 

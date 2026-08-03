@@ -13,7 +13,7 @@
  *     amber warning triangle (the import flow already warns).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, cleanup } from '@testing-library/react'
 import { isAddress } from 'viem'
 
 // Verification is chain-aware (isVerifiedToken) and resolved against the active

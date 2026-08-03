@@ -56,7 +56,6 @@
  */
 
 const { CHAIN } = require('../helpers/chains') // dimension-adapters helper — path relative to the FORK, adjust on import
-const { Adapter, FetchOptions } = require('../adapter.type') // types only; erased at runtime for a plain .js adapter
 
 // [SwapWithFee topic0 — mirrors TOPICS.SwapWithFee in src/lib/on-chain-monitor.ts]
 const SWAP_WITH_FEE_EVENT =

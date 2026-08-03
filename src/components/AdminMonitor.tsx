@@ -352,7 +352,7 @@ function OverviewTab({ dashboard, metrics, period, allTrades }: {
 }
 
 // ── Revenue Tab ──
-function RevenueTab({ dashboard, allTrades, period }: { dashboard: DashboardData; allTrades: TradeEvent[]; period: Period }) {
+function RevenueTab({ dashboard: _dashboard, allTrades, period }: { dashboard: DashboardData; allTrades: TradeEvent[]; period: Period }) {
   // Compute totals from filtered trades
   const totalFees = useMemo(() => allTrades.reduce((s, t) => s + t.feeUsd, 0), [allTrades])
   const totalVolume = useMemo(() => allTrades.reduce((s, t) => s + t.volumeUsd, 0), [allTrades])
@@ -782,7 +782,7 @@ function WalletsTab({ dashboard, allTrades, period }: { dashboard: DashboardData
 }
 
 // ── Activity Tab ──
-function ActivityTab({ trades, period }: { trades: TradeEvent[]; period: Period }) {
+function ActivityTab({ trades, period: _period }: { trades: TradeEvent[]; period: Period }) {
   const typeColor: Record<string, string> = {
     swap: '#4fc3f7', dca_buy: '#60A5FA', limit_fill: '#A78BFA', sltp_trigger: '#FB923C',
   }
