@@ -33,7 +33,7 @@
  *   - Exit 0 with a message when there is nothing new (idempotent).
  */
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -82,7 +82,7 @@ function main() {
 
   if (files.length === 0) {
     console.log('[commit-audit-report] nothing new under Audits cadence dirs — done.')
-    process.exit(0)
+    return 0 // no worktree created yet — nothing to clean up
   }
   console.log(`[commit-audit-report] ${files.length} report(s) to persist:\n  ${files.join('\n  ')}`)
 
@@ -97,7 +97,15 @@ function main() {
   }
 
   // 3. Temp detached worktree → copy reports in → signed commit → push.
+  //
+  // [FIX-AUDIT-WORKTREE-CLEANUP] Every exit below this point sets `exitCode` and falls through to
+  // `finally` rather than calling process.exit() directly — process.exit() terminates the process
+  // immediately without running pending finally blocks, which is exactly how ~28 worktrees under
+  // this prefix were orphaned (a `process.exit()` inside this try, past `worktree add`, on every
+  // early-return run). Returning normally lets `finally` — and the process.exit() call in the
+  // import.meta.url guard below, made only after main() itself has returned — run every time.
   const tmp = mkdtempSync(join(tmpdir(), 'audit-cadence-'))
+  let exitCode = 0
   try {
     git(['worktree', 'add', '--detach', tmp, base])
 
@@ -117,35 +125,51 @@ function main() {
         `[commit-audit-report] ABORT: the following report(s) already exist on origin/${BRANCH} as ` +
           `GitHub Action output and this run would overwrite them — refusing to commit:\n  ${conflicts.join('\n  ')}`,
       )
-      process.exit(1)
+      exitCode = 1
+    } else {
+      for (const f of files) {
+        mkdirSync(join(tmp, dirname(f)), { recursive: true })
+        cpSync(join(REPO, f), join(tmp, f), { preserveTimestamps: true })
+      }
+      git(['add', '--', ...CADENCE_DIRS], tmp)
+      // Anything staged? (report may already be on the branch from a prior run)
+      const staged = git(['diff', '--cached', '--name-only'], tmp).split('\n').filter(Boolean)
+      if (staged.length === 0) {
+        console.log('[commit-audit-report] all reports already on the branch — done.')
+      } else {
+        const names = staged.map((f) => f.split('/').pop())
+        const summary =
+          names.length <= 6 ? names.join(', ') : `${names.slice(0, 6).join(', ')} +${names.length - 6} more`
+        git(['commit', '-m', `docs(audits): cadence report(s) ${summary} [auto]`], tmp)
+        git(['push', 'origin', `HEAD:refs/heads/${BRANCH}`], tmp)
+        console.log(`[commit-audit-report] pushed ${staged.length} file(s) to origin/${BRANCH}.`)
+      }
     }
-
-    for (const f of files) {
-      mkdirSync(join(tmp, dirname(f)), { recursive: true })
-      cpSync(join(REPO, f), join(tmp, f), { preserveTimestamps: true })
-    }
-    git(['add', '--', ...CADENCE_DIRS], tmp)
-    // Anything staged? (report may already be on the branch from a prior run)
-    const staged = git(['diff', '--cached', '--name-only'], tmp).split('\n').filter(Boolean)
-    if (staged.length === 0) {
-      console.log('[commit-audit-report] all reports already on the branch — done.')
-      process.exit(0)
-    }
-    const names = staged.map((f) => f.split('/').pop())
-    const summary =
-      names.length <= 6 ? names.join(', ') : `${names.slice(0, 6).join(', ')} +${names.length - 6} more`
-    git(['commit', '-m', `docs(audits): cadence report(s) ${summary} [auto]`], tmp)
-    git(['push', 'origin', `HEAD:refs/heads/${BRANCH}`], tmp)
-    console.log(`[commit-audit-report] pushed ${staged.length} file(s) to origin/${BRANCH}.`)
   } finally {
     try {
       git(['worktree', 'remove', '--force', tmp])
     } catch {
       rmSync(tmp, { recursive: true, force: true })
     }
+    try {
+      git(['worktree', 'prune'])
+    } catch {
+      // best-effort — a failed prune here must not mask the run's real exitCode
+    }
   }
+  return exitCode
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main()
+// realpathSync, not a raw string compare: on macOS /tmp is a symlink to /private/tmp, so
+// import.meta.url (always the realpath) would silently never match a bare process.argv[1] and
+// main() would never run — this was caught by a dry run through a /tmp sandbox during review.
+const isMain = (() => {
+  try {
+    return process.argv[1] !== undefined && import.meta.url === `file://${realpathSync(process.argv[1])}`
+  } catch {
+    return false
+  }
+})()
+if (isMain) {
+  process.exit(main())
 }
