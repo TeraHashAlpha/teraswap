@@ -7,7 +7,7 @@
     "dev:fork": "NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545 next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --max-warnings 128",
+    "lint": "eslint . --max-warnings 94",
     "typecheck": "tsc --noEmit",
     "check:circular": "node scripts/check-circular.mjs",
     "guard:check": "vitest run src/lib/chains/catalog-address-guard.test.ts",
