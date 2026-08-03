@@ -6,7 +6,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { SUPABASE_ORDERS_TABLE, SUPABASE_EXECUTIONS_TABLE } from './config'
+import { SUPABASE_ORDERS_TABLE } from './config'
 import { ordersReadHeaders, ReadAuthRequiredError } from './read-auth'
 import type { AutonomousOrderStatus } from './types'
 
@@ -64,17 +64,6 @@ export interface OrderRow {
   executed_at: string | null
 }
 
-// ── Execution row type ───────────────────────────────────
-export interface ExecutionRow {
-  id: string
-  order_id: string
-  execution_number: number
-  amount_in: string
-  amount_out: string
-  tx_hash: string
-  created_at: string
-}
-
 // ── Create order (via server-side API — bypasses RLS) ────
 export async function createOrderInSupabase(params: {
   wallet: string
@@ -104,6 +93,13 @@ export async function createOrderInSupabase(params: {
   tokenOutSymbol: string
   tokenInDecimals: number
   tokenOutDecimals: number
+  // [SPRINT-V3-P2 / ADR-013 §1] Present ONLY for a v3-signed order — the server uses this exact
+  // top-level field (not orderData.maxSlippageBps) to decide the v2/v3 verification path.
+  maxSlippageBps?: number
+  // [SPRINT-P1B] The keccak256 the user actually SIGNED into the struct. MUST be sent for a pinned
+  // route: the server rebuilds the EIP-712 message for recovery and falls back to ZeroHash when
+  // this is absent, so omitting it would fail recovery with "Signature mismatch".
+  routerDataHash?: `0x${string}`
 }): Promise<OrderRow | null> {
   // Submitting order via API
 
@@ -135,6 +131,12 @@ export async function createOrderInSupabase(params: {
         orderData: params.orderData,
         tokenInDecimals: params.tokenInDecimals,
         tokenOutDecimals: params.tokenOutDecimals,
+        // [SPRINT-V3-P2] Omitted entirely (undefined ⇒ dropped by JSON.stringify) for a v2 order.
+        ...(params.maxSlippageBps !== undefined ? { maxSlippageBps: params.maxSlippageBps } : {}),
+        // [SPRINT-P1B] Omitted for DCA (the server's ZeroHash fallback is then correct, matching
+        // what was signed). Sent verbatim for a pinned non-DCA route so recovery uses the SIGNED
+        // hash, and so the server can cross-check it against orderData.routerData.
+        ...(params.routerDataHash !== undefined ? { routerDataHash: params.routerDataHash } : {}),
       }),
     })
 
@@ -237,24 +239,6 @@ export async function cancelOrderInSupabase(
     console.error('[OrderEngine] cancelOrder failed')
     return false
   }
-}
-
-// ── Fetch DCA executions ─────────────────────────────────
-export async function fetchDCAExecutions(orderId: string): Promise<ExecutionRow[]> {
-  const client = getClient()
-  if (!client) return []
-
-  const { data, error } = await client
-    .from(SUPABASE_EXECUTIONS_TABLE)
-    .select('*')
-    .eq('order_id', orderId)
-    .order('execution_number', { ascending: true })
-
-  if (error) {
-    console.error('[OrderEngine] Supabase executions fetch error:', error.message)
-    return []
-  }
-  return data ?? []
 }
 
 // ── Subscribe to order status changes ────────────────────

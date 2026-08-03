@@ -7,7 +7,7 @@ import {
   ledgerWallet,
   injectedWallet,
 } from '@rainbow-me/rainbowkit/wallets'
-import { mainnet, base } from 'wagmi/chains'
+import { mainnet, base, arbitrum } from 'wagmi/chains'
 import { http, fallback } from 'wagmi'
 
 // ── RPC Configuration with Fallback ──────────────────────
@@ -35,13 +35,26 @@ function buildMainnetTransport() {
     if (fallbackRpc2) transports.push(http(fallbackRpc2, { timeout: 12_000 }))
   }
 
-  // Last resort: wagmi default public RPC (CORS-safe in browser)
-  transports.push(http(undefined, { timeout: 15_000 }))
+  // No implicit/URL-less http() entry here: an unconfigured `http(undefined)`
+  // resolves to viem's built-in chain default (eth.merkle.io for mainnet),
+  // an endpoint we never chose and that isn't CORS-allowlisted for the
+  // browser. Every RPC URL used must be explicit — see Base/Arbitrum below.
+  //
+  // Server-only last resort, only reached if no primary/fallback env vars are
+  // set: an EXPLICIT written-down URL (same constant used by src/lib/rpc.ts
+  // and src/lib/on-chain-monitor.ts), not viem's implicit chain default.
+  if (typeof window === 'undefined' && transports.length === 0) {
+    transports.push(http('https://eth.llamarpc.com', { timeout: 15_000 }))
+  }
 
   // If only one transport, return it directly (no fallback wrapper needed)
   if (transports.length === 1) return transports[0]
 
-  return fallback(transports, { rank: true, retryCount: 2 })
+  // No `rank`: /api/rpc (our privacy-preserving proxy) must stay authoritative
+  // and never be demoted below a fallback by a latency/stability heuristic —
+  // rank:true also runs an unbounded background pinger against every
+  // transport in the array for the client's lifetime.
+  return fallback(transports, { retryCount: 2 })
 }
 
 // [BUGFIX] Validate WalletConnect projectId — empty string causes silent failures
@@ -100,12 +113,16 @@ export const WALLET_GROUPS = [
 export const config = getDefaultConfig({
   ...WALLETCONNECT_METADATA,
   projectId: walletConnectProjectId,
-  chains: [mainnet, base],
+  chains: [mainnet, base, arbitrum],
   wallets: WALLET_GROUPS,
   transports: {
     [mainnet.id]: buildMainnetTransport(),
     [base.id]: fallback([
       http(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', { timeout: 10_000 }),
+    ]),
+    [arbitrum.id]: fallback([
+      http(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', { timeout: 10_000 }),
+      http('https://arb1.arbitrum.io/rpc'),
     ]),
   },
   ssr: true,

@@ -54,3 +54,49 @@ test("returns null for non-SwapFailed data", () => {
   assert.strictEqual(decodeSwapFailed(undefined), null)
   assert.strictEqual(decodeSwapFailed("not-hex"), null)
 })
+
+// ── [FIX-P1B-M01] The executor's own market/route custom errors ─────────────────────────────
+import { decodeExecutorMarketRevert, EXECUTOR_MARKET_REVERT_SELECTORS } from "./revert-decode.js"
+
+test("EXECUTOR_MARKET_REVERT_SELECTORS pins the real selectors (keccak256 of the error signature)", () => {
+  assert.strictEqual(EXECUTOR_MARKET_REVERT_SELECTORS.InsufficientOutput, "0xbb2875c3")
+  assert.strictEqual(EXECUTOR_MARKET_REVERT_SELECTORS.PriceConditionNotMet, "0x3bef7afd")
+})
+
+test("decodes a raw InsufficientOutput() revert (no payload to ABI-decode)", () => {
+  const out = decodeExecutorMarketRevert("0xbb2875c3")
+  assert.ok(out)
+  assert.strictEqual(out.name, "InsufficientOutput")
+})
+
+test("decodes a raw PriceConditionNotMet() revert", () => {
+  const out = decodeExecutorMarketRevert("0x3bef7afd")
+  assert.ok(out)
+  assert.strictEqual(out.name, "PriceConditionNotMet")
+})
+
+test("is case-insensitive on the selector", () => {
+  const out = decodeExecutorMarketRevert("0xBB2875C3")
+  assert.ok(out)
+  assert.strictEqual(out.name, "InsufficientOutput")
+})
+
+test("returns null for SwapFailed's own selector (a different revert class)", () => {
+  assert.strictEqual(decodeExecutorMarketRevert("0xff9fa595"), null)
+})
+
+test("returns null for a PERMANENT-cause executor error (must NOT be classified as market)", () => {
+  // OrderExpired() = 0xc56873ba — deliberately absent from the market table.
+  assert.strictEqual(decodeExecutorMarketRevert("0xc56873ba"), null)
+})
+
+test("returns null for non-hex / absent data", () => {
+  assert.strictEqual(decodeExecutorMarketRevert(null), null)
+  assert.strictEqual(decodeExecutorMarketRevert(undefined), null)
+  assert.strictEqual(decodeExecutorMarketRevert("not-hex"), null)
+  assert.strictEqual(decodeExecutorMarketRevert(""), null)
+})
+
+test("returns null for an unrelated selector", () => {
+  assert.strictEqual(decodeExecutorMarketRevert("0x12345678"), null)
+})

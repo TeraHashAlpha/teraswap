@@ -32,8 +32,11 @@ export async function GET(req: NextRequest) {
       return q
     }
 
-    // Get counts per status in parallel (now all apply wallet filter)
-    const [active, executed, cancelled, expired, total] = await Promise.all([
+    // Get counts per status in parallel (now all apply wallet filter).
+    // [CHORE-DCA-VISIBILITY-AND-STATS] `failed` was previously omitted, so the
+    // per-status buckets didn't sum to `total` (recon: 35 total vs 28 counted —
+    // the 7 keeper-`failed` orders were invisible). Now counted.
+    const [active, executed, cancelled, expired, failed, total] = await Promise.all([
       ordersQuery()
         .eq('status', 'active')
         .then(r => r.count ?? 0),
@@ -47,18 +50,22 @@ export async function GET(req: NextRequest) {
         .eq('status', 'expired')
         .then(r => r.count ?? 0),
       ordersQuery()
+        .eq('status', 'failed')
+        .then(r => r.count ?? 0),
+      ordersQuery()
         .then(r => r.count ?? 0),
     ])
 
-    // Get recent executions count (last 24h)
+    // Get recent executions count (last 24h). order_executions has no `wallet`
+    // or `executed_at` column — timestamp is `created_at`, wallet is via join to orders.
     const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString()
     let execQuery = supabase
       .from('order_executions')
-      .select('*', { count: 'exact', head: true })
-      .gte('executed_at', oneDayAgo)
+      .select('*, orders!inner(wallet)', { count: 'exact', head: true })
+      .gte('created_at', oneDayAgo)
     // If wallet filter provided, only count executions for that wallet's orders
     if (wallet) {
-      execQuery = execQuery.eq('wallet', wallet.toLowerCase())
+      execQuery = execQuery.eq('orders.wallet', wallet.toLowerCase())
     }
     const { count: recentExecutions } = await execQuery
 
@@ -68,6 +75,7 @@ export async function GET(req: NextRequest) {
       executed,
       cancelled,
       expired,
+      failed,
       recentExecutions24h: recentExecutions ?? 0,
     })
   } catch (err: unknown) {

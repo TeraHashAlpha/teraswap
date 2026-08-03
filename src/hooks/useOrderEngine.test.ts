@@ -396,6 +396,45 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
       expect.any(Function),
     )
   })
+
+  // [SPRINT-V3-P3] The refuse-guard MUST stay wherever v3 is unconfigured (real config.ts — v3
+  // is null on every chain today). A v3-shaped order (order_data carries maxSlippageBps) must
+  // still be refused, never silently mis-sent through the v2 cancelOrder path.
+  it('cancelOrder REFUSES a v3 order when v3 is NOT configured on this chain (real, unmocked config)', async () => {
+    mockFetchUserOrders.mockResolvedValue([makeRow({
+      order_data: {
+        owner: ADDRESS,
+        tokenIn: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+        tokenOut: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        amountIn: '1000000000000000000',
+        minAmountOut: '2900000000',
+        maxSlippageBps: 300,
+        orderType: 2,
+        condition: 0,
+        targetPrice: '0',
+        priceFeed: '0x0000000000000000000000000000000000000000',
+        expiry: '9999999999',
+        nonce: '0',
+        router: '0x111111125421ca6dc452d289314280a0f8842a65',
+        routerDataHash: '0x' + '00'.repeat(32),
+        dcaInterval: '3600',
+        dcaTotal: '3',
+      },
+    })])
+    const { result } = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    const order = result.current.orders[0]
+    expect(order).toBeDefined()
+    await act(async () => { await result.current.cancelOrder(order.id) })
+
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+    expect(result.current.pendingCancel).toBeNull()
+    expect(result.current.latestEvent).toEqual(
+      expect.objectContaining({ type: 'order_error', orderId: order.id }),
+    )
+  })
 })
 
 describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () => {

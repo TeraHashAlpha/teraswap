@@ -6,7 +6,13 @@
  * no hardcoded chain assumptions. See docs/ADR/ADR-009-multi-chain-architecture.md.
  */
 
-export type GasModel = 'eip1559' | 'op-stack'
+// [SPRINT-46-ARBITRUM-CONFIG] 'arbitrum' = Nitro, which is neither pure EIP-1559 (mainnet) nor
+// op-stack (Base's L1-data-fee model): Nitro has its own L2 gas + a separate L1 calldata
+// component charged differently from OP-stack's GasPriceOracle. No fee-estimation branch
+// currently reads GasModel (useEthGasCost computes generically via wagmi's
+// useEstimateFeesPerGas + the per-chain Chainlink feed), so this is a config-only addition —
+// richer Nitro-specific L1-fee visualization is deferred to the activation sprint.
+export type GasModel = 'eip1559' | 'op-stack' | 'arbitrum'
 
 export interface ChainNativeCurrency {
   symbol: string

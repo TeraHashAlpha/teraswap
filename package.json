@@ -7,7 +7,7 @@
     "dev:fork": "NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545 next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src --ext .ts,.tsx,.js,.jsx",
+    "lint": "eslint . --max-warnings 128",
     "typecheck": "tsc --noEmit",
     "check:circular": "node scripts/check-circular.mjs",
     "guard:check": "vitest run src/lib/chains/catalog-address-guard.test.ts",
@@ -32,7 +32,7 @@
     "@capacitor/android": "8.3.4",
     "@capacitor/browser": "8.0.3",
     "@capacitor/cli": "8.4.1",
-    "@capacitor/core": "8.4.0",
+    "@capacitor/core": "8.4.2",
     "@capacitor/ios": "8.4.1",
     "@capacitor/splash-screen": "8.0.1",
     "@capacitor/status-bar": "8.0.2",
@@ -43,46 +43,55 @@
     "@upstash/redis": "1.38.0",
     "@vercel/analytics": "2.0.1",
     "framer-motion": "12.36.0",
-    "next": "^16.2.9",
+    "next": "16.2.11",
     "react": "18.3.0",
     "react-dom": "18.3.0",
     "valtio": "1.13.2",
-    "viem": "2.47.4",
+    "viem": "2.55.2",
     "wagmi": "2.19.5",
     "zustand": "4.5.7"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "3.3.5",
-    "@playwright/test": "1.61.0",
+    "@eslint/eslintrc": "3.3.6",
+    "@playwright/test": "1.61.1",
     "@testing-library/dom": "10.4.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
     "@types/node": "20.19.43",
-    "@types/react": "18.3.0",
-    "@types/react-dom": "18.3.0",
-    "autoprefixer": "10.5.0",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "autoprefixer": "10.5.4",
+    "cuer": "0.0.3",
     "esbuild": "0.28.1",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.9",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.2.11",
     "jsdom": "29.1.1",
-    "postcss": "8.5.15",
+    "postcss": "8.5.22",
     "tailwindcss": "3.4.19",
     "typescript": "~5.9.3",
-    "vitest": "4.1.9"
+    "vitest": "4.1.10"
   },
   "optionalDependencies": {
     "@next/swc-darwin-arm64": "16.2.6",
     "@next/swc-darwin-x64": "16.2.6",
     "@next/swc-linux-arm64-gnu": "16.2.6",
-    "@next/swc-linux-arm64-musl": "16.2.6",
-    "@next/swc-linux-x64-gnu": "16.2.6",
+    "@next/swc-linux-arm64-musl": "16.2.9",
+    "@next/swc-linux-x64-gnu": "16.2.9",
     "@next/swc-linux-x64-musl": "16.2.6",
     "@next/swc-win32-arm64-msvc": "16.2.6",
     "@next/swc-win32-x64-msvc": "16.2.6"
   },
   "overrides": {
-    "axios": "1.16.0",
+    "minimatch@10.2.5": {
+      "brace-expansion": "5.0.8"
+    },
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.16"
+    },
+    "js-yaml": "4.3.0",
+    "axios": "1.18.1",
+    "tar": "7.5.20",
     "next": {
       "postcss": ">=8.5.10"
     },
@@ -90,13 +99,15 @@
     "@walletconnect/sign-client": "2.21.1",
     "@walletconnect/universal-provider": "2.21.1",
     "qr": "0.5.5",
-    "hono": "4.12.25",
+    "hono": "4.12.27",
+    "@babel/core": "7.29.6",
     "@walletconnect/jsonrpc-ws-connection": {
       "ws": "7.5.11"
     },
     "ws": "8.21.0",
     "undici": "7.28.0",
     "form-data": "4.0.6",
-    "vite": "8.0.16"
+    "vite": "8.0.16",
+    "sharp": "0.35.3"
   }
 }

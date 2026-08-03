@@ -304,3 +304,45 @@ describe('useSplitRoute — sub-quote fetch URL chain awareness [CHORE-SPLITROUT
     expect(url.searchParams.has('chainId')).toBe(false)
   })
 })
+
+// [CHORE-STABLECOIN-CONSTANT] The USD estimate that gates split analysis resolves stable
+// membership through the chain-keyed constant — USDbC is ~$1 ON BASE (it never was in the
+// old inline list), while BOLD is mainnet-only (the old chain-blind list applied it everywhere).
+describe('chain-keyed stable membership for the USD estimate', () => {
+  const USDbC: Token = {
+    address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA',
+    symbol: 'USDbC',
+    name: 'USD Base Coin',
+    decimals: 6,
+    logoURI: '',
+    category: 'Stablecoin',
+  }
+
+  const BOLD: Token = {
+    address: '0x6440f144b7e50D6a8439336510312d2F54beB01D',
+    symbol: 'BOLD',
+    name: 'Liquity BOLD',
+    decimals: 18,
+    logoURI: '',
+    category: 'Stablecoin',
+  }
+
+  it('counts USDbC output as ~USD on Base (8453) → split analysis runs', async () => {
+    const meta = makeMeta('10000000000') // 10k USDbC (6 dp) out — above the $5k threshold.
+    renderHook(() => useSplitRoute(meta, ETH, USDbC, '5', true, 8453))
+    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+  })
+
+  it('does NOT count BOLD as ~USD on Base — BOLD is a mainnet-only stable', async () => {
+    const meta = makeMeta('10000000000000000000000') // 10k BOLD (18 dp) out.
+    renderHook(() => useSplitRoute(meta, ETH, BOLD, '5', true, 8453))
+    await act(async () => { await Promise.resolve() })
+    expect(mockFetchSplitQuotes).not.toHaveBeenCalled()
+  })
+
+  it('still counts BOLD as ~USD on mainnet (default chain)', async () => {
+    const meta = makeMeta('10000000000000000000000') // 10k BOLD (18 dp) out.
+    renderHook(() => useSplitRoute(meta, ETH, BOLD, '5', true))
+    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+  })
+})

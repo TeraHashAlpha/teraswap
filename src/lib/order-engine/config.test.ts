@@ -33,6 +33,9 @@ import {
   MIN_ORDER_AMOUNT,
   DCA_TOTAL_PRESETS,
   DCA_INTERVAL_PRESETS,
+  ORDER_EXECUTOR_V3_BY_CHAIN,
+  getOrderExecutorV3,
+  getOrderExecutorV3Domain,
 } from './config'
 
 // Byte-identical, checksummed mainnet-behaviour constants (must match config.ts exactly).
@@ -60,6 +63,15 @@ describe('getOrderExecutor — fail-closed on unwired chains', () => {
   // Arbitrum (42161) is the canonical "looks plausible but unwired" case.
   it('chain 42161 (Arbitrum) is unwired → null', () => {
     expect(getOrderExecutor(42161)).toBeNull()
+  })
+
+  // [SPRINT-46-ARBITRUM-CONFIG] 42161 stopped being a purely hypothetical "unwired chain"
+  // fixture the moment CHAIN_CONFIGS[42161] was registered (chains/registry.ts) — it is now a
+  // REAL, resolvable ChainConfig. This pins that registering the chain-config layer did NOT
+  // also (accidentally or otherwise) wire an OrderExecutor: ORDER_EXECUTOR_BY_CHAIN has no
+  // 42161 key, so the config-only registry change carries zero order/DCA surface with it.
+  it('registering CHAIN_CONFIGS[42161] did not wire an OrderExecutor — no key in the map', () => {
+    expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_BY_CHAIN, 42161)).toBe(false)
   })
 
   // Edge chainIds: 0 (falsy — must not be confused with "no key"), a huge unknown id,
@@ -236,5 +248,137 @@ describe('DCA presets [chore/dca-ux-tweaks]', () => {
 
   it('every interval is ≥ the server minimum (60s)', () => {
     for (const p of DCA_INTERVAL_PRESETS) expect(p.seconds).toBeGreaterThanOrEqual(60)
+  })
+})
+
+// ── [SPRINT-V3-P2] v3 config — fail-closed while unconfigured ──────────────────────────────
+describe('getOrderExecutorV3 — fail-closed while v3 is not deployed', () => {
+  it('mainnet (1) and Base (8453) are both null — v3 is not deployed anywhere yet', () => {
+    expect(getOrderExecutorV3(1)).toBeNull()
+    expect(getOrderExecutorV3(8453)).toBeNull()
+  })
+
+  it('ORDER_EXECUTOR_V3_BY_CHAIN has no non-null entries by default', () => {
+    expect(Object.values(ORDER_EXECUTOR_V3_BY_CHAIN).every((v) => v === null)).toBe(true)
+  })
+
+  it.each([0, 999999, -1, 42161])('unwired/unknown chain %i is also null', (chainId) => {
+    expect(getOrderExecutorV3(chainId)).toBeNull()
+  })
+
+  it('getOrderExecutorV3Domain THROWS while unconfigured — callers must check getOrderExecutorV3 first', () => {
+    expect(() => getOrderExecutorV3Domain(1)).toThrow(/No OrderExecutorV3 deployed on chain 1/)
+    expect(() => getOrderExecutorV3Domain(8453)).toThrow(/No OrderExecutorV3 deployed on chain 8453/)
+  })
+
+  it('v3 does not inherit v2 configuration — a wired v2 chain does NOT imply a wired v3 chain', () => {
+    // Mainnet + Base both have real v2 executors (asserted above), yet v3 stays null on both —
+    // "v3 enabled" must be an explicit address, never derived from v2's presence.
+    expect(getOrderExecutor(1)).not.toBeNull()
+    expect(getOrderExecutor(8453)).not.toBeNull()
+    expect(getOrderExecutorV3(1)).toBeNull()
+    expect(getOrderExecutorV3(8453)).toBeNull()
+  })
+})
+
+describe('getOrderExecutorV3Domain — once configured (env override)', () => {
+  const V3_MAINNET = '0x3333333333333333333333333333333333333333'
+  const V3_BASE = '0x4444444444444444444444444444444444444444'
+
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE
+    vi.resetModules()
+  })
+
+  it('resolves version "3" + the configured verifyingContract once an address is set', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    vi.resetModules()
+    const fresh = await import('./config')
+    expect(fresh.getOrderExecutorV3(1)).toBe(V3_MAINNET)
+    expect(fresh.getOrderExecutorV3Domain(1)).toEqual({
+      name: 'TeraSwapOrderExecutor',
+      version: '3',
+      chainId: 1,
+      verifyingContract: V3_MAINNET,
+    })
+    // Base is unaffected — configuring mainnet's v3 address doesn't enable Base.
+    expect(fresh.getOrderExecutorV3(8453)).toBeNull()
+  })
+
+  it('the v3 domain version ("3") differs from the v2 domain version ("2") on the same chain', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    vi.resetModules()
+    const fresh = await import('./config')
+    const v2Domain = fresh.getOrderExecutorDomain(1)
+    const v3Domain = fresh.getOrderExecutorV3Domain(1)
+    expect(v2Domain.version).toBe('2')
+    expect(v3Domain.version).toBe('3')
+    expect(v2Domain.verifyingContract).not.toBe(v3Domain.verifyingContract)
+  })
+
+  it('throws when the SAME v3 address is configured on two chains (config-typo guard)', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = V3_MAINNET
+    vi.resetModules()
+    await expect(import('./config')).rejects.toThrow(/the same v3 address is configured on two chains/)
+  })
+
+  it('accepts distinct addresses per chain without error', async () => {
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = V3_BASE
+    vi.resetModules()
+    const fresh = await import('./config')
+    expect(fresh.getOrderExecutorV3(1)).toBe(V3_MAINNET)
+    expect(fresh.getOrderExecutorV3(8453)).toBe(V3_BASE)
+  })
+})
+
+// ── [SPRINT-48-ARBITRUM-DCA-PREP] Arbitrum (42161) v3 plumbing — shipped DARK ───────────────
+describe('getOrderExecutorV3 — Arbitrum (42161) dark-state regression', () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
+    vi.resetModules()
+  })
+
+  it('unset NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM ⇒ 42161 resolves null, byte-identical to before this entry existed', () => {
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
+    expect(getOrderExecutorV3(42161)).toBeNull()
+    expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBeNull()
+  })
+
+  it('42161 IS a key in ORDER_EXECUTOR_V3_BY_CHAIN (unlike v2, which has no 42161 entry at all)', () => {
+    expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_V3_BY_CHAIN, 42161)).toBe(true)
+    expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_BY_CHAIN, 42161)).toBe(false)
+  })
+
+  it('getOrderExecutorV3Domain(42161) throws while unconfigured', () => {
+    expect(() => getOrderExecutorV3Domain(42161)).toThrow(/No OrderExecutorV3 deployed on chain 42161/)
+  })
+
+  it('setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM wires 42161 without disturbing mainnet/Base', async () => {
+    const V3_ARBITRUM = '0x5555555555555555555555555555555555555555'
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM = V3_ARBITRUM
+    vi.resetModules()
+    const fresh = await import('./config')
+    expect(fresh.getOrderExecutorV3(42161)).toBe(V3_ARBITRUM)
+    expect(fresh.getOrderExecutorV3Domain(42161)).toEqual({
+      name: 'TeraSwapOrderExecutor',
+      version: '3',
+      chainId: 42161,
+      verifyingContract: V3_ARBITRUM,
+    })
+    // Exact Base pattern: an unrelated chain's env var never implicitly wires another chain.
+    expect(fresh.getOrderExecutorV3(1)).toBeNull()
+    expect(fresh.getOrderExecutorV3(8453)).toBeNull()
+  })
+
+  it('the same-address-on-two-chains typo guard also catches Arbitrum reusing another chain\'s v3 address', async () => {
+    const SHARED = '0x6666666666666666666666666666666666666666'
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = SHARED
+    process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM = SHARED
+    vi.resetModules()
+    await expect(import('./config')).rejects.toThrow(/the same v3 address is configured on two chains/)
+    delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE
   })
 })

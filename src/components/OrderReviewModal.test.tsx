@@ -140,7 +140,17 @@ describe('OrderReviewModal [SPRINT-9U U2]', () => {
   it('passes the FROZEN tokenIn, total amountIn and chainId to useOrderApproval', () => {
     const review = makeReview({ orderType: OrderType.DCA })
     renderWithProviders(<OrderReviewModal order={review} onConfirm={vi.fn()} onCancel={vi.fn()} />)
-    expect(mockUseOrderApproval).toHaveBeenCalledWith(review.order.tokenIn, review.order.amountIn, review.chainId)
+    expect(mockUseOrderApproval).toHaveBeenCalledWith(review.order.tokenIn, review.order.amountIn, review.chainId, false)
+  })
+
+  // [BUG-DCA-APPROVE-SPENDER-V3] The 4th arg is the exact predicate the signing path uses
+  // (order.maxSlippageBps !== undefined) — this is what keeps the approve() spender pinned to the
+  // same executor confirmOrder signs against, for both v2 (undefined → false) and v3 (defined → true).
+  it('passes isV3Order=true to useOrderApproval when the frozen order has maxSlippageBps (v3)', () => {
+    const base = makeReview({ orderType: OrderType.DCA })
+    const review = { ...base, order: { ...base.order, maxSlippageBps: 300 } }
+    renderWithProviders(<OrderReviewModal order={review} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(mockUseOrderApproval).toHaveBeenCalledWith(review.order.tokenIn, review.order.amountIn, review.chainId, true)
   })
 
   it('once approved, the Approve step disappears and "Confirm & Sign Order" calls onConfirm', () => {

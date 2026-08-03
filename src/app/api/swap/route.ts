@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { fetchSwapFromSource, usesFeeCollector } from '@/lib/api'
 import { AGGREGATOR_APIS, type AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
+import { computeTokenAmountUsd } from '@/lib/chainlink'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
 import { validateCallDataRecipient } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
@@ -11,6 +12,7 @@ import { getChainStatus } from '@/lib/chains/activation'
 import { isSequencerUp, SequencerDownError } from '@/lib/chains/sequencer-check'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { sanitizeUpstreamError } from '@/lib/sanitize-error'
+import { trustedClientIp } from '@/lib/trusted-ip'
 
 // [SPRINT-9J J2] Give the function enough headroom that a slow swap-build never
 // hits the platform's default ceiling (which serves an HTML 504 the route never
@@ -138,9 +140,8 @@ export async function POST(req: NextRequest) {
 
     // [Audit B-06] Rate limiting by IP — persistent via Vercel KV.
     // Runs AFTER the source guard so invalid requests don't burn budget.
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-      || req.headers.get('x-real-ip')
-      || 'unknown'
+    // [CHORE-API-HARDENING-2 / P3a] Trusted IP — see trusted-ip.ts.
+    const ip = trustedClientIp(req)
     const rateCheck = await checkRateLimit(`swap:${ip}`, SWAP_RATE_LIMIT.limit, SWAP_RATE_LIMIT.windowMs)
 
     if (!rateCheck.allowed) {
@@ -244,20 +245,66 @@ export async function POST(req: NextRequest) {
       // mainnet 'ethereum' keeps the guard byte-identical; an unknown chainId
       // falls back to 'ethereum' rather than throwing. A Base swap now validates
       // Base prices instead of always-blocking (>$10k) / silently failing open.
+      const swapChainId = chainId != null ? Number(chainId) : DEFAULT_CHAIN_ID
       const llamaChain = (() => {
-        const cid = chainId != null ? Number(chainId) : DEFAULT_CHAIN_ID
-        try { return getChainConfig(cid).slug } catch { return 'ethereum' }
+        try { return getChainConfig(swapChainId).slug } catch { return 'ethereum' }
       })()
-      // [INT-01] Estimate swap value in USD for threshold-based blocking
+      // [INT-01 → CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Estimate swap value in USD for
+      // threshold-based blocking. Previously: INPUT token × DefiLlama only — an
+      // uncovered input priced the whole trade at $0 and every high-value branch below
+      // failed OPEN (the aToken-incident bypass: route size through a token DefiLlama
+      // cannot price). Now: max(inputUsd, outputUsd) across BOTH DefiLlama and the
+      // server Chainlink path (computeTokenAmountUsd — existing plumbing, no new
+      // oracle). [CHORE-API-SMALL-FIXES] computeTokenAmountUsd is now chain-aware
+      // (threads chainId to the price + decimals RPC calls), so non-mainnet chains
+      // consult their own Chainlink feed config (CHAINLINK_FEEDS_BY_CHAIN) instead of
+      // skipping straight to DefiLlama. On Base only WETH/USDC/DAI are mapped today —
+      // getChainlinkFeed returns null for everything else, so those legs still fall
+      // back to the chain-correct DefiLlama leg above (max(in,out) unchanged).
       let estimatedValueUsd = 0
+      let valuePriced = false
       try {
-        const tokenInPrice = await fetchDefiLlamaPrice(src, llamaChain)
-        if (tokenInPrice) {
-          const amountFloat = Number(amount) / 10 ** srcDecimals
-          estimatedValueUsd = amountFloat * tokenInPrice.price
+        const [llamaIn, llamaOut, linkIn, linkOut] = await Promise.all([
+          fetchDefiLlamaPrice(src, llamaChain).catch(() => null),
+          fetchDefiLlamaPrice(dst, llamaChain).catch(() => null),
+          computeTokenAmountUsd(src, amount, swapChainId).catch(() => null),
+          computeTokenAmountUsd(dst, result.toAmount as string, swapChainId).catch(() => null),
+        ])
+        const inFloat = Number(amount) / 10 ** srcDecimals
+        const outFloat = Number(result.toAmount) / 10 ** dstDecimals
+        const candidates = [
+          llamaIn ? inFloat * llamaIn.price : null,
+          llamaOut ? outFloat * llamaOut.price : null,
+          linkIn?.usd ?? null,
+          linkOut?.usd ?? null,
+        ].filter((v): v is number => v != null && Number.isFinite(v) && v > 0)
+        if (candidates.length > 0) {
+          valuePriced = true
+          estimatedValueUsd = Math.max(...candidates)
         }
       } catch {
-        // If price estimation fails, assume 0 → fail-open for threshold logic
+        // Each leg already degrades to null individually; a wholesale failure leaves
+        // the trade unpriced and the fail-CLOSED branch below fires.
+      }
+
+      // [CHORE-ORACLE-VALUE-FAILCLOSED] Neither side priced on either source → the
+      // high-value gate cannot size the trade, so it must FIRE, never silently pass.
+      // A USD "safe size ceiling" is unimplementable without a USD measure, so the
+      // conservative policy is a block. Only exotic↔exotic pairs (both tokens outside
+      // DefiLlama AND Chainlink coverage — exactly the thin/manipulable class behind
+      // the aToken incident) reach this; a trade with ANY priceable side gets a real
+      // max(in,out) estimate and the normal >$10k threshold (unchanged) downstream.
+      if (!valuePriced) {
+        console.warn('[PRICE-GUARD] Unpriceable trade (no DefiLlama/Chainlink coverage on either side) — failing closed')
+        return NextResponse.json(
+          {
+            error: 'Trade value cannot be verified: neither token has price coverage (DefiLlama or Chainlink). Unpriceable trades are blocked by high-value protection — use a pair with price coverage, or try again later.',
+            priceGuard: true,
+            blocked: true,
+            unpriceable: true,
+          },
+          { status: 422 },
+        )
       }
 
       try {

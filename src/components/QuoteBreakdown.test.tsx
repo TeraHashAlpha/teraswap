@@ -159,6 +159,41 @@ describe('QuoteBreakdown — render', () => {
     )
     expect(screen.getByText(/no chainlink oracle/i)).toBeInTheDocument()
   })
+
+  // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that exists but could not be READ is also
+  // oracleUnavailable — but saying the token "has no Chainlink oracle" is false during an outage.
+  // The two notices must not be interchangeable.
+  it('a READ FAILURE says the feed could not be read — never that the token has no oracle', () => {
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          priceCheck: { ...idlePriceCheck, oracleUnavailable: true, oracleReadFailed: true },
+        })}
+      />,
+    )
+    const notice = screen.getByTestId('oracle-read-failed-notice')
+    expect(notice.textContent).toMatch(/could not be read/i)
+    // The no-feed notice must NOT also render — one verdict, one message.
+    expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+  })
+
+  it('the Rate tooltip likewise distinguishes a read failure from a missing feed', () => {
+    const { rerender } = renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({
+          priceCheck: { ...idlePriceCheck, oracleUnavailable: true, oracleReadFailed: true },
+        })}
+      />,
+    )
+    expect(screen.getByText(/^Rate/).getAttribute('title')).toMatch(/could not be read/i)
+
+    rerender(
+      <QuoteBreakdown
+        {...makeProps({ priceCheck: { ...idlePriceCheck, oracleUnavailable: true } })}
+      />,
+    )
+    expect(screen.getByText(/^Rate/).getAttribute('title')).toMatch(/No Chainlink oracle/i)
+  })
 })
 
 describe('QuoteBreakdown — safeBigInt guard [10-L-01]', () => {
@@ -398,5 +433,51 @@ describe('QuoteBreakdown — quote-only source label [CHORE-SUSHI-V7]', () => {
       />,
     )
     expect(screen.queryByText(/quote only/i)).not.toBeInTheDocument()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [CHORE-QUORUM-LOWCONFIDENCE-FIX] Thin-quorum signal — meta.lowConfidence
+// (set by the quote-quorum band when the displayed best could not be
+// cross-checked: <3 usable responders) must reach the user as an
+// INFORMATIONAL cue: bold lead, calm body, no alarm colouring (house style
+// of the oracle-less notice above). The flag was previously set but
+// rendered nowhere — a dead safety signal.
+// ─────────────────────────────────────────────────────────────
+describe('QuoteBreakdown — low-confidence quorum cue [CHORE-QUORUM-LOWCONFIDENCE-FIX]', () => {
+  it('renders the cue when meta.lowConfidence is set — singular copy for a single usable source', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: { ...makeMeta(), lowConfidence: true } })} />,
+    )
+    expect(screen.getByText('Low confidence')).toBeInTheDocument()
+    expect(screen.getByText(/only 1 source responded with a usable quote/i)).toBeInTheDocument()
+  })
+
+  it('uses plural copy when two quotes are displayed but could not be cross-validated', () => {
+    const base = makeMeta()
+    const runnerUp = { ...base.best, source: 'kyberswap' as const, toAmount: '2990000000' }
+    renderWithProviders(
+      <QuoteBreakdown
+        {...makeProps({ meta: { ...base, all: [base.best, runnerUp], lowConfidence: true } })}
+      />,
+    )
+    expect(screen.getByText(/only 2 sources responded with a usable quote/i)).toBeInTheDocument()
+  })
+
+  it('renders NO cue when lowConfidence is absent (healthy quorum)', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps()} />)
+    expect(screen.queryByText('Low confidence')).toBeNull()
+  })
+
+  it('keeps the cue informational: bold lead, NO alarm colouring, and names the minimum-output backstop', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: { ...makeMeta(), lowConfidence: true } })} />,
+    )
+    const label = screen.getByText('Low confidence')
+    expect(label.className).toMatch(/font-semibold/)
+    const box = label.closest('div')!
+    // Non-alarmist by requirement: none of the danger/warn/amber alarm palettes.
+    expect(box.className).not.toMatch(/danger|warning|amber|red-/)
+    expect(box.textContent).toMatch(/minimum-output/i)
   })
 })

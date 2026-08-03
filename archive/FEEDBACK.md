@@ -6357,3 +6357,816 @@ keeper's BASE_ROUTERS map may then also add RedSnwapper (Base OE already whiteli
   correctness lens also positively verified: `chainId` was already in the analyze-effect deps (no stale
   closure), server quote-cache keys namespace by chainId, and coming-soon chains cannot reach the fetch
   (SwapBox gates `enabled` on `isChainActive`).
+
+## Feedback — CHORE-EIP712-ORDER-TYPES-DEDUP (branch chore/eip712-order-types-dedup)
+
+### Identity verified FIRST (per the gate) — no drift, dedup path taken
+- Structural, order-sensitive comparison of `ORDER_EIP712_TYPES` (order-engine/types.ts:37) vs the inline
+  `ORDER_TYPES` (orders/route.ts:30): 15 identical fields, identical names/solidity-types/order.
+- Cryptographic proof: `hashTypedData` over a fixed 15-field order under the real mainnet domain produced
+  the SAME digest from both declarations (`0x16163a15…8097070`). Domain was already single-sourced on both
+  sides via `getOrderExecutorDomain(chainId)` — only the types literal was duplicated.
+- Had they drifted, this would have STOPPED here per the prompt (live signature-recovery bug → Auditor).
+
+### Change (behaviour-preserving, proven post==pre)
+- orders/route.ts now imports `ORDER_EIP712_TYPES` for `recoverTypedDataAddress`; inline duplicate removed.
+- New `src/lib/order-engine/types.test.ts` locks: (1) the exact 15-field schema with a readable diff,
+  (2) the typed-data digest of a fixed order under a literal domain (env-independent — the pinned digest
+  equals the one the removed duplicate produced, which IS the post==pre proof), (3) a sign→recover
+  roundtrip in the exact call shape the route uses. Test header documents the upgrade protocol (schema
+  change ⇒ update pins + bump domain/contract together).
+- CI: `api-hardening-guard` now runs types.test.ts (full suite is not run in CI). Full local suite:
+  186 files / 2399 tests green; typecheck + lint clean.
+
+### Note for the Auditor (awareness, no action needed)
+- Fund-flow-adjacent surface (order signature verification) but zero semantic change — same bytes, same
+  digest, now impossible to edit one-sidedly. The client side (useOrderEngine) already used the canonical
+  export; CANCEL_ORDER_TYPES was already single-sourced.
+## Feedback — CHORE-P0-RESCUE-AUDIT-REPORTS (branch chore/rescue-audit-reports)
+
+### Rescued file list — 28 (set grew by 1 during the rescue: the 07-06 Weekly landed while working)
+- Audits/Daily/health-2026-06-{14,15,16,17,18,19,20,21,22,23,24,25,26,28,29,30}.md and
+  Audits/Daily/health-2026-07-{01,02,03,04,05,06}.md (22 — no 06-27, never generated)
+- Audits/Weekly/audit-2026-{06-15,06-22,06-29,07-06}.md (4)
+- Audits/Monthly/security-2026-07.md · Audits/Quarterly/review-2026-Q3.md
+- Verified absent from origin/main one-by-one (`git cat-file -e`). The 9 other untracked cadence files
+  (Dailies 06-06→06-13, Weekly 06-08) are byte-identical (sha256) to main's committed copies — no drift,
+  nothing rescued twice.
+
+### Secret scan — clean; one out-of-scope observation
+- gitleaks 8.30.1 with the repo `.gitleaks.toml` over the four cadence dirs + a regex battery over exactly
+  the 28 files: **0 findings in the rescued set → nothing excluded.**
+- Observation (pre-existing, NOT this PR): the same scan reports 43 hits (40 generic-api-key,
+  3 stripe-access-token) in cadence files **already tracked on main** — presumably CI-tolerated false
+  positives (CI runs gitleaks in git mode), but worth a one-time triage pass.
+
+### Generator: external (owner-level Claude scheduled tasks) — fix delivered in-repo + exact owner change
+- The generators are `~/.claude/scheduled-tasks/teraswap-{daily-health,weekly-audit,monthly-security,
+  quarterly-rotation}/SKILL.md` — outside the repo, hardcoding the working copy path, with **no
+  commit/push step** (the recurrence mechanism).
+- **Delivered:** `scripts/commit-audit-report.mjs` (tracked) — commits any new/modified cadence report to
+  the dedicated tracked branch `audits/cadence` and pushes, via a temp detached worktree (never switches
+  the operator's branch, never stashes/force-pushes, stages ONLY `Audits/{Daily,Weekly,Monthly,Quarterly}`,
+  inherits noreply + SSH signing). Runbook: `docs/Runbooks/AUDIT-CADENCE.md`.
+- **Verified end-to-end against the real working copy:** first run created `origin/audits/cadence`
+  (`bb2d931`, signature G, committer 256859133+TeraHashAlpha@users.noreply.github.com) with exactly the
+  28 files (the 9 identical overlaps no-op'd as designed); second run → idempotent no-op. The at-risk
+  reports therefore already exist on the remote TWICE (this PR branch + audits/cadence) as of today.
+- **Exact owner change (one line per SKILL.md, do not guess-edit performed):** append as the final step of
+  each of the four SKILL.md files:
+  `cd "/Users/tiagocruz/Desktop/Claude/dex-aggregator 2" && node scripts/commit-audit-report.mjs`
+  (full snippet in the runbook §2). Periodically merge `audits/cadence` → main via docs-only PR.
+
+### Defects found in the routines while locating them (owner should fix when editing — runbook §3)
+- `teraswap-monthly-security` and `teraswap-quarterly-rotation` curl **`teraswap.io`** for CSP checks —
+  wrong domain (canonical: `www.teraswap.app`; teraswap.io is not ours).
+- `teraswap-weekly-audit` runs **`npm audit fix`** (+build, +lockfile revert path) directly on the live
+  working copy — unreviewed dependency mutation; explains the modified package.json/lockfile on the dead
+  branch. Should be report-only (Dependabot + audit-gate cover fixes via PRs).
+- The daily's `/api/monitor` call reads a **stale local `MONITOR_SECRET`** (rotated on Vercel) → permanent
+  401 ⚠ noise in every Daily.
+
+### Owner action after this PR merges (documented, NOT performed)
+- `cd "/Users/tiagocruz/Desktop/Claude/dex-aggregator 2" && git checkout main && git pull` — and stop
+  working on `docs/inc-2026-06-09` (kept per rule #4; not deleted, not force-moved).
+## Feedback — REVIEW-AZ-REFRESH (branch docs/az-review-2026-07-06)
+
+### Which v1 findings were already FIXED on main: NONE — and that's provable, not sloppy
+- The v1 (2026-07-05) code review actually read commit `3613adc`, whose tree is byte-identical to the
+  audited `origin/main` HEAD `4524a97` (`rev-parse ^{tree}` both `5e15f32e…`). The prompt's premise that v1
+  audited the dead branch holds only for the P0 git-state evidence. Consequently the reconciliation produced
+  0×FIXED-on-main / 41×CONFIRMED-open / 5×PARTIAL — the PARTIALs correct v1's own statements, not code drift:
+  FE4 (Supabase-backed WalletHistory persists; only session list + approvals volatile), C3 (unpause IS tested
+  on FeeCollector; gap is OrderExecutor-only), C5 (.env example is a coherent Sepolia config; real issue =
+  mainnet ETH_USD_FEED default + documented tri-chain address reuse), S9 (on-chain-monitor is multichain since
+  E-4; only getChainlinkFeeds is mainnet-locked), O10 (.remember/ self-ignores; only .w0onchain.mjs loose).
+  Overlaps resolved: #260's source-health-monitor is a separate KV path (source-monitor read API still dead —
+  retire it); #263 fixed the splitroute chainId (now merged = the audited HEAD); AUDIT-W4 remains unimplemented;
+  the weak FeeCollector flat + DEPLOY.md were NOT touched by #254/#257 (only V2_DEPRECATED got the banner).
+
+### NEW findings at HEAD
+- **NEW-2 (confirmed 2/2 adversarial votes, #260 follow-up):** the low-quorum demotion reroutes the EXECUTED
+  source (meta.best drives executeSwap + fallbacks) despite quote-quorum.ts's "display-only" header, and the
+  `lowConfidence` flag is rendered by NO component (not even forwarded by /api/v1/quote). Execution gates
+  intact → execution-quality, not fund-safety; fix (render flag + demotion semantics) should get an Auditor
+  glance. RICE-ranked #13 in the review.
+- **NEW-1 (empirical):** the full vitest suite is not deterministically green — 1 flaky failure in 4 runs at
+  identical trees (identity uncaptured). Bakes the "deterministic vs flaky split" requirement into the single
+  `npm test` CI job before the money-path refactor.
+- **NEW-3 (refuted 2/2, recorded as LOW note):** "v1/swap auto-selects quote-only sources → on-chain-reverting
+  calldata" — the app/API scoping asymmetry is real (no isExecutableSource in /api/*), but the deployed FC
+  whitelists OpenOcean/Curve-NG on-chain (W7-followup §3) and SC-04/R1 are off-chain gates, so no revert path
+  was demonstrated. Align scoping when v1 goes multi-chain (S8).
+- Full deliverable: `Audits/Reviews/AZ-REVIEW-2026-07-06.md` (audited SHA, reconciliation table, reproduced
+  claims, RICE ranking with fund-flow + rule tags, dependency-ordered plan, corrected mis-frames).
+## Feedback — CHORE-QUORUM-LOWCONFIDENCE-FIX (branch chore/quorum-lowconfidence-fix)
+
+### ⚠ Needs an Auditor pass (execution-selection-adjacent)
+- The #260 low-quorum demotion CHANGES which source is presented as best and therefore which quote
+  the user signs/executes. This chore only (1) corrected the mischaracterized "display-only"
+  headers, (2) rendered `lowConfidence`, (3) added adversarial characterization tests. **The
+  demotion algorithm, the 500 bps band, and all execution gates are untouched.** Auditor sign-off
+  required before merge (as the prompt scopes it: "Then → Auditor").
+
+### FLAGGED GAP (not patched, per prompt): low-ball demotion of an honest winner
+- Adversarial result: with 2 responders the band always demotes the WINNER, but the pairwise spread
+  carries no information about WHICH side is wrong. A source quoting >500 bps UNDER an honest
+  winner (test uses −6%) gets the honest quote demoted and is ITSELF presented as best — steering
+  the user to the worse quote. Pinned in `quote-quorum.test.ts` as
+  "(a) FLAGGED GAP (Auditor): …" — characterization, NOT endorsement.
+- Not silent, and bounded: every demotion sets `lowConfidence` (now rendered); on feeded pairs the
+  client Chainlink gate requires explicit informed consent from 2% deviation and hard-blocks beyond
+  the 25% consent ceiling (price-gate.ts); the server-side DefiLlama guard (422, "output too far
+  below fair value") cannot be overridden; and the executed fill is bounded by its own on-chain
+  minimumOutput. Residual exposure: pairs that are BOTH oracle-less and DefiLlama-less, under the
+  tiered unverified-swap USD limits, where the only signals are the (new) cue + oracle-less note.
+- Options for the Auditor (deliberately NOT implemented here): (i) flag-without-reorder when the
+  error direction is ambiguous (keep the winner, set `lowConfidence`, show both quotes); (ii) demote
+  only when an external reference (Chainlink/DefiLlama anchor) confirms the WINNER is the outlier;
+  (iii) accept as-is — the observed defect class (mis-scale UP, OpenOcean 10^6–10^18×) is fully
+  covered, and a low-ball attack needs a compromised source AND an unfeeded pair to escape consent.
+
+### Adversarial results (2-responder window; all pinned as tests)
+- (b) Inflated winner beyond the band (+6% and 100× mis-scale): demoted — never presented as best.
+- (b-residual) Premium WITHIN the band (+4.9%): presented as best — the designed limit of any
+  pairwise band; bounded by that quote's own slippage/minimumOutput. Accepted residual.
+- (a) Low-ball WITHIN the band (−4%): cannot demote an honest winner (not even flagged).
+- (a) Low-ball BEYOND the band (−6%): the FLAGGED GAP above.
+- Determinism: frozen input, 50 repeated calls → identical outcome, zero input mutation/reorder;
+  an exact 2-source tie is kept, unflagged, order-stable.
+
+### Render-vs-remove decision: RENDERED (prompt-preferred)
+- Informational cue in QuoteBreakdown's notice stack, matching the oracle-less note's house style
+  (bold lead, calm body, protection reassurance) but on the NEUTRAL cream palette — deliberately no
+  amber/red. Non-alarmism is pinned by test (cue container className must not match
+  danger/warning/amber/red).
+- Copy nuance: N = `meta.all.length` (the sources actually shown) and the copy reads "responded
+  with a usable quote" — in the demotion case 2 sources responded but only 1 was usable, so plain
+  "only 1 source responded" would be false and "2 sources" would overstate the validation. The
+  defensive unusable-runner-up branch (2 shown + flagged) reads slightly generously; it is
+  unreachable in practice (adapters pre-filter non-positive amounts) and was left as-is.
+- No new plumbing: `MetaQuoteResult.lowConfidence` already flowed server→client through /api/quote
+  → useQuote → QuoteBreakdown props — it was set but rendered nowhere (dead safety signal).
+
+### #248 reconciliation (deviation-guard.js — read-only, unchanged)
+- No conflict: #248 is a keeper-side execution-TIME defer gate for an already-pinned DCA router
+  (1% vs a fresh cross-agg best, fail-open, defers only within a bounded window, never re-routes);
+  the quorum band is a pre-signature presentation gate (5%, per interactive request). Different
+  layer, different time, no shared state, neither relies on the other.
+- Interaction worth the Auditor's eye: if a low-quorum demotion ever steered which router a user
+  PINNED into a DCA order, #248 partially back-stops each fill (defers a >1% drifted route within
+  the window, then executes anyway) — a bound, not a rescue.
+
+### Header corrections (requirement 1)
+- `quote-quorum.ts`: "DISPLAY-ONLY" paragraph replaced with the honest characterization —
+  presented-best steering, gates named (SC-04 `isKnownSwapSelector`, R1
+  `validateCallDataRecipient`, on-chain `minimumOutput` = terminal backstop, which guarantee
+  faithful execution OF the presented quote but cannot restore a demoted better one) — plus the
+  adversarial-asymmetry note and the #248 reconciliation.
+- Also corrected: `quote-quorum.test.ts` header ("display selection only"), the `api.ts` call-site
+  comment, and `adapters/types.ts` `lowConfidence` doc ("Display metadata only" → "never gates
+  execution; rendered as the cue").
+
+### Test flake observed (pre-existing, unrelated)
+- One full-suite run failed `src/hooks/useOrderEngine.test.ts:768` (waitFor on a second hook mount,
+  orders length 1 vs 0) under parallel load; it passes alone, passes on full-suite rerun, and passes
+  on an untouched origin/main tree. Not introduced by this chore — noting for CI-hygiene triage.
+## Feedback — CHORE-AZ-SECURITY-BATCH · C4 flat banner / DEPLOY.md / guard (branch chore/flat-banner-deploy-guard)
+
+### Scope note — batch items delivered as separate branches, not one branch
+- The packet asks for four droppable commits on one `chore/az-security-batch` branch; in practice each
+  item is running as its own session/branch (C1 EIP-712 dedup is already in flight on
+  `chore/eip712-order-types-dedup`). This branch delivers **C4 only**. Per-item FEEDBACK verdicts for
+  C1 (EIP-712 identical-or-drifted + hash test), C2 (ignore-scripts confirmation) and C3 (stablecoin
+  per-chain set + gates changed) land with their own commits — nothing here touches those surfaces
+  (`.npmrc`/`--ignore-scripts` in ci.yml, the EIP-712 declarations, and every stablecoin list are
+  untouched on this branch).
+
+### Assumption corrected — the weak flat IS a deployed source (unlike the V2_DEPRECATED exemplar)
+- The prompt framed `TeraSwapFeeCollector_flat.sol` like `TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`
+  (stale, never deployed). Cross-checking `docs/security/DEPLOYED-SOURCES.md` (as the prompt required):
+  the V1 flat is the **byte-proven source of the FROZEN mainnet V1** (`0x4dAE…58eD`). Consequences:
+  the banner says "deployed-but-frozen — NEVER deploy again" (not "never deployed"), the file was NOT
+  renamed (a rename would break the canonical map row + `verify-deployed-sources.mjs`), and it keeps a
+  distinct banner marker (`DEPRECATED — DO NOT DEPLOY`) so the guard can pin each flat separately.
+
+### Verification — banner is bytecode-neutral (byte-proof intact)
+- The banner is comment-only. Proven: built the flat pre- and post-banner with the repo recipe and
+  byte-compared `deployedBytecode` with the CBOR metadata trailer stripped (the same convention the
+  byte-proofs use) — **identical** (2,414 B). The W2 byte-proof of the frozen V1 is unaffected.
+
+### Security concern found in passing (fixed) — DEPLOY.md told deployers to commit `.env.local`
+- The old guide's post-deploy step was `git add .env.local && git push origin main`. Replaced with
+  setting the env var in Vercel (`vercel env`) and an explicit "never commit `.env.local`" (rule #7
+  adjacent — env files must never enter git even when the value itself is public).
+
+### Guard extension — design notes
+- New checks (all negative-tested: banner strip, recipe-marker drift, non-⛔ flat mention, code
+  reference, file deletion — each fails the run; final state green): (4) V1 flat must exist (rule #4)
+  and keep its ⛔ banner; (5) `contracts/DEPLOY.md` must keep the canonical V2 recipe markers
+  (`contracts/TeraSwapFeeCollector.sol`, `0.8.28`, `via-IR`, `_admin`, `DEPLOYED-SOURCES.md`) and may
+  mention the V1 flat only on a line carrying ⛔; (6) the code-walk now also flags
+  `TeraSwapFeeCollector_flat` references (allowlist: the verify script + the flats themselves).
+- The `deployed-sources-guard` ci.yml comment deliberately avoids the literal flat filename — the
+  guard walks `.github/**/*.yml`, so the comment itself would trip check 6.
+
+### Edge case — stale Base section in DEPLOY.md
+- The "Base Deployment (Phase 2)" section still read as a pending deploy; the Base FeeCollector has
+  been live at `0xeFC3…f130` since 2026-06 (bootstrapped, byte-proven). Marked ✅ completed with
+  pointers to DEPLOYMENTS.md/DEPLOYED-SOURCES.md and kept as the reference checklist for the next
+  chain (rule #4 — nothing deleted). Its "Pre-activation code wiring" subsection is left as history;
+  current wiring status is tracked by the chain-awareness sprints, not this guide.
+
+## Feedback — CHORE-RESCUE-PROMPT-SPECS (branch chore/rescue-prompt-specs)
+
+### Rescued set: 46 files, all docs-only, sourced from `docs/inc-2026-06-09` @ 315d3bc
+- **44 `docs/Prompts/*.md`** absent from origin/main (`git diff --name-status --diff-filter=A origin/main
+  docs/inc-2026-06-09 -- docs/Prompts/` — exact list below).
+- **`docs/security/TERASWAP-AUDIT-FRAMEWORK.md`** (T-SAF source of truth; `git cat-file -e origin/main:…` fails —
+  it was the ONLY `docs/security` addition on the snapshot).
+- **+1 not in the snapshot:** `docs/Prompts/CHORE-RESCUE-PROMPT-SPECS.md` — this chore's own spec existed ONLY as an
+  untracked working-copy file (the exact single-disk failure mode being fixed). Sourced from the on-disk file,
+  NOT reconstructed.
+
+- docs/Prompts/AUDIT-NEW2-QUORUM-EXECUTION.md
+- docs/Prompts/CHORE-ANALYTICS-DCA-EXECUTIONS.md
+- docs/Prompts/CHORE-AZ-SECURITY-BATCH.md
+- docs/Prompts/CHORE-CATEGORY-SCROLL-FIX.md
+- docs/Prompts/CHORE-DCA-APPROVAL-FLOW.md
+- docs/Prompts/CHORE-DCA-POSITIONS-DASHBOARD.md
+- docs/Prompts/CHORE-DCA-PRELAUNCH-FIXES.md
+- docs/Prompts/CHORE-DCA-RESILIENCE.md
+- docs/Prompts/CHORE-DCA-ROUTER-CHAINAWARE.md
+- docs/Prompts/CHORE-DCA-SWAPFAILED.md
+- docs/Prompts/CHORE-DCA-UX-FIXES.md
+- docs/Prompts/CHORE-DCA-UX-POLISH.md
+- docs/Prompts/CHORE-DCA-UX-TWEAKS.md
+- docs/Prompts/CHORE-DCA-WETH-INPUT.md
+- docs/Prompts/CHORE-DEPS-TRIAGE-JUN19.md
+- docs/Prompts/CHORE-DOCS-REFRESH.md
+- docs/Prompts/CHORE-FEEDBACK-MERGE-UNION.md
+- docs/Prompts/CHORE-KEEPER-CI.md
+- docs/Prompts/CHORE-KEEPER-RECORD-EXECUTIONS.md
+- docs/Prompts/CHORE-KEEPER-SWAP-CHAINID.md
+- docs/Prompts/CHORE-KEEPER-SWAP-PAYLOAD-FIX.md
+- docs/Prompts/CHORE-LIMIT-COW-WETH-CHAINAWARE.md
+- docs/Prompts/CHORE-MOBILE-UX-POLISH-2.md
+- docs/Prompts/CHORE-MOBILE-UX-POLISH.md
+- docs/Prompts/CHORE-ORACLE-LESS-ADVISORY.md
+- docs/Prompts/CHORE-ORDER-API-CHAIN-AWARE.md
+- docs/Prompts/CHORE-P0-RESCUE-AUDIT-REPORTS.md
+- docs/Prompts/CHORE-QUORUM-LOWCONFIDENCE-FIX.md
+- docs/Prompts/CHORE-QUOTE-QUORUM-HARDENING.md
+- docs/Prompts/CHORE-QUOTE-SOURCE-FIXES.md
+- docs/Prompts/CHORE-SPLITROUTE-CHAINID.md
+- docs/Prompts/CHORE-SUPPORT-CONTACT-EMAIL.md
+- docs/Prompts/CHORE-SUSHI-V7-REDSNWAPPER-QUOTE-FIX.md
+- docs/Prompts/CHORE-SWAP-FEE-USD-FIX.md
+- docs/Prompts/CHORE-TOKEN-LOGOS-COVERAGE.md
+- docs/Prompts/CHORE-TOKEN-LOGOS-FIX.md
+- docs/Prompts/CHORE-WALLET-LOGOS-FIX.md
+- docs/Prompts/INVESTIGATE-SILENT-SOURCES.md
+- docs/Prompts/INVESTIGATE-SPLITROUTE-CHAIN-AWARENESS.md
+- docs/Prompts/REVIEW-AZ-REFRESH.md
+- docs/Prompts/SPRINT-DCA-OBSERVABILITY-FREEZE.md
+- docs/Prompts/SPRINT-DCA-UNGATE.md
+- docs/Prompts/SPRINT-TOKEN-SELECTOR-UX.md
+- docs/Prompts/T-SAF-ARCHITECT-BRIEF.md
+
+### Secret scan: CLEAN — nothing excluded, nothing flagged
+- gitleaks **8.30.1** with the repo `.gitleaks.toml` + `.gitleaksignore`, staged-diff scan
+  (`gitleaks git --pre-commit --staged`): **0 leaks** across all 46 files (232 KB). The on-chain addresses present
+  (e.g. PAXG/XAUT anchors in SPRINT-RWA-GOLD) are public token addresses, as the prompt anticipated.
+
+### M set (10 files) — left untouched; NO snapshot version carries substance main lacks
+- Verdict: main's versions are the fuller committed rewrites — main is longer in **all 10** (e.g.
+  AUDIT-CLEANUP-LOWS 98 vs 47 lines, CHORE-DCA-DEVIATION-GUARD 190 vs 71); the snapshot holds the Architect's
+  earlier compact drafts of the same specs. 3 of 10 are pure main-supersets (snapshot adds 0 lines).
+- Spot-verified each mixed draft's distinctive substance exists on main (grep hit counts): W2 leg-quote
+  fail-closed on unparseable/malformed/zero (4); address-guard transferability/bytecode/duplicate-symbol checks
+  (5/5/6); catalog-cleanup LCX-class + AVT/FLUX/LIT (2/6); collisions-decimals FLUX + decimals() (5/16);
+  RWA-gold PAXG/XAUT (6); deviation-guard 1% threshold / window / defer semantics (4/33/24).
+- Dup nuance: `docs/Prompts/CHORE-QUORUM-LOWCONFIDENCE-FIX.md` is in this rescue AND in open PR #272 —
+  byte-identical blobs (`a289a9a`), so the add/add auto-resolves regardless of merge order.
+
+### Process fix (adopt going forward)
+- **Commit the Architect's prompt spec as part of each implementation PR** — the Code Agent copies it into
+  `docs/Prompts/` in the same signed commit (precedent: PR #272, and this PR for its own spec). Specs then never
+  live single-disk again; a periodic docs sweep remains as backstop, but per-PR keeps the spec and its
+  implementation reviewable together.
+
+### Merge-order note
+- This PR and open PR #272 both append `FEEDBACK.md` at the tail — whichever merges second needs a rebase
+  (GitHub ignores the `merge=union` attribute when computing PR mergeability; see the PR #271/#272 history).
+## Feedback — CHORE-QUORUM-REFERENCE-CONFIRMED-DEMOTION (branch chore/quorum-reference-confirmed-demotion)
+
+### ✅ Ready for Auditor re-confirm to close NEW2-M-01
+- Implements Option 2 exactly as agreed (reference-confirmed demotion + flag-without-reorder
+  fallback). The former `(a) FLAGGED GAP (Auditor)` test is now `(a) FIXED (NEW2-M-01)`: a low-ball
+  attacker beyond the band can no longer demote a reference-confirmed honest winner, and even on
+  no-reference pairs the attacker no longer gains the presented-best slot (flag-without-reorder
+  keeps the honest winner first). Execution gates (SC-04 / R1 / on-chain `minimumOutput`) and
+  contracts untouched; the 500 bps band is unchanged and now ALSO gates the winner-vs-reference
+  check (no new threshold introduced). 2440 tests green (48 in quote-quorum, +31 vs #272),
+  typecheck/lint clean. Fund-flow-adjacent (execution-selection) → Auditor re-confirm requested.
+
+### How the reference is sourced per pair (reused plumbing only — nothing new built)
+- Resolution is LAZY: `lowQuorumBandTripped` (n==2, both amounts parseable, pairwise spread >band)
+  is the only trigger — the healthy path performs zero reference lookups. On a trip,
+  `resolveQuorumReference` tries, in the project's oracle order:
+  1. **Chainlink (#18 consent-gate feed)** via the existing `fetchChainlinkPriceRaw` for BOTH legs
+     in parallel — this inherits round-integrity validation, per-feed staleness (heartbeat×1.5),
+     the L2 sequencer gate, composed feeds (Base cbETH → cbETH/ETH × ETH/USD), and the native-ETH /
+     WETH → ETH/USD mapping inside `getChainlinkFeed` (so the most common ETH-leg pairs ARE
+     referenced);
+  2. **DefiLlama (#248 price)** via the existing `fetchDefiLlamaPrice` for BOTH legs (confidence
+     ≥0.5 enforced inside, 2-min cache, 3s timeout, fail-null), with the SAME chainId→slug mapping
+     as the swap-route guard (`getChainConfig(cid).slug`, unknown → 'ethereum').
+  Legs are never mixed across sources (a ratio built from two methodologies is not a reference).
+  The fair-output formula is the #248 `validateSwapPrice` one: `amountIn/10^decIn × (srcUsd/dstUsd)
+  × 10^decOut`. Latency cost: only on the anomalous (tripped) path, ≤2 parallel RPC reads then a
+  bounded DefiLlama fallback.
+- Direction semantics: demote ONLY when the winner is ABOVE the reference beyond the band (the
+  reference confirms the WINNER is the outlier — mis-scale defence preserved, and a
+  reference-confirmed runner-up-is-better case demotes). Winner within ±band of the reference →
+  kept regardless of pairwise spread. Winner BELOW the reference beyond the band (moved market /
+  stale reference; the runner-up is lower still) → kept + flagged: demoting would present something
+  even LOWER — the exact lever NEW2-M-01 removes. This below-reference case was not explicitly
+  spec'd; flag-not-demote is the reading consistent with "reference confirms the winner is the
+  outlier" (the pair's outlier is the runner-up there, not the winner).
+
+### Divergence from the Auditor's remediation wording (deliberate — Architect-spec compliant)
+- The Auditor's Option-2 remediation prompt (AUDIT-NEW2, "Remediation prompt") worded the demote
+  condition as: winner deviates from the reference beyond the band **"AND the runner-up agrees with
+  the reference"**. The Architect's final spec (this chore's authority) dropped the second clause —
+  demotion fires on "the winner deviates from the reference beyond the demotion threshold" alone.
+  **Shipped = the Architect rule.** The two rules differ ONLY when BOTH sides are broken in opposite
+  directions (winner >band ABOVE the reference AND runner-up >band BELOW it — two simultaneously
+  defective sources on an n=2 pair): the shipped rule demotes (presents the low runner-up, flagged;
+  on any referenced pair an egregiously-low execution is then still caught by the #18 consent gate /
+  25% ceiling or the non-overridable DefiLlama 422), while the Auditor wording would keep the
+  garbage-high winner (flagged). Neither the NEW2-M-01 attack nor the mis-scale defence is affected:
+  the attack shape has the winner WITHIN the band of the reference (never demotes under either
+  rule), and the mis-scale shape has the runner-up ON the reference (demotes under both). Flagged so
+  the re-confirm can consciously accept the shipped rule or request the extra clause (one guard line
+  + one test if wanted).
+
+### Behaviour choice worth the Auditor's eye: reference-confirmed winner ⇒ lowConfidence FALSE
+- When the reference confirms the winner against a beyond-band low-baller, the outcome is NOT
+  flagged: the displayed best was cross-validated by an external oracle — strictly stronger
+  validation than the unflagged 2-source-agreement case. Flagging it would also let a griefing
+  source permanently pin the cue on honest pairs (cry-wolf). The unconfirmable shapes (no
+  reference, winner-below-reference, demotion, unusable runner-up) all still flag.
+
+### Residual on no-reference pairs (oracle-less AND DefiLlama-less)
+- Flag-without-reorder means a genuinely mis-scaled/garbage-high winner on such a pair is now
+  SHOWN (flagged) rather than demoted — the trade the spec makes to remove the attacker-controlled
+  demotion lever. Bounded by: on-chain `minimumOutput` (a fill priced off a garbage-high quote
+  reverts rather than under-fills — failed-tx UX, not fund loss), the tiered unverified-swap USD
+  limits (oracle-less >$10k already blocked), and the rendered `lowConfidence` cue (#272,
+  non-alarmist house style — untouched here). A low-baller on these pairs can still force the cue
+  on (annoyance), but can no longer reorder anything.
+- The defensive unparseable-winner demotion stays reference-free (a `BigInt`-unparseable
+  `toAmount` is a data-integrity defect, not a price judgment; unreachable in practice — the
+  caller pre-filters non-positive amounts).
+
+### Edge case — ci.yml guard-job label now slightly stale (left untouched, out of scope)
+- `.github/workflows/ci.yml` line ~227: the `quote-quorum-guard` step name still reads "garbage
+  quote cannot win a 2-responder display" — since this chore that is guaranteed only on REFERENCED
+  pairs (no-reference pairs flag without reordering). Label-only drift (the job just runs the test
+  file, which is what gates); ci.yml is outside this prompt's files-affected list. One-line rename
+  suggestion for a future chore: "low-quorum sanity: reference-confirmed demotion".
+
+### Determinism / composition (NEW-1 guards)
+- `applyLowQuorumSanity` stays pure — the reference is resolved by the caller and passed IN;
+  determinism pinned in BOTH regimes (frozen input, 50 repeated calls, with and without reference)
+  plus the tie-stability test. The sanity stays BEFORE the 3×-median filter (single demotion
+  authority at n<3). `applyLowQuorumSanityWithReference` (the lazy wiring `fetchMetaQuote` now
+  consumes) is unit-tested end-to-end with the I/O fetchers mocked at the module boundary.
+## Feedback — INVESTIGATE-DCA-VISIBILITY-DATA (branch investigate/dca-visibility-data)
+
+### Verdict: FRONTEND-ONLY — the keeper recording does NOT need enriching
+- Full report: `Audits/Reviews/DCA-VISIBILITY-DATA-2026-07.md`. Every asked stat is computable from
+  existing `orders` + `order_executions` columns; P&L-vs-spot reuses the existing #18/#248 plumbing
+  (`/api/portfolio/prices` batch DefiLlama, or server-side `fetchChainlinkPriceRaw` /
+  `fetchDefiLlamaPrice`) — nothing new to build. Live-verified against production: the completed
+  Base test DCA (`5449dea0`, WETH→ETHFI, 5/5) has 5 confirmed fills with real event-decoded
+  per-fill amounts, fee (0.1% of input), gas_used, daily cadence. Two strictly-OPTIONAL keeper
+  nice-to-haves (not required by the asks): populate the existing `price_at_execution` column
+  (1-line — historical USD-at-fill only), record `effectiveGasPrice` (net-P&L-incl-gas only).
+- Stats compute paths (detail in report §3): avg buy price = Σin/Σout realized; total invested =
+  Σamount_in; total received = Σamount_out (NOT orders.amount_out — NULL, keeper never writes the
+  order-level summary cols); fills N/M + %complete = orders.dca_executed/dca_total; date range =
+  created_at→executed_at / fill MIN-MAX; next fill = last fill + dca_interval (already shipped in
+  the active-cards countdown); P&L vs spot = Σout×spot_out − Σin×spot_in.
+
+### Spec reconciliation (the 3 existing specs)
+- KEEPER-RECORD-EXECUTIONS: implemented & live (record-execution.js, idempotent by tx_hash,
+  event-decoded amounts; divergences documented — no per-row source/chainId/USD cols, derived via
+  the orders join). ANALYTICS-DCA-EXECUTIONS: implemented & live (/api/analytics union + swaps-first
+  tx_hash dedup — the blueprint for the History merge). DCA-POSITIONS-DASHBOARD: implemented for
+  ACTIVE positions (countdown/fills timeline); completed DCAs render only as compact flag-gated
+  history cards. **None covers ask #2 (History feed) or ask #3's aggregate stats** → new frontend
+  spec(s) needed; no contradictions. ⚠ All 3 spec files live only on origin/chore/rescue-prompt-specs
+  (unmerged) — not on main.
+
+### Completed(0) root cause — data reality, not a filter bug
+- Pipeline verified end-to-end (keeper 'executed' → API returns terminal rows → mapDbStatus
+  'executed'→'filled' → Completed tab filters 'filled'). The DB holds exactly ONE ever-completed
+  order, owned by the test wallet 0xd44d…962d (completed 2026-07-05); any other wallet truthfully
+  sees 0. Caveat: the Orders tab's initial all-statuses fetch needs the W6 read-auth signature —
+  declining it zeroes ALL tabs. History tab reads ONLY the `swaps` table → DCA fills structurally
+  invisible; recommend a server-side union in /api/history (analytics pattern) + a "DCA" badge.
+
+### Adjacent findings (backlog candidates, none changed)
+- Local .env.local Supabase keys are dead/rotated (live API 401s them) + its first var name is
+  mangled (`EXT_PUBLIC_ORDER_EXECUTOR_ADDRESS`, missing leading N) — local-only, prod (Vercel env)
+  unaffected; re-pull env before the next local DB task. `fetchDCAExecutions` is dead code (unused +
+  anon/RLS path returns empty without a Supabase-Auth JWT). `/api/orders/stats` omits the `failed`
+  bucket. `useSwapHistory` claims localStorage but has no persist middleware (session-only). Stale
+  memory corrected: the keeper IS running (daily fills 07-01→07-05).
+
+## Feedback — CHORE-STABLECOIN-CONSTANT (branch chore/stablecoin-constant)
+
+### The 6 sites and their historical memberships (AZ FE5 — verified verbatim on main @ a717427)
+1. `SlippageModal.tsx:19` — `[USDC, USDT, DAI, FRAX, LUSD, PYUSD, USDe, USDS, BOLD]` (auto-slippage recommendation; chain-blind)
+2. `SwapBox.tsx:231` — `[USDC, USDT, DAI, USDbC]` (execution-price derivation feeding the Chainlink deviation gate; chain-blind)
+3. `SwapBox.tsx:556` — `[USDC, USDT, DAI, USDe]` (input-USD estimate feeding the unverified-swap $1k warn / $10k block; chain-blind)
+4. `useSplitRoute.ts:67` — `[USDC, USDT, DAI, BOLD]` (split-routing USD threshold, output side; chain-blind)
+5. `useSplitRoute.ts:69` — same list (input side)
+6. `chains/tokens.ts:163` — `[USDC, USDT, DAI, USDbC, USDe, FRAX, LUSD, EURC]` (`inferCategory` 'Stablecoin' fallback; chain-blind)
+
+6 sites / 5 distinct memberships — no two gates agreed; USDbC was ~$1 for the deviation gate but not
+for the unverified-swap gate, split threshold, or auto-slippage.
+
+### Canonical per-chain set (new `src/lib/chains/stablecoins.ts`, enforced by `stablecoins.test.ts`)
+- **Mainnet (1):** `USDC, USDT, DAI, FRAX, LUSD, PYUSD, USDe, USDS, GHO, crvUSD, BOLD` — exactly the
+  curated `DEFAULT_TOKENS` 'Stablecoin' category (a drift-guard test pins set equality, so adding a
+  curated stable without touching the constant — or vice versa — fails CI loudly).
+- **Base (8453):** `USDC, USDbC, USDT, DAI` — the curated suggested USD stables. **USDbC is ~$1 on
+  Base in every gate now** (the AZ headline inconsistency).
+- **EURC:** EUR-pegged (trades at EUR/USD FX, not $1) → 'Stablecoin' *UI category* only
+  (`STABLECOIN_CATEGORY_EXTRAS`), never in a USD set. The old chains/tokens list conflated the two
+  semantics; the constant separates them.
+- **Unknown chains:** empty set — fail-closed, no ~$1 assumption anywhere.
+- **Exact-casing symbol match preserved** (same as all 6 historical sites): an imported lookalike
+  named `usdc` gains no ~$1 trust.
+- Membership rule: **curated stables only.** Long-tail catalog stables (Base LUSD/USDS/crvUSD;
+  mainnet TUSD/USDP/FDUSD/…) stay untrusted for ~$1 purposes — the same trust boundary the
+  historical gate lists drew, now documented. Yield-accruing lookalikes (sUSDe, sDAI) are pinned OUT
+  by test — they are NOT ~$1 and must never enter the USD sets.
+
+### Gates whose behaviour changes (and why the new value is correct)
+- **Auto-slippage (SlippageModal + SwapBox effect; now chain-keyed via `chainId` prop/param,
+  default mainnet for back-compat):**
+  - Mainnet + GHO, crvUSD → 0.1%/0.3% stable treatment. Correct: both are curated ~$1 stables the
+    old list simply missed (they postdate it).
+  - Base + USDbC → USDbC/USDC now 0.1% (was 0.5% default). Correct: bridged USDC ≈ $1 on Base.
+  - Base − FRAX/PYUSD/USDe/BOLD (not in the Base catalog at all — reachable only via custom import)
+    and − LUSD/USDS (Base long-tail only): 0.5% default instead of 0.1/0.3%. Correct and safer: a
+    thin bridged long-tail pool at 0.1% slippage mostly produces failed swaps, and custom-import
+    symbols should never get trust by name. This is the ONLY membership loss with a real user-visible
+    surface today (Base long-tail LUSD/USDS pairs get a wider default) — deliberate, not silent.
+- **Chainlink deviation gate feed (`execIn`/`execOut` derivation, SwapBox):**
+  - Mainnet + FRAX, LUSD, PYUSD, USDe, USDS, GHO, crvUSD, BOLD → selling/buying ANY curated stable
+    now derives a USD execution price and runs the deviation check (more oracle coverage; each is
+    ~$1 well inside the gate's warn/block bands). − USDbC on mainnet is a no-op (no such mainnet
+    token).
+  - Base: no change — the old list `[USDC, USDT, DAI, USDbC]` equals the Base canon exactly.
+- **Unverified-swap gate estimate (`estimatedInputUsd`, SwapBox; `activeChainId` added to the
+  `useMemo` deps):**
+  - Mainnet + FRAX, LUSD, PYUSD, USDS, GHO, crvUSD, BOLD → inputs from these stables now produce a
+    real USD estimate, so the $1k-warn/$10k-block for oracle-less pairs can actually fire
+    (previously PYUSD/USDS/GHO/crvUSD/BOLD inputs estimated $0 — the gate was blind). Strictly
+    stronger protection.
+  - Base + USDbC (gate now works for USDbC inputs); − USDe on Base (not a Base catalog token —
+    custom imports no longer get $1 by name; the estimate falls through to the Chainlink branch).
+- **Split-routing threshold (useSplitRoute; `chainId` added to the `useMemo` deps):**
+  - Mainnet + FRAX, LUSD, PYUSD, USDe, USDS, GHO, crvUSD → ≥$5k trades in/out of these now get
+    split analysis. Correct: the estimate is only a threshold input, and these are ~$1.
+  - Base + USDbC (split analysis now reachable for USDbC-denominated trades); − BOLD on Base
+    (mainnet-only token; the old chain-blind list applied it everywhere).
+- **Category fallback (chains/tokens `inferCategory`, now chain-keyed):** zero observable catalog
+  delta today — every genuine stable in both generated catalogs already carries pipeline category
+  'Stablecoin', so the fallback only fires for pipeline-'Other' tokens. Mainnet fallback additionally
+  recognises PYUSD/USDS/GHO/crvUSD/BOLD; EURC keeps the category via the extras map; USDbC leaving
+  the MAINNET fallback is a no-op (no mainnet USDbC exists).
+
+### Flagged — intentional/unclear exclusions NOT silently absorbed
+1. **`LimitOrderPanel.tsx:30` + `ConditionalOrderPanel.tsx:30`** carry two MORE copies of the
+   9-symbol list (`STABLECOIN_SYMBOLS`). Both components are documented L2-parking
+   (`[CHORE-ORDER-EXEC-PREP B]`, unwired from `page.tsx`, rule #4 — AZ FE6), which is why AZ counted
+   6 sites, not 8. Left byte-identical here; they should be wired to the constant when unparked.
+2. **`src/lib/order-engine/usd.ts` `APPROX_PRICES`** is a semantic sibling ($1 entries for
+   USDC/USDT/DAI/FRAX/LUSD/SUSD/CRVUSD/GHO/PYUSD) but a different beast: an approximate PRICE table
+   (incl. non-stables) shared with the analytics route (#228) under the "do not fabricate USD" rule.
+   Deliberately untouched (analytics parity). Gap worth a follow-up: it lacks USDbC/USDe/USDS/BOLD,
+   so Base USDbC DCA fills render "—" in the dashboard today.
+3. **Symbol-based membership (pre-existing):** all gates match by symbol, so a custom-imported token
+   NAMED like a stable passes ~$1 gates on the chain where that symbol is canon. Unchanged by this
+   chore (and narrowed on the wrong-chain axis: e.g. an imported "USDbC" on mainnet no longer gets
+   $1). Moving to address-based membership is a product/security decision for the Architect —
+   noting, not deciding, here.
+4. **`quorum-check.ts` "stablecoin pair"** detection is threshold-based (`maxDeviationPercent <= 2`
+   from reference-pair config), not symbol-list-based — verified NOT a 7th list; untouched.
+
+### Test gap closed
+- Neither `SlippageModal.test.tsx` nor any stable-membership behaviour was CI-gated (CI runs
+  single-file guard jobs, no full suite). New `stablecoin-constant-guard` job gates
+  `stablecoins.test.ts` (canon + drift-guards + call-site resolution scans) +
+  `SlippageModal.test.tsx`; the new chain-membership cases in `useSplitRoute.test.ts` ride the
+  existing `quote-source-guard`.
+
+## Feedback — CHORE-ORACLE-VALUE-FAILCLOSED (branch chore/oracle-value-failclosed) — FLAG FOR AUDITOR (gate-adjacent)
+
+### The policy (explicit, both layers; threshold UNCHANGED at $10k)
+- **Value estimate** = `max(inputUsd, outputUsd)`:
+  - **Server (binding, `api/swap/route.ts`):** four legs in parallel — DefiLlama(src), DefiLlama(dst)
+    (both chain-slug-scoped, as before) + the server Chainlink path `computeTokenAmountUsd(src|dst)`
+    (existing plumbing, no new oracle). Any leg failing degrades to null.
+  - **Client (UX mirror, `SwapBox.tsx` via new pure `src/lib/swap-usd-estimate.ts`):** per side —
+    chain-keyed USD-stable ≈$1 ([[stablecoins]] canon), the side's Chainlink hook price, the
+    conservative ETH/WETH≈$2k INT-01 fallback (all values/thresholds unchanged). The output side
+    uses the quote's `toAmount` + `tokenOutPriceCheck`, which already existed.
+- **Neither side prices on either source → fail CLOSED:**
+  - Server: **422 `{ priceGuard, blocked, unpriceable: true }`** before `validateSwapPrice` — the
+    gate FIRES instead of passing with $0. This applies to ALL unpriceable trades, not only ">$10k",
+    because a USD "safe size ceiling" is unimplementable without a USD measure — with zero price
+    coverage the size is unknowable, so the conservative branch is a block. Only exotic↔exotic pairs
+    (both tokens outside DefiLlama AND Chainlink — exactly the aToken-incident class) can reach it;
+    one priceable side always yields a real estimate and the normal unchanged >$10k threshold.
+  - Client: `priced: false` + oracle-unavailable + live quote → `oracleBlocked` (same button gate as
+    the >$10k branch) + a factual, non-alarmist notice ("value cannot be verified… blocked for
+    safety"). Server remains the binding control.
+- **Below $10k, priced trades are UNCHANGED** (fail-open small-swap behaviour in
+  `validateSwapPrice` is untouched); above $10k all existing high-value branches now see an honest
+  estimate instead of $0.
+
+### Behaviour changes (why correct)
+- An **uncovered-input trade with a measurable output** (e.g. exotic → USDC $50k) now carries
+  estimatedValueUsd = outputUsd, so the existing missing-price/low-confidence/error high-value
+  branches in `validateSwapPrice` fire — this was the P2 bypass (input-only estimate → $0).
+- **max(in,out) can only raise the estimate** vs the old input-only figure → strictly more
+  conservative; no gate got looser.
+- **Unpriceable (both sides) trades are now blocked at ANY size** on the server (were: silently
+  allowed at any size). Collateral: tiny legit exotic↔exotic swaps are blocked too — accepted
+  trade-off (per spec "the gate must FIRE"); DefiLlama covers pool-priced long tail, so reach is
+  minimal. Auditor should consciously ratify this "block-all-unpriceable" reading vs a size-capped
+  alternative (which would need a non-USD size measure that does not exist).
+
+### Bounds / flagged (not silently absorbed)
+1. **Server Chainlink legs are mainnet-only:** `computeTokenAmountUsd` takes no chainId and
+   resolves the mainnet feed registry; consulting it off-mainnet would look up foreign addresses in
+   the wrong registry (cross-chain address collisions). Off-mainnet keeps its chain-correct
+   DefiLlama legs (slug-scoped). Follow-up worth a small chore: thread chainId through
+   `computeTokenAmountUsd`/`fetchErc20Decimals`/`rpcCall` (fetchChainlinkPriceRaw already accepts
+   one) so Base gains the Chainlink legs too.
+2. **Client mirror has no DefiLlama leg pre-swap:** the quote route attaches no DefiLlama data, so
+   the client uses every source it actually has (stable/Chainlink/ETH, both sides). "DefiLlama
+   where available" = server-only today; adding oracle prices to /api/quote would be a separate
+   surface change.
+3. **P1a cross-reference (NOT fixed here, per spec):** `minimumOutput` derives from the quote's own
+   `toAmount`, so it cannot bound a self-consistent bad quote — that is the on-chain-floor class
+   (`SPRINT-ORDER-ONCHAIN-FLOOR`). This chore narrows the blast radius (a garbage quote on a
+   >$10k-measurable trade now hits an honest high-value gate) but does NOT close P1a.
+4. **Latency:** the estimate now runs 2 DefiLlama fetches + (mainnet) 2 Chainlink RPC reads, all in
+   one `Promise.all` — wall-clock ≈ the slowest single leg, vs 1 serial fetch before;
+   `validateSwapPrice` unchanged.
+5. **Test fixture updates (gate test file — each intent-preserving, Auditor please eyeball):** three
+   Base-chainId tests (G2 slug derivation, G4 activation-gate 200, E2-I-01 sequencer-up 200) ran with
+   the old implicit fail-open (DefiLlama null → estimate $0 → pass). Under fail-closed, an unpriced
+   Base pair 422s, so each now sets a priced DefiLlama fixture (`{ price: 3000 }`) — the behaviours
+   they pin (slug, activation, sequencer) are orthogonal to pricing and their assertions are
+   unchanged.
+
+### Tests / CI
+- `swap-usd-estimate.test.ts` (14): per-side pricing, max(in,out), chain-keyed USDbC, fail-closed
+  `{ usd: 0, priced: false }` contract. `route.test.ts` +4: unpriceable → 422 `unpriceable` (and
+  `validateSwapPrice` never reached), output-side pricing (the bypass), max(in,out), Chainlink-only
+  fallback. TDD red observed before implementation. New `oracle-value-guard` ci.yml job pins both
+  files (the swap route test file was previously NOT gated by any CI job).
+
+### Guard update from #278 (documented, not silent)
+- `stablecoins.test.ts` call-site scan: SwapBox `isUsdStablecoin` minUses 3 → 2, because the
+  input-USD-estimate use moved into `lib/swap-usd-estimate.ts`; that helper is now itself added to
+  the scanned call-site list (>=1 use + import + no inline list), so the single-source invariant is
+  net-unchanged (SwapBox exec-price ×2 + helper ×1).
+## Feedback — CHORE-DCA-VISIBILITY-AND-STATS (commits 35d46bf History + this commit stats)
+
+### Stat formulas (as implemented — for the Architect's record)
+- All realized stats are computed from the fills (`order_executions.amount_in` / `amount_out`,
+  the ACTUAL event-decoded per-fill amounts), NOT from `orders`-level summary columns (which the
+  keeper never writes) and NOT from `price_at_execution` (all-NULL on live data — ignored):
+  - **total invested** = Σ`amount_in` (input token); **total received** = Σ`amount_out` (output token);
+  - **avg buy price / cost basis** = totalInvested ÷ totalReceived (INPUT per OUTPUT, decimals-aware);
+  - **fills executed** = count of confirmed fills actually summed; **planned** = `max(dca_total, executed)`;
+  - **% complete** = round(executed / planned × 100);
+  - **date range** = min→max `created_at` over the confirmed fills.
+- **P&L vs spot** = totalReceived × spot(tokenOut) − totalInvested × spot(tokenIn), in USD. Non-alarmist:
+  a loss is a calm neutral cue (`direction: 'down'` → cream), never red. Returns null (no P&L shown)
+  when either token is unpriceable — no fabricated figure.
+
+### Reused / price source
+- The History merge (#2) reuses the **exact swaps-first `tx_hash` dedup** proven in `/api/analytics`
+  (`computeDashboard`): swaps first so a tx in both tables resolves to the swap row. The fills fetch is
+  the analytics `fetchConfirmedExecutions` shape but **wallet-scoped** via `orders!inner(...)` +
+  `.eq('orders.wallet', wallet)` (order_executions has no `wallet` column — the join carries it).
+- **P&L price source** = `/api/portfolio/prices` (DefiLlama batch, server-side, cached, chain-aware).
+  Base (8453) is a portfolio-supported chain, so DCA (Base-only) prices resolve; unsupported chains are
+  skipped client-side (no pointless 400).
+
+### Concern (pre-existing, out of scope — flagged not fixed)
+- `/api/orders/stats` `recentExecutions24h` queries `order_executions.eq('wallet', …)` and
+  `.gte('executed_at', …)`, but per the recon `order_executions` has **neither a `wallet` nor an
+  `executed_at` column** (only `created_at`; wallet lives on the parent order). So the wallet-scoped
+  branch and the 24h window are querying non-existent columns — that count is unreliable/likely-0 today.
+  Left untouched (the chore only added the missing `failed` bucket); worth a dedicated fix (join on
+  `orders.wallet` + use `created_at`).
+
+### Edge case
+- Expanded DCA card in Orders→Completed fetches `/api/orders/:id/executions` **twice** (once by the
+  existing `ExecutionTimeline`, once by the new `DCAPositionStats` self-fetch). Harmless (indexed
+  point-query, expand-triggered), but a future refactor could lift the fetch into `OrderCard` and pass
+  the fills to both. The active DCA dashboard (`MissionControlCard`) already avoids this — it passes its
+  existing `useOrderExecutions` fills into `DCAPositionStats` (`fills` prop → self-fetch disabled).
+- P&L prices by token ADDRESS via DefiLlama; a DCA whose output is the native-ETH sentinel (not WETH)
+  would be unpriceable → P&L simply hidden. DCA outputs are ERC-20 in practice (input must be WETH), so
+  not hit today; note for when native-ETH output DCAs appear.
+
+### Removed dead code
+- Deleted `fetchDCAExecutions` (recon-flagged: no caller, and its anon-key + RLS path returned []
+  anyway) and, with it, the now-unused `ExecutionRow` type + `SUPABASE_EXECUTIONS_TABLE` import + both
+  re-exports. `order_executions` is read server-side (service role) via `/api/orders/:id/executions`.
+## Feedback — SPRINT-ORDER-ONCHAIN-FLOOR (branch sprint/order-onchain-floor)
+
+### ⚠ Needs an Auditor pass (fund-flow / execution-selection)
+Closes threat-model P1a (HIGH): DCA's on-chain minOut is a 1-wei no-op, so the only floor was a flat
+0.5% self-referential keeper slippage. This sprint = Phase 0 (keeper-only, no redeploy) + Phase 1 (ADR
+only, NO contract deploy/change). Auditor sign-off required before merge and before any v3 deploy.
+
+### Phase 0 mechanism (implemented, keeper-only, off-chain)
+- **`order-floor.js` (pure, 19 tests):** `computeReferenceExpectedOut` derives fair-value output from an
+  INDEPENDENT reference (precision-safe BigInt: USD prices scaled to 8dp, 1e8 factors cancel);
+  `decideFloor` REJECTS a DCA fill whose built output < reference × (1 − maxSlippage). Default band
+  `DCA_ORACLE_FLOOR_BPS=300` (3%), clamped [50,2000], env-tunable. A reject DELAYS the fill (unlock +
+  retry next cycle) and NEVER force-executes — delay ≫ drain; it is NOT a failure (no orderRetries, no
+  'failed', no failure-alert), mirroring the deviation DEFER but without the window-end execute.
+- **Reference fetch `fetchReferencePriceUsd` (executor.js, fail-safe I/O):** Chainlink-first for the ETH
+  leg (reuses the trusted on-chain `readEthUsd`/`ETH_USD_FEED`), else DefiLlama current price by
+  chain:address (the #18/#248 price source; slugs ethereum/base). ANY miss (unmapped chain, no coverage,
+  HTTP/parse/timeout) ⇒ null ⇒ the pair is treated as "no reference" ⇒ the fill is FLAGGED (info alert),
+  never falsely rejected. A reference outage can only drop DCA to the flagged path, never halt it.
+- **No-reference pairs:** `decideFloor` returns `ok:true, flagged:true` — the fill proceeds on the
+  aggregator's own flat calldata minReturn (not blind, not 1-wei) and is surfaced to ops. Honest interim:
+  no keeper-side check can catch a self-consistent bad quote without an external anchor; the terminal fix
+  for these pairs is the on-chain signed floor (ADR-013).
+- **Reconciliation with #248:** the deviation guard (soft DEFER within a window, then execute-anyway) is
+  UNCHANGED and runs after the floor gate. The floor is the HARD safety gate (never execute below it);
+  #248 is execution-QUALITY timing. Both fail-open on a missing reference; they do not conflict.
+- **Scoping decision (Chainlink-first):** implemented Chainlink-first only for the ETH leg via the one
+  feed the keeper already trusts (ETH_USD_FEED), DefiLlama for the rest — rather than duplicating a full
+  keeper-side Chainlink feed map (wrong feed addresses would be a NEW fund risk). Faithful to
+  "Chainlink first, else DefiLlama" for the common ETH quote leg; per-feed Chainlink at execution is the
+  ADR's on-chain design. Flagged for the Architect if a wider keeper feed map is wanted sooner.
+
+### Base MEV-protect finding (Phase 0 step 2)
+- **`submission-policy.js` (pure, 9 tests) + fail-closed wiring:** replaced the SILENT
+  `FLASHBOTS_RPC ? flashbots : walletClient` public-mempool fallback. Now: Base/OP-stack (8453) →
+  `sequencer-private` (submits normally); Ethereum mainnet (1) / unknown prod chain → REQUIRES a private
+  relay or the explicit `ALLOW_PUBLIC_MEMPOOL=true` override, else the fill is REFUSED (unlock+retry).
+  Applies to ALL order types, not just DCA.
+- **Investigation result:** the threat model assumed "Base has no Flashbots → sandwichable". In fact
+  **Base (OP-stack) routes txs to a single sequencer whose mempool is PRIVATE** (no public pending-tx
+  gossip), so the classic retail public-mempool sandwich vector is largely ABSENT on Base today — there
+  is no Flashbots-equivalent and none is needed. Residual Base MEV is sequencer-level/backrunning, bounded
+  by the new oracle floor. So on Base the interim = private sequencer mempool + oracle floor; the
+  fail-closed relay requirement hardens mainnet (where DCA is not currently live).
+
+### Phase 1 ADR summary
+- **`docs/ADR/ADR-013-order-onchain-floor.md` (Proposed).** NOTE: the prompt said ADR-011, but
+  `ADR-011-feecollector-augustus-whitelist.md` (and 012) already exist — used the next free number
+  **ADR-013** per the no-collision convention (flagged, not silently overwritten).
+- Designs OrderExecutor **v3** (deployed executor is not upgradeable): (1) real per-chunk floor from a
+  Chainlink read at execution within a SIGNED `maxSlippageBps`, replacing `if(minOut==0)minOut=1` with a
+  REVERT (+ signed absolute-min fallback for no-feed pairs); (2) resolve routerDataHash (recommend:
+  dynamic calldata backed by the oracle floor for DCA, real hash for non-DCA); (3) Permit2-style
+  unordered/bitmap nonce as a PREREQUISITE to re-wiring Limit/SL/TP (fixes P1b — sequential nonce blocks
+  a stop-loss — and P1c — non-DCA routerDataHash=0 reverts). Covers deploy + 48h timelock + keeper/
+  frontend migration + Auditor pass + deploy runbook. NOT implemented/deployed this sprint.
+
+### Tests / verification
+- Keeper node:test suite: **155 pass** (28 new: order-floor 19 + submission-policy 9), auto-gated by
+  keeper-tests.yml (`node --test` auto-discovers *.test.mjs). RED proven by moving the module aside
+  (import fails) then GREEN on restore; submission-policy written test-first. `node --check executor.js`
+  parses. Live keeper verification (a sub-floor fill actually rejected end-to-end) requires Supabase+RPC+
+  signer and a pm2 restart on the EC2 host — an ops deploy step, not runnable in CI/local.
+- No contract deployed/changed; recipient/router/on-chain gates untouched; no ALLOW_PLAINTEXT_KEY; no
+  wagmi-v3.
+
+## Feedback — CHORE-KEEPER-HARDENING (branch chore/keeper-hardening) — 3 commits, → Auditor
+
+All keeper, off-chain, fund-adjacent; no contract/on-chain change; Phase-0 reject/submission behaviour + on-chain gates intact; no ALLOW_PLAINTEXT_KEY.
+
+- **P5a (HIGH) — Vault stub throws:** `signer-guard.js` (`VAULT_WIRED=false`) makes a configured-but-unwired `VAULT_ADDR` count as NO managed signer. `kms-signer.js` Vault branch now THROWS instead of falling through to `privateKeyToAccount`; `validateConfig` no longer lets `VAULT_ADDR` suppress the plaintext-key FATAL and logs the resolved signer kind at startup. (7 tests.)
+- **P1A-M-01 (MEDIUM) — bounded fail-open:** `fetchReferencePriceUsd` now returns `{price, transient}`. A TRANSIENT outage of a feed-having pair (network/timeout/5xx/429, or ETH leg unreadable) → **DELAY** (retry next cycle). A genuinely FEEDLESS pair → proceed **flagged** only within a **USD notional cap = $250** (`DCA_FAIL_OPEN_MAX_USD`, clamped [0,100000]); larger/unsizable → DELAY. Oracle `[50,2000]` bps band untouched. (11 tests.)
+- **P1A-I-01 (INFO) — ADR ref:** Phase-0 comments `ADR-011` → **ADR-013** (011 is the FeeCollector/Augustus ADR).
+
+**USD-cap chosen: $250** per fill — small enough to bound worst-case loss on an un-oracle-bounded feedless fill, large enough not to block genuine small feedless DCA; Auditor-tunable via env.
+
+Keeper node:test: **173 pass** (28 new). `node --check executor.js` OK. Live end-to-end (a transient-outage DELAY / feedless-cap path exercised against real Supabase+RPC) needs a keeper deploy (pm2 restart) — ops step. **→ Auditor (signer/floor-adjacent).**
+
+## Feedback — CHORE-DEFILLAMA-ADAPTER
+
+**Event signature used:** `SwapWithFee(address,address,address,uint256,uint256,address,uint256)`
+(`user, router, tokenIn, totalAmount, feeAmount, tokenOut, outputAmount`), read directly from
+`contracts/TeraSwapFeeCollector.sol:60-68` — the SAME topic already hardcoded as
+`TOPICS.SwapWithFee` in `src/lib/on-chain-monitor.ts`, not a newly-derived one. Both deployed
+FeeCollectors run this exact contract source: mainnet `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459`,
+Base `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` (cross-checked against `src/lib/constants.ts` +
+multiple audit files referencing both addresses as "FeeCollector").
+
+**DefiLlama target path:** `dexs/teraswap/index.js` in a fork of `DefiLlama/dimension-adapters`
+(category `Aggregator`) — NOT the TVL repo. This repo's copy lives at
+`integrations/defillama/teraswap.js` for the record; its two `require(...)` helper paths need
+adjusting to the fork's current layout at PR time (they weren't cloned/verified here — this task
+was scoped read-only on the TeraSwap contracts, no external repo access).
+
+**Methodology (submission text, full copy in `integrations/defillama/PR-NOTE.md`):** volume =
+Σ`totalAmount` (pre-fee notional, priced in `tokenIn`); fees = Σ`feeAmount` (same token, no
+cross-token conversion); revenue = fees (TeraSwap keeps 100%, no fee-sharing). Both chains use the
+identical event/contract; only the deployment `start:` date/block per chain is a TODO placeholder
+(needs an Etherscan/Basescan "Contract Creation" lookup, out of scope for a read-only task).
+
+**Edge case:** `SwapWithFee`'s first 3 slots (`user, router, tokenIn`) are shared with the frozen
+V1 FeeCollector (`0x4dAEAf24…`, `src/lib/constants.ts:FEE_COLLECTOR_V1_ADDRESS`), but V1's event
+has a 5-arg signature (no `tokenOut`/`outputAmount` — see `TOPICS.SwapWithFeeV1` in
+`on-chain-monitor.ts`) and V1 is deprecated/no longer receiving swaps, so it's correctly excluded
+from this adapter (no double-counting risk either way — different topic0).
+## Feedback — CHORE-API-HARDENING-2 (branch chore/api-hardening-2) — 5 commits, no Auditor
+
+No fund-flow/contract change; no auth loosened. Threat model P3.
+
+- **P3a — trusted-IP helper (confirmed):** `trusted-ip.ts` prefers `x-vercel-forwarded-for` (platform-set, unspoofable), else `x-real-ip`, else the RIGHT-most `x-forwarded-for` entry — never the client-controlled left-most token. Applied at all 4 call sites (`quote`, `swap`, `rpc`, `body-limit.clientIp`). Fixed one pre-existing test in `orders/route.hardening.test.ts` that pinned the old (vulnerable) left-most behaviour as "correct" — updated + added an adversarial case.
+- **P3c — `/api/rpc` cost policy (confirmed):** `debug_*`/`trace_*` denied outright (no legitimate use in the app's read surface); `eth_getLogs` numeric block ranges CLAMPED to 2000 blocks (rewrites `fromBlock`, keeps the call working) rather than rejected; batch capped at 25. Tag-based ranges (`latest`) pass through — can't bound cheaply without a chain-tip lookup.
+- **P3d — `/api/history` hardening:** added the 30/min-per-wallet rate limit it lacked (siblings `/api/orders`, `/api/analytics/export` already had one); `count:'exact'` → `'estimated'` (avoids a full table scan); offset clamped to `[0, 2000]`. The existing W6 read-auth boundary (swaps public-by-address, DCA fills gated by signature) is an explicit prior design decision — left untouched, not "loosened."
+- **P3b — quote-cache quantization:** `amount` bucketed to 4 significant figures before entering the cache key, so a scripted +1-wei increment now hits the same 3s cache entry instead of forcing an ~11-adapter fan-out per request. A genuinely different trade size still misses. The global KV-backed outbound throttle (per the threat model's bigger follow-up) is out of scope here.
+
+28 new tests across trusted-ip (8), rpc-cost-policy (11, pure) + rpc route (8), history route (+4), quote-cache (9) = 2558 total pass (1 pre-existing unrelated failed suite: `connect-modal-qr.test.ts`, missing `cuer/QrCode` dep in this worktree's node_modules — not touched by this chore). Typecheck clean on all edited/added files.
+## Feedback — CHORE-DCA-CUSTOM-PERIODS (branch chore/dca-custom-periods)
+
+**Spec source:** `docs/Prompts/CHORE-DCA-CUSTOM-PERIODS.md` did not exist in the repo/history/origin —
+implemented from the `/goal` command text (full spec), with the user's explicit go-ahead. Committing
+that text as the spec file in this PR per process.
+
+**Bounds found (read-only):**
+- Contract (`TeraSwapOrderExecutor.sol`): `dcaTotal>0` (`InvalidDCATotal`), `dcaInterval>0`
+  (`InvalidDCAInterval`), per-chunk floor `MIN_ORDER_AMOUNT=10_000` base units (pre-existing
+  guard, untouched). **No on-chain upper bound** on either.
+- Keeper (`executor.js`): `POLL_INTERVAL_MS=30_000` (30s) — the smallest custom interval (1h)
+  is 120× that, no precision issue.
+- **Order-creation API** (`api/orders/route.ts` + mirror in `contracts/order-engine/api/orders.ts`):
+  hard-rejects `expiry > now + 90d` (400). **This — not the contract, not the keeper — is the
+  real ceiling** for interval×buys (10d × 100 buys = 1000d, 11× over).
+
+**Design:** `DCA_MIN_CHUNK_USD` = `NEXT_PUBLIC_DCA_MIN_CHUNK_USD`, default **$5**, in
+`lib/order-engine/dca-custom.ts::getDcaMinChunkUsd`. Buffer for auto-derived expiry =
+`max(1h, 10% of interval)`. Both are product judgment calls (no existing precedent), flagged for
+Architect review.
+
+**Composition, not new gates:** Custom mode's auto-derived expiry is hard-capped at
+`MAX_EXPIRY_DAYS` (90d); when interval×buys alone exceeds that, the derived expiry lands below
+what the schedule needs, and the **pre-existing** `dcaScheduleFitsExpiry` gate (already wired,
+already tested for the preset path) blocks submit — no second hard-warn UI was built.
+
+**Dust guard fails open on unpriced tokens:** `fillUsd`/`APPROX_PRICES` only covers curated
+symbols (ETH/WETH/stables/majors). An imported/exotic DCA input token has no USD price → the
+min-chunk-USD guard no-ops (documented behavior, matches `fillUsd`'s existing posture elsewhere)
+— the contract's base-unit `MIN_ORDER_AMOUNT` floor remains the universal backstop regardless.
+
+**Not touched:** presets (`DCA_TOTAL_PRESETS`/`DCA_INTERVAL_PRESETS`/`EXPIRY_PRESETS`), contract,
+keeper, any gate. `.env.example` not updated (out of the read-only file scope) — the env var has
+a working default and no deploy step is required.
+
+**Tests:** `dca-custom.test.ts` (23, pure, TDD red→green) + 6 new `DCAPanel.test.tsx` integration
+cases (toggle, clamp-on-blur, dust-cap, dust-block, expiry-hard-warn, signed dcaInterval/dcaTotal
+match the clamped custom values). Full suite 2549/2549 green; typecheck/circular clean; 0
+lint-warning delta.
+
+## Feedback — CHORE-API-SMALL-FIXES (`79bd6ec`, `5a2802f`)
+
+### Query fix
+- `/api/orders/stats` `recentExecutions24h` queried non-existent `order_executions.wallet`
+  / `.executed_at` columns (real schema: `created_at`, `order_id`, `tx_hash` — wallet only
+  via `orders`). Fixed via `orders!inner(wallet)` join + `created_at`, same pattern as
+  `/api/history`. Tests added (`route.test.ts`).
+
+### Base Chainlink availability (Auditor note, commit `5a2802f`)
+- `computeTokenAmountUsd`/`fetchErc20Decimals` had no `chainId` param and always hit
+  mainnet RPC — on Base this meant the >$10k value gate's Chainlink leg was hard-skipped
+  entirely (guarded by `swapChainId === DEFAULT_CHAIN_ID` in `swap/route.ts`), not just
+  "unavailable". Threaded `chainId` through to the already chain-aware
+  `fetchChainlinkPriceRaw`/`rpcCall`. Base Chainlink feeds ARE available for WETH/ETH-USD,
+  USDC/USD, DAI/USD (`CHAINLINK_FEEDS_BY_CHAIN[8453]`); cbETH/USDbC remain unmapped
+  (deliberate — no safe feed) and still fall back to the existing DefiLlama leg via
+  `max(in,out)`. No new addresses invented, threshold/gate logic unchanged — **this
+  strictly tightens P2 fail-closed coverage on Base** and should be ratified alongside it.

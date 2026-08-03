@@ -12,5 +12,18 @@
     "high/critical. The committed lockfile pins those versions, so `npm ci`/`npm install` install them",
     "cleanly while .npmrc keeps min-release-age=7 for all other (future) dependency resolution."
   ],
-  "allow": []
+  "allow": [
+    {
+      "id": "GHSA-mh99-v99m-4gvg",
+      "package": "brace-expansion",
+      "severity": "high",
+      "vulnerableRange": "<=5.0.7",
+      "installed": "1.1.16 (single path: hoisted node_modules/minimatch@3.1.5)",
+      "fixedIn": "5.0.8",
+      "fixPublished": "2026-07-23",
+      "ageInOn": "2026-08-06",
+      "runtimePath": "DEV/LINT-TIME ONLY. Sole remaining path is the hoisted minimatch@3.1.5 consumed by eslint@9.39.5 and 5 eslint plugins. Brace patterns come from eslint config files and tsconfig, never from an HTTP request body or other external input, so the DoS is not reachable. The two minimatch@10.2.5 paths (@typescript-eslint/typescript-estree, glob) are pinned to 5.0.8 and are NOT covered by this entry.",
+      "reason": "The fixed version 5.0.8 is structurally incompatible with this consumer: it exports { expand } with __esModule, while minimatch@3.1.5 calls the require() result as a function, producing 'expand is not a function' on any pattern containing braces. Verified by direct execution. Backports 1.1.17/1.1.18 exist (2026-07-29 / 2026-07-30) but are inside the advisory range per GHSA metadata and are blocked by min-release-age=7. REVIEW ON 2026-08-06: check whether 1.1.18 carries the fix and, if so, replace this entry with a pin."
+    }
+  ]
 }

@@ -59,7 +59,10 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
   // the FROZEN order's chainId (never hardcoded) and approves the EXACT total (no max-uint). The
   // "Confirm & Sign Order" button stays DISABLED until that approval confirms. Applies to all three
   // panels that route through the executor (DCA/Limit/SL·TP) via this shared modal.
-  const approval = useOrderApproval(o.tokenIn, o.amountIn, order.chainId)
+  // [BUG-DCA-APPROVE-SPENDER-V3] o.maxSlippageBps !== undefined is the SAME predicate
+  // useOrderEngine's confirmOrder uses to pick the v3 signing domain — passing it through here is
+  // what keeps the approval spender and the EIP-712 verifyingContract pinned to the same executor.
+  const approval = useOrderApproval(o.tokenIn, o.amountIn, order.chainId, o.maxSlippageBps !== undefined)
   // Per AREA A: o.amountIn is the TOTAL; per-buy = amountIn / dcaTotal (floor). The contract's
   // cumulative tracking gives any rounding remainder to the FINAL chunk, so the sum of all chunks
   // equals o.amountIn exactly. We display the TOTAL as Total and the floored per-buy as Per buy.

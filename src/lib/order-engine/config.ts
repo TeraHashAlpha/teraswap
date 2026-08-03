@@ -50,6 +50,78 @@ export function getOrderExecutorDomain(chainId: number) {
   }
 }
 
+// ── v3 executor addresses (per chain) — NOT DEPLOYED ─────
+// [SPRINT-V3-P2] TeraSwapOrderExecutorV3 (ADR-013 §1–§3, audit-approved SHA 954c415) is a
+// NEW, separately-deployed contract per chain — v2 is not upgradeable. null = v3 signing is
+// DISABLED on that chain and the v2 flow above is completely untouched. Set an entry here
+// ONLY after a real OrderExecutorV3 is deployed + verified on that chain (same fail-closed
+// convention as ORDER_EXECUTOR_BY_CHAIN — "v3 enabled" means an EXPLICIT non-null address
+// here, never implied by anything else, e.g. never "v2 configured ⇒ v3 configured").
+export const ORDER_EXECUTOR_V3_BY_CHAIN: Record<number, `0x${string}` | null> = {
+  1: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS || null) as `0x${string}` | null,
+  8453: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE || null) as `0x${string}` | null,
+  // [SPRINT-48-ARBITRUM-DCA-PREP] Shipped DARK — no OrderExecutorV3 is deployed on Arbitrum yet.
+  // Exact Base pattern: unset env ⇒ null ⇒ v3 signing stays disabled here, byte-identical to
+  // before this entry existed.
+  42161: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM || null) as `0x${string}` | null,
+}
+
+// Invariant: "no two chains share a verifyingContract" — catches a config typo where the
+// same v3 address is pasted for two chains (each chain's domain still includes its own
+// chainId, so signatures can't actually cross-execute, but a shared address is a smell that
+// almost certainly means the wrong address was configured for one of the chains).
+{
+  const configured = Object.values(ORDER_EXECUTOR_V3_BY_CHAIN).filter(
+    (a): a is `0x${string}` => a !== null,
+  )
+  const unique = new Set(configured.map(a => a.toLowerCase()))
+  if (unique.size !== configured.length) {
+    throw new Error('ORDER_EXECUTOR_V3_BY_CHAIN: the same v3 address is configured on two chains')
+  }
+}
+
+/** Resolve the OrderExecutorV3 for a chain, or null when v3 isn't deployed there (fail-closed). */
+export function getOrderExecutorV3(chainId: number): `0x${string}` | null {
+  return ORDER_EXECUTOR_V3_BY_CHAIN[chainId] ?? null
+}
+
+/**
+ * [BUG-DCA-APPROVE-SPENDER-V3] Resolve the executor a caller must trust for a given order, using
+ * the EXACT branch the signing path (useOrderEngine confirmOrder) uses: `order.maxSlippageBps !==
+ * undefined` ⇒ v3, else v2. This is the SINGLE SOURCE OF TRUTH for "who is the spender/verifying
+ * contract for this order" — callers that need to independently resolve the executor (e.g. the
+ * pre-sign ERC-20 approval gate) MUST go through this function instead of re-deriving the v2/v3
+ * branch themselves, so the approve() spender and the EIP-712 verifyingContract can never diverge
+ * by construction. (Divergence bug: the approval flow called getOrderExecutor(chainId) directly —
+ * always v2 — while signing correctly branched to v3, so a v3 DCA order's funds were approved to
+ * the v2 executor and the v3 executor was left at zero allowance; the keeper then skipped every
+ * cycle with "Insufficient allowance".)
+ */
+export function resolveSigningExecutor(chainId: number, isV3Order: boolean): `0x${string}` | null {
+  return isV3Order ? getOrderExecutorV3(chainId) : getOrderExecutor(chainId)
+}
+
+/**
+ * [SPRINT-V3-P2] v3 EIP-712 domain: version "3" (vs v2's "2"), so a v2 signature can never be
+ * replayed against v3 and vice-versa — mirrors the contract's EIP712("TeraSwapOrderExecutor","3")
+ * constructor. Throws when v3 has no address on this chain — callers MUST check
+ * getOrderExecutorV3(chainId) first and take the v2 path instead (fail-closed while null).
+ */
+export function getOrderExecutorV3Domain(chainId: number) {
+  const verifyingContract = getOrderExecutorV3(chainId)
+  if (!verifyingContract) {
+    throw new Error(
+      `No OrderExecutorV3 deployed on chain ${chainId} — v3 conditional orders are unavailable there`,
+    )
+  }
+  return {
+    name: 'TeraSwapOrderExecutor' as const,
+    version: '3' as const,
+    chainId,
+    verifyingContract,
+  }
+}
+
 // ── EIP-712 cancel-order types [FULL-H-01] ───────────────
 // The PATCH /api/orders/[id] cancel endpoint requires a cryptographic
 // proof of ownership. The frontend signs this typed-data message and the
@@ -147,6 +219,36 @@ export function getDefaultRouter(chainId: number): RouterEntry {
   const routers = getWhitelistedRouters(chainId)
   const key = DEFAULT_ROUTER_KEY_BY_CHAIN[chainId] ?? '1inch'
   return routers[key] ?? MAINNET_ROUTERS['1inch']
+}
+
+/**
+ * [SPRINT-P1B / ADR-014 option (a)] The router key used for PINNED canonical routes (non-DCA
+ * Limit/Take-Profit on v3). Deliberately NOT `getDefaultRouter` — that resolves to Augustus V6 on
+ * Base, whose calldata embeds quoted amounts and deadlines and therefore cannot be pinned at
+ * signing. Only a canonical Uniswap V3 route is quote-free (see canonical-route.ts).
+ */
+export const CANONICAL_ROUTE_ROUTER_KEY = 'uniswapV3'
+
+/**
+ * Resolve the SwapRouter02 entry a pinned route must commit to, or null when this chain has no
+ * canonical router in its whitelisted set.
+ *
+ * Fail-closed by construction: the entry is looked up FROM the chain's already-whitelisted router
+ * map, so this can never widen the whitelist — it can only select a router the executor already
+ * accepts.
+ */
+export function getCanonicalRouteRouter(chainId: number): RouterEntry | null {
+  const routers = getWhitelistedRouters(chainId)
+  return routers[CANONICAL_ROUTE_ROUTER_KEY] ?? null
+}
+
+/**
+ * True when `router` is a member of this chain's whitelisted set. Used as an assertion before
+ * signing a pinned route — never as a way to add a router.
+ */
+export function isWhitelistedRouter(chainId: number, router: string): boolean {
+  const routers = getWhitelistedRouters(chainId)
+  return Object.values(routers).some(r => r.address.toLowerCase() === router.toLowerCase())
 }
 
 // Legacy export for backward compatibility (mainnet default)

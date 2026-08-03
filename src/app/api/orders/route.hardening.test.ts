@@ -206,7 +206,20 @@ describe('POST /api/orders — per-IP rate limit + body cap', () => {
   it('keys the limit by IP with the orders: prefix', async () => {
     mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 })
     await POST(postReq('{}', { 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }))
-    expect(mockCheckRateLimit).toHaveBeenCalledWith('orders:9.9.9.9', expect.any(Number), expect.any(Number))
+    expect(mockCheckRateLimit).toHaveBeenCalledWith('orders:10.0.0.1', expect.any(Number), expect.any(Number))
+  })
+
+  // [CHORE-API-HARDENING-2 / P3a] clientIp() (body-limit.ts) now delegates to
+  // trustedClientIp — the LEFT-most x-forwarded-for token is attacker-spoofable
+  // on Vercel (the platform appends the true IP as the LAST entry), so trusting
+  // it defeated this very rate limit. The test above pins the FIXED (right-most)
+  // behaviour; this one proves the vulnerable left-most reading no longer wins.
+  it("ADVERSARIAL: a spoofed left-most x-forwarded-for can no longer bypass the limit key", async () => {
+    mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 })
+    await POST(postReq('{}', { 'x-forwarded-for': 'attacker-controlled-spoof, 203.0.113.5' }))
+    const key = mockCheckRateLimit.mock.calls.at(-1)?.[0]
+    expect(key).not.toBe('orders:attacker-controlled-spoof')
+    expect(key).toBe('orders:203.0.113.5')
   })
 
   it('returns 413 for an oversized body (content-length) [W6-L-01]', async () => {

@@ -1,9 +1,10 @@
 /**
  * [SPRINT-9W-oracle] Unit tests for the cbETH depeg circuit-breaker verdict + the per-leg round
- * validator. The thresholds (2% consent / 10% block) and fail-open behaviour are the security core.
+ * validator. The thresholds (2% consent / 10% block) and the fail-CLOSED behaviour are the security
+ * core. [FIX-ORACLE-FAIL-CLOSED] "fail-open" in the original version of this header was the bug.
  */
 import { describe, it, expect } from 'vitest'
-import { evaluateDepeg, priceFromValidRound } from './depeg-gate'
+import { evaluateDepeg, priceFromValidRound, hasReadFailed, PENDING, UNVERIFIED } from './depeg-gate'
 import { DEPEG_DIVERGENCE_WARN, DEPEG_DIVERGENCE_BLOCK, DEPEG_CONSENT_TOLERANCE } from './constants'
 
 describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
@@ -44,16 +45,76 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
     expect(evaluateDepeg(1 + DEPEG_DIVERGENCE_BLOCK - 0.0001, 1.0, 'cbETH').mode).toBe('consent') // 9.99%
   })
 
-  it('FAIL-OPEN: a null / non-positive leg → ok (a feed outage is NOT a depeg → no false block)', () => {
-    expect(evaluateDepeg(null, 1.0, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(1.0, null, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(0, 1.0, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(1.0, 0, 'cbETH').mode).toBe('ok')
-    expect(evaluateDepeg(-1, 1.0, 'cbETH').mode).toBe('ok')
+  // [FIX-ORACLE-FAIL-CLOSED] This test previously asserted the OPPOSITE — that a null/non-positive
+  // leg returned 'ok'. That was the fail-open hole: a feed outage silently passed the swap through
+  // as though the peg had been verified. It is retained (not deleted) and inverted, because the old
+  // contract is exactly what must never come back.
+  it('FAIL-CLOSED: a null / non-positive leg → unverified (we could not check → block, do not pass)', () => {
+    expect(evaluateDepeg(null, 1.0, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(1.0, null, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(0, 1.0, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(1.0, 0, 'cbETH').mode).toBe('unverified')
+    expect(evaluateDepeg(-1, 1.0, 'cbETH').mode).toBe('unverified')
+  })
+
+  it('unverified copy says we could not CHECK — never that the asset is depegged', () => {
+    const r = evaluateDepeg(null, 1.0, 'cbETH')
+    expect(r.message).toContain("couldn't verify")
+    expect(r.message).toContain('cbETH')
+    expect(r.message).not.toMatch(/depeg/i)
+    expect(r.message).not.toMatch(/manipulation/i)
+    // No divergence was measured, so none is claimed.
+    expect(r.divergence).toBe(0)
+  })
+
+  it('unverified without a symbol (unresolved chain) still reads as a retry, not a verdict', () => {
+    const r = UNVERIFIED('')
+    expect(r.mode).toBe('unverified')
+    expect(r.message).toContain("couldn't verify")
+    expect(r.message).not.toMatch(/depeg/i)
+  })
+
+  it('PENDING is frictionless and distinct from UNVERIFIED — an in-flight read is not a failure', () => {
+    const p = PENDING('cbETH')
+    expect(p.mode).toBe('pending')
+    expect(p.message).toBeNull()          // nothing scary on a first render
+    expect(p.mode).not.toBe('unverified') // and never conflated with a real failure
   })
 
   it('tolerance constant exists for the consent auto-revoke (used by SwapBox)', () => {
     expect(DEPEG_CONSENT_TOLERANCE).toBe(0.005)
+  })
+})
+
+// [FIX-DEPEG-RETRY-WINDOW / M-01] The failure memory that decides whether an in-flight read may be
+// treated as a frictionless first render. Unit-tested here, away from React, because it is the whole
+// substance of the M-01 fix: `failureCount` alone is resettable by the library and let the gate
+// re-open once per 30s poll.
+describe('hasReadFailed [FIX-DEPEG-RETRY-WINDOW / M-01]', () => {
+  it('a read with no failure history has not failed (first-ever load stays frictionless)', () => {
+    expect(hasReadFailed({})).toBe(false)
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 0 })).toBe(false)
+    expect(hasReadFailed({ failureCount: undefined, errorUpdateCount: undefined })).toBe(false)
+  })
+
+  it('mid-retry (failureCount > 0, no error committed yet) counts as failed', () => {
+    // The first retry sequence: query-core increments fetchFailureCount but has not dispatched
+    // 'error', so errorUpdateCount is still 0. failureCount is the ONLY signal in this window.
+    expect(hasReadFailed({ failureCount: 2, errorUpdateCount: 0 })).toBe(true)
+  })
+
+  it('THE M-01 CASE: post-error refetch (failureCount reset to 0) still counts as failed', () => {
+    // query-core's `fetchState` resets fetchFailureCount to 0 on every new fetch and — when
+    // data === undefined — also rewinds error/status. errorUpdateCount is the only survivor, and
+    // relying on failureCount alone is exactly what re-opened the gate every 30s.
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 1 })).toBe(true)
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 7 })).toBe(true)
+  })
+
+  it('is monotonic in practice — a later successful FETCH does not clear the error history', () => {
+    // errorUpdateCount is never decremented by query-core (only ++ on the 'error' action), so the
+    // predicate stays true. Recovery is signalled by DATA arriving, never by this going false.
+    expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 3 })).toBe(true)
   })
 })
 

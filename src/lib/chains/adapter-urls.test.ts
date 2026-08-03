@@ -22,6 +22,18 @@ describe('chains/adapter-urls [P217]', () => {
     expect(getAdapterApiUrl('cowswap', 1)).toBe('https://api.cow.fi/mainnet/api/v1')
   })
 
+  it('[SPRINT-46-ARBITRUM-CONFIG] maps the CoW API base to /arbitrum/ for chainId 42161', () => {
+    expect(getCowApiBase(42161)).toBe('https://api.cow.fi/arbitrum/api/v1')
+    expect(getAdapterApiUrl('cowswap', 42161)).toBe('https://api.cow.fi/arbitrum/api/v1')
+  })
+
+  it('[SPRINT-46-ARBITRUM-CONFIG] puts the chainId/slug in the path adapters for 42161', () => {
+    expect(getAdapterApiUrl('1inch', 42161)).toBe('https://api.1inch.dev/swap/v6.0/42161')
+    expect(getAdapterApiUrl('openocean', 42161)).toBe('https://open-api.openocean.finance/v4/42161')
+    expect(getAdapterApiUrl('sushiswap', 42161)).toBe('https://api.sushi.com/swap/v7/42161')
+    expect(getAdapterApiUrl('kyberswap', 42161)).toBe('https://aggregator-api.kyberswap.com/arbitrum')
+  })
+
   it('defaults to the mainnet URL when chainId is omitted', () => {
     expect(getAdapterApiUrl('1inch')).toBe('https://api.1inch.dev/swap/v6.0/1')
     expect(getAdapterApiUrl('sushiswap')).toBe('https://api.sushi.com/swap/v7/1')

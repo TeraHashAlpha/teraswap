@@ -29,6 +29,8 @@
 import { DEFAULT_TOKENS, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
 import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
+import { isStablecoinCategorySymbol } from './stablecoins'
+import { ARBITRUM_CATALOG } from './arbitrum-catalog'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -59,7 +61,7 @@ export const SEARCH_RESULT_LIMIT = 80
 // [token-selector-ux] Core brand logos bundled into public/tokens/ (validated, 100%
 // reliable, no 404). The brand mark is identical across chains, so map BY SYMBOL — a
 // core token on ANY chain catalog here points to its local file instead of a remote CDN.
-const CORE_LOCAL_LOGO: Record<string, string> = {
+export const CORE_LOCAL_LOGO: Record<string, string> = {
   ETH: '/tokens/eth.png',
   WETH: '/tokens/weth.png',
   USDC: '/tokens/usdc.png',
@@ -138,11 +140,33 @@ function toChainToken(t: Token): ChainToken {
   }
 }
 
+// [CHORE-47C-ARBITRUM-CATALOG] Launch catalog: 5 Chainlink-feed-covered manifest tokens
+// (WETH, USDC, USDT, DAI, WBTC — owner decision, L-01 adjudication). Addresses/decimals come
+// from arbitrum-catalog.ts (generated from the manifest, zero hex here). Reuses the same
+// bundled local logo assets mainnet/Base already use for these majors (CORE_LOCAL_LOGO,
+// coverage/fallback pattern) — no new logo assets. Chain stays DARK (feeCollector env unset);
+// populating this catalog is additive only, see arbitrum-catalog.ts for the full rationale.
+// [CHORE-ARBITRUM-UI-POLISH] `verified` carries through from the manifest-sourced catalog
+// (arbitrum-catalog.generated.ts) the same way BASE_FULL carries the pipeline's `verified`.
+const ARBITRUM_FULL: ChainToken[] = ARBITRUM_CATALOG.map((t): ChainToken => ({
+  address: t.address,
+  symbol: t.key,
+  name: t.name,
+  decimals: t.decimals,
+  logoURI: CORE_LOCAL_LOGO[t.key] ?? '',
+  popular: true,
+  suggested: true,
+  verified: t.verified,
+  sources: ['manifest'],
+  category: t.key === 'WETH' ? 'Native' : isStablecoinCategorySymbol(t.key, 42161) ? 'Stablecoin' : t.key === 'WBTC' ? 'Wrapped BTC' : undefined,
+}))
+
 export const CHAIN_TOKENS: Record<number, ChainToken[]> = {
   1: DEFAULT_TOKENS.map(toChainToken),
   // [SPRINT-9Y] Base default view = the curated "Suggested" subset of the full
   // catalog. The long tail stays reachable via getSearchCatalog / getFullCatalog.
   8453: BASE_FULL.filter((t) => t.suggested),
+  42161: ARBITRUM_FULL,
 }
 
 /** Popular tokens for a chain (falls back to the whole list if none flagged). */
@@ -158,9 +182,10 @@ export function getChainToken(address: string, chainId: number): ChainToken | nu
   return (CHAIN_TOKENS[chainId] ?? []).find((t) => t.address.toLowerCase() === addr) ?? null
 }
 
-function inferCategory(symbol: string): TokenCategory {
+function inferCategory(symbol: string, chainId: number): TokenCategory {
   if (symbol === 'ETH' || symbol === 'WETH') return 'Native'
-  if (['USDC', 'USDT', 'DAI', 'USDbC', 'USDe', 'FRAX', 'LUSD', 'EURC'].includes(symbol)) return 'Stablecoin'
+  // [CHORE-STABLECOIN-CONSTANT] Chain-keyed membership (USD stables ∪ EUR-pegged extras).
+  if (isStablecoinCategorySymbol(symbol, chainId)) return 'Stablecoin'
   if (symbol === 'cbETH' || symbol === 'wstETH' || symbol === 'rETH') return 'Liquid Staking'
   if (symbol.includes('BTC')) return 'Wrapped BTC'
   // [SPRINT-9Y] light grouping for the curated Base suggested view (cosmetic only).
@@ -177,18 +202,19 @@ function inferCategory(symbol: string): TokenCategory {
  */
 export function getChainTokenList(chainId: number): Token[] {
   if (chainId === 1) return DEFAULT_TOKENS
-  return (CHAIN_TOKENS[chainId] ?? []).map(chainTokenToToken)
+  return (CHAIN_TOKENS[chainId] ?? []).map((t) => chainTokenToToken(t, chainId))
 }
 
 // [SPRINT-9Y] Map a ChainToken to the rich Token the selector renders.
-function chainTokenToToken(t: ChainToken): Token {
+// [CHORE-STABLECOIN-CONSTANT] Carries the chainId so the category fallback is chain-keyed.
+function chainTokenToToken(t: ChainToken, chainId: number): Token {
   return {
     address: t.address,
     symbol: t.symbol,
     name: t.name,
     decimals: t.decimals,
     logoURI: t.logoURI,
-    category: t.category ?? inferCategory(t.symbol),
+    category: t.category ?? inferCategory(t.symbol, chainId),
     verified: t.verified,
     sources: t.sources,
   }
@@ -203,6 +229,28 @@ const GENERATED_BY_ADDR: Record<number, Map<string, GeneratedToken>> = Object.fr
   ]),
 )
 
+// [CHORE-ARBITRUM-UI-POLISH] Arbitrum (42161) has no generated pipeline catalog yet (no
+// token-catalog.42161.json), so isVerifiedToken's lookup above found nothing and the 5
+// manifest-verified launch tokens rendered the "unverified" ⚠ badge despite being
+// on-chain checked (docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json). Seed the SAME lookup map
+// this function already reads from the manifest-sourced catalog — isVerifiedToken's logic
+// is unchanged; it simply now has data for chain 42161 too.
+GENERATED_BY_ADDR[42161] = new Map(
+  ARBITRUM_FULL.map((t) => [
+    t.address.toLowerCase(),
+    {
+      address: t.address,
+      symbol: t.symbol,
+      name: t.name,
+      decimals: t.decimals,
+      logoURI: t.logoURI,
+      category: t.category ?? 'Other',
+      verified: t.verified === true,
+      sources: t.sources ?? [],
+    },
+  ]),
+)
+
 // Mainnet long tail = generated chain-1 catalog minus what DEFAULT_TOKENS already curates
 // (DEFAULT_TOKENS wins on metadata/ordering; verified/sources come from the pipeline).
 const MAINNET_DEFAULT_ADDR = new Set(DEFAULT_TOKENS.map((t) => t.address.toLowerCase()))
@@ -214,7 +262,7 @@ const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
     name: t.name,
     decimals: t.decimals,
     logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
-    category: generatedCategory(t) ?? inferCategory(t.symbol),
+    category: generatedCategory(t) ?? inferCategory(t.symbol, 1),
     verified: t.verified,
     sources: t.sources,
   }))
@@ -228,7 +276,7 @@ const MAINNET_CURATED: Token[] = DEFAULT_TOKENS.map((t) => {
 
 // Precomputed full catalogs (stable references → cheap memoisation downstream).
 const MAINNET_FULL: Token[] = [...MAINNET_CURATED, ...MAINNET_LONGTAIL]
-const BASE_FULL_TOKENS: Token[] = BASE_FULL.map(chainTokenToToken)
+const BASE_FULL_TOKENS: Token[] = BASE_FULL.map((t) => chainTokenToToken(t, 8453))
 
 /**
  * [SPRINT-9Y] The FULL pinned catalog for a chain (curated + long tail), as Token[].

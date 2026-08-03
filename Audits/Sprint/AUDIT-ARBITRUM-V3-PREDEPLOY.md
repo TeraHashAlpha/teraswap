@@ -1,0 +1,23 @@
+# AUDIT-ARBITRUM-V3-PREDEPLOY — pre-deploy gate for OrderExecutorV3 on Arbitrum One (42161)
+
+## VERDICT: 0C / 0H / 0M / 0L — **CLEARED for owner-manual deploy per the runbook.**
+This clears **gate condition #2** (the 0C/0H pre-deploy Auditor pass). It does **not** waive the runbook's other hard gates — the deploy remains BLOCKED until #1 (fresh-block manifest re-verify), **#3 (keeper multi-chain sprint merged — the keeper is still single-chain today; deploying now strands orders `active` with no router to them)**, and #4 (Phase-0 active for 42161) are all satisfied. Audited `origin/main` @ `b9442c3` (#345 merged: `c13c4d5` gas tiers + `e14691c` sequencer-private).
+
+**Scope 1 — contract integrity: PASS.** `TeraSwapOrderExecutorV3.sol` is git-unchanged since the Base-deployed revision (last touched `45cc0a3`, pre-dates the 2026-07-17 Base cutover); `foundry.toml` pins solc **0.8.28**, optimizer 200 — same as Base. Constructor `(_feeRecipient,_admin,_weth,_sequencerUptimeFeed)` correctly takes a **real** sequencer feed on this L2 (mainnet passes `address(0)`); immutables semantics unchanged. Creation-code byte-identity is the deploy-time verify script + Arbiscan step (runbook §3) — `forge` unavailable to me; source drift = none.
+
+**Scope 2 — deploy config: PASS, no unsourced hex.** Bootstrap whitelist = **EXACTLY 2**, both live on-chain (fresh read, arb1) and manifest-traced: Augustus V6.2 `0x6A00…1068` (24 562 B) + Uniswap **SwapRouter02-Arbitrum** `0x68b3…Fc45` (24 497 B). Verified the Base SwapRouter02 `0x2626…e481` is **0 bytes on Arbitrum** — confirms the runbook's "do not reuse the Base constant" warning is load-bearing. `_weth 0x82aF…Bab1` + `_sequencerUptimeFeed 0xFdB6…697D` on-chain-live, manifest-cited. 5 launch feeds in `chainlink-feeds.ts[42161]` match the manifest 1:1 (WETH→`0x639F…`, USDC→`0x5083…`, DAI→`0xc5C8…`, USDT→`0x3f3f…`, WBTC→`0xd0C7…`), all decimals=8/fresh/answer>0. `_feeRecipient 0x107F…3ABA` + `_admin 0x9A38…C73C` are **not** manifest-derivable (owner addresses) — the runbook sources them from `DEPLOYMENTS.md` with an explicit "owner must reconfirm" gate, which is the correct handling; admin matches the known Base/mainnet admin.
+
+**Scope 3 — timelock + feeds: PASS.** 48h queue→wait→execute, `TIMELOCK_GRACE` 7-day, mirrors Base. Runbook §4 mandates each `actionId` be **re-extracted from the queue tx receipt at execute time**, never table-copied (DAI-saga lesson stated verbatim).
+
+**Scope 4 — keeper readiness (deferred from #345): PASS, and safe while dark.** `gas-tier.js[42161]` defer-never-fails preserved ("gas price alone can never fail an order on Arbitrum"), conservative 1:5:10, **explicitly uncalibrated** (Nitro mechanics, no real fills) — safe because miscalibration can only DELAY, never lose/fail; no fallback to Base LOW for unknown chains. `submission-policy.js` classifies 42161 "Arbitrum Nitro" = **sequencer-private** (single sequencer, no public mempool/MEV; mainnet stays public→relay-or-fail-closed). `executor.js` `ETH_USD_FEED_BY_CHAIN[42161]=0x639F…a612` (matches manifest) feeds the Phase-0 ref price chain-correctly; DefiLlama slug `42161→"arbitrum"`; chains 1/8453 have no new entry → unaffected.
+
+**Scope 5 — runbook: PASS.** Complete + ordered (pre-flight→deploy→bootstrap[2 routers + KMS keeper `0x71f5…2E5`]→48h oracle→verify→cutover); all 4 hard gates restated; keeper-FIRST/frontend-SECOND cutover order; **rollback = unset frontend env only, never the keeper config**. KMS-only signer (plaintext refused); a NEW per-chain Arbitrum KMS key (not reused).
+
+### Findings: none (0C/0H/0M/0L).
+### INFO (non-blocking, no action required to deploy):
+- **I-1 — deploy ACTION still gated:** my pass satisfies gate #2 only. Gate #3 (multi-chain keeper merged + live per-chain routing in the running process) is the operative blocker — do not deploy before it, per the runbook BLOCKER box.
+- **I-2 — admin is an EOA** (`0x9A38…C73C`) — inherits the standing **W1-L-02** (move to Safe/HW); mitigated meanwhile by the contract's own 48h/7d timelock on every admin action. Not new to this deploy.
+- **I-3 — cosmetic:** `route-source.ts` has no entry yet for Arbitrum SwapRouter02 → an Arbitrum UniV3 fill would badge "Aggregated" not "Uniswap V3". Frontend-only, out of this gate's scope; flagged in the runbook.
+- **I-4 — process:** audited against the locally-fetched `origin/main`; owner should confirm the deploy is cut from `b9442c3` (or later main with the contract line unchanged) and record the fresh-block re-verify (gate #1) in the runbook blanks before executing.
+
+*Read-only pass; no file edited, nothing deployed. On-chain reads via viem/JSON-RPC (arb1.arbitrum.io). Append to AUDIT-TOTAL + commit left for the owner's SSH-signed batch.*

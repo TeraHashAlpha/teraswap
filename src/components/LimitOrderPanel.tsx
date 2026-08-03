@@ -15,15 +15,27 @@ import {
   EXPIRY_PRESETS,
   getDefaultRouter,
   getChainlinkFeeds,
+  // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing for Limit orders.
+  getOrderExecutorV3,
+  getCanonicalRouteRouter,
+  buildCanonicalRoute,
+  isLimitLive,
+  DEFAULT_MAX_SLIPPAGE_BPS,
+  checkMinOutEconomicFloor,
+  pickCanonicalFeeTier,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig, AutonomousOrder } from '@/lib/order-engine'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { ETHERSCAN_TX, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import TokenSelector from './TokenSelector'
 import BetaDisclaimer from './BetaDisclaimer'
+// [FEAT-DEPEG-GATE-ORDER-CREATION] The same, twice-audited cbETH depeg circuit-breaker SwapBox
+// uses — wired here so a Limit order cannot be created against a depegged/unverifiable pair with
+// zero signal. Read-only reuse: neither the hook nor its thresholds are modified.
+import { useDepegCheck } from '@/hooks/useDepegCheck'
 
 // ── Stablecoin detection ─────────────────────────────────
 const STABLECOIN_SYMBOLS = new Set([
@@ -169,6 +181,23 @@ function CreateLimitForm({
   const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
   const [amount, setAmount] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(2) // 7 days default
+  // [SPRINT-P1B] Blocking reason surfaced before approve/sign (dust floor, route build, no feed).
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing behind the full launch gate; fail-closed.
+  const v3Live = isLimitLive(chainId)
+  const [maxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
+
+  // [FEAT-DEPEG-GATE-ORDER-CREATION] Same hook, same semantics as SwapBox — see DCAPanel.tsx for
+  // the full mode-by-mode rationale. Consent resets on a chain switch (a new chain is a new trade).
+  const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
+  const [acceptedDepeg, setAcceptedDepeg] = useState<number | null>(null)
+  useEffect(() => { setAcceptedDepeg(null) }, [chainId])
+  const depegConsentNeeded = depegCheck.mode === 'consent'
+  const depegAccepted = acceptedDepeg != null && depegCheck.divergence <= acceptedDepeg + DEPEG_CONSENT_TOLERANCE
+  const depegConsentBlocking = depegConsentNeeded && !depegAccepted
+  const depegHardBlocked = depegCheck.mode === 'block'
+  const depegUnverified = depegCheck.mode === 'unverified'
+  const depegBlocking = depegHardBlocked || depegConsentBlocking || depegUnverified
 
   // ── Price state ──────────────────────────────────────────
   const [targetPrice, setTargetPrice] = useState('')
@@ -304,6 +333,16 @@ function CreateLimitForm({
 
   const handleSubmit = async () => {
     if (!amount || !targetPrice || !isConnected) return
+
+    // [FEAT-DEPEG-GATE-ORDER-CREATION] Hard guard (defense-in-depth): never sign a Limit order
+    // against a depegged or unverifiable pair. The submit button is already disabled on this same
+    // condition; this also blocks any programmatic call. Message is sourced straight from the
+    // depeg gate, so the reason a user sees on submit matches the live banner above verbatim.
+    if (depegBlocking) {
+      setSubmitError(depegCheck.message ?? 'This pair could not be verified against its exchange rate.')
+      return
+    }
+
     startWaitingSound()
 
     let amountIn: string
@@ -338,16 +377,37 @@ function CreateLimitForm({
       : decDiff < 0
         ? expectedOutRaw / BigInt(10 ** Math.abs(decDiff))
         : expectedOutRaw
-    // Apply 2% slippage: multiply by 98, divide by 100
-    const minAmountOut = (expectedOutAdjusted * 98n / 100n).toString()
+    // [SPRINT-P1B / ADR-013 §1] On v3 the signed floor comes from the user's target price and the
+    // signed slippage bound; the BINDING on-chain floor stays max(oracleFloor, minAmountOut)
+    // (TeraSwapOrderExecutorV3.sol:532-554). v2 keeps the legacy flat 2%.
+    const minAmountOutBn = v3Live
+      ? (expectedOutAdjusted * BigInt(10_000 - maxSlippageBps)) / 10_000n
+      : (expectedOutAdjusted * 98n) / 100n
+    const minAmountOut = minAmountOutBn.toString()
 
     const feedToken = sellIsStable ? tokenOut : tokenIn
     const priceFeed = findPriceFeed(feedToken, chainId)
     if (!priceFeed) {
-      throw new Error(`No Chainlink price feed available for ${feedToken.symbol}. Select a supported token.`)
+      stopWaitingSound()
+      setSubmitError(`No Chainlink price feed available for ${feedToken.symbol}. Select a supported token.`)
+      return
     }
 
-    const config: CreateOrderConfig = {
+    // ── [SPRINT-P1B] $1 economic-floor pre-flight, BEFORE approve ──
+    // Must run before onSubmit: the approve button only exists inside the review modal that
+    // createOrder mounts, so failing later would cost the user an approve tx + a signature.
+    const floorCheck = checkMinOutEconomicFloor({
+      minAmountOut: minAmountOutBn,
+      tokenOutDecimals: tokenOut.decimals,
+      tokenOutUsdPrice: isStablecoin(tokenOut) ? 1 : null,
+    })
+    if (floorCheck.blocked) {
+      stopWaitingSound()
+      setSubmitError(floorCheck.reason)
+      return
+    }
+
+    let config: CreateOrderConfig = {
       tokenIn: { address: tokenIn.address, symbol: tokenIn.symbol, decimals: tokenIn.decimals },
       tokenOut: { address: tokenOut.address, symbol: tokenOut.symbol, decimals: tokenOut.decimals },
       amountIn,
@@ -360,6 +420,45 @@ function CreateLimitForm({
       router: getDefaultRouter(chainId).address,
     }
 
+    // ── [SPRINT-P1B / ADR-014 (a)] v3 pinned canonical route ──
+    // Non-DCA on v3 REQUIRES a real routerDataHash (V3:463-465). The route is pinned here at
+    // signing (quote-free, so it stays valid until expiry) and replayed verbatim by the keeper.
+    if (v3Live) {
+      const canonicalRouter = getCanonicalRouteRouter(chainId)
+      const executorV3 = getOrderExecutorV3(chainId)
+      if (!canonicalRouter || !executorV3) {
+        stopWaitingSound()
+        setSubmitError('Limit orders are unavailable on this network right now.')
+        return
+      }
+      try {
+        const route = buildCanonicalRoute({
+          tokenIn: tokenIn.address as `0x${string}`,
+          tokenOut: tokenOut.address as `0x${string}`,
+          amountIn: amountInBn,
+          minAmountOut: minAmountOutBn,
+          feeTier: pickCanonicalFeeTier({
+            tokenInIsStable: isStablecoin(tokenIn),
+            tokenOutIsStable: isStablecoin(tokenOut),
+          }),
+          router: canonicalRouter.address,
+          recipient: executorV3,
+        })
+        config = {
+          ...config,
+          router: route.router,
+          routerDataHash: route.routerDataHash,
+          routerData: route.routerData,
+          maxSlippageBps,
+        }
+      } catch (err) {
+        stopWaitingSound()
+        setSubmitError(err instanceof Error ? err.message : 'Could not build the swap route for this pair.')
+        return
+      }
+    }
+
+    setSubmitError(null)
     await onSubmit(config)
     setAmount('')
   }
@@ -449,6 +548,46 @@ function CreateLimitForm({
         </div>
       </div>
 
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] cbETH depeg HARD block — mirrors SwapBox's copy so the
+          same event reads identically wherever a user encounters it. No click-through. */}
+      {depegHardBlocked && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="limit-depeg-block">
+          <span className="font-semibold">&#9888; Order blocked — {depegCheck.symbol} depeg.</span>{' '}
+          {depegCheck.message}
+          <span className="mt-1 block text-xs text-danger/80">
+            The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+          </span>
+        </div>
+      )}
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] The depeg check applies but could NOT be run — same
+          posture and copy as SwapBox: blocks, but never claims a depeg when the truth is we could
+          not check. */}
+      {depegUnverified && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="limit-depeg-unverified">
+          <span className="font-semibold">&#9888; Order paused — price not verified.</span>{' '}
+          {depegCheck.message}
+          <span className="mt-1 block text-xs text-danger/80">
+            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+          </span>
+        </div>
+      )}
+      {/* [FEAT-DEPEG-GATE-ORDER-CREATION] Informed consent — 2–10% off the exchange rate, same
+          checkbox shape as SwapBox. */}
+      {depegConsentNeeded && (
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" data-testid="limit-depeg-consent">
+          <span className="font-semibold">&#9888; Possible depeg:</span> {depegCheck.message}
+          <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
+            <input
+              type="checkbox"
+              checked={depegAccepted}
+              onChange={(e) => setAcceptedDepeg(e.target.checked ? depegCheck.divergence : null)}
+              className="h-5 w-5 accent-warning"
+            />
+            I understand {depegCheck.symbol} may be depegged and want to proceed.
+          </label>
+        </div>
+      )}
+
       {/* Target price */}
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between">
@@ -536,15 +675,38 @@ function CreateLimitForm({
         <button
           // [BUGFIX] await async handleSubmit to catch errors properly
           onClick={async () => { playTouchMP3(); await handleSubmit() }}
-          disabled={isSubmitting || !amount || !targetPrice}
+          disabled={isSubmitting || !amount || !targetPrice || depegBlocking}
           className={`w-full rounded-xl py-3 text-sm font-bold transition-all ${
-            isSubmitting || !amount || !targetPrice
+            isSubmitting || !amount || !targetPrice || depegBlocking
               ? 'cursor-not-allowed bg-cream-08 text-cream-35'
               : 'bg-cream-gold text-[#080B10] hover:brightness-110 active:scale-[0.98]'
           }`}
         >
           {isSubmitting ? 'Signing order...' : 'Place Limit Order'}
         </button>
+      )}
+
+      {/* [SPRINT-P1B] Pre-approve blocking reason (dust floor / route build / missing feed). */}
+      {submitError && (
+        <div
+          data-testid="limit-submit-error"
+          className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300"
+        >
+          {submitError}
+        </div>
+      )}
+
+      {/* [SPRINT-P1B / ADR-014 (a)] Honest liveness copy — a pinned route is not a fill guarantee. */}
+      {v3Live && (
+        <div
+          data-testid="pinned-route-liveness-note"
+          className="mt-2 rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-[10px] text-cream-50"
+        >
+          This order executes when your price is met <strong className="text-cream-65">if the pinned
+          route is viable</strong> at that moment; otherwise it stays open until it expires. The
+          route is fixed when you sign, so a changed quote cannot alter it — but it also cannot
+          re-route around a pool that has dried up.
+        </div>
       )}
 
       {/* Info badge */}

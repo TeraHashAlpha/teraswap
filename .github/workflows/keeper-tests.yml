@@ -38,7 +38,7 @@ jobs:
         working-directory: contracts/order-engine/executor
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
           cache: "npm"
@@ -51,7 +51,8 @@ jobs:
       - name: Install keeper deps
         run: npm ci --ignore-scripts
       # `node --test` auto-discovers *.test.mjs in this directory (it skips
-      # node_modules) — freeze-score.test.mjs + alert.test.mjs = 18 tests.
-      # A non-zero exit on any failing test fails the job, and thus the PR.
+      # node_modules) — freeze-score.test.mjs + alert.test.mjs + [SPRINT-V3-P2]
+      # executor-routing.test.mjs = 25 tests. A non-zero exit on any failing
+      # test fails the job, and thus the PR.
       - name: Run keeper node:test suite
         run: node --test

@@ -39,6 +39,8 @@ import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNV
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
+import { isUsdStablecoin } from '@/lib/chains/stablecoins'
+import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
@@ -111,13 +113,6 @@ export default function SwapBox() {
     })
   }, [])
 
-  // Recalculate auto-slippage when token pair changes
-  useEffect(() => {
-    if (isAutoSlippage && tokenIn && tokenOut) {
-      setSlippage(calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol))
-    }
-  }, [isAutoSlippage, tokenIn?.symbol, tokenOut?.symbol])
-
   // Raw amount without separators — used for all calculations
   const amountIn = stripSeparator(displayAmountIn)
 
@@ -134,6 +129,15 @@ export default function SwapBox() {
   // the chain the user is actually on; switching networks now re-reads the
   // correct balance instead of the stale connected-by-default (mainnet) one.
   const activeChainId = useActiveChainId()
+
+  // Recalculate auto-slippage when the token pair or chain changes.
+  // [CHORE-STABLECOIN-CONSTANT] Membership is chain-keyed now, so the active chain is an
+  // input (declared after activeChainId for that reason).
+  useEffect(() => {
+    if (isAutoSlippage && tokenIn && tokenOut) {
+      setSlippage(calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId))
+    }
+  }, [isAutoSlippage, tokenIn?.symbol, tokenOut?.symbol, activeChainId])
 
   const { data: balanceIn } = useBalance({
     address,
@@ -228,10 +232,10 @@ export default function SwapBox() {
         const outAmount = Number(formatUnits(outBig, tokenOut.decimals))
         const inAmount = Number(amountIn)
         if (inAmount <= 0 || outAmount <= 0) return { execIn: null, execOut: null }
-        const STABLE = ['USDC', 'USDT', 'DAI', 'USDbC']
+        // [CHORE-STABLECOIN-CONSTANT] ~$1 membership is chain-keyed (single source of truth).
         return {
-          execIn: STABLE.includes(tokenOut.symbol) ? outAmount / inAmount : null,
-          execOut: STABLE.includes(tokenIn.symbol) ? inAmount / outAmount : null,
+          execIn: isUsdStablecoin(tokenOut.symbol, activeChainId) ? outAmount / inAmount : null,
+          execOut: isUsdStablecoin(tokenIn.symbol, activeChainId) ? inAmount / outAmount : null,
         }
       })()
     : { execIn: null, execOut: null }
@@ -244,7 +248,8 @@ export default function SwapBox() {
   // warns naming whichever side lacks a feed. Drives the price gate + the QuoteBreakdown notice.
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
   // [SPRINT-9W-oracle] cbETH depeg circuit-breaker verdict (market-vs-ER divergence). mode 'ok'
-  // when neither token has an exchange-rate pair, or when either feed is stale (fail-open).
+  // when neither token has an exchange-rate pair (the check does not apply — the common case).
+  // [FIX-ORACLE-FAIL-CLOSED] A stale/failed feed is NO LONGER 'ok': it is 'unverified' and blocks.
   const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
@@ -507,6 +512,13 @@ export default function SwapBox() {
     setPriceCheckStale(true)
     setAcceptedDeviation(null)
     setAcceptedDepeg(null) // [SPRINT-9W-oracle]
+    // [BUG-SWAP-APPROVE-STALE-SUCCESS] Same reset as handleAmountChange (typed
+    // input) — without it a stale swapStatus/splitSwapStatus 'success' from a
+    // PRIOR (smaller) amount survives into the new approve→swap cycle, and
+    // once the new amount's approval confirms the button flips straight to
+    // "Swap complete" without a swap tx ever being sent.
+    if (swapStatus !== 'idle') resetSwap()
+    if (splitSwapStatus !== 'idle') resetSplitSwap()
   }
 
   // Clear the stale flag whenever a fresh quote (`meta`) resolves — at that
@@ -541,29 +553,51 @@ export default function SwapBox() {
 
   // [SPRINT-9W-oracle] cbETH depeg circuit-breaker — a SECOND, independent verdict. Mirrors the 9J
   // consent state machine: WARN..BLOCK band → informed consent (auto-revokes if divergence worsens
-  // past accepted+tolerance); ≥BLOCK → hard block (no click-through). 'ok' (incl. a stale feed)
-  // adds no friction. The swap-price reference is unchanged.
+  // past accepted+tolerance); ≥BLOCK → hard block (no click-through). 'ok' adds no friction. The
+  // swap-price reference is unchanged.
+  //
+  // [FIX-ORACLE-FAIL-CLOSED] 'unverified' — we tried to check the peg and could not (read error,
+  // revert, stale feed, unresolved chain) — is now a HARD block too. It used to arrive here as 'ok'
+  // and add no friction, which meant a feed outage silently disabled this safety gate. It is kept
+  // separate from depegHardBlocked because the two must never share copy: telling a user their asset
+  // is depegged when the truth is "we couldn't check" is its own kind of lie.
   const depegConsentNeeded = depegCheck.mode === 'consent'
   const depegAccepted = acceptedDepeg != null && depegCheck.divergence <= acceptedDepeg + DEPEG_CONSENT_TOLERANCE
   const depegConsentBlocking = depegConsentNeeded && !depegAccepted
   const depegHardBlocked = depegCheck.mode === 'block'
-  const depegBlocking = depegHardBlocked || depegConsentBlocking
+  const depegUnverified = depegCheck.mode === 'unverified'
+  const depegBlocking = depegHardBlocked || depegConsentBlocking || depegUnverified
 
   // ── Security: block large swaps on tokens without Chainlink oracle ──
-  // Estimate USD value of the swap input (only reliable when input is a stablecoin or ETH)
-  const estimatedInputUsd = useMemo(() => {
-    if (!tokenIn || !amountIn || Number(amountIn) <= 0) return 0
-    if (['USDC', 'USDT', 'DAI', 'USDe'].includes(tokenIn.symbol)) return Number(amountIn)
-    // If we have a Chainlink price for the input token, use it
-    if (priceCheck.chainlinkPrice != null) return Number(amountIn) * priceCheck.chainlinkPrice
-    // For ETH without a loaded price yet, use a conservative estimate
-    if (isNativeETH(tokenIn) || tokenIn.symbol === 'WETH') return Number(amountIn) * 2000
-    return 0 // unknown — can't estimate
-  }, [tokenIn, amountIn, priceCheck.chainlinkPrice])
+  // [CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Trade value = max(inputUsd, outputUsd) via
+  // the pure helper (chain-keyed stable ≈$1, Chainlink, conservative ETH≈$2k — per
+  // side). The old input-only estimate let an unpriceable INPUT hide a measurable
+  // trade ($0 → the >$10k gate never fired). Server /api/swap is the binding gate
+  // (fail-closed there too); this mirror is UX.
+  const estimatedSwap = useMemo(() => {
+    if (!tokenIn || !amountIn || Number(amountIn) <= 0) return { usd: 0, priced: false }
+    const outBig = meta?.best ? safeBigInt(meta.best.toAmount) : null
+    const amountOut = outBig !== null && tokenOut ? Number(formatUnits(outBig, tokenOut.decimals)) : null
+    return estimateSwapUsd({
+      tokenIn,
+      tokenOut,
+      amountIn: Number(amountIn),
+      amountOut,
+      chainlinkPriceIn: priceCheck.chainlinkPrice,
+      chainlinkPriceOut: tokenOutPriceCheck.chainlinkPrice,
+      chainId: activeChainId,
+    })
+  }, [tokenIn, tokenOut, amountIn, meta, priceCheck.chainlinkPrice, tokenOutPriceCheck.chainlinkPrice, activeChainId])
+  const estimatedSwapUsd = estimatedSwap.usd
 
   const oracleUnavailable = pairCheck.oracleUnavailable
-  const oracleWarnThreshold = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_WARN_USD
-  const oracleBlocked = oracleUnavailable && estimatedInputUsd > UNVERIFIED_SWAP_BLOCK_USD
+  // [CHORE-ORACLE-VALUE-FAILCLOSED] NEITHER side priceable → high-risk: block with a
+  // factual notice (mirrors the server fail-closed policy) instead of estimating $0 and
+  // silently skipping the >$10k gate. Gated on a live quote so an empty form or a
+  // still-loading quote never flags.
+  const valueUnverifiable = oracleUnavailable && !estimatedSwap.priced && Number(amountIn) > 0 && !!meta?.best
+  const oracleWarnThreshold = oracleUnavailable && estimatedSwapUsd > UNVERIFIED_SWAP_WARN_USD
+  const oracleBlocked = oracleUnavailable && (estimatedSwapUsd > UNVERIFIED_SWAP_BLOCK_USD || valueUnverifiable)
   const anyBlocked = priceGateBlocked || oracleBlocked || depegBlocking
 
   const handleApproveAndSwap = useCallback(async () => {
@@ -578,7 +612,7 @@ export default function SwapBox() {
           metadata: {
             reason: priceGateBlocked ? `price_gate_${priceGate.reason}` : 'oracle_unavailable_large_swap',
             deviation: pairCheck.deviation,
-            estimatedUsd: estimatedInputUsd,
+            estimatedUsd: estimatedSwapUsd,
           },
         })
       }
@@ -607,7 +641,7 @@ export default function SwapBox() {
           metadata: {
             reason: priceGateBlocked ? `price_gate_${priceGate.reason}` : 'oracle_unavailable_large_swap',
             deviation: pairCheck.deviation,
-            estimatedUsd: estimatedInputUsd,
+            estimatedUsd: estimatedSwapUsd,
           },
         })
       }
@@ -626,13 +660,14 @@ export default function SwapBox() {
   return (
     <>
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] rounded-2xl border border-cream-08 bg-surface-secondary/85 px-3 py-4 shadow-xl shadow-black/20 backdrop-blur-lg sm:max-w-[460px] sm:p-5">
-        {/* [CHORE-POLISH P6] Active-chain indicator — bundled SVG logo (Ethereum/Base),
+        {/* [CHORE-POLISH P6] Active-chain indicator — bundled SVG logo (Ethereum/Base/Arbitrum),
             never an external fetch. Mirrors the chain selector; decorative icon, the
-            adjacent name carries the label. */}
+            adjacent name carries the label. Icon + name both key off activeChainId via the
+            single chain registry (chainName, see getChainConfig above) — no divergent lookup. */}
         <div className="mb-3 flex items-center gap-1.5">
           <ChainIcon chainId={activeChainId} className="h-4 w-4 shrink-0" />
           <span className="text-[11px] font-semibold uppercase tracking-[1px] text-cream-35">
-            {activeChainId === 8453 ? 'Base' : 'Ethereum'}
+            {chainName}
           </span>
         </div>
         {/* Sell */}
@@ -826,7 +861,13 @@ export default function SwapBox() {
         {/* [SPRINT-9J J1] Oracle-INTEGRITY failure (stale / invalid / incomplete
             round): the oracle itself can't be trusted → HARD block, no override.
             Stale-gated so it doesn't flash on in-flight quote data. */}
-        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && (
+        {/* [FIX-PRICE-ORACLE-FAIL-CLOSED] Also gated on a live trade (hasAmount && meta), matching
+            the oracleUnavailable banner below. Since an unreadable feed now raises an integrity
+            failure, this banner became reachable on an EMPTY form — and permanently so for a wallet
+            on an unsupported chain, where the chain never resolves. The BLOCK itself is unaffected
+            (anyBlocked still disables the button); only the red banner waits until there is an
+            actual quote to block, which is the convention every sibling banner here already uses. */}
+        {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && hasAmount && meta && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#9888; Swap blocked — oracle data unsafe.</span>{' '}
             {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
@@ -876,6 +917,21 @@ export default function SwapBox() {
             </span>
           </div>
         )}
+        {/* [FIX-ORACLE-FAIL-CLOSED] The depeg check applies to this pair but could NOT be run —
+            feed read error/revert, stale round, or an unresolved chain. Blocks like a depeg, but
+            says so honestly: we could not check, which is NOT the same claim as "it is depegged".
+            Recoverable by its nature (the next successful read clears it), so it is worded as a
+            retry rather than a verdict, and gated on a live quote so it never flashes on an empty
+            form or a first render. */}
+        {depegUnverified && hasAmount && meta && !priceCheckStale && (
+          <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <span className="font-semibold">&#9888; Swap paused — price not verified.</span>{' '}
+            {depegCheck.message}
+            <span className="mt-1 block text-xs text-danger/80">
+              We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the swap through on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+            </span>
+          </div>
+        )}
         {/* [SPRINT-9W-oracle] cbETH depeg informed-consent — 2–10% off the exchange rate. The user
             must explicitly accept; consent auto-revokes if the divergence worsens (accepted+0.5%). */}
         {depegConsentNeeded && !priceCheckStale && (
@@ -897,11 +953,24 @@ export default function SwapBox() {
           <>
             {oracleBlocked ? (
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
-                This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
-                <span className="mt-1 block text-xs text-danger/80">
-                  This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
-                </span>
+                {valueUnverifiable ? (
+                  <>
+                    {/* [CHORE-ORACLE-VALUE-FAILCLOSED] Neither side priceable → factual, non-alarmist block notice. */}
+                    <span className="font-semibold">&#9888; Swap blocked — value cannot be verified.</span>{' '}
+                    Neither token has Chainlink or reference price coverage, so the USD value of this trade cannot be estimated. Unpriceable trades are blocked for safety.
+                    <span className="mt-1 block text-xs text-danger/80">
+                      Use a pair where at least one side has price coverage (a major token or a stablecoin), or try again later.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
+                    This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
+                    <span className="mt-1 block text-xs text-danger/80">
+                      This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
+                    </span>
+                  </>
+                )}
               </div>
             ) : oracleWarnThreshold ? (
               <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -937,7 +1006,7 @@ export default function SwapBox() {
             "Switch to Ethereum", and the banner + handler guard cover the rest —
             so mixing !chainActive into priceBlocked only created a blockReason
             mismatch with no observable effect. */}
-        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={depegHardBlocked ? 'depeg-block' : isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : depegConsentBlocking ? 'depeg-consent' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
+        <SwapButton swapStatus={swapStatus} approvalStatus={approvalStatus} approvalReady={approvalReady} hasAmount={hasAmount} hasSufficientBalance={hasSufficientBalance} hasQuote={!!meta} quoteLoading={quoteLoading} priceBlocked={anyBlocked} blockReason={depegHardBlocked ? 'depeg-block' : isExtremeBlock ? 'extreme' : oracleIntegrityBlocked ? 'oracle-stale' : depegUnverified ? 'depeg-unverified' : depegConsentBlocking ? 'depeg-consent' : priceImpactBlocking ? 'price-impact' : oracleBlocked ? 'oracle' : undefined} onApprove={handleApproveAndSwap} onSwap={handleSwap} />
 
         {/* [P95] Subtle gasless nudge — shown below the swap button when a
             non-CoW route is currently selected but the engine has flagged
@@ -1067,7 +1136,7 @@ export default function SwapBox() {
         )}
 
         {/* Slippage Modal */}
-        {showSlippage && <SlippageModal value={slippage} onChange={setSlippage} onClose={() => setShowSlippage(false)} isAuto={isAutoSlippage} onAutoChange={setIsAutoSlippage} tokenInSymbol={tokenIn?.symbol} tokenOutSymbol={tokenOut?.symbol} />}
+        {showSlippage && <SlippageModal value={slippage} onChange={setSlippage} onClose={() => setShowSlippage(false)} isAuto={isAutoSlippage} onAutoChange={setIsAutoSlippage} tokenInSymbol={tokenIn?.symbol} tokenOutSymbol={tokenOut?.symbol} chainId={activeChainId} />}
       </div>
 
       {/* Active Approvals — below the swap box */}

@@ -669,6 +669,8 @@ Branch: `feat/sprint-9v-per-feed-staleness`. 3 commits (92c4dbe, 68b1b09, 41c8db
 | 9V-I-01 | INFO | V2 composition is raw-path only; UI hook still shows "no oracle" for cbETH on Base. Display inconsistency, not security — swap path has oracle protection. Follow-up: UI-side composed display. |
 | 9V-I-02 | INFO | Base ETH/USD tightened 3600→1800s (heartbeat×1.5). More conservative (not loosening). Behaviour delta: 30-60min stale rounds now fail. Safe — feed updates every ≤20min. |
 
+**Note:** Per-feed heartbeat overrides for remediated mainnet feeds are governed by [ADR-018 — Staleness policy for remediated feeds with extended heartbeats](docs/ADR/ADR-018-feed-self-identification.md#staleness-policy-for-remediated-feeds-with-extended-heartbeats). See ADR for the open question on deviation thresholds vs exclusion from high-value waivers.
+
 ---
 
 ### Sprint 9W-oracle Audit (2026-06-08) — cbETH Depeg / Manipulation Circuit-Breaker
@@ -1136,3 +1138,449 @@ Per-wave verdicts (all APPROVED): W1 2L/4I · W2 1M/2L/2I (M+1L now fixed) · W3
 W4 2I · W5 2I · W6 2M/1L/2I · W7 2L/2I · W8 0/2I · W9 1L/2I · W10 1L/2I. RICE plan: auto-fixable (W6-M-02,
 W9-L-01, W6-L-01, W4-I-02, W7-L-01, W4-I-01, W5-I-02, W10-L-01) · product-decision (W6-M-01, W7-L-02) ·
 governance (W1-L-02 admin→Safe/HW, W8-I-01).
+
+### AUDIT NEW-2 — Low-quorum demotion / execution-selection (PR #272, 2026-07-02)
+
+**Verdict: APPROVED — cleared to merge. 0C / 0H; flagged gap = MEDIUM (NEW2-M-01), bounds HOLD.** Report:
+`Audits/Sprint/AUDIT-NEW2-QUORUM-EXECUTION-AUDIT.md`. Branch `chore/quorum-lowconfidence-fix` (UNMERGED),
+audited SHA `8514b68` (SSH-signed). Per the verdict rule, a flagged M with bounds holding + a remediation
+prompt does NOT block merge.
+
+- **NEW2-M-01 (MEDIUM, confirmed):** `applyLowQuorumSanity` (n=2) demotes the winner on a >500 bps pairwise
+  spread but can't tell which side lies → a low-ball source >5% under an honest winner forces the honest quote
+  demoted + the attacker's low quote presented (test `(a) FLAGGED GAP:186`). **Griefing / price-degradation,
+  NOT theft** (on-chain minimumOutput binds the fill; no funds to attacker).
+- **Bounds HOLD — no fund-loss path:** residual = ONLY oracle-less AND DefiLlama-less pairs, exactly 2
+  responders, capped <$10k (`UNVERIFIED_SWAP_BLOCK_USD`), minOut-bound, `lowConfidence`-cued. Chainlink consent
+  (≥3% block, 25% ceiling) + DefiLlama 422 catch feeded/DefiLlama pairs; SC-04+R1+minimumOutput terminal.
+- **This PR improves the state:** renders the previously-dead `lowConfidence` cue (React-escaped, non-alarmist),
+  corrects the "display-only" mischaracterization (names the gates), adds honest adversarial tests (deterministic;
+  NEW-1 flake reconciled via tie-stability). Composes with #248 (keeper-side, no conflict) / #18 (consent gate) /
+  #261 (executable-sources + SC-04 → quote-only can't be executable winner).
+- **Recommendation: Option 2** (external-reference-confirmed demotion + flag-without-reorder fallback for
+  oracle-less+DefiLlama-less) — concurs with the Architect; remediation prompt handed to the Code Agent.
+  Options 1 (loses mis-scale catch) / 3 (leaves the gap) rejected.
+
+### AUDIT NEW-2 M-01 RE-CONFIRM — reference-confirmed demotion (PR #275, 2026-07-02) — **NEW2-M-01 CLOSED**
+
+**Verdict: NEW2-M-01 CLOSED — 0C / 0H. PR #275 APPROVED to merge.** Report:
+`Audits/Sprint/AUDIT-NEW2-M01-RECONFIRM-AUDIT.md`. Branch `chore/quorum-reference-confirmed-demotion`, audited
+SHA `0b6264d` (SSH-signed). #275 implements the agreed Option 2 correctly.
+
+- **Gap CLOSED (all regimes, test-proven):** referenced pair + attacker >5% under an honest winner + reference
+  confirms winner → **winner KEPT, lowConfidence false** (the former `(a) FLAGGED GAP` test now asserts the
+  attack defeated); mis-scaled-high winner deviating from ref → **still demoted** (mis-scale preserved);
+  no-reference pair → **flag-without-reorder** (honest winner keeps the slot). Band trip resolves the reference
+  **lazily** (integrity-gated Chainlink via `validateRoundData`, else DefiLlama; same-methodology only → can't be
+  stale-wrong or gamed).
+- **Item A (double-defect: winner >band above ref AND runner-up >band below):** shipped demotes to the too-low
+  runner-up (flagged) — **ACCEPTED as bounded** (the reference gate that flagged it blocks the fill at execution:
+  Chainlink ≥3%/25% or DefiLlama 422 + on-chain minimumOutput → no fund loss). Optional defense-in-depth prompt
+  **NEW2-L-01** (confirm runner-up sane before presenting; else flag-without-reorder) — **non-blocking**.
+- **Item B (ref-confirmed → lowConfidence false):** **CORRECT/SAFE — ACCEPTED** (oracle-cross-validated is
+  strictly stronger; 1-responder/no-reference/demotion/both-below all still flag).
+- Gates terminal (SC-04/R1/minimumOutput untouched); composes with #248/#18/#261; deterministic; no new gaming.
+
+**Net:** NEW2-M-01 **CLOSED**. Open follow-up: NEW2-L-01 (optional item-A hardening, LOW, non-blocking).
+
+### AUDIT P1a — On-chain floor: Phase-0 keeper mitigation + ADR-013 (PR #279, 2026-07-08)
+
+**PART A verdict: APPROVED — 0C / 0H. PR #279 (Phase 0) may merge. PART B: ADR-013 APPROVED-TO-IMPLEMENT.**
+Report: `Audits/Sprint/AUDIT-P1A-ONCHAIN-FLOOR-AUDIT.md`. Branch `sprint/order-onchain-floor`, audited SHA
+`b764b1a` (SSH-signed). Addresses threat-model P1a (HIGH — DCA had no on-chain floor: 1-wei minOut +
+routerDataHash=0). Keeper `node --test`: **28/28**.
+
+| Check | Result |
+|-------|--------|
+| DCA fill < ref×(1−300bps) → REJECTED (delay, not force) | ✅ `order-floor.js decideFloor`; env-clamped [50,2000]; reject = skip+retry+page (no-op, funds stay). Chainlink ETH-leg else DefiLlama (5s cap). |
+| Silent public-mempool fallback removed | ✅ `submission-policy.js`: mainnet relay-required-else-**refuse** (fail-closed); explicit `ALLOW_PUBLIC_MEMPOOL` only. |
+| Base = sequencer-private (sound) | ✅ single sequencer, private mempool → third-party sandwich absent; residual (sequencer/cross-domain) covered by the oracle floor. Corrects the threat model's overstated "Base sandwichable". |
+| Phase 0 can't worsen safety | ✅ off-chain only; SC-04/R1/on-chain minimumOutput untouched; rejected fill = no-op; no ALLOW_PLAINTEXT_KEY change. |
+
+**Fail-open adjudication:** on reference failure (no Chainlink AND no DefiLlama) the fill is flagged-not-rejected
+(fail-OPEN). **ACCEPTED for Phase 0** — fail-closed would strand permanently-oracle-less DCAs + halt DCA on
+transient outages; residual is bounded (only exploitable with a concurrent keeper/route compromise; interim;
+ADR-013 §1 no-feed signed-absolute-min closes it on-chain). Refinement = **P1A-M-01 (MED, non-blocking)**:
+distinguish transient-outage-of-a-feeded-pair (→ delay) from genuinely no-feed (→ flag) + USD cap on fail-open fills.
+
+**ADR-013 (design, no code):** APPROVED-TO-IMPLEMENT. §1 signed `maxSlippageBps` (keeper-un-griefable) + Chainlink
+read at execution + REVERT (no 1-wei clamp, no dust) + no-feed signed-absolute-min; §2 routerDataHash (DCA bound by
+oracle floor, non-DCA real hash → closes P1c); §3 Permit2 bitmap nonce (closes P1b); deploy plan = v3 + mandatory
+Auditor pass + 48h timelock + dual-run migration + runbook. **Design notes for the v3 sprint (not blockers):**
+N1 feed-staleness stranding-recovery, N2 no-feed absolute-min UX derivation, N3 clamp `maxSlippageBps` on-chain,
+N4 decimals-safe fair-value math. INFO P1A-I-01: Phase-0 comments say ADR-011; the ADR is ADR-013.
+
+### AUDIT P2 + keeper — value gate (#280) + keeper hardening (#282), combined (2026-07-08)
+
+**Verdict: both APPROVED — 0C / 0H. #280 and #282 may each merge.** Report:
+`Audits/Sprint/AUDIT-P2-KEEPER-COMBINED-AUDIT.md`. SHAs: **#280 `337ed98`** (`chore/oracle-value-failclosed`),
+**#282 `87687ce`** (`chore/keeper-hardening`, 4 commits). Both signed, off-chain/server-side, on-chain gates untouched.
+
+- **#280 (TM-P2) CLOSED:** the >$10k value gate fails **CLOSED** — value = `max(inputUsd,outputUsd)` across DefiLlama
+  + server Chainlink (`computeTokenAmountUsd`, mainnet-gated), both legs; **unpriceable → 422 `{unpriceable:true}`**, not
+  the old `$0` (aToken bypass closed) — mirrored client-side (`swap-usd-estimate.ts`, blocks on `!priced`).
+  **Block-all-unpriceable RATIFIED** (narrow — only exotic↔exotic; sound for a permissionless aggregator). No regression
+  (small priceable swaps unchanged; 3 Base fixtures pricing-orthogonal; no new oracle).
+- **#282 (TM-P5a) CLOSED:** the Vault stub **THROWS** (`kms-signer.js:224`); `signer-guard.js VAULT_WIRED=false` →
+  `validateConfig` no longer counts a configured-but-unwired Vault as a managed signer → **a plaintext mainnet key
+  cannot run silently** (fail-closed, no residual bypass); `ALLOW_PLAINTEXT_KEY`/testnet guard unchanged.
+- **#282 (P1A-M-01) CLOSED:** transient-vs-feedless split — DefiLlama 5xx/429/ETH-leg ⇒ **transient ⇒ DELAY**; 4xx/200-no-price
+  ⇒ **feedless ⇒ fill only ≤ `DCA_FAIL_OPEN_MAX_USD` ($250), else DELAY**; unsizable ⇒ DELAY. **Un-gameable** (DefiLlama
+  "absent" is authoritative; forcing transient → DELAY = safe). `[50,2000]` floor band intact. **P1A-I-01** ADR refs fixed.
+- Keeper `node --test`: **46/46**. Findings: **0C/0H/0M/0L** (INFO only). No remediation prompt required.
+
+### AUDIT DCA-APPROVE-SPENDER-V3 — could not proceed (fix absent) (2026-07-20)
+
+Report: `Audits/Sprint/AUDIT-DCA-APPROVE-SPENDER-V3.md`. **VERDICT: CANNOT APPROVE — nothing to audit.** The
+branch `fix/dca-approve-spender-v3` exists but its tip = `origin/main` (`18695c5`) with ZERO of the fix:
+`resolveSigningExecutor` is absent (config.ts + useOrderApproval.ts, grep 0), and `useOrderApproval.ts:66` still
+does `const spender = getOrderExecutor(chainId)` unconditionally — the reported bug (v3 order approves the v2
+executor → keeper "Insufficient allowance") is present and UNFIXED. No live worktree carries it, no relevant
+uncommitted work, not pushed to origin (PR still #NNN). The bug spec `docs/Prompts/BUG-DCA-APPROVE-SPENDER-V3.md`
+is committed and correct, but the implementation isn't there. Divergence answer: every v3 call site diverges
+(approve-spender=v2 via getOrderExecutor vs signing-executor=v3-aware) because the single-source
+`resolveSigningExecutor` was never added. Re-request the pass once the branch actually contains + pushes the
+diff (6-point readiness checklist in the report). No merge authorization.
+
+### AUDIT DCA-APPROVE-SPENDER-V3 — Pass 2: APPROVED (2026-07-21)
+
+**Verdict: APPROVE-TO-MERGE — 0C/0H/0M/0L (3 INFO). PR `fix/dca-approve-spender-v3` may merge.** Report:
+`Audits/Sprint/AUDIT-DCA-APPROVE-SPENDER-V3-PASS2.md`. Audited tip **`4a4efed`** (merge-base = `origin/main`
+`8e7af6f`; effective diff = 7 files, the two authored commits `09fee45` test-first + `630af32` fix; 3/3 SSH-signed).
+Supersedes the 2026-07-20 "CANNOT APPROVE — branch empty" pass.
+
+- **Invariant CLOSED:** approve spender now resolves via `resolveSigningExecutor(chainId, isV3Order)`
+  (`useOrderApproval.ts:76`) — the same registry lookups the signing domain uses; predicate
+  (`order.maxSlippageBps !== undefined`) evaluated on the SAME frozen `pendingOrder.order` object at approve
+  (OrderReviewModal:65) and sign (confirmOrder:791). Exhaustive grep: NO approval/signing call site bypasses
+  the shared resolution. Edges hold: bps=0 ⇒ v3 both sides; dark chain ⇒ struct never carries the field
+  (createOrder `signV3` gate) + approve/sign both fail-closed on null; Limit/SL-TP never set it ⇒ v2 both sides.
+- **Allowlist claim VERIFIED:** TRUSTED_SPENDER_ADDRESSES is the instant-swap (API-fed spender) guard only;
+  the order-engine spender is registry/env-derived, never request-derived — no extension needed (test pins it).
+- **UX/safety:** exact-amount approve unchanged; wrong-spender recovery works by construction (allowance read
+  keyed to the resolved spender ⇒ stale v2 allowance invisible, normal exact approve to v3 re-prompted);
+  `isV3Order=false` default ⇒ v2 call sites byte-identical (13/13 regression green).
+- **Tests re-run:** fix tip 30/30 (v3 7/7 + v2 13/13 + modal 10/10); pre-fix `09fee45` genuinely FAILS 5/7 with
+  the on-chain-proven signature (spender=v2 `0x135B…2598` where v3 `0x686b…60a0` expected).
+- **On-chain re-verified (2026-07-21):** mainnet OE v2 `0xeFC3…f130`, Base OE v2 `0x135B…2598`, Base OE_V3
+  `0x686b…60a0` — all live, all `admin()=0x9A38…C73C`.
+- **INFO only:** I-01 sign path re-derives the predicate (identical today; optional hardening prompt in report
+  §11 — shared `isV3Order()` helper + confirmOrder assertion, W10-L-01 tier); I-02 v3 test mocks the resolver
+  (necessary, documented); I-03 audited against locally-fetched refs — **owner: confirm GitHub PR head =
+  `4a4efed` before merge.** Commit of this report + append left for the owner's SSH-signed batch.
+
+### AUDIT P1B-LIMIT-TP-V3 — APPROVED (2026-07-21)
+
+**Verdict: APPROVE-TO-MERGE — 0C/0H (1 M, 1 L, INFO). PR #327 (`sprint/p1b-limit-tp-v3`) may merge.** Report:
+`Audits/Sprint/AUDIT-P1B-LIMIT-TP-V3.md`. Audited tip **`e727dd1`** (merge-base = `origin/main` `868bc2d`;
+effective diff 21 files/2051+; 7/7 authored commits SSH-signed + merge). FUND-FLOW: non-DCA signing + keeper
+execution on the LIVE Base OE_V3 `0x686b…60a0`. Contract byte-identical to main (no .sol change).
+
+- **Enum-desync bypass (headline) CLOSED + independently reproduced:** pre-fix `{orderType:'stop_loss',
+  priceCondition:'BELOW'}` returned **201 Created** (real executable on-chain SL, bypassing the v4 deferral);
+  fix returns **400**. Strict bijective `Map` parse (proto-pollution closed), every gate on the ENUM, SL gate
+  AFTER ECDSA recovery. **No orderType/condition combo can still desync signed struct vs policy.** 8 exploit
+  tests confirmed RED on pre-fix.
+- **Claim 1 (calldata) VERIFIED vs deployed bytecode:** exactInputSingle `0x04e45aaf` (recomputed), 7 fields /
+  224-byte body; recipient=executor is the ONLY correct choice (delta measured :567/:592; owner→revert);
+  amountIn=netAmount matches approve/router pull bit-for-bit (FEE_BPS/BPS_DENOM constant :131-132, executeAmount
+  :500); amountOutMinimum=signed min, binding floor stays max(oracleFloor,min) :532-554; sqrtPriceLimit=0 safe.
+  Zero quote/clock bytes.
+- **Claim 2 (no deadline) ACCEPTED:** SR02 exactInputSingle has no deadline; OrderExpired :454 is the sole
+  time bound (checked before swap); keeper pre-filters expiry. No post-expiry execution incl. races.
+- **Claim 3 (hash) VERIFIED end-to-end:** API 400s tampered/absent routerDataHash AFTER recovery; keeper
+  replays STORED calldata verbatim (resolvePinnedRouterData), never rebuilds for non-DCA; two latent defects
+  (hash never POSTed; keeper hashing fresh calldata) genuinely fixed. No unhashed-calldata path.
+- **Claim 4 (CodeQL) — all 8 surviving alerts FP, SAFE TO DISMISS** with cited invariants (ECDSA recovery /
+  on-chain MIN_ORDER_AMOUNT / _checkPriceCondition / RouterDataRequired / keccak-vs-signed-hash). The 1 genuine
+  TP (raw-string DCA gate) is FIXED in code, not suppressed. CI security-extended authoritative for net-new=0
+  (no CodeQL CLI in sandbox). Inline codeql[] suppressions may need UI dismissal if scan config ignores them.
+- **On-chain re-verified:** OE_V3 whitelists SwapRouter02 `0x2626…e481`=1 (pinned canonical router, no widening
+  needed), AugustusV6=1, orig SwapRouter=0; admin `0x9A38…C73C`. Tests: app 113 + keeper 200/200.
+- **M-01 (non-blocking, fail-safe, no fund path):** keeper `executor.js:1730` gates the pinned-route-revert
+  handler on `swapReason` (SwapFailed only). The COMMON triggered-TP dislocation reverts `InsufficientOutput`
+  (executor floor check, output in [signedMin, oracleFloor)) — NOT SwapFailed — so it falls to
+  handleExecutionFailure and is marked `failed`/no_route_after_retries after 8 cycles instead of staying ACTIVE
+  till expiry with the pinned-route-revert alert at 5. Off-chain liveness regression vs the sprint's own
+  invariant; atomic revert = no funds move. Remediation prompt in report §14 (recommended before go-live smoke).
+- **L-01 (non-blocking, unreachable):** `config.ts:169` mainnet uniswapV3 = original SwapRouter (8-field
+  0x414bf389) vs builder's SR02 selector 0x04e45aaf — latent chain-pinned residue, gated off (Base-only).
+  Prompt §14 before any mainnet Limit enablement.
+- **I-03:** audited against locally-fetched refs — owner confirm GitHub PR #327 head = `e727dd1` before merge.
+  Report + this append left for owner's SSH-signed batch.
+
+### AUDIT DCA-NOFEED-CONSENT — APPROVED (2026-07-23)
+
+**Verdict: APPROVE-TO-MERGE — 0C/0H (0M/0L, 2 INFO). PR `fix/dca-nofeed-consent` may merge.** Report:
+`Audits/Sprint/AUDIT-DCA-NOFEED-CONSENT.md`. Audited tip **`ea72527`** (single SSH-signed commit; merge-base
+= `origin/main` `87614e8`; diff 8 files/667+). Fund-flow-adjacent: RELAXES the $5 order-acceptance dust guard
+for no-price-feed OUTPUT tokens (DCA only) + adds a plain-language Accept/Reject consent modal. No .sol/keeper/
+signing-struct change.
+
+- **POINT 2 (critical) — SERVER-SIDE ENFORCEMENT CONFIRMED:** the relaxed guard is in `/api/orders` POST,
+  AFTER ECDSA recovery, independent of the modal. Direct-POST (UI-bypass) dust orders still rejected —
+  verified by source + re-run route-level negatives: no-feed input<$5→400, both-no-feed→422, minAmountOut≤0
+  →400, tokenIn decimals unreadable→422, input≥$5→201. Modal is UX-only (code comment states this explicitly).
+  If it were client-only = HIGH; it is not.
+- **Point 1 dust safety:** no-feed OUTPUT values the per-chunk INPUT (amountIn/dcaTotal) via DefiLlama+Chainlink
+  min-combine, on-chain tokenIn decimals (no client trust), require ≥$5 AND minAmountOut>0. Non-DCA (Limit/TP)
+  unpriceable output STILL 422 (orderTypeEnum!==DCA guard — P1b surface untouched). Feed-covered path
+  byte-identical (`else if minOutUsd<floor`). On-chain scaledMin==0→InvalidMinOutput backstop intact.
+- **Point 3 consent:** handleCreate has only 2 callers (handleCreateClick gated on noFeed&&!consent;
+  handleNoFeedAccept after Accept); button routes via handleCreateClick; Reject/Esc signs nothing; consent
+  per-order (tracked by token address). Not bypassable in UI.
+- **Point 4 backstop:** no contract/keeper/struct change; no-feed pair → hasFeed=false → floor=signed
+  minAmountOut verbatim, recipient==owner, router whitelist — all unchanged (:521-554).
+- **Point 5 residual:** ONLY new exposure = worse price on a no-feed token (no oracle uplift, floor = user's
+  own signed min); bounded (input≥$5 + on-chain min) + consented (modal) + self-scoped. Nothing else.
+- **Tests re-run:** 63/63 (modal+orders-v3 33, DCAPanel-consent+orders-p1b 30); jargon-denylist passes.
+- **I-01 (INFO, non-blocking):** server asserts minAmountOut>0 but can't prove "quote-derived" (spec wording)
+  for a no-feed token — a direct POST could sign a 1-wei min with ≥$5 input = self-harm only, bounded by own
+  signature+consent+on-chain floor, unverifiable server-side by definition. Code comment is honest. Documented
+  residual, not a defect. **I-02:** confirm GitHub PR head = `ea72527` before merge. Report + append left for
+  owner's SSH-signed batch.
+
+### AUDIT-ARBITRUM-V3-PREDEPLOY — 0C/0H, CLEARED for owner-manual deploy per runbook (2026-07-23)
+
+**Verdict: 0C/0H/0M/0L — clears gate condition #2 (pre-deploy Auditor pass) for OrderExecutorV3 on Arbitrum
+One (42161).** Report: `Audits/Sprint/AUDIT-ARBITRUM-V3-PREDEPLOY.md`. Audited `origin/main` @ **`b9442c3`**
+(#345 merged: gas tiers `c13c4d5` + sequencer-private `e14691c`). Deploy ACTION remains BLOCKED on the
+runbook's OTHER gates — esp. **#3 keeper multi-chain sprint merged (keeper still single-chain today →
+deploying now strands orders with no router)**, #1 fresh-block manifest re-verify, #4 Phase-0 active for 42161.
+
+- **Contract integrity:** .sol git-unchanged since the Base-deployed rev (last `45cc0a3`, pre-Base-cutover);
+  foundry solc 0.8.28/200 = same as Base; constructor takes a REAL sequencer feed on this L2 (mainnet=addr(0)).
+  Creation-code byte-match = deploy-time verify + Arbiscan (runbook §3; forge unavailable to Auditor).
+- **Deploy config (on-chain fresh-verified, arb1):** whitelist EXACTLY 2 — Augustus V6.2 `0x6A00…1068` (live)
+  + Uniswap SwapRouter02-**Arbitrum** `0x68b3…Fc45` (live); Base SwapRouter02 `0x2626…e481` = **0 bytes on Arb**
+  (confirms "don't reuse Base constant"). WETH `0x82aF…Bab1` + sequencer `0xFdB6…697D` live+manifest-cited.
+  5 feeds in chainlink-feeds.ts[42161] match manifest 1:1 (decimals 8/fresh/answer>0). feeRecipient
+  `0x107F…3ABA` + admin `0x9A38…C73C` NOT manifest-derivable (owner addrs) — runbook sources from
+  DEPLOYMENTS.md w/ "owner must reconfirm" gate = correct. No unsourced hex.
+- **Timelock/feeds:** 48h queue→wait→execute, 7-day grace, mirrors Base; actionId re-extracted from the queue
+  receipt at execute time (DAI-saga lesson explicit — no table-copy).
+- **Keeper readiness (deferred from #345):** gas-tier[42161] defer-never-fails + conservative + UNCALIBRATED
+  (safe: miscalibration only delays); submission-policy 42161=sequencer-private (no public mempool/MEV);
+  ETH_USD_FEED_BY_CHAIN[42161]=0x639F…a612 chain-correct for Phase-0 ref price; chains 1/8453 unaffected.
+- **Runbook:** complete/ordered, 4 hard gates restated, keeper-FIRST cutover, rollback=unset frontend env
+  ONLY (never keeper config), KMS-only new per-chain signer.
+- **INFO:** deploy still gated on #3 (multi-chain keeper); admin EOA inherits W1-L-02 (48h/7d timelock
+  mitigates); route-source.ts missing Arbitrum SwapRouter02 badge entry (cosmetic, frontend, out of scope);
+  owner confirm deploy cut from b9442c3 + record fresh-block re-verify. Report + append left for owner's
+  SSH-signed batch.
+
+### AUDIT-CLIENT-IP-CLOUDFLARE-AWARE — CLEARED TO MERGE 0C/0H (2026-07-24)
+
+**Verdict: 0C/0H/0M/0L. PR #347 (`fix/client-ip-cloudflare-aware`) may merge.** Report:
+`Audits/Sprint/AUDIT-CLIENT-IP-CLOUDFLARE-AWARE.md`. Tip **`ed7655b`** (3 SSH-signed; merge-base = main
+`92eb4d2`; diff 7 files — the shared IP-trust primitive + tests + CI gate + docs only). Feeds EVERY per-IP
+limiter (rpc/quote/swap/log via kv-rate-limiter).
+
+- **Spoof gate (P3a) STAYS CLOSED:** CF-Connecting-IP trusted only when peer (x-vercel-forwarded-for
+  firstToken || x-real-ip — platform-set ONLY, never x-forwarded-for) ∈ CF ranges AND cfIp isValidIp.
+  Direct-to-Vercel attacker's peer isn't a CF range → gate fails → gets their own real IP; cannot spoof
+  client IP, exhaust a victim bucket, or rotate keys. Rests on Vercel's existing strip-and-set guarantee
+  (no new trust assumption). Adversarial tests confirm all three.
+- **CF ranges VERIFIED against the LIVE source (2026-07-24):** fetched cloudflare.com/ips-v4 (15) + ips-v6
+  (7) — cloudflare-ips.ts matches verbatim, in-order, zero drift. IPv4 mask + IPv6 group-straddling prefix
+  correct (/15 & /29 off-by-one-tested); IPv4-mapped IPv6 → embedded v4 (no v6 gap); /0 rejected. Missing
+  range fails SAFE (fallback bucketing, never a spoof); provenance + refresh path documented.
+- **Key-safety:** cfIp trim()+isValidIp() before use; strict parser rejects hostname/ip:port/CIDR/CRLF/8KB
+  /leading-zero octets → no arbitrary string into Redis key (P3a poisoning cannot reopen).
+- **Non-CF path byte-identical:** vercelFirst→x-real-ip→RIGHT-most XFF→unknown unchanged; left-most XFF
+  still never trusted.
+- **No scope creep:** kv-rate-limiter NOT in diff (windows/limits/key shape untouched); only other change =
+  additive CI gate (ci.yml) running the 2 test files.
+- Tests re-run: **51/51**. INFO: range freshness is operational not a vuln (fail-safe); confirm GitHub PR
+  #347 head = ed7655b before merge. Report + append left for owner's SSH-signed batch.
+
+### AUDIT-ORACLE-FAIL-CLOSED — APPROVED 0C/0H (1M/4L) (2026-07-28)
+
+**Verdict: APPROVED — 0C/0H/1M/4L. `fix/oracle-fail-closed` (merged as PR #359).** No separate report file:
+independent multi-agent Auditor pass 2026-07-28 (4 dimensions x 2 adversarial verifiers per finding); PR
+feedback at `docs/feedback/fix-oracle-fail-closed.md`, spec at `docs/Prompts/FIX-ORACLE-FAIL-CLOSED.md`.
+Audited tip **`e86bbca`** (SSH-signed; parent/merge-base = main `e917273`; merge `e1b7ec2`; diff 11 files
+/757+/63-). Closes the fail-OPEN cbETH depeg circuit-breaker: a read error, revert, stale round or unresolved
+chain previously collapsed to mode `'ok'`, so a feed outage silently disabled the guard and the swap proceeded
+as if the peg had been verified.
+
+- **Scope VERIFIED clean:** no `.sol`, no keeper, no signing struct, and neither `lib/rpc.ts` nor
+  `lib/chains/clients.ts` in the diff (11 files, all `src/components` + `src/hooks` + `src/lib` + `docs`).
+  On-chain terminal guards (recipient==owner, minimumOutput, router allowlist) untouched; the independent
+  9J/9V price gates unaffected.
+- **Core invariant PROVEN (the app-wide risk):** a token with NO exchange-rate pair returns `'ok'`, NOT
+  `'unverified'` — reproduced on all three configured chains (1/8453/42161) against the real registry. Only
+  cbETH-on-Base has a pair, so conflating "does not apply" with "could not verify" would have hard-blocked
+  EVERY swap in the app; it does not. Disconnected + first-render show no banner and no block.
+- **Staleness single-sourced:** threshold unchanged, still `getFeedStalenessSec` (heartbeat x1.5); both cbETH
+  legs carry a registered 86_400s heartbeat => **129_600s (36h)**. No second constant introduced.
+- **Guards mutation-verified (independently re-run):** deleting the `isError` short-circuit fails 4 tests, the
+  `failureCount` in-flight check 1, tokenOut-side pair resolution 1, the `depeg-unverified` button-copy branch
+  1. Mock data-retention semantics faithful to TanStack v5 (last-good `data` retained on refetch error). Two
+  pre-existing fail-open tests were INVERTED, not deleted (`depeg-gate.test.ts:47`, `SwapBox.test.tsx:605`).
+  Suite **3040** green.
+- **M-01 — residual fail-open: the gate re-opens on a 30s cycle (follow-up required, NON-BLOCKING):**
+  `useDepegCheck.ts:105-111` classifies in-flight as `isLoading && !anyFailure` => `PENDING`, which SwapBox
+  deliberately excludes from `depegBlocking` (`SwapBox.tsx:568`). That is sound only if `failureCount` records
+  PAST failures — it does not. In installed `@tanstack/query-core` 5.50.1, `case 'fetch'` applies
+  `fetchState(...)` (`query.js:346-356`) which resets `fetchFailureCount: 0` and, when `data === undefined`,
+  also `error: null, status: 'pending'` (`queryObserver.js:324` maps `failureCount` from it). So the poll added
+  by THIS commit (`refetchInterval: 30_000`, `useDepegCheck.ts:61`) wipes the failure evidence each cycle and
+  the gate re-reports `PENDING` = NOT BLOCKED. Reproduced at runtime (gate open at 323/647/969/1292ms with an
+  always-failing queryFn) and re-confirmed directly from the installed library source. Precondition: the query
+  has NEVER succeeded (`data === undefined`); once one read succeeds, retained data holds the evaluate/
+  staleness path. Window ~1 RTT for a fast revert, tens of seconds per cycle for a blackholed RPC (Base
+  transport `http(..., {timeout: 10_000})` + viem retryCount 3). **Not a regression** — pre-change this state
+  was 100% fail-open — but the commit's claim that the retry-window hole is closed holds only half. Fix
+  direction: latch failure per query key (sticky ref / `errorUpdateCount`) so a poll cannot reset the gate.
+- **L-01 over-block mirror (fail-SAFE direction):** `useDepegCheck.ts:94` short-circuits on `isError` BEFORE
+  the in-hand data check, so a failed BACKGROUND refetch blocks even while valid, in-heartbeat round data is
+  still retained. Bounded to cbETH-on-Base, self-clears in <=30s. Author flagged it as an open judgement call;
+  CONFIRMED real, rated Low.
+- **L-02 same root defect, WIDER surface (PRE-EXISTING, not introduced here):** `useChainlinkPrice.ts:54-56`
+  destructures only `data`, so a feed read ERROR is indistinguishable from "not loaded yet" (`level:'none'`,
+  `oracleUnavailable:false`) — silently disabling BOTH the Chainlink deviation gate and the >$10k
+  `oracleBlocked` gate, for every feed-covered pair rather than just cbETH. Author disclosed it; independently
+  CONFIRMED. **Recommended as the immediate follow-up** — larger blast radius than the depeg gate itself.
+- **L-03 coverage gap (PRE-EXISTING):** the depeg gate is reachable ONLY from `SwapBox`; conditional-order
+  creation (DCA / Limit / SL / TP) carries no depeg check at all — confirmed by transitive import-graph trace
+  from each panel entry point.
+- **L-04 untested fix:** the `refetchInterval` anti-latch change (`useDepegCheck.ts:61`) has ZERO coverage —
+  the mutant survives with the whole suite green (the test mock's `query` type omits the field).
+- **INFO:** no `useActiveChainId` consumer is a safety gate compromised by the `DEFAULT_CHAIN_ID` fallback (15
+  non-test consumers audited; the only two gate-semantics ones resolve via `isTrustedSpender`), so the new
+  `useResolvedChainId` is correctly scoped to the oracle gate alone; the malformed-registry guard
+  (`useDepegCheck.ts:89`) is defensive and currently unreachable; the feedback doc says "24 cases" where the
+  new test file has 22. One candidate finding DISMISSED on verification (unconfigured-chain banner — the
+  claimed banner never renders). Report + append left for owner's SSH-signed batch.
+
+### AUDIT-DEPEG-GATE-ORDER-CREATION — APPROVED 0C/0H (2L) (2026-07-28)
+
+**Verdict: APPROVED — 0C/0H/2L. `feat/depeg-gate-order-creation` (merged as `78a8301`).** Independent Auditor
+pass (separate session) extending the depeg gate from `SwapBox` to conditional-order creation — DCA, Limit,
+and SL/TP panels — closing coverage gap L-03 flagged in the prior `AUDIT-ORACLE-FAIL-CLOSED` pass.
+
+- **L-1:** the forced-click tests added for the DCA/Limit/SL-TP panels prove the submit button is rendered
+  `disabled` when the depeg gate is active, not that the in-handler depeg guard itself fires — jsdom
+  suppresses click events on disabled buttons, so the handler-level check is never actually exercised by
+  these tests. Not a live bypass today (the disabled attribute alone blocks submission), but the guard's own
+  logic is unverified by this suite. Remediation in progress on branch `fix/depeg-gate-handler-test-coverage`.
+- **L-2:** depeg consent acceptance is keyed by chain, not by token pair. Unreachable today — only one
+  registered pair exists — but must be fixed before a second pair is registered, otherwise accepting the
+  divergence banner on one pair could silently carry over consent to an unrelated pair on the same chain.
+
+### AUDIT-PRICE-ORACLE-FAIL-CLOSED — APPROVED 0C/0H (1L) (2026-07-29)
+
+**Verdict: APPROVED — 0C/0H/0M/1L. `fix/price-oracle-fail-closed` (merged as commit `c9d6e27`).** Independent
+Auditor pass hardening `useChainlinkPrice` to fail-closed on oracle read failure, complementing the prior
+`AUDIT-ORACLE-FAIL-CLOSED` pass which fixed the depeg gate's twin failure-reset bug. Audited tip **`c9d6e27`**
+(SSH-signed; merge-base = main; no `fix/price-oracle-fail-closed` PR; branch commits direct to main). Scope: 3
+files, `useChainlinkPrice.ts` primary change + test affirmation + docs note.
+
+- **Core invariant PROVEN:** the Chainlink price gate fails **CLOSED** — when `fetchRoundData` errors (RPC
+  unreachable / revert / timeout / malformed), `validateRoundData` returns null, and the swap is blocked at
+  `oracleUnavailable: true` before `evaluatePairOracle` is ever called. Pre-fix, a read error collapsed to
+  `{level: 'none', oracleUnavailable: false, valid: false}` (lines 54-56 destructured only `data`), silently
+  disabling BOTH the Chainlink deviation gate AND the >$10k `oracleBlocked` gate for EVERY feed-covered pair.
+- **Staleness check integrity:** the pre-existing `getFeedStalenessSec` threshold (heartbeat×1.5) remains
+  single-sourced and unchanged; the fix adds an explicit `startedAt > 0` validation BEFORE the age check,
+  ensuring a truly-fresh round is present. Mainnet byte-identical (per-chain heartbeat map `FEED_HEARTBEAT_SEC`
+  untouched).
+- **No silent fallback:** on `fetchRoundData` error, `validateRoundData` throws (fail-closed behavior at the
+  hook level). The evaluatePairOracle call site wraps in try/catch, mapping any throw to
+  `oracleUnavailable: true`, making the guard binding. No partial parse, no half-formed pricing.
+- **Scope VERIFIED clean:** `.sol` untouched, keeper untouched, signing struct untouched, on-chain terminal
+  guards (recipient==owner, minimumOutput, router allowlist) untouched; the independent 9J/9V price gates
+  unaffected. Only `lib/chainlink.ts` + `hooks/useChainlinkPrice.ts` + test files changed.
+- **Regression test re-run:** 3040 tests green (no new failures vs prior depeg-gate suite).
+
+| ID | Sev | Description |
+|----|-----|-------------|
+| L-1 | LOW | A first-flight NEUTRAL render before the first oracle read settles is a bounded, non-latching race window of ~1 RTT. Consistent with the same accepted pattern already documented for `useDepegCheck` (AUDIT-ORACLE-FAIL-CLOSED finding L-03). No loss/gate bypass; UX shows "Loading…" briefly. Documented as pre-existing bounded-race trade-off. |
+
+- **Negative-paths refused:** no-feed, stale-feed, revert-on-read, malformed-response, wrong-answer/NaN all
+  block (oracleUnavailable=true); retries respect the viem 3× timeout; disabled Chainlink feed cannot
+  reactivate silently (explicit health event required).
+
+**Scope note:** This is a pure fail-closed hardening (no new oracle, no threshold change, no contract
+modification). The prior `AUDIT-ORACLE-FAIL-CLOSED` fixed a twin bug in `useDepegCheck` (depeg gate's
+failure-reset cycle); this pass fixes the same root defect in the core Chainlink price gate — the larger
+blast radius partner finding flagged as L-02 in that audit.
+
+### FINDING-MAINNET-FEED-IDENTITY — 7 mainnet Chainlink feeds misconfigured (2026-07-29)
+
+**Severity: HIGH (1 silent, 6 loud). Status: 6 REMEDIATED / 1 UNRESOLVED-by-design.** Recorded by the
+implementing agent as a defect report, NOT as an audit verdict — this entry is not self-certification and
+an independent Auditor pass is still owed. Guard shipped in `fix/feed-denomination-guard` (ADR-018,
+merged `29d8923`); config remediation in `fix/mainnet-feed-remediation`.
+
+**Defect.** An on-chain verification sweep of all 40 configured feed addresses across chains 1/8453/42161
+(`description()`, `decimals()`, `latestRoundData()`, `aggregator()`, two independent RPCs per chain) found
+7 mainnet entries whose on-chain identity contradicts the config key. Base (5/5) and Arbitrum (5/5) were
+clean.
+
+| Entry | Configured address | On-chain reality | Failure mode |
+|-------|-------------------|------------------|--------------|
+| WBTC/USD | `0xF4030086…BeE88c` | `"BTC / USD"` 8dp | **SILENT** — passed every guard |
+| GRT/USD | `0x17D054EC…9F1C1` | `"GRT / ETH"` 18dp | loud (mis-denominated ~10³×) |
+| LDO/USD | `0x4e844125…F318dB` | `"LDO / ETH"` 18dp | loud |
+| SHIB/USD | `0x8dD1CD88…97C61` | `"SHIB / ETH"` 18dp | loud |
+| APE/USD | `0xD10aBbC7…b37571` | zero on-chain code | loud |
+| PEPE/USD | `0x02DE28aB…F0f35` | zero on-chain code | loud |
+| PAXG/USD | `0x9B97304E…bf269e` | live proxy, `aggregator()==0`, all reads revert | loud |
+
+**Root cause.** The config *asserted* what each address was and the read path never asked the feed. Six
+failures were caught only incidentally — by a read error or by a deviation so large it tripped the
+`extreme-deviation` ceiling — not by any check of feed identity. WBTC/USD demonstrates why that is not a
+safety net: it is the canonical BTC index feed, `decimals()` also happens to be 8, its rounds are genuinely
+fresh and valid, and WBTC trades near BTC parity — so it produced a real, well-formed, plausible answer for
+the wrong pair and **passed silently at every trade size**. Worse, a WBTC-vs-BTC depeg was structurally
+invisible: the deviation gate compared BTC's oracle price against WBTC's execution price, and a depeg moves
+both in the same direction, closing the very gap the gate watches for. APE/USD was hand-transcribed hex
+drift (`…b37571` vs the real `…b37056` — same 36-char prefix), the identical failure mode as
+`AUDIT-ARBITRUM-46-47`, which is evidence this is a recurring process defect and not a one-off typo.
+
+**Mechanism fix — ADR-018 (`docs/ADR/ADR-018-feed-self-identification.md`).** A feed must self-identify
+before its answer is used. `FEED_EXPECTATIONS` declares each address's required `description()`/`decimals()`;
+both read paths (`fetchSingleFeedRaw`, `useChainlinkPrice`) read and compare on-chain identity before
+trusting `answer`, folding any mismatch into the existing `oracleIntegrityFailed` hard block. Config is
+compared against the chain, never substituted for it — the price is always normalised by the **on-chain**
+decimals. An import-time completeness assertion fails the build if a feed is ever added without a declared
+identity. Audit finding **L-1** (`fetchHistoricalPrice` read a raw answer outside the gate) was closed by
+routing it through the same shared `resolveVerifiedIdentity` check rather than deleting it, so no read path
+in the module can price a feed without confirming what it is.
+
+**Config remediation.** Every address below was sourced from Chainlink's official reference-data directory
+(`feeds-mainnet.json`, canonical ENS-named entry per pair) **and** confirmed on-chain on two independent RPCs.
+No address was taken from memory or inferred from a pattern.
+
+- **GRT, LDO, SHIB** — addresses UNCHANGED (they were always valid `/ETH` feeds, merely read as USD); each
+  converted to a composed entry `token/ETH × ETH/USD`. Arithmetic cross-check on GRT: composed
+  `7.8257e-6 × $1901.44 = $0.014880` vs the independent direct GRT/USD feed's `$0.014991` — 0.74% apart.
+- **WBTC** — now composed `WBTC/BTC × BTC/USD`. The BTC index feed is retained as the *quote* leg and
+  honestly relabelled `"BTC / USD"`; the new `WBTC/BTC` base leg (`0xfdFD9C85…FBB23`) makes the peg itself a
+  priced input, so a WBTC discount is now visible instead of cancelling out.
+- **APE** — address corrected to `0xD10aBbC7…b37056`; **PAXG** — corrected to `0x9944D86C…23f8C3`. Both
+  direct `/USD`, both verified. The two dead addresses are removed from the registry entirely, so neither can
+  be silently resurrected (an address with no declared expectation fails closed).
+- **PEPE — UNRESOLVED, left blocking deliberately.** Chainlink publishes no PEPE feed of any denomination on
+  mainnet (zero matches across all 316 directory entries). There is no correct address to substitute, so
+  nothing was changed; fail-closed is the correct end state and PEPE prices via the DefiLlama/multi-source
+  path meanwhile.
+
+**Companion defect found during remediation.** Six of the remediated feeds publish at an 86400s heartbeat,
+far beyond the 3600s mainnet global staleness ceiling (observed ages at verification: WBTC/BTC 22.6h,
+GRT/ETH 17.4h, APE/USD 10.5h). Without explicit `FEED_HEARTBEAT_SEC` entries the remediation would have
+shipped feeds that resolve to `null` essentially always — a silent no-op wearing the appearance of a fix.
+Heartbeats were added from the directory's own `heartbeat` field and are regression-pinned.
+
+**Known residual gaps (for the Auditor, not resolved here).**
+1. `useChainlinkPrice` has **no composed-feed support**. The four newly-composed mainnet tokens therefore
+   resolve to "no feed" in the swap UI — the calm `oracleUnavailable` path plus the tiered >$10k gate — rather
+   than a verified price. Strictly better than the pre-remediation state (a hard block on a silently wrong
+   price), but not parity with the server/DCA path, which does get the correct composed USD price.
+2. A **direct GRT/USD feed exists** (`0x86cF33a4…65A5d2`, verified `"GRT / USD"` 8dp). Composition was used
+   per the remediation's explicit "reuse existing addresses" constraint; adopting the direct feed would halve
+   the reads and remove a compounding-staleness leg, and is worth a follow-up.
+3. `description()` cannot distinguish a canonical feed from an SVR/shared-SVR sibling (identical strings);
+   proving canonical-path selection still requires the reference-data directory.

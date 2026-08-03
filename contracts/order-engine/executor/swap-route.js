@@ -159,6 +159,14 @@ const ROUTER_SOURCE = {
   // Mainnet (1) — unchanged
   "0x111111125421ca6dc452d289314280a0f8842a65": "1inch",      // 1inch v6
   "0xdef1c0ded9bec7f1a1670819833240f027b25eff": "0x",         // 0x Exchange Proxy
+  // [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] Arbitrum One (42161) — addresses taken verbatim from
+  // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json (contract:router:*, each eth_getCode-verified on
+  // two independent RPCs) and pinned against it by arbitrum-plumbing.test.mjs, so a hand-typed
+  // hex can never land here. NOTE: Velora's Augustus V6.2 is deployed at the SAME address on
+  // Arbitrum as on Base (0x6a00…1068, above) — the map is keyed by address precisely because
+  // addresses are globally unique, so that entry already covers Arbitrum and is NOT duplicated.
+  // Only Uniswap's SwapRouter02 differs per chain and needs its own row.
+  "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "uniswapv3",  // Uniswap SwapRouter02 (Arbitrum One)
 }
 
 /** Resolve the /api/swap source for a committed order.router, or null if unknown. */

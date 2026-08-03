@@ -60,6 +60,43 @@ describe('chains/routers [P222]', () => {
     expect(WHITELISTED_ROUTERS['0x'].address.toLowerCase()).toBe(mainnet['0x'].toLowerCase())
   })
 
+  it('[SPRINT-46-ARBITRUM-CONFIG] the Arbitrum whitelist has all 12 primary routers registered', () => {
+    expect(Object.keys(ROUTER_WHITELIST_BY_CHAIN[42161]).length).toBe(12)
+  })
+
+  it('[SPRINT-46-ARBITRUM-CONFIG] Arbitrum whitelist is INERT while feeCollector is null (dark launch)', async () => {
+    // Config-only: the addresses exist in the map, but the chain is not active, so
+    // nothing on the live swap path can reach isWhitelistedRouter(_, 42161) yet.
+    const { isChainActive } = await import('./activation')
+    expect(isChainActive(42161)).toBe(false)
+    // The whitelist function itself still resolves correctly (used by the future activation
+    // sprint + these tests) — inertness comes from isChainActive gating the swap path, not
+    // from this function refusing to answer.
+    expect(getRouterWhitelist(42161).length).toBeGreaterThan(0)
+  })
+
+  // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Regression guard: the two addresses that resolved to
+  // EMPTY on-chain code (sushiswap) or the WRONG contract (uniswapv3 — V1 SwapRouter, not
+  // SwapRouter02) must never silently reappear. See docs/Reports/ARBITRUM-ROUTER-VERIFICATION.md.
+  it('[SPRINT-47-ARBITRUM-ACTIVATION-PREP] the corrected Arbitrum addresses do not regress to the broken values', () => {
+    const arb = ROUTER_WHITELIST_BY_CHAIN[42161]
+    // uniswapv3 must be SwapRouter02 (same as mainnet), never the V1 SwapRouter.
+    expect(arb.uniswapv3.toLowerCase()).toBe('0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45')
+    expect(arb.uniswapv3.toLowerCase()).not.toBe('0xe592427a0aece92de3edee1f18e0157c05861564')
+    // sushiswap must be the real (RedSnwapper) address, never the undeployed recon value.
+    expect(arb.sushiswap.toLowerCase()).toBe('0xac4c6e212a361c968f1725b4d055b47e63f80b75')
+    expect(arb.sushiswap.toLowerCase()).not.toBe('0x54f0ff7bf862325b855b0481b8e493ec5c7cbbc7')
+    // the whitelist size is unchanged by the correction (still 12 — values fixed, not added/removed).
+    expect(Object.keys(arb).length).toBe(12)
+  })
+
+  it('[SPRINT-46-ARBITRUM-CONFIG] Velora/Augustus V6.2 is the same canonical address on 1/8453/42161', () => {
+    const v6_2 = '0x6a000f20005980200259b80c5102003040001068'
+    expect(ROUTER_WHITELIST_BY_CHAIN[1].velora.toLowerCase()).toBe(v6_2)
+    expect(ROUTER_WHITELIST_BY_CHAIN[8453].velora.toLowerCase()).toBe(v6_2)
+    expect(ROUTER_WHITELIST_BY_CHAIN[42161].velora.toLowerCase()).toBe(v6_2)
+  })
+
   it('isWhitelistedRouter validates per chain', () => {
     // 0x v2 AllowanceHolder is a Base router, not a mainnet one.
     const baseOnly = '0x0000000000001fF3684f28c67538d4D072C22734'

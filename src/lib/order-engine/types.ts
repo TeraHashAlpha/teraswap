@@ -21,6 +21,11 @@ export interface OnChainOrder {
   tokenOut: `0x${string}`
   amountIn: bigint
   minAmountOut: bigint
+  // [SPRINT-V3-P2 / ADR-013 §1] uint16, present ONLY on a v3-signed order. undefined ⇒ v2
+  // order (v2 has no such field — no signing/hash/domain impact, byte-identical). A defined
+  // value is the discriminator computeOrderHash/confirmOrder use to pick the v3 typehash +
+  // domain (version "3") over v2's.
+  maxSlippageBps?: number
   orderType: OrderType
   condition: PriceCondition
   targetPrice: bigint
@@ -33,7 +38,7 @@ export interface OnChainOrder {
   dcaTotal: bigint
 }
 
-// ── EIP-712 types for signing ────────────────────────────
+// ── EIP-712 types for signing (v2) ───────────────────────
 export const ORDER_EIP712_TYPES = {
   Order: [
     { name: 'owner', type: 'address' },
@@ -53,6 +58,48 @@ export const ORDER_EIP712_TYPES = {
     { name: 'dcaTotal', type: 'uint256' },
   ],
 } as const
+
+// ── EIP-712 types for signing (v3) [ADR-013 §1] ──────────
+// Adds `maxSlippageBps` (uint16) right after minAmountOut — MUST mirror
+// contracts/order-engine/TeraSwapOrderExecutorV3.sol's ORDER_TYPEHASH field-for-field
+// (audit-approved SHA 954c415). A mismatch here would make recoverTypedDataAddress
+// disagree with the contract's on-chain signer recovery — escalate as a P1 finding.
+export const ORDER_V3_EIP712_TYPES = {
+  Order: [
+    { name: 'owner', type: 'address' },
+    { name: 'tokenIn', type: 'address' },
+    { name: 'tokenOut', type: 'address' },
+    { name: 'amountIn', type: 'uint256' },
+    { name: 'minAmountOut', type: 'uint256' },
+    { name: 'maxSlippageBps', type: 'uint16' },  // [ADR-013 §1]
+    { name: 'orderType', type: 'uint8' },
+    { name: 'condition', type: 'uint8' },
+    { name: 'targetPrice', type: 'uint256' },
+    { name: 'priceFeed', type: 'address' },
+    { name: 'expiry', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'router', type: 'address' },
+    { name: 'routerDataHash', type: 'bytes32' },  // [C-01]
+    { name: 'dcaInterval', type: 'uint256' },
+    { name: 'dcaTotal', type: 'uint256' },
+  ],
+} as const
+
+// The exact EIP-712 type string the v3 contract hashes for ORDER_TYPEHASH — pinned here so a
+// unit test can assert byte-for-byte parity against the .sol source (read-only reference).
+export const ORDER_V3_TYPE_STRING =
+  'Order(address owner,address tokenIn,address tokenOut,uint256 amountIn,' +
+  'uint256 minAmountOut,uint16 maxSlippageBps,uint8 orderType,uint8 condition,' +
+  'uint256 targetPrice,address priceFeed,uint256 expiry,uint256 nonce,address router,' +
+  'bytes32 routerDataHash,uint256 dcaInterval,uint256 dcaTotal)'
+
+// [ADR-013 §1/N3] Immutable on-chain cap — mirrors MAX_ORDER_SLIPPAGE_BPS in the v3 contract
+// (uint16, no setter). Client-side enforcement is defense-in-depth only; the contract enforces
+// regardless.
+export const MAX_ORDER_SLIPPAGE_BPS = 500
+// Phase-0 keeper band default (order-floor.js DCA_ORACLE_FLOOR_BPS) — the starting point shown
+// to the user, adjustable up to MAX_ORDER_SLIPPAGE_BPS.
+export const DEFAULT_MAX_SLIPPAGE_BPS = 300
 
 // ── Order status (Supabase + UI) ─────────────────────────
 export type AutonomousOrderStatus =
@@ -110,6 +157,18 @@ export interface CreateOrderConfig {
   router: string                // whitelisted DEX router
   /** Keccak256 hash of the router calldata (ZeroHash for DCA since calldata varies) */
   routerDataHash?: `0x${string}`
+  /**
+   * [SPRINT-P1B / ADR-014 option (a)] The FULL pinned router calldata for a non-DCA v3 order.
+   * Persisted to Supabase (`order_data.routerData`) and replayed VERBATIM by the keeper at
+   * trigger — the contract requires `keccak256(routerData) == routerDataHash`
+   * (TeraSwapOrderExecutorV3.sol:465). Undefined for DCA (calldata is keeper-built per chunk).
+   */
+  routerData?: `0x${string}`
+  // [SPRINT-V3-P2] Present ONLY when this order should sign against v3 (the caller already
+  // checked getOrderExecutorV3(chainId) !== null). undefined ⇒ v2 order, byte-identical to
+  // today. useOrderEngine uses its presence (not a separate flag) as the v2/v3 discriminator,
+  // matching OnChainOrder.maxSlippageBps.
+  maxSlippageBps?: number
   // DCA-specific
   dcaInterval?: number          // seconds between executions
   dcaTotal?: number             // total number of executions

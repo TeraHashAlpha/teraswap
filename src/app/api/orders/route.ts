@@ -6,7 +6,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress, zeroHash } from 'viem'
-import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT } from '@/lib/order-engine/config'
+import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT,
+  // [SPRINT-V3-P2] v3 — fail-closed while getOrderExecutorV3(chainId) is null.
+  getOrderExecutorV3, getOrderExecutorV3Domain,
+  // [SPRINT-P1B] Served-router assertion for pinned non-DCA routes (never widens the whitelist).
+  isWhitelistedRouter } from '@/lib/order-engine/config'
+// [SPRINT-P1B / ADR-014 (a)] Pinned-calldata hash verification + the SL deferral reason.
+import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
+import { STOP_LOSS_DEFERRED_REASON } from '@/lib/order-engine/limit-launch'
+import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
+import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 import {
   verifyOrdersReadAccess,
   PUBLIC_ORDER_STATUSES,
@@ -17,9 +26,42 @@ import { getDcaFreezeState } from '@/lib/dca-freeze'
 import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { NATIVE_ETH } from '@/lib/constants'
+import { fetchDefiLlamaPrice } from '@/lib/defillama'
+import { computeTokenAmountUsd, fetchErc20Decimals } from '@/lib/chainlink'
+import { getChainConfig } from '@/lib/chains/registry'
 
 // [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
 const CONDITIONAL_ORDER_TYPES = new Set(['limit', 'stop_loss', 'dca'])
+
+// ── [SPRINT-P1B-SEC] Strict discriminator parsing (CodeQL: user-controlled bypass) ───────────
+// The order type and price condition are the discriminators every policy gate in this route keys
+// on (Stop-Loss deferral, DCA validation, the pinned-route requirement, the native-ETH gate).
+// They previously reached those gates as RAW request strings, while the EIP-712 message derived
+// its enums from the same strings through a LOSSY, silently-defaulting mapping:
+//
+//     orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
+//     conditionEnum = body.priceCondition === 'above' ? 0 : 1
+//
+// Anything unrecognised fell through to DCA / BELOW instead of being rejected. That let a caller
+// desync the POLICY view from the SIGNED view with nothing more than different casing — e.g.
+// `priceCondition: 'BELOW'` failed the `=== 'below'` Stop-Loss gate while still encoding
+// condition = 1 (BELOW) into the signed struct, producing a real, executable on-chain stop-loss
+// that the deferral policy was supposed to refuse.
+//
+// These maps are total-with-rejection: an unknown value yields undefined and is refused up front,
+// so the string→enum relation is bijective and the policy view can no longer disagree with the
+// signed view. Map (not an object literal) so inherited keys like `constructor` cannot match.
+const ORDER_TYPE_ENUM = new Map<string, 0 | 1 | 2>([['limit', 0], ['stop_loss', 1], ['dca', 2]])
+const PRICE_CONDITION_ENUM = new Map<string, 0 | 1>([['above', 0], ['below', 1]])
+
+/** Canonical enum values — the ONLY thing policy gates may branch on. */
+const ORDER_TYPE_STOP_LOSS = 1
+const ORDER_TYPE_DCA = 2
+const CONDITION_BELOW = 1
+
+/** Inverse maps, so the persisted row is derived from the enum rather than the raw request text. */
+const ORDER_TYPE_LABEL = ['limit', 'stop_loss', 'dca'] as const
+const PRICE_CONDITION_LABEL = ['above', 'below'] as const
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_EXPIRY_DAYS = 90
@@ -27,25 +69,13 @@ const MAX_ACTIVE_ORDERS = 20
 // [API-02] MIN_ORDER_AMOUNT (= contract's 10_000) is now imported from order-engine/config.ts —
 // [CHORE-DCA-PRELAUNCH-FIXES] single source of truth shared with the client pre-sign guard.
 
-const ORDER_TYPES = {
-  Order: [
-    { name: 'owner', type: 'address' },
-    { name: 'tokenIn', type: 'address' },
-    { name: 'tokenOut', type: 'address' },
-    { name: 'amountIn', type: 'uint256' },
-    { name: 'minAmountOut', type: 'uint256' },
-    { name: 'orderType', type: 'uint8' },
-    { name: 'condition', type: 'uint8' },
-    { name: 'targetPrice', type: 'uint256' },
-    { name: 'priceFeed', type: 'address' },
-    { name: 'expiry', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'router', type: 'address' },
-    { name: 'routerDataHash', type: 'bytes32' },  // [C-01]
-    { name: 'dcaInterval', type: 'uint256' },
-    { name: 'dcaTotal', type: 'uint256' },
-  ],
-}
+// [CHORE-EIP712-ORDER-TYPES-DEDUP] The Order schema is single-sourced from
+// order-engine/types.ts (ORDER_EIP712_TYPES) — the SAME object the client
+// signs with in useOrderEngine. It was previously re-declared inline here
+// (byte-identical, proven by digest comparison at dedup time); a one-sided
+// edit would have silently broken recoverTypedDataAddress with a 400
+// "Signature mismatch". Schema + digest are locked by
+// src/lib/order-engine/types.test.ts.
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -89,6 +119,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── [SPRINT-P1B-SEC] Parse the discriminators STRICTLY, before any gate reads them ────────
+    // Everything downstream branches on these enums, never on the raw strings, so a request field
+    // can no longer steer a policy decision away from what the signature will bind.
+    if (typeof body.orderType !== 'string' || !ORDER_TYPE_ENUM.has(body.orderType)) {
+      return NextResponse.json(
+        { error: `Invalid orderType — must be one of: ${[...ORDER_TYPE_ENUM.keys()].join(', ')}` },
+        { status: 400 },
+      )
+    }
+    if (typeof body.priceCondition !== 'string' || !PRICE_CONDITION_ENUM.has(body.priceCondition)) {
+      return NextResponse.json(
+        { error: `Invalid priceCondition — must be one of: ${[...PRICE_CONDITION_ENUM.keys()].join(', ')}` },
+        { status: 400 },
+      )
+    }
+    const orderTypeEnum = ORDER_TYPE_ENUM.get(body.orderType)!
+    const conditionEnum = PRICE_CONDITION_ENUM.get(body.priceCondition)!
+    // Canonical spellings, derived FROM the enum — never the caller's original casing.
+    const orderTypeLabel = ORDER_TYPE_LABEL[orderTypeEnum]
+    const priceConditionLabel = PRICE_CONDITION_LABEL[conditionEnum]
+
     // [CHORE-DCA-WETH-INPUT] Fail-closed: a conditional order's INPUT (spend token) must be an
     // ERC-20 (WETH), never native ETH. The OrderExecutor pulls tokenIn via Permit2/transferFrom,
     // which the native sentinel can't satisfy, so reject it here (case-insensitive — the sentinel
@@ -96,7 +147,7 @@ export async function POST(req: NextRequest) {
     // delivery). Placed after the address loop (tokenIn is now a known-valid hex string) and before
     // any signature/DB work. Instant-swap is a different route and is unaffected.
     if (
-      CONDITIONAL_ORDER_TYPES.has(body.orderType) &&
+      CONDITIONAL_ORDER_TYPES.has(orderTypeLabel) &&
       typeof body.tokenIn === 'string' &&
       body.tokenIn.toLowerCase() === NATIVE_ETH.toLowerCase()
     ) {
@@ -106,6 +157,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // codeql[js/user-controlled-bypass] — presence precondition only; the security decision is the
+    // ECDSA recovery at the EIP-712 block below (recovered address must equal body.wallet).
     if (!body.signature || !body.orderHash) {
       return NextResponse.json({ error: 'Missing signature or orderHash' }, { status: 400 })
     }
@@ -113,6 +166,8 @@ export async function POST(req: NextRequest) {
     if (typeof body.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(body.signature)) {
       return NextResponse.json({ error: 'Invalid signature format' }, { status: 400 })
     }
+    // codeql[js/user-controlled-bypass] — amountIn is bound by the EIP-712 signature and re-enforced
+    // on-chain (MIN_ORDER_AMOUNT / OrderTooSmall); this is a fast-fail, not the security boundary.
     if (!body.amountIn || body.amountIn === '0') {
       return NextResponse.json({ error: 'amountIn must be positive' }, { status: 400 })
     }
@@ -142,7 +197,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate DCA fields
-    if (body.orderType === 'dca') {
+    // [SPRINT-P1B-SEC] Keyed on the canonical enum: a raw-string compare here let `orderType:'DCA'`
+    // skip the interval/chunk minimums AND the freeze circuit-breaker while still encoding a real
+    // DCA (enum 2) into the signed struct.
+    if (orderTypeEnum === ORDER_TYPE_DCA) {
       if (!body.dcaInterval || body.dcaInterval < 60) {
         return NextResponse.json({ error: 'DCA interval must be ≥ 60s' }, { status: 400 })
       }
@@ -190,11 +248,13 @@ export async function POST(req: NextRequest) {
     // Validate priceFeed — must be a valid address.
     // DCA orders may use address(0) to skip price condition (execute at any price on schedule).
     const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
+    // codeql[js/user-controlled-bypass] — format check on a signature-bound field; the binding
+    // decision is the contract's own _checkPriceCondition (staleness, round integrity, feed config).
     if (!body.priceFeed || !body.priceFeed.startsWith('0x') || body.priceFeed.length !== 42) {
       return NextResponse.json({ error: 'Invalid or missing Chainlink price feed address' }, { status: 400 })
     }
     // Non-DCA orders must have a real price feed (not zero address)
-    if (body.orderType !== 'dca' && body.priceFeed === ZERO_ADDR) {
+    if (orderTypeEnum !== ORDER_TYPE_DCA && body.priceFeed === ZERO_ADDR) {
       return NextResponse.json({ error: 'Limit/Stop-Loss orders require a Chainlink price feed' }, { status: 400 })
     }
 
@@ -212,22 +272,49 @@ export async function POST(req: NextRequest) {
     if (typeof chainId !== 'number' || !Number.isInteger(chainId)) {
       return NextResponse.json({ error: 'Invalid chainId' }, { status: 400 })
     }
-    const executorAddress = getOrderExecutor(chainId)
+
+    // [SPRINT-V3-P2 / ADR-013 §1] A v3 order is one the client signed with maxSlippageBps set
+    // (the frontend only sets it once getOrderExecutorV3(chainId) is configured — see
+    // useOrderEngine.ts). Server-side detection is INDEPENDENT of client intent: presence of a
+    // numeric top-level body.maxSlippageBps is the sole discriminator, and everything downstream
+    // (executor resolution, domain, typed-data schema, extra validation) branches on it. Never
+    // trust the client's claim that this is/isn't v3 beyond this one typed field — the recovered
+    // signer check below is what actually proves the order was signed under the claimed schema.
+    const isV3Order = typeof body.maxSlippageBps === 'number'
+
+    if (isV3Order) {
+      // [ADR-013 §1/N3] Mirrors the contract's immutable MAX_ORDER_SLIPPAGE_BPS cap — reject
+      // absent/zero/out-of-range before any signature work (closes I-01 off-chain).
+      if (!Number.isFinite(body.maxSlippageBps) || body.maxSlippageBps <= 0 || body.maxSlippageBps > MAX_ORDER_SLIPPAGE_BPS) {
+        return NextResponse.json(
+          { error: `maxSlippageBps must be > 0 and <= ${MAX_ORDER_SLIPPAGE_BPS}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // [SPRINT-V3-P2] Executor resolution branches on isV3Order — a v3 order on a chain with no
+    // v3 executor configured is rejected here, fail-closed, exactly like the v2 unwired-chain
+    // case below. A v2 order is completely unaffected (identical to before this sprint).
+    const executorAddress = isV3Order ? getOrderExecutorV3(chainId) : getOrderExecutor(chainId)
     if (!executorAddress) {
       return NextResponse.json(
-        { error: `Conditional orders are not yet available on chain ${chainId}` },
+        { error: `${isV3Order ? 'v3 c' : 'C'}onditional orders are not yet available on chain ${chainId}` },
         { status: 400 },
       )
     }
     {
       try {
-        const domain = getOrderExecutorDomain(chainId)
-        const orderTypeEnum = body.orderType === 'limit' ? 0 : body.orderType === 'stop_loss' ? 1 : 2
-        const conditionEnum = body.priceCondition === 'above' ? 0 : 1
-
+        const domain = isV3Order ? getOrderExecutorV3Domain(chainId) : getOrderExecutorDomain(chainId)
+        // [SPRINT-P1B-SEC] Enums come from the strict parse above — the same values every policy
+        // gate uses. Previously re-derived here by a lossy mapping, which is what allowed the
+        // policy view and the signed view to disagree.
         const message = {
           owner: body.wallet, tokenIn: body.tokenIn, tokenOut: body.tokenOut,
           amountIn: body.amountIn, minAmountOut: body.minAmountOut,
+          // [ADR-013 §1] Only present in the v3 schema — omitted entirely for a v2 message so the
+          // v2 typed-data encoding stays byte-identical to before this sprint.
+          ...(isV3Order ? { maxSlippageBps: body.maxSlippageBps } : {}),
           orderType: orderTypeEnum, condition: conditionEnum,
           targetPrice: body.targetPrice, priceFeed: body.priceFeed,
           expiry: body.expiry, nonce: body.nonce, router: body.router,
@@ -237,7 +324,7 @@ export async function POST(req: NextRequest) {
 
         const recovered = await recoverTypedDataAddress({
           domain,
-          types: ORDER_TYPES,
+          types: isV3Order ? ORDER_V3_EIP712_TYPES : ORDER_EIP712_TYPES,
           primaryType: 'Order' as const,
           message,
           signature: body.signature as `0x${string}`,
@@ -251,6 +338,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── [SPRINT-P1B / ADR-014] Stop-Loss is deferred to the v4 executor ──────────────────────
+    // Owner decision 2026-07-22. Under ADR-014 option (a) the route is pinned at signing, so a
+    // dislocated pool at trigger makes the fill revert and the order simply stays open. For a
+    // Limit/TP that is an acceptable outcome; for a Stop-Loss "did not fill during a crash" IS
+    // the loss — an inverted failure mode. SL therefore waits for v4.
+    //
+    // NOTE on the discriminator: the contract uses OrderType.STOP_LOSS (enum 1) for BOTH SL and
+    // Take-Profit, so orderType alone cannot separate them. The condition can: a stop_loss order
+    // triggering when price falls BELOW target is an SL; ABOVE is a Take-Profit.
+    //
+    // [SPRINT-P1B-SEC] Placed AFTER signature recovery and keyed on the ENUMS that were encoded
+    // into the verified message — not on `body.orderType` / `body.priceCondition`. Recovery has
+    // now proven the wallet signed a struct carrying exactly these enum values, so refusing on
+    // them refuses the order that would actually execute on-chain. Deciding this from the raw
+    // request strings (as it did before) allowed a casing desync — `priceCondition: 'BELOW'`
+    // slipped past `=== 'below'` while still encoding condition = 1 into the signed struct.
+    if (orderTypeEnum === ORDER_TYPE_STOP_LOSS && conditionEnum === CONDITION_BELOW) {
+      return NextResponse.json(
+        {
+          error: STOP_LOSS_DEFERRED_REASON,
+          detail:
+            'A stop-loss needs a route that can still fill in a fast market. The current executor ' +
+            'pins the route when you sign, which cannot be guaranteed to fill during a crash — so ' +
+            'stop-loss orders are held back until the v4 executor ships. Take-Profit and Limit ' +
+            'orders are unaffected.',
+        },
+        { status: 400 },
+      )
+    }
+
     // [Audit M-07] Cross-validate order_data blob against top-level fields
     if (body.orderData) {
       const od = body.orderData
@@ -261,9 +378,234 @@ export async function POST(req: NextRequest) {
       if (String(od.amountIn) !== String(body.amountIn)) mismatchFields.push('amountIn')
       if (String(od.minAmountOut) !== String(body.minAmountOut)) mismatchFields.push('minAmountOut')
       if (od.router?.toLowerCase() !== body.router?.toLowerCase()) mismatchFields.push('router')
+      // [SPRINT-V3-P2] Only checked for a v3 order — od.maxSlippageBps is absent entirely on v2.
+      if (isV3Order && Number(od.maxSlippageBps) !== Number(body.maxSlippageBps)) mismatchFields.push('maxSlippageBps')
+      // [SPRINT-P1B] The pinned calldata's hash must match the hash the user SIGNED. Checked
+      // inside the M-07 block because it is the same class of guarantee: order_data must not be
+      // able to disagree with the signed struct.
+      //
+      // Only for a REAL hash: ZeroHash is the DCA/legacy shape, where order_data legitimately
+      // omits routerDataHash entirely (and `'0x00..00'` is a truthy string, so a bare truthiness
+      // check here would false-positive on every such order).
+      if (
+        body.routerDataHash &&
+        body.routerDataHash !== zeroHash &&
+        od.routerDataHash?.toLowerCase() !== body.routerDataHash.toLowerCase()
+      ) {
+        mismatchFields.push('routerDataHash')
+      }
       if (mismatchFields.length > 0) {
         return NextResponse.json(
           { error: `order_data mismatch on fields: ${mismatchFields.join(', ')}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route integrity for non-DCA orders ─────────────────
+    // Runs AFTER signature recovery on purpose: recovery has already proven the user signed
+    // exactly `body.routerDataHash`, so verifying the stored calldata against it proves the
+    // stored bytes are the ones that will satisfy the contract at :465. Doing this before
+    // recovery would only compare two attacker-supplied values.
+    //
+    // The keeper replays these bytes verbatim and never rebuilds a route, so calldata that does
+    // not match here would produce an order that can never fill. Reject at creation instead.
+    // Scoped to v3 specifically: v3 is where pinned routes exist and where the executor enforces
+    // the hash. The legacy v2 non-DCA path is left byte-identical (it is separately unexecutable
+    // — threat-model P1c — but that is not this sprint's to change).
+    if (isV3Order && orderTypeEnum !== ORDER_TYPE_DCA) {
+      const storedRouterData = body.orderData?.routerData
+
+      // codeql[js/user-controlled-bypass] — routerDataHash is part of the EIP-712 message just
+      // verified, so this reads a signature-bound value; the contract re-enforces RouterDataRequired.
+      if (!body.routerDataHash || body.routerDataHash === zeroHash) {
+        return NextResponse.json(
+          {
+            error:
+              'Non-DCA orders must commit to a real routerDataHash — the executor rejects ZeroHash ' +
+              '(RouterDataRequired), so such an order could never execute.',
+          },
+          { status: 400 },
+        )
+      }
+      // codeql[js/user-controlled-bypass] — presence precondition for the cryptographic check on the
+      // next lines: verifyRouterDataHash compares these unsigned bytes against the SIGNED hash.
+      if (!storedRouterData) {
+        return NextResponse.json(
+          { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
+          { status: 400 },
+        )
+      }
+      if (!verifyRouterDataHash(storedRouterData, body.routerDataHash)) {
+        return NextResponse.json(
+          { error: 'orderData.routerData does not hash to the signed routerDataHash' },
+          { status: 400 },
+        )
+      }
+      // The committed router must be one this chain actually serves. Never widens the executor's
+      // on-chain whitelist — it only refuses a router we could not execute against.
+      if (!isWhitelistedRouter(chainId, body.router)) {
+        return NextResponse.json(
+          { error: `Router ${body.router} is not served on chain ${chainId}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // [SPRINT-V3-P2 / ADR-013 §1, I-01+L-01 off-chain closure] USD dust floor for v3 orders only
+    // — v2's minAmountOut is meaningless (always '1', the on-chain clamp made it a no-op), so
+    // there is nothing to dust-check there. A v3 order's minAmountOut is the SIGNED absolute
+    // floor the contract enforces verbatim on no-feed pairs — a dust-sized signed min is exactly
+    // as unprotective as the old 1-wei clamp, so reject it here rather than let it reach the
+    // contract. Prices the tokenOut leg (DefiLlama + server Chainlink, same plumbing /api/swap's
+    // >$10k gate uses); unpriceable on BOTH sources fails CLOSED (mirrors that gate's posture) —
+    // never trust the client's own derivation.
+    //
+    // [SPRINT-V3-P3 / M-01] The decimals used to convert body.minAmountOut into a human token
+    // amount MUST come from the chain, never from body.tokenOutDecimals: a client that inflates
+    // (or deflates) its claimed decimals shifts the computed USD value by a power of 10 and can
+    // make a genuinely-dust minAmountOut look economically meaningful (or vice versa) to this
+    // gate — the exact bypass the audit flagged. fetchErc20Decimals reads decimals() on-chain via
+    // RPC; a client value that disagrees is a malformed/malicious order, rejected outright (422),
+    // not silently corrected or merely warned about. If the on-chain read itself fails, the floor
+    // cannot be computed with any authority at all — fail closed exactly like the unpriceable
+    // branch below (never fall back to the untrusted client figure).
+    if (isV3Order) {
+      const dustFloorUsd = getDcaMinChunkUsd()
+      const llamaChain = (() => {
+        try { return getChainConfig(chainId).slug } catch { return 'ethereum' }
+      })()
+
+      const onChainDecimals = await fetchErc20Decimals(body.tokenOut, chainId).catch(() => null)
+      if (onChainDecimals === null) {
+        return NextResponse.json(
+          {
+            error: 'Order value cannot be verified: could not read tokenOut decimals on-chain. Unpriceable v3 orders are blocked.',
+            unpriceable: true,
+          },
+          { status: 422 },
+        )
+      }
+      if (body.tokenOutDecimals !== undefined && body.tokenOutDecimals !== null && Number(body.tokenOutDecimals) !== onChainDecimals) {
+        return NextResponse.json(
+          { error: `tokenOutDecimals mismatch: client claimed ${body.tokenOutDecimals}, on-chain reports ${onChainDecimals}` },
+          { status: 422 },
+        )
+      }
+
+      let minOutUsd: number | null = null
+      try {
+        const [llama, link] = await Promise.all([
+          fetchDefiLlamaPrice(body.tokenOut, llamaChain).catch(() => null),
+          computeTokenAmountUsd(body.tokenOut, String(body.minAmountOut), chainId).catch(() => null),
+        ])
+        // [M-01] onChainDecimals — the RPC-verified value — not the client-supplied figure.
+        const minOutFloat = Number(body.minAmountOut) / 10 ** onChainDecimals
+        const candidates = [
+          llama && Number.isFinite(minOutFloat) ? minOutFloat * llama.price : null,
+          link?.usd ?? null,
+        ].filter((v): v is number => v != null && Number.isFinite(v) && v >= 0)
+        // [M-01] min-combine: the floor gate must be the HARDEST of the two independent
+        // estimates to pass, not the easiest — max() let a manipulated/optimistic single leg
+        // wave a dust order through whenever the other leg happened to price it generously.
+        if (candidates.length > 0) minOutUsd = Math.min(...candidates)
+      } catch {
+        // Each leg already degrades to null individually; a wholesale failure leaves minOutUsd
+        // null and the fail-CLOSED branch below fires.
+      }
+
+      if (minOutUsd === null) {
+        // ── [FIX-DCA-NOFEED-CONSENT] No-feed OUTPUT — value the INPUT instead ──────────────
+        // Owner decision 2026-07-23: a no-price-feed output token (e.g. ETHFI) no longer hard
+        // blocks a DCA. Scoped to DCA only (orderType===dca) — Limit/TP behavior for an
+        // unpriceable output is UNCHANGED (still blocked below), since the owner's decision was
+        // framed specifically around DCA and this repo has not separately reviewed relaxing it
+        // for the trigger-condition order types.
+        //
+        // The per-CHUNK input (never the whole-order total) is what actually changes hands each
+        // fill, so that is what must clear the dust floor — WETH/USDC (the only DCA inputs today)
+        // are always feed-covered, so this leg is expected to price in the overwhelming majority
+        // of cases; the "both no-feed" branch below exists only for a theoretical future input.
+        if (orderTypeEnum !== ORDER_TYPE_DCA) {
+          return NextResponse.json(
+            {
+              error: 'Order value cannot be verified: no price coverage (DefiLlama or Chainlink) for the output token. Unpriceable v3 orders are blocked.',
+              unpriceable: true,
+            },
+            { status: 422 },
+          )
+        }
+
+        const dcaTotalForChunk = Number(body.dcaTotal) > 0 ? BigInt(body.dcaTotal) : 1n
+        const perChunkInputRaw = BigInt(body.amountIn) / dcaTotalForChunk
+
+        const onChainInputDecimals = await fetchErc20Decimals(body.tokenIn, chainId).catch(() => null)
+        if (onChainInputDecimals === null) {
+          return NextResponse.json(
+            {
+              error: 'Order value cannot be verified: could not read tokenIn decimals on-chain, and the output token has no price coverage. Unpriceable v3 orders are blocked.',
+              unpriceable: true,
+            },
+            { status: 422 },
+          )
+        }
+
+        let inputUsd: number | null = null
+        try {
+          const [llamaIn, linkIn] = await Promise.all([
+            fetchDefiLlamaPrice(body.tokenIn, llamaChain).catch(() => null),
+            computeTokenAmountUsd(body.tokenIn, perChunkInputRaw.toString(), chainId).catch(() => null),
+          ])
+          const perChunkInputFloat = Number(perChunkInputRaw) / 10 ** onChainInputDecimals
+          const inputCandidates = [
+            llamaIn && Number.isFinite(perChunkInputFloat) ? perChunkInputFloat * llamaIn.price : null,
+            linkIn?.usd ?? null,
+          ].filter((v): v is number => v != null && Number.isFinite(v) && v >= 0)
+          if (inputCandidates.length > 0) inputUsd = Math.min(...inputCandidates)
+        } catch {
+          // Falls through to the null (unpriceable) branch below, same posture as the output leg.
+        }
+
+        if (inputUsd === null) {
+          // Neither leg can be assessed — the rare "both no-feed" case. Block clearly.
+          return NextResponse.json(
+            {
+              error: 'Order value cannot be verified: neither the output token nor the input token has price coverage (DefiLlama or Chainlink). Unpriceable v3 orders are blocked.',
+              unpriceable: true,
+            },
+            { status: 422 },
+          )
+        }
+        if (inputUsd < dustFloorUsd) {
+          return NextResponse.json(
+            {
+              error: `The input amount per buy is below the $${dustFloorUsd} minimum ($${inputUsd.toFixed(4)}) — the order must be economically meaningful, not dust.`,
+              minimumUsd: dustFloorUsd,
+            },
+            { status: 400 },
+          )
+        }
+        // [FIX-DCA-NOFEED-CONSENT] The output can't be USD-valued, so the ONE thing we can and
+        // MUST still verify is that the signed minAmountOut is a real, non-zero floor — never
+        // the 1-wei/zero no-op the v2 clamp used to permit. This does not (and cannot) prove the
+        // value is "quote-derived", only that it is not degenerate; the on-chain
+        // max(oracleFloor, minAmountOut) check remains the terminal backstop regardless.
+        if (BigInt(body.minAmountOut) <= 0n) {
+          return NextResponse.json(
+            { error: 'minAmountOut must be a real, non-zero signed floor for a no-feed output token.' },
+            { status: 400 },
+          )
+        }
+        // Allowed: input-side value clears the dust floor and the signed min is non-degenerate.
+        // The frontend is responsible for having shown the no-feed consent modal before this
+        // request was ever sent (see DCAPanel + NoFeedConsentModal) — the API cannot verify
+        // "did the user see the modal" and does not attempt to; it only enforces the bounds.
+      } else if (minOutUsd < dustFloorUsd) {
+        return NextResponse.json(
+          {
+            error: `minAmountOut is below the $${dustFloorUsd} minimum ($${minOutUsd.toFixed(4)}) — the signed floor must be economically meaningful, not dust.`,
+            minimumUsd: dustFloorUsd,
+          },
           { status: 400 },
         )
       }
@@ -284,7 +626,7 @@ export async function POST(req: NextRequest) {
       .from('orders')
       .insert({
         wallet: body.wallet.toLowerCase(),
-        order_type: body.orderType,
+        order_type: orderTypeLabel,
         token_in: body.tokenIn.toLowerCase(),
         token_in_symbol: body.tokenInSymbol,
         token_out: body.tokenOut.toLowerCase(),
@@ -293,7 +635,7 @@ export async function POST(req: NextRequest) {
         min_amount_out: body.minAmountOut,
         target_price: body.targetPrice,
         price_feed: body.priceFeed?.toLowerCase() || '',
-        price_condition: body.priceCondition,
+        price_condition: priceConditionLabel,
         expiry: body.expiry,
         nonce: body.nonce,
         signature: body.signature,

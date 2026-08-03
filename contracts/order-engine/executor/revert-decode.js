@@ -53,6 +53,36 @@ export function decodeSwapFailed(data) {
   return { selector: SWAP_FAILED_SELECTOR, innerHex: inner, reason: decodeInner(inner) }
 }
 
+// [FIX-P1B-M01] The executor's own no-arg custom errors that a triggered non-DCA v3 order can hit
+// AFTER canExecute's pre-check passed (a race between the read and the tx landing): output
+// dropped below max(oracleFloor, minAmountOut) between check and execution, or the Chainlink price
+// crossed back over the target in the same window. Both are MARKET reverts — the pinned route is
+// still valid, the moment just wasn't — not a reason to fail the order. Selectors are
+// keccak256("InsufficientOutput()")/keccak256("PriceConditionNotMet()") — no-arg errors have no
+// payload to ABI-decode, so a raw selector match is sufficient and exact.
+export const EXECUTOR_MARKET_REVERT_SELECTORS = {
+  InsufficientOutput: "0xbb2875c3", // TeraSwapOrderExecutorV3.sol:278, reverted at :610
+  PriceConditionNotMet: "0x3bef7afd", // TeraSwapOrderExecutorV3.sol:275
+}
+
+/**
+ * Decode a raw revert blob as one of the executor's own market/route custom errors (as opposed to
+ * SwapFailed, which wraps the ROUTER's revert). Returns null for anything else, including the
+ * executor's PERMANENT-cause errors (OrderExpired, RouterNotWhitelisted, InsufficientBalance, ...)
+ * — those are deliberately NOT in this table, so they keep falling through to the existing
+ * failure-ladder classification unchanged.
+ * @param {string} data hex revert data
+ * @returns {{ selector: string, name: string } | null}
+ */
+export function decodeExecutorMarketRevert(data) {
+  if (typeof data !== "string" || !isHex(data)) return null
+  const selector = data.slice(0, 10).toLowerCase()
+  for (const [name, sel] of Object.entries(EXECUTOR_MARKET_REVERT_SELECTORS)) {
+    if (selector === sel.toLowerCase()) return { selector: sel, name }
+  }
+  return null
+}
+
 /**
  * Best-effort extraction of raw revert data from a viem error chain, so the
  * caller can feed it to decodeSwapFailed(). Returns null if none is found.

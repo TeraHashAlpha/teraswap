@@ -34,11 +34,23 @@
  *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
  *   ORDER_EXECUTOR_ADDRESS      -- Deployed contract address
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
- *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet)
+ *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet). One keeper
+ *                                  INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum One).
+ *
+ * BOOT REFUSAL [FIX-KEEPER-BOOT-CHAIN-VERIFICATION]: before any work, main() asks the chain to
+ * confirm this config (chain-verify.js) — eth_chainId must equal CHAIN_ID, the executor address
+ * must hold code THERE, and the contract must self-identify via ORDER_TYPEHASH(). A mismatch, an
+ * unreachable/slow RPC or a malformed answer exits non-zero after a bounded retry; the keeper never
+ * warns and continues. "Keeper won't start" with a FATAL chain-verify line is that gate, not a bug:
+ * fix RPC_URL / CHAIN_ID / ORDER_EXECUTOR_ADDRESS so they describe the same chain.
  *
  * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
  *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
- *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec (default mainnet feed)
+ *   ETH_USD_FEED                -- (optional) Chainlink ETH/USD aggregator, 8 dec. Unset ⇒ resolved
+ *                                  for CHAIN_ID from eth-usd-feed.js (1 / 8453 / 42161), which
+ *                                  mirrors src/lib/chains/chainlink-feeds.ts. A chain with no
+ *                                  known aggregator disables the Chainlink read (fail-closed) —
+ *                                  never another chain's feed.
  *   LOW_GAS_USD_THRESHOLD       -- (optional) USD gas-value below which a low-gas alert fires (default 5)
  *   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -- (optional) Telegram alert sink (see alert.js)
  *
@@ -56,7 +68,6 @@ import {
   getContract,
   getAddress,
   keccak256,
-  parseGwei,
   formatUnits,
   formatEther,
   zeroHash,
@@ -68,9 +79,9 @@ import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS 
 import { startEventWatcher } from "./event-watcher.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
-import { computeFreezeScore, scoreTier } from "./freeze-score.js"
+import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
 import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
-import { decodeSwapFailed, extractRevertData } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes)
+import { decodeSwapFailed, extractRevertData, decodeExecutorMarketRevert } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes); [FIX-P1B-M01] the executor's own market reverts
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
 // + parent-order status transition (pure, unit-tested in record-execution.test.mjs).
 import {
@@ -109,6 +120,49 @@ import {
   decideDcaExecution,
 } from "./deviation-guard.js"
 
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] Oracle-bounded per-fill floor for DCA:
+// reject a fill whose built output is below an INDEPENDENT fair-value reference
+// (Chainlink/DefiLlama), closing the "on-chain minOut is 1 wei for DCA" gap that
+// let a compromised keeper / loose calldata drain a chunk to dust. Pure gate;
+// the reference is fetched by fetchReferencePriceUsd below. See order-floor.js.
+import {
+  computeReferenceExpectedOut,
+  decideFloor,
+  getFloorMaxSlippageBps,
+  classifyReference,
+  decideFailOpen,
+  getFailOpenMaxUsd,
+} from "./order-floor.js"
+// [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
+// count as a managed signer (else it suppresses the plaintext-key FATAL).
+import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Fail-closed submission policy: never
+// SILENTLY fall back to the public mempool on a public-mempool chain. See
+// submission-policy.js (Base's sequencer mempool is private → submits normally).
+import { resolveSubmissionPolicy } from "./submission-policy.js"
+// [SPRINT-V3-P2 / ADR-013 §1] Dual-executor (v2/v3) selection per order — pure, unit-tested.
+import { resolveExecutorRouting } from "./executor-routing.js"
+// [SPRINT-P1B / ADR-014 (a)] Pinned-route replay for non-DCA v3 orders (Limit / Take-Profit).
+import { resolvePinnedRouterData, planPinnedRouteRevert, isMarketRevert } from "./pinned-route.js"
+// [FIX-KEEPER-GAS-TIER-BASE] Per-chain gas-tier resolution — mainnet byte-identical, Base gets
+// its own calibrated regime instead of the mainnet-scaled defaults.
+import { getGasTierConfig, resolveGasTier as resolveGasTierForChain, assertTierOrdering } from "./gas-tier.js"
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware ETH/USD aggregator resolution — fail-closed
+// (unknown chain ⇒ no feed ⇒ no read) so the ETH leg of the DCA floor reference can never be
+// priced off another chain's aggregator.
+import { resolveEthUsdFeed } from "./eth-usd-feed.js"
+// [FIX-KEEPER-BOOT-CHAIN-VERIFICATION] Boot-time, FAIL-CLOSED verification that the RPC really IS
+// CHAIN_ID and that the configured executor address is a deployed TeraSwapOrderExecutor there
+// (eth_chainId + eth_getCode + an ORDER_TYPEHASH() self-identification read, ADR-018's pattern).
+// validateConfig only checks the address is PRESENT — presence is not identity, and the same
+// deployer/nonce lands on the same address on every chain.
+import {
+  verifyChainBinding,
+  createRpcProbe,
+  EXPECTED_ORDER_TYPEHASH_V2,
+  EXPECTED_ORDER_TYPEHASH_V3,
+} from "./chain-verify.js"
+
 // ---- Load .env.executor manually (no dotenv dependency) ----------------
 
 function loadEnv(filePath) {
@@ -140,6 +194,11 @@ const PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
+// [SPRINT-V3-P2 / ADR-013] v3 executor for the chain THIS keeper instance serves (CHAIN_ID).
+// Unset/empty = v3 DISABLED — any order whose order_data carries maxSlippageBps (a v3-signed
+// order) is SKIPPED + FLAGGED, never mis-routed to the v2 contract (see the dual-executor
+// routing block in executeCycle). v2 orders are completely unaffected either way.
+const V3_CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_V3_ADDRESS || ""
 const FEE_COLLECTOR_ADDRESS = process.env.FEE_COLLECTOR_ADDRESS || ""
 const API_URL = process.env.TERASWAP_API_URL || ""
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
@@ -152,39 +211,72 @@ const TESTNET_CHAIN_IDS = new Set([11155111 /* Sepolia */, 84532 /* Base Sepolia
 // [B-02] Flashbots Protect RPC -- prevents MEV/sandwich attacks on executor txs
 const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
 
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Explicit, documented override to
+// permit PUBLIC-mempool submission on a public-mempool chain (e.g. Ethereum
+// mainnet) with no private relay. Default OFF → the keeper fail-CLOSES rather
+// than silently sandwiching a fill (mirrors ALLOW_PLAINTEXT_KEY). Base and other
+// OP-stack chains use their private sequencer mempool and need no override.
+const ALLOW_PUBLIC_MEMPOOL = process.env.ALLOW_PUBLIC_MEMPOOL === "true"
+
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] DefiLlama chain slugs for the keeper-side
+// fair-value reference (the #18/#248 price plumbing, keeper-side). Only chains we
+// actually run DCA on need an entry; an unmapped chain ⇒ no DefiLlama reference
+// ⇒ the fill is flagged (not blindly filled), never falsely rejected.
+// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] 42161 -> "arbitrum" matches the app-side slug in
+// src/lib/chains/registry.ts (ethereum / base / arbitrum). Without the entry a 42161 keeper
+// would hit the "unmapped chain" branch below: every non-ETH leg would read as FEEDLESS, so
+// the oracle floor could never be applied and fills would fall to the capped fail-open path.
+const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base", 42161: "arbitrum" }
+
+// ETH/WETH (and the native-ETH sentinel) per chain — these legs are priced from
+// the trusted on-chain Chainlink ETH/USD feed (readEthUsd) FIRST, before falling
+// back to DefiLlama, honouring "Chainlink first, else DefiLlama".
+const ETH_PRICED_ADDRESSES = new Set(
+  [
+    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // native-ETH sentinel
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH mainnet
+    "0x4200000000000000000000000000000000000006", // WETH Base
+    // [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] WETH Arbitrum One — Arbitrum does NOT reuse the
+    // OP-stack predeploy above, so without this entry the WETH leg of every Arbitrum DCA
+    // would skip Chainlink and fall straight to DefiLlama. Sourced from
+    // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json (token:WETH), pinned by
+    // arbitrum-plumbing.test.mjs.
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH Arbitrum One
+  ].map((a) => a.toLowerCase()),
+)
+
 // [DCA-OBS] Freeze-observability env vars (all OPTIONAL, safe defaults; alerting
 // is non-blocking and only fires when Telegram is configured via alert.js).
 //   OUTFLOW_THRESHOLD_ETH  -- ETH leaving the executor wallet beyond own gas spend
 //                             that counts as a "full alarm" unexplained outflow.
 //                             Default 0.01 ETH. Drives the DOMINANT freeze signal.
-//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals) used to
-//                             value the wallet's ETH for the low-gas signal.
-//                             Default = mainnet ETH/USD feed.
+//   ETH_USD_FEED           -- Chainlink ETH/USD aggregator (8 decimals). Values the
+//                             wallet's ETH for the low-gas signal AND prices the ETH
+//                             leg of the DCA oracle-floor reference. Unset ⇒ resolved
+//                             per chain (eth-usd-feed.js); unknown chain ⇒ no read.
 //   LOW_GAS_USD_THRESHOLD  -- USD value of the wallet's ETH below which we emit a
 //                             low-gas alert. Default 5 (matches freeze-score GAS_LOW_USD).
 const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0.01")
-const ETH_USD_FEED = process.env.ETH_USD_FEED || "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware, FAIL-CLOSED ETH/USD aggregator resolution
+// (eth-usd-feed.js, pinned to the app's chainlink-feeds.ts by a drift test). Replaces the previous
+// "|| <mainnet address>" tail, which handed EVERY unlisted chain a codeless address — this is not
+// only the low-gas alert: readEthUsd feeds fetchReferencePriceUsd, i.e. the ETH leg of the DCA
+// Phase-0 oracle floor. An explicit ETH_USD_FEED still overrides, verbatim and first. A chain with
+// no known aggregator now resolves to NULL (readEthUsd skips the read; the existing DefiLlama /
+// no-reference fallback is untouched) rather than to another chain's feed.
+const ETH_USD_FEED_RESOLUTION = resolveEthUsdFeed({ chainId: CHAIN_ID, envFeed: process.env.ETH_USD_FEED })
+const ETH_USD_FEED = ETH_USD_FEED_RESOLUTION.feed
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
 
 const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
 // ── Gas Strategy Tiers ──────────────────────────────────────
-// Defaults preserve 100 gwei ceiling but add tiered filtering: NORMAL ≤30, ELEVATED ≤80, URGENT ≤100.
-// Orders below ceiling but above their tier threshold may be deferred — this is intentional.
-const GAS_TIER_NORMAL   = parseInt(process.env.GAS_TIER_NORMAL_GWEI   || "30")
-const GAS_TIER_ELEVATED = parseInt(process.env.GAS_TIER_ELEVATED_GWEI || "80")
-const GAS_TIER_URGENT   = parseInt(process.env.GAS_TIER_URGENT_GWEI   || "100")
-
-// EIP-1559 priority fees per tier (in gwei)
-const PRIORITY_FEE_NORMAL   = parseFloat(process.env.GAS_PRIORITY_NORMAL_GWEI   || "1.5")
-const PRIORITY_FEE_ELEVATED = parseFloat(process.env.GAS_PRIORITY_ELEVATED_GWEI || "2.5")
-const PRIORITY_FEE_URGENT   = parseFloat(process.env.GAS_PRIORITY_URGENT_GWEI   || "4")
-
-// Base fee multipliers per tier
-const BASEFEE_MULT_NORMAL   = parseFloat(process.env.GAS_BASEFEE_MULT_NORMAL   || "2")
-const BASEFEE_MULT_ELEVATED = parseFloat(process.env.GAS_BASEFEE_MULT_ELEVATED || "2.5")
-const BASEFEE_MULT_URGENT   = parseFloat(process.env.GAS_BASEFEE_MULT_URGENT   || "3")
+// [FIX-KEEPER-GAS-TIER-BASE] Per-chain now (gas-tier.js) — mainnet keeps its original hardcoded
+// values (30/80/100 gwei thresholds, 1.5/2.5/4 gwei priority, 2/2.5/3 base-fee multipliers,
+// same unsuffixed env vars); Base (8453) gets its own regime derived from
+// FILL-ECONOMICS-CALIBRATION.md's measured ~0.005-0.006 gwei live floor. Orders below ceiling but
+// above their tier threshold may be deferred — this is intentional (see resolveGasTier below).
 
 // Urgency thresholds
 const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "7200") // 2 hours
@@ -197,6 +289,10 @@ const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "720
 // count resets to 0 on any successful execution. In-memory only (resets on keeper
 // restart — see FEEDBACK).
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }
+// [SPRINT-P1B / ADR-014 (a)] orderId -> consecutive pinned-route reverts. Tracked separately from
+// orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
+// order stays fillable until expiry. Cleared on any successful fill.
+const pinnedRouteReverts = new Map()
 
 // [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
 //   seenDcaOrderIds          -- DCA order ids already announced via alertNewDcaPosition.
@@ -239,18 +335,22 @@ function validateConfig() {
     process.exit(1)
   }
 
-  // [C-02/B-01] Validate that at least one signing method is configured
+  // [C-02/B-01] Validate that at least one signing method is configured.
+  // [CHORE-KEEPER-HARDENING / P5a] An unwired VAULT_ADDR does NOT count as a
+  // managed signer (signer-guard.VAULT_WIRED=false), so it can neither satisfy
+  // "a signer exists" on its own nor suppress the plaintext-key FATAL below.
   const hasKms = !!process.env.KMS_KEY_ID
   const hasVault = !!process.env.VAULT_ADDR
   const hasKey = !!PRIVATE_KEY
+  const signerKind = resolveSignerKind({ hasKms, hasVaultConfigured: hasVault, hasKey })
 
-  if (!hasKms && !hasVault && !hasKey) {
-    console.error("FATAL: No signing method configured.")
-    console.error("   Set KMS_KEY_ID (recommended), VAULT_ADDR, or EXECUTOR_PRIVATE_KEY")
+  if (signerKind === "none") {
+    console.error("FATAL: No usable signing method configured.")
+    console.error("   Set KMS_KEY_ID (recommended) or EXECUTOR_PRIVATE_KEY (VAULT_ADDR is not yet wired).")
     process.exit(1)
   }
 
-  if (hasKey && !hasKms && !hasVault) {
+  if (hasKey && !hasKms && !vaultCountsAsManagedSigner(hasVault)) {
     // [EX-01 / CHORE-EXECUTOR-KEY-GUARD] A plaintext EXECUTOR_PRIVATE_KEY controls real funds on any
     // PRODUCTION chain, so it is FATAL on every chain that is NOT an explicit testnet (mainnet 1, Base
     // 8453, and any future prod chain). Prefer KMS_KEY_ID (AWS KMS) / VAULT_ADDR (HashiCorp Vault).
@@ -267,6 +367,14 @@ function validateConfig() {
       process.exit(1)
     }
   }
+
+  // [CHORE-KEEPER-HARDENING / P5a] Startup assertion: surface the RESOLVED signer
+  // kind so a plaintext-behind-VAULT_ADDR downgrade can never be silent. Anything
+  // unsafe on a production chain has already been FATAL'd above (fail-closed).
+  console.log(
+    `[C-02] Resolved signer: ${signerKind}` +
+      (signerKind === "plaintext" ? " (plaintext key -- prefer KMS on production)" : ""),
+  )
 }
 
 // ---- ABI (JSON format for viem) ----------------------------------------
@@ -319,6 +427,80 @@ const ORDER_EXECUTOR_ABI = [
           { name: "tokenOut", type: "address" },
           { name: "amountIn", type: "uint256" },
           { name: "minAmountOut", type: "uint256" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "routerDataHash", type: "bytes32" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+      { name: "routerData", type: "bytes" },
+    ],
+    outputs: [],
+  },
+]
+
+// [SPRINT-V3-P2 / ADR-013 §1] v3 ABI subset — the ONLY struct difference from v2 is
+// maxSlippageBps (uint16) inserted right after minAmountOut, mirroring
+// contracts/order-engine/TeraSwapOrderExecutorV3.sol's Order struct field-for-field (audited SHA
+// 954c415). Selected per-order by the dual-executor routing in executeCycle — never used for a
+// v2 order.
+const ORDER_EXECUTOR_V3_ABI = [
+  {
+    name: "canExecute",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "maxSlippageBps", type: "uint16" },
+          { name: "orderType", type: "uint8" },
+          { name: "condition", type: "uint8" },
+          { name: "targetPrice", type: "uint256" },
+          { name: "priceFeed", type: "address" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "router", type: "address" },
+          { name: "routerDataHash", type: "bytes32" },
+          { name: "dcaInterval", type: "uint256" },
+          { name: "dcaTotal", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [
+      { name: "canExec", type: "bool" },
+      { name: "reason", type: "string" },
+    ],
+  },
+  {
+    name: "executeOrder",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "minAmountOut", type: "uint256" },
+          { name: "maxSlippageBps", type: "uint16" },
           { name: "orderType", type: "uint8" },
           { name: "condition", type: "uint8" },
           { name: "targetPrice", type: "uint256" },
@@ -535,10 +717,26 @@ async function readFreezeFlag() {
   }
 }
 
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Warn ONCE per process when this keeper's chain has no
+// known ETH/USD aggregator — the condition is static for the run, and readEthUsd is called every
+// cycle plus once per ETH leg, so repeating it would drown the log it needs to stand out in.
+let ethUsdFeedMissingWarned = false
+
 // [DCA-OBS] Read ETH/USD from the Chainlink aggregator (8 decimals). Returns a
 // Number USD price, or null if the feed read fails (non-fatal; low-gas signal is
 // simply skipped that cycle). Never throws.
+// [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] A null feed (unknown chain, ETH_USD_FEED unset) returns
+// null WITHOUT a read — fail-closed. Callers are unchanged: the low-gas signal skips that cycle,
+// and fetchReferencePriceUsd falls through to its existing DefiLlama path (and, for the ETH leg,
+// classifies a miss as TRANSIENT, so the fill is delayed/flagged rather than filled unbounded).
 async function readEthUsd(publicClient) {
+  if (!ETH_USD_FEED) {
+    if (!ethUsdFeedMissingWarned) {
+      ethUsdFeedMissingWarned = true
+      log(`  WARNING: no ETH/USD Chainlink read possible -- ${ETH_USD_FEED_RESOLUTION.reason}`)
+    }
+    return null
+  }
   try {
     const [, answer] = await publicClient.readContract({
       address: getAddress(ETH_USD_FEED),
@@ -629,21 +827,104 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
 // committed route has drifted. It NEVER changes which router the fill uses. Fully
 // fail-open: any missing config / error / timeout / missing field ⇒ null ⇒ the
 // gate executes (we never block a DCA on our own uncertainty). Never throws.
+//
+// [CHORE-DCA-AGGREGATION-VALUE] Also returns the RUNNER-UP (second-best source)
+// from this SAME response — one HTTP call, one quote round, so the runner-up is
+// guaranteed to be from the identical round as `bestOut` (never a second,
+// possibly-stale fetch). `all` is sorted best-first (src/lib/api.ts's
+// fetchMetaQuote), so the runner-up is simply `all[1]`. `nextBestOut`/
+// `nextBestSource` are null (never fabricated) when fewer than 2 sources quoted
+// this round or the field is malformed — purely additive telemetry for the
+// settlement receipt, never a routing input; the deviation-guard's existing
+// `bestOut` behavior is unchanged byte-for-byte.
 async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, dstDecimals) {
-  if (!API_URL) return null
+  if (!API_URL) return { bestOut: null, nextBestOut: null, nextBestSource: null }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a poll cycle
   try {
     const path = buildQuotePath({ tokenIn, tokenOut, amount: String(amount), srcDecimals, dstDecimals, chainId })
     const res = await fetch(`${API_URL}${path}`, { signal: controller.signal })
-    if (!res.ok) return null
+    if (!res.ok) return { bestOut: null, nextBestOut: null, nextBestSource: null }
     const json = await res.json()
     const best = json?.best?.toAmount
-    return best != null ? String(best) : null
+    const runnerUp = Array.isArray(json?.all) ? json.all[1] : null
+    const hasRunnerUp = runnerUp && runnerUp.toAmount != null && runnerUp.source
+    return {
+      bestOut: best != null ? String(best) : null,
+      nextBestOut: hasRunnerUp ? String(runnerUp.toAmount) : null,
+      nextBestSource: hasRunnerUp ? String(runnerUp.source) : null,
+    }
   } catch {
-    return null // fail-open: timeout / network / parse error ⇒ no reference
+    return { bestOut: null, nextBestOut: null, nextBestSource: null } // fail-open: timeout/network/parse error
   } finally {
     clearTimeout(timer)
+  }
+}
+
+// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] Fair-value USD price for one leg, used to
+// build the oracle-bounded DCA floor. "Chainlink first, else DefiLlama":
+//   - ETH/WETH (and native-ETH) → the trusted on-chain Chainlink ETH/USD feed
+//     the keeper already reads (readEthUsd, chain-appropriate via ETH_USD_FEED).
+//   - everything else → DefiLlama current price by chain:address (the #18/#248
+//     price source), 8-dp-friendly float.
+// Fully FAIL-SAFE: any miss (unmapped chain, no coverage, HTTP/parse error,
+// timeout) ⇒ null. A null makes the floor gate treat the pair as "no reference"
+// (the fill is FLAGGED, never falsely rejected) — a reference outage can never
+// halt DCA, only drop it to the flagged path. Never throws.
+// [CHORE-KEEPER-HARDENING / P1A-M-01] Returns a DISCRIMINATED result so the floor
+// gate can tell a TRANSIENT outage of a feed-having pair (delay the fill) from a
+// pair with genuinely NO feed (fail-open, capped):
+//   { price: number }                 -- a usable fair-value price
+//   { price: null, transient: true }  -- a feed EXISTS but is momentarily down
+//                                        (RPC/HTTP/timeout/5xx/429) -> DELAY
+//   { price: null, transient: false } -- genuinely no feed for this pair on this
+//                                        chain (unmapped chain / DefiLlama 200-but-
+//                                        -absent / 4xx) -> feedless (capped fail-open)
+async function fetchReferencePriceUsd(token, chainId, publicClient) {
+  try {
+    if (!token || typeof token !== "string") return { price: null, transient: false }
+    const addr = token.toLowerCase()
+    const ethPriced = ETH_PRICED_ADDRESSES.has(addr)
+
+    // Chainlink-first for the ETH leg (most common DCA quote leg).
+    if (ethPriced) {
+      const eth = await readEthUsd(publicClient)
+      if (eth != null) return { price: eth, transient: false }
+      // else fall through to DefiLlama; if that also misses we know a feed EXISTS
+      // (ETH always has one), so the miss is TRANSIENT, not feedless.
+    }
+
+    const slug = DEFILLAMA_CHAIN_SLUG[Number(chainId)]
+    if (!slug) {
+      // Unmapped chain: no keeper feed config. For the ETH leg a feed still exists
+      // (transient); otherwise genuinely feedless.
+      return { price: null, transient: ethPriced }
+    }
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a cycle
+    try {
+      const res = await fetch(`https://coins.llama.fi/prices/current/${slug}:${token}`, { signal: controller.signal })
+      if (!res.ok) {
+        // 5xx / 429 ⇒ transient; a 4xx (absent) ⇒ feedless. ETH leg: always transient.
+        const transient = ethPriced || res.status >= 500 || res.status === 429
+        return { price: null, transient }
+      }
+      const json = await res.json()
+      const price = json?.coins?.[`${slug}:${token}`]?.price
+      const num = Number(price)
+      if (Number.isFinite(num) && num > 0) return { price: num, transient: false }
+      // 200 but no price: DefiLlama authoritatively doesn't cover it ⇒ feedless
+      // (unless it's the ETH leg, which must have a feed ⇒ transient).
+      return { price: null, transient: ethPriced }
+    } catch {
+      // network / timeout / parse error ⇒ transient (a feed may well exist)
+      return { price: null, transient: true }
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return { price: null, transient: true } // fail-safe: unknown error ⇒ delay, don't fail-open
   }
 }
 
@@ -695,46 +976,25 @@ function classifyOrderUrgency(dbOrder, orderStruct) {
 }
 
 /**
- * Determine if an order should execute at the current gas price,
- * and return EIP-1559 parameters if so.
+ * Determine if an order should execute at the current gas price, and return EIP-1559 parameters
+ * if so. [FIX-KEEPER-GAS-TIER-BASE] Thin wrapper over gas-tier.js's pure, per-chain
+ * resolveGasTier — this file's CHAIN_ID selects mainnet's original tiers or Base's calibrated
+ * ones. Deferring (execute:false) is UNCHANGED behavior: the call site below unlocks the order
+ * back to 'active' and retries next cycle — never routes through handleExecutionFailure, so a
+ * gas-price defer can never mark an order 'failed' (consistent with the M-01 pinned-route-revert
+ * pattern of "market/timing conditions aren't wrong, just not right yet").
  * @param {bigint} currentGasPrice
  * @param {bigint} baseFee
  * @param {"URGENT" | "ELEVATED" | "NORMAL"} urgency
  * @returns {{ execute: boolean, tier: string, maxFeePerGas?: bigint, maxPriorityFeePerGas?: bigint }}
  */
 function resolveGasTier(currentGasPrice, baseFee, urgency) {
-  const gasPriceGwei = Number(formatUnits(currentGasPrice, 9))
-
-  if (gasPriceGwei > GAS_TIER_URGENT) {
-    return { execute: false, tier: "SKIP" }
-  }
-
-  if (gasPriceGwei > GAS_TIER_ELEVATED) {
-    if (urgency !== "URGENT") return { execute: false, tier: "URGENT_ONLY" }
-    const priority = parseGwei(String(PRIORITY_FEE_URGENT))
-    return {
-      execute: true, tier: "URGENT_ONLY",
-      maxPriorityFeePerGas: priority,
-      maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_URGENT)) / 1n + priority,
-    }
-  }
-
-  if (gasPriceGwei > GAS_TIER_NORMAL) {
-    if (urgency === "NORMAL") return { execute: false, tier: "ELEVATED" }
-    const priority = parseGwei(String(PRIORITY_FEE_ELEVATED))
-    return {
-      execute: true, tier: "ELEVATED",
-      maxPriorityFeePerGas: priority,
-      maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_ELEVATED)) / 1n + priority,
-    }
-  }
-
-  const priority = parseGwei(String(PRIORITY_FEE_NORMAL))
-  return {
-    execute: true, tier: "NORMAL",
-    maxPriorityFeePerGas: priority,
-    maxFeePerGas: baseFee * BigInt(Math.ceil(BASEFEE_MULT_NORMAL)) / 1n + priority,
-  }
+  return resolveGasTierForChain({
+    chainId: CHAIN_ID,
+    currentGasPriceWei: currentGasPrice,
+    baseFeeWei: baseFee,
+    urgency,
+  })
 }
 
 // ---- Freeze-observability helpers (all NON-BLOCKING / fail-safe) --------
@@ -986,6 +1246,36 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         continue
       }
 
+      // [SPRINT-V3-P2 / ADR-013 §1] Dual-executor routing: a v3-signed order carries
+      // maxSlippageBps in its order_data (the frontend only sets it once v3 is configured for
+      // the signing chain — useOrderEngine.ts). Select the CONTRACT + ABI for THIS order
+      // independently of every other order in the batch: v2 orders (the overwhelming majority
+      // until migration) keep executing against v2 exactly as before; a v3 order executes ONLY
+      // when THIS keeper's V3_CONTRACT_ADDRESS is configured for its chain — otherwise it is
+      // SKIPPED + FLAGGED (left active, retried later), NEVER mis-routed to v2 (wrong typehash
+      // -> the v2 contract would either revert or, worse, silently ignore the intended
+      // maxSlippageBps bound entirely).
+      const routing = resolveExecutorRouting({
+        orderData: od,
+        v2Address: CONTRACT_ADDRESS,
+        v2Abi: ORDER_EXECUTOR_ABI,
+        v3Address: V3_CONTRACT_ADDRESS,
+        v3Abi: ORDER_EXECUTOR_V3_ABI,
+      })
+      if (!routing.ok) {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... -- ${routing.reason}`)
+        try {
+          await alertOps(
+            { kind: "submission-blocked", detail: `v3 order ${dbOrder.id} received but ORDER_EXECUTOR_V3_ADDRESS is unset for chain ${CHAIN_ID} -- v3 not deployed/configured here yet` },
+            TIER_WARN_THRESHOLD,
+          )
+        } catch {}
+        await updateOrderStatus(dbOrder.id, "active") // unlock; retried once v3 is configured
+        skipped++
+        continue
+      }
+      const { isV3, execAddress, execAbi } = routing
+
       // Use order_data directly -- it has the exact values that were EIP-712 signed
       const orderStruct = {
         owner: getAddress(od.owner),                         // checksum address
@@ -993,6 +1283,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         tokenOut: getAddress(od.tokenOut),
         amountIn: BigInt(od.amountIn),                       // uint256
         minAmountOut: BigInt(od.minAmountOut),
+        // [ADR-013 §1] Present ONLY for a v3 order — omitted entirely for v2 so the v2 tuple
+        // shape (and its ABI-encoding) stays byte-identical to before this sprint.
+        ...(isV3 ? { maxSlippageBps: Number(od.maxSlippageBps) } : {}),
         orderType: Number(od.orderType),                     // uint8
         condition: Number(od.condition),                     // uint8
         targetPrice: BigInt(od.targetPrice),                 // uint256
@@ -1005,7 +1298,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         dcaTotal: BigInt(od.dcaTotal),                       // uint256
       }
 
-      log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}`)
+      log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}, executor=${isV3 ? 'v3' : 'v2'}`)
 
       // Debug: read current Chainlink price
       try {
@@ -1020,10 +1313,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
       }
 
-      // Check via contract
+      // Check via contract [SPRINT-V3-P2] execAddress/execAbi resolved per-order above.
       const [canExec, reason] = await publicClient.readContract({
-        address: CONTRACT_ADDRESS,
-        abi: ORDER_EXECUTOR_ABI,
+        address: execAddress,
+        abi: execAbi,
         functionName: "canExecute",
         args: [orderStruct, dbOrder.signature],
       })
@@ -1047,45 +1340,86 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // SIGNED order.router (executeOrder approves + calls exactly that router). All
       // swap params come from orderStruct (the EIP-712-signed order), not the DB row.
       const isDca = dbOrder.order_type === "dca"
+      // [CHORE-DCA-AGGREGATION-VALUE] Populated (best-effort) inside the deviation-guard block
+      // below when it runs; read later at the POST-execution recording site, after the fill has
+      // already confirmed. Stays null when the guard doesn't run (non-DCA) or the quote round
+      // yields no comparison — additive telemetry only, never consulted for routing/execution.
+      let dcaNextBestOut = null
+      let dcaNextBestSource = null
       const netAmount = computeNetChunkAmount({
         amountIn: orderStruct.amountIn,
         dcaTotal: Number(orderStruct.dcaTotal),
         execCount: Number(dbOrder.dca_executed || 0),
         isDca,
       })
-      const swapData = await fetchSwapRoute(
-        orderStruct.tokenIn,
-        orderStruct.tokenOut,
-        netAmount,
-        CONTRACT_ADDRESS,
-        CHAIN_ID, // keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
-        srcDecimals,
-        dstDecimals,
-        orderStruct.router,
-      )
+      // ── [SPRINT-P1B / ADR-014 (a)] Pinned route for non-DCA ───────────────────────────────
+      // A non-DCA order committed to EXACT calldata at signing (V3:463-465). The keeper must
+      // REPLAY those bytes verbatim and must NEVER rebuild a route: a rebuilt route hashes
+      // differently and reverts RouterDataMismatch essentially always. (That was the latent
+      // defect in the previous shape -- it hashed freshly-built calldata against the signed
+      // hash, which could only match by luck.) DCA is unaffected and still builds per-chunk
+      // calldata against its ZeroHash bypass.
+      const pinned = resolvePinnedRouterData({
+        orderType: dbOrder.order_type,
+        orderData: dbOrder.order_data,
+        signedRouterDataHash: orderStruct.routerDataHash,
+      })
 
-      if (!swapData) {
-        // [chore/dca-resilience] No route THIS cycle is transient: keep the order
-        // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
-        // consecutive misses does this fail with no_route_after_retries (+alert).
-        log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
-        await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
-        skipped++
-        continue
-      }
-
-      // [C-01] Verify routerData hash for non-DCA orders.
-      // DCA orders use ZeroHash as routerDataHash since calldata varies per execution --
-      // the contract now skips the hash check when routerDataHash == bytes32(0).
-      // IMPORTANT: Do NOT modify orderStruct.routerDataHash -- it must match the
-      // original signed value or EIP-712 signature verification will fail.
-      if (orderStruct.routerDataHash !== zeroHash) {
-        const actualRouterDataHash = keccak256(swapData.data)
-        if (actualRouterDataHash !== orderStruct.routerDataHash) {
-          log(`  Order ${dbOrder.id.slice(0, 8)}... routerData hash mismatch, skipping`)
+      let swapData
+      if (pinned.pinned) {
+        if (!pinned.ok) {
+          // Refuse rather than burn gas on a guaranteed revert. Leave the order ACTIVE: this is
+          // a data problem (or the P1c ZeroHash landmine), not a market outcome.
+          log(`  Order ${dbOrder.id.slice(0, 8)}... pinned route unusable -- ${pinned.reason}`)
+          try {
+            await alertOps(
+              { kind: "pinned-route-unusable", detail: `Order ${dbOrder.id}: ${pinned.reason}` },
+              TIER_WARN_THRESHOLD,
+            )
+          } catch {}
           await updateOrderStatus(dbOrder.id, "active") // Unlock
           skipped++
           continue
+        }
+        // toAmount is null by design: a pinned route is quote-free, so there is no expected-out
+        // to compare. Only the DCA-gated blocks below read toAmount and they are unreachable
+        // for a pinned order, so this keeps fetchSwapRoute's return shape.
+        swapData = { data: pinned.routerData, toAmount: null }
+        log(`  Order ${dbOrder.id.slice(0, 8)}... replaying pinned route (${pinned.routerData.slice(0, 10)}...)`)
+      } else {
+        swapData = await fetchSwapRoute(
+          orderStruct.tokenIn,
+          orderStruct.tokenOut,
+          netAmount,
+          execAddress, // [SPRINT-V3-P2] the contract that will actually hold + swap the funds
+          CHAIN_ID, // keeper's chain (8453 on Base; 1 → omitted, mainnet byte-identical)
+          srcDecimals,
+          dstDecimals,
+          orderStruct.router,
+        )
+
+        if (!swapData) {
+          // [chore/dca-resilience] No route THIS cycle is transient: keep the order
+          // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
+          // consecutive misses does this fail with no_route_after_retries (+alert).
+          log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
+          await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
+          skipped++
+          continue
+        }
+
+        // [C-01] Verify routerData hash for keeper-built routes. DCA signs ZeroHash (the
+        // contract skips the check), so this stays as defence in depth on the built path.
+        // IMPORTANT: Do NOT modify orderStruct.routerDataHash -- it must match the original
+        // signed value or EIP-712 signature verification will fail.
+        if (orderStruct.routerDataHash !== zeroHash) {
+          const actualRouterDataHash = keccak256(swapData.data)
+          if (actualRouterDataHash !== orderStruct.routerDataHash) {
+            log(`  Order ${dbOrder.id.slice(0, 8)}... routerData hash mismatch, skipping`)
+            await updateOrderStatus(dbOrder.id, "active") // Unlock
+            skipped++
+            continue
+          }
         }
       }
 
@@ -1102,8 +1436,105 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // alert. DCA still buys regardless of market price — this guards execution
       // QUALITY, not market timing.
       if (isDca) {
+        // ── Oracle-bounded per-fill floor ── [SPRINT-ORDER-ONCHAIN-FLOOR / P1a
+        // + CHORE-KEEPER-HARDENING / P1A-M-01]. DCA's on-chain minOut is a 1-wei
+        // no-op, so the keeper verifies the built output against an INDEPENDENT
+        // fair-value reference (Chainlink for ETH, else DefiLlama).
+        //   - both legs priced → REJECT a fill grossly below reference ×
+        //     (1 − maxSlippage) (drain-to-dust tail); a reject DELAYS (retry next
+        //     cycle), never fails and never force-executes — delay ≫ drain.
+        //   - a TRANSIENT reference outage on a feed-having pair → DELAY (do NOT
+        //     fail-open on a momentary blip).
+        //   - a genuinely FEEDLESS pair → proceed FLAGGED, but only for a SMALL
+        //     fill within the USD notional cap; larger/unsizable → DELAY.
+        // Reference fetch is fully fail-safe (any unknown error ⇒ transient ⇒ delay).
+        const [refIn, refOut] = await Promise.all([
+          fetchReferencePriceUsd(orderStruct.tokenIn, CHAIN_ID, publicClient),
+          fetchReferencePriceUsd(orderStruct.tokenOut, CHAIN_ID, publicClient),
+        ])
+        const bothPriced = refIn.price != null && refOut.price != null && swapData.toAmount != null
+        if (bothPriced) {
+          const referenceExpectedOut = computeReferenceExpectedOut({
+            netAmountIn: netAmount,
+            srcDecimals,
+            dstDecimals,
+            priceInUsd: refIn.price,
+            priceOutUsd: refOut.price,
+          })
+          const floorDecision = decideFloor({
+            builtExpectedOut: swapData.toAmount,
+            referenceExpectedOut,
+            maxSlippageBps: getFloorMaxSlippageBps(),
+            hasReference: true,
+          })
+          if (!floorDecision.ok) {
+            log(
+              `  Order ${dbOrder.id.slice(0, 8)}... DCA FLOOR BREACH -- ${floorDecision.reason} (built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}) -- refusing to fill, retry next cycle`,
+            )
+            // Fund-adjacent: built output grossly below fair value. Page (warn).
+            try {
+              await alertOps(
+                {
+                  kind: "dca-floor-breach",
+                  detail: `Order ${dbOrder.id} DCA fill rejected by oracle floor: ${floorDecision.reason}; built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}`,
+                },
+                TIER_WARN_THRESHOLD,
+              )
+            } catch {}
+            // DELAY, never drain. NOT a failure (no orderRetries/'failed'/failure
+            // alert); and UNLIKE the deviation window-end path, NEVER executes-anyway.
+            await updateOrderStatus(dbOrder.id, "active")
+            skipped++
+            continue
+          }
+          // else oracle-bounded pass → fall through to the deviation gate + execute.
+        } else {
+          // Not both priced: split TRANSIENT (delay) vs FEEDLESS (capped fail-open).
+          const statusOf = (r) => (r.price != null ? "ok" : r.transient ? "transient" : "feedless")
+          const referenceStatus = classifyReference({ inStatus: statusOf(refIn), outStatus: statusOf(refOut) })
+          // Size the fail-open fill from whichever leg IS priced (for the USD cap).
+          let notionalUsd = null
+          if (refIn.price != null) {
+            notionalUsd = (Number(netAmount) / 10 ** srcDecimals) * refIn.price
+          } else if (refOut.price != null && swapData.toAmount != null) {
+            notionalUsd = (Number(swapData.toAmount) / 10 ** dstDecimals) * refOut.price
+          }
+          const failOpen = decideFailOpen({
+            referenceStatus,
+            notionalUsd,
+            maxFailOpenUsd: getFailOpenMaxUsd(),
+          })
+          if (!failOpen.ok) {
+            // Transient outage, or a feedless fill above the cap / unsizable ⇒ DELAY.
+            // Not a breach → info alert; unlock + retry next cycle (never fill blind).
+            log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill DELAYED -- ${failOpen.reason}`)
+            try {
+              await alertOps(
+                { kind: "dca-floor-delay", detail: `Order ${dbOrder.id} DCA fill delayed: ${failOpen.reason}` },
+                0,
+              )
+            } catch {}
+            await updateOrderStatus(dbOrder.id, "active")
+            skipped++
+            continue
+          }
+          // Small feedless fill within the USD cap: proceed on the aggregator's own
+          // flat calldata minReturn, surfaced (info) so it is never silent. Terminal
+          // fix for feedless pairs is the on-chain signed floor (ADR-013).
+          log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill NOT oracle-bounded -- ${failOpen.reason}`)
+          try {
+            await alertOps(
+              {
+                kind: "dca-floor-unverified",
+                detail: `Order ${dbOrder.id} DCA fill has no fair-value reference (${orderStruct.tokenIn} -> ${orderStruct.tokenOut} on chain ${CHAIN_ID}); ${failOpen.reason}`,
+              },
+              0,
+            )
+          } catch {}
+        }
+
         const dueSec = dcaDueSec(dbOrder)
-        const bestOut = await fetchBestQuote(
+        const { bestOut, nextBestOut, nextBestSource } = await fetchBestQuote(
           orderStruct.tokenIn,
           orderStruct.tokenOut,
           netAmount,
@@ -1111,6 +1542,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           srcDecimals,
           dstDecimals,
         )
+        // [CHORE-DCA-AGGREGATION-VALUE] Stash for the POST-execution recording site below —
+        // read-only telemetry, never consulted by the deviation guard itself (which uses only
+        // `bestOut`, unchanged from before this chore).
+        dcaNextBestOut = nextBestOut
+        dcaNextBestSource = nextBestSource
         // Reference is only usable when BOTH sides are present; otherwise fail-open.
         const referenceAvailable = bestOut != null && swapData.toAmount != null
         const deviation = referenceAvailable
@@ -1173,6 +1609,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
       log(`  Gas: ${formatUnits(gasPrice, 9)} gwei | baseFee: ${formatUnits(baseFee, 9)} gwei | urgency: ${urgency} | tier: ${gasTier.tier}`)
 
+      // [FIX-KEEPER-GAS-TIER-BASE / calibration rec 3] Cost-above-tier is a DEFER signal, never a
+      // failure: unlock back to 'active' and retry a later cycle. This never touches
+      // orderRetries or handleExecutionFailure, so a gas-price defer can never accumulate toward
+      // MAX_CYCLE_FAILURES or mark an order 'failed' — the same "not wrong, just not yet" shape
+      // as the M-01 pinned-route-revert handling.
       if (!gasTier.execute) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... skipped by gas tier (${gasTier.tier}, urgency: ${urgency})`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
@@ -1184,13 +1625,40 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // Send transaction!
       log(`  Executing order ${dbOrder.id.slice(0, 8)}... (${dbOrder.order_type}, tier: ${gasTier.tier})`)
 
-      // [B-02] Use Flashbots Protect RPC if configured (prevents MEV/sandwich attacks)
-      const txWalletClient = FLASHBOTS_RPC ? flashbotsWalletClient : walletClient
-      const txPublicClient = FLASHBOTS_RPC ? flashbotsPublicClient : publicClient
+      // [SPRINT-ORDER-ONCHAIN-FLOOR / P1a step 2] Fail-closed submission policy.
+      // Previously this SILENTLY fell back to the public mempool when
+      // FLASHBOTS_RPC was unset — sandwichable on a public-mempool chain. Now the
+      // choice is explicit: Base/OP-stack submit via their private sequencer
+      // mempool; a public-mempool chain (mainnet) REQUIRES a private relay (or the
+      // explicit ALLOW_PUBLIC_MEMPOOL override) or the fill is refused this cycle.
+      const submission = resolveSubmissionPolicy({
+        chainId: CHAIN_ID,
+        hasPrivateRelay: !!FLASHBOTS_RPC,
+        allowPublicOverride: ALLOW_PUBLIC_MEMPOOL,
+      })
+      if (!submission.ok) {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... submission REFUSED -- ${submission.reason}`)
+        try {
+          await alertOps(
+            { kind: "submission-blocked", detail: `Order ${dbOrder.id} not submitted: ${submission.reason}` },
+            TIER_WARN_THRESHOLD,
+          )
+        } catch {}
+        await updateOrderStatus(dbOrder.id, "active") // unlock; retry when a relay is configured
+        skipped++
+        continue
+      }
+      // [B-02] Route through the private relay only when the policy resolved to it;
+      // 'sequencer-private' (Base 8453, Arbitrum One 42161) and the explicit 'public'
+      // override both use the default clients (those chains' sequencer mempools are
+      // themselves private, and neither has a Flashbots-equivalent relay to route to).
+      const usePrivateRelay = submission.mode === "private"
+      const txWalletClient = usePrivateRelay ? flashbotsWalletClient : walletClient
+      const txPublicClient = usePrivateRelay ? flashbotsPublicClient : publicClient
 
       const txHash = await txWalletClient.writeContract({
-        address: CONTRACT_ADDRESS,
-        abi: ORDER_EXECUTOR_ABI,
+        address: execAddress,
+        abi: execAbi,
         functionName: "executeOrder",
         args: [orderStruct, dbOrder.signature, swapData.data],
         maxFeePerGas: gasTier.maxFeePerGas,
@@ -1219,6 +1687,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [chore/dca-resilience] ...and resets THIS order's transient-miss count,
         // so a later isolated miss starts fresh (consecutive, not cumulative).
         orderRetries.delete(dbOrder.id)
+        // [SPRINT-P1B] A fill also clears the pinned-route revert streak (consecutive, not
+        // cumulative) so the ops alert only fires on a genuinely stuck route.
+        pinnedRouteReverts.delete(dbOrder.id)
 
         const now = new Date().toISOString()
 
@@ -1259,11 +1730,18 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // are decoded from the on-chain OrderExecuted event (authoritative); analytics (#228)
         // values the chunk from the parent order, so no USD is written here. Failures are
         // surfaced, not swallowed (the original silent-400 bug that left the table empty).
-        const decoded = decodeOrderExecuted(receipt.logs, CONTRACT_ADDRESS)
+        const decoded = decodeOrderExecuted(receipt.logs, execAddress)
         if (!decoded) {
           log(`  WARNING: OrderExecuted event not found in tx ${txHash.slice(0, 10)}... — recording with fallback amounts`)
         }
-        const execRow = buildExecutionRow({ dbOrder, txHash, receipt, decoded })
+        // [CHORE-DCA-AGGREGATION-VALUE] Additive, best-effort — dcaNextBestOut/Source are null
+        // for non-DCA fills, a single-source quote round, or any quote-fetch failure; either way
+        // buildExecutionRow only sets the columns when non-null, so they stay NULL in the row.
+        const execRow = buildExecutionRow({
+          dbOrder, txHash, receipt, decoded,
+          nextBestOut: dcaNextBestOut,
+          nextBestSource: dcaNextBestSource,
+        })
         const rec = await recordExecutionRow(supabaseFetch, execRow)
         if (rec.recorded) {
           log(`  Recorded execution #${execRow.execution_number} for order ${dbOrder.id.slice(0, 8)}...`)
@@ -1299,13 +1777,25 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // classifyFailure below so a permanent cause (allowance/balance/nonce) is
       // failed-with-reason immediately rather than retried to the cap.
       let swapReason = null
+      // [FIX-P1B-M01] Set ONLY when the revert is one of the executor's OWN market/route errors
+      // (InsufficientOutput / PriceConditionNotMet) — never for permanent-cause errors, which are
+      // deliberately absent from decodeExecutorMarketRevert's table and must keep falling through
+      // to the unchanged failure-ladder classification below.
+      let executorErrorName = null
       try {
-        const sf = decodeSwapFailed(extractRevertData(err))
+        const revertData = extractRevertData(err)
+        const sf = decodeSwapFailed(revertData)
         if (sf) {
           swapReason = sf.reason
           // dbOrder (loop var) is in catch scope; orderStruct is not (declared in the try).
           const failedRouter = dbOrder.router ?? (dbOrder.order_data || {}).router ?? "?"
           console.error(`  Order ${dbOrder.id.slice(0, 8)}... SwapFailed → ${sf.reason} (router=${failedRouter}, inner=${sf.innerHex})`)
+        } else {
+          const marketErr = decodeExecutorMarketRevert(revertData)
+          if (marketErr) {
+            executorErrorName = marketErr.name
+            console.error(`  Order ${dbOrder.id.slice(0, 8)}... ${marketErr.name} (executor revert — output below the signed/oracle floor, or the price condition slipped back before the tx landed)`)
+          }
         }
       } catch { /* never let diagnostics mask the original error */ }
       console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
@@ -1314,6 +1804,45 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       consecutiveExecFailures++
       stats.totalErrors++
       stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
+
+      // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route revert is NOT an order failure ──────────
+      // Under option (a) the route is fixed at signing, so a thin/dislocated pool at trigger
+      // makes the swap revert. The correct outcome is: leave the order ACTIVE so it can fill
+      // on any later cycle within its expiry (for a Limit/TP "did not fill" is acceptable —
+      // exactly why Stop-Loss was deferred to v4). Routing this through handleExecutionFailure
+      // would mark it 'failed' and permanently kill a still-valid order. We do surface it: a
+      // route that keeps reverting is a liveness signal, so ops gets paged at the threshold.
+      // [FIX-P1B-M01] Branch on the CLASSIFICATION (SwapFailed OR the executor's own market
+      // errors), not on swapReason truthiness alone — swapReason is null for InsufficientOutput
+      // (the router call itself succeeded; the executor's OWN post-swap floor check reverted), so
+      // gating on it alone let the common triggered-TP dislocation fall through to 'failed'.
+      if (dbOrder.order_type !== "dca" && isMarketRevert({ swapReason, executorErrorName })) {
+        const prior = pinnedRouteReverts.get(dbOrder.id) || 0
+        const consecutiveReverts = prior + 1
+        pinnedRouteReverts.set(dbOrder.id, consecutiveReverts)
+        const plan = planPinnedRouteRevert({ consecutiveReverts })
+        const observedReason = swapReason || executorErrorName
+        log(`  Order ${dbOrder.id.slice(0, 8)}... ${plan.reason}`)
+        if (plan.alert) {
+          try {
+            await alertOps(
+              {
+                kind: "pinned-route-revert",
+                detail:
+                  `Order ${dbOrder.id} (${dbOrder.order_type}) pinned route reverted ` +
+                  `${consecutiveReverts}x consecutively: ${observedReason}. The order remains ACTIVE ` +
+                  `and will retry until expiry — the pinned pool may be dislocated.`,
+              },
+              TIER_WARN_THRESHOLD,
+            )
+          } catch {}
+        }
+        // Reuse the existing per-order backoff (the cycle's retry-skip reads exactly this map),
+        // so a persistently-reverting order doesn't re-estimate gas every poll.
+        orderRetries.set(dbOrder.id, { count: consecutiveReverts, lastAttempt: Date.now() })
+        await updateOrderStatus(dbOrder.id, "active") // stays fillable
+        continue
+      }
 
       // [chore/dca-resilience] Classify transient vs permanent and decide retry
       // (keep active) vs fail-with-specific-reason — replaces the old blunt
@@ -1413,12 +1942,9 @@ function startHealthServer() {
 async function main() {
   validateConfig()
 
-  // Validate gas tier ordering
-  if (GAS_TIER_NORMAL >= GAS_TIER_ELEVATED || GAS_TIER_ELEVATED >= GAS_TIER_URGENT) {
-    throw new Error(
-      `Invalid gas tier ordering: NORMAL(${GAS_TIER_NORMAL}) < ELEVATED(${GAS_TIER_ELEVATED}) < URGENT(${GAS_TIER_URGENT}) required`
-    )
-  }
+  // [FIX-KEEPER-GAS-TIER-BASE] Validate THIS chain's gas tier ordering (mainnet or Base — each
+  // keeper instance runs a single CHAIN_ID, so only that chain's config need hold at boot).
+  assertTierOrdering(CHAIN_ID)
 
   console.log("")
   console.log("+===========================================+")
@@ -1432,6 +1958,54 @@ async function main() {
     chain,
     transport: http(RPC_URL),
   })
+
+  // [FIX-KEEPER-BOOT-CHAIN-VERIFICATION] ASK THE CHAIN before doing any work. Everything above is
+  // config asserting what an address is; this is the first and only point where the keeper
+  // verifies it against reality — the RPC's own chain id, real bytecode at the executor address on
+  // THAT chain, and the contract self-identifying via ORDER_TYPEHASH() as the exact Order struct
+  // this process encodes calldata for. Runs before the signer, the health server, the event
+  // watcher and the first cycle, so a mis-bound keeper never touches an order. Any failure —
+  // mismatch, empty code, unreachable RPC, timeout, malformed answer — exits non-zero after a
+  // bounded retry; there is deliberately no warn-and-continue branch.
+  try {
+    await verifyChainBinding({
+      provider: createRpcProbe(publicClient),
+      chainId: CHAIN_ID,
+      contracts: [
+        {
+          label: "ORDER_EXECUTOR_ADDRESS (v2)",
+          address: CONTRACT_ADDRESS,
+          expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
+        },
+        // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
+        // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
+        // with the v3 typehash, which also catches a v2/v3 address swap in the env.
+        ...(V3_CONTRACT_ADDRESS
+          ? [
+              {
+                label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
+                address: V3_CONTRACT_ADDRESS,
+                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
+              },
+            ]
+          : []),
+      ],
+      log,
+    })
+  } catch (err) {
+    console.error(err.message)
+    // Name the RPC by HOST only — an RPC_URL routinely carries the provider API key in its path,
+    // and a boot-refusal log is exactly the text an operator pastes into a ticket.
+    let rpcHost = "unparseable RPC_URL"
+    try {
+      rpcHost = new URL(RPC_URL).host
+    } catch {}
+    console.error(
+      `   Refusing to boot: the keeper will not execute orders against an unverified chain/contract ` +
+        `binding (CHAIN_ID=${CHAIN_ID}, RPC host=${rpcHost}).`,
+    )
+    process.exit(1)
+  }
 
   // [C-02/B-01] Use KMS/Vault account if configured, otherwise plaintext key
   const account = await createExecutorAccount()
@@ -1464,11 +2038,23 @@ async function main() {
   log(`Executor wallet: ${account.address}`)
   log(`Chain: ${CHAIN_ID}`)
   log(`Balance: ${formatEther(balance)} ETH`)
-  log(`Contract: ${CONTRACT_ADDRESS}`)
+  log(`Contract (v2): ${CONTRACT_ADDRESS}`)
+  // [SPRINT-V3-P2] Loud about v3 state at boot: either the configured address, or an explicit
+  // "disabled" so a v3 order silently piling up (skip+flag every cycle) is diagnosable from logs.
+  log(`Contract (v3): ${V3_CONTRACT_ADDRESS || "not configured -- v3 orders will be skipped + flagged"}`)
+  // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Loud about the resolved aggregator at boot: this feed
+  // prices the ETH leg of the DCA oracle-floor reference, so "which address, and why that one"
+  // must be diagnosable from the log rather than inferred from the chain id.
+  log(
+    `ETH/USD feed: ${ETH_USD_FEED ?? "NONE -- Chainlink reads disabled"} ` +
+      `[${ETH_USD_FEED_RESOLUTION.source}] ${ETH_USD_FEED_RESOLUTION.reason}`,
+  )
   log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
   log(`Max batch: ${MAX_BATCH}`)
-  log(`Gas tiers: NORMAL ≤${GAS_TIER_NORMAL}gwei | ELEVATED ≤${GAS_TIER_ELEVATED}gwei | URGENT ≤${GAS_TIER_URGENT}gwei | >URGENT → SKIP`)
-  log(`Priority fees: NORMAL ${PRIORITY_FEE_NORMAL}gwei | ELEVATED ${PRIORITY_FEE_ELEVATED}gwei | URGENT ${PRIORITY_FEE_URGENT}gwei`)
+  // [FIX-KEEPER-GAS-TIER-BASE] Log THIS chain's resolved config, not a hardcoded mainnet one.
+  const gasTierCfg = getGasTierConfig(CHAIN_ID)
+  log(`Gas tiers (chain ${CHAIN_ID}): NORMAL ≤${gasTierCfg.thresholdsGwei.NORMAL}gwei | ELEVATED ≤${gasTierCfg.thresholdsGwei.ELEVATED}gwei | URGENT ≤${gasTierCfg.thresholdsGwei.URGENT}gwei | >URGENT → SKIP`)
+  log(`Priority fees (chain ${CHAIN_ID}): NORMAL ${gasTierCfg.priorityFeeGwei.NORMAL}gwei | ELEVATED ${gasTierCfg.priorityFeeGwei.ELEVATED}gwei | URGENT ${gasTierCfg.priorityFeeGwei.URGENT}gwei`)
   console.log("")
 
   if (balance === 0n) {
@@ -1490,6 +2076,11 @@ async function main() {
   ]
   if (FEE_COLLECTOR_ADDRESS) {
     watchedContracts.push({ address: FEE_COLLECTOR_ADDRESS, label: 'FeeCollector' })
+  }
+  // [SPRINT-V3-P2] Admin-event monitoring parity for v3, once configured (timelock queue/execute,
+  // pause/unpause, router/oracle-config changes are the same event shapes as v2).
+  if (V3_CONTRACT_ADDRESS) {
+    watchedContracts.push({ address: V3_CONTRACT_ADDRESS, label: 'OrderExecutorV3' })
   }
   startEventWatcher(publicClient, watchedContracts, monitor)
 

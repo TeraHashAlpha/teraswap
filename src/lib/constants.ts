@@ -84,6 +84,8 @@ const COW_API_URLS: Record<number, string> = {
   1: 'https://api.cow.fi/mainnet/api/v1',
   100: 'https://api.cow.fi/xdai/api/v1',
   8453: 'https://api.cow.fi/base/api/v1', // [P217] Base L2
+  // [SPRINT-46-ARBITRUM-CONFIG] Arbitrum One — CONFIG-ONLY, dark until chain activation.
+  42161: 'https://api.cow.fi/arbitrum/api/v1',
 }
 export function getCowApiBase(chainId: number): string {
   return COW_API_URLS[chainId] || COW_API_URLS[1]
@@ -347,22 +349,34 @@ export const CHAINLINK_FEEDS: Record<string, `0x${string}`> = {
   '0x853d955acef822db058eb8505911ed77f175b99e': '0xB9E1E3A9feFf48998E45Fa90847ed4D467E8BcfD', // FRAX/USD
   '0x5f98805a4e8be255a32880fdec7f6728c6568ba0': '0x3D7aE7E594f2f2091Ad8798313450130d0Aba3a0', // LUSD/USD
   // ── Blue chips ──
-  '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c', // WBTC/USD
+  // [FIX-MAINNET-FEED-REMEDIATION] WBTC (0x2260…c599) MOVED to COMPOSED_FEEDS_BY_CHAIN[1] —
+  // WBTC/USD = WBTC/BTC × BTC/USD. It was mapped to 0xF4030086… which self-reports "BTC / USD":
+  // the canonical BTC *index* feed, blind to a WBTC-vs-BTC depeg. That address is retained as the
+  // composition's QUOTE leg; the WBTC/BTC base leg is new. A direct WBTC/USD feed does not exist
+  // on mainnet. Composed entries must NOT appear here — resolveFeed consults the composed map only
+  // when this direct lookup returns null.
   '0x514910771af9ca656af840dff83e8264ecf986ca': '0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c', // LINK/USD
   '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984': '0x553303d460EE0afB37EdFf9bE42922D8FF63220e', // UNI/USD
   '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9': '0x547a514d5e3769680Ce22B2361c10Ea13619e8a9', // AAVE/USD
   '0xc00e94cb662c3520282e6f5717214004a7f26888': '0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5', // COMP/USD
   '0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2': '0xec1D1B3b0443256cc3860e24a46F108e699484Aa', // MKR/USD
   '0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f': '0xDC3EA94CD0AC27d9A86C180091e7f78C683d3699', // SNX/USD
-  '0xc944e90c64b2c07662a292be6244bdf05cda44a7': '0x17D054ECAC33D91F7340645341eFB5DE9009F1C1', // GRT/USD
+  // [FIX-MAINNET-FEED-REMEDIATION] GRT (0xc944…44a7) MOVED to COMPOSED_FEEDS_BY_CHAIN[1] — the
+  // address it was mapped to is the GRT/ETH feed ("GRT / ETH", 18dp), read here as if it were USD.
+  // Same address, now correctly composed against ETH/USD.
   // ── DeFi governance ──
   '0xd533a949740bb3306d119cc777fa900ba034cd52': '0xCd627aA160A6fA45Eb793D19Ef54f5062F20f33f', // CRV/USD
   '0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e': '0xA027702dbb89fbd58938e4324ac03B58d812b0E1', // YFI/USD
   '0xba100000625a3754423978a60c9317c58a424e3d': '0xdF2917806E30300537aEB49A7663062F4d1F2b5F', // BAL/USD
   '0x6b3595068778dd592e39a122f4f5a5cf09c90fe2': '0xCc70F09A6CC17553b2E31954cD36E4A2d89501f7', // SUSHI/USD
   // ── LSDs & others ──
-  '0x5a98fcbea516cf06857215779fd812ca3bef1b32': '0x4e844125952D32AcdF339BE976c98E22F6F318dB', // LDO/USD
-  '0x4d224452801aced8b2f0aebe155379bb5d594381': '0xD10aBbC76679a20055E167BB80A24ac851b37571', // APE/USD
+  // [FIX-MAINNET-FEED-REMEDIATION] LDO (0x5a98…1b32) MOVED to COMPOSED_FEEDS_BY_CHAIN[1] — its
+  // address is the LDO/ETH feed ("LDO / ETH", 18dp). Same address, now composed against ETH/USD.
+  // [FIX-MAINNET-FEED-REMEDIATION] APE — address CORRECTED. Was 0xD10aBbC7…b37571, which has ZERO
+  // on-chain code: hand-transcribed hex drift from the real APE/USD proxy 0xD10aBbC7…b37056 (same
+  // 36-char prefix, last 4 differ). New address sourced from Chainlink's official reference-data
+  // directory (ens "ape-usd") and confirmed on-chain: description() "APE / USD", decimals() 8.
+  '0x4d224452801aced8b2f0aebe155379bb5d594381': '0xD10aBbC76679a20055E167BB80A24ac851b37056', // APE/USD
   '0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0': '0x7bAC85A8a13A4BcD8abb3eB7d6b4d632c5a57676', // MATIC/USD
   '0xc18360217d8f7ab5e7c516566761ea12ce7f9d72': '0x5C00128d4d1c2F4f652C267d7bcdD7aC99C16E16', // ENS/USD
   '0x111111111117dc0aa78b770fa6a738034120c302': '0xc929ad75B72593967DE83E7F7Cda0493458261D9', // 1INCH/USD
@@ -373,10 +387,22 @@ export const CHAINLINK_FEEDS: Record<string, `0x${string}`> = {
   // TODO: rETH (0xae78736cd615f374d3085123a210448e74fc6393) → 0x536218f9E9Eb48863970252233c8F271f554C2d0 — ETH-denominated feed, needs conversion before evaluateDeviation() can compare against USD execution prices.
   // TODO: wstETH (0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0) → 0x4F67e4d9BD67eFa28236013288737D39AeF48e79 — stETH-denominated feed, needs conversion before evaluateDeviation() can compare against USD execution prices.
   // ── Meme / popular ──
-  '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce': '0x8dD1CD88F43aF196ae478e91b9F5E4Ac69A97C61', // SHIB/USD
-  '0x6982508145454ce325ddbe47a25d4ec3d2311933': '0x02DE28aB3C28A5B1E8236B1069a211b7494F0f35', // PEPE/USD
+  // [FIX-MAINNET-FEED-REMEDIATION] SHIB (0x95ad…c4ce) MOVED to COMPOSED_FEEDS_BY_CHAIN[1] — its
+  // address is the SHIB/ETH feed ("SHIB / ETH", 18dp). Same address, now composed against ETH/USD.
+  // [FIX-MAINNET-FEED-REMEDIATION] PEPE — UNRESOLVED, deliberately left as-is and therefore still
+  // BLOCKED by the ADR-018 guard. 0x02DE28aB… has zero on-chain code, and Chainlink publishes NO
+  // PEPE feed of any denomination on Ethereum mainnet: a search of the official reference-data
+  // directory (feeds-mainnet.json, 316 entries, fetched 2026-07-29) returns zero matches for PEPE
+  // in either `name` or `ens`. There is no correct address to substitute, so per the remediation's
+  // no-unverified-address rule nothing is changed here. Fail-closed is the correct end state until
+  // Chainlink publishes one; PEPE prices via the DefiLlama/multi-source path meanwhile.
+  '0x6982508145454ce325ddbe47a25d4ec3d2311933': '0x02DE28aB3C28A5B1E8236B1069a211b7494F0f35', // PEPE/USD — UNRESOLVED (dead address, no feed exists)
   // ── Commodities ──
-  '0x45804880de22913dafe09f4980848ece6ecbaf78': '0x9B97304EA12EFed0FAd976FBeCAad46016bf269e', // PAXG/USD
+  // [FIX-MAINNET-FEED-REMEDIATION] PAXG — address CORRECTED. Was 0x9B97304E…f269e, a live proxy
+  // whose aggregator() is address(0) so every read reverts (a retired deployment). New address
+  // sourced from Chainlink's official reference-data directory (ens "paxg-usd") and confirmed
+  // on-chain: description() "PAXG / USD", decimals() 8.
+  '0x45804880de22913dafe09f4980848ece6ecbaf78': '0x9944D86CEB9160aF5C5feB251FD671923323f8C3', // PAXG/USD
 }
 
 // ── Native ETH ───────────────────────────────────────────

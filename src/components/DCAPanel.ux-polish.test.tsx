@@ -24,6 +24,17 @@ vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))
+// [SPRINT-V3-P2] see DCAPanel.routability.test.tsx — stub useChainlinkPrice directly rather than
+// expanding this file's minimal wagmi mock with useReadContract.
+vi.mock('@/hooks/useChainlinkPrice', () => ({
+  useChainlinkPrice: () => ({ chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }),
+}))
+// [FEAT-DEPEG-GATE-ORDER-CREATION] Same precedent as useChainlinkPrice above — stub directly
+// rather than expanding this file's minimal wagmi mock with useReadContract. This suite doesn't
+// exercise depeg behaviour, so a static 'ok' (no exchange-rate pair) keeps every test unaffected.
+vi.mock('@/hooks/useDepegCheck', () => ({
+  useDepegCheck: () => ({ mode: 'ok', divergence: 0, symbol: '', message: null }),
+}))
 
 vi.mock('@/hooks/useTokenBalances', () => ({
   useTokenBalances: () => useTokenBalancesMock(),
@@ -213,7 +224,11 @@ describe('DCAPanel spend step — per-chunk MIN re-validation', () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(pctButton('100%'))
     expect(amountInput()).toHaveValue('0.00000000000005')
-    expect(screen.getByText(/on-chain minimum/i)).toBeInTheDocument()
+    // [fix/dca-min-buy-copy] Human/USD floor label + a concrete fix computed from this total
+    // (floor(50,000 / 10,000) = 5 max buys), not raw base units.
+    const hint = screen.getByText(/on-chain minimum/i)
+    expect(hint.textContent).toMatch(/0\.00000000000001 WETH \(~\$0\.0000\)/)
+    expect(hint.textContent).toMatch(/Lower to 5 buys/)
   })
 
   it('shows no min hint for a healthy preset fill', () => {

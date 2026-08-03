@@ -36,6 +36,32 @@ interface KeyInput {
   chainId?: number
 }
 
+// [CHORE-API-HARDENING-2 / P3b] Significant figures kept when bucketing `amount`
+// for the cache key. 4 sig figs buckets to ~0.05-0.1% resolution on typical raw
+// amounts — a +1 wei increment (or any sub-bucket change) lands in the same
+// bucket and hits the cache, while a genuinely different trade size (a
+// different leading digit within the same magnitude, or a different magnitude)
+// still misses and gets its own quote.
+const AMOUNT_CACHE_SIG_FIGS = 4
+
+/**
+ * Bucket a raw (unsigned integer string) amount to `AMOUNT_CACHE_SIG_FIGS`
+ * significant figures by zeroing the trailing digits (rounds DOWN to the
+ * bucket floor). Defeats a "+1 wei per request" cache-bypass amplification: an
+ * attacker scripting /api/quote with an incrementing amount now hits the same
+ * cache entry instead of forcing an ~11-adapter fan-out on every request.
+ *
+ * Not a validator — a non-digit-string amount (already rejected elsewhere by
+ * the route's own validation) passes through UNCHANGED so this function can
+ * never be the reason a request fails; it only narrows the cache key for
+ * well-formed amounts.
+ */
+export function quantizeAmount(amount: string, sigFigs: number = AMOUNT_CACHE_SIG_FIGS): string {
+  if (!/^\d+$/.test(amount)) return amount
+  if (amount.length <= sigFigs) return amount
+  return amount.slice(0, sigFigs) + '0'.repeat(amount.length - sigFigs)
+}
+
 export function quoteCacheKey({
   src,
   dst,
@@ -52,7 +78,7 @@ export function quoteCacheKey({
   // (default) key is byte-identical to the pre-multi-chain key and existing
   // mainnet cache entries/hits are unaffected.
   const chainSuffix = chainId && chainId !== 1 ? `|${chainId}` : ''
-  return `${src.toLowerCase()}|${dst.toLowerCase()}|${amount}|${srcDecimals}|${dstDecimals}|${exclude}${chainSuffix}`
+  return `${src.toLowerCase()}|${dst.toLowerCase()}|${quantizeAmount(amount)}|${srcDecimals}|${dstDecimals}|${exclude}${chainSuffix}`
 }
 
 export function getQuote(key: string): MetaQuoteResult | undefined {

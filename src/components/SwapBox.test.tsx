@@ -231,6 +231,30 @@ describe('SwapBox — active-chain logo [CHORE-POLISH P6]', () => {
   })
 })
 
+describe('SwapBox — active-chain badge NAME [BUG-SWAPCARD-CHAIN-LABEL]', () => {
+  it('shows "Ethereum" for chainId 1, paired with the matching icon', () => {
+    mockChainId = 1
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-1')).toBeInTheDocument()
+    expect(screen.getByText('Ethereum')).toBeInTheDocument()
+  })
+
+  it('shows "Base" for chainId 8453, paired with the matching icon', () => {
+    mockChainId = 8453
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-8453')).toBeInTheDocument()
+    expect(screen.getByText('Base')).toBeInTheDocument()
+  })
+
+  it('shows "Arbitrum One" (not "Ethereum") for chainId 42161, paired with the matching icon', () => {
+    mockChainId = 42161
+    renderWithProviders(<SwapBox />)
+    expect(screen.getByTestId('chain-icon-42161')).toBeInTheDocument()
+    expect(screen.getByText('Arbitrum One')).toBeInTheDocument()
+    expect(screen.queryByText('Ethereum')).not.toBeInTheDocument()
+  })
+})
+
 describe('SwapBox — renders', () => {
   it('mounts with default ETH → USDC tokens (no crash)', () => {
     renderWithProviders(<SwapBox />)
@@ -507,12 +531,15 @@ describe('SwapBox — J1 price-impact informed consent', () => {
 // ─────────────────────────────────────────────────────────────
 // [SPRINT-9W-oracle] cbETH depeg circuit-breaker — a SECOND, independent verdict from
 // market-vs-exchange-rate divergence. Mirrors the 9J consent UX. useDepegCheck is mocked, so the
-// verdict drives the UI directly (the staleness/integrity → 'ok' fail-open is unit-tested in
-// depeg-gate.test.ts). HEALTHY_OK on the price-impact gate keeps depeg the only active verdict.
+// verdict drives the UI directly ([FIX-ORACLE-FAIL-CLOSED] the staleness/integrity → 'unverified'
+// fail-CLOSED mapping is unit-tested in depeg-gate.test.ts + useDepegCheck.test.ts). HEALTHY_OK on
+// the price-impact gate keeps depeg the only active verdict.
 // ─────────────────────────────────────────────────────────────
 const DEPEG_CONSENT_5 = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.' }
 const DEPEG_BLOCK_12 = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.' }
 const DEPEG_OK = { mode: 'ok' as const, divergence: 0.003, symbol: 'cbETH', message: null }
+// [FIX-ORACLE-FAIL-CLOSED] Applies but could not be checked (read error / revert / stale / unresolved chain).
+const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now — try again in a moment." }
 
 describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
   it('market ≈ ER (0.3%) → no friction', async () => {
@@ -578,16 +605,48 @@ describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
   })
 
-  it('either feed stale → hook returns ok → NO false block (falls to multi-source path)', async () => {
+  // [FIX-ORACLE-FAIL-CLOSED] This test previously asserted "either feed stale → hook returns ok →
+  // NO false block". That premise is exactly the hole that was fixed: a stale leg now yields
+  // 'unverified', which BLOCKS. Retained and inverted rather than deleted — the old contract is
+  // what must never return.
+  it('either feed stale → hook returns unverified → BLOCKED (a guard that cannot verify must not pass)', async () => {
     useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
-    // priceFromValidRound nulls a stale leg → evaluateDepeg → 'ok' (unit-tested in depeg-gate.test).
-    useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0, symbol: 'cbETH', message: null })
+    useDepegCheckMock.mockReturnValue(DEPEG_UNVERIFIED)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    const btn = screen.getByTestId('swap-button')
+    expect(btn.getAttribute('data-blocked')).toBe('true')
+    expect(btn.getAttribute('data-reason')).toBe('depeg-unverified')
+    // Not click-through-able: there is nothing for the user to accept, the feeds must answer.
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('unverified copy tells the user we could not CHECK — it never claims a depeg', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useDepegCheckMock.mockReturnValue(DEPEG_UNVERIFIED)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    useQuoteMock.mockReturnValue(quoteMeta('2940000000'))
+    await act(async () => { rerender(<SwapBox />) })
+    expect(screen.getByText(/price not verified/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Swap blocked — cbETH depeg/i)).toBeNull()
+  })
+
+  it('pending (reads in flight) adds NO friction — a first render is not a scary error', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useDepegCheckMock.mockReturnValue({ mode: 'pending', divergence: 0, symbol: 'cbETH', message: null })
     useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
     const { container } = renderWithProviders(<SwapBox />)
     const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
     await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
     expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
-    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByText(/price not verified/i)).toBeNull()
   })
 
   it('non-cbETH swaps are unchanged (default no-pair verdict adds no friction)', async () => {
@@ -598,6 +657,104 @@ describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
     const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
     await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
     expect(screen.getByTestId('swap-button').getAttribute('data-blocked')).toBe('false')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [BUG-SWAP-APPROVE-STALE-SUCCESS] Repro: after a completed swap, growing the
+// amount via the 50%/MAX quick-fill buttons must reset the PREVIOUS swap's
+// success state — same as typing a new amount already does (handleAmountChange
+// calls resetSwap()). Before the fix, handleSetAmount (used by 50%/MAX) never
+// called resetSwap()/resetSplitSwap(), so a stale status:'success' from the
+// low-amount swap survived into the new approve→swap cycle. Once the new
+// (larger) amount's approval confirmed, SwapButton's swapStatus === 'success'
+// branch fired again with NO new swap ever sent — the exact prod repro.
+// ─────────────────────────────────────────────────────────────
+describe('SwapBox — stale success reset on quick-fill amount change [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+  it('clicking MAX after a completed swap resets the swap state (ready to swap again, not stale success)', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success', // stale success left over from the PREVIOUS (small-amount) swap
+      txHash: '0xPREVIOUS_SWAP_TX',
+      errorMessage: null,
+      cowOrderUid: null,
+      priceGuardBlocked: false,
+      priceGuardDeviation: 0,
+      simulationPassed: true,
+      pendingSwap: null,
+      mevSurplusActualWei: null,
+      execute: vi.fn(),
+      confirmSwap: vi.fn(),
+      reset: resetSwapSpy,
+    })
+    const { container, getByText } = renderWithProviders(<SwapBox />)
+
+    // User clicks the MAX quick-fill button to swap a larger amount of the same token.
+    await act(async () => { fireEvent.click(getByText('MAX')) })
+
+    // The stale 'success' state from the prior swap MUST be reset — a fresh
+    // approve→swap cycle for the new amount must never inherit the old success.
+    expect(resetSwapSpy).toHaveBeenCalled()
+
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
+    expect(input!.value).not.toBe('')
+  })
+
+  it('clicking 50% after a completed swap also resets the swap state', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success',
+      txHash: '0xPREVIOUS_SWAP_TX',
+      errorMessage: null,
+      cowOrderUid: null,
+      priceGuardBlocked: false,
+      priceGuardDeviation: 0,
+      simulationPassed: true,
+      pendingSwap: null,
+      mevSurplusActualWei: null,
+      execute: vi.fn(),
+      confirmSwap: vi.fn(),
+      reset: resetSwapSpy,
+    })
+    const { getByText } = renderWithProviders(<SwapBox />)
+
+    await act(async () => { fireEvent.click(getByText('50%')) })
+
+    expect(resetSwapSpy).toHaveBeenCalled()
+  })
+
+  // Regression guards for the other reset paths (already correct pre-fix,
+  // pinned here so a future change can't silently drop them).
+  it('typing a new amount after a completed swap also resets the swap state', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success', txHash: '0xPREVIOUS_SWAP_TX', errorMessage: null, cowOrderUid: null,
+      priceGuardBlocked: false, priceGuardDeviation: 0, simulationPassed: true,
+      pendingSwap: null, mevSurplusActualWei: null,
+      execute: vi.fn(), confirmSwap: vi.fn(), reset: resetSwapSpy,
+    })
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '5' } }) })
+
+    expect(resetSwapSpy).toHaveBeenCalled()
+  })
+
+  it('selecting a different tokenOut after a completed swap also resets the swap state', async () => {
+    const resetSwapSpy = vi.fn()
+    useSwapMock.mockReturnValue({
+      status: 'success', txHash: '0xPREVIOUS_SWAP_TX', errorMessage: null, cowOrderUid: null,
+      priceGuardBlocked: false, priceGuardDeviation: 0, simulationPassed: true,
+      pendingSwap: null, mevSurplusActualWei: null,
+      execute: vi.fn(), confirmSwap: vi.fn(), reset: resetSwapSpy,
+    })
+    renderWithProviders(<SwapBox />)
+    const selectors = screen.getAllByTestId('token-selector')
+    // Second selector is tokenOut (mocked to select WBTC on click, see the
+    // ./TokenSelector mock above).
+    await act(async () => { fireEvent.click(selectors[1]) })
+
+    expect(resetSwapSpy).toHaveBeenCalled()
   })
 })
 

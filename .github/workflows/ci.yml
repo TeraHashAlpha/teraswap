@@ -2,22 +2,19 @@
 # Build runs after lint + typecheck + audit + lockfile-lint pass.
 # Contract tests run independently (Foundry/Forge).
 #
-# ── SECURITY NOTE (M-01) ─────────────────────────────────────────────
-# We run `npm ci --ignore-scripts=false` intentionally because our
-# postinstall hook runs `prisma generate` (required for the build).
-# This means npm lifecycle scripts ARE executed during CI installs.
+# ── SECURITY NOTE (CHORE-REVERT-IGNORE-SCRIPTS) ───────────────────────
+# `npm ci` honours the repo-root .npmrc `ignore-scripts=true` — install
+# lifecycle scripts (preinstall/install/postinstall) do NOT run. This was
+# previously overridden with `--ignore-scripts=false`, justified by a
+# Prisma `postinstall` that does not actually exist (0 occurrences in
+# package-lock.json; no `prisma` dependency, no postinstall script in
+# package.json). Reverted (threat model P5d / AZ review) to close the
+# unnecessary supply-chain surface.
 #
-# Mitigations:
-#   1. lockfile-lint job validates that all resolved URLs point to the
-#      official npm registry over HTTPS and that integrity hashes match.
-#   2. Dependabot keeps dependencies up-to-date, reducing the window
-#      for supply-chain attacks via compromised transitive packages.
-#   3. npm audit (high/critical gate) catches known-vulnerable packages.
-#   4. .npmrc min-release-age=7d refuses packages published < 7 days,
-#      blocking zero-day supply chain attacks (e.g. Mini Shai-Hulud).
-#
-# If you remove the prisma dependency, switch back to plain `npm ci`
-# (which defaults to --ignore-scripts=true in CI).
+# If a future dependency genuinely needs an install script, do NOT
+# blanket-revert this — scope `npm_config_ignore_scripts=false` (or an
+# npm `--foreground-scripts`/per-package override) to just that install
+# step and document why in FEEDBACK.
 # ─────────────────────────────────────────────────────────────────────
 
 name: "CI"
@@ -40,23 +37,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
-      - name: Lint (warnings only — React Compiler rules are advisory)
-        run: npx next lint --max-warnings 200 || true
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - run: npm run typecheck
       # [INC-2026-05-31-001] Fail on any NEW circular import — a cycle can yield
       # undefined exports in the Next prod bundle that unit tests don't catch.
@@ -67,11 +64,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Security audit (high/critical, allowlist-aware)
         # Fails on any high/critical NOT in audit-allowlist.json. The allowlist holds
         # only fixes blocked by .npmrc min-release-age=7 (each with a dated TODO). See
@@ -89,11 +86,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Catalog address guard
         run: npx vitest run src/lib/chains/catalog-address-guard.test.ts
 
@@ -105,13 +102,49 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Platform-fee USD guard
         run: npx vitest run src/lib/fee-usd.test.ts src/components/QuoteBreakdown.test.tsx
+
+  stablecoin-constant-guard:
+    # [CHORE-STABLECOIN-CONSTANT] Gate the chain-keyed stablecoin single source of truth
+    # (AZ review FE5: 6 divergent inline lists — USDbC counted as ~$1 in one gate but not
+    # another). The full vitest suite is not run in CI (only single-file guards), so this
+    # pins: the canonical per-chain USD (~$1) membership + its catalog drift-guards, EURC
+    # (EUR-pegged) staying category-only, every historical call site resolving to the
+    # constant, and the chain-keyed auto-slippage behaviour.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Stablecoin constant guard
+        run: npx vitest run src/lib/chains/stablecoins.test.ts src/components/SlippageModal.test.tsx
+
+  oracle-value-guard:
+    # [CHORE-ORACLE-VALUE-FAILCLOSED] Gate the fail-closed >$10k trade-value estimate
+    # (threat model PR #277, P2 MED confirmed): value = max(inputUsd, outputUsd) across
+    # DefiLlama + the server Chainlink path; a trade neither source can price on either
+    # side must BLOCK (422 `unpriceable`), never pass as "$0". The full vitest suite is
+    # not run in CI (only single-file guards), so this pins the server route branch and
+    # the client estimate helper.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Oracle value fail-closed guard
+        run: npx vitest run src/app/api/swap/route.test.ts src/lib/swap-usd-estimate.test.ts
 
   quote-source-guard:
     # [CHORE-QUOTE-SOURCE-FIXES] The full vitest suite is not run in CI (only
@@ -125,11 +158,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Quote-source guard (OpenOcean units; Balancer disabled; Sushi v7 sender + executable scoping; split sub-quote chainId)
         run: npx vitest run src/lib/adapters/openocean.test.ts src/lib/adapters/balancer-disabled.test.ts src/lib/adapters/sushiswap.test.ts src/lib/executable-sources.test.ts src/hooks/useSplitRoute.test.ts
 
@@ -141,16 +174,22 @@ jobs:
     # human messages instead of the generic "swap route unavailable"; (2) the DCA create
     # form blocks a schedule that can't finish before expiry (interval × buys > expiry).
     # The keeper-side policy (retry-policy.test.mjs) is gated by keeper-tests.yml.
+    # [CHORE-CI-TEST-DISCOVERY] DCAPanel.*.test.tsx is discovered by shell glob, not
+    # enumerated by name — a hard-coded single file (DCAPanel.routability.test.tsx) let
+    # DCAPanel.v3.test.tsx and DCAPanel.failed/.nofeed-consent/.ux-polish/.test.tsx run
+    # untested in CI with no workflow signal. A new DCAPanel.*.test.tsx file is covered
+    # automatically. src/components/ holds test files for many unrelated components, so
+    # the glob is scoped to the DCAPanel* prefix, not the whole directory.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
-      - name: DCA resilience guard (failure reasons + creation guard)
-        run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel.routability.test.tsx
+      - run: npm ci
+      - name: DCA resilience guard (failure reasons + creation guard + all DCAPanel suites)
+        run: npx vitest run src/lib/order-engine/failed-reason.test.ts src/lib/order-engine/dca-creation-guard.test.ts src/components/DCAPanel*.test.tsx
 
   oracle-advisory-guard:
     # [chore/oracle-less-advisory] Pins the oracle-coverage detection behind the
@@ -161,11 +200,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Oracle-less advisory guard (detection + fail-open)
         run: npx vitest run src/lib/order-engine/oracle-coverage.test.ts src/lib/order-engine/check-oracle.test.ts
 
@@ -178,16 +217,22 @@ jobs:
     # of the COMMITTED generated catalogs (schema, EIP-55, cores present+verified, no
     # duplicate address/symbol, verified⇒sources, CSP-safe 'self' logo URLs) and the
     # pinned per-chain majors. NO network — pure logic + committed JSON.
+    # [CHORE-CI-TEST-DISCOVERY] scripts/token-catalog/lib/*.test.ts is discovered by
+    # shell glob, not enumerated by name — the enumerated list had silently missed
+    # curated.test.ts (never ran in CI). That directory holds only this pipeline's own
+    # test files, so the glob is unambiguous. src/lib/chains/ is a large shared directory
+    # with many test files pinned by other unrelated guard jobs, so those 3 files stay
+    # individually listed — a directory glob there would silently widen this job's scope.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Token-catalog pipeline guard (cross-verify logic + committed catalog invariants)
-        run: npx vitest run scripts/token-catalog/lib/verify.test.ts scripts/token-catalog/lib/guard-gate.test.ts scripts/token-catalog/lib/build-chain.test.ts scripts/token-catalog/lib/sources.test.ts scripts/token-catalog/lib/category.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts src/lib/chains/tokens.test.ts
+        run: npx vitest run scripts/token-catalog/lib/*.test.ts src/lib/chains/token-catalog-json.test.ts src/lib/chains/token-catalog.test.ts src/lib/chains/tokens.test.ts
 
   minimum-output-guard:
     # [AUDIT-W2 / W2-L-01] The full vitest suite is not run in CI (only single-file
@@ -200,11 +245,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Minimum-output guard (unusable quote → refusal, never minOutput 0)
         run: npx vitest run src/lib/minimum-output.test.ts src/lib/swap-simulation.test.ts src/hooks/__tests__/swap-validations.test.ts src/hooks/useSplitSwap.test.ts
 
@@ -219,11 +264,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Quote-quorum guard (garbage quote cannot win a 2-responder display)
         run: npx vitest run src/lib/quote-quorum.test.ts
 
@@ -238,28 +283,53 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: Source-health guard (silence/outlier/drift pages once per window)
         run: npx vitest run src/lib/source-health-monitor.test.ts
+
+  client-ip-trust-guard:
+    # [FIX-CLIENT-IP-CLOUDFLARE-AWARE] trustedClientIp is the shared IP-TRUST PRIMITIVE behind
+    # every per-IP limiter (rpc / quote / swap / log, via kv-rate-limiter) — and it had NO guard
+    # job at all, so the P3a anti-spoof tests never ran in CI. This pins both halves of the trust
+    # model: (a) P3a — a client-prepended left-most x-forwarded-for is ignored when the
+    # platform-set header is present; (b) the Cloudflare gate — CF-Connecting-IP is honoured ONLY
+    # when the connecting peer is inside Cloudflare's published ranges, so a direct-to-origin
+    # attacker cannot nominate their own client IP, and a malformed value never reaches a Redis
+    # rate-limit key. A refactor that widens either one now fails the PR instead of shipping.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Client-IP trust guard (P3a anti-spoof + Cloudflare CF-Connecting-IP gate)
+        run: npx vitest run src/lib/trusted-ip.test.ts src/lib/cloudflare-ips.test.ts
 
   deployed-sources-guard:
     # [AUDIT-W2 / W2-M-01] Static deployed-source-of-truth gate: the canonical
     # addr → source → compiler → code-hash map (docs/security/DEPLOYED-SOURCES.md)
     # must exist and stay consistent, the stale never-deployed FeeCollector flat
     # must keep its DEPRECATED name + banner and must never be referenced by code
-    # or listed as a deployed source. Dependency-free and offline (no npm ci); the
-    # on-chain half is scripts/verify-deployed-sources.mjs (manual/audit runs).
+    # or listed as a deployed source. [CHORE-AZ-SECURITY-BATCH C4] Also: the weak
+    # V1 flat (frozen on-chain; 1-arg ctor, no admin/whitelist/timelock/
+    # minimumOutput, open receive) must keep its ⛔ DO-NOT-DEPLOY banner and stay
+    # out of code, and contracts/DEPLOY.md must keep prescribing the canonical V2
+    # recipe (TeraSwapFeeCollector.sol, solc 0.8.28, via-IR, 2-arg ctor).
+    # Dependency-free and offline (no npm ci); the on-chain half is
+    # scripts/verify-deployed-sources.mjs (manual/audit runs).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - name: Deployed-sources guard (source-integrity map + deprecated flat)
+      - name: Deployed-sources guard (map + deprecated/V1 flats + DEPLOY.md recipe)
         run: node scripts/check-deployed-sources.mjs
 
   api-hardening-guard:
@@ -275,19 +345,64 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - name: API hardening guard (read gate 401 / rate limit 429 / body cap 413)
-        run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
+        run: npx vitest run src/lib/order-engine/read-auth.test.ts src/lib/order-engine/types.test.ts src/lib/body-limit.test.ts src/app/api/orders src/app/api/log-routes.hardening.test.ts src/app/api/log-swap/route.test.ts src/hooks/useOrderEngine.test.ts src/components/OrderDashboard.test.tsx
+
+  dca-visibility-guard:
+    # [CHORE-DCA-VISIBILITY-AND-STATS] The full vitest suite is not run in CI (only
+    # single-file guards), so this pins the DCA visibility surface:
+    #   #2 /api/history merges the wallet's CONFIRMED order_executions fills with the
+    #      swaps table (swaps-first tx_hash dedup, reused from /api/analytics) and the
+    #      fills are W6-gated — surfaced ONLY with a valid per-session read signature,
+    #      never another wallet's, never an active DCA's running strategy.
+    #   #3 src/lib/dca/position-stats.ts computes cost-basis / invested / received /
+    #      %-complete / P&L-vs-spot purely from the fills; the golden completed DCA
+    #      0x5449dea0 (WETH→ETHFI, 5/5) reconciles exactly, P&L uses a live price.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: DCA visibility guard (history union + W6 gate + position stats)
+        run: npx vitest run src/app/api/history/route.test.ts src/lib/dca/position-stats.test.ts
+
+  full-suite:
+    # [CHORE-CI-FULL-SUITE-JOB] Additive alongside the 14 per-file guard jobs above, not a
+    # replacement for them (those stay as separately-named PR checks). This job runs the
+    # WHOLE vitest suite with no file arguments and no globs — discovery comes entirely from
+    # vitest.config.ts's own `include`, so a new test file anywhere in the repo is picked up
+    # automatically with no workflow edit, closing the gap the per-file guards leave: 164 of
+    # 220 test files (measured 2026-07-30, CI=true, no .env.local, all green, zero flake
+    # across two back-to-back runs) are reachable from NONE of them today.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Full test suite + coverage floor
+        run: |
+          CI=true npx vitest run --reporter=verbose --reporter=json --outputFile=/tmp/vitest-report.json
+          # [CHORE-CI-FULL-SUITE-JOB] Lowering 220 is a deliberate act requiring a stated reason
+          # (e.g. a test file was intentionally deleted or merged into another) — raising it
+          # needs no edit here, since adding test files only grows testResults.length.
+          node -e "const r=require('/tmp/vitest-report.json'); const n=r.testResults.length; const floor=220; if(n<floor){console.error('Coverage floor breached: '+n+' test files executed (floor '+floor+')'); process.exit(1)} console.log('Coverage floor OK: '+n+' test files (floor '+floor+')')"
 
   lockfile-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
@@ -297,6 +412,26 @@ jobs:
         run: |
           grep -q 'min-release-age' .npmrc || (echo "ERROR: .npmrc missing min-release-age" && exit 1)
           grep -q 'registry=https://registry.npmjs.org/' .npmrc || (echo "ERROR: .npmrc missing registry pin" && exit 1)
+
+  keeper-suite:
+    # [CI-KEEPER-SUITE-REQUIRED] The fund-moving executor layer (contracts/order-engine/executor)
+    # had no CI gate at all — its 406-test node:test suite only ran when a human remembered to run
+    # it locally. No path filter: this is meant to become a required check, and a required check
+    # behind paths:/paths-ignore: never reports on PRs that miss the filter, permanently blocking
+    # them from merging.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install keeper dependencies
+        working-directory: contracts/order-engine/executor
+        run: npm ci
+      - name: Keeper test suite
+        working-directory: contracts/order-engine/executor
+        run: node --test
 
   test-contracts:
     # [CHORE-TEST-CONTRACTS-REAL-GATE] continue-on-error REMOVED: the suite is now
@@ -308,7 +443,7 @@ jobs:
         with:
           submodules: recursive
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1
         with:
           version: stable
       - name: Run forge tests — OrderExecutor (order-engine)
@@ -325,9 +460,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci --ignore-scripts=false
+      - run: npm ci
       - run: npm run build
