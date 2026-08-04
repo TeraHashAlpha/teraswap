@@ -1,3 +1,10 @@
+/**
+ * @deprecated Odos ceased ALL operations 2026-07-30 (vendor shutdown,
+ * announced publicly) — permanently disabled via DISABLED_SOURCES.odos in
+ * lib/constants.ts. Re-enable is impossible; the company no longer exists.
+ * Kept in place (never delete, see CLAUDE.md); ADAPTER_REGISTRY filters this
+ * out of every quote before it ever reaches fetchQuote below.
+ */
 import { DEFAULT_SLIPPAGE } from '@/lib/constants'
 import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { parseJsonOrThrow } from './shared'
