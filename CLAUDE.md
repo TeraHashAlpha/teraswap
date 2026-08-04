@@ -1,6 +1,6 @@
 # TeraSwap
 
-Ethereum Mainnet meta-aggregator — 11 liquidity sources, conditional orders (Limit/SL/TP/DCA), MEV protection via CoW Protocol, gasless approvals via Permit2. Smart contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor v2 (Solidity 0.8.28, Foundry).
+Ethereum Mainnet meta-aggregator — 10 liquidity sources (11 incl. Bebop; Odos permanently disabled 2026-07-30, vendor shutdown), conditional orders (Limit/SL/TP/DCA), MEV protection via CoW Protocol, gasless approvals via Permit2. Smart contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor v2 (Solidity 0.8.28, Foundry).
 
 **State:** Phase 1 complete. Sprint 9B in progress (FeeCollector V2 minimumOutput — P68 mainnet deploy pending); parallel `CHORE-*` stream running post-9B (stablecoin canon, fail-closed oracle gate, DCA visibility/custom periods, DefiLlama adapter). 2587 TS + 74 Foundry tests passing. 8 CI workflows (`ci`, `codeql`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`).
 

@@ -2,7 +2,7 @@
 
 ## Completed
 
-- **Meta-aggregation engine** — 11 liquidity sources (1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, Curve Finance)
+- **Meta-aggregation engine** — 11 liquidity sources shipped (1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, Curve Finance); **10 active today** — Odos permanently disabled 2026-07-30 (vendor shutdown)
 - **MEV protection** — CoW Protocol batch auctions + Chainlink price validation
 - **Gasless approvals** — Permit2 / EIP-2612 off-chain signing
 - **FeeCollector contract** — 0.1% protocol fee with on-chain routing
@@ -67,7 +67,7 @@ TeraSwapOrderExecutor v2 deployed with all audit findings resolved.
 
 - [x] ~~**Base support**~~ — ✅ **LIVE & fully hardened** (2026-06-02). Chain-aware adapters
   (Sprints 43–45 + 9C), per-chain Uniswap V3 registry, FeeCollector + routers whitelisted on Base,
-  gas/fee in ETH+USD, Base/mainnet UI parity (9E). **12 sources incl. Bebop** (ADR-010, 9D).
+  gas/fee in ETH+USD, Base/mainnet UI parity (9E). **11 sources incl. Bebop** (ADR-010, 9D; was 12 — Odos permanently disabled 2026-07-30, vendor shutdown).
   **Safety/oracle gates chain-aware** (9G: Chainlink + L2 sequencer, DefiLlama >$10k guard,
   post-execution validator, server-side activation gate — all per-chain; rule #9 satisfied on Base).
   **Source-execution fixed** (9H: Velora/Augustus V6.2 Curve selectors, Bebop fail-soft).

@@ -14,7 +14,7 @@ export const helpSections: HelpSection[] = [
     items: [
       {
         q: 'What is TeraSwap?',
-        a: 'TeraSwap is a DEX meta-aggregator that searches 11 liquidity sources simultaneously to find you the best swap rate on Ethereum. Instead of checking each DEX manually, TeraSwap does it in one click.',
+        a: 'TeraSwap is a DEX meta-aggregator that searches 10 liquidity sources simultaneously to find you the best swap rate on Ethereum. Instead of checking each DEX manually, TeraSwap does it in one click.',
       },
       {
         q: 'How do I connect my wallet?',
@@ -35,7 +35,7 @@ export const helpSections: HelpSection[] = [
     items: [
       {
         q: 'How does the meta-aggregator work?',
-        a: 'When you request a quote, TeraSwap queries 11 sources (1inch, 0x, Odos, KyberSwap, CowSwap, Uniswap V3, OpenOcean, SushiSwap, Balancer, Curve, and Velora) in parallel and ranks them by output amount. You always get the best available rate.',
+        a: 'When you request a quote, TeraSwap queries 10 sources (1inch, 0x, KyberSwap, CowSwap, Uniswap V3, OpenOcean, SushiSwap, Balancer, Curve, and Velora) in parallel and ranks them by output amount. You always get the best available rate.',
       },
       {
         q: 'What is Split Routing?',
