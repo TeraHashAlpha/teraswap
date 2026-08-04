@@ -22,7 +22,7 @@ const jetbrainsMono = JetBrains_Mono({
 const SITE_URL = 'https://www.teraswap.app'
 const SITE_TITLE = 'TeraSwap — The Gold Standard of DeFi Trading'
 const SITE_DESCRIPTION =
-  'Maximum liquidity. Absolute protection. TeraSwap is an Ethereum meta-aggregator that queries 11 liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-free execution via CoW Protocol, and a privacy proxy that hides your IP from all external services.'
+  'Maximum liquidity. Absolute protection. TeraSwap is an Ethereum meta-aggregator that queries 10 liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-free execution via CoW Protocol, and a privacy proxy that hides your IP from all external services.'
 
 export const metadata: Metadata = {
   title: SITE_TITLE,
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   keywords: [
     'DeFi', 'DEX aggregator', 'meta-aggregator', 'Ethereum', 'swap',
     'TeraSwap', '1inch', '0x', 'CoW Protocol', 'Uniswap', 'ParaSwap',
-    'Odos', 'KyberSwap', 'Chainlink', 'MEV protection', 'best rate',
+    'KyberSwap', 'Chainlink', 'MEV protection', 'best rate',
     'privacy', 'IP protection', 'DefiLlama', 'non-custodial',
   ],
   authors: [{ name: 'TeraSwap' }],
