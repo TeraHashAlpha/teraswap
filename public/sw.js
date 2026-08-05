@@ -81,6 +81,11 @@ self.addEventListener('fetch', (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
           }
           return response
+        }).catch(() => {
+          // A CSP-blocked or otherwise failed fetch (e.g. a cross-origin font/asset
+          // rejected by connect-src) must not surface as an unhandled promise
+          // rejection in respondWith — synthesize a network-error response instead.
+          return new Response(null, { status: 504, statusText: 'Gateway Timeout' })
         })
       })
     )
