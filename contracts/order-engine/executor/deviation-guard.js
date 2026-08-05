@@ -25,6 +25,8 @@
 // ─── Tunable thresholds (env-overridable, guarded to a sane range) ──────────
 // Both are clamped on load: a mis-set env var can only ever tighten/loosen the
 // gate within safe bounds, never disable the fail-safe (unparseable ⇒ default).
+// [KEEPER-ENV-ORDER] These module-scope env reads resolve correctly because every
+// entrypoint imports ./env.js FIRST — pinned by env-order.test.mjs.
 
 /**
  * Clamp a parsed fraction into [0,1], falling back on unparseable input. When

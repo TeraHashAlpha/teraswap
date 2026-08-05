@@ -61,6 +61,11 @@
  *   ALLOW_PLAINTEXT_KEY_MAINNET -- back-compat alias for ALLOW_PLAINTEXT_KEY (either enables the bypass)
  */
 
+// [KEEPER-ENV-ORDER] MUST stay the first import: env.js loads .env.executor in its
+// module body, so it must evaluate before any module below reads process.env at
+// module scope (alert.js, retry-policy.js, deviation-guard.js). Pinned by
+// env-order.test.mjs.
+import "./env.js"
 import {
   createPublicClient,
   createWalletClient,
@@ -72,8 +77,6 @@ import {
   formatEther,
   zeroHash,
 } from "viem"
-import { readFileSync } from "fs"
-import { join } from "path"
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
 import { startEventWatcher } from "./event-watcher.js"
@@ -163,31 +166,9 @@ import {
   EXPECTED_ORDER_TYPEHASH_V3,
 } from "./chain-verify.js"
 
-// ---- Load .env.executor manually (no dotenv dependency) ----------------
-
-function loadEnv(filePath) {
-  try {
-    const content = readFileSync(filePath, "utf-8")
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
-      const eqIndex = trimmed.indexOf("=")
-      if (eqIndex === -1) continue
-      const key = trimmed.slice(0, eqIndex).trim()
-      const value = trimmed.slice(eqIndex + 1).trim()
-      if (!process.env[key]) {
-        process.env[key] = value
-      }
-    }
-  } catch (err) {
-    console.warn(`WARNING: Could not load ${filePath}: ${err.message}`)
-  }
-}
-
-// Use process.cwd() -- works with spaces in path
-loadEnv(join(process.cwd(), ".env.executor"))
-
 // ---- Configuration -----------------------------------------------------
+// .env.executor is loaded by ./env.js (the FIRST import above), so every read
+// below — and every module-scope read in the modules imported above — sees it.
 
 const RPC_URL = process.env.RPC_URL
 const PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY
