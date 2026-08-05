@@ -174,9 +174,15 @@ function main() {
 // realpathSync, not a raw string compare: on macOS /tmp is a symlink to /private/tmp, so
 // import.meta.url (always the realpath) would silently never match a bare process.argv[1] and
 // main() would never run — this was caught by a dry run through a /tmp sandbox during review.
+// Compare resolved PATHS, not a hand-built URL string: `file://${realpathSync(...)}` doesn't
+// percent-encode, so a checkout path containing a space (e.g. "dex-aggregator 2") never matched
+// import.meta.url's %20-encoded form — main() silently never ran there (field-confirmed 2026-08-04).
 const isMain = (() => {
   try {
-    return process.argv[1] !== undefined && import.meta.url === `file://${realpathSync(process.argv[1])}`
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+    )
   } catch {
     return false
   }
