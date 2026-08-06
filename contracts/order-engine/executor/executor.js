@@ -1967,37 +1967,53 @@ async function main() {
   // watcher and the first cycle, so a mis-bound keeper never touches an order. Any failure —
   // mismatch, empty code, unreachable RPC, timeout, malformed answer — exits non-zero after a
   // bounded retry; there is deliberately no warn-and-continue branch.
+  // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] Built once, refused-if-empty BEFORE the gate touches the
+  // network: a keeper with NEITHER executor address has nothing to verify and nothing to execute
+  // against, and must never reach the work loop. verifyChainBinding would also refuse an empty
+  // list, but as a generic config error — this is the distinct, named failure that tells the
+  // operator exactly which two variables can fix it. (validateConfig enforces the same rule even
+  // earlier; this check is the gate's own backstop, so a future validateConfig drift can never
+  // hand the gate nothing to verify.)
+  const gateContracts = [
+    // v2 mirrors the v3 spread below: Arbitrum One has no v2 OrderExecutor, so an ABSENT
+    // ORDER_EXECUTOR_ADDRESS skips the entry instead of bricking the boot. A CONFIGURED v2 is
+    // still verified fail-closed exactly as before — wrong chain, no code, or a wrong
+    // ORDER_TYPEHASH all still exit non-zero.
+    ...(CONTRACT_ADDRESS
+      ? [
+          {
+            label: "ORDER_EXECUTOR_ADDRESS (v2)",
+            address: CONTRACT_ADDRESS,
+            expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
+          },
+        ]
+      : []),
+    // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
+    // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
+    // with the v3 typehash, which also catches a v2/v3 address swap in the env.
+    ...(V3_CONTRACT_ADDRESS
+      ? [
+          {
+            label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
+            address: V3_CONTRACT_ADDRESS,
+            expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
+          },
+        ]
+      : []),
+  ]
+  if (gateContracts.length === 0) {
+    console.error(
+      "FATAL: no executor contract configured — set ORDER_EXECUTOR_ADDRESS (v2) and/or " +
+        "ORDER_EXECUTOR_V3_ADDRESS (v3). A keeper with neither has nothing to verify or execute. " +
+        "Refusing to boot.",
+    )
+    process.exit(1)
+  }
   try {
     await verifyChainBinding({
       provider: createRpcProbe(publicClient),
       chainId: CHAIN_ID,
-      contracts: [
-        // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] v2 mirrors the v3 spread below: Arbitrum One has no
-        // v2 OrderExecutor, so an ABSENT ORDER_EXECUTOR_ADDRESS skips the entry instead of
-        // bricking the boot. A CONFIGURED v2 is still verified fail-closed exactly as before —
-        // wrong chain, no code, or a wrong ORDER_TYPEHASH all still exit non-zero.
-        ...(CONTRACT_ADDRESS
-          ? [
-              {
-                label: "ORDER_EXECUTOR_ADDRESS (v2)",
-                address: CONTRACT_ADDRESS,
-                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
-              },
-            ]
-          : []),
-        // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
-        // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
-        // with the v3 typehash, which also catches a v2/v3 address swap in the env.
-        ...(V3_CONTRACT_ADDRESS
-          ? [
-              {
-                label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
-                address: V3_CONTRACT_ADDRESS,
-                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
-              },
-            ]
-          : []),
-      ],
+      contracts: gateContracts,
       log,
     })
   } catch (err) {
