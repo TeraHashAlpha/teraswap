@@ -1972,11 +1972,19 @@ async function main() {
       provider: createRpcProbe(publicClient),
       chainId: CHAIN_ID,
       contracts: [
-        {
-          label: "ORDER_EXECUTOR_ADDRESS (v2)",
-          address: CONTRACT_ADDRESS,
-          expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
-        },
+        // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] v2 mirrors the v3 spread below: Arbitrum One has no
+        // v2 OrderExecutor, so an ABSENT ORDER_EXECUTOR_ADDRESS skips the entry instead of
+        // bricking the boot. A CONFIGURED v2 is still verified fail-closed exactly as before —
+        // wrong chain, no code, or a wrong ORDER_TYPEHASH all still exit non-zero.
+        ...(CONTRACT_ADDRESS
+          ? [
+              {
+                label: "ORDER_EXECUTOR_ADDRESS (v2)",
+                address: CONTRACT_ADDRESS,
+                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
+              },
+            ]
+          : []),
         // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
         // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
         // with the v3 typehash, which also catches a v2/v3 address swap in the env.
