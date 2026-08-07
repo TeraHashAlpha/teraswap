@@ -209,16 +209,17 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     })
   })
 
-  // Note: the default DCA pair (WETH → ETH) is covered by the APPROX_PRICES last-resort table,
-  // so it never actually hits the "no price reference" fallback through the full component tree
-  // with this test's stubbed TokenSelector (can't pick an unpriced token). The fallback/decay-
-  // warning path itself (hasFeed=false, source='fallback', non-zero floor) is exhaustively unit
-  // tested in v3-min-derivation.test.ts — this test instead proves the UI wiring degrades
-  // gracefully (still renders a real floor, no crash) when both live price sources fail.
-  it('still renders a real (non-1-wei) floor via the APPROX_PRICES tier when DefiLlama has no coverage', async () => {
-    // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Premise is now the LEGITIMATE no-feed case (the token has
-    // no Chainlink feed at all ⇒ oracleUnavailable, integrity NOT failed ⇒ evaluatePriceGate 'ok'),
-    // not an unreadable feed. This doubles as the regression guard that the new gate does not block
+  // [FIX-SIGNING-MIN-PRICE-INTEGRITY / INC-2026-08-07-001] This test previously asserted the
+  // OPPOSITE: that with both live sources dead the panel still rendered an APPROX_PRICES-derived
+  // floor and did NOT show the decay warning. That is precisely the UI symptom of the incident —
+  // order ef85438b signed a table-priced floor and the user was shown no warning at all, because
+  // the derivation reported hasFeed=true / source='chainlink'. The hardcoded table is no longer a
+  // signing tier, so this scenario must now surface the warning. The floor must still be real and
+  // non-1-wei, which is what the rest of this test still proves.
+  it('shows the decay warning and a real (non-1-wei) floor when NO live price source covers the pair', async () => {
+    // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] Premise is the LEGITIMATE no-feed case (the token has no
+    // Chainlink feed at all ⇒ oracleUnavailable, integrity NOT failed ⇒ evaluatePriceGate 'ok'),
+    // not an unreadable feed. This doubles as the regression guard that the gate does not block
     // feedless tokens — the ordinary DCA case for imported/thin assets.
     resolveFeedOverride = () => null // no price source of any shape for either leg
     mockFetchDefiLlamaPrice.mockResolvedValue(null) // no DefiLlama coverage either
@@ -229,9 +230,9 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     await waitFor(() => {
       expect(screen.getByText(/Signed floor per order/i)).toBeInTheDocument()
     })
-    // The default WETH/ETH pair is APPROX_PRICES-covered, so this should NOT show the decay
-    // warning (source='approx', not 'fallback').
-    expect(screen.queryByText(/no price reference for this pair/i)).toBeNull()
+    // Neither live source covers the pair ⇒ hasFeed=false ⇒ the ADR-013 decay warning MUST be
+    // visible. Before this fix the APPROX_PRICES tier silently suppressed it.
+    expect(screen.getByText(/no price reference for this pair/i)).toBeInTheDocument()
     // Self-verifying premise: the no-feed state must genuinely have been produced, i.e. the legitimate
     // DefiLlama fallback WAS reached (and returned nothing). Without this the test silently passes if
     // the resolver stub ever stops taking effect again — exactly how it went vacuous on the #370 rebase.
