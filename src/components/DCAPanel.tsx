@@ -88,8 +88,9 @@ const DCA_PAUSED_RE = /temporarily paused/i
  * This panel used to read `useChainlinkPrice(...).chainlinkPrice` and DISCARD both
  * `oracleIntegrityFailed` and `oracleReadFailed` — the same fail-open class already closed in the
  * swap flow. The discarded verdict was not cosmetic here: that price is the reference
- * `deriveSigningMinAmountOut` derives the per-buy `minAmountOut` floor from, so a feed we could not
- * verify became a floor the user then SIGNED — and, for the stale / `answeredInRound < roundId`
+ * `deriveSigningMinAmountOut` derives the `minAmountOut` floor from — signed against the ORDER
+ * TOTAL, then rescaled per chunk on-chain (TeraSwapOrderExecutorV3.sol:526; see [D3] below) — so a
+ * feed we could not verify became a floor the user then SIGNED — and, for the stale / `answeredInRound < roundId`
  * cases, `chainlinkPrice` comes back POPULATED alongside `oracleIntegrityFailed: true`, so the bad
  * number was used directly rather than merely leaving a gap.
  *
@@ -135,7 +136,7 @@ export function evaluateDcaOracleGate(spend: PriceCheck, buy: PriceCheck): DcaOr
  * It used to call `getChainlinkFeed`, which only knows DIRECT token/USD feeds. Post-ADR-018 a token
  * may instead resolve COMPOSED (base × quote) — Base cbETH is exactly that: no direct cbETH/USD
  * entry, but a verified cbETH/ETH × ETH/USD pair that the hook reads and that
- * `deriveSigningMinAmountOut` derives the per-buy floor from. The direct-only lookup returned null
+ * `deriveSigningMinAmountOut` derives the (order-total-basis) floor from. The direct-only lookup returned null
  * for it, so cbETH fired a "no feed" consent modal that was simply false.
  *
  * `resolveFeed` is the SAME resolver the hook uses, so the two cannot disagree. The safe direction is
@@ -1227,9 +1228,20 @@ function CreateDCAForm({
                   </button>
                 ))}
               </div>
-              {signingMin != null && tokenOut && (
+              {/* [Auditor L-3] `signingMin.minAmountOut` is the TOTAL-basis signed value (D3); the
+                  contract enforces only `executeAmount/amountIn` of it on any ONE buy
+                  (TeraSwapOrderExecutorV3.sol:526). The old copy — a bare "Signed floor per order:
+                  ≥ X" — read as "this much protects every buy": for 30 buys it showed 0.0001 WETH
+                  while the actual per-fill protection was 0.0000033 WETH. "per order" now
+                  explicitly means TOTAL (kept verbatim as a label, not a claim about each fill),
+                  and the per-buy enforced figure (perChunkRaw — the SAME total/parts split
+                  useOrderEngine.createOrder uses elsewhere in this file) is shown alongside it, not
+                  buried. Display only — signingMin.minAmountOut itself, and what gets signed, is
+                  unchanged. */}
+              {signingMin != null && tokenOut && parts > 0 && (
                 <p className="mt-2 text-[11px] text-cream-35">
-                  Signed floor per order: ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol}
+                  Signed floor per order (total): ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol} across {parts} buys
+                  {' '}— ≥ {formatUnits(perChunkRaw(signingMin.minAmountOut, parts), tokenOut.decimals)} {tokenOut.symbol} enforced per buy
                   {!signingMin.hasFeed && (
                     <span className="ml-1 text-amber-300">
                       (no price reference for this pair — fixed floor, not price-derived; it may

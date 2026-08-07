@@ -386,7 +386,10 @@ jobs:
     # strongest; D2: a hardcoded table can no longer reach a signed on-chain minimum; D3: the
     # total-vs-per-chunk amountIn cancellation against TeraSwapOrderExecutorV3.sol:526 is pinned so
     # it cannot be "fixed" by halves). v3-min-derivation.test.ts is the module's existing unit
-    # suite. See Audits/Incidents/INC-2026-08-07-001.md for the full incident record.
+    # suite. [Auditor M-1] DCAPanel.v3.test.tsx also runs here: after M-1 it carries the ONLY
+    # caller-side pin — an exact-literal assertion on the real EIP-712 signed minAmountOut — since
+    # the derivation-level tests feed literals straight into the module and never bind the caller.
+    # See Audits/Incidents/INC-2026-08-07-001.md for the full incident record.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -395,8 +398,8 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: Signing-path price-integrity guard (v3 DCA minAmountOut derivation)
-        run: npx vitest run src/lib/order-engine/v3-min-derivation.test.ts src/lib/order-engine/v3-min-price-integrity.test.ts
+      - name: Signing-path price-integrity guard (v3 DCA minAmountOut derivation + DCAPanel caller pin)
+        run: npx vitest run src/lib/order-engine/v3-min-derivation.test.ts src/lib/order-engine/v3-min-price-integrity.test.ts src/components/DCAPanel.v3.test.tsx
 
   full-suite:
     # [CHORE-CI-FULL-SUITE-JOB] Additive alongside the 14 per-file guard jobs above, not a

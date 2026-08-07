@@ -103,17 +103,28 @@ describe('D2 — a hardcoded table may NEVER price a signed on-chain minimum', (
   })
 
   it('the table cannot even be PASSED to the signing derivation (compiler-enforced)', () => {
-    // The strongest form of this policy is one a future caller cannot opt out of. If
-    // `approxPriceIn` is ever reintroduced to DeriveSigningMinParams, the @ts-expect-error below
-    // becomes unused and `npm run typecheck` fails — so this pin cannot rot silently.
-    const r = deriveSigningMinAmountOut({
+    // The strongest form of this policy is one a future caller cannot opt out of. If EITHER
+    // `approxPriceIn` or `approxPriceOut` is ever reintroduced to DeriveSigningMinParams, the
+    // matching TS-expect-error directive below becomes unused and `npm run typecheck` fails — so
+    // this pin cannot rot silently. [Auditor L-2] Each property gets its OWN directive line: one
+    // directive covering both properties would still be satisfied by a SINGLE excess-property
+    // error, so a future change re-adding only `approxPriceOut` (leaving `approxPriceIn` removed)
+    // would go uncaught — the shared directive would find `approxPriceIn`'s error and stop looking.
+    const rIn = deriveSigningMinAmountOut({
       ...scenario,
       // @ts-expect-error — approxPriceIn was removed from DeriveSigningMinParams on purpose.
       approxPriceIn: 3600,
     })
-    // And even smuggled in at runtime it changes nothing: the no-feed path still wins.
-    expect(r.hasFeed).toBe(false)
-    expect(r.minAmountOut).not.toBe(SIGNED_MIN_AMOUNT_OUT)
+    const rOut = deriveSigningMinAmountOut({
+      ...scenario,
+      // @ts-expect-error — approxPriceOut was removed from DeriveSigningMinParams on purpose.
+      approxPriceOut: 3600,
+    })
+    // And even smuggled in at runtime it changes nothing: the no-feed path still wins, either leg.
+    expect(rIn.hasFeed).toBe(false)
+    expect(rIn.minAmountOut).not.toBe(SIGNED_MIN_AMOUNT_OUT)
+    expect(rOut.hasFeed).toBe(false)
+    expect(rOut.minAmountOut).not.toBe(SIGNED_MIN_AMOUNT_OUT)
   })
 
   it('a leg priced ONLY by the table is treated as unpriced on either side', () => {

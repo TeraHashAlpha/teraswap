@@ -195,6 +195,32 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     expect(mockFetchDefiLlamaPrice).not.toHaveBeenCalled()
   })
 
+  // [Auditor M-1] The D3 pin (v3-min-price-integrity.test.ts "the total/per-chunk cancellation")
+  // never imports DCAPanel — it feeds literals straight into deriveAbsoluteMinAmountOut. Nothing
+  // caller-side asserted an EXACT number, only `not.toBe(1n)` / `> 0n` above: a caller-side
+  // regression that divides the total by dcaTotal before signing (a real risk — the value LOOKS
+  // like a per-chunk amount would belong there) passed every existing test. This asserts the
+  // literal the real signing path (handleCreate → EIP-712 message) must produce.
+  it('signs an EXACT minAmountOut derived from the ORDER TOTAL, never a per-chunk amount [Auditor M-1]', async () => {
+    renderWithProviders(<DCAPanel />)
+    enterAmount('100')
+
+    fireEvent.click(startDcaButton())
+    fireEvent.click(await screen.findByTestId('confirm-review'))
+
+    await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))
+    const signArg = mockSignTypedDataAsync.mock.calls[0][0] as {
+      message: { minAmountOut: bigint }
+    }
+    // amountIn = 100 WETH (18dp) TOTAL. Both legs price at $2000 (healthyEthUsdRound answers the
+    // same round for any feed address), so fairOut = amountIn exactly. maxSlippageBps defaults to
+    // DEFAULT_MAX_SLIPPAGE_BPS = 300 (3%): minAmountOut = amountIn * 9700/10000 = 97 whole WETH.
+    // The default preset is 10 buys (DCA_TOTAL_PRESETS[2]) — a caller-side bug that divides by
+    // dcaTotal before signing would produce 9.7e18 here, a full order of magnitude smaller, and
+    // this is the only assertion in the suite that would catch it.
+    expect(signArg.message.minAmountOut).toBe(97_000000000000000000n)
+  })
+
   it('the derived floor is shown in the Advanced panel once a slippage tier is selected', async () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
