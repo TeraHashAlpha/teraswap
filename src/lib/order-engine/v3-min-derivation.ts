@@ -88,7 +88,22 @@ export function computeReferenceExpectedOutTs(p: {
 }
 
 export interface DeriveAbsoluteMinParams {
-  /** Raw tokenIn amount for THIS chunk (per-DCA-execution amount, not the order total). */
+  /**
+   * Raw tokenIn amount the floor is derived from.
+   *
+   * ⚠ [D3 — LOAD-BEARING. Read before "correcting" this.] This doc used to read "per-chunk amount,
+   * not the order total". For DCA that was WRONG, and the code was right: DCAPanel deliberately
+   * passes the ORDER TOTAL. TeraSwapOrderExecutorV3.sol:526 then scales the signed minimum down to
+   * each chunk itself —
+   *   `scaledMin = minAmountOut * executeAmount / amountIn`
+   * — so the per-chunk division happens exactly once, on-chain. The two ends cancel by design.
+   *
+   * Passing the per-chunk amount here would divide a SECOND time and leave every DCA floor
+   * ~dcaTotal times too low: a silent fail-open on a fund-flow path, and strictly worse than the
+   * over-tight floor of INC-2026-08-07-001 (which at least failed closed). Change BOTH ends
+   * together or neither. Pinned by v3-min-price-integrity.test.ts → "D3 — the total/per-chunk
+   * cancellation".
+   */
   amountIn: bigint | number | string
   srcDecimals: number
   dstDecimals: number

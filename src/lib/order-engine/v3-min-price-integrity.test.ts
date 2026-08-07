@@ -172,3 +172,68 @@ describe('D1 — the reported tier must be the WEAKEST of the two legs', () => {
     expect(r.source).toBe('chainlink')
   })
 })
+
+describe('D3 — the total/per-chunk cancellation is load-bearing; do not "fix" one end', () => {
+  // deriveAbsoluteMinAmountOut's docblock USED to ask for a PER-CHUNK amount while DCAPanel passed
+  // the TOTAL — a contradiction that reads like a bug and is not one.
+  // TeraSwapOrderExecutorV3.sol:526 divides by exactly the same factor (executeAmount/amountIn), so
+  // the two cancel and the enforced per-chunk floor is correct. Correcting only the caller would
+  // divide once more and leave every DCA minimum ~dcaTotal times too low — a fail-open on a
+  // fund-flow path. The docblock is now explicit; these tests exist so that if someone "fixes" it
+  // anyway, they break a test instead of every future DCA order.
+  const priceIn = 2204 // a realistic cbETH
+  const priceOut = WETH_CHAINLINK_PRICE
+
+  const signedFromTotal = deriveAbsoluteMinAmountOut({
+    amountIn: AMOUNT_IN_TOTAL,
+    srcDecimals: 18,
+    dstDecimals: 18,
+    priceInUsd: priceIn,
+    priceOutUsd: priceOut,
+    maxSlippageBps: MAX_SLIPPAGE_BPS,
+  })!
+
+  const executeAmount =
+    (AMOUNT_IN_TOTAL * 1n) / DCA_TOTAL - (AMOUNT_IN_TOTAL * 0n) / DCA_TOTAL
+
+  it('signing the TOTAL then contract-scaling equals signing the per-chunk amount', () => {
+    // What the contract actually enforces for chunk 1, given today's (total) signing input.
+    const enforcedPerChunk = (signedFromTotal * executeAmount) / AMOUNT_IN_TOTAL
+
+    // What the docblock's literal reading would have signed instead.
+    const signedFromChunk = deriveAbsoluteMinAmountOut({
+      amountIn: executeAmount,
+      srcDecimals: 18,
+      dstDecimals: 18,
+      priceInUsd: priceIn,
+      priceOutUsd: priceOut,
+      maxSlippageBps: MAX_SLIPPAGE_BPS,
+    })!
+
+    // Equal up to integer-division rounding (a few wei on an 18dp magnitude).
+    const diff =
+      enforcedPerChunk > signedFromChunk
+        ? enforcedPerChunk - signedFromChunk
+        : signedFromChunk - enforcedPerChunk
+    expect(diff).toBeLessThanOrEqual(4n)
+  })
+
+  it('correcting ONLY the caller would leave the enforced floor ~dcaTotal times too low', () => {
+    // The naive "fix": sign the per-chunk amount, while the contract keeps scaling by
+    // executeAmount/amountIn. The division lands twice.
+    const signedFromChunk = deriveAbsoluteMinAmountOut({
+      amountIn: executeAmount,
+      srcDecimals: 18,
+      dstDecimals: 18,
+      priceInUsd: priceIn,
+      priceOutUsd: priceOut,
+      maxSlippageBps: MAX_SLIPPAGE_BPS,
+    })!
+    const wouldBeEnforced = (signedFromChunk * executeAmount) / AMOUNT_IN_TOTAL
+    const correctlyEnforced = (signedFromTotal * executeAmount) / AMOUNT_IN_TOTAL
+
+    // ~1/3 of the protection the user actually signed up for.
+    const ratio = Number(correctlyEnforced) / Number(wouldBeEnforced)
+    expect(ratio).toBeCloseTo(Number(DCA_TOTAL), 2)
+  })
+})

@@ -509,6 +509,8 @@ function CreateDCAForm({
     // price a signed on-chain minimum (INC-2026-08-07-001). An unpriceable leg now yields the
     // honest no-feed floor + decay warning. The parameters no longer exist, so this is enforced by
     // the compiler, not by this comment.
+    // [D3 — LOAD-BEARING] `liveAmountInRaw` is the ORDER TOTAL, deliberately: the contract divides
+    // per chunk (TeraSwapOrderExecutorV3.sol:526). See the amountIn docblock in v3-min-derivation.ts.
     return deriveSigningMinAmountOut({
       amountIn: liveAmountInRaw,
       srcDecimals: tokenIn.decimals,
@@ -730,6 +732,13 @@ function CreateDCAForm({
     // APPROX_PRICES.CBETH = 3600 and became permanently unfillable (516 reverts). The parameters
     // were removed from DeriveSigningMinParams, so this is compiler-enforced. APPROX_PRICES stays
     // in use below for DISPLAY/dust-guard purposes, where a stale estimate is not fund-flow.
+    //
+    // [D3 — LOAD-BEARING] `amountIn` here is the ORDER TOTAL, not the per-chunk amount, and that is
+    // CORRECT: TeraSwapOrderExecutorV3.sol:526 scales the signed minimum per chunk on-chain
+    // (`scaledMin = minAmountOut * executeAmount / amountIn`), so the division lands exactly once.
+    // "Fixing" this call site alone to pass the per-chunk amount would divide twice and leave every
+    // DCA floor ~dcaTotal times too low — a fail-open. Change both ends together or neither; see
+    // the amountIn docblock in v3-min-derivation.ts and its pinning test.
     let minAmountOut: string
     let maxSlippageBpsForConfig: number | undefined
     if (v3Enabled) {
