@@ -502,10 +502,13 @@ function CreateDCAForm({
 
   const signingMin = useMemo(() => {
     // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] No floor is PREVIEWED on a blocked oracle either. Without
-    // this the panel would still render a confident "Signed floor per order: ≥ X" derived from
-    // APPROX_PRICES (the last tier inside deriveSigningMinAmountOut, which needs no live source at
-    // all) while creation is blocked — showing the user a number we just refused to stand behind.
+    // this the panel would still render a confident "Signed floor per order: ≥ X" while creation is
+    // blocked — showing the user a number we just refused to stand behind.
     if (!v3Enabled || oracleBlocked || !tokenIn || !tokenOut || liveAmountInRaw == null || liveAmountInRaw <= 0n) return null
+    // [FIX-SIGNING-MIN-PRICE-INTEGRITY] APPROX_PRICES is NOT passed: a hardcoded table may not
+    // price a signed on-chain minimum (INC-2026-08-07-001). An unpriceable leg now yields the
+    // honest no-feed floor + decay warning. The parameters no longer exist, so this is enforced by
+    // the compiler, not by this comment.
     return deriveSigningMinAmountOut({
       amountIn: liveAmountInRaw,
       srcDecimals: tokenIn.decimals,
@@ -513,8 +516,6 @@ function CreateDCAForm({
       maxSlippageBps,
       chainlinkPriceIn, chainlinkPriceOut,
       defiLlamaPriceIn: llamaPriceIn, defiLlamaPriceOut: llamaPriceOut,
-      approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
-      approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
     })
   }, [v3Enabled, oracleBlocked, tokenIn, tokenOut, liveAmountInRaw, maxSlippageBps, chainlinkPriceIn, chainlinkPriceOut, llamaPriceIn, llamaPriceOut])
 
@@ -718,10 +719,17 @@ function CreateDCAForm({
 
     // [SPRINT-V3-P2 / ADR-013 §1] v3 signing: derive a REAL absolute minAmountOut (never '1')
     // from the reference price × (1 − maxSlippageBps), same formula the keeper's oracle floor
-    // uses. Falls back to a fixed non-zero, non-price floor (still never '1') when no reference
-    // price exists on either side — the ADR-013 owner-approved no-feed UX. v2 (v3Enabled=false,
-    // the case on every chain today) is completely unchanged: minAmountOut = '1', no
-    // maxSlippageBps field, byte-identical to before this sprint.
+    // uses. Falls back to a fixed non-zero, non-price floor (still never '1') when no LIVE
+    // reference price exists on either side — the ADR-013 owner-approved no-feed UX. v2
+    // (v3Enabled=false, the case on every chain today) is completely unchanged: minAmountOut = '1',
+    // no maxSlippageBps field, byte-identical to before this sprint.
+    //
+    // [FIX-SIGNING-MIN-PRICE-INTEGRITY / INC-2026-08-07-001] APPROX_PRICES is NOT passed here. The
+    // signed minimum is an on-chain commitment enforced on every fill until expiry, so it may rest
+    // only on a live source; order ef85438b signed a floor off the stale table entry
+    // APPROX_PRICES.CBETH = 3600 and became permanently unfillable (516 reverts). The parameters
+    // were removed from DeriveSigningMinParams, so this is compiler-enforced. APPROX_PRICES stays
+    // in use below for DISPLAY/dust-guard purposes, where a stale estimate is not fund-flow.
     let minAmountOut: string
     let maxSlippageBpsForConfig: number | undefined
     if (v3Enabled) {
@@ -732,8 +740,6 @@ function CreateDCAForm({
         maxSlippageBps,
         chainlinkPriceIn, chainlinkPriceOut,
         defiLlamaPriceIn: llamaPriceIn, defiLlamaPriceOut: llamaPriceOut,
-        approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
-        approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
       })
       minAmountOut = derivation.minAmountOut.toString()
       maxSlippageBpsForConfig = maxSlippageBps
