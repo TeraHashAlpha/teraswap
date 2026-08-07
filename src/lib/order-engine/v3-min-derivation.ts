@@ -13,6 +13,23 @@
  * fetched prices (Chainlink first, else DefiLlama — same plumbing useChainlinkPrice/checkOracleCoverage
  * already use). null in ⇒ null out (no-feed pair): the caller then falls back to a fixed, still-real
  * (never 1-wei) signed minimum and surfaces the decay warning (ADR-013 owner decision).
+ *
+ * ── PRICE-INTEGRITY POLICY [FIX-SIGNING-MIN-PRICE-INTEGRITY / INC-2026-08-07-001] ────────────
+ * A signed `minAmountOut` is an on-chain commitment the user cannot revise: the contract enforces
+ * it on every fill until expiry. It may therefore rest ONLY on a live price source — Chainlink, or
+ * DefiLlama as the documented fallback. A hardcoded approximation table must never reach it.
+ *
+ * Order ef85438b proved why. cbETH had neither a Chainlink nor a DefiLlama price, so the signing
+ * path fell through to `APPROX_PRICES.CBETH = 3600` while the WETH leg priced live at
+ * $1942.46585493. cbETH was really ~$2204 that day, so the table overstated the pair ratio by
+ * ~63%; after the contract's per-chunk scaling the floor sat ~1.59x above market and no fill could
+ * ever clear it — 516 reverts, all in simulation. The table's ETH entry ($3500 against a live
+ * $1911.90) shows the staleness is systemic, not a one-token slip.
+ *
+ * Consequently `approxPrice*` is NOT part of this module's signing inputs. The omission is
+ * deliberate and compiler-enforced: there is no parameter through which a table price can enter.
+ * APPROX_PRICES remains correct and in use for DISPLAY and ANALYTICS (src/lib/order-engine/usd.ts),
+ * where a stale estimate costs a wrong label, not an unfillable order.
  */
 
 function toPositiveBigInt(v: bigint | number | string): bigint | null {
@@ -71,7 +88,22 @@ export function computeReferenceExpectedOutTs(p: {
 }
 
 export interface DeriveAbsoluteMinParams {
-  /** Raw tokenIn amount for THIS chunk (per-DCA-execution amount, not the order total). */
+  /**
+   * Raw tokenIn amount the floor is derived from.
+   *
+   * ⚠ [D3 — LOAD-BEARING. Read before "correcting" this.] This doc used to read "per-chunk amount,
+   * not the order total". For DCA that was WRONG, and the code was right: DCAPanel deliberately
+   * passes the ORDER TOTAL. TeraSwapOrderExecutorV3.sol:526 then scales the signed minimum down to
+   * each chunk itself —
+   *   `scaledMin = minAmountOut * executeAmount / amountIn`
+   * — so the per-chunk division happens exactly once, on-chain. The two ends cancel by design.
+   *
+   * Passing the per-chunk amount here would divide a SECOND time and leave every DCA floor
+   * ~dcaTotal times too low: a silent fail-open on a fund-flow path, and strictly worse than the
+   * over-tight floor of INC-2026-08-07-001 (which at least failed closed). Change BOTH ends
+   * together or neither. Pinned by v3-min-price-integrity.test.ts → "D3 — the total/per-chunk
+   * cancellation".
+   */
   amountIn: bigint | number | string
   srcDecimals: number
   dstDecimals: number
@@ -107,7 +139,15 @@ export function deriveAbsoluteMinAmountOut(p: DeriveAbsoluteMinParams): bigint |
 // non-price fallback) — the "same plumbing as the keeper floor" the sprint spec calls for,
 // plus the ADR-013 owner-approved no-feed UX (a real, non-1-wei fixed min + decay warning). ──
 
-export type MinAmountOutSource = 'chainlink' | 'defillama' | 'approx' | 'fallback'
+/**
+ * Live price tiers a signed floor may rest on, STRONGEST FIRST — the array order IS the ranking
+ * `weakestTier` reads. `'fallback'` is not a tier: it means no derivation happened at all.
+ * `'approx'` is deliberately absent (see the price-integrity policy in the module header).
+ */
+const SIGNING_TIERS = ['chainlink', 'defillama'] as const
+type SigningTier = (typeof SIGNING_TIERS)[number]
+
+export type MinAmountOutSource = SigningTier | 'fallback'
 
 export interface DeriveSigningMinParams {
   amountIn: bigint | number | string
@@ -120,46 +160,68 @@ export interface DeriveSigningMinParams {
   /** DefiLlama price for each leg (fetched only when Chainlink is null), null if unpriced. */
   defiLlamaPriceIn: number | null
   defiLlamaPriceOut: number | null
-  /** Last-resort approximate price table lookups (e.g. lib/order-engine/usd.ts APPROX_PRICES),
-   *  keyed the same way as the caller's table — pass null when the symbol isn't covered. */
-  approxPriceIn: number | null
-  approxPriceOut: number | null
+  // NOTE: there is deliberately no `approxPrice*` here. A hardcoded table may not price a signed
+  // on-chain minimum — module header, [FIX-SIGNING-MIN-PRICE-INTEGRITY]. Removing the parameters
+  // rather than ignoring them makes the policy compiler-enforced: a caller that tries to
+  // reintroduce the table fails to typecheck instead of silently signing a stale price.
 }
 
 export interface DeriveSigningMinResult {
   minAmountOut: bigint
-  /** false ⇒ neither Chainlink nor DefiLlama priced BOTH legs — the fixed 'fallback' floor was
-   *  used (or 'approx' partially bridged it). The caller MUST show the ADR-013 decay warning
-   *  whenever source !== 'chainlink' — a stale fixed min loses meaning over a long DCA. */
+  /**
+   * true ⇒ BOTH legs were priced by a LIVE source, so `minAmountOut` is genuinely price-derived.
+   * false ⇒ at least one leg had no live price, the fixed non-price ADR-013 floor was used, and
+   * the caller MUST surface the decay warning (DCAPanel gates the warning on exactly this flag).
+   *
+   * [FIX-SIGNING-MIN-PRICE-INTEGRITY] A table price can no longer make this true. Before the fix,
+   * an APPROX_PRICES leg reported hasFeed=true AND source='chainlink' — so BOTH the flag the UI
+   * reads and the tier the docs referenced were wrong, and the warning stayed silent on the one
+   * order shape that most needed it (INC-2026-08-07-001).
+   */
   hasFeed: boolean
+  /**
+   * The WEAKEST tier across the two legs, never the stronger one — a floor is only as trustworthy
+   * as its worse input, so a mixed chainlink/defillama pair reports 'defillama'.
+   */
   source: MinAmountOutSource
 }
 
-/** First non-null price across (chainlink, defillama, approx), plus which tier it came from. */
+/**
+ * First live price for a leg (Chainlink, else DefiLlama), plus which tier it came from.
+ * Returns null when the leg has no live price at all — the caller then takes the no-feed path.
+ */
 function pickPrice(
   chainlink: number | null,
   defillama: number | null,
-  approx: number | null,
-): { price: number | null; source: MinAmountOutSource } {
-  if (chainlink != null) return { price: chainlink, source: 'chainlink' }
-  if (defillama != null) return { price: defillama, source: 'defillama' }
-  if (approx != null) return { price: approx, source: 'approx' }
-  return { price: null, source: 'fallback' }
+): { price: number; tier: SigningTier } | null {
+  if (chainlink != null) return { price: chainlink, tier: 'chainlink' }
+  if (defillama != null) return { price: defillama, tier: 'defillama' }
+  return null
+}
+
+/** The weaker (later-ranked) of two tiers. Ties return that same tier. */
+function weakestTier(a: SigningTier, b: SigningTier): SigningTier {
+  return SIGNING_TIERS.indexOf(a) >= SIGNING_TIERS.indexOf(b) ? a : b
 }
 
 /**
- * Full signing-time derivation: try Chainlink for both legs, else DefiLlama, else the
- * approximate price table. If EITHER leg still has no price, fall back to a small, deliberately
+ * Full signing-time derivation: Chainlink for both legs, else DefiLlama for whichever leg
+ * Chainlink missed. If EITHER leg still has no LIVE price, fall back to a small, deliberately
  * non-price, non-zero absolute minimum (never 1 wei) scaled to tokenOut's decimals — a real
  * on-chain floor, but one the ADR-013 decay warning must accompany (fixed forever, never
  * re-derived: price appreciation strands the order below reachable slippage, depreciation makes
  * the floor economically weak).
+ *
+ * There is no third pricing tier. A hardcoded table is not an acceptable basis for a signed
+ * commitment — see the price-integrity policy in the module header. An unpriceable pair yields the
+ * honest no-feed floor plus a visible warning, never a confident-looking number resting on a
+ * constant that was last edited by hand.
  */
 export function deriveSigningMinAmountOut(p: DeriveSigningMinParams): DeriveSigningMinResult {
-  const inPick = pickPrice(p.chainlinkPriceIn, p.defiLlamaPriceIn, p.approxPriceIn)
-  const outPick = pickPrice(p.chainlinkPriceOut, p.defiLlamaPriceOut, p.approxPriceOut)
+  const inPick = pickPrice(p.chainlinkPriceIn, p.defiLlamaPriceIn)
+  const outPick = pickPrice(p.chainlinkPriceOut, p.defiLlamaPriceOut)
 
-  if (inPick.price !== null && outPick.price !== null) {
+  if (inPick !== null && outPick !== null) {
     const derived = deriveAbsoluteMinAmountOut({
       amountIn: p.amountIn,
       srcDecimals: p.srcDecimals,
@@ -169,11 +231,12 @@ export function deriveSigningMinAmountOut(p: DeriveSigningMinParams): DeriveSign
       maxSlippageBps: p.maxSlippageBps,
     })
     if (derived !== null) {
-      // 'chainlink' only when BOTH legs used Chainlink; a mixed chainlink+defillama/approx pair
-      // is still priced (real derivation, not the fixed fallback) but isn't the strongest tier.
-      const source: MinAmountOutSource =
-        inPick.source === 'chainlink' && outPick.source === 'chainlink' ? 'chainlink' : outPick.source
-      return { minAmountOut: derived, hasFeed: true, source }
+      // Report the WEAKEST leg's tier. The previous form —
+      //   both-chainlink ? 'chainlink' : outPick.source
+      // — read only the tokenOut leg whenever the pair was mixed, so an in=<weaker>/out=chainlink
+      // pair was announced as 'chainlink'. That is what suppressed the decay warning on ef85438b.
+      // A floor is only as trustworthy as its worse input, so the worse input is what we report.
+      return { minAmountOut: derived, hasFeed: true, source: weakestTier(inPick.tier, outPick.tier) }
     }
   }
 
