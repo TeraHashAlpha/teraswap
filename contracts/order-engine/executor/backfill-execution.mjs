@@ -15,6 +15,9 @@
 //
 // No secrets are embedded; everything comes from env.
 
+// [KEEPER-ENV-ORDER] MUST stay the first import (see env.js) — loads .env.executor
+// from cwd before the module-scope env reads below; explicit shell env still wins.
+import "./env.js"
 import { createPublicClient, http } from "viem"
 import { decodeOrderExecuted, buildExecutionRow, recordExecutionRow } from "./record-execution.js"
 
