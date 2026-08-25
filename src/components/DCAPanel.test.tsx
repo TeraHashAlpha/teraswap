@@ -18,7 +18,7 @@ const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockRefetchNonce = vi.fn<() => Promise<unknown>>()
 const mockReadContractImpl =
-  vi.fn<(opts: { functionName: string }) => { data: unknown; isLoading: boolean; refetch: () => Promise<unknown> }>()
+  vi.fn<(opts: { functionName: string; address?: unknown }) => { data: unknown; isLoading: boolean; refetch: () => Promise<unknown> }>()
 const useAccountMock = vi.fn()
 const useChainIdMock = vi.fn(() => 8453)
 
@@ -41,7 +41,7 @@ vi.mock('wagmi', () => ({
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),
   useWriteContract: () => ({ writeContractAsync: mockWriteContractAsync }),
-  useReadContract: (opts: { functionName: string }) => mockReadContractImpl(opts),
+  useReadContract: (opts: { functionName: string; address?: unknown }) => mockReadContractImpl(opts),
   // [CHORE-DCA-WETH-INPUT] CreateDCAForm now reads useTokenBalances() (which calls useBalance +
   // useReadContracts) for the "wrap ETH first" advisory hint. Default: empty balances ⇒ no hint,
   // so the existing build/sign/submit assertions are unaffected.
@@ -94,6 +94,10 @@ vi.mock('./OrderCancelReviewModal', () => ({ default: () => null }))
 import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import DCAPanel from './DCAPanel'
 import { getOrderExecutor } from '@/lib/order-engine'
+// [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] The REAL registry — addresses and identities are derived
+// from it, never retyped here (rule #9 / ADR-018).
+import { getChainlinkFeed, getFeedExpectation } from '@/lib/chains/chainlink-feeds'
+import { NATIVE_ETH } from '@/lib/constants'
 
 /**
  * [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] `fireEvent.click` on a disabled button never
@@ -117,6 +121,50 @@ function clickBypassingDisabled(el: HTMLElement): unknown {
   return onClick({})
 }
 
+/**
+ * [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE / INC-2026-08-07-001 follow-up 1] A LIVE Chainlink feed
+ * for the spend leg.
+ *
+ * The SC-02 min-chunk dust guard used to value the order from `APPROX_PRICES` — a hardcoded table
+ * that said `WETH: 3500` while the live Base ETH/USD feed read ~1912 on the day of the incident.
+ * A guard fed a HIGH valuation over-values the order and waves through chunks it exists to stop, so
+ * it now reads the SAME live price the signing floor rests on. These tests therefore have to supply
+ * one; with `data: undefined` everywhere (as before) the leg is unpriced and the guard fails OPEN,
+ * which would leave the dust cases below asserting nothing.
+ *
+ * $2000 is deliberately NOT 3500: revert the guard to the table and the expected buy counts below
+ * change (0.01 WETH → 20 buys live, 35 from the table), so the regression is visible, not silent.
+ */
+const ETH_TEST_PRICE_USD = 2000
+// Derived from the REAL registry — never hand-typed (rule #9). getChainlinkFeed maps the native-ETH
+// sentinel to the chain's wrapped-native address, which is the panel's default tokenIn on Base.
+const BASE_ETH_USD_FEED = getChainlinkFeed(NATIVE_ETH, 8453)!
+const FEED_PRICES_USD: Record<string, number> = {
+  [BASE_ETH_USD_FEED.toLowerCase()]: ETH_TEST_PRICE_USD,
+}
+
+/**
+ * Serve any address the ADR-018 registry knows a full, self-consistent Chainlink read: the feed's
+ * OWN declared description()/decimals() plus a fresh, valid round. Building the answer from the
+ * declared decimals (rather than a literal) is what keeps this faithful — a feed's identity and the
+ * scale of its answer can never drift apart here, which is the drift ADR-018 exists to catch.
+ */
+function chainlinkRead(address: unknown, functionName: string): { data: unknown } | null {
+  if (!address) return null
+  const feed = String(address).toLowerCase()
+  const expectation = getFeedExpectation(feed)
+  if (!expectation) return null
+  if (functionName === 'description') return { data: expectation.description }
+  if (functionName === 'decimals') return { data: expectation.decimals }
+  if (functionName === 'latestRoundData') {
+    const price = FEED_PRICES_USD[feed] ?? 1
+    const answer = BigInt(Math.round(price * 10 ** expectation.decimals))
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    return { data: [1n, answer, now, now, 1n] }
+  }
+  return null
+}
+
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = '0x' + 'cc'.repeat(65)
 // Mirrors the server's freeze-403 body message (route.ts), as rethrown by createOrderInSupabase.
@@ -133,15 +181,23 @@ function startDcaButton(): HTMLButtonElement {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true })
+  // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] `chain` added. `useResolvedChainId` — which every
+  // oracle-safety consumer reads — is `useAccount().chain?.id` with NO fallback, so a connected
+  // account with no `chain` made the price hook report "we do not know which chain this is" and
+  // return UNREADABLE for every leg. That was harmless while the dust guard read a hardcoded table;
+  // now that it reads the live price, an unresolvable chain means an unpriced leg and a guard that
+  // fails open. A connected wallet always has a chain, and 8453 matches the mocked useChainId().
+  useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: 8453 } })
   useChainIdMock.mockReturnValue(8453) // Base
   useDepegCheckMock.mockReturnValue(DEPEG_OK)
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
   mockRefetchNonce.mockResolvedValue({ data: 5n })
-  mockReadContractImpl.mockImplementation(({ functionName }) => {
+  mockReadContractImpl.mockImplementation(({ functionName, address }) => {
     if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
+    const feedRead = chainlinkRead(address, functionName)
+    if (feedRead) return { ...feedRead, isLoading: false, refetch: mockRefetchNonce }
     return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
   })
   mockFetchUserOrders.mockResolvedValue([])
@@ -285,20 +341,23 @@ describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
   it('caps buys and warns when the requested count would produce a dust chunk', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('dca-custom-toggle'))
-    // 0.01 WETH ≈ $35 total (APPROX_PRICES). 100 buys → $0.35/buy, under the $1 default floor.
-    // floor(35/1) = 35 buys clears it.
+    // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] Priced LIVE now: 0.01 WETH x $2000 = $20 total, so
+    // 100 buys → $0.20/buy, under the $1 default floor, and floor(20/1) = 20 buys clears it.
+    // The old table price (3500) would say $35 and allow 35 — 75% more dust chunks than the live
+    // valuation permits. That difference is the whole point of the change: a HIGH valuation
+    // over-values the order and lets through chunks the guard exists to stop.
     enterAmount('0.01')
     const buysInput = screen.getByTestId('dca-custom-buys-input') as HTMLInputElement
     fireEvent.change(buysInput, { target: { value: '100' } })
 
     const warning = await screen.findByTestId('dca-min-chunk-warning')
-    expect(warning.textContent).toMatch(/capped to 35 buys/)
+    expect(warning.textContent).toMatch(/capped to 20 buys/)
   })
 
   it('blocks submit (never signs) when the total is too small to clear the minimum even at 1 buy', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('dca-custom-toggle'))
-    // 0.0001 WETH ≈ $0.35 total — below the $1 default floor even for a single buy.
+    // 0.0001 WETH x $2000 = $0.20 total — below the $1 default floor even for a single buy.
     enterAmount('0.0001')
 
     const warning = await screen.findByTestId('dca-min-chunk-warning')
