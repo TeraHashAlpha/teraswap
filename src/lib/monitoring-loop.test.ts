@@ -171,7 +171,6 @@ vi.mock('@/lib/supabase', () => ({
 import { runMonitoringTick } from './monitoring-loop'
 import {
   beginTick,
-  recordHealthCheck,
   forceDisable,
   forceActivate,
   getStatus,

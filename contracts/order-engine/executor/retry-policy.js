@@ -31,6 +31,8 @@ export const FAILURE_REASON = {
 // Max CONSECUTIVE transient cycle-failures for ONE order before we give up and
 // mark it failed (no_route_after_retries) + ALERT. A recurring DCA gets far more
 // chances than the old MAX_RETRIES=3 fast cap. Override via MAX_CYCLE_FAILURES.
+// [KEEPER-ENV-ORDER] Module-scope env reads here (and below) resolve correctly
+// because every entrypoint imports ./env.js FIRST — pinned by env-order.test.mjs.
 export const MAX_CYCLE_FAILURES = Math.max(
   1,
   parseInt(process.env.MAX_CYCLE_FAILURES || "8", 10) || 8,

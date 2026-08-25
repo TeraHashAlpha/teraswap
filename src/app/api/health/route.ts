@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Test 2: Can we query the quotes table?
-  const { data: quoteTest, error: quoteErr } = await supabase
+  const { data: _quoteTest, error: quoteErr } = await supabase
     .from('quotes')
     .select('id')
     .limit(1)

@@ -315,11 +315,11 @@ jobs:
           trap 'git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"' EXIT
 
           mkdir -p "$WT/Audits/Daily"
-          cp "$REPORT_PATH" "$WT/Audits/Daily/health-${REPORT_DATE}.md"
+          cp "$REPORT_PATH" "$WT/Audits/Daily/health-${REPORT_DATE}-gha.md"
 
           # `git -C "$WT"` throughout — never `cd` into the worktree — so the trap's cleanup can
           # remove it unconditionally without the shell's own cwd being inside the path it deletes.
-          git -C "$WT" add "Audits/Daily/health-${REPORT_DATE}.md"
+          git -C "$WT" add "Audits/Daily/health-${REPORT_DATE}-gha.md"
           if git -C "$WT" diff --cached --quiet; then
             echo "report already on audits/cadence — nothing to commit"
             exit 0

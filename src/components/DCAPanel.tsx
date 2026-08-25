@@ -71,7 +71,7 @@ import { useDepegCheck } from '@/hooks/useDepegCheck'
 
 // ── Map token symbols to Chainlink feeds ─────────────────
 // Returns empty string if no feed found — callers must check before submitting.
-function findPriceFeed(token: Token, chainId: number): string {
+function _findPriceFeed(token: Token, chainId: number): string {
   const feeds = getChainlinkFeeds(chainId)
   const key = `${token.symbol}/USD`
   return feeds[key]?.address ?? ''
@@ -88,8 +88,9 @@ const DCA_PAUSED_RE = /temporarily paused/i
  * This panel used to read `useChainlinkPrice(...).chainlinkPrice` and DISCARD both
  * `oracleIntegrityFailed` and `oracleReadFailed` — the same fail-open class already closed in the
  * swap flow. The discarded verdict was not cosmetic here: that price is the reference
- * `deriveSigningMinAmountOut` derives the per-buy `minAmountOut` floor from, so a feed we could not
- * verify became a floor the user then SIGNED — and, for the stale / `answeredInRound < roundId`
+ * `deriveSigningMinAmountOut` derives the `minAmountOut` floor from — signed against the ORDER
+ * TOTAL, then rescaled per chunk on-chain (TeraSwapOrderExecutorV3.sol:526; see [D3] below) — so a
+ * feed we could not verify became a floor the user then SIGNED — and, for the stale / `answeredInRound < roundId`
  * cases, `chainlinkPrice` comes back POPULATED alongside `oracleIntegrityFailed: true`, so the bad
  * number was used directly rather than merely leaving a gap.
  *
@@ -135,7 +136,7 @@ export function evaluateDcaOracleGate(spend: PriceCheck, buy: PriceCheck): DcaOr
  * It used to call `getChainlinkFeed`, which only knows DIRECT token/USD feeds. Post-ADR-018 a token
  * may instead resolve COMPOSED (base × quote) — Base cbETH is exactly that: no direct cbETH/USD
  * entry, but a verified cbETH/ETH × ETH/USD pair that the hook reads and that
- * `deriveSigningMinAmountOut` derives the per-buy floor from. The direct-only lookup returned null
+ * `deriveSigningMinAmountOut` derives the (order-total-basis) floor from. The direct-only lookup returned null
  * for it, so cbETH fired a "no feed" consent modal that was simply false.
  *
  * `resolveFeed` is the SAME resolver the hook uses, so the two cannot disagree. The safe direction is
@@ -154,11 +155,11 @@ export function outputHasNoResolvableFeed(token: Token | null, chainId: number):
 
 export default function DCAPanel() {
   const { address, isConnected } = useAccount()
-  const chainId = useChainId()
+  const _chainId = useChainId()
   const {
     dcaOrders,
-    activeOrders,
-    historyOrders,
+    activeOrders: _activeOrders,
+    historyOrders: _historyOrders,
     latestEvent,
     isSubmitting,
     createOrder,
@@ -502,10 +503,15 @@ function CreateDCAForm({
 
   const signingMin = useMemo(() => {
     // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] No floor is PREVIEWED on a blocked oracle either. Without
-    // this the panel would still render a confident "Signed floor per order: ≥ X" derived from
-    // APPROX_PRICES (the last tier inside deriveSigningMinAmountOut, which needs no live source at
-    // all) while creation is blocked — showing the user a number we just refused to stand behind.
+    // this the panel would still render a confident "Signed floor per order: ≥ X" while creation is
+    // blocked — showing the user a number we just refused to stand behind.
     if (!v3Enabled || oracleBlocked || !tokenIn || !tokenOut || liveAmountInRaw == null || liveAmountInRaw <= 0n) return null
+    // [FIX-SIGNING-MIN-PRICE-INTEGRITY] APPROX_PRICES is NOT passed: a hardcoded table may not
+    // price a signed on-chain minimum (INC-2026-08-07-001). An unpriceable leg now yields the
+    // honest no-feed floor + decay warning. The parameters no longer exist, so this is enforced by
+    // the compiler, not by this comment.
+    // [D3 — LOAD-BEARING] `liveAmountInRaw` is the ORDER TOTAL, deliberately: the contract divides
+    // per chunk (TeraSwapOrderExecutorV3.sol:526). See the amountIn docblock in v3-min-derivation.ts.
     return deriveSigningMinAmountOut({
       amountIn: liveAmountInRaw,
       srcDecimals: tokenIn.decimals,
@@ -513,8 +519,6 @@ function CreateDCAForm({
       maxSlippageBps,
       chainlinkPriceIn, chainlinkPriceOut,
       defiLlamaPriceIn: llamaPriceIn, defiLlamaPriceOut: llamaPriceOut,
-      approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
-      approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
     })
   }, [v3Enabled, oracleBlocked, tokenIn, tokenOut, liveAmountInRaw, maxSlippageBps, chainlinkPriceIn, chainlinkPriceOut, llamaPriceIn, llamaPriceOut])
 
@@ -718,10 +722,24 @@ function CreateDCAForm({
 
     // [SPRINT-V3-P2 / ADR-013 §1] v3 signing: derive a REAL absolute minAmountOut (never '1')
     // from the reference price × (1 − maxSlippageBps), same formula the keeper's oracle floor
-    // uses. Falls back to a fixed non-zero, non-price floor (still never '1') when no reference
-    // price exists on either side — the ADR-013 owner-approved no-feed UX. v2 (v3Enabled=false,
-    // the case on every chain today) is completely unchanged: minAmountOut = '1', no
-    // maxSlippageBps field, byte-identical to before this sprint.
+    // uses. Falls back to a fixed non-zero, non-price floor (still never '1') when no LIVE
+    // reference price exists on either side — the ADR-013 owner-approved no-feed UX. v2
+    // (v3Enabled=false, the case on every chain today) is completely unchanged: minAmountOut = '1',
+    // no maxSlippageBps field, byte-identical to before this sprint.
+    //
+    // [FIX-SIGNING-MIN-PRICE-INTEGRITY / INC-2026-08-07-001] APPROX_PRICES is NOT passed here. The
+    // signed minimum is an on-chain commitment enforced on every fill until expiry, so it may rest
+    // only on a live source; order ef85438b signed a floor off the stale table entry
+    // APPROX_PRICES.CBETH = 3600 and became permanently unfillable (516 reverts). The parameters
+    // were removed from DeriveSigningMinParams, so this is compiler-enforced. APPROX_PRICES stays
+    // in use below for DISPLAY/dust-guard purposes, where a stale estimate is not fund-flow.
+    //
+    // [D3 — LOAD-BEARING] `amountIn` here is the ORDER TOTAL, not the per-chunk amount, and that is
+    // CORRECT: TeraSwapOrderExecutorV3.sol:526 scales the signed minimum per chunk on-chain
+    // (`scaledMin = minAmountOut * executeAmount / amountIn`), so the division lands exactly once.
+    // "Fixing" this call site alone to pass the per-chunk amount would divide twice and leave every
+    // DCA floor ~dcaTotal times too low — a fail-open. Change both ends together or neither; see
+    // the amountIn docblock in v3-min-derivation.ts and its pinning test.
     let minAmountOut: string
     let maxSlippageBpsForConfig: number | undefined
     if (v3Enabled) {
@@ -732,8 +750,6 @@ function CreateDCAForm({
         maxSlippageBps,
         chainlinkPriceIn, chainlinkPriceOut,
         defiLlamaPriceIn: llamaPriceIn, defiLlamaPriceOut: llamaPriceOut,
-        approxPriceIn: APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null,
-        approxPriceOut: APPROX_PRICES[(tokenOut.symbol || '').toUpperCase()] ?? null,
       })
       minAmountOut = derivation.minAmountOut.toString()
       maxSlippageBpsForConfig = maxSlippageBps
@@ -1212,9 +1228,20 @@ function CreateDCAForm({
                   </button>
                 ))}
               </div>
-              {signingMin != null && tokenOut && (
+              {/* [Auditor L-3] `signingMin.minAmountOut` is the TOTAL-basis signed value (D3); the
+                  contract enforces only `executeAmount/amountIn` of it on any ONE buy
+                  (TeraSwapOrderExecutorV3.sol:526). The old copy — a bare "Signed floor per order:
+                  ≥ X" — read as "this much protects every buy": for 30 buys it showed 0.0001 WETH
+                  while the actual per-fill protection was 0.0000033 WETH. "per order" now
+                  explicitly means TOTAL (kept verbatim as a label, not a claim about each fill),
+                  and the per-buy enforced figure (perChunkRaw — the SAME total/parts split
+                  useOrderEngine.createOrder uses elsewhere in this file) is shown alongside it, not
+                  buried. Display only — signingMin.minAmountOut itself, and what gets signed, is
+                  unchanged. */}
+              {signingMin != null && tokenOut && parts > 0 && (
                 <p className="mt-2 text-[11px] text-cream-35">
-                  Signed floor per order: ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol}
+                  Signed floor per order (total): ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol} across {parts} buys
+                  {' '}— ≥ {formatUnits(perChunkRaw(signingMin.minAmountOut, parts), tokenOut.decimals)} {tokenOut.symbol} enforced per buy
                   {!signingMin.hasFeed && (
                     <span className="ml-1 text-amber-300">
                       (no price reference for this pair — fixed floor, not price-derived; it may

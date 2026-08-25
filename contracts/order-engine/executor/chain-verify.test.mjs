@@ -733,23 +733,62 @@ describe("chain-verify — no secret survives a refusal, whatever shape it arriv
   // Every quantifier in the pattern set is either bounded or a single greedy pass over a negated
   // class with nothing after it to backtrack into; these are the inputs that would expose it if
   // that ever stopped being true.
-  test("the pattern set is linear — 10k-char pathological inputs stay under 50ms", () => {
-    const EVIL = [
-      ["an unterminated scheme body", "https://" + "a".repeat(10_000)],
-      ["labels that never reach a TLD", ("a".repeat(64) + ".").repeat(160)],
-      ["a host that never reaches a port", "a".repeat(10_000) + "!"],
-      ["an endless port", "127.0.0.1:" + "1".repeat(10_000)],
-      ["an endless hex run", "0x" + "a".repeat(10_000)],
-      ["alternating dots and dashes", "a-.".repeat(3_400)],
-      ["nothing that can match at all", "é".repeat(10_000)],
-    ]
-    for (const [label, input] of EVIL) {
+  //
+  // This asserts LINEARITY itself, not a wall-clock proxy for it: for each pathological shape we
+  // measure redactUrls at a base size and at 10x that size and assert the RATIO of the two times
+  // stays bounded. A ratio is hardware-independent — a slower or more loaded runner scales both
+  // measurements together, so the ratio is unaffected, where an absolute-ms budget is not.
+  // A linear implementation gives ~10x on a 10x input; quadratic backtracking gives ~100x;
+  // catastrophic backtracking gives far more than that. RATIO_BOUND = 30 sits with margin on both
+  // sides of the ~10x/~100x split: high enough that constant-factor overhead (allocation, GC, JIT
+  // warmup) on an ideal linear pass never trips it, low enough that nothing quadratic-or-worse can
+  // sneak under it.
+  //
+  // Each measurement takes the MINIMUM across several repetitions, never the mean — scheduler
+  // noise (a GC pause, a context switch) only ever ADDS time, so the minimum is the one statistic
+  // noise cannot inflate. Each repetition itself times a small batch of calls and divides by the
+  // batch size, which keeps the per-call time well above timer-resolution noise even for inputs
+  // fast enough that a single call would measure as 0ms.
+  const RATIO_BOUND = 30
+  function timeMinOf(input, { batches = 5, callsPerBatch = 10 } = {}) {
+    let min = Infinity
+    for (let b = 0; b < batches; b++) {
       const started = performance.now()
-      redactUrls(input)
-      const elapsed = performance.now() - started
-      assert.ok(elapsed < 50, `${label}: redactUrls took ${elapsed.toFixed(1)}ms on ${input.length} chars`)
+      for (let c = 0; c < callsPerBatch; c++) redactUrls(input)
+      const perCall = (performance.now() - started) / callsPerBatch
+      if (perCall < min) min = perCall
     }
-  })
+    return min
+  }
+
+  test(
+    "the pattern set is linear — time on a 10x-larger pathological input stays within RATIO_BOUND",
+    { timeout: 10_000 }, // one loose absolute ceiling, order of seconds, purely to catch a true hang
+    () => {
+      const EVIL = [
+        ["an unterminated scheme body", (n) => "https://" + "a".repeat(n), 1_000],
+        ["labels that never reach a TLD", (n) => ("a".repeat(64) + ".").repeat(n), 16],
+        ["a host that never reaches a port", (n) => "a".repeat(n) + "!", 1_000],
+        ["an endless port", (n) => "127.0.0.1:" + "1".repeat(n), 1_000],
+        ["an endless hex run", (n) => "0x" + "a".repeat(n), 1_000],
+        ["alternating dots and dashes", (n) => "a-.".repeat(n), 340],
+        ["nothing that can match at all", (n) => "é".repeat(n), 1_000],
+      ]
+      for (const [label, make, base] of EVIL) {
+        const small = make(base)
+        const large = make(base * 10)
+        // The 0.001 floor only guards divide-by-zero; batching keeps it from firing in practice.
+        const tSmall = Math.max(timeMinOf(small), 0.001)
+        const tLarge = timeMinOf(large)
+        const ratio = tLarge / tSmall
+        assert.ok(
+          ratio < RATIO_BOUND,
+          `${label}: 10x the input took ${ratio.toFixed(1)}x as long ` +
+            `(${tSmall.toFixed(4)}ms -> ${tLarge.toFixed(4)}ms) — exceeds RATIO_BOUND=${RATIO_BOUND}, looks superlinear`,
+        )
+      }
+    },
+  )
 })
 
 describe("chain-verify — retries are bounded and terminate in refusal", () => {
@@ -1051,11 +1090,17 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
   })
 
   /**
-   * Boot the real keeper against a scripted RPC. Returns its exit code, stderr and the ORDERED
-   * list of RPC methods it actually called.
+   * Boot the real keeper against a scripted RPC. Returns its exit code, stderr, the ORDERED list
+   * of RPC methods it actually called, and `targets` — the per-call {method, address} for the two
+   * address-bearing gate reads, so a test can assert WHICH contracts were verified, not just that
+   * something was. [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] v2Address/v3Address control the env: the
+   * default keeps every pre-existing caller byte-identical (v2 set, v3 unset); null omits the
+   * variable entirely. `typehash` may be a function of the called address so a both-configured
+   * boot can answer each executor with its own identity.
    */
-  async function bootExecutor({ chainId, code, typehash, rpcPath = "", dead = false }) {
+  async function bootExecutor({ chainId, code, typehash, rpcPath = "", dead = false, v2Address = V2_ADDRESS, v3Address = null }) {
     const seen = []
+    const targets = []
     const server = createServer((req, res) => {
       let body = ""
       req.on("data", (c) => (body += c))
@@ -1072,10 +1117,17 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
           switch (call.method) {
             case "eth_chainId":
               return { jsonrpc: "2.0", id: call.id, result: `0x${chainId.toString(16)}` }
-            case "eth_getCode":
+            case "eth_getCode": {
+              const address = Array.isArray(call.params) ? call.params[0] : undefined
+              targets.push({ method: "eth_getCode", address: String(address).toLowerCase() })
               return { jsonrpc: "2.0", id: call.id, result: code }
-            case "eth_call":
-              return { jsonrpc: "2.0", id: call.id, result: typehash }
+            }
+            case "eth_call": {
+              const to = Array.isArray(call.params) && call.params[0] ? call.params[0].to : undefined
+              targets.push({ method: "eth_call", address: String(to).toLowerCase() })
+              const result = typeof typehash === "function" ? typehash(String(to).toLowerCase()) : typehash
+              return { jsonrpc: "2.0", id: call.id, result }
+            }
             default:
               // Everything past the gate (eth_getBalance first) errors, so the child exits on its
               // own instead of going on to bind the health/metrics ports.
@@ -1109,7 +1161,10 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
         // carries one (…/v2/<key>); the double answers on any path.
         RPC_URL: `http://127.0.0.1:${dead ? 1 : port}${rpcPath}`,
         CHAIN_ID: String(TEST_CHAIN),
-        ORDER_EXECUTOR_ADDRESS: V2_ADDRESS,
+        // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] Each address var exists only when the test configures
+        // it — `null` means genuinely unset, not empty-string-set.
+        ...(v2Address ? { ORDER_EXECUTOR_ADDRESS: v2Address } : {}),
+        ...(v3Address ? { ORDER_EXECUTOR_V3_ADDRESS: v3Address } : {}),
         SUPABASE_URL: "http://127.0.0.1:9/unused",
         SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
         EXECUTOR_PRIVATE_KEY: DEV_KEY,
@@ -1132,7 +1187,7 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
       })
     })
     await new Promise((resolve) => server.close(resolve))
-    return { exitCode, stdout, stderr, seen }
+    return { exitCode, stdout, stderr, seen, targets }
   }
 
   test("chain mismatch → the boot REFUSES and the signer is never reached", { timeout: 60_000 }, async () => {
@@ -1223,6 +1278,103 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
     assert.match(boot.stderr, /could not read eth_chainId/)
     assert.ok(!boot.stderr.includes(BOOT_SENTINEL), `key leaked to stderr:\n${boot.stderr}`)
     assert.ok(!boot.stdout.includes(BOOT_SENTINEL), `key leaked to stdout:\n${boot.stdout}`)
+    assert.ok(!boot.seen.includes("eth_getBalance"), "the signer/balance step ran despite a refusal")
+  })
+
+  // ── [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] The v2 gate entry is conditional now ─────────────────
+  //
+  // Arbitrum One has no v2 OrderExecutor, only v3 — so ORDER_EXECUTOR_ADDRESS becomes optional
+  // WHEN ORDER_EXECUTOR_V3_ADDRESS is set. The four config shapes below assert on behaviour the
+  // RPC double observes (which addresses the gate reads, whether the boot proceeds to the
+  // signer's eth_getBalance, whether ANY RPC happens at all), never on log strings alone. Every
+  // relaxation is justified by an address being ABSENT: the fifth test proves a configured-but-
+  // wrong v3 still refuses exactly as before.
+  const gateReadsFor = (boot, method) => boot.targets.filter((t) => t.method === method)
+
+  test("v3-only config → the gate verifies exactly ONE contract (the v3), boot proceeds", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({
+      chainId: TEST_CHAIN,
+      code: SOME_CODE,
+      typehash: EXPECTED_ORDER_TYPEHASH_V3,
+      v2Address: null,
+      v3Address: V3_ADDRESS,
+    })
+    // The boot got PAST the gate: the signer's first read happened.
+    assert.ok(boot.seen.includes("eth_getBalance"), `boot never reached the signer; saw ${boot.seen.join(", ")}\n${boot.stderr}`)
+    // Exactly one contract entry was verified, and it is the v3 address.
+    const codeReads = gateReadsFor(boot, "eth_getCode")
+    assert.equal(codeReads.length, 1, `expected one eth_getCode, saw ${JSON.stringify(boot.targets)}`)
+    assert.equal(codeReads[0].address, V3_ADDRESS.toLowerCase())
+    const identityReads = gateReadsFor(boot, "eth_call")
+    assert.equal(identityReads.length, 1, "exactly one ORDER_TYPEHASH identity read")
+    assert.equal(identityReads[0].address, V3_ADDRESS.toLowerCase())
+    // The gate still ran BEFORE the signer.
+    const balanceAt = boot.seen.indexOf("eth_getBalance")
+    for (const gateRead of ["eth_chainId", "eth_getCode", "eth_call"]) {
+      assert.ok(boot.seen.indexOf(gateRead) < balanceAt, `${gateRead} must precede eth_getBalance`)
+    }
+  })
+
+  test("v2-only config → unchanged from today: exactly one contract entry (the v2)", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({ chainId: TEST_CHAIN, code: SOME_CODE, typehash: EXPECTED_ORDER_TYPEHASH_V2 })
+    assert.ok(boot.seen.includes("eth_getBalance"), `boot never reached the signer\n${boot.stderr}`)
+    const codeReads = gateReadsFor(boot, "eth_getCode")
+    assert.equal(codeReads.length, 1)
+    assert.equal(codeReads[0].address, V2_ADDRESS.toLowerCase())
+    assert.equal(gateReadsFor(boot, "eth_call").length, 1)
+  })
+
+  test("both configured → the gate verifies BOTH, each against its own identity", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({
+      chainId: TEST_CHAIN,
+      code: SOME_CODE,
+      typehash: (to) =>
+        to === V2_ADDRESS.toLowerCase() ? EXPECTED_ORDER_TYPEHASH_V2 : EXPECTED_ORDER_TYPEHASH_V3,
+      v3Address: V3_ADDRESS,
+    })
+    assert.ok(boot.seen.includes("eth_getBalance"), `boot never reached the signer\n${boot.stderr}`)
+    const codeAddresses = gateReadsFor(boot, "eth_getCode").map((t) => t.address)
+    assert.deepEqual(
+      codeAddresses.sort(),
+      [V2_ADDRESS.toLowerCase(), V3_ADDRESS.toLowerCase()].sort(),
+      "both executors must be code-checked",
+    )
+    const identityAddresses = gateReadsFor(boot, "eth_call").map((t) => t.address)
+    assert.deepEqual(
+      identityAddresses.sort(),
+      [V2_ADDRESS.toLowerCase(), V3_ADDRESS.toLowerCase()].sort(),
+      "both executors must self-identify",
+    )
+  })
+
+  test("NEITHER configured → refuses BEFORE any RPC, naming both variables", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({
+      chainId: TEST_CHAIN,
+      code: SOME_CODE,
+      typehash: EXPECTED_ORDER_TYPEHASH_V2,
+      v2Address: null,
+      v3Address: null,
+    })
+    assert.equal(boot.exitCode, 1, `expected exit 1, got ${boot.exitCode}\nstdout=${boot.stdout}`)
+    // The named failure: an operator must learn BOTH variables from the refusal.
+    assert.match(boot.stderr, /ORDER_EXECUTOR_ADDRESS/)
+    assert.match(boot.stderr, /ORDER_EXECUTOR_V3_ADDRESS/)
+    // The behaviour, not the log: a keeper with nothing to verify never touches the network.
+    assert.equal(boot.seen.length, 0, `RPC was reached before the refusal: ${boot.seen.join(", ")}`)
+  })
+
+  // Every relaxation must be justified by ABSENCE, never by inconvenience: a v3 address that IS
+  // configured but self-identifies wrongly must refuse exactly as a wrong v2 always has.
+  test("v3-only config with the WRONG identity still refuses — the gate stayed fail-closed", { timeout: 60_000 }, async () => {
+    const boot = await bootExecutor({
+      chainId: TEST_CHAIN,
+      code: SOME_CODE,
+      typehash: WRONG_TYPEHASH,
+      v2Address: null,
+      v3Address: V3_ADDRESS,
+    })
+    assert.equal(boot.exitCode, 1, boot.stderr)
+    assert.match(boot.stderr, /contract identity mismatch/)
     assert.ok(!boot.seen.includes("eth_getBalance"), "the signer/balance step ran despite a refusal")
   })
 })

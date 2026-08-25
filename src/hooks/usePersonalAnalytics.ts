@@ -63,7 +63,6 @@ export function usePersonalAnalytics(): UsePersonalAnalyticsResult {
   useEffect(() => {
     load(address)
     return () => abortRef.current?.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])
 
   return {

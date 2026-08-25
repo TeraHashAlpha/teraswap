@@ -64,7 +64,7 @@ export default function ConditionalOrderPanel() {
   const [tab, setTab] = useState<'create' | 'orders'>('create')
   const { stopLossOrders, latestEvent, isSubmitting, createOrder, pendingOrder, confirmOrder, clearPendingOrder, cancelOrder, removeOrder, pendingCancel, confirmCancel, clearPendingCancel } = useOrderEngine()
   const { address } = useAccount()
-  const chainId = useChainId()
+  const _chainId = useChainId()
 
   const { toast } = useToast()
 

@@ -6,7 +6,7 @@
  * degradation, zero expected output, audit trail write, and auto-disable on critical.
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { validateExecution, type ValidateExecutionParams } from './post-execution-validator'
 import { _clearClientCache } from './chains/clients'
 

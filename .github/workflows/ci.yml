@@ -42,8 +42,8 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: Lint (warnings only — React Compiler rules are advisory)
-        run: npx next lint --max-warnings 200 || true
+      - name: Lint
+        run: npm run lint
 
   typecheck:
     runs-on: ubuntu-latest
@@ -373,6 +373,33 @@ jobs:
       - run: npm ci
       - name: DCA visibility guard (history union + W6 gate + position stats)
         run: npx vitest run src/app/api/history/route.test.ts src/lib/dca/position-stats.test.ts
+
+  signing-price-integrity-guard:
+    # [INC-2026-08-07-001 / FIX-SIGNING-MIN-PRICE-INTEGRITY] The full vitest suite is not run
+    # per-file in CI (only single-file guards get a required, individually-named PR check; the
+    # additive full-suite job below covers everything but is whole-repo, not a targeted required
+    # gate), so this pins the DCA v3 signing-floor arithmetic that a stale hardcoded price table
+    # poisoned: order ef85438b signed a minAmountOut derived from APPROX_PRICES.CBETH = 3600 on one
+    # leg while the other priced live from Chainlink, producing a floor 1.588x above market —
+    # unfillable, 516 reverts. v3-min-price-integrity.test.ts reproduces the historical number
+    # exactly and pins the fix (D1: reported price-source tier is the WEAKEST leg, not the
+    # strongest; D2: a hardcoded table can no longer reach a signed on-chain minimum; D3: the
+    # total-vs-per-chunk amountIn cancellation against TeraSwapOrderExecutorV3.sol:526 is pinned so
+    # it cannot be "fixed" by halves). v3-min-derivation.test.ts is the module's existing unit
+    # suite. [Auditor M-1] DCAPanel.v3.test.tsx also runs here: after M-1 it carries the ONLY
+    # caller-side pin — an exact-literal assertion on the real EIP-712 signed minAmountOut — since
+    # the derivation-level tests feed literals straight into the module and never bind the caller.
+    # See Audits/Incidents/INC-2026-08-07-001.md for the full incident record.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Signing-path price-integrity guard (v3 DCA minAmountOut derivation + DCAPanel caller pin)
+        run: npx vitest run src/lib/order-engine/v3-min-derivation.test.ts src/lib/order-engine/v3-min-price-integrity.test.ts src/components/DCAPanel.v3.test.tsx
 
   full-suite:
     # [CHORE-CI-FULL-SUITE-JOB] Additive alongside the 14 per-file guard jobs above, not a

@@ -6,7 +6,7 @@
 
 ## 1. What is TeraSwap
 
-TeraSwap is an Ethereum DEX **meta-aggregator** — it queries 11 independent liquidity sources simultaneously, selects the best execution path, and routes the swap through a fee-collecting proxy contract. It also supports autonomous order execution (Limit, Stop-Loss, DCA) via EIP-712 signed orders and an off-chain keeper network.
+TeraSwap is an Ethereum DEX **meta-aggregator** — it queries 10 independent liquidity sources simultaneously (11 incl. Bebop), selects the best execution path, and routes the swap through a fee-collecting proxy contract. It also supports autonomous order execution (Limit, Stop-Loss, DCA) via EIP-712 signed orders and an off-chain keeper network.
 
 **Deployed contracts:**
 - `TeraSwapFeeCollector` (V2, current — adds `minimumOutput` revert per H-04) — `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459`
@@ -18,23 +18,28 @@ TeraSwap is an Ethereum DEX **meta-aggregator** — it queries 11 independent li
 
 ---
 
-## 2. Liquidity Sources (11 Adapters)
+## 2. Liquidity Sources (10 Adapters)
 
 Each source implements a unified `DEXAdapter` interface (`fetchQuote()` + `fetchSwapData()`), wrapped with per-source circuit breakers.
+
+> **Odos** ceased all operations 2026-07-30 (vendor shutdown) and is permanently
+> disabled via `DISABLED_SOURCES.odos` — no longer in the active table below.
+> The adapter file and its on-chain router whitelist entries are kept (never
+> deleted) but dormant: the API layer never quotes it, so no order can route
+> there.
 
 | # | Source | Type | Protocol |
 |---|--------|------|----------|
 | 1 | **1inch** | Meta-aggregator | Pathfinder routing |
 | 2 | **0x** | RFQ + AMM | Professional market makers |
 | 3 | **Velora** | Order-flow auction | MEV-protected execution |
-| 4 | **Odos** | Smart order routing | Proprietary multi-path algorithm |
-| 5 | **KyberSwap** | Concentrated liquidity aggregator | Elastic pools |
-| 6 | **CoW Protocol** | Intent-based (EIP-712) | Batch auction with surplus capture |
-| 7 | **Uniswap V3** | Direct pool | Fee-tier auto-detection |
-| 8 | **OpenOcean** | Cross-chain aggregator | Multi-DEX routing |
-| 9 | **SushiSwap** | AMM | Trident pools |
-| 10 | **Balancer** | Weighted pools | Vault-based liquidity |
-| 11 | **Curve** | StableSwap | Optimized for pegged assets |
+| 4 | **KyberSwap** | Concentrated liquidity aggregator | Elastic pools |
+| 5 | **CoW Protocol** | Intent-based (EIP-712) | Batch auction with surplus capture |
+| 6 | **Uniswap V3** | Direct pool | Fee-tier auto-detection |
+| 7 | **OpenOcean** | Cross-chain aggregator | Multi-DEX routing |
+| 8 | **SushiSwap** | AMM | Trident pools |
+| 9 | **Balancer** | Weighted pools | Vault-based liquidity |
+| 10 | **Curve** | StableSwap | Optimized for pegged assets |
 
 ---
 
@@ -267,7 +272,7 @@ After each swap execution, an advisory validator compares actual output against 
 Every 60 seconds:
   ① Acquire distributed lock (KV SET NX, 55s TTL)
   ② Cold-start detection (gap >5min → skip latency recording)
-  ③ Health check all 11 source endpoints (parallel)
+  ③ Health check all 10 active source endpoints (parallel; odos permanently disabled)
   ④ Feed results into per-source state machine
   ⑤ Process state transitions (active ↔ degraded ↔ disabled)
   ⑥ Auto-recovery for non-P0 disabled sources
@@ -314,7 +319,7 @@ Detects systemic events (coordinated attacks, provider outages):
 
 | Trigger | Condition | Action |
 |---------|-----------|--------|
-| **Majority** | ≥6 of 11 sources disabled | P0 systemic alert (all channels) |
+| **Majority** | ≥6 of 10 sources disabled | P0 systemic alert (all channels) |
 | **Rapid cascade** | ≥4 sources disabled within 10 minutes | P0 systemic alert (all channels) |
 
 15-minute cooldown prevents alert storms during prolonged outages. Alert-only — no automatic routing pause (deliberate design: avoid self-inflicted DoS).
@@ -481,7 +486,7 @@ Seven reasons that block auto-recovery and trigger immediate full fan-out:
 ┌──────────────────────────────────────────────────────────────────┐
 │                    MONITORING STACK (per tick)                    │
 │                                                                  │
-│  H1: Health checks (11 sources, parallel)                        │
+│  H1: Health checks (10 sources, parallel)                        │
 │  H2: TLS fingerprint + DNS record validation                    │
 │  H5: Quorum cross-check (every 5th tick, IQR + median)          │
 │  P45: Post-execution balance validation                          │
