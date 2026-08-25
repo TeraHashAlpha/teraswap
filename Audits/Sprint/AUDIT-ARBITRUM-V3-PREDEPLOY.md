@@ -16,7 +16,7 @@ This clears **gate condition #2** (the 0C/0H pre-deploy Auditor pass). It does *
 ### Findings: none (0C/0H/0M/0L).
 ### INFO (non-blocking, no action required to deploy):
 - **I-1 — deploy ACTION still gated:** my pass satisfies gate #2 only. Gate #3 (multi-chain keeper merged + live per-chain routing in the running process) is the operative blocker — do not deploy before it, per the runbook BLOCKER box.
-- **I-2 — admin is an EOA** (`0x9A38…C73C`) — inherits the standing **W1-L-02** (move to Safe/HW); mitigated meanwhile by the contract's own 48h/7d timelock on every admin action. Not new to this deploy.
+- **I-2 — admin is an EOA** (`0x9A38…C73C`) — inherits the standing **W1-L-02** (move to Safe/HW); mitigated meanwhile by the contract's own 48h/7d timelock on most admin actions — `pause`, `unpause`, and `setOracleConfig` (trigger-feed bounds) execute instantly, a deliberate scope judged accepted in [ADR-019](../../docs/ADR/ADR-019-trigger-feed-timelock-asymmetry.md). Not new to this deploy. *(corrected 2026-08-07)*
 - **I-3 — cosmetic:** `route-source.ts` has no entry yet for Arbitrum SwapRouter02 → an Arbitrum UniV3 fill would badge "Aggregated" not "Uniswap V3". Frontend-only, out of this gate's scope; flagged in the runbook.
 - **I-4 — process:** audited against the locally-fetched `origin/main`; owner should confirm the deploy is cut from `b9442c3` (or later main with the contract line unchanged) and record the fresh-block re-verify (gate #1) in the runbook blanks before executing.
 

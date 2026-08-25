@@ -23,7 +23,14 @@ export const MONITORED_ENDPOINTS: MonitoredEndpoint[] = [
   { id: '1inch',     hostname: 'api.1inch.dev',                        critical: true },
   { id: '0x',        hostname: 'api.0x.org',                           critical: true },
   { id: 'paraswap',  hostname: 'api.paraswap.io',                      critical: true },
-  { id: 'odos',      hostname: 'api.odos.xyz',                         critical: true },
+  // odos removed 2026-08-04: vendor ceased ALL operations 2026-07-30 (company
+  // shutdown, permanent — see DISABLED_SOURCES.odos in constants.ts). Unlike
+  // balancer/openocean/sushiswap below (disabled but theoretically fixable,
+  // kept non-critical so a hijack of a still-operated domain still pages), a
+  // shuttered vendor's domain is not worth TLS/DNS-integrity monitoring: no
+  // quote traffic ever depends on it again, and a repurposed/hijacked dead
+  // domain returning 200s again is exactly what would wrongly re-page this
+  // as reachable.
   { id: 'kyberswap', hostname: 'aggregator-api.kyberswap.com',         critical: true },
   { id: 'cowswap',   hostname: 'api.cow.fi',                           critical: true },
   { id: 'openocean', hostname: 'open-api.openocean.finance',           critical: false },

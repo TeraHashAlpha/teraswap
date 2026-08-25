@@ -65,15 +65,24 @@ const REPO = process.env.AUDIT_REPO_DIR
 const CADENCE_DIRS = ['Audits/Daily', 'Audits/Weekly', 'Audits/Monthly', 'Audits/Quarterly']
 const BRANCH = 'audits/cadence'
 
+// trimEnd, not trim: `git status --porcelain` lines that are worktree-modified-only (" M path")
+// start with a leading space that IS the index-status column — a blanket .trim() strips it off
+// the first line of the output, shifting every column and corrupting the slice(3) parse below
+// the moment a modified (not untracked) report is first/only in the list.
 const git = (args, cwd = REPO) =>
-  execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd()
 
 // Wrapped in main() + the import.meta.url guard below so this module can be `import()`-ed (e.g.
 // to exercise findCrossLaneConflicts in isolation) without shelling out to git or exiting the host.
 function main() {
-  // 1. Enumerate new/modified cadence reports in the operator's working copy.
-  //    --porcelain: "?? path" (untracked) / " M path" (modified). Reports only.
-  const status = git(['status', '--porcelain', '--', ...CADENCE_DIRS])
+  // 1. Enumerate new/modified/added cadence reports in the operator's working copy.
+  //    --porcelain: "?? path" (untracked) / " M path" / "MM path" (modified) / "A  path" (added).
+  //    XY is always exactly 2 chars + 1 separating space, so slice(3) is safe for all of those —
+  //    EXCEPT rename lines ("R  old -> new"), which git emits once two reports (e.g. yesterday's
+  //    and today's cadence report) are similar enough to trip rename detection; slice(3) would
+  //    then return the literal "old -> new" as a single bogus path and cpSync() would ENOENT on
+  //    it. --no-renames forces every touched path to report as its own plain XY-path line.
+  const status = git(['status', '--porcelain', '--no-renames', '--', ...CADENCE_DIRS])
   const files = status
     .split('\n')
     .filter(Boolean)
@@ -81,7 +90,7 @@ function main() {
     .filter((f) => f.endsWith('.md'))
 
   if (files.length === 0) {
-    console.log('[commit-audit-report] nothing new under Audits cadence dirs — done.')
+    console.log('[commit-audit-report] nothing to persist — no new/modified Audits cadence reports.')
     return 0 // no worktree created yet — nothing to clean up
   }
   console.log(`[commit-audit-report] ${files.length} report(s) to persist:\n  ${files.join('\n  ')}`)
@@ -99,11 +108,13 @@ function main() {
   // 3. Temp detached worktree → copy reports in → signed commit → push.
   //
   // [FIX-AUDIT-WORKTREE-CLEANUP] Every exit below this point sets `exitCode` and falls through to
-  // `finally` rather than calling process.exit() directly — process.exit() terminates the process
-  // immediately without running pending finally blocks, which is exactly how ~28 worktrees under
-  // this prefix were orphaned (a `process.exit()` inside this try, past `worktree add`, on every
-  // early-return run). Returning normally lets `finally` — and the process.exit() call in the
-  // import.meta.url guard below, made only after main() itself has returned — run every time.
+  // `finally` rather than calling the process's immediate-exit method directly — that method
+  // terminates the process at once without running pending finally blocks, which is exactly how
+  // ~28 worktrees under this prefix were orphaned (an immediate exit inside this try, past
+  // `worktree add`, on every early-return run). Returning normally lets `finally` run every time,
+  // and lets the caller set `process.exitCode` (below) instead of forcing an exit — see
+  // [FIX-AUDIT-SILENT-EXIT] for why that distinction also matters for stdout that's still
+  // buffered when the process would otherwise exit.
   const tmp = mkdtempSync(join(tmpdir(), 'audit-cadence-'))
   let exitCode = 0
   try {
@@ -135,7 +146,7 @@ function main() {
       // Anything staged? (report may already be on the branch from a prior run)
       const staged = git(['diff', '--cached', '--name-only'], tmp).split('\n').filter(Boolean)
       if (staged.length === 0) {
-        console.log('[commit-audit-report] all reports already on the branch — done.')
+        console.log('[commit-audit-report] nothing to persist — all reports already on the branch.')
       } else {
         const names = staged.map((f) => f.split('/').pop())
         const summary =
@@ -163,13 +174,32 @@ function main() {
 // realpathSync, not a raw string compare: on macOS /tmp is a symlink to /private/tmp, so
 // import.meta.url (always the realpath) would silently never match a bare process.argv[1] and
 // main() would never run — this was caught by a dry run through a /tmp sandbox during review.
+// Compare resolved PATHS, not a hand-built URL string: `file://${realpathSync(...)}` doesn't
+// percent-encode, so a checkout path containing a space (e.g. "dex-aggregator 2") never matched
+// import.meta.url's %20-encoded form — main() silently never ran there (field-confirmed 2026-08-04).
 const isMain = (() => {
   try {
-    return process.argv[1] !== undefined && import.meta.url === `file://${realpathSync(process.argv[1])}`
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+    )
   } catch {
     return false
   }
 })()
+// [FIX-AUDIT-SILENT-EXIT] Calling the process's immediate-exit method truncates buffered-but-not
+// -yet-flushed stdout/stderr writes (e.g. when this process's output is piped, as it is under a
+// scheduled task or GHA runner) — the exact shape of the 2026-08-04 failure: exit 0, zero stdout,
+// nothing pushed, no error anywhere. Setting `process.exitCode` and letting the script return
+// naturally lets Node drain its output streams before the process actually exits. The try/catch
+// below is the backstop for errors main() doesn't already handle (e.g. a failing `git fetch`/`git
+// push`) — every path out of this script now either logs its own outcome or lands here and logs
+// the error; none exit silently.
 if (isMain) {
-  process.exit(main())
+  try {
+    process.exitCode = main()
+  } catch (err) {
+    console.error(`[commit-audit-report] FATAL: ${err.message}`)
+    process.exitCode = 1
+  }
 }

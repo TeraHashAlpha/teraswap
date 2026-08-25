@@ -11,7 +11,6 @@ import { hostname } from "os"
 import { scoreTier } from "./freeze-score.js"
 
 const HOST = hostname()
-const CHAIN_ID = process.env.CHAIN_ID || "1"
 
 /**
  * Minimal HTML escaping for values interpolated into a Telegram HTML body.
@@ -54,6 +53,10 @@ function scoreLines(score) {
 export async function sendTelegramAlert(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
+  // [KEEPER-ENV-ORDER] Read at SEND time, like token/chatId above — a module-scope
+  // capture ran before .env.executor was loaded and froze the "1" default (a Base
+  // keeper alerting "Chain: 1"). Lazy reads are evaluation-order-proof.
+  const chainId = process.env.CHAIN_ID || "1"
 
   if (!token || !chatId) {
     console.warn("[ALERT] Telegram not configured, skipping alert")
@@ -65,7 +68,7 @@ export async function sendTelegramAlert(message) {
     `🚨 <b>TeraSwap Executor Alert</b>`,
     `Host: ${HOST}`,
     `Time: ${now}`,
-    `Chain: ${CHAIN_ID}`,
+    `Chain: ${chainId}`,
     ``,
     message,
   ].join("\n")

@@ -184,6 +184,13 @@ export const DISABLED_SOURCES: Record<string, string> = {
   // src/lib/adapters/balancer.ts to the Balancer v3 GraphQL SOR
   // (POST /graphql, sorGetSwapPaths).
   balancer: 'SOR order endpoint dead (404) — re-enable requires migrating to the Balancer v3 GraphQL SOR (sorGetSwapPaths)',
+  // Odos ceased ALL operations 2026-07-30 (vendor shutdown, announced
+  // publicly). PERMANENT — re-enable is impossible, the company no longer
+  // exists. Adapter file kept (never delete, see CLAUDE.md) with a
+  // @deprecated header; the on-chain router whitelist entries stay too
+  // (immutable on Arbitrum by design) — dormant and harmless since the API
+  // layer never quotes it.
+  odos: 'vendor shutdown 2026-07-30 — permanent, re-enable impossible (company no longer exists)',
 }
 
 // FeeCollector ABI (only the functions we call from the frontend)

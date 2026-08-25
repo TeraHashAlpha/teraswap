@@ -6,37 +6,15 @@
     "converted to an npm `overrides` pin and DELETED from this file once its fix ages past",
     "min-release-age (see `ageInOn`). The gate FAILS on ANY high/critical advisory NOT listed here,",
     "so the allowlist never weakens the gate for un-triaged findings. Reviewed by the Architect.",
-    "STATUS 2026-06-18: empty. The three prior entries (form-data GHSA-hmw2-7cc7-3qxx, vite",
-    "GHSA-fx2h-pf6j-xcff, undici GHSA-vmh5-mc38-953g) are now pinned to their patched versions via",
-    "`overrides` in package.json (form-data 4.0.6, vite 8.0.16, undici 7.28.0). npm audit reports 0",
-    "high/critical. The committed lockfile pins those versions, so `npm ci`/`npm install` install them",
-    "cleanly while .npmrc keeps min-release-age=7 for all other (future) dependency resolution."
+    "STATUS 2026-08-07: empty. The two brace-expansion entries (GHSA-mh99-v99m-4gvg,",
+    "GHSA-rgw5-rvv9-x895) aged in on 2026-08-06 and are now pinned via nested `overrides` in",
+    "package.json: the 1.x path (minimatch@3.1.5) -> brace-expansion 1.1.18, the 5.x path",
+    "(minimatch@10.2.5) -> brace-expansion 5.0.9 -- verified distinct per `npm ls brace-expansion",
+    "--all` (5.0.x is incompatible with the 1.x consumer, see the removed entries' `reason`).",
+    "js-yaml (GHSA-5p4m-2wfm-xmqj) is separately resolved by raising its `overrides` pin to",
+    "^5.2.1. npm audit reports 0 high/critical. The committed lockfile pins all three, so",
+    "`npm ci`/`npm install` install them cleanly while .npmrc keeps min-release-age=7 for all",
+    "other (future) dependency resolution."
   ],
-  "allow": [
-    {
-      "id": "GHSA-mh99-v99m-4gvg",
-      "package": "brace-expansion",
-      "severity": "high",
-      "vulnerableRange": "<=5.0.7",
-      "installed": "1.1.16 (single path: hoisted node_modules/minimatch@3.1.5)",
-      "fixedIn": "5.0.8",
-      "fixPublished": "2026-07-23",
-      "ageInOn": "2026-08-06",
-      "runtimePath": "DEV/LINT-TIME ONLY. Sole remaining path is the hoisted minimatch@3.1.5 consumed by eslint@9.39.5 and 5 eslint plugins. Brace patterns come from eslint config files and tsconfig, never from an HTTP request body or other external input, so the DoS is not reachable. The two minimatch@10.2.5 paths (@typescript-eslint/typescript-estree, glob) are pinned to 5.0.8 and are NOT covered by this entry.",
-      "reason": "The fixed version 5.0.8 is structurally incompatible with this consumer: it exports { expand } with __esModule, while minimatch@3.1.5 calls the require() result as a function, producing 'expand is not a function' on any pattern containing braces. Verified by direct execution. Backports 1.1.17/1.1.18 exist (2026-07-29 / 2026-07-30) but are inside the advisory range per GHSA metadata and are blocked by min-release-age=7. REVIEW ON 2026-08-06: check whether 1.1.18 carries the fix and, if so, replace this entry with a pin."
-    },
-    {
-      "id": "GHSA-rgw5-rvv9-x895",
-      "package": "brace-expansion",
-      "severity": "high",
-      "vulnerableRange": "<1.1.18 || >=4.0.0 <5.0.9",
-      "installed": "1.1.16 (hoisted node_modules/minimatch@3.1.5) and 5.0.8 (node_modules/minimatch@10.2.5, consumed by @typescript-eslint/typescript-estree and glob)",
-      "fixedIn": "1.1.18 (for the 1.x path) / 5.0.9 (for the 5.x path)",
-      "fixPublished": "2026-07-30",
-      "ageInOn": "2026-08-06",
-      "added": "2026-08-04",
-      "runtimePath": "DEV/LINT-TIME ONLY, same as GHSA-mh99 above — brace patterns come from eslint config/tsconfig, never external input.",
-      "reason": "patch younger than min-release-age 7d. Both fixed versions (1.1.18, 5.0.9) are from the 2026-07-30 release wave, 5 days old as of 2026-08-04, and are blocked by .npmrc min-release-age=7. Bypasses the GHSA-mh99 mitigation, so both this entry and GHSA-mh99 age in on 2026-08-06 and are intended to be resolved together in the day-6 `overrides` pin PR — do not merge them into a single entry before then."
-    }
-  ]
+  "allow": []
 }

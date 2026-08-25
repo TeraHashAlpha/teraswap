@@ -209,7 +209,6 @@ function AdapterConstellation() {
     { name: '1inch', category: 'API' },
     { name: '0x', category: 'API' },
     { name: 'Velora', category: 'API' },
-    { name: 'Odos', category: 'API' },
     { name: 'KyberSwap', category: 'API' },
     { name: 'OpenOcean', category: 'API' },
     { name: 'SushiSwap', category: 'API' },
@@ -799,8 +798,8 @@ const FEATURES: {
   comingSoon?: boolean
 }[] = [
   {
-    title: '11 Liquidity Sources',
-    desc: 'Simultaneous queries across 7 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, Odos, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
+    title: '10 Liquidity Sources',
+    desc: 'Simultaneous queries across 6 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
     icon: <FeatNetworkIcon />,
   },
   {
@@ -810,7 +809,7 @@ const FEATURES: {
   },
   {
     title: 'Statistical Outlier Detection',
-    desc: 'True median-based filtering across all 11 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
+    desc: 'True median-based filtering across all 10 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
     icon: <FeatChartAlertIcon />,
   },
   {
