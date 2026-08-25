@@ -67,31 +67,22 @@
     "eslint": "9.39.5",
     "eslint-config-next": "16.2.11",
     "jsdom": "29.1.1",
-    "postcss": "8.5.22",
+    "postcss": "8.5.23",
     "tailwindcss": "3.4.19",
     "typescript": "~5.9.3",
     "vitest": "4.1.10"
   },
-  "optionalDependencies": {
-    "@next/swc-darwin-arm64": "16.2.6",
-    "@next/swc-darwin-x64": "16.2.6",
-    "@next/swc-linux-arm64-gnu": "16.2.6",
-    "@next/swc-linux-arm64-musl": "16.2.9",
-    "@next/swc-linux-x64-gnu": "16.2.9",
-    "@next/swc-linux-x64-musl": "16.2.6",
-    "@next/swc-win32-arm64-msvc": "16.2.6",
-    "@next/swc-win32-x64-msvc": "16.2.6"
-  },
   "overrides": {
     "minimatch@10.2.5": {
-      "brace-expansion": "5.0.8"
+      "brace-expansion": "5.0.9"
     },
     "minimatch@3.1.5": {
-      "brace-expansion": "1.1.16"
+      "brace-expansion": "1.1.18"
     },
-    "js-yaml": "4.3.0",
+    "js-yaml": "^5.2.1",
     "axios": "1.18.1",
-    "tar": "7.5.20",
+    "tar": "^7.5.21",
+    "nanoid": "^3.3.17",
     "next": {
       "postcss": ">=8.5.10"
     },
@@ -105,7 +96,8 @@
       "ws": "7.5.11"
     },
     "ws": "8.21.0",
-    "undici": "7.28.0",
+    "undici": "7.29.0",
+    "socket.io-parser": "4.2.7",
     "form-data": "4.0.6",
     "vite": "8.0.16",
     "sharp": "0.35.3"

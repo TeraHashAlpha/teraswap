@@ -136,7 +136,6 @@ describe('deriveSigningMinAmountOut', () => {
       ...base,
       chainlinkPriceIn: 2000, chainlinkPriceOut: 1,
       defiLlamaPriceIn: null, defiLlamaPriceOut: null,
-      approxPriceIn: null, approxPriceOut: null,
     })
     expect(r.hasFeed).toBe(true)
     expect(r.source).toBe('chainlink')
@@ -148,21 +147,25 @@ describe('deriveSigningMinAmountOut', () => {
       ...base,
       chainlinkPriceIn: 2000, chainlinkPriceOut: null,
       defiLlamaPriceIn: null, defiLlamaPriceOut: 1,
-      approxPriceIn: null, approxPriceOut: null,
     })
     expect(r.hasFeed).toBe(true)
+    // [FIX-SIGNING-MIN-PRICE-INTEGRITY] The WEAKEST leg's tier, not the tokenOut leg's.
     expect(r.source).toBe('defillama')
   })
 
-  it('falls back to the approx price table as the last priced tier', () => {
+  // [FIX-SIGNING-MIN-PRICE-INTEGRITY / INC-2026-08-07-001] This test previously asserted that the
+  // hardcoded APPROX_PRICES table was "the last priced tier" and reported hasFeed=true. That tier
+  // is what signed the unfillable floor on order ef85438b, so it no longer exists: the parameters
+  // are gone from DeriveSigningMinParams and an unpriceable leg takes the honest no-feed path.
+  // Full scenario coverage lives in v3-min-price-integrity.test.ts.
+  it('has no approx tier — a leg without a LIVE price takes the no-feed path', () => {
     const r = deriveSigningMinAmountOut({
       ...base,
       chainlinkPriceIn: 2000, chainlinkPriceOut: null,
       defiLlamaPriceIn: null, defiLlamaPriceOut: null,
-      approxPriceIn: null, approxPriceOut: 1,
     })
-    expect(r.hasFeed).toBe(true)
-    expect(r.source).toBe('approx')
+    expect(r.hasFeed).toBe(false)
+    expect(r.source).toBe('fallback')
   })
 
   it('no price on either leg from any tier ⇒ fixed non-zero fallback, hasFeed=false', () => {
@@ -170,7 +173,6 @@ describe('deriveSigningMinAmountOut', () => {
       ...base,
       chainlinkPriceIn: null, chainlinkPriceOut: null,
       defiLlamaPriceIn: null, defiLlamaPriceOut: null,
-      approxPriceIn: null, approxPriceOut: null,
     })
     expect(r.hasFeed).toBe(false)
     expect(r.source).toBe('fallback')
@@ -184,14 +186,12 @@ describe('deriveSigningMinAmountOut', () => {
       ...base, dstDecimals: 6,
       chainlinkPriceIn: null, chainlinkPriceOut: null,
       defiLlamaPriceIn: null, defiLlamaPriceOut: null,
-      approxPriceIn: null, approxPriceOut: null,
     })
     expect(r6.minAmountOut).toBeGreaterThan(0n)
     const r2 = deriveSigningMinAmountOut({
       ...base, dstDecimals: 2,
       chainlinkPriceIn: null, chainlinkPriceOut: null,
       defiLlamaPriceIn: null, defiLlamaPriceOut: null,
-      approxPriceIn: null, approxPriceOut: null,
     })
     expect(r2.minAmountOut).toBeGreaterThanOrEqual(1n)
   })
@@ -201,7 +201,6 @@ describe('deriveSigningMinAmountOut', () => {
       ...base,
       chainlinkPriceIn: 2000, chainlinkPriceOut: null,
       defiLlamaPriceIn: null, defiLlamaPriceOut: null,
-      approxPriceIn: null, approxPriceOut: null,
     })
     expect(r.hasFeed).toBe(false)
     expect(r.source).toBe('fallback')

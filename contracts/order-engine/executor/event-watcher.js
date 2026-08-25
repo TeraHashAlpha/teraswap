@@ -51,13 +51,27 @@ const INITIAL_BACKOFF_MS = 5_000
 const MAX_BACKOFF_MS = 80_000
 const MAX_CONSECUTIVE_FAILURES = 5
 
-const CHAIN_ID = process.env.CHAIN_ID || "1"
-const ETHERSCAN_BASE =
-  CHAIN_ID === "1"
-    ? "https://etherscan.io"
-    : CHAIN_ID === "11155111"
-      ? "https://sepolia.etherscan.io"
-      : "https://etherscan.io"
+// [KEEPER-ENV-ORDER] Explorer resolved per alert (lazily), NOT at module scope —
+// this module is evaluated before the entrypoint's body ran, so a module-scope
+// CHAIN_ID capture froze the "1" default and every tx link pointed at etherscan.io
+// regardless of the keeper's actual chain.
+const EXPLORER_BY_CHAIN = {
+  "1": "https://etherscan.io",
+  "11155111": "https://sepolia.etherscan.io",
+  "8453": "https://basescan.org",
+  "42161": "https://arbiscan.io",
+}
+
+/**
+ * Explorer base URL for a chain id, or null when the chain is unknown — an
+ * unknown chain must NEVER silently fall back to etherscan.io (a link to another
+ * chain's explorer 404s and reads as a lie). Exported for unit tests.
+ * @param {string|undefined} chainId
+ * @returns {string|null}
+ */
+export function explorerBase(chainId) {
+  return EXPLORER_BY_CHAIN[chainId] ?? null
+}
 
 // ── Event formatters ────────────────────────────────────────
 
@@ -133,7 +147,12 @@ function formatSweepQueued(args, txHash) {
 }
 
 function txLink(txHash) {
-  return `Tx: <a href="${ETHERSCAN_BASE}/tx/${txHash}">${txHash.slice(0, 18)}...</a>`
+  const base = explorerBase(process.env.CHAIN_ID || "1")
+  if (!base) {
+    // Unknown chain: show the raw hash rather than a wrong-explorer link.
+    return `Tx: <code>${txHash}</code>`
+  }
+  return `Tx: <a href="${base}/tx/${txHash}">${txHash.slice(0, 18)}...</a>`
 }
 
 // Map event name → { emoji, severity, formatter }

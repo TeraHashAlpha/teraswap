@@ -32,7 +32,10 @@
  *   EXECUTOR_PRIVATE_KEY        -- Private key for the executor wallet (pays gas)
  *   SUPABASE_URL                -- Supabase project URL
  *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
- *   ORDER_EXECUTOR_ADDRESS      -- Deployed contract address
+ *   ORDER_EXECUTOR_ADDRESS      -- Deployed v2 contract address. Optional when
+ *                                  ORDER_EXECUTOR_V3_ADDRESS is set (a v3-only
+ *                                  chain, e.g. Arbitrum One); at least ONE of
+ *                                  the two must be configured.
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
  *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet). One keeper
  *                                  INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum One).
@@ -61,6 +64,11 @@
  *   ALLOW_PLAINTEXT_KEY_MAINNET -- back-compat alias for ALLOW_PLAINTEXT_KEY (either enables the bypass)
  */
 
+// [KEEPER-ENV-ORDER] MUST stay the first import: env.js loads .env.executor in its
+// module body, so it must evaluate before any module below reads process.env at
+// module scope (alert.js, retry-policy.js, deviation-guard.js). Pinned by
+// env-order.test.mjs.
+import "./env.js"
 import {
   createPublicClient,
   createWalletClient,
@@ -72,8 +80,6 @@ import {
   formatEther,
   zeroHash,
 } from "viem"
-import { readFileSync } from "fs"
-import { join } from "path"
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
 import { startEventWatcher } from "./event-watcher.js"
@@ -163,31 +169,9 @@ import {
   EXPECTED_ORDER_TYPEHASH_V3,
 } from "./chain-verify.js"
 
-// ---- Load .env.executor manually (no dotenv dependency) ----------------
-
-function loadEnv(filePath) {
-  try {
-    const content = readFileSync(filePath, "utf-8")
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
-      const eqIndex = trimmed.indexOf("=")
-      if (eqIndex === -1) continue
-      const key = trimmed.slice(0, eqIndex).trim()
-      const value = trimmed.slice(eqIndex + 1).trim()
-      if (!process.env[key]) {
-        process.env[key] = value
-      }
-    }
-  } catch (err) {
-    console.warn(`WARNING: Could not load ${filePath}: ${err.message}`)
-  }
-}
-
-// Use process.cwd() -- works with spaces in path
-loadEnv(join(process.cwd(), ".env.executor"))
-
 // ---- Configuration -----------------------------------------------------
+// .env.executor is loaded by ./env.js (the FIRST import above), so every read
+// below — and every module-scope read in the modules imported above — sees it.
 
 const RPC_URL = process.env.RPC_URL
 const PRIVATE_KEY = process.env.EXECUTOR_PRIVATE_KEY
@@ -322,7 +306,6 @@ function validateConfig() {
     RPC_URL,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY: SUPABASE_KEY,
-    ORDER_EXECUTOR_ADDRESS: CONTRACT_ADDRESS,
   }
 
   const missing = Object.entries(required)
@@ -331,6 +314,20 @@ function validateConfig() {
 
   if (missing.length > 0) {
     console.error(`FATAL: Missing required env vars: ${missing.join(", ")}`)
+    console.error("   Copy .env.executor.example -> .env.executor and fill in values")
+    process.exit(1)
+  }
+
+  // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] ORDER_EXECUTOR_ADDRESS is required only when
+  // ORDER_EXECUTOR_V3_ADDRESS is absent: a v3-only chain (Arbitrum One has no v2 OrderExecutor)
+  // boots with v3 alone. A keeper with NEITHER address still fails closed right here — both
+  // variables named, before any RPC client exists. The chain-verify gate in main() re-checks the
+  // same rule against its own contracts array as a backstop.
+  if (!CONTRACT_ADDRESS && !V3_CONTRACT_ADDRESS) {
+    console.error(
+      "FATAL: no executor contract configured — set ORDER_EXECUTOR_ADDRESS (v2) and/or " +
+        "ORDER_EXECUTOR_V3_ADDRESS (v3). A keeper with neither has nothing to verify or execute.",
+    )
     console.error("   Copy .env.executor.example -> .env.executor and fill in values")
     process.exit(1)
   }
@@ -1274,6 +1271,22 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         skipped++
         continue
       }
+      // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] v2 counterpart of the v3 skip above, for a v3-only
+      // keeper: with no ORDER_EXECUTOR_ADDRESS a v2 order has no contract to execute against —
+      // leave it active (skip + flag), and never substitute the v3 address (wrong typehash, and
+      // exactly the mis-routing the guard above exists to prevent in the other direction).
+      if (!routing.isV3 && !CONTRACT_ADDRESS) {
+        log(`  Order ${dbOrder.id.slice(0, 8)}... -- v2 order but ORDER_EXECUTOR_ADDRESS is unset on this keeper -- skipping, never mis-routed to v3`)
+        try {
+          await alertOps(
+            { kind: "submission-blocked", detail: `v2 order ${dbOrder.id} received but ORDER_EXECUTOR_ADDRESS is unset for chain ${CHAIN_ID} -- this keeper is v3-only` },
+            TIER_WARN_THRESHOLD,
+          )
+        } catch {}
+        await updateOrderStatus(dbOrder.id, "active") // unlock; a v2 order needs a v2 executor
+        skipped++
+        continue
+      }
       const { isV3, execAddress, execAbi } = routing
 
       // Use order_data directly -- it has the exact values that were EIP-712 signed
@@ -1967,29 +1980,53 @@ async function main() {
   // watcher and the first cycle, so a mis-bound keeper never touches an order. Any failure —
   // mismatch, empty code, unreachable RPC, timeout, malformed answer — exits non-zero after a
   // bounded retry; there is deliberately no warn-and-continue branch.
+  // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] Built once, refused-if-empty BEFORE the gate touches the
+  // network: a keeper with NEITHER executor address has nothing to verify and nothing to execute
+  // against, and must never reach the work loop. verifyChainBinding would also refuse an empty
+  // list, but as a generic config error — this is the distinct, named failure that tells the
+  // operator exactly which two variables can fix it. (validateConfig enforces the same rule even
+  // earlier; this check is the gate's own backstop, so a future validateConfig drift can never
+  // hand the gate nothing to verify.)
+  const gateContracts = [
+    // v2 mirrors the v3 spread below: Arbitrum One has no v2 OrderExecutor, so an ABSENT
+    // ORDER_EXECUTOR_ADDRESS skips the entry instead of bricking the boot. A CONFIGURED v2 is
+    // still verified fail-closed exactly as before — wrong chain, no code, or a wrong
+    // ORDER_TYPEHASH all still exit non-zero.
+    ...(CONTRACT_ADDRESS
+      ? [
+          {
+            label: "ORDER_EXECUTOR_ADDRESS (v2)",
+            address: CONTRACT_ADDRESS,
+            expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
+          },
+        ]
+      : []),
+    // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
+    // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
+    // with the v3 typehash, which also catches a v2/v3 address swap in the env.
+    ...(V3_CONTRACT_ADDRESS
+      ? [
+          {
+            label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
+            address: V3_CONTRACT_ADDRESS,
+            expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
+          },
+        ]
+      : []),
+  ]
+  if (gateContracts.length === 0) {
+    console.error(
+      "FATAL: no executor contract configured — set ORDER_EXECUTOR_ADDRESS (v2) and/or " +
+        "ORDER_EXECUTOR_V3_ADDRESS (v3). A keeper with neither has nothing to verify or execute. " +
+        "Refusing to boot.",
+    )
+    process.exit(1)
+  }
   try {
     await verifyChainBinding({
       provider: createRpcProbe(publicClient),
       chainId: CHAIN_ID,
-      contracts: [
-        {
-          label: "ORDER_EXECUTOR_ADDRESS (v2)",
-          address: CONTRACT_ADDRESS,
-          expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V2,
-        },
-        // v3 is optional (unset ⇒ v3 orders are skipped + flagged, see above), but when it IS set
-        // the keeper submits fund-moving calldata to it too, so it gets the identical treatment —
-        // with the v3 typehash, which also catches a v2/v3 address swap in the env.
-        ...(V3_CONTRACT_ADDRESS
-          ? [
-              {
-                label: "ORDER_EXECUTOR_V3_ADDRESS (v3)",
-                address: V3_CONTRACT_ADDRESS,
-                expectedOrderTypehash: EXPECTED_ORDER_TYPEHASH_V3,
-              },
-            ]
-          : []),
-      ],
+      contracts: gateContracts,
       log,
     })
   } catch (err) {
@@ -2038,7 +2075,8 @@ async function main() {
   log(`Executor wallet: ${account.address}`)
   log(`Chain: ${CHAIN_ID}`)
   log(`Balance: ${formatEther(balance)} ETH`)
-  log(`Contract (v2): ${CONTRACT_ADDRESS}`)
+  // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] Same loud-when-absent style as the v3 line below.
+  log(`Contract (v2): ${CONTRACT_ADDRESS || "not configured -- v2 orders will be skipped + flagged"}`)
   // [SPRINT-V3-P2] Loud about v3 state at boot: either the configured address, or an explicit
   // "disabled" so a v3 order silently piling up (skip+flag every cycle) is diagnosable from logs.
   log(`Contract (v3): ${V3_CONTRACT_ADDRESS || "not configured -- v3 orders will be skipped + flagged"}`)
@@ -2071,9 +2109,12 @@ async function main() {
   monitor.startHeartbeat()
 
   // [EX-WATCH] Start on-chain admin event watcher (L-02: monitor FeeCollector too)
-  const watchedContracts = [
-    { address: CONTRACT_ADDRESS, label: 'OrderExecutor' },
-  ]
+  const watchedContracts = []
+  // [A6-KEEPER-BOOT-GATE-OPTIONAL-V2] v2 is watched only when configured — an absent address is
+  // not a contract to poll logs from, and an empty string would fail every getLogs call.
+  if (CONTRACT_ADDRESS) {
+    watchedContracts.push({ address: CONTRACT_ADDRESS, label: 'OrderExecutor' })
+  }
   if (FEE_COLLECTOR_ADDRESS) {
     watchedContracts.push({ address: FEE_COLLECTOR_ADDRESS, label: 'FeeCollector' })
   }
