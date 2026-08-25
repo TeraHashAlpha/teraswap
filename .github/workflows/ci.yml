@@ -401,6 +401,34 @@ jobs:
       - name: Signing-path price-integrity guard (v3 DCA minAmountOut derivation + DCAPanel caller pin)
         run: npx vitest run src/lib/order-engine/v3-min-derivation.test.ts src/lib/order-engine/v3-min-price-integrity.test.ts src/components/DCAPanel.v3.test.tsx
 
+  feed-resolution-guard:
+    # [FIX-CBETH-DIRECT-FEED / INC-2026-08-07-001] Which Chainlink feed prices a leg decides what
+    # `minAmountOut` a user SIGNS — an on-chain commitment they cannot revise. Base cbETH now
+    # resolves DIRECT-PREFERRED (a "CBETH / USD" 8dp feed leads; the cbETH/ETH x ETH/USD
+    # composition is retained as its fallback), and the fall-through policy is deliberately
+    # asymmetric: a stale/reverting/zero-answer primary falls through, an IDENTITY MISMATCH hard
+    # blocks and is never masked. Nothing in the type system expresses that, so it is pinned here.
+    #
+    # This is the registry + resolution half of the same fund-flow path signing-price-integrity-guard
+    # covers arithmetically: chainlink-feeds (registry shape, USD-denomination invariant, heartbeat),
+    # useChainlinkPrice (the panel's read path + the MAGNITUDE guard: cbETH/USD must be >= ETH/USD
+    # and within 2x, so an ETH-denominated feed in a USD slot fails), chainlink (the server read path,
+    # which must apply the SAME ordering or the signed floor and the server valuation diverge), and
+    # usd-scope-guard (APPROX_PRICES cannot be imported by anything that gates or signs).
+    #
+    # The additive full-suite job below also runs these, but it is whole-repo; this is the targeted,
+    # individually-named PR check, matching the convention of the 15 guards above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Feed-resolution guard (direct-preferred ordering + magnitude + APPROX_PRICES scope)
+        run: npx vitest run src/lib/chains/chainlink-feeds.test.ts src/hooks/useChainlinkPrice.test.ts src/lib/chainlink.test.ts src/lib/order-engine/usd-scope-guard.test.ts
+
   full-suite:
     # [CHORE-CI-FULL-SUITE-JOB] Additive alongside the 14 per-file guard jobs above, not a
     # replacement for them (those stay as separately-named PR checks). This job runs the
