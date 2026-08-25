@@ -1365,9 +1365,10 @@ deploying now strands orders with no router)**, #1 fresh-block manifest re-verif
 - **Runbook:** complete/ordered, 4 hard gates restated, keeper-FIRST cutover, rollback=unset frontend env
   ONLY (never keeper config), KMS-only new per-chain signer.
 - **INFO:** deploy still gated on #3 (multi-chain keeper); admin EOA inherits W1-L-02 (48h/7d timelock
-  mitigates); route-source.ts missing Arbitrum SwapRouter02 badge entry (cosmetic, frontend, out of scope);
-  owner confirm deploy cut from b9442c3 + record fresh-block re-verify. Report + append left for owner's
-  SSH-signed batch.
+  mitigates most admin actions — pause/unpause/setOracleConfig are instant, accepted scope per ADR-019,
+  corrected 2026-08-07); route-source.ts missing Arbitrum SwapRouter02 badge entry (cosmetic, frontend,
+  out of scope); owner confirm deploy cut from b9442c3 + record fresh-block re-verify. Report + append
+  left for owner's SSH-signed batch.
 
 ### AUDIT-CLIENT-IP-CLOUDFLARE-AWARE — CLEARED TO MERGE 0C/0H (2026-07-24)
 
