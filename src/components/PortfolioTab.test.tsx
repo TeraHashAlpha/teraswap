@@ -16,11 +16,12 @@ import type { PortfolioData, PortfolioToken } from '@/hooks/usePortfolio'
 // ─── Wagmi mocks ─────────────────────────────────────────
 
 let isConnected = true
+let activeChainId = 1
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({
     address: isConnected ? '0x1111111111111111111111111111111111111111' : undefined,
     isConnected,
-    chain: { id: 1, name: 'mainnet' },
+    chain: { id: activeChainId, name: 'mainnet' },
   })),
 }))
 
@@ -90,6 +91,7 @@ function makePortfolio(over: Partial<PortfolioData>): PortfolioData {
     isError: false,
     lastUpdated: new Date(),
     refresh: refreshSpy,
+    isChainSupported: true,
     ...over,
   }
 }
@@ -128,6 +130,7 @@ const UNI = entry({
 
 beforeEach(() => {
   isConnected = true
+  activeChainId = 1
   refreshSpy.mockReset()
   portfolioState = makePortfolio({ tokens: [] })
 })
@@ -180,6 +183,28 @@ describe('PortfolioTab', () => {
     const retry = screen.getByRole('button', { name: /try again/i })
     fireEvent.click(retry)
     expect(refreshSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] Arbitrum One (42161) is active for swaps but is not in
+  // ALCHEMY_BASE_BY_CHAIN, so usePortfolio reports isChainSupported: false. The component must
+  // show an availability state naming the chain instead of the generic error/empty states.
+  it('shows a chain-availability state naming the selected chain when the chain has no portfolio support', () => {
+    activeChainId = 42161
+    portfolioState = makePortfolio({ tokens: [], isChainSupported: false })
+    render(<PortfolioTab />)
+    expect(screen.getByTestId('portfolio-chain-unavailable').textContent).toMatch(/Arbitrum One/i)
+    expect(screen.queryByText(/Failed to load portfolio/i)).toBeNull()
+    expect(screen.queryByText(/No tokens found/i)).toBeNull()
+  })
+
+  it('names the selected (non-mainnet) chain in the empty-state string when the chain IS supported', () => {
+    // A hardcoded "Ethereum mainnet" string would fail this: chain 8453 is Base, and it IS in
+    // ALCHEMY_BASE_BY_CHAIN, so this exercises the ordinary empty state, not the availability one.
+    activeChainId = 8453
+    portfolioState = makePortfolio({ tokens: [], isChainSupported: true })
+    render(<PortfolioTab />)
+    expect(screen.getByText(/No tokens found in this wallet on Base\./i)).toBeTruthy()
+    expect(screen.queryByText(/Ethereum mainnet/i)).toBeNull()
   })
 
   it('calls onSwapToken with the row token when its Swap button is clicked', () => {

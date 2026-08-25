@@ -10,6 +10,8 @@ import {
 } from '@/lib/tokens'
 import { usePortfolio, type PortfolioToken } from '@/hooks/usePortfolio'
 import { useTokenImport } from '@/hooks/useTokenImport'
+import { useActiveChainId } from '@/hooks/useChainId'
+import { getChainConfig } from '@/lib/chains/registry'
 
 interface PortfolioTabProps {
   onSwapToken?: (token: Token) => void
@@ -214,8 +216,14 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
 
 export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
   const { isConnected } = useAccount()
-  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh } = usePortfolio()
+  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = usePortfolio()
   const { importToken } = useTokenImport()
+  const activeChainId = useActiveChainId()
+  // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] The chain's own display name, from the registry — never a
+  // literal — used both by the availability state below and by the empty-state copy.
+  const chainDisplayName = (() => {
+    try { return getChainConfig(activeChainId).name } catch { return 'this chain' }
+  })()
 
   // Tracks tokens the user has imported this session. addCustomToken in
   // lib/tokens mutates a module-level array but TokenSelector reads it
@@ -276,6 +284,18 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
     )
   }
 
+  // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] The active chain has no Alchemy discovery endpoint
+  // (isPortfolioSupportedChain, via usePortfolio's isChainSupported) — token discovery never ran
+  // (usePortfolio skips the request that would 400), so none of the loading/error/empty states
+  // below apply. Named after the actual selected chain, not a hardcoded one.
+  if (!isChainSupported) {
+    return (
+      <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-6 text-center" data-testid="portfolio-chain-unavailable">
+        <p className="text-sm text-cream-35">Portfolio isn&apos;t available on {chainDisplayName} yet.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full space-y-3">
       {/* Header */}
@@ -331,7 +351,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
       {/* Empty (connected, no balances, not loading) */}
       {!isLoading && !isError && tokens.length === 0 && (
         <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-6 text-center">
-          <p className="text-sm text-cream-35">No tokens found in this wallet on Ethereum mainnet.</p>
+          <p className="text-sm text-cream-35">No tokens found in this wallet on {chainDisplayName}.</p>
         </div>
       )}
 
