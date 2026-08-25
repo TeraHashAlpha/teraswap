@@ -586,6 +586,19 @@ function CreateDCAForm({
       : { buys: customBuysClamped, warning: null as string | null, blocked: false },
     [customMode, totalUsd, customBuysClamped, dcaMinChunkUsd],
   )
+  // [FIX-USD-SCOPE-GUARD-AND-UNCHECKABLE-DUST-GUARD, L-2] `applyDcaMinChunkGuard` fails OPEN
+  // (returns `{ warning: null, blocked: false }`) whenever `totalUsd` is null — by design, per its
+  // own docblock, so an unpriced spend leg is never treated as "checked and fine". A silent no-op is
+  // indistinguishable from "checked and fine" to the user, though, so this tells them the client-side
+  // SC-02 check specifically could NOT run, and that the base-unit MIN_ORDER_AMOUNT floor
+  // (useOrderEngine.createOrder) is still the one enforcing a per-chunk minimum. Never reads
+  // APPROX_PRICES to manufacture a number here — that would trip the usd-scope-guard and, worse,
+  // resurrect exactly the wrong-but-present valuation this whole change moved away from. Mutually
+  // exclusive with the oracle-blocked and chain-unavailable states: gated on both `v3Enabled` (the
+  // chain-unavailable condition is `!v3Enabled`) and `!oracleBlocked`.
+  const minChunkUncheckable =
+    customMode && v3Enabled && !oracleBlocked &&
+    !!tokenIn && !!tokenOut && Number(totalDisplay) > 0 && livePriceIn == null
 
   const parts = customMode ? minChunkGuard.buys : DCA_TOTAL_PRESETS[partsIdx]
   const interval = customMode ? customInterval : DCA_INTERVAL_PRESETS[intervalIdx]
@@ -1099,6 +1112,17 @@ function CreateDCAForm({
             data-testid="dca-min-chunk-warning"
           >
             {minChunkGuard.warning}
+          </p>
+        )}
+        {/* [FIX-USD-SCOPE-GUARD-AND-UNCHECKABLE-DUST-GUARD, L-2] The spend leg has no live price
+            (Chainlink and DefiLlama both came back empty), so the SC-02 min-chunk check above could
+            not run at all — distinct from `minChunkGuard.warning`, which fires only once the guard
+            DID run and found something to say. */}
+        {minChunkUncheckable && (
+          <p className="mt-1 text-[11px] text-amber-300" data-testid="dca-minchunk-uncheckable">
+            The per-chunk minimum could not be checked — {tokenIn?.symbol ?? 'this token'} has no live
+            price right now. The ${dcaMinChunkUsd} minimum wasn&apos;t verified, but the base-unit
+            minimum order amount still applies to every buy.
           </p>
         )}
       </div>
