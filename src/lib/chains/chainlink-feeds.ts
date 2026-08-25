@@ -36,13 +36,18 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
     '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': '0x458138Fc0D67027E9A6778ef40a6ffC318c69061',
     // DAI  → DAI/USD   description() "DAI / USD", decimals() 8   [SPRINT-9S S1]
     '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': '0x591e79239a7d679378eC8c847e5038150364C78F',
-    // NOT mapped, by design (rule #9 — a wrong feed mis-prices swaps):
-    //  • cbETH (0x2Ae3…0DEc22): Chainlink publishes only cbETH/ETH on Base (description()
-    //    "CBETH / ETH", 18 dp — ETH-denominated). Dropping it into this USD-keyed map would
-    //    read ~1.08 as "$1.08". Correct support needs cbETH/ETH × ETH/USD composition, which
-    //    is a validation-layer feature beyond this map (see FEEDBACK 9S — follow-up).
+    // NOT mapped HERE, by design (rule #9 — a wrong feed mis-prices swaps):
+    //  • cbETH (0x2Ae3…0DEc22): a direct "CBETH / USD" feed DOES exist on Base and IS now adopted
+    //    — but in PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN below, NOT in this map. The distinction is
+    //    load-bearing: an entry here is terminal (getChainlinkFeed hit ⇒ resolveFeed returns
+    //    'single' and never looks at the composition), whereas the preferred map keeps the
+    //    cbETH/ETH × ETH/USD composition alive as the FALLBACK. INC-2026-08-07-001 was caused by
+    //    an UNPRICED leg, so a single point of failure on the one feed is exactly what must not be
+    //    reintroduced. The earlier note here ("Chainlink publishes only cbETH/ETH on Base") was
+    //    factually wrong and is corrected by 9V-M-01 + the on-chain verification in
+    //    scripts/verify-base-cbeth-feeds.mjs.
     //  • USDbC (0xd9aA…b6CA): no Chainlink feed exists on Base (absent from the directory).
-    //  Both correctly fall through to null → multi-source compare + on-chain minimumOutput.
+    //    Correctly falls through to null → multi-source compare + on-chain minimumOutput.
   },
   // [SPRINT-46-ARBITRUM-CONFIG → CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] Arbitrum (42161) — 5 core
   // feeds. AUDIT-ARBITRUM-46-47 HIGH: ALL 5 recon-sourced feed addresses had ZERO on-chain code
@@ -118,6 +123,13 @@ const FEED_HEARTBEAT_SEC: Record<string, number> = {
   '0x591e79239a7d679378ec8c847e5038150364c78f': 86400,  // DAI/USD  (24 h)
   '0x806b4ac04501c29769051e42783cf04dce41440b': 86400,  // cbETH/ETH MARKET feed (24 h — V2 base leg; see 9V-M-01 note below)
   '0x868a501e68f3d1e89cfc0d22f6b22e8dabce5f04': 86400,  // cbETH/ETH Exchange-Rate feed (24 h — 9W depeg breaker leg)
+  // [FIX-CBETH-DIRECT-FEED] cbETH/USD DIRECT feed — 1200s, the `heartbeat` field of the canonical
+  // ENS-named `cbeth-usd` entry in Chainlink's own reference-data directory
+  // (feeds-ethereum-mainnet-base-1.json). x1.5 ⇒ a 1800s staleness ceiling: 72x TIGHTER than the
+  // 86400s cbETH/ETH leg it is preferred over, which is the second reason to prefer it (the first
+  // being one read instead of two). That tightness is exactly why the composition is RETAINED as
+  // the fallback — a 20-min feed that misses a round must not leave the leg unpriced.
+  '0xd7818272b9e248357d13057aab0b417af31e817d': 1200,   // cbETH/USD DIRECT (20 min)
   // ── Arbitrum (42161) [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] — keys are the CORRECTED feed
   // addresses (see the CHAINLINK_FEEDS_BY_CHAIN[42161] block above); heartbeats are the exact
   // `heartbeat` field from Chainlink's official reference-data directory for each feed's
@@ -263,6 +275,58 @@ export function getComposedFeed(
 }
 
 /**
+ * [FIX-CBETH-DIRECT-FEED / 9V-M-01 / INC-2026-08-07-001] DIRECT token/USD feeds that are PREFERRED
+ * over an existing composition WITHOUT replacing it. Keyed by token address (lowercased), value is
+ * the direct feed PROXY.
+ *
+ * Why this is a separate map and not an entry in CHAINLINK_FEEDS_BY_CHAIN. That map is TERMINAL:
+ * `getChainlinkFeed` hitting it makes `resolveFeed` return `kind:'single'` and the token's composed
+ * entry becomes dead config that never runs. INC-2026-08-07-001 was caused by a leg with NO usable
+ * price at signing time, so collapsing cbETH onto a single feed would trade one failure mode for
+ * the same one: the 20-min cbETH/USD feed missing a round would leave the leg unpriced again, and a
+ * signed `minAmountOut` cannot be revised after the fact. Owner decision (this goal): direct FIRST,
+ * composition SECOND — neither alone.
+ *
+ * Resolution order is therefore, in `resolveFeed`:
+ *   1. CHAINLINK_FEEDS_BY_CHAIN (plain direct, no fallback)  → kind 'single'
+ *   2. THIS map + COMPOSED_FEEDS_BY_CHAIN                    → kind 'preferred' (primary, base, quote)
+ *   3. COMPOSED_FEEDS_BY_CHAIN alone                         → kind 'composed'
+ *   4. nothing                                               → null (the pre-existing no-oracle path)
+ *
+ * PROVENANCE (rule #9 / ADR-018 — no address here was typed from a doc or from memory):
+ *   - token key  ← the EXISTING COMPOSED_FEEDS_BY_CHAIN key for the same token. The import-time
+ *     assert below rejects any key that is not already a configured composed token, so a
+ *     mistyped token address throws on import rather than silently pricing nothing.
+ *   - feed proxy ← Chainlink's official reference-data directory
+ *     (feeds-ethereum-mainnet-base-1.json), canonical ENS-named entry `cbeth-usd`, then CONFIRMED
+ *     on-chain: description() "CBETH / USD", decimals() 8, fresh latestRoundData(), aggregator()
+ *     0x71E021bc… matching the directory's contractAddress — identical on two independent Base
+ *     RPCs. Re-runnable: `node scripts/verify-base-cbeth-feeds.mjs`.
+ */
+const PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string}`>> = {
+  // ── Base (8453) ──
+  8453: {
+    // cbETH (0x2Ae3…0DEc22) → "CBETH / USD" 8 dp, 1200s heartbeat. Falls back to the
+    // cbETH/ETH x ETH/USD composition already configured below for the same token.
+    '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': '0xd7818272B9e248357d13057AAb0B417aF31E817d',
+  },
+}
+
+/**
+ * [FIX-CBETH-DIRECT-FEED] The DIRECT token/USD feed PREFERRED for a token, or null. Unlike
+ * `getChainlinkFeed`, a hit here is NOT terminal — the caller must retain the token's composed
+ * feed as the fallback (that is the whole point of the map). Defaults to mainnet, which has none.
+ */
+export function getPreferredDirectUsdFeed(
+  tokenAddress: string,
+  chainId: number = DEFAULT_CHAIN_ID,
+): `0x${string}` | null {
+  const feeds = PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN[chainId]
+  if (!feeds) return null
+  return feeds[tokenAddress.toLowerCase()] ?? null
+}
+
+/**
  * [SPRINT-9W-oracle] An asset that has BOTH a market price feed AND an exchange-rate (redemption)
  * feed for the same pair — the inputs to the depeg circuit-breaker. The MARKET feed remains the
  * swap-price reference (9V); the EXCHANGE-RATE feed is the manipulation-resistant comparison leg.
@@ -402,6 +466,14 @@ const FEED_EXPECTATIONS: Record<string, FeedExpectation> = {
   // cbETH composed legs (SPRINT-9V V2 / 9V-M-01) — ETH-denominated by design, not USD.
   '0x806b4ac04501c29769051e42783cf04dce41440b': { description: 'CBETH / ETH', decimals: 18 },
   '0x868a501e68f3d1e89cfc0d22f6b22e8dabce5f04': { description: 'cbETH-ETH Exchange Rate', decimals: 18 },
+  // [FIX-CBETH-DIRECT-FEED] cbETH/USD DIRECT — the PREFERRED primary. Recorded from the ON-CHAIN
+  // reading (description() "CBETH / USD", decimals() 8), verified on two independent Base RPCs
+  // (mainnet.base.org + base-rpc.publicnode.com, identical answers) and cross-checked against the
+  // reference directory's aggregator 0x71E021bc… — see scripts/verify-base-cbeth-feeds.mjs. This
+  // entry is what makes "an ETH-denominated feed dropped into a USD slot" fail CLOSED: swap the
+  // address for 0x806b… (CBETH / ETH, 18 dp) and the read path's identity check rejects it before
+  // the ~1.14 answer can ever be read as "$1.14".
+  '0xd7818272b9e248357d13057aab0b417af31e817d': { description: 'CBETH / USD', decimals: 8 },
 
   // ── Arbitrum (42161) [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] ──
   '0x639fe6ab55c921f74e7fac1ee960c0b6293ba612': { description: 'ETH / USD', decimals: 8 },
@@ -433,6 +505,24 @@ export interface FeedLeg {
 export type ResolvedFeed =
   | { kind: 'single'; leg: FeedLeg }
   | { kind: 'composed'; base: FeedLeg; quote: FeedLeg }
+  /**
+   * [FIX-CBETH-DIRECT-FEED] A DIRECT token/USD feed (`primary`) that is read FIRST, with the
+   * `base x quote` composition retained as the FALLBACK for the same token. Deliberately FLAT
+   * rather than recursive (`{ primary: ResolvedFeed; fallback: ResolvedFeed }`): the UI hook must
+   * declare a FIXED number of `useReadContract` calls (Rules of Hooks), and a flat three-leg shape
+   * bounds that at 3 legs x 3 reads statically. A recursive shape would allow arbitrary depth and
+   * could not be read by the hook at all.
+   *
+   * FALL-THROUGH POLICY, enforced identically in `useChainlinkPrice` and `fetchChainlinkPriceRaw`:
+   *   - primary UNREADABLE (revert / no round / transport), STALE, bad round-sequence, or a
+   *     non-positive answer  → fall through to base x quote. This is the case the fallback exists
+   *     for: an unpriced leg is what caused INC-2026-08-07-001.
+   *   - primary IDENTITY MISMATCH (description/decimals != FEED_EXPECTATIONS) → HARD BLOCK, never
+   *     masked by the fallback. A feed that is not what the config claims is an ADR-018 security
+   *     event, not an outage; silently switching to the composition would hide exactly the defect
+   *     shape ADR-018 exists to surface.
+   */
+  | { kind: 'preferred'; primary: FeedLeg; base: FeedLeg; quote: FeedLeg }
 
 function toLeg(address: `0x${string}`): FeedLeg | null {
   const expectation = getFeedExpectation(address)
@@ -451,12 +541,34 @@ export function resolveFeed(
   tokenAddress: string,
   chainId: number = DEFAULT_CHAIN_ID,
 ): ResolvedFeed | null {
+  // 1. Plain direct feed — terminal, no fallback (unchanged).
   const direct = getChainlinkFeed(tokenAddress, chainId)
   if (direct) {
     const leg = toLeg(direct)
     return leg ? { kind: 'single', leg } : null
   }
+
   const composed = getComposedFeed(tokenAddress, chainId)
+
+  // 2. [FIX-CBETH-DIRECT-FEED] Direct-PREFERRED — the direct feed leads, the composition backs it
+  //    up. A primary with no declared identity (toLeg → null) is dropped rather than trusted, and
+  //    the composition alone still prices the token: failing closed on the PRIMARY must not take
+  //    the fallback down with it, or the fix would reintroduce the unpriced leg it exists to close.
+  const preferred = getPreferredDirectUsdFeed(tokenAddress, chainId)
+  if (preferred) {
+    const primary = toLeg(preferred)
+    if (primary) {
+      if (!composed) return { kind: 'single', leg: primary }
+      const pBase = toLeg(composed.base)
+      const pQuote = toLeg(composed.quote)
+      // A composition missing an identity on either leg is not usable as a fallback; the primary
+      // alone is still a real, fully-identified direct USD feed, so it stands on its own.
+      if (pBase && pQuote) return { kind: 'preferred', primary, base: pBase, quote: pQuote }
+      return { kind: 'single', leg: primary }
+    }
+  }
+
+  // 3. Composition alone (mainnet GRT/LDO/SHIB/WBTC).
   if (!composed) return null
   const base = toLeg(composed.base)
   const quote = toLeg(composed.quote)
@@ -474,17 +586,31 @@ export function resolveFeed(
 export function listConfiguredFeedTokens(): Array<{
   chainId: number
   token: string
-  kind: 'single' | 'composed'
+  kind: ResolvedFeed['kind']
 }> {
-  const out: Array<{ chainId: number; token: string; kind: 'single' | 'composed' }> = []
-  for (const [chainIdStr, feeds] of Object.entries(CHAINLINK_FEEDS_BY_CHAIN)) {
-    for (const token of Object.keys(feeds)) {
-      out.push({ chainId: Number(chainIdStr), token, kind: 'single' })
-    }
-  }
-  for (const [chainIdStr, composed] of Object.entries(COMPOSED_FEEDS_BY_CHAIN)) {
-    for (const token of Object.keys(composed)) {
-      out.push({ chainId: Number(chainIdStr), token, kind: 'composed' })
+  // [FIX-CBETH-DIRECT-FEED] Union the three registries and DEDUPE by (chain, token) — a
+  // direct-preferred token appears in two of them and must be enumerated once. `kind` is now the
+  // kind the token ACTUALLY resolves to rather than the registry it was found in: the guard's job
+  // is to assert the consuming code path handles what `resolveFeed` produces, so reporting the
+  // registry of origin would let a shape mismatch (configured one way, resolved another) pass.
+  const seen = new Set<string>()
+  const out: Array<{ chainId: number; token: string; kind: ResolvedFeed['kind'] }> = []
+  const registries: Array<Record<number, Record<string, unknown>>> = [
+    CHAINLINK_FEEDS_BY_CHAIN,
+    PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN,
+    COMPOSED_FEEDS_BY_CHAIN,
+  ]
+  for (const registry of registries) {
+    for (const [chainIdStr, feeds] of Object.entries(registry)) {
+      const chainId = Number(chainIdStr)
+      for (const token of Object.keys(feeds)) {
+        const key = `${chainId}:${token.toLowerCase()}`
+        if (seen.has(key)) continue
+        const resolved = resolveFeed(token, chainId)
+        if (!resolved) continue // unreachable given the completeness assert; never guess a kind
+        seen.add(key)
+        out.push({ chainId, token, kind: resolved.kind })
+      }
     }
   }
   return out
@@ -508,11 +634,59 @@ export function listConfiguredFeedTokens(): Array<{
       addresses.add(quote.toLowerCase())
     }
   }
+  // [FIX-CBETH-DIRECT-FEED] The preferred-direct map hands out addresses too — omitting it here
+  // would leave the one feed this change introduces as the only un-self-identified address in the
+  // registry, which is precisely the hole ADR-018 invariant (a) exists to close.
+  for (const chainPreferred of Object.values(PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN)) {
+    for (const feed of Object.values(chainPreferred)) addresses.add(feed.toLowerCase())
+  }
   const missing = [...addresses].filter((a) => !FEED_EXPECTATIONS[a])
   if (missing.length > 0) {
     throw new Error(
       `[ADR-018] ${missing.length} Chainlink feed address(es) configured without a self-identification ` +
       `expectation in FEED_EXPECTATIONS: ${missing.join(', ')}`,
     )
+  }
+})()
+
+/**
+ * [FIX-CBETH-DIRECT-FEED] Import-time invariants for the preferred-direct map. Three properties,
+ * each closing a way this change could silently become the defect it fixes:
+ *
+ *  (a) TOKEN PROVENANCE — every key must already be a configured COMPOSED token on the same chain.
+ *      That is what makes "derive the token address from the existing registry" structural rather
+ *      than a promise: a mistyped token key matches no composed entry and throws on import, instead
+ *      of quietly configuring a preference for an address no token has.
+ *  (b) NO DOUBLE-CONFIGURATION — a token in the terminal direct map can never also be preferred
+ *      here, or the preference would be dead config that `resolveFeed` short-circuits past.
+ *  (c) USD DENOMINATION — the declared identity of a PREFERRED DIRECT USD feed must itself be
+ *      USD-denominated ("… / USD") at 8 dp. This is the registry-level half of the magnitude
+ *      guard: it makes "an ETH-denominated feed dropped into a USD slot" — the original defect's
+ *      shape, where a ~1.14 answer would be read as $1.14 — fail at IMPORT, before any read.
+ */
+;(function assertPreferredDirectFeedsWellFormed(): void {
+  for (const [chainIdStr, feeds] of Object.entries(PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN)) {
+    const chainId = Number(chainIdStr)
+    for (const [token, feed] of Object.entries(feeds)) {
+      if (!getComposedFeed(token, chainId)) {
+        throw new Error(
+          `[FIX-CBETH-DIRECT-FEED] (a) preferred-direct token ${token} on chain ${chainId} is not a ` +
+          `configured composed token — the composition is the mandated fallback, so it must exist.`,
+        )
+      }
+      if (getChainlinkFeed(token, chainId)) {
+        throw new Error(
+          `[FIX-CBETH-DIRECT-FEED] (b) token ${token} on chain ${chainId} is in BOTH the terminal ` +
+          `direct map and the preferred-direct map — resolveFeed would never reach the preference.`,
+        )
+      }
+      const expectation = getFeedExpectation(feed)
+      if (!expectation || !/\/\s*USD$/.test(expectation.description) || expectation.decimals !== 8) {
+        throw new Error(
+          `[FIX-CBETH-DIRECT-FEED] (c) preferred-direct feed ${feed} (chain ${chainId}) does not ` +
+          `declare a USD-denominated 8-decimal identity: ${JSON.stringify(expectation)}`,
+        )
+      }
+    }
   }
 })()

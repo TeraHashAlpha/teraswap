@@ -41,8 +41,6 @@ import {
   // [SPRINT-V3-P3] v3 cancel/invalidate — fail-closed while getOrderExecutorV3(chainId) is null.
   ORDER_EXECUTOR_V3_ABI,
   computeInvalidationBatches,
-  // [fix/dca-min-buy-copy] Same price source the form already uses (DCAPanel's totalUsd/fillUsd).
-  APPROX_PRICES,
 } from '@/lib/order-engine'
 import type {
   OnChainOrder,
@@ -651,7 +649,11 @@ export function useOrderEngine() {
       const isDca = (config.dcaTotal ?? 1) > 1
       // [fix/dca-min-buy-copy] Human/USD-readable copy instead of raw base units — the SAME
       // formatter DCAPanel's inline warning uses, so the toast and the inline hint never drift.
-      const priceUsd = APPROX_PRICES[(config.tokenIn.symbol || '').toUpperCase()] ?? null
+      // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] The LIVE price the caller priced the form with —
+      // NOT `APPROX_PRICES`. The table is a hand-edited constant that read ETH at 3500 against a
+      // live ~1912 (INC-2026-08-07-001 §2), so every "~$…" figure in this floor copy was ~83% high;
+      // absent a live price the copy states the floor in token units instead of fabricating USD.
+      const priceUsd = config.priceInUsd ?? null
       const error = isDca
         ? formatMinBuyMessage({
             minBuyRaw: MIN_ORDER_AMOUNT,

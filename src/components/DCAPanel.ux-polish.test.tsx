@@ -26,8 +26,13 @@ vi.mock('wagmi', () => ({
 }))
 // [SPRINT-V3-P2] see DCAPanel.routability.test.tsx — stub useChainlinkPrice directly rather than
 // expanding this file's minimal wagmi mock with useReadContract.
+// [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] The stub now returns a LIVE price ($2000) instead of
+// null. The per-buy floor hint's "~$…" figure used to come from the APPROX_PRICES table (WETH:
+// 3500) and now comes from this hook — the same source the signed floor rests on — so a null here
+// means an unpriced leg and copy with no USD at all. $2000 is a plausible live ETH price and is
+// deliberately not 3500, so a revert to the table would change the rendered figure.
 vi.mock('@/hooks/useChainlinkPrice', () => ({
-  useChainlinkPrice: () => ({ chainlinkPrice: null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }),
+  useChainlinkPrice: () => ({ chainlinkPrice: 2000, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }),
 }))
 // [FEAT-DEPEG-GATE-ORDER-CREATION] Same precedent as useChainlinkPrice above — stub directly
 // rather than expanding this file's minimal wagmi mock with useReadContract. This suite doesn't

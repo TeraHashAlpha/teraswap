@@ -248,3 +248,108 @@ describe('D3 — the total/per-chunk cancellation is load-bearing; do not "fix" 
     expect(ratio).toBeCloseTo(Number(DCA_TOTAL), 2)
   })
 })
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// [FIX-CBETH-DIRECT-FEED — ACCEPTANCE 3] THE SAME ORDER, WITH cbETH PRICED FROM THE DIRECT FEED
+//
+// #408 stopped the table from reaching a signed minimum, but it left cbETH UNPRICED — which takes
+// the ADR-013 no-feed floor (~0.0001 tokenOut): safe from "unfillable", worthless as protection.
+// Adopting the direct "CBETH / USD" Base feed makes the leg priceable, so the same order that
+// produced 516 reverts now derives a floor that sits BELOW market and would fill.
+//
+// Both legs are read from the SAME on-chain snapshot (Base, block timestamp 1787695639,
+// 2026-08-25, identical on two independent RPCs) — mixing a live price for one leg with a
+// historical price for the other is exactly the mismatched-pair mistake that caused the incident.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+describe('[FIX-CBETH-DIRECT-FEED] ACCEPTANCE 3 — the incident recomputed with the direct cbETH/USD feed', () => {
+  /** "CBETH / USD" 0xd781…817d, 8 dp → raw answer 278273887800. */
+  const CBETH_DIRECT_PRICE = 2782.738878
+  /** "ETH / USD" 0x7104…Bb70, 8 dp → raw answer 244554190200. */
+  const WETH_LIVE_PRICE = 2445.541902
+  /** "CBETH / ETH" 0x806b…440b, 18 dp → 1137732356968620000. The independent cross-check. */
+  const CBETH_ETH_FEED_RATIO = 1.13773235696862
+
+  const recomputed = deriveSigningMinAmountOut({
+    amountIn: AMOUNT_IN_TOTAL,
+    srcDecimals: 18,
+    dstDecimals: 18,
+    maxSlippageBps: MAX_SLIPPAGE_BPS,
+    chainlinkPriceIn: CBETH_DIRECT_PRICE, // cbETH — now PRICEABLE, from the direct feed
+    chainlinkPriceOut: WETH_LIVE_PRICE,
+    defiLlamaPriceIn: null,
+    defiLlamaPriceOut: null,
+  })
+
+  it('the implied pair ratio lands at MARKET (~1.1379), not the table mismatch (1.853314)', () => {
+    // The ratio a signed floor implies, inverted straight out of the derivation:
+    //   minAmountOut = amountIn x (pIn/pOut) x (1 - bps/10000)   [both legs 18 dp]
+    // so pIn/pOut = minAmountOut / (amountIn x (1 - bps/10000)). Deriving it from the OUTPUT rather
+    // than from the two inputs is deliberate: it proves the number the user would sign, not merely
+    // that two constants divide correctly.
+    const impliedRatio =
+      Number(recomputed.minAmountOut) /
+      (Number(AMOUNT_IN_TOTAL) * (1 - MAX_SLIPPAGE_BPS / 10_000))
+
+    expect(impliedRatio).toBeCloseTo(1.137882, 5)
+    expect(impliedRatio).toBeLessThan(1.2)
+
+    // The incident's ratio was 1.853314 — 1.63x higher, and the entire reason no fill could clear.
+    const incidentRatio = CBETH_TABLE_PRICE / WETH_CHAINLINK_PRICE
+    expect(incidentRatio / impliedRatio).toBeCloseTo(1.6287, 3)
+  })
+
+  it('the direct USD feed agrees with the cbETH/ETH x ETH/USD composition to 0.02% — it IS USD-denominated', () => {
+    // Independent confirmation of denomination and scale: two feeds that were never configured to
+    // agree, agreeing. If the direct slot ever carried an ETH-denominated answer, this ratio would
+    // be ~1/2445, not ~1.
+    const composed = CBETH_ETH_FEED_RATIO * WETH_LIVE_PRICE
+    expect(Math.abs(CBETH_DIRECT_PRICE - composed) / composed).toBeLessThan(0.0002)
+  })
+
+  it('the floor is genuinely price-derived — hasFeed true, tier chainlink, no decay warning', () => {
+    // On the day of the incident this same order reported hasFeed=true / source='chainlink' while
+    // resting on a constant. Now both are true for the reason they claim.
+    expect(recomputed.hasFeed).toBe(true)
+    expect(recomputed.source).toBe('chainlink')
+    expect(recomputed.minAmountOut).toBe(3517247074632108n)
+    // And NOT the ADR-013 no-feed floor #408 would otherwise leave this leg on.
+    expect(recomputed.minAmountOut).not.toBe(10n ** 14n)
+  })
+
+  it('THE POINT — after per-chunk scaling the floor is 0.975x market: it FILLS, where the original could not', () => {
+    // Same contract arithmetic as the historical reproduction above (OrderExecutorV3.sol:526).
+    const executeAmount =
+      (AMOUNT_IN_TOTAL * 1n) / DCA_TOTAL - (AMOUNT_IN_TOTAL * 0n) / DCA_TOTAL
+    const scaledMin = (recomputed.minAmountOut * executeAmount) / AMOUNT_IN_TOTAL
+    const marketQuote = 1202000000000000n // the keeper's four independent re-quotes
+
+    expect(scaledMin).toBe(1172415691544035n)
+    expect(scaledMin < marketQuote).toBe(true) // clearable — 516 reverts become 0
+    expect(Number(scaledMin) / Number(marketQuote)).toBeCloseTo(0.9754, 3)
+
+    // Contrast, in one line: the signed floor that actually shipped.
+    const original = (SIGNED_MIN_AMOUNT_OUT * executeAmount) / AMOUNT_IN_TOTAL
+    expect(Number(original) / Number(marketQuote)).toBeCloseTo(1.5887, 3)
+  })
+
+  it('CONTROL — the same order stays fillable at the incident-day prices too (~1.1346)', () => {
+    // The market ratio moves; the fix must not be an artifact of the day it was measured. cbETH was
+    // ~$2204 against the incident's own uniquely-reconstructed WETH price of $1942.46585493.
+    const sameDay = deriveSigningMinAmountOut({
+      amountIn: AMOUNT_IN_TOTAL,
+      srcDecimals: 18,
+      dstDecimals: 18,
+      maxSlippageBps: MAX_SLIPPAGE_BPS,
+      chainlinkPriceIn: 2204,
+      chainlinkPriceOut: WETH_CHAINLINK_PRICE,
+      defiLlamaPriceIn: null,
+      defiLlamaPriceOut: null,
+    })
+    const impliedRatio =
+      Number(sameDay.minAmountOut) /
+      (Number(AMOUNT_IN_TOTAL) * (1 - MAX_SLIPPAGE_BPS / 10_000))
+    expect(impliedRatio).toBeCloseTo(1.13464, 4)
+    // The signed floor was 1.633x what a correctly-priced cbETH leg would have produced.
+    expect(Number(SIGNED_MIN_AMOUNT_OUT) / Number(sameDay.minAmountOut)).toBeCloseTo(1.6334, 3)
+  })
+})

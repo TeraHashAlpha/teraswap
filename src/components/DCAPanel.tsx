@@ -23,8 +23,6 @@ import {
   getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
   dcaScheduleFitsExpiry,
-  fillUsd,
-  APPROX_PRICES,
   DCA_CUSTOM_BUYS_MIN,
   DCA_CUSTOM_BUYS_MAX,
   DCA_CUSTOM_INTERVAL_NUMBER_MIN,
@@ -501,6 +499,26 @@ function CreateDCAForm({
     return () => { cancelled = true }
   }, [v3Enabled, oracleFallbackAllowed, tokenIn, tokenOut, chainlinkPriceIn, chainlinkPriceOut, chainId])
 
+  /**
+   * [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE / INC-2026-08-07-001 follow-up 1] The LIVE USD price of
+   * one whole tokenIn — Chainlink first, DefiLlama second. This is byte-for-byte the same tier
+   * ordering (and the same two values) `deriveSigningMinAmountOut` uses for the spend leg below, so
+   * the number the form VALUES the order with and the number the signed floor RESTS on can no
+   * longer come from different worlds.
+   *
+   * They used to. `totalUsd` was priced from `APPROX_PRICES` — a hand-edited constant table with
+   * `ETH: 3500` against a live Base ETH/USD of ~1912 on the day of the incident, i.e. ~83% high on
+   * the most-traded asset in the catalogue. It no longer touches signing (#408 removed the
+   * parameters outright), but it still fed the SC-02 min-chunk dust guard, and a guard fed a HIGH
+   * valuation over-values the order and waves through chunks it exists to stop: at $3500/ETH the
+   * guard believed 0.01 WETH was $35 and allowed 35 buys, where the live price allows 24.
+   *
+   * null when neither source priced the leg. The guard then fails OPEN exactly as it does today for
+   * any unpriced token, and the per-chunk base-unit MIN_ORDER_AMOUNT floor in
+   * useOrderEngine.createOrder stays the universal backstop.
+   */
+  const livePriceIn = chainlinkPriceIn ?? llamaPriceIn
+
   // Live preview of the amount that WOULD be signed, for the "derived floor" display.
   const liveAmountInRaw = useMemo(() => {
     if (!v3Enabled || !tokenIn || !totalDisplay) return null
@@ -528,19 +546,24 @@ function CreateDCAForm({
     })
   }, [v3Enabled, oracleBlocked, tokenIn, tokenOut, liveAmountInRaw, maxSlippageBps, chainlinkPriceIn, chainlinkPriceOut, llamaPriceIn, llamaPriceOut])
 
-  // [CHORE-DCA-CUSTOM-PERIODS req.2 min-chunk] Total spend in USD (APPROX_PRICES-priced
-  // tokens only — null for anything unpriced, e.g. an imported token). Feeds the SC-02 dust
-  // guard below; fails OPEN when unpriced (same posture fillUsd uses everywhere else), so the
-  // per-chunk MIN_ORDER_AMOUNT base-unit floor (useOrderEngine.createOrder, untouched) stays
-  // the universal backstop regardless of pricing.
+  // [CHORE-DCA-CUSTOM-PERIODS req.2 min-chunk] Total spend in USD — the input to the SC-02 dust
+  // guard below. Fails OPEN when unpriced, so the per-chunk MIN_ORDER_AMOUNT base-unit floor
+  // (useOrderEngine.createOrder, untouched) stays the universal backstop regardless of pricing.
+  //
+  // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] Priced from `livePriceIn` (Chainlink → DefiLlama), NOT
+  // from `fillUsd`/`APPROX_PRICES`. See the `livePriceIn` docblock: this is a GATE, and a gate may
+  // not read a hardcoded table. `fillUsd` remains correct for the fills timeline and analytics,
+  // where a stale estimate costs a wrong label rather than a wrong decision.
   const totalUsd = useMemo(() => {
-    if (!totalDisplay || !tokenIn) return null
+    if (!totalDisplay || !tokenIn || livePriceIn == null) return null
     try {
-      return fillUsd(parseUnits(totalDisplay, tokenIn.decimals).toString(), tokenIn.decimals, tokenIn.symbol)
+      const human = Number(formatUnits(parseUnits(totalDisplay, tokenIn.decimals), tokenIn.decimals))
+      if (!Number.isFinite(human)) return null
+      return human * livePriceIn
     } catch {
       return null
     }
-  }, [totalDisplay, tokenIn])
+  }, [totalDisplay, tokenIn, livePriceIn])
 
   // [FEAT-DEPEG-GATE-ORDER-CREATION] Same hook, same semantics as SwapBox: 'ok' when the pair has
   // no registered exchange-rate feed (the common case — creation proceeds), 'consent'/'block' when
@@ -611,13 +634,15 @@ function CreateDCAForm({
 
   // [fix/dca-min-buy-copy] Human/USD-readable per-buy floor hint — the SAME formatter the
   // useOrderEngine.createOrder toast uses, so the inline warning and the toast never drift.
-  // priceUsd reuses the SAME price source as totalUsd above (APPROX_PRICES via fillUsd),
-  // failing OPEN to token-units-only copy (no fabricated USD) when the symbol is unpriced.
+  // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] priceUsd reuses the SAME price source as totalUsd
+  // above — now `livePriceIn` (Chainlink → DefiLlama), not the APPROX_PRICES table — and still
+  // fails OPEN to token-units-only copy (no fabricated USD) when the leg is unpriced. The toast
+  // this mirrors is fed the same value via CreateOrderConfig.priceInUsd, so the two still agree.
   const minBuyMessage = useMemo(() => {
     if (!underMin || !totalDisplay || !tokenIn || !parts) return null
     try {
       const totalRaw = parseUnits(totalDisplay, tokenIn.decimals)
-      const priceUsd = APPROX_PRICES[(tokenIn.symbol || '').toUpperCase()] ?? null
+      const priceUsd = livePriceIn
       return formatMinBuyMessage({
         minBuyRaw: MIN_ORDER_AMOUNT,
         decimals: tokenIn.decimals,
@@ -629,7 +654,7 @@ function CreateDCAForm({
     } catch {
       return null
     }
-  }, [underMin, totalDisplay, tokenIn, parts])
+  }, [underMin, totalDisplay, tokenIn, parts, livePriceIn])
 
   // Derived values
   const perPart = useMemo(() => {
@@ -782,6 +807,10 @@ function CreateDCAForm({
       priceFeed, // address(0) = no price condition (DCA executes on schedule)
       expirySeconds: expiry.seconds,
       router: getDefaultRouter(chainId).address, // Best aggregated price
+      // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] The LIVE spend-leg price, so the createOrder
+      // per-buy-floor toast quotes the same USD the inline warning above does. Copy only — the
+      // pre-sign floor createOrder enforces is the exact base-unit MIN_ORDER_AMOUNT comparison.
+      priceInUsd: livePriceIn,
       dcaInterval: interval.seconds,
       dcaTotal: parts,
     }

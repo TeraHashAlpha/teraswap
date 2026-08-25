@@ -169,6 +169,19 @@ export interface CreateOrderConfig {
   // today. useOrderEngine uses its presence (not a separate flag) as the v2/v3 discriminator,
   // matching OnChainOrder.maxSlippageBps.
   maxSlippageBps?: number
+  /**
+   * [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE / INC-2026-08-07-001 follow-up 1] LIVE USD price of one
+   * whole `tokenIn`, from the SAME source the signing floor rests on (Chainlink, else DefiLlama) —
+   * never the `APPROX_PRICES` table.
+   *
+   * Used ONLY to render the "~$…" figure inside the per-buy minimum copy. It does not gate anything:
+   * `createOrder`'s pre-sign floor is the exact base-unit `MIN_ORDER_AMOUNT` comparison and is
+   * unaffected by this value's presence or absence. Omitted / null ⇒ the copy simply drops the USD
+   * suffix and states the floor in token units, which is the repo's "never fabricate USD" rule
+   * rather than a degraded message. The table used to fill this in and read ~83% high on ETH
+   * (3500 against a live ~1912 at the time of the incident).
+   */
+  priceInUsd?: number | null
   // DCA-specific
   dcaInterval?: number          // seconds between executions
   dcaTotal?: number             // total number of executions

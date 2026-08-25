@@ -43,9 +43,14 @@ function formatApproxUsd(usd: number): string {
 /**
  * Human-readable form of the on-chain per-buy floor: the amount in the token's OWN units (e.g.
  * "0.0001 cbBTC" for a 10,000-base-unit floor at 8 decimals) plus its approximate USD value when
- * a price is known. `priceUsd` is the caller-supplied USD price of one WHOLE token (e.g. via
- * lib/order-engine/usd.ts's APPROX_PRICES) — null when unpriced, which drops the "(~$…)" suffix
- * rather than fabricating a USD figure.
+ * a price is known. `priceUsd` is the caller-supplied USD price of one WHOLE token — null when
+ * unpriced, which drops the "(~$…)" suffix rather than fabricating a USD figure.
+ *
+ * [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] That price is now the LIVE Chainlink → DefiLlama price
+ * (DCAPanel's `livePriceIn`, threaded to useOrderEngine via CreateOrderConfig.priceInUsd), NOT
+ * `APPROX_PRICES`. The table read ~83% high on ETH; see the scope policy in
+ * lib/order-engine/usd.ts. This module stays price-source agnostic — it only formats what it is
+ * given — but the "~" prefix is load-bearing either way and must not be dropped.
  */
 export function formatMinBuyUnit(
   minBuyRaw: bigint,

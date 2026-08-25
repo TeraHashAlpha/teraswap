@@ -15,7 +15,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
 import { fetchChainlinkPriceRaw, fetchHistoricalPrice, fetchErc20Decimals, computeTokenAmountUsd, getChainlinkFeed, getFeedStalenessSec, getFeedExpectation, chainlinkAggregatorAbi, evaluatePairOracle, _clearFeedIdentityCache, type PriceCheck } from './chainlink'
-import { getComposedFeed, getExchangeRatePair } from './chains/chainlink-feeds'
+import { getComposedFeed, getExchangeRatePair, getPreferredDirectUsdFeed } from './chains/chainlink-feeds'
 import { getRpcUrlForChain } from './adapters/shared'
 import { NATIVE_ETH, CHAINLINK_MAX_STALENESS_SEC } from './constants'
 
@@ -943,5 +943,143 @@ describe('[FIX-MAINNET-FEED-REMEDIATION] remediated mainnet feeds', () => {
       [ETH_USD]: ethUsdLeg(now),
     })
     expect(await fetchChainlinkPriceRaw(GRT, 1)).toBeNull()
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// [FIX-CBETH-DIRECT-FEED] The SERVER read path for a direct-preferred token.
+//
+// `useChainlinkPrice` (the panel) and `fetchChainlinkPriceRaw` (the server / API) must apply the
+// SAME ordering and the SAME fall-through policy, or the floor a user signs and the floor the
+// server values it at come from different feeds. These pin the server half; the hook half lives in
+// useChainlinkPrice.test.ts.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+describe('chainlink — [FIX-CBETH-DIRECT-FEED] preferred: direct primary, composed fallback', () => {
+  const CBETH_BASE = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const CBETH_USD = getPreferredDirectUsdFeed(CBETH_BASE, 8453)!
+  const CBETH_ETH = getComposedFeed(CBETH_BASE, 8453)!.base
+  const ETH_USD_BASE = getComposedFeed(CBETH_BASE, 8453)!.quote
+
+  // Real Base readings, 2026-08-25 (block ts 1787695639), two independent RPCs agreeing.
+  const CBETH_USD_ANSWER = 278_273_887_800n            // $2782.738878 @ 8 dp
+  const ETH_USD_ANSWER = 244_554_190_200n              // $2445.541902 @ 8 dp
+  const CBETH_ETH_ANSWER = 1_137_732_356_968_620_000n  // 1.13773235696862 @ 18 dp
+  const COMPOSED_PRICE = 1.13773235696862 * 2445.541902
+
+  type LegState = { answer: bigint; decimals: number; description?: string; updatedAt?: bigint; revert?: boolean }
+
+  /** Per-ADDRESS RPC stub — a composition reads different addresses with different identities and
+   *  different decimals, so a single flat config could not express any of these cases. */
+  function mockLegs(legs: Record<string, LegState>) {
+    const now = nowSec()
+    const fetchMock = vi.fn(async (_url: unknown, init: { body?: string }) => {
+      const body = JSON.parse(init.body as string)
+      const to: string = String(body.params[0].to).toLowerCase()
+      const selector: string = String(body.params[0].data).slice(0, 10).toLowerCase()
+      const leg = legs[to]
+      if (!leg || leg.revert) throw new Error(`revert at ${to}`)
+
+      let result: `0x${string}`
+      if (selector === DECIMALS_SELECTOR) {
+        result = encodeFunctionResult({ abi: chainlinkAggregatorAbi, functionName: 'decimals', result: leg.decimals })
+      } else if (selector === DESCRIPTION_SELECTOR) {
+        result = describeSelectorResult(to, leg.description)
+      } else if (selector === LATEST_ROUND_SELECTOR) {
+        const updatedAt = leg.updatedAt ?? now
+        result = encodeFunctionResult({
+          abi: chainlinkAggregatorAbi,
+          functionName: 'latestRoundData',
+          result: [1n, leg.answer, updatedAt, updatedAt, 1n],
+        })
+      } else {
+        throw new Error(`Unexpected selector ${selector}`)
+      }
+      return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  const healthy = (): Record<string, LegState> => ({
+    [CBETH_USD.toLowerCase()]: { answer: CBETH_USD_ANSWER, decimals: 8 },
+    [CBETH_ETH.toLowerCase()]: { answer: CBETH_ETH_ANSWER, decimals: 18 },
+    [ETH_USD_BASE.toLowerCase()]: { answer: ETH_USD_ANSWER, decimals: 8 },
+  })
+
+  it('prices cbETH from the DIRECT feed and never reads the composition legs', async () => {
+    const fetchMock = mockLegs({
+      ...healthy(),
+      // Absurd base: if the composition were used the answer would be ~$24455, not ~$2783.
+      [CBETH_ETH.toLowerCase()]: { answer: 10n * 10n ** 18n, decimals: 18 },
+    })
+    const result = await fetchChainlinkPriceRaw(CBETH_BASE, 8453)
+    expect(result!.price).toBeCloseTo(2782.738878, 6)
+    // Not merely "the right number" — the fallback legs are not even READ on the happy path.
+    const addressesRead = fetchMock.mock.calls.map((c) =>
+      String(JSON.parse((c[1] as { body: string }).body).params[0].to).toLowerCase(),
+    )
+    expect(addressesRead).not.toContain(CBETH_ETH.toLowerCase())
+  })
+
+  it('a STALE direct feed falls through to the composition, not to null', async () => {
+    // 1801s — one second past the direct feed's own 1200 x 1.5 ceiling.
+    mockLegs({
+      ...healthy(),
+      [CBETH_USD.toLowerCase()]: { answer: CBETH_USD_ANSWER, decimals: 8, updatedAt: nowSec() - 1801n },
+    })
+    const result = await fetchChainlinkPriceRaw(CBETH_BASE, 8453)
+    expect(result).not.toBeNull()
+    expect(result!.price).toBeCloseTo(COMPOSED_PRICE, 6)
+  })
+
+  it('a REVERTING direct feed falls through to the composition', async () => {
+    mockLegs({ ...healthy(), [CBETH_USD.toLowerCase()]: { answer: 0n, decimals: 8, revert: true } })
+    const result = await fetchChainlinkPriceRaw(CBETH_BASE, 8453)
+    expect(result).not.toBeNull()
+    expect(result!.price).toBeCloseTo(COMPOSED_PRICE, 6)
+  })
+
+  it('a direct feed answering ZERO falls through to the composition', async () => {
+    mockLegs({ ...healthy(), [CBETH_USD.toLowerCase()]: { answer: 0n, decimals: 8 } })
+    const result = await fetchChainlinkPriceRaw(CBETH_BASE, 8453)
+    expect(result!.price).toBeCloseTo(COMPOSED_PRICE, 6)
+  })
+
+  it('an IDENTITY MISMATCH on the direct feed returns null — the healthy composition does NOT rescue it', async () => {
+    // The asymmetry, on the server side. A reachable feed that is not what the config claims is an
+    // ADR-018 config defect, and a fallback that quietly succeeds would hide it forever.
+    mockLegs({
+      ...healthy(),
+      [CBETH_USD.toLowerCase()]: { answer: CBETH_ETH_ANSWER, decimals: 18, description: 'CBETH / ETH' },
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH_BASE, 8453)).toBeNull()
+  })
+
+  it('both sources unusable → null (fail closed, unchanged no-oracle path)', async () => {
+    mockLegs({
+      [CBETH_USD.toLowerCase()]: { answer: 0n, decimals: 8 },
+      [CBETH_ETH.toLowerCase()]: { answer: 0n, decimals: 18 },
+      [ETH_USD_BASE.toLowerCase()]: { answer: ETH_USD_ANSWER, decimals: 8 },
+    })
+    expect(await fetchChainlinkPriceRaw(CBETH_BASE, 8453)).toBeNull()
+  })
+
+  it('the L2 sequencer gate still runs first — a down sequencer prices nothing, direct feed or not', async () => {
+    mockLegs(healthy())
+    mockIsSequencerUp.mockResolvedValueOnce(false)
+    expect(await fetchChainlinkPriceRaw(CBETH_BASE, 8453)).toBeNull()
+  })
+
+  it('computeTokenAmountUsd values a cbETH amount from the direct feed', async () => {
+    // The server-trusted valuation the >$10k gate reads. cbETH used to be priceable here ONLY via
+    // the composition; it now resolves through the direct feed with the same result to 0.02%.
+    mockLegs({
+      ...healthy(),
+      // fetchErc20Decimals reads the TOKEN's decimals() — cbETH is 18 dp.
+      [CBETH_BASE.toLowerCase()]: { answer: 0n, decimals: 18 },
+    })
+    const result = await computeTokenAmountUsd(CBETH_BASE, (10n ** 18n).toString(), 8453)
+    expect(result!.price).toBeCloseTo(2782.738878, 6)
+    expect(result!.usd).toBeCloseTo(2782.738878, 6)
   })
 })
