@@ -14,6 +14,8 @@ import {
   getFeedStalenessSec,
   getFeedExpectation,
   getComposedFeed,
+  getPreferredDirectUsdFeed,
+  listConfiguredFeedTokens,
   resolveFeed,
   type ResolvedFeed,
 } from './chainlink-feeds'
@@ -202,21 +204,90 @@ describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => 
     }
   })
 
-  it('a composed-only token (Base cbETH) resolves to kind:"composed" with BOTH legs\' identities attached', () => {
+  // [FIX-CBETH-DIRECT-FEED — ACCEPTANCE 1, registry half] cbETH used to resolve 'composed'. It now
+  // resolves 'preferred': the DIRECT "CBETH / USD" feed leads and the composition is RETAINED as
+  // the fallback. Both halves are asserted here, because either one alone is the bug — direct-only
+  // reintroduces the single point of failure that left the leg unpriced in INC-2026-08-07-001, and
+  // composed-only is simply the pre-change behaviour.
+  it('Base cbETH resolves to kind:"preferred" — DIRECT primary FIRST, composition RETAINED as fallback', () => {
     const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
     const composed = getComposedFeed(CBETH, 8453)
     expect(composed).not.toBeNull()
+    const preferred = getPreferredDirectUsdFeed(CBETH, 8453)
+    expect(preferred).not.toBeNull()
 
     const resolved = resolveFeed(CBETH, 8453)
     expect(resolved).not.toBeNull()
-    expect(resolved!.kind).toBe('composed')
-    if (resolved!.kind === 'composed') {
+    expect(resolved!.kind).toBe('preferred')
+    if (resolved!.kind === 'preferred') {
+      // PRIMARY — the direct USD feed. USD-denominated at 8 dp; an ETH-denominated leg here is the
+      // original defect's shape (a ~1.14 answer read as "$1.14").
+      expect(resolved!.primary.address.toLowerCase()).toBe(preferred!.toLowerCase())
+      expect(resolved!.primary.expectedDescription).toBe('CBETH / USD')
+      expect(resolved!.primary.expectedDecimals).toBe(8)
+      // FALLBACK — unchanged cbETH/ETH x ETH/USD, still fully identified on both legs.
       expect(resolved!.base.address.toLowerCase()).toBe(composed!.base.toLowerCase())
       expect(resolved!.base.expectedDescription).toBe('CBETH / ETH')
       expect(resolved!.base.expectedDecimals).toBe(18)
       expect(resolved!.quote.address.toLowerCase()).toBe(composed!.quote.toLowerCase())
       expect(resolved!.quote.expectedDescription).toBe('ETH / USD')
       expect(resolved!.quote.expectedDecimals).toBe(8)
+    }
+  })
+
+  // The preference must NOT be expressed by adding cbETH to the terminal direct map: a hit there
+  // short-circuits resolveFeed to 'single' and the composition becomes dead config. This is the
+  // assertion that catches that specific "simplification".
+  it('the preference does NOT come from the terminal direct map (which would kill the fallback)', () => {
+    const CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+    expect(getChainlinkFeed(CBETH, 8453)).toBeNull()
+    expect(CHAINLINK_FEEDS_BY_CHAIN[8453][CBETH.toLowerCase()]).toBeUndefined()
+  })
+
+  // [FIX-CBETH-DIRECT-FEED] The direct feed's whole second advantage is its 1200s heartbeat — 72x
+  // tighter than the 86400s cbETH/ETH leg. Without a heartbeat entry it would fall back to the
+  // hook's 90000s global and the tightness would be silently thrown away.
+  it('the direct cbETH/USD feed carries its own 1200s heartbeat (1800s staleness ceiling)', () => {
+    const feed = getPreferredDirectUsdFeed('0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', 8453)!
+    expect(getFeedHeartbeatSec(feed)).toBe(1200)
+    expect(getFeedStalenessSec(feed, 90_000)).toBe(1800)
+    // The fallback leg keeps its own, much looser ceiling — preferring the direct feed must not
+    // tighten the composition it falls back to.
+    expect(getFeedStalenessSec('0x806b4Ac04501c29769051e42783cF04dCE41440b', 90_000)).toBe(129_600)
+  })
+
+  // [FIX-CBETH-DIRECT-FEED — ACCEPTANCE 2, registry half] The magnitude guard's structural twin:
+  // a feed cannot be preferred into a USD slot unless it DECLARES a USD identity at 8 dp. Point the
+  // map at 0x806b… (CBETH / ETH, 18 dp) and the import-time assert in chainlink-feeds.ts throws
+  // before a single read happens. Data-driven over the whole map, so a future entry is covered.
+  it('EVERY preferred-direct feed declares a USD-denominated 8-decimal identity', () => {
+    const preferredTokens = listConfiguredFeedTokens().filter((f) => f.kind === 'preferred')
+    expect(preferredTokens.length).toBeGreaterThan(0) // guard is not vacuous
+    for (const { chainId, token } of preferredTokens) {
+      const feed = getPreferredDirectUsdFeed(token, chainId)!
+      expect(feed, `${chainId}:${token}`).not.toBeNull()
+      const expectation = getFeedExpectation(feed)!
+      expect(expectation, `${chainId}:${token}`).not.toBeNull()
+      expect(expectation.description, `${chainId}:${token} ${feed}`).toMatch(/\/\s*USD$/)
+      expect(expectation.decimals, `${chainId}:${token} ${feed}`).toBe(8)
+      // And the fallback it prefers over must still exist — 'preferred' without a composition is
+      // just 'single' wearing a different name.
+      expect(getComposedFeed(token, chainId), `${chainId}:${token}`).not.toBeNull()
+    }
+  })
+
+  // listConfiguredFeedTokens is what the hook's structural guard enumerates. A direct-preferred
+  // token lives in TWO registries, so a missing dedupe would enumerate it twice, and reporting the
+  // registry of origin rather than the resolved kind would let a shape mismatch through.
+  it('listConfiguredFeedTokens reports cbETH ONCE, as the kind it actually resolves to', () => {
+    const CBETH = '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22'
+    const entries = listConfiguredFeedTokens().filter(
+      (f) => f.chainId === 8453 && f.token.toLowerCase() === CBETH,
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0].kind).toBe('preferred')
+    for (const entry of listConfiguredFeedTokens()) {
+      expect(resolveFeed(entry.token, entry.chainId)?.kind, `${entry.chainId}:${entry.token}`).toBe(entry.kind)
     }
   })
 
@@ -286,6 +357,11 @@ describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => 
           return 'single'
         case 'composed':
           return 'composed'
+        // [FIX-CBETH-DIRECT-FEED] The third variant. Adding it made this switch fail to TYPECHECK
+        // until handled — which is exactly what the never-assignment is for, and it did so in both
+        // production dispatches (chainlink.ts::fetchChainlinkPriceRaw) as well as here.
+        case 'preferred':
+          return 'preferred'
         default: {
           const exhaustive: never = r
           return exhaustive
@@ -294,5 +370,6 @@ describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => 
     }
     const resolved = resolveFeed('0x4200000000000000000000000000000000000006', 8453)!
     expect(classify(resolved)).toBe('single')
+    expect(classify(resolveFeed('0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', 8453)!)).toBe('preferred')
   })
 })

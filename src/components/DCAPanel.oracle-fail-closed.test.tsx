@@ -51,6 +51,15 @@ const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
 // single flat description/decimals pair would make the composed base leg fail identity verification
 // and the L-2 test would then pass or fail for a reason that has nothing to do with L-2.
 const BASE_CBETH_ETH_FEED = '0x806b4Ac04501c29769051e42783cF04dCE41440b'
+// [FIX-CBETH-DIRECT-FEED] cbETH now resolves 'preferred': the DIRECT "CBETH / USD" feed leads and
+// the composition above is its fallback, so a THIRD address is read for cbETH. Derived from the
+// registry rather than retyped. Without a branch for it below the generic "ETH / USD" fallback
+// answer would be served to a feed whose declared identity is "CBETH / USD" — an identity mismatch,
+// which is (correctly) a hard block and would fail every cbETH test here for the wrong reason.
+const BASE_CBETH_USD_FEED = getPreferredDirectUsdFeed(
+  '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22',
+  8453,
+)!
 
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
@@ -157,6 +166,8 @@ vi.mock('./NoFeedConsentModal', () => ({
 import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import { PRICE_IMPACT_CONSENT_CEILING } from '@/lib/constants'
 import type { PriceCheck } from '@/lib/chainlink'
+// [FIX-CBETH-DIRECT-FEED] The real registry — the direct cbETH/USD proxy is derived, not retyped.
+import { getPreferredDirectUsdFeed } from '@/lib/chains/chainlink-feeds'
 import DCAPanel, { evaluateDcaOracleGate, outputHasNoResolvableFeed } from './DCAPanel'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
@@ -234,6 +245,14 @@ function healthyRound() {
   return [1n, 2000_00000000n, now - 60n, now - 60n, 1n]
 }
 
+/** [FIX-CBETH-DIRECT-FEED] Healthy cbETH/USD round: $2782.738878 at the feed's real 8 decimals —
+ *  the reading actually taken from Base at implementation time, and consistent in magnitude with
+ *  the composition (1.1377 x $2445) rather than an invented number. */
+function healthyCbethUsdRound() {
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  return [1n, 2782_73887800n, now - 60n, now - 60n, 1n]
+}
+
 /** Healthy cbETH/ETH round: ~1.08 ETH at the feed's real 18 decimals. */
 function healthyCbethEthRound() {
   const now = BigInt(Math.floor(Date.now() / 1000))
@@ -257,6 +276,12 @@ function feedReads(override?: (addr: string, fn: string) => { data: unknown; isE
       if (functionName === 'latestRoundData') return { data: healthyCbethEthRound(), isLoading: false, refetch: mockRefetchNonce }
       if (functionName === 'decimals') return { data: 18, isLoading: false, refetch: mockRefetchNonce }
       if (functionName === 'description') return { data: 'CBETH / ETH', isLoading: false, refetch: mockRefetchNonce }
+    }
+    // [FIX-CBETH-DIRECT-FEED] The direct cbETH/USD primary — its own genuine identity, 8 dp.
+    if (addr === BASE_CBETH_USD_FEED.toLowerCase()) {
+      if (functionName === 'latestRoundData') return { data: healthyCbethUsdRound(), isLoading: false, refetch: mockRefetchNonce }
+      if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
+      if (functionName === 'description') return { data: 'CBETH / USD', isLoading: false, refetch: mockRefetchNonce }
     }
     if (functionName === 'latestRoundData') return { data: healthyRound(), isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }

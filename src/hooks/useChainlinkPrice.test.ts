@@ -15,7 +15,7 @@
  *   - deviation ≥ 3%                → level='danger' (blocks the swap)
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 
 // Mock wagmi BEFORE importing the hook — vi.mock factories hoist.
 //
@@ -46,7 +46,13 @@ let mockReadOverride: Record<string, ReadResult> = {}
  * decimals — which would make an identity check that is actually per-leg look like it passes. Takes
  * precedence over the single-feed globals below; unset addresses fall back to them.
  */
-let mockByAddress: Record<string, { round?: unknown; decimals?: number; description?: string; isLoading?: boolean }> = {}
+// [FIX-CBETH-DIRECT-FEED] `isError`/`errorUpdateCount` added: the direct-preferred shape has to
+// distinguish a leg that REVERTED (tried, failed, fall through now) from one still in flight (wait),
+// and only a real error shape exercises `hasReadFailed`.
+let mockByAddress: Record<string, {
+  round?: unknown; decimals?: number; description?: string
+  isLoading?: boolean; isError?: boolean; errorUpdateCount?: number
+}> = {}
 const EMPTY_READ: ReadResult = {
   data: undefined, isError: false, isLoading: false, failureCount: 0, errorUpdateCount: 0,
 }
@@ -56,7 +62,12 @@ vi.mock('wagmi', () => ({
     if (opts.query?.enabled === false) return EMPTY_READ
     const perAddress = opts.address ? mockByAddress[String(opts.address).toLowerCase()] : undefined
     if (perAddress) {
-      const base = { ...EMPTY_READ, isLoading: perAddress.isLoading ?? false }
+      const base = {
+        ...EMPTY_READ,
+        isLoading: perAddress.isLoading ?? false,
+        isError: perAddress.isError ?? false,
+        errorUpdateCount: perAddress.errorUpdateCount ?? (perAddress.isError ? 1 : 0),
+      }
       if (opts.functionName === 'latestRoundData') return { ...base, data: perAddress.round }
       if (opts.functionName === 'decimals') return { ...base, data: perAddress.decimals }
       if (opts.functionName === 'description') return { ...base, data: perAddress.description }
@@ -103,13 +114,15 @@ vi.mock('./useChainId', () => ({
 import { renderHook } from '@testing-library/react'
 import { useReadContract } from 'wagmi'
 import { NATIVE_ETH } from '@/lib/constants'
-// getFeedExpectation / getChainlinkFeed / getComposedFeed / listConfiguredFeedTokens come through the
-// partial mock's `...actual` spread, so these are the REAL implementations — only resolveFeed is
-// intercepted. That is deliberate: the structural test below must enumerate the genuine registry.
+// getFeedExpectation / getComposedFeed / getPreferredDirectUsdFeed / listConfiguredFeedTokens come
+// through the partial mock's `...actual` spread, so these are the REAL implementations — only
+// resolveFeed is intercepted. That is deliberate: the structural test below must enumerate the
+// genuine registry. `resolveFeed` itself therefore cannot be imported here at all (it would resolve
+// to the mock); the two suites that need the real one reach it via vi.importActual.
 import {
   getFeedExpectation,
-  getChainlinkFeed as actualGetChainlinkFeed,
   getComposedFeed as actualGetComposedFeed,
+  getPreferredDirectUsdFeed as actualGetPreferredDirectUsdFeed,
   listConfiguredFeedTokens,
 } from '@/lib/chains/chainlink-feeds'
 import { useChainlinkPrice } from './useChainlinkPrice'
@@ -127,6 +140,10 @@ function leg(address: string) {
 }
 const single = (address: string) => ({ kind: 'single' as const, leg: leg(address) })
 const composed = (base: string, quote: string) => ({ kind: 'composed' as const, base: leg(base), quote: leg(quote) })
+/** [FIX-CBETH-DIRECT-FEED] The direct-preferred shape: primary leads, base x quote backs it up. */
+const preferred = (primary: string, base: string, quote: string) => ({
+  kind: 'preferred' as const, primary: leg(primary), base: leg(base), quote: leg(quote),
+})
 
 /** Helper: build the tuple Chainlink.latestRoundData() returns. */
 function roundData(opts: {
@@ -775,14 +792,17 @@ describe('useChainlinkPrice — [FIX-HOOK-COMPOSED-FEEDS] composed feeds', () =>
     expect(result.current.chainlinkPrice).toBeNull()
   })
 
-  it('a single feed still issues exactly 3 reads; leg B is disabled', () => {
+  it('a single feed still issues exactly 3 reads; legs B and C are disabled', () => {
     mockResolveFeed.mockReturnValue(single(FEED))
     mockRoundData = roundData({})
     mockDecimals = 8
     renderHook(() => useChainlinkPrice(TOKEN, null))
     const calls = vi.mocked(useReadContract).mock.calls.map((c) => c[0] as { query?: { enabled?: boolean } })
     expect(calls.filter((c) => c.query?.enabled === true)).toHaveLength(3)
-    expect(calls.filter((c) => c.query?.enabled === false)).toHaveLength(3)
+    // [FIX-CBETH-DIRECT-FEED] 6 disabled, not 3: leg C's three slots are always DECLARED (Rules of
+    // Hooks — a fixed call count) and simply disabled for every non-'preferred' shape. A direct-feed
+    // token still issues exactly the three network reads it always did.
+    expect(calls.filter((c) => c.query?.enabled === false)).toHaveLength(6)
   })
 
   it('a composed feed issues 6 enabled reads (3 per leg)', () => {
@@ -791,6 +811,276 @@ describe('useChainlinkPrice — [FIX-HOOK-COMPOSED-FEEDS] composed feeds', () =>
     renderHook(() => useChainlinkPrice(GRT_TOKEN, null))
     const calls = vi.mocked(useReadContract).mock.calls.map((c) => c[0] as { query?: { enabled?: boolean } })
     expect(calls.filter((c) => c.query?.enabled === true)).toHaveLength(6)
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// [FIX-CBETH-DIRECT-FEED / INC-2026-08-07-001] DIRECT-PREFERRED — direct leads, composition backs up
+//
+// INC-2026-08-07-001: a DCA order signed a floor 1.588x above market because cbETH had no usable
+// price at signing and the derivation fell through to a hardcoded table. #408 closed the
+// fall-through; this closes the hole it fell through — the leg is now PRICEABLE, from a direct
+// "CBETH / USD" feed, with the cbETH/ETH x ETH/USD composition kept as the fallback so a single
+// feed missing a round can never leave the leg unpriced again.
+//
+// Every number below is a REAL on-chain reading taken from Base at implementation time (block
+// timestamp 1787695639, two independent RPCs agreeing) — not an invented magnitude. That is what
+// makes the magnitude guard meaningful rather than self-fulfilling.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed fallback', () => {
+  // Addresses come from the REAL registry, never hand-typed here (rule #9 / ADR-018).
+  const CBETH_TOKEN = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const CBETH_USD = actualGetPreferredDirectUsdFeed(CBETH_TOKEN, 8453)!
+  const CBETH_ETH = actualGetComposedFeed(CBETH_TOKEN, 8453)!.base
+  const ETH_USD_BASE = actualGetComposedFeed(CBETH_TOKEN, 8453)!.quote
+
+  // ── Measured on Base, 2026-08-25 ──
+  /** "CBETH / USD" 8 dp → $2782.738878 */
+  const CBETH_USD_ANSWER = 278_273_887_800n
+  /** "ETH / USD" 8 dp → $2445.541902 */
+  const ETH_USD_ANSWER = 244_554_190_200n
+  /** "CBETH / ETH" 18 dp → 1.13773235696862 ETH */
+  const CBETH_ETH_ANSWER = 1_137_732_356_968_620_000n
+  /** The composition those two produce: 1.13773235696862 x 2445.541902 */
+  const COMPOSED_PRICE = 1.13773235696862 * 2445.541902
+
+  /** All three legs healthy and carrying their genuine on-chain magnitudes. */
+  const healthyLegs = () => ({
+    [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_USD_ANSWER, updatedAt: NOW_SECONDS }), decimals: 8, description: 'CBETH / USD' },
+    [CBETH_ETH.toLowerCase()]: { round: roundData({ answer: CBETH_ETH_ANSWER, updatedAt: NOW_SECONDS }), decimals: 18, description: 'CBETH / ETH' },
+    [ETH_USD_BASE.toLowerCase()]: { round: roundData({ answer: ETH_USD_ANSWER, updatedAt: NOW_SECONDS }), decimals: 8, description: 'ETH / USD' },
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRoundData = undefined
+    mockDecimals = undefined
+    mockDescription = undefined
+    mockReadOverride = {}
+    mockByAddress = {}
+    mockIsConnected = true
+    mockChainId = 8453
+    mockResolveFeed.mockReturnValue(preferred(CBETH_USD, CBETH_ETH, ETH_USD_BASE))
+  })
+
+  // ── ACCEPTANCE 1a: the DIRECT feed is what prices the leg ──
+  it('prices cbETH from the DIRECT feed — provably, not by coincidence', () => {
+    // The composition is fed a deliberately absurd base so the two sources cannot be confused: if
+    // the hook composed instead of reading the direct feed, the price would be ~$24455, not ~$2783.
+    mockByAddress = {
+      ...healthyLegs(),
+      [CBETH_ETH.toLowerCase()]: { round: roundData({ answer: 10n * 10n ** 18n, updatedAt: NOW_SECONDS }), decimals: 18, description: 'CBETH / ETH' },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(2782.738878, 6)
+    expect(result.current.oracleUnavailable).toBe(false)
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+  })
+
+  // ── ACCEPTANCE 1b: a STALE direct feed falls through to the COMPOSITION, never to null ──
+  it('a STALE direct feed falls through to the composition (never to "no price")', () => {
+    // 1801s old — one second past the direct feed's own 1200s x 1.5 ceiling, and nowhere near the
+    // 86400s x 1.5 ceiling the cbETH/ETH fallback leg is judged by. Per-feed staleness is what
+    // makes this asymmetry work.
+    mockByAddress = {
+      ...healthyLegs(),
+      [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_USD_ANSWER, updatedAt: NOW_SECONDS - 1801 }), decimals: 8, description: 'CBETH / USD' },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(COMPOSED_PRICE, 6)
+    expect(result.current.chainlinkPrice).not.toBeNull()
+    expect(result.current.oracleUnavailable).toBe(false)
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+  })
+
+  it('the direct feed is still trusted at 1799s — the fall-through is the ceiling, not a hair trigger', () => {
+    mockByAddress = {
+      ...healthyLegs(),
+      [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_USD_ANSWER, updatedAt: NOW_SECONDS - 1799 }), decimals: 8, description: 'CBETH / USD' },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(2782.738878, 6)
+  })
+
+  // ── ACCEPTANCE 1c: a REVERTING direct feed falls through too ──
+  it('a REVERTING direct feed falls through to the composition', () => {
+    mockByAddress = {
+      ...healthyLegs(),
+      [CBETH_USD.toLowerCase()]: { isError: true, errorUpdateCount: 1 },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(COMPOSED_PRICE, 6)
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+  })
+
+  it('a direct feed that settles EMPTY (no code / dead proxy) falls through to the composition', () => {
+    mockByAddress = { ...healthyLegs(), [CBETH_USD.toLowerCase()]: {} }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(COMPOSED_PRICE, 6)
+  })
+
+  it('a direct feed answering ZERO falls through to the composition', () => {
+    mockByAddress = {
+      ...healthyLegs(),
+      [CBETH_USD.toLowerCase()]: { round: roundData({ answer: 0n, updatedAt: NOW_SECONDS }), decimals: 8, description: 'CBETH / USD' },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(COMPOSED_PRICE, 6)
+  })
+
+  // ── The deliberate asymmetry: IDENTITY is never masked ──
+  it('an IDENTITY MISMATCH on the direct feed HARD BLOCKS — the healthy composition does NOT rescue it', () => {
+    // This is the line the whole design turns on. A stale feed is an outage and must fall through;
+    // a feed that self-reports something other than what the config claims means the CONFIG is
+    // wrong (ADR-018), and letting the composition quietly succeed would bury that forever — while
+    // being exactly the defect shape ADR-018 exists to surface (an ETH-denominated feed in a USD
+    // slot reads ~1.14 as "$1.14"). The composition below is fully healthy and is NOT used.
+    mockByAddress = {
+      ...healthyLegs(),
+      [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_ETH_ANSWER, updatedAt: NOW_SECONDS }), decimals: 18, description: 'CBETH / ETH' },
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeNull()
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+    expect(result.current.oracleUnavailable).toBe(false) // never the branch evaluatePriceGate waives
+    expect(result.current.message).toMatch(/identity does not match/i)
+  })
+
+  // ── Readiness: two independent sources means "unreadable" needs BOTH to have settled ──
+  it('a direct feed still IN FLIGHT does not delay a healthy composition', () => {
+    mockByAddress = { ...healthyLegs(), [CBETH_USD.toLowerCase()]: { isLoading: true } }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeCloseTo(COMPOSED_PRICE, 6)
+  })
+
+  it('direct in flight + composition unreadable stays NEUTRAL — not a false UNREADABLE block', () => {
+    // The primary may still answer. Declaring the token unreadable here would hard-block a swap on
+    // a first render, which is the fail-CLOSED-too-eagerly mirror of the bug this file guards.
+    mockByAddress = {
+      [CBETH_USD.toLowerCase()]: { isLoading: true },
+      [CBETH_ETH.toLowerCase()]: {},
+      [ETH_USD_BASE.toLowerCase()]: {},
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.level).toBe('none')
+    expect(result.current.oracleUnavailable).toBe(false)
+    expect(result.current.oracleIntegrityFailed).toBeFalsy()
+  })
+
+  it('BOTH sources dead → a hard, honest block (fail-closed, and never the waived branch)', () => {
+    mockByAddress = {
+      [CBETH_USD.toLowerCase()]: {},
+      [CBETH_ETH.toLowerCase()]: {},
+      [ETH_USD_BASE.toLowerCase()]: {},
+    }
+    const { result } = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    expect(result.current.chainlinkPrice).toBeNull()
+    expect(result.current.oracleIntegrityFailed).toBe(true)
+    expect(result.current.oracleReadFailed).toBe(true)
+  })
+
+  it('a preferred token issues 9 enabled reads — 3 legs x 3, all polled so the fallback is warm', () => {
+    mockByAddress = healthyLegs()
+    renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    const calls = vi.mocked(useReadContract).mock.calls.map((c) => c[0] as { query?: { enabled?: boolean } })
+    expect(calls.filter((c) => c.query?.enabled === true)).toHaveLength(9)
+    expect(calls.filter((c) => c.query?.enabled === false)).toHaveLength(0)
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// [FIX-CBETH-DIRECT-FEED — ACCEPTANCE 2] THE MAGNITUDE GUARD
+//
+// cbETH is a staking derivative of ETH: it is worth slightly MORE than ETH and drifts further above
+// it over time. So the resolved cbETH/USD price must be >= ETH/USD and within 2x of it. A resolved
+// price near 1.0 means an ETH-DENOMINATED feed was wired into a USD slot — the original defect's
+// shape, where a ~1.14 answer would be read as "$1.14" and would under-value a cbETH leg by ~2400x.
+//
+// This test must FAIL if someone does that, and it does: swapping the preferred map to the
+// cbETH/ETH feed makes the hook's ADR-018 identity check reject the leg (description "CBETH / ETH"
+// against a declared "CBETH / USD"), so `chainlinkPrice` comes back null and the ratio assertions
+// below have nothing to compare. The registry-level twin — a preferred feed MUST declare a
+// "… / USD" 8dp identity, asserted at import — is in chainlink-feeds.test.ts.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] MAGNITUDE: cbETH/USD is USD-denominated', () => {
+  const CBETH_TOKEN = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
+  const WETH_BASE = '0x4200000000000000000000000000000000000006'
+  const CBETH_USD = actualGetPreferredDirectUsdFeed(CBETH_TOKEN, 8453)!
+  const CBETH_ETH = actualGetComposedFeed(CBETH_TOKEN, 8453)!.base
+  const ETH_USD_BASE = actualGetComposedFeed(CBETH_TOKEN, 8453)!.quote
+
+  // Real Base readings, 2026-08-25 — cbETH/ETH was 1.1377, i.e. cbETH ~13.8% above ETH.
+  const CBETH_USD_ANSWER = 278_273_887_800n
+  const ETH_USD_ANSWER = 244_554_190_200n
+  const CBETH_ETH_ANSWER = 1_137_732_356_968_620_000n
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRoundData = undefined
+    mockDecimals = undefined
+    mockDescription = undefined
+    mockReadOverride = {}
+    mockIsConnected = true
+    mockChainId = 8453
+    mockByAddress = {
+      [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_USD_ANSWER, updatedAt: NOW_SECONDS }), decimals: 8, description: 'CBETH / USD' },
+      [CBETH_ETH.toLowerCase()]: { round: roundData({ answer: CBETH_ETH_ANSWER, updatedAt: NOW_SECONDS }), decimals: 18, description: 'CBETH / ETH' },
+      [ETH_USD_BASE.toLowerCase()]: { round: roundData({ answer: ETH_USD_ANSWER, updatedAt: NOW_SECONDS }), decimals: 8, description: 'ETH / USD' },
+    }
+  })
+
+  // `resolveFeed` itself is the thing under test here, so it must be the GENUINE implementation —
+  // and it cannot be imported normally, because the module-level vi.mock replaces that very export
+  // (importing it back would just call the mock, recursively). vi.importActual is the escape hatch.
+  let realResolveFeed: typeof import('@/lib/chains/chainlink-feeds').resolveFeed
+  beforeAll(async () => {
+    const actual = await vi.importActual<typeof import('@/lib/chains/chainlink-feeds')>(
+      '@/lib/chains/chainlink-feeds',
+    )
+    realResolveFeed = actual.resolveFeed
+  })
+
+  /** Price cbETH and Base WETH through the REAL registry resolution, same chain, same reads. */
+  function pricePair(): { cbeth: number | null; eth: number | null } {
+    mockResolveFeed.mockImplementation((addr: string, chainId?: number) =>
+      realResolveFeed(addr, chainId),
+    )
+    const cb = renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
+    const weth = renderHook(() => useChainlinkPrice(WETH_BASE, null))
+    return { cbeth: cb.result.current.chainlinkPrice, eth: weth.result.current.chainlinkPrice }
+  }
+
+  it('the resolved cbETH USD price is >= ETH/USD and within 2x of it', () => {
+    const { cbeth, eth } = pricePair()
+    expect(eth).not.toBeNull()
+    expect(cbeth).not.toBeNull()
+    // >= ETH: a staking derivative never trades below its underlying for long, and a value BELOW
+    // ETH here is the tell that something ETH-denominated leaked into the USD slot.
+    expect(cbeth!).toBeGreaterThanOrEqual(eth!)
+    // <= 2x ETH: bounds the other direction (a decimals slip inflates by orders of magnitude).
+    expect(cbeth!).toBeLessThanOrEqual(eth! * 2)
+    // And explicitly NOT the raw ratio: ~1.14 is what an ETH-denominated answer would produce.
+    expect(cbeth!).toBeGreaterThan(100)
+  })
+
+  it('the same guard, stated as the ratio: cbETH/ETH sits in [1, 2)', () => {
+    const { cbeth, eth } = pricePair()
+    const ratio = cbeth! / eth!
+    expect(ratio).toBeGreaterThanOrEqual(1)
+    expect(ratio).toBeLessThan(2)
+    expect(ratio).toBeCloseTo(1.1379, 3) // the measured market ratio, not a placeholder
+  })
+
+  it('DEMONSTRATION — an ETH-denominated feed in the USD slot is rejected, so the guard cannot pass vacuously', () => {
+    // Force the exact defect: the direct slot serves what the cbETH/ETH feed actually publishes
+    // (description "CBETH / ETH", 18 dp, ~1.1377). The identity check refuses it, and because the
+    // composition must NOT mask an identity failure, the price is null — the guard above would fail.
+    mockByAddress = {
+      ...mockByAddress,
+      [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_ETH_ANSWER, updatedAt: NOW_SECONDS }), decimals: 18, description: 'CBETH / ETH' },
+    }
+    const { cbeth } = pricePair()
+    expect(cbeth).toBeNull()
   })
 })
 
@@ -818,30 +1108,46 @@ describe('useChainlinkPrice — STRUCTURAL: every configured feed resolves', () 
 
   const ALL = listConfiguredFeedTokens()
 
-  it('the registry is non-empty and includes BOTH single and composed shapes (guard is not vacuous)', () => {
+  // [FIX-CBETH-DIRECT-FEED] The genuine resolver, obtained past the module mock — see the identical
+  // note in the MAGNITUDE describe. Reconstructing the ResolvedFeed from the registry primitives
+  // (which is what this guard used to do) would test the reconstruction, not `resolveFeed`, and a
+  // token configured for one shape but resolving to another would sail straight through.
+  let realResolveFeed: typeof import('@/lib/chains/chainlink-feeds').resolveFeed
+  beforeAll(async () => {
+    const actual = await vi.importActual<typeof import('@/lib/chains/chainlink-feeds')>(
+      '@/lib/chains/chainlink-feeds',
+    )
+    realResolveFeed = actual.resolveFeed
+  })
+
+  it('the registry is non-empty and includes single, composed AND preferred shapes (guard is not vacuous)', () => {
     expect(ALL.length).toBeGreaterThan(30)
     expect(ALL.some((f) => f.kind === 'single')).toBe(true)
     expect(ALL.some((f) => f.kind === 'composed')).toBe(true)
+    // [FIX-CBETH-DIRECT-FEED] The third shape must be in scope too, or this guard would go quiet
+    // on exactly the tokens whose resolution just changed.
+    expect(ALL.some((f) => f.kind === 'preferred')).toBe(true)
     // The four mainnet composed tokens this regression was about must be in scope.
     const mainnetComposed = ALL.filter((f) => f.chainId === 1 && f.kind === 'composed')
     expect(mainnetComposed).toHaveLength(4)
   })
 
-  it('NO configured token — on any chain, single or composed — reaches the price gate as oracleUnavailable', () => {
+  it('NO configured token — on any chain, any shape — reaches the price gate as oracleUnavailable', () => {
     const offenders: string[] = []
 
     for (const entry of ALL) {
-      // Resolve with the REAL registry (getChainlinkFeed/getComposedFeed are un-mocked here; only
-      // resolveFeed itself is intercepted), then feed each leg a valid fresh round carrying that
-      // address's own declared identity. Any token the hook cannot resolve shows up as unavailable.
-      const direct = actualGetChainlinkFeed(entry.token, entry.chainId)
-      const comp = direct ? null : actualGetComposedFeed(entry.token, entry.chainId)
-      if (!direct && !comp) { offenders.push(`${entry.chainId}:${entry.token} (registry gave no source)`); continue }
+      // Resolve with the REAL resolver, then feed EVERY leg it names a valid fresh round carrying
+      // that address's own declared identity. Any token the hook cannot price shows up here.
+      const resolved = realResolveFeed(entry.token, entry.chainId)
+      if (!resolved) { offenders.push(`${entry.chainId}:${entry.token} (registry gave no source)`); continue }
 
       mockChainId = entry.chainId
-      mockResolveFeed.mockReturnValue(direct ? single(direct) : composed(comp!.base, comp!.quote))
+      mockResolveFeed.mockReturnValue(resolved)
 
-      const legs = direct ? [direct] : [comp!.base, comp!.quote]
+      const legs =
+        resolved.kind === 'single' ? [resolved.leg.address]
+        : resolved.kind === 'composed' ? [resolved.base.address, resolved.quote.address]
+        : [resolved.primary.address, resolved.base.address, resolved.quote.address]
       mockByAddress = {}
       for (const addr of legs) {
         const exp = getFeedExpectation(addr)!

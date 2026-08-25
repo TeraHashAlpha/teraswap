@@ -79,6 +79,29 @@ import { useResolvedChainId } from './useChainId'
  * A leg that is READ but fails identity/integrity/staleness yields `oracleIntegrityFailed: true` with
  * `oracleUnavailable: false` — a hard block at every trade size, never the waived branch. Only a
  * token with genuinely NO configured feed (resolveFeed → null) is `oracleUnavailable`.
+ *
+ * [FIX-CBETH-DIRECT-FEED / INC-2026-08-07-001] DIRECT-PREFERRED SUPPORT — a third read slot.
+ *
+ * `resolveFeed` can now return `kind:'preferred'`: a DIRECT token/USD feed that leads, with the
+ * existing base x quote composition retained as its FALLBACK (Base cbETH is the first such token —
+ * a real "CBETH / USD" 8dp feed at a 1200s heartbeat, 72x tighter than the 86400s cbETH/ETH leg).
+ * Neither source alone: the incident was caused by a leg with NO usable price at signing, so
+ * collapsing onto one feed would trade one single-point-of-failure for another.
+ *
+ * Slot layout (fixed hook-call count, Rules of Hooks — 3 legs x 3 reads, always declared):
+ *   leg A = 'single'.leg | composition base      leg B = composition quote      leg C = the primary
+ *
+ * Leg C is evaluated BEFORE A x B and short-circuits when healthy. Its failure handling is
+ * deliberately asymmetric, and this is the load-bearing part:
+ *   - IDENTITY mismatch on the primary → HARD BLOCK. Never masked. Under ADR-018 a feed that
+ *     self-reports something other than what the config claims is a security event, and the whole
+ *     point of the identity check is that it is visible; letting the composition quietly succeed
+ *     would restore the exact blindness ADR-018 removed. It is also the original defect's shape:
+ *     an ETH-denominated feed sitting in a USD slot reads ~1.14 as "$1.14".
+ *   - Everything else (unreadable, stale, bad round sequence, non-positive answer) → fall through
+ *     to A x B. That is an OUTAGE, and an outage must not leave the leg unpriced.
+ * Freshness/staleness are judged per feed (`getFeedStalenessSec`), so the primary's tight 1800s
+ * ceiling applies to it alone and does not tighten the composition it falls back to.
  */
 
 /** Neutral, frictionless verdict — a first render or a case with nothing to guard. */
@@ -125,6 +148,17 @@ const LEG_FAILED = (
   oracleIntegrityFailed: true,
 })
 
+/**
+ * [FIX-CBETH-DIRECT-FEED] A successfully priced token → the pre-existing deviation ladder, or a bare
+ * price when there is no execution price to compare against. Extracted verbatim from the tail of
+ * the hook so the preferred-primary short-circuit and the single/composed path return through ONE
+ * implementation and cannot drift.
+ */
+const PRICED = (chainlinkPrice: number, executionPriceUsd: number | null): PriceCheck =>
+  executionPriceUsd
+    ? evaluateDeviation(chainlinkPrice, executionPriceUsd)
+    : { chainlinkPrice, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }
+
 /** Per-reason copy. Wording preserved from the pre-composition branches so existing UX is unchanged. */
 const LEG_FAILURE_COPY: Record<FeedLegFailure, (ageSeconds: number) => string> = {
   identity: () => 'Chainlink feed identity does not match the configured pair. Price not verified.',
@@ -158,7 +192,10 @@ export function useChainlinkPrice(
   const legA: FeedLeg | null = resolved
     ? (resolved.kind === 'single' ? resolved.leg : resolved.base)
     : null
-  const legB: FeedLeg | null = resolved && resolved.kind === 'composed' ? resolved.quote : null
+  const legB: FeedLeg | null = resolved && resolved.kind !== 'single' ? resolved.quote : null
+  // [FIX-CBETH-DIRECT-FEED] Leg C — the PREFERRED direct token/USD feed. Null for every other
+  // shape, so a single-feed or plain-composed token issues exactly the reads it always did.
+  const legC: FeedLeg | null = resolved && resolved.kind === 'preferred' ? resolved.primary : null
 
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] refetchInterval mirrors useDepegCheck and the sibling read hooks.
   // It is not cosmetic: a query that settles into `error` is not retried by TanStack on its own, so
@@ -166,6 +203,10 @@ export function useChainlinkPrice(
   // feed is actually configured, so no-feed tokens still issue zero reads.
   const queryA = { enabled: !!legA, refetchInterval: legA ? 30_000 : undefined }
   const queryB = { enabled: !!legB, refetchInterval: legB ? 30_000 : undefined }
+  // [FIX-CBETH-DIRECT-FEED] The fallback legs are polled alongside the primary rather than only
+  // after it fails: a fallback that had to start loading at the moment of an outage would leave the
+  // leg unpriced for a full round-trip, which is the state the incident turned on.
+  const queryC = { enabled: !!legC, refetchInterval: legC ? 30_000 : undefined }
 
   const round = useReadContract({
     address: legA?.address as `0x${string}`,
@@ -220,6 +261,32 @@ export function useChainlinkPrice(
     query: queryB,
   })
 
+  // [FIX-CBETH-DIRECT-FEED] Leg C — the preferred DIRECT token/USD feed. Disabled for every other
+  // ResolvedFeed shape.
+  const roundC = useReadContract({
+    address: legC?.address as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'latestRoundData',
+    chainId,
+    query: queryC,
+  })
+
+  const decC = useReadContract({
+    address: legC?.address as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'decimals',
+    chainId,
+    query: queryC,
+  })
+
+  const descC = useReadContract({
+    address: legC?.address as `0x${string}`,
+    abi: chainlinkAggregatorAbi,
+    functionName: 'description',
+    chainId,
+    query: queryC,
+  })
+
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] Chain unresolved. Disconnected is NOT a failure — there is no
   // swap to guard and no chain to guard it on, so stay neutral (identical to the frictionless first
   // render this hook has always had for a disconnected visitor). CONNECTED with an unresolvable
@@ -247,6 +314,40 @@ export function useChainlinkPrice(
       level: isReal ? 'warn' : 'none',
       message: isReal ? 'No Chainlink oracle available — price cannot be independently verified. Proceed with caution.' : null,
       oracleUnavailable: isReal,
+    }
+  }
+
+  // ── [FIX-CBETH-DIRECT-FEED] TIER 1: the PREFERRED direct token/USD feed (leg C) ──────────────
+  // Consulted before the composition and short-circuiting when healthy. `primaryStillInFlight`
+  // carries the one thing the fall-through must remember: a primary that has not settled yet is a
+  // reason to stay NEUTRAL rather than declare the token unreadable, because it may still price it.
+  let primaryStillInFlight = false
+  if (legC) {
+    const roundCData = roundC.data
+    const decCData = decC.data
+    const descCData = descC.data
+    if (roundCData && decCData !== undefined && descCData !== undefined) {
+      const [rIdC, ansC, startC, updC, airC] = roundCData
+      const verdictC = evaluateFeedLeg({
+        feed: legC.address,
+        description: descCData as string,
+        decimals: Number(decCData),
+        roundId: rIdC, answer: ansC, startedAt: startC, updatedAt: updC, answeredInRound: airC,
+        globalStalenessSec: 90_000,
+      })
+      // The direct feed priced it — one read, its own tight per-feed staleness ceiling. Done.
+      if (verdictC.ok) return PRICED(verdictC.price, executionPriceUsd)
+      // IDENTITY is the one failure the fallback must NOT absorb: a reachable feed that is not what
+      // the config says it is means the CONFIG is wrong (ADR-018), and the composition succeeding
+      // would bury that indefinitely. Every other reason is an outage → fall through below.
+      if (verdictC.reason === 'identity') return LEG_FAILED(executionPriceUsd, verdictC, null)
+    } else {
+      // Not settled. A failure on record means "tried and could not" (fall through immediately);
+      // no failure means the primary may still answer, so the composition's own readiness check
+      // below must not mistake that for an unreadable token.
+      const readsC = [roundC, decC, descC]
+      primaryStillInFlight =
+        readsC.some((r) => r.isLoading) && !readsC.some((r) => r.isError || hasReadFailed(r))
     }
   }
 
@@ -281,7 +382,12 @@ export function useChainlinkPrice(
     const reads = legB ? [round, dec, desc, roundB, decB, descB] : [round, dec, desc]
     const anyFailure = reads.some((r) => r.isError || hasReadFailed(r))
     const inFlight = reads.some((r) => r.isLoading) && !anyFailure
-    return inFlight
+    // [FIX-CBETH-DIRECT-FEED] `primaryStillInFlight` is OR-ed in, never AND-ed: with two independent
+    // sources the token is only unreadable once BOTH have settled without a usable round. Note the
+    // primary's reads are deliberately NOT folded into `reads` above — a failure there is the
+    // expected, designed-for case, and letting it set `anyFailure` would turn a healthy composition
+    // that is merely still loading into a hard UNREADABLE verdict.
+    return inFlight || primaryStillInFlight
       ? NEUTRAL(executionPriceUsd)
       : UNREADABLE(executionPriceUsd, 'Chainlink price feed could not be read. Price not verified.')
   }
@@ -328,9 +434,5 @@ export function useChainlinkPrice(
   }
 
   // No execution price to compare → just return chainlink price
-  if (!executionPriceUsd) {
-    return { chainlinkPrice, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false }
-  }
-
-  return evaluateDeviation(chainlinkPrice, executionPriceUsd)
+  return PRICED(chainlinkPrice, executionPriceUsd)
 }

@@ -468,6 +468,42 @@ async function fetchSingleFeedRaw(
 }
 
 /**
+ * [FIX-CBETH-DIRECT-FEED] Read the PREFERRED direct feed of a `kind:'preferred'` resolution, and
+ * report WHY it failed — because the two failure classes must be handled differently:
+ *
+ *   - `misidentified: true`  → the feed is REACHABLE but self-reports something other than what
+ *     FEED_EXPECTATIONS declares. NEVER masked by the fallback: the caller must fail closed. Under
+ *     ADR-018 that is a config/proxy defect, not an outage, and the composition succeeding would
+ *     hide it forever.
+ *   - `value: null` with `misidentified: false` → unreadable (revert / transport / no code) or a
+ *     round that failed integrity or the per-feed staleness ceiling. The caller falls through to
+ *     the composition; an UNPRICED leg is what caused INC-2026-08-07-001 and is the thing this
+ *     whole shape exists to avoid.
+ *
+ * `resolveVerifiedIdentity` is consulted first purely to separate those two; its result is cached
+ * per (chainId, feed) for the process lifetime, so `fetchSingleFeedRaw` below re-uses it with no
+ * extra RPC call.
+ */
+async function fetchPreferredPrimaryRaw(
+  feed: `0x${string}`,
+  chainId: number,
+): Promise<{ misidentified: boolean; value: { price: number; updatedAt: number; roundId: bigint } | null }> {
+  let identity: { description: string; decimals: number } | null
+  try {
+    identity = await resolveVerifiedIdentity(feed, chainId)
+  } catch {
+    // Read failure (no code / revert / transport). NOT a misidentification — fall through.
+    return { misidentified: false, value: null }
+  }
+  if (identity === null) return { misidentified: true, value: null }
+
+  // Rejections here are transport-level too (the TEST-H-01 propagate contract applies to the
+  // single-feed entry point, not to a leg the caller is explicitly allowed to fall through from).
+  const value = await fetchSingleFeedRaw(feed, chainId).catch(() => null)
+  return { misidentified: false, value }
+}
+
+/**
  * Fetch current Chainlink USD price for a token via direct RPC (non-hook).
  * Returns price as a number (e.g. 2850.42) or null if no feed exists.
  *
@@ -477,9 +513,14 @@ async function fetchSingleFeedRaw(
  * either leg invalid/stale/misidentified → null (no partial pricing), exactly like a missing direct
  * feed, so the existing calm no-oracle + multi-source fallback kicks in.
  *
+ * [FIX-CBETH-DIRECT-FEED] A `kind:'preferred'` token (Base cbETH) reads its DIRECT token/USD feed
+ * first and falls through to the composition when that feed is unreadable/stale — but NOT when it
+ * is misidentified, which fails closed. See fetchPreferredPrimaryRaw for why the two are split.
+ *
  * [ADR-018] Dispatches on resolveFeed's `kind` discriminant — the `default` arm's `never` assignment
- * makes the single/composed split exhaustive at compile time: a third ResolvedFeed shape added later
- * fails the build here until handled, rather than silently falling through unread.
+ * makes the dispatch exhaustive at compile time: a further ResolvedFeed shape added later fails the
+ * build here until handled, rather than silently falling through unread. (It did exactly that when
+ * 'preferred' was introduced.)
  */
 export async function fetchChainlinkPriceRaw(
   tokenAddress: string,
@@ -516,6 +557,25 @@ export async function fetchChainlinkPriceRaw(
       return {
         ...composeFeedLegs(base, quote),
         roundId: base.roundId, // representative (base leg); composition has no single round
+      }
+    }
+
+    case 'preferred': {
+      // [FIX-CBETH-DIRECT-FEED] DIRECT first, composition second — the SAME ordering and the SAME
+      // fall-through policy `useChainlinkPrice` applies, so the server floor and the panel that
+      // signs it can never disagree about which feed priced the leg.
+      const primary = await fetchPreferredPrimaryRaw(resolved.primary.address, chainId)
+      if (primary.misidentified) return null // identity failure is NEVER masked by the fallback
+      if (primary.value) return primary.value
+
+      // Primary unreadable / stale / bad round → the composition still prices the leg.
+      const base = await fetchSingleFeedRaw(resolved.base.address, chainId)
+      if (!base) return null
+      const quote = await fetchSingleFeedRaw(resolved.quote.address, chainId)
+      if (!quote) return null
+      return {
+        ...composeFeedLegs(base, quote),
+        roundId: base.roundId,
       }
     }
 
