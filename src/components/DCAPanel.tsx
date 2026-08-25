@@ -441,6 +441,12 @@ function CreateDCAForm({
   // of Hooks — always called) but is a no-op: minAmountOut stays the existing '1' v2 path in
   // handleSubmit until v3Enabled flips true on a real deployment.
   const v3Enabled = getOrderExecutorV3(chainId) !== null
+  // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] The chain's own display name, from the registry — never a
+  // literal. Falls back to a neutral phrase (not a hardcoded chain name) if the connected chain has
+  // no registry entry at all, which `!v3Enabled` alone does not guarantee.
+  const chainDisplayName = (() => {
+    try { return getChainConfig(chainId).name } catch { return 'this chain' }
+  })()
   const [maxSlippageBps, setMaxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
 
   // Chainlink first (same hook the swap UI already uses for oracle display).
@@ -970,6 +976,19 @@ function CreateDCAForm({
           manipulation language: dressing our own feed outage or misconfiguration up as suspected
           manipulation would be a false accusation against the asset. `extreme-deviation` is the
           opposite case (a healthy feed the price has run away from) and gets its own copy. */}
+      {/* [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] Distinct from the oracle-verification banner below:
+          this fires when the order engine has no v3 executor wired for the connected chain at all
+          (an infrastructure gap), never when a feed failed to read (a price-verification gap). The
+          two must never share copy — conflating them would misdiagnose a missing executor as an
+          oracle problem (or vice versa) on whichever chain hits either case. `oracleBlocked` is
+          already `v3Enabled && oracleGate.blocked`, so this and that banner are mutually exclusive
+          without an extra `!v3Enabled` guard here. */}
+      {!v3Enabled && (
+        <div className="mb-3 rounded-lg border border-cream-08 bg-surface-secondary/60 px-3 py-2 text-xs text-cream-50" data-testid="dca-chain-unavailable">
+          <span className="font-semibold text-cream">DCA is not available on {chainDisplayName} yet.</span>{' '}
+          The order engine does not have an executor deployed on this chain.
+        </div>
+      )}
       {oracleBlocked && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-oracle-block">
           {oracleGate.reason === 'extreme-deviation' ? (

@@ -7,6 +7,7 @@ import { DEFAULT_TOKENS, isNativeETH, type Token, type TokenCategory } from '@/l
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { getChainTokenList } from '@/lib/chains/tokens'
+import { isPortfolioSupportedChain } from '@/lib/portfolio-chains'
 import { useTokenBalances } from './useTokenBalances'
 
 // ── Public surface ────────────────────────────────────────
@@ -26,6 +27,10 @@ export interface PortfolioData {
   isError: boolean
   lastUpdated: Date | null
   refresh: () => void
+  /** [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] false when the active chain has no Alchemy discovery
+   *  endpoint (see isPortfolioSupportedChain) — the caller should show an availability state
+   *  instead of the generic loading/error/empty ones, which all assume the fetch below can run. */
+  isChainSupported: boolean
 }
 
 const PRICES_REFRESH_MS = 60_000
@@ -113,6 +118,17 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
 
   useEffect(() => {
     if (!address) {
+      setTokens([])
+      setIsAvailable(true)
+      setIsLoading(false)
+      setIsError(false)
+      return
+    }
+    // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] /api/portfolio/tokens 400s on any chain outside
+    // ALCHEMY_BASE_BY_CHAIN (checked server-side via isPortfolioSupportedChain) — never fire that
+    // doomed request. usePortfolio's own `isChainSupported` flag is what tells the caller to render
+    // an availability state instead; this effect just goes quiet rather than surfacing it as isError.
+    if (!isPortfolioSupportedChain(chainId)) {
       setTokens([])
       setIsAvailable(true)
       setIsLoading(false)
@@ -453,5 +469,6 @@ export function usePortfolio(): PortfolioData {
       (useAlchemyPath ? discovery.isError : multicallError),
     lastUpdated,
     refresh,
+    isChainSupported: isPortfolioSupportedChain(activeChainId),
   }
 }
