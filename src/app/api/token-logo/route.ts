@@ -8,12 +8,12 @@
  * logoURIs — but it is ~1MB (eth) / ~0.5MB (base), so it must stay SERVER-SIDE
  * (never bundled/shipped to the client) and be served via this cached redirect.
  *
- *   GET /api/token-logo?chainId=<1|8453>&address=<0x..40hex>
+ *   GET /api/token-logo?chainId=<any chain in the registry>&address=<0x..40hex>
  *     → 302 redirect to the resolved logo:
  *         • CoinGecko logoURI when the address is in the per-chain list (cached long),
  *         • else the DefiLlama by-address CDN (cached shorter — it may itself 404,
  *           at which point <TokenLogo> advances to its next candidate client-side).
- *     → 400 on a bad chainId (only 1 and 8453) or a malformed address.
+ *     → 400 on a chainId the chain registry does not know, or a malformed address.
  *
  * Fail-safe: ANY fetch/parse error on the CoinGecko list falls back to the DefiLlama
  * redirect. This route NEVER 500s on a logo lookup — a missing logo is cosmetic.
@@ -21,21 +21,48 @@
  * The per-chain list is cached IN MEMORY at module scope (one Map per chain, ~12h
  * TTL) so a warm instance fetches each ~1MB list at most once per TTL window.
  *
+ * [FIX-RPC-CHAIN-IDENTITY-GUARD] The accepted chains come from the CHAIN REGISTRY, not from a
+ * hardcoded pair. This route 400'd for chainId=42161 while Arbitrum had been a supported chain
+ * since SPRINT-46, so every Arbitrum token silently lost its logo. A chain the registry knows is
+ * served; a chain it does not know is still rejected.
+ *
  * @internal — server-only route. Reads only; no auth, no fund flow, no state write.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { getSupportedChainIds } from '@/lib/chains/registry'
 
 export const dynamic = 'force-dynamic'
 
-// chainId → CoinGecko asset-platform slug. A literal comparison (NOT a user-keyed
-// object lookup) so a crafted chainId such as '__proto__' can never pass validation
-// or be used as a cache key (js/remote-property-injection). Only '1' and '8453'.
-function platformFor(chainId: string): 'ethereum' | 'base' | null {
-  if (chainId === '1') return 'ethereum'
-  if (chainId === '8453') return 'base'
-  return null
+/**
+ * Validate the raw `chainId` param against the chain registry and return it as a NUMBER.
+ *
+ * The digits-only test runs FIRST and is what preserves the CodeQL js/remote-property-injection
+ * property the old literal comparison gave us: a crafted `__proto__` / `constructor` / `prototype`
+ * never survives it, so it can never reach a lookup or become a cache key. Everything downstream
+ * then works on a validated number, and every container it touches is a Map.
+ */
+function resolveChainId(raw: string): number | null {
+  if (!/^\d{1,10}$/.test(raw)) return null
+  const chainId = Number(raw)
+  return getSupportedChainIds().includes(chainId) ? chainId : null
 }
+
+/**
+ * chainId → CoinGecko asset-platform slug. A Map (never a plain object) so no key can reach a
+ * prototype property. Note these are CoinGecko's slugs, not the registry's: Arbitrum One is
+ * `arbitrum-one` upstream but `arbitrum` in our own config, so this cannot be derived from
+ * ChainConfig.slug.
+ *
+ * A registry chain ABSENT from this map is NOT an error: `getChainMap` returns null and the
+ * request falls through to the chain-agnostic DefiLlama CDN. CoinGecko simply does not publish a
+ * per-chain list for every chain, and a missing logo is cosmetic — it must never become a 400.
+ */
+const COINGECKO_PLATFORM = new Map<number, string>([
+  [1, 'ethereum'],
+  [8453, 'base'],
+  [42161, 'arbitrum-one'],
+])
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -56,9 +83,9 @@ interface ChainListCache {
   fetchedAt: number
 }
 
-// Module-level cache keyed by chainId. A Map (not a plain object) so a user-supplied
-// chainId can never write to a prototype property. Lives for a warm instance's life.
-const listCache = new Map<string, ChainListCache>()
+// Module-level cache keyed by the VALIDATED numeric chainId. A Map (not a plain object) so a
+// user-supplied chainId can never write to a prototype property. Lives for a warm instance's life.
+const listCache = new Map<number, ChainListCache>()
 
 /** Test-only: clear the module-level cache between cases. */
 export function __resetTokenLogoCache(): void {
@@ -75,7 +102,7 @@ interface CoinGeckoToken {
  * pitfall) and chainId-aware. Byte-for-byte the same shape <TokenLogo> uses for its
  * own DefiLlama candidate.
  */
-function defiLlamaUrl(chainId: string, address: string): string {
+function defiLlamaUrl(chainId: number, address: string): string {
   return `https://token-icons.llamao.fi/icons/tokens/${chainId}/${address.toLowerCase()}?h=48&w=48`
 }
 
@@ -84,13 +111,14 @@ function defiLlamaUrl(chainId: string, address: string): string {
  * per-chain `all.json`. Returns null on any fetch/parse failure so the caller can
  * fall back. Never throws.
  */
-async function getChainMap(chainId: string): Promise<Map<string, string> | null> {
+async function getChainMap(chainId: number): Promise<Map<string, string> | null> {
   const cached = listCache.get(chainId)
   if (cached && Date.now() - cached.fetchedAt < LIST_TTL_MS) {
     return cached.map
   }
 
-  const platform = platformFor(chainId)
+  // No CoinGecko list for this chain — not a failure, just no shortcut. Fall through to DefiLlama.
+  const platform = COINGECKO_PLATFORM.get(chainId)
   if (!platform) return null
 
   try {
@@ -147,11 +175,11 @@ function redirect(target: string, cacheControl: string): NextResponse {
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(req.url)
-  const chainId = searchParams.get('chainId') ?? ''
   const address = searchParams.get('address') ?? ''
 
-  // ① Validate — only the two supported chains and a well-formed address.
-  if (!platformFor(chainId)) {
+  // ① Validate — any chain the registry supports, and a well-formed address.
+  const chainId = resolveChainId(searchParams.get('chainId') ?? '')
+  if (chainId === null) {
     return NextResponse.json({ error: 'invalid chainId' }, { status: 400 })
   }
   if (!ADDRESS_RE.test(address)) {
