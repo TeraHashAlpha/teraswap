@@ -5,6 +5,7 @@ import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { getRpcUrlForChain } from '@/lib/adapters/shared'
 import { trustedClientIp } from '@/lib/trusted-ip'
 import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, MAX_RPC_BATCH_SIZE } from '@/lib/rpc-cost-policy'
+import { assertChainIdentity, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-identity'
 
 /**
  * Privacy-preserving RPC proxy.
@@ -31,6 +32,16 @@ import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, MAX_RPC_BATCH_
  * range is CLAMPED (not rejected) so the call still works, just bounded. A
  * request batch is capped at MAX_RPC_BATCH_SIZE. Rate limiting and forwarding
  * otherwise remain unchanged.
+ *
+ * [FIX-RPC-CHAIN-IDENTITY-GUARD] The proxy also proves the upstream IS the chain the caller
+ * asked for. `NEXT_PUBLIC_ARBITRUM_RPC_URL` held a BASE endpoint from 2026-08-05 to 2026-08-26,
+ * so `?chainId=42161` answered `eth_chainId` = `0x2105` with HTTP 200 and a well-formed envelope
+ * for three weeks. Nothing logged, because to every layer here it looked like a healthy answer:
+ * resolveProxyChainId validated the PARAM against the registry, and nobody ever asked the
+ * upstream what it was. A mismatch is now a 502 that names both chain ids and forwards nothing;
+ * an unreachable upstream is an outage rather than a lie and behaves exactly as it does today.
+ * The verdict is cached per (chain, upstream) for the life of the instance — see
+ * rpc-chain-identity.ts — so there is no extra round-trip on a per-request basis.
  *
  * Smoke test:
  *   curl -X POST http://localhost:3000/api/rpc \
@@ -132,6 +143,28 @@ export async function POST(req: NextRequest) {
       )
     }
     const upstreamUrl = getRpcUrlForChain(resolved.chainId)
+
+    // [FIX-RPC-CHAIN-IDENTITY-GUARD] Prove the upstream serves the chain we resolved BEFORE any
+    // of the caller's traffic reaches it. Verified once per (chain, upstream) per instance and
+    // cached, so this is not a round-trip per request.
+    //
+    // Only `mismatch` blocks. `unverified` means we could not get an answer at all (timeout, 5xx,
+    // JSON-RPC error, garbage) — an outage proves nothing about identity, and refusing on it
+    // would turn every provider blip into a hard app outage, so it falls through as it does today.
+    const identity = await assertChainIdentity({
+      expectedChainId: resolved.chainId,
+      endpoint: upstreamUrl,
+      probe: createJsonRpcChainIdProbe(upstreamUrl),
+    })
+    if (identity.status === 'mismatch') {
+      // 502: the upstream is not what it claims. -32006 is a server-defined JSON-RPC error in the
+      // reserved -32000..-32099 range, distinct from the proxy's own -32603 internal error so a
+      // client (and a log search) can tell a misrouted chain from a proxy fault.
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32006, message: identity.message } },
+        { status: 502, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
 
     // Forward to upstream RPC (without user's IP)
     const upstream = await fetch(upstreamUrl, {

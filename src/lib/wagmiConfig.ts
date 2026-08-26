@@ -8,31 +8,41 @@ import {
   injectedWallet,
 } from '@rainbow-me/rainbowkit/wallets'
 import { mainnet, base, arbitrum } from 'wagmi/chains'
-import { http, fallback } from 'wagmi'
+import { fallback } from 'wagmi'
+import type { Transport } from 'viem'
+import { guardedHttp } from '@/lib/rpc-guarded-transport'
 
 // ── RPC Configuration with Fallback ──────────────────────
 // Primary: user-configured RPC (e.g. Alchemy, Infura)
 // Fallbacks: public RPCs for resilience when primary is down
+//
+// [FIX-RPC-CHAIN-IDENTITY-GUARD] Every transport below is built with `guardedHttp`, never bare
+// `http`. NEXT_PUBLIC_ARBITRUM_RPC_URL held a BASE endpoint from 2026-08-05 to 2026-08-26: viem
+// forwarded Base's answers as Arbitrum's for three weeks without a single error, because a
+// well-formed 200 from the wrong chain is not an error to any layer below this one. guardedHttp
+// asks each endpoint `eth_chainId` once (cached per process — see rpc-chain-identity.ts) and
+// refuses to read from one that answers for a different chain. An UNREACHABLE endpoint is an
+// outage, not a lie, and still falls through to the next entry exactly as it does today.
 const primaryRpc = process.env.NEXT_PUBLIC_RPC_URL
 const fallbackRpc1 = process.env.NEXT_PUBLIC_FALLBACK_RPC_1
 const fallbackRpc2 = process.env.NEXT_PUBLIC_FALLBACK_RPC_2
 
-function buildMainnetTransport() {
-  const transports = []
+function buildMainnetTransport(): Transport {
+  const transports: Transport[] = []
 
   // In browser: always use /api/rpc as primary (hides user IP, avoids CORS).
   if (typeof window !== 'undefined') {
-    transports.push(http('/api/rpc', { timeout: 10_000 }))
+    transports.push(guardedHttp('/api/rpc', mainnet.id, { timeout: 10_000 }))
   } else if (primaryRpc) {
     // Server-only: hit the configured RPC directly (no IP to protect).
-    transports.push(http(primaryRpc, { timeout: 10_000 }))
+    transports.push(guardedHttp(primaryRpc, mainnet.id, { timeout: 10_000 }))
   }
 
   // Fallback RPCs (secondary providers) — server-only; browser cannot
   // reach these directly without CORS allowlisting.
   if (typeof window === 'undefined') {
-    if (fallbackRpc1) transports.push(http(fallbackRpc1, { timeout: 12_000 }))
-    if (fallbackRpc2) transports.push(http(fallbackRpc2, { timeout: 12_000 }))
+    if (fallbackRpc1) transports.push(guardedHttp(fallbackRpc1, mainnet.id, { timeout: 12_000 }))
+    if (fallbackRpc2) transports.push(guardedHttp(fallbackRpc2, mainnet.id, { timeout: 12_000 }))
   }
 
   // No implicit/URL-less http() entry here: an unconfigured `http(undefined)`
@@ -44,7 +54,7 @@ function buildMainnetTransport() {
   // set: an EXPLICIT written-down URL (same constant used by src/lib/rpc.ts
   // and src/lib/on-chain-monitor.ts), not viem's implicit chain default.
   if (typeof window === 'undefined' && transports.length === 0) {
-    transports.push(http('https://eth.llamarpc.com', { timeout: 15_000 }))
+    transports.push(guardedHttp('https://eth.llamarpc.com', mainnet.id, { timeout: 15_000 }))
   }
 
   // If only one transport, return it directly (no fallback wrapper needed)
@@ -118,11 +128,11 @@ export const config = getDefaultConfig({
   transports: {
     [mainnet.id]: buildMainnetTransport(),
     [base.id]: fallback([
-      http(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', { timeout: 10_000 }),
+      guardedHttp(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', base.id, { timeout: 10_000 }),
     ]),
     [arbitrum.id]: fallback([
-      http(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', { timeout: 10_000 }),
-      http('https://arb1.arbitrum.io/rpc'),
+      guardedHttp(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', arbitrum.id, { timeout: 10_000 }),
+      guardedHttp('https://arb1.arbitrum.io/rpc', arbitrum.id),
     ]),
   },
   ssr: true,
