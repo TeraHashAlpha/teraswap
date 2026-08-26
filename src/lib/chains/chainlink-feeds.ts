@@ -57,9 +57,26 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
   // "-svr"/"-shared-svr" sibling entries also present there), verified on two independent
   // Arbitrum RPCs (description() matches the pair, decimals()===8, fresh latestRoundData(),
   // answer>0). Keyed by Arbitrum token address (lowercased) — the token addresses were ALSO
-  // corrected in registry.ts for USDT/DAI/WBTC, so the map keys changed too. CONFIG-ONLY / dark:
-  // unreachable while contracts.feeCollector is null (isChainActive(42161) === false). See
+  // corrected in registry.ts for USDT/DAI/WBTC, so the map keys changed too. See
   // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json + ARBITRUM-ADDRESS-VERIFICATION.md.
+  //
+  // [FIX-ARBITRUM-FEED-VERIFICATION] LIVE — these five feeds gate real swaps. This block used to
+  // be labelled "CONFIG-ONLY / dark: unreachable while contracts.feeCollector is null
+  // (isChainActive(42161) === false)". That was never a property of THIS file, and it is not true
+  // in Production. `isChainActive(chainId)` is exactly `contracts.feeCollector !== null`
+  // (activation.ts), and ARBITRUM's feeCollector is env-driven —
+  // `process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR || null` (registry.ts). So this block is:
+  //   - LIVE  wherever that variable is SET. It is set in Vercel Production, where Arbitrum is
+  //           offered in the chain selector and swaps execute against these feeds today.
+  //   - dark  ONLY where it is unset — local checkouts and preview deployments.
+  // The dark case is precisely the environment a developer reads this comment in, which is how a
+  // conditional, environment-dependent state got written down as a standing property and then
+  // outlived the deploy that falsified it. Treat these addresses as production oracle inputs.
+  // Re-verified on-chain 2026-08-26 against two independent public Arbitrum RPCs: all five carry
+  // bytecode, description()/decimals() match FEED_EXPECTATIONS, and the answers pass magnitude +
+  // freshness checks. Re-run with `node scripts/verify-arbitrum-chainlink-feeds.mjs` (it parses
+  // these addresses out of this file — never retyped); readings and method are recorded in
+  // docs/Prompts/VERIFY-ARBITRUM-CHAINLINK-FEEDS.md.
   42161: {
     // WETH → ETH/USD
     '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': '0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612',
