@@ -101,13 +101,13 @@ export const ORDER_EXECUTOR_V3_BY_CHAIN: Record<number, `0x${string}` | null> = 
 }
 ```
 
-**The answer: NO OrderExecutor V3 is DEPLOYED on Arbitrum yet.** The code entry exists (line 66), but it's set to env-var-derived null (shipped DARK). See the comment on line 63: `// [SPRINT-48-ARBITRUM-DCA-PREP] Shipped DARK — no OrderExecutorV3 is deployed on Arbitrum yet.`
+**The answer: UNVERIFIED from the repo alone.** The code entry exists (line 66) and a slot was populated in Vercel from 2026-08-04 to 2026-08-26, making DCA reachable on Arbitrum in production during that window. Whether a contract is actually deployed at that address is not documented in the repo and requires on-chain verification. *(Superseded by INC-2026-08-26-001)*
 
 **Any Arbitrum executor address found in the repo?**
 
 File: `docs/Runbooks/ARBITRUM-V3-EXECUTOR-DEPLOY.md` exists — a comprehensive runbook for deploying it. However, it is a PRE-DEPLOY runbook (specifies arguments, not a deployed address). No deployed address found anywhere in the repo (no broadcast artifact, no DEPLOYMENTS.md entry for V3 on Arbitrum, no ADR).
 
-**Search results:** `NOTHING FOUND` for a deployed OrderExecutorV3 address on Arbitrum. The config slot is ready, the runbook is written, but the contract does not exist on-chain yet.
+**What is known:** The environment variable slot was populated in Vercel from 2026-08-04 to 2026-08-26 (INC-2026-08-26-001), and DCA was reachable on Arbitrum in production during that window. The config slot is ready and the runbook is written. Whether the contract exists on-chain at that address is unverified from the repo alone and requires on-chain inspection. *(Superseded by INC-2026-08-26-001)*
 
 ---
 
@@ -148,7 +148,7 @@ The feeds themselves are verified on-chain and on data.chain.link, but they're n
 
 - **Portfolio: CONFIG CHANGE.** Add Alchemy endpoint for 42161 to `ALCHEMY_BASE_BY_CHAIN`, add 42161 to token-catalog pipeline config, and optionally add curated Base-analog seeds for Arbitrum. The registry entry (slug, contracts, tokens) is already there. Everything else is database/config entries.
 
-- **DCA: NEEDS SOMETHING THAT DOESN'T EXIST YET.** Requires OrderExecutorV3 to be deployed on Arbitrum One (42161). The code is ready (wired in ORDER_EXECUTOR_V3_BY_CHAIN, runbook written), but the smart contract is not deployed on-chain. Until that deployment happens, DCA stays disabled on Arbitrum regardless of configuration.
+- **DCA: DEPLOYMENT UNVERIFIED.** A slot for OrderExecutorV3 on Arbitrum One (42161) was populated in Vercel from 2026-08-04 to 2026-08-26, and DCA was reachable on Arbitrum in production during that window. The code is ready (wired in ORDER_EXECUTOR_V3_BY_CHAIN, runbook written), but whether the smart contract is actually deployed on-chain at that address is not documented in the repo and requires on-chain verification. *(Superseded by INC-2026-08-26-001)*
 
 ---
 
