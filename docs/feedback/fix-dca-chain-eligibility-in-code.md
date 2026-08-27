@@ -20,7 +20,7 @@ the facts stated in the `/goal`.
 |---|---|---|---|
 | **1** (mainnet) | `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS` | **null** — nothing in the repo says the var is set, and the repo says it must not be | No v3 executor on mainnet. `docs/DEPLOYMENTS.md:13-15` and the `README.md` table list OrderExecutor **V3 on Base only** (mainnet has v2). `docs/Runbooks/V3-EXECUTOR-DEPLOY.md §8 "Mainnet (deferred template)"`: *"Deploy only if/when DCA activates on mainnet (currently Base-only, ADR-009)"*; §5 of the same runbook: do **not** set the mainnet variant unless deploying mainnet. `src/lib/dca-launch.ts` `DCA_CHAINS` deliberately excludes 1; `src/lib/order-engine/limit-launch.ts` `LIMIT_TP_CHAIN_ID = 8453` only ("mainnet/Arbitrum are out of scope"). No Foundry broadcast for chain 1 anywhere. |
 | **8453** (Base) | `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE` | **non-null — LIVE** | `docs/DEPLOYMENTS.md:15`: OrderExecutor V3 **LIVE** (cutover 2026-07-21); README table; ADR-014 "deployed and live on Base". Every keeper runbook configures the keeper for this chain: `EC2-EXECUTOR-HOST.md:50`, `AWS-KMS-EXECUTOR-SETUP.md:73`, `BASE-DCA-GOLIVE.md:23` (`CHAIN_ID=8453`). `DCAPanel.chain-availability.test.tsx` already models "8453 non-null, every other chain null". |
-| **42161** (Arbitrum One) | `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM` | **null since 2026-08-26** (var re-scoped to Development only — `/goal`); **non-null from 2026-08-04 to 08-26** — the incident | The repo records **no** Arbitrum V3 deployment: no `docs/DEPLOYMENTS.md` row; `Audits/Sprint/AUDIT-ARBITRUM-V3-PREDEPLOY.md` is a *pre-deploy* gate; `docs/Runbooks/ARBITRUM-V3-EXECUTOR-DEPLOY.md:11` states the keeper is single-chain (Base-only); `docs/Prompts/SPRINT-KEEPER-MULTICHAIN-ARBITRUM.md` is the unshipped keeper blocker. **No keeper polls 42161.** |
+| **42161** (Arbitrum One) | `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM` | **null since 2026-08-26** (var re-scoped to Development only — `/goal`); **non-null from 2026-08-04 to 08-26** — the incident | The repo *records* **no** Arbitrum V3 deployment: no `docs/DEPLOYMENTS.md` row; `Audits/Sprint/AUDIT-ARBITRUM-V3-PREDEPLOY.md` is a *pre-deploy* gate; `docs/Runbooks/ARBITRUM-V3-EXECUTOR-DEPLOY.md:11` states the keeper is single-chain (Base-only); `docs/Prompts/SPRINT-KEEPER-MULTICHAIN-ARBITRUM.md` is the unshipped keeper blocker. **No keeper polls 42161.** ⚠️ But one *was* deployed on 2026-08-04 and the repo never recorded it — see **Concern → Deployment record vs. reality**. Ineligibility rests on the keeper (condition 2), not on the contract's absence. |
 
 **Allowlist chosen: `ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS = [8453]`.** The repo settles all three chains — Base is
 the only one with a deployed + verified V3 **and** a keeper that polls it — so the STOP condition was not hit.
@@ -116,11 +116,34 @@ the only one with a deployed + verified V3 **and** a keeper that polls it — so
 
 ## Concern
 
-- **Deployment record vs. reality.** The owner's main checkout has an *untracked, uncommitted*
-  `contracts/order-engine/broadcast/DeployOrderExecutorV3.s.sol/42161/` directory (directory name only observed;
-  nothing inside was read, nothing committed). A local Arbitrum V3 deploy broadcast that the repo does not record
-  is exactly how "not deployed yet" comments go stale. Reconcile `docs/DEPLOYMENTS.md` before the next reader
-  treats it as fact — independently of whether 42161 is ever allowlisted.
+- **Deployment record vs. reality — RESOLVED, and worse than assumed (read 2026-08-26, second pass).** The earlier
+  pass observed only the directory name of the owner's *untracked* `contracts/order-engine/broadcast/`
+  `DeployOrderExecutorV3.s.sol/42161/`. It has now been read. It is **not** a dry run: `run-latest.json` records a
+  `CREATE` of `TeraSwapOrderExecutorV3` with a real tx hash
+  (`0x0792a2528f033215994b67afe6607dd3688a817973107ce759b946b87d13cb1a`), receipt `status: 0x1`, block
+  `0x1d433dec` (490946028), **timestamp 2026-08-04 07:43 UTC**. An Arbitrum OrderExecutorV3 was really deployed.
+  Three consequences the Auditor should weigh:
+  1. **The incident was not a stray variable.** The deploy and the Vercel var landed on the *same day*
+     (2026-08-04). The sequence was deploy → wire into Production → no keeper, not an accidental env edit. What was
+     missing was never the contract; it was the decision and the executor. This is the strongest argument for the
+     change in this PR: step 1 of the "to add a chain" checklist was arguably met and DCA *still* must not have
+     lit up, because steps 2 and 3 were not.
+  2. **The deployed address collides with a live mainnet fund-path contract.** It is
+     `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` — byte-identical to the **mainnet FeeCollector V2**
+     (`docs/DEPLOYMENTS.md:10`, `.env.example:62`, `NEXT_PUBLIC_FEE_COLLECTOR` default in `constants.ts`), by
+     deployer-nonce alignment. It is also the exact address a Base OrderExecutor deploy was **abandoned** on for
+     this same collision (`docs/DEPLOYMENTS.md:14`: *"collided w/ mainnet FeeCollector addr — abandoned,
+     unbootstrapped, do not use"*). The repo's own standing warning is *"always qualify by chain"*
+     (`docs/DEPLOYMENTS.md:20`). Recommend the Arbitrum V3 be treated as **abandoned on the same precedent**
+     rather than allowlisted later — a chain-qualified mistake here misroutes against a live mainnet fee contract.
+  3. **`docs/DEPLOYMENTS.md` has no row for it**, and neither the broadcast nor a verification record is committed
+     (nothing was committed here either — this PR does not add the artifact; it only reports it). Until it is
+     reconciled, "no Arbitrum V3 deployment" is a claim the repo *implies* and reality contradicts — the same
+     failure mode as the stale `config.ts` comment this PR removed.
+
+  **None of this changes the allowlist.** 42161 fails eligibility condition **2** (no keeper polls it —
+  `executor.js:569` is `chain_id=eq.${CHAIN_ID}`, single-chain, `CHAIN_ID=8453` in every keeper runbook) and
+  condition **3**, independently of whether a contract exists. `ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS = [8453]` stands.
 - **Memory/prior notes are stale on CI shape:** `.github/workflows/ci.yml:435-454` now runs the *whole* vitest
   suite (coverage floor 220 files), so no per-file guard job is needed for these tests to be gated.
 
@@ -143,3 +166,23 @@ the only one with a deployed + verified V3 **and** a keeper that polls it — so
 - `tsc --noEmit`: clean. `eslint` on the 5 changed files: clean.
 - **Full vitest suite** (`CI=true npx vitest run`, the same whole-suite invocation as `ci.yml`): **227 test
   files passed, 3258 tests passed, 0 failed.**
+
+### Independent re-verification (second pass, same worktree, before push)
+
+Re-run from scratch rather than taken on trust from the notes above:
+
+- **GREEN** — `CI=true npx vitest run` on the three files: **3 files, 67 tests passed, 0 failed.** ✔ matches.
+- **RED against `origin/main`** — `config.ts` + `index.ts` checked out from `origin/main`, tests kept, re-run:
+  **3 files failed, 4 tests failed / 11 passed** ✔ matches. Exact failures:
+  - `page.arbitrum-dark.test.tsx` → Production-shape case: `AssertionError: expected '0x5555…' to be null`.
+  - `dca-launch.arbitrum-activation.test.ts` → Arbitrum Production-shape case: `expected '0x5555…' to be null`;
+    mainnet case: `expected '0x3333…' to be null`; Base positive control:
+    `TypeError: Cannot read properties of undefined (reading 'includes')` (the allowlist export is absent on
+    `main`) — **three** failures in this file, not the two listed in the edge-case note above.
+  - `config.test.ts` → fails at *collection* with the same `TypeError`.
+  Both files were restored from `HEAD` afterwards; `git status` clean, tree byte-identical to the commit.
+- Repo claims behind the allowlist re-checked at source, not from the notes: `docs/DEPLOYMENTS.md:15` (V3 LIVE on
+  Base) and the absence of any V3 row for chain 1 or 42161; `contracts/order-engine/executor/executor.js:569`
+  (`orders?status=eq.active&chain_id=eq.${CHAIN_ID}`) and `:40` ("One keeper" per chain id);
+  `contracts/order-engine/schema.sql:125` (`idx_orders_chain_status`); `CHAIN_ID=8453` in
+  `EC2-EXECUTOR-HOST.md:50`, `AWS-KMS-EXECUTOR-SETUP.md:73`, `BASE-DCA-GOLIVE.md:23`. All hold.
