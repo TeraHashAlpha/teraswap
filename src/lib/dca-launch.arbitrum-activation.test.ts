@@ -1,18 +1,20 @@
 // @vitest-environment node
 /**
- * [SPRINT-47-ARBITRUM-ACTIVATION-PREP, updated SPRINT-48-ARBITRUM-DCA-PREP] End-to-end
- * order-engine isolation under the REAL activated state.
+ * [SPRINT-47-ARBITRUM-ACTIVATION-PREP, updated SPRINT-48-ARBITRUM-DCA-PREP, repaired
+ * INC-2026-08-26-001] End-to-end order-engine isolation under the REAL activated state.
  *
  * dca-launch.test.ts already pins isDcaLive's DCA_CHAINS-allowlist logic with every dependency
  * mocked (isChainActive, getOrderExecutorV3). That proves the gate's OWN logic is correct, but
  * not that the ACTUAL wiring stays isolated once Arbitrum genuinely activates. This file uses
- * the REAL chains/registry, chains/activation, and order-engine modules (no mocks) with
- * NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR really set via vi.stubEnv — the exact env flip the owner
- * will perform per docs/Runbooks/ARBITRUM-FEECOLLECTOR-DEPLOY.md — and confirms:
- *   1. isChainActive(42161) really does flip to true (activation plumbing works end-to-end), and
- *   2. isDcaLive(42161) STILL returns false regardless (SPRINT-48-ARBITRUM-DCA-PREP put 42161 IN
- *      the DCA_CHAINS allowlist, but shipped it DARK — no OrderExecutorV3 is wired there yet, so
- *      the v3-wired AND term alone keeps it fail-closed until a real deploy + env flip).
+ * the REAL chains/registry, chains/activation, and order-engine modules (no mocks) with the
+ * Arbitrum env vars really set via vi.stubEnv, and confirms:
+ *   1. isChainActive(42161) really does flip to true once NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR is set
+ *      (activation plumbing works end-to-end), and
+ *   2. isDcaLive(42161) STILL returns false — with the v3 env var UNSET (block 1) AND, since
+ *      INC-2026-08-26-001, with ALL THREE vars SET (block 2): v3 chain eligibility is a code
+ *      decision (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, src/lib/order-engine/config.ts), so a populated
+ *      NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM no longer makes getOrderExecutorV3(42161)
+ *      non-null. Block 2 previously asserted the opposite and specified the defect.
  *
  * Modules read env vars at call time / module-load time, so each case re-imports fresh.
  */
@@ -81,76 +83,98 @@ describe('order-engine isolation on Arbitrum — REAL activated state (not mocke
   })
 })
 
-// [CHORE-ARBITRUM-ACTIVATION-SWITCH-PROOF] The block above proves the dark state end-to-end
-// (real modules, no mocks). This block proves the ACTUAL switch about to be flipped: with all
-// four of isDcaLive's AND-terms driven through real env + the real registry/order-engine (never
-// mocking isChainActive/getOrderExecutorV3 themselves — a mock is a bet the consumer keeps
-// calling it the same way; stubbing the env underneath the real modules verifies the whole chain
-// including that plumbing, not just isDcaLive's own boolean algebra). One positive (all four
-// true) + three negatives that isolate one term each via real env. The fourth term (v3-wired) is
-// already isolated with real modules by the first test in the block above
-// ('activating Arbitrum … does NOT make DCA live there') — not duplicated here.
-describe('dca-launch — the real Arbitrum activation switch (real modules, env-driven)', () => {
-  it('ALL FOUR real conditions satisfied (flag + allowlist + active + v3-wired) ⇒ isDcaLive(42161) is true', async () => {
+// [INC-2026-08-26-001] The block above proves the unset state end-to-end (real modules, no mocks).
+// This block pins the state that was ACTUALLY in Production from 2026-08-04 to 2026-08-26 —
+// NEXT_PUBLIC_DCA_ENABLED, NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR and
+// NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM all SET — and proves it does NOT make DCA live on
+// Arbitrum: v3 chain eligibility is decided in code (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS), not by env.
+// The previous version of this block asserted the opposite ("ALL FOUR real conditions satisfied ⇒
+// isDcaLive(42161) is true") — it specified the defect, and it was green for the whole incident.
+//
+// Real modules throughout (never mocking isChainActive/getOrderExecutorV3 themselves — a mock is a
+// bet the consumer keeps calling it the same way; stubbing the env underneath the real modules
+// verifies the whole chain including that plumbing, not just isDcaLive's own boolean algebra).
+// The positive control and the per-term falsifications now run on Base, the one eligible chain —
+// on Arbitrum the v3 term is false by code, so no other term can be isolated there any more.
+describe('dca-launch — env alone cannot light a chain: the 2026-08-04 → 08-26 Production shape (real modules, env-driven)', () => {
+  // Synthetic, syntactically valid 20-byte test addresses (this repo's existing test constants).
+  const FEE_COLLECTOR_STUB = '0x000000000000000000000000000000000000dEaD'
+  const ARBITRUM_V3_STUB = '0x5555555555555555555555555555555555555555'
+  const BASE_V3_STUB = '0x4444444444444444444444444444444444444444'
+  const MAINNET_V3_STUB = '0x3333333333333333333333333333333333333333'
+
+  const BASE_ALL_SET: Record<string, string> = {
+    NEXT_PUBLIC_DCA_ENABLED: 'true',
+    NEXT_PUBLIC_BASE_FEE_COLLECTOR: FEE_COLLECTOR_STUB,
+    NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE: BASE_V3_STUB,
+  }
+
+  it('all three Arbitrum vars SET ⇒ the env reaches the real modules (chain active, raw v3 slot populated, 42161 in DCA_CHAINS) yet getOrderExecutorV3(42161) is null and isDcaLive(42161) is false', async () => {
     vi.resetModules()
     vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
-    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
-    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', '0x00000000000000000000000000000000BEEF01')
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', FEE_COLLECTOR_STUB)
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', ARBITRUM_V3_STUB)
 
     const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
-    const { isDcaLive } = await import('./dca-launch')
+    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_BY_CHAIN, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } =
+      await import('@/lib/order-engine')
+    const { isDcaLive, isDcaLaunchEnabled, DCA_CHAINS } = await import('./dca-launch')
 
-    // Sanity: both real dependencies genuinely resolved true/non-null before asserting the gate.
+    // Sanity: the three env-driven terms genuinely reached the real modules — this is the exact
+    // Production state of the incident, not a strawman.
+    expect(isDcaLaunchEnabled()).toBe(true)
     expect(isChainActive(42161)).toBe(true)
-    expect(getOrderExecutorV3(42161)).not.toBeNull()
-    expect(isDcaLive(42161)).toBe(true)
+    expect(DCA_CHAINS.includes(42161)).toBe(true)
+    expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBe(ARBITRUM_V3_STUB)
+    // ...and the gate still says no. Against a config.ts where env alone can enable a chain, THIS
+    // is the assertion that fails (`expected '0x5555…' to be null`) — the incident, as a test.
+    expect(getOrderExecutorV3(42161)).toBeNull()
+    expect(isDcaLive(42161)).toBe(false)
+    // The code-level decision is what keeps it dark.
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(42161)).toBe(false)
   })
 
-  it('condition 1 (launch flag) falsified — both Arbitrum env vars real, flag left unset ⇒ false', async () => {
+  it('positive control — the gate CAN open, on the eligible chain: all three Base vars SET ⇒ isDcaLive(8453) is true', async () => {
     vi.resetModules()
-    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
-    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', '0x00000000000000000000000000000000BEEF01')
-    // NEXT_PUBLIC_DCA_ENABLED deliberately left unset — the only falsified term.
+    for (const [key, value] of Object.entries(BASE_ALL_SET)) vi.stubEnv(key, value)
 
     const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } = await import('@/lib/order-engine')
     const { isDcaLive } = await import('./dca-launch')
 
-    expect(isChainActive(42161)).toBe(true)
-    expect(getOrderExecutorV3(42161)).not.toBeNull()
-    expect(isDcaLive(42161)).toBe(false)
+    expect(isChainActive(8453)).toBe(true)
+    expect(getOrderExecutorV3(8453)).toBe(BASE_V3_STUB)
+    expect(isDcaLive(8453)).toBe(true)
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(8453)).toBe(true)
   })
 
-  it('condition 3 (chain active / FeeCollector) falsified — flag on + v3 wired, FeeCollector env left unset ⇒ false', async () => {
+  it.each([
+    ['NEXT_PUBLIC_DCA_ENABLED', 'launch flag'],
+    ['NEXT_PUBLIC_BASE_FEE_COLLECTOR', 'FeeCollector / isChainActive'],
+    ['NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE', 'v3 executor slot'],
+  ])('env keeps the power to DISABLE — Base with only %s unset (%s falsified) ⇒ isDcaLive(8453) is false', async (missing) => {
     vi.resetModules()
-    vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
-    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', '0x00000000000000000000000000000000BEEF01')
-    // NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR deliberately left unset — the only falsified term.
+    for (const [key, value] of Object.entries(BASE_ALL_SET)) vi.stubEnv(key, key === missing ? undefined : value)
 
-    const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
     const { isDcaLive } = await import('./dca-launch')
-
-    expect(isChainActive(42161)).toBe(false)
-    expect(getOrderExecutorV3(42161)).not.toBeNull()
-    expect(isDcaLive(42161)).toBe(false)
+    expect(isDcaLive(8453)).toBe(false)
   })
 
-  it('condition 2 (DCA_CHAINS allowlist) falsified — mainnet has its own real active+v3-wired state but is absent from the allowlist ⇒ false', async () => {
+  it('mainnet: its own v3 var SET ⇒ blocked at BOTH layers — not eligible in config (getOrderExecutorV3(1) null) AND absent from DCA_CHAINS', async () => {
     vi.resetModules()
     vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
-    // Mainnet's own real v3 slot (not an Arbitrum var) — proves the allowlist, not wiring, blocks it.
-    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS', '0x00000000000000000000000000000000BEEF02')
+    // Mainnet's own real v3 slot (not an Arbitrum var). Before INC-2026-08-26-001 only DCA_CHAINS
+    // stood between this state and a live mainnet DCA gate; now the config allowlist does too.
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS', MAINNET_V3_STUB)
 
     const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine')
     const { isDcaLive, DCA_CHAINS } = await import('./dca-launch')
 
-    // Sanity: mainnet's own dependencies genuinely resolve true/non-null (real modules).
     expect(isChainActive(1)).toBe(true)
-    expect(getOrderExecutorV3(1)).not.toBeNull()
-    expect(DCA_CHAINS.includes(1)).toBe(false)
+    expect(ORDER_EXECUTOR_V3_BY_CHAIN[1]).toBe(MAINNET_V3_STUB) // env reached the raw slot
+    expect(getOrderExecutorV3(1)).toBeNull()                    // layer 1: config eligibility
+    expect(DCA_CHAINS.includes(1)).toBe(false)                  // layer 2: DCA allowlist
     expect(isDcaLive(1)).toBe(false)
   })
 })
