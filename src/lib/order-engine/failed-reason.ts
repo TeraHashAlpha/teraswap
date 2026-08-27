@@ -29,6 +29,10 @@ export const FAILURE_REASON_LABELS: Record<string, string> = {
   nonce_invalid:
     'This order is no longer valid (its nonce was replaced, or it was already executed). No further funds were moved.',
   cancelled: 'This order was cancelled. No further funds were moved.',
+  // [FIX-RETRY-CAP-RESTART] Distinct from no_route_after_retries: routes existed, but none could meet the
+  // minimum output this order requires (its signed floor). The fix is a different order, not a retry.
+  min_output_unreachable:
+    'The minimum output this order requires could not be met by any available route after several automatic attempts — the minimum is above what the market can deliver. Any completed buys are kept and no further funds were moved. Cancel this order and re-create it with a realistic minimum.',
 }
 
 export function failedOrderReason(error: string | null | undefined): string {

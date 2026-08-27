@@ -5,10 +5,18 @@
  * the browser through /api/rpc to hide the user's IP — so mainnet simulation
  * behaviour is byte-identical. Other chains get a cached client built from the
  * chain's configured RPC (falling back to viem's default public RPC).
+ *
+ * [FIX-RPC-CHAIN-IDENTITY-GUARD] `guardedHttp` (rpc-guarded-transport.ts), never bare `http(url)`.
+ * This is the THIRD upstream resolver the incident exposed — after `/api/rpc` and
+ * `wagmiConfig.ts` — and it feeds quote simulation, portfolio reads, and the on-chain monitor,
+ * so an endpoint answering for the wrong chain here is the same silent-lie failure mode with a
+ * different blast radius. Mainnet is untouched: `getPrivateClient()` already routes through the
+ * guarded `/api/rpc` proxy.
  */
 import { createPublicClient, fallback, http, type Chain, type PublicClient } from 'viem'
 import { mainnet, base, arbitrum } from 'viem/chains'
 import { getPrivateClient } from '@/lib/rpc'
+import { guardedHttp } from '@/lib/rpc-guarded-transport'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 
 // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum was registered in chains/registry.ts (Sprint 46)
@@ -42,13 +50,24 @@ export function getPublicClientForChain(chainId: number = DEFAULT_CHAIN_ID): Pub
   // pattern: a single URL stays a plain http transport; several become a viem
   // fallback() chain tried in order. The mainnet path above (getPrivateClient
   // → /api/rpc privacy proxy) is intentionally untouched.
-  const urls = [config.rpc.primary, ...(config.rpc.fallbacks ?? [])].filter(Boolean)
+  const configuredUrls = [config.rpc.primary, ...(config.rpc.fallbacks ?? [])].filter(Boolean)
+  // [FIX-RPC-CHAIN-IDENTITY-GUARD] No configured RPC at all (registry primary + fallbacks both
+  // empty — currently unreachable for Base/Arbitrum, whose registry entries always carry a
+  // hardcoded fallback, but real for any future chain registered without one). Bare `http()`
+  // would resolve to viem's OWN default public RPC for the chain — an endpoint we never chose
+  // but is nonetheless a specific, known URL (`chain.rpcUrls.default.http`). "Implicitly the
+  // right chain" is exactly the assumption this whole module exists to stop trusting, so we
+  // resolve that default explicitly and guard it identically to a configured URL, rather than
+  // carving out the one path this branch would otherwise leave unverified. Only if viem's own
+  // chain metadata carries no default URL either (not true for any chain in VIEM_CHAINS today)
+  // does this fall through to bare `http()`.
+  const urls = configuredUrls.length > 0 ? configuredUrls : (chain?.rpcUrls.default.http ?? [])
   const transport =
     urls.length === 0
-      ? http() // no configured RPC at all → viem default public RPC for the chain
+      ? http() // no explicit or default URL exists anywhere — nothing to guard against
       : urls.length === 1
-        ? http(urls[0])
-        : fallback(urls.map((url) => http(url)))
+        ? guardedHttp(urls[0], chainId)
+        : fallback(urls.map((url) => guardedHttp(url, chainId)))
 
   const client = createPublicClient({ chain, transport }) as PublicClient
   clientCache.set(chainId, client)

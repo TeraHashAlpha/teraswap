@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS orders (
   -- Error message (set on failure)
   error       TEXT,
 
+  -- [FIX-RETRY-CAP-RESTART] Keeper failure-ladder state, persisted so MAX_CYCLE_FAILURES survives
+  -- a keeper restart (INC-2026-08-07-001: 516 reverts under a cap of 8 across 228 restarts).
+  -- consecutive_failures = transient misses in a row since the last fill (reset to 0 by a fill;
+  -- never touched by pinned-route reverts or gas/deviation/oracle-floor defers);
+  -- last_attempt_at = when the last counted miss happened (drives backoff across restarts).
+  -- See supabase/migrations/20260827190000_add_orders_retry_state.sql.
+  consecutive_failures INTEGER NOT NULL DEFAULT 0
+    CONSTRAINT orders_consecutive_failures_nonneg CHECK (consecutive_failures >= 0),
+  last_attempt_at TIMESTAMPTZ,
+
   -- Router (part of signed order in v2)
   router      TEXT NOT NULL DEFAULT '',                -- DEX router from signed order
 

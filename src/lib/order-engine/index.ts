@@ -10,6 +10,9 @@ export { ORDER_EXECUTOR_ABI,
 export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
   // [SPRINT-V3-P2] v3 config — fail-closed while ORDER_EXECUTOR_V3_BY_CHAIN[chainId] is null.
   ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3, getOrderExecutorV3Domain, resolveSigningExecutor,
+  // [INC-2026-08-26-001] v3 chain eligibility is a code decision — getOrderExecutorV3 is null
+  // unless the chain is on this allowlist AND its env slot is set (env can disable, never enable).
+  ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, isOrderExecutorV3EligibleChain,
   // [SPRINT-P1B / ADR-014 (a)] Pinned canonical-route router selection (never widens the whitelist).
   CANONICAL_ROUTE_ROUTER_KEY, getCanonicalRouteRouter, isWhitelistedRouter } from './config'
 // [SPRINT-P1B / ADR-014 (a)] Deterministic quote-free pinned route for non-DCA v3 orders.
