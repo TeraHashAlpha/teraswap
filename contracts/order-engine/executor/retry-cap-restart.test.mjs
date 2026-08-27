@@ -294,12 +294,50 @@ describe("acceptance 3 — gas-price / delay-not-drain defers count as zero fail
 // ─── Wiring — the executor really reads the row and really passes the floor signal ────────────
 
 describe("executor.js wiring (source anchors) — the decision reads persisted state", () => {
-  test("handleExecutionFailure plans from the ROW: no orderRetries.get, no prevFailures from the cache, floor name passed", () => {
+  // [FIX-RETRY-FALLBACK-MIGRATION-LAGS] This anchor originally required the Map to be ABSENT from
+  // handleExecutionFailure outright. That rule was too strong in one direction and left a hole in
+  // the other: with the persisted columns missing, "never read the Map" meant the base was always
+  // 0, so the cap never fired at all (strictly worse than before FIX-RETRY-CAP-RESTART). The rule
+  // is now NARROWER, not weaker — the Map may reach the decision ONLY through
+  // prevFailuresForDecision, whose `columnsAvailable` gate returns 0 whenever the row is usable
+  // (proven behaviourally in the "columns PRESENT" suite above, not just structurally here).
+  test("handleExecutionFailure plans from the ROW, and touches the cache ONLY through the gated helper", () => {
     const body = sliceBetween(executorSource(), "async function handleExecutionFailure(", "\nasync function unlockStaleOrders")
-    assert.equal(body.includes("orderRetries.get("), false, "the decision must not read the in-memory cache")
-    assert.equal(body.includes("prevFailures:"), false, "planFailureHandling derives the base from dbOrder.consecutive_failures")
+    assert.ok(
+      body.includes("prevFailures: prevFailuresForDecision({"),
+      "the cache may enter the decision only via the gated helper",
+    )
+    assert.ok(
+      body.includes("columnsAvailable: retryStateAvailability.isAvailable()"),
+      "and only when the persisted columns are unavailable",
+    )
+    // The pre-FIX-RETRY-CAP-RESTART shape must NOT come back: an ungated cache read that feeds the
+    // decision directly is exactly the regression this anchor exists to catch.
+    // `prev` is a prefix of `prevFailuresForDecision`, so the lookahead is load-bearing: without
+    // it this would match the CORRECT gated call and never catch the shape it is aiming at.
+    assert.equal(
+      /prevFailures:\s*(?!prevFailuresForDecision\b)(prev\b|orderRetries\b)/.test(body),
+      false,
+      "the decision must never take an UNGATED count from the in-memory cache",
+    )
     assert.ok(body.includes("executorErrorName"), "the floor signal reaches the plan (Task 3)")
     assert.ok(body.includes("patchOrderRow(dbOrder.id, plan.patch)"), "the patch — with the count — is what lands on the row")
+  })
+
+  test("patchOrderRow is the sensor: it marks the columns missing on the 400 and PRESENT on an accepted write", () => {
+    const body = sliceBetween(executorSource(), "async function patchOrderRow(", "\n// [chore/dca-resilience] Single failure handler")
+    assert.ok(body.includes("retryStateAvailability.markMissing()"), "the specific 400 flips the fallback on")
+    assert.ok(body.includes("retryStateAvailability.markPresent()"), "an accepted write flips it back off")
+    // markPresent must be gated on the patch having CARRIED the columns — a status-only patch (or
+    // the stripped re-send) succeeding proves nothing about the schema and must not clear it.
+    assert.ok(
+      body.includes("if (hadRetryState && !retryStateAvailability.isAvailable())"),
+      "only a patch that carried the columns may clear the fallback",
+    )
+    assert.ok(
+      body.includes("detail: RETRY_STATE_COLUMNS_MISSING_ALERT"),
+      "the ops page uses the pinned constant, so its text cannot drift from the behaviour",
+    )
   })
 
   test("the catch site forwards executorErrorName to handleExecutionFailure", () => {
