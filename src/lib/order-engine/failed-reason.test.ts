@@ -13,6 +13,38 @@
 
 import { describe, it, expect } from 'vitest'
 import { failedOrderReason, DEFAULT_FAILED_REASON, FAILURE_REASON_LABELS } from './failed-reason'
+// [FIX-RETRY-CAP-RESTART] The keeper's side of the contract, imported directly (ESM, no I/O on
+// import beyond reading process.env for its caps) so this suite fails the moment the two diverge.
+import { FAILURE_REASON } from '../../../contracts/order-engine/executor/retry-policy.js'
+
+describe('FAILURE_REASON (keeper) ↔ FAILURE_REASON_LABELS (UI) — the docblock says "keep in sync"; this enforces it', () => {
+  const keeperCodes = Object.values(FAILURE_REASON).sort()
+  const uiKeys = Object.keys(FAILURE_REASON_LABELS).sort()
+
+  it('every keeper terminal reason code has a UI label', () => {
+    const missing = keeperCodes.filter((c) => !(c in FAILURE_REASON_LABELS))
+    expect(missing).toEqual([])
+  })
+
+  it('every UI label key is a keeper terminal reason code (no orphan labels)', () => {
+    const orphans = uiKeys.filter((k) => !keeperCodes.includes(k))
+    expect(orphans).toEqual([])
+  })
+
+  it('the two sets are identical', () => {
+    expect(uiKeys).toEqual(keeperCodes)
+  })
+
+  it('min_output_unreachable → tells the user the floor could not be met and to cancel + re-create at a realistic minimum', () => {
+    const msg = failedOrderReason(FAILURE_REASON.MIN_OUTPUT_UNREACHABLE)
+    expect(msg).not.toBe(DEFAULT_FAILED_REASON)
+    expect(msg).toMatch(/minimum/i)
+    expect(msg).toMatch(/cancel/i)
+    expect(msg).toMatch(/re-?create|new order/i)
+    expect(msg).not.toMatch(/no swap route/i)
+    expect(msg).toMatch(/no (further )?funds were moved/i)
+  })
+})
 
 describe('failedOrderReason — backward compatibility', () => {
   it('returns a legacy free-text error verbatim', () => {
