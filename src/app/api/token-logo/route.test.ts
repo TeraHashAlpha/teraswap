@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET, __resetTokenLogoCache } from './route'
+import { getSupportedChainIds } from '@/lib/chains/registry'
 
 // A CoinGecko-shaped token in the stubbed per-chain list. Mixed-case address to
 // prove the route lower-cases keys before lookup.
@@ -93,6 +94,7 @@ describe('GET /api/token-logo', () => {
   it('returns 400 for an unsupported chainId', async () => {
     vi.stubGlobal('fetch', vi.fn())
 
+    // 137 (Polygon) is not in the chain registry — still rejected.
     const res = await GET(req({ chainId: '137', address: KNOWN_ADDR }))
 
     expect(res.status).toBe(400)
@@ -188,5 +190,69 @@ describe('GET /api/token-logo', () => {
 
     // Only CoinGecko-hosted URLs are rewritten; everything else passes through verbatim.
     expect(res.headers.get('location')).toBe(url)
+  })
+
+  // ── [FIX-RPC-CHAIN-IDENTITY-GUARD] Registry-wide chain support ──────────────────────────
+  // The allowlist was a hardcoded pair (1, 8453), so /api/token-logo 400'd for chainId=42161
+  // even though Arbitrum has been in the chain registry since SPRINT-46. The registry is the
+  // allowlist now; the CoinGecko platform slug is only an optimisation on top of it.
+
+  it('serves Arbitrum (42161) instead of 400ing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okList()))
+
+    const res = await GET(req({ chainId: '42161', address: UNKNOWN_ADDR }))
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      `https://token-icons.llamao.fi/icons/tokens/42161/${UNKNOWN_ADDR.toLowerCase()}?h=48&w=48`,
+    )
+  })
+
+  it('resolves an Arbitrum address from the CoinGecko arbitrum-one list', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okList())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await GET(req({ chainId: '42161', address: KNOWN_ADDR }))
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(KNOWN_LOGO)
+    // CoinGecko's asset-platform slug for Arbitrum One is `arbitrum-one`, not the registry slug.
+    expect(fetchMock.mock.calls[0][0]).toBe('https://tokens.coingecko.com/arbitrum-one/all.json')
+  })
+
+  it('serves EVERY chain in the registry — the allowlist is the registry, not a hardcoded pair', async () => {
+    for (const chainId of getSupportedChainIds()) {
+      __resetTokenLogoCache()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okList()))
+
+      const res = await GET(req({ chainId: String(chainId), address: UNKNOWN_ADDR }))
+
+      expect(res.status, `chainId ${chainId} must be served`).toBe(302)
+      expect(res.headers.get('location')).toContain(`/tokens/${chainId}/`)
+    }
+  })
+
+  it('keeps caching per chain (an Arbitrum list fetch does not satisfy a mainnet request)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okList())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await GET(req({ chainId: '42161', address: KNOWN_ADDR }))
+    await GET(req({ chainId: '1', address: KNOWN_ADDR }))
+    await GET(req({ chainId: '42161', address: UNKNOWN_ADDR }))
+
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      'https://tokens.coingecko.com/arbitrum-one/all.json',
+      'https://tokens.coingecko.com/ethereum/all.json',
+    ])
+  })
+
+  it('still rejects a numeric chainId that is not in the registry', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+
+    for (const unsupported of ['137', '10', '56', '0', '99999999999999999999']) {
+      const res = await GET(req({ chainId: unsupported, address: KNOWN_ADDR }))
+      expect(res.status, `chainId ${unsupported} must be rejected`).toBe(400)
+    }
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

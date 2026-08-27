@@ -10,9 +10,17 @@
  * primary failed ALL Base reads (quote simulation / portfolio / monitor).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { __resetChainIdentityCache } from '../rpc-chain-identity'
 
 const PRIMARY = 'https://base-primary.test'
 const FALLBACK = 'https://base-fallback.test'
+const BASE_CHAIN_ID_HEX = '0x2105' // 8453 — what a correctly-identified endpoint answers
+
+/** Reads the JSON-RPC method name off a viem http transport's fetch call. */
+function methodOf(init: RequestInit | undefined): string {
+  const parsed = JSON.parse(String(init?.body ?? '{}'))
+  return Array.isArray(parsed) ? parsed[0]?.method : parsed.method
+}
 
 // Mutable per-test rpc block for Base; chain 1 and everything else stay real.
 let fakeBaseRpc: { primary: string; fallbacks: string[] } = {
@@ -35,11 +43,13 @@ import { getPublicClientForChain, _clearClientCache } from './clients'
 
 beforeEach(() => {
   _clearClientCache()
+  __resetChainIdentityCache()
   fakeBaseRpc = { primary: PRIMARY, fallbacks: [FALLBACK] }
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  __resetChainIdentityCache()
 })
 
 describe('chains/clients — Base RPC fallback [CHORE-POLISH-3 P3]', () => {
@@ -48,6 +58,9 @@ describe('chains/clients — Base RPC fallback [CHORE-POLISH-3 P3]', () => {
     expect(client.transport.type).toBe('fallback')
   })
 
+  // [FIX-RPC-CHAIN-IDENTITY-GUARD] Both URLs now sit behind guardedHttp, so the mock must answer
+  // eth_chainId correctly (0x2105) for both hosts — an uncontrolled answer here would read as a
+  // chain mismatch, not the HTTP-error failover this test is about.
   it('fails over to the registry fallback RPC when the Base primary errors', async () => {
     // Exact parsed-host comparison (not substring/prefix matching) — more
     // precise for a URL-dispatching mock and avoids the CodeQL
@@ -57,6 +70,12 @@ describe('chains/clients — Base RPC fallback [CHORE-POLISH-3 P3]', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const host = hostOf(String(url))
       seenHosts.push(host)
+      if (methodOf(init) === 'eth_chainId') {
+        return new Response(
+          JSON.stringify({ jsonrpc: '2.0', id: 1, result: BASE_CHAIN_ID_HEX }),
+          { status: 200 },
+        )
+      }
       if (host === hostOf(PRIMARY)) {
         // 401 is a deterministic HTTP error → viem fails over without retries.
         return new Response('Unauthorized', { status: 401 })
@@ -75,7 +94,7 @@ describe('chains/clients — Base RPC fallback [CHORE-POLISH-3 P3]', () => {
     expect(seenHosts).toContain(hostOf(FALLBACK))
   })
 
-  it('keeps a single configured URL as a plain http transport (no wrapper)', () => {
+  it('keeps a single configured URL as a plain http-typed transport (still guarded — guardedHttp preserves transport.type)', () => {
     fakeBaseRpc = { primary: PRIMARY, fallbacks: [] }
     const client = getPublicClientForChain(8453)
     expect(client.transport.type).toBe('http')
