@@ -107,10 +107,17 @@ import {
 // decision + reason-bearing orders patches (pure, unit-tested in
 // retry-policy.test.mjs). Replaces the old blunt MAX_RETRIES=3 → 'failed' (no
 // reason) that permanently failed a routable DCA on a single transient miss.
+// [FIX-RETRY-CAP-RESTART] The consecutive-miss DECISION reads the row (orders.consecutive_failures
+// / last_attempt_at, migration 20260827190000_add_orders_retry_state.sql); the in-memory Map below
+// is only a same-process backoff cache. Otherwise every keeper restart reset the count to 0 —
+// INC-2026-08-07-001: 516 reverts under a cap of 8 across 228 restarts.
 import {
   MAX_CYCLE_FAILURES,
-  backoffMs,
   planFailureHandling,
+  readPersistedRetryState,
+  isInBackoffWindow,
+  resetRetryStateFields,
+  stripRetryStateColumns,
 } from "./retry-policy.js"
 // [chore/dca-deviation-guard] Execution-QUALITY defer gate for DCA fills (pure,
 // unit-tested in deviation-guard.test.mjs). Compares the committed order.router's
@@ -270,9 +277,14 @@ const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "720
 // keeps the order ACTIVE and retries a later cycle with backoff (backoffMs); only
 // a PERMANENT reason (classifyFailure) or the consecutive-failure CAP
 // (MAX_CYCLE_FAILURES, default 8) marks it 'failed' — with the real reason. The
-// count resets to 0 on any successful execution. In-memory only (resets on keeper
-// restart — see FEEDBACK).
-const orderRetries = new Map()   // orderId -> { count, lastAttempt }
+// count resets to 0 on any successful execution.
+// [FIX-RETRY-CAP-RESTART] This Map is a same-process BACKOFF CACHE only. The count
+// that decides retry-vs-fail is the row's orders.consecutive_failures (written by
+// every ladder patch, read by planFailureHandling), and the cycle's backoff gate
+// falls back to the row's last_attempt_at when this Map is empty — i.e. after a
+// restart. The pinned-route path below still writes here (backoff reuse) but
+// never persists a count, so it can never feed the ladder.
+const orderRetries = new Map()   // orderId -> { count, lastAttempt }  (backoff cache)
 // [SPRINT-P1B / ADR-014 (a)] orderId -> consecutive pinned-route reverts. Tracked separately from
 // orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
 // order stays fillable until expiry. Cleared on any successful fill.
@@ -610,6 +622,52 @@ async function updateOrderStatus(orderId, status) {
   })
 }
 
+// [FIX-RETRY-CAP-RESTART] PATCH an orders row, tolerating a database that has not yet received
+// migration 20260827190000_add_orders_retry_state.sql. PostgREST rejects an unknown column with
+// HTTP 400 (PGRST204 "Could not find the '<col>' column"); if that happens for the retry-state
+// columns, the STATUS transition must still land — an order that should be 'failed' must not sit
+// in 'executing' until the stale-unlock returns it to 'active' and it is retried forever — so the
+// patch is re-sent without them and ops is paged ONCE per process: until the migration is applied
+// the cap is back to being process-memory only. Any other non-2xx is logged, never swallowed.
+let retryStateSchemaAlerted = false
+async function patchOrderRow(orderId, patch) {
+  const send = (body) =>
+    supabaseFetch(`orders?id=eq.${orderId}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(body),
+    })
+  let res = await send(patch)
+  if (res.ok) return res
+  let body = ""
+  try { body = await res.text() } catch { /* body is diagnostic only */ }
+  const stripped = stripRetryStateColumns(patch)
+  const hadRetryState = Object.keys(stripped).length < Object.keys(patch).length
+  if (res.status === 400 && hadRetryState && /consecutive_failures|last_attempt_at/.test(body)) {
+    console.error(
+      `  Order ${orderId.slice(0, 8)}... retry-state columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
+        `migration 20260827190000_add_orders_retry_state.sql is NOT applied; the retry cap cannot survive a restart until it is. Re-sending without them.`,
+    )
+    if (!retryStateSchemaAlerted) {
+      retryStateSchemaAlerted = true
+      try {
+        await alertOps(
+          {
+            kind: "schema-drift",
+            detail: "orders.consecutive_failures / last_attempt_at missing — apply supabase/migrations/20260827190000_add_orders_retry_state.sql. Until then MAX_CYCLE_FAILURES is process-memory only (INC-2026-08-07-001 regression risk).",
+          },
+          TIER_WARN_THRESHOLD,
+        )
+      } catch { /* alert is best-effort */ }
+    }
+    res = await send(stripped)
+    if (res.ok) return res
+    try { body = await res.text() } catch { /* diagnostic only */ }
+  }
+  console.error(`  Order ${orderId.slice(0, 8)}... orders PATCH FAILED (${res.status}: ${body.slice(0, 160)}) — patch keys: ${Object.keys(patch).join(",")}`)
+  return res
+}
+
 // [chore/dca-resilience] Single failure handler for BOTH the no-route path and a
 // thrown/reverted execution. The decision is the pure, unit-tested
 // planFailureHandling() (retry-policy.js); this function only EXECUTES the plan:
@@ -621,14 +679,17 @@ async function updateOrderStatus(orderId, status) {
 //       no_route_after_retries + a one-shot #201 Telegram alert.
 // Never double-executes: only status/error/updated_at are written here — never
 // dca_executed — so completed DCA chunks are preserved.
-async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, noRoute = false } = {}, obsCtx = null) {
-  const prev = orderRetries.get(dbOrder.id)
+// [FIX-RETRY-CAP-RESTART] The count is read from the ROW (dbOrder.consecutive_failures — fetched
+// fresh every cycle by fetchActiveOrders' select=*), never from the in-memory Map, so a restart
+// cannot reset the ladder. executorErrorName (revert-decode.js) is forwarded so the cap failure on
+// the executor's own InsufficientOutput is named min_output_unreachable (Task 3), not no-route.
+async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false } = {}, obsCtx = null) {
   const plan = planFailureHandling({
     dbOrder,
     err,
     swapReason,
+    executorErrorName,
     noRoute,
-    prevFailures: prev ? prev.count : 0,
     nowSec: Math.floor(Date.now() / 1000),
     nowIso: new Date().toISOString(),
   })
@@ -646,14 +707,10 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
     } catch { /* alert is best-effort, never blocks the fail */ }
   }
 
-  // Apply the Supabase patch (status [+ error] + updated_at).
-  await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify(plan.patch),
-  })
+  // Apply the Supabase patch (status [+ error] + updated_at + consecutive_failures/last_attempt_at).
+  await patchOrderRow(dbOrder.id, plan.patch)
 
-  // Update the in-memory consecutive-miss tracker.
+  // Refresh the same-process backoff cache (the row already carries the authoritative count).
   if (plan.clearRetries) {
     orderRetries.delete(dbOrder.id)
   } else {
@@ -1207,8 +1264,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // [chore/dca-resilience] Honor the per-order backoff — skip until the
       // exponential (capped) window since the last transient miss has elapsed,
       // so a transient route/API outage has time to recover between retries.
-      const retryState = orderRetries.get(dbOrder.id)
-      if (retryState && Date.now() - retryState.lastAttempt < backoffMs(retryState.count)) {
+      // [FIX-RETRY-CAP-RESTART] After a restart the cache is empty, so fall back to the
+      // row's persisted count + last_attempt_at — a fresh process must not hammer an
+      // order that was mid-ladder when the previous process died.
+      const retryState = orderRetries.get(dbOrder.id) || readPersistedRetryState(dbOrder)
+      if (isInBackoffWindow({ count: retryState.count, lastAttempt: retryState.lastAttempt, nowMs: Date.now() })) {
         continue // Still in backoff window — retry a later cycle
       }
 
@@ -1717,24 +1777,19 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
             dca_last_exec: now,
             tx_hash: txHash,
             updated_at: now,
+            // [FIX-RETRY-CAP-RESTART] A fill resets the persisted ladder (consecutive, not cumulative).
+            ...resetRetryStateFields(),
           }
           if (next.complete) orderPatch.executed_at = now
-          await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
-            method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify(orderPatch),
-          })
+          await patchOrderRow(dbOrder.id, orderPatch)
         } else {
           // Limit / Stop-Loss: single execution
-          await supabaseFetch(`orders?id=eq.${dbOrder.id}`, {
-            method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify({
-              status: "executed",
-              executed_at: now,
-              tx_hash: txHash,
-              updated_at: now,
-            }),
+          await patchOrderRow(dbOrder.id, {
+            status: "executed",
+            executed_at: now,
+            tx_hash: txHash,
+            updated_at: now,
+            ...resetRetryStateFields(),
           })
         }
 
@@ -1861,7 +1916,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // (keep active) vs fail-with-specific-reason — replaces the old blunt
       // MAX_RETRIES=3 → 'failed' (no reason), which permanently failed a routable
       // DCA on a single transient miss and masked the real cause.
-      await handleExecutionFailure(dbOrder, { err, swapReason }, obsCtx)
+      // [FIX-RETRY-CAP-RESTART] executorErrorName rides along: a DCA that trips the cap on the
+      // executor's own InsufficientOutput (the incident's shape — DCA is excluded from the pinned
+      // branch above by construction) is failed as min_output_unreachable, not no-route.
+      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName }, obsCtx)
     }
   }
 
