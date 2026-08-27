@@ -142,9 +142,13 @@ describe('Home — real Arbitrum gate (no mocked dca-launch / order-engine / reg
     // Sanity: the env genuinely reached the REAL modules — the chain is active and the raw v3 env
     // slot is populated. The only thing standing between this state and <DCAPanel> is the
     // code-level allowlist; if these two lines ever fail the case would be passing vacuously.
+    // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] The raw map is deliberately not
+    // re-exported from '@/lib/order-engine' (the public barrel) — imported from '@/lib/order-engine/config'
+    // instead, the one place it is meant to be read directly.
     vi.resetModules()
     const { isChainActive } = await import('@/lib/chains')
-    const { ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine/config')
     expect(isChainActive(42161)).toBe(true)
     expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBe(V3_EXECUTOR_STUB)
     expect(getOrderExecutorV3(42161)).toBeNull()

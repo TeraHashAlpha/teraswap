@@ -68,7 +68,10 @@ describe('order-engine isolation on Arbitrum — REAL activated state (not mocke
     vi.resetModules()
     vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', '0x000000000000000000000000000000000000dEaD')
 
-    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] The raw map is not re-exported from the
+    // public barrel — read from '@/lib/order-engine/config' directly for this sanity check.
+    const { ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine/config')
     expect(getOrderExecutorV3(42161)).toBeNull()
     expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_V3_BY_CHAIN, 42161)).toBe(true)
   })
@@ -116,8 +119,11 @@ describe('dca-launch — env alone cannot light a chain: the 2026-08-04 → 08-2
     vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', ARBITRUM_V3_STUB)
 
     const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_BY_CHAIN, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } =
+    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } =
       await import('@/lib/order-engine')
+    // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] The raw map is not re-exported from the
+    // public barrel — read from '@/lib/order-engine/config' directly for this sanity check.
+    const { ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine/config')
     const { isDcaLive, isDcaLaunchEnabled, DCA_CHAINS } = await import('./dca-launch')
 
     // Sanity: the three env-driven terms genuinely reached the real modules — this is the exact
@@ -168,7 +174,10 @@ describe('dca-launch — env alone cannot light a chain: the 2026-08-04 → 08-2
     vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS', MAINNET_V3_STUB)
 
     const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine')
+    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] The raw map is not re-exported from the
+    // public barrel — read from '@/lib/order-engine/config' directly for this sanity check.
+    const { ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine/config')
     const { isDcaLive, DCA_CHAINS } = await import('./dca-launch')
 
     expect(isChainActive(1)).toBe(true)
