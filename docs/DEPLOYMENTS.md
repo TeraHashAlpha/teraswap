@@ -37,14 +37,8 @@ Arbitrum executor was unrecorded, not a security issue).*
 
 | Chain | Signer address | KMS alias | KMS key id | Region | Key created | Keeper polling today? |
 |---|---|---|---|---|---|---|
-| Base (8453) | `0x71f5AC191587AE132D966a719569b2468e0Aa2E5` | `teraswap-executor` | `096547c1-7664-4d5e-998e-8e56ce67c08b` (`docs/Runbooks/EC2-EXECUTOR-HOST.md`) | `eu-north-1` | unknown — not recorded anywhere in this repo. **Gap:** the runbook records the key's ARN/alias/region and its derived address, never its creation timestamp. | **Yes** — `Audits/Incidents/INC-2026-08-26-001.md` §6: "only a Base keeper runs." |
+| Base (8453) | `0x71f5AC191587AE132D966a719569b2468e0Aa2E5` | `teraswap-executor` | `096547c1-7664-4d5e-998e-8e56ce67c08b` (`docs/Runbooks/EC2-EXECUTOR-HOST.md`) | `eu-north-1` | 2026-06-16 17:49 UTC — owner-supplied, not verifiable from this repo | **Yes** — `Audits/Incidents/INC-2026-08-26-001.md` §6: "only a Base keeper runs." |
 | Arbitrum One (42161) | `0x5f47F6301ceD087D5e24FD15C7ff8fBF82CE39ab` (`Audits/Sprint/ARBITRUM-V3-STATE-2026-08-26.md` §0/§2.2 — event-derived, never hand-typed) | `teraswap-keeper-arbitrum` | `193845d3-c7d3-4858-9f7e-2eb0bd696d1c` — **owner-supplied, not verifiable from this repo** | `eu-north-1` | 2026-08-04 | **No** — `ARBITRUM-V3-STATE-2026-08-26.md` §0/§4 (B3): whitelisted on-chain, but no repo-known process runs against this chain. |
-
-**Note on the Base creation-date gap:** `docs/Runbooks/AWS-KMS-EXECUTOR-SETUP.md` is a template
-(placeholder key id, placeholder region) and does not describe the key actually in production;
-`docs/Runbooks/EC2-EXECUTOR-HOST.md` records the real key's ARN, alias and derived address but not
-when it was created. No other file in this repo records it. Left as `unknown` rather than inferred
-from the executor's first observed activity, per this session's instruction not to guess.
 
 ## Canonical production env (Vercel)
 
