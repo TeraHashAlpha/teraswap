@@ -8,8 +8,17 @@ export { ORDER_EXECUTOR_ABI,
   // [SPRINT-V3-P3] cancel/invalidate write path only (cancelOrder, invalidateUnorderedNonces).
   ORDER_EXECUTOR_V3_ABI } from './abi'
 export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
-  // [SPRINT-V3-P2] v3 config — fail-closed while ORDER_EXECUTOR_V3_BY_CHAIN[chainId] is null.
-  ORDER_EXECUTOR_V3_BY_CHAIN, getOrderExecutorV3, getOrderExecutorV3Domain, resolveSigningExecutor,
+  // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] ORDER_EXECUTOR_V3_BY_CHAIN is deliberately
+  // NOT re-exported here. It is the raw, env-only slot map — config.ts's own comment above its
+  // definition says "Never read this map directly for a signing / execution / API decision", but a
+  // comment is not a boundary. Every real consumer needs getOrderExecutorV3(chainId), which applies
+  // ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS on top of the map; a module importing the raw map from this
+  // barrel would bypass that allowlist with no tripwire. No production code did — verified by
+  // grepping every importer before this change — so the map is kept internal to config.ts instead
+  // of guarded. A test that needs the raw map for a real env-reached-the-module sanity check (as
+  // page.arbitrum-dark.test.tsx and dca-launch.arbitrum-activation.test.ts do) imports it from
+  // '@/lib/order-engine/config' directly, not from this public barrel.
+  getOrderExecutorV3, getOrderExecutorV3Domain, resolveSigningExecutor,
   // [INC-2026-08-26-001] v3 chain eligibility is a code decision — getOrderExecutorV3 is null
   // unless the chain is on this allowlist AND its env slot is set (env can disable, never enable).
   ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, isOrderExecutorV3EligibleChain,
