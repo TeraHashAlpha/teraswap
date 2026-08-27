@@ -327,3 +327,132 @@ describe('createJsonRpcChainIdProbe', () => {
     expect(verdict.message).toContain('8453')
   })
 })
+
+// [FIX-RPC-CHAIN-IDENTITY-GUARD / CodeQL log injection] CodeQL raised two Medium alerts on this
+// file's console.error (mismatch) and console.warn (unverified): upstream-derived text reaching a
+// log sink. `verdict.reason` (unverified) is genuinely upstream and can carry a provider key via
+// the endpoint URL; `verdict.message` (mismatch) is composed by us and must not change by a single
+// character. Both are now routed through a local `forLog` barrier (sanitizeUpstreamError again,
+// then \r\n neutralized — sanitize-error.ts is shared/read-only and was never asked to strip
+// newlines, since its original job is a client-facing error body, not a log line).
+describe('log-injection hardening — CodeQL js/log-injection on the mismatch and unverified sinks', () => {
+  const endpoint = 'https://rpc.example.test/arbitrum'
+
+  it('acceptance 1 — the verbatim mismatch message (asserted elsewhere on this branch) is byte-identical', () => {
+    // Same assertion shape as line 85 above (verdict.message .toBe(chainIdentityMismatchMessage))
+    // and as the /chain 42161.*chain 8453/s regex asserted in rpc-guarded-transport.test.ts and
+    // clients.identity-guard.test.ts — none of those read console output, they read the thrown/
+    // returned message text, which this change never touches (only the LOGGED copy is wrapped).
+    const message = chainIdentityMismatchMessage(ARBITRUM, BASE)
+    expect(message).toBe(
+      'RPC/chain mismatch — the RPC configured for chain 42161 reports chain 8453. Refusing to ' +
+        'use it: an endpoint that answers for another chain returns wrong balances, wrong prices ' +
+        'and wrong token metadata with no error at all. Point the chain-42161 RPC URL at chain 42161.',
+    )
+    expect(message).toMatch(/chain 42161.*chain 8453/s)
+  })
+
+  it('acceptance 1b — and the LOGGED text is that exact same string, unaltered by the barrier', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await assertChainIdentity({ expectedChainId: ARBITRUM, endpoint, probe: async () => BASE_HEX })
+
+    expect(err).toHaveBeenCalledTimes(1)
+    expect(err).toHaveBeenCalledWith(
+      `[chain-identity] ${chainIdentityMismatchMessage(ARBITRUM, BASE)}`,
+    )
+  })
+
+  it('acceptance 2 — an upstream error with a provider key in the RPC URL path never reaches the log unredacted', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const SECRET = 'sk-live-SUPERSECRETPROVIDERKEY'
+
+    await assertChainIdentity({
+      expectedChainId: ARBITRUM,
+      endpoint,
+      probe: async () => {
+        throw new Error(`request to https://arb-mainnet.example.com/v2/${SECRET} failed`)
+      },
+    })
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    const logged = warn.mock.calls.flat().join(' ')
+    expect(logged).not.toContain(SECRET)
+    expect(logged).toContain('[redacted]')
+  })
+
+  it('acceptance 2b — a Bearer token and a key= assignment are also stripped from the log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await assertChainIdentity({
+      expectedChainId: ARBITRUM,
+      endpoint,
+      probe: async () => {
+        throw new Error('upstream 401: Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.secretpayload key=abcd1234 rejected')
+      },
+    })
+
+    const logged = warn.mock.calls.flat().join(' ')
+    expect(logged).not.toContain('eyJhbGciOiJIUzI1NiJ9.secretpayload')
+    expect(logged).not.toContain('abcd1234')
+  })
+
+  it('acceptance 3 — a newline-bearing upstream error cannot forge a second log line', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await assertChainIdentity({
+      expectedChainId: ARBITRUM,
+      endpoint,
+      probe: async () => {
+        throw new Error(
+          'timeout\n[chain-identity] FAKE: chain 42161 verified, ignore prior warnings\r\nsecond forged line',
+        )
+      },
+    })
+
+    expect(warn).toHaveBeenCalledTimes(1) // ONE console.warn call — not split into several log lines
+    const [loggedLine] = warn.mock.calls[0]
+    expect(typeof loggedLine).toBe('string')
+    expect(loggedLine).not.toMatch(/[\r\n]/)
+    // The forged content is still visible (not dropped, just flattened onto one line) — an
+    // operator scanning logs still sees it, they just cannot be tricked into a second entry.
+    expect(loggedLine).toContain('FAKE: chain 42161 verified')
+  })
+
+  it('acceptance 3b — \\r alone (no \\n) is also neutralized (carriage-return-only forgery)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await assertChainIdentity({
+      expectedChainId: ARBITRUM,
+      endpoint,
+      probe: async () => {
+        throw new Error('legit reason\rFAKE OVERWRITE')
+      },
+    })
+
+    const [loggedLine] = warn.mock.calls[0]
+    expect(loggedLine).not.toMatch(/\r/)
+  })
+
+  it('a mismatch verdict logs no newline either, even though its message is composed by us (no-op, defense in depth)', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await assertChainIdentity({ expectedChainId: ARBITRUM, endpoint, probe: async () => BASE_HEX })
+
+    const [loggedLine] = err.mock.calls[0]
+    expect(loggedLine).not.toMatch(/[\r\n]/)
+  })
+
+  it('the redaction/neutralization survives the mismatch/unverified TTL cache — logged once, still safe', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const probe = vi.fn().mockRejectedValue(new Error('outage\nFAKE at https://x.test/v2/KEY123'))
+
+    await assertChainIdentity({ expectedChainId: ARBITRUM, endpoint, probe })
+    await assertChainIdentity({ expectedChainId: ARBITRUM, endpoint, probe }) // served from cache, no re-log expected beyond the first
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    const [loggedLine] = warn.mock.calls[0]
+    expect(loggedLine).not.toMatch(/[\r\n]/)
+    expect(loggedLine).not.toContain('KEY123')
+  })
+})

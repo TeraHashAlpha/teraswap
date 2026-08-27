@@ -275,3 +275,96 @@ automatically — the combination hung past vitest's default test timeout. `retr
 behaviour (it had no `retryCount` override before this branch either), so I left production code
 alone and removed the one test that needed it — the MISMATCH-TTL test already fully proves
 acceptance criterion 4 on its own.
+
+---
+
+## Follow-up — CodeQL log-injection hardening on `rpc-chain-identity.ts`
+
+CodeQL raised two Medium `js/log-injection` alerts on this file: the `console.error` on the
+mismatch path and the `console.warn` on the unverified path.
+
+### Sweep — every log/throw/error-body site in the file that carries text
+
+- **2 log sinks fixed** (the two CodeQL flagged, and the only two `console.*` calls in the file):
+  `console.error` (mismatch, logs `verdict.message`) and `console.warn` (unverified, logs
+  `verdict.reason`).
+- **1 upstream-text source audited, no separate fix needed:** `createJsonRpcChainIdProbe` throws
+  `Error(\`eth_chainId probe returned a JSON-RPC error: ${json.error.message ?? 'unknown'}\`)` —
+  `json.error.message` is genuinely upstream (the RPC's own JSON-RPC error envelope). It is caught
+  in `verifyChainIdentity`'s catch block and already flows through `errText` (→
+  `sanitizeUpstreamError`) into `verdict.reason`, i.e. through the same pipeline the fix now also
+  neutralizes for newlines at the log sink — so no independent fix was needed there.
+- **Dismissed as not upstream text:** the probe-timeout `Error` (line ~148, only interpolates our
+  own `timeoutMs` number), the malformed-`eth_chainId` literal string, and the non-ok-HTTP-status
+  `Error` (only interpolates `res.status`, a number, not free text).
+- **No throw or error-body sink in this file** — `verifyChainIdentity`/`assertChainIdentity` never
+  throw (by design, per the module docblock), and this file writes no HTTP response bodies (that
+  happens in `/api/rpc`'s route handler, out of scope — Files list is this file and its tests).
+
+Total: **2 sinks changed**.
+
+### Why sanitizeUpstreamError alone didn't satisfy CodeQL, and what closes the real gap
+
+`verdict.reason` was already routed through `sanitizeUpstreamError` (via the existing `errText`
+helper) before this change — so the provider-key-redaction acceptance tests (2, 2b) pass **even
+against the pre-fix file**, confirmed by reverting the fix and re-running: only the newline tests
+(3, 3b, and the TTL-cache one) fail against the reverted file. `sanitizeUpstreamError` targets
+secrets (URL path/query, Bearer tokens, key/secret/token/password assignments) — it does not touch
+`\r`/`\n`, because its original job (SPRINT-9J J2) is a client-facing JSON error body, where a
+literal newline is cosmetic. A `console.*` sink is different: an upstream error with an embedded
+`\n[chain-identity] fake verdict` line could forge a second, independent-looking log entry — which
+is the actual log-injection primitive CodeQL's query is watching for, and it survives secret
+redaction untouched.
+
+Since `sanitize-error.ts` is read-only for this task (it's shared — used elsewhere for
+client-facing bodies, where adding newline-stripping wasn't asked for and is out of scope), the fix
+adds a **local** barrier in `rpc-chain-identity.ts`:
+
+```ts
+const forLog = (text: string): string => sanitizeUpstreamError(text).replace(/[\r\n]/g, ' ')
+```
+
+Applied at both sinks: `forLog(verdict.message)` (mismatch) and `forLog(verdict.reason)`
+(unverified). Re-running `sanitizeUpstreamError` there is redundant for `verdict.reason` (already
+sanitized once via `errText`) but idempotent and harmless, and it puts the secret-redaction call
+directly adjacent to the sink — the standard shape for satisfying a static dataflow scanner that
+may not track through an intermediate named wrapper with full precision.
+
+### `verdict.message` — composed by us, sanitized anyway, verified byte-identical
+
+Empirically confirmed (`node` script, then pinned as a test) that `forLog(chainIdentityMismatchMessage(...))`
+is character-for-character identical to the unwrapped string: no URL, no `Bearer`, and — despite
+containing the substring "token" (`"wrong token metadata"`) — no `key=`/`secret=`/`token=`-style
+assignment for the redaction regex to match, and no newline. `chainIdentityMismatchMessage` itself,
+`ChainIdentityError`, and every other read of `verdict.message` are untouched by this change; only
+the *logged* copy at the one `console.error` call site is wrapped.
+
+### Acceptance results
+
+1. **Verbatim mismatch message byte-identical** — `chainIdentityMismatchMessage(42161, 8453)` string-
+   pinned exactly (and matches the `/chain 42161.*chain 8453/s` shape asserted elsewhere), plus a
+   separate assertion that the *logged* text via `console.error` is that identical string
+   (`toHaveBeenCalledWith`). All four other files on this branch that assert this message —
+   `rpc-chain-identity.test.ts` (own suite, pre-existing `.toBe()` assertion, line 85, untouched),
+   `rpc-guarded-transport.test.ts`, `wagmiConfig.test.ts`, `clients.identity-guard.test.ts` — run
+   green, unmodified (31/31). ✅
+2. **Provider key in an RPC URL path does not reach the log unredacted** — asserted for a
+   path-embedded key (`.../v2/<key>`) and, separately, a Bearer token and a `key=` assignment. ✅
+3. **A newline-bearing upstream error cannot forge a second log line** — asserted `console.warn` is
+   called exactly once, the logged string contains no `\r`/`\n`, and (separately) a lone `\r` with
+   no `\n` is also neutralized. **This is the test that actually discriminates the fix**: reverted
+   the two sinks back to raw interpolation, re-ran the suite — 3 tests failed (the newline ones;
+   the secret-redaction ones still passed, since that redaction already existed pre-fix via
+   `errText`) — then restored the file byte-identical (`diff` confirmed) and re-ran green (32/32). ✅
+4. **Full suite / lint / typecheck** — `tsc --noEmit`: clean. `eslint . --max-warnings 94`: exit 0,
+   94 warnings (0 errors, at the existing ceiling, none in the touched file). Full `vitest run`:
+   232 files / 3338 tests green (was 3330 before this follow-up; +8 new cases in
+   `rpc-chain-identity.test.ts`). ✅
+
+### Not touched, per the goal
+
+No change to the guard's decision logic, TTLs, cache keys, or fall-through behaviour — `forLog` is
+a pure logging-time wrapper around already-final `verdict.message`/`verdict.reason` strings; the
+`ChainIdentityVerdict` shape, `assertChainIdentity`'s caching, and `verifyChainIdentity`'s
+classification are byte-for-byte what they were before this commit. `sanitize-error.ts` untouched
+(read-only, per the Files list).
