@@ -154,3 +154,124 @@ covers the server ladder; the browser branch is covered structurally plus by the
 No CSP host added (the guard's probe always uses the *same* URL as the transport it guards, so no
 new origin is contacted). No RPC URL or env var changed. No `.sol`, keeper, or order-engine config.
 No file deleted.
+
+---
+
+## Follow-up — closing the third resolver (`getPublicClientForChain`)
+
+`src/lib/chains/clients.ts` — flagged above and left alone as out of scope for the original PR — is
+now guarded too. It feeds `useSwap`/`useSplitSwap` (client), `on-chain-monitor.ts`, `price-monitor.ts`,
+`api.ts`, `chainlink.ts`, `post-execution-validator.ts`, `dca/settlement-receipt.ts`, and
+`/api/swap/route.ts`, so an unguarded endpoint here is the same silent-lie failure mode reaching
+quote simulation, portfolio, and the sequencer-uptime read, not just the Chainlink feed hook.
+
+### The three transport shapes, and the decision on shape 3
+
+`configuredUrls = [config.rpc.primary, ...config.rpc.fallbacks].filter(Boolean)`:
+
+1. one URL → `guardedHttp(url, chainId)` (was `http(url)`)
+2. several → `fallback(urls.map(url => guardedHttp(url, chainId)))` (was `fallback([...http(url)])`)
+3. **zero** → previously bare `http()`, letting viem silently resolve its own default public RPC
+   for the chain (`arb1.arbitrum.io` / `mainnet.base.org`, per `viem/chains`).
+
+Shape 3 is currently unreachable for Base and Arbitrum specifically: both registry entries hardcode
+a non-empty `fallbacks` array (`['https://mainnet.base.org']` / `['https://arb1.arbitrum.io/rpc']`),
+so `configuredUrls` is never empty for them today. It is real defensive surface for any future chain
+registered without an RPC entry, and the prompt asked for a decision on it regardless.
+
+**Decision: guard it too, against the chain's own known default.** viem's default for a chain is a
+specific, discoverable URL — `chain.rpcUrls.default.http[0]` — not a mystery; I resolve that URL
+explicitly and route it through the identical `guardedHttp` used for a configured one, rather than
+carving out the one path this whole module exists to stop leaving unverified:
+
+```
+const urls = configuredUrls.length > 0 ? configuredUrls : (chain?.rpcUrls.default.http ?? [])
+```
+
+**Why not leave it bare, as "implicitly correct by construction":** the guard's own docblock says it
+plainly — *"implicitly is not verified, and that is the whole point of this branch."* Viem's default
+being "that chain's own public endpoint" is true by viem's own source, but the incident's actual
+lesson was that a config value silently answering for the wrong chain is invisible at every layer
+below the transport — a hardcoded literal is not exempt from that failure mode, it is just a
+different place the mistake could live (a copy-paste of the wrong chain's default into `VIEM_CHAINS`,
+a future viem major renumbering a `rpcUrls.default` entry, etc.). Guarding it costs nothing extra: it
+is the same one-probe-per-process-per-endpoint the configured-URL path already pays. The only
+remaining unguarded fallback is the innermost `urls.length === 0` branch — reachable only if a viem
+`Chain` object itself carried zero default RPC URLs, which is not true for any chain in
+`VIEM_CHAINS` today and would be a viem-library-level anomaly, not a config error this branch can
+meaningfully probe against (there is no URL to guard).
+
+### The cache trap — investigated, confirmed NOT a bug
+
+`clientCache` caches one `PublicClient` per chain for the process lifetime, but the identity check
+is **not** performed once at client construction — it lives inside the `request` closure that
+`guardedHttp` returns, which is invoked on every actual RPC call the cached client makes. That
+closure calls `assertChainIdentity(...)` fresh each time, and `assertChainIdentity` is the one that
+owns the TTL cache (verified 30 min / mismatch 60 s / unverified 30 s), keyed by
+`(expectedChainId, endpoint)` — entirely independent of `clientCache`. So:
+
+- The **client** object is cached and reused (unchanged behaviour, still one `createPublicClient`
+  call per chain).
+- The **verdict** is cached separately with its own short TTL, and is re-evaluated on every request
+  the moment that TTL lapses — with no client-cache invalidation, no new `PublicClient`, no
+  redeploy.
+
+Proven directly in `clients.identity-guard.test.ts` ("the SAME cached PublicClient recovers from a
+mismatch once the mismatch TTL elapses"): a mismatching endpoint is refused twice back-to-back (one
+network probe, one cache hit — proving the TTL, not zero caching), then, on the exact same
+`PublicClient` reference (`getPublicClientForChain(ARBITRUM)` returns `===` the original), once fake
+time crosses `CHAIN_IDENTITY_MISMATCH_TTL_MS` the SAME cached client re-probes (fetch call count
+2→confirmed) and serves the read once the upstream is corrected — no cache clear, no new client. No
+fix was needed; the design already keeps these two caches orthogonal by construction (the guard sits
+inside the transport's per-request closure, not at transport-construction time).
+
+### Files touched
+
+- `src/lib/chains/clients.ts` — the three-shape routing above; mainnet branch
+  (`chainId === DEFAULT_CHAIN_ID → getPrivateClient()`) untouched, still the first line of the
+  function, still returns before the registry/guard branch is reached at all.
+- `src/lib/chains/clients.fallback.test.ts` — the pre-existing "fails over to the registry fallback
+  RPC" test's fetch mock answered `eth_chainId` with the block-number stub value for the FALLBACK
+  host (a leftover from before this branch existed) — now a guardedHttp transport, that would have
+  read as a genuine chain mismatch rather than the HTTP-error failover the test is about, so both
+  hosts now answer `eth_chainId` correctly (`0x2105`) and the real read is what varies by host. The
+  "single configured URL" test's name/comment updated from "no wrapper" to reflect that it IS
+  wrapped now (guardedHttp preserves viem's `transport.type: 'http'`, so the assertion itself did
+  not need to change).
+- `src/lib/chains/clients.identity-guard.test.ts` (new) — the acceptance tests below, plus shape-3
+  coverage (mismatch and outage against the chain's own default URL, with no registry entry at all).
+
+### Acceptance results
+
+1. **Mismatch trips the guard through `getPublicClientForChain`, naming both ids verbatim** — three
+   tests: single-URL shape, the `ChainIdentityError` object's `expectedChainId`/`reportedChainId`,
+   and the two-URL `fallback()` shape (`client.transport.type === 'fallback'`, still refused). ✅
+2. **An unreachable RPC through this path still falls through** — probe throws (`ECONNRESET`) and a
+   probe 5xx, both resolve the real read normally, no `ChainIdentityError`. ✅
+3. **The mainnet path is unchanged** — `getPublicClientForChain(1)` still returns two DIFFERENT
+   objects on repeat calls (the documented "intentionally per-call" behaviour of `getPrivateClient`,
+   which a cached or guard-wrapped client would not exhibit), and a chain-1 read needs no fetch stub
+   at all — it never reaches the registry/guard branch. Reference-equality to a fresh
+   `getPrivateClient()` call was tried first and is the WRONG assertion (that factory itself never
+   returns the same object twice, guard or no guard); the per-call/no-cache behaviour is the
+   meaningful proof and is what the test asserts. ✅
+4. **The client cache does not pin a stale verdict** — described above; one test, fake timers,
+   asserts both the object identity (`===`) across the TTL boundary and the fetch call count
+   (1 → still 1 on an immediate re-read → 2 after the TTL elapses and the upstream is corrected). ✅
+5. **Full suite + lint/typecheck** — `npx vitest run`: 232 files / 3330 tests green (was 3310 before
+   this follow-up; +20 from the two touched/new client test files, net of the fallback-test mock
+   fix). `npx tsc --noEmit`: clean. `npx eslint . --max-warnings 94`: exit 0, 94 warnings (at the
+   existing ceiling, unchanged files list — none of the 94 are in the files this follow-up touched). ✅
+
+### Note
+
+An initial version of the cache-trap test also tried to cover the UNVERIFIED-verdict TTL (shorter,
+30 s) alongside the MISMATCH one, combining fake timers with an induced fetch rejection. Dropped it:
+viem's `http()` transport has its own internal retry/backoff (default `retryCount: 3`) on a genuine
+network rejection, scheduled via real `setTimeout` calls that fake timers do not advance
+automatically — the combination hung past vitest's default test timeout. `retryCount: 0` is what
+`rpc-guarded-transport.test.ts` passes to sidestep exactly this, but adding it to the production
+`guardedHttp` calls in `clients.ts` would be an unrequested change to this file's existing retry
+behaviour (it had no `retryCount` override before this branch either), so I left production code
+alone and removed the one test that needed it — the MISMATCH-TTL test already fully proves
+acceptance criterion 4 on its own.
