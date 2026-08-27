@@ -101,13 +101,13 @@ export const ORDER_EXECUTOR_V3_BY_CHAIN: Record<number, `0x${string}` | null> = 
 }
 ```
 
-**The answer: NO OrderExecutor V3 is DEPLOYED on Arbitrum yet.** The code entry exists (line 66), but it's set to env-var-derived null (shipped DARK). See the comment on line 63: `// [SPRINT-48-ARBITRUM-DCA-PREP] Shipped DARK — no OrderExecutorV3 is deployed on Arbitrum yet.`
+**The answer: DEPLOYED — verified on-chain 2026-08-27.** The code entry exists (line 66) and a slot was populated in Vercel from 2026-08-04 to 2026-08-26, making DCA reachable on Arbitrum in production during that window. The contract is real: `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` on Arbitrum One holds **18,247 B** of runtime code — identical on `arb1.arbitrum.io/rpc` and `arbitrum-one-rpc.publicnode.com` (`keccak256` `0x363faecf8d0d0af8…`) — and that code is **byte-equal to a fresh `forge build` of `contracts/order-engine/TeraSwapOrderExecutorV3.sol`** once each side's CBOR metadata trailer is stripped and the artifact's `immutableReferences` are masked. It answers all 12 V3-only selectors probed, its `ORDER_TYPEHASH()` and `domainSeparator()` are content matches to the source, and the FeeCollector-only `TIMELOCK_DELAY()` reverts. **It is the OrderExecutorV3.** The same hex is the FeeCollector V2 on mainnet (5,419 B) and an abandoned, unbootstrapped OrderExecutor v2 on Base (15,475 B) — a deployer+nonce collision across three chains. *(Superseded by INC-2026-08-26-001 §11)*
 
 **Any Arbitrum executor address found in the repo?**
 
 File: `docs/Runbooks/ARBITRUM-V3-EXECUTOR-DEPLOY.md` exists — a comprehensive runbook for deploying it. However, it is a PRE-DEPLOY runbook (specifies arguments, not a deployed address). No deployed address found anywhere in the repo (no broadcast artifact, no DEPLOYMENTS.md entry for V3 on Arbitrum, no ADR).
 
-**Search results:** `NOTHING FOUND` for a deployed OrderExecutorV3 address on Arbitrum. The config slot is ready, the runbook is written, but the contract does not exist on-chain yet.
+**What is known (updated 2026-08-27):** the paragraph above was right about *git* and wrong about the *disk*. The contract was deployed on **2026-08-04 07:43:15 UTC**, Arbitrum block **490,946,028**, tx `0x0792a252…d13cb1a`, from `0x9A387f…C73C` at nonce 2 — which is why it landed on the mainnet FeeCollector V2's address. A Foundry receipt for it sits at `contracts/order-engine/broadcast/DeployOrderExecutorV3.s.sol/42161/run-latest.json`, **untracked and not gitignored**, so it never entered the repo; `docs/DEPLOYMENTS.md` still had no row and there is no ADR. On-chain the contract is `bootstrapped()` = true, unpaused, with **ten** routers whitelisted (the runbook prescribed exactly two), **no repo-known keeper whitelisted as an executor**, and its oracle floor unconfigured (`tokenUsdFeeds` zero/disabled for all five manifest tokens). *(Superseded by INC-2026-08-26-001 §11)*
 
 ---
 
@@ -148,7 +148,7 @@ The feeds themselves are verified on-chain and on data.chain.link, but they're n
 
 - **Portfolio: CONFIG CHANGE.** Add Alchemy endpoint for 42161 to `ALCHEMY_BASE_BY_CHAIN`, add 42161 to token-catalog pipeline config, and optionally add curated Base-analog seeds for Arbitrum. The registry entry (slug, contracts, tokens) is already there. Everything else is database/config entries.
 
-- **DCA: NEEDS SOMETHING THAT DOESN'T EXIST YET.** Requires OrderExecutorV3 to be deployed on Arbitrum One (42161). The code is ready (wired in ORDER_EXECUTOR_V3_BY_CHAIN, runbook written), but the smart contract is not deployed on-chain. Until that deployment happens, DCA stays disabled on Arbitrum regardless of configuration.
+- **DCA: DEPLOYED AND WIRED, BUT UNKEEPERED.** Not a config gap — a deployment gap in the opposite direction. OrderExecutorV3 **is** deployed on Arbitrum One (42161) at `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` since 2026-08-04, byte-proven against `contracts/order-engine/TeraSwapOrderExecutorV3.sol` on two independent RPCs (18,247 B), bootstrapped and unpaused, with the Vercel slot pointed at it from 2026-08-04 to 2026-08-26. What is missing is downstream of the contract: **no repo-known executor is whitelisted** (so `executeOrder` is uncallable by any keeper the repo names) and the **oracle-feed timelock was never executed** (`tokenUsdFeeds`/`oracleConfigs` unset for all five manifest tokens/feeds), leaving V3's defining oracle floor dark. *(Superseded by INC-2026-08-26-001 §11)*
 
 ---
 

@@ -50,19 +50,27 @@ export function getOrderExecutorDomain(chainId: number) {
   }
 }
 
-// ── v3 executor addresses (per chain) — NOT DEPLOYED ─────
+// ── v3 executor addresses (per chain) — the RAW env view ─
 // [SPRINT-V3-P2] TeraSwapOrderExecutorV3 (ADR-013 §1–§3, audit-approved SHA 954c415) is a
 // NEW, separately-deployed contract per chain — v2 is not upgradeable. null = v3 signing is
-// DISABLED on that chain and the v2 flow above is completely untouched. Set an entry here
-// ONLY after a real OrderExecutorV3 is deployed + verified on that chain (same fail-closed
-// convention as ORDER_EXECUTOR_BY_CHAIN — "v3 enabled" means an EXPLICIT non-null address
-// here, never implied by anything else, e.g. never "v2 configured ⇒ v3 configured").
+// DISABLED on that chain and the v2 flow above is completely untouched. "v3 enabled" means an
+// EXPLICIT non-null address here, never implied by anything else (never "v2 configured ⇒ v3
+// configured").
+//
+// [INC-2026-08-26-001] This map is ONLY what the environment says. It is NOT the eligibility
+// decision — that is ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS below, and a populated slot on a chain
+// that is not eligible resolves to null through getOrderExecutorV3, by design. Never read this
+// map directly for a signing / execution / API decision; every consumer goes through
+// getOrderExecutorV3(chainId). Reads stay static `process.env.NEXT_PUBLIC_*` member accesses
+// because Next.js only inlines those into the client bundle (a dynamic process.env[name] would be
+// undefined in the browser and silently turn every chain dark).
 export const ORDER_EXECUTOR_V3_BY_CHAIN: Record<number, `0x${string}` | null> = {
   1: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS || null) as `0x${string}` | null,
   8453: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE || null) as `0x${string}` | null,
-  // [SPRINT-48-ARBITRUM-DCA-PREP] Shipped DARK — no OrderExecutorV3 is deployed on Arbitrum yet.
-  // Exact Base pattern: unset env ⇒ null ⇒ v3 signing stays disabled here, byte-identical to
-  // before this entry existed.
+  // [SPRINT-48-ARBITRUM-DCA-PREP] Env slot reserved for Arbitrum One. Populating it is NOT enough
+  // to enable v3 there — see ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS. (An earlier comment here asserted
+  // "no OrderExecutorV3 is deployed on Arbitrum yet" — a claim about the world on the day it was
+  // written, never revalidated; INC-2026-08-26-001. Deployment status lives in docs/DEPLOYMENTS.md.)
   42161: (process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM || null) as `0x${string}` | null,
 }
 
@@ -80,8 +88,52 @@ export const ORDER_EXECUTOR_V3_BY_CHAIN: Record<number, `0x${string}` | null> = 
   }
 }
 
-/** Resolve the OrderExecutorV3 for a chain, or null when v3 isn't deployed there (fail-closed). */
+// ── v3 chain eligibility — a CODE decision, never env alone ──────────────────────────────
+// [INC-2026-08-26-001] DCA was live and reachable on Arbitrum One (42161) for 22 days
+// (2026-08-04 → 2026-08-26) on a chain with no keeper. Nobody decided that: one Vercel env var
+// (NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM, scoped All Environments) made
+// ORDER_EXECUTOR_V3_BY_CHAIN[42161] non-null, getOrderExecutorV3(42161) went non-null, DCAPanel's
+// v3Enabled went true and the DCA tab rendered. Zero orders were created — the only thing in the
+// way was a client-side oracle gate failing for an unrelated reason. Protection by accident.
+//
+// This list is the decision. getOrderExecutorV3(chainId) resolves non-null ONLY when the chain is
+// listed here AND its env slot is set. Env keeps the power to DISABLE a chain (unset its var ⇒ null
+// — the documented rollback in docs/Runbooks/V3-EXECUTOR-DEPLOY.md §Rollback) and loses the power
+// to ENABLE one: enabling is a reviewed, Auditor-gated code change to this list.
+//
+// To add a chain, ALL of the following must hold, in the same PR that adds the id:
+//   1. A TeraSwapOrderExecutorV3 is DEPLOYED + VERIFIED on that chain — the chain's deploy runbook
+//      run end to end (Foundry verifier script passed, explorer source-verified) and a row recorded
+//      in docs/DEPLOYMENTS.md.
+//   2. A keeper instance ACTUALLY POLLS that chain id. The keeper scopes its active-orders query by
+//      (status, chain_id) — contracts/order-engine/schema.sql:125 (idx_orders_chain_status /
+//      idx_orders_chain_active) and executor.js `orders?status=eq.active&chain_id=eq.${CHAIN_ID}` —
+//      so a chain with no keeper ACCEPTS orders nobody executes. executor.js is single-chain
+//      (one instance per CHAIN_ID; every keeper runbook configures CHAIN_ID=8453), so a new chain
+//      means a new keeper instance, boot-gated by chain-verify.js against that chain's executor.
+//   3. Only then: the chain's env slot exists in ORDER_EXECUTOR_V3_BY_CHAIN and its Vercel var is
+//      set for Production.
+// Removing an id here is the code-level kill-switch; unsetting the env var is the ops-level one.
+export const ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS: readonly number[] = [
+  // Base (8453): OrderExecutor V3 deployed + verified, LIVE since the 2026-07-21 cutover
+  // (docs/DEPLOYMENTS.md, README); the one chain a keeper polls (CHAIN_ID=8453).
+  8453,
+]
+
+/** True when `chainId` may resolve a v3 executor at all — the code-level allowlist above. */
+export function isOrderExecutorV3EligibleChain(chainId: number): boolean {
+  return ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(chainId)
+}
+
+/**
+ * Resolve the OrderExecutorV3 for a chain, or null (fail-closed) when EITHER the chain is not in
+ * ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS OR its env slot is unset. This is the single gate every v3
+ * consumer goes through (isDcaLive, isLimitLive, DCAPanel's v3Enabled, useOrderEngine,
+ * /api/orders, settlement-receipt, resolveSigningExecutor) — a chain that is not eligible is null
+ * here no matter what the environment says.
+ */
 export function getOrderExecutorV3(chainId: number): `0x${string}` | null {
+  if (!isOrderExecutorV3EligibleChain(chainId)) return null
   return ORDER_EXECUTOR_V3_BY_CHAIN[chainId] ?? null
 }
 
