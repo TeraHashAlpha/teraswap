@@ -91,6 +91,92 @@ export function stripRetryStateColumns(patch) {
   return out
 }
 
+// ─── Degrade to the PREVIOUS state, never to the absence of the guard ──────────────────────────
+// [FIX-RETRY-FALLBACK-MIGRATION-LAGS] The FIX-RETRY-CAP-RESTART change removed the in-memory Map
+// from the decision (`prevFailures: prev ? prev.count : 0` is gone) so the cap could survive a
+// restart. That is right whenever the row can hold a count — but when the migration has NOT been
+// applied yet, `readPersistedRetryState` reads an absent column as 0, so EVERY miss computes 1/8
+// and the cap never fires at all. A deploy done in the wrong order was therefore strictly WORSE
+// than before that change, not equal to it, while the ops alert claimed the opposite.
+//
+// The rule this restores: a guard degrades to the PREVIOUS state (the process-memory cap), never
+// to no guard. The Map is consulted for the decision in EXACTLY ONE state — the persisted columns
+// are unavailable — and stops being consulted the moment they are available again.
+
+/**
+ * The ops page for the one state where the cap is weaker than it should be. Exported as a constant
+ * so the alert text and the test that pins it cannot drift, and so the claim it makes is the
+ * behaviour `prevFailuresForDecision` actually implements: the cap DOES still fire within a single
+ * process, and it DOES reset on restart.
+ */
+export const RETRY_STATE_COLUMNS_MISSING_ALERT =
+  "orders.consecutive_failures / last_attempt_at are MISSING — apply " +
+  "supabase/migrations/20260827190000_add_orders_retry_state.sql. The retry cap has FALLEN BACK to the " +
+  "in-memory count: it still fires after MAX_CYCLE_FAILURES consecutive misses within a single keeper " +
+  "process, but the count RESETS ON RESTART — the INC-2026-08-07-001 shape (516 reverts under a cap of 8 " +
+  "across 228 restarts). It returns to the persisted count automatically, with no restart, on the first " +
+  "successful write after the migration is applied."
+
+/**
+ * Tracks whether the persisted retry-state columns are usable, for ONE process.
+ *
+ * DETECTED from what PostgREST actually answers, never guessed: the executor's `patchOrderRow`
+ * calls `markMissing()` on the specific HTTP 400 that names one of the two columns, and
+ * `markPresent()` when a patch that CARRIED those columns is accepted.
+ *
+ * It must CLEAR, not latch: applying the migration while the keeper is running has to restore the
+ * persisted (restart-proof) semantics on its own — a latch that never cleared would silently keep
+ * the weak process-memory cap until someone happened to restart the keeper.
+ *
+ * Starts OPTIMISTIC (`available = true`): the migration is merged, so the overwhelmingly common
+ * state is "present", and the first rejected write flips it within one cycle. The one miss that
+ * happens before the flip is counted as 1 either way, so nothing is lost by starting optimistic.
+ *
+ * A factory rather than module state so tests get an isolated instance per case (executor.js holds
+ * exactly one, since the schema is a property of the process's database, not of an order).
+ */
+export function createRetryStateAvailability() {
+  let available = true
+  let alertedThisOutage = false
+  return {
+    /** True while the row can carry the count — i.e. the decision must read the ROW. */
+    isAvailable: () => available,
+    /**
+     * The columns were rejected by the database.
+     * @returns {boolean} true if ops should be paged — once per OUTAGE (not once per process), so
+     *   a second, later outage after a recovery is not swallowed by a stale one-shot latch.
+     */
+    markMissing() {
+      const shouldAlert = !alertedThisOutage
+      available = false
+      alertedThisOutage = true
+      return shouldAlert
+    },
+    /** A write carrying the columns was accepted — the migration is applied. Clears the fallback. */
+    markPresent() {
+      available = true
+      alertedThisOutage = false
+    },
+  }
+}
+
+/**
+ * The `prevFailures` to hand `planFailureHandling` — the ONE place the Map may enter the decision.
+ *
+ * Columns AVAILABLE  → 0. `planFailureHandling` takes `max(persisted, prevFailures)`, so 0 means
+ *                      the decision provably follows the ROW and the Map cannot raise it.
+ * Columns MISSING    → the same-process cached count, i.e. exactly the pre-FIX-RETRY-CAP-RESTART
+ *                      behaviour, so the cap still fires at MAX_CYCLE_FAILURES within one process.
+ *
+ * @param {{ columnsAvailable: boolean, cached?: { count?: unknown } | null }} p
+ * @returns {number}
+ */
+export function prevFailuresForDecision({ columnsAvailable, cached = null } = {}) {
+  if (columnsAvailable) return 0
+  const n = Number(cached ? cached.count : 0)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
+}
+
 /**
  * Was this revert the executor's OWN floor check (`InsufficientOutput()`)? Deliberately narrow: a
  * ROUTER min-out revert wrapped in SwapFailed ("Too little received", INSUFFICIENT_OUTPUT_AMOUNT…)
