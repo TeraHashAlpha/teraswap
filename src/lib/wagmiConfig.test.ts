@@ -11,8 +11,9 @@
  *   - the config is a single module singleton (one WC Core),
  *   - exactly one WalletConnect connector is registered.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { getSupportedChainIds } from './chains/registry'
+import { __resetChainIdentityCache } from './rpc-chain-identity'
 
 type WagmiConfigModule = typeof import('./wagmiConfig')
 let config: WagmiConfigModule['config']
@@ -122,5 +123,97 @@ describe('wagmiConfig — chain/registry parity guard [CHORE-WAGMI-ARBITRUM]', (
     const wagmiChainIds = config.chains.map((c) => c.id).sort((a, b) => a - b)
     const registryChainIds = getSupportedChainIds().sort((a, b) => a - b)
     expect(wagmiChainIds).toEqual(registryChainIds)
+  })
+})
+
+describe('wagmiConfig — RPC chain-identity guard [FIX-RPC-CHAIN-IDENTITY-GUARD]', () => {
+  // The incident: NEXT_PUBLIC_ARBITRUM_RPC_URL held a BASE endpoint for three weeks. Every
+  // browser read for chain 42161 was answered by chain 8453 with a clean HTTP 200, and nothing
+  // logged, because nothing was an error. wagmi transports are the browser-side place an upstream
+  // is resolved, so every one of them must prove its chain before a read is trusted.
+  const BASE_CHAIN_ID_HEX = '0x2105' // what the misconfigured endpoint actually answered
+
+  const jsonRpc = (result: string) =>
+    new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  const methodOf = (init: RequestInit | undefined): string => {
+    const parsed = JSON.parse(String(init?.body ?? '{}'))
+    return Array.isArray(parsed) ? parsed[0]?.method : parsed.method
+  }
+
+  beforeEach(() => {
+    __resetChainIdentityCache()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    __resetChainIdentityCache()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  // Chain 1 is excluded from the wired-config cases below, and ONLY for an environment reason:
+  // in the browser its transport is the relative `/api/rpc`, and viem builds a `new Request(url)`
+  // before fetching, which no non-browser runtime can construct from a relative path. The
+  // mainnet transport is covered instead by wagmiConfig.server.test.ts (node env, absolute URL)
+  // and by rpc-guarded-transport.test.ts.
+  const WIRED_CHAINS = [
+    { id: 8453, urlHint: 'base', lie: '0x1', lieId: 1 },
+    { id: 42161, urlHint: 'arb', lie: BASE_CHAIN_ID_HEX, lieId: 8453 },
+  ]
+
+  it('refuses a read on a configured chain whose endpoint reports a different chain id', async () => {
+    // Each endpoint answers eth_chainId with a chain that is NOT the one it is configured for —
+    // Arbitrum's answers Base (the real incident), Base's answers mainnet.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (methodOf(init) !== 'eth_chainId') return jsonRpc('0xdeadbeef')
+        return jsonRpc(String(url).includes('base') ? '0x1' : BASE_CHAIN_ID_HEX)
+      }),
+    )
+
+    for (const { id, lieId } of WIRED_CHAINS) {
+      __resetChainIdentityCache()
+      const client = config.getClient({ chainId: id as 8453 })
+      const err = await client.request({ method: 'eth_blockNumber' }).catch((e: unknown) => e)
+
+      const text = String((err as Error)?.message ?? err)
+      expect(text).toContain(`chain ${id}`)
+      expect(text).toContain(`chain ${lieId}`)
+    }
+  })
+
+  it('still serves the read when the identity probe is UNREACHABLE (outage, not a lie)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (methodOf(init) === 'eth_chainId') throw new Error('ECONNRESET')
+        return jsonRpc('0x1b4')
+      }),
+    )
+
+    const client = config.getClient({ chainId: 42161 })
+    await expect(client.request({ method: 'eth_blockNumber' })).resolves.toBe('0x1b4')
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it('lets a correctly configured chain through after a single probe', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      methodOf(init) === 'eth_chainId' ? jsonRpc('0xa4b1') /* 42161 */ : jsonRpc('0x1b4'),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = config.getClient({ chainId: 42161 })
+    await expect(client.request({ method: 'eth_blockNumber' })).resolves.toBe('0x1b4')
+    await expect(client.request({ method: 'eth_blockNumber' })).resolves.toBe('0x1b4')
+
+    const probes = fetchMock.mock.calls.filter(([, init]) => methodOf(init) === 'eth_chainId')
+    expect(probes).toHaveLength(1)
+    expect(console.error).not.toHaveBeenCalled()
   })
 })

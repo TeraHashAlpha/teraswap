@@ -6,9 +6,29 @@ import { addCustomToken, type Token } from '@/lib/tokens'
 import { findChainToken } from '@/lib/chains/tokens'
 import { useActiveChainId } from '@/hooks/useChainId'
 
+/** The token answered, and what it answered is not ERC-20 shaped. A verdict about the TOKEN. */
+export const TOKEN_NOT_ERC20_MESSAGE = 'Not a valid ERC-20 token'
+
+/**
+ * We never got an answer to read. A statement about OUR read path — the transport failed, the
+ * proxy refused (including the 502 the chain-identity guard returns for a misrouted upstream),
+ * we were rate limited, or the node returned a JSON-RPC error. Says nothing about the token.
+ */
+export const TOKEN_READ_FAILED_MESSAGE =
+  'Network error — could not read this contract. Please try again.'
+
 /**
  * Hook to import a custom ERC-20 token by pasting its contract address.
  * Reads on-chain: symbol, name, decimals via wagmi multicall.
+ *
+ * [FIX-RPC-CHAIN-IDENTITY-GUARD] A read failure is NOT a verdict about the token. This hook used
+ * to collapse every way `symbol()`/`decimals()` could come back empty into one message — "Not a
+ * valid ERC-20 token" — so an empty result from a broken transport and an empty result from a
+ * non-token were indistinguishable. While NEXT_PUBLIC_ARBITRUM_RPC_URL held a Base endpoint we
+ * spent three weeks telling users their token was invalid when the fault was ours.
+ *
+ * `callRpc` now reports WHICH of the two happened, and only a SUCCESSFUL read that fails the
+ * ERC-20 shape may call the token invalid.
  */
 export function useTokenImport() {
   const [importing, setImporting] = useState(false)
@@ -47,15 +67,27 @@ export function useTokenImport() {
         callRpc(rpcUrl, addr, '0x313ce567'), // decimals()
       ])
 
-      if (!symbolRes || !decimalsRes) {
-        setError('Not a valid ERC-20 token')
+      // ① Did the read even land? If ANY required call failed to produce an answer we cannot
+      //    conclude anything about the token — not even from the calls that DID answer. Blaming
+      //    the token on a half-broken read is exactly the bug this branch exists to prevent.
+      if (unreadable(symbolRes) || unreadable(decimalsRes)) {
+        setError(TOKEN_READ_FAILED_MESSAGE)
         setImporting(false)
         return null
       }
 
-      const rawSymbol = decodeString(symbolRes)
-      const rawName = nameRes ? decodeString(nameRes) : rawSymbol
-      const decimals = parseInt(decimalsRes as string, 16)
+      // ② The read succeeded and the contract returned nothing for symbol()/decimals(): an EOA,
+      //    or a contract that is not ERC-20. Only HERE have we earned the right to say so.
+      if (!symbolRes.ok || !decimalsRes.ok) {
+        setError(TOKEN_NOT_ERC20_MESSAGE)
+        setImporting(false)
+        return null
+      }
+
+      const rawSymbol = decodeString(symbolRes.value)
+      // name() is optional — an unreadable or empty name falls back to the symbol, as before.
+      const rawName = nameRes.ok ? decodeString(nameRes.value) : rawSymbol
+      const decimals = parseInt(decimalsRes.value, 16)
 
       if (!rawSymbol || isNaN(decimals)) {
         setError('Could not read token data')
@@ -98,7 +130,28 @@ export function useTokenImport() {
 
 // ── RPC helpers ──
 
-async function callRpc(rpcUrl: string, to: string, data: string): Promise<string | null> {
+/**
+ * [FIX-RPC-CHAIN-IDENTITY-GUARD] The result of one eth_call, with the two failure modes kept
+ * APART rather than both collapsing to `null`:
+ *
+ *   • 'empty'      — the call SUCCEEDED and the contract returned no data (`0x`). Evidence about
+ *                    the token: it is an EOA, or has no such method.
+ *   • 'unreadable' — we never got a usable answer: the transport threw, our own proxy returned a
+ *                    non-2xx (429 rate limit, or the 502 the chain-identity guard returns for an
+ *                    upstream serving another chain), the body would not parse, or the node
+ *                    answered with a JSON-RPC error. Evidence about US, not about the token.
+ *
+ * A JSON-RPC error counts as 'unreadable' deliberately, even though a revert can mean the
+ * contract lacks the method: an error envelope is not a successful read, and the rule is that
+ * only a successful read may condemn a token. Over-reporting "we could not read it" costs a
+ * retry; under-reporting it calls a user's token fake because our RPC was broken.
+ */
+type RpcRead = { ok: true; value: string } | { ok: false; reason: 'empty' | 'unreadable' }
+
+const unreadable = (read: RpcRead): boolean => !read.ok && read.reason === 'unreadable'
+
+async function callRpc(rpcUrl: string, to: string, data: string): Promise<RpcRead> {
+  let json: { result?: unknown; error?: unknown }
   try {
     const res = await fetch(rpcUrl, {
       method: 'POST',
@@ -110,12 +163,16 @@ async function callRpc(rpcUrl: string, to: string, data: string): Promise<string
         params: [{ to, data }, 'latest'],
       }),
     })
-    const json = await res.json()
-    if (json.error || !json.result || json.result === '0x') return null
-    return json.result
+    if (!res.ok) return { ok: false, reason: 'unreadable' }
+    json = await res.json()
   } catch {
-    return null
+    // Network failure, abort, or an unparseable body — no read happened.
+    return { ok: false, reason: 'unreadable' }
   }
+  if (json?.error) return { ok: false, reason: 'unreadable' }
+  if (typeof json?.result !== 'string') return { ok: false, reason: 'unreadable' }
+  if (json.result === '0x') return { ok: false, reason: 'empty' }
+  return { ok: true, value: json.result }
 }
 
 // [F-03 / CQL-03] Sanitize token name/symbol to prevent XSS via malicious ERC-20
