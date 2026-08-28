@@ -21,6 +21,19 @@ resolve_grok_model() {
   esac
 }
 
+# --- the deny-flag list (one constant, indexed array — bash 3.2 has no `declare -A`) --------
+# CHORE-GROK-DENY-FLAGS: this is the only thing between a `grok` run and this repo's .env*
+# files, since Grok Build has no [permissions] config table (see .grok/config.toml's TODO) and
+# silently ignores one if you add it. Verified against `grok --help` / ~/.grok/README.md's
+# Permission Rules section (ToolPrefix(glob) syntax, Read(...)/Bash(...) prefixes). Never extend
+# this list by guessing — a new entry needs the same verification.
+GROK_DENY_FLAGS=(
+  --deny "Read(.env*)"
+  --deny "Read(**/.env*)"
+  --deny "Bash(security*)"
+  --deny "Bash(git credential-*)"
+)
+
 # --- glob patterns that force interactive mode / outright refusal ---------------------------
 SENSITIVE_FILE_PATTERNS=(
   "contracts/*"
@@ -165,7 +178,7 @@ if [[ "$WORKTREE_DIR" == "$MAIN_ROOT" ]]; then
   exit 1
 fi
 
-GROK_CMD=(grok -p "\$(cat $SPEC)" --output-format json --no-auto-update)
+GROK_CMD=(grok -p "\$(cat $SPEC)" --output-format json --no-auto-update "${GROK_DENY_FLAGS[@]}")
 if [[ "$INTERACTIVE_REQUIRED" -eq 0 ]]; then
   GROK_CMD+=(--always-approve)
 fi
@@ -237,7 +250,7 @@ pushd "$WORKTREE_DIR" > /dev/null
 if [[ "$INTERACTIVE_REQUIRED" -eq 1 ]]; then
   echo "Running interactively (fund-flow-adjacent files or high tier) — approve each step by hand." >&2
 fi
-EXEC_GROK_CMD=(grok -p "$(cat "$SPEC")" --output-format json --no-auto-update)
+EXEC_GROK_CMD=(grok -p "$(cat "$SPEC")" --output-format json --no-auto-update "${GROK_DENY_FLAGS[@]}")
 if [[ "$INTERACTIVE_REQUIRED" -eq 0 ]]; then
   EXEC_GROK_CMD+=(--always-approve)
 fi

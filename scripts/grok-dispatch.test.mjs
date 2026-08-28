@@ -205,3 +205,76 @@ describe('grok-dispatch.sh — worktree targeting', () => {
     expect(result.stdout).toContain(branch)
   })
 })
+
+describe('grok-dispatch.sh — CHORE-GROK-DENY-FLAGS: deny flags on every invocation', () => {
+  // Verified against `grok --help` / ~/.grok/README.md's Permission Rules section — see the
+  // GROK_DENY_FLAGS comment in grok-dispatch.sh. Kept here as plain substrings, not a shared
+  // import, so this test independently re-states what the shipped command must contain.
+  const EXPECTED_DENY_FLAGS = [
+    '--deny Read(.env*)',
+    '--deny Read(**/.env*)',
+    '--deny Bash(security*)',
+    '--deny Bash(git credential-*)',
+  ]
+
+  // printf '%q' backslash-escapes the parens/asterisks/space in the reported command; strip
+  // backslashes so we can assert on the plain ToolPrefix(glob) text.
+  function unescapedCommand(stdout) {
+    const commandBlock = stdout.split('-- exact command')[1] ?? ''
+    return commandBlock.replace(/\\/g, '')
+  }
+
+  it('every deny flag appears in the --dry-run command (positive control)', () => {
+    const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
+    const result = run([spec, uniqueBranch('denyflags'), '--dry-run'])
+    const command = unescapedCommand(result.stdout)
+    for (const flag of EXPECTED_DENY_FLAGS) {
+      expect(command).toContain(flag)
+    }
+  })
+
+  it('every deny flag appears regardless of approval mode (interactive path too)', () => {
+    const spec = specFile('spec.md', specWithFiles(CONTROL_HIGH, ['src/foo.ts']))
+    const result = run([spec, uniqueBranch('denyflags-interactive'), '--dry-run'])
+    const command = unescapedCommand(result.stdout)
+    for (const flag of EXPECTED_DENY_FLAGS) {
+      expect(command).toContain(flag)
+    }
+  })
+
+  it('a copy of the script with one deny flag dropped fails this assertion (negative control — proves it bites)', () => {
+    // Mutate a scratch copy of the real script, not the array literal in this test file — the
+    // point is to prove the ACTUAL dispatcher's command-building breaks the assertion above if a
+    // flag is ever dropped, not just that our own expectation list can shrink.
+    const mutatedDir = mkdtempSync(path.join(tmpdir(), 'grok-dispatch-mutant-'))
+    specDirs.push(mutatedDir)
+    const mutatedScript = path.join(mutatedDir, 'grok-dispatch.sh')
+    const original = execFileSync('cat', [SCRIPT], { encoding: 'utf8' })
+    const mutated = original.replace('  --deny "Bash(security*)"\n', '')
+    expect(mutated).not.toBe(original) // sanity: the replace actually matched something
+    writeFileSync(mutatedScript, mutated, { mode: 0o755 })
+
+    const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
+    const result = (() => {
+      try {
+        const stdout = execFileSync(mutatedScript, [spec, uniqueBranch('mutant'), '--dry-run'], {
+          cwd: REPO_ROOT,
+          encoding: 'utf8',
+        })
+        return { stdout }
+      } catch (err) {
+        return { stdout: err.stdout ?? '' }
+      }
+    })()
+    const command = unescapedCommand(result.stdout)
+
+    expect(command).toContain('--deny Read(.env*)') // the other flags are still there
+    expect(command).not.toContain('--deny Bash(security*)') // the dropped one is gone
+
+    // Prove the positive-control assertion style would have FAILED against this mutant, i.e.
+    // requirement 4's "builder mutated to drop a flag FAILS the test" is demonstrated, not
+    // asserted.
+    const wouldPass = EXPECTED_DENY_FLAGS.every((flag) => command.includes(flag))
+    expect(wouldPass).toBe(false)
+  })
+})
