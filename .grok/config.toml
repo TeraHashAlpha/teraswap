@@ -1,7 +1,13 @@
 # TeraSwap — project-scoped Grok Build config.
 #
 # TODO(security): this file cannot enforce the .env*/keychain deny rule described in
-# AGENTS.md's "Credential hygiene" section, and should not be read as doing so.
+# AGENTS.md's "Credential hygiene" section, and should not be read as doing so. As of
+# CHORE-GROK-DENY-FLAGS, real enforcement is wired in two places instead — CLI flags injected at
+# invocation time, since that's the only mechanism Grok Build actually supports:
+#   - scripts/grok-dispatch.sh's GROK_DENY_FLAGS constant (scripted/headless dispatch)
+#   - scripts/grok-guard.sh's grok() function, sourced into an interactive shell (a hand-launched
+#     Grok TUI goes through neither script otherwise and would have no guard at all)
+# Both lists carry the same flags and must be updated together if this list ever changes.
 #
 # Verified against the installed `grok` binary (1.0.5, `grok --help`) and its shipped
 # ~/.grok/README.md, Configuration + Permission Rules sections:
@@ -14,12 +20,12 @@
 #
 # Do not add a [permissions] table below — Grok Build silently ignores unknown sections in
 # project config, so it would look like enforcement while doing nothing. Real enforcement has
-# to happen at invocation time via CLI flags, e.g. (reference syntax, not wired up here —
-# scripts/grok-dispatch.sh is out of scope for this change):
+# to happen at invocation time via CLI flags — the exact flags, now wired into both
+# scripts/grok-dispatch.sh and scripts/grok-guard.sh:
 #
 #   --deny "Read(.env*)" --deny "Read(**/.env*)"
 #   --deny "Bash(security*)" --deny "Bash(git credential-*)"
 #
 # This repo currently has no [mcp_servers] to declare project-wide, so this file is otherwise
-# empty. It exists so the TODO above is committed and reviewable, and so a future PR wiring
-# --deny into scripts/grok-dispatch.sh has the exact syntax to use, verified rather than guessed.
+# empty. It exists so this TODO stays committed and reviewable next to the actual enforcement
+# points, and so any future change to the flag list has the verified syntax to extend from.

@@ -54,7 +54,8 @@ repo and open an incident before it happens against a real `.env*` file.
 
 ### Note
 `node scripts/check-agents-parity.mjs --write` recomputed the pin after the `CLAUDE.md`/`AGENTS.md`
-"Grok Build launch" bullet: `<sha will be logged here after --write>` (len=64, sha256 hex, never hand-typed).
+"Grok Build launch" bullet: `3f821ebc3d2a4e53780ea23ae1b7e5b01536cf9daf3d240595ed2108214bff8c` (len=64, sha256
+hex, never hand-typed). `node scripts/check-agents-parity.mjs` confirms green against the committed pair.
 `.grok/config.toml`'s `TODO(security)` updated to note the flags are now wired in two places
 (`scripts/grok-dispatch.sh` + `scripts/grok-guard.sh`) — the verified README quotes are kept unchanged, since
 they remain the evidence for why no `[permissions]` table exists; no such table was added.
