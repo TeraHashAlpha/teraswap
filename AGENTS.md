@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: 5e2882925bf18708620ad6416f90b1d07d3b26be2da5cbc0ec2e0534da8943af -->
+<!-- claude-md-sha256: 9f698307fdd9d886219a335d4f73bff921752eef4cd41114250970863253fa7f -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -45,6 +45,10 @@ repo's incident history.
 dependency the moment it publishes. Never delete a file — supersede it in place (mark deprecated/superseded)
 or move it verbatim to `archive/<original-path>/`. Nothing is ever deleted; git history is not considered a
 substitute for this rule.
+
+**Bash compatibility.** Every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` /
+`${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via
+`tr '[:upper:]' '[:lower:]'`. `scripts/check-bash3-compat.mjs` enforces this on every tracked `.sh` file.
 
 ## What a Grok Build task must never touch
 

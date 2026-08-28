@@ -1,0 +1,25 @@
+# TeraSwap — project-scoped Grok Build config.
+#
+# TODO(security): this file cannot enforce the .env*/keychain deny rule described in
+# AGENTS.md's "Credential hygiene" section, and should not be read as doing so.
+#
+# Verified against the installed `grok` binary (1.0.5, `grok --help`) and its shipped
+# ~/.grok/README.md, Configuration + Permission Rules sections:
+#   - Project-scoped .grok/config.toml supports ONLY the [mcp_servers] table. Verbatim from
+#     the README: "Only [mcp_servers] is supported in project-scoped .grok/config.toml. Other
+#     config sections (models, etc.) are only read from ~/.grok/config.toml."
+#   - There is no [permissions] (or any other) TOML table for allow/deny rules anywhere in the
+#     shipped docs, project-scoped OR global. Permission rules exist ONLY as the `--allow` /
+#     `--deny` CLI flags, using `ToolPrefix(glob)` syntax (e.g. `Read(...)`, `Bash(...)`).
+#
+# Do not add a [permissions] table below — Grok Build silently ignores unknown sections in
+# project config, so it would look like enforcement while doing nothing. Real enforcement has
+# to happen at invocation time via CLI flags, e.g. (reference syntax, not wired up here —
+# scripts/grok-dispatch.sh is out of scope for this change):
+#
+#   --deny "Read(.env*)" --deny "Read(**/.env*)"
+#   --deny "Bash(security*)" --deny "Bash(git credential-*)"
+#
+# This repo currently has no [mcp_servers] to declare project-wide, so this file is otherwise
+# empty. It exists so the TODO above is committed and reviewable, and so a future PR wiring
+# --deny into scripts/grok-dispatch.sh has the exact syntax to use, verified rather than guessed.

@@ -46,6 +46,8 @@ jobs:
         run: npm run lint
       - name: AGENTS.md parity guard
         run: npm run check:agents-parity
+      - name: Bash 3.2 compatibility guard
+        run: npm run check:bash3-compat
 
   typecheck:
     runs-on: ubuntu-latest
