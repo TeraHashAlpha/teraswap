@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: 3f821ebc3d2a4e53780ea23ae1b7e5b01536cf9daf3d240595ed2108214bff8c -->
+<!-- claude-md-sha256: 8672d22d004b64a6dab36750a0409973bbd5a2b6b6267922430e0953a2bc60f9 -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -50,8 +50,7 @@ substitute for this rule.
 `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via
 `tr '[:upper:]' '[:lower:]'`. `scripts/check-bash3-compat.mjs` enforces this on every tracked `.sh` file.
 
-**Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that
-sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard.
+**Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard. Their `--deny` flags (`Read(.env*)`, `Bash(security*)`, `Bash(git credential-*)`) do NOT protect `.env*` — measured (`docs/security/GROK-DENY-CANARY-2026-08-28.md`): Grok routes around a denied read by choosing a different command, because a `Bash(...)` deny rule matches the invoked command name, not its arguments, so `Bash(*.env*)` cannot match `cat .env.canary`. Only `--deny "Bash(*)"` actually refuses, and that blocks the whole shell — unusable for real work, so there is no usable middle. Treat those three flags as speed bumps and intent signals only, never as enforcement. What actually holds: (a) `--deny "Bash(*)"`, when acceptable to run unusable-for-real-work; (b) running in a git worktree that does not contain `.env*` at all — `scripts/grok-dispatch.sh` creates its worktree outside this repo (`${TS_WORKTREE_BASE:-$HOME/ts-worktrees}`, never under `.claude/worktrees/`, which is still inside the repo and reachable via `../../../`).
 
 ## What a Grok Build task must never touch
 
@@ -73,4 +72,6 @@ reviewing and updating this file, then commit both files together.
 
 - `docs/Prompts/_PROMPT-TEMPLATE.md` — canonical prompt shape, model/effort tiers, Auditor gating rules.
 - `docs/security/AUDIT-TOTAL.md` — open and closed audit findings; check before any fund-flow change.
+- `docs/security/GROK-DENY-CANARY-2026-08-28.md` — measured evidence that Grok's `--deny` flags do not protect
+  `.env*`; read this before trusting or re-adding any Grok deny-flag enforcement claim.
 - `CLAUDE.md` — full, normative project conventions. Read it in full, not just this file.
