@@ -44,6 +44,8 @@ jobs:
       - run: npm ci
       - name: Lint
         run: npm run lint
+      - name: AGENTS.md parity guard
+        run: npm run check:agents-parity
 
   typecheck:
     runs-on: ubuntu-latest
