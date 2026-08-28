@@ -3,6 +3,20 @@
 # TODO(security): this file cannot enforce the .env*/keychain deny rule described in
 # AGENTS.md's "Credential hygiene" section, and should not be read as doing so.
 #
+# CORRECTION (FIX-GROK-GUARD-CLAIMS, 2026-08-28): CHORE-GROK-DENY-FLAGS originally wired the
+# flags below into scripts/grok-dispatch.sh and scripts/grok-guard.sh and called that "real
+# enforcement." It is NOT. Measured via four hand-run canary probes — see
+# docs/security/GROK-DENY-CANARY-2026-08-28.md for exact commands and results — a `Bash(...)`
+# deny rule matches the INVOKED COMMAND NAME, not its arguments, so `Bash(*.env*)` cannot match
+# `cat .env.canary`; Grok simply chose a different command and read the file anyway. Only
+# `--deny "Bash(*)"` (blocking the entire shell) actually refuses, and that is unusable for real
+# work. These flags are SPEED BUMPS AND INTENT SIGNALS ONLY, never enforcement:
+#   - scripts/grok-dispatch.sh's GROK_DENY_FLAGS constant (scripted/headless dispatch)
+#   - scripts/grok-guard.sh's grok() function, sourced into an interactive shell
+# The REAL control is running Grok in a git worktree that never contains .env* at all —
+# scripts/grok-dispatch.sh creates its worktree outside this repo
+# (${TS_WORKTREE_BASE:-$HOME/ts-worktrees}), not under .claude/worktrees/.
+#
 # Verified against the installed `grok` binary (1.0.5, `grok --help`) and its shipped
 # ~/.grok/README.md, Configuration + Permission Rules sections:
 #   - Project-scoped .grok/config.toml supports ONLY the [mcp_servers] table. Verbatim from
@@ -13,13 +27,13 @@
 #     `--deny` CLI flags, using `ToolPrefix(glob)` syntax (e.g. `Read(...)`, `Bash(...)`).
 #
 # Do not add a [permissions] table below — Grok Build silently ignores unknown sections in
-# project config, so it would look like enforcement while doing nothing. Real enforcement has
-# to happen at invocation time via CLI flags, e.g. (reference syntax, not wired up here —
-# scripts/grok-dispatch.sh is out of scope for this change):
+# project config, so it would look like enforcement while doing nothing (the same lesson the
+# CORRECTION above applies to these CLI flags: looking like a guard is not being one). The
+# speed-bump flags, kept for the reasons above:
 #
 #   --deny "Read(.env*)" --deny "Read(**/.env*)"
 #   --deny "Bash(security*)" --deny "Bash(git credential-*)"
 #
 # This repo currently has no [mcp_servers] to declare project-wide, so this file is otherwise
-# empty. It exists so the TODO above is committed and reviewable, and so a future PR wiring
-# --deny into scripts/grok-dispatch.sh has the exact syntax to use, verified rather than guessed.
+# empty. It exists so this TODO stays committed and reviewable next to the actual (non-)
+# enforcement points, and so nobody rebuilds the false confidence this file used to encode.
