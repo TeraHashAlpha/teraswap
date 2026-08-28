@@ -46,6 +46,10 @@ dependency the moment it publishes. Never delete a file — supersede it in plac
 or move it verbatim to `archive/<original-path>/`. Nothing is ever deleted; git history is not considered a
 substitute for this rule.
 
+**Bash compatibility.** Every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` /
+`${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via
+`tr '[:upper:]' '[:lower:]'`. `scripts/check-bash3-compat.mjs` enforces this on every tracked `.sh` file.
+
 ## What a Grok Build task must never touch
 
 `contracts/**`, `keeper/**`, any path or symbol containing `executor`, `src/lib/chains/**`, or any

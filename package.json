@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "check:circular": "node scripts/check-circular.mjs",
     "check:agents-parity": "node scripts/check-agents-parity.mjs",
+    "check:bash3-compat": "node scripts/check-bash3-compat.mjs",
     "guard:check": "vitest run src/lib/chains/catalog-address-guard.test.ts",
     "guard:refresh": "npx --yes tsx --tsconfig tsconfig.json scripts/refresh-catalog-guard.ts",
     "fork": "./scripts/fork-test.sh",
