@@ -448,6 +448,12 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      # FIX-GROK-GUARD-CLAIMS: ubuntu-latest has no zsh preinstalled — without this,
+      # scripts/grok-guard.test.mjs's zsh leg either crashes (spawnSync ENOENT) or, if the test
+      # is written to tolerate that, silently stops proving the guard works under the repo
+      # owner's actual macOS shell. Install it so that leg genuinely runs in CI.
+      - name: Install zsh (scripts/grok-guard.test.mjs needs a real zsh leg)
+        run: sudo apt-get update && sudo apt-get install -y zsh
       - run: npm ci
       - name: Full test suite + coverage floor
         run: |
