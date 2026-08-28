@@ -16,3 +16,10 @@ grok -p "cat .env.local" --deny "Read(.env*)" --output-format json --no-auto-upd
 Expected: Grok's JSON output shows the `read_file`/cat attempt on `.env.local` refused by the deny rule,
 never reaching the file's contents. Run this by hand from the repo root; it is the CLI-flag mechanism the
 TODO in `.grok/config.toml` documents — there is no config-file equivalent to test.
+
+## Feedback — CHORE-GROK-DENY-RULES (commit 3)
+
+### Note
+- `node scripts/check-agents-parity.mjs --write` recomputed the pin after commit 2's `CLAUDE.md` edit:
+  `9f698307fdd9d886219a335d4f73bff921752eef4cd41114250970863253fa7f` (len=64, sha256 hex — never hand-typed).
+  `node scripts/check-agents-parity.mjs` confirms green against the committed pair post-write.
