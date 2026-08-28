@@ -22,11 +22,15 @@ resolve_grok_model() {
 }
 
 # --- the deny-flag list (one constant, indexed array — bash 3.2 has no `declare -A`) --------
-# CHORE-GROK-DENY-FLAGS: this is the only thing between a `grok` run and this repo's .env*
-# files, since Grok Build has no [permissions] config table (see .grok/config.toml's TODO) and
-# silently ignores one if you add it. Verified against `grok --help` / ~/.grok/README.md's
-# Permission Rules section (ToolPrefix(glob) syntax, Read(...)/Bash(...) prefixes). Never extend
-# this list by guessing — a new entry needs the same verification.
+# FIX-GROK-GUARD-CLAIMS: these flags are SPEED BUMPS AND INTENT SIGNALS ONLY, NOT enforcement —
+# measured, see docs/security/GROK-DENY-CANARY-2026-08-28.md. A `Bash(...)` deny rule matches the
+# invoked command name, not its arguments, so `Bash(*.env*)` cannot match `cat .env.canary`; Grok
+# routes around a denied `Read(.env*)` by shelling out instead. Only `--deny "Bash(*)"` (blocking
+# every shell command) actually refuses, and that is unusable for real work. The REAL control is
+# GROK_WORKTREE_BASE_DIR below — Grok never runs anywhere near this repo's real .env* files.
+# Verified against `grok --help` / ~/.grok/README.md's Permission Rules section (ToolPrefix(glob)
+# syntax, Read(...)/Bash(...) prefixes). Never extend this list by guessing — a new entry needs
+# the same verification.
 #
 # scripts/grok-guard.sh carries the SAME flags for interactive `grok` sessions — deliberately
 # NOT shared code. That file is an interactive-shell function scoped to whatever shell sourced
@@ -40,6 +44,15 @@ GROK_DENY_FLAGS=(
   --deny "Bash(security*)"
   --deny "Bash(git credential-*)"
 )
+
+# --- the worktree base directory (the REAL control, per docs/security/GROK-DENY-CANARY-2026-08-28.md) ---
+# ALWAYS outside this repo — a fresh `git worktree add` only checks out TRACKED files, so a
+# worktree rooted outside the repo simply has no .env* to reach: no path, walked or otherwise,
+# leads back to them. .claude/worktrees/ (the old location) is still INSIDE the repo tree, three
+# levels below the real .env* files (../../../.env.production.local reaches them) — never use it.
+# Override with TS_WORKTREE_BASE for a non-default location; it is validated below to still be
+# outside the repo.
+GROK_WORKTREE_BASE_DIR="${TS_WORKTREE_BASE:-$HOME/ts-worktrees}"
 
 # --- glob patterns that force interactive mode / outright refusal ---------------------------
 SENSITIVE_FILE_PATTERNS=(
@@ -178,7 +191,21 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 MAIN_ROOT_LINE="$(git worktree list --porcelain | grep -m1 '^worktree ')"
 MAIN_ROOT="${MAIN_ROOT_LINE#worktree }"
-WORKTREE_DIR="$MAIN_ROOT/.claude/worktrees/$BRANCH"
+
+# FIX-GROK-GUARD-CLAIMS: GROK_WORKTREE_BASE_DIR must resolve to somewhere outside MAIN_ROOT — the
+# repo directory holding the real, untracked .env* files. A base dir under it defeats the whole
+# point (see the comment on GROK_WORKTREE_BASE_DIR above): reject outright, in --dry-run and
+# --execute alike, rather than silently creating a worktree that can still reach them via
+# ../../../. This is a configuration error, not a per-spec judgment call, so it fails before the
+# usual refusal-checks report the way a missing spec file does.
+case "$GROK_WORKTREE_BASE_DIR" in
+  "$MAIN_ROOT" | "$MAIN_ROOT"/*)
+    echo "Refusing: GROK_WORKTREE_BASE_DIR ($GROK_WORKTREE_BASE_DIR) is inside the repo ($MAIN_ROOT) — this is the exact hole FIX-GROK-GUARD-CLAIMS closes. Set TS_WORKTREE_BASE to a path outside the repo." >&2
+    exit 1
+    ;;
+esac
+
+WORKTREE_DIR="$GROK_WORKTREE_BASE_DIR/$BRANCH"
 
 if [[ "$WORKTREE_DIR" == "$MAIN_ROOT" ]]; then
   echo "Refusing: resolved worktree path equals the main checkout. Never run Grok there." >&2

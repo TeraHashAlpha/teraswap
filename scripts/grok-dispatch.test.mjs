@@ -26,9 +26,13 @@ function uniqueBranch(tag) {
   return `chore/test-${tag}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function run(args) {
+function run(args, env) {
   try {
-    const stdout = execFileSync(SCRIPT, args, { cwd: REPO_ROOT, encoding: 'utf8' })
+    const stdout = execFileSync(SCRIPT, args, {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      env: env ? { ...process.env, ...env } : process.env,
+    })
     return { code: 0, stdout, stderr: '' }
   } catch (err) {
     return { code: err.status, stdout: err.stdout ?? '', stderr: err.stderr ?? '' }
@@ -196,13 +200,64 @@ describe('grok-dispatch.sh — high effort tier forces interactive mode', () => 
   })
 })
 
-describe('grok-dispatch.sh — worktree targeting', () => {
-  it('always resolves the worktree under the main checkout, never the checkout itself', () => {
+describe('grok-dispatch.sh — FIX-GROK-GUARD-CLAIMS: worktree lives outside the repo', () => {
+  // The .env*/keychain --deny flags are speed bumps, not enforcement (measured, see
+  // docs/security/GROK-DENY-CANARY-2026-08-28.md). The REAL control is that Grok never runs
+  // anywhere near this repo's real, untracked .env* files — a worktree outside the repo entirely
+  // has no such files to reach, tracked-only or otherwise.
+  function extractWorktreePath(stdout) {
+    const match = stdout.match(/^worktree:\s+(\S.*?)\s+\(git worktree add/m)
+    return match?.[1]
+  }
+
+  it('the default worktree base dir resolves outside the repo (positive control)', () => {
     const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
-    const branch = uniqueBranch('worktree')
+    const branch = uniqueBranch('worktree-outside')
     const result = run([spec, branch, '--dry-run'])
-    expect(result.stdout).toMatch(/worktree:\s+\S.*\.claude\/worktrees\//)
-    expect(result.stdout).toContain(branch)
+    const worktreePath = extractWorktreePath(result.stdout)
+
+    expect(worktreePath).toBeTruthy()
+    expect(worktreePath.startsWith(REPO_ROOT)).toBe(false)
+    expect(worktreePath).toContain(branch)
+    // Never the old in-repo location.
+    expect(worktreePath).not.toContain('.claude/worktrees')
+  })
+
+  it('a base dir under the repo root is rejected outright, in --dry-run too (negative control)', () => {
+    const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
+    const branch = uniqueBranch('worktree-rejected')
+    // REPO_ROOT is itself nested under the repo's main checkout, so it's a valid "inside the
+    // repo" probe regardless of which worktree this test suite happens to run from.
+    const insideRepoBase = path.join(REPO_ROOT, 'scratch-worktree-base')
+    const result = run([spec, branch, '--dry-run'], { TS_WORKTREE_BASE: insideRepoBase })
+
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('Refusing')
+    expect(result.stderr).toContain('is inside the repo')
+    expect(result.stderr).toContain(insideRepoBase)
+    // The refusal must fire before anything resembling the plan report — no worktree line at all.
+    expect(result.stdout).not.toContain('worktree:')
+  })
+
+  it('a base dir equal to the repo root itself is also rejected (negative control, boundary case)', () => {
+    const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
+    const branch = uniqueBranch('worktree-rejected-exact')
+    const result = run([spec, branch, '--dry-run'], { TS_WORKTREE_BASE: REPO_ROOT })
+
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('Refusing')
+  })
+
+  it('TS_WORKTREE_BASE outside the repo is honored and reflected in the plan (positive control)', () => {
+    const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
+    const branch = uniqueBranch('worktree-custom-base')
+    const customBase = mkdtempSync(path.join(tmpdir(), 'grok-worktree-base-'))
+    specDirs.push(customBase)
+    const result = run([spec, branch, '--dry-run'], { TS_WORKTREE_BASE: customBase })
+    const worktreePath = extractWorktreePath(result.stdout)
+
+    expect(result.code).toBe(0)
+    expect(worktreePath.startsWith(customBase)).toBe(true)
   })
 })
 
