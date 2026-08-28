@@ -131,3 +131,24 @@ NEVER invoke credential helpers or read the keychain (git credential-*, security
 
 *(Memory: `feedback_architect_prompt_template`, `feedback_agent_cost_optimization`, `feedback_goal_char_limit`,
 `feedback_commit_prompt_specs`; project memories under `project_*`.)*
+
+---
+
+## 7. Dispatching to Grok Build
+
+Grok Build (xAI's coding-agent CLI) is a second Code Agent alongside Claude Code. It reads `AGENTS.md`, not
+`CLAUDE.md`, so a spec's own `/goal` payload is the only thing carrying the rules to it — the `/goal` written
+under §1–§4 above **is** the Grok Build payload, unchanged.
+
+- **`scripts/grok-dispatch.sh <spec> <branch> [--dry-run] [--execute]` is the only sanctioned entry point.**
+  Never invoke `grok` directly against this repo's working tree.
+- **`--execute` is always a human decision.** `--dry-run` is the default and prints the plan (resolved
+  model, approval mode, every refusal check) without touching anything; a real run requires the operator to
+  pass `--execute` explicitly, after reviewing a `--dry-run` first.
+- The dispatcher resolves the Grok model from the CONTROL header's `effort` field and refuses to run when the
+  header is missing model/effort, when "Files affected" names a `.env*` path or a keychain/credential
+  reference, or forces interactive mode (never `--always-approve`) when "Files affected" touches
+  `contracts/**`, `keeper/**`, an `*executor*` path, `src/lib/chains/**`, or any swap/gate/signer path — see
+  `AGENTS.md` and the dispatcher's own refusal checks for the exact rules.
+- The dispatcher always works in a fresh `git worktree add … origin/main`, never the main checkout, and never
+  polls CI — it writes the run's JSON output plus a summary to `docs/feedback/<branch>.md` and stops.

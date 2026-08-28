@@ -47,6 +47,9 @@ yarn-error.log*
 
 # Scripts & tools (local dev only — never deployed)
 scripts/*.sh
+# CHORE-GROK-DISPATCH: guarded, unit-tested dispatcher is a reviewed deliverable, not a local
+# convenience script — it must ship in the PR for CI and reviewers to see it.
+!scripts/grok-dispatch.sh
 tools/
 TeraSwap_OrderEngine_SecurityAudit.pdf
 
