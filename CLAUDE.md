@@ -24,6 +24,7 @@ Ethereum Mainnet meta-aggregator — 10 liquidity sources (11 incl. Bebop; Odos 
 - **Sprint naming:** `docs/Prompts/SPRINT-{N}{A-Z}.md` — one file per sprint phase.
 - **Commits:** each prompt = 1 atomic commit, hash recorded in sprint packet.
 - **Bash compatibility:** every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` / `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via `tr '[:upper:]' '[:lower:]'`.
+- **Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard.
 - **Marketing:** all marketing content goes to `dex-aggregator 2.marketing/`, NEVER in this repo.
 
 ---

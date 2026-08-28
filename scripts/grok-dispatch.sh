@@ -27,6 +27,13 @@ resolve_grok_model() {
 # silently ignores one if you add it. Verified against `grok --help` / ~/.grok/README.md's
 # Permission Rules section (ToolPrefix(glob) syntax, Read(...)/Bash(...) prefixes). Never extend
 # this list by guessing — a new entry needs the same verification.
+#
+# scripts/grok-guard.sh carries the SAME flags for interactive `grok` sessions — deliberately
+# NOT shared code. That file is an interactive-shell function scoped to whatever shell sourced
+# it; this script always runs as its own non-interactive subshell/subprocess and never inherits a
+# caller's shell functions, so it cannot rely on grok-guard.sh having been sourced. Do not
+# "de-duplicate" the two lists — they guard two different launch paths and must both be updated,
+# in parallel, whenever one changes.
 GROK_DENY_FLAGS=(
   --deny "Read(.env*)"
   --deny "Read(**/.env*)"

@@ -50,6 +50,9 @@ substitute for this rule.
 `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via
 `tr '[:upper:]' '[:lower:]'`. `scripts/check-bash3-compat.mjs` enforces this on every tracked `.sh` file.
 
+**Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that
+sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard.
+
 ## What a Grok Build task must never touch
 
 `contracts/**`, `keeper/**`, any path or symbol containing `executor`, `src/lib/chains/**`, or any
