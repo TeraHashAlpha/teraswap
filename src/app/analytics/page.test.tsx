@@ -75,4 +75,52 @@ describe('/analytics page — public protocol stats', () => {
     expect(await screen.findByTestId('public-protocol-stats')).toBeInTheDocument()
     expect(await screen.findByTestId('personal-dashboard')).toBeInTheDocument()
   })
+
+  it('says not available yet when /api/stats is disabled, with a reason and no zeroed metrics', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ enabled: false }),
+      })),
+    )
+    render(<AnalyticsPage />)
+    const unavailable = await screen.findByTestId('protocol-stats-unavailable')
+    expect(unavailable).toHaveTextContent(/not available yet/i)
+    expect(unavailable).toHaveTextContent(/stats backend is not configured/i)
+    expect(screen.queryByTestId('protocol-metric-totalSwaps')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('protocol-metric-totalQuotes')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('protocol-chart-sources')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('protocol-chart-winners')).not.toBeInTheDocument()
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('0.0%')).not.toBeInTheDocument()
+  })
+
+  it('says not available yet for a metric with no data yet, without fabricating a zero', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          enabled: true,
+          totalSwaps: 0,
+          totalQuotes: SAMPLE_STATS.totalQuotes,
+          topSwapSources: [],
+          topQuoteWinners: SAMPLE_STATS.topQuoteWinners,
+        }),
+      })),
+    )
+    render(<AnalyticsPage />)
+    const emptySwaps = await screen.findByTestId('protocol-metric-totalSwaps-unavailable')
+    expect(emptySwaps).toHaveTextContent(/not available yet/i)
+    expect(emptySwaps).toHaveTextContent(/no swaps recorded yet/i)
+    expect(screen.queryByTestId('protocol-metric-totalSwaps')).not.toBeInTheDocument()
+    expect(screen.getByTestId('protocol-metric-totalQuotes')).toHaveTextContent(
+      SAMPLE_STATS.totalQuotes.toLocaleString(),
+    )
+    expect(screen.getByTestId('protocol-chart-sources-unavailable')).toHaveTextContent(/not available yet/i)
+    expect(screen.queryByTestId('protocol-chart-sources')).not.toBeInTheDocument()
+    expect(screen.getByTestId('protocol-chart-winners')).toBeInTheDocument()
+  })
 })
