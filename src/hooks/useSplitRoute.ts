@@ -48,7 +48,8 @@ export function useSplitRoute(
   // on-chain whitelist — e.g. Sushi v7/RedSnwapper) must not be offered as
   // a leg: one such leg would fail the whole split at the client selector
   // gate. Passed in (rather than read via wagmi) so the hook stays
-  // renderable without a provider; SwapBox supplies useActiveChainId().
+  // renderable without a provider; SwapBox supplies useQuoteChainId()
+  // [feat/quote-before-wallet] — the quote/browse chain, not just the wallet's.
   chainId: number = DEFAULT_CHAIN_ID,
 ): UseSplitRouteResult {
   const [splitResult, setSplitResult] = useState<SplitQuoteResult | null>(null)

@@ -39,6 +39,7 @@ vi.mock('@/lib/chains', async (importOriginal) => {
 
 import { renderWithProviders, screen, fireEvent } from '@/test-utils/render'
 import ChainSelector from './ChainSelector'
+import { useDisconnectedChainSelection } from '@/hooks/useChainId'
 
 function openSelector() {
   fireEvent.click(screen.getByLabelText(/network/i))
@@ -48,6 +49,10 @@ function openSelector() {
 beforeEach(() => {
   switchChainMock.mockClear()
   vi.mocked(useAccount).mockReturnValue({ isConnected: true, chain: { id: 1, name: 'mainnet' } } as ReturnType<typeof useAccount>)
+  // [feat/quote-before-wallet] the disconnected-chain pick is now a shared store
+  // (module-level), not per-render local state — reset it so a selection made in
+  // one test can't leak into the next.
+  useDisconnectedChainSelection.setState({ chainId: null })
 })
 
 describe('[9Y] ChainSelector — chain logos', () => {

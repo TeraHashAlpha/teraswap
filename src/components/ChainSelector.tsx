@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react'
 import { useAccount, useSwitchChain } from 'wagmi'
 import { getSupportedChainIds, getChainConfig } from '@/lib/chains'
-import { useActiveChainId } from '@/hooks/useChainId'
+import { useActiveChainId, useDisconnectedChainSelection } from '@/hooks/useChainId'
 import ChainIcon from './icons/ChainIcon'
 
 /**
@@ -29,11 +29,11 @@ import ChainIcon from './icons/ChainIcon'
  * circle below `sm`, icon+name from `sm` up (same single button both ways).
  * The popover becomes a bottom sheet below `sm`; desktop's positioned panel
  * is unchanged. Selecting a chain while disconnected updates
- * `disconnectedChainId` (local state) instead of calling wagmi's
- * `switchChain` — there's no wallet chain to switch to when there's no
- * wallet. There is no app-wide "selected chain" store yet, so this only
- * drives what this trigger/list displays, not quoting/routing (those stay
- * on the existing wallet-derived `useActiveChainId()` default).
+ * `useDisconnectedChainSelection` (a tiny shared store, [feat/quote-before-wallet])
+ * instead of calling wagmi's `switchChain` — there's no wallet chain to switch
+ * to when there's no wallet. That store is also what `useQuoteChainId()` reads,
+ * so a disconnected pick here now drives quoting/routing too — not just this
+ * trigger's own display (previously local state, display-only).
  */
 interface ChainSelectorProps {
   variant?: 'compact' | 'full'
@@ -72,7 +72,8 @@ export default function ChainSelector({ variant = 'compact' }: ChainSelectorProp
   const { switchChain, isPending } = useSwitchChain()
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const [disconnectedChainId, setDisconnectedChainId] = useState<number | null>(null)
+  const disconnectedChainId = useDisconnectedChainSelection((s) => s.chainId)
+  const setDisconnectedChainId = useDisconnectedChainSelection((s) => s.setChainId)
   const displayChainId = isConnected ? activeChainId : (disconnectedChainId ?? activeChainId)
 
   const chains = useMemo(() => getSupportedChainIds().map((id) => getChainConfig(id)), [])
