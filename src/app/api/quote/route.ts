@@ -90,6 +90,104 @@ async function setCachedQuote(key: string, value: MetaQuoteResult): Promise<void
 }
 
 /**
+ * [feat/quote-before-wallet — second-level dampener] COST DAMPENING, not a security cap and NOT a
+ * rate limit. Both the KV rate limit above and the KV quote cache share one dependency (Upstash):
+ * a single Redis outage removes both brakes at once, and every visitor's request now goes straight
+ * upstream (this route no longer requires a connected wallet, and the landing widget quotes on
+ * every page load). This is what's left standing when that happens — process-local, in-memory,
+ * with NONE of Upstash's guarantees:
+ *
+ *   - Per-INSTANCE only. Fluid Compute reuses instances, so a warm instance dampens its own
+ *     repeat traffic, but there is no coordination across instances the way KV coordinates across
+ *     every visitor. N instances still means up to N upstream calls for the same query.
+ *   - Resets on cold start / restart. No persistence, no guarantee of any kind.
+ *   - It must never be read as "the rate limit" — QUOTE_RATE_LIMIT (kv-rate-limiter.ts, 30/60s per
+ *     IP) is the only per-identity abuse control and is completely untouched by this. This dampens
+ *     REDUNDANT upstream fan-out for the same query shape, from any IP, only while Upstash is down.
+ *
+ * Two mechanisms, in order, exactly as the task frames it — collapsing concurrent duplicates is
+ * worth more than any counter:
+ *
+ *   1. In-flight coalescing (the primary mechanism): N concurrent requests for the identical
+ *      cache key that arrive while one is already fetching share that ONE upstream call instead of
+ *      firing N. This is what catches the landing page's fixed default-pair quote being hit by a
+ *      burst of simultaneous anonymous visitors during a KV outage.
+ *   2. A short local result cache, for requests that are sequential rather than concurrent.
+ *      DAMPENER_TTL_MS (5s) is deliberately LESS than QUOTE_CACHE_TTL_SECONDS (12s) so this can
+ *      never be the reason a visitor sees a quote staler than the KV cache would have already
+ *      allowed — it only narrows the window, never widens it. 5s is also well under
+ *      QUOTE_REFRESH_MS (15s, the client's own poll cadence in src/lib/constants.ts), so any
+ *      staleness this introduces during an outage is smaller than what a single open tab already
+ *      tolerates between its own ticks.
+ *
+ * Both structures are consulted AFTER a KV cache miss (the ordinary path — the first request for
+ * any pair, and every request after the 12s KV TTL expires) or a KV error/timeout. Only a KV
+ * *hit* skips this dampener entirely. During an Upstash outage every request is a miss, so this
+ * is exactly when the dampener carries the whole load — it is NOT a rarely-exercised fallback.
+ * It still guarantees nothing on its own (see the per-instance/no-persistence caveats above);
+ * what it reliably does is collapse redundant upstream fan-out for the same query shape.
+ *
+ * localQuoteDampenerCache is bounded to MAX_DAMPENER_CACHE_ENTRIES with oldest-first eviction,
+ * checked on every access rather than via a background sweep (no timers in a serverless request
+ * path). The value this cache exists to capture is the landing page's ONE fixed default pair
+ * during an outage; 50 entries is generous headroom for every distinct (chain, pair, amount)
+ * shape actually in rotation across the app's chains while keeping worst-case memory (50 small
+ * MetaQuoteResult JSON blobs) trivial — a cache that forgets old entries is correct, one that
+ * grows without bound is not.
+ */
+const DAMPENER_TTL_MS = 5_000
+const MAX_DAMPENER_CACHE_ENTRIES = 50
+
+const inFlightQuotes = new Map<string, Promise<MetaQuoteResult>>()
+const localQuoteDampenerCache = new Map<string, { value: MetaQuoteResult; expiresAt: number }>()
+
+function getLocalDampenerEntry(key: string): MetaQuoteResult | undefined {
+  const local = localQuoteDampenerCache.get(key)
+  if (!local) return undefined
+  if (local.expiresAt > Date.now()) return local.value
+  // Expired — remove it now rather than leaving it to be silently overwritten later, so an
+  // expired entry never persists or counts against the size bound below.
+  localQuoteDampenerCache.delete(key)
+  return undefined
+}
+
+function setLocalDampenerEntry(key: string, value: MetaQuoteResult): void {
+  localQuoteDampenerCache.delete(key) // re-insert at the end so it isn't evicted as "oldest"
+  if (localQuoteDampenerCache.size >= MAX_DAMPENER_CACHE_ENTRIES) {
+    const oldestKey = localQuoteDampenerCache.keys().next().value
+    if (oldestKey !== undefined) localQuoteDampenerCache.delete(oldestKey)
+  }
+  localQuoteDampenerCache.set(key, { value, expiresAt: Date.now() + DAMPENER_TTL_MS })
+}
+
+async function getOrFetchDampened(
+  key: string,
+  fetcher: () => Promise<MetaQuoteResult>,
+): Promise<{ result: MetaQuoteResult; source: 'local-cache' | 'coalesced' | 'fresh' }> {
+  const local = getLocalDampenerEntry(key)
+  if (local) {
+    return { result: local, source: 'local-cache' }
+  }
+
+  const existing = inFlightQuotes.get(key)
+  if (existing) {
+    return { result: await existing, source: 'coalesced' }
+  }
+
+  // Synchronous check-then-set above, no `await` in between — this is the single-threaded JS
+  // event loop, so no other call to this function can interleave and race the leader role here.
+  const promise = fetcher()
+  inFlightQuotes.set(key, promise)
+  try {
+    const result = await promise
+    setLocalDampenerEntry(key, result)
+    return { result, source: 'fresh' }
+  } finally {
+    inFlightQuotes.delete(key)
+  }
+}
+
+/**
  * Shared 503 response for when the circuit breaker has halted routing.
  * Returns Retry-After: 300 (5 min) so clients back off without hammering.
  */
@@ -230,14 +328,31 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
     // [feat/quote-before-wallet] Shared server-side cache — see QUOTE_CACHE_TTL_SECONDS above.
     const cacheKey = quoteCacheKey(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId)
     const cached = await getCachedQuote(cacheKey)
-    const result = cached ?? await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId)
-    if (!cached) await setCachedQuote(cacheKey, result)
+
+    let result: MetaQuoteResult
+    let cacheHeader: string
+    if (cached) {
+      result = cached
+      cacheHeader = 'hit'
+    } else {
+      // [feat/quote-before-wallet] KV cache missed (or Upstash is down) — fall through to the
+      // process-local dampener (coalescing + short local cache) before hitting upstream.
+      const dampened = await getOrFetchDampened(
+        cacheKey,
+        () => fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId),
+      )
+      result = dampened.result
+      cacheHeader = dampened.source === 'fresh' ? 'miss' : `miss-dampened-${dampened.source}`
+      // Only the leader of a fresh fetch writes through to KV — a coalesced/local-cache hit
+      // already holds a value that either came from (or was just written to) KV moments ago.
+      if (dampened.source === 'fresh') await setCachedQuote(cacheKey, result)
+    }
 
     // Serialize BigInt-safe (toAmount is already a string in NormalizedQuote)
     return NextResponse.json(result, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
-        'X-Quote-Cache': cached ? 'hit' : 'miss',
+        'X-Quote-Cache': cacheHeader,
         'X-RateLimit-Remaining': String(rateCheck.remaining),
         'X-RateLimit-Reset': String(rateCheck.resetAt),
       },

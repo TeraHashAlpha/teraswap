@@ -48,3 +48,58 @@
 6. Full suite: 3474/3476 passing (2 pre-existing failures in `scripts/grok-dispatch.test.mjs`,
    unrelated — that script/test wasn't touched by this branch). Lint: 94/94 warnings (repo
    ceiling, unchanged from `origin/main` baseline). Typecheck: clean.
+
+---
+
+## Feedback — process-local dampener follow-up (c960fa9)
+
+### Mechanism
+Two process-local, in-memory structures in `route.ts`, consulted only AFTER a KV cache miss/error
+(so a healthy Upstash never touches either — the KV cache stays the one and only primary path):
+
+1. **In-flight coalescing** (`inFlightQuotes: Map<key, Promise>`) — the primary mechanism, per the
+   goal's own framing ("collapsing identical in-flight requests is worth more than any counter").
+   N concurrent requests for the same cache key share the ONE upstream `fetchMetaQuote` call
+   already in progress instead of firing N. Race-free: the check-then-set is synchronous (no
+   `await` in between), so no interleaving is possible on Node's single-threaded event loop.
+2. **A short local result cache** (`localQuoteDampenerCache`, TTL 5s) — catches sequential (not
+   strictly concurrent) repeats during an outage, e.g. a burst of landing-page loads a few seconds
+   apart rather than in the same tick.
+
+### Bound + justification
+`DAMPENER_TTL_MS = 5_000`, chosen against two existing constants:
+- **`QUOTE_CACHE_TTL_SECONDS` (12s, the KV cache TTL added earlier on this branch)** — 5s is
+  deliberately less than half of it. This is what makes acceptance #3 true by construction: the
+  dampener's own cache always expires well before the KV TTL would have, so it can never be the
+  reason a visitor sees something staler than the KV cache already permits — it only narrows the
+  staleness window during an outage, never widens it.
+- **`QUOTE_REFRESH_MS` (15s, the client's own poll cadence, `src/lib/constants.ts`)** — 5s is a
+  third of it, so any staleness this introduces during a Redis outage is smaller than what a
+  single already-open tab already tolerates between its own polling ticks.
+- **`QUOTE_RATE_LIMIT` (30 req/60s per IP, `kv-rate-limiter.ts`)** — deliberately NOT a factor in
+  the bound. That's a per-identity abuse control; this dampener is identity-blind cost dampening
+  for redundant upstream fan-out on the SAME query shape, from any IP. The two are orthogonal and
+  this change touches neither the limit's values nor its logic.
+
+### Acceptance results
+1. `route.test.ts` — with both `kv.get` and `kv.set` throwing on every call, 5 concurrent identical
+   requests produce exactly 1 `fetchMetaQuote` call (test asserts `< N`, actual is 1). A companion
+   test proves this is keyed coalescing, not global serialization — two concurrent but DIFFERENT
+   amounts still produce 2 upstream calls.
+2. `route.test.ts` — with Upstash healthy (fake KV, no forced failure), a second identical request
+   is still served as a plain KV `hit` (not a dampener path), with the upstream-call count
+   unchanged (still 1 after the first miss) — pinning that the KV path is untouched.
+3. `route.test.ts` (fake timers) — same request at t=0 (miss, 1 call), t=3s (served by the local
+   dampener cache, still 1 call, header `miss-dampened-local-cache`), t=6s (dampener's own TTL
+   expired — refetches fresh, 2 calls) — all still well inside the KV's 12s TTL window, proving the
+   5s bound sits strictly inside it rather than reaching or exceeding it.
+4. Full suite: 3478/3480 passing (same 2 pre-existing, unrelated `grok-dispatch.test.mjs`
+   failures as before — untouched by this change). Lint: 94/94 warnings (unchanged ceiling).
+   Typecheck: clean.
+
+### What this dampener does NOT guarantee
+It is per-instance, in-memory, uncoordinated cost dampening only — it resets on every cold
+start/restart, provides no cross-instance coordination (N warm instances can still each make their
+own upstream call for the same query), and is not a rate limit, a security boundary, or any kind of
+guarantee; `QUOTE_RATE_LIMIT` remains the only per-identity abuse control and is completely
+unchanged.
