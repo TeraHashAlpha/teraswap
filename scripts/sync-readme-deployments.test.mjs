@@ -27,16 +27,16 @@ describe('sync-readme-deployments', () => {
     }
   })
 
-  it('does not alter the five addresses that were already in README on origin/main', () => {
-    const origin = execFileSync('git', ['show', 'origin/main:README.md'], {
+  it('does not invent or mistype README table addresses; the copier is a no-op on the current README', () => {
+    const deploymentAddrs = deployments.map((row) => row.address)
+    for (const addr of table.addrs) {
+      expect(deploymentAddrs).toContain(addr)
+    }
+    const stdout = execFileSync('node', [SCRIPT, '--check'], {
       cwd: ROOT,
       encoding: 'utf8',
     })
-    const originTable = extractReadmeTableAddresses(origin)
-    expect(originTable.addrs).toHaveLength(5)
-    for (const addr of originTable.addrs) {
-      expect(table.addrs).toContain(addr)
-    }
+    expect(stdout).toMatch(/matches docs\/DEPLOYMENTS\.md/)
   })
 
   it('adds Base OrderExecutor v2 and Arbitrum V3 by copying DEPLOYMENTS.md', () => {
