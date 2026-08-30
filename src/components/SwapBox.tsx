@@ -46,6 +46,7 @@ import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
 import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
+import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
 import { playSwapConfirmMP3, playCancelOrderMP3, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
@@ -1114,7 +1115,7 @@ export default function SwapBox() {
               const savedPercent = worstOut > 0 ? ((bestOut - worstOut) / worstOut * 100) : 0
               const savedDisplay = savedPercent > 0.01 ? savedPercent.toFixed(2) : null
               const shareText = savedDisplay
-                ? `I just saved ${savedDisplay}% on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates 11 DEX sources for the best price.\nhttps://www.teraswap.app`
+                ? `I just saved ${savedDisplay}% on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`
                 : `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`
               return (
                 <button

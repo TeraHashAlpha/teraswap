@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import ClientProviders from './client-providers'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
+import { SITE_META_DESCRIPTION } from '@/config/product-claims'
 import './globals.css'
 
 const inter = Inter({
@@ -21,8 +22,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 const SITE_URL = 'https://www.teraswap.app'
 const SITE_TITLE = 'TeraSwap — The Gold Standard of DeFi Trading'
-const SITE_DESCRIPTION =
-  'Maximum liquidity. Absolute protection. TeraSwap is an Ethereum meta-aggregator that queries 10 liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-free execution via CoW Protocol, and a privacy proxy that hides your IP from all external services.'
+const SITE_DESCRIPTION = SITE_META_DESCRIPTION
 
 export const metadata: Metadata = {
   title: SITE_TITLE,

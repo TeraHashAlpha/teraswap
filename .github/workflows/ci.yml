@@ -50,6 +50,8 @@ jobs:
         run: npm run check:bash3-compat
       - name: Status-palette CVD contrast guard
         run: npm run check:color-contrast
+      - name: Product-claims truth guard
+        run: npm run check:product-claims
 
   typecheck:
     runs-on: ubuntu-latest
