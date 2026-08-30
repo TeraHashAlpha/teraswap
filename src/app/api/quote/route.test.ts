@@ -371,4 +371,59 @@ describe('GET /api/quote — process-local dampener [acceptance 1–3]', () => {
       vi.useRealTimers()
     }
   })
+
+  it('[bound] localQuoteDampenerCache never exceeds its max entry count — the oldest key is evicted first', async () => {
+    kvShouldFail = true
+    fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
+    const MAX = 50
+    const amountFor = (i: number) => String(1_000_000_000_000_000 + i)
+
+    // Insert MAX + 1 distinct keys sequentially — each awaited so it lands in the local cache
+    // before the next request starts, guaranteeing insertion order.
+    for (let i = 0; i < MAX + 1; i++) {
+      await callGET({ src: USDC, dst: WETH, amount: amountFor(i), chainId: '1' })
+    }
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(MAX + 1)
+
+    // The oldest key (index 0) must have been evicted to stay within the bound — re-querying it
+    // is a fresh upstream call, not a local-cache hit. Without the bound, this would be a hit.
+    const evicted = await callGET({ src: USDC, dst: WETH, amount: amountFor(0), chainId: '1' })
+    expect(evicted.headers.get('X-Quote-Cache')).toBe('miss')
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(MAX + 2)
+
+    // The most recently inserted key (well within the bound) is still served locally.
+    const recent = await callGET({ src: USDC, dst: WETH, amount: amountFor(MAX), chainId: '1' })
+    expect(recent.headers.get('X-Quote-Cache')).toBe('miss-dampened-local-cache')
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(MAX + 2)
+  })
+
+  it('[expiry] an expired local-cache entry is not served and does not persist — a later request refetches and re-caches fresh', async () => {
+    vi.useFakeTimers()
+    try {
+      kvShouldFail = true
+      const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }
+      fetchMetaQuoteMock.mockResolvedValueOnce(META_RESULT)
+      const r1 = await callGET(params)
+      expect(r1.headers.get('X-Quote-Cache')).toBe('miss')
+      expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+
+      // Past the dampener's 5s TTL — the stale entry must not be served.
+      await vi.advanceTimersByTimeAsync(6_000)
+      const NEW_RESULT = { ...META_RESULT, fetchedAt: 999 }
+      fetchMetaQuoteMock.mockResolvedValueOnce(NEW_RESULT)
+      const r2 = await callGET(params)
+      expect(r2.headers.get('X-Quote-Cache')).toBe('miss')
+      expect(await r2.json()).toEqual(NEW_RESULT)
+      expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
+
+      // Immediately after, within the new TTL: served locally with the NEW value — proving the
+      // expired entry was actually removed rather than left to be silently overwritten later.
+      const r3 = await callGET(params)
+      expect(r3.headers.get('X-Quote-Cache')).toBe('miss-dampened-local-cache')
+      expect(await r3.json()).toEqual(NEW_RESULT)
+      expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

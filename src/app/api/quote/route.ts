@@ -120,22 +120,53 @@ async function setCachedQuote(key: string, value: MetaQuoteResult): Promise<void
  *      staleness this introduces during an outage is smaller than what a single open tab already
  *      tolerates between its own ticks.
  *
- * Both structures are only ever consulted AFTER a KV cache miss/error (see handleQuoteGet below),
- * so when Upstash is healthy this never runs — the KV cache stays the one and only primary path,
- * unchanged.
+ * Both structures are consulted AFTER a KV cache miss (the ordinary path — the first request for
+ * any pair, and every request after the 12s KV TTL expires) or a KV error/timeout. Only a KV
+ * *hit* skips this dampener entirely. During an Upstash outage every request is a miss, so this
+ * is exactly when the dampener carries the whole load — it is NOT a rarely-exercised fallback.
+ * It still guarantees nothing on its own (see the per-instance/no-persistence caveats above);
+ * what it reliably does is collapse redundant upstream fan-out for the same query shape.
+ *
+ * localQuoteDampenerCache is bounded to MAX_DAMPENER_CACHE_ENTRIES with oldest-first eviction,
+ * checked on every access rather than via a background sweep (no timers in a serverless request
+ * path). The value this cache exists to capture is the landing page's ONE fixed default pair
+ * during an outage; 50 entries is generous headroom for every distinct (chain, pair, amount)
+ * shape actually in rotation across the app's chains while keeping worst-case memory (50 small
+ * MetaQuoteResult JSON blobs) trivial — a cache that forgets old entries is correct, one that
+ * grows without bound is not.
  */
 const DAMPENER_TTL_MS = 5_000
+const MAX_DAMPENER_CACHE_ENTRIES = 50
 
 const inFlightQuotes = new Map<string, Promise<MetaQuoteResult>>()
 const localQuoteDampenerCache = new Map<string, { value: MetaQuoteResult; expiresAt: number }>()
+
+function getLocalDampenerEntry(key: string): MetaQuoteResult | undefined {
+  const local = localQuoteDampenerCache.get(key)
+  if (!local) return undefined
+  if (local.expiresAt > Date.now()) return local.value
+  // Expired — remove it now rather than leaving it to be silently overwritten later, so an
+  // expired entry never persists or counts against the size bound below.
+  localQuoteDampenerCache.delete(key)
+  return undefined
+}
+
+function setLocalDampenerEntry(key: string, value: MetaQuoteResult): void {
+  localQuoteDampenerCache.delete(key) // re-insert at the end so it isn't evicted as "oldest"
+  if (localQuoteDampenerCache.size >= MAX_DAMPENER_CACHE_ENTRIES) {
+    const oldestKey = localQuoteDampenerCache.keys().next().value
+    if (oldestKey !== undefined) localQuoteDampenerCache.delete(oldestKey)
+  }
+  localQuoteDampenerCache.set(key, { value, expiresAt: Date.now() + DAMPENER_TTL_MS })
+}
 
 async function getOrFetchDampened(
   key: string,
   fetcher: () => Promise<MetaQuoteResult>,
 ): Promise<{ result: MetaQuoteResult; source: 'local-cache' | 'coalesced' | 'fresh' }> {
-  const local = localQuoteDampenerCache.get(key)
-  if (local && local.expiresAt > Date.now()) {
-    return { result: local.value, source: 'local-cache' }
+  const local = getLocalDampenerEntry(key)
+  if (local) {
+    return { result: local, source: 'local-cache' }
   }
 
   const existing = inFlightQuotes.get(key)
@@ -149,7 +180,7 @@ async function getOrFetchDampened(
   inFlightQuotes.set(key, promise)
   try {
     const result = await promise
-    localQuoteDampenerCache.set(key, { value: result, expiresAt: Date.now() + DAMPENER_TTL_MS })
+    setLocalDampenerEntry(key, result)
     return { result, source: 'fresh' }
   } finally {
     inFlightQuotes.delete(key)
