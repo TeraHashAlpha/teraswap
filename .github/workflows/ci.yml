@@ -48,6 +48,8 @@ jobs:
         run: npm run check:agents-parity
       - name: Bash 3.2 compatibility guard
         run: npm run check:bash3-compat
+      - name: Status-palette CVD contrast guard
+        run: npm run check:color-contrast
 
   typecheck:
     runs-on: ubuntu-latest

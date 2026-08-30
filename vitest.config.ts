@@ -17,6 +17,7 @@ export default defineConfig({
       // [CHORE-TOKEN-CATALOG-PIPELINE] build-time catalog pipeline logic is pure + unit-tested.
       'scripts/token-catalog/**/*.test.ts',
       // [CHORE-GROK-DISPATCH] repo-hygiene scripts get the same coverage as source.
+      // [CHORE-COLOR-CONTRAST-CHECK] CIEDE2000 + CVD tests live next to the checker.
       'scripts/*.test.mjs',
     ],
     // jsdom shim for tests that touch `localStorage`/`window` via the
