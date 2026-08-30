@@ -29,8 +29,8 @@ Highlights
 Best-execution routing across 12 integrated liquidity sources — aggregators (0x, 1inch,
 ParaSwap/Velora, KyberSwap, OpenOcean, Odos), AMMs (Uniswap V3, Curve, Balancer, SushiSwap), and
 intent/RFQ venues (CoW Protocol, Bebop).
-On-chain conditional orders — DCA is **live on Base**, executed autonomously by an audited on-chain
-order engine and Chainlink-triggered keeper. Limit, Stop-Loss, and Take-Profit orders are **coming
+On-chain conditional orders — executed autonomously by an audited on-chain
+order engine and Chainlink-triggered keeper. DCA, Limit, Stop-Loss, and Take-Profit orders are **coming
 soon**.
 MEV protection — sensitive flow can settle through CoW Protocol's batch auctions to neutralise
 sandwich and front-running risk.
@@ -107,7 +107,9 @@ contract address can be a different contract on a different chain (documented go
 | FeeCollector (instant swaps) | Base | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
 | FeeCollector (instant swaps) | Arbitrum One | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
 | OrderExecutor v2 (conditional orders) | Ethereum Mainnet | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
-| OrderExecutor V3 (conditional orders, DCA live) | Base | `0x686b4f812291F4De238E59ED00BA6dD6129e60a0` |
+| OrderExecutor v2 (conditional orders) | Base | `0x135B339902Ea4E0fB4CF059961dc8856bA1D2598` |
+| OrderExecutor V3 (conditional orders) | Base | `0x686b4f812291F4De238E59ED00BA6dD6129e60a0` |
+| OrderExecutor V3 (conditional orders) | Arbitrum One | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` |
 
 All contracts are MIT-licensed, source-verified, and developed/tested with Foundry (119 contract tests).
 
@@ -121,8 +123,8 @@ Recurring internal and external security reviews; findings tracked to closure.
 
 Status
 
-Live on Ethereum Mainnet, Base, and Arbitrum. DCA orders are live on Base; Limit, Stop-Loss, and
-Take-Profit are in development. Actively developed.
+Live on Ethereum, Base, and Arbitrum One. DCA, Limit, Stop-Loss, and Take-Profit follow each type's
+launch flag (default off). Actively developed.
 
 Disclaimer
 
