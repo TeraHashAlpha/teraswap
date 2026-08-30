@@ -29,12 +29,19 @@ vi.mock('@/lib/circuit-breaker', () => ({
 
 // [feat/quote-before-wallet] In-memory fake standing in for Upstash — real
 // get/set/TTL semantics (good enough for these tests) without hitting a
-// real KV instance. Reset per-test in beforeEach below.
+// real KV instance. Reset per-test in beforeEach below. `kvShouldFail` lets a
+// test simulate Upstash being completely down (used by the dampener tests)
+// without fighting mockRejectedValue-vs-clearAllMocks persistence semantics.
 const fakeKvStore = new Map<string, unknown>()
+let kvShouldFail = false
 vi.mock('@/lib/kv', () => ({
   kv: {
-    get: vi.fn((key: string) => Promise.resolve(fakeKvStore.get(key) ?? null)),
-    set: vi.fn((key: string, value: unknown) => { fakeKvStore.set(key, value); return Promise.resolve('OK') }),
+    get: vi.fn((key: string) => kvShouldFail ? Promise.reject(new Error('Upstash unreachable')) : Promise.resolve(fakeKvStore.get(key) ?? null)),
+    set: vi.fn((key: string, value: unknown) => {
+      if (kvShouldFail) return Promise.reject(new Error('Upstash unreachable'))
+      fakeKvStore.set(key, value)
+      return Promise.resolve('OK')
+    }),
   },
 }))
 
@@ -84,6 +91,7 @@ describe('GET /api/quote — debug=sources', () => {
     vi.clearAllMocks()
     vi.resetModules()
     fakeKvStore.clear()
+    kvShouldFail = false
     originalToken = process.env.DEBUG_QUOTE_TOKEN
     fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
     diagnoseQuoteSourcesMock.mockResolvedValue(DIAG_RESULT)
@@ -230,6 +238,7 @@ describe('GET /api/quote — shared cache [feat/quote-before-wallet acceptance 5
     vi.clearAllMocks()
     vi.resetModules()
     fakeKvStore.clear()
+    kvShouldFail = false
     fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
   })
 
@@ -264,5 +273,102 @@ describe('GET /api/quote — shared cache [feat/quote-before-wallet acceptance 5
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual(META_RESULT)
     expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── [feat/quote-before-wallet] Process-local dampener (Upstash-independent) ─
+//
+// COST DAMPENING, never a security cap or a rate limit — see the block comment
+// above getOrFetchDampened in route.ts. These tests pin exactly the three
+// numbered acceptance criteria from the follow-up goal: fewer-than-N upstream
+// calls when Upstash is fully down (1), zero change to the KV hit path when
+// Upstash is healthy (2), and a staleness bound strictly inside the KV TTL (3).
+
+describe('GET /api/quote — process-local dampener [acceptance 1–3]', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+    fakeKvStore.clear()
+    kvShouldFail = false
+    fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
+  })
+
+  it('[acceptance 1] with kv.get AND kv.set both throwing, N concurrent identical requests produce FEWER than N upstream calls', async () => {
+    kvShouldFail = true
+    let resolveFetch!: (v: unknown) => void
+    fetchMetaQuoteMock.mockImplementation(() => new Promise((resolve) => { resolveFetch = resolve }))
+
+    const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }
+    const N = 5
+    const inFlight = Array.from({ length: N }, () => callGET(params))
+    // Let every concurrent request run up to (and start) its upstream fetch before any resolves.
+    await new Promise((r) => setTimeout(r, 20))
+    resolveFetch(META_RESULT)
+    const responses = await Promise.all(inFlight)
+
+    for (const res of responses) {
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual(META_RESULT)
+    }
+    // The whole point: fewer than N (in fact exactly 1) upstream calls despite Upstash being
+    // fully down for both reads AND writes on every one of the N requests.
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+    expect(fetchMetaQuoteMock.mock.calls.length).toBeLessThan(N)
+  })
+
+  it('[regression] a genuinely DIFFERENT query, concurrent with the first, still gets its own upstream call (coalescing is keyed, not global)', async () => {
+    // Sanity check on test 1's premise: coalescing must key on the request signature, not
+    // collapse everything indiscriminately. Two distinct amounts fired concurrently must each
+    // still reach fetchMetaQuote once — proving the single call in test 1 comes from the SAME
+    // key overlapping, not from some global one-fetch-at-a-time serialization.
+    kvShouldFail = true
+    fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
+    const paramsA = { src: USDC, dst: WETH, amount: '111000000000000000', chainId: '1' }
+    const paramsB = { src: USDC, dst: WETH, amount: '222000000000000000', chainId: '1' }
+    await Promise.all([callGET(paramsA), callGET(paramsB)])
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('[acceptance 2] with Upstash healthy, a KV hit is served unchanged — the dampener never runs', async () => {
+    const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }
+    const first = await callGET(params)
+    expect(first.headers.get('X-Quote-Cache')).toBe('miss')
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+
+    // Second request: KV already holds the value (kvShouldFail is false — Upstash is healthy).
+    // This must be a plain KV 'hit', not a dampener path, and must add zero upstream calls —
+    // exactly today's (pre-dampener) behavior.
+    const second = await callGET(params)
+    expect(second.headers.get('X-Quote-Cache')).toBe('hit')
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('[acceptance 3] the dampener\'s own TTL is strictly shorter than the KV cache TTL, so it never outlives what KV would already allow', async () => {
+    vi.useFakeTimers()
+    try {
+      kvShouldFail = true
+      const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }
+
+      const r1 = await callGET(params)
+      expect(r1.headers.get('X-Quote-Cache')).toBe('miss')
+      expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+
+      // 3s later — inside the dampener's own (5s) local-cache TTL: still served locally, no
+      // new upstream call, and NOT reported as a plain KV hit (Upstash is still down).
+      await vi.advanceTimersByTimeAsync(3_000)
+      const r2 = await callGET(params)
+      expect(r2.headers.get('X-Quote-Cache')).toBe('miss-dampened-local-cache')
+      expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+
+      // 3s more (6s total) — past the dampener's 5s TTL but still under the KV cache's 12s TTL.
+      // The dampener refuses to serve anything that old on its own and refetches — proving its
+      // bound sits strictly inside the KV TTL window rather than reaching or exceeding it.
+      await vi.advanceTimersByTimeAsync(3_000)
+      const r3 = await callGET(params)
+      expect(r3.headers.get('X-Quote-Cache')).toBe('miss')
+      expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
