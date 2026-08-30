@@ -43,6 +43,7 @@ import {
 import type { CreateOrderConfig } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
 import { getWrappedNative, getChainConfig } from '@/lib/chains/registry'
+import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
 import { findChainToken } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
@@ -1240,7 +1241,7 @@ function CreateDCAForm({
             <span className="text-cream font-medium">{expiry.label}</span>
           </div>
           <div className="mt-2 border-t border-cream-08 pt-2 text-[11px] text-cream-35">
-            Each buy routes through 11 DEX sources via 1inch aggregation.
+            Each buy routes through {INTEGRATED_DEX_SOURCE_COUNT} DEX sources via 1inch aggregation.
             Orders execute autonomously — no browser needed.
           </div>
         </div>

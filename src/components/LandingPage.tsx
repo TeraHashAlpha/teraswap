@@ -18,6 +18,12 @@ import { motion, useInView } from 'framer-motion'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { playTouchMP3 } from '@/lib/sounds'
+import {
+  INTEGRATED_DEX_SOURCE_COUNT,
+  INTEGRATED_DEX_SOURCE_COUNT_WORDS,
+  INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
+  SWAP_CHAIN_LIST_LABEL,
+} from '@/config/product-claims'
 
 interface Props {
   onLaunchApp: () => void
@@ -163,7 +169,7 @@ function AnimatedCounter({
 }
 
 // ── SwapPreview ──────────────────────────────────────────
-// Static mock of the real SwapBox — 0.5 ETH → 994.68 USDC via Velora.
+// Static mock of the real SwapBox — 0.5 ETH → 994.68 USDC.
 // Lives in the hero's right column so first-time visitors see the
 // product immediately (Sprint 27B / Prompt 73). Clicking the Swap
 // button launches the live app via the passed onLaunchApp handler.
@@ -199,8 +205,8 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
         </div>
         <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-cream-75">
           <div className="flex justify-between">
-            <span>Best via</span>
-            <span className="font-semibold" style={{ color: '#C8B89A' }}>Velora</span>
+            <span>Compared</span>
+            <span className="font-semibold" style={{ color: '#C8B89A' }}>{INTEGRATED_DEX_SOURCE_COUNT} DEX sources</span>
           </div>
           <div className="mt-1 flex justify-between">
             <span>Platform fee</span>
@@ -234,7 +240,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   // bar ("7 Independent validation layers"). Prompts 69 and 71 are both
   // explicit; an Architect-side reconciliation is queued.
   const ANCHOR_STATS: { v: number; label: string }[] = [
-    { v: 11, label: 'LIQUIDITY SOURCES' },
+    { v: INTEGRATED_DEX_SOURCE_COUNT, label: 'LIQUIDITY SOURCES' },
     { v: 2,  label: 'VERIFICATION LAYERS' },
     { v: 29, label: 'CHAINLINK ORACLES' },
   ]
@@ -277,7 +283,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             className="mb-5 font-display text-[36px] sm:text-[52px] md:text-[68px] font-extrabold leading-[1.05] tracking-[-0.02em] text-cream"
             style={{ textShadow: HEADLINE_TEXT_SHADOW }}
           >
-            <SplitText>One swap. Eleven routes.</SplitText>{' '}
+            <SplitText>{`One swap. ${INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP} routes.`}</SplitText>{' '}
             <span className="text-shimmer">Verified.</span>
           </h1>
 
@@ -289,7 +295,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             className="mb-10 max-w-xl text-[16px] sm:text-[18px] leading-relaxed text-cream-75"
             style={{ textShadow: BODY_TEXT_SHADOW }}
           >
-            TeraSwap compares eleven liquidity sources for every trade, verifies the price against
+            TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade, verifies the price against
             Chainlink oracles, and routes through MEV-protected execution.
           </motion.p>
 
@@ -332,7 +338,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
       <div className="relative z-10 mx-auto mt-16 flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
         <span>Non-custodial</span>
         <span aria-hidden className="text-cream-35">·</span>
-        <span>Ethereum Mainnet</span>
+        <span>{SWAP_CHAIN_LIST_LABEL}</span>
         <span aria-hidden className="text-cream-35">·</span>
         <span>Powered by Chainlink</span>
         <span aria-hidden className="text-cream-35">·</span>

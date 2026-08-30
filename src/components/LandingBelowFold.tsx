@@ -13,6 +13,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
+import {
+  INTEGRATED_DEX_SOURCE_COUNT,
+  INTEGRATED_DEX_SOURCE_COUNT_WORDS,
+  INTEGRATED_DEX_SOURCE_NAMES,
+  SWAP_CHAIN_LIST_LABEL,
+  isOrderTypeLive,
+  type OrderTypeId,
+} from '@/config/product-claims'
 
 // ── Shared constants (mirrored from LandingPage.tsx) ──────
 
@@ -189,7 +197,7 @@ function PerformanceSection() {
             style={{ textShadow: BODY_TEXT_SHADOW }}
           >
             Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously
-            scans eleven liquidity sources across Ethereum — identifying and executing the optimal
+            scans {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources across {SWAP_CHAIN_LIST_LABEL} — identifying and executing the optimal
             route to deliver the highest net output on every single swap. Gas costs are folded into
             the ranking, so the quote you see is the one your wallet actually feels.
           </p>
@@ -205,18 +213,10 @@ function PerformanceSection() {
 }
 
 function AdapterConstellation() {
-  const adapters: { name: string; category: string }[] = [
-    { name: '1inch', category: 'API' },
-    { name: '0x', category: 'API' },
-    { name: 'Velora', category: 'API' },
-    { name: 'KyberSwap', category: 'API' },
-    { name: 'OpenOcean', category: 'API' },
-    { name: 'SushiSwap', category: 'API' },
-    { name: 'Uniswap V3', category: 'On-chain' },
-    { name: 'Curve', category: 'On-chain' },
-    { name: 'CoW Protocol', category: 'Intent' },
-    { name: 'Balancer', category: 'Hybrid' },
-  ]
+  const adapters: { name: string; category: string }[] = INTEGRATED_DEX_SOURCE_NAMES.map((name) => ({
+    name,
+    category: '',
+  }))
 
   const RX = 42
   const RY = 36
@@ -795,11 +795,11 @@ const FEATURES: {
   title: string
   desc: string
   icon?: React.ReactNode
-  comingSoon?: boolean
+  orderType?: OrderTypeId
 }[] = [
   {
-    title: '10 Liquidity Sources',
-    desc: 'Simultaneous queries across 6 aggregator APIs and 4 direct DEX protocols — 1inch, 0x, Velora, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.',
+    title: `${INTEGRATED_DEX_SOURCE_COUNT} Liquidity Sources`,
+    desc: `Simultaneous queries across aggregator APIs and direct DEX protocols — 1inch, 0x, Velora, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.`,
     icon: <FeatNetworkIcon />,
   },
   {
@@ -809,7 +809,7 @@ const FEATURES: {
   },
   {
     title: 'Statistical Outlier Detection',
-    desc: 'True median-based filtering across all 10 sources removes manipulated quotes automatically. No bogus prices ever reach your screen.',
+    desc: `True median-based filtering across all ${INTEGRATED_DEX_SOURCE_COUNT} sources removes manipulated quotes automatically. No bogus prices ever reach your screen.`,
     icon: <FeatChartAlertIcon />,
   },
   {
@@ -820,17 +820,17 @@ const FEATURES: {
   {
     title: 'Smart DCA Engine',
     desc: 'Automated dollar-cost averaging with price-aware buying windows. Fully autonomous execution powered by Chainlink oracles — no browser required.',
-    comingSoon: true,
+    orderType: 'dca',
   },
   {
     title: 'Limit Orders',
     desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order — zero gas, MEV-protected, with partial fills and price improvement.',
-    comingSoon: true,
+    orderType: 'limit',
   },
   {
     title: 'Stop Loss / Take Profit',
     desc: 'Automated position protection powered by Chainlink oracles. Prices are monitored in real-time — when your trigger fires, a CoW limit order is auto-submitted.',
-    comingSoon: true,
+    orderType: 'stopLoss',
   },
   {
     title: 'Split Routing',
@@ -855,8 +855,12 @@ const FEATURES: {
 ]
 
 function FeaturesSection() {
-  const liveFeatures = FEATURES.filter((f) => !('comingSoon' in f && f.comingSoon))
-  const roadmapFeatures = FEATURES.filter((f) => 'comingSoon' in f && f.comingSoon)
+  const withStatus = FEATURES.map((f) => ({
+    ...f,
+    comingSoon: f.orderType ? !isOrderTypeLive(f.orderType) : false,
+  }))
+  const liveFeatures = withStatus.filter((f) => !f.comingSoon)
+  const roadmapFeatures = withStatus.filter((f) => f.comingSoon)
 
   return (
     <section id="features" className="relative py-16 px-6">
@@ -958,7 +962,7 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
       </button>
 
       <div className="relative z-10 mt-6 text-[11px] font-medium uppercase tracking-[0.1em] text-cream-75">
-        Non-custodial · Ethereum Mainnet · Powered by Chainlink · IP-protected
+        Non-custodial · {SWAP_CHAIN_LIST_LABEL} · Powered by Chainlink · IP-protected
       </div>
     </section>
   )

@@ -8,6 +8,7 @@ import { ADAPTER_REGISTRY } from '@/lib/adapters'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
+  INTEGRATED_DEX_SOURCE_NAMES,
   INTEGRATED_DEX_SOURCES_CLAIM,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   SITE_META_DESCRIPTION,
@@ -35,6 +36,7 @@ describe('product-claims — source count from ADAPTER_REGISTRY', () => {
   it('equals ADAPTER_REGISTRY.length (the registry is the list)', () => {
     expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(ADAPTER_REGISTRY.length)
     expect(ADAPTER_REGISTRY.length).toBeGreaterThan(0)
+    expect([...INTEGRATED_DEX_SOURCE_NAMES]).toEqual(ADAPTER_REGISTRY.map((a) => a.name))
   })
 
   it('claim string is "N integrated DEX sources" with that same N', () => {

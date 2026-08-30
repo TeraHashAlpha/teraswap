@@ -4,6 +4,12 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
 import { SUPPORT_EMAIL } from '@/lib/constants'
+import {
+  INTEGRATED_DEX_SOURCE_COUNT,
+  INTEGRATED_DEX_SOURCES_CLAIM,
+  SWAP_CHAIN_LIST_LABEL,
+  isOrderTypeLive,
+} from '@/config/product-claims'
 
 // ── Animation helpers ─────────────────────────────────────
 
@@ -226,7 +232,7 @@ export default function DocsPage() {
         >
           TeraSwap Protocol v1.0
           <br />
-          <span className="text-cream-20">Ethereum Mainnet</span>
+          <span className="text-cream-20">{SWAP_CHAIN_LIST_LABEL}</span>
         </div>
       </nav>
 
@@ -239,7 +245,7 @@ export default function DocsPage() {
           >
             <span className="h-2 w-2 rounded-full" style={{ background: '#4ADE80' }} />
             <span className="text-[11px] font-semibold uppercase tracking-wider text-cream-65">
-              Live on Ethereum Mainnet
+              Live on {SWAP_CHAIN_LIST_LABEL}
             </span>
           </div>
         </motion.div>
@@ -249,8 +255,8 @@ export default function DocsPage() {
           <SectionTitle icon="◈" title="Overview" />
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
             TeraSwap is a <strong className="text-cream">meta-aggregator</strong> for decentralized exchanges. Instant
-            swaps are live on Ethereum Mainnet. Instead of searching manually across multiple DEXs, TeraSwap queries
-            <strong className="text-cream"> up to 12 independent liquidity sources</strong> simultaneously and
+            swaps are live on {SWAP_CHAIN_LIST_LABEL}. Instead of searching manually across multiple DEXs, TeraSwap queries
+            <strong className="text-cream"> {INTEGRATED_DEX_SOURCE_COUNT} independent liquidity sources</strong> simultaneously and
             automatically routes your trade through whichever offers the best net output — accounting for gas costs,
             slippage, and pool fees.
           </p>
@@ -264,7 +270,7 @@ export default function DocsPage() {
           <div className="flex flex-wrap gap-2">
             <Tag>Non-custodial</Tag>
             <Tag>Permissionless · no KYC</Tag>
-            <Tag>Up to 12 DEX sources</Tag>
+            <Tag>{INTEGRATED_DEX_SOURCES_CLAIM}</Tag>
             <Tag>Multi-oracle verified</Tag>
             <Tag>MEV protected</Tag>
             <Tag>IP protected</Tag>
@@ -295,7 +301,7 @@ export default function DocsPage() {
         <AnimatedSection id="liquidity-sources">
           <SectionTitle icon="◉" title="Liquidity Sources" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap integrates up to 12 liquidity sources across three categories: API aggregators that
+            TeraSwap integrates {INTEGRATED_DEX_SOURCE_COUNT} liquidity sources across three categories: API aggregators that
             themselves search hundreds of pools, direct on-chain protocols, and intent-based systems. Every
             registered adapter is queried in parallel on each quote.
           </p>
@@ -470,7 +476,7 @@ export default function DocsPage() {
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
             Most MEV-protected venues quote against their own internal liquidity. That solves the MEV
             problem but caps the trade to a single source&apos;s pricing. Most general-purpose aggregators
-            do the opposite — they query 5-10 sources for the best public price but route through the
+            do the opposite — they query several venues for the best public price but route through the
             public mempool, accepting the MEV exposure as the cost of cheaper execution.
           </p>
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
@@ -665,7 +671,9 @@ export default function DocsPage() {
         {/* ═══ LIMIT ORDERS ═══ */}
         <AnimatedSection id="limit-orders">
           <SectionTitle icon="⊕" title="Limit Orders" />
-          <ComingSoonBanner note="Limit-order creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
+          {!isOrderTypeLive('limit') && (
+            <ComingSoonBanner note="Limit-order creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
+          )}
           <div className="opacity-50">
             <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
               A limit order (OrderType LIMIT) lets you set a target price; the order becomes eligible once a Chainlink
@@ -705,7 +713,9 @@ export default function DocsPage() {
         {/* ═══ STOP LOSS / TAKE PROFIT ═══ */}
         <AnimatedSection id="stop-loss">
           <SectionTitle icon="⛊" title="Stop Loss / Take Profit" />
-          <ComingSoonBanner note="Stop-loss / take-profit creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
+          {!isOrderTypeLive('stopLoss') && !isOrderTypeLive('takeProfit') && (
+            <ComingSoonBanner note="Stop-loss / take-profit creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
+          )}
           <div className="opacity-50">
             <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
               Protect your positions or lock in gains automatically. Stop-loss and take-profit are the same on-chain
@@ -748,7 +758,9 @@ export default function DocsPage() {
         {/* ═══ DCA ═══ */}
         <AnimatedSection id="dca">
           <SectionTitle icon="⟳" title="DCA (Dollar-Cost Averaging)" />
-          <ComingSoonBanner note="DCA ships with launch — it is not live yet. It rolls out first on Base (L2). The section below previews how it works." />
+          {!isOrderTypeLive('dca') && (
+            <ComingSoonBanner note="DCA ships with launch — it is not live yet. It rolls out first on Base (L2). The section below previews how it works." />
+          )}
           <div className="opacity-50">
             <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
               DCA splits a single buy into a series of smaller, scheduled purchases that run autonomously —{' '}
@@ -890,8 +902,8 @@ export default function DocsPage() {
           >
             {[
               { phase: 'Phase 1', status: 'Live', color: '#4ADE80', items: [
-                'Instant swaps on Ethereum Mainnet',
-                'Meta-aggregator with up to 12 liquidity sources',
+                `Instant swaps on ${SWAP_CHAIN_LIST_LABEL}`,
+                `Meta-aggregator with ${INTEGRATED_DEX_SOURCES_CLAIM}`,
                 'Chainlink oracle price validation (2% warn / 3% block)',
                 'DefiLlama server-side oracle validation',
                 'Cross-quote median consensus validation',

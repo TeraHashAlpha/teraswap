@@ -45,6 +45,7 @@ export function formatChainList(names: readonly string[]): string {
 
 /** (a) Count the registry itself. Never a parallel list. */
 export const INTEGRATED_DEX_SOURCE_COUNT = ADAPTER_REGISTRY.length
+export const INTEGRATED_DEX_SOURCE_NAMES: readonly string[] = ADAPTER_REGISTRY.map((a) => a.name)
 
 /** Claim string the registry proves: these adapters are integrated. */
 export const INTEGRATED_DEX_SOURCES_CLAIM = `${INTEGRATED_DEX_SOURCE_COUNT} integrated DEX sources`
