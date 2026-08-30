@@ -24,6 +24,11 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
   SWAP_CHAIN_LIST_LABEL,
 } from '@/config/product-claims'
+import { useQuote } from '@/hooks/useQuote'
+import { findToken } from '@/lib/tokens'
+import { formatUnits } from 'viem'
+import { formatDisplay } from '@/lib/format'
+import { safeBigInt } from '@/lib/utils'
 
 interface Props {
   onLaunchApp: () => void
@@ -169,13 +174,39 @@ function AnimatedCounter({
 }
 
 // ── SwapPreview ──────────────────────────────────────────
-// Static mock of the real SwapBox — 0.5 ETH → 994.68 USDC.
-// Lives in the hero's right column so first-time visitors see the
-// product immediately (Sprint 27B / Prompt 73). Clicking the Swap
-// button launches the live app via the passed onLaunchApp handler.
-// NOT functional — purely a marketing surface; no quotes, no
-// allowance, no real swap. If the mock data goes stale, edit here.
+// [feat/quote-before-wallet] A LIVE preview of the real SwapBox — 0.5 ETH →
+// a real quote for USDC, via the SAME useQuote hook SwapBox uses (never a
+// second quote implementation — the two paths would drift). Lives in the
+// hero's right column so first-time visitors see the actual product
+// immediately (Sprint 27B / Prompt 73 established the layout; the mock data
+// it originally shipped with is gone). Clicking the Swap button launches the
+// live app via the passed onLaunchApp handler. This page is the
+// highest-traffic surface in the app — /api/quote's own server-side cache
+// (see the quote route) is what keeps N anonymous visitors here from each
+// fanning out to every liquidity source.
+const LANDING_PREVIEW_AMOUNT_IN = '0.5'
+
 function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
+  const previewTokenIn = findToken('ETH')
+  const previewTokenOut = findToken('USDC')
+  const { meta, loading, error } = useQuote(
+    previewTokenIn ?? null,
+    previewTokenOut ?? null,
+    LANDING_PREVIEW_AMOUNT_IN,
+    true,
+  )
+
+  const receiveDisplay = (() => {
+    if (!meta?.best || !previewTokenOut) return null
+    const outBig = safeBigInt(meta.best.toAmount)
+    if (outBig === null) return null
+    return formatDisplay(Number(formatUnits(outBig, previewTokenOut.decimals)), 4)
+  })()
+
+  // "Compared" only claims a comparison happened once a quote has actually
+  // resolved — never while loading, and never on a failed quote.
+  const hasResolvedQuote = receiveDisplay !== null && !error
+
   return (
     <div className="mx-auto w-full max-w-sm md:max-w-[380px] lg:max-w-sm">
       <div
@@ -195,24 +226,30 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
         </div>
         <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
           <div className="flex items-center justify-between">
-            <span className="text-2xl font-bold text-cream-75" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              994.68
+            <span
+              className="text-2xl font-bold text-cream-75"
+              style={{ fontVariantNumeric: 'tabular-nums' }}
+              aria-live="polite"
+            >
+              {receiveDisplay ?? (error ? 'Unavailable' : loading ? '···' : '···')}
             </span>
             <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
               <span className="text-sm font-semibold text-cream">USDC</span>
             </div>
           </div>
         </div>
-        <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-cream-75">
-          <div className="flex justify-between">
-            <span>Compared</span>
-            <span className="font-semibold" style={{ color: '#C8B89A' }}>{INTEGRATED_DEX_SOURCE_COUNT} DEX sources</span>
+        {hasResolvedQuote && (
+          <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-cream-75">
+            <div className="flex justify-between">
+              <span>Compared</span>
+              <span className="font-semibold" style={{ color: '#C8B89A' }}>{INTEGRATED_DEX_SOURCE_COUNT} DEX sources</span>
+            </div>
+            <div className="mt-1 flex justify-between">
+              <span>Platform fee</span>
+              <span>0.1%</span>
+            </div>
           </div>
-          <div className="mt-1 flex justify-between">
-            <span>Platform fee</span>
-            <span>0.1%</span>
-          </div>
-        </div>
+        )}
         <button
           onClick={() => { playTouchMP3(); onLaunchApp() }}
           style={{ background: '#C8B89A' }}

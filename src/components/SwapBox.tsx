@@ -37,7 +37,7 @@ import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
-import { useActiveChainId } from '@/hooks/useChainId'
+import { useQuoteChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
 import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
@@ -123,13 +123,23 @@ export default function SwapBox() {
   // and any future activated L2 — drive quotes/balances instead of forcing
   // "Switch to Ethereum". On a coming-soon chain isChainActive is false, so the
   // existing coming-soon UX (banner + disabled swap) is preserved unchanged.
+  // Only meaningful once CONNECTED — there is no "wrong chain" for a browsing
+  // visitor with no wallet at all. [feat/quote-before-wallet]
   const isCorrectChain = !!chain && isChainActive(chain.id)
+  // [feat/quote-before-wallet] Quoting is a READ — it needs inputs, not an
+  // account. Chain-correctness is a wallet-action concern (can this address
+  // actually execute here?), so it only gates once a wallet is connected.
+  const isChainOkForQuote = !isConnected || isCorrectChain
 
   // [SPRINT-9F bug4] Active chain id — also feeds the chain-aware spender
   // allowlist + token remap below. Declared here so the balance query targets
   // the chain the user is actually on; switching networks now re-reads the
   // correct balance instead of the stale connected-by-default (mainnet) one.
-  const activeChainId = useActiveChainId()
+  // [feat/quote-before-wallet] useQuoteChainId (not useActiveChainId): while
+  // disconnected this follows ChainSelector's pick instead of assuming
+  // mainnet, so the quote/remap/banner below all agree with what the visitor
+  // is actually browsing.
+  const activeChainId = useQuoteChainId()
 
   // Recalculate auto-slippage when the token pair or chain changes.
   // [CHORE-STABLECOIN-CONSTANT] Membership is chain-keyed now, so the active chain is an
@@ -149,7 +159,7 @@ export default function SwapBox() {
 
   const excludeArray = useMemo(() => excludedSources.size > 0 ? Array.from(excludedSources) : undefined, [excludedSources])
   const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } =
-    useQuote(tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, excludeArray)
+    useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray)
 
   // [LP-04 / P140] Smart MEV routing — logic extracted to
   // src/lib/mev-preference.ts for direct unit testing.
@@ -255,7 +265,7 @@ export default function SwapBox() {
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
   const { splitResult, analyzing: splitAnalyzing, useSplit, toggleSplit } =
-    useSplitRoute(meta, tokenIn, tokenOut, amountIn, isConnected && isCorrectChain, activeChainId)
+    useSplitRoute(meta, tokenIn, tokenOut, amountIn, isChainOkForQuote, activeChainId)
 
   const {
     status: splitSwapStatus,

@@ -25,6 +25,11 @@ vi.mock('@/lib/kv-rate-limiter', () => ({
 }))
 vi.mock('@/lib/source-monitor', () => ({ recordSourcePing: vi.fn() }))
 vi.mock('@/lib/source-state-machine', () => ({ getAllStatuses: vi.fn().mockResolvedValue([]) }))
+// [feat/quote-before-wallet] The route now reads/writes a quote cache — stub it out
+// (always a miss) so this suite still exercises the real fetchMetaQuote/adapters path.
+vi.mock('@/lib/kv', () => ({
+  kv: { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue('OK') },
+}))
 
 // Keep the REAL ADAPTER_REGISTRY shape (all 12 incl. bebop) but make every
 // fetchQuote fail fast so no network is hit and the "no valid quotes" path runs.

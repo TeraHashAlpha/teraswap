@@ -27,6 +27,17 @@ vi.mock('@/lib/circuit-breaker', () => ({
   isSystemHalted: vi.fn().mockResolvedValue(false),
 }))
 
+// [feat/quote-before-wallet] In-memory fake standing in for Upstash — real
+// get/set/TTL semantics (good enough for these tests) without hitting a
+// real KV instance. Reset per-test in beforeEach below.
+const fakeKvStore = new Map<string, unknown>()
+vi.mock('@/lib/kv', () => ({
+  kv: {
+    get: vi.fn((key: string) => Promise.resolve(fakeKvStore.get(key) ?? null)),
+    set: vi.fn((key: string, value: unknown) => { fakeKvStore.set(key, value); return Promise.resolve('OK') }),
+  },
+}))
+
 const DEBUG_TOKEN = 'debug-quote-token-xyz'
 // A valid checksummed-looking address so the real isValidAddress passes.
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
@@ -72,6 +83,7 @@ describe('GET /api/quote — debug=sources', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.resetModules()
+    fakeKvStore.clear()
     originalToken = process.env.DEBUG_QUOTE_TOKEN
     fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
     diagnoseQuoteSourcesMock.mockResolvedValue(DIAG_RESULT)
@@ -208,5 +220,49 @@ describe('POST /api/quote — chainId coercion + sequencer mapping [E2-AUDIT]', 
     expect(body.sequencerDown).toBe(true)
     expect(body.error).toMatch(/^Base sequencer is down or recovering/i)
     expect(res.headers.get('Retry-After')).toBe('60')
+  })
+})
+
+// ── [feat/quote-before-wallet] Shared server-side quote cache ───────────────
+
+describe('GET /api/quote — shared cache [feat/quote-before-wallet acceptance 5]', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+    fakeKvStore.clear()
+    fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
+  })
+
+  it('N identical requests within the TTL produce exactly 1 upstream fetchMetaQuote call', async () => {
+    const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }
+    for (let i = 0; i < 5; i++) {
+      const res = await callGET(params)
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual(META_RESULT)
+    }
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks the first request a cache miss and subsequent identical requests a cache hit', async () => {
+    const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }
+    const first = await callGET(params)
+    expect(first.headers.get('X-Quote-Cache')).toBe('miss')
+    const second = await callGET(params)
+    expect(second.headers.get('X-Quote-Cache')).toBe('hit')
+  })
+
+  it('a different amount is a separate cache key — still fetches live', async () => {
+    await callGET({ src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' })
+    await callGET({ src: USDC, dst: WETH, amount: '1000000000000000000', chainId: '1' })
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a KV read failure fails OPEN — still returns a live quote, never a broken response', async () => {
+    const { kv } = await import('@/lib/kv')
+    vi.mocked(kv.get).mockRejectedValueOnce(new Error('upstash unreachable'))
+    const res = await callGET({ src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(META_RESULT)
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
   })
 })

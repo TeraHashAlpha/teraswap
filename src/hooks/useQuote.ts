@@ -9,7 +9,7 @@ import { logQuoteToSupabase } from '@/lib/analytics'
 import { fetchJson } from '@/lib/fetch-json'
 import { analyzeGasless } from '@/lib/gasless-engine'
 import { useEthGasCost } from './useEthGasCost'
-import { useActiveChainId } from './useChainId'
+import { useQuoteChainId } from './useChainId'
 import { isChainActive } from '@/lib/chains'
 
 /**
@@ -105,7 +105,9 @@ export function useQuote(
   // AbortController in doFetch cancels the stale in-flight request). On mainnet
   // this never changes, so quote behaviour is unchanged. End-to-end chainId →
   // /api/quote threading is deferred to the Base-activation sprint (see FEEDBACK).
-  const activeChainId = useActiveChainId()
+  // [feat/quote-before-wallet] useQuoteChainId (not useActiveChainId) — a disconnected
+  // visitor's ChainSelector pick must drive the quote, not a silent mainnet fallback.
+  const activeChainId = useQuoteChainId()
   const { estimate: estimateGasCost } = useEthGasCost()
   const [meta, setMeta] = useState<MetaQuoteResult | null>(null)
   const [loading, setLoading] = useState(false)

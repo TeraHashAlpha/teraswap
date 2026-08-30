@@ -1,5 +1,6 @@
 'use client'
 
+import { create } from 'zustand'
 import { useAccount } from 'wagmi'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
@@ -14,6 +15,43 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 export function useActiveChainId(): number {
   const { chain } = useAccount()
   return chain?.id ?? DEFAULT_CHAIN_ID
+}
+
+/**
+ * [feat/quote-before-wallet] The chain a DISCONNECTED visitor picked in
+ * ChainSelector. Wagmi has no `chain` to report without a wallet, so this
+ * tiny store is the only place that memory lives — written by ChainSelector,
+ * read by useQuoteChainId below. Global/shared (not per-component state) so
+ * the selector and the quote path agree on the same chain.
+ */
+interface DisconnectedChainSelection {
+  chainId: number | null
+  setChainId: (chainId: number | null) => void
+}
+
+export const useDisconnectedChainSelection = create<DisconnectedChainSelection>((set) => ({
+  chainId: null,
+  setChainId: (chainId) => set({ chainId }),
+}))
+
+/**
+ * [feat/quote-before-wallet] Chain id for the QUOTE/browse path only. A quote
+ * is a read, not an account action — it should reflect whatever chain a
+ * disconnected visitor is looking at, not silently assume mainnet the way
+ * useActiveChainId's fallback does for its ~15 wallet-action consumers
+ * (balances, approvals, swap execution, portfolio — all correctly mainnet-
+ * biased while there's no wallet to act with).
+ *
+ * Deliberately a SEPARATE hook from useActiveChainId, same reasoning as
+ * useResolvedChainId below: changing the shared fallback would silently
+ * change balances/approvals/portfolio behavior for every disconnected
+ * visitor, which is out of scope for a quote-before-wallet change.
+ */
+export function useQuoteChainId(): number {
+  const { chain, isConnected } = useAccount()
+  const disconnectedChainId = useDisconnectedChainSelection((s) => s.chainId)
+  if (isConnected) return chain?.id ?? DEFAULT_CHAIN_ID
+  return disconnectedChainId ?? DEFAULT_CHAIN_ID
 }
 
 /**

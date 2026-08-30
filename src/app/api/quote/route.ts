@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { bodySizeGuard } from '@/lib/body-limit'
-import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
+import { fetchMetaQuote, diagnoseQuoteSources, type MetaQuoteResult } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { SequencerDownError } from '@/lib/chains/sequencer-check'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
@@ -9,6 +9,7 @@ import { verifyBearerToken } from '@/lib/auth'
 import { DEFAULT_CHAIN_ID, getChainStatus } from '@/lib/chains'
 import { withTimeout } from '@/lib/adapters/shared'
 import { trustedClientIp } from '@/lib/trusted-ip'
+import { kv } from '@/lib/kv'
 
 /**
  * [SPRINT-9X X2] Give the quote function the SAME 60s ceiling as /api/swap (9J/J2). Previously this
@@ -38,6 +39,53 @@ function onKvTimeout<T>(fallback: T) {
   return (e: unknown): T => {
     if (e instanceof Error && e.message === 'Timeout') return fallback
     throw e
+  }
+}
+
+/**
+ * [feat/quote-before-wallet] Server-side quote cache, shared across every visitor via Upstash
+ * (not per-instance memory — Fluid Compute reuses instances, but a shared KV is what actually
+ * guarantees "N visitors, 1 upstream call" regardless of which instance serves which request).
+ *
+ * TTL chosen just under QUOTE_REFRESH_MS (15s, src/lib/constants.ts) — the client's own poll
+ * cadence — so a cache hit is never staler than what an already-open tab would show anyway on
+ * its own next tick. Keyed on the full request signature (chain + pair + amount + decimals +
+ * excludes), so it transparently collapses whichever query is currently hottest — in practice
+ * the landing page's fixed 0.5 ETH -> USDC default pair (by far the highest-traffic identical
+ * query, hit by every anonymous visitor), while distinct real-trade amounts mostly miss and fall
+ * through to a live fetch exactly as before. Fails open on any Redis error/timeout (same
+ * pattern as the halt/rate-limit gates above) — a cache outage degrades to "no caching", never
+ * to a broken quote.
+ */
+const QUOTE_CACHE_TTL_SECONDS = 12
+
+function quoteCacheKey(
+  src: string,
+  dst: string,
+  amount: string,
+  srcDecimals: number,
+  dstDecimals: number,
+  excludeSources: string[] | undefined,
+  chainId: number | undefined,
+): string {
+  const chain = chainId ?? DEFAULT_CHAIN_ID
+  const exclude = excludeSources && excludeSources.length > 0 ? [...excludeSources].sort().join(',') : ''
+  return `quote:cache:v1:${chain}:${src.toLowerCase()}:${dst.toLowerCase()}:${amount}:${srcDecimals}:${dstDecimals}:${exclude}`
+}
+
+async function getCachedQuote(key: string): Promise<MetaQuoteResult | null> {
+  try {
+    return await withTimeout(kv.get<MetaQuoteResult>(key), KV_GATE_TIMEOUT_MS)
+  } catch {
+    return null
+  }
+}
+
+async function setCachedQuote(key: string, value: MetaQuoteResult): Promise<void> {
+  try {
+    await withTimeout(kv.set(key, value, { ex: QUOTE_CACHE_TTL_SECONDS }), KV_GATE_TIMEOUT_MS)
+  } catch {
+    // Best-effort — a cache-write failure must never fail the request.
   }
 }
 
@@ -178,12 +226,18 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
   try {
     const excludeSources = excludeParam ? excludeParam.split(',').map(s => s.trim()) : undefined
     const chainId = chainIdParam ? Number(chainIdParam) : undefined
-    const result = await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId)
+
+    // [feat/quote-before-wallet] Shared server-side cache — see QUOTE_CACHE_TTL_SECONDS above.
+    const cacheKey = quoteCacheKey(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId)
+    const cached = await getCachedQuote(cacheKey)
+    const result = cached ?? await fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId)
+    if (!cached) await setCachedQuote(cacheKey, result)
 
     // Serialize BigInt-safe (toAmount is already a string in NormalizedQuote)
     return NextResponse.json(result, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
+        'X-Quote-Cache': cached ? 'hit' : 'miss',
         'X-RateLimit-Remaining': String(rateCheck.remaining),
         'X-RateLimit-Reset': String(rateCheck.resetAt),
       },

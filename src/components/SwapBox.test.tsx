@@ -334,6 +334,41 @@ describe('SwapBox — wallet disconnected', () => {
   })
 })
 
+describe('SwapBox — quote-before-wallet [feat/quote-before-wallet]', () => {
+  // [Acceptance 1] A quote is a READ — it must stay enabled without a wallet.
+  // This test FAILS if `isConnected` (or `isConnected && isCorrectChain`)
+  // returns to useQuote's 4th (enabled) argument.
+  it('enables useQuote without a connected wallet', () => {
+    mockIsConnected = false
+    renderWithProviders(<SwapBox />)
+    const lastCall = useQuoteMock.mock.calls.at(-1)!
+    expect(lastCall[3]).toBe(true)
+  })
+
+  it('enables useSplitRoute without a connected wallet', () => {
+    mockIsConnected = false
+    renderWithProviders(<SwapBox />)
+    const lastCall = useSplitRouteMock.mock.calls.at(-1)!
+    expect(lastCall[4]).toBe(true)
+  })
+
+  // [Acceptance 3] Information opens; action stays closed. useBalance must
+  // stay gated on a connected wallet regardless of the quote-enablement change.
+  it('keeps useBalance disabled without a connected wallet', () => {
+    mockIsConnected = false
+    renderWithProviders(<SwapBox />)
+    const lastCall = vi.mocked(useBalance).mock.calls.at(-1)!
+    expect(lastCall[0]).toEqual(expect.objectContaining({ query: expect.objectContaining({ enabled: false }) }))
+  })
+
+  it('keeps useBalance enabled once a wallet is connected on the correct chain (unchanged behavior)', () => {
+    mockIsConnected = true
+    renderWithProviders(<SwapBox />)
+    const lastCall = vi.mocked(useBalance).mock.calls.at(-1)!
+    expect(lastCall[0]).toEqual(expect.objectContaining({ query: expect.objectContaining({ enabled: true }) }))
+  })
+})
+
 describe('SwapBox — DigitRoller visibility [P195]', () => {
   it('shows the DigitRoller when a quote value exists even during a refresh poll', async () => {
     // meta.best present AND loading:true → a 15s refresh poll is in flight
