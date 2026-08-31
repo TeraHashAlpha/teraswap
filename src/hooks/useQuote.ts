@@ -163,13 +163,24 @@ export function useQuote(
   // backoff interval. Called when entering or leaving backoff. Reads
   // from doFetchRef so the timer always uses the latest closure even
   // though this helper is invoked from inside doFetch's own body.
+  // [fix/quote-poll-visibility] A backoff-triggering response can resolve
+  // after the tab was hidden (in-flight fetches are never aborted on hide —
+  // see the visibility effect below). In that case don't rearm the interval
+  // — it would just be cleared again by the hide path having already run, or
+  // worse, tick in the background. The visibilitychange handler restarts
+  // polling (at whatever currentIntervalMsRef now holds) when the tab comes
+  // back.
   const rearmPollTimer = useCallback(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current)
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    setCountdown(Math.ceil(currentIntervalMsRef.current / 1000))
+    if (typeof document !== 'undefined' && document.hidden) return
     intervalRef.current = setInterval(
       () => doFetchRef.current?.(),
       currentIntervalMsRef.current,
     )
-    setCountdown(Math.ceil(currentIntervalMsRef.current / 1000))
   }, [])
 
   const doFetch = useCallback(async () => {
@@ -328,17 +339,16 @@ export function useQuote(
       return
     }
 
-    doFetch()
-    intervalRef.current = setInterval(doFetch, currentIntervalMsRef.current)
-    countdownRef.current = setInterval(() => {
-      // [hotfix] Read the live interval so the countdown reflects the
-      // current backoff window (rolling over to 120s when rate-limited).
-      setCountdown((prev) => (prev <= 1
-        ? Math.ceil(currentIntervalMsRef.current / 1000)
-        : prev - 1))
-    }, 1000)
-
-    return () => {
+    // [fix/quote-poll-visibility] Quotes now render for anonymous visitors
+    // (feat/quote-before-wallet), so this poll runs on the landing page for
+    // every visitor, not just a connected wallet mid-swap. A hidden tab has
+    // nobody reading the number, so both the poll and the 1s countdown
+    // ticker (which exists purely to paint that number) are pure cost with
+    // no payoff — start/stop both with the Page Visibility API rather than
+    // a focus/mouse heuristic, which fires on unrelated events (e.g.
+    // switching windows on a multi-monitor setup while still "looking" at
+    // the tab isn't hidden; alt-tabbing away is).
+    const stopTimers = () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
@@ -347,6 +357,62 @@ export function useQuote(
         clearInterval(countdownRef.current)
         countdownRef.current = null
       }
+    }
+
+    // [fix/quote-poll-visibility] Idempotent: calls stopTimers() first so
+    // two consecutive "visible" signals (e.g. a bfcache restore firing both
+    // `visibilitychange` and `pageshow`) can't overwrite intervalRef/
+    // countdownRef with fresh handles while the previous pair is still
+    // running — that would orphan the old interval with no reference left
+    // to clear it, doubling the poll permanently. Don't rely on the caller
+    // only ever invoking this on a hidden→visible transition.
+    const startTimers = () => {
+      stopTimers()
+      doFetchRef.current?.()
+      intervalRef.current = setInterval(() => doFetchRef.current?.(), currentIntervalMsRef.current)
+      countdownRef.current = setInterval(() => {
+        // [hotfix] Read the live interval so the countdown reflects the
+        // current backoff window (rolling over to 120s when rate-limited).
+        setCountdown((prev) => (prev <= 1
+          ? Math.ceil(currentIntervalMsRef.current / 1000)
+          : prev - 1))
+      }, 1000)
+    }
+
+    // [fix/quote-poll-visibility] Resuming fetches IMMEDIATELY (not waiting
+    // out the remaining interval) so a returning user never stares at a
+    // stale quote. Thundering-herd note (FEEDBACK): this hook has no
+    // client-side jitter on that resume fetch — coalescing already happens
+    // server-side. /api/quote's process-local dampener (route.ts,
+    // DAMPENER_TTL_MS=5s) coalesces concurrent requests for the same
+    // (pair, amount, chain) key within a 5s window into one upstream call,
+    // and the KV cache (12s TTL) serves identical requests beyond that
+    // without hitting a source at all. Many tabs/devices for the same pair
+    // waking at once collapses into that existing cache path — untouched
+    // per the Do NOT list — rather than a new client-side stagger.
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopTimers()
+      } else {
+        startTimers()
+      }
+    }
+
+    // [fix/quote-poll-visibility] This effect only runs client-side (React
+    // effects never run during SSR), so `document` is always defined here —
+    // unlike rearmPollTimer, which is also invoked synchronously from
+    // inside doFetch and so keeps its own `typeof document` guard. No such
+    // dead branch here: an `undefined` document would make the next line
+    // (addEventListener) throw regardless, so a guard that skipped
+    // startTimers() but not that call would be false safety.
+    if (!document.hidden) {
+      startTimers()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      stopTimers()
       // [P208] Cancel any pending request so an unmount (or enabled flip)
       // can't resolve into a state update on a torn-down hook.
       if (abortControllerRef.current) {
