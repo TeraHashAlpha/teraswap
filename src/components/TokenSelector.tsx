@@ -10,7 +10,7 @@ import CategoryChips from './CategoryChips'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { getChainTokenList, getPopularTokens, getSearchCatalog, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
+import { getChainTokenList, getPopularTokens, getSearchCatalog, rankSearchMatches, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
@@ -89,7 +89,9 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
           t.name.toLowerCase().includes(q) ||
           t.address.toLowerCase().includes(q)),
     )
-    return matches.slice(0, SEARCH_RESULT_LIMIT)
+    // [fix/token-search-ranking] Exact symbol match first, then more `sources` — see
+    // rankSearchMatches. Ranking never filters, so lookalikes stay reachable, just lower.
+    return rankSearchMatches(matches, q).slice(0, SEARCH_RESULT_LIMIT)
   }, [isSearching, q, disabledAddress, activeChainId, activeCategory, hideNativeInput])
 
   // Tokens with balance — sorted highest first, shown above categories

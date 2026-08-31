@@ -332,6 +332,29 @@ export function getSearchCatalog(chainId: number): Token[] {
 }
 
 /**
+ * [fix/token-search-ranking] Ranks token search matches so an EXACT case-insensitive
+ * symbol match (e.g. "USDC") outranks a substring match (e.g. "aUSDC", "waEthUSDC"),
+ * and among equally-tiered matches, more `sources` (catalog-pipeline cross-verification
+ * count) ranks higher. Both signals come from the catalog rows themselves — never a
+ * hardcoded symbol or address list, so any lookalike is ranked correctly by construction.
+ * Does not filter: every match stays in the returned array, just reordered.
+ */
+export function rankSearchMatches<T extends { symbol: string; sources?: string[] }>(
+  matches: T[],
+  query: string,
+): T[] {
+  const q = query.toLowerCase()
+  return [...matches].sort((a, b) => {
+    const aExact = a.symbol.toLowerCase() === q
+    const bExact = b.symbol.toLowerCase() === q
+    if (aExact !== bExact) return aExact ? -1 : 1
+    const aSources = a.sources?.length ?? 0
+    const bSources = b.sources?.length ?? 0
+    return bSources - aSources
+  })
+}
+
+/**
  * [SPRINT-9E] Re-resolve a selected token to the active chain's catalog BY SYMBOL,
  * so a swap quotes the chain's REAL address (e.g. mainnet USDC 0xA0b8… → Base USDC
  * 0x833589…). Returns the original token unchanged when the same-symbol token on

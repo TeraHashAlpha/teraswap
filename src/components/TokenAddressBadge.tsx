@@ -65,7 +65,7 @@ export default function TokenAddressBadge({
     <span className="inline-flex items-center gap-1">
       {/* Verified / Imported indicator */}
       {verified ? (
-        <span title="Verified — listed in TeraSwap default tokens" className="text-emerald-500">
+        <span title="Verified — identity cross-checked across catalog sources. Not an endorsement: receipt/wrapped tokens (e.g. aUSDC) are verified too." className="text-emerald-500">
           {/* Green shield with a centered white check (crisp inline SVG, not an emoji). */}
           <svg className="h-3.5 w-3.5 align-middle" viewBox="0 0 24 24" aria-hidden="true">
             <path
