@@ -348,18 +348,6 @@ export function useQuote(
     // a focus/mouse heuristic, which fires on unrelated events (e.g.
     // switching windows on a multi-monitor setup while still "looking" at
     // the tab isn't hidden; alt-tabbing away is).
-    const startTimers = () => {
-      doFetchRef.current?.()
-      intervalRef.current = setInterval(() => doFetchRef.current?.(), currentIntervalMsRef.current)
-      countdownRef.current = setInterval(() => {
-        // [hotfix] Read the live interval so the countdown reflects the
-        // current backoff window (rolling over to 120s when rate-limited).
-        setCountdown((prev) => (prev <= 1
-          ? Math.ceil(currentIntervalMsRef.current / 1000)
-          : prev - 1))
-      }, 1000)
-    }
-
     const stopTimers = () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
@@ -369,6 +357,26 @@ export function useQuote(
         clearInterval(countdownRef.current)
         countdownRef.current = null
       }
+    }
+
+    // [fix/quote-poll-visibility] Idempotent: calls stopTimers() first so
+    // two consecutive "visible" signals (e.g. a bfcache restore firing both
+    // `visibilitychange` and `pageshow`) can't overwrite intervalRef/
+    // countdownRef with fresh handles while the previous pair is still
+    // running — that would orphan the old interval with no reference left
+    // to clear it, doubling the poll permanently. Don't rely on the caller
+    // only ever invoking this on a hidden→visible transition.
+    const startTimers = () => {
+      stopTimers()
+      doFetchRef.current?.()
+      intervalRef.current = setInterval(() => doFetchRef.current?.(), currentIntervalMsRef.current)
+      countdownRef.current = setInterval(() => {
+        // [hotfix] Read the live interval so the countdown reflects the
+        // current backoff window (rolling over to 120s when rate-limited).
+        setCountdown((prev) => (prev <= 1
+          ? Math.ceil(currentIntervalMsRef.current / 1000)
+          : prev - 1))
+      }, 1000)
     }
 
     // [fix/quote-poll-visibility] Resuming fetches IMMEDIATELY (not waiting
@@ -390,7 +398,14 @@ export function useQuote(
       }
     }
 
-    if (typeof document === 'undefined' || !document.hidden) {
+    // [fix/quote-poll-visibility] This effect only runs client-side (React
+    // effects never run during SSR), so `document` is always defined here —
+    // unlike rearmPollTimer, which is also invoked synchronously from
+    // inside doFetch and so keeps its own `typeof document` guard. No such
+    // dead branch here: an `undefined` document would make the next line
+    // (addEventListener) throw regardless, so a guard that skipped
+    // startTimers() but not that call would be false safety.
+    if (!document.hidden) {
       startTimers()
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)

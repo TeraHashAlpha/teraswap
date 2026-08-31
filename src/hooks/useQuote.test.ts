@@ -520,6 +520,38 @@ describe('useQuote — visibility-aware polling', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3)
   })
 
+  it('does NOT double the poll interval when "visible" fires twice in a row (bfcache/pageshow path)', async () => {
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    const fetchSpy = mockFetchSuccess()
+
+    renderHook(() => useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // Two consecutive hidden=false visibilitychange signals — e.g. a
+    // bfcache restore firing both `visibilitychange` and `pageshow` mapped
+    // to the same handler — must not stack a second interval on top of
+    // the first.
+    await act(async () => {
+      setHidden(false)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => {
+      setHidden(false)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fetchSpy.mockClear()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS)
+    })
+    // A single active interval fires once per QUOTE_REFRESH_MS. A leaked
+    // duplicate would fire twice.
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('stops the poll interval and the countdown ticker (no discarded timers) once the tab hides', async () => {
     Object.defineProperty(document, 'hidden', { value: false, configurable: true })
     mockFetchSuccess()
