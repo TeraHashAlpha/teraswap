@@ -127,21 +127,20 @@ describe('LandingPage — SwapPreview follows the widget\'s chain [fix/landing-p
     expect(tokenOut?.address.toLowerCase()).toBe(baseUsdc?.address.toLowerCase())
   })
 
-  it('[acceptance 3] Arbitrum — ETH has no catalog entry (fall-through): renders the honest unavailable state and fires no quote', () => {
+  it('[acceptance 3] Arbitrum — native ETH resolves via the shared NATIVE_ETH sentinel, same as mainnet/Base', () => {
     mockChainId = 42161
+    useQuoteMock.mockClear()
     render(<LandingPage onLaunchApp={vi.fn()} />)
 
-    // Confirms the premise: Arbitrum's catalog genuinely has no 'ETH' entry today.
-    expect(getChainTokenList(42161).some((t) => t.symbol.toLowerCase() === 'eth')).toBe(false)
-
-    // The ETH leg falls through (no Arbitrum catalog entry) and must not be quoted with
-    // the mainnet address — tokenIn is null. USDC does resolve on Arbitrum, but with no
-    // honest ETH leg the pair as a whole is unavailable: `enabled` is false, so useQuote
-    // fires no request regardless of the USDC leg resolving on its own.
-    const [tokenIn, , , enabled] = useQuoteMock.mock.calls[0]
-    expect(tokenIn).toBeNull()
-    expect(enabled).toBe(false)
-    expect(screen.getByText('Unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('Compared')).not.toBeInTheDocument()
+    // [fix/arbitrum-native-eth] Arbitrum's catalog now carries a native-ETH entry (added
+    // directly in tokens.ts, mirroring mainnet/Base) — the fall-through this test used to
+    // pin no longer applies.
+    const expectedEth = getChainTokenList(42161).find((t) => t.symbol.toLowerCase() === 'eth')
+    const expectedUsdc = getChainTokenList(42161).find((t) => t.symbol.toLowerCase() === 'usdc')
+    expect(expectedEth).toBeDefined()
+    expect(useQuoteMock).toHaveBeenCalled()
+    const [tokenIn, tokenOut] = useQuoteMock.mock.calls[0]
+    expect(tokenIn?.address.toLowerCase()).toBe(expectedEth?.address.toLowerCase())
+    expect(tokenOut?.address.toLowerCase()).toBe(expectedUsdc?.address.toLowerCase())
   })
 })

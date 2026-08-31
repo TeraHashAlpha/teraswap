@@ -27,6 +27,7 @@
  * token-catalog-json.test.ts.
  */
 import { DEFAULT_TOKENS, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
+import { NATIVE_ETH } from '@/lib/constants'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
 import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
 import { isStablecoinCategorySymbol } from './stablecoins'
@@ -148,18 +149,45 @@ function toChainToken(t: Token): ChainToken {
 // populating this catalog is additive only, see arbitrum-catalog.ts for the full rationale.
 // [CHORE-ARBITRUM-UI-POLISH] `verified` carries through from the manifest-sourced catalog
 // (arbitrum-catalog.generated.ts) the same way BASE_FULL carries the pipeline's `verified`.
-const ARBITRUM_FULL: ChainToken[] = ARBITRUM_CATALOG.map((t): ChainToken => ({
-  address: t.address,
-  symbol: t.key,
-  name: t.name,
-  decimals: t.decimals,
-  logoURI: CORE_LOCAL_LOGO[t.key] ?? '',
+//
+// [fix/arbitrum-native-eth] Native ETH is prepended here — NOT in arbitrum-catalog.generated.ts
+// or ARBITRUM-ADDRESS-MANIFEST.json, since a native asset has no ERC-20 contract and so can
+// never appear in a manifest built from on-chain symbol()/decimals() reads. It satisfies the
+// CHORE-47C-ARBITRUM-CATALOG launch rule (launch set ⊆ Chainlink-feed-covered set):
+// getChainlinkFeed maps NATIVE_ETH on an L2 to that chain's nativeCurrency.wrappedAddress,
+// which for 42161 is the WETH address already covered by the WETH → ETH/USD feed
+// (chainlink-feeds.ts, pinned by the "native ETH sentinel maps through..." test). Treatment
+// mirrors mainnet (DEFAULT_TOKENS' first entry) and Base (GENERATED_TOKEN_CATALOG[8453]'s
+// sentinel row, sources: ['native']): address is the shared NATIVE_ETH sentinel (no chain-
+// specific hex), category 'Native', the bundled local logo, and popular/suggested/verified
+// all true — listed first, same as both other chains.
+const ARBITRUM_NATIVE_ETH: ChainToken = {
+  address: NATIVE_ETH,
+  symbol: 'ETH',
+  name: 'Ethereum',
+  decimals: 18,
+  logoURI: CORE_LOCAL_LOGO.ETH,
   popular: true,
   suggested: true,
-  verified: t.verified,
-  sources: ['manifest'],
-  category: t.key === 'WETH' ? 'Native' : isStablecoinCategorySymbol(t.key, 42161) ? 'Stablecoin' : t.key === 'WBTC' ? 'Wrapped BTC' : undefined,
-}))
+  verified: true,
+  sources: ['native'],
+  category: 'Native',
+}
+const ARBITRUM_FULL: ChainToken[] = [
+  ARBITRUM_NATIVE_ETH,
+  ...ARBITRUM_CATALOG.map((t): ChainToken => ({
+    address: t.address,
+    symbol: t.key,
+    name: t.name,
+    decimals: t.decimals,
+    logoURI: CORE_LOCAL_LOGO[t.key] ?? '',
+    popular: true,
+    suggested: true,
+    verified: t.verified,
+    sources: ['manifest'],
+    category: t.key === 'WETH' ? 'Native' : isStablecoinCategorySymbol(t.key, 42161) ? 'Stablecoin' : t.key === 'WBTC' ? 'Wrapped BTC' : undefined,
+  })),
+]
 
 export const CHAIN_TOKENS: Record<number, ChainToken[]> = {
   1: DEFAULT_TOKENS.map(toChainToken),

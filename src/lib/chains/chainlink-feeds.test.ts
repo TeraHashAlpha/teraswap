@@ -68,6 +68,9 @@ describe('chainlink-feeds — Arbitrum (42161) [CHORE-47B-ARBITRUM-ADDRESS-REMED
 
   it('native ETH sentinel maps through the wrapped-native (WETH) feed on Arbitrum', () => {
     const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+    // [fix/arbitrum-native-eth] L-01 pin: the WETH-keyed feed must actually exist (non-null),
+    // not just happen to equal another null.
+    expect(getChainlinkFeed(NATIVE_ETH, 42161)).not.toBeNull()
     expect(getChainlinkFeed(NATIVE_ETH, 42161)).toBe(getChainlinkFeed(ARBITRUM_TOKENS.WETH, 42161))
   })
 
