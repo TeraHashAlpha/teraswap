@@ -11,11 +11,25 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
+import { ADAPTER_REGISTRY } from '@/lib/adapters'
 import SourceToggle, { TOGGLEABLE_SOURCES } from './SourceToggle'
 
 describe('SourceToggle — list completeness [SPRINT-9F]', () => {
   it('includes Bebop (the 12th source) so it can be disabled', () => {
     expect(TOGGLEABLE_SOURCES).toContain('bebop')
+  })
+
+  it('never silently diverges from ADAPTER_REGISTRY — every adapter is toggleable unless explicitly excluded', () => {
+    // Odos is the only adapter currently held out, and only because it's
+    // permanently disabled (vendor shutdown 2026-07-30). Any other
+    // ADAPTER_REGISTRY name that isn't in TOGGLEABLE_SOURCES means the
+    // exclusion set in SourceToggle.tsx needs updating (or the source was
+    // dropped by mistake, as happened to Bebop in SPRINT-9F).
+    const registryNames = ADAPTER_REGISTRY.map(a => a.name)
+    const explicitlyExcluded = new Set(['odos'])
+    const expectedToggleable = registryNames.filter(name => !explicitlyExcluded.has(name))
+
+    expect(TOGGLEABLE_SOURCES.sort()).toEqual(expectedToggleable.sort())
   })
 
   it('lists exactly the 11 active ADAPTER_REGISTRY sources (no alias/pseudo-source)', () => {
