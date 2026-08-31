@@ -369,6 +369,30 @@ describe('useQuote — [P208] AbortController', () => {
     expect(result.current.meta).not.toBeNull() // prior pair's quote retained
   })
 
+  it('[fix/quote-identity-loop, acceptance 2] does NOT refetch when a caller hands a structurally identical but newly-allocated token object', async () => {
+    const fetchSpy = mockFetchSuccess()
+    const { rerender } = renderHook(
+      ({ tin, tout }: { tin: Token; tout: Token }) =>
+        useQuote(tin, tout, '1', true, undefined),
+      { initialProps: { tin: TOKEN_IN, tout: TOKEN_OUT } },
+    )
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+
+    // A fresh object with the SAME address/decimals — e.g. getChainTokenList()
+    // rebuilding the catalog via .map() every call. Object identity differs;
+    // the values that actually determine a quote do not.
+    const equivalentTokenIn: Token = { ...TOKEN_IN }
+    const equivalentTokenOut: Token = { ...TOKEN_OUT }
+    expect(equivalentTokenIn).not.toBe(TOKEN_IN)
+
+    for (let i = 0; i < 5; i++) {
+      rerender({ tin: { ...equivalentTokenIn }, tout: { ...equivalentTokenOut } })
+    }
+    await flush()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('cleans up on unmount — aborts the pending request', async () => {
     const pending = new Promise<Response>(() => {}) // never resolves
     const fetchSpy = vi.spyOn(global, 'fetch').mockReturnValue(pending)

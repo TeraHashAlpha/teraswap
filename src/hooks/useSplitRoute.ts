@@ -71,7 +71,11 @@ export function useSplitRoute(
     // If input token is a stablecoin on this chain, input amount ≈ USD
     if (isUsdStablecoin(tokenIn.symbol, chainId)) return inAmount
     return null
-  }, [meta, tokenIn, tokenOut, amountIn, chainId])
+    // [fix/quote-identity-loop] Keyed on token VALUES, not object identity — see useQuote.ts.
+    // This memo doesn't itself loop (its output is stable across equivalent-object renders,
+    // so tradeAboveThreshold below never flips), but it's the same anti-pattern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta, tokenIn?.symbol, tokenOut?.symbol, tokenOut?.decimals, amountIn, chainId])
 
   const tradeAboveThreshold = executionPriceUsd !== null && executionPriceUsd >= SPLIT_MIN_USD
 
