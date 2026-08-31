@@ -18,11 +18,15 @@ const manifest = JSON.parse(
 ) as { entries: Array<{ category: string; key: string; address: string; expectDecimals: number }> }
 
 const LAUNCH_SYMBOLS = ['WETH', 'USDC', 'USDT', 'DAI', 'WBTC']
+// [fix/arbitrum-native-eth] Native ETH added directly in tokens.ts (not the manifest — a
+// native asset has no ERC-20 contract to manifest). Manifest-derived assertions below stay
+// scoped to LAUNCH_SYMBOLS; catalog-wide assertions grow to 6.
+const CATALOG_SYMBOLS = ['ETH', ...LAUNCH_SYMBOLS]
 
 describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
-  it('CHAIN_TOKENS[42161] is exactly the 5-token launch set (adding a 6th requires updating this test)', () => {
-    expect(CHAIN_TOKENS[42161]).toHaveLength(5)
-    expect(new Set(CHAIN_TOKENS[42161].map((t) => t.symbol))).toEqual(new Set(LAUNCH_SYMBOLS))
+  it('CHAIN_TOKENS[42161] is the 5-token manifest launch set plus native ETH (adding a 7th requires updating this test)', () => {
+    expect(CHAIN_TOKENS[42161]).toHaveLength(6)
+    expect(new Set(CHAIN_TOKENS[42161].map((t) => t.symbol))).toEqual(new Set(CATALOG_SYMBOLS))
   })
 
   it('does NOT include wstETH (deferred, owner decision — no Chainlink feed in the manifest)', () => {
@@ -42,11 +46,12 @@ describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
     }
   })
 
-  it('getPopularTokens(42161) resolves the 5-token set (Preview smoke can find WETH→USDC)', () => {
+  it('getPopularTokens(42161) resolves the 6-token set (Preview smoke can find WETH→USDC)', () => {
     const popular = getPopularTokens(42161)
-    expect(popular).toHaveLength(5)
+    expect(popular).toHaveLength(6)
     expect(popular.some((t) => t.symbol === 'WETH')).toBe(true)
     expect(popular.some((t) => t.symbol === 'USDC')).toBe(true)
+    expect(popular.some((t) => t.symbol === 'ETH')).toBe(true)
   })
 
   it('getChainToken resolves each of the 5 tokens by address', () => {
@@ -57,7 +62,10 @@ describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
 
   it('getChainTokenList(42161) carries decimals + category through to the rich Token shape', () => {
     const list = getChainTokenList(42161)
-    expect(list).toHaveLength(5)
+    expect(list).toHaveLength(6)
+    const eth = list.find((t) => t.symbol === 'ETH')!
+    expect(eth.decimals).toBe(18)
+    expect(eth.category).toBe('Native')
     const weth = list.find((t) => t.symbol === 'WETH')!
     expect(weth.decimals).toBe(18)
     expect(weth.category).toBe('Native')

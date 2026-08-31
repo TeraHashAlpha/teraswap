@@ -122,7 +122,9 @@ describe('Arbitrum (42161) — CATALOG addresses match the manifest [CHORE-47C-A
     },
   )
 
-  it('the catalog is EXACTLY the 5-token launch set — a 6th token requires updating this test', () => {
-    expect(CHAIN_TOKENS[42161]).toHaveLength(5)
+  it('the catalog is EXACTLY the 5 manifest tokens plus native ETH — a 7th requires updating this test', () => {
+    // [fix/arbitrum-native-eth] Native ETH is added directly in tokens.ts, not the manifest —
+    // a native asset has no ERC-20 contract to manifest. See arbitrum-catalog.test.ts.
+    expect(CHAIN_TOKENS[42161]).toHaveLength(6)
   })
 })

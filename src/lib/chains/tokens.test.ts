@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest'
 import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl } from './tokens'
 import { DEFAULT_TOKENS, findToken, addCustomToken } from '@/lib/tokens'
+import { NATIVE_ETH } from '@/lib/constants'
+import { getChainlinkFeed } from './chainlink-feeds'
 
 describe('chains/tokens [P221]', () => {
   it('returns Base popular tokens for chainId 8453', () => {
@@ -30,6 +32,24 @@ describe('chains/tokens [P221]', () => {
   it('getChainToken returns null for an unknown address', () => {
     expect(getChainToken('0xdeadbeef00000000000000000000000000000000', 8453)).toBeNull()
     expect(getChainToken('0x1111111111111111111111111111111111111111', 1)).toBeNull()
+  })
+})
+
+// [fix/arbitrum-native-eth] CHORE-47C-ARBITRUM-CATALOG had no native ETH row (a native asset
+// has no manifest entry by construction). Added directly in tokens.ts, mirroring mainnet/Base.
+describe('Arbitrum (42161) native ETH [fix/arbitrum-native-eth]', () => {
+  it('getChainTokenList includes native ETH as the shared NATIVE_ETH sentinel (no chain-specific hex)', () => {
+    const eth = getChainTokenList(42161).find((t) => t.symbol === 'ETH')
+    expect(eth).toBeDefined()
+    expect(eth?.address).toBe(NATIVE_ETH)
+    expect(eth?.category).toBe('Native')
+  })
+
+  it('L-01: getChainlinkFeed(NATIVE_ETH, 42161) is non-null and equals the WETH-keyed feed', () => {
+    const wethFeed = getChainlinkFeed('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 42161)
+    const ethFeed = getChainlinkFeed(NATIVE_ETH, 42161)
+    expect(ethFeed).not.toBeNull()
+    expect(ethFeed).toBe(wethFeed)
   })
 })
 
