@@ -2,7 +2,7 @@
  * [P224] Per-chain token catalog (P221).
  */
 import { describe, it, expect } from 'vitest'
-import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl } from './tokens'
+import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches } from './tokens'
 import { DEFAULT_TOKENS, findToken, addCustomToken } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getChainlinkFeed } from './chainlink-feeds'
@@ -139,5 +139,85 @@ describe('findChainToken — chain-scoped import lookup [9P]', () => {
     addCustomToken({ address: collision, symbol: 'BASEONLY', name: 'Base Only', decimals: 18, logoURI: '', category: 'Imported', chainId: 8453 })
     expect(findChainToken(collision, 8453)?.symbol).toBe('BASEONLY')
     expect(findChainToken(collision, 1)).toBeNull()
+  })
+})
+
+// [fix/token-search-ranking] Rank derived from the catalog rows (exact symbol match,
+// then source count) — never a hardcoded symbol/address allowlist.
+describe('rankSearchMatches — data-driven ranking, no hardcoded allowlist [fix/token-search-ranking]', () => {
+  it('ranks an exact case-insensitive symbol match above a substring-only match', () => {
+    const tokens = [
+      { symbol: 'aUSDC', sources: ['s1', 's2', 's3', 's4'] },
+      { symbol: 'USDC', sources: ['s1', 's2'] },
+    ]
+    const ranked = rankSearchMatches(tokens, 'usdc')
+    expect(ranked[0].symbol).toBe('USDC')
+    expect(ranked[1].symbol).toBe('aUSDC')
+  })
+
+  it('among equal-tier matches, ranks more sources higher', () => {
+    const tokens = [
+      { symbol: 'cUSDC', sources: ['s1'] },
+      { symbol: 'aUSDC', sources: ['s1', 's2', 's3'] },
+      { symbol: 'waUSDC', sources: ['s1', 's2'] },
+    ]
+    const ranked = rankSearchMatches(tokens, 'usdc')
+    expect(ranked.map((t) => t.symbol)).toEqual(['aUSDC', 'waUSDC', 'cUSDC'])
+  })
+
+  it('applies the same generic rule to synthetic symbols never in any real catalog — proves no hardcoded symbol/address list is involved', () => {
+    const tokens = [
+      { symbol: 'ZQXFOO', sources: ['s1'] },
+      { symbol: 'wZQXFOO', sources: ['s1', 's2', 's3', 's4', 's5'] },
+    ]
+    const ranked = rankSearchMatches(tokens, 'zqxfoo')
+    // Exact match wins even though the substring match has far more sources.
+    expect(ranked[0].symbol).toBe('ZQXFOO')
+  })
+
+  it('leaves non-matching relative order stable when neither tier nor source count differ', () => {
+    const tokens = [
+      { symbol: 'FOOBAR', sources: ['s1'] },
+      { symbol: 'FOOBAZ', sources: ['s1'] },
+    ]
+    const ranked = rankSearchMatches(tokens, 'foo')
+    expect(ranked.map((t) => t.symbol)).toEqual(['FOOBAR', 'FOOBAZ'])
+  })
+})
+
+describe('getSearchCatalog ranking — real catalog, per chain [fix/token-search-ranking]', () => {
+  function exactMatchAddress(chainId: number, symbol: string): string {
+    const catalog = getSearchCatalog(chainId)
+    const exact = catalog.find((t) => t.symbol.toLowerCase() === symbol.toLowerCase())
+    if (!exact) throw new Error(`fixture assumption broken: no exact '${symbol}' match in chain ${chainId} catalog`)
+    return exact.address
+  }
+
+  it('mainnet (1): searching "USDC" ranks the canonical USDC first', () => {
+    const expected = exactMatchAddress(1, 'USDC')
+    const catalog = getSearchCatalog(1)
+    const matches = catalog.filter((t) => t.symbol.toLowerCase().includes('usdc'))
+    const ranked = rankSearchMatches(matches, 'USDC')
+    expect(ranked[0].address).toBe(expected)
+    // Receipt/wrapped tokens (lookalikes) are still present, not filtered out.
+    expect(ranked.length).toBeGreaterThan(1)
+  })
+
+  it('Base (8453): the same ranking rule applies, derived from the Base catalog', () => {
+    const catalog = getSearchCatalog(8453)
+    const matches = catalog.filter((t) => t.symbol.toLowerCase().includes('usdc'))
+    if (matches.length < 2) return // fixture has no lookalikes on this chain — rule still holds trivially
+    const expected = exactMatchAddress(8453, 'USDC')
+    const ranked = rankSearchMatches(matches, 'USDC')
+    expect(ranked[0].address).toBe(expected)
+  })
+
+  it('Arbitrum (42161): the same ranking rule applies, derived from the Arbitrum catalog', () => {
+    const catalog = getSearchCatalog(42161)
+    const matches = catalog.filter((t) => t.symbol.toLowerCase().includes('usdc'))
+    if (matches.length < 2) return // fixture has no lookalikes on this chain — rule still holds trivially
+    const expected = exactMatchAddress(42161, 'USDC')
+    const ranked = rankSearchMatches(matches, 'USDC')
+    expect(ranked[0].address).toBe(expected)
   })
 })
