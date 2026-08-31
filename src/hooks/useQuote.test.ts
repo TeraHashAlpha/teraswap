@@ -68,6 +68,7 @@ vi.mock('@/lib/analytics', () => ({
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useQuote } from './useQuote'
 import type { Token } from '@/lib/tokens'
+import { QUOTE_REFRESH_MS } from '@/lib/constants'
 
 const TOKEN_IN: Token = {
   address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
@@ -407,5 +408,145 @@ describe('useQuote — [P208] AbortController', () => {
 
     unmount()
     expect(signal?.aborted).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [fix/quote-poll-visibility] Page Visibility API — suspend/resume poll
+// ─────────────────────────────────────────────────────────────
+describe('useQuote — visibility-aware polling', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    // Restore jsdom's default so other describe blocks in this file (real
+    // timers, no visibility overrides) aren't affected by a leaked stub.
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+  })
+
+  function setHidden(hidden: boolean) {
+    Object.defineProperty(document, 'hidden', { value: hidden, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  it('[acceptance 1] fires zero fetches across N poll intervals while the document is hidden', async () => {
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true })
+    const fetchSpy = mockFetchSuccess()
+
+    renderHook(() => useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS * 4)
+    })
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('[acceptance 2] becoming visible triggers exactly one immediate fetch, not zero and not two', async () => {
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true })
+    const fetchSpy = mockFetchSuccess()
+
+    renderHook(() => useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    await act(async () => {
+      setHidden(false)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // Advancing less than a full interval must not add a second fetch —
+    // the resume fetch does not also rearm an interval that fires again
+    // immediately.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS - 1000)
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('[acceptance 3] a quote already in flight when the tab hides still resolves and updates state', async () => {
+    let resolveFetch: ((r: Response) => void) | undefined
+    const pending = new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })
+    vi.spyOn(global, 'fetch').mockReturnValueOnce(pending)
+
+    const { result } = renderHook(() =>
+      useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.loading).toBe(true)
+
+    // Hide the tab while the request is still on the wire — the in-flight
+    // fetch is never aborted on hide, only future scheduling stops.
+    await act(async () => {
+      setHidden(true)
+    })
+
+    await act(async () => {
+      resolveFetch?.(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.meta).not.toBeNull()
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('[acceptance 4] a visible tab repeats polling every QUOTE_REFRESH_MS unchanged from today\'s cadence', async () => {
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    const fetchSpy = mockFetchSuccess()
+
+    renderHook(() => useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS)
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS)
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops the poll interval and the countdown ticker (no discarded timers) once the tab hides', async () => {
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    mockFetchSuccess()
+
+    const { result } = renderHook(() =>
+      useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.countdown).toBe(QUOTE_REFRESH_MS / 1000)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    const countdownAtHide = result.current.countdown
+    expect(countdownAtHide).toBeLessThan(QUOTE_REFRESH_MS / 1000)
+
+    await act(async () => {
+      setHidden(true)
+    })
+
+    // Advancing time while hidden must not change the countdown — the
+    // ticker itself is stopped, not just the fetch.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.countdown).toBe(countdownAtHide)
   })
 })
