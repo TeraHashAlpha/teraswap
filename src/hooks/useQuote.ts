@@ -288,8 +288,27 @@ export function useQuote(
         setLoading(false)
       }
     }
+  // [fix/quote-identity-loop] Keyed on the VALUES that actually change a quote —
+  // address/decimals, not the token object references. getChainTokenList()
+  // rebuilds token objects via .map() on every call for non-mainnet chains, so a
+  // caller re-resolving an equivalent token (e.g. LandingPage's preview pair) was
+  // handing this callback a new object identity every render. That churned
+  // doFetch's identity, which re-ran the polling effect below (:302), which calls
+  // doFetch() synchronously in its body — an unbounded fetch loop on any chain
+  // whose token list isn't the stable DEFAULT_TOKENS array (see INC for the prod
+  // incident this caused on Base/Arbitrum).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenIn, tokenOut, debouncedAmount, address, excludeKey, rearmPollTimer, activeChainId])
+  }, [
+    tokenIn?.address,
+    tokenIn?.decimals,
+    tokenOut?.address,
+    tokenOut?.decimals,
+    debouncedAmount,
+    address,
+    excludeKey,
+    rearmPollTimer,
+    activeChainId,
+  ])
 
   // [hotfix] doFetchRef anchors the latest doFetch for the
   // setInterval callback in rearmPollTimer — without it the timer

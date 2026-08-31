@@ -13,7 +13,7 @@
  * initial bundle for fastest FCP/LCP.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
@@ -25,7 +25,9 @@ import {
   SWAP_CHAIN_LIST_LABEL,
 } from '@/config/product-claims'
 import { useQuote } from '@/hooks/useQuote'
-import { findToken } from '@/lib/tokens'
+import { useQuoteChainId } from '@/hooks/useChainId'
+import { findToken, type Token } from '@/lib/tokens'
+import { remapTokenToChain, getChainTokenList } from '@/lib/chains'
 import { formatUnits } from 'viem'
 import { formatDisplay } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
@@ -186,26 +188,65 @@ function AnimatedCounter({
 // fanning out to every liquidity source.
 const LANDING_PREVIEW_AMOUNT_IN = '0.5'
 
+/**
+ * [fix/landing-preview-chain-aware] Resolve a preview leg against the GIVEN chain, the
+ * same way SwapBox's activeChainId effect does via remapTokenToChain — never a bare
+ * findToken() result (that's always the mainnet entry, see src/lib/chains/tokens.ts:310-312
+ * for the "mainnet USDC on Base" failure class this exists to avoid).
+ *
+ * remapTokenToChain alone is not enough here: on a genuine catalog miss (no entry for
+ * this symbol on this chain) it falls BACK to the token it was given — the exact
+ * stale-address behaviour this fix removes — so we additionally confirm the chain's own
+ * catalog actually lists the symbol before trusting the result. No match → null, and the
+ * caller must not quote.
+ */
+function resolvePreviewToken(symbol: string, chainId: number): Token | null {
+  const base = findToken(symbol)
+  if (!base) return null
+  const chainHasSymbol = getChainTokenList(chainId).some(
+    (t) => t.symbol.toLowerCase() === symbol.toLowerCase(),
+  )
+  if (!chainHasSymbol) return null
+  return remapTokenToChain(base, chainId)
+}
+
 function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
-  const previewTokenIn = findToken('ETH')
-  const previewTokenOut = findToken('USDC')
+  // [fix/landing-preview-chain-aware] Same chain source useQuote itself resolves from
+  // (useQuoteChainId, via ChainSelector for a disconnected visitor) — never a second
+  // source of chain truth.
+  const chainId = useQuoteChainId()
+  // [fix/quote-identity-loop] Memoised on chainId alone: resolvePreviewToken (via
+  // getChainTokenList/remapTokenToChain) allocates a fresh token object on every call
+  // for non-mainnet chains, so calling it unmemoised on every render fed useQuote a new
+  // object identity each time. useQuote.ts now keys its own effect on token VALUES
+  // (address/decimals), not identity, so this alone no longer causes the fetch loop —
+  // but a caller re-allocating an equivalent object every render is wrong on its own
+  // terms, so this stays fixed too (belt and braces).
+  const [previewTokenIn, previewTokenOut] = useMemo(
+    () => [resolvePreviewToken('ETH', chainId), resolvePreviewToken('USDC', chainId)],
+    [chainId],
+  )
+  // A leg that fell through (no catalog entry for this symbol on this chain) means there
+  // is no honest pair to quote — never fetch with the other chain's stale address.
+  const pairUnavailable = previewTokenIn === null || previewTokenOut === null
   const { meta, loading, error } = useQuote(
-    previewTokenIn ?? null,
-    previewTokenOut ?? null,
+    previewTokenIn,
+    previewTokenOut,
     LANDING_PREVIEW_AMOUNT_IN,
-    true,
+    !pairUnavailable,
   )
 
   const receiveDisplay = (() => {
-    if (!meta?.best || !previewTokenOut) return null
+    if (pairUnavailable || !meta?.best || !previewTokenOut) return null
     const outBig = safeBigInt(meta.best.toAmount)
     if (outBig === null) return null
     return formatDisplay(Number(formatUnits(outBig, previewTokenOut.decimals)), 4)
   })()
 
   // "Compared" only claims a comparison happened once a quote has actually
-  // resolved — never while loading, and never on a failed quote.
-  const hasResolvedQuote = receiveDisplay !== null && !error
+  // resolved — never while loading, never on a failed quote, and never when
+  // the pair itself couldn't be resolved on this chain.
+  const hasResolvedQuote = receiveDisplay !== null && !error && !pairUnavailable
 
   return (
     <div className="mx-auto w-full max-w-sm md:max-w-[380px] lg:max-w-sm">
@@ -231,7 +272,7 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
               style={{ fontVariantNumeric: 'tabular-nums' }}
               aria-live="polite"
             >
-              {receiveDisplay ?? (error ? 'Unavailable' : loading ? '···' : '···')}
+              {receiveDisplay ?? (pairUnavailable || error ? 'Unavailable' : loading ? '···' : '···')}
             </span>
             <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
               <span className="text-sm font-semibold text-cream">USDC</span>
