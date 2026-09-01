@@ -83,6 +83,11 @@ import {
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
 import { startEventWatcher } from "./event-watcher.js"
+// [PERF-KEEPER-IDLE-BACKOFF] Orders-driven idle backoff for RPC work (pure, unit-tested in
+// idle-backoff.test.mjs). With 0 active orders the full cycle and the event-watcher poll run every
+// IDLE_POLL_INTERVAL_MS; the Supabase probe stays at POLL_INTERVAL_MS so a new order promotes the
+// keeper within one poll. With ≥1 order every cycle is byte-for-byte today's.
+import { POLL_INTERVAL_MS, IDLE_POLL_INTERVAL_MS, createIdleCadence } from "./idle-backoff.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
@@ -265,7 +270,7 @@ const ETH_USD_FEED_RESOLUTION = resolveEthUsdFeed({ chainId: CHAIN_ID, envFeed: 
 const ETH_USD_FEED = ETH_USD_FEED_RESOLUTION.feed
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
 
-const POLL_INTERVAL_MS = 30_000 // 30 seconds
+// POLL_INTERVAL_MS (30s) + IDLE_POLL_INTERVAL_MS (300s) come from ./idle-backoff.js (imported above).
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
 // ── Gas Strategy Tiers ──────────────────────────────────────
@@ -1267,7 +1272,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
     log("  No active orders")
     // [DCA-OBS] Still close out observability (outflow check) even with no orders.
     await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
-    return
+    return 0
   }
 
   log(`  Found ${orders.length} active order(s)`)
@@ -1968,6 +1973,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
 
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
+  // [PERF-KEEPER-IDLE-BACKOFF] The count drives the loop's idle/active mode (main's runTick).
+  return orders.length
 }
 
 // ---- Stats tracking ----------------------------------------------------
@@ -2176,7 +2183,7 @@ async function main() {
     `ETH/USD feed: ${ETH_USD_FEED ?? "NONE -- Chainlink reads disabled"} ` +
       `[${ETH_USD_FEED_RESOLUTION.source}] ${ETH_USD_FEED_RESOLUTION.reason}`,
   )
-  log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
+  log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s (RPC work every ${IDLE_POLL_INTERVAL_MS / 1000}s while there are no active orders)`)
   log(`Max batch: ${MAX_BATCH}`)
   // [FIX-KEEPER-GAS-TIER-BASE] Log THIS chain's resolved config, not a hardcoded mainnet one.
   const gasTierCfg = getGasTierConfig(CHAIN_ID)
@@ -2212,14 +2219,35 @@ async function main() {
   if (V3_CONTRACT_ADDRESS) {
     watchedContracts.push({ address: V3_CONTRACT_ADDRESS, label: 'OrderExecutorV3' })
   }
-  startEventWatcher(publicClient, watchedContracts, monitor)
+  const watcher = startEventWatcher(publicClient, watchedContracts, monitor)
+
+  // [PERF-KEEPER-IDLE-BACKOFF] Every POLL_INTERVAL_MS tick runs runTick. ACTIVE (the last cycle
+  // found ≥1 order): the tick IS a full cycle — today's behaviour. IDLE (0 orders): the tick is a
+  // DB-only probe — the same two Supabase calls a cycle makes, zero RPC — and the full cycle
+  // (balance/freeze/ETH-USD reads + the event-watcher poll) runs once every IDLE_POLL_INTERVAL_MS.
+  // A probe that finds a row promotes the keeper to a full cycle on that same tick, so a new order
+  // is noticed within one POLL_INTERVAL_MS regardless of the idle cadence.
+  const cadence = createIdleCadence()
+
+  async function runTick() {
+    if (cadence.tick() === "probe") {
+      await unlockStaleOrders()
+      const probe = await fetchActiveOrders()
+      if (probe.length === 0) return
+      log("  Active order(s) appeared while idle -- running the full cycle now")
+    }
+    const activeOrders = await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+    cadence.record(activeOrders)
+    watcher.setIdle(cadence.isIdle())
+    if (cadence.isIdle()) log(`  Idle: next RPC cycle in ${IDLE_POLL_INTERVAL_MS / 1000}s (Supabase probe every ${POLL_INTERVAL_MS / 1000}s)`)
+  }
 
   // Run immediately, then on interval
-  await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+  await runTick()
 
   setInterval(async () => {
     try {
-      await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+      await runTick()
     } catch (err) {
       console.error("Cycle error:", err.message)
       if (monitor) monitor.onCycleError(err)

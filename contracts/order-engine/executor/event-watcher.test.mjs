@@ -182,3 +182,56 @@ describe("event-watcher: one eth_getLogs per poll (Task 1)", () => {
     assert.equal(fake.blockNumberCalls(), 2, "one eth_blockNumber per poll, as before")
   })
 })
+
+// ── Task 2: the watcher follows the keeper's idle mode ────────────────────────────────────────
+
+describe("event-watcher: idle backoff (Task 2)", () => {
+  test("setIdle(true) ⇒ next poll after IDLE_POLL_INTERVAL_MS; setIdle(false) ⇒ back to POLL_INTERVAL_MS; a repeated setIdle(true) never resets the pending poll", async () => {
+    mock.timers.enable({ apis: ["setInterval", "setTimeout"] })
+    const logMock = mock.method(console, "log", () => {})
+    // A constant block number ⇒ every poll is exactly one eth_blockNumber and no getLogs.
+    const fake = fakePublicClient({ blocks: [100n] })
+    const watcher = startEventWatcher(fake.client, CONTRACTS, null)
+    try {
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 1, "initial poll")
+      mock.timers.tick(30_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 2, "active cadence: 30s")
+
+      watcher.setIdle(true)
+      mock.timers.tick(30_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 2, "idle: no poll at 30s")
+      mock.timers.tick(269_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 2, "idle: no poll at 299s")
+      // The executor re-asserts idle after EVERY idle cycle — that must not restart the timer,
+      // or the watcher would never fire (its poll would be reset just before it was due).
+      watcher.setIdle(true)
+      mock.timers.tick(1_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 3, "idle poll at exactly 300s after going idle")
+      mock.timers.tick(300_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 4, "and every 300s after")
+
+      watcher.setIdle(false)
+      mock.timers.tick(30_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 5, "active again: 30s")
+      mock.timers.tick(30_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 6)
+
+      watcher.stop()
+      mock.timers.tick(600_000)
+      await flush()
+      assert.equal(fake.blockNumberCalls(), 6, "stopped: no further polls in either mode")
+    } finally {
+      watcher.stop()
+      logMock.mock.restore()
+      mock.timers.reset()
+    }
+  })
+})
