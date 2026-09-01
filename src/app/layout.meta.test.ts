@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
+import { DISABLED_SOURCES } from '@/lib/constants'
 import { INTEGRATED_DEX_SOURCE_COUNT, SITE_META_DESCRIPTION } from '@/config/product-claims'
 
 const LAYOUT = path.resolve(__dirname, './layout.tsx')
@@ -20,13 +21,14 @@ describe('layout.tsx meta description', () => {
     expect(src).toMatch(/SITE_DESCRIPTION\s*=\s*SITE_META_DESCRIPTION/)
   })
 
-  it("meta-description count equals ADAPTER_REGISTRY.length", () => {
-    expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(ADAPTER_REGISTRY.length)
+  it("meta-description count equals ADAPTER_REGISTRY.length minus DISABLED_SOURCES", () => {
+    const quotingCount = ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name]).length
+    expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(quotingCount)
     expect(SITE_META_DESCRIPTION).toContain(
       `queries ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources`,
     )
     expect(SITE_META_DESCRIPTION).toContain(
-      `queries ${ADAPTER_REGISTRY.length} liquidity sources`,
+      `queries ${quotingCount} liquidity sources`,
     )
   })
 
