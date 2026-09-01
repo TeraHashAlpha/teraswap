@@ -5,14 +5,17 @@
  * surface must be derived here — never typed as prose in a component.
  *
  * Source of truth:
- *   (a) integrated DEX source count = ADAPTER_REGISTRY.length
- *       (the registry is the list; a file scan or filename blocklist would be
- *       one more hand-maintained fact)
+ *   (a) integrated DEX source count = ADAPTER_REGISTRY.length minus the
+ *       DISABLED_SOURCES entries present in the registry
+ *       (a registry entry proves an adapter EXISTS, not that it can quote —
+ *       DISABLED_SOURCES is the one place that tracks "never quotes";
+ *       a file scan or filename blocklist would be one more hand-maintained fact)
  *   (b) chains that execute swaps = the chain registry
  *   (c) order-type availability = each type's launch flag (strict `'true'`)
  */
 
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
+import { DISABLED_SOURCES } from '@/lib/constants'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 
 const SMALL_WORDS = [
@@ -43,9 +46,15 @@ export function formatChainList(names: readonly string[]): string {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }
 
-/** (a) Count the registry itself. Never a parallel list. */
-export const INTEGRATED_DEX_SOURCE_COUNT = ADAPTER_REGISTRY.length
-export const INTEGRATED_DEX_SOURCE_NAMES: readonly string[] = ADAPTER_REGISTRY.map((a) => a.name)
+/**
+ * (a) Registry minus DISABLED_SOURCES. Never a parallel list: both inputs
+ * already exist (ADAPTER_REGISTRY = what's built, DISABLED_SOURCES = what
+ * never quotes), so the public count is their difference, not a third fact.
+ */
+const QUOTING_ADAPTERS = ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name])
+
+export const INTEGRATED_DEX_SOURCE_COUNT = QUOTING_ADAPTERS.length
+export const INTEGRATED_DEX_SOURCE_NAMES: readonly string[] = QUOTING_ADAPTERS.map((a) => a.name)
 
 /** Claim string the registry proves: these adapters are integrated. */
 export const INTEGRATED_DEX_SOURCES_CLAIM = `${INTEGRATED_DEX_SOURCE_COUNT} integrated DEX sources`

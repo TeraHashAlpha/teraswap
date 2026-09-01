@@ -1,10 +1,12 @@
 /**
  * Product claims must be derived from code, never from a typed number.
- * The expected source count is ADAPTER_REGISTRY.length — this file does
+ * The expected source count is ADAPTER_REGISTRY.length minus the
+ * DISABLED_SOURCES entries present in the registry — this file does
  * not hard-code it.
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
+import { DISABLED_SOURCES } from '@/lib/constants'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
@@ -32,28 +34,55 @@ afterEach(() => {
   else process.env.NEXT_PUBLIC_LIMIT_ENABLED = ORIG_LIMIT
 })
 
-describe('product-claims — source count from ADAPTER_REGISTRY', () => {
-  it('equals ADAPTER_REGISTRY.length (the registry is the list)', () => {
-    expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(ADAPTER_REGISTRY.length)
-    expect(ADAPTER_REGISTRY.length).toBeGreaterThan(0)
-    expect([...INTEGRATED_DEX_SOURCE_NAMES]).toEqual(ADAPTER_REGISTRY.map((a) => a.name))
-  })
+const QUOTING_COUNT = ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name]).length
 
-  it('claim string is "N integrated DEX sources" with that same N', () => {
-    expect(INTEGRATED_DEX_SOURCES_CLAIM).toBe(
-      `${ADAPTER_REGISTRY.length} integrated DEX sources`,
+describe('product-claims — source count from ADAPTER_REGISTRY minus DISABLED_SOURCES', () => {
+  it('excludes registry entries that are permanently disabled', () => {
+    expect(QUOTING_COUNT).toBeLessThan(ADAPTER_REGISTRY.length)
+    expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(QUOTING_COUNT)
+    expect(INTEGRATED_DEX_SOURCE_COUNT).toBeGreaterThan(0)
+    expect([...INTEGRATED_DEX_SOURCE_NAMES]).toEqual(
+      ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name]).map((a) => a.name),
     )
   })
 
+  it('never names a disabled source in the public list', () => {
+    for (const name of INTEGRATED_DEX_SOURCE_NAMES) {
+      expect(DISABLED_SOURCES[name]).toBeUndefined()
+    }
+  })
+
+  it('claim string is "N integrated DEX sources" with that same N', () => {
+    expect(INTEGRATED_DEX_SOURCES_CLAIM).toBe(`${QUOTING_COUNT} integrated DEX sources`)
+  })
+
   it('spells the same N (no parallel number table for the claim)', () => {
-    expect(INTEGRATED_DEX_SOURCE_COUNT_WORDS).toBe(spellCount(ADAPTER_REGISTRY.length))
+    expect(INTEGRATED_DEX_SOURCE_COUNT_WORDS).toBe(spellCount(QUOTING_COUNT))
+  })
+
+  it('changes when a source is added to DISABLED_SOURCES', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/constants', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/constants')>()
+      const firstQuoting = ADAPTER_REGISTRY.find((a) => !actual.DISABLED_SOURCES[a.name])!.name
+      return {
+        ...actual,
+        DISABLED_SOURCES: { ...actual.DISABLED_SOURCES, [firstQuoting]: 'test-only disable' },
+      }
+    })
+
+    const mod = await import('./product-claims')
+    expect(mod.INTEGRATED_DEX_SOURCE_COUNT).toBe(QUOTING_COUNT - 1)
+
+    vi.doUnmock('@/lib/constants')
+    vi.resetModules()
   })
 })
 
 describe('product-claims — meta description', () => {
   it("embeds the derived count, not a handwritten digit", () => {
     expect(SITE_META_DESCRIPTION).toContain(
-      `queries ${ADAPTER_REGISTRY.length} liquidity sources`,
+      `queries ${QUOTING_COUNT} liquidity sources`,
     )
   })
 })

@@ -1,6 +1,6 @@
 // Drives the shipped checker. Does not re-implement the claim regex.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,7 @@ import {
   USER_FACING_FILES,
   ROOT,
 } from './check-product-claims.mjs'
+import { INTEGRATED_DEX_SOURCE_COUNT } from '../src/config/product-claims.ts'
 
 const SCRIPT = fileURLToPath(new URL('./check-product-claims.mjs', import.meta.url))
 
@@ -98,5 +99,14 @@ describe('check-product-claims — live tree (post commit 2)', () => {
     for (const r of results) {
       expect(r.violations).toEqual([])
     }
+  })
+})
+
+describe('check-product-claims — CLAUDE.md matches the derived count', () => {
+  it("CLAUDE.md's headline liquidity-source count equals INTEGRATED_DEX_SOURCE_COUNT", () => {
+    const claudeMd = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8')
+    const match = claudeMd.match(/(\d+)\s+liquidity sources/)
+    expect(match, 'CLAUDE.md should state "N liquidity sources"').not.toBeNull()
+    expect(Number(match[1])).toBe(INTEGRATED_DEX_SOURCE_COUNT)
   })
 })
