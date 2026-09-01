@@ -357,18 +357,35 @@ export async function scanContractEvents(
   // Cap range
   const effectiveTo = Math.min(toBlock, fromBlock + MAX_BLOCKS_PER_SCAN - 1)
 
-  // Fetch logs from the chain's deployed contracts in parallel.
-  // Mainnet: OrderExecutor + both FeeCollector versions (V1 still emits Sweep
-  // on residual-balance recoveries even though no new swaps route there; V1
-  // and V2 share the SwapWithFee event signature so classification is shared).
-  // Base: FeeCollector V2 only (no executor / V1 deployed there).
+  // Fetch logs from the chain's deployed contracts in ONE eth_getLogs call
+  // over the address array — Alchemy meters getLogs per CALL, not per block,
+  // so N addresses in one call costs 1x instead of Nx. Mainnet: OrderExecutor
+  // + both FeeCollector versions (V1 still emits Sweep on residual-balance
+  // recoveries even though no new swaps route there; V1 and V2 share the
+  // SwapWithFee event signature so classification is shared). Base:
+  // FeeCollector V2 only (no executor / V1 deployed there).
   const range = { fromBlock: BigInt(fromBlock), toBlock: BigInt(effectiveTo) }
-  const [executorLogs, feeCollectorV2Logs, feeCollectorV1Logs] = await Promise.all([
-    targets.executor ? client.getLogs({ address: targets.executor, ...range }) : Promise.resolve([] as Log[]),
-    targets.feeCollector ? client.getLogs({ address: targets.feeCollector, ...range }) : Promise.resolve([] as Log[]),
-    targets.feeCollectorV1 ? client.getLogs({ address: targets.feeCollectorV1, ...range }) : Promise.resolve([] as Log[]),
-  ])
-  const feeCollectorLogs = [...feeCollectorV2Logs, ...feeCollectorV1Logs]
+  const addresses = [targets.executor, targets.feeCollector, targets.feeCollectorV1]
+    .filter((a): a is `0x${string}` => a !== undefined)
+
+  const logs = addresses.length > 0 ? await client.getLogs({ address: addresses, ...range }) : []
+
+  // Partition by log.address (lower-cased) into the same three buckets the
+  // pre-refactor code produced from three separate calls.
+  const executorAddr = targets.executor?.toLowerCase()
+  const feeCollectorAddr = targets.feeCollector?.toLowerCase()
+  const feeCollectorV1Addr = targets.feeCollectorV1?.toLowerCase()
+
+  const executorLogs: Log[] = []
+  const feeCollectorLogs: Log[] = []
+  for (const log of logs) {
+    const addr = typeof log.address === 'string' ? log.address.toLowerCase() : undefined
+    if (addr !== undefined && addr === executorAddr) {
+      executorLogs.push(log)
+    } else if (addr !== undefined && (addr === feeCollectorAddr || addr === feeCollectorV1Addr)) {
+      feeCollectorLogs.push(log)
+    }
+  }
 
   const events: OnChainEvent[] = []
 

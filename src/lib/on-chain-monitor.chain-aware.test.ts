@@ -150,9 +150,9 @@ describe('on-chain-monitor — chain-aware scan targets [#4]', () => {
 
     await runOnChainScan()
 
-    const scanned = mockGetLogs.mock.calls.map(c =>
-      String((c[0] as { address?: string }).address).toLowerCase(),
-    )
+    const scanned = mockGetLogs.mock.calls
+      .flatMap(c => (c[0] as { address?: string[] }).address ?? [])
+      .map(a => a.toLowerCase())
     // The Arbitrum FeeCollector WAS queried (it's monitorable)...
     expect(scanned).toContain(FAKE_ARB_FC)
     // ...but neither executor address was queried "as part of" Arbitrum —

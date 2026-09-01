@@ -15,6 +15,8 @@ import {
   _internal,
   type OnChainEvent,
 } from './on-chain-monitor'
+import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from './constants'
+import { ORDER_EXECUTOR_ADDRESS } from './order-engine/config'
 
 // ── Mocks ────────────────────────────────────────────────
 
@@ -62,7 +64,10 @@ function makeLog(topic0: string, opts?: {
   address?: string
 }) {
   return {
-    address: opts?.address ?? '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130',
+    // Defaults to the OrderExecutor address since most callers here use
+    // OrderExecutor-classified topics (AdminTransferred, OrderExecuted);
+    // pass an explicit `address` for FeeCollector-classified topics.
+    address: opts?.address ?? ORDER_EXECUTOR_ADDRESS,
     topics: [topic0, ...(opts?.topics ?? [])],
     data: opts?.data ?? '0x',
     transactionHash: opts?.transactionHash ?? '0x' + 'a'.repeat(64),
@@ -245,17 +250,21 @@ describe('scanContractEvents', () => {
   })
 
   it('returns parsed events from both contracts', async () => {
-    // OrderExecutor returns an AdminTransferred log
-    // FeeCollector returns a SwapWithFee log
-    mockGetLogs
-      .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
+    // ONE getLogs call now returns a mixed log set — one log per contract
+    // address, tagged by log.address so the partition (not call order)
+    // decides the bucket.
+    mockGetLogs.mockResolvedValueOnce([
+      makeLog(TOPICS.AdminTransferred, {
+        address: ORDER_EXECUTOR_ADDRESS,
         topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
         transactionHash: '0x' + 'b'.repeat(64),
-      })])
-      .mockResolvedValueOnce([makeLog(TOPICS.SwapWithFee, {
+      }),
+      makeLog(TOPICS.SwapWithFee, {
+        address: FEE_COLLECTOR_ADDRESS,
         data: '0x' + '0'.repeat(192),
         transactionHash: '0x' + 'c'.repeat(64),
-      })])
+      }),
+    ])
 
     const mockClient = {
       getLogs: mockGetLogs,
@@ -280,7 +289,7 @@ describe('scanContractEvents', () => {
 
     await scanContractEvents(20000000, 20005000, mockClient)
 
-    // Both getLogs calls should use capped toBlock
+    // The single getLogs call should use the capped toBlock
     for (const call of mockGetLogs.mock.calls) {
       const args = call[0] as { toBlock: bigint }
       expect(Number(args.toBlock)).toBeLessThanOrEqual(20000000 + MAX_BLOCKS_PER_SCAN - 1)
@@ -291,6 +300,84 @@ describe('scanContractEvents', () => {
     const mockClient = { getLogs: mockGetLogs } as any
     const events = await scanContractEvents(20000000, 20000100, mockClient)
     expect(events).toEqual([])
+  })
+
+  // [perf/onchain-monitor-one-getlogs] Acceptance #1: exactly one getLogs
+  // call per scanContractEvents invocation, with the address array holding
+  // exactly the configured addresses for the chain.
+  it('issues exactly one getLogs call with an address array of all configured targets (mainnet: 3)', async () => {
+    const mockClient = { getLogs: mockGetLogs } as any
+
+    await scanContractEvents(20000000, 20000100, mockClient)
+
+    expect(mockGetLogs).toHaveBeenCalledTimes(1)
+    const args = mockGetLogs.mock.calls[0][0] as { address: string[] }
+    expect(args.address).toHaveLength(3)
+    expect(args.address).toEqual(
+      expect.arrayContaining([ORDER_EXECUTOR_ADDRESS, FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS]),
+    )
+  })
+
+  it('issues exactly one getLogs call with a single-address array for a Base-shaped target (no executor/V1)', async () => {
+    const mockClient = { getLogs: mockGetLogs } as any
+    const baseShapedTargets = {
+      chainId: 8453,
+      feeCollector: '0x1111111111111111111111111111111111111111' as `0x${string}`,
+    }
+
+    await scanContractEvents(20000000, 20000100, mockClient, baseShapedTargets)
+
+    expect(mockGetLogs).toHaveBeenCalledTimes(1)
+    const args = mockGetLogs.mock.calls[0][0] as { address: string[] }
+    expect(args.address).toEqual([baseShapedTargets.feeCollector])
+  })
+
+  // Acceptance #2: mixed log set (one log per address, plus one from an
+  // unrelated address that must not appear) partitions into the same
+  // buckets — same contract/eventName/severity — as the pre-refactor code.
+  //
+  // Expected-output capture (run against the PRE-refactor code, 3 separate
+  // getLogs calls): AdminTransferred → { contract: 'OrderExecutor',
+  // eventName: 'AdminTransferred', severity: 'critical' }; SwapWithFee →
+  // { contract: 'FeeCollector', eventName: 'SwapWithFee', severity: 'info' };
+  // the unrelated-address log never appeared in any bucket (pre-refactor
+  // getLogs was called with a single `address`, so an RPC could never have
+  // returned it — this test asserts the new partition preserves that
+  // behavior even though a real RPC also can't return it for the array call).
+  it('partitions a mixed log set by log.address, dropping unrelated addresses', async () => {
+    const targets = {
+      chainId: 1,
+      executor: '0xf7c7b8bd0d43ee5a6c07dcc75c3f6a0a99d80eba' as `0x${string}`,
+      feeCollector: '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130' as `0x${string}`,
+    }
+    mockGetLogs.mockResolvedValueOnce([
+      makeLog(TOPICS.AdminTransferred, {
+        address: targets.executor,
+        topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
+        transactionHash: '0x' + 'd'.repeat(64),
+      }),
+      makeLog(TOPICS.SwapWithFee, {
+        address: targets.feeCollector, // upper/lowercase must not matter
+        data: '0x' + '0'.repeat(192),
+        transactionHash: '0x' + 'e'.repeat(64),
+      }),
+      makeLog(TOPICS.OwnershipTransferred, {
+        address: '0x9999999999999999999999999999999999999999', // unrelated — must not appear
+        transactionHash: '0x' + 'f'.repeat(64),
+      }),
+    ])
+
+    const mockClient = { getLogs: mockGetLogs } as any
+    const events = await scanContractEvents(20000000, 20000100, mockClient, targets)
+
+    expect(events).toHaveLength(2)
+    expect(events.find(e => e.txHash === '0x' + 'f'.repeat(64))).toBeUndefined()
+
+    const admin = events.find(e => e.eventName === 'AdminTransferred')
+    expect(admin).toMatchObject({ contract: 'OrderExecutor', eventName: 'AdminTransferred', severity: 'critical' })
+
+    const swap = events.find(e => e.eventName === 'SwapWithFee')
+    expect(swap).toMatchObject({ contract: 'FeeCollector', eventName: 'SwapWithFee', severity: 'info' })
   })
 })
 
@@ -370,7 +457,6 @@ describe('runOnChainScan', () => {
       .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
         topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
       })])
-      .mockResolvedValueOnce([])
 
     const result = await runOnChainScan()
     expect(result!.criticalCount).toBe(1)
@@ -385,7 +471,6 @@ describe('runOnChainScan', () => {
   it('does NOT emit alert for info events', async () => {
     mockGetLogs
       .mockResolvedValueOnce([makeLog(TOPICS.OrderExecuted)])
-      .mockResolvedValueOnce([])
 
     const result = await runOnChainScan()
     expect(result!.infoCount).toBe(1)
@@ -491,8 +576,6 @@ describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
         topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
         transactionHash: '0x' + 'a'.repeat(64),
       })])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
     // Telegram dispatch fails
     mockEmitTransitionAlert.mockRejectedValue(new Error('telegram unavailable'))
 
@@ -517,8 +600,6 @@ describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
         topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
         transactionHash: '0x' + 'b'.repeat(64),
       })])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
     mockEmitTransitionAlert.mockRejectedValue(new Error('boom'))
 
     await runOnChainScan()
@@ -542,8 +623,6 @@ describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
       .mockResolvedValueOnce([makeLog(TOPICS.AdminTransferred, {
         topics: ['0x' + '0'.repeat(64), '0x' + '1'.repeat(64)],
       })])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
     // Alert delivers successfully
     mockEmitTransitionAlert.mockResolvedValue(undefined)
     // KV audit-trail write fails (but not the block-advance write — we
@@ -647,8 +726,6 @@ describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
         transactionHash: '0x' + 'e'.repeat(64),
         blockNumber: 20000050n,
       })])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
     mockEmitTransitionAlert.mockRejectedValue(new Error('boom'))
 
     await runOnChainScan()
@@ -674,8 +751,6 @@ describe('runOnChainScan — alert dispatch resilience [10-L-04]', () => {
         transactionHash: '0x' + 'e'.repeat(64),
         blockNumber: 20000050n,
       })])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
 
     await runOnChainScan()
     const queueWrites = mockKvSet.mock.calls
