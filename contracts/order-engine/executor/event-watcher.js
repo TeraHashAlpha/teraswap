@@ -207,13 +207,25 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
       // No new blocks
       if (currentBlock <= lastBlock) return
 
-      // Fetch logs from each monitored contract
+      // [PERF-KEEPER-IDLE-BACKOFF] ONE eth_getLogs for ALL monitored contracts over the range —
+      // viem accepts `address: Address[]`. The provider bills eth_getLogs per CALL, so the previous
+      // one-call-per-contract loop cost N× for the same blocks. The union is partitioned back into
+      // the same per-contract buckets (by log.address, lower-cased — nodes return it lower-case,
+      // env addresses may be checksummed) and processed contract-by-contract in `contracts` order,
+      // exactly as the per-contract calls did. Pinned by event-watcher.test.mjs.
+      const unionLogs = await publicClient.getLogs({
+        address: contracts.map((c) => c.address),
+        fromBlock: lastBlock + 1n,
+        toBlock: currentBlock,
+      })
+      const logsByAddress = new Map(contracts.map((c) => [c.address.toLowerCase(), []]))
+      for (const log of unionLogs) {
+        const bucket = logsByAddress.get(String(log.address).toLowerCase())
+        if (bucket) bucket.push(log) // a log from an unwatched address is never processed
+      }
+
       for (const { address, label } of contracts) {
-        const logs = await publicClient.getLogs({
-          address,
-          fromBlock: lastBlock + 1n,
-          toBlock: currentBlock,
-        })
+        const logs = logsByAddress.get(address.toLowerCase())
 
         for (const log of logs) {
           // Tag with contract label for alert attribution
