@@ -16,7 +16,13 @@
  *          and the event-watcher poll — run once every IDLE_POLL_INTERVAL_MS. A probe that finds
  *          ≥1 row promotes the keeper to a full cycle on that same tick.
  *
- * Idle-cycle balance reads are handled by createIdleBalanceCarry (Task 3) — see below.
+ * Idle-cycle balance reads: beginCycleObservability reads the wallet balance at cycle start and
+ * endCycleObservability read it AGAIN at cycle end even with 0 orders. An idle cycle sends nothing,
+ * so the NEXT cycle's start read IS its end read — the idle cycle holds its context
+ * (createIdleBalanceCarry) and the next successful start read closes its window with the SAME
+ * math (unexplainedOutflowWei, ownGas = 0). Active cycles keep both reads. The comparison is never
+ * lost — a failed start read leaves the held window for the next successful one — and lands at
+ * most IDLE_POLL_INTERVAL_MS after the idle cycle's start read instead of ≈1–2s (its end read).
  */
 
 /** Active cadence: the keeper's cycle and the event-watcher poll (unchanged: 30s). */
@@ -55,6 +61,46 @@ export function createIdleCadence({ pollIntervalMs = POLL_INTERVAL_MS, idlePollI
     },
     isIdle() {
       return idle
+    },
+  }
+}
+
+/**
+ * The unexplained-outflow math endCycleObservability always used, verbatim:
+ * max(0, start − end − ownGas); a non-bigint ownGas counts as 0.
+ * @param {bigint} startBalanceWei
+ * @param {bigint} endBalanceWei
+ * @param {bigint|undefined} ownGasSpentWei
+ * @returns {bigint}
+ */
+export function unexplainedOutflowWei(startBalanceWei, endBalanceWei, ownGasSpentWei) {
+  const ownGas = typeof ownGasSpentWei === "bigint" ? ownGasSpentWei : 0n
+  let outflowWei = startBalanceWei - endBalanceWei - ownGas
+  if (outflowWei < 0n) outflowWei = 0n
+  return outflowWei
+}
+
+/**
+ * Holds the observability context of the last IDLE cycle whose outflow window is still open —
+ * the one that skipped its end-of-cycle balance read. executor.js:
+ *   endCycleObservability(…, { idle: true })  ⇒ hold(ctx)   (no read)
+ *   beginCycleObservability, after a SUCCESSFUL start read ⇒ take() and close the window with
+ *   that read (ownGas 0). A failed start read leaves it held: the comparison is delayed, never lost.
+ * @returns {{ hold: (ctx: object) => void, take: () => object|null, pending: () => boolean }}
+ */
+export function createIdleBalanceCarry() {
+  let held = null
+  return {
+    hold(ctx) {
+      held = ctx
+    },
+    take() {
+      const ctx = held
+      held = null
+      return ctx
+    },
+    pending() {
+      return held !== null
     },
   }
 }
