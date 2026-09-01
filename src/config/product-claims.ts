@@ -62,9 +62,6 @@ export const INTEGRATED_DEX_SOURCES_CLAIM = `${INTEGRATED_DEX_SOURCE_COUNT} inte
 export const INTEGRATED_DEX_SOURCE_COUNT_WORDS = spellCount(INTEGRATED_DEX_SOURCE_COUNT)
 export const INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP = capitalizeWord(INTEGRATED_DEX_SOURCE_COUNT_WORDS)
 
-export const SITE_META_DESCRIPTION =
-  `Maximum liquidity. Absolute protection. TeraSwap is an Ethereum meta-aggregator that queries ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-free execution via CoW Protocol, and a privacy proxy that hides your IP from all external services.`
-
 /** (b) Chains the registry actually lists as swap-capable configs. */
 export const SWAP_CHAIN_IDS: readonly number[] = getSupportedChainIds()
 
@@ -76,6 +73,9 @@ export const SWAP_CHAINS: readonly { chainId: number; name: string; slug: string
 
 export const SWAP_CHAIN_NAMES: readonly string[] = SWAP_CHAINS.map((c) => c.name)
 export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
+
+export const SITE_META_DESCRIPTION =
+  `Maximum liquidity. Absolute protection. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that queries ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-free execution via CoW Protocol, and a privacy proxy that hides your IP from all external services.`
 
 export type OrderTypeId = 'instant' | 'dca' | 'limit' | 'takeProfit' | 'stopLoss'
 
