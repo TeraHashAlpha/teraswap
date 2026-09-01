@@ -302,6 +302,22 @@ describe('scanContractEvents', () => {
     expect(events).toEqual([])
   })
 
+  // [perf/onchain-scan-cadence] Every supported chain's cap must cover 2x
+  // the blocks it can mine within one scan interval (ONCHAIN_TICK_INTERVAL
+  // ticks at the 5-min cadence), or its cursor falls behind on every scan
+  // and never catches up (the Arbitrum divergence this guards against).
+  // Computed from the SAME constants the production code uses, so a future
+  // chain or cadence change that breaks the invariant fails this test.
+  it.each([1, 8453, 42161])('cap for chain %d satisfies minRequiredBlocksPerScan', (chainId) => {
+    const required = _internal.minRequiredBlocksPerScan(chainId)
+    const cap = _internal.maxBlocksPerScan(chainId)
+    expect(cap).toBeGreaterThanOrEqual(required)
+  })
+
+  it('keeps the mainnet cap at 1000 (byte-identical to pre-cadence-change behaviour)', () => {
+    expect(_internal.maxBlocksPerScan(1)).toBe(1000)
+  })
+
   // [perf/onchain-monitor-one-getlogs] Acceptance #1: exactly one getLogs
   // call per scanContractEvents invocation, with the address array holding
   // exactly the configured addresses for the chain.
@@ -381,31 +397,39 @@ describe('scanContractEvents', () => {
   })
 })
 
-describe('shouldRunOnChainScan [P109/M-05]', () => {
+describe('shouldRunOnChainScan [perf/onchain-scan-cadence]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  // [P109] The function now always returns true so on-chain events are
-  // scanned every Cloudflare-Worker tick (~60 s) instead of every 5th
-  // tick (~5 min). Closes M-05.
-  it('returns true on every tick (every-tick cadence)', async () => {
+  // [perf/onchain-scan-cadence] Gated to every ONCHAIN_TICK_INTERVAL-th tick
+  // (5) via the KV counter modulo — restores the M-05-era gate the owner
+  // has decided to re-accept for cost reasons (see module docblock).
+  it('runs iff the KV counter is a multiple of ONCHAIN_TICK_INTERVAL', async () => {
+    for (let n = 1; n <= 10; n++) {
+      mockKvIncr.mockResolvedValueOnce(n)
+      expect(await shouldRunOnChainScan()).toBe(n % _internal.ONCHAIN_TICK_INTERVAL === 0)
+    }
+  })
+
+  it('does not run on a non-multiple tick', async () => {
+    mockKvIncr.mockResolvedValue(7)
+    expect(await shouldRunOnChainScan()).toBe(false)
+  })
+
+  it('runs on a multiple-of-5 tick', async () => {
     mockKvIncr.mockResolvedValue(10)
     expect(await shouldRunOnChainScan()).toBe(true)
   })
 
-  it('returns true regardless of the tick-counter modulo', async () => {
-    mockKvIncr.mockResolvedValue(7)
-    expect(await shouldRunOnChainScan()).toBe(true)
-  })
-
-  it('returns true even when the KV tick-counter increment fails', async () => {
+  it('fails OPEN (scan runs) when the KV tick-counter increment fails', async () => {
     mockKvIncr.mockRejectedValue(new Error('KV unavailable'))
-    // Failure is non-fatal — the increment is best-effort telemetry.
+    // A cost guard is not an availability guard — losing the gate for one
+    // tick is cheap; going silently blind to admin events is not.
     expect(await shouldRunOnChainScan()).toBe(true)
   })
 
-  it('still increments the tick counter for telemetry continuity', async () => {
+  it('increments the tick counter exactly once per call', async () => {
     mockKvIncr.mockResolvedValue(42)
     await shouldRunOnChainScan()
     expect(mockKvIncr).toHaveBeenCalledTimes(1)
