@@ -4,8 +4,12 @@ import Link from 'next/link'
 import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
 
+// Mainnet block time is ~12s; polling faster only reissues eth_blockNumber
+// calls that cannot return new information.
+export const FOOTER_BLOCK_POLL_MS = 12_000
+
 export default function Footer() {
-  const { data: blockNumber } = useBlockNumber({ watch: true })
+  const { data: blockNumber } = useBlockNumber({ watch: { pollingInterval: FOOTER_BLOCK_POLL_MS } })
 
   return (
     <footer className="relative z-[1] flex flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-cream-08 px-4 py-4 text-[11px] text-cream-35 sm:gap-y-1">
