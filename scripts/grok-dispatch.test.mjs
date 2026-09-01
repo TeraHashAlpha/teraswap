@@ -11,7 +11,21 @@ import { fileURLToPath } from 'node:url'
 import { describe, it, expect, afterEach } from 'vitest'
 
 const SCRIPT = fileURLToPath(new URL('./grok-dispatch.sh', import.meta.url))
-const REPO_ROOT = path.resolve(path.dirname(SCRIPT), '..')
+const WORKTREE_ROOT = path.resolve(path.dirname(SCRIPT), '..')
+
+// grok-dispatch.sh guards GROK_WORKTREE_BASE_DIR against MAIN_ROOT — the FIRST entry of
+// `git worktree list`, i.e. the main checkout — not wherever this test file happens to live.
+// Worktrees now live outside the repo (~/ts-worktrees/), so deriving REPO_ROOT from the test's
+// own file location (this worktree's root) probed the wrong directory: it never matched
+// MAIN_ROOT, so both negative controls below silently never fired, from any worktree. Derive it
+// the same way the script does so the controls test the guard, not the test's own location.
+const MAIN_ROOT_LINE = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+  cwd: WORKTREE_ROOT,
+  encoding: 'utf8',
+})
+  .split('\n')
+  .find((line) => line.startsWith('worktree '))
+const REPO_ROOT = MAIN_ROOT_LINE.slice('worktree '.length)
 
 const specDirs = []
 function specFile(name, content) {
@@ -29,7 +43,7 @@ function uniqueBranch(tag) {
 function run(args, env) {
   try {
     const stdout = execFileSync(SCRIPT, args, {
-      cwd: REPO_ROOT,
+      cwd: WORKTREE_ROOT,
       encoding: 'utf8',
       env: env ? { ...process.env, ...env } : process.env,
     })
@@ -226,8 +240,9 @@ describe('grok-dispatch.sh — FIX-GROK-GUARD-CLAIMS: worktree lives outside the
   it('a base dir under the repo root is rejected outright, in --dry-run too (negative control)', () => {
     const spec = specFile('spec.md', specWithFiles(CONTROL_MEDIUM, ['src/foo.ts']))
     const branch = uniqueBranch('worktree-rejected')
-    // REPO_ROOT is itself nested under the repo's main checkout, so it's a valid "inside the
-    // repo" probe regardless of which worktree this test suite happens to run from.
+    // REPO_ROOT is the main checkout itself (matching the script's own MAIN_ROOT derivation), so
+    // it's a valid "inside the repo" probe regardless of which worktree this test suite happens
+    // to run from.
     const insideRepoBase = path.join(REPO_ROOT, 'scratch-worktree-base')
     const result = run([spec, branch, '--dry-run'], { TS_WORKTREE_BASE: insideRepoBase })
 

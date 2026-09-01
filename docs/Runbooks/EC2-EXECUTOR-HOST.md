@@ -39,8 +39,7 @@ sudo npm i -g pm2
 Clone the repo (use a GitHub read-only **deploy key** or a PAT for the private repo), then:
 ```bash
 cd teraswap/contracts/order-engine/executor   # path within the repo
-npm install
-npm install @aws-sdk/client-kms                # until the package.json fix lands
+npm ci                                        # installs from this dir's own package.json/lockfile
 ```
 
 ## Step 5 — Configure `.env.executor` (NO access keys — instance role provides creds)

@@ -2,17 +2,23 @@
 
 import { useState } from 'react'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { ADAPTER_REGISTRY } from '@/lib/adapters'
 
-// Sources shown in the toggle — the 11 real, active ADAPTER_REGISTRY adapters.
-// Excludes the `uniswap` legacy alias (duplicate of `uniswapv3`) and the
-// internal `teraswap_order_engine` pseudo-source. [SPRINT-9F] Added 'bebop'
-// (the 12th adapter) — it was missing, so users could not disable it even
-// while it quoted. 'odos' removed (permanent DISABLED_SOURCES entry — vendor
-// shutdown 2026-07-30, never quotes, so toggling it would do nothing).
-export const TOGGLEABLE_SOURCES: AggregatorName[] = [
-  '1inch', '0x', 'velora', 'kyberswap',
-  'cowswap', 'uniswapv3', 'openocean', 'sushiswap', 'balancer', 'curve', 'bebop',
-]
+// Sources permanently excluded from the toggle, with the reason each one is
+// held out — never omit a source silently, or a new adapter (e.g. Bebop,
+// [SPRINT-9F]) can go live un-toggleable without anyone noticing.
+const EXCLUDED_FROM_TOGGLE = new Set<AggregatorName>([
+  // Odos ceased operations 2026-07-30 (permanent DISABLED_SOURCES entry) —
+  // it never quotes, so toggling it would do nothing.
+  'odos',
+])
+
+// Sources shown in the toggle — every ADAPTER_REGISTRY adapter not listed in
+// EXCLUDED_FROM_TOGGLE above. Derived (not hand-restated) so the list can
+// never drift from the engine's real adapter set.
+export const TOGGLEABLE_SOURCES: AggregatorName[] = ADAPTER_REGISTRY
+  .map(adapter => adapter.name)
+  .filter(name => !EXCLUDED_FROM_TOGGLE.has(name))
 
 interface SourceToggleProps {
   excludedSources: Set<string>
