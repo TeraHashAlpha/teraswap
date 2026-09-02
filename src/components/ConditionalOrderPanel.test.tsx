@@ -9,7 +9,7 @@
  * submit, show the right copy, and the defense-in-depth guard fires even on a forced click.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const useOrderEngineMock = vi.fn()
 const useAccountMock = vi.fn()
@@ -66,6 +66,8 @@ const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: '
 
 import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
 import ConditionalOrderPanel from './ConditionalOrderPanel'
+// [ADR-020] Real (unmocked) chain lookup — the fail-closed router map is what these assert.
+import { NO_ROUTER_FOR_CHAIN_REASON, getDefaultRouter } from '@/lib/order-engine'
 
 /**
  * [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] `fireEvent.click` on a disabled button never
@@ -223,5 +225,58 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
     await act(async () => { await clickBypassingDisabled(btn) })
 
     expect(createOrder).not.toHaveBeenCalled()
+  })
+})
+
+// [ADR-020 / finding B6] Same defect, same shape as LimitOrderPanel: `getDefaultRouter` used to
+// fall back to MAINNET's `1inch` entry on any chain config.ts had no router set for, so a
+// Take-Profit created on Arbitrum One would have committed a mainnet router into the signed
+// order — unexecutable by that chain's executor, cancel-only for the user. config.ts is NOT
+// mocked here; the real chain lookup is the thing under test.
+describe('ConditionalOrderPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
+  const ARBITRUM_CHAIN_ID = 42161
+
+  function submitButton(): HTMLButtonElement {
+    return screen.getByRole('button', { name: /set take profit/i }) as HTMLButtonElement
+  }
+  function enterAmountAndTrigger() {
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '1' } })
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2000' } })
+  }
+
+  beforeEach(() => {
+    useChainIdMock.mockReturnValue(ARBITRUM_CHAIN_ID)
+  })
+  afterEach(() => {
+    useChainIdMock.mockReturnValue(1) // restore this file's default for any later suite
+  })
+
+  it('sanity: chain 42161 really has no default router (otherwise the tests below are vacuous)', () => {
+    expect(getDefaultRouter(ARBITRUM_CHAIN_ID)).toBeNull()
+    expect(getDefaultRouter(1)).not.toBeNull()
+  })
+
+  it('shows the named refusal and never calls createOrder', async () => {
+    const createOrder = vi.fn()
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
+    renderWithProviders(<ConditionalOrderPanel />)
+    enterAmountAndTrigger()
+
+    await act(async () => { await clickBypassingDisabled(submitButton()) })
+
+    expect(screen.getByTestId('conditional-submit-error')).toHaveTextContent(NO_ROUTER_FOR_CHAIN_REASON)
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+
+  it('reports the chain gap as itself — not as a missing price feed or a dust floor', async () => {
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder: vi.fn() })
+    renderWithProviders(<ConditionalOrderPanel />)
+    enterAmountAndTrigger()
+
+    await act(async () => { await clickBypassingDisabled(submitButton()) })
+
+    const err = screen.getByTestId('conditional-submit-error')
+    expect(err.textContent).toBe(NO_ROUTER_FOR_CHAIN_REASON)
+    expect(err.textContent).not.toMatch(/price feed/i)
   })
 })

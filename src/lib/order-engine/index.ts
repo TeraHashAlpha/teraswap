@@ -23,7 +23,12 @@ export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getO
   // unless the chain is on this allowlist AND its env slot is set (env can disable, never enable).
   ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, isOrderExecutorV3EligibleChain,
   // [SPRINT-P1B / ADR-014 (a)] Pinned canonical-route router selection (never widens the whitelist).
-  CANONICAL_ROUTE_ROUTER_KEY, getCanonicalRouteRouter, isWhitelistedRouter } from './config'
+  CANONICAL_ROUTE_ROUTER_KEY, getCanonicalRouteRouter, isWhitelistedRouter,
+  // [ADR-020] getDefaultRouter / getCanonicalRouteRouter return null and getWhitelistedRouters
+  // returns {} on a chain with no order-engine router set. Every consumer here must REFUSE on
+  // that — never substitute another chain's routers — and this is the one reason string they
+  // all show, so the copy cannot drift between the three creation panels.
+  NO_ROUTER_FOR_CHAIN_REASON } from './config'
 // [SPRINT-P1B / ADR-014 (a)] Deterministic quote-free pinned route for non-DCA v3 orders.
 export { buildCanonicalRoute, verifyRouterDataHash, computeNetAmountIn, CANONICAL_FEE_TIERS,
   SWAPROUTER02_EXACT_INPUT_SINGLE_SELECTOR, EXACT_INPUT_SINGLE_PARAMS, ORDER_FEE_BPS,

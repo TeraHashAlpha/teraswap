@@ -20,6 +20,8 @@ vi.mock('@/lib/dca/settlement-receipt', async () => {
 })
 
 import SettlementReceiptModal, { isReceiptEligible } from '../SettlementReceiptModal'
+// [ADR-020] Real (unmocked) chain lookup — the route label is resolved against it.
+import { getWhitelistedRouters } from '@/lib/order-engine'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 
@@ -303,5 +305,77 @@ describe('SettlementReceiptModal [CHORE-DCA-AGGREGATION-VALUE] — aggregation v
     expect(body.toLowerCase()).not.toMatch(/guaranteed|always saves|1inch\.io|paraswap\.io|uniswap\.org/i)
     // Naming the WINNING source by its keeper-recorded label ("1inch") is fine — that IS the data;
     // the denylist above targets marketing-style named-competitor comparisons, not this.
+  })
+})
+
+// ── [ADR-020 / finding B6] The receipt's route label reads the chain's whitelisted-router map ──
+// This is a DISPLAY path, so "fail closed" here means "never fabricate": a router address that is
+// not in THIS chain's set must degrade to the generic label, not borrow mainnet's name for it.
+// Before the fail-closed map, an order on a chain config.ts does not know resolved its label
+// against MAINNET_ROUTERS, so a mainnet address printed a confident, wrong "1inch v6".
+describe('SettlementReceiptModal [ADR-020] — route label never borrows another chain map', () => {
+  const ARBITRUM_CHAIN_ID = 42161
+
+  function receiptWithRunnerUp() {
+    return makeReceipt({
+      chainId: ARBITRUM_CHAIN_ID,
+      fills: [
+        {
+          executionNumber: 1,
+          txHash: '0xfill1',
+          txUrl: 'https://arbiscan.io/tx/0xfill1',
+          timestamp: 1_700_000_000_000,
+          amountInRaw: '1000000',
+          amountOutRaw: '500000000000000000',
+          effectivePrice: 2,
+          protocolFeeRaw: '2000',
+          networkCostWeiRaw: '100000000000000',
+          nextBestOutRaw: '480000000000000000',
+          nextBestSource: 'kyberswap',
+          aggregationValueRaw: '20000000000000000',
+        },
+      ],
+    })
+  }
+
+  it("shows the generic label for a mainnet router address on a chain with no router set", async () => {
+    // Address READ from the mainnet map, never typed here — the same negative control the
+    // config-level suite uses (src/lib/order-engine/router-map-fail-closed.test.ts).
+    const mainnetOneInch = getWhitelistedRouters(1)['1inch']
+    expect(mainnetOneInch).toBeDefined()
+
+    buildSettlementReceiptMock.mockResolvedValue(receiptWithRunnerUp())
+    render(
+      <SettlementReceiptModal
+        order={makeOrder({
+          chainId: ARBITRUM_CHAIN_ID,
+          order: { maxSlippageBps: 300, router: mainnetOneInch.address } as AutonomousOrder['order'],
+        })}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const line = await screen.findByTestId('fill-aggregation-value')
+    expect(line.textContent).toMatch(/Best route: our route/)
+    expect(line.textContent).not.toMatch(new RegExp(mainnetOneInch.label))
+  })
+
+  it('still names the router on a chain that DOES have a set (Base)', async () => {
+    const baseAugustus = getWhitelistedRouters(8453)['augustusV6']
+    expect(baseAugustus).toBeDefined()
+
+    buildSettlementReceiptMock.mockResolvedValue(makeReceipt({ ...receiptWithRunnerUp(), chainId: 8453 }))
+    render(
+      <SettlementReceiptModal
+        order={makeOrder({
+          chainId: 8453,
+          order: { maxSlippageBps: 300, router: baseAugustus.address } as AutonomousOrder['order'],
+        })}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const line = await screen.findByTestId('fill-aggregation-value')
+    expect(line.textContent).toMatch(new RegExp(`Best route: ${baseAugustus.label}`))
   })
 })

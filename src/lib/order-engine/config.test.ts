@@ -14,9 +14,13 @@
  *   - getOrderExecutorDomain(unwired) throws with the SPECIFIC message the callers grep.
  *   - CANCEL_ORDER_TYPES.CancelOrder structure ([FULL-H-01]) — recoverTypedDataAddress
  *     depends on this exact field order/types.
- *   - getWhitelistedRouters / getDefaultRouter / getChainlinkFeeds currently IGNORE
- *     chainId and always return the mainnet map — assert that so a future per-chain
- *     change can't silently land unnoticed.
+ *   - getChainlinkFeeds still IGNORES chainId and always returns the mainnet map — asserted
+ *     here so a future per-chain change can't silently land unnoticed.
+ *   - [ADR-020] getWhitelistedRouters / getDefaultRouter no longer do: an unknown chain gets
+ *     an EMPTY map and a null default instead of mainnet's. The exhaustive fail-closed surface
+ *     (every unknown chain, both siblings, the negative controls, and the pre-fix snapshots of
+ *     1/8453) lives in router-map-fail-closed.test.ts; what stays here is the chain-aware
+ *     behaviour of 1 and 8453 plus the one unwired-chain case this file already carried.
  *   - The chain-1 env override (NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS) is read at module
  *     load → exercised via vi.resetModules() + dynamic import.
  */
@@ -175,13 +179,19 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
   })
 
   it('getDefaultRouter(8453) commits Augustus V6 (0x6A00…1068), not mainnet 1inch', () => {
-    expect(getDefaultRouter(8453)).toEqual({ address: BASE_AUGUSTUS_V6, label: 'ParaSwap Augustus v6' })
-    expect(getDefaultRouter(8453).address).not.toBe(ONEINCH_V6)
+    const base = getDefaultRouter(8453)
+    expect(base).toEqual({ address: BASE_AUGUSTUS_V6, label: 'ParaSwap Augustus v6' })
+    expect(base?.address).not.toBe(ONEINCH_V6)
   })
 
-  it('an unwired chain falls back to the mainnet map + default (byte-identical)', () => {
-    expect(getWhitelistedRouters(42161)).toBe(getWhitelistedRouters(1))
-    expect(getDefaultRouter(42161)).toEqual({ address: ONEINCH_V6, label: '1inch v6' })
+  // [ADR-020] This test used to assert the OPPOSITE — that an unwired chain fell back to the
+  // mainnet map and mainnet's default router. That fallback was finding B6: on Arbitrum One the
+  // app would have offered, signed and self-validated mainnet routers the deployed Arbitrum
+  // OrderExecutorV3 does not whitelist. A chain map that does not know the chain must fail closed.
+  it('an unwired chain gets NOTHING — no map, no default router (never mainnet\'s)', () => {
+    expect(getWhitelistedRouters(42161)).toEqual({})
+    expect(getWhitelistedRouters(42161)).not.toBe(getWhitelistedRouters(1))
+    expect(getDefaultRouter(42161)).toBeNull()
   })
 })
 
