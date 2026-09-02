@@ -83,6 +83,19 @@ import {
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
 import { startEventWatcher } from "./event-watcher.js"
+// [PERF-KEEPER-IDLE-BACKOFF] Orders-driven idle backoff for RPC work (pure, unit-tested in
+// idle-backoff.test.mjs). With 0 active orders the full cycle and the event-watcher poll run every
+// IDLE_POLL_INTERVAL_MS; the Supabase probe stays at POLL_INTERVAL_MS so a new order promotes the
+// keeper within one poll. With ≥1 order every cycle is byte-for-byte today's.
+// One balance read per idle cycle: the next cycle's start read closes an idle cycle's outflow window
+// (createIdleBalanceCarry) with the same math (unexplainedOutflowWei); active cycles keep two reads.
+import {
+  POLL_INTERVAL_MS,
+  IDLE_POLL_INTERVAL_MS,
+  createIdleCadence,
+  unexplainedOutflowWei,
+  createIdleBalanceCarry,
+} from "./idle-backoff.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
 import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
@@ -265,7 +278,7 @@ const ETH_USD_FEED_RESOLUTION = resolveEthUsdFeed({ chainId: CHAIN_ID, envFeed: 
 const ETH_USD_FEED = ETH_USD_FEED_RESOLUTION.feed
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
 
-const POLL_INTERVAL_MS = 30_000 // 30 seconds
+// POLL_INTERVAL_MS (30s) + IDLE_POLL_INTERVAL_MS (300s) come from ./idle-backoff.js (imported above).
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
 // ── Gas Strategy Tiers ──────────────────────────────────────
@@ -307,6 +320,9 @@ const seenDcaOrderIds = new Set()
 let consecutiveExecFailures = 0
 let rpcDown = false
 let freezeAlertedState = null
+// [PERF-KEEPER-IDLE-BACKOFF] The last IDLE cycle's observability context, held until the next
+// successful cycle-start balance read closes its outflow window (see endCycleObservability).
+const idleBalanceCarry = createIdleBalanceCarry()
 
 // ---- Chain config (minimal, supports any chain ID) ---------------------
 
@@ -1130,6 +1146,13 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
     ctx.cycleStartBalanceWei = await publicClient.getBalance({ address: walletAddress })
     ctx.walletBalanceEth = Number(formatEther(ctx.cycleStartBalanceWei))
     rpcDown = false
+    // [PERF-KEEPER-IDLE-BACKOFF] The previous cycle was IDLE and skipped its end read (nothing was
+    // sent, so THIS read is its end read): close its outflow window now — same math, ownGas = 0.
+    // Taken only after a SUCCESSFUL read, so a failed one leaves the window for the next cycle.
+    const carried = idleBalanceCarry.take()
+    if (carried !== null) {
+      await checkUnexplainedOutflow(carried, ctx.cycleStartBalanceWei, 0n)
+    }
   } catch (err) {
     // Could not read chain state ⇒ flag RPC down for the score; keep going.
     rpcDown = true
@@ -1177,16 +1200,36 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
  * unexplainedOutflowEth = max(0, (start - end - ownGasSpentWei)/1e18). If it
  * exceeds OUTFLOW_THRESHOLD_ETH, emit alertUnexplainedOutflow with the score.
  * Never throws.
+ * [PERF-KEEPER-IDLE-BACKOFF] An IDLE cycle (0 active orders) sent nothing, so its end read would
+ * equal the next cycle's start read: it skips the read and holds ctx; beginCycleObservability
+ * closes the window with its own read (same math, ownGas 0). Active cycles: unchanged, two reads.
  * @param {object} ctx — from beginCycleObservability
  * @param {bigint} ownGasSpentWei — gas this executor itself spent this cycle
+ * @param {{ idle?: boolean }} [opts] — idle: the cycle found 0 active orders
  */
-async function endCycleObservability(ctx, publicClient, ownGasSpentWei) {
+async function endCycleObservability(ctx, publicClient, ownGasSpentWei, { idle = false } = {}) {
   if (!ctx || ctx.cycleStartBalanceWei === null) return
+  if (idle) {
+    idleBalanceCarry.hold(ctx)
+    return
+  }
   try {
     const endBalanceWei = await publicClient.getBalance({ address: ctx.walletAddress })
-    const ownGas = typeof ownGasSpentWei === "bigint" ? ownGasSpentWei : 0n
-    let outflowWei = ctx.cycleStartBalanceWei - endBalanceWei - ownGas
-    if (outflowWei < 0n) outflowWei = 0n
+    await checkUnexplainedOutflow(ctx, endBalanceWei, ownGasSpentWei)
+  } catch { /* never throw */ }
+}
+
+/**
+ * The unexplained-outflow check endCycleObservability always ran, unchanged: outflow =
+ * max(0, start − end − ownGas) (unexplainedOutflowWei); above OUTFLOW_THRESHOLD_ETH ⇒ alert with
+ * the score. Also closes a carried idle window from beginCycleObservability. Never throws.
+ * @param {object} ctx — the cycle whose window is being closed (its start balance + score inputs)
+ * @param {bigint} endBalanceWei — the read that closes the window
+ * @param {bigint} ownGasSpentWei — gas the executor itself spent inside that window
+ */
+async function checkUnexplainedOutflow(ctx, endBalanceWei, ownGasSpentWei) {
+  try {
+    const outflowWei = unexplainedOutflowWei(ctx.cycleStartBalanceWei, endBalanceWei, ownGasSpentWei)
     const unexplainedOutflowEth = Number(formatEther(outflowWei))
     if (unexplainedOutflowEth > OUTFLOW_THRESHOLD_ETH) {
       const score = scoreFromContext({ ...ctx, unexplainedOutflowEth })
@@ -1266,8 +1309,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   if (orders.length === 0) {
     log("  No active orders")
     // [DCA-OBS] Still close out observability (outflow check) even with no orders.
-    await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
-    return
+    // [PERF-KEEPER-IDLE-BACKOFF] …without a second balance read: nothing was sent, so the next
+    // cycle's start read closes this window (idle-backoff.js).
+    await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
+    return 0
   }
 
   log(`  Found ${orders.length} active order(s)`)
@@ -1968,6 +2013,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
 
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
+  // [PERF-KEEPER-IDLE-BACKOFF] The count drives the loop's idle/active mode (main's runTick).
+  return orders.length
 }
 
 // ---- Stats tracking ----------------------------------------------------
@@ -2176,7 +2223,7 @@ async function main() {
     `ETH/USD feed: ${ETH_USD_FEED ?? "NONE -- Chainlink reads disabled"} ` +
       `[${ETH_USD_FEED_RESOLUTION.source}] ${ETH_USD_FEED_RESOLUTION.reason}`,
   )
-  log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`)
+  log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s (RPC work every ${IDLE_POLL_INTERVAL_MS / 1000}s while there are no active orders)`)
   log(`Max batch: ${MAX_BATCH}`)
   // [FIX-KEEPER-GAS-TIER-BASE] Log THIS chain's resolved config, not a hardcoded mainnet one.
   const gasTierCfg = getGasTierConfig(CHAIN_ID)
@@ -2212,14 +2259,35 @@ async function main() {
   if (V3_CONTRACT_ADDRESS) {
     watchedContracts.push({ address: V3_CONTRACT_ADDRESS, label: 'OrderExecutorV3' })
   }
-  startEventWatcher(publicClient, watchedContracts, monitor)
+  const watcher = startEventWatcher(publicClient, watchedContracts, monitor)
+
+  // [PERF-KEEPER-IDLE-BACKOFF] Every POLL_INTERVAL_MS tick runs runTick. ACTIVE (the last cycle
+  // found ≥1 order): the tick IS a full cycle — today's behaviour. IDLE (0 orders): the tick is a
+  // DB-only probe — the same two Supabase calls a cycle makes, zero RPC — and the full cycle
+  // (balance/freeze/ETH-USD reads + the event-watcher poll) runs once every IDLE_POLL_INTERVAL_MS.
+  // A probe that finds a row promotes the keeper to a full cycle on that same tick, so a new order
+  // is noticed within one POLL_INTERVAL_MS regardless of the idle cadence.
+  const cadence = createIdleCadence()
+
+  async function runTick() {
+    if (cadence.tick() === "probe") {
+      await unlockStaleOrders()
+      const probe = await fetchActiveOrders()
+      if (probe.length === 0) return
+      log("  Active order(s) appeared while idle -- running the full cycle now")
+    }
+    const activeOrders = await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+    cadence.record(activeOrders)
+    watcher.setIdle(cadence.isIdle())
+    if (cadence.isIdle()) log(`  Idle: next RPC cycle in ${IDLE_POLL_INTERVAL_MS / 1000}s (Supabase probe every ${POLL_INTERVAL_MS / 1000}s)`)
+  }
 
   // Run immediately, then on interval
-  await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+  await runTick()
 
   setInterval(async () => {
     try {
-      await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+      await runTick()
     } catch (err) {
       console.error("Cycle error:", err.message)
       if (monitor) monitor.onCycleError(err)
