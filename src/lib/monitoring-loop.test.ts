@@ -703,6 +703,16 @@ describe('on-chain scan & circuit breaker integration', () => {
     expect(vi.mocked(runOnChainScan)).not.toHaveBeenCalled()
   })
 
+  // [perf/onchain-scan-cadence] Acceptance #2: health checks (H1/H2) are not
+  // gated by shouldRunOnChainScan — they must still run on a non-scan tick.
+  it('still runs health checks (H1) on a tick where the on-chain scan is skipped', async () => {
+    vi.mocked(shouldRunOnChainScan).mockResolvedValueOnce(false)
+    const result = await runMonitoringTick()
+
+    expect(result.checksRun).toBe(1) // MONITORED_ENDPOINTS mock has 1 entry
+    expect('onChainScan' in result).toBe(false)
+  })
+
   // ── T3 ── runOnChainScan returns null → no onChainScan key
   it('omits onChainScan key when runOnChainScan returns null', async () => {
     vi.mocked(shouldRunOnChainScan).mockResolvedValueOnce(true)
