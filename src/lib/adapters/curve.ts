@@ -4,10 +4,10 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 // CurveRouterNG on Ethereum mainnet
-const CURVE_ROUTER_NG = '0x16C6521Dff6baB339122a0FE25a9116693265353' as const
+export const CURVE_ROUTER_NG = '0x16C6521Dff6baB339122a0FE25a9116693265353' as const
 
 // ABI fragment for CurveRouterNG
-const CURVE_ROUTER_ABI = [
+export const CURVE_ROUTER_ABI = [
   {
     name: 'get_dy',
     inputs: [
@@ -36,11 +36,20 @@ const CURVE_ROUTER_ABI = [
   },
 ] as const
 
-// Common Curve pools for major pairs (Ethereum mainnet)
-const CURVE_POOLS: Record<string, {
+// Common Curve pools for major pairs (Ethereum mainnet).
+//
+// `poolType` is CurveRouterNG's required pool-ABI selector — `_swap_params[..][3]`
+// (1 = legacy stable, 10 = stable-ng, 2/3 = crypto/tricrypto-ng, 20/30 = crypto-ng,
+// 4 = llamma). It is NOT derived from the pool family name: every value below was
+// proven with a live `eth_call` per pool, both swap directions, against the real
+// CurveRouterNG (see scripts/verify-curve-pool-types.mjs — run its output is
+// reproduced in this branch's PR feedback). A pool whose poolType could not be
+// proven on-chain is excluded below rather than defaulted.
+export const CURVE_POOLS: Record<string, {
   pool: `0x${string}`
   coins: `0x${string}`[]
   swapType: number
+  poolType: number
 }> = {
   '3pool': {
     pool: '0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7',
@@ -50,15 +59,7 @@ const CURVE_POOLS: Record<string, {
       '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
     ],
     swapType: 1,
-  },
-  tricrypto2: {
-    pool: '0xD51a44d3FaE010294C616388b506AcdA1bfAAE46',
-    coins: [
-      '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
-      '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // WBTC
-      '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', // WETH
-    ],
-    swapType: 3,
+    poolType: 1, // proven: legacy stable — get_dy succeeds both directions, DAI<->USDC
   },
   steth: {
     pool: '0xDC24316b9AE028F1497c275EB9192a3Ea0f67022',
@@ -67,6 +68,7 @@ const CURVE_POOLS: Record<string, {
       '0xae7ab96520de3a18e5e111b5eaab095312d7fe84', // stETH
     ],
     swapType: 1,
+    poolType: 1, // proven: legacy stable — get_dy succeeds both directions, ETH<->stETH
   },
   fraxusdc: {
     pool: '0xDcEF968d416a41Cdac0ED8702fAC8128A64241A2',
@@ -75,23 +77,25 @@ const CURVE_POOLS: Record<string, {
       '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
     ],
     swapType: 1,
+    poolType: 1, // proven: legacy stable — get_dy succeeds both directions, FRAX<->USDC
   },
-  crvusdusdc: {
-    pool: '0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E',
-    coins: [
-      '0xf939e0a03fb07f59a73314e73794be0e57ac1b4e', // crvUSD
-      '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
-    ],
-    swapType: 4,
-  },
-  crvusdusdt: {
-    pool: '0x390f3595bCa2Df7d23783dFd126427CCeb997BF4',
-    coins: [
-      '0xf939e0a03fb07f59a73314e73794be0e57ac1b4e', // crvUSD
-      '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
-    ],
-    swapType: 4,
-  },
+  // ── Excluded from routing — poolType could not be proven on-chain ──
+  //
+  // tricrypto2 (0xD51a44d3FaE010294C616388b506AcdA1bfAAE46): every poolType
+  // candidate reverts get_dy with this pool's configured swapType=3. Debugging
+  // showed swapType=1 succeeds (amountOut matches a direct pool call) regardless
+  // of poolType — i.e. `swapType`, not `poolType`, is wrong for this pool. Fixing
+  // swapType is outside this fix's scope (poolType/_swap_params[..][3] only, per
+  // the task). Flagged in this branch's PR feedback as a separate pre-existing bug.
+  //
+  // crvusdusdc (0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E) / crvusdusdt
+  // (0x390f3595bCa2Df7d23783dFd126427CCeb997BF4): this file's declared `coins`
+  // order ([crvUSD, USDC]) does NOT match the pool's on-chain coins() order
+  // ([USDC, crvUSD]) — confirmed via coins(0)/coins(1) — a pre-existing bug
+  // independent of poolType. Because `findCurvePool` derives i/j from the
+  // (wrong) declared order, any get_dy result through the router is not trustworthy
+  // proof of a correct poolType. Flagged in this branch's PR feedback; left out
+  // until the coin order is fixed.
 }
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as `0x${string}`
@@ -102,6 +106,7 @@ function findCurvePool(tokenIn: string, tokenOut: string): {
   i: number
   j: number
   swapType: number
+  poolType: number
 } | null {
   const inLower = tokenIn.toLowerCase()
   const outLower = tokenOut.toLowerCase()
@@ -110,7 +115,10 @@ function findCurvePool(tokenIn: string, tokenOut: string): {
     const iIdx = info.coins.findIndex(c => c.toLowerCase() === inLower)
     const jIdx = info.coins.findIndex(c => c.toLowerCase() === outLower)
     if (iIdx >= 0 && jIdx >= 0 && iIdx !== jIdx) {
-      return { poolName: name, pool: info.pool, i: iIdx, j: jIdx, swapType: info.swapType }
+      return {
+        poolName: name, pool: info.pool, i: iIdx, j: jIdx,
+        swapType: info.swapType, poolType: info.poolType,
+      }
     }
   }
   return null
@@ -122,13 +130,14 @@ type CurveSwapParam = readonly [bigint, bigint, bigint, bigint, bigint]
 type CurveSwapParams = readonly [CurveSwapParam, CurveSwapParam, CurveSwapParam, CurveSwapParam, CurveSwapParam]
 type CurvePools = readonly [`0x${string}`, `0x${string}`, `0x${string}`, `0x${string}`, `0x${string}`]
 
-function buildCurveRoute(
+export function buildCurveRoute(
   tokenIn: `0x${string}`,
   tokenOut: `0x${string}`,
   pool: `0x${string}`,
   i: number,
   j: number,
   swapType: number,
+  poolType: number,
 ): {
   route: CurveRoute
   swapParams: CurveSwapParams
@@ -140,7 +149,7 @@ function buildCurveRoute(
 
   const zeroRow: CurveSwapParam = [0n, 0n, 0n, 0n, 0n]
   const swapParams: CurveSwapParams = [
-    [BigInt(i), BigInt(j), BigInt(swapType), 0n, 0n],
+    [BigInt(i), BigInt(j), BigInt(swapType), BigInt(poolType), 0n],
     zeroRow, zeroRow, zeroRow, zeroRow,
   ]
 
@@ -160,11 +169,11 @@ async function fetchCurveQuote(
   const poolInfo = findCurvePool(tokenIn, tokenOut)
   if (!poolInfo) throw new Error('Curve: no pool found for this pair')
 
-  const { poolName, pool, i, j, swapType } = poolInfo
+  const { poolName, pool, i, j, swapType, poolType } = poolInfo
   const { route, swapParams, pools } = buildCurveRoute(
     tokenIn as `0x${string}`,
     tokenOut as `0x${string}`,
-    pool, i, j, swapType,
+    pool, i, j, swapType, poolType,
   )
 
   const callData = encodeFunctionData({
@@ -222,11 +231,11 @@ async function fetchCurveSwap(
   const poolInfo = findCurvePool(tokenIn, tokenOut)
   if (!poolInfo) throw new Error('Curve: no pool found for this pair')
 
-  const { poolName, pool, i, j, swapType } = poolInfo
+  const { poolName, pool, i, j, swapType, poolType } = poolInfo
   const { route, swapParams, pools } = buildCurveRoute(
     tokenIn as `0x${string}`,
     tokenOut as `0x${string}`,
-    pool, i, j, swapType,
+    pool, i, j, swapType, poolType,
   )
 
   // Step 1: get expected output
