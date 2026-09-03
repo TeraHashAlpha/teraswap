@@ -263,9 +263,13 @@ describe('A4 — validateFeeIntegrity', () => {
 
 /**
  * Mirrors the production guard in useSwap.ts so a future drift between
- * the two flags the test rather than the user. Tests inject the
- * partner-fee membership explicitly because the production constant
- * (`FEE_NATIVE_SOURCES`) is currently empty.
+ * the two flags the test rather than the user. Membership is injected
+ * explicitly here so each branch can be exercised in isolation; the guard
+ * driven by the REAL constant lives in lib/fee-integrity-armed.test.ts.
+ *
+ * [fix/zerox-partner-fee-armed] `FEE_NATIVE_SOURCES` is no longer empty — it
+ * names 0x, cowswap and bebop, the three sources whose adapters actually send
+ * partner-fee params. These cases are therefore reachable in production now.
  */
 function runFeeIntegrityCallSite(args: {
   quoteToAmount: string | null
@@ -301,9 +305,8 @@ describe('A4b — fee integrity call-site guard [P156]', () => {
   // ── Case 2: partner-fee source (the only case the check applies to) ──
 
   it('source IS in FEE_NATIVE_SOURCES → RUNS validateFeeIntegrity', () => {
-    // Pretend a source is in the partner-fee list (in production this list
-    // is currently empty, so this case isn't reachable from the live code
-    // path — but the guard remains correct for future re-enablement).
+    // Injected membership keeps this case source-agnostic. In production the
+    // reachable members are 0x / cowswap / bebop (FEE_NATIVE_SOURCES).
     const result = runFeeIntegrityCallSite({
       quoteToAmount: '1000000',
       swapToAmount: '990000', // ~1% lower → fee likely applied → valid
@@ -356,13 +359,28 @@ describe('A4b — fee integrity call-site guard [P156]', () => {
     expect(result.ran).toBe(false)
   })
 
-  // ── Constant invariant: FEE_NATIVE_SOURCES currently empty ──
+  // ── Constant invariant: FEE_NATIVE_SOURCES names the real partner-fee sources ──
 
-  it('FEE_NATIVE_SOURCES is empty today → every live swap skips the check', () => {
-    // Documents the current production reality: with no partner-fee sources
-    // configured, the guard at the call site is always false. The check
-    // re-arms automatically the moment a source is added to the constant.
-    expect(FEE_NATIVE_SOURCES).toEqual([])
+  it('FEE_NATIVE_SOURCES names the sources whose adapters send partner-fee params', () => {
+    // [fix/zerox-partner-fee-armed] This assertion used to read `toEqual([])`
+    // and called that "the current production reality". It had stopped being
+    // true: SPRINT-9T shipped native partner-fee params in adapters/zerox.ts,
+    // cow.ts and bebop.ts while this list stayed empty, so the guard below was
+    // skipping the very sources it exists to check. Pinning the empty list is
+    // what let that drift survive — the list is now derived from what the
+    // adapters actually put on the wire, enforced by
+    // lib/adapters/partner-fee-drift.test.ts.
+    expect([...FEE_NATIVE_SOURCES].sort()).toEqual(['0x', 'bebop', 'cowswap'])
+  })
+
+  it('a 0x swap therefore RUNS the check at the call site', () => {
+    const result = runFeeIntegrityCallSite({
+      quoteToAmount: '1000000',
+      swapToAmount: '990000',
+      source: '0x',
+      usesPartnerFee: FEE_NATIVE_SOURCES.includes('0x'),
+    })
+    expect(result).toEqual({ ran: true, valid: true })
   })
 })
 

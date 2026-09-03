@@ -428,10 +428,27 @@ export function useSwap(
       // path — and triggered the false-positive block on every swap.
       //
       // Gating on FEE_NATIVE_SOURCES restricts the check to case 2 only.
-      // FEE_NATIVE_SOURCES is currently empty (no source uses partner-fee
-      // mode), so the check is effectively inert; reintroducing a partner-
-      // fee integration later automatically re-arms the check via the
-      // constants list — no code change needed here.
+      //
+      // [fix/zerox-partner-fee-armed] The check is LIVE, not inert. It was
+      // written when FEE_NATIVE_SOURCES was empty, but SPRINT-9T T1/T2 shipped
+      // native partner-fee params for 0x, CoW and Bebop without updating the
+      // list, so the guard silently never ran for the very sources it was
+      // built for. The list now names all three (constants.ts, enforced by
+      // partner-fee-drift.test.ts). Per-source behaviour, measured:
+      //   - '0x'      ARMED and meaningful. Both the /price quote and the
+      //               /quote build carry swapFeeBps, so the two amounts differ
+      //               only by routing drift; the check catches the asymmetric
+      //               case where 0x honours the fee on the quote and drops it
+      //               on the build. Tolerance is a ONE-SIDED +2% ceiling
+      //               (api.ts validateFeeIntegrity), far above 0x's own 10 bps
+      //               fee, so an honest quote cannot trip it.
+      //   - 'cowswap' inert by design — validateFeeIntegrity hard-skips it
+      //               (solver surplus is not a deduction, so a higher fill is
+      //               normal and must not block).
+      //   - 'bebop'   armed but structurally untrippable: its price quote is
+      //               GROSS and only the firm quote carries the fee, so
+      //               swapToAmount <= quoteToAmount always.
+      // Evidence: fee-integrity-armed.test.ts.
       const usesPartnerFee = FEE_NATIVE_SOURCES.includes(source)
       if (quoteToAmount && usesPartnerFee) {
         const feeCheck = validateFeeIntegrity(quoteToAmount, swapData.toAmount, source)
