@@ -173,7 +173,7 @@ export const FEE_COLLECTOR_V1_ADDRESS = '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa5
 // same concept as FEE_INCOMPATIBLE_SOURCES (cannot route through the
 // FeeCollector) — they happen to hold the same three members today, which is a
 // measured coincidence, not a definition. Fee is partner-fee XOR FeeCollector,
-// never both (partner-fee-invariant.test.ts).
+// never both (src/lib/adapters/partner-fee-invariant.test.ts).
 export const FEE_NATIVE_SOURCES: AggregatorName[] = [
   '0x', 'cowswap', 'bebop',
 ]
