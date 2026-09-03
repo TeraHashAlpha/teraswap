@@ -21,7 +21,7 @@ import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { shouldFallbackToNextSource } from '@/lib/swap-fallback'
 import { isExecutableSource } from '@/lib/executable-sources'
-import { validateCallDataRecipient } from '@/lib/calldata-recipient'
+import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
 
 // ── Price Guard error (DefiLlama server-side block) ──────
 class PriceGuardError extends Error {
@@ -395,7 +395,9 @@ export function useSwap(
       // [R1] Validate recipient in calldata matches connected wallet.
       // [FULL-M-01] On direct routes the FeeCollector is NOT an acceptable
       // recipient — only fee-routed swaps may deliver to it.
-      const recipientCheck = validateCallDataRecipient(swapData.tx.data as string, address, routeViaFeeCollector, chainId)
+      // [ADR-023] async: 0x's exec target is checked against the chain's live
+      // Settler registry, which needs an on-chain read.
+      const recipientCheck = await validateCallDataRecipientAsync(swapData.tx.data as string, address, routeViaFeeCollector, chainId)
       if (!recipientCheck.valid) {
         console.error('[R1] Recipient mismatch:', recipientCheck)
         throw new Error(

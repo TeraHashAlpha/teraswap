@@ -20,7 +20,7 @@ import { logSwapToSupabase } from '@/lib/analytics'
 import { deriveMinimumOutput } from '@/lib/minimum-output'
 import type { SplitRoute } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
-import { validateCallDataRecipient } from '@/lib/calldata-recipient'
+import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
 
@@ -308,7 +308,9 @@ export function useSplitSwap(
         }
         // [R1] Validate recipient in calldata matches connected wallet.
         // [FULL-M-01] Direct legs reject the FeeCollector as a recipient.
-        const recipientCheck = validateCallDataRecipient(calldataHex, address, routeViaFeeCollector, chainId)
+        // [ADR-023] async: 0x's exec target is checked against the chain's
+        // live Settler registry, which needs an on-chain read.
+        const recipientCheck = await validateCallDataRecipientAsync(calldataHex, address, routeViaFeeCollector, chainId)
         if (!recipientCheck.valid) {
           throw new Error(`Split leg recipient mismatch: tokens would go to ${recipientCheck.extracted?.slice(0, 10)}... instead of your wallet.`)
         }

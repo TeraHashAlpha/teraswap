@@ -83,8 +83,12 @@ const mockValidateCallDataRecipient = vi.fn<(...a: unknown[]) => RecipientResult
   extracted: '0x1111111111111111111111111111111111111111',
   implicitRecipient: false,
 }))
+// [ADR-023] The execution paths call the registry-aware async entry point; the
+// sync export stays mocked too so nothing in this file can reach a real RPC.
 vi.mock('@/lib/calldata-recipient', () => ({
   validateCallDataRecipient: (...args: unknown[]) => mockValidateCallDataRecipient(...args),
+  validateCallDataRecipientAsync: async (...args: unknown[]) =>
+    mockValidateCallDataRecipient(...args),
 }))
 
 // Allow the real KNOWN_SWAP_SELECTORS set so we can construct a known

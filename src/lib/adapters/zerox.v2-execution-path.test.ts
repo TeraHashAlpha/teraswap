@@ -177,13 +177,25 @@ describe('[R1 Group G] the recipient gate now DECODES exec instead of rejecting 
     expect(result.implicitRecipient).toBe(false)
   })
 
-  it('STILL NOT EXECUTABLE END-TO-END: the live Settler is not a whitelisted exec target', () => {
-    // Group G validates exec's `target` against the per-chain router whitelist,
-    // because an exec with an arbitrary target is a fund-transfer primitive, not a
-    // swap. 0x's real target is the Settler — which ADR-021 established ROTATES with
-    // each 0x release and therefore cannot be whitelisted. So R1 now fails at the
-    // target check rather than the selector check, and 0x execution remains blocked
-    // on every chain. Full shape + real mainnet evidence: calldata-recipient.test.ts.
+  it('[ADR-023] EXECUTABLE END-TO-END: exec\'s target is checked against 0x\'s registry, not the whitelist', () => {
+    // The last gate. Group G used to validate exec's `target` against the
+    // per-chain router whitelist; 0x's real target is the Settler, which
+    // ADR-021 established ROTATES with each release and therefore can never be
+    // a whitelist entry — so 0x was executable on zero chains by construction.
+    //
+    // ADR-023 replaced that check with a use-time read of 0x's deployer/registry
+    // (ownerOf(2) OR prev(2)). Two things must both stay true:
+    //
+    //  1. The rotating Settler is STILL not in the router whitelist — the fix
+    //     was not to widen the whitelist, and this pins that it was not.
     expect(getRouterWhitelist(1)).not.toContain(ROTATING_SETTLER_STANDIN.toLowerCase())
+
+    //  2. `tx.to` — the address the wallet actually calls — is the
+    //     AllowanceHolder, which IS whitelisted and does NOT rotate. That is
+    //     the only address the outer router gate ever sees.
+    expect(getRouterWhitelist(1)).toContain(ZEROX_ALLOWANCE_HOLDER.toLowerCase())
+
+    // The identity check itself, with real per-chain calldata and real registry
+    // answers, lives in calldata-recipient.test.ts ([ADR-023] golden vectors).
   })
 })
