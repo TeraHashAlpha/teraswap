@@ -88,3 +88,43 @@ describe('env-validation — ZEROX_API_KEY required-when-enabled [dead-sources-a
     expect(errors.some((e) => e.includes('ZEROX_API_KEY'))).toBe(false)
   })
 })
+
+// [CHORE-2026-09-03 / INC-2026-09-03-001] openocean/bebop disabled — no key
+// may become required for either. openocean has no key variable at all;
+// BEBOP_API_KEY was never a RULES entry. Both must stay that way now that
+// the sources are disabled, and ZEROX_API_KEY (0x stays enabled) must keep
+// failing without it, proving disabling these two didn't loosen anything.
+describe('env-validation — disabled sources require no keys [CHORE-2026-09-03]', () => {
+  const ORIGINAL_ZEROX_KEY = process.env.ZEROX_API_KEY
+  const ORIGINAL_BEBOP_KEY = process.env.BEBOP_API_KEY
+
+  beforeEach(() => {
+    delete process.env.ZEROX_API_KEY
+    delete process.env.BEBOP_API_KEY
+  })
+
+  afterEach(() => {
+    if (ORIGINAL_ZEROX_KEY === undefined) delete process.env.ZEROX_API_KEY
+    else process.env.ZEROX_API_KEY = ORIGINAL_ZEROX_KEY
+    if (ORIGINAL_BEBOP_KEY === undefined) delete process.env.BEBOP_API_KEY
+    else process.env.BEBOP_API_KEY = ORIGINAL_BEBOP_KEY
+  })
+
+  it('bebop and openocean are both in DISABLED_SOURCES', () => {
+    expect(DISABLED_SOURCES.bebop).toBeTruthy()
+    expect(DISABLED_SOURCES.openocean).toBeTruthy()
+  })
+
+  it('passes with neither BEBOP_API_KEY nor any OpenOcean var set', () => {
+    process.env.ZEROX_API_KEY = 'a-real-key' // keep 0x's own gate satisfied
+    const { errors } = validateEnv()
+    expect(errors.some((e) => e.includes('BEBOP'))).toBe(false)
+    expect(errors.some((e) => e.toLowerCase().includes('openocean'))).toBe(false)
+  })
+
+  it('still fails without ZEROX_API_KEY — 0x stays enabled', () => {
+    const { valid, errors } = validateEnv()
+    expect(valid).toBe(false)
+    expect(errors.some((e) => e.includes('ZEROX_API_KEY'))).toBe(true)
+  })
+})
