@@ -68,3 +68,25 @@ export const ZEROX_MAINNET_EXEC_CALLDATA =
   '00000000000000a0000000000000000000000000000000000000000000000000000000000000' +
   '0000000000000000000000000000000000000000000000000000000000000000000000000000' +
   '0000000000000000000000000000000000000000'
+
+/**
+ * [ADR-023] The registry answer at THE SAME BLOCK as the calldata above.
+ *
+ * Read on 2026-09-03 over a public archive mainnet RPC (https://eth.drpc.org)
+ * at block 25897835, from 0x's deployer/registry
+ * 0x00000000000004533Fe15556B1E086BB1A72cEae — which carried 58 bytes of code
+ * at that block — for the taker-submitted feature id 2.
+ *
+ * The captured `exec` targets `prev(2)`, NOT `ownerOf(2)`: 0x API was inside
+ * its dwell window. An `ownerOf`-only check would have rejected this real,
+ * successful mainnet swap.
+ */
+export const ZEROX_MAINNET_EXEC_BLOCK = 25897835n
+
+/** `ownerOf(2)` at ZEROX_MAINNET_EXEC_BLOCK — the CURRENT Settler. */
+export const ZEROX_MAINNET_SETTLER_CURRENT =
+  '0x666FEdd4CdD4E890A5aD20E7B60975409435a64A' as const
+
+/** `prev(2)` at ZEROX_MAINNET_EXEC_BLOCK — the PREVIOUS Settler, still in dwell. */
+export const ZEROX_MAINNET_SETTLER_PREV =
+  '0x0889e9327b98D7d1BE3C301A4585ff3330502c9A' as const
