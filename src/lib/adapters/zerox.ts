@@ -26,23 +26,33 @@ function applyPartnerFee(qs: URLSearchParams, src: string, dst: string): void {
   qs.set('swapFeeToken', sellIsNative ? dst : src)
 }
 
-// [SPRINT-9E] 0x v2 flow per chain. Mainnet uses the permit2 endpoint; other
-// chains (Base) use the allowance-holder endpoint so the returned tx.to is the
-// AllowanceHolder — the address whitelisted for 0x on Base in chains/routers.ts
-// (the permit2 Settler tx.to would fail that whitelist).
-function zeroxQuotePath(chainId: number): string {
-  return chainId === DEFAULT_CHAIN_ID ? '/swap/permit2/quote' : '/swap/allowance-holder/quote'
-}
+/**
+ * [ADR-021] 0x v2 endpoint family — ALLOWANCE-HOLDER on every chain, mainnet included.
+ *
+ * Was: mainnet on `/swap/permit2/*`, Base/Arbitrum on `/swap/allowance-holder/*`
+ * (SPRINT-9E). The permit2 endpoint returns a **Settler** address as `transaction.to`,
+ * and 0x rotates the Settler with each release — so it can never be safely whitelisted:
+ * pinning one guarantees an outage at the next rotation, and not pinning it defeats the
+ * router gate. The AllowanceHolder is a fixed, deterministic address (already trusted on
+ * 8453/42161, and verified deployed on mainnet — see ZEROX_ALLOWANCE_HOLDER).
+ *
+ * The permit2 flow was also never executable here: it requires the taker to sign the
+ * returned `permit2.eip712` payload and the integrator to append that signature to the
+ * calldata. This repo has no Permit2 signing on the swap path at all (`signTypedData`
+ * appears nowhere in useSwap.ts / useSplitSwap.ts), so a permit2 quote would revert
+ * on-chain even with both gates open.
+ *
+ * Exported so the tests can pin the exact path — a silent revert to the permit2 family
+ * would change `transaction.to` back to a non-whitelisted Settler.
+ */
+export const ZEROX_V2_QUOTE_PATH = '/swap/allowance-holder/quote'
+export const ZEROX_V2_PRICE_PATH = '/swap/allowance-holder/price'
 
-// [fix/zerox-price-endpoint] The /quote endpoints are the firm, signable quote
-// and REQUIRE `taker` (https://docs.0x.org/api-reference/evm-ap-is/swap/permit-2-getquote,
-// .../allowanceholder-getquote). Since quote-before-wallet (#439) there is no
-// taker at quote time, so fetchQuote must use the indicative /price family
-// instead — same permit2/allowance-holder split, for the same Base-whitelist
-// reason as zeroxQuotePath.
-function zeroxPricePath(chainId: number): string {
-  return chainId === DEFAULT_CHAIN_ID ? '/swap/permit2/price' : '/swap/allowance-holder/price'
-}
+// [fix/zerox-price-endpoint] The /quote endpoint is the firm, signable quote and
+// REQUIRES `taker` (https://docs.0x.org/api-reference/evm-ap-is/swap/allowanceholder-getquote).
+// Since quote-before-wallet (#439) there is no taker at quote time, so fetchQuote must
+// use the indicative /price endpoint instead
+// (https://docs.0x.org/api-reference/evm-ap-is/swap/allowanceholder-getprice).
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
@@ -58,7 +68,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
   // and .../allowanceholder-getprice both list it as required, with no mainnet default.
   qs.set('chainId', String(chainId))
   applyPartnerFee(qs, src, dst) // [SPRINT-9T T1] uniform 0.1% (ERC-20 fee token)
-  const res = await fetch(`${base}${zeroxPricePath(chainId)}?${qs}`, {
+  const res = await fetch(`${base}${ZEROX_V2_PRICE_PATH}?${qs}`, {
     headers: {
       '0x-api-key': key,
       '0x-version': 'v2',
@@ -79,7 +89,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
 
 async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, from, slippage, recipient, chainId = DEFAULT_CHAIN_ID } = params
-  // [P101] 0x v2 permit2 swap doesn't expose a separate recipient field —
+  // [P101] 0x v2 doesn't expose a separate recipient field —
   // `taker` is both signer and destination. The /v1/swap route already
   // rejects this source (FEE_INCOMPATIBLE_SOURCES), so this branch is
   // mostly defensive: log when an upstream caller threads recipient.
@@ -101,7 +111,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
   // [P217, corrected] `chainId` is required on /quote too — see fetchQuote.
   qs.set('chainId', String(chainId))
   applyPartnerFee(qs, src, dst) // [SPRINT-9T T1] same fee on swap-build → quote == execution
-  const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
+  const res = await fetch(`${base}${ZEROX_V2_QUOTE_PATH}?${qs}`, {
     headers: {
       '0x-api-key': key,
       '0x-version': 'v2',
