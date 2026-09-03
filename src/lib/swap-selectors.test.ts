@@ -13,9 +13,43 @@
  * exactly, confirming the method.
  */
 import { describe, it, expect } from 'vitest'
+import { toFunctionSelector } from 'viem'
 import { KNOWN_SWAP_SELECTORS, isKnownSwapSelector } from './swap-selectors'
 
 const CALLDATA = (selector: string) => `${selector}${'0'.repeat(128)}`
+
+// ── [ADR-021] 0x API v2 selectors ───────────────────────────────────────────
+//
+// The two selectors production rejected on 2026-09-03 12:35–12:36 UTC:
+//   [SC-04] Rejected unknown swap selector: 0x2213bc0b source: 0x   (x2)
+//   [SC-04] Rejected unknown swap selector: 0x1fff991f source: 0x   (x1)
+// These are OBSERVATIONS copied from the server log, never "known" constants.
+// Every assertion below puts the keccak-DERIVED value on the expected side and
+// the observation on the actual side, so the test proves the signature
+// reproduces the bytes rather than restating them.
+const OBSERVED_IN_PROD = {
+  exec: '0x2213bc0b',
+  execute: '0x1fff991f',
+} as const
+
+/**
+ * AllowanceHolder.exec — 0xProject/0x-settler,
+ * src/allowanceholder/AllowanceHolderBase.sol:
+ *   function exec(address operator, address token, uint256 amount,
+ *                 address payable target, bytes calldata data)
+ * `address payable` is `address` in the ABI encoding.
+ */
+const ALLOWANCE_HOLDER_EXEC_SIG = 'exec(address,address,uint256,address,bytes)'
+
+/**
+ * Settler.execute — 0xProject/0x-settler, src/Settler.sol:
+ *   function execute(AllowedSlippage memory slippage, bytes[] calldata actions,
+ *                    bytes32 /* zid & affiliate *\/)
+ * with src/interfaces/ISettlerBase.sol:
+ *   struct AllowedSlippage { address payable recipient; IERC20 buyToken; uint256 minAmountOut; }
+ * → the struct flattens to the ABI tuple (address,address,uint256).
+ */
+const SETTLER_EXECUTE_SIG = 'execute((address,address,uint256),bytes[],bytes32)'
 
 describe('KNOWN_SWAP_SELECTORS — Augustus V6.2 Curve methods [SPRINT-9H]', () => {
   it('allows swapExactAmountInOnCurveV1 (0x1a01c532) — the CurveV1StableNg route that failed on Base', () => {
@@ -56,7 +90,53 @@ describe('KNOWN_SWAP_SELECTORS — mainnet selector set preserved [SPRINT-9H]', 
     for (const sel of PRE_9H) expect(KNOWN_SWAP_SELECTORS.has(sel)).toBe(true)
   })
 
-  it('adds exactly the two verified Curve selectors (22 total, no accidental widening)', () => {
-    expect(KNOWN_SWAP_SELECTORS.size).toBe(PRE_9H.length + 2)
+  it('adds exactly the two verified Curve selectors + the one 0x v2 selector (23 total, no accidental widening)', () => {
+    // +2 Curve (SPRINT-9H) +1 AllowanceHolder.exec (ADR-021).
+    expect(KNOWN_SWAP_SELECTORS.size).toBe(PRE_9H.length + 2 + 1)
+  })
+})
+
+describe('KNOWN_SWAP_SELECTORS — 0x API v2 execution path [ADR-021]', () => {
+  it('the derivation method itself is sound: it reproduces two selectors already in the set', () => {
+    // Control for the method, not for 0x. If viem/keccak or the canonical-signature
+    // convention were wrong, these two long-standing entries would not reproduce.
+    expect(toFunctionSelector('sellToUniswap(address[],uint256,uint256,bool)')).toBe('0xd9627aa4')
+    expect(
+      toFunctionSelector('transformERC20(address,address,uint256,uint256,(uint32,bytes)[])'),
+    ).toBe('0x415565b0')
+    expect(KNOWN_SWAP_SELECTORS.has('0xd9627aa4')).toBe(true)
+    expect(KNOWN_SWAP_SELECTORS.has('0x415565b0')).toBe(true)
+  })
+
+  it('0x2213bc0b IS AllowanceHolder.exec — derived, not asserted', () => {
+    // Derived value on the expected side; the production observation on the actual side.
+    expect(OBSERVED_IN_PROD.exec).toBe(toFunctionSelector(ALLOWANCE_HOLDER_EXEC_SIG))
+  })
+
+  it('0x1fff991f IS Settler.execute — derived, not asserted', () => {
+    expect(OBSERVED_IN_PROD.execute).toBe(toFunctionSelector(SETTLER_EXECUTE_SIG))
+  })
+
+  it('accepts AllowanceHolder.exec — the only selector the chosen v2 flow emits', () => {
+    const sel = toFunctionSelector(ALLOWANCE_HOLDER_EXEC_SIG)
+    expect(KNOWN_SWAP_SELECTORS.has(sel)).toBe(true)
+    expect(isKnownSwapSelector(CALLDATA(sel))).toBe(true)
+  })
+
+  it('still REJECTS Settler.execute — deliberate, not an oversight', () => {
+    // [ADR-021] The allowance-holder flow puts Settler.execute in the `data`
+    // ARGUMENT of exec(), never in `transaction.data`'s first four bytes. Since
+    // the adapter no longer calls the permit2 endpoint on any chain, nothing we
+    // build can emit this as an outer selector — and the Settler address rotates,
+    // so it is not (and cannot be) router-whitelisted either. Whitelisting it
+    // would widen the gate for calldata no TeraSwap flow produces.
+    const sel = toFunctionSelector(SETTLER_EXECUTE_SIG)
+    expect(KNOWN_SWAP_SELECTORS.has(sel)).toBe(false)
+    expect(isKnownSwapSelector(CALLDATA(sel))).toBe(false)
+  })
+
+  it('negative control: an invented selector is still rejected', () => {
+    expect(isKnownSwapSelector(CALLDATA('0xdeadbeef'))).toBe(false)
+    expect(KNOWN_SWAP_SELECTORS.has('0xdeadbeef')).toBe(false)
   })
 })

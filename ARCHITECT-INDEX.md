@@ -27,6 +27,8 @@ Location: `docs/ADR/`
 | [ADR-013](docs/ADR/ADR-013-order-onchain-floor.md) | Order on-chain floor | Accepted | On-chain minimum order-amount floor for conditional orders (SC-hardening). |
 | [ADR-020](docs/ADR/ADR-020-order-router-map-fail-closed.md) | Order-engine router map fails closed | Accepted (2026-09-02) | An unknown chain gets an empty router map, a null default router and `isWhitelistedRouter` false — never mainnet's answer (finding B6). Says which of `routers.ts` (swap gate) and `config.ts` (order signing) is authoritative for what. |
 
+| [ADR-021](docs/ADR/ADR-021-zerox-v2-allowance-holder.md) | 0x executes through the AllowanceHolder, never the Settler | Accepted (2026-09-03) | Mainnet 0x moves to the v2 `/swap/allowance-holder/*` family (as 8453/42161 already were). The permit2 endpoint's `transaction.to` is a Settler that rotates each 0x release and so can never be whitelisted; the AllowanceHolder is fixed. Adds exactly one selector (`0x2213bc0b` `exec`), and records why the Settler's `0x1fff991f` is deliberately NOT added — and that the R1 recipient gate still blocks `exec`. |
+
 New ADRs go in `docs/ADR/` with filename `ADR-NNN-short-slug.md`. Update the table above.
 
 ---

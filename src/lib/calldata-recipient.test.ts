@@ -345,18 +345,39 @@ describe('calldata-recipient', () => {
   // ── VALIDATED_SELECTORS allowlist ──────────────────────
 
   describe('VALIDATED_SELECTORS allowlist', () => {
-    it('contains exactly 22 selectors (all known swap selectors)', () => {
+    it('contains exactly 22 selectors — unchanged by ADR-021', () => {
       // [SPRINT-9H] 20 → 22: + Augustus V6.2 swapExactAmountInOnCurveV1/V2.
+      // [ADR-021] deliberately still 22: KNOWN_SWAP_SELECTORS grew to 23 but this
+      // gate did NOT — see the divergence test below for why.
       expect(VALIDATED_SELECTORS.size).toBe(22)
     })
 
-    it('matches KNOWN_SWAP_SELECTORS from swap-selectors.ts', async () => {
+    it('matches KNOWN_SWAP_SELECTORS except for exactly one documented selector [ADR-021]', async () => {
       const { KNOWN_SWAP_SELECTORS } = await import('./swap-selectors')
-      // Every known swap selector should be in the validated set
-      for (const sel of KNOWN_SWAP_SELECTORS) {
-        expect(VALIDATED_SELECTORS.has(sel)).toBe(true)
-      }
-      // Every validated selector should be in the known swap set
+
+      // [ADR-021] The invariant "these two sets are identical" held until 0x moved to
+      // API v2. AllowanceHolder.exec is now accepted by the SC-04 pre-filter but is
+      // NOT yet decodable here, so it is still rejected by this gate — /api/swap
+      // clears SC-04 and the router whitelist and then 400s at R1.
+      //
+      // This is a KNOWN OPEN GAP, not a resolved state: 0x execution stays broken on
+      // mainnet AND on Base/Arbitrum (unnoticed there since SPRINT-9E) until an
+      // extractor for exec lands. It was left out of ADR-021 on purpose —
+      // exec(operator, token, amount, target, data) carries no recipient of its own;
+      // the destination is AllowedSlippage.recipient inside the Settler execute()
+      // call nested in `data`. Admitting it as msg.sender-implicit would blind the
+      // very gate that stops calldata delivering output somewhere else, so it needs a
+      // nested-decode extractor and its own Auditor sign-off.
+      //
+      // The assertion is deliberately EXACT (a named, size-1 difference) rather than
+      // relaxed: any second divergence, in either direction, fails this test.
+      const ALLOWANCE_HOLDER_EXEC = '0x2213bc0b'
+
+      const knownNotValidated = [...KNOWN_SWAP_SELECTORS].filter((s) => !VALIDATED_SELECTORS.has(s))
+      expect(knownNotValidated).toEqual([ALLOWANCE_HOLDER_EXEC])
+
+      // The reverse direction still holds with no exceptions: this gate must never
+      // validate a selector the SC-04 pre-filter would reject.
       for (const sel of VALIDATED_SELECTORS) {
         expect(KNOWN_SWAP_SELECTORS.has(sel)).toBe(true)
       }
