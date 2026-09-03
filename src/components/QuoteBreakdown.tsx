@@ -5,8 +5,8 @@ import type { MetaQuoteResult } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import type { PriceCheck } from '@/lib/chainlink'
 import type { ApprovalPlan } from '@/lib/approvals'
-import { FEE_PERCENT, FEE_NATIVE_SOURCES, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
-import { isFeeCollectorActive } from '@/lib/api'
+import { FEE_PERCENT, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
+import { feeMode, isFeeCollected } from '@/lib/fee-mode'
 import { isExecutableSource } from '@/lib/executable-sources'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
@@ -105,8 +105,19 @@ export default function QuoteBreakdown({
   const inverseRate = outputAmountValid && outputAmount > 0 && inputAmount > 0
     ? formatDisplay(inputAmount / outputAmount, 4)
     : '—'
-  // Fee is collected when: source has native fee API params, OR FeeCollector proxy is active
-  const feeCollected = FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()
+  // [fix/zerox-partner-fee-armed] Name the mechanism that actually collects the
+  // fee instead of OR-ing two unrelated conditions. The old expression was
+  // `FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()`: for a
+  // 0x quote the first term was false (the list was empty despite zerox.ts
+  // sending swapFeeBps) so the claim rested on the FeeCollector being active —
+  // which is NOT the mechanism collecting on a 0x swap, since 0x is
+  // FEE_INCOMPATIBLE and never routes through the FeeCollector. Right answer,
+  // wrong reason. `feeMode` returns which of the three mechanisms applies, so
+  // the claim is now true FOR the reason it states. Chain-aware too: the bare
+  // isFeeCollectorActive() ignored `chainId` and answered for mainnet on every
+  // chain. Wording is unchanged — see FEEDBACK for a proposed honest label.
+  const activeFeeMode = feeMode(best.source, chainId)
+  const feeCollected = isFeeCollected(best.source, chainId)
   const feeAbsolute = feeCollected ? (inputAmount * FEE_PERCENT) / 100 : 0
   // [chore/swap-fee-usd-fix] Fee USD = FEE_PERCENT% of the swap's REAL notional,
   // taken from whichever side is reliably priced (its own oracle) — NEVER the
@@ -475,8 +486,11 @@ export default function QuoteBreakdown({
           </span>
         </div>
 
-        {/* Platform fee */}
-        <div className="mb-1 flex items-center justify-between font-medium text-cream-80">
+        {/* Platform fee — data-fee-mode names the collecting mechanism
+            ('native-partner-fee' | 'fee-collector' | 'none') so the claim is
+            observable in the DOM and in tests. Presentation only: no copy,
+            layout or styling depends on it. */}
+        <div data-fee-mode={activeFeeMode} className="mb-1 flex items-center justify-between font-medium text-cream-80">
           <span className="flex items-center gap-1">
             Platform fee {feeCollected ? `(${FEE_PERCENT}%)` : ''}
             <InfoTooltip label="Platform fee info" content={feeCollected ? 'This fee supports platform development. Collected by the aggregator API.' : 'No fee for this route. Fees are collected on 1inch, 0x, and KyberSwap routes.'} />
