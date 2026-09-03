@@ -26,12 +26,22 @@ function applyPartnerFee(qs: URLSearchParams, src: string, dst: string): void {
   qs.set('swapFeeToken', sellIsNative ? dst : src)
 }
 
-// [SPRINT-9E] 0x v2 flow per chain. Mainnet keeps the permit2 endpoint
-// (byte-identical). Other chains (Base) use the allowance-holder endpoint so the
-// returned tx.to is the AllowanceHolder — the address whitelisted for 0x on Base
-// in chains/routers.ts (the permit2 Settler tx.to would fail that whitelist).
+// [SPRINT-9E] 0x v2 flow per chain. Mainnet uses the permit2 endpoint; other
+// chains (Base) use the allowance-holder endpoint so the returned tx.to is the
+// AllowanceHolder — the address whitelisted for 0x on Base in chains/routers.ts
+// (the permit2 Settler tx.to would fail that whitelist).
 function zeroxQuotePath(chainId: number): string {
   return chainId === DEFAULT_CHAIN_ID ? '/swap/permit2/quote' : '/swap/allowance-holder/quote'
+}
+
+// [fix/zerox-price-endpoint] The /quote endpoints are the firm, signable quote
+// and REQUIRE `taker` (https://docs.0x.org/api-reference/evm-ap-is/swap/permit-2-getquote,
+// .../allowanceholder-getquote). Since quote-before-wallet (#439) there is no
+// taker at quote time, so fetchQuote must use the indicative /price family
+// instead — same permit2/allowance-holder split, for the same Base-whitelist
+// reason as zeroxQuotePath.
+function zeroxPricePath(chainId: number): string {
+  return chainId === DEFAULT_CHAIN_ID ? '/swap/permit2/price' : '/swap/allowance-holder/price'
 }
 
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
@@ -43,11 +53,12 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     buyToken: dst,
     sellAmount: amount,
   })
-  // [P217] 0x v2 defaults to mainnet when chainId is omitted; only attach it
-  // for non-mainnet chains so the mainnet request stays byte-identical.
-  if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
+  // [P217, corrected] `chainId` is a REQUIRED query param on every 0x v2 price/quote
+  // call, mainnet included — https://docs.0x.org/api-reference/evm-ap-is/swap/permit-2-getprice
+  // and .../allowanceholder-getprice both list it as required, with no mainnet default.
+  qs.set('chainId', String(chainId))
   applyPartnerFee(qs, src, dst) // [SPRINT-9T T1] uniform 0.1% (ERC-20 fee token)
-  const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
+  const res = await fetch(`${base}${zeroxPricePath(chainId)}?${qs}`, {
     headers: {
       '0x-api-key': key,
       '0x-version': 'v2',
@@ -87,8 +98,8 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     taker: from,
     slippageBps: Math.round(clampSlippage(slippage) * 100).toString(),
   })
-  // [P217] Attach chainId only for non-mainnet chains (see fetchQuote).
-  if (chainId !== DEFAULT_CHAIN_ID) qs.set('chainId', String(chainId))
+  // [P217, corrected] `chainId` is required on /quote too — see fetchQuote.
+  qs.set('chainId', String(chainId))
   applyPartnerFee(qs, src, dst) // [SPRINT-9T T1] same fee on swap-build → quote == execution
   const res = await fetch(`${base}${zeroxQuotePath(chainId)}?${qs}`, {
     headers: {
