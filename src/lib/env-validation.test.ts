@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { validateEnv } from './env-validation'
+import { DISABLED_SOURCES } from './constants'
 
 const ORIGINAL = process.env.ALCHEMY_API_KEY
 
@@ -42,5 +43,48 @@ describe('env-validation — ALCHEMY_API_KEY [CHORE-POLISH-3 P4]', () => {
     process.env.ALCHEMY_API_KEY = 'test-key'
     const { warnings } = validateEnv()
     expect(warnings.some((w) => w.includes('ALCHEMY_API_KEY'))).toBe(false)
+  })
+})
+
+// [dead-sources-are-loud, 2026-09] ZEROX_API_KEY required-when-enabled.
+//
+// ZEROX_API_KEY was OPTIONAL — a missing/expired key never failed a build or
+// boot, so 0x 401'd quietly on every quote for weeks (measured 2026-09-02).
+// It must now fail validation whenever '0x' is enabled (not in
+// DISABLED_SOURCES) and the key is absent.
+describe('env-validation — ZEROX_API_KEY required-when-enabled [dead-sources-are-loud]', () => {
+  const ORIGINAL_ZEROX_KEY = process.env.ZEROX_API_KEY
+  const ORIGINAL_0X_DISABLED = DISABLED_SOURCES['0x']
+
+  beforeEach(() => {
+    delete process.env.ZEROX_API_KEY
+    delete DISABLED_SOURCES['0x']
+  })
+
+  afterEach(() => {
+    if (ORIGINAL_ZEROX_KEY === undefined) delete process.env.ZEROX_API_KEY
+    else process.env.ZEROX_API_KEY = ORIGINAL_ZEROX_KEY
+    if (ORIGINAL_0X_DISABLED === undefined) delete DISABLED_SOURCES['0x']
+    else DISABLED_SOURCES['0x'] = ORIGINAL_0X_DISABLED
+  })
+
+  it('fails, naming "0x" and ZEROX_API_KEY, when the key is absent and 0x is enabled', () => {
+    const { valid, errors } = validateEnv()
+    expect(valid).toBe(false)
+    const err = errors.find((e) => e.includes('ZEROX_API_KEY'))
+    expect(err).toBeTruthy()
+    expect(err).toContain('0x')
+  })
+
+  it('passes the ZEROX_API_KEY check when 0x is in DISABLED_SOURCES', () => {
+    DISABLED_SOURCES['0x'] = 'test: temporarily disabled'
+    const { errors } = validateEnv()
+    expect(errors.some((e) => e.includes('ZEROX_API_KEY'))).toBe(false)
+  })
+
+  it('passes when the key is set and 0x is enabled', () => {
+    process.env.ZEROX_API_KEY = 'a-real-key'
+    const { errors } = validateEnv()
+    expect(errors.some((e) => e.includes('ZEROX_API_KEY'))).toBe(false)
   })
 })
