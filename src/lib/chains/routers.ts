@@ -20,6 +20,7 @@ import {
   FEE_COLLECTOR_ADDRESS,
   BEBOP_JAM_SETTLEMENT,
   BEBOP_BALANCE_MANAGER,
+  ZEROX_ALLOWANCE_HOLDER,
 } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 
@@ -32,7 +33,15 @@ import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 export const ROUTER_WHITELIST_BY_CHAIN: Record<number, Record<string, `0x${string}`>> = {
   1: {
     '1inch': '0x111111125421cA6dc452d289314280a0f8842A65', // AggregationRouterV6
-    '0x': '0xDef1C0ded9bec7F1a1670819833240f027b25EfF',     // Exchange Proxy (v1)
+    // [ADR-021] 0x v2 AllowanceHolder — the swap target of the allowance-holder
+    // endpoint family the mainnet adapter now uses (was the v1 Exchange Proxy
+    // 0xDef1C0ded9bec7F1a1670819833240f027b25EfF, which 0x API v2 never returns).
+    // Same deterministic address as the 8453/42161 entries below. Confirmed
+    // deployed on mainnet 2026-09-03: eth_getCode → 1009 bytes.
+    // NOTE: this now DIVERGES from order-engine/config.ts MAINNET_ROUTERS['0x'],
+    // which is the deployed OrderExecutor's on-chain whitelist and still holds the
+    // v1 Exchange Proxy. That divergence is real and intended — see ADR-021.
+    '0x': ZEROX_ALLOWANCE_HOLDER,
     velora: '0x6A000F20005980200259B80c5102003040001068',   // Augustus V6
     odos: '0xCf5540fFFCdC3d510B18bFcA6d2b9987b0772559',       // Odos Router V2
     kyberswap: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',  // MetaAggregationRouterV2
@@ -147,7 +156,11 @@ const MAINNET_FULL: string[] = [
   '0xba12222222228d8ba445958a75a0704d566bf2c8', // Balancer Vault V2
   '0x111111125421ca6dc452d289314280a0f8842a65', // 1inch AggregationRouter v6
   '0x1111111254eeb25477b68fb85ed929f73a960582', // 1inch AggregationRouter v5 (legacy)
-  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x Exchange Proxy (mainnet)
+  // [2026-09-03 / ADR-021] 0x Exchange Proxy v1 — retained, NOT removed (rule #4):
+  // no current swap flow targets it (the adapter is on API v2 everywhere), but the
+  // deployed mainnet OrderExecutor still whitelists it on-chain.
+  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x Exchange Proxy v1 (mainnet)
+  ZEROX_ALLOWANCE_HOLDER,                       // [ADR-021] 0x v2 AllowanceHolder (swap target + approval spender)
   '0xdef171fe48cf0115b1d80b88dc8eab59176fee57', // ParaSwap Augustus V5 (legacy)
   '0x6a000f20005980200259b80c5102003040001068', // ParaSwap Augustus V6 (Velora)
   '0x216b4b4ba9f3e719726886d34a177484278bfcae', // ParaSwap Augustus V6.2

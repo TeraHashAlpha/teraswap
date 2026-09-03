@@ -365,6 +365,24 @@ export function isApiKeyTier(value: unknown): value is ApiKeyTier {
 // ── Contracts ────────────────────────────────────────────
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
 
+/**
+ * [ADR-021] 0x API v2 AllowanceHolder — the swap target (`transaction.to`) AND the
+ * ERC-20 approval spender of the `/swap/allowance-holder/*` endpoint family.
+ *
+ * Deterministic: the SAME address on every chain 0x deploys it to. Already hardcoded
+ * (pre-ADR-021) as the `'0x'` entry for Base + Arbitrum in chains/routers.ts; a test
+ * pins this constant against both of those literals so the three cannot drift.
+ *
+ * Verified on Ethereum mainnet 2026-09-03 via public RPC `eth_getCode`:
+ * 1009 bytes of runtime code, whose dispatch table contains BOTH selectors we rely on —
+ * `exec` (0x2213bc0b, the swap entry point) and `transferFrom` (0x15dacbea, how it pulls
+ * the taker's ERC-20, which is why the taker approves THIS address and not Permit2).
+ *
+ * Unlike 0x's Settler (the permit2 endpoint's `transaction.to`), this address does NOT
+ * rotate between 0x releases — which is the whole reason it can be whitelisted at all.
+ */
+export const ZEROX_ALLOWANCE_HOLDER = '0x0000000000001fF3684f28c67538d4D072C22734' as const
+
 // CoW Protocol contracts
 export const COW_VAULT_RELAYER = '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110' as const
 export const COW_SETTLEMENT = '0x9008D19f58AAbD9eD0D60971565AA8510560ab41' as const

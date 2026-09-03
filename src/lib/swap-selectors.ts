@@ -10,13 +10,37 @@
  * Zero dependencies. No imports.
  */
 
-// ── Known swap function selectors (22 total) ────────────────
+// ── Known swap function selectors (23 total) ────────────────
 
 export const KNOWN_SWAP_SELECTORS: Set<string> = new Set([
   // 1inch
   '0x12aa3caf', '0xe449022e', '0x0502b1c5', '0x2e95b6c8',
-  // 0x
+  // 0x — Exchange Proxy v1 (0xDef1C0ded9bec7F1a1670819833240f027b25EfF):
+  //   0xd9627aa4 sellToUniswap(address[],uint256,uint256,bool)
+  //   0x415565b0 transformERC20(address,address,uint256,uint256,(uint32,bytes)[])
+  // [2026-09-03 / ADR-021] NO flow in this repo emits these any more: the SWAP path
+  // moved to 0x API v2 on every chain (mainnet was the last one still on a v1-era
+  // whitelist). Kept, not removed (rule #4), because the v1 Exchange Proxy remains
+  // whitelisted ON-CHAIN by the deployed mainnet OrderExecutor — see the '0x' entry
+  // in order-engine/config.ts MAINNET_ROUTERS, which this repo cannot change — so an
+  // order-path route through it would emit them again. calldata-recipient.ts also
+  // still classifies both in MSG_SENDER_SELECTORS.
   '0xd9627aa4', '0x415565b0',
+  // [ADR-021] 0x API v2 — AllowanceHolder.exec, the ONLY selector the v2
+  // allowance-holder flow puts in `transaction.data`. The Settler's
+  // execute((address,address,uint256),bytes[],bytes32) (0x1fff991f) is INNER
+  // calldata carried in this call's `data` argument, never the outer tx selector,
+  // so it is deliberately NOT whitelisted here (see ADR-021 §Consequences).
+  //   exec(address operator, address token, uint256 amount, address payable target, bytes data)
+  //   → canonical ABI signature: exec(address,address,uint256,address,bytes)
+  //   → viem toFunctionSelector(...) === 0x2213bc0b
+  // Never typed as "known": swap-selectors.test.ts recomputes the keccak from the
+  // signature string and asserts it equals this entry.
+  // ABI source: 0xProject/0x-settler, src/allowanceholder/AllowanceHolderBase.sol
+  //   https://github.com/0xProject/0x-settler/blob/master/src/allowanceholder/AllowanceHolderBase.sol
+  // On-chain cross-check (mainnet eth_getCode, 2026-09-03): 0x2213bc0b appears in
+  // the AllowanceHolder's 1009-byte runtime dispatch table; 0x1fff991f does not.
+  '0x2213bc0b',
   // Paraswap (Augustus V5 — legacy)
   '0x3598d8ab', '0xa94e78ef', '0x46c67b6d',
   // Paraswap / Velora (Augustus V6.2 — multi-hop swapExactAmountIn)

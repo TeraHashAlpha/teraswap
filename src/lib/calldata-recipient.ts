@@ -10,11 +10,19 @@
  * Only selectors in the VALIDATED_SELECTORS allowlist are permitted.
  * Trusted router selectors (proprietary formats where the router sends to
  * msg.sender by design) are allowed with implicitRecipient: true.
+ *
+ * [R1 Group G / ADR-021] 0x API v2 puts the recipient one ABI-encoded `bytes`
+ * argument deep — `AllowanceHolder.exec(...)` carries the real destination
+ * inside the Settler call in its `data` argument — so it gets a decode class of
+ * its own that unwraps that argument. exec is a generic call primitive, so
+ * Group G additionally requires its `target` and `operator` to be whitelisted
+ * routers for the chain before the nested recipient means anything.
  */
 
-import { decodeAbiParameters, type Hex } from 'viem'
+import { decodeAbiParameters, toFunctionSelector, type Hex } from 'viem'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { isWhitelistedRouter } from '@/lib/chains/routers'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,6 +73,62 @@ export const TRUSTED_ROUTER_SELECTORS = new Set([
 ])
 
 /**
+ * Group G — 0x API v2 AllowanceHolder.exec: the recipient lives one
+ * ABI-encoded `bytes` argument deep.
+ *
+ * Neither selector below is typed. Both are derived at module load with viem's
+ * `toFunctionSelector` from the canonical signature of the corresponding
+ * function in 0x's published source, pinned at
+ * `0xProject/0x-settler@1df908742d38cf407f667df6518dae6e04a01ac3` (master,
+ * 2026-08-27). `calldata-recipient.test.ts` re-derives both independently and
+ * cross-checks them against the SC-04 entry, so a typo cannot survive.
+ *
+ * `exec` — src/allowanceholder/IAllowanceHolder.sol
+ *   https://github.com/0xProject/0x-settler/blob/master/src/allowanceholder/IAllowanceHolder.sol
+ *   function exec(address operator, address token, uint256 amount,
+ *                 address payable target, bytes calldata data)
+ *
+ * `execute` — src/interfaces/ISettlerTakerSubmitted.sol (struct in
+ * src/interfaces/ISettlerBase.sol)
+ *   https://github.com/0xProject/0x-settler/blob/master/src/interfaces/ISettlerTakerSubmitted.sol
+ *   https://github.com/0xProject/0x-settler/blob/master/src/interfaces/ISettlerBase.sol
+ *   function execute(AllowedSlippage memory slippage, bytes[] calldata actions, bytes32 zid)
+ *   struct AllowedSlippage { address payable recipient; IERC20 buyToken; uint256 minAmountOut; }
+ *   → ABI tuple (address,address,uint256), `recipient` is field 0. THIS is the
+ *     destination of the swap output and the only thing R1 cares about.
+ */
+const ALLOWANCE_HOLDER_EXEC_SIGNATURE = 'exec(address,address,uint256,address,bytes)'
+const SETTLER_EXECUTE_SIGNATURE = 'execute((address,address,uint256),bytes[],bytes32)'
+
+/** [Group G] The ONLY selector 0x v2 puts in `transaction.data`. Derived, never typed. */
+export const ALLOWANCE_HOLDER_EXEC_SELECTOR: string = toFunctionSelector(
+  ALLOWANCE_HOLDER_EXEC_SIGNATURE,
+)
+
+/**
+ * [Group G] Explicit allowlist of inner selectors reachable through `exec`.
+ *
+ * `exec` forwards `data` verbatim to `target` (plus 20 bytes of ERC-2771-style
+ * sender suffix appended by the AllowanceHolder itself, which is NOT part of the
+ * calldata we see), so the inner call can be ANY function on ANY contract. Only
+ * shapes whose recipient position is known are admitted; everything else fails
+ * closed.
+ *
+ * Deliberately holds `execute` alone:
+ *   - `executeWithPermit((address,address,uint256),bytes[],bytes32,bytes)` is the
+ *     other taker-submitted entry point and is also only reachable via the
+ *     AllowanceHolder (`_isForwarded()`), but it requires a taker-signed permit
+ *     this repo never produces — ADR-021 established there is NO signing on the
+ *     swap path at all — so no TeraSwap flow can emit it.
+ *   - `executeMetaTxn(...)` belongs to SettlerMetaTxn, a different flow entirely.
+ * Both stay rejected; `calldata-recipient.test.ts` pins that by re-deriving their
+ * selectors and asserting they are absent.
+ */
+export const ALLOWANCE_HOLDER_INNER_SELECTORS: ReadonlySet<string> = new Set([
+  toFunctionSelector(SETTLER_EXECUTE_SIGNATURE),
+])
+
+/**
  * [API-M-02] Complete allowlist of validated selectors — union of all groups.
  * Any selector NOT in this set is blocked (fail-closed). This list can be
  * audited to understand exactly which calldata patterns are permitted.
@@ -80,6 +144,9 @@ export const TRUSTED_ROUTER_SELECTORS = new Set([
  *
  * Validated-by-recursion:
  *   Group E: Uniswap multicall wrappers
+ *
+ * Validated-by-unwrapping (recipient decoded out of one nested `bytes` arg):
+ *   Group G: 0x v2 AllowanceHolder.exec
  */
 export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // Group A — msg.sender implicit
@@ -111,6 +178,11 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // [SPRINT-9H] Augustus V6.2 single-DEX Curve methods (verified vs live ABI)
   '0x1a01c532', // swapExactAmountInOnCurveV1 (CurveV1StableNg)
   '0xe37ed256', // swapExactAmountInOnCurveV2
+  // Group G — 0x v2 AllowanceHolder.exec (recipient unwrapped from inner `data`).
+  // Derived above, not typed. This entry restores the R1 ≡ SC-04 equality that
+  // ADR-021 had to break for one release: KNOWN_SWAP_SELECTORS and this set are
+  // pinned equal again by calldata-recipient.test.ts.
+  ALLOWANCE_HOLDER_EXEC_SELECTOR,
 ])
 
 // ---------------------------------------------------------------------------
@@ -434,6 +506,126 @@ function decodeMulticallRecipient(
 }
 
 // ---------------------------------------------------------------------------
+// Group G — 0x v2 AllowanceHolder.exec (recipient nested one `bytes` deep)
+// ---------------------------------------------------------------------------
+
+/** ABI of `exec`'s five arguments — mirrors ALLOWANCE_HOLDER_EXEC_SIGNATURE. */
+const EXEC_ARG_TYPES = [
+  { name: 'operator', type: 'address' },
+  { name: 'token', type: 'address' },
+  { name: 'amount', type: 'uint256' },
+  { name: 'target', type: 'address' },
+  { name: 'data', type: 'bytes' },
+] as const
+
+/** ABI of `execute`'s three arguments — mirrors SETTLER_EXECUTE_SIGNATURE. */
+const SETTLER_EXECUTE_ARG_TYPES = [
+  {
+    name: 'slippage',
+    type: 'tuple',
+    components: [
+      { name: 'recipient', type: 'address' },
+      { name: 'buyToken', type: 'address' },
+      { name: 'minAmountOut', type: 'uint256' },
+    ],
+  },
+  { name: 'actions', type: 'bytes[]' },
+  { name: 'zid', type: 'bytes32' },
+] as const
+
+function execFailure(reason: string): RecipientCheckResult {
+  console.warn(`[calldata-recipient] Group G blocked AllowanceHolder.exec: ${reason}`)
+  return { valid: false, extracted: null, implicitRecipient: false, reason }
+}
+
+/**
+ * Validate the recipient of a 0x v2 `AllowanceHolder.exec` call.
+ *
+ * `exec(operator, token, amount, target, data)` carries no recipient of its own.
+ * It is a *generic* primitive: it grants `operator` a transaction-scoped
+ * allowance over the caller's `token` and then calls `target` with `data`. An
+ * `exec` whose `target`/`operator` are attacker contracts drains the taker's
+ * standing approval outright, so the recipient buried in `data` is only
+ * meaningful once both of those addresses are known-good. Every step below fails
+ * closed; a throw anywhere is caught by validateCallDataRecipientInner's handler
+ * and reported as a decode error.
+ *
+ * This handler is a LEAF: it never calls back into
+ * validateCallDataRecipientInner, so it neither consumes nor raises the `depth`
+ * budget Group E spends. An `exec` nested inside a multicall is therefore still
+ * limited to Group E's single level of recursion.
+ */
+function decodeAllowanceHolderExecRecipient(
+  data: Hex,
+  expectedAddress: string,
+  routeViaFeeCollector: boolean,
+  chainId: number,
+): RecipientCheckResult {
+  const decoded = decodeAbiParameters(EXEC_ARG_TYPES, data)
+  const operator = decoded[0] as string
+  const target = decoded[3] as string
+  const innerCalldata = decoded[4] as string
+
+  // (1) `target` — the contract AllowanceHolder will call with `data`. An exec
+  // against an arbitrary target is a transfer primitive, not a swap.
+  if (!isWhitelistedRouter(target, chainId)) {
+    return execFailure(
+      `AllowanceHolder exec target ${target} is not a whitelisted router on chain ${chainId}`,
+    )
+  }
+
+  // (2) `operator` — the address authorised to pull the taker's tokens back out
+  // of the AllowanceHolder via its `transferFrom`. In every 0x v2 call observed
+  // on mainnet it equals `target`; either way it must be a known router, because
+  // it is the address that can actually move funds.
+  if (!isWhitelistedRouter(operator, chainId)) {
+    return execFailure(
+      `AllowanceHolder exec operator ${operator} is not a whitelisted router on chain ${chainId}`,
+    )
+  }
+
+  // (3) The inner call must carry a selector at all.
+  if (!innerCalldata || innerCalldata.length < 10) {
+    return execFailure('AllowanceHolder exec inner calldata is too short to contain a selector')
+  }
+
+  // (4) …and that selector must be one whose recipient position we know.
+  const innerSelector = innerCalldata.slice(0, 10).toLowerCase()
+  if (!ALLOWANCE_HOLDER_INNER_SELECTORS.has(innerSelector)) {
+    return execFailure(
+      `AllowanceHolder exec inner selector ${innerSelector} is not in the Settler allowlist`,
+    )
+  }
+
+  // (5) Unwrap AllowedSlippage.recipient. A tuple mismatch throws here and is
+  // caught upstream as a decode error — never silently treated as "no recipient".
+  const innerDecoded = decodeAbiParameters(
+    SETTLER_EXECUTE_ARG_TYPES,
+    `0x${innerCalldata.slice(10)}` as Hex,
+  )
+  const slippage = innerDecoded[0] as {
+    recipient: string
+    buyToken: string
+    minAmountOut: bigint
+  }
+  const recipient = slippage?.recipient
+  if (!recipient) {
+    return execFailure('AllowanceHolder exec inner execute() carries no recipient')
+  }
+
+  // (6) Same recipient rule as every other group — no separate policy.
+  const valid = isValidRecipient(recipient, expectedAddress, routeViaFeeCollector, chainId)
+  return {
+    valid,
+    extracted: recipient,
+    implicitRecipient: false,
+    ...(!valid && {
+      reason: `Recipient ${recipient} does not match expected ${expectedAddress}`,
+    }),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Internal recursive entry point
 // ---------------------------------------------------------------------------
 
@@ -513,6 +705,11 @@ function validateCallDataRecipientInner(
     const MULTICALL_SELECTORS = ['0xac9650d8', '0x5ae401dc']
     if (MULTICALL_SELECTORS.includes(selector)) {
       return decodeMulticallRecipient(selector, data, expectedAddress, depth, routeViaFeeCollector, chainId)
+    }
+
+    // Group G — 0x v2 AllowanceHolder.exec (recipient inside the `data` arg)
+    if (selector === ALLOWANCE_HOLDER_EXEC_SELECTOR) {
+      return decodeAllowanceHolderExecRecipient(data, expectedAddress, routeViaFeeCollector, chainId)
     }
 
     // [API-M-02] Unknown selector — fail closed
