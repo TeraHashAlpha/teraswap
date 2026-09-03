@@ -25,6 +25,7 @@ Location: `docs/ADR/`
 | [ADR-011](docs/ADR/ADR-011-feecollector-augustus-whitelist.md) | FeeCollector Augustus whitelist | Accepted | Whitelist Velora Augustus V5/V6/V6.2 routers on-chain in FeeCollector V2. |
 | [ADR-012](docs/ADR/ADR-012-avoid-transitive-copyleft-deps.md) | Avoid transitive copyleft deps | Accepted | Dependency policy: reject transitive copyleft (GPL-family) licenses in the supply chain. |
 | [ADR-013](docs/ADR/ADR-013-order-onchain-floor.md) | Order on-chain floor | Accepted | On-chain minimum order-amount floor for conditional orders (SC-hardening). |
+| [ADR-020](docs/ADR/ADR-020-order-router-map-fail-closed.md) | Order-engine router map fails closed | Accepted (2026-09-02) | An unknown chain gets an empty router map, a null default router and `isWhitelistedRouter` false — never mainnet's answer (finding B6). Says which of `routers.ts` (swap gate) and `config.ts` (order signing) is authoritative for what. |
 
 New ADRs go in `docs/ADR/` with filename `ADR-NNN-short-slug.md`. Update the table above.
 

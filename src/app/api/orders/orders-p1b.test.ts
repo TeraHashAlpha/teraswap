@@ -42,6 +42,13 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
 })
 
 const V3_MAINNET = '0x3333333333333333333333333333333333333333'
+// [ADR-020] Arbitrum One is wired in this mock ON PURPOSE, and only here: it simulates the day
+// 42161 joins ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, which is precisely when finding B6 stops being
+// latent. The ROUTER MAP is deliberately NOT mocked (only the executor getters are), so the API's
+// router gate reads the real, fail-closed set for that chain. No other test in this file uses
+// 42161, and chain 1 is byte-identical to before.
+const V3_ARBITRUM = '0x4444444444444444444444444444444444444444'
+const V3_BY_CHAIN: Record<number, string> = { 1: V3_MAINNET, 42161: V3_ARBITRUM }
 // The mainnet whitelisted set includes the UniV3 SwapRouter — the pinned-route router.
 const SERVED_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564'
 const UNSERVED_ROUTER = '0x9999999999999999999999999999999999999999'
@@ -49,10 +56,11 @@ vi.mock('@/lib/order-engine/config', async () => {
   const actual = await vi.importActual<typeof import('@/lib/order-engine/config')>('@/lib/order-engine/config')
   return {
     ...actual,
-    getOrderExecutorV3: (chainId: number) => (chainId === 1 ? V3_MAINNET : null),
+    getOrderExecutorV3: (chainId: number) => V3_BY_CHAIN[chainId] ?? null,
     getOrderExecutorV3Domain: (chainId: number) => {
-      if (chainId !== 1) throw new Error(`No OrderExecutorV3 deployed on chain ${chainId}`)
-      return { name: 'TeraSwapOrderExecutor' as const, version: '3' as const, chainId, verifyingContract: V3_MAINNET }
+      const verifyingContract = V3_BY_CHAIN[chainId]
+      if (!verifyingContract) throw new Error(`No OrderExecutorV3 deployed on chain ${chainId}`)
+      return { name: 'TeraSwapOrderExecutor' as const, version: '3' as const, chainId, verifyingContract }
     },
   }
 })
@@ -352,5 +360,38 @@ describe('POST /api/orders [FIX-DCA-NOFEED-CONSENT] — non-DCA no-feed output s
     expect(json.unpriceable).toBe(true)
     // Must be the ORIGINAL output-unpriceable message, not the new "neither input nor output" one.
     expect(String(json.error)).toMatch(/output token/i)
+  })
+})
+
+// [ADR-020 / finding B6] The server-side half of the fail-closed router map. B6 is latent only
+// because ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS is [8453]; the day a chain with no order-engine router
+// set becomes eligible, the question is whether the API still accepts an order carrying another
+// chain's router. It must not — `isWhitelistedRouter` reads THAT chain's set, which is now empty,
+// so every router is refused there rather than validated against mainnet's.
+describe('POST /api/orders [ADR-020] — a chain with no router set can have no order created on it', () => {
+  const ARBITRUM_CHAIN_ID = 42161
+
+  function tpOn(chainId: number, router: string) {
+    const od = { ...(tpBody().orderData as Record<string, unknown>), router }
+    return tpBody({ chainId, router, orderData: od })
+  }
+
+  it("refuses a pinned Take-Profit on 42161 that commits MAINNET's served router", async () => {
+    const { status, json } = await post(tpOn(ARBITRUM_CHAIN_ID, SERVED_ROUTER))
+    expect(status).toBe(400)
+    expect(String(json.error)).toMatch(/not served on chain 42161/i)
+  })
+
+  it('refuses EVERY router on 42161 — the set is empty, not "mainnet\'s minus a few"', async () => {
+    for (const router of [SERVED_ROUTER, UNSERVED_ROUTER, SERVED_ROUTER.toLowerCase()]) {
+      const { status, json } = await post(tpOn(ARBITRUM_CHAIN_ID, router))
+      expect(status).toBe(400)
+      expect(String(json.error)).toMatch(/not served on chain 42161/i)
+    }
+  })
+
+  it('the identical body on chain 1 is still ACCEPTED — the refusal is the chain, not the router', async () => {
+    const { status } = await post(tpOn(1, SERVED_ROUTER))
+    expect(status).toBe(201)
   })
 })

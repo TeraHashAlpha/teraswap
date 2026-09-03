@@ -14,6 +14,7 @@ import {
   PriceCondition,
   EXPIRY_PRESETS,
   getDefaultRouter,
+  NO_ROUTER_FOR_CHAIN_REASON,
   getChainlinkFeeds,
   // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing for Limit orders.
   getOrderExecutorV3,
@@ -343,6 +344,16 @@ function CreateLimitForm({
       return
     }
 
+    // [ADR-020] Fail closed on a chain with no order-engine router set. getDefaultRouter returns
+    // null there — never a sibling chain's router — so there is nothing to commit. An order signed
+    // against a router the chain's own executor does not whitelist reverts RouterNotWhitelisted on
+    // every fill: it can never execute, only be cancelled. Refuse BEFORE approve/sign, not after.
+    const defaultRouter = getDefaultRouter(chainId)
+    if (!defaultRouter) {
+      setSubmitError(NO_ROUTER_FOR_CHAIN_REASON)
+      return
+    }
+
     startWaitingSound()
 
     let amountIn: string
@@ -417,7 +428,7 @@ function CreateLimitForm({
       targetPrice: targetPrice8dec,
       priceFeed,
       expirySeconds: EXPIRY_PRESETS[expiryIdx].seconds,
-      router: getDefaultRouter(chainId).address,
+      router: defaultRouter.address,
     }
 
     // ── [SPRINT-P1B / ADR-014 (a)] v3 pinned canonical route ──

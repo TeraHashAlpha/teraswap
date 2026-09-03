@@ -43,6 +43,44 @@ export const DEFAULT_CB_CONFIG: CircuitBreakerConfig = {
   halfOpenMaxAttempts: 1,
 }
 
+// ── [dead-sources-are-loud] Failure classification ──────────
+//
+// onFailure() used to log the transition (OPEN/HALF_OPEN) without the
+// reason — the error was in hand and dropped, so a source that had been
+// 401ing for weeks produced nothing but "test failed" in the logs. This
+// classifies the error into a short, bounded label + HTTP status (when
+// present) WITHOUT ever emitting the raw error message: adapter error
+// messages can carry response bodies or (in a crafted case) a URL with a
+// query string, and neither belongs in a log line.
+export interface FailureClassification {
+  errorClass: string
+  status?: number
+}
+
+// 3-digit token with a non-word boundary on both sides — matches "0x 401"
+// or "Odos 502: ..." but not a run of digits like "chain 42161" (no boundary
+// between adjacent digits) or a status baked into an alphanumeric key.
+const HTTP_STATUS_RE = /\b([1-5]\d{2})\b/
+
+export function classifyFailure(err: unknown): FailureClassification {
+  if (!(err instanceof Error)) return { errorClass: 'UnknownError' }
+  const msg = err.message
+  const statusMatch = msg.match(HTTP_STATUS_RE)
+  const status = statusMatch ? Number(statusMatch[1]) : undefined
+
+  if (msg === 'Timeout') return { errorClass: 'TimeoutError' }
+  if (/invalid response \(non-json\)/i.test(msg)) return { errorClass: 'ParseError' }
+  if (/<!doctype|<html/i.test(msg)) return { errorClass: 'HTMLResponse', status }
+  if (status !== undefined) return { errorClass: 'HttpError', status }
+  if (/failed to fetch|network ?error|econnrefused|enotfound/i.test(msg)) return { errorClass: 'NetworkError' }
+  return { errorClass: 'UpstreamError' }
+}
+
+function formatFailureSuffix(err: unknown): string {
+  const { errorClass, status } = classifyFailure(err)
+  return status !== undefined ? `${errorClass} ${status}` : errorClass
+}
+
 // ── CircuitBreaker class ────────────────────────────────────
 
 export class CircuitBreaker {
@@ -86,8 +124,13 @@ export class CircuitBreaker {
     this.halfOpenAttempts = 0
   }
 
-  /** Record a failed call — may open the circuit. */
-  onFailure(): void {
+  /**
+   * Record a failed call — may open the circuit.
+   * [dead-sources-are-loud] `err` is optional so existing direct callers
+   * (tests, the [SPRINT-9S S3] per-chain tests) keep working; passing it
+   * puts the reason on the OPEN transition log line.
+   */
+  onFailure(err?: unknown): void {
     this.consecutiveFailures++
     this.lastFailureAt = Date.now()
 
@@ -95,13 +138,13 @@ export class CircuitBreaker {
       this.halfOpenAttempts++
       if (this.halfOpenAttempts >= this.config.halfOpenMaxAttempts) {
         this.state = 'OPEN'
-        console.warn(`[CB] ${this.name}: HALF_OPEN → OPEN (test failed)`)
+        console.warn(`[CB] ${this.name}: HALF_OPEN → OPEN (test failed) — ${formatFailureSuffix(err)}`)
         this.halfOpenAttempts = 0
       }
     } else if (this.state === 'CLOSED') {
       if (this.consecutiveFailures >= this.config.failureThreshold) {
         this.state = 'OPEN'
-        console.warn(`[CB] ${this.name}: CLOSED → OPEN (${this.consecutiveFailures} consecutive failures)`)
+        console.warn(`[CB] ${this.name}: CLOSED → OPEN (${this.consecutiveFailures} consecutive failures) — ${formatFailureSuffix(err)}`)
       }
     }
   }
@@ -267,7 +310,7 @@ export async function withCircuitBreaker<T>(
     if (result != null) cb.onSuccess()
     return result
   } catch (err) {
-    cb.onFailure()
+    cb.onFailure(err)
     throw err
   }
 }

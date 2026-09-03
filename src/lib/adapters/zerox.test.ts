@@ -1,10 +1,23 @@
 // @vitest-environment node
 /**
- * [SPRINT-9E P3] 0x must be chain-aware. On mainnet it uses the v2 permit2 flow
- * (byte-identical). On Base it must use the v2 ALLOWANCE-HOLDER flow so the
- * returned tx.to is the AllowanceHolder (0x0000000000001fF3684f28c67538d4D072C22734)
- * — the address whitelisted for 0x on Base in chains/routers.ts. The permit2
- * endpoint returns a Settler/Permit2 tx.to that would fail the Base whitelist.
+ * [SPRINT-9E P3] 0x must be chain-aware. On mainnet it uses the v2 permit2 flow.
+ * On Base it must use the v2 ALLOWANCE-HOLDER flow so the returned tx.to is the
+ * AllowanceHolder (0x0000000000001fF3684f28c67538d4D072C22734) — the address
+ * whitelisted for 0x on Base in chains/routers.ts. The permit2 endpoint returns
+ * a Settler/Permit2 tx.to that would fail the Base whitelist.
+ *
+ * [fix/zerox-price-endpoint] 0x API v2's /quote endpoints are the firm,
+ * signable quote and REQUIRE `taker`
+ * (https://docs.0x.org/api-reference/evm-ap-is/swap/permit-2-getquote,
+ * https://docs.0x.org/api-reference/evm-ap-is/swap/allowanceholder-getquote).
+ * The indicative endpoint that does NOT require `taker` is `/price`
+ * (https://docs.0x.org/api-reference/evm-ap-is/swap/permit-2-getprice,
+ * https://docs.0x.org/api-reference/evm-ap-is/swap/allowanceholder-getprice).
+ * Since quote-before-wallet (#439) there is never a taker at quote time, so
+ * fetchQuote must hit /price, not /quote — the old /quote-without-taker shape
+ * was a 400 by construction. `chainId` is REQUIRED on every v2 call per both
+ * reference pages above (no mainnet default) — fetchQuote and fetchSwapData
+ * both send it unconditionally now.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import zerox from './zerox'
@@ -34,40 +47,60 @@ beforeEach(() => {
 })
 afterEach(() => vi.restoreAllMocks())
 
-describe('0x chain-aware endpoint [SPRINT-9E]', () => {
-  it('mainnet (chainId 1) uses the permit2 quote endpoint, no chainId param — byte-identical', async () => {
+describe('0x fetchQuote uses the indicative /price endpoint, no taker [fix/zerox-price-endpoint]', () => {
+  it('mainnet (chainId 1) hits /swap/permit2/price, with chainId, without taker', async () => {
     await zerox.fetchQuote({ src: WETH, dst: USDC, amount: '1000000000000000000', chainId: 1 })
-    expect(calls[0]).toContain('/swap/permit2/quote')
+    expect(calls[0]).toContain('/swap/permit2/price')
+    expect(calls[0]).not.toContain('/quote')
     expect(calls[0]).not.toContain('allowance-holder')
-    expect(calls[0]).not.toContain('chainId=')
+    expect(calls[0]).toContain('chainId=1')
+    expect(calls[0]).not.toContain('taker=')
   })
 
-  it('Base (chainId 8453) uses the allowance-holder quote endpoint + chainId param', async () => {
+  it('Base (chainId 8453) hits /swap/allowance-holder/price, with chainId, without taker', async () => {
     await zerox.fetchQuote({ src: WETH, dst: USDC, amount: '1000000000000000000', chainId: 8453 })
-    expect(calls[0]).toContain('/swap/allowance-holder/quote')
+    expect(calls[0]).toContain('/swap/allowance-holder/price')
+    expect(calls[0]).not.toContain('/quote')
     expect(calls[0]).toContain('chainId=8453')
+    expect(calls[0]).not.toContain('taker=')
   })
 
-  it('Base swap returns tx.to = AllowanceHolder via the allowance-holder endpoint', async () => {
+  it('negative control: the old /quote-without-taker shape is what broke production — asserting the fixed path is NOT /quote proves this test would fail on that shape', async () => {
+    await zerox.fetchQuote({ src: WETH, dst: USDC, amount: '1000000000000000000', chainId: 1 })
+    // Pre-fix, calls[0] contained '/swap/permit2/quote' with no taker — a 400 by
+    // construction (0x v2 /quote requires taker). That shape must never recur.
+    expect(calls[0]).not.toMatch(/\/swap\/(permit2|allowance-holder)\/quote/)
+  })
+})
+
+describe('0x fetchSwapData keeps /quote WITH taker [fix/zerox-price-endpoint]', () => {
+  it('mainnet (chainId 1) hits /swap/permit2/quote, with chainId and taker', async () => {
+    await zerox.fetchSwapData({ src: WETH, dst: USDC, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId: 1 })
+    expect(calls[0]).toContain('/swap/permit2/quote')
+    expect(calls[0]).toContain('chainId=1')
+    expect(calls[0]).toContain(`taker=${FROM}`)
+  })
+
+  it('Base (chainId 8453) hits /swap/allowance-holder/quote, with chainId and taker; tx.to = AllowanceHolder', async () => {
     const r = await zerox.fetchSwapData({ src: WETH, dst: USDC, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId: 8453 })
     expect(calls[0]).toContain('/swap/allowance-holder/quote')
+    expect(calls[0]).toContain('chainId=8453')
+    expect(calls[0]).toContain(`taker=${FROM}`)
     expect(r?.tx?.to?.toLowerCase()).toBe(BASE_ALLOWANCE_HOLDER.toLowerCase())
     expect(r?.toAmount).toBe('1982000000')
   })
 })
 
-describe('0x partner fee [SPRINT-9T T1]', () => {
-  // swapFeeToken is the SELL token (mirrors FeeCollector charging on input); the shared FEE_BPS
-  // constant (not a magic number) at the shared FEE_RECIPIENT.
+describe('0x partner fee [SPRINT-9T T1] — present on both /price and /quote', () => {
   for (const chainId of [1, 8453]) {
-    it(`fetchQuote carries swapFeeRecipient/Bps/Token on chain ${chainId}`, async () => {
+    it(`fetchQuote (/price) carries swapFeeRecipient/Bps/Token on chain ${chainId}`, async () => {
       await zerox.fetchQuote({ src: WETH, dst: USDC, amount: '1000000000000000000', chainId })
       expect(calls[0]).toContain(`swapFeeRecipient=${FEE_RECIPIENT}`)
       expect(calls[0]).toContain(`swapFeeBps=${FEE_BPS}`)
       expect(calls[0]).toContain(`swapFeeToken=${WETH}`) // sell side
     })
 
-    it(`fetchSwapData carries the SAME fee params on chain ${chainId} (quote == execution)`, async () => {
+    it(`fetchSwapData (/quote) carries the SAME fee params on chain ${chainId} (quote == execution)`, async () => {
       await zerox.fetchSwapData({ src: WETH, dst: USDC, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId })
       expect(calls[0]).toContain(`swapFeeRecipient=${FEE_RECIPIENT}`)
       expect(calls[0]).toContain(`swapFeeBps=${FEE_BPS}`)
@@ -104,5 +137,70 @@ describe('0x partner fee [SPRINT-9T T1]', () => {
   it('ERC-20 SELL keeps the fee on the SELL token (mirrors FeeCollector input charging)', async () => {
     await zerox.fetchSwapData({ src: USDC, dst: WETH, amount: '1000000', from: FROM, slippage: 0.5, chainId: 1 })
     expect(calls[0]).toContain(`swapFeeToken=${USDC}`) // sell side
+  })
+})
+
+// Fixture reproduces the shape of 0x's own documented example response for
+// GET /swap/permit2/price (https://docs.0x.org/api-reference/evm-ap-is/swap/permit-2-getprice),
+// with the null placeholder fields the docs show filled in with representative
+// values so the mapping is actually exercised end-to-end.
+const ZEROX_PRICE_FIXTURE = {
+  allowanceTarget: '0x000000000022d473030f116ddee9f6b43ac78ba3',
+  blockNumber: '12345678',
+  buyAmount: '996500000',
+  buyToken: '0xdac17f958d2ee523a2206206994597c13d831ec7',
+  fees: {
+    integratorFee: null,
+    integratorFees: [{ amount: '1000000000000000', token: '0x4200000000000000000000000000000000000006', type: 'volume' }],
+    zeroExFee: null,
+    gasFee: null,
+  },
+  issues: {
+    allowance: { actual: '0', spender: '0x000000000022d473030f116ddee9f6b43ac78ba3' },
+    balance: { token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', actual: '1000000000000000000', expected: '1000000000000000000' },
+    simulationIncomplete: false,
+    invalidSourcesPassed: [],
+  },
+  liquidityAvailable: true,
+  minBuyAmount: '991536500',
+  mode: 'exact-in',
+  route: {
+    fills: [{ from: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', to: '0xdac17f958d2ee523a2206206994597c13d831ec7', source: 'SolidlyV3', proportionBps: '10000' }],
+    tokens: [
+      { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC' },
+      { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT' },
+    ],
+  },
+  sellAmount: '1000000000000000000',
+  sellToken: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+  tokenMetadata: {
+    buyToken: { buyTaxBps: '0', sellTaxBps: '0', transferTaxBps: '0' },
+    sellToken: { buyTaxBps: '0', sellTaxBps: '0', transferTaxBps: '0' },
+  },
+  totalNetworkFee: '2100000000000000',
+  zid: '0x111111111111111111111111',
+  // /price has NO `transaction` object (no signable tx for an indicative quote)
+  // — the gas estimate is the top-level `gas` field instead.
+  gas: '150000',
+  gasPrice: '14000000000',
+}
+
+describe('0x /price response mapping [fix/zerox-price-endpoint]', () => {
+  it('maps buyAmount, route.fills[].source, and the top-level gas field (no transaction object in /price)', async () => {
+    vi.restoreAllMocks()
+    let capturedUrl = ''
+    vi.spyOn(global, 'fetch').mockImplementation(async (...args: unknown[]) => {
+      const [url] = args as [string]
+      capturedUrl = url
+      return new Response(JSON.stringify(ZEROX_PRICE_FIXTURE), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+
+    const r = await zerox.fetchQuote({ src: USDC, dst: WETH, amount: '1000000000000000000', chainId: 1 })
+
+    expect(capturedUrl).toContain('/swap/permit2/price')
+    expect(r?.toAmount).toBe('996500000')
+    expect(r?.routes).toEqual(['SolidlyV3'])
+    // Never silently 0 — must read the top-level `gas` field since /price has no `transaction`.
+    expect(r?.estimatedGas).toBe(150000)
   })
 })

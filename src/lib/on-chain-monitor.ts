@@ -10,15 +10,27 @@
  *   critical — admin ops (AdminTransferred, ExecutorChangeProposed,
  *              RouterWhitelisted, Paused/Unpaused) → P0 full fan-out
  *
- * Uses eth_getLogs with topic filters. Block range capped at 1000 per call
- * to prevent RPC timeouts; larger gaps are chunked across ticks.
+ * Uses eth_getLogs with topic filters. Block range capped per chain
+ * (MAX_BLOCKS_PER_SCAN_BY_CHAIN) to prevent RPC timeouts; larger gaps are
+ * chunked across scans.
  *
- * [P109/M-05] Runs every monitoring tick (~60 s — the Cloudflare Worker
- * cron interval). Previously gated to every 5th tick, which delayed
- * detection of AdminTransferred / Paused / OwnershipTransferred /
- * RouterWhitelisted by up to 5 minutes. RPC cost is bounded by a
- * process-scope `lastScannedBlock` cache (fast-path skip when no new
- * blocks since the last tick) plus the existing KV-backed tracker.
+ * [perf/onchain-scan-cadence] Gated to every 5th monitoring tick (~5 min at
+ * the Cloudflare Worker cron's 60 s interval) via shouldRunOnChainScan().
+ * Alchemy bills per call, and scanning every tick on every chain with a
+ * FeeCollector (mainnet, Base, Arbitrum) cost 8,640 calls/day idle — over
+ * the owner's <= 5 EUR/month budget for the idle system. The owner has
+ * accepted the resulting <= 5 min alert latency for admin events (he is the
+ * admin; executor changes sit behind a 48h timelock). This reinstates the
+ * gating that [P109/M-05] previously removed to close a latency finding;
+ * the cost/latency tradeoff has since been revisited by the owner.
+ *
+ * The process-scope `lastScannedBlockInMemory` cache below is NOT a cost
+ * bound at this cadence: it only short-circuits eth_getLogs when a chain
+ * mines zero blocks in the 5-minute gap since the last scan, which does not
+ * happen on mainnet, Base, or Arbitrum (block times of seconds, not
+ * minutes) — the fast-path branch is effectively dead code on every chain
+ * we monitor today. The actual cost bound is the tick gate in
+ * shouldRunOnChainScan().
  *
  * @internal — server-only module. Called by runMonitoringTick().
  */
@@ -240,8 +252,60 @@ function maybeElevateFeeEvent(event: OnChainEvent, log: Log): OnChainEvent {
 
 // ── Constants ────────────────────────────────────────────
 
-/** Max blocks per eth_getLogs call (prevents RPC timeout) */
+/** Monitoring tick cadence — the Cloudflare Worker cron interval. */
+const MONITORING_TICK_SECONDS = 60
+
+/** [perf/onchain-scan-cadence] Only scan on-chain events every Nth
+ *  monitoring tick — see shouldRunOnChainScan(). Alchemy bills per call;
+ *  gating to 1-in-5 (~5 min) keeps the idle system under the owner's
+ *  <= 5 EUR/month budget. Owner-accepted tradeoff: alert latency for
+ *  admin events (Paused, AdminTransferred, RouterWhitelisted) rises to
+ *  <= 5 min (he is the admin; executor changes sit behind a 48h timelock). */
+const ONCHAIN_TICK_INTERVAL = 5
+
+/** Average seconds per block, per chain — used ONLY to size
+ *  MAX_BLOCKS_PER_SCAN_BY_CHAIN so a chain's cursor can never fall behind
+ *  faster than the cap can cover in one scan interval. Cited from chain
+ *  documentation, not measured on-chain: mainnet ~12s (post-Merge PoS
+ *  slot time), Base ~2s (OP-Stack default), Arbitrum ~0.25s (Nitro
+ *  sub-second blocks). */
+const BLOCK_TIME_SECONDS: Record<number, number> = {
+  1: 12,
+  8453: 2,
+  42161: 0.25,
+}
+
+/**
+ * Minimum MAX_BLOCKS_PER_SCAN a chain needs so its scan cursor never falls
+ * permanently behind: 2x headroom over the blocks it can mine within one
+ * scan interval (ONCHAIN_TICK_INTERVAL ticks). Below this, a chain that
+ * mines faster than the cap covers would fall further behind on every
+ * scan and never catch up — see MAX_BLOCKS_PER_SCAN_BY_CHAIN's Arbitrum
+ * entry, which this replaces a silent divergence for.
+ */
+function minRequiredBlocksPerScan(chainId: number): number {
+  const blockTime = BLOCK_TIME_SECONDS[chainId] ?? BLOCK_TIME_SECONDS[DEFAULT_CHAIN_ID]
+  const scanIntervalSeconds = ONCHAIN_TICK_INTERVAL * MONITORING_TICK_SECONDS
+  const blocksPerScanInterval = scanIntervalSeconds / blockTime
+  return Math.ceil(2 * blocksPerScanInterval)
+}
+
+/** Max blocks per eth_getLogs call, per chain (prevents RPC timeouts AND
+ *  cursor divergence — see minRequiredBlocksPerScan). Mainnet is kept at
+ *  the pre-existing 1000 (byte-identical behaviour there); Base and
+ *  Arbitrum are sized with headroom above minRequiredBlocksPerScan() at
+ *  the current 5-tick cadence. */
 const MAX_BLOCKS_PER_SCAN = 1000
+const MAX_BLOCKS_PER_SCAN_BY_CHAIN: Record<number, number> = {
+  1: MAX_BLOCKS_PER_SCAN,
+  8453: 500,
+  42161: 3000,
+}
+
+function maxBlocksPerScan(chainId: number): number {
+  return MAX_BLOCKS_PER_SCAN_BY_CHAIN[chainId] ?? MAX_BLOCKS_PER_SCAN
+}
+
 /** KV key for last scanned block. [E-4] Mainnet keeps the EXACT legacy key
  *  (cursor continuity across the deploy); other chains get a :chainId suffix
  *  so cursors can never mix. */
@@ -252,14 +316,11 @@ function lastBlockKey(chainId: number): string {
 /** KV key for recent critical events (7-day TTL) */
 const CRITICAL_EVENTS_KEY = 'teraswap:onchain:critical-events'
 const CRITICAL_EVENTS_TTL = 7 * 24 * 60 * 60
-/** [P109] Tick-counter KV key — kept for telemetry continuity (existing
- *  dashboards graph the counter to detect a stalled monitoring worker).
- *  No longer used to gate execution; see shouldRunOnChainScan(). */
+/** [perf/onchain-scan-cadence] Tick-counter KV key — atomically incremented
+ *  every monitoring tick and gated on modulo ONCHAIN_TICK_INTERVAL by
+ *  shouldRunOnChainScan(). Also doubles as telemetry continuity (existing
+ *  dashboards graph the counter to detect a stalled monitoring worker). */
 const ONCHAIN_TICK_COUNTER_KEY = 'teraswap:onchain:tick-counter'
-/** [P109] Legacy modulo divisor — every tick now scans (M-05). Kept
- *  exported via `_internal` so downstream tooling that imports it for
- *  display purposes doesn't break, but the scan loop ignores it. */
-const ONCHAIN_TICK_INTERVAL = 1
 
 /** [P109] Process-scope cache of the highest block we've successfully
  *  scanned in this worker instance. Cold-start safe — when null we fall
@@ -354,21 +415,38 @@ export async function scanContractEvents(
   // so existing callers/tests are byte-identical.
   targets: ChainScanTargets = MAINNET_TARGETS,
 ): Promise<OnChainEvent[]> {
-  // Cap range
-  const effectiveTo = Math.min(toBlock, fromBlock + MAX_BLOCKS_PER_SCAN - 1)
+  // Cap range — per chain, see maxBlocksPerScan()
+  const effectiveTo = Math.min(toBlock, fromBlock + maxBlocksPerScan(targets.chainId) - 1)
 
-  // Fetch logs from the chain's deployed contracts in parallel.
-  // Mainnet: OrderExecutor + both FeeCollector versions (V1 still emits Sweep
-  // on residual-balance recoveries even though no new swaps route there; V1
-  // and V2 share the SwapWithFee event signature so classification is shared).
-  // Base: FeeCollector V2 only (no executor / V1 deployed there).
+  // Fetch logs from the chain's deployed contracts in ONE eth_getLogs call
+  // over the address array — Alchemy meters getLogs per CALL, not per block,
+  // so N addresses in one call costs 1x instead of Nx. Mainnet: OrderExecutor
+  // + both FeeCollector versions (V1 still emits Sweep on residual-balance
+  // recoveries even though no new swaps route there; V1 and V2 share the
+  // SwapWithFee event signature so classification is shared). Base:
+  // FeeCollector V2 only (no executor / V1 deployed there).
   const range = { fromBlock: BigInt(fromBlock), toBlock: BigInt(effectiveTo) }
-  const [executorLogs, feeCollectorV2Logs, feeCollectorV1Logs] = await Promise.all([
-    targets.executor ? client.getLogs({ address: targets.executor, ...range }) : Promise.resolve([] as Log[]),
-    targets.feeCollector ? client.getLogs({ address: targets.feeCollector, ...range }) : Promise.resolve([] as Log[]),
-    targets.feeCollectorV1 ? client.getLogs({ address: targets.feeCollectorV1, ...range }) : Promise.resolve([] as Log[]),
-  ])
-  const feeCollectorLogs = [...feeCollectorV2Logs, ...feeCollectorV1Logs]
+  const addresses = [targets.executor, targets.feeCollector, targets.feeCollectorV1]
+    .filter((a): a is `0x${string}` => a !== undefined)
+
+  const logs = addresses.length > 0 ? await client.getLogs({ address: addresses, ...range }) : []
+
+  // Partition by log.address (lower-cased) into the same three buckets the
+  // pre-refactor code produced from three separate calls.
+  const executorAddr = targets.executor?.toLowerCase()
+  const feeCollectorAddr = targets.feeCollector?.toLowerCase()
+  const feeCollectorV1Addr = targets.feeCollectorV1?.toLowerCase()
+
+  const executorLogs: Log[] = []
+  const feeCollectorLogs: Log[] = []
+  for (const log of logs) {
+    const addr = typeof log.address === 'string' ? log.address.toLowerCase() : undefined
+    if (addr !== undefined && addr === executorAddr) {
+      executorLogs.push(log)
+    } else if (addr !== undefined && (addr === feeCollectorAddr || addr === feeCollectorV1Addr)) {
+      feeCollectorLogs.push(log)
+    }
+  }
 
   const events: OnChainEvent[] = []
 
@@ -656,27 +734,30 @@ async function enqueueFailedAlerts(failures: OnChainEvent[]): Promise<void> {
 // ── Tick cadence ─────────────────────────────────────────
 
 /**
- * [P109/M-05] Should this tick run an on-chain scan?
+ * [perf/onchain-scan-cadence] Should this tick run an on-chain scan?
  *
- * Always returns `true` — the Cloudflare Worker cron fires at 60 s and
- * we want every tick to surface admin events. The previous every-5th
- * gating delayed critical-event detection (AdminTransferred, Paused,
- * OwnershipTransferred, RouterWhitelisted) by up to 5 minutes.
+ * Gated to every ONCHAIN_TICK_INTERVAL-th tick (5, ~5 min at the
+ * Cloudflare Worker cron's 60 s interval) via an atomic KV counter — a
+ * cost decision (Alchemy bills per call; see the module docblock), not an
+ * availability guard. If KV is unreachable we fail OPEN (scan runs) —
+ * losing the cost guard for one tick is cheap; silently going blind to
+ * admin events because KV hiccuped is not acceptable.
  *
- * RPC cost is bounded inside `runOnChainScan()` by the in-memory
- * `lastScannedBlockInMemory` fast-path: when `eth_blockNumber` returns
- * a value we've already scanned, the function short-circuits without
- * issuing `eth_getLogs`. The KV tick counter is still incremented so
- * dashboards graphing cadence continuity keep working.
+ * Health checks (H1/H2) in runMonitoringTick() are NOT gated by this
+ * function — they run on every tick regardless of this return value.
  */
 export async function shouldRunOnChainScan(): Promise<boolean> {
   try {
-    // Best-effort telemetry increment; failure is non-fatal.
-    await kv.incr(ONCHAIN_TICK_COUNTER_KEY)
+    // Atomic increment — eliminates race condition between concurrent lambdas.
+    const count = await kv.incr(ONCHAIN_TICK_COUNTER_KEY)
+    return count % ONCHAIN_TICK_INTERVAL === 0
   } catch (err) {
-    console.warn('[ONCHAIN] Tick counter KV increment failed (continuing):', err instanceof Error ? err.message : err)
+    console.warn(
+      '[ONCHAIN] Tick counter KV increment failed — scanning anyway (fail open, cost guard is not an availability guard):',
+      err instanceof Error ? err.message : err,
+    )
+    return true
   }
-  return true
 }
 
 // ── Main entry point ─────────────────────────────────────
@@ -762,8 +843,8 @@ async function scanOneChain(targets: ChainScanTargets): Promise<ChainScanOutcome
     }
   }
 
-  // Cap to MAX_BLOCKS_PER_SCAN — remaining blocks will be scanned next tick
-  const toBlock = Math.min(currentBlock, fromBlock + MAX_BLOCKS_PER_SCAN - 1)
+  // Cap to this chain's max — remaining blocks will be scanned next scan
+  const toBlock = Math.min(currentBlock, fromBlock + maxBlocksPerScan(chainId) - 1)
 
   // Scan
   let events: OnChainEvent[]
@@ -874,6 +955,11 @@ export function _resetLastScannedBlockCache(): void {
 export const _internal = {
   TOPICS,
   MAX_BLOCKS_PER_SCAN,
+  MAX_BLOCKS_PER_SCAN_BY_CHAIN,
+  BLOCK_TIME_SECONDS,
+  MONITORING_TICK_SECONDS,
+  minRequiredBlocksPerScan,
+  maxBlocksPerScan,
   LAST_BLOCK_KEY,
   ONCHAIN_TICK_INTERVAL,
   classifyOrderExecutorEvent,

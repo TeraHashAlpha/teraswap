@@ -99,9 +99,11 @@ beforeEach(() => {
 
 describe('on-chain-monitor — multi-chain [E-4]', () => {
   it('scans the Base FeeCollector and tags its alerts with the chain', async () => {
-    // A critical event on the BASE FeeCollector only.
-    mockGetLogs.mockImplementation(async (args: { address?: string }) =>
-      args.address?.toLowerCase() === FAKE_BASE_FC.toLowerCase()
+    // A critical event on the BASE FeeCollector only. One getLogs call per
+    // chain now carries an ADDRESS ARRAY — match if the target address is
+    // among the queried addresses.
+    mockGetLogs.mockImplementation(async (args: { address?: string[] }) =>
+      (args.address ?? []).some(a => a.toLowerCase() === FAKE_BASE_FC.toLowerCase())
         ? [ownershipTransferredLog(FAKE_BASE_FC)]
         : [],
     )
@@ -110,7 +112,9 @@ describe('on-chain-monitor — multi-chain [E-4]', () => {
     expect(result).not.toBeNull()
 
     // Base FeeCollector was actually queried.
-    const scannedAddresses = mockGetLogs.mock.calls.map(c => String((c[0] as { address?: string }).address).toLowerCase())
+    const scannedAddresses = mockGetLogs.mock.calls
+      .flatMap(c => (c[0] as { address?: string[] }).address ?? [])
+      .map(a => a.toLowerCase())
     expect(scannedAddresses).toContain(FAKE_BASE_FC.toLowerCase())
     // Mainnet legs unchanged: executor + FC v2 still queried.
     expect(scannedAddresses).toContain(ORDER_EXECUTOR_ADDRESS.toLowerCase())
@@ -128,8 +132,8 @@ describe('on-chain-monitor — multi-chain [E-4]', () => {
 
   it('per-chain cursors are isolated: a held mainnet advance does not block the Base cursor', async () => {
     // Mainnet emits a critical whose alert FAILS → mainnet cursor held.
-    mockGetLogs.mockImplementation(async (args: { address?: string }) =>
-      args.address?.toLowerCase() === FEE_COLLECTOR_ADDRESS.toLowerCase()
+    mockGetLogs.mockImplementation(async (args: { address?: string[] }) =>
+      (args.address ?? []).some(a => a.toLowerCase() === FEE_COLLECTOR_ADDRESS.toLowerCase())
         ? [ownershipTransferredLog(FEE_COLLECTOR_ADDRESS)]
         : [],
     )
@@ -145,8 +149,8 @@ describe('on-chain-monitor — multi-chain [E-4]', () => {
   })
 
   it('per-chain cursors are isolated: a held Base advance does not block the mainnet cursor', async () => {
-    mockGetLogs.mockImplementation(async (args: { address?: string }) =>
-      args.address?.toLowerCase() === FAKE_BASE_FC.toLowerCase()
+    mockGetLogs.mockImplementation(async (args: { address?: string[] }) =>
+      (args.address ?? []).some(a => a.toLowerCase() === FAKE_BASE_FC.toLowerCase())
         ? [ownershipTransferredLog(FAKE_BASE_FC)]
         : [],
     )

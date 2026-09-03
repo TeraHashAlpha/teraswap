@@ -1,11 +1,12 @@
 /**
  * On-chain event watcher for TeraSwap admin events.
  *
- * Polls for contract events every 30 seconds using viem's getLogs.
+ * Polls for contract events every 30 seconds using viem's getLogs (every 5 minutes while the
+ * keeper has no active orders — [PERF-KEEPER-IDLE-BACKOFF], see idle-backoff.js).
  * Sends Telegram alerts for governance-critical events (timelock, pause, admin transfer).
  *
- * Supports monitoring multiple contracts (e.g. OrderExecutor + FeeCollector).
- * Each contract's logs are tagged with a label for clear alert attribution.
+ * Supports monitoring multiple contracts (e.g. OrderExecutor + FeeCollector) with ONE
+ * eth_getLogs per poll. Each contract's logs are tagged with a label for clear alert attribution.
  *
  * Design:
  *   - Polling-based (getLogs), NOT WebSocket subscriptions
@@ -17,6 +18,9 @@
 
 import { parseAbiItem, formatEther, decodeEventLog } from "viem"
 import { sendTelegramAlert } from "./alert.js"
+// [PERF-KEEPER-IDLE-BACKOFF] The poll follows the keeper's mode: POLL_INTERVAL_MS while it has
+// active orders, IDLE_POLL_INTERVAL_MS while it has none (executor.js pushes the mode via setIdle).
+import { POLL_INTERVAL_MS, IDLE_POLL_INTERVAL_MS } from "./idle-backoff.js"
 
 // ── Events to monitor (OrderExecutor) ──────────────────────
 const WATCHED_EVENTS = [
@@ -46,7 +50,6 @@ for (const abi of WATCHED_EVENTS) {
   EVENT_BY_TOPIC.set(abi.name, abi)
 }
 
-const POLL_INTERVAL_MS = 30_000 // 30 seconds
 const INITIAL_BACKOFF_MS = 5_000
 const MAX_BACKOFF_MS = 80_000
 const MAX_CONSECUTIVE_FAILURES = 5
@@ -175,7 +178,7 @@ const EVENT_CONFIG = {
  * @param {import('viem').PublicClient} publicClient — viem public client
  * @param {Array<{ address: string, label: string }>|string} contracts — contracts to monitor
  * @param {import('./monitor.js').ExecutorMonitor|null} monitor — optional Prometheus monitor
- * @returns {{ stop: () => void }}
+ * @returns {{ stop: () => void, setIdle: (idle: boolean) => void }}
  */
 export function startEventWatcher(publicClient, contracts, monitor = null) {
   // Backward compatibility: accept a single address string
@@ -188,6 +191,7 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
   let backoffMs = INITIAL_BACKOFF_MS
   let timer = null
   let stopped = false
+  let idle = false
 
   async function poll() {
     if (stopped) return
@@ -207,13 +211,25 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
       // No new blocks
       if (currentBlock <= lastBlock) return
 
-      // Fetch logs from each monitored contract
+      // [PERF-KEEPER-IDLE-BACKOFF] ONE eth_getLogs for ALL monitored contracts over the range —
+      // viem accepts `address: Address[]`. The provider bills eth_getLogs per CALL, so the previous
+      // one-call-per-contract loop cost N× for the same blocks. The union is partitioned back into
+      // the same per-contract buckets (by log.address, lower-cased — nodes return it lower-case,
+      // env addresses may be checksummed) and processed contract-by-contract in `contracts` order,
+      // exactly as the per-contract calls did. Pinned by event-watcher.test.mjs.
+      const unionLogs = await publicClient.getLogs({
+        address: contracts.map((c) => c.address),
+        fromBlock: lastBlock + 1n,
+        toBlock: currentBlock,
+      })
+      const logsByAddress = new Map(contracts.map((c) => [c.address.toLowerCase(), []]))
+      for (const log of unionLogs) {
+        const bucket = logsByAddress.get(String(log.address).toLowerCase())
+        if (bucket) bucket.push(log) // a log from an unwatched address is never processed
+      }
+
       for (const { address, label } of contracts) {
-        const logs = await publicClient.getLogs({
-          address,
-          fromBlock: lastBlock + 1n,
-          toBlock: currentBlock,
-        })
+        const logs = logsByAddress.get(address.toLowerCase())
 
         for (const log of logs) {
           // Tag with contract label for alert attribution
@@ -283,13 +299,21 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
     }
   }
 
+  // [PERF-KEEPER-IDLE-BACKOFF] (Re)arm the interval for the current mode. Called once at start and
+  // ONLY on a mode change (see setIdle) — re-arming on every idle cycle would reset the pending
+  // idle poll just before it was due and the watcher would never fire.
+  function schedule() {
+    if (timer) clearInterval(timer)
+    timer = setInterval(poll, idle ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
+    if (timer.unref) timer.unref()
+  }
+
   // Start polling
   poll() // Initial poll (records block number)
-  timer = setInterval(poll, POLL_INTERVAL_MS)
-  if (timer.unref) timer.unref()
+  schedule()
 
   const contractList = contracts.map(c => `${c.label}(${c.address})`).join(', ')
-  console.log(`[EVENT-WATCHER] Started — polling every ${POLL_INTERVAL_MS / 1000}s for: ${contractList}`)
+  console.log(`[EVENT-WATCHER] Started — polling every ${POLL_INTERVAL_MS / 1000}s (${IDLE_POLL_INTERVAL_MS / 1000}s while the keeper is idle) for: ${contractList}`)
 
   return {
     stop() {
@@ -299,6 +323,18 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
         timer = null
       }
       console.log("[EVENT-WATCHER] Stopped")
+    },
+    /**
+     * Follow the keeper's mode: idle ⇒ poll every IDLE_POLL_INTERVAL_MS, active ⇒ POLL_INTERVAL_MS.
+     * Idempotent — an unchanged mode leaves the pending poll untouched.
+     * @param {boolean} nextIdle
+     */
+    setIdle(nextIdle) {
+      const next = nextIdle === true
+      if (next === idle || stopped) return
+      idle = next
+      schedule()
+      console.log(`[EVENT-WATCHER] ${idle ? "Idle" : "Active"} — polling every ${(idle ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS) / 1000}s`)
     },
   }
 }

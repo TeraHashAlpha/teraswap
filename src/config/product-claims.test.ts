@@ -85,6 +85,47 @@ describe('product-claims — meta description', () => {
       `queries ${QUOTING_COUNT} liquidity sources`,
     )
   })
+
+  it('initialises without a temporal-dead-zone ReferenceError', async () => {
+    vi.resetModules()
+    const mod = await import('./product-claims')
+    expect(typeof mod.SITE_META_DESCRIPTION).toBe('string')
+    expect(mod.SITE_META_DESCRIPTION.length).toBeGreaterThan(0)
+  })
+
+  it('embeds the derived SWAP_CHAIN_LIST_LABEL, not a hardcoded chain list', () => {
+    expect(SITE_META_DESCRIPTION).toContain(
+      `an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL}`,
+    )
+    expect(SITE_META_DESCRIPTION).not.toContain('an Ethereum meta-aggregator')
+  })
+
+  it('names Ethereum via the derived chain list', () => {
+    expect(SWAP_CHAIN_NAMES).toContain('Ethereum')
+    expect(SITE_META_DESCRIPTION).toContain('Ethereum')
+  })
+
+  it('changes when a chain is added to the registry (fails against a hardcoded list)', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/chains/registry', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/chains/registry')>()
+      const EXTRA_CHAIN = { ...actual.CHAIN_CONFIGS[1], chainId: 999999, name: 'Testnet Chain', slug: 'testnet-chain' }
+      const patchedConfigs = { ...actual.CHAIN_CONFIGS, 999999: EXTRA_CHAIN }
+      return {
+        ...actual,
+        CHAIN_CONFIGS: patchedConfigs,
+        getSupportedChainIds: () => Object.keys(patchedConfigs).map(Number),
+      }
+    })
+
+    const mod = await import('./product-claims')
+    expect(mod.SWAP_CHAIN_NAMES).toContain('Testnet Chain')
+    expect(mod.SITE_META_DESCRIPTION).toContain('Testnet Chain')
+    expect(mod.SITE_META_DESCRIPTION).not.toBe(SITE_META_DESCRIPTION)
+
+    vi.doUnmock('@/lib/chains/registry')
+    vi.resetModules()
+  })
 })
 
 describe('product-claims — swap chains from the registry', () => {

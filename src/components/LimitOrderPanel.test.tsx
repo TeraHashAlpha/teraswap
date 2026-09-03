@@ -7,7 +7,7 @@
  * is fully mocked.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const useOrderEngineMock = vi.fn()
 const useAccountMock = vi.fn()
@@ -70,6 +70,8 @@ vi.mock('@/lib/analytics-tracker', () => ({
 
 import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
 import LimitOrderPanel from './LimitOrderPanel'
+// [ADR-020] Real (unmocked) chain lookup — the fail-closed router map is what these assert.
+import { NO_ROUTER_FOR_CHAIN_REASON, getDefaultRouter } from '@/lib/order-engine'
 
 /**
  * [FIX-DEPEG-GATE-HANDLER-TEST-COVERAGE / L-1] `fireEvent.click` on a disabled button never
@@ -259,4 +261,59 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
 
     expect(createOrder).not.toHaveBeenCalled()
   })
+})
+
+// [ADR-020 / finding B6] `getDefaultRouter` used to fall back to MAINNET's `1inch` entry on any
+// chain config.ts had no router set for, so the panel would have committed a mainnet router
+// address into a signed Limit order on Arbitrum One. The router is fixed at signing and replayed
+// by the keeper on every fill, so a router the chain's own executor does not whitelist yields an
+// order that can never execute. Nothing about config.ts is mocked here — the chain lookup IS the
+// module under test.
+describe('LimitOrderPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
+  const ARBITRUM_CHAIN_ID = 42161
+
+  async function enterAmountAndPrice() {
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '1' } })
+    fireEvent.change(await screen.findByPlaceholderText('0.0'), { target: { value: '2000' } })
+  }
+
+  beforeEach(() => {
+    useChainIdMock.mockReturnValue(ARBITRUM_CHAIN_ID)
+  })
+  afterEach(() => {
+    useChainIdMock.mockReturnValue(1) // restore this file's default for any later suite
+  })
+
+  it('sanity: chain 42161 really has no default router (otherwise the tests below are vacuous)', () => {
+    expect(getDefaultRouter(ARBITRUM_CHAIN_ID)).toBeNull()
+    expect(getDefaultRouter(1)).not.toBeNull()
+  })
+
+  it('shows the named refusal and never calls createOrder', async () => {
+    const createOrder = vi.fn()
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    await act(async () => { await clickBypassingDisabled(submitBtn()) })
+
+    expect(screen.getByTestId('limit-submit-error')).toHaveTextContent(NO_ROUTER_FOR_CHAIN_REASON)
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+
+  it('refuses before any feed/floor work — the chain gap is reported as itself, not as a token problem', async () => {
+    useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder: vi.fn() })
+    renderWithProviders(<LimitOrderPanel />)
+    await enterAmountAndPrice()
+
+    await act(async () => { await clickBypassingDisabled(submitBtn()) })
+
+    const err = screen.getByTestId('limit-submit-error')
+    expect(err.textContent).toBe(NO_ROUTER_FOR_CHAIN_REASON)
+    expect(err.textContent).not.toMatch(/price feed/i)
+  })
+
+  function submitBtn(): HTMLButtonElement {
+    return screen.getByRole('button', { name: /place limit order/i }) as HTMLButtonElement
+  }
 })

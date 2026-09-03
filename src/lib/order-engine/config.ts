@@ -247,30 +247,60 @@ const BASE_ROUTERS: Record<string, RouterEntry> = {
   },
 }
 
+// [ADR-020] A chain is present here ONLY when its set has been derived from that chain's DEPLOYED
+// executor whitelist (the executor's own Bootstrap / RouterChanged events) AND intersected with
+// what /api/swap can actually serve there. Entries are never typed from a runbook, from a sibling
+// chain, or from an address that "looks the same everywhere" — a cross-chain address collision is
+// a coincidence, not a whitelist. Absence from this map is a decision, and it means "we do not
+// know this chain", which fails closed everywhere below.
 const ROUTERS_BY_CHAIN: Record<number, Record<string, RouterEntry>> = {
   1: MAINNET_ROUTERS,
   8453: BASE_ROUTERS,
 }
 
-// The router-map key whose entry is committed by default at order creation.
+// The router-map key whose entry is committed by default at order creation. A chain absent here
+// has no default — there is deliberately no cross-chain fallback key (ADR-020).
 const DEFAULT_ROUTER_KEY_BY_CHAIN: Record<number, string> = {
   1: '1inch',         // mainnet unchanged
   8453: 'augustusV6', // Base → Augustus V6 (serveable via /api/swap `velora`)
 }
 
+// [ADR-020] The single fail-closed answer for a chain ROUTERS_BY_CHAIN does not know. Frozen and
+// shared: a caller cannot mutate it into a non-empty map, and every unknown chain gets the same
+// object, so there is exactly one "we don't know this chain" state to reason about.
+const NO_ROUTERS = Object.freeze({}) as Record<string, RouterEntry>
+
 /**
- * Get whitelisted routers for a given chainId. Unknown chains fall back to the
- * mainnet map (mainnet behaviour byte-identical). [chore/dca-router-chainaware]
+ * [ADR-020] The refusal reason every order-creation path shows when the connected chain has no
+ * order-engine router set. Exported (and pinned verbatim by tests) so the panels cannot drift
+ * apart, and so a reviewer can grep ONE string to find every refusal site.
+ */
+export const NO_ROUTER_FOR_CHAIN_REASON =
+  'Conditional orders are unavailable on this network — no whitelisted router is configured for it.'
+
+/**
+ * Get whitelisted routers for a given chainId. [ADR-020 / finding B6] A chain this file does not
+ * know gets an EMPTY map, never a sibling chain's. This used to fall back to MAINNET_ROUTERS,
+ * which on Arbitrum One (42161) offered mainnet routers the deployed Arbitrum OrderExecutorV3
+ * does not whitelist — and made `isWhitelistedRouter` validate against the wrong chain's set into
+ * the bargain, so the whole loop agreed with itself and was wrong. Mainnet (1) and Base (8453)
+ * are byte-identical to before. [chore/dca-router-chainaware]
  */
 export function getWhitelistedRouters(chainId: number): Record<string, RouterEntry> {
-  return ROUTERS_BY_CHAIN[chainId] ?? MAINNET_ROUTERS
+  return ROUTERS_BY_CHAIN[chainId] ?? NO_ROUTERS
 }
 
-/** Default router for a given chainId (the one order creation commits). */
-export function getDefaultRouter(chainId: number): RouterEntry {
-  const routers = getWhitelistedRouters(chainId)
-  const key = DEFAULT_ROUTER_KEY_BY_CHAIN[chainId] ?? '1inch'
-  return routers[key] ?? MAINNET_ROUTERS['1inch']
+/**
+ * Default router for a given chainId (the one order creation commits), or null when this chain
+ * has no order-engine router set. [ADR-020] Null is the fail-closed answer and every caller MUST
+ * refuse on it — the nullable return type is what makes that a compile error rather than a
+ * convention. This previously fell back TWICE (unknown chain ⇒ mainnet map, unknown key ⇒ mainnet
+ * '1inch'), so an unknown chain silently committed a mainnet router into a signed order.
+ */
+export function getDefaultRouter(chainId: number): RouterEntry | null {
+  const key = DEFAULT_ROUTER_KEY_BY_CHAIN[chainId]
+  if (!key) return null
+  return getWhitelistedRouters(chainId)[key] ?? null
 }
 
 /**
@@ -287,7 +317,10 @@ export const CANONICAL_ROUTE_ROUTER_KEY = 'uniswapV3'
  *
  * Fail-closed by construction: the entry is looked up FROM the chain's already-whitelisted router
  * map, so this can never widen the whitelist — it can only select a router the executor already
- * accepts.
+ * accepts. [ADR-020] That construction only holds once the map itself fails closed: while unknown
+ * chains fell back to MAINNET_ROUTERS this returned mainnet's SwapRouter for Arbitrum, an address
+ * the Arbitrum executor does not whitelist (finding B6). It is now null there, as it always
+ * should have been for a chain with no set of its own.
  */
 export function getCanonicalRouteRouter(chainId: number): RouterEntry | null {
   const routers = getWhitelistedRouters(chainId)
@@ -297,13 +330,22 @@ export function getCanonicalRouteRouter(chainId: number): RouterEntry | null {
 /**
  * True when `router` is a member of this chain's whitelisted set. Used as an assertion before
  * signing a pinned route — never as a way to add a router.
+ *
+ * [ADR-020] "This chain's" is load-bearing. An unknown chain now has an EMPTY set, so this is
+ * false for every address there — including addresses that are genuinely whitelisted on mainnet.
+ * Before the fix it validated an unknown chain against the MAINNET map, so it answered true for
+ * routers the actual executor would reject, and could never have caught finding B6.
  */
 export function isWhitelistedRouter(chainId: number, router: string): boolean {
   const routers = getWhitelistedRouters(chainId)
   return Object.values(routers).some(r => r.address.toLowerCase() === router.toLowerCase())
 }
 
-// Legacy export for backward compatibility (mainnet default)
+// Legacy export for backward compatibility — the MAINNET set, statically. [ADR-020] Unchanged and
+// deliberately NOT chain-aware: it is `ROUTERS_BY_CHAIN[1]` under an old name, pinned by
+// src/lib/chains/routers.test.ts against the mainnet executor's on-chain whitelist. Never read it
+// as "the routers" for a connected chain — that is getWhitelistedRouters(chainId), which returns
+// {} for a chain we do not know.
 export const WHITELISTED_ROUTERS = MAINNET_ROUTERS
 
 // ── Chainlink price feeds ────────────────────────────────

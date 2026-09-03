@@ -4,8 +4,18 @@ import Link from 'next/link'
 import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
 
+// Mainnet block time is ~12s; polling faster only reissues eth_blockNumber
+// calls that cannot return new information.
+export const FOOTER_BLOCK_POLL_MS = 12_000
+
 export default function Footer() {
-  const { data: blockNumber } = useBlockNumber({ watch: true })
+  // [fix/footer-poll-hidden-tab] `watch:` is a viem watchBlockNumber subscription
+  // that polls for the life of the tab regardless of visibility — a forgotten
+  // background tab bills eth_blockNumber calls forever. TanStack Query's own
+  // refetchInterval pauses while the tab is hidden and resumes on focus.
+  const { data: blockNumber } = useBlockNumber({
+    query: { refetchInterval: FOOTER_BLOCK_POLL_MS, refetchIntervalInBackground: false },
+  })
 
   return (
     <footer className="relative z-[1] flex flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-cream-08 px-4 py-4 text-[11px] text-cream-35 sm:gap-y-1">
