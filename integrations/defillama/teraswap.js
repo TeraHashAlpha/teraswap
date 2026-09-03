@@ -1,6 +1,6 @@
 /**
- * @deprecated superseded by `teraswap.ts` in this directory — the in-repo
- * mirror of the adapter actually MERGED upstream on 2026-07-09 as
+ * @deprecated superseded by `teraswap-adapter.ts` in this directory — the
+ * in-repo mirror of the adapter actually MERGED upstream on 2026-07-09 as
  * `aggregators/teraswap/index.ts`. This draft targets `dexs/teraswap/index.js`,
  * a path DefiLlama never used for it, ships CommonJS instead of the merged
  * TypeScript `SimpleAdapter`, and configures only ethereum + base (no

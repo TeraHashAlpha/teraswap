@@ -1,6 +1,6 @@
 /**
  * Guards for the in-repo mirror of the MERGED DefiLlama adapter
- * (`integrations/defillama/teraswap.ts` ↔ upstream
+ * (`integrations/defillama/teraswap-adapter.ts` ↔ upstream
  * `aggregators/teraswap/index.ts`).
  *
  * The two failures this file exists to prevent are the two the live upstream
@@ -28,7 +28,7 @@ import adapter, {
   EXCLUDED_SOURCES,
   EXCLUDED_SOURCE_LABELS,
   SWAP_WITH_FEE_EVENT,
-} from '../integrations/defillama/teraswap.ts'
+} from '../integrations/defillama/teraswap-adapter'
 
 /** DefiLlama chain key → EVM chain id, for looking the row up in the doc. */
 const CHAIN_IDS: Record<string, number> = {
@@ -70,8 +70,9 @@ describe('DefiLlama adapter — chain coverage', () => {
   })
 
   it('was not shipped without Arbitrum One, which is what the live upstream adapter got wrong', () => {
-    // Arbitrum's FeeCollector flipped to production 2026-07-20, eleven days
-    // after the upstream merge; with no entry, its volume and fees read zero.
+    // Arbitrum's FeeCollector has been emitting SwapWithFee since 2026-07-17,
+    // after the 2026-07-09 upstream merge; with no entry, a live chain reports
+    // zero rather than erroring.
     expect(adapter.adapter.arbitrum).toBeDefined()
   })
 

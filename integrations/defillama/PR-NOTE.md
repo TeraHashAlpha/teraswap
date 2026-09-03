@@ -12,18 +12,26 @@ sit in a TeraSwap contract, so on-chain TVL is **~0 by design**. The listing is 
 
 Not `dexs/teraswap/index.js`. The earlier draft in this directory (`teraswap.js`) still describes
 that path and is now `@deprecated`; it is kept, never deleted (CLAUDE.md rule #4). The file to
-work from is **`teraswap.ts`** in this directory — an in-repo mirror of the merged upstream file,
+work from is **`teraswap-adapter.ts`** in this directory — an in-repo mirror of the merged upstream
+file (the name deliberately differs from the `.js` draft, so no extensionless import can resolve to
+the wrong one),
 so the adapter can be diffed and unit-tested here before anything is pasted upstream.
 
 ## Two defects in the LIVE adapter, and what this fixes
 
-### 1. Arbitrum One is missing — six weeks of volume and fees reporting as zero
+### 1. Arbitrum One is missing — a live chain configured as if it did not exist
 
-The live adapter configures `CHAIN.ETHEREUM` and `CHAIN.BASE` only. Arbitrum One's FeeCollector
-flipped to production **2026-07-20**, eleven days *after* the upstream merge, so it was never in
+The live adapter configures `CHAIN.ETHEREUM` and `CHAIN.BASE` only. Arbitrum One has been emitting
+`SwapWithFee` since **2026-07-17**, after the 2026-07-09 upstream merge, so the chain was never in
 scope for that PR. A chain with no entry does not error — it reports zero.
 
-`teraswap.ts` adds `CHAIN.ARBITRUM`. Every address in it was **extracted** from the table in
+**How much volume is actually missing: very little.** Chain 42161 has emitted **five**
+`SwapWithFee` events in total — one on 2026-07-17, two on 2026-07-20, two on 2026-08-03 — and none
+since (checked against head block 501,410,306, 2026-09-03T18:46Z). This is a configuration error
+being corrected so a live chain stops reading as zero, not the recovery of six weeks of unreported
+trading.
+
+`teraswap-adapter.ts` adds `CHAIN.ARBITRUM`. Every address in it was **extracted** from the table in
 `docs/DEPLOYMENTS.md` qualified by chain, never hand-typed, and verified with `eth_getCode` on
 its own chain (measured 2026-09-03):
 
@@ -45,7 +53,9 @@ chain in its own right, and mainnet is a different address entirely — the nega
 `0xfa0dfc578960f7d720572de5d451ede06be38cc78ed2c39e00376b1cef4a658c`, block timestamp
 `1784275673` = **2026-07-17T08:07:53Z**. The RPC accepted an unbounded range, so no fallback to
 the doc's 2026-07-20 prod-flip date was needed — and the derived date matters, because the flip
-date is three days *later* and would have dropped the fills before it. `start: '2026-07-17'`.
+date is three days *later* and would silently drop the first of those five events.
+`start: '2026-07-17'`. (`docs/DEPLOYMENTS.md` now carries this first-log line on its Arbitrum
+FeeCollector row, so the doc and the chain no longer disagree.)
 
 That `topic0` is `keccak256` of the **7-argument** signature
 `SwapWithFee(address,address,address,uint256,uint256,address,uint256)` — the same value
@@ -63,7 +73,7 @@ fee-collection through"*. It is not. The sources in `FEE_INCOMPATIBLE_SOURCES`
 — they never touch the FeeCollector and emit no `SwapWithFee` — so this adapter cannot see them.
 At least one is live and quoting today. The claim overstates what the number covers.
 
-`teraswap.ts` renders the excluded names from that same list rather than restating them in prose,
+`teraswap-adapter.ts` renders the excluded names from that same list rather than restating them in prose,
 and `__tests__/defillama-teraswap-adapter.test.ts` asserts the list equals
 `FEE_INCOMPATIBLE_SOURCES` — so the paragraph cannot drift out of date silently.
 
@@ -72,7 +82,7 @@ and `__tests__/defillama-teraswap-adapter.test.ts` asserts the list equals
 ## Pasting it upstream
 
 1. Fork `DefiLlama/dimension-adapters` and open `aggregators/teraswap/index.ts`.
-2. Copy the body of `teraswap.ts` over it, then make these three mechanical edits — they exist
+2. Copy the body of `teraswap-adapter.ts` over it, then make these three mechanical edits — they exist
    only because this repo has no dimension-adapters SDK to import:
    - delete the block fenced `── IN-REPO SHIM ──` … `── END IN-REPO SHIM ──` and restore the
      three imports it names (`FetchOptions`/`SimpleAdapter`, `CHAIN`, `METRIC`);
@@ -91,9 +101,10 @@ and `__tests__/defillama-teraswap-adapter.test.ts` asserts the list equals
 
 > **Add Arbitrum One, and stop overstating what Volume covers.**
 >
-> TeraSwap's FeeCollector went to production on Arbitrum One (42161) on 2026-07-20, eleven days
-> after this adapter merged, so Arbitrum volume and fees have been reporting as zero ever since.
-> This adds the chain. The FeeCollector there is `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130`
+> TeraSwap's FeeCollector on Arbitrum One (42161) has been emitting `SwapWithFee` since
+> 2026-07-17, after this adapter merged, so Arbitrum has been reporting as zero ever since. The
+> amounts are small — five events to date, the last on 2026-08-03 — so this is a correctness fix
+> rather than a material restatement. This adds the chain. The FeeCollector there is `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130`
 > (5,339 bytes of code on chain 42161) — the same string as the Base entry, which is a
 > deployer-nonce collision and not the same deployment; each address was verified with
 > `eth_getCode` on its own chain. `start` is derived from the first `SwapWithFee` log at that

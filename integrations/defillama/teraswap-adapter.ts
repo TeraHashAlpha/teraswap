@@ -8,9 +8,17 @@
  *
  * ── What this mirror CHANGES vs. what is live upstream ────────────────────
  * 1. Adds Arbitrum One (42161). The live adapter configures ONLY ethereum and
- *    base; Arbitrum's FeeCollector reached production 2026-07-20, eleven days
- *    AFTER the upstream merge, so every Arbitrum swap since has reported as
- *    zero volume and zero fees.
+ *    base. `docs/DEPLOYMENTS.md` dates the Arbitrum prod flip 2026-07-20, but
+ *    the chain's own logs put the FIRST `SwapWithFee` three days earlier, on
+ *    2026-07-17 (block 484,739,263) — so the flip date is the wrong `start`,
+ *    and the derived one is used instead. Either way it postdates the
+ *    2026-07-09 upstream merge, which is why the chain was never configured.
+ *
+ *    Scale, stated honestly: chain 42161 has emitted **five** `SwapWithFee`
+ *    events in total — 2026-07-17, two on 2026-07-20, two on 2026-08-03 — and
+ *    none since (verified against head 2026-09-03T18:46Z). This corrects a
+ *    configuration error that makes a live chain read as zero; it does not
+ *    recover a meaningful amount of unreported volume.
  * 2. Rewrites `methodology.Volume`. The live text calls the FeeCollector "the
  *    single contract every TeraSwap swap routes fee-collection through". That
  *    is not true: the sources in `FEE_INCOMPATIBLE_SOURCES`
@@ -22,7 +30,9 @@
  * ── Why this repo has no `dexs/teraswap/index.js` ─────────────────────────
  * `teraswap.js` in this directory is the pre-submission draft and still
  * describes the `dexs/` path and a `dexs/teraswap/index.js` target. It is
- * `@deprecated` and superseded by this file; it is kept, not deleted
+ * `@deprecated` and superseded by this file (`teraswap-adapter.ts` — the name
+ * differs deliberately, so no extensionless import can resolve to the `.js`
+ * draft instead); it is kept, not deleted
  * (CLAUDE.md rule #4). PR-NOTE.md documents the real upstream path and the
  * exact paste procedure.
  *
@@ -153,7 +163,9 @@ const chainConfig: Record<string, { feeCollector: string; start: string }> = {
   // start DERIVED, not typed: the FIRST SwapWithFee log at this address on 42161 is
   // block 484,739,263 (tx 0xfa0dfc578960f7d720572de5d451ede06be38cc78ed2c39e00376b1cef4a658c),
   // timestamp 1784275673 = 2026-07-17T08:07:53Z — three days BEFORE the doc's
-  // 2026-07-20 prod flip, so starting at the flip date would drop real fills.
+  // 2026-07-20 prod flip, so starting at the flip date would silently drop the
+  // first of the chain's five SwapWithFee events (the other four are two on
+  // 2026-07-20 and two on 2026-08-03; none since).
   [CHAIN.ARBITRUM]: {
     feeCollector: '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130',
     start: '2026-07-17',
