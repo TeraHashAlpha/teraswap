@@ -1,24 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { AGGREGATOR_META, DISABLED_SOURCES, type AggregatorName } from '@/lib/constants'
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
 
-// Sources permanently excluded from the toggle, with the reason each one is
-// held out — never omit a source silently, or a new adapter (e.g. Bebop,
-// [SPRINT-9F]) can go live un-toggleable without anyone noticing.
-const EXCLUDED_FROM_TOGGLE = new Set<AggregatorName>([
-  // Odos ceased operations 2026-07-30 (permanent DISABLED_SOURCES entry) —
-  // it never quotes, so toggling it would do nothing.
-  'odos',
-])
-
-// Sources shown in the toggle — every ADAPTER_REGISTRY adapter not listed in
-// EXCLUDED_FROM_TOGGLE above. Derived (not hand-restated) so the list can
-// never drift from the engine's real adapter set.
+// Sources shown in the toggle — every ADAPTER_REGISTRY adapter not present in
+// DISABLED_SOURCES. Derived (not hand-restated) so the list can never drift
+// from either the engine's real adapter set or the disabled-source registry:
+// a source that never quotes (odos, balancer, openocean, bebop — see
+// DISABLED_SOURCES in lib/constants.ts) would do nothing if toggled, so it
+// is never offered.
 export const TOGGLEABLE_SOURCES: AggregatorName[] = ADAPTER_REGISTRY
   .map(adapter => adapter.name)
-  .filter(name => !EXCLUDED_FROM_TOGGLE.has(name))
+  .filter(name => !DISABLED_SOURCES[name])
 
 interface SourceToggleProps {
   excludedSources: Set<string>

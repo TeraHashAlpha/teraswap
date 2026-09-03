@@ -20,6 +20,7 @@ import {
   DCA_TOTAL_PRESETS,
   EXPIRY_PRESETS,
   getDefaultRouter,
+  NO_ROUTER_FOR_CHAIN_REASON,
   getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
   dcaScheduleFitsExpiry,
@@ -716,6 +717,17 @@ function CreateDCAForm({
     // call, and it is what stops the v3 derivation below from reading llama/APPROX prices.
     if (oracleBlocked) return
     setRouteBlock(null)
+
+    // [ADR-020] Fail closed on a chain with no order-engine router set. getDefaultRouter returns
+    // null there — never a sibling chain's router — so there is nothing to commit. An order signed
+    // against a router the chain's own executor does not whitelist reverts RouterNotWhitelisted on
+    // every fill: it can never execute, only be cancelled. Refuse BEFORE approve/sign, not after.
+    const defaultRouter = getDefaultRouter(chainId)
+    if (!defaultRouter) {
+      setRouteBlock(NO_ROUTER_FOR_CHAIN_REASON)
+      return
+    }
+
     startWaitingSound()
 
     let amountIn: string
@@ -820,7 +832,7 @@ function CreateDCAForm({
       targetPrice: '0', // Unused when priceFeed = address(0)
       priceFeed, // address(0) = no price condition (DCA executes on schedule)
       expirySeconds: expiry.seconds,
-      router: getDefaultRouter(chainId).address, // Best aggregated price
+      router: defaultRouter.address, // Best aggregated price
       // [FIX-CBETH-DIRECT-FEED-AND-APPROX-SCOPE] The LIVE spend-leg price, so the createOrder
       // per-buy-floor toast quotes the same USD the inline warning above does. Copy only — the
       // pre-sign floor createOrder enforces is the exact base-unit MIN_ORDER_AMOUNT comparison.
