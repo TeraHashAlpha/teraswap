@@ -4,7 +4,7 @@ import { AGGREGATOR_APIS, type AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
 import { computeTokenAmountUsd } from '@/lib/chainlink'
 import { isKnownSwapSelector, getSelector } from '@/lib/swap-selectors'
-import { validateCallDataRecipient } from '@/lib/calldata-recipient'
+import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
 import { checkRateLimit, SWAP_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
@@ -215,7 +215,9 @@ export async function POST(req: NextRequest) {
         // [FULL-M-01] Only fee-routed sources may legitimately deliver output
         // to the FeeCollector. Direct sources (0x, CoW) must reject it.
         const routeViaFeeCollector = usesFeeCollector(source as AggregatorName, chainId ? Number(chainId) : undefined)
-        const recipientCheck = validateCallDataRecipient(result.tx.data as string, expectedRecipient, routeViaFeeCollector, chainId ? Number(chainId) : undefined)
+        // [ADR-023] async: 0x's exec target is checked against the chain's
+        // live Settler registry, which needs an on-chain read.
+        const recipientCheck = await validateCallDataRecipientAsync(result.tx.data as string, expectedRecipient, routeViaFeeCollector, chainId ? Number(chainId) : undefined)
         if (!recipientCheck.valid) {
           console.error(
             `[R1] BLOCKED: Recipient mismatch in ${source} calldata.`,

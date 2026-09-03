@@ -4,6 +4,10 @@
 - **Implemented by:** `fix/r1-allowance-holder-recipient`
 - **Follows:** [ADR-021](ADR-021-zerox-v2-allowance-holder.md), which opened SC-04 and the router
   whitelist for `0x2213bc0b` and explicitly deferred this gate
+- **Followed by:** [ADR-023](ADR-023-zerox-settler-identity.md) — makes the "*fourth* decision" this
+  ADR defers below, and **partially supersedes** it: `exec`'s `target` and `operator` are now checked
+  against 0x's on-chain deployer/registry instead of the router whitelist. The `operator === target`
+  narrowing is KEPT (added 2026-09-03; nothing else in this ADR changed)
 - **Fund-flow:** yes. Unmerged until an Auditor pass returns 0C/0H.
 
 ## Context
@@ -101,6 +105,12 @@ Reopening 0x execution therefore needs a *fourth* decision, out of scope here: s
 Settler identity that survives rotation — e.g. resolving the currently-deployed Settler from 0x's
 on-chain deployer registry at quote time and passing it in as a per-request trusted target. That is a
 new trust assumption and belongs in its own ADR.
+
+> **Update, 2026-09-03 — [ADR-023](ADR-023-zerox-settler-identity.md) makes exactly that decision**,
+> and the two tests pinning "0x is NOT executable" now pin the opposite. The whitelist check on
+> `target`/`operator` described above is superseded by `ownerOf(2) || prev(2)` read from 0x's
+> registry; the `operator === target` narrowing below is kept, because the two-address registry set
+> does not subsume it.
 
 **The confirmation modal shows the nested recipient.** `calldata-decoder.ts` gained the matching
 display extractor; without it "clear signing" would have shown `implicit` (i.e. "goes to you by

@@ -59,7 +59,7 @@ import {
   type AggregatorName,
 } from '@/lib/constants'
 import { analyzeGasless } from '@/lib/gasless-engine'
-import { validateCallDataRecipient } from '@/lib/calldata-recipient'
+import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
 
 export const dynamic = 'force-dynamic'
 
@@ -515,7 +515,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //     minimumOutput revert (H-04) is the authoritative safety net,
   //     and it always checks the SENDER's balance delta. /api/swap
   //     (in-app) is stricter because it has no such on-chain backstop.
-  const recipientCheck = validateCallDataRecipient(
+  // [ADR-023] async: 0x's exec target is checked against the chain's live
+  // Settler registry, which needs an on-chain read.
+  const recipientCheck = await validateCallDataRecipientAsync(
     swapData.tx.data as string,
     expectedRecipient,
   )
