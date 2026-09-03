@@ -18,6 +18,8 @@ import {
   VALIDATED_SELECTORS,
   MSG_SENDER_SELECTORS,
   TRUSTED_ROUTER_SELECTORS,
+  ALLOWANCE_HOLDER_EXEC_SELECTOR,
+  ALLOWANCE_HOLDER_INNER_SELECTORS,
 } from '@/lib/calldata-recipient'
 
 // ── Types ──────────────────────────────────────────────
@@ -48,6 +50,9 @@ export const SELECTOR_INFO: Record<string, { functionName: string; dexLabel: str
   // 0x
   '0xd9627aa4': { functionName: 'sellToUniswap', dexLabel: '0x' },
   '0x415565b0': { functionName: 'transformERC20', dexLabel: '0x' },
+  // [R1 Group G / ADR-021] 0x API v2 — AllowanceHolder.exec. Key derived from the
+  // signature in calldata-recipient.ts, never typed, so the two cannot drift.
+  [ALLOWANCE_HOLDER_EXEC_SELECTOR]: { functionName: 'exec', dexLabel: '0x v2' },
   // ParaSwap (Augustus V5 — legacy)
   '0x3598d8ab': { functionName: 'megaSwap', dexLabel: 'ParaSwap' },
   '0xa94e78ef': { functionName: 'multiSwap', dexLabel: 'ParaSwap' },
@@ -110,6 +115,62 @@ function tryDecodeV3ExactInputSingle(data: Hex): Partial<TransactionPreview> {
       recipientType: 'extracted',
       amountIn: p.amountIn.toString(),
       amountOutMin: p.amountOutMinimum.toString(),
+    }
+  } catch { return {} }
+}
+
+/**
+ * [R1 Group G] 0x v2 AllowanceHolder.exec — the display recipient lives inside
+ * the nested Settler call, exactly where calldata-recipient.ts reads it. Without
+ * this the confirmation modal would show "implicit" for a call whose recipient is
+ * explicit, which is the opposite of clear signing.
+ *
+ * Display only, and best-effort: an inner selector this decoder does not know
+ * simply yields no recipient. It grants nothing — R1 remains the gate.
+ */
+function tryDecodeAllowanceHolderExec(data: Hex): Partial<TransactionPreview> {
+  try {
+    const decoded = decodeAbiParameters(
+      [
+        { name: 'operator', type: 'address' },
+        { name: 'token', type: 'address' },
+        { name: 'amount', type: 'uint256' },
+        { name: 'target', type: 'address' },
+        { name: 'data', type: 'bytes' },
+      ],
+      data,
+    )
+    const base: Partial<TransactionPreview> = {
+      tokenIn: decoded[1] as string,
+      amountIn: (decoded[2] as bigint).toString(),
+    }
+    const inner = decoded[4] as string
+    if (inner.length < 10) return base
+    if (!ALLOWANCE_HOLDER_INNER_SELECTORS.has(inner.slice(0, 10).toLowerCase())) return base
+
+    const innerDecoded = decodeAbiParameters(
+      [
+        {
+          name: 'slippage', type: 'tuple', components: [
+            { name: 'recipient', type: 'address' },
+            { name: 'buyToken', type: 'address' },
+            { name: 'minAmountOut', type: 'uint256' },
+          ],
+        },
+        { name: 'actions', type: 'bytes[]' },
+        { name: 'zid', type: 'bytes32' },
+      ],
+      `0x${inner.slice(10)}` as Hex,
+    )
+    const slippage = innerDecoded[0] as {
+      recipient: string; buyToken: string; minAmountOut: bigint
+    }
+    return {
+      ...base,
+      tokenOut: slippage.buyToken,
+      amountOutMin: slippage.minAmountOut.toString(),
+      recipient: slippage.recipient,
+      recipientType: 'extracted',
     }
   } catch { return {} }
 }
@@ -372,6 +433,8 @@ export function decodeTransactionPreview(
       params = tryDecodeV2Swap(selector, data); break
     case '0xac9650d8': case '0x5ae401dc':
       params = tryDecodeMulticall(selector, data); break
+    case ALLOWANCE_HOLDER_EXEC_SELECTOR:
+      params = tryDecodeAllowanceHolderExec(data); break
     // Groups A & F: no additional params decodable from proprietary calldata
   }
 

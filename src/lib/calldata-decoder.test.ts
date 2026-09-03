@@ -7,9 +7,14 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { encodeAbiParameters } from 'viem'
+import { encodeAbiParameters, toFunctionSelector } from 'viem'
 import { decodeTransactionPreview, SELECTOR_INFO } from './calldata-decoder'
-import { VALIDATED_SELECTORS } from './calldata-recipient'
+import { VALIDATED_SELECTORS, ALLOWANCE_HOLDER_EXEC_SELECTOR } from './calldata-recipient'
+import { ZEROX_ALLOWANCE_HOLDER } from '@/lib/constants'
+import {
+  ZEROX_MAINNET_EXEC_CALLDATA,
+  ZEROX_MAINNET_EXEC_TAKER,
+} from './__fixtures__/zerox-allowance-holder-mainnet'
 
 // ── Test helpers ───────────────────────────────────────
 
@@ -280,6 +285,35 @@ describe('decodeTransactionPreview', () => {
       expect(preview.selector).toBe('0x04e45aaf')
       expect(preview.validated).toBe(true) // selector is known
       // Params may not decode but that's ok
+    })
+  })
+
+  // ── [R1 Group G] 0x v2 AllowanceHolder.exec preview ───
+
+  describe('[Group G] AllowanceHolder.exec preview', () => {
+    it('shows the NESTED recipient as extracted, never as implicit', () => {
+      // Clear signing: the modal must not tell the user "goes to msg.sender" for
+      // a call whose destination is written explicitly inside the calldata.
+      // Driven by REAL mainnet calldata, not a hand-built mock.
+      const preview = decodeTransactionPreview(ZEROX_MAINNET_EXEC_CALLDATA, ZEROX_ALLOWANCE_HOLDER, '0x')
+      expect(preview.selector).toBe(ALLOWANCE_HOLDER_EXEC_SELECTOR)
+      expect(preview.functionName).toBe('exec')
+      expect(preview.validated).toBe(true)
+      expect(preview.recipientType).toBe('extracted')
+      expect(preview.recipient?.toLowerCase()).toBe(ZEROX_MAINNET_EXEC_TAKER.toLowerCase())
+    })
+
+    it('degrades to no recipient (never throws) on an unknown inner selector', () => {
+      const innerSelector = toFunctionSelector('execute((address,address,uint256),bytes[],bytes32)')
+      const at = ZEROX_MAINNET_EXEC_CALLDATA.indexOf(innerSelector.slice(2))
+      expect(at).toBeGreaterThan(0)
+      const tampered =
+        ZEROX_MAINNET_EXEC_CALLDATA.slice(0, at) + 'ffffffff' + ZEROX_MAINNET_EXEC_CALLDATA.slice(at + 8)
+
+      const preview = decodeTransactionPreview(tampered, ZEROX_ALLOWANCE_HOLDER, '0x')
+      expect(preview.selector).toBe(ALLOWANCE_HOLDER_EXEC_SELECTOR)
+      expect(preview.recipient).toBeNull()
+      expect(preview.recipientType).toBe('implicit')
     })
   })
 
