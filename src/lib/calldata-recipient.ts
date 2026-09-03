@@ -15,14 +15,21 @@
  * argument deep — `AllowanceHolder.exec(...)` carries the real destination
  * inside the Settler call in its `data` argument — so it gets a decode class of
  * its own that unwraps that argument. exec is a generic call primitive, so
- * Group G additionally requires its `target` and `operator` to be whitelisted
- * routers for the chain before the nested recipient means anything.
+ * Group G additionally requires its `target` and `operator` to be a genuine 0x
+ * Settler for the chain before the nested recipient means anything.
+ *
+ * [ADR-023] That Settler ROTATES, so it is not whitelistable and is instead
+ * resolved from 0x's deployer/registry at use time. The resolved set is an
+ * INPUT to this module (`RecipientCheckOptions.zeroxSettlers`) so the decode
+ * path stays synchronous and pure; `validateCallDataRecipientAsync` is the
+ * entry point that resolves it first. Group G fails closed when no set is
+ * supplied, so a caller that forgets cannot accidentally fail open.
  */
 
 import { decodeAbiParameters, toFunctionSelector, type Hex } from 'viem'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
-import { isWhitelistedRouter } from '@/lib/chains/routers'
+import { resolveZeroxSettlers } from '@/lib/zerox-settler-registry'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +40,18 @@ export interface RecipientCheckResult {
   extracted: string | null
   reason?: string
   implicitRecipient: boolean
+}
+
+/**
+ * [ADR-023] Out-of-band facts the synchronous decode cannot read for itself.
+ *
+ * `zeroxSettlers` holds the lower-cased addresses 0x's deployer/registry names
+ * as this chain's current and previous taker-submitted Settler. Absent means
+ * "not resolved", which Group G treats as a rejection — never as "skip the
+ * check".
+ */
+export interface RecipientCheckOptions {
+  zeroxSettlers?: ReadonlySet<string>
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +456,10 @@ function decode1inchRecipient(selector: string, data: Hex): string {
 // Group E — Multicall wrappers (1 level of recursion max)
 // ---------------------------------------------------------------------------
 
+/** Group E — multicall wrappers, hoisted so the async entry point can ask
+ *  whether calldata could reach Group G before it resolves the registry. */
+const MULTICALL_SELECTORS = ['0xac9650d8', '0x5ae401dc']
+
 function decodeMulticallRecipient(
   selector: string,
   data: Hex,
@@ -444,6 +467,7 @@ function decodeMulticallRecipient(
   depth: number,
   routeViaFeeCollector: boolean,
   chainId: number = DEFAULT_CHAIN_ID,
+  options: RecipientCheckOptions = {},
 ): RecipientCheckResult {
   if (depth > 0) {
     // [SEC-04] Fail-closed: a nested multicall would let an adapter wrap
@@ -502,7 +526,7 @@ function decodeMulticallRecipient(
 
   // Recursively validate the first inner call only
   const firstCall = innerCalls[0] as string
-  return validateCallDataRecipientInner(firstCall, expectedAddress, depth + 1, routeViaFeeCollector, chainId)
+  return validateCallDataRecipientInner(firstCall, expectedAddress, depth + 1, routeViaFeeCollector, chainId, options)
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +570,8 @@ function execFailure(reason: string): RecipientCheckResult {
  * allowance over the caller's `token` and then calls `target` with `data`. An
  * `exec` whose `target`/`operator` are attacker contracts drains the taker's
  * standing approval outright, so the recipient buried in `data` is only
- * meaningful once both of those addresses are known-good. Every step below fails
+ * meaningful once both of those addresses are a 0x Settler that 0x's own
+ * deployer/registry vouches for right now ([ADR-023]). Every step below fails
  * closed; a throw anywhere is caught by validateCallDataRecipientInner's handler
  * and reported as a decode error.
  *
@@ -560,38 +585,51 @@ function decodeAllowanceHolderExecRecipient(
   expectedAddress: string,
   routeViaFeeCollector: boolean,
   chainId: number,
+  options: RecipientCheckOptions = {},
 ): RecipientCheckResult {
   const decoded = decodeAbiParameters(EXEC_ARG_TYPES, data)
   const operator = decoded[0] as string
   const target = decoded[3] as string
   const innerCalldata = decoded[4] as string
 
-  // (1) `target` — the contract AllowanceHolder will call with `data`. An exec
-  // against an arbitrary target is a transfer primitive, not a swap.
-  if (!isWhitelistedRouter(target, chainId)) {
+  // (0) [ADR-023] The admitted counterparties are 0x's current and previous
+  // taker-submitted Settler for THIS chain, read from 0x's deployer/registry.
+  // They rotate, so they are not in any whitelist and cannot be resolved from
+  // here — the caller resolves them and passes them in. No set means the
+  // registry was never consulted (or its read failed), and that is a rejection.
+  const settlers = options.zeroxSettlers
+  if (!settlers || settlers.size === 0) {
     return execFailure(
-      `AllowanceHolder exec target ${target} is not a whitelisted router on chain ${chainId}`,
+      `AllowanceHolder exec cannot be validated: no 0x Settler resolved from the registry for chain ${chainId}`,
+    )
+  }
+
+  // (1) `target` — the contract AllowanceHolder will call with `data`. An exec
+  // against an arbitrary target is a transfer primitive, not a swap. This
+  // REPLACES the router-whitelist check ADR-022 used: the Settler is never in
+  // the whitelist, and the registry set (two addresses) is strictly narrower
+  // than the whitelist ever was.
+  if (!settlers.has(target.toLowerCase())) {
+    return execFailure(
+      `AllowanceHolder exec target ${target} is not the current or previous 0x Settler on chain ${chainId}`,
     )
   }
 
   // (2) `operator` — the address authorised to pull the taker's tokens back out
-  // of the AllowanceHolder via its `transferFrom`. In every 0x v2 call observed
-  // on mainnet it equals `target`; either way it must be a known router, because
-  // it is the address that can actually move funds.
-  if (!isWhitelistedRouter(operator, chainId)) {
+  // of the AllowanceHolder via its `transferFrom`. It is the address that can
+  // actually move funds, so it is held to the same registry-derived identity as
+  // the target, not merely to the router whitelist.
+  if (!settlers.has(operator.toLowerCase())) {
     return execFailure(
-      `AllowanceHolder exec operator ${operator} is not a whitelisted router on chain ${chainId}`,
+      `AllowanceHolder exec operator ${operator} is not the current or previous 0x Settler on chain ${chainId}`,
     )
   }
 
-  // (2b) [ADR-022 interim] The narrowest correct admitted counterparty for
-  // `exec` is the chain's current taker-submitted Settler, which cannot be
-  // pinned here because it rotates — that requires ADR-022's registry
-  // lookup. Until then, requiring operator === target is a free narrowing:
-  // it holds in every observed mainnet call (including the pinned golden
-  // vector) and shrinks the admitted set below "any two whitelisted
-  // routers" without needing the registry. This ADDS to, never replaces,
-  // the operator/target whitelist checks above.
+  // (2b) [ADR-022 → kept by ADR-023] The registry set does NOT dominate this
+  // check: with two admitted addresses, `operator = ownerOf(2)` paired with
+  // `target = prev(2)` clears (1) and (2) and is still a shape 0x never emits.
+  // Requiring operator === target collapses the admitted pairs from four to
+  // two at zero cost, so it stays. It ADDS to, never replaces, (1) and (2).
   if (operator.toLowerCase() !== target.toLowerCase()) {
     return execFailure(
       `AllowanceHolder exec operator ${operator} does not match target ${target}`,
@@ -657,6 +695,7 @@ function validateCallDataRecipientInner(
   depth: number,
   routeViaFeeCollector: boolean,
   chainId: number = DEFAULT_CHAIN_ID,
+  options: RecipientCheckOptions = {},
 ): RecipientCheckResult {
   try {
     if (!calldata || calldata.length < 10) {
@@ -724,14 +763,13 @@ function validateCallDataRecipientInner(
     }
 
     // Group E — Multicall wrappers
-    const MULTICALL_SELECTORS = ['0xac9650d8', '0x5ae401dc']
     if (MULTICALL_SELECTORS.includes(selector)) {
-      return decodeMulticallRecipient(selector, data, expectedAddress, depth, routeViaFeeCollector, chainId)
+      return decodeMulticallRecipient(selector, data, expectedAddress, depth, routeViaFeeCollector, chainId, options)
     }
 
     // Group G — 0x v2 AllowanceHolder.exec (recipient inside the `data` arg)
     if (selector === ALLOWANCE_HOLDER_EXEC_SELECTOR) {
-      return decodeAllowanceHolderExecRecipient(data, expectedAddress, routeViaFeeCollector, chainId)
+      return decodeAllowanceHolderExecRecipient(data, expectedAddress, routeViaFeeCollector, chainId, options)
     }
 
     // [API-M-02] Unknown selector — fail closed
@@ -769,6 +807,65 @@ export function validateCallDataRecipient(
   routeViaFeeCollector: boolean = true,
   // [P225] Target chain — resolves the per-chain FeeCollector in the valid set. Default mainnet.
   chainId: number = DEFAULT_CHAIN_ID,
+  // [ADR-023] Out-of-band facts the decode cannot read for itself. Omitting
+  // `zeroxSettlers` makes Group G reject; every other group is unaffected.
+  options: RecipientCheckOptions = {},
 ): RecipientCheckResult {
-  return validateCallDataRecipientInner(calldata, expectedAddress, 0, routeViaFeeCollector, chainId)
+  return validateCallDataRecipientInner(calldata, expectedAddress, 0, routeViaFeeCollector, chainId, options)
+}
+
+/**
+ * [ADR-023] Does this calldata have any path to Group G?
+ *
+ * Directly, if the outer selector IS `exec`; indirectly, if it is a Group E
+ * multicall wrapper, whose one level of recursion can land on an `exec`. Only
+ * these shapes need 0x's registry consulted, so nothing else pays an RPC.
+ */
+function mayReachAllowanceHolderExec(calldata: string): boolean {
+  const selector = getSelector(calldata ?? '')
+  return selector === ALLOWANCE_HOLDER_EXEC_SELECTOR || MULTICALL_SELECTORS.includes(selector)
+}
+
+/**
+ * [ADR-023] The entry point every execution path should call.
+ *
+ * Identical to `validateCallDataRecipient` except that, for calldata that can
+ * reach Group G, it first resolves the chain's genuine 0x Settlers from 0x's
+ * deployer/registry and passes them in. A failed resolution REJECTS the swap —
+ * there is no static fallback and no other chain's answer to borrow.
+ *
+ * Calldata that cannot reach Group G issues no RPC at all and behaves exactly
+ * as the synchronous function does.
+ */
+export async function validateCallDataRecipientAsync(
+  calldata: string,
+  expectedAddress: string,
+  routeViaFeeCollector: boolean = true,
+  chainId: number = DEFAULT_CHAIN_ID,
+): Promise<RecipientCheckResult> {
+  if (!mayReachAllowanceHolderExec(calldata)) {
+    return validateCallDataRecipient(calldata, expectedAddress, routeViaFeeCollector, chainId)
+  }
+
+  let zeroxSettlers: ReadonlySet<string> | undefined
+  let lookupError: string | undefined
+  try {
+    zeroxSettlers = await resolveZeroxSettlers(chainId)
+  } catch (err) {
+    lookupError = err instanceof Error ? err.message : String(err)
+  }
+
+  // A failed lookup is only fatal for calldata that IS an exec. A multicall
+  // that happens to wrap something else must not be collateral damage of an RPC
+  // blip — and one that wraps an exec still fails closed inside Group G, on the
+  // "no 0x Settler resolved" branch, because no set is passed down.
+  if (!zeroxSettlers && getSelector(calldata) === ALLOWANCE_HOLDER_EXEC_SELECTOR) {
+    return execFailure(
+      `AllowanceHolder exec cannot be validated: 0x Settler registry lookup failed on chain ${chainId} — ${lookupError}`,
+    )
+  }
+
+  return validateCallDataRecipient(calldata, expectedAddress, routeViaFeeCollector, chainId, {
+    zeroxSettlers,
+  })
 }

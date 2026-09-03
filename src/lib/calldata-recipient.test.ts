@@ -11,7 +11,7 @@
  *  - VALIDATED_SELECTORS allowlist matches KNOWN_SWAP_SELECTORS
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   decodeAbiParameters,
   encodeAbiParameters,
@@ -22,16 +22,43 @@ import {
 } from 'viem'
 import {
   validateCallDataRecipient,
+  validateCallDataRecipientAsync,
   VALIDATED_SELECTORS,
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
   ALLOWANCE_HOLDER_INNER_SELECTORS,
 } from './calldata-recipient'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
+import { resolveZeroxSettlers } from '@/lib/zerox-settler-registry'
 import {
   ZEROX_MAINNET_EXEC_CALLDATA,
   ZEROX_MAINNET_EXEC_TAKER,
+  ZEROX_MAINNET_EXEC_BLOCK,
+  ZEROX_MAINNET_SETTLER_CURRENT,
+  ZEROX_MAINNET_SETTLER_PREV,
 } from './__fixtures__/zerox-allowance-holder-mainnet'
+import {
+  ZEROX_BASE_EXEC_CALLDATA,
+  ZEROX_BASE_EXEC_TAKER,
+  ZEROX_BASE_EXEC_BLOCK,
+  ZEROX_BASE_SETTLER_CURRENT,
+  ZEROX_BASE_SETTLER_PREV,
+} from './__fixtures__/zerox-allowance-holder-base'
+import {
+  ZEROX_ARBITRUM_EXEC_CALLDATA,
+  ZEROX_ARBITRUM_EXEC_TAKER,
+  ZEROX_ARBITRUM_EXEC_BLOCK,
+  ZEROX_ARBITRUM_SETTLER_CURRENT,
+  ZEROX_ARBITRUM_SETTLER_PREV,
+} from './__fixtures__/zerox-allowance-holder-arbitrum'
+
+// [ADR-023] The registry is MOCKED everywhere in this file — no test issues an
+// RPC. The addresses fed in are the real per-chain answers read on 2026-09-03,
+// pinned in the fixtures alongside the calldata they belong to.
+vi.mock('@/lib/zerox-settler-registry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/zerox-settler-registry')>()
+  return { ...actual, resolveZeroxSettlers: vi.fn() }
+})
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -384,12 +411,30 @@ describe('calldata-recipient', () => {
     ])
     const EXECUTE_SELECTOR = toFunctionSelector('execute((address,address,uint256),bytes[],bytes32)')
 
-    // A whitelisted mainnet router, taken from the registry rather than typed.
-    const WHITELISTED_TARGET = ROUTER_WHITELIST_BY_CHAIN[1]['0x']
+    // [ADR-023] The admitted counterparties are no longer whitelist entries —
+    // they are what 0x's deployer/registry answers for feature 2 on this chain.
+    // These are the REAL mainnet answers at the golden vector's block.
+    const CURRENT_SETTLER = ZEROX_MAINNET_SETTLER_CURRENT
+    const PREV_SETTLER = ZEROX_MAINNET_SETTLER_PREV
+    const MAINNET_SETTLERS: ReadonlySet<string> = new Set([
+      CURRENT_SETTLER.toLowerCase(),
+      PREV_SETTLER.toLowerCase(),
+    ])
 
-    // Real, non-whitelisted counterparties observed on mainnet — see the
-    // "not executable end-to-end" test at the bottom of this block.
-    const LIVE_SETTLER_2026_09_03 = '0x0889e9327b98D7d1BE3C301A4585ff3330502c9A'
+    // The AllowanceHolder itself — a whitelisted router, and NOT a Settler. It
+    // is `tx.to`, never `exec`'s target, so Group G must reject it as a target.
+    const ALLOWANCE_HOLDER = ROUTER_WHITELIST_BY_CHAIN[1]['0x']
+
+    /**
+     * Every Group G case runs against a MOCKED resolved set — the sync entry
+     * point takes it as an input, so no test here touches an RPC.
+     */
+    const check = (
+      calldata: string,
+      expected: string,
+      routeViaFeeCollector = false,
+      zeroxSettlers: ReadonlySet<string> | undefined = MAINNET_SETTLERS,
+    ) => validateCallDataRecipient(calldata, expected, routeViaFeeCollector, 1, { zeroxSettlers })
 
     const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
     const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
@@ -413,7 +458,7 @@ describe('calldata-recipient', () => {
       inner?: Hex
       minAmountOut?: bigint
     }): string {
-      const target = (opts.target ?? WHITELISTED_TARGET) as `0x${string}`
+      const target = (opts.target ?? PREV_SETTLER) as `0x${string}`
       const operator = (opts.operator ?? target) as `0x${string}`
       const inner =
         opts.inner ?? buildSettlerExecute(opts.recipient ?? USER_ADDRESS, opts.minAmountOut)
@@ -466,7 +511,7 @@ describe('calldata-recipient', () => {
     // ── Acceptance 1 — both controls ──
 
     it('ACCEPTS exec whose nested AllowedSlippage.recipient is the user', () => {
-      const result = validateCallDataRecipient(buildExec({ recipient: USER_ADDRESS }), USER_ADDRESS, false)
+      const result = check(buildExec({ recipient: USER_ADDRESS }), USER_ADDRESS, false)
       expect(result.valid).toBe(true)
       expect(result.extracted?.toLowerCase()).toBe(USER_ADDRESS.toLowerCase())
       // Extracted, NOT assumed: exec must never be classified msg.sender-implicit.
@@ -474,7 +519,7 @@ describe('calldata-recipient', () => {
     })
 
     it('REJECTS the same calldata with an attacker recipient', () => {
-      const result = validateCallDataRecipient(buildExec({ recipient: ATTACKER_ADDRESS }), USER_ADDRESS, false)
+      const result = check(buildExec({ recipient: ATTACKER_ADDRESS }), USER_ADDRESS, false)
       expect(result.valid).toBe(false)
       expect(result.extracted?.toLowerCase()).toBe(ATTACKER_ADDRESS.toLowerCase())
       expect(result.reason).toContain('does not match expected')
@@ -483,14 +528,14 @@ describe('calldata-recipient', () => {
     it('honours routeViaFeeCollector — the FeeCollector is a recipient only on fee routes', () => {
       if (!FEE_COLLECTOR_ADDRESS) return
       const calldata = buildExec({ recipient: FEE_COLLECTOR_ADDRESS })
-      expect(validateCallDataRecipient(calldata, USER_ADDRESS, true).valid).toBe(true)
-      expect(validateCallDataRecipient(calldata, USER_ADDRESS, false).valid).toBe(false)
+      expect(check(calldata, USER_ADDRESS, true).valid).toBe(true)
+      expect(check(calldata, USER_ADDRESS, false).valid).toBe(false)
     })
 
     // ── Nested amount integrity — minAmountOut ──
 
     it('REJECTS a zero minAmountOut with its own reason', () => {
-      const result = validateCallDataRecipient(
+      const result = check(
         buildExec({ recipient: USER_ADDRESS, minAmountOut: 0n }),
         USER_ADDRESS,
         false,
@@ -500,7 +545,7 @@ describe('calldata-recipient', () => {
     })
 
     it('ACCEPTS a non-zero minAmountOut', () => {
-      const result = validateCallDataRecipient(
+      const result = check(
         buildExec({ recipient: USER_ADDRESS, minAmountOut: 1n }),
         USER_ADDRESS,
         false,
@@ -509,46 +554,51 @@ describe('calldata-recipient', () => {
     })
 
     it('the golden vector carries a non-zero minAmountOut and is unaffected by the guard', () => {
-      const calldata = retarget(ZEROX_MAINNET_EXEC_CALLDATA, WHITELISTED_TARGET)
-      const result = validateCallDataRecipient(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
+      const calldata = ZEROX_MAINNET_EXEC_CALLDATA
+      const result = check(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
       expect(result.valid).toBe(true)
     })
 
     // ── Acceptance 2 — three distinct fail-closed reasons ──
 
-    it('REJECTS a non-whitelisted target with a target-specific reason', () => {
-      const result = validateCallDataRecipient(
+    it('REJECTS a non-Settler target with a target-specific reason', () => {
+      const result = check(
         buildExec({ recipient: USER_ADDRESS, target: ATTACKER_ADDRESS }),
         USER_ADDRESS,
         false,
       )
       expect(result.valid).toBe(false)
       expect(result.reason).toContain('exec target')
-      expect(result.reason).toContain('not a whitelisted router')
+      expect(result.reason).toContain('not the current or previous 0x Settler')
     })
 
-    it('REJECTS a non-whitelisted operator even when the target is whitelisted', () => {
+    it('REJECTS a non-Settler operator even when the target is a Settler', () => {
       // operator is the address allowed to pull the taker's tokens back out of
-      // the AllowanceHolder — a whitelisted target does not make it safe.
-      const result = validateCallDataRecipient(
+      // the AllowanceHolder — a genuine target does not make it safe.
+      // [ADR-023] It is now held to the registry-derived identity, which is
+      // strictly narrower than the router whitelist ADR-022 checked it against.
+      const result = check(
         buildExec({ recipient: USER_ADDRESS, operator: ATTACKER_ADDRESS }),
         USER_ADDRESS,
         false,
       )
       expect(result.valid).toBe(false)
       expect(result.reason).toContain('exec operator')
-      expect(result.reason).toContain('not a whitelisted router')
+      expect(result.reason).toContain('not the current or previous 0x Settler')
     })
 
     // ── [ADR-022 interim] operator === target narrowing ──
 
-    it('REJECTS operator !== target with a distinct reason even when both are individually whitelisted', () => {
-      // velora is a real, whitelisted mainnet router — distinct from the
-      // whitelisted target — so this exercises the narrowing itself, not the
-      // whitelist checks above it.
-      const otherWhitelistedRouter = ROUTER_WHITELIST_BY_CHAIN[1]['velora']
-      const result = validateCallDataRecipient(
-        buildExec({ recipient: USER_ADDRESS, operator: otherWhitelistedRouter }),
+    it('REJECTS operator !== target with a distinct reason even when BOTH are admitted Settlers', () => {
+      // [ADR-022, kept by ADR-023] Both addresses are in the resolved registry
+      // set, so checks (1) and (2) pass and this exercises the narrowing itself
+      // — the case that proves the registry check does not subsume it.
+      const result = check(
+        buildExec({
+          recipient: USER_ADDRESS,
+          target: PREV_SETTLER,
+          operator: CURRENT_SETTLER,
+        }),
         USER_ADDRESS,
         false,
       )
@@ -558,15 +608,15 @@ describe('calldata-recipient', () => {
     })
 
     it('ACCEPTS operator === target on the golden vector (unaffected by the narrowing)', () => {
-      const calldata = retarget(ZEROX_MAINNET_EXEC_CALLDATA, WHITELISTED_TARGET)
-      const result = validateCallDataRecipient(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
+      const calldata = ZEROX_MAINNET_EXEC_CALLDATA
+      const result = check(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
       expect(result.valid).toBe(true)
     })
 
     it('REJECTS an unknown inner selector with an inner-selector-specific reason', () => {
       // A Uniswap V3 exactInputSingle would be perfectly valid as OUTER calldata;
       // through exec it is an unknown shape and must fail closed.
-      const result = validateCallDataRecipient(
+      const result = check(
         buildExec({ inner: buildV3ExactInputSingle(USER_ADDRESS) as Hex }),
         USER_ADDRESS,
         false,
@@ -577,14 +627,14 @@ describe('calldata-recipient', () => {
     })
 
     it('REJECTS empty inner bytes with a too-short reason', () => {
-      const result = validateCallDataRecipient(buildExec({ inner: '0x' as Hex }), USER_ADDRESS, false)
+      const result = check(buildExec({ inner: '0x' as Hex }), USER_ADDRESS, false)
       expect(result.valid).toBe(false)
       expect(result.reason).toContain('too short to contain a selector')
     })
 
     it('REJECTS malformed inner bytes behind a valid inner selector (decode error)', () => {
       // Right selector, truncated tuple → decodeAbiParameters throws → fail closed.
-      const result = validateCallDataRecipient(
+      const result = check(
         buildExec({ inner: `${EXECUTE_SELECTOR}${'00'.repeat(32)}` as Hex }),
         USER_ADDRESS,
         false,
@@ -595,7 +645,7 @@ describe('calldata-recipient', () => {
     })
 
     it('REJECTS malformed OUTER exec args (decode error, never a pass)', () => {
-      const result = validateCallDataRecipient(
+      const result = check(
         `${ALLOWANCE_HOLDER_EXEC_SELECTOR}${'00'.repeat(32)}`,
         USER_ADDRESS,
         false,
@@ -618,14 +668,14 @@ describe('calldata-recipient', () => {
         return '0xac9650d8' + encoded.slice(2)
       }
       expect(
-        validateCallDataRecipient(
+        check(
           wrapInMulticall(buildExec({ recipient: USER_ADDRESS })),
           USER_ADDRESS,
           false,
         ).valid,
       ).toBe(true)
       expect(
-        validateCallDataRecipient(
+        check(
           wrapInMulticall(buildExec({ recipient: ATTACKER_ADDRESS })),
           USER_ADDRESS,
           false,
@@ -674,49 +724,360 @@ describe('calldata-recipient', () => {
         expect(slippage.recipient.toLowerCase()).toBe(ZEROX_MAINNET_EXEC_TAKER.toLowerCase())
       })
 
-      it('Group G extracts the same recipient from it once the target is whitelisted', () => {
-        // Only the two address words change; the inner Settler call — a real
-        // 3-action route with real bytes[] offsets — is untouched. This is the
-        // strongest available check that the decoder handles 0x's real encoding
-        // and not just calldata this test file built itself.
-        const calldata = retarget(ZEROX_MAINNET_EXEC_CALLDATA, WHITELISTED_TARGET)
-        const result = validateCallDataRecipient(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
-        expect(result.valid).toBe(true)
-        expect(result.extracted?.toLowerCase()).toBe(ZEROX_MAINNET_EXEC_TAKER.toLowerCase())
-
-        // …and the same bytes are rejected for anybody else.
-        expect(validateCallDataRecipient(calldata, ATTACKER_ADDRESS, false).valid).toBe(false)
-      })
-
-      it('as-captured it is REJECTED, because the live Settler is not whitelisted', () => {
-        const result = validateCallDataRecipient(
+      it('[ADR-023] AS-CAPTURED it is now ACCEPTED — 0x is executable end-to-end', () => {
+        // The bytes are untouched: no retarget, no rewrite. This is the exact
+        // calldata 0x API emitted for a real taker on mainnet, and the gate
+        // that used to reject it (a static allowlist that could never hold a
+        // rotating address) now asks 0x's own registry instead.
+        const result = check(
           ZEROX_MAINNET_EXEC_CALLDATA,
           ZEROX_MAINNET_EXEC_TAKER,
           false,
         )
+        expect(result.valid).toBe(true)
+        expect(result.extracted?.toLowerCase()).toBe(ZEROX_MAINNET_EXEC_TAKER.toLowerCase())
+
+        // …and the same bytes are still rejected for anybody else.
+        expect(check(ZEROX_MAINNET_EXEC_CALLDATA, ATTACKER_ADDRESS, false).valid).toBe(false)
+      })
+
+      it('retargeted onto an attacker contract, the very same bytes are REJECTED', () => {
+        // Real 0x calldata is not a free pass: rewrite only the operator and
+        // target words — every byte of the inner Settler call, including the
+        // taker in AllowedSlippage.recipient, stays exactly as 0x emitted it —
+        // and the registry check refuses it.
+        const hijacked = retarget(ZEROX_MAINNET_EXEC_CALLDATA, ATTACKER_ADDRESS)
+        const result = check(hijacked, ZEROX_MAINNET_EXEC_TAKER, false)
         expect(result.valid).toBe(false)
-        expect(result.reason).toContain('exec target')
+        expect(result.reason).toContain('not the current or previous 0x Settler')
+      })
+
+      it('it targets prev(2), NOT ownerOf(2) — the dwell window is why prev is admitted', () => {
+        // Pinned because it is the whole argument for accepting `prev`: at
+        // block ZEROX_MAINNET_EXEC_BLOCK an ownerOf-only check would have
+        // rejected this real, successful mainnet swap.
+        const [operator, , , target] = decodeAbiParameters(
+          [
+            { name: 'operator', type: 'address' },
+            { name: 'token', type: 'address' },
+            { name: 'amount', type: 'uint256' },
+            { name: 'target', type: 'address' },
+            { name: 'data', type: 'bytes' },
+          ],
+          `0x${ZEROX_MAINNET_EXEC_CALLDATA.slice(10)}` as Hex,
+        )
+        expect(target.toLowerCase()).toBe(PREV_SETTLER.toLowerCase())
+        expect(target.toLowerCase()).not.toBe(CURRENT_SETTLER.toLowerCase())
+        expect(operator.toLowerCase()).toBe(target.toLowerCase())
+        expect(ZEROX_MAINNET_EXEC_BLOCK).toBe(25897835n)
+
+        // ownerOf alone would have blocked it.
+        const ownerOfOnly: ReadonlySet<string> = new Set([CURRENT_SETTLER.toLowerCase()])
+        const result = check(
+          ZEROX_MAINNET_EXEC_CALLDATA,
+          ZEROX_MAINNET_EXEC_TAKER,
+          false,
+          ownerOfOnly,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('not the current or previous 0x Settler')
       })
     })
 
-    it('the LIVE 0x Settler is still not a whitelisted target — 0x is NOT executable end-to-end', () => {
-      // Observed on Ethereum mainnet 2026-09-03, block 25897835, txs
-      // 0x962bc111baf4f44bf463a0b64fd06354f4904b75860e8e60ba8463e94b05d1a0 and
-      // 0x74c56e5a0b37d545c6799f48f81b6b58adc97ea4ed29fffc04c2c3c09a40b324:
-      // AllowanceHolder.exec with operator === target === this address and inner
-      // selector 0x1fff991f, AllowedSlippage.recipient === tx.from.
-      //
-      // Group G decodes that calldata correctly — but ADR-021 established that the
-      // Settler ROTATES with each 0x release and therefore cannot be whitelisted.
-      // So R1 now fails at the target check instead of the selector check. This is
-      // the honest state of the gate, pinned so it cannot be misreported as fixed.
-      const result = validateCallDataRecipient(
-        buildExec({ recipient: USER_ADDRESS, target: LIVE_SETTLER_2026_09_03 }),
-        USER_ADDRESS,
-        false,
-      )
-      expect(result.valid).toBe(false)
-      expect(result.reason).toContain('exec target')
+    // ── [ADR-023] Acceptance 1 — registry-derived identity, registry MOCKED ──
+
+    describe('[ADR-023] Settler identity comes from the registry', () => {
+      it('ACCEPTS the CURRENT Settler — ownerOf(2)', () => {
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: CURRENT_SETTLER }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(true)
+      })
+
+      it('ACCEPTS the PREVIOUS Settler — prev(2), the dwell window', () => {
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: PREV_SETTLER }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(true)
+      })
+
+      it('REJECTS an arbitrary address with its own registry-specific reason', () => {
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: ATTACKER_ADDRESS }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('exec target')
+        expect(result.reason).toContain('not the current or previous 0x Settler')
+        // The reason is distinct from every sibling Group G reason.
+        expect(result.reason).not.toContain('whitelisted router')
+      })
+
+      it('REJECTS the AllowanceHolder itself as a target — whitelisted is not Settler', () => {
+        // Before ADR-023 this address PASSED the target check, because the
+        // check was "is it a whitelisted router". It is `tx.to`, never exec's
+        // target, and the registry has never named it.
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: ALLOWANCE_HOLDER }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('not the current or previous 0x Settler')
+      })
+
+      it('REJECTS a whitelisted router that is not a Settler — the whitelist no longer admits', () => {
+        const velora = ROUTER_WHITELIST_BY_CHAIN[1]['velora']
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: velora }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('not the current or previous 0x Settler')
+      })
+
+      it('REJECTS when NO set was resolved — a caller that forgets fails closed', () => {
+        // Called through the raw sync entry point with NO options at all, i.e.
+        // exactly what a caller that skipped the registry would produce.
+        const result = validateCallDataRecipient(
+          buildExec({ recipient: USER_ADDRESS, target: CURRENT_SETTLER }),
+          USER_ADDRESS,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('no 0x Settler resolved from the registry')
+      })
+
+      it('REJECTS when the resolved set is empty', () => {
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: CURRENT_SETTLER }),
+          USER_ADDRESS,
+          false,
+          new Set<string>(),
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('no 0x Settler resolved from the registry')
+      })
+
+      it('REJECTS another chain’s Settler — the set is per chain', () => {
+        const result = check(
+          buildExec({ recipient: USER_ADDRESS, target: ZEROX_BASE_SETTLER_PREV }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('not the current or previous 0x Settler')
+      })
+
+      // ── [ADR-022, KEPT] The narrowing the registry does NOT dominate ──
+
+      it('REJECTS operator = ownerOf(2) paired with target = prev(2)', () => {
+        // Both are in the resolved set, so checks (1) and (2) pass. The pair is
+        // still a shape 0x never emits — this is exactly the case that proves
+        // the registry check does not subsume #473's operator === target.
+        const result = check(
+          buildExec({
+            recipient: USER_ADDRESS,
+            target: PREV_SETTLER,
+            operator: CURRENT_SETTLER,
+          }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('does not match target')
+      })
+
+      it('REJECTS an operator that is not a Settler even when the target is', () => {
+        const result = check(
+          buildExec({
+            recipient: USER_ADDRESS,
+            target: CURRENT_SETTLER,
+            operator: ATTACKER_ADDRESS,
+          }),
+          USER_ADDRESS,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('exec operator')
+        expect(result.reason).toContain('not the current or previous 0x Settler')
+      })
+    })
+
+    // ── [ADR-023] Acceptance 3 — one golden vector per chain ──
+
+    describe('[ADR-023] golden vectors — real exec calldata per chain', () => {
+      const cases = [
+        {
+          chain: 'Ethereum mainnet',
+          chainId: 1,
+          calldata: ZEROX_MAINNET_EXEC_CALLDATA,
+          taker: ZEROX_MAINNET_EXEC_TAKER,
+          block: ZEROX_MAINNET_EXEC_BLOCK,
+          current: ZEROX_MAINNET_SETTLER_CURRENT,
+          prev: ZEROX_MAINNET_SETTLER_PREV,
+        },
+        {
+          chain: 'Base',
+          chainId: 8453,
+          calldata: ZEROX_BASE_EXEC_CALLDATA,
+          taker: ZEROX_BASE_EXEC_TAKER,
+          block: ZEROX_BASE_EXEC_BLOCK,
+          current: ZEROX_BASE_SETTLER_CURRENT,
+          prev: ZEROX_BASE_SETTLER_PREV,
+        },
+        {
+          chain: 'Arbitrum One',
+          chainId: 42161,
+          calldata: ZEROX_ARBITRUM_EXEC_CALLDATA,
+          taker: ZEROX_ARBITRUM_EXEC_TAKER,
+          block: ZEROX_ARBITRUM_EXEC_BLOCK,
+          current: ZEROX_ARBITRUM_SETTLER_CURRENT,
+          prev: ZEROX_ARBITRUM_SETTLER_PREV,
+        },
+      ] as const
+
+      for (const c of cases) {
+        it(`${c.chain} (chain ${c.chainId}) @ block ${c.block}: real calldata + registry answer`, () => {
+          const settlers: ReadonlySet<string> = new Set([
+            c.current.toLowerCase(),
+            c.prev.toLowerCase(),
+          ])
+          expect(c.calldata.slice(0, 10)).toBe(ALLOWANCE_HOLDER_EXEC_SELECTOR)
+
+          const result = validateCallDataRecipient(c.calldata, c.taker, false, c.chainId, {
+            zeroxSettlers: settlers,
+          })
+          expect(result.valid).toBe(true)
+          expect(result.extracted?.toLowerCase()).toBe(c.taker.toLowerCase())
+
+          // Every chain was inside the dwell window on 2026-09-03.
+          const [, , , target] = decodeAbiParameters(
+            [
+              { name: 'operator', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+              { name: 'target', type: 'address' },
+              { name: 'data', type: 'bytes' },
+            ],
+            `0x${c.calldata.slice(10)}` as Hex,
+          )
+          expect(target.toLowerCase()).toBe(c.prev.toLowerCase())
+
+          // …and nobody else's wallet gets the output.
+          expect(
+            validateCallDataRecipient(c.calldata, ATTACKER_ADDRESS, false, c.chainId, {
+              zeroxSettlers: settlers,
+            }).valid,
+          ).toBe(false)
+        })
+      }
+    })
+
+    // ── [ADR-023] The async entry point that resolves the set ──
+
+    describe('[ADR-023] validateCallDataRecipientAsync', () => {
+      const mockedResolve = vi.mocked(resolveZeroxSettlers)
+
+      beforeEach(() => {
+        mockedResolve.mockReset()
+      })
+
+      it('resolves the registry for exec calldata and accepts the live Settler', async () => {
+        mockedResolve.mockResolvedValue(MAINNET_SETTLERS)
+        const result = await validateCallDataRecipientAsync(
+          ZEROX_MAINNET_EXEC_CALLDATA,
+          ZEROX_MAINNET_EXEC_TAKER,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(true)
+        expect(mockedResolve).toHaveBeenCalledWith(1)
+      })
+
+      it('REJECTS the swap when the registry lookup throws', async () => {
+        mockedResolve.mockRejectedValue(new Error('rpc down'))
+        const result = await validateCallDataRecipientAsync(
+          ZEROX_MAINNET_EXEC_CALLDATA,
+          ZEROX_MAINNET_EXEC_TAKER,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('registry lookup failed on chain 1')
+        expect(result.reason).toContain('rpc down')
+      })
+
+      it('REJECTS the swap when the registry resolves to an empty set', async () => {
+        mockedResolve.mockResolvedValue(new Set<string>())
+        const result = await validateCallDataRecipientAsync(
+          ZEROX_MAINNET_EXEC_CALLDATA,
+          ZEROX_MAINNET_EXEC_TAKER,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('no 0x Settler resolved from the registry')
+      })
+
+      it('issues NO registry read for calldata that cannot reach Group G', async () => {
+        const result = await validateCallDataRecipientAsync(
+          buildV3ExactInputSingle(USER_ADDRESS),
+          USER_ADDRESS,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(true)
+        expect(mockedResolve).not.toHaveBeenCalled()
+      })
+
+      it('a multicall wrapping an exec is still validated against the registry', async () => {
+        mockedResolve.mockResolvedValue(MAINNET_SETTLERS)
+        const encoded = encodeAbiParameters(
+          [{ name: 'data', type: 'bytes[]' }],
+          [[buildExec({ recipient: USER_ADDRESS }) as Hex]],
+        )
+        const result = await validateCallDataRecipientAsync(
+          `0xac9650d8${encoded.slice(2)}`,
+          USER_ADDRESS,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(true)
+        expect(mockedResolve).toHaveBeenCalledWith(1)
+      })
+
+      it('a failed lookup does not blanket-block a multicall that holds no exec', async () => {
+        // An RPC blip must not take Uniswap's multicall down with 0x. The
+        // nested exec case still fails closed inside Group G — proven above.
+        mockedResolve.mockRejectedValue(new Error('rpc down'))
+        const encoded = encodeAbiParameters(
+          [{ name: 'data', type: 'bytes[]' }],
+          [[buildV3ExactInputSingle(USER_ADDRESS) as Hex]],
+        )
+        const result = await validateCallDataRecipientAsync(
+          `0xac9650d8${encoded.slice(2)}`,
+          USER_ADDRESS,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(true)
+      })
+
+      it('a failed lookup DOES block a multicall that holds an exec', async () => {
+        mockedResolve.mockRejectedValue(new Error('rpc down'))
+        const encoded = encodeAbiParameters(
+          [{ name: 'data', type: 'bytes[]' }],
+          [[buildExec({ recipient: USER_ADDRESS }) as Hex]],
+        )
+        const result = await validateCallDataRecipientAsync(
+          `0xac9650d8${encoded.slice(2)}`,
+          USER_ADDRESS,
+          false,
+          1,
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain('no 0x Settler resolved from the registry')
+      })
     })
   })
 
