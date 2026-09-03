@@ -154,10 +154,29 @@ const _feeCollector = process.env.NEXT_PUBLIC_FEE_COLLECTOR ?? ''
 export const FEE_COLLECTOR_ADDRESS = (_feeCollector || '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459') as `0x${string}`
 export const FEE_COLLECTOR_V1_ADDRESS = '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD' as `0x${string}`
 
-// Sources that collect fees natively via their API (no FeeCollector needed)
-// EMPTY: API fee params require registered partner accounts to work.
-// All fee collection now goes through the FeeCollector smart contract.
-export const FEE_NATIVE_SOURCES: AggregatorName[] = []
+// Sources that collect TeraSwap's fee NATIVELY via their own API partner-fee
+// params (no FeeCollector hop). INVARIANT: a source belongs here IF AND ONLY IF
+// its adapter attaches partner-fee params to an outgoing request —
+//   - '0x'      swapFeeRecipient + swapFeeBps + swapFeeToken (adapters/zerox.ts
+//               applyPartnerFee, on BOTH the /price quote and the /quote build)
+//   - 'cowswap' metadata.partnerFee { bps, recipient } in the order appData
+//               (adapters/cow.ts buildCowAppData, quote + order paths)
+//   - 'bebop'   fee + fee_recipient on the FIRM quote only (adapters/bebop.ts
+//               fetchSwapData); the price quote stays GROSS so Bebop ranks fairly
+// partner-fee-drift.test.ts drives every registered adapter and enforces the
+// invariant in BOTH directions, so a new integration cannot silently drift out
+// of this list (which is what happened to '0x' between SPRINT-9T T1 and
+// fix/zerox-partner-fee-armed: the params shipped, the list stayed empty).
+//
+// This list is what ARMS the M-01 fee-integrity check in useSwap/useSplitSwap
+// and what names the fee mechanism in the UI (lib/fee-mode.ts). It is NOT the
+// same concept as FEE_INCOMPATIBLE_SOURCES (cannot route through the
+// FeeCollector) — they happen to hold the same three members today, which is a
+// measured coincidence, not a definition. Fee is partner-fee XOR FeeCollector,
+// never both (partner-fee-invariant.test.ts).
+export const FEE_NATIVE_SOURCES: AggregatorName[] = [
+  '0x', 'cowswap', 'bebop',
+]
 
 // Sources incompatible with FeeCollector proxy routing.
 // These sources cannot route through the FeeCollector contract due to
