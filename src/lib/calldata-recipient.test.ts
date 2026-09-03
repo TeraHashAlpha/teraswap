@@ -394,12 +394,12 @@ describe('calldata-recipient', () => {
     const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
     const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
 
-    function buildSettlerExecute(recipient: string): Hex {
+    function buildSettlerExecute(recipient: string, minAmountOut = 3000000000n): Hex {
       return encodeFunctionData({
         abi: SETTLER_ABI,
         functionName: 'execute',
         args: [
-          [recipient as `0x${string}`, USDC as `0x${string}`, 3000000000n],
+          [recipient as `0x${string}`, USDC as `0x${string}`, minAmountOut],
           ['0x' as Hex],
           `0x${'11'.repeat(32)}` as Hex,
         ],
@@ -411,15 +411,28 @@ describe('calldata-recipient', () => {
       target?: string
       operator?: string
       inner?: Hex
+      minAmountOut?: bigint
     }): string {
       const target = (opts.target ?? WHITELISTED_TARGET) as `0x${string}`
       const operator = (opts.operator ?? target) as `0x${string}`
-      const inner = opts.inner ?? buildSettlerExecute(opts.recipient ?? USER_ADDRESS)
+      const inner =
+        opts.inner ?? buildSettlerExecute(opts.recipient ?? USER_ADDRESS, opts.minAmountOut)
       return encodeFunctionData({
         abi: EXEC_ABI,
         functionName: 'exec',
         args: [operator, WETH as `0x${string}`, 1000000000000000000n, target, inner],
       })
+    }
+
+    /** Replace `operator` (arg 0) and `target` (arg 3) in raw exec calldata. */
+    function retarget(calldata: string, address: string): string {
+      const word = (i: number) => 10 + i * 64
+      const padded = address.toLowerCase().slice(2).padStart(64, '0')
+      const chars = calldata.split('')
+      for (const i of [0, 3]) {
+        chars.splice(word(i), 64, ...padded.split(''))
+      }
+      return chars.join('')
     }
 
     // ── Selector derivation (acceptance: never typed) ──
@@ -474,6 +487,33 @@ describe('calldata-recipient', () => {
       expect(validateCallDataRecipient(calldata, USER_ADDRESS, false).valid).toBe(false)
     })
 
+    // ── Nested amount integrity — minAmountOut ──
+
+    it('REJECTS a zero minAmountOut with its own reason', () => {
+      const result = validateCallDataRecipient(
+        buildExec({ recipient: USER_ADDRESS, minAmountOut: 0n }),
+        USER_ADDRESS,
+        false,
+      )
+      expect(result.valid).toBe(false)
+      expect(result.reason).toContain('zero minAmountOut')
+    })
+
+    it('ACCEPTS a non-zero minAmountOut', () => {
+      const result = validateCallDataRecipient(
+        buildExec({ recipient: USER_ADDRESS, minAmountOut: 1n }),
+        USER_ADDRESS,
+        false,
+      )
+      expect(result.valid).toBe(true)
+    })
+
+    it('the golden vector carries a non-zero minAmountOut and is unaffected by the guard', () => {
+      const calldata = retarget(ZEROX_MAINNET_EXEC_CALLDATA, WHITELISTED_TARGET)
+      const result = validateCallDataRecipient(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
+      expect(result.valid).toBe(true)
+    })
+
     // ── Acceptance 2 — three distinct fail-closed reasons ──
 
     it('REJECTS a non-whitelisted target with a target-specific reason', () => {
@@ -498,6 +538,29 @@ describe('calldata-recipient', () => {
       expect(result.valid).toBe(false)
       expect(result.reason).toContain('exec operator')
       expect(result.reason).toContain('not a whitelisted router')
+    })
+
+    // ── [ADR-022 interim] operator === target narrowing ──
+
+    it('REJECTS operator !== target with a distinct reason even when both are individually whitelisted', () => {
+      // velora is a real, whitelisted mainnet router — distinct from the
+      // whitelisted target — so this exercises the narrowing itself, not the
+      // whitelist checks above it.
+      const otherWhitelistedRouter = ROUTER_WHITELIST_BY_CHAIN[1]['velora']
+      const result = validateCallDataRecipient(
+        buildExec({ recipient: USER_ADDRESS, operator: otherWhitelistedRouter }),
+        USER_ADDRESS,
+        false,
+      )
+      expect(result.valid).toBe(false)
+      expect(result.reason).toContain('operator')
+      expect(result.reason).toContain('does not match target')
+    })
+
+    it('ACCEPTS operator === target on the golden vector (unaffected by the narrowing)', () => {
+      const calldata = retarget(ZEROX_MAINNET_EXEC_CALLDATA, WHITELISTED_TARGET)
+      const result = validateCallDataRecipient(calldata, ZEROX_MAINNET_EXEC_TAKER, false)
+      expect(result.valid).toBe(true)
     })
 
     it('REJECTS an unknown inner selector with an inner-selector-specific reason', () => {
@@ -575,17 +638,6 @@ describe('calldata-recipient', () => {
     // ── Golden vector — real mainnet bytes, not a hand-written mock ──
 
     describe('golden vector: real mainnet exec calldata', () => {
-      /** Replace `operator` (arg 0) and `target` (arg 3) in raw exec calldata. */
-      function retarget(calldata: string, address: string): string {
-        const word = (i: number) => 10 + i * 64
-        const padded = address.toLowerCase().slice(2).padStart(64, '0')
-        const chars = calldata.split('')
-        for (const i of [0, 3]) {
-          chars.splice(word(i), 64, ...padded.split(''))
-        }
-        return chars.join('')
-      }
-
       it('decodes to the shape Group G assumes (independent viem decode)', () => {
         expect(ZEROX_MAINNET_EXEC_CALLDATA.slice(0, 10)).toBe(ALLOWANCE_HOLDER_EXEC_SELECTOR)
 
