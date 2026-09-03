@@ -158,29 +158,32 @@ describe('[ADR-021] the SC-04 gate now passes the calldata 0x v2 actually produc
   })
 })
 
-describe('[ADR-021 / FOLLOW-UP] the R1 recipient gate still blocks exec — NOT fixed here', () => {
-  it('DOCUMENTED GAP: validateCallDataRecipient fails closed on AllowanceHolder.exec', () => {
-    // This pins a REAL, still-open defect, deliberately left unfixed by this PR.
-    //
-    // calldata-recipient.ts fails closed on any selector outside VALIDATED_SELECTORS
-    // ([API-M-02]). exec() is not in it, so /api/swap will now clear SC-04 and the
-    // router gate and then still return 400 at R1 — on mainnet AND on Base/Arbitrum,
-    // which have been silently in this state since SPRINT-9E.
-    //
-    // It is NOT fixed here because doing it correctly is a design decision, not a
-    // list entry: exec(operator, token, amount, target, data) carries no recipient
-    // of its own — the real destination is AllowedSlippage.recipient inside the
-    // Settler execute() call nested in `data`. Classifying exec as msg.sender-implicit
-    // (Group A/F) would be WRONG and would blind the gate that exists precisely to
-    // stop calldata delivering output elsewhere. It needs a nested-decode extractor
-    // and an Auditor sign-off of its own.
-    //
-    // When that lands, this test flips to `.valid === true` with an extracted
-    // recipient. Until then it is executable evidence that 0x execution is still
-    // blocked, so the gap cannot be lost in prose.
+describe('[R1 Group G] the recipient gate now DECODES exec instead of rejecting the selector', () => {
+  it('exec is no longer rejected as an unknown selector', () => {
+    // ADR-021 shipped with this pinned as an open gap: exec sat outside
+    // VALIDATED_SELECTORS, so R1 rejected it on the selector alone. Group G
+    // replaced that with a real nested decode. Whatever R1 says about exec now,
+    // it must NOT be "unknown selector".
+    const result = validateCallDataRecipient(EXEC_CALLDATA, FROM, false, 1)
+    expect(result.reason ?? '').not.toContain('not in validated allowlist')
+  })
+
+  it('EXEC_CALLDATA above is a placeholder, not real exec args — it still fails closed', () => {
+    // 64 zero bytes cannot decode as (address,address,uint256,address,bytes); the
+    // decode throws and R1 blocks. Recorded so the assertion above is never read
+    // as "this synthetic calldata would execute".
     const result = validateCallDataRecipient(EXEC_CALLDATA, FROM, false, 1)
     expect(result.valid).toBe(false)
-    expect(result.reason).toContain('not in validated allowlist')
     expect(result.implicitRecipient).toBe(false)
+  })
+
+  it('STILL NOT EXECUTABLE END-TO-END: the live Settler is not a whitelisted exec target', () => {
+    // Group G validates exec's `target` against the per-chain router whitelist,
+    // because an exec with an arbitrary target is a fund-transfer primitive, not a
+    // swap. 0x's real target is the Settler — which ADR-021 established ROTATES with
+    // each 0x release and therefore cannot be whitelisted. So R1 now fails at the
+    // target check rather than the selector check, and 0x execution remains blocked
+    // on every chain. Full shape + real mainnet evidence: calldata-recipient.test.ts.
+    expect(getRouterWhitelist(1)).not.toContain(ROTATING_SETTLER_STANDIN.toLowerCase())
   })
 })

@@ -5,6 +5,8 @@
   selector: 0x2213bc0b source: 0x` (×2) and `... 0x1fff991f source: 0x` (×1)
 - **Implemented by:** `fix/zerox-v2-execution-path`
 - **Supersedes (partially):** the per-chain endpoint split introduced by SPRINT-9E P3
+- **Followed by:** [ADR-022](ADR-022-r1-group-g-allowance-holder-recipient.md) — closes the R1
+  gap this ADR records under §Consequences (added 2026-09-03; nothing else in this ADR changed)
 
 ## Context
 
