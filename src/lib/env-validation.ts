@@ -2,6 +2,8 @@
 // Validates critical env vars at build/startup time.
 // Import this in layout.tsx or providers.tsx so missing vars fail fast.
 
+import { DISABLED_SOURCES } from './constants'
+
 type EnvRule = {
   key: string
   required: boolean
@@ -58,12 +60,6 @@ const RULES: EnvRule[] = [
     required: false, // optional — graceful degradation if not set
     serverOnly: true,
     label: '1inch API key (server-only)',
-  },
-  {
-    key: 'ZEROX_API_KEY',
-    required: false,
-    serverOnly: true,
-    label: '0x API key (server-only)',
   },
   // [RQ-2026-06-11] Read by lib/api.ts (Odos quotes are skipped when absent) but
   // was never registered here — an unset key degraded Odos silently with no
@@ -142,6 +138,31 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   }
 
   // ── Cross-checks ──
+
+  // [dead-sources-are-loud, 2026-09] Required-when-enabled: a source's API
+  // key must not be able to silently 401 forever. ZEROX_API_KEY used to be
+  // OPTIONAL — a missing or expired key never failed a build or boot, so 0x
+  // 401'd quietly on every quote (measured 2026-09-02; the same failure mode
+  // as the July silent-sources incident). Computed here (not a static RULES
+  // entry) so it stays in sync with DISABLED_SOURCES at call time: the key
+  // is required only while '0x' is enabled (not in DISABLED_SOURCES) — if
+  // 0x is ever disabled, its key requirement lapses with it.
+  //
+  // OpenOcean (src/lib/adapters/openocean.ts) sends no Authorization/API-key
+  // header at all — its v4 quote endpoint is unauthenticated — so there is no
+  // OpenOcean key variable to add here.
+  if (typeof window === 'undefined' && !('0x' in DISABLED_SOURCES)) {
+    const zeroxKey = process.env.ZEROX_API_KEY
+    if (!zeroxKey || zeroxKey.trim() === '') {
+      errors.push(
+        '❌ Missing required env var: ZEROX_API_KEY — source "0x" is enabled ' +
+        '(not in DISABLED_SOURCES) and its adapter requires this key to ' +
+        'authenticate. Set ZEROX_API_KEY or add "0x" to DISABLED_SOURCES ' +
+        'before deploying.'
+      )
+    }
+  }
+
   // BLOCK if NEXT_PUBLIC_ API keys are set — they leak keys into the browser bundle.
   // The fallbacks were removed from constants.ts; these vars must NOT be used.
   if (process.env.NEXT_PUBLIC_1INCH_API_KEY) {
