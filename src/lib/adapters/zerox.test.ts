@@ -1,10 +1,12 @@
 // @vitest-environment node
 /**
- * [SPRINT-9E P3] 0x must be chain-aware. On mainnet it uses the v2 permit2 flow.
- * On Base it must use the v2 ALLOWANCE-HOLDER flow so the returned tx.to is the
- * AllowanceHolder (0x0000000000001fF3684f28c67538d4D072C22734) — the address
- * whitelisted for 0x on Base in chains/routers.ts. The permit2 endpoint returns
- * a Settler/Permit2 tx.to that would fail the Base whitelist.
+ * [SPRINT-9E P3, superseded by ADR-021] 0x uses the v2 ALLOWANCE-HOLDER flow on
+ * EVERY chain, so the returned tx.to is always the AllowanceHolder
+ * (0x0000000000001fF3684f28c67538d4D072C22734) — the address whitelisted for 0x on
+ * 1/8453/42161 in chains/routers.ts. The permit2 endpoint returns a Settler tx.to
+ * that rotates with each 0x release and can never be whitelisted; mainnet was the
+ * last chain still on it, which is why its execution failed in production
+ * 2026-09-03. Endpoint-family coverage lives in zerox.v2-execution-path.test.ts.
  *
  * [fix/zerox-price-endpoint] 0x API v2's /quote endpoints are the firm,
  * signable quote and REQUIRE `taker`
@@ -48,11 +50,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('0x fetchQuote uses the indicative /price endpoint, no taker [fix/zerox-price-endpoint]', () => {
-  it('mainnet (chainId 1) hits /swap/permit2/price, with chainId, without taker', async () => {
+  // [ADR-021] Was '/swap/permit2/price' — mainnet moved to the allowance-holder
+  // family so its tx.to is the fixed AllowanceHolder instead of a rotating Settler.
+  it('mainnet (chainId 1) hits /swap/allowance-holder/price, with chainId, without taker', async () => {
     await zerox.fetchQuote({ src: WETH, dst: USDC, amount: '1000000000000000000', chainId: 1 })
-    expect(calls[0]).toContain('/swap/permit2/price')
+    expect(calls[0]).toContain('/swap/allowance-holder/price')
     expect(calls[0]).not.toContain('/quote')
-    expect(calls[0]).not.toContain('allowance-holder')
+    expect(calls[0]).not.toContain('permit2')
     expect(calls[0]).toContain('chainId=1')
     expect(calls[0]).not.toContain('taker=')
   })
@@ -74,9 +78,12 @@ describe('0x fetchQuote uses the indicative /price endpoint, no taker [fix/zerox
 })
 
 describe('0x fetchSwapData keeps /quote WITH taker [fix/zerox-price-endpoint]', () => {
-  it('mainnet (chainId 1) hits /swap/permit2/quote, with chainId and taker', async () => {
+  // [ADR-021] Was '/swap/permit2/quote' — see zerox.v2-execution-path.test.ts for
+  // why mainnet moved, and for the tx.to/whitelist pin that goes with it.
+  it('mainnet (chainId 1) hits /swap/allowance-holder/quote, with chainId and taker', async () => {
     await zerox.fetchSwapData({ src: WETH, dst: USDC, amount: '1000000000000000000', from: FROM, slippage: 0.5, chainId: 1 })
-    expect(calls[0]).toContain('/swap/permit2/quote')
+    expect(calls[0]).toContain('/swap/allowance-holder/quote')
+    expect(calls[0]).not.toContain('permit2')
     expect(calls[0]).toContain('chainId=1')
     expect(calls[0]).toContain(`taker=${FROM}`)
   })
@@ -197,7 +204,7 @@ describe('0x /price response mapping [fix/zerox-price-endpoint]', () => {
 
     const r = await zerox.fetchQuote({ src: USDC, dst: WETH, amount: '1000000000000000000', chainId: 1 })
 
-    expect(capturedUrl).toContain('/swap/permit2/price')
+    expect(capturedUrl).toContain('/swap/allowance-holder/price') // [ADR-021] was permit2
     expect(r?.toAmount).toBe('996500000')
     expect(r?.routes).toEqual(['SolidlyV3'])
     // Never silently 0 — must read the top-level `gas` field since /price has no `transaction`.

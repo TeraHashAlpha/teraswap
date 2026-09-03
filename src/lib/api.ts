@@ -10,6 +10,7 @@ import {
   UNISWAP_SWAP_ROUTER_02,
   BEBOP_JAM_SETTLEMENT,
   BEBOP_BALANCE_MANAGER,
+  ZEROX_ALLOWANCE_HOLDER,
   type AggregatorName,
 } from './constants'
 import { globalLimiter } from './rate-limiter'
@@ -635,7 +636,12 @@ export async function fetchApproveSpender(source: AggregatorName, chainId: numbe
     case '1inch':
       return '0x111111125421cA6dc452d289314280a0f8842A65' as `0x${string}`
     case '0x':
-      return PERMIT2_ADDRESS as `0x${string}`
+      // [ADR-021] The v2 allowance-holder flow pulls the taker's ERC-20 with a plain
+      // AllowanceHolder.transferFrom (selector 0x15dacbea, present in its mainnet
+      // runtime code), so the AllowanceHolder is the spender — NOT Permit2, which was
+      // the spender only for the permit2 endpoint this adapter no longer calls.
+      // Matches what chains 8453/42161 already resolve via ROUTER_WHITELIST_BY_CHAIN.
+      return ZEROX_ALLOWANCE_HOLDER as `0x${string}`
     case 'velora':
       return '0x216B4B4Ba9F3e719726886d34a177484278BfcaE' as `0x${string}`
     case 'odos':
@@ -679,7 +685,11 @@ export const ROUTER_WHITELIST: Set<string> = new Set([
   '0xba12222222228d8ba445958a75a0704d566bf2c8', // Balancer Vault V2
   '0x111111125421ca6dc452d289314280a0f8842a65', // 1inch AggregationRouter v6
   '0x1111111254eeb25477b68fb85ed929f73a960582', // 1inch AggregationRouter v5 (legacy)
-  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x Exchange Proxy (mainnet)
+  // [2026-09-03 / ADR-021] 0x Exchange Proxy v1 — retained, NOT removed (rule #4):
+  // no current swap flow targets it (the adapter is on API v2 everywhere), but the
+  // deployed mainnet OrderExecutor still whitelists it on-chain.
+  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x Exchange Proxy v1 (mainnet)
+  ZEROX_ALLOWANCE_HOLDER.toLowerCase(),         // [ADR-021] 0x v2 AllowanceHolder (swap target + approval spender)
   '0xdef171fe48cf0115b1d80b88dc8eab59176fee57', // ParaSwap Augustus V5 (legacy)
   '0x6a000f20005980200259b80c5102003040001068', // ParaSwap Augustus V6 (Velora)
   '0x216b4b4ba9f3e719726886d34a177484278bfcae', // ParaSwap Augustus V6.2

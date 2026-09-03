@@ -5,15 +5,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fetchApproveSpender, classifyAdapterResult } from './api'
 import type { NormalizedQuote } from './api'
-import { FEE_COLLECTOR_ADDRESS, PERMIT2_ADDRESS } from './constants'
+import { FEE_COLLECTOR_ADDRESS, PERMIT2_ADDRESS, ZEROX_ALLOWANCE_HOLDER } from './constants'
 
 const quote = (toAmount: string): NormalizedQuote =>
   ({ source: 'bebop', toAmount, estimatedGas: 0, gasUsd: 0, routes: [] } as NormalizedQuote)
 
 describe('api — fetchApproveSpender per-chain [P226]', () => {
-  it('returns the mainnet spender for chainId=1 (unchanged)', async () => {
-    // 0x is FeeCollector-incompatible → its mainnet spender is Permit2.
-    expect((await fetchApproveSpender('0x', 1)).toLowerCase()).toBe(PERMIT2_ADDRESS.toLowerCase())
+  it('returns the mainnet spender for chainId=1', async () => {
+    // 0x is FeeCollector-incompatible → it approves a 0x contract directly.
+    // [ADR-021] Was Permit2, for the permit2 endpoint family. Mainnet now uses the
+    // allowance-holder family, which pulls the taker's ERC-20 via
+    // AllowanceHolder.transferFrom — so the AllowanceHolder is the spender, the same
+    // address chains 8453/42161 already resolve (see the Base case below).
+    expect((await fetchApproveSpender('0x', 1)).toLowerCase())
+      .toBe(ZEROX_ALLOWANCE_HOLDER.toLowerCase())
+    expect((await fetchApproveSpender('0x', 1)).toLowerCase())
+      .not.toBe(PERMIT2_ADDRESS.toLowerCase())
     // 1inch routes through the FeeCollector → spender is the (mainnet) FeeCollector.
     expect((await fetchApproveSpender('1inch', 1)).toLowerCase()).toBe(FEE_COLLECTOR_ADDRESS.toLowerCase())
   })

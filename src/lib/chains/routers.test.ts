@@ -53,11 +53,21 @@ describe('chains/routers [P222]', () => {
     // Augustus V6 must never appear in the ORDER set (it belongs to the swap path).
     const orderAddresses = Object.values(WHITELISTED_ROUTERS).map((r) => r.address.toLowerCase())
     expect(orderAddresses).not.toContain(AUGUSTUS_V6.toLowerCase())
-    // The swap-path registry (this file's subject) and the order set still agree
-    // on the two routers they share — pin the duplicated values against drift.
+    // The swap-path registry (this file's subject) and the order set share two
+    // router keys — pin both, whether they agree (1inch) or deliberately do not (0x).
     const mainnet = ROUTER_WHITELIST_BY_CHAIN[1]
     expect(WHITELISTED_ROUTERS['1inch'].address.toLowerCase()).toBe(mainnet['1inch'].toLowerCase())
-    expect(WHITELISTED_ROUTERS['0x'].address.toLowerCase()).toBe(mainnet['0x'].toLowerCase())
+    // [ADR-021] 0x is the one router where the two registries INTENTIONALLY diverge.
+    // The swap path moved to 0x API v2, whose allowance-holder endpoint returns the
+    // AllowanceHolder as tx.to; the ORDER path is the deployed OrderExecutor's
+    // on-chain whitelist, which still holds the v1 Exchange Proxy and cannot be
+    // changed from this repo. Pin BOTH sides so neither drifts unnoticed and so a
+    // future on-chain whitelist update has to come here and delete this comment.
+    expect(mainnet['0x'].toLowerCase())
+      .toBe('0x0000000000001ff3684f28c67538d4d072c22734')     // v2 AllowanceHolder (swap)
+    expect(WHITELISTED_ROUTERS['0x'].address.toLowerCase())
+      .toBe('0xdef1c0ded9bec7f1a1670819833240f027b25eff')     // v1 Exchange Proxy (order)
+    expect(WHITELISTED_ROUTERS['0x'].address.toLowerCase()).not.toBe(mainnet['0x'].toLowerCase())
   })
 
   it('[SPRINT-46-ARBITRUM-CONFIG] the Arbitrum whitelist has all 12 primary routers registered', () => {
@@ -98,10 +108,16 @@ describe('chains/routers [P222]', () => {
   })
 
   it('isWhitelistedRouter validates per chain', () => {
-    // 0x v2 AllowanceHolder is a Base router, not a mainnet one.
-    const baseOnly = '0x0000000000001fF3684f28c67538d4D072C22734'
-    expect(isWhitelistedRouter(baseOnly, 8453)).toBe(true)
-    expect(isWhitelistedRouter(baseOnly, 1)).toBe(false)
+    // [ADR-021] The 0x v2 AllowanceHolder USED to be the Base-only example here.
+    // It is now whitelisted on mainnet too (the mainnet swap path moved onto the
+    // allowance-holder endpoint family), so it no longer demonstrates isolation —
+    // Base's Odos Router V2 does: a genuinely different address from mainnet's.
+    const zeroxAllowanceHolder = '0x0000000000001fF3684f28c67538d4D072C22734'
+    expect(isWhitelistedRouter(zeroxAllowanceHolder, 8453)).toBe(true)
+    expect(isWhitelistedRouter(zeroxAllowanceHolder, 1)).toBe(true)
+    const baseOnlyOdos = '0x19cEeAd7105607Cd444F5ad10dd51356436095a1'
+    expect(isWhitelistedRouter(baseOnlyOdos, 8453)).toBe(true)
+    expect(isWhitelistedRouter(baseOnlyOdos, 1)).toBe(false)
     // Uniswap mainnet SwapRouter02 is not the Base SwapRouter02.
     const mainnetUniswap = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
     expect(isWhitelistedRouter(mainnetUniswap, 1)).toBe(true)
