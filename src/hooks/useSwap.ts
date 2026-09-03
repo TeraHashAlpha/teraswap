@@ -435,13 +435,13 @@ export function useSwap(
       // list, so the guard silently never ran for the very sources it was
       // built for. The list now names all three (constants.ts, enforced by
       // partner-fee-drift.test.ts). Per-source behaviour, measured:
-      //   - '0x'      ARMED and meaningful. Both the /price quote and the
-      //               /quote build carry swapFeeBps, so the two amounts differ
-      //               only by routing drift; the check catches the asymmetric
-      //               case where 0x honours the fee on the quote and drops it
-      //               on the build. Tolerance is a ONE-SIDED +2% ceiling
-      //               (api.ts validateFeeIntegrity), far above 0x's own 10 bps
-      //               fee, so an honest quote cannot trip it.
+      //   - '0x'      ARMED, but an anomaly tripwire, not proof the fee was
+      //               taken. Tolerance is a ONE-SIDED +2% ceiling (api.ts
+      //               validateFeeIntegrity) against 0x's own 10 bps
+      //               (FEE_BPS) fee — dropping that fee raises the output
+      //               only ~0.1%, ~20x inside the 2% band, so the check
+      //               cannot detect a dropped fee, symmetric or asymmetric.
+      //               It only catches gross anomalies far past that band.
       //   - 'cowswap' inert by design — validateFeeIntegrity hard-skips it
       //               (solver surplus is not a deduction, so a higher fill is
       //               normal and must not block).
