@@ -79,6 +79,7 @@ import {
 } from './quorum-check'
 import { beginTick } from './source-state-machine'
 import { isP0Reason, P0_REASONS } from './p0-reasons'
+import { getCircuitBreaker, resetAllCircuitBreakers, circuitKey } from './adapters/circuit-breaker'
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -280,6 +281,95 @@ describe('quorum-check', () => {
       expect(result.skipped).toBe(false)
       expect(result.outliers).toHaveLength(0)
       expect(result.correlatedOutlierCount).toBe(0)
+    })
+  })
+
+  // ── [dead-sources-are-loud] honest "active" vs "callable" summary ──
+
+  describe('quorum summary reports active vs callable [dead-sources-are-loud]', () => {
+    beforeEach(() => {
+      resetAllCircuitBreakers()
+    })
+
+    it('reports callable = active when every breaker is CLOSED', async () => {
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
+
+      mockFetchMetaQuote.mockResolvedValue(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3000000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '2995000000' },
+          { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
+        ]),
+      )
+
+      const result = await runQuorumCheck()
+      expect(result.activeCount).toBe(5)
+      expect(result.callableCount).toBe(5)
+      expect(result.openBreakerSourceIds).toEqual([])
+    })
+
+    it('a source that is "active" but breaker-OPEN drops callable by one and is named', async () => {
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
+
+      // openocean's breaker is OPEN even though the state machine still says active —
+      // exactly the divergence measured 2026-09-02.
+      getCircuitBreaker(circuitKey('kyberswap')).forceOpen('test: simulated dead source')
+
+      mockFetchMetaQuote.mockResolvedValue(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3000000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '2995000000' },
+          { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
+        ]),
+      )
+
+      const result = await runQuorumCheck()
+      expect(result.activeCount).toBe(5)
+      expect(result.callableCount).toBe(4)
+      expect(result.openBreakerSourceIds).toEqual(['kyberswap'])
+    })
+
+    it('the console line names the OPEN-breaker source and both counts', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+      seedSource('1inch', 'active')
+      seedSource('cowswap', 'active')
+      seedSource('velora', 'active')
+      seedSource('odos', 'active')
+      seedSource('kyberswap', 'active')
+      getCircuitBreaker(circuitKey('odos')).forceOpen('test: simulated dead source')
+
+      mockFetchMetaQuote.mockResolvedValue(
+        makeMetaQuoteResult([
+          { source: '1inch', toAmount: '3000000000' },
+          { source: 'cowswap', toAmount: '3005000000' },
+          { source: 'velora', toAmount: '2995000000' },
+          { source: 'odos', toAmount: '3002000000' },
+          { source: 'kyberswap', toAmount: '3001000000' },
+        ]),
+      )
+
+      await runQuorumCheck()
+
+      const line = log.mock.calls.map(c => c.join(' ')).find(l => l.includes('[QUORUM]') && l.includes('callable'))
+      expect(line).toBeTruthy()
+      expect(line).toContain('5 active')
+      expect(line).toContain('4 callable')
+      expect(line).toContain('odos')
+
+      log.mockRestore()
     })
   })
 

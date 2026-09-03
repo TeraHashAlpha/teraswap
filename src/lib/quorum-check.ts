@@ -28,6 +28,7 @@ import { WETH_ADDRESS } from './constants'
 import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'
 import { getAllStatuses, getStatus, getThresholds, forceDisable } from './source-state-machine'
+import { getCircuitBreaker, circuitKey } from './adapters/circuit-breaker'
 
 // ── Token addresses (Ethereum mainnet) ──────────────────
 
@@ -99,6 +100,14 @@ export interface QuorumCheckResult {
   correlatedOutlierCount: number
   skipped: boolean
   skipReason?: string
+  /** [dead-sources-are-loud] "active" (source-state-machine) sources at check time. */
+  activeCount?: number
+  /** Of activeCount, how many have a callable (CLOSED/HALF_OPEN) circuit breaker — a
+   *  source can be `state === 'active'` while its breaker is OPEN, so this is NOT the
+   *  same number as activeCount. */
+  callableCount?: number
+  /** Active source ids whose circuit breaker is currently OPEN. */
+  openBreakerSourceIds?: string[]
 }
 
 // ── KV keys ────────────────────────────────────────────
@@ -460,10 +469,26 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
   // Log summary
   const warningCount = allOutliers.filter(o => o.classification === 'warning').length
   const flaggedCount = allOutliers.filter(o => o.classification === 'flagged' || o.classification === 'correlated').length
+
+  // [dead-sources-are-loud] "active" here is the source-state-machine's view; a
+  // source can be `state === 'active'` while its own circuit breaker is OPEN
+  // (api.ts filters on the breaker BEFORE a request) — two different objects
+  // measuring two different things. Report BOTH numbers so a dead-but-"active"
+  // source can't hide behind an honest-looking "N active" count.
+  const openBreakerSourceIds = activeSources
+    .map(s => s.id)
+    .filter(id => getCircuitBreaker(circuitKey(id)).getState() === 'OPEN')
+  const callableCount = activeSources.length - openBreakerSourceIds.length
+
   if (allOutliers.length > 0) {
     console.warn(`[QUORUM] ${allOutliers.length} outlier(s): ${warningCount} warning, ${flaggedCount} flagged/correlated`)
   } else {
-    console.log(`[QUORUM] All sources within tolerance (${activeSources.length} active, ${pairResults.filter(p => !p.skipped).length} pairs checked)`)
+    const openSuffix = openBreakerSourceIds.length > 0
+      ? ` — breaker OPEN: ${openBreakerSourceIds.join(', ')}`
+      : ''
+    console.log(
+      `[QUORUM] ${activeSources.length} active (state) · ${callableCount} callable (breaker CLOSED/HALF_OPEN)${openSuffix} (${pairResults.filter(p => !p.skipped).length} pairs checked)`,
+    )
   }
 
   const result: QuorumCheckResult = {
@@ -472,6 +497,9 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
     outliers: allOutliers,
     correlatedOutlierCount,
     skipped: false,
+    activeCount: activeSources.length,
+    callableCount,
+    openBreakerSourceIds,
   }
 
   // Persist latest result for heartbeat endpoint consumption
