@@ -1,39 +1,44 @@
 // @vitest-environment jsdom
 /**
- * [SPRINT-9F] SourceToggle — the "Liquidity Sources" selector must list EVERY
- * real, active aggregator the engine queries, so a user can disable any of
- * them. Bebop (the 12th adapter) was missing, so users could not turn it off
- * even though it was quoting (and, when its RFQ swap data is incomplete,
- * failing). The list must match ADAPTER_REGISTRY's 11 active sources (odos
- * permanently disabled 2026-07-30 — vendor shutdown, never quotes) — and must
- * NOT include the `uniswap` legacy alias (a duplicate of `uniswapv3`) or the
- * internal `teraswap_order_engine` pseudo-source.
+ * [SPRINT-9F / CHORE-2026-09-03] SourceToggle — the "Liquidity Sources"
+ * selector must list every real, quoting aggregator the engine queries, and
+ * must never offer a source that DISABLED_SOURCES says can't quote (toggling
+ * it would do nothing). TOGGLEABLE_SOURCES is derived as
+ * ADAPTER_REGISTRY minus DISABLED_SOURCES — never a hand-kept exclusion set,
+ * so a newly disabled source (openocean/bebop, INC-2026-09-03-001) drops out
+ * automatically and a newly re-enabled one reappears automatically.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
+import { AGGREGATOR_META, DISABLED_SOURCES, type AggregatorName } from '@/lib/constants'
 import SourceToggle, { TOGGLEABLE_SOURCES } from './SourceToggle'
 
-describe('SourceToggle — list completeness [SPRINT-9F]', () => {
-  it('includes Bebop (the 12th source) so it can be disabled', () => {
-    expect(TOGGLEABLE_SOURCES).toContain('bebop')
-  })
-
-  it('never silently diverges from ADAPTER_REGISTRY — every adapter is toggleable unless explicitly excluded', () => {
-    // Odos is the only adapter currently held out, and only because it's
-    // permanently disabled (vendor shutdown 2026-07-30). Any other
-    // ADAPTER_REGISTRY name that isn't in TOGGLEABLE_SOURCES means the
-    // exclusion set in SourceToggle.tsx needs updating (or the source was
-    // dropped by mistake, as happened to Bebop in SPRINT-9F).
+describe('SourceToggle — list completeness [CHORE-2026-09-03]', () => {
+  it('never silently diverges from ADAPTER_REGISTRY minus DISABLED_SOURCES', () => {
     const registryNames = ADAPTER_REGISTRY.map(a => a.name)
-    const explicitlyExcluded = new Set(['odos'])
-    const expectedToggleable = registryNames.filter(name => !explicitlyExcluded.has(name))
+    const expectedToggleable = registryNames.filter(name => !DISABLED_SOURCES[name])
 
     expect(TOGGLEABLE_SOURCES.sort()).toEqual(expectedToggleable.sort())
   })
 
-  it('lists exactly the 11 active ADAPTER_REGISTRY sources (no alias/pseudo-source)', () => {
-    expect(TOGGLEABLE_SOURCES).toHaveLength(11)
+  it('contains no DISABLED_SOURCES key (negative control: a fake disabled entry disappears from the toggle)', () => {
+    for (const name of Object.keys(DISABLED_SOURCES)) {
+      expect(TOGGLEABLE_SOURCES).not.toContain(name)
+    }
+
+    // Negative control: an adapter that IS in the registry but is NOT
+    // disabled must still be toggleable — proving the filter is keyed off
+    // DISABLED_SOURCES membership, not some other exclusion.
+    const stillEnabled = ADAPTER_REGISTRY.map(a => a.name).find(
+      (name) => !DISABLED_SOURCES[name]
+    ) as AggregatorName
+    expect(TOGGLEABLE_SOURCES).toContain(stillEnabled)
+  })
+
+  it('lists exactly the ADAPTER_REGISTRY sources not in DISABLED_SOURCES (no alias/pseudo-source)', () => {
+    const expectedCount = ADAPTER_REGISTRY.filter(a => !DISABLED_SOURCES[a.name]).length
+    expect(TOGGLEABLE_SOURCES).toHaveLength(expectedCount)
     // `uniswap` is a legacy alias of `uniswapv3` in AGGREGATOR_META — must not
     // appear or "Uniswap V3" would render twice.
     expect(TOGGLEABLE_SOURCES).not.toContain('uniswap')
@@ -41,23 +46,30 @@ describe('SourceToggle — list completeness [SPRINT-9F]', () => {
     expect(TOGGLEABLE_SOURCES).not.toContain('teraswap_order_engine')
     // Odos ceased operations 2026-07-30 — permanently disabled, never quotes.
     expect(TOGGLEABLE_SOURCES).not.toContain('odos')
+    // openocean/bebop — disabled 2026-09-03 (INC-2026-09-03-001), never quoted.
+    expect(TOGGLEABLE_SOURCES).not.toContain('openocean')
+    expect(TOGGLEABLE_SOURCES).not.toContain('bebop')
   })
 })
 
-describe('SourceToggle — render + toggle [SPRINT-9F]', () => {
-  it('renders the Bebop row and toggling it calls onToggle("bebop")', () => {
+describe('SourceToggle — render + toggle [CHORE-2026-09-03]', () => {
+  it('renders a still-enabled source row and toggling it calls onToggle', () => {
     const onToggle = vi.fn()
+    const target = TOGGLEABLE_SOURCES[0]
+    const targetLabel = AGGREGATOR_META[target].label
     renderWithProviders(<SourceToggle excludedSources={new Set()} onToggle={onToggle} />)
-    // Open the dropdown (button shows "11/11 sources").
-    fireEvent.click(screen.getByText(/\/11 sources/))
-    const bebopRow = screen.getByText('Bebop').closest('button')
-    expect(bebopRow).not.toBeNull()
-    fireEvent.click(bebopRow!)
-    expect(onToggle).toHaveBeenCalledWith('bebop')
+    fireEvent.click(screen.getByText(new RegExp(`/${TOGGLEABLE_SOURCES.length} sources`)))
+    const row = screen.getByText(targetLabel).closest('button')
+    expect(row).not.toBeNull()
+    fireEvent.click(row!)
+    expect(onToggle).toHaveBeenCalledWith(target)
   })
 
-  it('counts an excluded source as disabled in the "N/11 sources" label', () => {
-    renderWithProviders(<SourceToggle excludedSources={new Set(['bebop'])} onToggle={vi.fn()} />)
-    expect(screen.getByText('10/11 sources')).toBeInTheDocument()
+  it('counts an excluded source as disabled in the "N/total sources" label', () => {
+    const excluded = new Set([TOGGLEABLE_SOURCES[0]])
+    renderWithProviders(<SourceToggle excludedSources={excluded} onToggle={vi.fn()} />)
+    expect(
+      screen.getByText(`${TOGGLEABLE_SOURCES.length - 1}/${TOGGLEABLE_SOURCES.length} sources`)
+    ).toBeInTheDocument()
   })
 })
