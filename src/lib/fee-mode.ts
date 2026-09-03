@@ -24,7 +24,7 @@
  * silently-correct coincidence.
  *
  * The order below is the real precedence: partner fee is XOR FeeCollector fee
- * (partner-fee-invariant.test.ts), and every FEE_NATIVE source is also
+ * (src/lib/adapters/partner-fee-invariant.test.ts), and every FEE_NATIVE source is also
  * FEE_INCOMPATIBLE, so `usesFeeCollector` is already false for them. Checking
  * native first therefore does not mask a FeeCollector route — it just names the
  * mechanism that is actually collecting.

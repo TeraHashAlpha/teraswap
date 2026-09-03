@@ -584,6 +584,20 @@ function decodeAllowanceHolderExecRecipient(
     )
   }
 
+  // (2b) [ADR-022 interim] The narrowest correct admitted counterparty for
+  // `exec` is the chain's current taker-submitted Settler, which cannot be
+  // pinned here because it rotates — that requires ADR-022's registry
+  // lookup. Until then, requiring operator === target is a free narrowing:
+  // it holds in every observed mainnet call (including the pinned golden
+  // vector) and shrinks the admitted set below "any two whitelisted
+  // routers" without needing the registry. This ADDS to, never replaces,
+  // the operator/target whitelist checks above.
+  if (operator.toLowerCase() !== target.toLowerCase()) {
+    return execFailure(
+      `AllowanceHolder exec operator ${operator} does not match target ${target}`,
+    )
+  }
+
   // (3) The inner call must carry a selector at all.
   if (!innerCalldata || innerCalldata.length < 10) {
     return execFailure('AllowanceHolder exec inner calldata is too short to contain a selector')
@@ -611,6 +625,14 @@ function decodeAllowanceHolderExecRecipient(
   const recipient = slippage?.recipient
   if (!recipient) {
     return execFailure('AllowanceHolder exec inner execute() carries no recipient')
+  }
+
+  // (5b) Same amount-integrity class as the `minReturn = 0` guards on other
+  // groups: a zero minAmountOut removes the taker's only floor against a
+  // mid-`actions` value diversion, so it is rejected on its own terms
+  // regardless of whether the recipient checks out.
+  if (slippage.minAmountOut === 0n) {
+    return execFailure('AllowanceHolder exec inner execute() carries a zero minAmountOut')
   }
 
   // (6) Same recipient rule as every other group — no separate policy.
