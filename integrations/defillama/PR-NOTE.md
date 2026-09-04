@@ -54,8 +54,10 @@ chain in its own right, and mainnet is a different address entirely — the nega
 `1784275673` = **2026-07-17T08:07:53Z**. The RPC accepted an unbounded range, so no fallback to
 the doc's 2026-07-20 prod-flip date was needed — and the derived date matters, because the flip
 date is three days *later* and would silently drop the first of those five events.
-`start: '2026-07-17'`. (`docs/DEPLOYMENTS.md` now carries this first-log line on its Arbitrum
-FeeCollector row, so the doc and the chain no longer disagree.)
+`start: '2026-07-16'` — the day *before* that first log, for the run-gate reason in
+[§ `start` is a run gate](#start-is-a-run-gate-not-a-provenance-note). (`docs/DEPLOYMENTS.md` now
+carries this first-log line on its Arbitrum FeeCollector row, so the doc and the chain no longer
+disagree.)
 
 That `topic0` is `keccak256` of the **7-argument** signature
 `SwapWithFee(address,address,address,uint256,uint256,address,uint256)` — the same value
@@ -102,6 +104,27 @@ Mainnet's `start` changes accordingly: it now derives from V1's first log (2026-
 the previously configured 2026-05-08, which was neither V1's nor V2's real first log (V2's is
 2026-05-26). **Mainnet total: 37** — 14 from V1, 23 from V2.
 
+### `start` is a run gate, not a provenance note
+
+The first cut of this change set each chain's `start` to the exact UTC day of its own first log —
+mainnet `2026-03-04`, Base `2026-06-04`, Arbitrum `2026-07-17`. Measured against DefiLlama's own
+harness on 2026-09-04, **that zeroed the opening day of every chain**, including Base's, which the
+live upstream file reports as `2.71k`.
+
+The mechanism is one line of upstream code, not anything in `fetch`. `setChainValidStart` in
+`adapters/utils/runAdapter.ts` admits a chain to the slot ending at `endTimestamp` only when
+`start <= endTimestamp - 86400`, and because this adapter is `pullHourly: true`, the runner splits
+each day into 24 one-hour slots (`runHourlyMultiSlot`, `cli/testAdapter.ts`). A `start` equal to the
+day being measured clears that test only for the final slot, 23:00–00:00 UTC, and the chain is
+skipped for the other 23 hours. Every one of these chains emitted its first log in the morning, so
+each opening day read `0.00`.
+
+So each `start` is the day **before** its first log: mainnet `2026-03-03`, Base `2026-06-03`,
+Arbitrum `2026-07-16`. The extra day holds no logs and sums to zero, and the first-log block, tx and
+timestamp stay recorded verbatim per chain, so the derivation is still checkable.
+`__tests__/defillama-teraswap-adapter.test.ts` asserts the gate arithmetic directly and keeps the
+three rejected same-day values as a negative control.
+
 ## Pasting it upstream
 
 1. Fork `DefiLlama/dimension-adapters` and open `aggregators/teraswap/index.ts`.
@@ -118,10 +141,96 @@ the previously configured 2026-05-08, which was neither V1's nor V2's real first
 3. The `chainConfig` entries, the `fetch` body, `methodology` and `breakdownMethodology` need
    **no** change — they are already in the merged file's shape (`fetch`'s second, conditional
    `getLogs` call for mainnet's `legacyFeeCollector` is ordinary control flow, not a shape change).
-4. Run that repo's harness for the adapter per its CONTRIBUTING guide and confirm Arbitrum returns
-   non-zero volume for a day on or after 2026-07-17, and mainnet returns non-zero volume for a day
-   between 2026-03-04 and 2026-04-24 (V1-only window, before V2 existed).
+4. **Run DefiLlama's harness — the mandatory protocol in the next section. This is not optional and
+   the in-repo suite does not substitute for it.**
 5. Open the PR with the paragraph below.
+
+## MANDATORY — run DefiLlama's own harness before submitting
+
+**A green in-repo vitest suite is NOT evidence that this adapter works.** Every guard in
+`__tests__/defillama-teraswap-adapter.test.ts` and `__tests__/defillama-upstream-artifact.test.ts`
+tests the artifact's *form* — addresses against the deployments doc, topic0 hashes, methodology
+prose, generator drift, TypeScript compilation. None of them can run DefiLlama's SDK, so none of
+them observe what the adapter **returns**. PR #476 shipped behind a fully green suite and zeroed the
+Base chain; the suite noticed nothing, because there was nothing in it that could.
+
+The only evidence that counts is DefiLlama's own runner, on all four dates below, for **both** the
+current upstream file (the baseline) and our artifact, compared cell by cell.
+
+### 1. Clone and install — in a scratch dir, never in this repo
+
+```bash
+cd /tmp && rm -rf dimension-adapters
+git clone --depth 1 https://github.com/DefiLlama/dimension-adapters.git
+cd /tmp/dimension-adapters && pnpm i
+```
+
+Never commit anything into that clone, and never clone it under this repo.
+
+### 2. Baseline FIRST — what their file returns today, untouched
+
+```bash
+cd /tmp/dimension-adapters
+cp aggregators/teraswap/index.ts /tmp/baseline-teraswap-index.ts   # keep it to restore later
+for d in 2026-03-05 2026-05-27 2026-06-05 2026-07-18; do
+  echo "===== baseline @ $d ====="
+  pnpm test aggregators teraswap "$d"
+done
+```
+
+Record the per-chain rows under `TOTAL DAILY AGGREGATED`. Runs where only one chain is eligible
+print a single `ETHEREUM 👇` block instead of a table — read that as the ethereum row.
+
+### 3. Then ours — the generated artifact, same four dates
+
+```bash
+cd /tmp/dimension-adapters
+cp /path/to/teraswap/integrations/defillama/upstream/index.ts aggregators/teraswap/index.ts
+for d in 2026-03-05 2026-05-27 2026-06-05 2026-07-18; do
+  echo "===== ours @ $d ====="
+  pnpm test aggregators teraswap "$d"
+done
+```
+
+Paste the **generated** `upstream/index.ts`, never `teraswap-adapter.ts` — the mirror still carries
+the in-repo shim. Regenerate it first with `npm run build:defillama`.
+
+### 4. The dates — and why these four
+
+**The date argument is the END of the window: date `D` measures the day `D-1`.** Get this wrong and
+every number moves by a day.
+
+| date arg | day measured | what it proves |
+|---|---|---|
+| `2026-03-05` | 2026-03-04 | mainnet's V1-only window: the frozen V1 contract emitted 2 `SwapWithFee` logs that day, 83 days before V2 existed. Non-zero here is the whole point of the V1 read. |
+| `2026-05-27` | 2026-05-26 | V2's own first log day. Mainnet must be unchanged from baseline — the control that the V1 read did not disturb V2. |
+| `2026-06-05` | 2026-06-04 | **Base's opening day — the regression canary.** Baseline reports `2.71k`; anything less is a regression. |
+| `2026-07-18` | 2026-07-17 | Arbitrum's opening day. Baseline cannot see the chain at all; ours must report it non-zero. |
+
+### 5. The comparison — measured 2026-09-04
+
+| date arg | baseline (their live file) | #476 as shipped (the regression) | ours, fixed |
+|---|---|---|---|
+| `2026-03-05` | no chain eligible — nothing reported | ethereum `0.00` | ethereum **`13.00`** (fees `0.0128` ≈ 0.1%) |
+| `2026-05-27` | ethereum `24.00` | ethereum `24.00` | ethereum `24.00` |
+| `2026-06-05` | ethereum `294.00` · base **`2.71k`** · Aggregate `3.00k` | ethereum `294.00` · base **`0.00`** · Aggregate `294.00` | ethereum `294.00` · base **`2.71k`** · Aggregate `3.00k` |
+| `2026-07-18` | ethereum `900.00` · base `0.00` · Aggregate `900.00` | ethereum `900.00` · base `0.00` · arbitrum **`0.00`** · Aggregate `900.00` | ethereum `900.00` · base `0.00` · arbitrum **`0.56`** · Aggregate `900.56` |
+
+### 6. The rules
+
+- **A chain reading `0.00` where the baseline reads non-zero is a regression. Stop and fix it — do
+  not submit, and do not explain it away as rounding.**
+- Every chain in ours must be **at or above** its baseline cell on every date. Ours may add chains
+  and add history; it may never subtract either.
+- Mainnet's V1-only window must be non-zero, and its fees must land near 0.1% of its volume — that
+  ratio is what confirms the 5-argument decode put `totalAmount` and `feeAmount` in the right slots
+  rather than merely returning *some* number.
+- A cell that changes for a reason you cannot name is a finding, not noise.
+- Diagnostic, not a fix: `DISABLE_PULL_HOURLY=true pnpm test aggregators teraswap <date>` runs the
+  same file as a single daily window instead of 24 hourly slots. If a chain is non-zero there and
+  zero without it, the fault is the `start` run gate, not `fetch`.
+- Restore their file (`cp /tmp/baseline-teraswap-index.ts aggregators/teraswap/index.ts`) before
+  re-running a baseline, so a stale paste never gets mistaken for one.
 
 ## For the upstream PR description
 
@@ -136,6 +245,12 @@ the previously configured 2026-05-08, which was neither V1's nor V2's real first
 > into the same totals as V2. Mainnet's `start` now derives from V1's first log, 2026-03-04.
 > Mainnet total to date: 37 events (14 from V1, 23 from V2).
 >
+> Each `start` is set to the day *before* its chain's first log rather than to that day itself.
+> `setChainValidStart` admits a chain to an hourly slot only when `start <= endTimestamp - 86400`,
+> so with `pullHourly: true` a `start` equal to the day being measured runs only the 23:00–00:00
+> slot and the chain reports zero for its own opening day. All three of these chains emitted their
+> first log in the morning. The skipped day is empty by construction, so nothing is over-claimed.
+>
 > It also adds Arbitrum One (42161): its FeeCollector has been emitting `SwapWithFee` since
 > 2026-07-17, after this adapter merged, so Arbitrum has been reporting as zero ever since. The
 > amounts are small — five events to date, the last on 2026-08-03 — so this is a correctness fix
@@ -144,7 +259,9 @@ the previously configured 2026-05-08, which was neither V1's nor V2's real first
 > string as the Base entry, which is a deployer-nonce collision and not the same deployment; each
 > address was verified with `eth_getCode` on its own chain. `start` is derived from the first
 > `SwapWithFee` log at that address on 42161: block 484,739,263, 2026-07-17T08:07:53Z. Base's
-> `start` is likewise corrected to its first `SwapWithFee` log rather than its deploy date.
+> `start` is likewise derived from its first `SwapWithFee` log rather than its deploy date. Base's
+> reported figures are unchanged from what this adapter returns today — verified against this
+> repo's harness on 2026-03-05, 2026-05-27, 2026-06-05 and 2026-07-18.
 >
 > Finally it corrects `methodology.Volume`. The current text describes the FeeCollector as the
 > single contract every TeraSwap swap routes fee-collection through. That is not accurate: routes
