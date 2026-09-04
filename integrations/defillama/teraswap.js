@@ -1,4 +1,12 @@
 /**
+ * @deprecated superseded by `teraswap-adapter.ts` in this directory — the
+ * in-repo mirror of the adapter actually MERGED upstream on 2026-07-09 as
+ * `aggregators/teraswap/index.ts`. This draft targets `dexs/teraswap/index.js`,
+ * a path DefiLlama never used for it, ships CommonJS instead of the merged
+ * TypeScript `SimpleAdapter`, and configures only ethereum + base (no
+ * Arbitrum One). Kept for the record — CLAUDE.md rule #4, never delete — but
+ * do NOT paste this file upstream; see `PR-NOTE.md`.
+ *
  * TeraSwap — DefiLlama dimension-adapter (Dexs → Aggregator).
  *
  * TeraSwap is a DEX META-AGGREGATOR: user funds route through other DEXes'
