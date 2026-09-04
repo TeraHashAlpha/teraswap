@@ -28,6 +28,7 @@ import adapter, {
   EXCLUDED_SOURCES,
   EXCLUDED_SOURCE_LABELS,
   SWAP_WITH_FEE_EVENT,
+  SWAP_WITH_FEE_EVENT_V1,
 } from '../integrations/defillama/teraswap-adapter'
 
 /** DefiLlama chain key → EVM chain id, for looking the row up in the doc. */
@@ -64,6 +65,29 @@ function feeCollectorsFromDeploymentsDoc(): Record<number, string> {
   return found
 }
 
+/**
+ * The frozen mainnet V1 row, parsed separately: `feeCollectorsFromDeploymentsDoc`
+ * deliberately excludes it (it is not a chain the live adapter routes to), but
+ * mainnet's `legacyFeeCollector` must still trace back to that exact row.
+ */
+function legacyFeeCollectorFromDeploymentsDoc(): string | undefined {
+  const doc = readFileSync(path.join(__dirname, '..', 'docs', 'DEPLOYMENTS.md'), 'utf8')
+
+  for (const line of doc.split('\n')) {
+    if (!line.startsWith('|')) continue
+    const cells = line.split('|').map((c) => c.trim())
+    if (cells.length < 5) continue
+    const [, role, chain, address] = cells
+    if (!/FeeCollector V1/.test(role)) continue
+    if (!/Ethereum Mainnet/.test(chain)) continue
+
+    const hex = address.match(/^`(0x[0-9a-fA-F]{40})`$/)
+    if (hex) return hex[1]
+  }
+
+  return undefined
+}
+
 describe('DefiLlama adapter — chain coverage', () => {
   it('configures exactly the three chains with a production FeeCollector', () => {
     expect(Object.keys(adapter.adapter).sort()).toEqual(['arbitrum', 'base', 'ethereum'])
@@ -87,6 +111,17 @@ describe('DefiLlama adapter — chain coverage', () => {
     }
   })
 
+  it("starts mainnet at V1's first SwapWithFee log's day, since V1 predates V2", () => {
+    // Derived on chain 1: V1's first SwapWithFee is block 24,585,100, timestamp
+    // 1772639423 = 2026-03-04T15:50:23Z, 83 days before V2's own first log
+    // (block 25,181,121, 2026-05-26T17:54:47Z). Mainnet's start must be V1's,
+    // or the pre-V2 history this adapter now counts would be excluded by its
+    // own `start`.
+    expect(adapter.adapter.ethereum.start).toBe('2026-03-04')
+    expect(new Date(`${adapter.adapter.ethereum.start}T00:00:00Z`).getTime() / 1000)
+      .toBeLessThanOrEqual(1772639423)
+  })
+
   it("starts Arbitrum at the first SwapWithFee log's day, not the later prod-flip date", () => {
     // Derived on 42161: first SwapWithFee at this address is block 484,739,263,
     // timestamp 1784275673 = 2026-07-17T08:07:53Z. The doc's prod flip is
@@ -94,6 +129,47 @@ describe('DefiLlama adapter — chain coverage', () => {
     expect(adapter.adapter.arbitrum.start).toBe('2026-07-17')
     expect(new Date(`${adapter.adapter.arbitrum.start}T00:00:00Z`).getTime() / 1000)
       .toBeLessThanOrEqual(1784275673)
+  })
+
+  it("starts Base at the first SwapWithFee log's day, not the contract's deploy date", () => {
+    // Deploy block 46,697,561 (2026-05-30T23:41:09Z) predates the first fill —
+    // block 46,884,917, 2026-06-04T07:46:21Z (timestamp 1780559181) — by five days.
+    expect(adapter.adapter.base.start).toBe('2026-06-04')
+    expect(new Date(`${adapter.adapter.base.start}T00:00:00Z`).getTime() / 1000)
+      .toBeLessThanOrEqual(1780559181)
+  })
+})
+
+describe('DefiLlama adapter — mainnet aggregates both FeeCollector deployments', () => {
+  const legacyFromDoc = legacyFeeCollectorFromDeploymentsDoc()
+
+  it("mainnet's legacyFeeCollector matches the frozen V1 row in docs/DEPLOYMENTS.md", () => {
+    expect(legacyFromDoc).toBeDefined()
+    const configured = adapter.adapter.ethereum.legacyFeeCollector
+    expect(configured).toBeDefined()
+    expect(configured!.length).toBe(42)
+    expect(configured!.toLowerCase()).toBe(legacyFromDoc!.toLowerCase())
+  })
+
+  it('double-counting is structurally impossible: V1 and V2 are different addresses', () => {
+    // The real risk of aggregating two sources into one chain: a mutation
+    // that points legacyFeeCollector at the same address as feeCollector
+    // would double-count every V2 log. This fails the moment that happens.
+    expect(adapter.adapter.ethereum.legacyFeeCollector!.toLowerCase())
+      .not.toBe(adapter.adapter.ethereum.feeCollector.toLowerCase())
+  })
+
+  it('double-counting is structurally impossible: V1 and V2 events hash to different topic0s', () => {
+    expect(toEventSelector(SWAP_WITH_FEE_EVENT_V1)).not.toBe(toEventSelector(SWAP_WITH_FEE_EVENT))
+  })
+
+  it("V1's 5-arg event hashes to the topic0 observed on its own historical logs", () => {
+    // topic0 of V1's SwapWithFee, read off its own bytecode (contracts/
+    // TeraSwapFeeCollectorV2_DEPRECATED_flat.sol) and confirmed against its
+    // 14 on-chain logs (2026-03-04 – 2026-04-24).
+    expect(toEventSelector(SWAP_WITH_FEE_EVENT_V1)).toBe(
+      '0xe41d09ea59537dbbeb0d52b509aff6db0348253cb4f871b7d2c163002576c042',
+    )
   })
 })
 
