@@ -14,6 +14,7 @@
     "check:bash3-compat": "node scripts/check-bash3-compat.mjs",
     "check:color-contrast": "node scripts/check-color-contrast.mjs",
     "check:product-claims": "node scripts/check-product-claims.mjs",
+    "build:defillama": "node scripts/build-defillama-upstream.mjs",
     "guard:check": "vitest run src/lib/chains/catalog-address-guard.test.ts",
     "guard:refresh": "npx --yes tsx --tsconfig tsconfig.json scripts/refresh-catalog-guard.ts",
     "fork": "./scripts/fork-test.sh",
