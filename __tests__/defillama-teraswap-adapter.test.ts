@@ -88,6 +88,29 @@ function legacyFeeCollectorFromDeploymentsDoc(): string | undefined {
   return undefined
 }
 
+const DAY = 86400
+
+/**
+ * The first on-chain `SwapWithFee` log per chain, as a unix timestamp. These
+ * are the same values recorded block-by-block in the adapter's per-chain
+ * comments; restating them here means the `start` rules below are asserted
+ * against on-chain evidence rather than against another copy of `start`.
+ */
+const FIRST_LOG_TIMESTAMP: Record<string, number> = {
+  // V1, block 24,585,100 — 2026-03-04T15:50:23Z (V2's own first log is
+  // 1779818087 = 2026-05-26T17:54:47Z, 83 days later).
+  ethereum: 1772639423,
+  // block 46,884,917 — 2026-06-04T07:46:21Z
+  base: 1780559181,
+  // block 484,739,263 — 2026-07-17T08:07:53Z
+  arbitrum: 1784275673,
+}
+
+const startOfUtcDay = (timestamp: number) => Math.floor(timestamp / DAY) * DAY
+
+const startTimestampOf = (chain: string) =>
+  new Date(`${adapter.adapter[chain].start}T00:00:00Z`).getTime() / 1000
+
 describe('DefiLlama adapter — chain coverage', () => {
   it('configures exactly the three chains with a production FeeCollector', () => {
     expect(Object.keys(adapter.adapter).sort()).toEqual(['arbitrum', 'base', 'ethereum'])
@@ -111,32 +134,73 @@ describe('DefiLlama adapter — chain coverage', () => {
     }
   })
 
-  it("starts mainnet at V1's first SwapWithFee log's day, since V1 predates V2", () => {
+  it("starts mainnet from V1's first SwapWithFee log, since V1 predates V2", () => {
     // Derived on chain 1: V1's first SwapWithFee is block 24,585,100, timestamp
     // 1772639423 = 2026-03-04T15:50:23Z, 83 days before V2's own first log
     // (block 25,181,121, 2026-05-26T17:54:47Z). Mainnet's start must be V1's,
     // or the pre-V2 history this adapter now counts would be excluded by its
     // own `start`.
-    expect(adapter.adapter.ethereum.start).toBe('2026-03-04')
-    expect(new Date(`${adapter.adapter.ethereum.start}T00:00:00Z`).getTime() / 1000)
-      .toBeLessThanOrEqual(1772639423)
+    expect(startTimestampOf('ethereum')).toBeLessThanOrEqual(FIRST_LOG_TIMESTAMP.ethereum)
+    expect(startTimestampOf('ethereum')).toBeLessThan(1779818087)
   })
 
-  it("starts Arbitrum at the first SwapWithFee log's day, not the later prod-flip date", () => {
+  it("starts Arbitrum from the first SwapWithFee log, not the later prod-flip date", () => {
     // Derived on 42161: first SwapWithFee at this address is block 484,739,263,
     // timestamp 1784275673 = 2026-07-17T08:07:53Z. The doc's prod flip is
     // 2026-07-20 — starting there would drop the fills before it.
-    expect(adapter.adapter.arbitrum.start).toBe('2026-07-17')
-    expect(new Date(`${adapter.adapter.arbitrum.start}T00:00:00Z`).getTime() / 1000)
-      .toBeLessThanOrEqual(1784275673)
+    const prodFlip = new Date('2026-07-20T00:00:00Z').getTime() / 1000
+    expect(startTimestampOf('arbitrum')).toBeLessThanOrEqual(FIRST_LOG_TIMESTAMP.arbitrum)
+    expect(startTimestampOf('arbitrum')).toBeLessThan(prodFlip)
   })
 
-  it("starts Base at the first SwapWithFee log's day, not the contract's deploy date", () => {
+  it("starts Base from the first SwapWithFee log, not from nothing at all", () => {
     // Deploy block 46,697,561 (2026-05-30T23:41:09Z) predates the first fill —
     // block 46,884,917, 2026-06-04T07:46:21Z (timestamp 1780559181) — by five days.
-    expect(adapter.adapter.base.start).toBe('2026-06-04')
-    expect(new Date(`${adapter.adapter.base.start}T00:00:00Z`).getTime() / 1000)
-      .toBeLessThanOrEqual(1780559181)
+    expect(startTimestampOf('base')).toBeLessThanOrEqual(FIRST_LOG_TIMESTAMP.base)
+  })
+
+  it.each(Object.keys(FIRST_LOG_TIMESTAMP))(
+    '%s: start is the UTC day immediately before that chain\'s first log',
+    (chain) => {
+      // Derived, not chosen: exactly one day before the first log's UTC day.
+      // Earlier would be harmless but unmoored from the evidence; later loses
+      // the opening day outright (the run-gate test below).
+      expect(startTimestampOf(chain)).toBe(startOfUtcDay(FIRST_LOG_TIMESTAMP[chain]) - DAY)
+    },
+  )
+
+  it.each(Object.keys(FIRST_LOG_TIMESTAMP))(
+    "%s: start clears the runner's hourly run gate for the whole first-log day",
+    (chain) => {
+      // THE REGRESSION GUARD. `start` is a RUN GATE, not a provenance note.
+      // DefiLlama's runner (`setChainValidStart`, adapters/utils/runAdapter.ts)
+      // runs a chain in the hourly slot ending at `endTimestamp` only when
+      // `start <= endTimestamp - 86400`, and `pullHourly: true` splits each day
+      // into 24 such slots (`runHourlyMultiSlot`, cli/testAdapter.ts). The
+      // earliest slot of the first-log day ends at 01:00 UTC, so the entire day
+      // runs only when `start <= firstLogDay + 3600 - 86400`. Fail this and the
+      // chain silently reports 0.00 for its own opening day.
+      const earliestSlotEnd = startOfUtcDay(FIRST_LOG_TIMESTAMP[chain]) + 3600
+      expect(startTimestampOf(chain)).toBeLessThanOrEqual(earliestSlotEnd - DAY)
+    },
+  )
+
+  it('negative control: the starts shipped in #476 fail that run gate', () => {
+    // Measured against DefiLlama's own harness on 2026-09-04, these three
+    // same-day starts produced ethereum 0.00 on 2026-03-04, base 0.00 on
+    // 2026-06-04 (against a baseline 2.71k) and arbitrum 0.00 on 2026-07-17.
+    // If this control ever passes, the gate arithmetic above has drifted and
+    // the guard has stopped guarding.
+    const shipped: Record<string, string> = {
+      ethereum: '2026-03-04',
+      base: '2026-06-04',
+      arbitrum: '2026-07-17',
+    }
+    for (const [chain, start] of Object.entries(shipped)) {
+      const startTs = new Date(`${start}T00:00:00Z`).getTime() / 1000
+      const earliestSlotEnd = startOfUtcDay(FIRST_LOG_TIMESTAMP[chain]) + 3600
+      expect(startTs, chain).toBeGreaterThan(earliestSlotEnd - DAY)
+    }
   })
 })
 
@@ -261,6 +325,78 @@ describe('DefiLlama adapter — methodology does not overclaim', () => {
   it('keeps the upstream breakdown metric key on every fee series', () => {
     for (const series of ['Fees', 'Revenue', 'ProtocolRevenue']) {
       expect(Object.keys(adapter.breakdownMethodology[series])).toEqual(['Token Swap Fees'])
+    }
+  })
+})
+
+/**
+ * What `fetch` does with the logs it is handed, against a stub `getLogs`.
+ *
+ * Scope, stated honestly: this CANNOT catch the #476 regression. That failure
+ * happened in DefiLlama's runner *before* `fetch` was ever called, so a test
+ * that calls `fetch` directly sees nothing wrong. The run-gate test in the
+ * chain-coverage block above is the guard for that. What this block catches is
+ * the adjacent failure — a `fetch` that stops issuing `getLogs` on some chain,
+ * or reads a log without summing it — which no other test here would notice.
+ */
+describe('DefiLlama adapter — fetch sums logs on every configured chain', () => {
+  type RecordedAdd = { token: string; amount: bigint; metric?: string }
+
+  /** One log per `getLogs` call, with a recorder for every balance mutation. */
+  function stubOptions(chain: string) {
+    const getLogsCalls: { target: string; eventAbi: string }[] = []
+    const balances: RecordedAdd[][] = []
+
+    const options = {
+      chain,
+      getLogs: async (args: { target: string; eventAbi: string }) => {
+        getLogsCalls.push(args)
+        return [{ tokenIn: `${chain}-token`, totalAmount: 1_000n, feeAmount: 1n }]
+      },
+      createBalances: () => {
+        const sink: RecordedAdd[] = []
+        balances.push(sink)
+        return {
+          add: (token: string, amount: bigint, metric?: string) =>
+            sink.push({ token, amount, metric }),
+        }
+      },
+    }
+
+    return { options, getLogsCalls, balances }
+  }
+
+  const chains = Object.keys(FIRST_LOG_TIMESTAMP)
+
+  it.each(chains)('%s: a log from getLogs reaches dailyVolume AND dailyFees', async (chain) => {
+    const { options, getLogsCalls, balances } = stubOptions(chain)
+
+    const result = await adapter.fetch(options)
+
+    // The chain queried at least one contract...
+    expect(getLogsCalls.length).toBeGreaterThan(0)
+    // ...and every log it got back landed in both balances, none dropped.
+    const [dailyVolume, dailyFees] = balances
+    expect(dailyVolume.length).toBe(getLogsCalls.length)
+    expect(dailyFees.length).toBe(getLogsCalls.length)
+    expect(dailyVolume.every((add) => add.amount === 1_000n)).toBe(true)
+    expect(dailyFees.every((add) => add.amount === 1n)).toBe(true)
+    expect(dailyFees.every((add) => add.metric === 'Token Swap Fees')).toBe(true)
+    // Revenue and protocol revenue are the same balances object as fees.
+    expect(result.dailyRevenue).toBe(result.dailyFees)
+    expect(result.dailyProtocolRevenue).toBe(result.dailyFees)
+  })
+
+  it('queries two contracts on mainnet and exactly one on every other chain', async () => {
+    for (const chain of chains) {
+      const { options, getLogsCalls } = stubOptions(chain)
+      await adapter.fetch(options)
+
+      expect(getLogsCalls.length, chain).toBe(chain === 'ethereum' ? 2 : 1)
+      // Distinct targets AND distinct event shapes — the double-count control
+      // from the V1 work, asserted on the calls actually issued.
+      expect(new Set(getLogsCalls.map((c) => c.target)).size, chain).toBe(getLogsCalls.length)
+      expect(new Set(getLogsCalls.map((c) => c.eventAbi)).size, chain).toBe(getLogsCalls.length)
     }
   })
 })

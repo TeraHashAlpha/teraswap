@@ -22,11 +22,14 @@
  *    `contracts/TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`, which is V1's
  *    source despite the filename). V1's total: 14 logs. V2's total (7-arg,
  *    unchanged): 23 logs. Mainnet total: 37. Every chain's `start` is also
- *    corrected to its contract's actual first log (see item 2 below) rather
- *    than an inherited, unverified date — mainnet's had read 2026-05-08, which
- *    was neither V1's real first log (2026-03-04, 65 days earlier) nor V2's
- *    (2026-05-26, 18 days later) — it fell in the gap between the two and
- *    excluded both.
+ *    derived from its contract's actual first log rather than an inherited,
+ *    unverified date — mainnet's had read 2026-05-08, which was neither V1's
+ *    real first log (2026-03-04, 65 days earlier) nor V2's (2026-05-26, 18
+ *    days later) — it fell in the gap between the two and excluded both. Each
+ *    `start` is then set to the day BEFORE that first log, because the
+ *    runner's hourly run gate skips a chain for 23 of a day's 24 slots when
+ *    `start` equals that day; the `chainConfig` comment below carries the
+ *    mechanism and the measurement.
  * 1. Adds Arbitrum One (42161). The live adapter configures ONLY ethereum and
  *    base. `docs/DEPLOYMENTS.md` dates the Arbitrum prod flip 2026-07-20, but
  *    the chain's own logs put the FIRST `SwapWithFee` three days earlier, on
@@ -186,9 +189,27 @@ const excludedList =
  * chain — never hand-typed — because the same address is a DIFFERENT contract
  * on different chains (that doc's "same address, different contract per chain"
  * gotcha). Each entry carries its source row, its 42-char length sentinel and
- * the `eth_getCode` size measured on ITS OWN chain on 2026-09-03. Every
- * `start` is likewise DERIVED from that chain's first on-chain `SwapWithFee`
- * log, never inherited from a config or prod-flip date.
+ * the `eth_getCode` size measured on ITS OWN chain on 2026-09-03.
+ *
+ * Every `start` is likewise DERIVED from that chain's first on-chain
+ * `SwapWithFee` log — never inherited from a config or prod-flip date — and
+ * is then set to the UTC day BEFORE that log. That last step is not slack:
+ * `start` is a RUN GATE, not a provenance annotation. For a
+ * `pullHourly: true` adapter the runner splits the day into 24 one-hour
+ * slots and runs a chain in the slot ending at `endTimestamp` only when
+ * `start <= endTimestamp - 86400` (`setChainValidStart` in
+ * `adapters/utils/runAdapter.ts`; the slots are built by `runHourlyMultiSlot`
+ * in `cli/testAdapter.ts`). A `start` equal to the day being measured passes
+ * that test for the LAST slot only (23:00–00:00 UTC) and skips the chain for
+ * the other 23 — so a chain started on its own first-log day reports ZERO
+ * for that day unless the log happens to land in the final hour. Measured
+ * against DefiLlama's own harness on 2026-09-04: Base with
+ * `start: '2026-06-04'` reported 0.00 for 2026-06-04, where the same file
+ * and day with an earlier `start` reports 2.71k.
+ *
+ * Starting a day early costs nothing — the extra day holds no logs and sums
+ * to zero — and each first-log block, tx and timestamp is recorded verbatim
+ * per chain below, so the derivation stays checkable either way.
  */
 const chainConfig: Record<
   string,
@@ -200,9 +221,9 @@ const chainConfig: Record<
   // 0xdeb17a805b0069c4641dd9e0e5e51bc88205f083bad288ad31dbb20ed296cdb6,
   // timestamp 1779818087 = 2026-05-26T17:54:47Z — NOT the mainnet start, since
   // `legacyFeeCollector` below has fills that predate it by 83 days. This
-  // chain's `start` is V1's first log instead (see legacyFeeCollector comment),
-  // replacing the previously configured (unverified, and wrong either way)
-  // 2026-05-08.
+  // chain's `start` is derived from V1's first log instead (see the
+  // legacyFeeCollector comment), replacing the previously configured
+  // (unverified, and wrong either way) 2026-05-08.
   //
   // legacyFeeCollector: docs/DEPLOYMENTS.md · row "**FeeCollector V1** (frozen)"
   // · chain "Ethereum Mainnet (1)" · "deprecated, do not route here" for
@@ -210,26 +231,29 @@ const chainConfig: Record<
   // and belong in this adapter's count. length sentinel 42 · eth_getCode on
   // chain 1 = 5,826 bytes. start DERIVED: V1's first SwapWithFee is block
   // 24,585,100, tx 0xb42d6fda447057d1d84cdfbddd1ab8b3a22c83219a958e3414418d368a791973,
-  // timestamp 1772639423 = 2026-03-04T15:50:23Z — matches the 2026-03-04 date
-  // in the pre-V2 mainnet history this fixes. V1 emitted 14 SwapWithFee logs
-  // total (2026-03-04 through 2026-04-24, none since; V2 has 23 to date, for
-  // 37 mainnet-wide) before V2 replaced it.
+  // timestamp 1772639423 = 2026-03-04T15:50:23Z, the 2026-03-04 date in the
+  // pre-V2 mainnet history this fixes — so `start` is 2026-03-03, the day
+  // before, or the run gate above drops every hourly slot of 2026-03-04
+  // except 23:00–00:00 and that opening day reads zero despite its two logs.
+  // V1 emitted 14 SwapWithFee logs total (2026-03-04 through 2026-04-24, none
+  // since; V2 has 23 to date, for 37 mainnet-wide) before V2 replaced it.
   [CHAIN.ETHEREUM]: {
     feeCollector: '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459',
     legacyFeeCollector: '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD',
-    start: '2026-03-04',
+    start: '2026-03-03',
   },
   // docs/DEPLOYMENTS.md · row "**FeeCollector** (instant swaps)" · chain "Base (8453)".
   // length sentinel 42 · eth_getCode on chain 8453 (mainnet.base.org) = 5,339 bytes.
   // start DERIVED: Base's first SwapWithFee is block 46,884,917, tx
   // 0x8c79514e0e793e7889ecebb986b1a969c93c84e3cce366e5931b7c5d74fedb00,
-  // timestamp 1780559181 = 2026-06-04T07:46:21Z — five days after the
-  // contract's own deploy (block 46,697,561, 2026-05-30T23:41:09Z) and after
-  // the previously configured 2026-05-30, which was the deploy date, not the
-  // first fill.
+  // timestamp 1780559181 = 2026-06-04T07:46:21Z, five days after the
+  // contract's own deploy (block 46,697,561, 2026-05-30T23:41:09Z) — so
+  // `start` is 2026-06-03, the day before that first fill. Base is the chain
+  // the run gate above was measured on: with `start: '2026-06-04'` its own
+  // opening day reported 0.00, against 2.71k as configured here.
   [CHAIN.BASE]: {
     feeCollector: '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130',
-    start: '2026-06-04',
+    start: '2026-06-03',
   },
   // docs/DEPLOYMENTS.md · row "**FeeCollector** (instant swaps)" · chain "Arbitrum One (42161)".
   // Same 42-char string as the Base row — a deployer-nonce collision, a DIFFERENT
@@ -240,10 +264,12 @@ const chainConfig: Record<
   // timestamp 1784275673 = 2026-07-17T08:07:53Z — three days BEFORE the doc's
   // 2026-07-20 prod flip, so starting at the flip date would silently drop the
   // first of the chain's five SwapWithFee events (the other four are two on
-  // 2026-07-20 and two on 2026-08-03; none since).
+  // 2026-07-20 and two on 2026-08-03; none since). `start` is 2026-07-16, the
+  // day before that first log: at 08:07 UTC it is outside the only slot a
+  // same-day `start` would have run, so 2026-07-17 would otherwise read zero.
   [CHAIN.ARBITRUM]: {
     feeCollector: '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130',
-    start: '2026-07-17',
+    start: '2026-07-16',
   },
 }
 

@@ -76,16 +76,12 @@ const BODY_REWRITES = [
  * chain — never hand-typed — because the same address is a DIFFERENT contract
  * on different chains (that doc's "same address, different contract per chain"
  * gotcha). Each entry carries its source row, its 42-char length sentinel and
- * the \`eth_getCode\` size measured on ITS OWN chain on 2026-09-03. Every
- * \`start\` is likewise DERIVED from that chain's first on-chain \`SwapWithFee\`
- * log, never inherited from a config or prod-flip date.`,
+ * the \`eth_getCode\` size measured on ITS OWN chain on 2026-09-03.`,
     ` * FeeCollector per chain. Every address here was verified on its own chain
  * — never hand-typed — because the same address is, in one case below, a
  * DIFFERENT contract on a different chain (a deployer-nonce collision, not
  * the same deployment). Each entry carries its 42-char length sentinel and
- * the \`eth_getCode\` size measured on ITS OWN chain. Every \`start\` is
- * DERIVED from that chain's first on-chain \`SwapWithFee\` log, never a
- * config or prod-flip date.`,
+ * the \`eth_getCode\` size measured on ITS OWN chain.`,
   ],
   [
     '  // docs/DEPLOYMENTS.md · row "**FeeCollector V2** (instant swaps)" · chain "Ethereum Mainnet (1)".',
