@@ -38,6 +38,7 @@
   "exclude": [
     "node_modules",
     "workers",
-    "e2e"
+    "e2e",
+    "integrations/defillama/upstream/index.ts"
   ]
 }
