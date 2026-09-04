@@ -7,6 +7,26 @@
  *   DefiLlama/dimension-adapters → `aggregators/teraswap/index.ts`
  *
  * ── What this mirror CHANGES vs. what is live upstream ────────────────────
+ * 0. Aggregates BOTH mainnet FeeCollector deployments. The frozen V1 contract
+ *    (`docs/DEPLOYMENTS.md`, "FeeCollector V1 (frozen)" row,
+ *    `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD`) emitted the 5-argument
+ *    `SwapWithFee(address,address,address,uint256,uint256)` — topic0
+ *    `0xe41d09ea59537dbbeb0d52b509aff6db0348253cb4f871b7d2c163002576c042` —
+ *    14 times between 2026-03-04 and 2026-04-24, before V2 took over. The live
+ *    upstream adapter only reads V2's 7-arg event, so this entire pre-V2
+ *    mainnet history (TeraSwap's first six weeks) reads as zero. This mirror
+ *    issues a second `getLogs` on chain 1, against V1's own address and its
+ *    own (5-arg) event shape, and sums it into the same `dailyVolume`/
+ *    `dailyFees` as V2 — `tokenIn`/`totalAmount`/`feeAmount` sit in the same
+ *    roles in both shapes (confirmed against
+ *    `contracts/TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`, which is V1's
+ *    source despite the filename). V1's total: 14 logs. V2's total (7-arg,
+ *    unchanged): 23 logs. Mainnet total: 37. Every chain's `start` is also
+ *    corrected to its contract's actual first log (see item 2 below) rather
+ *    than an inherited, unverified date — mainnet's had read 2026-05-08, which
+ *    was neither V1's real first log (2026-03-04, 65 days earlier) nor V2's
+ *    (2026-05-26, 18 days later) — it fell in the gap between the two and
+ *    excluded both.
  * 1. Adds Arbitrum One (42161). The live adapter configures ONLY ethereum and
  *    base. `docs/DEPLOYMENTS.md` dates the Arbitrum prod flip 2026-07-20, but
  *    the chain's own logs put the FIRST `SwapWithFee` three days earlier, on
@@ -52,6 +72,22 @@
  * `docs/DEPLOYMENTS.md`
  * (`0xf14b181b91f1b3274fdaa19248d7619acadd21f0666cfbfbede40bdb660927b2`,
  * block 485,946,212, status 0x1).
+ *
+ * The frozen mainnet V1 contract (`TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`
+ * — V1's actual source, despite the filename) emits a narrower, 5-arg form of
+ * the same event instead:
+ *
+ *   event SwapWithFee(
+ *     address indexed user, address indexed router, address tokenIn,
+ *     uint256 totalAmount, uint256 feeAmount
+ *   );
+ *
+ * `tokenIn`, `totalAmount` and `feeAmount` sit in the same three positions as
+ * the 7-arg event, so both shapes decode into the `SwapWithFeeLog` fields this
+ * file actually reads. Its `topic0` —
+ * 0xe41d09ea59537dbbeb0d52b509aff6db0348253cb4f871b7d2c163002576c042 — differs
+ * from the 7-arg one in both hash and byte length, so no log can ever satisfy
+ * both filters: the two event reads below can't double-count each other.
  */
 
 /*
@@ -89,7 +125,7 @@ type SimpleAdapter = {
   version: number
   pullHourly: boolean
   fetch: (options: FetchOptions) => Promise<Record<string, Balances>>
-  adapter: Record<string, { feeCollector: string; start: string }>
+  adapter: Record<string, { feeCollector: string; start: string; legacyFeeCollector?: string }>
   methodology: Record<string, string>
   breakdownMethodology: Record<string, Record<string, string>>
 }
@@ -107,6 +143,15 @@ const METRIC = {
 
 export const SWAP_WITH_FEE_EVENT =
   'event SwapWithFee(address indexed user, address indexed router, address tokenIn, uint256 totalAmount, uint256 feeAmount, address tokenOut, uint256 outputAmount)'
+
+/**
+ * The frozen mainnet V1 contract's own (5-arg) `SwapWithFee` shape. `tokenIn`
+ * / `totalAmount` / `feeAmount` are in the same positions as
+ * `SWAP_WITH_FEE_EVENT`, so `fetch` can decode both into the same
+ * `SwapWithFeeLog` shape and sum them.
+ */
+export const SWAP_WITH_FEE_EVENT_V1 =
+  'event SwapWithFee(address indexed user, address indexed router, address tokenIn, uint256 totalAmount, uint256 feeAmount)'
 
 /**
  * Sources that collect the SAME 0.1% through their own partner-fee params
@@ -141,20 +186,50 @@ const excludedList =
  * chain — never hand-typed — because the same address is a DIFFERENT contract
  * on different chains (that doc's "same address, different contract per chain"
  * gotcha). Each entry carries its source row, its 42-char length sentinel and
- * the `eth_getCode` size measured on ITS OWN chain on 2026-09-03.
+ * the `eth_getCode` size measured on ITS OWN chain on 2026-09-03. Every
+ * `start` is likewise DERIVED from that chain's first on-chain `SwapWithFee`
+ * log, never inherited from a config or prod-flip date.
  */
-const chainConfig: Record<string, { feeCollector: string; start: string }> = {
+const chainConfig: Record<
+  string,
+  { feeCollector: string; start: string; legacyFeeCollector?: string }
+> = {
   // docs/DEPLOYMENTS.md · row "**FeeCollector V2** (instant swaps)" · chain "Ethereum Mainnet (1)".
-  // length sentinel 42 · eth_getCode on chain 1 (ethereum-rpc.publicnode.com) = 5,419 bytes.
+  // length sentinel 42 · eth_getCode on chain 1 (gateway.tenderly.co/public/mainnet) = 5,419 bytes.
+  // start DERIVED: V2's first SwapWithFee is block 25,181,121, tx
+  // 0xdeb17a805b0069c4641dd9e0e5e51bc88205f083bad288ad31dbb20ed296cdb6,
+  // timestamp 1779818087 = 2026-05-26T17:54:47Z — NOT the mainnet start, since
+  // `legacyFeeCollector` below has fills that predate it by 83 days. This
+  // chain's `start` is V1's first log instead (see legacyFeeCollector comment),
+  // replacing the previously configured (unverified, and wrong either way)
+  // 2026-05-08.
+  //
+  // legacyFeeCollector: docs/DEPLOYMENTS.md · row "**FeeCollector V1** (frozen)"
+  // · chain "Ethereum Mainnet (1)" · "deprecated, do not route here" for
+  // ROUTING, but its 14 historical SwapWithFee logs are real settled volume
+  // and belong in this adapter's count. length sentinel 42 · eth_getCode on
+  // chain 1 = 5,826 bytes. start DERIVED: V1's first SwapWithFee is block
+  // 24,585,100, tx 0xb42d6fda447057d1d84cdfbddd1ab8b3a22c83219a958e3414418d368a791973,
+  // timestamp 1772639423 = 2026-03-04T15:50:23Z — matches the 2026-03-04 date
+  // in the pre-V2 mainnet history this fixes. V1 emitted 14 SwapWithFee logs
+  // total (2026-03-04 through 2026-04-24, none since; V2 has 23 to date, for
+  // 37 mainnet-wide) before V2 replaced it.
   [CHAIN.ETHEREUM]: {
     feeCollector: '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459',
-    start: '2026-05-08',
+    legacyFeeCollector: '0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD',
+    start: '2026-03-04',
   },
   // docs/DEPLOYMENTS.md · row "**FeeCollector** (instant swaps)" · chain "Base (8453)".
   // length sentinel 42 · eth_getCode on chain 8453 (mainnet.base.org) = 5,339 bytes.
+  // start DERIVED: Base's first SwapWithFee is block 46,884,917, tx
+  // 0x8c79514e0e793e7889ecebb986b1a969c93c84e3cce366e5931b7c5d74fedb00,
+  // timestamp 1780559181 = 2026-06-04T07:46:21Z — five days after the
+  // contract's own deploy (block 46,697,561, 2026-05-30T23:41:09Z) and after
+  // the previously configured 2026-05-30, which was the deploy date, not the
+  // first fill.
   [CHAIN.BASE]: {
     feeCollector: '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130',
-    start: '2026-05-30',
+    start: '2026-06-04',
   },
   // docs/DEPLOYMENTS.md · row "**FeeCollector** (instant swaps)" · chain "Arbitrum One (42161)".
   // Same 42-char string as the Base row — a deployer-nonce collision, a DIFFERENT
@@ -173,19 +248,31 @@ const chainConfig: Record<string, { feeCollector: string; start: string }> = {
 }
 
 const fetch = async (options: FetchOptions) => {
-  const target = chainConfig[options.chain].feeCollector
-
-  const logs = await options.getLogs({
-    target,
-    eventAbi: SWAP_WITH_FEE_EVENT,
-  })
+  const cfg = chainConfig[options.chain]
 
   const dailyVolume = options.createBalances()
   const dailyFees = options.createBalances()
 
-  for (const log of logs) {
+  const accumulate = (log: SwapWithFeeLog) => {
     dailyVolume.add(log.tokenIn, log.totalAmount)
     dailyFees.add(log.tokenIn, log.feeAmount, METRIC.SWAP_FEES)
+  }
+
+  const logs = await options.getLogs({
+    target: cfg.feeCollector,
+    eventAbi: SWAP_WITH_FEE_EVENT,
+  })
+  for (const log of logs) accumulate(log)
+
+  // Mainnet only: the frozen V1 contract's pre-V2 history, decoded from its
+  // own (5-arg) event shape and summed into the same balances. Its address
+  // and topic0 both differ from V2's, so this can never re-read a V2 log.
+  if (cfg.legacyFeeCollector) {
+    const legacyLogs = await options.getLogs({
+      target: cfg.legacyFeeCollector,
+      eventAbi: SWAP_WITH_FEE_EVENT_V1,
+    })
+    for (const log of legacyLogs) accumulate(log)
   }
 
   return {
@@ -197,7 +284,7 @@ const fetch = async (options: FetchOptions) => {
 }
 
 const methodology = {
-  Volume: `Sum of totalAmount (the pre-fee swap notional a user commits, in tokenIn) from every SwapWithFee event emitted by the TeraSwapFeeCollector proxy, the contract that collects the 0.1% on-chain before the trade is forwarded to the underlying DEX router. Not all TeraSwap volume reaches that contract: routes filled by ${excludedList} collect the identical 0.1% through those venues' own partner-fee parameters instead of the FeeCollector, emit no SwapWithFee event, and are therefore NOT counted here.`,
+  Volume: `Sum of totalAmount (the pre-fee swap notional a user commits, in tokenIn) from every SwapWithFee event emitted by the TeraSwapFeeCollector proxy, the contract that collects the 0.1% on-chain before the trade is forwarded to the underlying DEX router. On Ethereum mainnet this aggregates both FeeCollector deployments — the frozen V1 contract and the live V2 contract that replaced it — so mainnet's reported history is continuous back to TeraSwap's first on-chain swap rather than starting at the V2 cutover. Not all TeraSwap volume reaches that contract: routes filled by ${excludedList} collect the identical 0.1% through those venues' own partner-fee parameters instead of the FeeCollector, emit no SwapWithFee event, and are therefore NOT counted here.`,
   Fees: 'A flat 0.1% (10 bps) fee taken by the FeeCollector on every swap, read directly from the feeAmount field of each SwapWithFee event (no estimation — the exact on-chain value).',
   Revenue: "A flat 0.1% (10 bps) fee taken by the FeeCollector on every swap, read directly from the feeAmount field of each SwapWithFee event (no estimation — the exact on-chain value).",
   ProtocolRevenue: "A flat 0.1% (10 bps) fee taken by the FeeCollector on every swap, read directly from the feeAmount field of each SwapWithFee event (no estimation — the exact on-chain value).",

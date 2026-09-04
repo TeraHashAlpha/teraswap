@@ -79,6 +79,29 @@ and `__tests__/defillama-teraswap-adapter.test.ts` asserts the list equals
 
 `Fees`, `Revenue` and `ProtocolRevenue` wording is **unchanged** from what is live.
 
+### 3. Mainnet counts only the live V2 FeeCollector — the frozen V1 contract's history is invisible
+
+Mainnet had a FeeCollector before V2: `docs/DEPLOYMENTS.md`'s "FeeCollector V1 (frozen)" row,
+`0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` — "deprecated, do not route here" for new swaps, but
+its 14 historical `SwapWithFee` logs (2026-03-04 through 2026-04-24) are real settled volume and
+predate V2's own first log (2026-05-26) by 83 days. The live adapter only reads V2's address and
+event shape, so this entire pre-V2 window — TeraSwap's first six weeks on mainnet — reads as zero.
+
+V1 emits a narrower, 5-argument `SwapWithFee(address,address,address,uint256,uint256)` — topic0
+`0xe41d09ea59537dbbeb0d52b509aff6db0348253cb4f871b7d2c163002576c042` — instead of V2's 7-argument
+form. `tokenIn`, `totalAmount` and `feeAmount` sit in the same three positions in both (confirmed
+against `contracts/TeraSwapFeeCollectorV2_DEPRECATED_flat.sol`, V1's actual source), so
+`teraswap-adapter.ts` decodes both into the same log shape and sums them: it issues a second
+`getLogs` on chain 1, against V1's own address (`legacyFeeCollector` in `chainConfig`) and its own
+event ABI, and folds the result into the same `dailyVolume`/`dailyFees` as V2. V1's address and
+topic0 both differ from V2's, so a V2 log can never satisfy V1's filter or vice versa —
+`__tests__/defillama-teraswap-adapter.test.ts` asserts both differences as a structural
+double-counting guard, not a comment.
+
+Mainnet's `start` changes accordingly: it now derives from V1's first log (2026-03-04) rather than
+the previously configured 2026-05-08, which was neither V1's nor V2's real first log (V2's is
+2026-05-26). **Mainnet total: 37** — 14 from V1, 23 from V2.
+
 ## Pasting it upstream
 
 1. Fork `DefiLlama/dimension-adapters` and open `aggregators/teraswap/index.ts`.
@@ -86,42 +109,60 @@ and `__tests__/defillama-teraswap-adapter.test.ts` asserts the list equals
    only because this repo has no dimension-adapters SDK to import:
    - delete the block fenced `── IN-REPO SHIM ──` … `── END IN-REPO SHIM ──` and restore the
      three imports it names (`FetchOptions`/`SimpleAdapter`, `CHAIN`, `METRIC`);
-   - drop the `export` keyword from `SWAP_WITH_FEE_EVENT`, `EXCLUDED_SOURCES` and
-     `EXCLUDED_SOURCE_LABELS` (they are exported here only so the tests can assert on them);
+   - drop the `export` keyword from `SWAP_WITH_FEE_EVENT`, `SWAP_WITH_FEE_EVENT_V1`,
+     `EXCLUDED_SOURCES` and `EXCLUDED_SOURCE_LABELS` (they are exported here only so the tests can
+     assert on them);
    - drop the in-repo-only header comment block if the maintainers prefer a lean file — the
      per-address source comments should stay, CodeRabbit asked for exactly that provenance
      upstream.
-3. The three `chainConfig` entries, the `fetch` body, `methodology` and `breakdownMethodology`
-   need **no** change — they are already in the merged file's shape.
-4. Run that repo's harness for the adapter per its CONTRIBUTING guide and confirm Arbitrum
-   returns non-zero volume for a day on or after 2026-07-17.
+3. The `chainConfig` entries, the `fetch` body, `methodology` and `breakdownMethodology` need
+   **no** change — they are already in the merged file's shape (`fetch`'s second, conditional
+   `getLogs` call for mainnet's `legacyFeeCollector` is ordinary control flow, not a shape change).
+4. Run that repo's harness for the adapter per its CONTRIBUTING guide and confirm Arbitrum returns
+   non-zero volume for a day on or after 2026-07-17, and mainnet returns non-zero volume for a day
+   between 2026-03-04 and 2026-04-24 (V1-only window, before V2 existed).
 5. Open the PR with the paragraph below.
 
 ## For the upstream PR description
 
-> **Add Arbitrum One, and stop overstating what Volume covers.**
+> **Count mainnet's pre-V2 history, add Arbitrum One, and stop overstating what Volume covers.**
 >
-> TeraSwap's FeeCollector on Arbitrum One (42161) has been emitting `SwapWithFee` since
+> TeraSwap's mainnet FeeCollector was redeployed once: a frozen V1 contract
+> (`0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD`) ran from 2026-03-04 to 2026-04-24 (14
+> `SwapWithFee` events) before the current V2 contract took over. This adapter has only ever read
+> V2, so mainnet's first six weeks read as zero. V1 emits a narrower 5-argument `SwapWithFee`
+> (`tokenIn`/`totalAmount`/`feeAmount` in the same positions as V2's 7-argument form); the adapter
+> now issues a second `getLogs` against V1's address and event shape on mainnet only, and sums it
+> into the same totals as V2. Mainnet's `start` now derives from V1's first log, 2026-03-04.
+> Mainnet total to date: 37 events (14 from V1, 23 from V2).
+>
+> It also adds Arbitrum One (42161): its FeeCollector has been emitting `SwapWithFee` since
 > 2026-07-17, after this adapter merged, so Arbitrum has been reporting as zero ever since. The
 > amounts are small — five events to date, the last on 2026-08-03 — so this is a correctness fix
-> rather than a material restatement. This adds the chain. The FeeCollector there is `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130`
-> (5,339 bytes of code on chain 42161) — the same string as the Base entry, which is a
-> deployer-nonce collision and not the same deployment; each address was verified with
-> `eth_getCode` on its own chain. `start` is derived from the first `SwapWithFee` log at that
-> address on 42161: block 484,739,263, 2026-07-17T08:07:53Z.
+> rather than a material restatement. The FeeCollector there is
+> `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` (5,339 bytes of code on chain 42161) — the same
+> string as the Base entry, which is a deployer-nonce collision and not the same deployment; each
+> address was verified with `eth_getCode` on its own chain. `start` is derived from the first
+> `SwapWithFee` log at that address on 42161: block 484,739,263, 2026-07-17T08:07:53Z. Base's
+> `start` is likewise corrected to its first `SwapWithFee` log rather than its deploy date.
 >
-> It also corrects `methodology.Volume`. The current text describes the FeeCollector as the single
-> contract every TeraSwap swap routes fee-collection through. That is not accurate: routes filled
-> by 0x, CoW Swap and Bebop take the identical 0.1% through those venues' own partner-fee
+> Finally it corrects `methodology.Volume`. The current text describes the FeeCollector as the
+> single contract every TeraSwap swap routes fee-collection through. That is not accurate: routes
+> filled by 0x, CoW Swap and Bebop take the identical 0.1% through those venues' own partner-fee
 > parameters, emit no `SwapWithFee`, and are therefore not counted by this adapter. The new text
-> says so explicitly and names them, so the reported figure is understood as a floor rather than a
-> total. Fees, Revenue and ProtocolRevenue are unchanged.
+> says so explicitly, names them, and notes that mainnet now aggregates both FeeCollector
+> deployments — so the reported figure is understood as a floor rather than a total, with mainnet's
+> history continuous rather than starting at the V2 cutover. Fees, Revenue and ProtocolRevenue are
+> unchanged.
 
 ### Volume methodology, verbatim as the adapter renders it
 
 > Sum of totalAmount (the pre-fee swap notional a user commits, in tokenIn) from every SwapWithFee
 > event emitted by the TeraSwapFeeCollector proxy, the contract that collects the 0.1% on-chain
-> before the trade is forwarded to the underlying DEX router. Not all TeraSwap volume reaches that
-> contract: routes filled by 0x, CoW Swap and Bebop collect the identical 0.1% through those
-> venues' own partner-fee parameters instead of the FeeCollector, emit no SwapWithFee event, and
+> before the trade is forwarded to the underlying DEX router. On Ethereum mainnet this aggregates
+> both FeeCollector deployments — the frozen V1 contract and the live V2 contract that replaced
+> it — so mainnet's reported history is continuous back to TeraSwap's first on-chain swap rather
+> than starting at the V2 cutover. Not all TeraSwap volume reaches that contract: routes filled by
+> 0x, CoW Swap and Bebop collect the identical 0.1% through those venues' own partner-fee
+> parameters instead of the FeeCollector, emit no SwapWithFee event, and
 > are therefore NOT counted here.
