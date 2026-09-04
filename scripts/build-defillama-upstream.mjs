@@ -26,9 +26,7 @@ const DEFAULT_OUTPUT_PATH = path.join(REPO_ROOT, 'integrations/defillama/upstrea
 const SHIM_START_MARKER = '/*\n * ── IN-REPO SHIM'
 const BODY_START_MARKER = 'export const SWAP_WITH_FEE_EVENT ='
 
-const UPSTREAM_HEADER = `// @ts-nocheck — generated file; see the header note below.
-//
-// TeraSwap — DefiLlama dimension-adapter (Aggregators).
+const UPSTREAM_HEADER = `// TeraSwap — DefiLlama dimension-adapter (Aggregators).
 //
 // Sums SwapWithFee events from TeraSwap's FeeCollector contracts across
 // Ethereum mainnet (both the frozen V1 and live V2 deployments), Base, and
@@ -36,13 +34,23 @@ const UPSTREAM_HEADER = `// @ts-nocheck — generated file; see the header note 
 // reviewer can check independently: chain id, the eth_getCode byte length
 // measured on that chain, and the first SwapWithFee log's block and tx hash.
 //
-// GENERATED — do not hand-edit. Produced by
-// scripts/build-defillama-upstream.mjs from the tested, reviewed source at
-// https://github.com/TeraHashAlpha/teraswap/blob/main/integrations/defillama/teraswap-adapter.ts
+// Source: https://github.com/TeraHashAlpha/teraswap/blob/main/integrations/defillama/teraswap-adapter.ts
 
 import { FetchOptions, SimpleAdapter } from "../../adapters/types";
 import { CHAIN } from "../../helpers/chains";
 import { METRIC } from "../../helpers/metrics";
+
+/**
+ * Local decoded-log shape for \`SwapWithFee\`. DefiLlama's own
+ * \`FetchOptions.getLogs\` returns \`Promise<any[]>\` — the SDK exports no type
+ * for the fields an \`eventAbi\` decodes into, so this is declared locally
+ * rather than imported; \`any[]\` is freely assignable to it.
+ */
+type SwapWithFeeLog = {
+  tokenIn: string
+  totalAmount: bigint
+  feeAmount: bigint
+}
 
 `
 

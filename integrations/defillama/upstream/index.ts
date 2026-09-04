@@ -1,5 +1,3 @@
-// @ts-nocheck — generated file; see the header note below.
-//
 // TeraSwap — DefiLlama dimension-adapter (Aggregators).
 //
 // Sums SwapWithFee events from TeraSwap's FeeCollector contracts across
@@ -8,13 +6,23 @@
 // reviewer can check independently: chain id, the eth_getCode byte length
 // measured on that chain, and the first SwapWithFee log's block and tx hash.
 //
-// GENERATED — do not hand-edit. Produced by
-// scripts/build-defillama-upstream.mjs from the tested, reviewed source at
-// https://github.com/TeraHashAlpha/teraswap/blob/main/integrations/defillama/teraswap-adapter.ts
+// Source: https://github.com/TeraHashAlpha/teraswap/blob/main/integrations/defillama/teraswap-adapter.ts
 
 import { FetchOptions, SimpleAdapter } from "../../adapters/types";
 import { CHAIN } from "../../helpers/chains";
 import { METRIC } from "../../helpers/metrics";
+
+/**
+ * Local decoded-log shape for `SwapWithFee`. DefiLlama's own
+ * `FetchOptions.getLogs` returns `Promise<any[]>` — the SDK exports no type
+ * for the fields an `eventAbi` decodes into, so this is declared locally
+ * rather than imported; `any[]` is freely assignable to it.
+ */
+type SwapWithFeeLog = {
+  tokenIn: string
+  totalAmount: bigint
+  feeAmount: bigint
+}
 
 const SWAP_WITH_FEE_EVENT =
   'event SwapWithFee(address indexed user, address indexed router, address tokenIn, uint256 totalAmount, uint256 feeAmount, address tokenOut, uint256 outputAmount)'
