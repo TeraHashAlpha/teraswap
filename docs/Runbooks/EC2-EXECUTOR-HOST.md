@@ -78,3 +78,9 @@ pm2 logs teraswap-executor   # confirm: KMS signer loaded, address 0x71f5…, Su
 - Keep the SG locked to your IP for SSH; rotate the SSH key if leaked.
 - Cost: t4g.small ~$12/mo (or t4g.micro ~$6) + KMS ~$1/mo — covered by the $200 credits for a long time.
 - Kill-switch is on-chain: admin `pause()` halts execution regardless of the host.
+- Never leave an env backup on this host. If you copy `.env.executor` aside for a migration or
+  a test, remove it in the same session — a backup that outlives its session is a second,
+  unaudited copy of every credential on the box.
+- When attributing a Supabase (or any) key on this host, compare the key **value** — fingerprint
+  it, don't trust its filename or label. A key's name is only ever a claim about what it is,
+  never proof (INC-2026-09-08-001).
