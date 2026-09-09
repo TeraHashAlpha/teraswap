@@ -2,10 +2,11 @@
  * [P224] Per-chain token catalog (P221).
  */
 import { describe, it, expect } from 'vitest'
-import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches } from './tokens'
+import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches, getCanonicalUsdc } from './tokens'
 import { DEFAULT_TOKENS, findToken, addCustomToken } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getChainlinkFeed } from './chainlink-feeds'
+import { getChainConfig, getWrappedNative, getSupportedChainIds } from './registry'
 
 describe('chains/tokens [P221]', () => {
   it('returns Base popular tokens for chainId 8453', () => {
@@ -219,5 +220,41 @@ describe('getSearchCatalog ranking — real catalog, per chain [fix/token-search
     const expected = exactMatchAddress(42161, 'USDC')
     const ranked = rankSearchMatches(matches, 'USDC')
     expect(ranked[0].address).toBe(expected)
+  })
+})
+
+// [CHORE-DCA-DEFAULT-BUY-USDC] DCA's buy leg now defaults to the chain's canonical USDC instead
+// of native ETH (which resolveSignableToken turned into the same wrapped native the sell leg is
+// pinned to — a same-token WETH→WETH default that signed fine and only failed at routing). Every
+// assertion here is against the CATALOG (getChainConfig / getWrappedNative), never an address
+// literal, per the prompt's requirement.
+describe('getCanonicalUsdc — chain-aware DCA default-buy resolution [CHORE-DCA-DEFAULT-BUY-USDC]', () => {
+  it('every supported chain: resolves to exactly the catalog USDC entry for that chain', () => {
+    for (const chainId of getSupportedChainIds()) {
+      const usdcAddress = getChainConfig(chainId).tokens.USDC
+      const resolved = getCanonicalUsdc(chainId)
+      expect(resolved).not.toBeNull()
+      expect(resolved!.address.toLowerCase()).toBe(usdcAddress.toLowerCase())
+      expect(resolved!.symbol).toBe('USDC')
+    }
+  })
+
+  it('every supported chain: the invariant — default buy (USDC) never equals default sell (WETH)', () => {
+    for (const chainId of getSupportedChainIds()) {
+      const buy = getCanonicalUsdc(chainId)
+      const sell = getWrappedNative(chainId)
+      expect(buy).not.toBeNull()
+      expect(buy!.address.toLowerCase()).not.toBe(sell.toLowerCase())
+    }
+  })
+
+  it('a chain with no catalog USDC yields no default (empty selector, never a wrong one)', () => {
+    // No chain in CHAIN_CONFIGS actually lacks a USDC entry today (proven by the first test
+    // above, over every id getSupportedChainIds() returns) — this exercises the SAME fail-closed
+    // path getCanonicalUsdc takes for that case, via a chain id absent from the registry
+    // entirely (getChainConfig throws), rather than defaulting to something wrong.
+    const unsupportedChainId = 999999
+    expect(() => getChainConfig(unsupportedChainId)).toThrow()
+    expect(getCanonicalUsdc(unsupportedChainId)).toBeNull()
   })
 })

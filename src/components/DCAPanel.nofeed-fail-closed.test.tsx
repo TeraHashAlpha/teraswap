@@ -198,6 +198,16 @@ vi.mock('@/components/TokenSelector', () => ({
               symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: '', category: 'Stablecoin', chainId: 8453,
             })}
           >pick-registered</button>
+          {/* [CHORE-DCA-DEFAULT-BUY-USDC] The buy leg no longer DEFAULTS to native ETH (it defaults
+              to USDC — see tokens.test.ts). This button lets the still-relevant "native ETH signs
+              as WETH" case below pick it explicitly instead of relying on the old default. */}
+          <button
+            data-testid="pick-native-out"
+            onClick={() => onSelect({
+              address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+              symbol: 'ETH', name: 'Ether', decimals: 18, logoURI: '', category: 'Native', chainId: 8453,
+            })}
+          >pick-native</button>
         </>
       )}
     </div>
@@ -307,7 +317,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     expect((await screen.findByTestId('dca-submit-block')).textContent).toMatch(/could not check/i)
   })
 
-  it('the DEFAULT output (native ETH) is asked about under the EXACT address that gets SIGNED', async () => {
+  it('a native-ETH output is asked about under the EXACT address that gets SIGNED', async () => {
     // [fix/dca-native-out-signs-weth] PREMISE CHANGED — and the guard it was written for is now
     // pinned directly instead of by proxy.
     //
@@ -329,7 +339,13 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     // about must be exactly what ends up in the signed message. A gate that normalises on its own,
     // in either direction, fails this — which is a strictly stronger version of the original pin.
     // The fail-closed behaviour itself is untouched and still pinned by the ETHFI cases above.
+    //
+    // [CHORE-DCA-DEFAULT-BUY-USDC] The buy leg no longer defaults to native ETH — it defaults to
+    // USDC, which is already registered and reaches signing without any gate (see the NON-VACUITY
+    // case above). Native ETH is picked here explicitly so this test keeps exercising the same
+    // resolution path it always did.
     renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('pick-native-out'))
     enterAmount('100')
 
     await driveCreationAsFarAsTheUiAllows()

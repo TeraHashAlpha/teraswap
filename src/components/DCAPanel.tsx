@@ -48,10 +48,10 @@ import {
   type DcaCustomIntervalUnit,
 } from '@/lib/order-engine'
 import type { CreateOrderConfig } from '@/lib/order-engine'
-import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
+import { isNativeETH, type Token } from '@/lib/tokens'
 import { getWrappedNative, getChainConfig } from '@/lib/chains/registry'
 import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
-import { findChainToken, resolveSignableToken } from '@/lib/chains/tokens'
+import { findChainToken, resolveSignableToken, getCanonicalUsdc } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
@@ -341,17 +341,37 @@ function CreateDCAForm({
 }) {
   const chainId = useChainId()
   // [CHORE-DCA-WETH-INPUT] DCA spends an ERC-20: default the INPUT to the chain's WETH
-  // (never native ETH). The OUTPUT selection still defaults to native ETH, but is RESOLVED to the
-  // same wrapped native below — the parenthetical that used to stand here, "contract unwraps
-  // WETH→ETH", was false: the executor reverts on a codeless tokenOut long before any unwrap, and
-  // its ETH-forwarding branch only fires for the WRAPPED address. See [fix/dca-native-out-signs-weth].
+  // (never native ETH). See [CHORE-DCA-DEFAULT-BUY-USDC] below for why the OUTPUT no longer
+  // defaults to native ETH (it used to be RESOLVED to this same wrapped native, below — the
+  // parenthetical that used to stand here, "contract unwraps WETH→ETH", was false: the executor
+  // reverts on a codeless tokenOut long before any unwrap, and its ETH-forwarding branch only
+  // fires for the WRAPPED address). See [fix/dca-native-out-signs-weth].
   const [tokenIn, setTokenIn] = useState<Token | null>(() => wethFor(chainId))
-  // [fix/dca-native-out-signs-weth] What the user PICKED in the buy selector. Nothing downstream
+  // [CHORE-DCA-DEFAULT-BUY-USDC] What the user PICKED in the buy selector. Nothing downstream
   // reads this — every consumer reads `tokenOut` below, which is the same choice resolved into the
   // form it can actually be signed in.
-  const [buySelection, setBuySelection] = useState<Token | null>(
-    DEFAULT_TOKENS.find(t => t.symbol === 'ETH') ?? null
-  )
+  //
+  // Defaults to the chain's canonical USDC (catalog-resolved via getCanonicalUsdc — never a
+  // hardcoded address, never a hardcoded/branched chain id), not native ETH. Before this, the
+  // default was native ETH, which resolveSignableToken (below) turns into the SAME wrapped native
+  // tokenIn is pinned to — a same-token WETH→WETH order that signed fine and only failed at
+  // routing. The cheap, in-code assertion of the invariant that actually matters — default buy
+  // must never equal default sell, on any chain — lives right here: if the catalog's canonical
+  // USDC ever collided with the chain's wrapped native, fail closed to an empty selector rather
+  // than silently recreate the WETH→WETH defect this fixes. No supported chain hits this branch
+  // today (see tokens.test.ts), but the check is what makes that a proven fact, not an assumption.
+  const [buySelection, setBuySelection] = useState<Token | null>(() => {
+    const usdc = getCanonicalUsdc(chainId)
+    const weth = wethFor(chainId)
+    if (usdc && weth && usdc.address.toLowerCase() === weth.address.toLowerCase()) {
+      console.error(
+        `[DCA] default buy (USDC) resolved to the same address as the pinned sell default ` +
+        `(WETH) on chain ${chainId} — leaving the buy selector empty instead of defaulting.`
+      )
+      return null
+    }
+    return usdc
+  })
   // ── [fix/dca-native-out-signs-weth] THE single native→wrapped resolution point for the BUY leg ──
   // Applied here, once, BEFORE anything is built or shown — so the signed struct, the executor
   // feed-coverage gate, the min-output derivation, the panel's own copy and the review modal all
