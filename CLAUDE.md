@@ -1,8 +1,8 @@
 # TeraSwap
 
-Ethereum Mainnet meta-aggregator — 8 liquidity sources (12 adapters registered; Odos, Balancer, OpenOcean, and Bebop disabled/permanently disabled — Odos: vendor shutdown 2026-07-30 [permanent]; Balancer: dead SOR endpoint, 0 production quotes since 2026-07-02; OpenOcean/Bebop: no vendor key access, disabled 2026-09-03 per INC-2026-09-03-001, written re-enable criteria apply), conditional orders (Limit/SL/TP/DCA), MEV protection via CoW Protocol, gasless approvals via Permit2. Smart contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor v2 (Solidity 0.8.28, Foundry).
+Multi-chain meta-aggregator — live on Ethereum Mainnet, Base, and Arbitrum One (see `docs/DEPLOYMENTS.md`); all pricing, gating, RPC, and router logic MUST be chain-aware — 8 liquidity sources (12 adapters registered; Odos, Balancer, OpenOcean, and Bebop disabled/permanently disabled — Odos: vendor shutdown 2026-07-30 [permanent]; Balancer: dead SOR endpoint, 0 production quotes since 2026-07-02; OpenOcean/Bebop: no vendor key access, disabled 2026-09-03 per INC-2026-09-03-001, written re-enable criteria apply), conditional orders (Limit/SL/TP/DCA), MEV protection via CoW Protocol, gasless approvals via Permit2. Smart contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor v2 (Solidity 0.8.28, Foundry).
 
-**State:** Phase 1 complete. Sprint 9B in progress (FeeCollector V2 minimumOutput — P68 mainnet deploy pending); parallel `CHORE-*` stream running post-9B (stablecoin canon, fail-closed oracle gate, DCA visibility/custom periods, DefiLlama adapter). 2587 TS + 74 Foundry tests passing. 8 CI workflows (`ci`, `codeql`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`).
+**State:** Phase 1 complete. FeeCollector V2 minimumOutput (P68) is deployed and live on Ethereum Mainnet. TeraSwap now also runs on Base (FeeCollector + OrderExecutor V3 live) and Arbitrum One (FeeCollector live; OrderExecutor V3 deployed 2026-08-04 but not yet operational — no whitelisted executor, oracle floor unconfigured) — see `docs/DEPLOYMENTS.md`. Sprint packets have progressed through Sprint 48 (Arbitrum DCA prep, PR #323); current work ships as named `fix/*`/`feat/*`/`chore/*` branches rather than sequential sprint numbers (most recently merged: `chore/audit-overrides-2026-09-09` PR #485, `fix/dca-no-feed-fail-closed` PR #484). 3814 TS + 138 Foundry tests passing. 9 CI workflows (`ci`, `codeql`, `daily-health-report`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`).
 
 ---
 
@@ -128,14 +128,19 @@ preserved for historical reference; do not append to it or resurrect it at the r
 
 ---
 
-## Current state (updated 2026-07-08)
+## Current state (updated 2026-09-09)
 
-- **Sprint 9B:** 2/3 done — P66 (contract) + P67 (frontend) shipped. P68 (mainnet deploy) pending.
-- **Parallel `CHORE-*` stream (post-9B, pre-P68):** stablecoin canon (PR #278), fail-closed oracle >$10k gate
-  (PR #280), DCA visibility/stats (PR #281), DCA custom periods (PR #286), DefiLlama adapter — combined P2/keeper
-  audit APPROVED 0C/0H.
-- **Open findings:** 0C/0H from internal audits. External analysis: 4H closed, 5M/4L in backlog (Sprint 9C+).
-- **Next milestones:** P68 deploy → Sprint 9A/9B auditor review → Sprint 9C (frontend integration tests, M-01).
-- **Known tech debt:** SC-02 (DCA dust), FE-01 (localStorage → Web Crypto V2), npm audit (1H/13M).
-- **Test/CI reality (2026-07-08):** 2587 TS tests + 74 Foundry tests passing. 8 CI workflows: `ci`, `codeql`, `e2e`,
-  `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`.
+- **Sprint 9B:** DONE — P66 (contract), P67 (frontend), P68 (mainnet deploy) all shipped; FeeCollector V2
+  minimumOutput live on Ethereum Mainnet (`0x47f2…7459`, verified on-chain — `docs/DEPLOYMENTS.md`).
+- **Multi-chain rollout since 9B:** Base — FeeCollector + OrderExecutor V3 live. Arbitrum One — FeeCollector live
+  (prod flip 2026-07-20); OrderExecutor V3 deployed 2026-08-04 but **not operational** (no whitelisted executor,
+  oracle floor unconfigured — `docs/DEPLOYMENTS.md`). Sprint packets progressed through Sprint 48 (Arbitrum DCA
+  prep, PR #323, shipped DARK); current work ships as named `fix/*`/`feat/*`/`chore/*` branches rather than
+  sequential sprint numbers.
+- **Open findings:** every internal audit pass recorded in `docs/security/AUDIT-TOTAL.md` through its last entry
+  (2026-07-29) is 0C/0H. Not re-verified for anything logged after that date.
+- **Known tech debt:** SC-02 (DCA dust), FE-01 (localStorage → Web Crypto V2) — status not re-verified this pass.
+  npm audit (measured 2026-09-09): 0 Critical, 0 High, 25 Moderate.
+- **Test/CI reality (2026-09-09):** 3814 TS tests (265 files) + 138 Foundry tests passing. 9 CI workflows: `ci`,
+  `codeql`, `daily-health-report`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`,
+  `token-catalog-refresh`.
