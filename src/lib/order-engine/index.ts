@@ -38,6 +38,12 @@ export type { CanonicalRoute, CanonicalFeeTier, BuildCanonicalRouteParams } from
 // [SPRINT-P1B] Client-side mirror of the server's $1 dust floor, run BEFORE approve.
 export { checkMinOutEconomicFloor } from './economic-floor'
 export type { MinOutFloorParams, MinOutFloorResult } from './economic-floor'
+// [FIX-DCA-NOFEED-FAIL-CLOSED] The executor's OWN tokenUsdFeeds registry — the source
+// _fairValueOut consults (V3:540-554). Panels import the module directly (like check-route) so it
+// can be stubbed per suite; re-exported here for parity with the other order-engine helpers.
+export { readExecutorFeedCoverage, EXECUTOR_FEED_REGISTRY_FN } from './executor-feed-registry'
+export type { ExecutorFeedCoverage, ExecutorFeedLeg, ExecutorFeedReader,
+  ExecutorFeedCoverageParams } from './executor-feed-registry'
 // [SPRINT-P1B] Limit/TP launch gate + the Stop-Loss deferral reason (deferred to v4).
 export { isLimitLaunchEnabled, isLimitLive, LIMIT_TP_CHAIN_ID, STOP_LOSS_DEFERRED_REASON } from './limit-launch'
 export { OrderType, PriceCondition, ORDER_EIP712_TYPES,
