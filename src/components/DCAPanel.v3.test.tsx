@@ -169,12 +169,18 @@ beforeEach(() => {
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
   mockRefetchNonce.mockResolvedValue({ data: 5n })
-  mockReadContractImpl.mockImplementation(({ functionName }) => {
+  mockReadContractImpl.mockImplementation(({ address, functionName }: { address?: string; functionName: string }) => {
     if (functionName === 'nonces') return { data: 5n, isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'invalidatedNonces') return { data: 0n, isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'latestRoundData') return { data: healthyEthUsdRound(), isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'description') return { data: 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'description') {
+      // [CHORE-DCA-DEFAULT-BUY-USDC] The buy leg now defaults to USDC (was native ETH → WETH),
+      // so both legs' feeds need a real identity here — real Base USDC/USD feed + description,
+      // same pair as chainlink-feeds.ts's FEED_EXPECTATIONS entry.
+      const isUsdcFeed = (address ?? '').toLowerCase() === '0x458138fc0d67027e9a6778ef40a6ffc318c69061'
+      return { data: isUsdcFeed ? 'USDC / USD' : 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
+    }
     return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
   })
   mockFetchUserOrders.mockResolvedValue([])
@@ -224,13 +230,14 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     const signArg = mockSignTypedDataAsync.mock.calls[0][0] as {
       message: { minAmountOut: bigint }
     }
-    // amountIn = 100 WETH (18dp) TOTAL. Both legs price at $2000 (healthyEthUsdRound answers the
-    // same round for any feed address), so fairOut = amountIn exactly. maxSlippageBps defaults to
-    // DEFAULT_MAX_SLIPPAGE_BPS = 300 (3%): minAmountOut = amountIn * 9700/10000 = 97 whole WETH.
-    // The default preset is 10 buys (DCA_TOTAL_PRESETS[2]) — a caller-side bug that divides by
-    // dcaTotal before signing would produce 9.7e18 here, a full order of magnitude smaller, and
-    // this is the only assertion in the suite that would catch it.
-    expect(signArg.message.minAmountOut).toBe(97_000000000000000000n)
+    // amountIn = 100 WETH (18dp) TOTAL, tokenOut defaults to USDC (6dp) [CHORE-DCA-DEFAULT-BUY-USDC].
+    // Both legs price at $2000 (healthyEthUsdRound answers the same round for any feed address), so
+    // fairOut = 100 whole USDC (the $ value is unchanged, just re-denominated into 6dp units).
+    // maxSlippageBps defaults to DEFAULT_MAX_SLIPPAGE_BPS = 300 (3%): minAmountOut = fairOut *
+    // 9700/10000 = 97 whole USDC. The default preset is 10 buys (DCA_TOTAL_PRESETS[2]) — a
+    // caller-side bug that divides by dcaTotal before signing would produce 9.7 USDC here, a full
+    // order of magnitude smaller, and this is the only assertion in the suite that would catch it.
+    expect(signArg.message.minAmountOut).toBe(97_000000n)
   })
 
   it('the derived floor is shown in the Advanced panel once a slippage tier is selected', async () => {

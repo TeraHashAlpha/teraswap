@@ -37,6 +37,10 @@ const mockFetchDefiLlamaPrice = vi.fn()
 
 const V3_ADDRESS = '0x3333333333333333333333333333333333333333'
 const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+// [CHORE-DCA-DEFAULT-BUY-USDC] The buy leg now defaults to USDC (was native ETH → WETH), so the
+// healthy-path fixture below needs a real description() for the Base USDC/USD feed too — same
+// address/description pair as chainlink-feeds.ts's FEED_EXPECTATIONS entry for Base.
+const BASE_USDC_USD_FEED = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
 
 vi.mock('wagmi', () => ({
   useAccount: () => useAccountMock(),
@@ -147,7 +151,10 @@ function feedReads(override?: (addr: string, fn: string) => { data: unknown; isE
     if (forced) return { ...forced, isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'latestRoundData') return { data: healthyRound(), isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'description') return { data: 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'description') {
+      const description = addr === BASE_USDC_USD_FEED.toLowerCase() ? 'USDC / USD' : 'ETH / USD'
+      return { data: description, isLoading: false, refetch: mockRefetchNonce }
+    }
     return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
   }
 }
