@@ -51,3 +51,68 @@ audit-gate FAILED — 2 high/critical advisories are NOT allowlisted:
 ## What could not be fixed here, and exactly why
 
 **`next` (GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4) — not fixed on this branch**, per explicit instruction: Task 3 says an existing dependabot branch (`dependabot/npm_and_yarn/next-16.3.3`, already satisfies the 7-day age gate at 15 days old) already resolves both, and not to duplicate it; Task 4 says change no other dependency version. Fixing it is one `npm merge` away, on `origin/dependabot/npm_and_yarn/next-16.3.3` — not blocked by policy, just intentionally left to that branch.
+
+---
+
+## Amendment — Architect resolution of the Acceptance-1 conflict
+
+The Architect's own read of the previous section: Acceptance 1 ("gate passes locally") cannot
+hold alongside Task 3 ("don't duplicate dependabot") and the original Do-NOT ("change no other
+dependency version") — confirmed correct, conflict was in the spec, not the execution. Resolved
+here in favour of one green PR, per Architect instruction, after one empirical check.
+
+### Q1 — does next@16.3.3 alone drag sharp to a patched version?
+
+Two different answers depending on what "alone" means, and the gap between them is the whole
+story:
+
+1. **In the abstract** (next@16.3.3's own manifest, no override in the way): `next@16.3.3`
+   declares `optionalDependencies.sharp: "^0.35.3"` (read from
+   `https://registry.npmjs.org/next/16.3.3`). Bumping `next` to 16.3.3 **with the sharp override
+   removed** and reinstalling resolves `sharp` to **0.35.4** on its own — npm's normal semver
+   resolution picks the highest 0.35.x satisfying `^0.35.3` that also clears
+   `.npmrc min-release-age=7` (0.35.4, 14 days old; nothing newer in the 0.35.x line existed to
+   consider). `node scripts/audit-gate.mjs` → **0 blocking** in this configuration.
+
+2. **On the actual, currently-open `origin/dependabot/npm_and_yarn/next-16.3.3` branch, as
+   committed**: checked out into an isolated clone and ran `npm ci` + the real gate script.
+   Result: **sharp resolves to 0.35.3** (the vulnerable version) and the gate reports
+   **1 blocking** (`HIGH sharp GHSA-rgj7-g3m4-5g8c`) — `next`'s two CRITICALs are gone, sharp's
+   HIGH is not. Reason: that branch's `package.json` still carries the **pre-existing**
+   `overrides.sharp: "0.35.3"` entry (present in `origin/main` before either of these branches
+   existed) — dependabot's tooling bumped only the `next` dependency line, it did not touch or
+   remove that override, and an `overrides` pin always wins over a dependency's own declared
+   range. So next's `^0.35.3` is silently overruled back down to the exact vulnerable version.
+
+**This is answer (2) that matters** — it's the artifact the owner would actually merge — and it
+is the "does NOT" case, not the "does" case the question was hedging against. Merging the
+dependabot branch alone, unmodified, would still leave the gate red.
+
+### Branch taken: keep the sharp override AND bump next — this branch supersedes dependabot's
+
+Per the Architect's own ELSE instruction. On top of `a780567` (sharp override 0.35.3→0.35.4):
+bumped `dependencies.next` `16.2.11` → `16.3.3` (byte-identical version target to
+`dependabot/npm_and_yarn/next-16.3.3`'s own change), refreshed the lockfile. Diff: one line in
+`package.json`, plus `package-lock.json` confined to `next`, its `@next/swc-*` platform binaries,
+`@next/env`, `@swc/helpers` (0.5.15→0.5.23), and `postcss` (8.4.31→8.5.23, next's own bundled
+dependency — matches `next@16.3.3`'s registry manifest exactly). `sharp` itself is untouched by
+this commit (already at 0.35.4 from `a780567`) and resolves to 0.35.4 in the refreshed lockfile.
+
+**Gate, before this commit** (at `a780567`, sharp fixed / next not): `2 high/critical, 0 allowlisted, 2 blocking` (both `next` CRITICALs).
+**Gate, after this commit**: 
+```
+audit-gate: 0 high/critical advisories present, 0 allowlisted, 0 blocking.
+audit-gate PASSED — no un-allowlisted high/critical advisories.
+```
+
+Suite: 263 files / 3793 tests, all green (unchanged). Typecheck: clean. Lint: 94 warnings, 0
+errors — matches today's baseline exactly. `audit-allowlist.json`: untouched.
+
+### What the owner should merge, and in what order
+
+**Merge this branch (`chore/audit-overrides-2026-09-09`) only.** It is now self-sufficient — 0
+blocking on its own — and it supersedes `dependabot/npm_and_yarn/next-16.3.3`, which resolves to
+the identical `next` version but, merged alone, would leave `sharp`'s HIGH open (verified above).
+Close or let dependabot auto-close the `next-16.3.3` PR once this merges (same target version, no
+conflict expected); do not merge both, since npm would end up processing next's version bump from
+two different branches for no additional benefit — this branch already carries it.
