@@ -28,7 +28,7 @@
  */
 import { DEFAULT_TOKENS, getCustomTokens, type Token, type TokenCategory } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
-import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
+import { DEFAULT_CHAIN_ID, getChainConfig, getWrappedNative } from '@/lib/chains/registry'
 import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
 import { isStablecoinCategorySymbol } from './stablecoins'
 import { ARBITRUM_CATALOG } from './arbitrum-catalog'
@@ -389,6 +389,41 @@ export function findChainToken(address: string, chainId: number): Token | null {
     (t) => t.address.toLowerCase() === addr && (t.chainId ?? DEFAULT_CHAIN_ID) === chainId,
   )
   return custom ?? null
+}
+
+/**
+ * [fix/dca-native-out-signs-weth] The token EXACTLY as it can be committed to a signed order
+ * struct — THE single native→wrapped resolution point for a conditional order's legs.
+ *
+ * The native-ETH sentinel `0xEeee…EEeE` is not a token; it is a convention, and it has no code on
+ * any chain (`eth_getCode` → "0x" on both Ethereum mainnet and Base, re-derived 2026-09-09). An
+ * order struct carrying it can never execute:
+ *
+ *   - TeraSwapOrderExecutorV3.sol:567 snapshots `IERC20(order.tokenOut).balanceOf(address(this))`
+ *     BEFORE the swap and :579 re-reads it after, both unconditional and both ahead of every
+ *     delivery branch. Against a codeless address Solidity's extcodesize guard reverts with empty
+ *     revert data, so EVERY fill reverts — for a DCA, on every scheduled buy until expiry.
+ *   - The executor's fair-value registry has no entry for the sentinel either
+ *     (`tokenUsdFeeds(0xEeee…)` → `registered: false` on the live Base V3), so it cannot even be
+ *     priced, while the WRAPPED native is registered.
+ *   - The contract's own "router returned native ETH → forward ETH to the owner" branch (V3:593)
+ *     is keyed on `order.tokenOut == WETH`. Signing the WRAPPED address is therefore what BUYS the
+ *     user native-ETH delivery; signing the sentinel forfeits it and reverts first regardless.
+ *
+ * Chain-aware through `getWrappedNative` (never a hardcoded address, never a hardcoded chain id),
+ * and returns the catalog `Token` so the resolved leg carries the symbol/decimals/logo the user
+ * sees — the caller must use this ONE value for both the signed struct and the screen, or the two
+ * drift apart again.
+ *
+ * FAILS CLOSED: `null` when the chain's catalog has no wrapped-native entry, which callers already
+ * treat as "no token selected". Falling back to the sentinel would re-create the unexecutable
+ * order this function exists to prevent. A non-native token is returned untouched — this resolves
+ * the sentinel and nothing else.
+ */
+export function resolveSignableToken(token: Token | null, chainId: number): Token | null {
+  if (!token) return token
+  if (token.address.toLowerCase() !== NATIVE_ETH.toLowerCase()) return token
+  return findChainToken(getWrappedNative(chainId), chainId)
 }
 
 /**

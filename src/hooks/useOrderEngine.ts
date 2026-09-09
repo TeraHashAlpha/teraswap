@@ -678,7 +678,20 @@ export function useOrderEngine() {
     // satisfy (the contract would revert, wasting an EIP-712
     // signature). The UI hides native ETH from the DCA INPUT selector, but resolve the
     // sentinel here too (chain-aware WETH, never hardcoded) so it can NEVER reach the signed
-    // struct. tokenOut is left untouched — native ETH is a valid OUTPUT (contract unwraps).
+    // struct.
+    //
+    // [fix/dca-native-out-signs-weth] tokenOut is left untouched HERE, and that is deliberate: the
+    // sentence that used to stand in this spot — "native ETH is a valid OUTPUT (contract unwraps)"
+    // — was false, and it is the belief that shipped an unexecutable order. The executor snapshots
+    // `IERC20(order.tokenOut).balanceOf(address(this))` unconditionally before the swap
+    // (TeraSwapOrderExecutorV3.sol:567) and re-reads it after (:579); the native sentinel has no
+    // code on any chain, so that read reverts and EVERY fill reverts with it. Its unwrap branch
+    // (:593) is keyed on `order.tokenOut == WETH`, i.e. only the WRAPPED address ever reaches the
+    // native-ETH delivery path. The resolution therefore happens ONCE, upstream, at DCAPanel's
+    // `tokenOut` memo (lib/chains/tokens.ts::resolveSignableToken), so the address the user is
+    // shown and the address that is signed are the same value and cannot drift. Resolving it a
+    // second time here would re-create exactly that drift — a struct saying one thing and a panel
+    // saying another — which is the failure this fix removes, not a belt to add.
     const tokenInAddress = config.tokenIn.address.toLowerCase() === NATIVE_ETH.toLowerCase()
       ? getWrappedNative(chainId)
       : (config.tokenIn.address as `0x${string}`)

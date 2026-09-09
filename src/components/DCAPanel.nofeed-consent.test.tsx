@@ -192,15 +192,26 @@ describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED] — feed-covered tokens are unaf
     expect(screen.queryByTestId('dca-submit-block')).not.toBeInTheDocument()
   })
 
-  it('the DEFAULT output (native ETH) is refused — the 0xEeee… sentinel is what gets SIGNED', async () => {
-    // useOrderEngine.createOrder resolves a native-ETH tokenIn to wrapped native and leaves tokenOut
-    // alone, so `_fairValueOut` looks up the sentinel — unregistered on Base (measured 2026-09-09).
-    // Recorded here because it is a real behaviour change for the panel's own default pair.
+  it('the DEFAULT output (native ETH) is no longer refused — it resolves to a registered token', async () => {
+    // [fix/dca-native-out-signs-weth] PREMISE CHANGED — this test previously read "the DEFAULT
+    // output (native ETH) is refused — the 0xEeee… sentinel is what gets SIGNED" and asserted the
+    // block. That was correct while `order.tokenOut` really was the sentinel: unregistered on Base
+    // (`tokenUsdFeeds(0xEeee…)` → registered:false, re-read 2026-09-09), so the gate refused it.
+    //
+    // The sentinel is no longer what gets signed. DCAPanel resolves a native buy leg to the chain's
+    // WRAPPED native BEFORE the struct is built (its `tokenOut` memo → resolveSignableToken), and
+    // that address IS registered (`tokenUsdFeeds(0x4200…0006)` → registered:true). So the gate now
+    // asks about a token the executor can price and correctly lets it through.
+    //
+    // This is NOT the gate going fail-open: the fail-closed behaviour it exists for is pinned
+    // unchanged by the `pick-nofeed-output` cases above, which still refuse ETHFI. What changed is
+    // the address being asked about, and it changed because the SIGNED address changed with it —
+    // which is exactly the address fidelity `executor-feed-registry.ts` requires.
     renderWithProviders(<DCAPanel />)
     enterAmount('1')
     startDca()
 
-    await waitFor(() => expect(screen.getByTestId('dca-submit-block')).toBeInTheDocument())
-    expect(createOrderMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId('dca-submit-block')).not.toBeInTheDocument()
   })
 })
