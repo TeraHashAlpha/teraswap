@@ -41,10 +41,13 @@ const mockSubscribeToOrders = vi.fn()
 const mockFetchDefiLlamaPrice = vi.fn()
 
 const V3_ADDRESS = '0x3333333333333333333333333333333333333333'
-// The real Base ETH/USD feed. Both DEFAULT DCA legs resolve here on Base: tokenIn defaults to Base
-// WETH, and native ETH (the tokenOut default) is mapped to the chain's wrapped-native.
+// The real Base ETH/USD feed — tokenIn defaults to Base WETH, which reads this feed.
 // Its genuine FEED_EXPECTATIONS entry is { description: 'ETH / USD', decimals: 8 } (ADR-018).
 const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
+// [CHORE-DCA-DEFAULT-BUY-USDC] The real Base USDC/USD feed. tokenOut (the buy leg) now defaults to
+// USDC (was native ETH → WETH, which read BASE_ETH_USD_FEED above). Its genuine FEED_EXPECTATIONS
+// entry is { description: 'USDC / USD', decimals: 8 } (ADR-018).
+const BASE_USDC_USD_FEED = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
 // [L-2] The base leg of Base cbETH's COMPOSED feed (cbETH/USD = cbETH/ETH × ETH/USD). Its genuine
 // FEED_EXPECTATIONS entry is { description: 'CBETH / ETH', decimals: 18 } — a DIFFERENT identity and
 // a DIFFERENT decimal count from the quote leg, which is why the per-address mock below exists: a
@@ -297,7 +300,10 @@ function feedReads(override?: (addr: string, fn: string) => { data: unknown; isE
     }
     if (functionName === 'latestRoundData') return { data: healthyRound(), isLoading: false, refetch: mockRefetchNonce }
     if (functionName === 'decimals') return { data: 8, isLoading: false, refetch: mockRefetchNonce }
-    if (functionName === 'description') return { data: 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
+    if (functionName === 'description') {
+      const description = addr === BASE_USDC_USD_FEED.toLowerCase() ? 'USDC / USD' : 'ETH / USD'
+      return { data: description, isLoading: false, refetch: mockRefetchNonce }
+    }
     return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
   }
 }

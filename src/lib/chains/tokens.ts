@@ -427,6 +427,26 @@ export function resolveSignableToken(token: Token | null, chainId: number): Toke
 }
 
 /**
+ * [CHORE-DCA-DEFAULT-BUY-USDC] The chain's canonical USDC, catalog-resolved — never a hardcoded
+ * address, never a hardcoded/branched chain id. Reads `getChainConfig(chainId).tokens.USDC` (the
+ * one address the registry curates as canonical per chain — e.g. Arbitrum's entry is USDC-native,
+ * deliberately excluding USDC.e) and resolves it to the full catalog `Token` via findChainToken.
+ *
+ * FAILS CLOSED to `null`, never to a wrong address: an unsupported chainId (getChainConfig throws)
+ * or a supported chain whose registry entry has no `USDC` key both return null, which callers
+ * already treat as "no default — leave the selector empty for the user to pick."
+ */
+export function getCanonicalUsdc(chainId: number): Token | null {
+  let usdcAddress: `0x${string}` | undefined
+  try {
+    usdcAddress = getChainConfig(chainId).tokens.USDC
+  } catch {
+    return null
+  }
+  return usdcAddress ? findChainToken(usdcAddress, chainId) : null
+}
+
+/**
  * [SPRINT-9P → CHORE-TOKEN-CATALOG-PIPELINE] Verified-badge auto-detect, chain-aware.
  *
  * ✓ now reads the REAL per-token `verified` field persisted by the catalog pipeline
