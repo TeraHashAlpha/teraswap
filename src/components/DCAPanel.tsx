@@ -8,8 +8,10 @@ import TokenSelector from './TokenSelector'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
 import OrderReviewModal from './OrderReviewModal'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
-// [FIX-DCA-NOFEED-CONSENT] Plain-language consent gate for a no-price-feed output token.
-import NoFeedConsentModal from './NoFeedConsentModal'
+// [FIX-DCA-NOFEED-FAIL-CLOSED] NoFeedConsentModal is deliberately NOT imported any more. Its whole
+// premise — "allow a no-price-feed DCA, gated by consent" — was reversed by the owner on
+// 2026-09-09: a leg the executor cannot price now BLOCKS creation (see the executor-registry gate
+// in handleCreate). The component file is retained, marked superseded, per rule #4.
 // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED L-2] resolveFeed, NOT getChainlinkFeed — see
 // outputHasNoResolvableFeed below for why the direct-only lookup was wrong post-ADR-018.
 import { resolveFeed } from '@/lib/chains/chainlink-feeds'
@@ -34,6 +36,10 @@ import {
   deriveCustomExpirySeconds,
   getDcaMinChunkUsd,
   applyDcaMinChunkGuard,
+  // [FIX-DCA-NOFEED-FAIL-CLOSED / SPRINT-P1B] The SAME pre-approve USD dust guard LimitOrderPanel
+  // and ConditionalOrderPanel already call. It was never wired here — DCA had only the token-unit
+  // MIN_ORDER_AMOUNT floor in useOrderEngine.createOrder.
+  checkMinOutEconomicFloor,
   // [SPRINT-V3-P2 / ADR-013 §1] v3 signing — fail-closed while getOrderExecutorV3(chainId) is null.
   getOrderExecutorV3,
   MAX_ORDER_SLIPPAGE_BPS,
@@ -57,6 +63,12 @@ import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
 import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
+// [FIX-DCA-NOFEED-FAIL-CLOSED] Imported as its own module (like check-route above) rather than via
+// the order-engine barrel, so a suite can stub the on-chain read without restubbing the barrel.
+import { readExecutorFeedCoverage } from '@/lib/order-engine/executor-feed-registry'
+// The per-chain viem client the rest of the app already reads contracts through — chain-aware by
+// construction (guarded transport, registry RPCs), so this gate can never query the wrong chain.
+import { getPublicClientForChain } from '@/lib/chains/clients'
 import DCADashboard from './dca/DCADashboard'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
@@ -128,10 +140,16 @@ export function evaluateDcaOracleGate(spend: PriceCheck, buy: PriceCheck): DcaOr
 
 /**
  * [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED L-2] Does the OUTPUT token have NO price source of any shape on
- * this chain? This is the single signal behind the "this token has no Chainlink price feed" consent
- * modal, and it must answer the same question `useChainlinkPrice` answers — otherwise the panel
- * demands consent for a missing feed while the hook is pricing the token perfectly well, and the
- * signing floor the user is being warned about is in fact oracle-derived.
+ * this chain, as the BROWSER sees it? It must answer the same question `useChainlinkPrice` answers —
+ * otherwise the panel would disagree with the hook that is pricing the token perfectly well.
+ *
+ * [FIX-DCA-NOFEED-FAIL-CLOSED] SUPERSEDED as a creation gate, retained as a predicate. It used to
+ * gate the no-feed consent modal; creation is now gated on the EXECUTOR's own `tokenUsdFeeds`
+ * registry instead (`readExecutorFeedCoverage`), because that — not this frontend table — is the
+ * mapping `_fairValueOut` reads to decide `hasFeed`, and therefore the only source that can answer
+ * "will the on-chain floor be `max(oracleFloor, scaledMin)` or bare `scaledMin`?". The two answer
+ * different questions and can legitimately disagree; the contract's answer is the one that binds.
+ * Kept exported and tested (see DCAPanel.oracle-fail-closed.test.tsx L-2) rather than removed.
  *
  * It used to call `getChainlinkFeed`, which only knows DIRECT token/USD feeds. Post-ADR-018 a token
  * may instead resolve COMPOSED (base × quote) — Base cbETH is exactly that: no direct cbETH/USD
@@ -329,19 +347,16 @@ function CreateDCAForm({
     DEFAULT_TOKENS.find(t => t.symbol === 'ETH') ?? null
   )
 
-  // [FIX-DCA-NOFEED-CONSENT] Whether the OUTPUT token has no Chainlink feed on this chain — the
-  // single signal that gates the consent modal. Feed-covered tokens never trigger it.
-  // [L-2] Resolved via the hook's own resolver, so a COMPOSED feed counts as having a feed.
-  const noFeedOutput = useMemo(
-    () => outputHasNoResolvableFeed(tokenOut, chainId),
-    [tokenOut, chainId],
-  )
-  const [showNoFeedModal, setShowNoFeedModal] = useState(false)
-  // Tracks WHICH token address consent was last given for (not a bare boolean), so switching to a
-  // different output token — or simply comparing against the currently selected one — naturally
-  // requires asking again, with no separate reset effect needed.
-  const [noFeedConsentGivenFor, setNoFeedConsentGivenFor] = useState<string | null>(null)
-  const noFeedConsentGiven = !!tokenOut && noFeedConsentGivenFor === tokenOut.address
+  // [FIX-DCA-NOFEED-FAIL-CLOSED] The one surface both new pre-approve gates write to — the executor
+  // fair-value-feed check and the $1 economic floor — mirroring the single `submitError` string
+  // LimitOrderPanel and ConditionalOrderPanel each keep.
+  //
+  // Stored WITH the selection it was earned on, not as a bare string, exactly as the (now removed)
+  // `noFeedConsentGivenFor` was and for the same stated reason: switching chain or either token
+  // naturally invalidates it, with no reset effect needed. That also makes the seq-guard the
+  // routability check needs unnecessary here — an in-flight read whose pair was swapped mid-flight
+  // writes a block keyed to the OLD selection, which the derived value below simply ignores.
+  const [submitBlockFor, setSubmitBlockFor] = useState<{ key: string; reason: string } | null>(null)
 
   // [CHORE-DCA-WETH-INPUT] Keep the spend token pinned to the active chain's WETH. Also
   // recovers if the input ever became native ETH (it can't via the selector, which hides
@@ -415,6 +430,11 @@ function CreateDCAForm({
   const routeCheckSeq = useRef(0)
   // Clear a stale block AND invalidate any in-flight check when the user changes either token.
   useEffect(() => { setRouteBlock(null); routeCheckSeq.current++ }, [tokenIn, tokenOut])
+  // [FIX-DCA-NOFEED-FAIL-CLOSED] The selection a pre-approve refusal belongs to. chainId is part of
+  // it because the executor, its registry and the chain's display name are all per-chain — a
+  // refusal earned on one chain says nothing about the next.
+  const selectionKey = `${chainId}:${tokenIn?.address ?? ''}:${tokenOut?.address ?? ''}`
+  const submitBlock = submitBlockFor?.key === selectionKey ? submitBlockFor.reason : null
 
   // [chore/oracle-less-advisory] Detect whether the BOUGHT token has an independent
   // price oracle (Chainlink feed OR DefiLlama coverage) on the active chain. When it
@@ -520,6 +540,19 @@ function CreateDCAForm({
    * useOrderEngine.createOrder stays the universal backstop.
    */
   const livePriceIn = chainlinkPriceIn ?? llamaPriceIn
+
+  // [FIX-DCA-NOFEED-FAIL-CLOSED] The BUY leg's live USD price, same two tiers in the same order as
+  // `livePriceIn` above and as the server's own dust gate (DefiLlama + Chainlink over tokenOut,
+  // api/orders/route.ts). This is what `checkMinOutEconomicFloor` values the signed floor with.
+  //
+  // It is a strictly better argument than the `isStablecoin(tokenOut) ? 1 : null` the other two
+  // panels pass, and not a second pattern: that literal is what LimitOrderPanel and
+  // ConditionalOrderPanel pass because neither has a live tokenOut price in scope — this panel
+  // already computes one, one line above, for exactly this class of use. Both values are null while
+  // `oracleBlocked` (the DefiLlama effect clears its own, Chainlink returns null on an integrity
+  // failure, and handleCreate returns early anyway), so the trap above still holds: a floor check
+  // can never be answered by a price the oracle gate refused.
+  const livePriceOut = chainlinkPriceOut ?? llamaPriceOut
 
   // Live preview of the amount that WOULD be signed, for the "derived floor" display.
   const liveAmountInRaw = useMemo(() => {
@@ -696,7 +729,7 @@ function CreateDCAForm({
     [interval, parts, expiry],
   )
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking && !oracleBlocked
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking && !oracleBlocked && !submitBlock
 
   async function handleCreate() {
     if (!canCreate || !tokenIn || !tokenOut) return
@@ -717,6 +750,7 @@ function CreateDCAForm({
     // call, and it is what stops the v3 derivation below from reading llama/APPROX prices.
     if (oracleBlocked) return
     setRouteBlock(null)
+    setSubmitBlockFor(null)
 
     // [ADR-020] Fail closed on a chain with no order-engine router set. getDefaultRouter returns
     // null there — never a sibling chain's router — so there is nothing to commit. An order signed
@@ -777,6 +811,42 @@ function CreateDCAForm({
       }
     }
 
+    // ── [FIX-DCA-NOFEED-FAIL-CLOSED] Executor fair-value-feed coverage, BEFORE approve ──
+    // The gap this closes, measured on Base 2026-09-09: a DCA WETH→ETHFI reached an on-chain
+    // approval AND an EIP-712 signature before anything refused it, because the only authoritative
+    // USD check lives server-side in api/orders/route.ts — inside the POST that happens AFTER
+    // OrderReviewModal's approve tx and useOrderEngine's signTypedDataAsync. "Before approve" here
+    // means before onSubmit is called at all: the approve button only exists inside the review
+    // modal that useOrderEngine.createOrder mounts by freezing pendingOrder.
+    //
+    // Derived AT USE TIME from the executor's own registry on the ACTIVE chain — no frontend list,
+    // no env list, no hardcoded chain id. Armed on `v3Enabled` for the same reason `oracleBlocked`
+    // is (the v2 path has no tokenUsdFeeds registry and no oracle floor at all, and this panel is
+    // only ever rendered behind isDcaLive(chainId), which requires getOrderExecutorV3(chainId) !==
+    // null — so wherever a user can reach this panel, the gate is armed).
+    if (v3Enabled) {
+      // The addresses EXACTLY as they will be SIGNED — `_fairValueOut` is called with
+      // order.tokenIn / order.tokenOut, so anything else answers a question the contract never
+      // asks. useOrderEngine.createOrder resolves a native-ETH tokenIn to the chain's wrapped
+      // native and leaves tokenOut untouched; this mirrors that, and only that.
+      const signedTokenIn = isNativeETH(tokenIn) ? getWrappedNative(chainId) : tokenIn.address
+      const coverage = await readExecutorFeedCoverage({
+        reader: getPublicClientForChain(chainId),
+        executor: getOrderExecutorV3(chainId),
+        chainName: chainDisplayName,
+        legs: [
+          { role: 'spend', symbol: tokenIn.symbol, address: signedTokenIn },
+          { role: 'buy', symbol: tokenOut.symbol, address: tokenOut.address },
+        ],
+      })
+      if (!coverage.ok) {
+        stopWaitingSound()
+        // Keyed to the selection this read was made for; a pair swapped mid-flight makes it inert.
+        setSubmitBlockFor({ key: selectionKey, reason: coverage.reason ?? '' })
+        return
+      }
+    }
+
     // [SPRINT-V3-P2 / ADR-013 §1] v3 signing: derive a REAL absolute minAmountOut (never '1')
     // from the reference price × (1 − maxSlippageBps), same formula the keeper's oracle floor
     // uses. Falls back to a fixed non-zero, non-price floor (still never '1') when no LIVE
@@ -816,6 +886,28 @@ function CreateDCAForm({
       minAmountOut = '1'
     }
 
+    // ── [SPRINT-P1B] $1 economic-floor pre-flight, BEFORE approve ──
+    // Byte-for-byte the guard LimitOrderPanel:410 and ConditionalOrderPanel:318 already run, wired
+    // here for the first time: DCA had only the token-unit MIN_ORDER_AMOUNT floor in
+    // useOrderEngine.createOrder (which values the INPUT), so a dust OUTPUT floor was discovered
+    // only by the server's 400 — after an approve tx and a signature had been spent.
+    //
+    // Scoped to v3 because the server's own dust gate is (`if (isV3Order)`, route.ts), and because
+    // on the v2 path minAmountOut is the literal '1' by design — valuing that would refuse every v2
+    // order for a floor v2 never claimed to enforce.
+    if (v3Enabled) {
+      const floorCheck = checkMinOutEconomicFloor({
+        minAmountOut: BigInt(minAmountOut),
+        tokenOutDecimals: tokenOut.decimals,
+        tokenOutUsdPrice: livePriceOut,
+      })
+      if (floorCheck.blocked) {
+        stopWaitingSound()
+        setSubmitBlockFor({ key: selectionKey, reason: floorCheck.reason ?? '' })
+        return
+      }
+    }
+
     // DCA uses priceFeed = address(0) — the contract skips the Chainlink price check
     // entirely, executing on schedule at any price. This avoids MAX_STALENESS rejections
     // (contract has 300s staleness vs Chainlink's 3600s heartbeat).
@@ -843,32 +935,16 @@ function CreateDCAForm({
 
     await onSubmit(config)
     setTotalDisplay('')
-    // [FIX-DCA-NOFEED-CONSENT] Consent is per-creation — require it again for the NEXT order,
-    // even against the same still-selected no-feed token.
-    setNoFeedConsentGivenFor(null)
   }
 
-  // [FIX-DCA-NOFEED-CONSENT] Gate BEFORE signing: a no-feed output token must show the consent
-  // modal and get an explicit Accept before handleCreate ever runs. Feed-covered tokens skip this
-  // entirely — byte-identical to the pre-existing submit path.
+  // [FIX-DCA-NOFEED-FAIL-CLOSED] The no-feed CONSENT branch that used to live here is gone. It
+  // opened a modal telling the user "you're not unprotected" and then let them proceed; with an
+  // unregistered leg the on-chain floor is the ADR-013 dust fallback, so that sentence was not
+  // true. Consent is not the right instrument for a claim the code cannot deliver — the executor
+  // registry gate inside handleCreate refuses the order instead, and says which leg.
   async function handleCreateClick() {
     if (!canCreate) return
-    if (noFeedOutput && !noFeedConsentGiven) {
-      setShowNoFeedModal(true)
-      return
-    }
     await handleCreate()
-  }
-
-  function handleNoFeedAccept() {
-    setShowNoFeedModal(false)
-    setNoFeedConsentGivenFor(tokenOut?.address ?? null)
-    void handleCreate()
-  }
-
-  function handleNoFeedReject() {
-    setShowNoFeedModal(false)
-    // Nothing signed, nothing submitted — the user is simply back on the panel.
   }
 
   return (
@@ -1063,6 +1139,17 @@ function CreateDCAForm({
               </span>
             </>
           )}
+        </div>
+      )}
+      {/* [FIX-DCA-NOFEED-FAIL-CLOSED] The pre-approve refusal: an executor leg with no registered
+          fair-value feed, a registry we could not read, or a signed floor worth less than the $1
+          economic minimum. Placed after the oracle banner because it can only be set by a click
+          that got PAST the oracle gate, so the two are never on screen together. Distinct testid
+          and distinct copy from `dca-oracle-block`: "this token has no on-chain price source" and
+          "our feed for this pair is broken" are different facts and must not be told as one. */}
+      {submitBlock && (
+        <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-submit-block">
+          <span className="font-semibold">&#9888; DCA not started.</span> {submitBlock}
         </div>
       )}
 
@@ -1356,7 +1443,6 @@ function CreateDCAForm({
         <button
           disabled={!canCreate}
           // [BUGFIX] await async handleCreate to catch errors properly
-          // [FIX-DCA-NOFEED-CONSENT] Routes through the consent gate first.
           onClick={async () => { playTouchMP3(); await handleCreateClick() }}
           className={`w-full rounded-xl py-3 text-[14px] font-bold uppercase tracking-wider transition-all ${
             canCreate
@@ -1379,13 +1465,6 @@ function CreateDCAForm({
         </button>
       )}
 
-      {/* [FIX-DCA-NOFEED-CONSENT] Only ever shown for a no-feed OUTPUT token, before signing. */}
-      <NoFeedConsentModal
-        open={showNoFeedModal}
-        tokenSymbol={tokenOut?.symbol || 'this token'}
-        onAccept={handleNoFeedAccept}
-        onReject={handleNoFeedReject}
-      />
     </div>
   )
 }
