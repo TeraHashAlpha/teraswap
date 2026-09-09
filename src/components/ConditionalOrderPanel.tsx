@@ -9,6 +9,11 @@ import OrderReviewModal from './OrderReviewModal'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
 import { getTokenPriceUSD } from '@/lib/price-monitor'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
+// [fix/native-out-signs-weth-limit-sltp] THE single native->wrapped resolution point for the BUY
+// leg. This is the SAME function the merged DCA fix uses — called here, never re-implemented,
+// never wrapped in a local helper with its own failure behaviour.
+import { resolveSignableToken } from '@/lib/chains/tokens'
+import { getWrappedNative, getChainConfig } from '@/lib/chains/registry'
 import {
   OrderType,
   PriceCondition,
@@ -52,9 +57,33 @@ function isStablecoin(token: Token): boolean {
 // Returns empty string if no feed found — callers must check before submitting.
 function findPriceFeed(token: Token, chainId: number): string {
   const feeds = getChainlinkFeeds(chainId)
-  const key = `${token.symbol}/USD`
-  return feeds[key]?.address ?? ''
+  const direct = feeds[`${token.symbol}/USD`]?.address
+  if (direct) return direct
+  // [fix/native-out-signs-weth-limit-sltp] This panel feeds the SELL leg to Chainlink, and the
+  // resolved BUY leg reaches the sell slot through `handleSwapTokens` / `handleTokenInSelect`
+  // below — both of which now move the RESOLVED (wrapped) token, not the raw pick. Chainlink
+  // publishes `ETH/USD` and never `WETH/USD`; they are the same number off the same aggregator
+  // (config.ts:355). Without this the swap button would silently make a previously creatable
+  // order refuse with "No Chainlink price feed available for WETH".
+  // Fail-soft on an unknown chain, mirroring getWrappedNative's own shape (registry.ts:199-206):
+  // getChainConfig THROWS there, and a throw inside handleSubmit lands after startWaitingSound()
+  // and would strand the panel in its waiting state.
+  if (token.address.toLowerCase() === getWrappedNative(chainId).toLowerCase()) {
+    try {
+      return feeds[`${getChainConfig(chainId).nativeCurrency.symbol}/USD`]?.address ?? ''
+    } catch { return '' }
+  }
+  return ''
 }
+
+/**
+ * [fix/native-out-signs-weth-limit-sltp] Shown when the BUY leg cannot be resolved into a form this
+ * order can be signed in — `resolveSignableToken` returns null when the connected chain's catalog
+ * carries no wrapped-native entry. Refusing IS the fix: falling back to the native sentinel would
+ * re-create the order that reverts on TeraSwapOrderExecutorV3.sol:567 on every fill.
+ */
+const UNRESOLVABLE_BUY_TOKEN_REASON =
+  'This network has no wrapped-ETH entry, so an order that buys native ETH cannot be signed here. Pick a different receive token.'
 
 type ConditionalOrderType = 'stop_loss' | 'take_profit'
 
@@ -184,7 +213,32 @@ function CreateConditionalForm({
   const v3Live = isLimitLive(chainId)
   const [maxSlippageBps] = useState(DEFAULT_MAX_SLIPPAGE_BPS)
   const [tokenIn, setTokenIn] = useState<Token>(DEFAULT_TOKENS[0])   // ETH
-  const [tokenOut, setTokenOut] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
+  // [fix/native-out-signs-weth-limit-sltp] What the user PICKED in the Receive selector. Nothing
+  // downstream reads this — every consumer reads `tokenOut` below, which is the same choice
+  // resolved into the form it can actually be signed in.
+  const [buySelection, setBuySelection] = useState<Token>(DEFAULT_TOKENS[2])  // USDC
+  // ── [fix/native-out-signs-weth-limit-sltp] THE single native->wrapped resolution point ──
+  // Applied here, once, BEFORE the value reaches ANY consumer — the Receive selector's own label,
+  // the ≈-output preview, the min-output derivation, the $1 economic floor, the signed
+  // CreateOrderConfig, the order hash and the review modal all read this one value and therefore
+  // cannot disagree about which token this order buys. It also sits ahead of the v2/v3 fork below,
+  // so BOTH signing paths commit the resolved address.
+  //
+  // Identical defect to the one the merged DCA fix removed, and flagged by its author as out of
+  // scope there: `useOrderEngine.createOrder` resolves the native sentinel for tokenIn ONLY, so a
+  // Take-Profit buying native ETH signed 0xEeee…EEeE as `order.tokenOut` — an address with no code
+  // on any chain. TeraSwapOrderExecutorV3 snapshots `IERC20(order.tokenOut).balanceOf(address(this))`
+  // unconditionally at sol:567 and re-reads it at :579, both ahead of every delivery branch, so
+  // Solidity's extcodesize guard reverts EVERY fill. Its "forward raw ETH to the owner" branch
+  // (:593) is keyed on `order.tokenOut == WETH`, so signing the WRAPPED address is what BUYS the
+  // user native-ETH delivery; signing the sentinel forfeits it and reverts first regardless.
+  //
+  // Fails closed to null (never back to the sentinel) when a chain has no wrapped-native entry;
+  // handleSubmit refuses on that below rather than signing something unfillable.
+  const tokenOut = useMemo(
+    () => resolveSignableToken(buySelection, chainId),
+    [buySelection, chainId],
+  )
   const [amount, setAmount] = useState('')
   const [triggerPrice, setTriggerPrice] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(3) // 30d default
@@ -243,6 +297,16 @@ function CreateConditionalForm({
     // create an SL. The API rejects it too, with this same reason.
     if (orderType === 'stop_loss') {
       setSubmitError(STOP_LOSS_DEFERRED_REASON)
+      return
+    }
+
+    // [fix/native-out-signs-weth-limit-sltp] Fail closed on a BUY leg that cannot be signed. The
+    // only way here is a chain whose catalog carries no wrapped-native entry while the user has
+    // picked native ETH; `resolveSignableToken` returns null rather than handing back the sentinel,
+    // and refusing is the correct end state — the alternative is an EIP-712 signature over an order
+    // that reverts on every fill. Placed BEFORE startWaitingSound() so the panel never waits on it.
+    if (!tokenOut) {
+      setSubmitError(UNRESOLVABLE_BUY_TOKEN_REASON)
       return
     }
 
@@ -385,23 +449,28 @@ function CreateConditionalForm({
   }
 
   const handleTokenInSelect = (token: Token) => {
-    if (token.address === tokenOut.address) setTokenOut(tokenIn)
+    if (token.address === tokenOut?.address) setBuySelection(tokenIn)
     setTokenIn(token)
     setTriggerPrice('')
     setCurrentUsdPrice(0)
   }
 
   const handleTokenOutSelect = (token: Token) => {
-    if (token.address === tokenIn.address) setTokenIn(tokenOut)
-    setTokenOut(token)
+    // [fix/native-out-signs-weth-limit-sltp] `tokenOut` is the RESOLVED leg; with none resolved
+    // there is nothing to move into the sell slot, so only the selection changes.
+    if (token.address === tokenIn.address && tokenOut) setTokenIn(tokenOut)
+    setBuySelection(token)
   }
 
   const handleSwapTokens = () => {
+    // [fix/native-out-signs-weth-limit-sltp] A swap needs a resolved buy leg to move into the sell
+    // slot; with none there is nothing to swap, so this is a no-op rather than half a swap.
+    if (!tokenOut) return
     playClick()
     const prevIn = tokenIn
     const prevOut = tokenOut
     setTokenIn(prevOut)
-    setTokenOut(prevIn)
+    setBuySelection(prevIn)
     setTriggerPrice('')
     setCurrentUsdPrice(0)
   }
@@ -507,7 +576,7 @@ function CreateConditionalForm({
           <TokenSelector selected={tokenOut} onSelect={handleTokenOutSelect} disabledAddress={tokenIn?.address} />
           <span className="flex-1 text-right text-sm text-cream-35">
             {currentUsdPrice > 0 && amount
-              ? `≈ ${(parseFloat(amount) * parseFloat(triggerPrice || '0')).toFixed(isStablecoin(tokenOut) ? 2 : 6)}`
+              ? `≈ ${(parseFloat(amount) * parseFloat(triggerPrice || '0')).toFixed(tokenOut && isStablecoin(tokenOut) ? 2 : 6)}`
               : 'Set trigger price below'}
           </span>
         </div>
@@ -646,9 +715,9 @@ function CreateConditionalForm({
         <button
           // [BUGFIX] await async handleSubmit to catch errors properly
           onClick={async () => { playTouchMP3(); await handleSubmit() }}
-          disabled={isSubmitting || !amount || !triggerPrice || depegBlocking}
+          disabled={isSubmitting || !amount || !triggerPrice || depegBlocking || !tokenOut}
           className={`w-full rounded-xl py-3 text-sm font-bold transition-all ${
-            isSubmitting || !amount || !triggerPrice || depegBlocking
+            isSubmitting || !amount || !triggerPrice || depegBlocking || !tokenOut
               ? 'cursor-not-allowed bg-cream-08 text-cream-35'
               : orderType === 'stop_loss'
                 ? 'bg-red-500/80 text-white hover:bg-red-500 active:scale-[0.98]'
