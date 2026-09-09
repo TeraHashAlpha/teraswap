@@ -307,20 +307,39 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     expect((await screen.findByTestId('dca-submit-block')).textContent).toMatch(/could not check/i)
   })
 
-  it('the DEFAULT output (native ETH) is refused too — the sentinel is what gets SIGNED', async () => {
-    // useOrderEngine.createOrder resolves a native-ETH tokenIn to wrapped native and leaves tokenOut
-    // untouched, so order.tokenOut is the 0xEeee… sentinel and that is the key _fairValueOut looks
-    // up. It is not registered on Base (measured 2026-09-09), so hasFeed is false and the floor is
-    // the dust fallback. Pinning it here so a future "normalise the sentinel to WETH" convenience
-    // cannot quietly re-open the hole by answering a question the contract never asks.
+  it('the DEFAULT output (native ETH) is asked about under the EXACT address that gets SIGNED', async () => {
+    // [fix/dca-native-out-signs-weth] PREMISE CHANGED — and the guard it was written for is now
+    // pinned directly instead of by proxy.
+    //
+    // This test read "the DEFAULT output (native ETH) is refused too — the sentinel is what gets
+    // SIGNED", asserted the block, and pinned `0xeeee…` as the queried key, so that "a future
+    // 'normalise the sentinel to WETH' convenience cannot quietly re-open the hole by answering a
+    // question the contract never asks". The hole it feared is a gate normalised INDEPENDENTLY of
+    // the struct — asking about WETH while still signing the sentinel.
+    //
+    // That is not what happened. The struct itself changed: DCAPanel resolves a native buy leg to
+    // the chain's wrapped native BEFORE the struct is built, so the sentinel never reaches
+    // `order.tokenOut` at all and asking about the wrapped native is precisely the question the
+    // contract asks. Re-derived on Base 2026-09-09: `eth_getCode(0xEeee…)` is "0x" on Base AND
+    // mainnet, `tokenUsdFeeds(0xEeee…)` → registered:false, `tokenUsdFeeds(0x4200…0006)` →
+    // registered:true, and the executor's own `WETH()` is 0x4200…0006 — the only address its
+    // native-ETH delivery branch (V3:593) will ever match.
+    //
+    // So the assertion below pins the INVARIANT rather than one address: whatever the gate asks
+    // about must be exactly what ends up in the signed message. A gate that normalises on its own,
+    // in either direction, fails this — which is a strictly stronger version of the original pin.
+    // The fail-closed behaviour itself is untouched and still pinned by the ETHFI cases above.
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
 
     await driveCreationAsFarAsTheUiAllows()
 
-    expectNoWalletInteraction()
-    await screen.findByTestId('dca-submit-block')
-    expect(registryCalls.map(c => c.token)).toContain('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+    await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))
+    const signedOut = (mockSignTypedDataAsync.mock.calls[0][0] as { message: { tokenOut: string } })
+      .message.tokenOut.toLowerCase()
+    expect(registryCalls.map(c => c.token)).toContain(signedOut)
+    expect(registryCalls.map(c => c.token)).not.toContain('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+    expect(signedOut).toBe(WETH_BASE.toLowerCase())
   })
 })
 

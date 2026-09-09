@@ -51,7 +51,7 @@ import type { CreateOrderConfig } from '@/lib/order-engine'
 import { DEFAULT_TOKENS, isNativeETH, type Token } from '@/lib/tokens'
 import { getWrappedNative, getChainConfig } from '@/lib/chains/registry'
 import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
-import { findChainToken } from '@/lib/chains/tokens'
+import { findChainToken, resolveSignableToken } from '@/lib/chains/tokens'
 import { useTokenBalances } from '@/hooks/useTokenBalances'
 import { useTokenBalance } from '@/hooks/useTokenBalance'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
@@ -341,10 +341,32 @@ function CreateDCAForm({
 }) {
   const chainId = useChainId()
   // [CHORE-DCA-WETH-INPUT] DCA spends an ERC-20: default the INPUT to the chain's WETH
-  // (never native ETH). The OUTPUT still defaults to native ETH (contract unwraps WETH→ETH).
+  // (never native ETH). The OUTPUT selection still defaults to native ETH, but is RESOLVED to the
+  // same wrapped native below — the parenthetical that used to stand here, "contract unwraps
+  // WETH→ETH", was false: the executor reverts on a codeless tokenOut long before any unwrap, and
+  // its ETH-forwarding branch only fires for the WRAPPED address. See [fix/dca-native-out-signs-weth].
   const [tokenIn, setTokenIn] = useState<Token | null>(() => wethFor(chainId))
-  const [tokenOut, setTokenOut] = useState<Token | null>(
+  // [fix/dca-native-out-signs-weth] What the user PICKED in the buy selector. Nothing downstream
+  // reads this — every consumer reads `tokenOut` below, which is the same choice resolved into the
+  // form it can actually be signed in.
+  const [buySelection, setBuySelection] = useState<Token | null>(
     DEFAULT_TOKENS.find(t => t.symbol === 'ETH') ?? null
+  )
+  // ── [fix/dca-native-out-signs-weth] THE single native→wrapped resolution point for the BUY leg ──
+  // Applied here, once, BEFORE anything is built or shown — so the signed struct, the executor
+  // feed-coverage gate, the min-output derivation, the panel's own copy and the review modal all
+  // read one value and cannot disagree about which token this order buys. Measured on Base
+  // 2026-09-09: `order.tokenOut` was signed as the native sentinel, an address with no code, so
+  // TeraSwapOrderExecutorV3's unconditional `IERC20(order.tokenOut).balanceOf` (sol:567/579)
+  // reverted on every fill and a DCA buying ETH was never executable. See resolveSignableToken.
+  //
+  // Deliberately NOT normalised for display only, and deliberately NOT normalised inside
+  // useOrderEngine.createOrder: either would leave one surface telling the user something the
+  // signature does not say. The user still keeps native ETH delivery — the executor forwards raw
+  // ETH when `order.tokenOut == WETH` (V3:593), which is a branch only the wrapped address reaches.
+  const tokenOut = useMemo(
+    () => resolveSignableToken(buySelection, chainId),
+    [buySelection, chainId],
   )
 
   // [FIX-DCA-NOFEED-FAIL-CLOSED] The one surface both new pre-approve gates write to — the executor
@@ -1039,7 +1061,7 @@ function CreateDCAForm({
         <div className="flex items-center gap-2 rounded-xl border border-cream-08 bg-surface-primary px-3 py-2.5">
           <TokenSelector
             selected={tokenOut}
-            onSelect={setTokenOut}
+            onSelect={setBuySelection}
             disabledAddress={tokenIn?.address}
           />
           <span className="flex-1 text-right text-sm text-cream-35">
