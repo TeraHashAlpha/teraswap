@@ -104,6 +104,18 @@ vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
 }))
 
+// [FIX-DCA-NOFEED-FAIL-CLOSED] Creation now asks the ACTIVE chain's OrderExecutorV3 whether both
+// legs have a registered fair-value feed (`tokenUsdFeeds`) BEFORE approve — reading it through
+// `getPublicClientForChain`. Pinned "registered" for every token here so this suite keeps testing
+// its own subject; the gate itself has its own suite (DCAPanel.nofeed-fail-closed.test.tsx), which
+// is where its fail-closed behaviour is pinned.
+vi.mock('@/lib/chains/clients', () => ({
+  getPublicClientForChain: () => ({
+    // The real Base WETH row: feed, feedDecimals, tokenDecimals, maxStaleness, registered.
+    readContract: async () => ['0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', 8, 18, 3600n, true],
+  }),
+  _clearClientCache: vi.fn(),
+}))
 vi.mock('@rainbow-me/rainbowkit', () => ({
   ConnectButton: () => <button data-testid="rk-connect">Connect</button>,
 }))
@@ -489,56 +501,53 @@ describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedl
   })
 })
 
-// ── [L-1] The in-handler guard, reached through the one caller that can reach it ──
+// ── [L-1] The in-handler guard, reached by forcing the handler over a blocked render ──
 
-describe('DCAPanel — L-1: the consent-accept path cannot sign over a blocked oracle', () => {
+describe('DCAPanel — L-1: a forced create cannot sign over a blocked oracle, feedless output included', () => {
   /**
-   * `handleNoFeedAccept` calls `handleCreate()` directly — it is the ONLY caller that does not go
-   * through the Start-DCA button's own handler, and therefore the only surface from which
-   * `handleCreate`'s in-handler guards are reachable at all. The scenario is a real one rather than a
-   * contrivance: a feedless output token opens the consent modal while the SPEND feed is healthy, the
-   * spend feed then degrades mid-session (these reads re-poll), and the user accepts a modal that was
-   * opened under the earlier, healthy verdict. Nothing about the modal tells them the oracle moved.
+   * [FIX-DCA-NOFEED-FAIL-CLOSED] This block used to drive `handleNoFeedAccept` — the consent modal's
+   * Accept handler, which called `handleCreate()` directly and was therefore the only caller that
+   * did not go through the Start-DCA button. That handler is gone: a no-feed output no longer asks
+   * for consent, it is refused by the executor-registry gate. The SCENARIO it covered is not gone
+   * and is preserved verbatim below — a feedless output token, the spend feed degrading mid-session,
+   * and a create forced over the now-blocked render — driven through the surface that remains,
+   * `clickBypassingDisabled`. What is pinned is unchanged: `handleCreate`'s own in-handler guard,
+   * not the button's `disabled` attribute.
    */
-  async function openConsentThenDegrade() {
+  async function selectFeedlessThenDegrade() {
     renderWithProviders(<DCAPanel />)
     pickFeedlessOutput()
     enterAmount('100')
     await waitFor(() => expect(screen.getByTestId('token-selector-out').textContent).toMatch(/NOFEED/))
     // Healthy so far: not blocked, and the button is live.
     expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
-    fireEvent.click(startDcaButton())
-    expect(await screen.findByTestId('nofeed-modal')).toBeInTheDocument()
+    expect(startDcaButton()).not.toBeDisabled()
 
     // Mid-session degradation of the SPEND feed, then a re-render so the hooks re-read it.
     mockIdentityMismatch()
     enterAmount('100.5')
     await waitFor(() => expect(screen.getByTestId('dca-oracle-block')).toBeInTheDocument())
-    // The modal is still open over a now-blocked render — this is the exact window the guard covers.
-    expect(screen.getByTestId('nofeed-modal')).toBeInTheDocument()
   }
 
-  it('accepting the consent modal after the spend feed degrades signs nothing', async () => {
-    await openConsentThenDegrade()
+  it('forcing create after the spend feed degrades signs nothing', async () => {
+    await selectFeedlessThenDegrade()
 
-    await act(async () => { fireEvent.click(screen.getByTestId('nofeed-accept')) })
+    await act(async () => { await clickBypassingDisabled(startDcaButton()) })
 
     expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
     expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
     expect(screen.queryByTestId('confirm-review')).toBeNull()
   })
 
-  it('NON-VACUITY — the same accept path DOES sign while the oracle stays verified', async () => {
-    // Without this, the test above would pass just as well if `handleNoFeedAccept` were broken, or if
-    // the accept button were never wired at all.
+  it('NON-VACUITY — the same forced path DOES sign while the oracle stays verified', async () => {
+    // Without this, the test above would pass just as well if the forced click never reached the
+    // handler at all.
     renderWithProviders(<DCAPanel />)
     pickFeedlessOutput()
     enterAmount('100')
     await waitFor(() => expect(screen.getByTestId('token-selector-out').textContent).toMatch(/NOFEED/))
 
-    fireEvent.click(startDcaButton())
-    expect(await screen.findByTestId('nofeed-modal')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('nofeed-accept'))
+    await act(async () => { await clickBypassingDisabled(startDcaButton()) })
 
     fireEvent.click(await screen.findByTestId('confirm-review'))
     await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))

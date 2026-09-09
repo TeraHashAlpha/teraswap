@@ -79,6 +79,18 @@ vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
 }))
 
+// [FIX-DCA-NOFEED-FAIL-CLOSED] Creation now asks the ACTIVE chain's OrderExecutorV3 whether both
+// legs have a registered fair-value feed (`tokenUsdFeeds`) BEFORE approve — reading it through
+// `getPublicClientForChain`. Pinned "registered" for every token here so this suite keeps testing
+// its own subject; the gate itself has its own suite (DCAPanel.nofeed-fail-closed.test.tsx), which
+// is where its fail-closed behaviour is pinned.
+vi.mock('@/lib/chains/clients', () => ({
+  getPublicClientForChain: () => ({
+    // The real Base WETH row: feed, feedDecimals, tokenDecimals, maxStaleness, registered.
+    readContract: async () => ['0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', 8, 18, 3600n, true],
+  }),
+  _clearClientCache: vi.fn(),
+}))
 vi.mock('@rainbow-me/rainbowkit', () => ({
   ConnectButton: () => <button data-testid="rk-connect">Connect</button>,
 }))

@@ -205,6 +205,24 @@ export const ORDER_EXECUTOR_ABI = [
  * frontend can cancel a v3 order without touching the v2 ABI/contract.
  */
 export const ORDER_EXECUTOR_V3_ABI = [
+  // [FIX-DCA-NOFEED-FAIL-CLOSED] The executor's OWN per-token fair-value feed registry — the exact
+  // mapping `_fairValueOut` consults through `_readFeedUsd` (TeraSwapOrderExecutorV3.sol:1046,
+  // 1076-1090). `registered` is the bit that decides `hasFeed`, and therefore whether the on-chain
+  // floor is max(oracleFloor, scaledMin) or the signed `scaledMin` alone (V3:540-554). Read-only;
+  // added so the client can ask the contract rather than a frontend table.
+  {
+    inputs: [{ name: '', type: 'address' }],
+    name: 'tokenUsdFeeds',
+    outputs: [
+      { name: 'feed', type: 'address' },
+      { name: 'feedDecimals', type: 'uint8' },
+      { name: 'tokenDecimals', type: 'uint8' },
+      { name: 'maxStaleness', type: 'uint256' },
+      { name: 'registered', type: 'bool' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
   {
     inputs: [
       { components: [
