@@ -154,6 +154,15 @@ vi.mock('@/components/TokenSelector', () => ({
         data-testid="pick-link"
         onClick={() => onSelect({ ...LINK[CHAIN_ID], name: 'Chainlink', logoURI: '', category: 'DeFi', chainId: CHAIN_ID })}
       >pick-link</button>
+      {/* [fix/limit-sltp-chain-aware-price-feed] The chain's wrapped native, picked directly —
+          the negative control's Base sell leg, see the note on that test. */}
+      <button
+        data-testid="pick-weth"
+        onClick={() => onSelect({
+          address: getWrappedNative(CHAIN_ID), symbol: 'WETH', name: 'Wrapped Ether',
+          decimals: 18, logoURI: '', category: 'Native', chainId: CHAIN_ID,
+        })}
+      >pick-weth</button>
     </div>
   ),
 }))
@@ -277,9 +286,15 @@ describe('LimitOrderPanel — a native-ETH output is SIGNED as the chain\'s wrap
     })
   }
 
+  // [fix/limit-sltp-chain-aware-price-feed — Auditor H2] The sell leg was LINK, and Base has NO
+  // LINK entry in CHAINLINK_FEEDS_BY_CHAIN[8453]. This test reached a signature at all only
+  // because the old symbol-keyed findPriceFeed answered with the MAINNET LINK aggregator — i.e.
+  // it was silently exercising the defect. WETH is the non-stable Base sell leg that genuinely
+  // has a Base feed; the assertions (tokenOut passed through, never rewritten to the wrapped
+  // native) are unchanged and still the point of the test.
   it('NEGATIVE CONTROL — a non-native tokenOut is passed through completely untouched', async () => {
     await renderOn(8453)
-    fireEvent.click(sell('pick-link'))   // non-stable sell leg => the feed token is the SELL leg
+    fireEvent.click(sell('pick-weth'))   // non-stable sell leg => the feed token is the SELL leg
     fireEvent.click(buy('pick-usdc'))    // buy USDC
     await act(async () => { await Promise.resolve() })
     enterAmount('100')

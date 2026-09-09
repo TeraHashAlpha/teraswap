@@ -363,10 +363,34 @@ const MAINNET_FEEDS: Record<string, FeedEntry> = {
 
 // [H-01] Sepolia Chainlink feeds removed for mainnet deployment.
 
-/** Get Chainlink feeds for a given chainId */
-export function getChainlinkFeeds(_chainId: number): Record<string, FeedEntry> {
-  // Only mainnet feeds supported in production
-  return MAINNET_FEEDS
+// [ADR-020 shape] The single fail-closed answer for a chain this MAINNET table does not describe.
+// Frozen and shared, like NO_ROUTERS above: one "we have no feeds for this chain" object, which a
+// caller cannot mutate into a non-empty map.
+const NO_FEEDS = Object.freeze({}) as Record<string, FeedEntry>
+
+/**
+ * Chainlink feeds for a given chainId — SYMBOL-keyed, and MAINNET IS THE ONLY CHAIN THIS TABLE
+ * DESCRIBES.
+ *
+ * [fix/limit-sltp-chain-aware-price-feed — Auditor H2 on merge 227a7f2] This function used to take
+ * `_chainId` and DISCARD it, returning MAINNET_FEEDS for every chain. The signature promised
+ * chain-awareness the body did not deliver, which is precisely why the defect survived review: at
+ * both call sites `getChainlinkFeeds(chainId)` READS as chain-correct. Limit/TP are Base-only
+ * (limit-launch.ts:45), so every Base order signed a MAINNET aggregator into `order.priceFeed` — an
+ * address with no code on Base, so `_checkPriceCondition` reverts on Solidity's extcodesize guard
+ * (TeraSwapOrderExecutorV3.sol:1117, from the call site at :504) and EVERY fill reverts.
+ *
+ * The chainId is now load-bearing and the answer is fail-closed: an unknown chain gets NO feeds
+ * rather than another chain's. This table is NOT extended per chain — the per-chain,
+ * ADDRESS-keyed registry `getChainlinkFeed(token, chainId)` (chains/chainlink-feeds.ts:100) is the
+ * single source of truth for that, and both order panels now resolve `order.priceFeed` through it.
+ * Growing a second, symbol-keyed per-chain map here is the duplication that bred this bug.
+ *
+ * Address-keyed beats symbol-keyed for the same reason: a symbol is not an identity. 'USDC/USD'
+ * matched ANY token whose symbol string was 'USDC', imposters included.
+ */
+export function getChainlinkFeeds(chainId: number): Record<string, FeedEntry> {
+  return chainId === 1 ? MAINNET_FEEDS : NO_FEEDS
 }
 
 // Legacy export (mainnet default)
