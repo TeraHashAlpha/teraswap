@@ -104,6 +104,13 @@ becoming another chain's keeper.
 `docs/DEPLOYMENTS.md` (§ Contracts, OrderExecutor V3 · Arbitrum One row; § Keeper registry,
 Arbitrum One row) at the moment you run the commands, then cross-checked on-chain and against AWS.
 
+**Never `export EXECUTOR_ENV_FILE`** in any shell that touches either app. Both apps now pin their
+own env file explicitly in `ecosystem.config.cjs` ([FIX-KEEPER-ENV-PIN-AND-RUNBOOK]) precisely so
+a stray shell export can no longer win over the file it names (shell env always wins — env.js), but
+a `pm2 restart <app> --update-env` still re-reads whatever *is* exported at that moment. To confirm
+which file a running process actually loaded, don't trust memory — read that process's own `Env
+file: …` boot line (S2.5 below for Arbitrum; the pre-restart check in S2.4 for Base).
+
 ### S2.0 — Host guard (define once per shell; EVERY command below is prefixed with it)
 
 Every command in this section starts with `ts_host_guard &&`. The guard refuses to run anywhere
@@ -127,26 +134,37 @@ ts_host_guard && echo "on the executor host"
 
 ### S2.1 — IAM: allow `kms:Sign` on the **Arbitrum** key (resolved, not typed)
 
-The instance role's existing policy (`teraswap-executor-kms`) names only the Base key ARN. Add a
-statement for the Arbitrum key. Resolve the ARN from the alias recorded in
-`docs/DEPLOYMENTS.md` § Keeper registry (Arbitrum One row: alias `teraswap-keeper-arbitrum`,
-region `eu-north-1`) and **compare the key id in the output with that row before proceeding** —
-if they differ, stop: the registry or the alias is wrong, and this is not the key to grant.
+The instance role's existing policy (`teraswap-executor-kms`) names only the Base key ARN, and the
+instance role holds only `Sign` + `GetPublicKey` on that one resource (`AWS-KMS-EXECUTOR-SETUP.md`
+Step 2) — it cannot itself call `kms:DescribeKey`, on the Arbitrum key or any other. Granting the
+new permission is therefore IAM write access the instance role does not have and must not be given
+just to bootstrap itself, so this step is split: the grant happens from an admin shell (the
+owner's workstation, never the host), and the host only ever *verifies* the grant afterwards.
+
+#### S2.1a — ADMIN-SHELL (owner's workstation — NOT the executor host)
+
+Resolve the ARN from the alias recorded in `docs/DEPLOYMENTS.md` § Keeper registry (Arbitrum One
+row: alias `teraswap-keeper-arbitrum`, region `eu-north-1`) and **compare the key id in the output
+with that row before proceeding** — if they differ, stop: the registry or the alias is wrong, and
+this is not the key to grant.
 
 ```bash
-# On the host (instance role) or an admin shell — read-only:
-ts_host_guard && ARB_KEY_ARN=$(aws kms describe-key --region eu-north-1 \
+# ADMIN-SHELL — an identity with IAM + KMS admin permissions. Do NOT run this on the executor host;
+# ts_host_guard is deliberately absent here because this step must NOT run on the instance.
+ARB_KEY_ARN=$(aws kms describe-key --region eu-north-1 \
     --key-id alias/teraswap-keeper-arbitrum --query 'KeyMetadata.Arn' --output text) \
   && echo "$ARB_KEY_ARN"
 # ↑ the trailing key id must equal the "KMS key id" cell of the Arbitrum One row in DEPLOYMENTS.md.
+# Record that key id — S2.1b re-derives it on the host and compares against this same DEPLOYMENTS.md row.
 ```
 
 Policy statement to add to `teraswap-executor-kms` (or as a second policy
-`teraswap-keeper-arbitrum-kms` attached to the same role). Only `Sign` + `GetPublicKey`, only
-this ARN — the Base statement stays as it is:
+`teraswap-keeper-arbitrum-kms` attached to the instance role, `teraswap-executor-ec2`). Only
+`Sign` + `GetPublicKey`, only this ARN — the Base statement stays as it is:
 
 ```bash
-ts_host_guard && cat <<POLICY
+# ADMIN-SHELL
+cat <<POLICY
 {
   "Effect": "Allow",
   "Action": ["kms:Sign", "kms:GetPublicKey"],
@@ -155,14 +173,42 @@ ts_host_guard && cat <<POLICY
 POLICY
 ```
 
-Apply it in IAM (console or `aws iam create-policy-version` from an admin shell). Verify from the
-host that the role can now read the key's public part — and that it resolves to the Arbitrum
-signer address recorded in DEPLOYMENTS.md § Keeper registry (Arbitrum One row), which is also the
-address `ARBITRUM-V3-STATE-2026-08-26.md` shows whitelisted on-chain:
+Apply it in IAM (console, or `aws iam create-policy-version` from this same admin shell). Do not
+proceed to S2.1b until the change has propagated (IAM is eventually consistent — a minute is
+typically enough).
+
+#### S2.1b — ON THE HOST (guarded): verify the grant before anything relies on it
+
+The instance role cannot `DescribeKey`, so the host confirms the grant the same way the running
+keeper eventually will — `GetPublicKey` by alias — and compares the key id it reaches against the
+same DEPLOYMENTS.md row S2.1a used, before deriving or trusting any signer address:
+
+```bash
+ts_host_guard && cd ~/teraswap \
+  && ARB_KEY_ID_HOST=$(aws kms get-public-key --region eu-north-1 \
+       --key-id alias/teraswap-keeper-arbitrum --query 'KeyId' --output text | sed 's#.*/##') \
+  && ARB_KEY_ID_DOC=$(grep 'Arbitrum One (42161)' docs/DEPLOYMENTS.md \
+       | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1) \
+  && if [ -n "$ARB_KEY_ID_HOST" ] && [ "$ARB_KEY_ID_HOST" = "$ARB_KEY_ID_DOC" ]; then \
+       echo "MATCH: $ARB_KEY_ID_HOST"; \
+     else \
+       echo "DIFF: host reached '${ARB_KEY_ID_HOST:-<none>}', DEPLOYMENTS.md says '${ARB_KEY_ID_DOC:-<none>}' — stop"; \
+     fi
+```
+
+`DIFF`, or either side empty, means the grant, the alias, or the registry entry is wrong — do not
+continue until this prints `MATCH`. No ARN is typed anywhere in this step; the host only ever
+addresses the key by alias, which is also what removes any need to carry `$ARB_KEY_ARN` from
+S2.1a's shell (a different machine) into this one.
+
+Only once S2.1b prints `MATCH` does deriving the signer address make sense — again by alias, never
+a typed ARN — to confirm it resolves to the Arbitrum signer recorded in DEPLOYMENTS.md § Keeper
+registry (Arbitrum One row), which is also the address `ARBITRUM-V3-STATE-2026-08-26.md` shows
+whitelisted on-chain:
 
 ```bash
 ts_host_guard && cd ~/teraswap/contracts/order-engine/executor \
-  && KMS_KEY_ID="$ARB_KEY_ARN" KMS_REGION=eu-north-1 \
+  && KMS_KEY_ID="alias/teraswap-keeper-arbitrum" KMS_REGION=eu-north-1 \
      node -e "import('./kms-signer.js').then(async m=>{const a=await m.createExecutorAccount();console.log(a.address)})"
 ```
 
@@ -194,7 +240,7 @@ CHAIN_ID=42161
 RPC_URL=<Alchemy/Infura Arbitrum One RPC — NOT the Base URL>
 ORDER_EXECUTOR_V3_ADDRESS=<DEPLOYMENTS.md § Contracts, "OrderExecutor V3 · Arbitrum One (42161)" row>
 #  no ORDER_EXECUTOR_ADDRESS: Arbitrum has no v2 OrderExecutor (v3-only boot is supported)
-KMS_KEY_ID=<the ARN printed by S2.1>
+KMS_KEY_ID=<the ARN printed by S2.1a>
 KMS_REGION=eu-north-1
 SUPABASE_URL=<same project URL as the Base keeper>
 SUPABASE_SERVICE_ROLE_KEY=<the NEW key from S2.2 — never the Base keeper's>
@@ -212,39 +258,106 @@ per app (`3002` / `9091` / this file's name) and shell env wins over the file, s
 collide with Base's `3001` / `9090` whatever the file says. Do **not** set `EXECUTOR_PRIVATE_KEY`
 or `ALLOW_PLAINTEXT_KEY` — the instance role + KMS are the signer.
 
+S2.2 requires the Supabase key pasted above to be a **new** key, never the Base keeper's. Verify
+that mechanically — by content, not by filename or label (INC-2026-09-08-001 §7) — without ever
+printing either key:
+
+```bash
+ts_host_guard && cd ~/teraswap/contracts/order-engine/executor \
+  && BASE_HASH=$(grep '^SUPABASE_SERVICE_ROLE_KEY=' .env.executor | cut -d= -f2- | sha256sum | cut -d' ' -f1) \
+  && ARB_HASH=$(grep '^SUPABASE_SERVICE_ROLE_KEY=' .env.executor.arbitrum | cut -d= -f2- | sha256sum | cut -d' ' -f1) \
+  && if [ -n "$BASE_HASH" ] && [ -n "$ARB_HASH" ] && [ "$BASE_HASH" != "$ARB_HASH" ]; then \
+       echo "ok  SUPABASE_SERVICE_ROLE_KEY differs between apps"; \
+     else \
+       echo "FAIL  SUPABASE_SERVICE_ROLE_KEY missing or identical between apps — stop"; \
+     fi
+```
+
 Optional pre-flight without starting anything (needs Foundry's `cast` on the host; skip if absent
 — the boot gate makes the identical read and refuses on `false`):
 
 ```bash
 ts_host_guard && cd ~/teraswap/contracts/order-engine/executor \
-  && ARB_SIGNER=$(KMS_KEY_ID="$ARB_KEY_ARN" KMS_REGION=eu-north-1 node -e "import('./kms-signer.js').then(async m=>{const a=await m.createExecutorAccount();console.log(a.address)})" | tail -1) \
-  && ARB_V3=$(grep '^ORDER_EXECUTOR_V3_ADDRESS=' .env.executor.arbitrum | cut -d= -f2) \
-  && ARB_RPC=$(grep '^RPC_URL=' .env.executor.arbitrum | cut -d= -f2) \
+  && ARB_SIGNER=$(KMS_KEY_ID="alias/teraswap-keeper-arbitrum" KMS_REGION=eu-north-1 node -e "import('./kms-signer.js').then(async m=>{const a=await m.createExecutorAccount();console.log(a.address)})" | tail -1) \
+  && ARB_V3=$(grep '^ORDER_EXECUTOR_V3_ADDRESS=' .env.executor.arbitrum | cut -d= -f2-) \
+  && ARB_RPC=$(grep '^RPC_URL=' .env.executor.arbitrum | cut -d= -f2-) \
   && cast call "$ARB_V3" "whitelistedExecutors(address)(bool)" "$ARB_SIGNER" --rpc-url "$ARB_RPC"
 # expect: true   (false ⇒ the executor change for this signer has not been executed on-chain — stop)
 ```
 
 ### S2.4 — Start the new app ONLY
 
+**START PRECONDITION.** `ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS` (`src/lib/order-engine/config.ts:117`)
+is a code-level allowlist and today it is `[8453]` — Base only, Arbitrum One is not in it. That
+list gates the **frontend/API** (order creation), not this keeper process, and nothing in this
+runbook adds 42161 to it. Starting `teraswap-keeper-arbitrum` before that list includes 42161 is
+therefore safe and intentional: the process boots green (chain-verify passes — OrderExecutorV3 is
+already deployed and whitelisted on-chain), polls Supabase for `chain_id=eq.42161` orders, finds
+none (the eligibility gate prevents any from being created), and idles — signing nothing. That is
+the expected, unremarkable state of this app until the code-level allowlist is separately widened.
+
 ```bash
 ts_host_guard && cd ~/teraswap/contracts/order-engine/executor \
   && git pull --ff-only \
   && npm ci --ignore-scripts \
-  && mkdir -p logs \
+  && install -d -m 700 logs \
   && pm2 start ecosystem.config.cjs --only teraswap-keeper-arbitrum \
   && pm2 save
 ```
+
+(`install -d -m 700 logs` rather than `mkdir -p logs`: the directory's own permissions are the
+real access control for the files pm2 creates inside it — see S2.6, where `create 0600` in the
+logrotate stanza is a no-op under `copytruncate` and cannot substitute for this.)
 
 `--only` starts exactly that app; `teraswap-executor` (Base) is neither restarted nor re-read.
 Confirm: `ts_host_guard && pm2 describe teraswap-executor | grep -E 'status|uptime|restarts'` must
 show the same uptime/restart count as before you began.
 
-Side effect on Base, by design: `git pull` updates the code on disk, so at its **next** restart the
-Base process boots through the same stricter gate — `CHAIN_ID` / `KMS_REGION` must be present in
-`.env.executor` (Step 5 already lists both) and its signer must be `whitelistedExecutors() = true`
-on the Base executor (it is: that is the key filling today). Nothing about what it signs, selects
-or fills changes. If a Base restart ever prints a `FATAL:` line, the env file is incomplete — fix
-the named variable; do not add an override.
+Side effect on Base, by design: `git pull` updates the code on disk, so Base's **next** restart
+boots through the same stricter gate. That restart is not automatic — pm2 does not restart Base
+just because `git pull` touched files on disk — so when the owner does restart Base (here or at
+any later time), run this pre-restart check first, under `ts_host_guard`, names only (no value is
+ever printed):
+
+```bash
+ts_host_guard && cd ~/teraswap/contracts/order-engine/executor \
+  && ok=0 \
+  && for v in CHAIN_ID KMS_REGION KMS_KEY_ID RPC_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY ORDER_EXECUTOR_ADDRESS ORDER_EXECUTOR_V3_ADDRESS; do \
+       if grep -Eq "^${v}=[^[:space:]]+" .env.executor; then echo "ok  $v"; ok=$((ok+1)); else echo "MISSING/BLANK  $v"; fi; \
+     done \
+  && if grep -Eq '^CHAIN_ID=8453[[:space:]]*$' .env.executor; then echo "ok  CHAIN_ID=8453"; ok=$((ok+1)); else echo "MISSING/BLANK  CHAIN_ID=8453"; fi \
+  && echo "checks ok: $ok / 9"
+```
+
+Expect **9** `ok` lines. Anything less: do not pull, do not restart — fix `.env.executor` first.
+Also confirm no identity-bearing variable is sitting in the shell that could win over the file:
+
+```bash
+ts_host_guard && env | grep -E '^(EXECUTOR_ENV_FILE|CHAIN_ID|RPC_URL|KMS_|SUPABASE_)'
+```
+
+This must print **nothing**. Any output here is a stray export from an earlier session — unset it
+before continuing; shell env wins over the file (env.js), so a leftover export would silently
+override `.env.executor` at restart.
+
+Only once both checks are clean:
+
+```bash
+ts_host_guard && cd ~/teraswap/contracts/order-engine/executor \
+  && before=$(git rev-parse HEAD:contracts/order-engine/executor/package-lock.json 2>/dev/null) \
+  && git pull --ff-only \
+  && after=$(git rev-parse HEAD:contracts/order-engine/executor/package-lock.json 2>/dev/null) \
+  && if [ "$before" != "$after" ]; then echo "package-lock.json changed — running npm ci"; npm ci --ignore-scripts; else echo "package-lock.json unchanged — skipping npm ci"; fi
+ts_host_guard && pm2 restart teraswap-executor
+# ATTENDED. Never --update-env (re-reads the shell env checked above into the process).
+# Never `restart all` (would also bounce teraswap-keeper-arbitrum). Never a bare
+# `pm2 start ecosystem.config.cjs` (re-declares both apps from this file).
+```
+
+Then read `pm2 logs teraswap-executor --lines 60 --nostream` and confirm the boot lines appear in
+this order: `eth_chainId` matches `CHAIN_ID`, `ORDER_TYPEHASH` (×2 — v2 and v3), the KMS executor
+address, `whitelistedExecutors = true` (×2 — v2 and v3), `Env file: …/.env.executor`, `Chain: 8453`.
+Any `FATAL:` line ⇒ the env file is incomplete — fix the named variable; do not add an override.
 
 ### S2.5 — Boot log lines the owner must see (in this order)
 
@@ -293,8 +406,17 @@ ROTATE
 ts_host_guard && sudo logrotate -d /etc/logrotate.d/teraswap-keeper   # dry run; no "error" lines expected
 ```
 
-The rotated files inherit `0600`: the error log holds order data in plaintext (INC-2026-09-08-001
-§8), so it must never become group/world-readable through rotation.
+`create 0600` above is a no-op with `copytruncate`: copytruncate truncates the live file in place
+rather than rotating-and-recreating it, so `create`'s permission-setting never actually runs
+against it. The real protection is the `logs/` directory permissions set once, up front, in S2.4
+(`install -d -m 700 logs`) — new files created inside a `700` directory by the `ec2-user`-owned
+`teraswap-keeper-arbitrum` process are unreachable by any other local user regardless of what
+`create` claims here. The `create 0600` line is left in place as documentation of intent (and in
+case the stanza is ever changed to drop `copytruncate`), but do not rely on it for the guarantee
+below.
+
+The error log holds order data in plaintext (INC-2026-09-08-001 §8), so it must never become
+group/world-readable through rotation.
 
 ### S2.7 — Roll back (Base untouched)
 

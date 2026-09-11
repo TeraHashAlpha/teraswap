@@ -21,7 +21,9 @@
  * same directory under pm2, so each app names its own file in its pm2 `env` block — that is shell
  * env from this module's point of view, so it is already set when this body runs, and the file it
  * names is loaded before any later import evaluates (same guarantee as above; pinned by
- * env-order.test.mjs). The Base process sets nothing and keeps `.env.executor`, byte-for-byte.
+ * env-order.test.mjs). [FIX-KEEPER-ENV-PIN-AND-RUNBOOK] The Base process now pins `.env.executor`
+ * explicitly in its pm2 `env` block too (previously it relied on this default), so the fallback
+ * below only matters for a manual, non-pm2 invocation.
  */
 
 import { readFileSync } from "fs"
