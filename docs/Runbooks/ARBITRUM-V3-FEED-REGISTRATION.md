@@ -7,9 +7,12 @@ Nothing else: no keeper change, no env change, no other token, no other chain.
 **Audience:** the owner holding the V3 **admin** key. This decides the **on-chain output floor** of every
 Arbitrum DCA fill (ADR-013 §1) → **Auditor sign-off required before §6** (CLAUDE.md #2/#3).
 
-**Why:** DCA on Arbitrum is blocked by one on-chain fact — `tokenUsdFeeds[WETH]` and `tokenUsdFeeds[USDC]`
-are both zero (re-measured 2026-09-11, §4). The #484 no-feed guard (`readExecutorFeedCoverage`) reads that
-registry and fails closed, so no Arbitrum pair can pass until both legs are registered. The 48h timelock is
+**Why:** `tokenUsdFeeds[WETH]` and `tokenUsdFeeds[USDC]` are both zero on the Arbitrum V3 executor
+(re-measured 2026-09-11, §4). The #484 no-feed guard (`readExecutorFeedCoverage`) reads that registry and
+fails closed, so no Arbitrum pair can pass through that guard until both legs are registered — this is a
+necessary condition for the on-chain oracle floor, but **not** what currently gates the DCA product surface
+(§10, §12): `ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS = [8453]` (`config.ts:117-121`) blocks Arbitrum DCA in the
+UI independently of this registry, and registering these feeds does not change that. The 48h timelock is
 the longest pole, and a wrong parameter costs another 48h — so every value below is derived and verified,
 never copied from Base.
 
@@ -38,13 +41,19 @@ never copied from Base.
 | `SEQUENCER_GRACE_PERIOD` | 3600 s | source `:148`; on-chain → `3600` |
 | `paused()` / `bootstrapped()` | `false` / `true` | §4 |
 
+**`maxStaleness` — OPTION C, adopted by the owner over this runbook's original proposal** (Option A,
+`2633` / `383`, superseded by the Auditor's measurement — §2.4 keeps the full comparison for the audit
+trail): `maxStaleness = 2 × (heartbeat + 13 s) + 60 s`, so this registration survives one fully missed OCR
+round instead of only clearing the observed maximum gap. Derivation and trade-offs in §2.4.
+
 **Precomputed, ABI-verified `actionHash = keccak256(abi.encode("setTokenUsdFeed", token, feed, tokenDecimals, maxStaleness))`**
-(the two proposals of §2.4 — re-derive in §4, and both were reproduced byte-for-byte by the real contract on a fork, Appendix C):
+(re-derive in §4; recomputed for Option C via `cast abi-encode ... | cast keccak` against the runbook's own
+values, nothing copied):
 
 | Registration | `actionHash` |
 |---|---|
-| WETH → ETH/USD, `tokenDecimals=18`, `maxStaleness=2633` | `0x0a731790cfd362ecd8cb74d6113ee2325b205099750a5dfb67fe982f5d5e47ce` |
-| USDC → USDC/USD, `tokenDecimals=6`, `maxStaleness=383` | `0xdbf34b71c8d2063a049a1de2dc7742995dfbd48fe7772de587a1c09920194f30` |
+| WETH → ETH/USD, `tokenDecimals=18`, `maxStaleness=3596` | `0x21a777eaf762bc6c5a0ebfa965acd6c8dc9137ba3159eaf32810034a04e8967c` |
+| USDC → USDC/USD, `tokenDecimals=6`, `maxStaleness=596` | `0xbf199f5c374ee648ce2295c3b4a2a8c88c1004776ce3d9f3ab343fc15ca4ea42` |
 
 **Custom-error selectors** (what a revert's `data` means):
 
@@ -183,7 +192,7 @@ whole tx reverts and the entry survives (revert undoes the delete) — you can r
 §4's on-chain read is the only guard against a wrong value. `maxStaleness` is **never** validated.
 `feedDecimals` is read from the feed and cached (1006/1015). There is **no** unregister function — the only
 write to `tokenUsdFeeds` is line 1013 — an executed entry can only be **overwritten** by another 48h
-registration; the instant emergency lever is `pause()` (902–907).
+registration; the instant emergency lever is `pause()` (903–907).
 
 ### 1.4 Storage and read-back
 
@@ -243,16 +252,17 @@ independent of this value.
 | `feedDecimals` (cached) | 8 | 8 | 8 (read on-chain, §2.2) | 8 (read on-chain, §2.2) |
 | `tokenDecimals` | 18 | 6 | **18** (on-chain `decimals()`) | **6** (on-chain `decimals()`) |
 | Chainlink published heartbeat | 1200 s (`chainlink-feeds.ts:138`) | 86400 s (`:139`) | **1755 s** (fetched 2026-09-11, §2.3) | **255 s** (fetched 2026-09-11, §2.3) |
-| `maxStaleness` registered / proposed | **3600** (= 3.0 × heartbeat) | **90000** (= heartbeat + 3600, 1.04 ×) | **2633** (= round(1.5 × 1755)) | **383** (= round(1.5 × 255)) |
+| `maxStaleness` registered / proposed | **3600** (= 3.0 × heartbeat) | **90000** (= heartbeat + 3600, 1.04 ×) | **3596** (Option C = 2×(heartbeat+13 s)+60 s, §2.4) | **596** (same rule) |
 | Source | `docs/feedback/fix-dca-no-feed-fail-closed.md:27` (on-chain read 2026-09-09), pinned in `src/lib/order-engine/executor-feed-registry.test.ts:10-12` | `…:28` / `…:11` | this runbook §2.3–2.4 | this runbook §2.3–2.4 |
 
 **What differs and why it matters:** the two chains' feeds have different heartbeats, so the Base numbers are
 not transferable. Base's USDC/USD is a 24 h-heartbeat feed; Arbitrum's is a **255 s** feed — copying Base's
 `90000` would let a frozen Arbitrum USDC feed be trusted as the fair-value floor for **25 h** (353 × its
-heartbeat). Base's WETH `3600` is 3 × Base's 1200 s heartbeat; against Arbitrum's 1755 s it would be an
-unexplained 2.05 ×. Neither Base margin follows one rule (3.0 × vs 1.04 ×), so they are a precedent, not a
-derivation. The Arbitrum values below follow the **one** staleness rule this codebase has already codified
-and audited for these exact feeds (§2.4).
+heartbeat). Base's WETH `3600` happens to land within 4 s of Arbitrum's Option C value (3596) purely by
+arithmetic coincidence (Base's is 3 × its own 1200 s heartbeat; Arbitrum's is derived from measured
+transmission latency on a 1755 s heartbeat, §2.4) — the two numbers must never be treated as the same
+derivation. The Arbitrum values below follow the staleness rule the Auditor measured and the owner adopted
+for these exact feeds (§2.4).
 
 ### 2.2 Feed verification — on-chain, two RPCs, 2026-09-11 (Appendix A for the raw output)
 
@@ -295,55 +305,70 @@ Siblings deliberately **not** used (same `name`, different products): `eth-usd-s
 These match the values already pinned in `chainlink-feeds.ts:154-155` and
 `docs/Reports/ARBITRUM-ADDRESS-VERIFICATION.md:68-70` — independently re-fetched here rather than inherited.
 
-**Empirical cross-check (Appendix B):** the last 401 rounds of each feed via `getRoundData`:
+**Empirical cross-check (Appendix B, re-measured for the Auditor's Option C review):** ETH/USD over ≥5 days,
+USDC/USD over ≥14 days, via `getRoundData` on the aggregator directly (not the proxy — plain, unphased
+round IDs), fetched in batches of `eth_call` against `arb1.arbitrum.io/rpc`:
 
 | | ETH / USD | USDC / USD |
 |---|---|---|
-| Sample window | 2026-09-10T16:43:43Z → 2026-09-11T11:25:50Z (18.7 h) | 2026-09-10T05:25:03Z → 2026-09-11T11:25:41Z (30.0 h) |
-| Inter-round gap min / median / p90 / p99 / **max** | 30 / 120 / 390 / 990 / **1470 s** | 257 / 270 / 271 / 272 / **273 s** |
-| Gaps > published heartbeat | **0** (max = 0.84 × 1755) | **400 of 400** — every gap is 2–18 s **over** 255 s because `updatedAt` includes the on-chain transmission latency (`startedAt → updatedAt` ≈ 12–13 s each round); max = 1.07 × |
+| Sample window | 2026-09-05T06:27:07Z → 2026-09-11T13:53:24Z (**6.31 d**) | 2026-08-27T20:30:26Z → 2026-09-11T13:49:46Z (**14.72 d**) |
+| Rounds sampled (aggregator round IDs) | **3,546** (114400–114945) | **4,701** (2253–6953) |
+| Inter-round gap min / median / p90 / p99 / **max** | 16 / 90 / 330 / 930 / **1771 s** | 30 / 270 / 271 / 330 / **331 s** |
+| Gaps > published heartbeat | **2 of 3545** (max = 1.009 × 1755) | **4,682 of 4,700** — nearly every gap is a few seconds **over** 255 s because `updatedAt` includes on-chain transmission latency (`startedAt → updatedAt`: min 12 s / median 13 s / max 253 s); max gap = 1.30 × heartbeat |
 | Gaps > 1.5 × heartbeat | 0 | 0 |
+| Gaps > 300 s (global `MAX_STALENESS`) | n/a (heartbeat itself is 1755 s) | **85 of 4,700** |
 | Integrity failures in sample | 0 | 0 |
 
-The USDC row is the important one: the feed's **effective** `updatedAt` cadence is ~270 s, not 255 s. Any
-`maxStaleness` at or near the raw heartbeat — and in particular the global fallback `MAX_STALENESS = 300`
-— would leave ~30 s of slack per cycle and turn routine rounds into NO-FEED fills.
+The USDC row is still the important one: the feed's **effective** `updatedAt` cadence is ~270 s, not 255 s,
+and over 14.7 days 85 rounds (1.8 %) landed past the global `MAX_STALENESS` (300 s) — the global fallback
+would have turned those routine rounds into NO-FEED fills. The observed maxima (1771 s ETH / 331 s USDC)
+are what Option C (§2.4) is measured against, not the theoretical heartbeat.
 
-### 2.4 `maxStaleness` derivation
+### 2.4 `maxStaleness` derivation — OPTION C (Auditor-recommended, owner-adopted)
 
-**Rule applied: `maxStaleness = round(heartbeat × 1.5)`** — the staleness policy this codebase has already
-codified, audited (SPRINT-9V) and applies today to these same two feed addresses in the raw quote gate and
-the UI hook (`getFeedStalenessSec`, `chainlink-feeds.ts:181-193`; test-pinned for the ETH/USD Arbitrum feed at
-`chainlink-feeds.test.ts:96` as `Math.round(1755 * 1.5)`). Using it on-chain means the keeper/frontend and
-the contract agree on what "fresh" means for every round.
+This runbook originally proposed **Option A** (`maxStaleness = round(heartbeat × 1.5)`, the staleness policy
+already codified for the raw quote gate and UI hook, `getFeedStalenessSec`, `chainlink-feeds.ts:181-193`).
+The Auditor's review of the parameter table (0C/0H/2M/3L) measured the feeds' actual round cadence (§2.3,
+Appendix B) and recommended **Option C** instead: `maxStaleness = 2 × (heartbeat + 13 s) + 60 s`. The owner
+adopted that recommendation. **Option A (2633 / 383) is superseded by the Auditor's measurement** and is
+kept below only for the audit trail — it is not queued by this runbook.
 
-| Token | Published heartbeat (§2.3) | × 1.5 | **Proposed `maxStaleness`** | Slack over observed max gap (§2.3) | Frozen-feed detection |
-|---|---|---|---|---|---|
-| WETH | 1755 s | 2632.5 | **2633** (`Math.round`, as the codebase does) | 2633 − 1470 = **1163 s** | ≤ 43.9 min |
-| USDC | 255 s | 382.5 | **383** | 383 − 273 = **110 s** | ≤ 6.4 min |
+The `+13 s` is the median on-chain transmission latency observed in both feeds' samples (§2.3, `startedAt →
+updatedAt`); the `× 2` is what actually buys survival of one fully missed OCR round (Option A does not: its
+margin over the observed max gap was positive but smaller than one heartbeat, so a single missed round would
+still exceed it); the `+60 s` is block-time/RPC slack on top.
+
+| Token | Published heartbeat (§2.3) | 2×(heartbeat+13 s) | +60 s | **`maxStaleness` (Option C)** | Slack over observed max gap (§2.3) | Frozen-feed detection |
+|---|---|---|---|---|---|---|
+| WETH | 1755 s | 3536 | 3596 | **3596** | 3596 − 1771 = **1825 s** (≈30.4 min) | ≤ 59.9 min |
+| USDC | 255 s | 536 | 596 | **596** | 596 − 331 = **265 s** (≈4.4 min) | ≤ 9.9 min |
 
 Properties, stated for the Auditor:
-- Clears every round observed in the 400-round samples, and every heartbeat-driven round (worst normal
-  case ≈ heartbeat + ~13 s latency: 1768 s / 268 s) with margin.
-- Does **not** survive one fully **missed** round (≈ 2 × cadence: ~3540 s / ~540 s). In that case the fill
-  degrades to the scaled signed min for the remainder of the gap (≤ ~15 min ETH / ≤ ~157 s USDC) — the
-  contract's designed fallback (`:536-538`, "never fill blind"), not a revert and not a blind fill.
+- Clears every round observed in the ≥5 d / ≥14 d samples (max gap 1771 s ETH / 331 s USDC, §2.3) with
+  margin, and every heartbeat-driven round with margin.
+- **Survives one fully missed round** (≈ 2 × cadence: ~3510 s ETH / ~510 s USDC) by design — that is the
+  point of the `× 2` term, and the property Option A lacked.
 - `0` (global 300 s) is **rejected** for both: ETH/USD would be NO-FEED whenever the price is calm for
-  > 5 min; USDC/USD would be NO-FEED on a ~30 s-late round (§2.3).
+  > 5 min; USDC/USD would be NO-FEED on 85 of the 4,700 sampled rounds (§2.3).
 
-Alternatives, so the choice is visible (none is recommended; shown with their consequences):
+Alternatives, so the choice is visible:
 
 | Option | ETH/USD | USDC/USD | Survives 1 missed round? | Frozen-feed exposure |
 |---|---|---|---|---|
-| **A — heartbeat × 1.5 (proposed)** | **2633** | **383** | no | 44 min / 6.4 min |
-| B — heartbeat × 2 | 3510 | 510 | no (3510 < ~3540; 510 < ~540) — buys nothing over A | 58 min / 8.5 min |
-| C — 2 × (heartbeat + 13 s) + 60 s | 3596 | 596 | yes | 60 min / 10 min — ⚠️ the ETH value lands within 4 s of Base's `3600` by arithmetic coincidence (Base's is 3 × 1200); if chosen it must be recorded as derived from 1755, not copied |
+| A — heartbeat × 1.5 (**superseded by the Auditor's measurement**) | 2633 | 383 | no | 44 min / 6.4 min |
+| B — heartbeat × 2 | 3510 | 510 | no — equals exactly 2 × the raw heartbeat, with no latency margin, so a missed round plus the observed ~13 s/round transmission latency can still exceed it | 58 min / 8.5 min |
+| **C — 2 × (heartbeat + 13 s) + 60 s — ADOPTED** | **3596** | **596** | yes | 60 min / 10 min |
 | Base precedent (NOT a derivation) | 3600 | 90000 | — | 60 min / **25 h** |
 
-> **AUDITOR MUST CONFIRM** before §6: option A (2633 / 383) as the on-chain policy — i.e. that "a single
-> missed round briefly degrades to the signed-min floor" is preferred over "a frozen feed is trusted for
-> longer". If the Auditor chooses another option, **only** the two `maxStaleness` numbers change; every
-> `actionHash` in §0 must then be recomputed (§4 shows how) — the rest of this runbook is unchanged.
+⚠️ The ETH Option C value (3596) lands within 4 s of Base's registered `3600` — arithmetic coincidence only
+(Base's is 3 × its own 1200 s heartbeat); it is recorded above as derived from Arbitrum's 1755 s heartbeat
+plus measured latency, never copied from Base (§2.1).
+
+> **Auditor-confirmed, owner-adopted:** Option C (`3596` / `596`) is the on-chain policy for §6–§9 of this
+> runbook — the owner accepted that "a single missed round is survived without degrading to the signed-min
+> floor" is preferred over "the tighter Option A margin with a smaller frozen-feed exposure window." If this
+> decision is ever revisited, **only** the two `maxStaleness` numbers change; every `actionHash` in §0 must
+> then be recomputed (§4 shows how) — the rest of this runbook is unchanged.
 
 ---
 
@@ -364,8 +389,8 @@ export WETH_DEC_CAT=$(tokdec WETH) USDC_DEC_CAT=$(tokdec USDC)
 export FEED_WETH=$(feed_for "$WETH") FEED_USDC=$(feed_for "$USDC")
 export V3=$(grep -E '^\| \*\*OrderExecutor V3\*\*.*Arbitrum One \(42161\)' "$DEP" | grep -oE '`0x[0-9a-fA-F]{40}`' | head -1 | tr -d '`')
 export ADMIN=$(grep -E '^\| Contract admin' "$DEP" | grep -oE '0x[0-9a-fA-F]{40}' | head -1)
-# proposed values (§2.4 — change ONLY if the Auditor picked another option)
-export ST_WETH=2633 ST_USDC=383
+# proposed values — Option C, Auditor-recommended, owner-adopted (§2.4 — change ONLY on a new Auditor decision)
+export ST_WETH=3596 ST_USDC=596
 for v in WETH USDC DAI FEED_WETH FEED_USDC V3 ADMIN; do eval val=\$$v; printf "%-10s %s len=%s\n" "$v" "$val" "${#val}"; done
 ```
 
@@ -402,16 +427,20 @@ done
 
 Expected feed lines: `9571 B`, `dec=8`, `desc="ETH / USD"` / `desc="USDC / USD"`; in each `latestRoundData`
 JSON, `answer > 0`, element 5 (`answeredInRound`) ≥ element 1 (`roundId`) — compare as big integers, bash
-`[ -ge ]` overflows on uint80 — and `now − updatedAt` **≤ 1768 s (ETH) / ≤ 268 s (USDC)** (a fresh round; the
-execute-time bound is 86400 s). Both RPCs must return the same `roundId`.
+`[ -ge ]` overflows on uint80 — and `now − updatedAt` **≤ the proposed `maxStaleness`: 3596 s (ETH) / 596 s
+(USDC)** (a fresh round; the execute-time bound is 86400 s). A tighter bound tied to the raw heartbeat
+(e.g. the earlier draft's 1768 s / 268 s) is the wrong check here — 268 s sits *below* USDC/USD's own
+observed cadence (§2.3), so a routine round could fail this pre-flight gate even though the on-chain
+registration you are about to queue (`maxStaleness = 596`) would accept it. The gate that matters is whether
+the round is fresh enough for the value you are registering. Both RPCs must return the same `roundId`.
 
 Re-derive the two `actionHash`es (must equal the §0 table):
 
 ```bash
 cast abi-encode "x(string,address,address,uint8,uint256)" setTokenUsdFeed $WETH $FEED_WETH 18 $ST_WETH | cast keccak
-# => 0x0a731790cfd362ecd8cb74d6113ee2325b205099750a5dfb67fe982f5d5e47ce
+# => 0x21a777eaf762bc6c5a0ebfa965acd6c8dc9137ba3159eaf32810034a04e8967c
 cast abi-encode "x(string,address,address,uint8,uint256)" setTokenUsdFeed $USDC $FEED_USDC 6 $ST_USDC | cast keccak
-# => 0xdbf34b71c8d2063a049a1de2dc7742995dfbd48fe7772de587a1c09920194f30
+# => 0xbf199f5c374ee648ce2295c3b4a2a8c88c1004776ce3d9f3ab343fc15ca4ea42
 ```
 
 Finally confirm the keystore you will sign with **is** the admin (this prompts for the keystore password, reads
@@ -563,9 +592,9 @@ parameter differs from what was queued (re-check §6 hashes) · `0xdfc44acf` →
 ```bash
 for R in "$RPC_URL" "$RPC_URL2"; do echo "== $R"
   cast call $V3 "tokenUsdFeeds(address)(address,uint8,uint8,uint256,bool)" $WETH --rpc-url "$R" | tr '\n' ' '; echo
-  #  => $FEED_WETH 8 18 2633 true
+  #  => $FEED_WETH 8 18 3596 true
   cast call $V3 "tokenUsdFeeds(address)(address,uint8,uint8,uint256,bool)" $USDC --rpc-url "$R" | tr '\n' ' '; echo
-  #  => $FEED_USDC 8 6 383 true
+  #  => $FEED_USDC 8 6 596 true
   cast call $V3 "tokenUsdFeeds(address)(address,uint8,uint8,uint256,bool)" $DAI  --rpc-url "$R" | tr '\n' ' '; echo
   #  => 0x0000000000000000000000000000000000000000 0 0 0 false      <-- NEGATIVE CONTROL: must be UNCHANGED
   cast call $V3 "timelockActions(bytes32)(bytes32,uint256,bool)" $AID_WETH --rpc-url "$R" | tr '\n' ' '; echo   # => 0x00…00 0 false (consumed)
@@ -583,10 +612,17 @@ forge script script/VerifyOrderExecutorV3.s.sol:VerifyOrderExecutorV3 --rpc-url 
   --sig "checkOracleFeed(address,address,uint256)" $V3 $USDC $ST_USDC
 ```
 
-Both must print `[OK] token registered` and pass the live `decimals()` + freshness asserts. **Product check
-(owner, not scriptable):** the DCA panel on Arbitrum for WETH ⇄ USDC no longer shows the "no registered
-price source" block. **Follow-up (separate PR, not this runbook):** record the two execute tx hashes and the
-registered tuples in `docs/DEPLOYMENTS.md` and clear its "oracle floor is unconfigured" warning for 42161.
+Both must print `[OK] token registered` and pass the live `decimals()` + freshness asserts.
+
+**This is the sole acceptance criterion for this runbook** — the on-chain `tokenUsdFeeds` read (above) plus
+the `checkOracleFeed` script pass. There is **no** product-visible check to run alongside it:
+`ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS = [8453]` (`config.ts:117-121`) means `getOrderExecutorV3(42161)` resolves
+`null`, so the Arbitrum DCA panel renders "DCA is not available on Arbitrum One yet." (`DCAPanel.tsx:1119`)
+and never reaches the feed-coverage read this runbook populates — even immediately after a perfect execute.
+Do **not** use the DCA panel as a check for this runbook; it will show the unavailable message regardless of
+whether §9 succeeded, and that is expected (§12). **Follow-up (separate PR, not this runbook):** record the
+two execute tx hashes and the registered tuples in `docs/DEPLOYMENTS.md` and clear its "oracle floor is
+unconfigured" warning for 42161.
 
 ---
 
@@ -603,15 +639,19 @@ cast call $V3 "timelockActions(bytes32)(bytes32,uint256,bool)" $AID_WETH --rpc-u
 **After execute there is no unregister** (§1.3). To change a registered entry, queue a **replacement**
 registration for the same `token` with the corrected `feed`/`tokenDecimals`/`maxStaleness` — same §6→§9 flow,
 same 48 h — and `executeTokenUsdFeed` overwrites the struct (line 1013). The only **instant** lever is
-`pause()` (902–907), which halts every Arbitrum fill, not just this pair — an incident, not a rollback.
+`pause()` (903–907), which halts every Arbitrum fill, not just this pair — an incident, not a rollback.
 
 ---
 
 ## 12. Gates & notes
 
-- **Auditor sign-off required before §6** (CLAUDE.md #2/#3): it decides the on-chain floor. The one open
-  decision is the §2.4 multiplier (**AUDITOR MUST CONFIRM** option A = 2633 / 383); everything else is
-  measured, not chosen.
+- **Auditor sign-off obtained before §6** (CLAUDE.md #2/#3): the Auditor reviewed the §2.4 comparison and the
+  owner adopted **Option C** (`3596` / `596`) over this runbook's original Option A proposal; everything else
+  in this runbook was already measured, not chosen.
+- **Product surface note:** registering these feeds does **not** make Arbitrum DCA appear in the UI. The DCA
+  panel stays on its "DCA is not available on Arbitrum One yet." message (`DCAPanel.tsx:1119`) until `42161`
+  is added to `ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS` (`config.ts:117-121`) in its **own, separately audited PR**
+  — do not read that message after this runbook's §9 as a failed registration; verify with §10 instead.
 - **Zero transactions, zero keys** were involved in producing this runbook: public-RPC `eth_call`/`eth_getCode`,
   one HTTPS fetch of Chainlink's published JSON, and a local `anvil` fork with an impersonated admin.
 - This runbook changes **no source, config, keeper or host**. The keeper-side prerequisites for Arbitrum fills
@@ -624,6 +664,9 @@ same 48 h — and `executeTokenUsdFeed` overwrites the struct (line 1013). The o
   covers ETH-out orders; the `0xEeee…EEeE` sentinel is intentionally never registered.
 - Fresh-block rule (`ARBITRUM-V3-EXECUTOR-DEPLOY.md` gate 1): §4 must be re-run on the day of §6 and again on
   the day of §9 — the readings in this document are evidence for the Auditor, not a substitute.
+- **Out of scope:** `oracleConfigs(ETH/USD)` is unregistered on 42161, so Limit/SL-TP trigger checks on
+  Arbitrum would run on the global `MAX_STALENESS` (300 s) rather than a feed-specific value — a separate
+  decision, not addressed by this runbook.
 
 ---
 
@@ -649,47 +692,51 @@ block-pinned latestRoundData (both RPCs returned identical rounds):
   USDC/USD roundId=55340232221128661771 answer=99985837     startedAt=1789126469 updatedAt=1789126482 answeredInRound=55340232221128661771 age=23s   answeredInRound>=roundId=True answer>0=True phase=3
 ```
 
-## Appendix B — feed cadence samples (`getRoundData`, batched `eth_call`, 2026-09-11)
+## Appendix B — feed cadence samples (`getRoundData` on the aggregator directly, batched `eth_call`,
+re-measured 2026-09-11 for the Auditor's Option C review — ETH/USD ≥5 d, USDC/USD ≥14 d)
 
 ```
-ETH/USD  latest roundId=36893488147419218031 phase=2 aggregatorRoundId=114799
-  sampled rounds=401 (agg ids 114399..114799) window=67327s (18.7h) 2026-09-10T16:43:43Z → 2026-09-11T11:25:50Z
-  gap stats (s): min=30 median=120 p90=390 p99=990 max=1470   published heartbeat=1755s  max/heartbeat=0.84
-  gaps > heartbeat: 0   gaps > 1.5x heartbeat: 0   gaps > 2x: 0   integrity failures: 0
-  phase 2 round 1 updatedAt=1773938236 (2026-03-19T16:37:16Z)
-USDC/USD latest roundId=55340232221128661769 phase=3 aggregatorRoundId=6921
-  sampled rounds=401 (agg ids 6521..6921) window=108038s (30.0h) 2026-09-10T05:25:03Z → 2026-09-11T11:25:41Z
-  gap stats (s): min=257 median=270 p90=271 p99=272 max=273     published heartbeat=255s   max/heartbeat=1.07
-  gaps > heartbeat: 400   gaps > 1.5x heartbeat: 0   gaps > 2x: 0   integrity failures: 0
-  phase 3 round 1 updatedAt=1787242551 (2026-08-20T16:15:51Z)
+ETH/USD  aggregator=0xD827123D014578C965F6c9d87A641ec05FaA5501 (phase 2)  latest sampled aggregatorRoundId=114945
+  sampled rounds=3546 (agg ids 111400..114945) window=545177s (151.4h = 6.31d) 2026-09-05T06:27:07Z → 2026-09-11T13:53:24Z
+  gap stats (s): min=16 median=90 p90=330 p99=930 max=1771   published heartbeat=1755s  max/heartbeat=1.009
+  gaps > heartbeat: 2/3545   gaps > 1.5x heartbeat: 0   gaps > 2x: 0   integrity failures: 0
+  transmission latency (updatedAt-startedAt, s): min=12 median=12 max=72
+USDC/USD aggregator=0xb10cb22245D54f58C66eE65353FaB5D94ca21A1C (phase 3)  latest sampled aggregatorRoundId=6953
+  sampled rounds=4701 (agg ids 2253..6953) window=1271960s (353.3h = 14.72d) 2026-08-27T20:30:26Z → 2026-09-11T13:49:46Z
+  gap stats (s): min=30 median=270 p90=271 p99=330 max=331     published heartbeat=255s   max/heartbeat=1.298
+  gaps > heartbeat: 4682/4700   gaps > 1.5x heartbeat: 0   gaps > 2x: 0   gaps > 300s (global MAX_STALENESS): 85/4700   integrity failures: 0
+  transmission latency (updatedAt-startedAt, s): min=12 median=13 max=253
 ```
 
-## Appendix C — local anvil fork transcript (impersonated admin; nothing broadcast)
+## Appendix C — local anvil fork transcript (impersonated admin; nothing broadcast; re-run for Option C, 2026-09-11)
 
 ```
-fork chainId=42161 block=504035855
-registry BEFORE: WETH=[0x0,0,0,0,false] USDC=[0x0,0,0,0,false] DAI=[0x0,0,0,0,false]
-QUEUE
-  WETH queue block=504035856 ts=1789126305  actionId(event)=0x6ce4f4ad41b2830ceac0a63a627133f597e0979124d4692402e48524fbecdcfa
-       actionHash(event)=0x0a731790cfd362ecd8cb74d6113ee2325b205099750a5dfb67fe982f5d5e47ce  matches precomputed: YES
-       actionId recomputed from (actionHash, queue-block ts) matches event: YES
-       timelockActions(actionId)=[0x0a731790…5e47ce, 1789299105, true]   readyAt − ts = 172800
-  USDC queue block=504035857 ts=1789126307  actionId(event)=0x190be0f070d9cda7681734b12be2c763d28bf45e9af07e14644e6870cf859bd7
-       actionHash(event)=0xdbf34b71c8d2063a049a1de2dc7742995dfbd48fe7772de587a1c09920194f30  matches precomputed: YES
-       actionId recomputed matches event: YES   timelockActions=[0xdbf34b71…94f30, 1789299107, true]
+fork chainId=42161 block=504072023  (fork 1, port 8547)
+registry BEFORE: WETH=[0x0,0,0,0,false] USDC=[0x0,0,0,0,false]
+QUEUE (ST_WETH=3596, ST_USDC=596)
+  WETH queue block=504072024 ts=1789135375  actionId(event)=0x16348ea654c54b3002f1e3c88e707ae4c90e9eca4efc350d260d242657e75c9c
+       actionHash(event)=0x21a777eaf762bc6c5a0ebfa965acd6c8dc9137ba3159eaf32810034a04e8967c  matches precomputed (§0): YES
+       timelockActions(actionId)=[0x21a777…8967c, 1789308175, true]   readyAt − ts = 172800
+  USDC queue block=504072025 ts=1789135376  actionId(event)=0x9a1ca1d31810371ba6c3a66cbc66153d3547ca43690c2e46dfcba2e2209eb114
+       actionHash(event)=0xbf199f5c374ee648ce2295c3b4a2a8c88c1004776ce3d9f3ab343fc15ca4ea42  matches precomputed (§0): YES
 execute BEFORE readyAt                      → reverted 0x7378c19d (TimelockNotReady)
-evm_increaseTime 172801 → fork ts 1789299110 (delta 172805 s)
-execute with WRONG params (staleness+1)     → reverted 0x522dbb19 (TimelockHashMismatch)
+evm_increaseTime 172801 → fork ts 1789308176
+execute with WRONG params (staleness+1=3597) → reverted 0x522dbb19 (TimelockHashMismatch)
 execute with RIGHT params, feed frozen 48h  → reverted "Feed seems dead (>24h stale)"   (line 1011 — fork artefact, §5b)
 
-second fork (readyAt shortened in storage — simulation-only; timelockActions found at slot 9 by scan)
+fork chainId=42161 block=504072023  (fork 2, port 8548 — readyAt shortened in storage; simulation-only;
+timelockActions confirmed at slot 9 — base = keccak256(abi.encode(actionId, 9)), word0 == actionHash)
+re-queued at fork-2 timestamp 1789135446: WETH actionId=0xc145f046253d2d2b7b98834b43549fd1c7d4e073f79f41f3f58d02a7385855c1
+                                           USDC actionId=0x5cb575a997c5851257e1d6ec79bf8bc0b57a7207c63f064f6832324d156620e6
+  storage at base+1 (readyAt) set to 1789135446 (= now) for both actionIds — no time warp needed, so the feed is not stale
   WETH execute status=0x1 topics0=[TimelockExecuted 0x26a53932…, TokenUsdFeedConfigured 0x91dc6839…]
-  USDC execute status=0x1 topics0=[TimelockExecuted, TokenUsdFeedConfigured]
-  registry AFTER: WETH=[0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612, 8, 18, 2633, true]
-                  USDC=[0x50834F3163758fcC1Df9973b6e91f0F0F0434aD3, 8, 6, 383, true]
+  USDC execute status=0x1 topics0=[TimelockExecuted 0x26a53932…, TokenUsdFeedConfigured 0x91dc6839…]
+  registry AFTER: WETH=[0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612, 8, 18, 3596, true]
+                  USDC=[0x50834F3163758fcC1Df9973b6e91f0F0F0434aD3, 8, 6, 596, true]
                   DAI (NEGATIVE CONTROL)=[0x0000000000000000000000000000000000000000, 0, 0, 0, false]
-  timelockActions(WETH actionId) after execute = [0x00…00, 0, false]     re-execute → reverted 0xdfc44acf (TimelockNotQueued)
-CANCEL
-  fresh WETH queue → exists=true;  cancel from 0x…dEaD → reverted 0x7bfa4b9f (NotAdmin)
-  cancel from admin → status=0x1 topics0=[TimelockCancelled 0xa32a56a4…];  entry after = [0x00…00, 0, false];  registry WETH unchanged
+  re-execute WETH actionId → reverted 0xdfc44acf (TimelockNotQueued)
+CANCEL (fork 2, fresh WETH queue, distinct actionId=0x40dd1aea0bfca516a41c7883a028bcd8556c1323cca9a3aebc179d52ec7e6be4)
+  cancel from 0x…dEaD → reverted 0x7bfa4b9f (NotAdmin)
+  cancel from admin → status=0x1 topics0=[TimelockCancelled 0xa32a56a4…];  entry after=[0x00…00, 0, false]
+  registry WETH unchanged after cancel: [0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612, 8, 18, 3596, true]
 ```
