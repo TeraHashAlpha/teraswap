@@ -166,6 +166,19 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: vi.fn().mockReturnValue(null),
 }))
 
+// ── Mock keeper-health-monitor ──────────────────────────
+// [Auditor M2 / PR #497] Pulls in viem (via ./chains/clients) + @/lib/supabase — same module-load
+// hazard the mocks above document. Default: no chains monitored, no alerts, so existing tests'
+// result shape is unaffected unless a test opts in via mockResolvedValueOnce.
+
+const mockCheckAllKeeperChains = vi.fn().mockResolvedValue([])
+const mockAlertOnKeeperTrouble = vi.fn().mockResolvedValue(undefined)
+
+vi.mock('./keeper-health-monitor', () => ({
+  checkAllKeeperChains: (...args: unknown[]) => mockCheckAllKeeperChains(...args),
+  alertOnKeeperTrouble: (...args: unknown[]) => mockAlertOnKeeperTrouble(...args),
+}))
+
 // ── Import after mocks ─────────────────────────────────
 
 import { runMonitoringTick } from './monitoring-loop'
@@ -848,5 +861,47 @@ describe('on-chain scan & circuit breaker integration', () => {
     expect(result.failures).toBe(0)
     expect(Array.isArray(result.transitions)).toBe(true)
     expect(Array.isArray(result.statuses)).toBe(true)
+  })
+
+  // ── Keeper health wiring [Auditor M2 / PR #497] ─────────
+  describe('keeper health wiring', () => {
+    it('calls checkAllKeeperChains and alertOnKeeperTrouble exactly once per tick', async () => {
+      await runMonitoringTick()
+      expect(mockCheckAllKeeperChains).toHaveBeenCalledTimes(1)
+      expect(mockAlertOnKeeperTrouble).toHaveBeenCalledTimes(1)
+    })
+
+    it('passes checkAllKeeperChains output through to alertOnKeeperTrouble and the tick result', async () => {
+      const health = [
+        { chainId: 8453, monitored: true, gasStatus: 'ok' as const, balanceEth: 0.05, overdueOrderCount: 0 },
+        { chainId: 42161, monitored: false },
+      ]
+      mockCheckAllKeeperChains.mockResolvedValueOnce(health)
+
+      const result = await runMonitoringTick()
+
+      expect(result.keeperHealth).toEqual(health)
+      expect(mockAlertOnKeeperTrouble).toHaveBeenCalledWith(health)
+    })
+
+    it('does not fail the tick when checkAllKeeperChains rejects', async () => {
+      mockCheckAllKeeperChains.mockRejectedValueOnce(new Error('rpc down'))
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const result = await runMonitoringTick()
+
+      expect(result.keeperHealth).toBeUndefined()
+      expect(result.timestamp).toBeDefined()
+      const warnings = consoleSpy.mock.calls.filter(
+        args => typeof args[0] === 'string' && args[0].includes('Keeper health check failed'),
+      )
+      expect(warnings.length).toBe(1)
+      consoleSpy.mockRestore()
+    })
+
+    it('includes an empty keeperHealth array when no chains are monitored (default mock)', async () => {
+      const result = await runMonitoringTick()
+      expect(result.keeperHealth).toEqual([])
+    })
   })
 })
