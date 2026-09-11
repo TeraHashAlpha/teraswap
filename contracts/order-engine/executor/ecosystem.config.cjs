@@ -9,7 +9,7 @@
  *   pm2 save && pm2 startup  (auto-restart on reboot)
  *
  * [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] TWO apps, one per chain, from this same directory:
- *   teraswap-executor        — Base (8453), env from `.env.executor` (the default; unchanged)
+ *   teraswap-executor        — Base (8453), env from `.env.executor` (pinned explicitly)
  *   teraswap-keeper-arbitrum — Arbitrum One (42161), env from `.env.executor.arbitrum`
  * Start ONLY the new one on a host already running Base:
  *   pm2 start ecosystem.config.cjs --only teraswap-keeper-arbitrum
@@ -22,6 +22,14 @@
  * values. Shell env wins over the file, which is what pins the ports below regardless of what an
  * env file says. Pinned by env-order.test.mjs (first-import + EXECUTOR_ENV_FILE) and
  * ecosystem.test.mjs (this file's shape).
+ *
+ * [FIX-KEEPER-ENV-PIN-AND-RUNBOOK] Both apps set EXECUTOR_ENV_FILE explicitly — Base pins its own
+ * default rather than relying on env.js's fallback. Relying on the fallback meant a bare shell
+ * `export EXECUTOR_ENV_FILE=...` ahead of `pm2 restart teraswap-executor --update-env` would win
+ * over this file (shell env wins, see above) and silently turn Base into a second Arbitrum keeper.
+ * Pinning it here does not change what Base loads — it removes the unset state a stray export could
+ * fill. NEVER `export EXECUTOR_ENV_FILE` in a shell that touches either app; read the `Env file:`
+ * boot line (S2.5 in the runbook) to confirm which file a running process actually loaded.
  *
  * WHAT THIS FILE MAY CARRY. Only what must DIFFER per app on one host — the env-file name, the
  * listening ports, the log files — plus NODE_ENV. Everything identity-bearing (CHAIN_ID, RPC_URL,
@@ -54,8 +62,9 @@ module.exports = {
       name: 'teraswap-executor',
       env: {
         NODE_ENV: 'production',
+        EXECUTOR_ENV_FILE: '.env.executor', // pinned explicitly — see env.js and the note above
         METRICS_PORT: '9090',     // Prometheus metrics endpoint
-        // HEALTH_PORT (3001) and everything else come from .env.executor (EXECUTOR_ENV_FILE unset ⇒ default).
+        // HEALTH_PORT (3001) and everything else come from .env.executor.
       },
       error_file: './logs/error.log',
       out_file: './logs/out.log',

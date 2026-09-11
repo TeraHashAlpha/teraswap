@@ -40,7 +40,19 @@ describe("ecosystem.config.cjs — two apps, disjoint env, nothing identity-bear
     assert.equal(base.env.METRICS_PORT, "9090")
     assert.equal(base.error_file, "./logs/error.log")
     assert.equal(base.out_file, "./logs/out.log")
-    assert.equal(base.env.EXECUTOR_ENV_FILE, undefined, "Base keeps the default .env.executor")
+    assert.equal(base.env.EXECUTOR_ENV_FILE, ".env.executor", "Base pins its default explicitly — [FIX-KEEPER-ENV-PIN-AND-RUNBOOK]")
+  })
+
+  test("[FIX-KEEPER-ENV-PIN-AND-RUNBOOK] both apps pin distinct, explicit env files — neither relies on env.js's fallback", () => {
+    const base = byName[BASE]
+    const arb = byName[ARBITRUM]
+    assert.ok(base.env.EXECUTOR_ENV_FILE, "Base must pin EXECUTOR_ENV_FILE explicitly, not rely on the default")
+    assert.ok(arb.env.EXECUTOR_ENV_FILE, "Arbitrum must pin EXECUTOR_ENV_FILE explicitly")
+    assert.notEqual(
+      base.env.EXECUTOR_ENV_FILE,
+      arb.env.EXECUTOR_ENV_FILE,
+      "a shell export of EXECUTOR_ENV_FILE plus --update-env could otherwise turn one app into the other's keeper"
+    )
   })
 
   test("the Arbitrum app runs the same script, single instance, from its own env file", () => {
