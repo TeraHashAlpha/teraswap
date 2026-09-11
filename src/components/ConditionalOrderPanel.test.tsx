@@ -234,7 +234,7 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
 // order — unexecutable by that chain's executor, cancel-only for the user. config.ts is NOT
 // mocked here; the real chain lookup is the thing under test.
 describe('ConditionalOrderPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
-  const ARBITRUM_CHAIN_ID = 42161
+  const UNKNOWN_CHAIN_ID = 10 // [feat/arbitrum-dca-gates] was 42161, which now has a derived router set
 
   function submitButton(): HTMLButtonElement {
     return screen.getByRole('button', { name: /set take profit/i }) as HTMLButtonElement
@@ -245,14 +245,14 @@ describe('ConditionalOrderPanel — [ADR-020] refuses to sign on a chain with no
   }
 
   beforeEach(() => {
-    useChainIdMock.mockReturnValue(ARBITRUM_CHAIN_ID)
+    useChainIdMock.mockReturnValue(UNKNOWN_CHAIN_ID)
   })
   afterEach(() => {
     useChainIdMock.mockReturnValue(1) // restore this file's default for any later suite
   })
 
-  it('sanity: chain 42161 really has no default router (otherwise the tests below are vacuous)', () => {
-    expect(getDefaultRouter(ARBITRUM_CHAIN_ID)).toBeNull()
+  it('sanity: chain 10 (no order-engine set) really has no default router (otherwise the tests below are vacuous)', () => {
+    expect(getDefaultRouter(UNKNOWN_CHAIN_ID)).toBeNull()
     expect(getDefaultRouter(1)).not.toBeNull()
   })
 
