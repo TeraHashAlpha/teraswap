@@ -7,12 +7,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const useOrderEngineMock = vi.fn()
 const useAccountMock = vi.fn()
+const useChainIdMock = vi.fn(() => 1)
 
 vi.mock('@/hooks/useOrderEngine', () => ({
   useOrderEngine: () => useOrderEngineMock(),
 }))
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
+  useChainId: () => useChainIdMock(),
   useReadContract: vi.fn(() => ({ data: undefined, isLoading: false })),
 }))
 vi.mock('@/lib/sounds', () => ({
@@ -69,6 +72,7 @@ function makeOrder(over: Partial<AutonomousOrder> = {}): AutonomousOrder {
 beforeEach(() => {
   vi.clearAllMocks()
   useAccountMock.mockReturnValue({ address: '0x1111111111111111111111111111111111111111' })
+  useChainIdMock.mockReturnValue(1)
 })
 
 describe('OrderDashboard — wallet states', () => {
@@ -238,6 +242,49 @@ describe('OrderDashboard — cancel all', () => {
     renderWithProviders(<OrderDashboard />)
     fireEvent.click(screen.getByText(/Cancel All \(2\)/))
     expect(cancelAllOrders).toHaveBeenCalled()
+  })
+})
+
+describe('OrderDashboard — [fix/cross-chain-order-cancel] chain badge + mismatch', () => {
+  it('shows the order\'s chain name; no mismatch styling when it matches the connected wallet', () => {
+    const order = makeOrder({ status: 'active', chainId: 1 })
+    useChainIdMock.mockReturnValue(1)
+    useOrderEngineMock.mockReturnValue({
+      orders: [order],
+      activeOrders: [order],
+      historyOrders: [],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+    })
+    renderWithProviders(<OrderDashboard />)
+    const badge = screen.getByTestId('order-chain-badge')
+    expect(badge.textContent).toMatch(/Ethereum/i)
+    expect(badge.className).not.toMatch(/amber/)
+    fireEvent.click(screen.getByText(/WETH/).closest('button')!)
+    expect(screen.getByText('Cancel Order')).toBeInTheDocument()
+  })
+
+  it('flags a mismatch and relabels the button when the order\'s chain differs from the connected wallet', () => {
+    const order = makeOrder({ status: 'active', chainId: 42161 })
+    useChainIdMock.mockReturnValue(8453) // wallet on Base, order on Arbitrum
+    useOrderEngineMock.mockReturnValue({
+      orders: [order],
+      activeOrders: [order],
+      historyOrders: [],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+    })
+    renderWithProviders(<OrderDashboard />)
+    const badge = screen.getByTestId('order-chain-badge')
+    expect(badge.textContent).toMatch(/Arbitrum/i)
+    expect(badge.className).toMatch(/amber/)
+    fireEvent.click(screen.getByText(/WETH/).closest('button')!)
+    expect(screen.getByText(/Switch to Arbitrum/i)).toBeInTheDocument()
+    expect(screen.queryByText('Cancel Order')).toBeNull()
   })
 })
 

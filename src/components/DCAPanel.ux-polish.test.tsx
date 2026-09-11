@@ -21,6 +21,7 @@ const useTokenBalanceMock = vi.fn()
 const createOrderMock = vi.fn()
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))

@@ -23,6 +23,7 @@ const mockSubscribeToOrders = vi.fn()
 const V3_ADDRESS = '0x3333333333333333333333333333333333333333'
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: vi.fn(() => ({ address: '0x1111111111111111111111111111111111111111' })),
   useChainId: vi.fn(() => 1),
   useSignTypedData: vi.fn(() => ({ signTypedDataAsync: mockSignTypedDataAsync })),

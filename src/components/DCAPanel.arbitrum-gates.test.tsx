@@ -90,6 +90,7 @@ let registryMode: 'empty' | 'registered' = 'empty'
 let registeredRows: Record<string, FeedRow> = {}
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),

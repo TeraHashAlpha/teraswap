@@ -32,6 +32,7 @@ const checkRouteMock = vi.fn()
 const checkOracleMock = vi.fn()
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))

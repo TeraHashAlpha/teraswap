@@ -33,6 +33,7 @@ let resolveFeedOverride: ResolveFeedFn | null = null
 const V3_ADDRESS = '0x3333333333333333333333333333333333333333'
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),

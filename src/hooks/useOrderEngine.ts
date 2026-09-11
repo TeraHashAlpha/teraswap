@@ -14,7 +14,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useAccount, useChainId, useSignTypedData, useReadContract, useWriteContract } from 'wagmi'
+import { useAccount, useChainId, useSignTypedData, useReadContract, useWriteContract, useSwitchChain } from 'wagmi'
 import { keccak256, encodeAbiParameters, toBytes } from 'viem'
 import {
   ORDER_EXECUTOR_ABI,
@@ -58,7 +58,7 @@ import type {
 import { formatMinBuyMessage, formatMinBuyUnit } from '@/lib/dca-quick-fill'
 import { initSecureStorage, secureGet, secureSet } from '@/lib/secure-storage'
 import { NATIVE_ETH } from '@/lib/constants'
-import { getWrappedNative } from '@/lib/chains/registry'
+import { getWrappedNative, getChainName } from '@/lib/chains/registry'
 import { findChainToken } from '@/lib/chains/tokens'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
@@ -362,6 +362,15 @@ export type PendingCancelReview =
       // Union of v2AffectedOrders + every v3Batch's affectedOrders + v3DcaOrders — what the
       // review modal counts/lists.
       affectedOrders: AutonomousOrder[]
+      // [fix/cross-chain-order-cancel] Active orders on a DIFFERENT chain than the one this plan
+      // executes against. `orders` is fetched per-wallet, not per-chain, so a "cancel all" click
+      // can see active orders on several chains at once — but the wallet is connected to exactly
+      // one chain, and a chain switch clears this whole frozen plan (the [9R defense] reset
+      // effect), so one confirmCancel can only ever run against ONE chain's contracts. Rather than
+      // silently drop the rest, cancelAllOrders freezes only the active chain's group and lists
+      // everything else here so the review modal can say what it skipped — never silent partial
+      // success.
+      skippedOrders: AutonomousOrder[]
       chainId: number
       account: `0x${string}`
     }
@@ -409,6 +418,9 @@ export function useOrderEngine() {
   const orderExecutorV3 = getOrderExecutorV3(chainId)
   const { signTypedDataAsync } = useSignTypedData()
   const { writeContractAsync } = useWriteContract()
+  // [fix/cross-chain-order-cancel] Cancel resolves its executor/domain from the ORDER's chain, never
+  // the wallet's active one — when they differ this requests a switch instead of falling through.
+  const { switchChainAsync } = useSwitchChain()
 
   const [orders, setOrders] = useState<AutonomousOrder[]>([])
   // [SPRINT-9U U2] Frozen order awaiting review before the EIP-712 signature.
@@ -989,6 +1001,41 @@ export function useOrderEngine() {
     const order = orders.find(o => o.id === orderId)
     if (!order) return
 
+    // [fix/cross-chain-order-cancel] THE RULE: cancel resolves its executor + domain from the
+    // ORDER's own chain, never the wallet's active one. `orders` is fetched per-wallet
+    // (fetchUserOrders(address)), not per-chain, so a Base order and an Arbitrum order sit side by
+    // side in the same list while the wallet is connected to only one chain at a time — without
+    // this guard, cancelling a Base order while connected to Arbitrum would send its struct to the
+    // Arbitrum V3 (msg.sender == owner still passes there; an irrelevant hash gets marked) and the
+    // Supabase row would flip regardless (feedback doc: "the third gate", cross-chain cancel
+    // concern). Request a chain switch; if it fails or is refused, refuse the cancel by name —
+    // NEVER fall through and freeze a plan under the wrong chain.
+    const orderChainId = order.chainId ?? DEFAULT_CHAIN_ID
+    if (orderChainId !== chainId) {
+      const chainName = getChainName(orderChainId)
+      try {
+        await switchChainAsync({ chainId: orderChainId })
+      } catch {
+        setLatestEvent({
+          type: 'order_error',
+          orderId,
+          error: `This order is on ${chainName} — switch your wallet to ${chainName} to cancel it.`,
+        })
+        return
+      }
+      // The switch succeeded, but every value this closure captured (chainId, orderExecutorV3) was
+      // read from the render THIS callback closed over — stale for the chain we just switched to.
+      // Re-deriving them inline here risks exactly the kind of divergence this fix closes, so bail
+      // instead: the chain-change reset effect clears any pending review, wagmi's chainId updates on
+      // the next render, and a second click re-runs this same guard, which now falls straight through.
+      setLatestEvent({
+        type: 'order_error',
+        orderId,
+        error: `Switched to ${chainName} — click Cancel again to continue.`,
+      })
+      return
+    }
+
     // [SPRINT-V3-P2 -> SPRINT-V3-P3] v3 cancel is now wired (below), targeting the v3
     // executor+ABI so the on-chain cancelOrder() hash matches what was actually signed. The
     // refuse-guard STAYS for a chain whose v3 address is null: without a real v3 contract to
@@ -1019,14 +1066,24 @@ export function useOrderEngine() {
       const errorMsg = err instanceof Error ? err.message.slice(0, 120) : 'Cancel failed'
       setLatestEvent({ type: 'order_error', orderId, error: errorMsg })
     }
-  }, [address, orders, chainId, orderExecutorV3])
+  }, [address, orders, chainId, orderExecutorV3, switchChainAsync])
 
   // ── [CANCEL-REVIEW] Cancel ALL = Phase A: FREEZE the invalidate plan for review (NO tx) ──
   const cancelAllOrders = useCallback(async () => {
     if (!address) return
-    const active = orders.filter(o =>
+    const activeAll = orders.filter(o =>
       o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled'
     )
+    // [fix/cross-chain-order-cancel] `orders` spans every chain the wallet has ever created an
+    // order on, but the wallet is connected to exactly ONE chain, and a chain switch clears this
+    // whole frozen plan (the [9R defense] reset effect) — so a single confirmCancel can only ever
+    // execute against one chain's contracts. CHOICE: cancel only the active chain's group and
+    // report the rest as skipped, rather than attempting a switch-per-group sequence the
+    // freeze/review architecture has no way to run safely inside one confirm (a mid-sequence chain
+    // change would blow away the very plan carrying the remaining groups). Never silent partial
+    // success — skippedOrders below is what the review modal lists.
+    const active = activeAll.filter(o => (o.chainId ?? DEFAULT_CHAIN_ID) === chainId)
+    const skippedOrders = activeAll.filter(o => (o.chainId ?? DEFAULT_CHAIN_ID) !== chainId)
     const v2Orders = active.filter(o => o.order.maxSlippageBps === undefined)
     // [SPRINT-V3-P3] Only build a v3 plan when v3 is actually configured for THIS chain — an
     // order shouldn't exist with maxSlippageBps set anywhere else, but never construct a plan
@@ -1065,6 +1122,7 @@ export function useOrderEngine() {
       v3Batches,
       v3DcaOrders,
       affectedOrders: [...v2Orders, ...v3NonDca, ...v3Dca],
+      skippedOrders,
       chainId,
       account: address,
     })
@@ -1091,6 +1149,12 @@ export function useOrderEngine() {
 
     if (p.action === 'cancel') {
       const { orderId, order, orderStruct, isV3 } = p
+      // [fix/cross-chain-order-cancel] Resolved from the ORDER's own chain, never `chainId` (the
+      // active one) — the [9R defense] guard above (p.chainId !== chainId) already forces them
+      // equal by the time we get here (cancelOrder only ever freezes a plan once the wallet is ON
+      // order.chainId), but naming the source explicitly means a future loosening of that guard
+      // can't silently reintroduce the wrong-chain cancel this fix closes.
+      const orderChainId = order.chainId ?? DEFAULT_CHAIN_ID
       // [SPRINT-V3-P3] Re-check at confirm time (chain may have changed since the freeze —
       // the [9R defense] chainId guard above already covers the common case, this is
       // belt-and-suspenders). Never send a v3 struct to v2's cancelOrder — different typehash,
@@ -1098,26 +1162,29 @@ export function useOrderEngine() {
       // is the SAME resolver the order's signing domain came from, so cancelOrder() lands on the
       // very contract whose domain separator verified the signature: V3.sol:636 marks
       // cancelledOrders[getOrderHash(order)] on address(this), the :449 verifier's domain.
-      const cancelExecAddress = resolveSigningExecutor(chainId, isV3)
+      const cancelExecAddress = resolveSigningExecutor(orderChainId, isV3)
       if (!cancelExecAddress) {
         setLatestEvent({
           type: 'order_error',
           orderId,
           error: isV3
-            ? `v3 conditional orders are not yet available on chain ${chainId}.`
-            : `Conditional orders are not available on chain ${chainId}.`,
+            ? `v3 conditional orders are not yet available on chain ${orderChainId}.`
+            : `Conditional orders are not available on chain ${orderChainId}.`,
         })
         return
       }
       const cancelExecAbi = isV3 ? ORDER_EXECUTOR_V3_ABI : ORDER_EXECUTOR_ABI
       try {
         // Cancel on-chain — contract verifies msg.sender == order.owner, then marks hash as
-        // cancelled. Sends the FROZEN struct the user just reviewed, 1:1.
+        // cancelled. Sends the FROZEN struct the user just reviewed, 1:1. `chainId: orderChainId`
+        // is defense-in-depth: the [9R defense] guard already guarantees the connected chain IS
+        // orderChainId here, but naming it stops wagmi from ever routing this tx anywhere else.
         await writeContractAsync({
           address: cancelExecAddress,
           abi: cancelExecAbi,
           functionName: 'cancelOrder',
           args: [orderStruct],
+          chainId: orderChainId,
         })
 
         // Cancel in Supabase (uses the stored order_hash, which may be UUID or bytes32).
@@ -1126,17 +1193,18 @@ export function useOrderEngine() {
         // recover the signer and confirm ownership. A declined signature is
         // swallowed by cancelOrderInSupabase (returns false) — the on-chain
         // cancel above is authoritative, so the order is still cancelled.
-        // Domain uses the ACTIVE chainId (chain-agnostic, [H-05]) through the ONE rule the API
-        // recovers under (getCancelOrderDomain: v2's where v2 exists, else v3's) — never the v2
-        // domain by name, which throws on a v3-only chain.
+        // [fix/cross-chain-order-cancel] Domain AND the chainId reported to the API are the
+        // ORDER's chain (orderChainId), through the ONE rule both sides recover under
+        // (getCancelOrderDomain: v2's where v2 exists, else v3's) — never the wallet's active
+        // chain, and never the v2 domain by name, which throws on a v3-only chain.
         await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
           const signature = await signTypedDataAsync({
-            domain: getCancelOrderDomain(chainId),
+            domain: getCancelOrderDomain(orderChainId),
             types: CANCEL_ORDER_TYPES,
             primaryType: 'CancelOrder',
             message: { id: rowId, action: 'cancel' },
           })
-          return { signature, chainId }
+          return { signature, chainId: orderChainId }
         })
 
         setOrders(prev => prev.map(o =>
@@ -1213,14 +1281,18 @@ export function useOrderEngine() {
       // order; declined signatures are swallowed (the on-chain calls above are
       // authoritative regardless).
       for (const order of p.affectedOrders) {
+        // [fix/cross-chain-order-cancel] Per-order chain, not the outer `chainId` — cancelAllOrders
+        // already restricts `p.affectedOrders` to the active chain's group, so these are equal in
+        // practice, but resolving from the order keeps the rule identical to single-cancel above.
+        const orderChainId = order.chainId ?? DEFAULT_CHAIN_ID
         await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
           const signature = await signTypedDataAsync({
-            domain: getCancelOrderDomain(chainId), // the ONE proof-domain rule (see single cancel)
+            domain: getCancelOrderDomain(orderChainId), // the ONE proof-domain rule (see single cancel)
             types: CANCEL_ORDER_TYPES,
             primaryType: 'CancelOrder',
             message: { id: rowId, action: 'cancel' },
           })
-          return { signature, chainId }
+          return { signature, chainId: orderChainId }
         }).catch(() => {})
       }
 

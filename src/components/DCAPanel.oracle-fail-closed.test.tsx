@@ -65,6 +65,7 @@ const BASE_CBETH_USD_FEED = getPreferredDirectUsdFeed(
 )!
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),

@@ -131,27 +131,46 @@ export async function PATCH(
   // [BUGFIX] Atomic cancel: use WHERE status='active' AND wallet=? in a single
   // UPDATE to prevent TOCTOU race condition where an executor changes status
   // between our check and update.
+  // [fix/cross-chain-order-cancel] Also gate on chain_id = the chainId the ownership proof was
+  // just recovered under. The client is supposed to derive that chainId from order.chain_id (never
+  // its active chain — see useOrderEngine cancelOrder), but the server must not simply trust it: a
+  // wallet CAN produce a validly-signed CancelOrder message under any domain it likes, since it's
+  // signing over its own id/action pair. Without this, a client that got its own chainId wrong (or
+  // deliberately declared a different one) would still flip this row to cancelled even though the
+  // domain it verified under names a chain this order doesn't live on. This condition can only
+  // ever match a row whose chain_id equals the declared chainId, so a mismatch always falls
+  // through to the probe below instead of ever cancelling anything.
   const { data: updated, error } = await supabase
     .from('orders')
     .update({ status: 'cancelled' })
     .eq('id', id)
     .eq('wallet', wallet.toLowerCase())
     .eq('status', 'active')
+    .eq('chain_id', chainId)
     .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   if (!updated || updated.length === 0) {
-    // Determine why it failed: order not found, wrong wallet, or wrong status
+    // Determine why it failed: order not found, wrong wallet, wrong chain, or wrong status
     const { data: order } = await supabase
       .from('orders')
-      .select('wallet, status')
+      .select('wallet, status, chain_id')
       .eq('id', id)
       .single()
 
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     if (order.wallet !== wallet.toLowerCase()) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+    }
+    // [fix/cross-chain-order-cancel] The ownership proof recovered correctly, but the domain it
+    // recovered under (this chainId) isn't the chain this order actually lives on — refuse by
+    // name rather than flip status against a chain the order was never signed for.
+    if (order.chain_id !== chainId) {
+      return NextResponse.json(
+        { error: `This order is on chain ${order.chain_id}, not chain ${chainId}` },
+        { status: 400 },
+      )
     }
     return NextResponse.json(
       { error: `Cannot cancel order in status: ${order.status}` },

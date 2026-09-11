@@ -69,6 +69,9 @@ const MAINNET_V2 = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockRefetchNonce = vi.fn<() => Promise<unknown>>()
+// [fix/cross-chain-order-cancel] Named + controllable so tests can assert WHICH chain a cancel
+// requested a switch to, and simulate a refused switch (rejects).
+const mockSwitchChainAsync = vi.fn<(args: { chainId: number }) => Promise<unknown>>()
 const useChainIdMock = vi.fn<() => number>(() => ARBITRUM)
 /** Every useReadContract call the hook makes — the evidence that the v2 nonce reads are fail-closed. */
 const readContractCalls: Array<{ address?: string; functionName?: string; enabled?: boolean }> = []
@@ -80,6 +83,7 @@ const mockCancelOrderInSupabase = vi.fn()
 const mockSubscribeToOrders = vi.fn()
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: mockSwitchChainAsync }),
   useAccount: () => ({ address: '0x1111111111111111111111111111111111111111' }),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),
@@ -111,7 +115,7 @@ vi.mock('@/lib/order-engine', async () => {
 
 import { renderHook, act } from '@testing-library/react'
 import { hashTypedData } from 'viem'
-import { useOrderEngine } from './useOrderEngine'
+import { useOrderEngine, type PendingCancelReview } from './useOrderEngine'
 import {
   OrderType, PriceCondition, ORDER_EXECUTOR_ABI, ORDER_EXECUTOR_V3_ABI, ORDER_V3_EIP712_TYPES,
   CANCEL_ORDER_TYPES, getOrderExecutor, getOrderExecutorV3, getOrderExecutorDomain,
@@ -149,10 +153,10 @@ function makeConfig(chainId: number, overrides: Partial<CreateOrderConfig> = {})
 }
 
 /** A stored v3 DCA row on `chainId`, as fetchUserOrders would return it. */
-function makeV3Row(chainId: number): OrderRow {
+function makeV3Row(chainId: number, id: string = ROW_ID): OrderRow {
   const router = getDefaultRouter(chainId)!.address
   return {
-    id: ROW_ID,
+    id,
     wallet: ADDRESS,
     order_hash: ('0x' + 'aa'.repeat(32)) as string,
     order_type: 'dca',
@@ -227,6 +231,7 @@ beforeEach(() => {
   useChainIdMock.mockReturnValue(ARBITRUM)
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
+  mockSwitchChainAsync.mockResolvedValue(undefined)
   mockRefetchNonce.mockResolvedValue({ data: 5n })
   mockFetchUserOrders.mockResolvedValue([])
   mockFetchActiveOrders.mockResolvedValue([])
@@ -295,6 +300,33 @@ describe('[third gate] Arbitrum One (42161) — v3-only: create, confirm, cancel
       expect(read.address).toBeUndefined()
       expect(read.enabled).toBe(false)
     }
+  })
+
+  // [fix/cross-chain-order-cancel — Task 3] With v2 disabled on this v3-only chain, `nonces()` never
+  // resolves ⇒ currentNonce reads as 0n (getNextNonce: onChainNonce = 0n when currentNonce is
+  // undefined). The session-local high-water mark (localNonceRef, P213/FULL-M-06) takes over from
+  // there — the SAME sequence a fresh Base wallet with no v2 history would see, since v3 orders
+  // never advance v2's counter on ANY chain either. This is safe for DCA specifically because the
+  // contract's bitmap check (invalidateUnorderedNonces / UnorderedNonceInvalidation) is skipped
+  // entirely for OrderType.DCA — V3.sol never consults it for a DCA order, gating on
+  // dcaExecutions/cancelledOrders instead (see buildOrderStructForCancel's comment) — so V3's
+  // unordered-nonce model is not honoured here, by contract design, not by omission. The nonce's
+  // only remaining job is disambiguating getOrderHash, which `expiry` (per-second) already does
+  // across sessions.
+  it('nonce source on 42161 (v3-only): v2 nonces() is disabled so currentNonce reads 0n, and sequential orders take 0n then 1n from the session-local counter — never from V3\'s unordered-nonce bitmap', async () => {
+    const { result } = renderHook(() => useOrderEngine())
+    expect(result.current.currentNonce).toBe(0n)
+
+    await createAndConfirm(result, makeConfig(ARBITRUM, { maxSlippageBps: 300 }))
+    expect(orderSign().message.nonce).toBe(0n)
+
+    await createAndConfirm(result, makeConfig(ARBITRUM, { maxSlippageBps: 300 }))
+    const secondOrderSign = signCalls().filter(c => c.primaryType === 'Order').at(-1)!
+    expect(secondOrderSign.message.nonce).toBe(1n)
+
+    // Neither invalidateUnorderedNonces nor any bitmap read backs this sequence — it is pure
+    // session-local bookkeeping, not V3's unordered-nonce mechanism.
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
   })
 
   it('create → confirm: signs under {TeraSwapOrderExecutor, "3", 42161, <Arbitrum V3>} with the v3 schema and POSTs chainId 42161 — no "not yet available" refusal', async () => {
@@ -384,6 +416,95 @@ describe('[third gate] Arbitrum One (42161) — v3-only: create, confirm, cancel
     expect(writes.some(w => w.functionName === 'invalidateNonces')).toBe(false)
     expect(proofSigns().map(p => p.domain)).toEqual([getOrderExecutorV3Domain(ARBITRUM)])
     expect(result.current.latestEvent).toEqual({ type: 'order_cancelled', orderId: 'all' })
+  })
+})
+
+// [fix/cross-chain-order-cancel] `orders` is fetched per-wallet (fetchUserOrders(address)), not
+// per-chain, so a Base order and an Arbitrum order can sit side by side in the same list while the
+// wallet is connected to only ONE chain at a time. THE RULE: cancel resolves its executor + domain
+// from the order's OWN chain_id, never the wallet's active one — a mismatch requests a chain switch
+// and, failing that, refuses by name. Never falls through to the active chain.
+describe('[fix/cross-chain-order-cancel] cancel follows the ORDER chain, never the wallet chain', () => {
+  it('Base order + wallet on Arbitrum → cancel requests a switch to Base; a REFUSED switch refuses the cancel, no tx to any executor', async () => {
+    useChainIdMock.mockReturnValue(ARBITRUM)
+    mockFetchUserOrders.mockResolvedValue([makeV3Row(BASE, 'row-base')])
+    mockSwitchChainAsync.mockRejectedValue(new Error('User rejected the request'))
+    const { result } = renderHook(() => useOrderEngine())
+    await settleLoad()
+    const order = result.current.orders.find(o => o.chainId === BASE)!
+    expect(order).toBeDefined()
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+
+    expect(mockSwitchChainAsync).toHaveBeenCalledWith({ chainId: BASE })
+    // Refused ⇒ no plan was ever frozen, and NOTHING was sent to any executor on any chain.
+    expect(result.current.pendingCancel).toBeNull()
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+    expect(result.current.latestEvent?.type).toBe('order_error')
+    expect((result.current.latestEvent as { error: string }).error).toMatch(/Base/)
+  })
+
+  it('Base order + wallet on Arbitrum → a SUCCESSFUL switch still does not freeze/cancel on this click (stale-closure guard) — no tx, click Cancel again after the switch', async () => {
+    useChainIdMock.mockReturnValue(ARBITRUM)
+    mockFetchUserOrders.mockResolvedValue([makeV3Row(BASE, 'row-base')])
+    mockSwitchChainAsync.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useOrderEngine())
+    await settleLoad()
+    const order = result.current.orders.find(o => o.chainId === BASE)!
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+
+    expect(mockSwitchChainAsync).toHaveBeenCalledWith({ chainId: BASE })
+    expect(result.current.pendingCancel).toBeNull() // never froze under the stale (Arbitrum) chain
+    expect(mockWriteContractAsync).not.toHaveBeenCalled()
+  })
+
+  it('Base order + wallet on Base (chains already match) → unchanged: no switch requested, cancelOrder() lands on the Base V3, address pinned', async () => {
+    useChainIdMock.mockReturnValue(BASE)
+    mockFetchUserOrders.mockResolvedValue([makeV3Row(BASE, 'row-base')])
+    const { result } = renderHook(() => useOrderEngine())
+    await settleLoad()
+    const order = result.current.orders.find(o => o.chainId === BASE)!
+
+    await act(async () => { await result.current.cancelOrder(order.id) })
+    expect(mockSwitchChainAsync).not.toHaveBeenCalled()
+    expect(result.current.pendingCancel?.action).toBe('cancel')
+    await act(async () => { await result.current.confirmCancel() })
+
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
+    const cancel = writeCalls()[0]
+    expect(cancel.address).toBe(BASE_V3)
+    expect(cancel.functionName).toBe('cancelOrder')
+    expect(proofSigns()[0].domain).toEqual(getOrderExecutorDomain(BASE)) // v2's domain — Base has v2
+    expect(result.current.orders[0].status).toBe('cancelled')
+  })
+
+  it('cancelAllOrders with a mixed-chain portfolio (Base + Arbitrum, wallet on Arbitrum) cancels ONLY the active chain\'s group and lists the rest as skipped — never silent partial success', async () => {
+    useChainIdMock.mockReturnValue(ARBITRUM)
+    mockFetchUserOrders.mockResolvedValue([
+      makeV3Row(BASE, 'row-base'),
+      makeV3Row(ARBITRUM, 'row-arb'),
+    ])
+    const { result } = renderHook(() => useOrderEngine())
+    await settleLoad()
+    expect(result.current.orders).toHaveLength(2)
+    const baseOrder = result.current.orders.find(o => o.chainId === BASE)!
+    const arbOrder = result.current.orders.find(o => o.chainId === ARBITRUM)!
+
+    await act(async () => { await result.current.cancelAllOrders() })
+    expect(result.current.pendingCancel?.action).toBe('invalidate')
+    const plan = result.current.pendingCancel as Extract<PendingCancelReview, { action: 'invalidate' }>
+    expect(plan.affectedOrders.map(o => o.id)).toEqual([arbOrder.id])
+    expect(plan.skippedOrders.map(o => o.id)).toEqual([baseOrder.id])
+
+    await act(async () => { await result.current.confirmCancel() })
+
+    // Only ONE on-chain call, targeting Arbitrum's V3 — the Base order was never touched on-chain.
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
+    expect(writeCalls()[0]).toMatchObject({ address: ARBITRUM_V3, functionName: 'cancelOrder' })
+    expect(result.current.orders.find(o => o.id === arbOrder.id)?.status).toBe('cancelled')
+    // The skipped Base order is untouched — still active, no DB/chain divergence for it.
+    expect(result.current.orders.find(o => o.id === baseOrder.id)?.status).toBe('active')
   })
 })
 

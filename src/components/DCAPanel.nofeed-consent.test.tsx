@@ -35,6 +35,7 @@ const BASE_REGISTERED: Record<string, readonly unknown[]> = {
 }
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))

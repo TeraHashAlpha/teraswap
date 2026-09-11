@@ -21,6 +21,7 @@ vi.mock('@/hooks/useOrderEngine', () => ({
   useOrderEngine: () => useOrderEngineMock(),
 }))
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))
