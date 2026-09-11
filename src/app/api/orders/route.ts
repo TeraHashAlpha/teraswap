@@ -13,7 +13,7 @@ import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT,
   isWhitelistedRouter } from '@/lib/order-engine/config'
 // [SPRINT-P1B / ADR-014 (a)] Pinned-calldata hash verification + the SL deferral reason.
 import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
-import { STOP_LOSS_DEFERRED_REASON } from '@/lib/order-engine/limit-launch'
+import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine/limit-launch'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 import {
@@ -364,6 +364,21 @@ export async function POST(req: NextRequest) {
             'stop-loss orders are held back until the v4 executor ships. Take-Profit and Limit ' +
             'orders are unaffected.',
         },
+        { status: 400 },
+      )
+    }
+
+    // ── [feat/arbitrum-dca-gates] Limit / Take-Profit are Base-only, server-side too ─────────
+    // `isLimitLive` (limit-launch.ts) pins chainId === LIMIT_TP_CHAIN_ID, but it is consulted only
+    // by the panels; this route never asked. That was harmless while the v3 eligibility list held a
+    // single chain, because the executor null-check above refused every other chain first. The
+    // list is SHARED with DCA, so widening it for Arbitrum DCA would otherwise open non-DCA v3
+    // creation on 42161 to a hand-crafted POST the UI never offers — a Limit/TP the keeper would
+    // try to fill against an unconfigured oracle floor. Mirrors the pin, keyed on the VERIFIED
+    // enum (same reason as the SL gate above); DCA is untouched and Base (8453) is byte-identical.
+    if (isV3Order && orderTypeEnum !== ORDER_TYPE_DCA && chainId !== LIMIT_TP_CHAIN_ID) {
+      return NextResponse.json(
+        { error: `Limit/Take-Profit orders are not available on chain ${chainId}` },
         { status: 400 },
       )
     }
