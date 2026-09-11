@@ -397,8 +397,10 @@ export function getChainlinkFeeds(chainId: number): Record<string, FeedEntry> {
   return chainId === 1 ? MAINNET_FEEDS : NO_FEEDS
 }
 
-// Legacy export (mainnet default)
-export const CHAINLINK_FEEDS = MAINNET_FEEDS
+// Legacy export (mainnet default). Named for its key space (symbol, e.g. 'ETH/USD') and its scope
+// (mainnet only) — distinct from the address-keyed, multi-chain `CHAINLINK_FEEDS` in
+// `lib/constants.ts`, which this is not an alias of and must never be confused with.
+export const MAINNET_FEEDS_BY_SYMBOL = MAINNET_FEEDS
 
 // ── Supabase config ──────────────────────────────────────
 export const SUPABASE_ORDERS_TABLE = 'orders'

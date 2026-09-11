@@ -23,7 +23,6 @@ import {
   EXPIRY_PRESETS,
   getDefaultRouter,
   NO_ROUTER_FOR_CHAIN_REASON,
-  getChainlinkFeeds,
   MIN_ORDER_AMOUNT,
   dcaScheduleFitsExpiry,
   DCA_CUSTOM_BUYS_MIN,
@@ -80,14 +79,6 @@ import BetaDisclaimer from './BetaDisclaimer'
 // uses — wired here so a multi-day autonomous DCA cannot be started into a depegged/unverifiable
 // pair with zero signal. Read-only reuse: neither the hook nor its thresholds are modified.
 import { useDepegCheck } from '@/hooks/useDepegCheck'
-
-// ── Map token symbols to Chainlink feeds ─────────────────
-// Returns empty string if no feed found — callers must check before submitting.
-function _findPriceFeed(token: Token, chainId: number): string {
-  const feeds = getChainlinkFeeds(chainId)
-  const key = `${token.symbol}/USD`
-  return feeds[key]?.address ?? ''
-}
 
 // [SPRINT-DCA-UNGATE] The DCA circuit-breaker (#201) returns an HTTP 403 whose message begins
 // "New DCA orders are temporarily paused…". We can't poll a status endpoint (none exists — handle
