@@ -383,11 +383,15 @@ const NO_FEEDS = Object.freeze({}) as Record<string, FeedEntry>
  * The chainId is now load-bearing and the answer is fail-closed: an unknown chain gets NO feeds
  * rather than another chain's. This table is NOT extended per chain — the per-chain,
  * ADDRESS-keyed registry `getChainlinkFeed(token, chainId)` (chains/chainlink-feeds.ts:100) is the
- * single source of truth for that, and both order panels now resolve `order.priceFeed` through it.
- * Growing a second, symbol-keyed per-chain map here is the duplication that bred this bug.
+ * single source of truth for every OTHER chain. Growing a second, symbol-keyed per-chain map here
+ * is the duplication that bred this bug.
  *
- * Address-keyed beats symbol-keyed for the same reason: a symbol is not an identity. 'USDC/USD'
- * matched ANY token whose symbol string was 'USDC', imposters included.
+ * [NARROWED — owner's SPLIT decision] On MAINNET this table is still the ONLY feed source the order
+ * panels sign from (order-engine/price-feed.ts), exactly as at origin/main. The first cut of this
+ * branch resolved mainnet through the address-keyed registry too, which silently widened the
+ * mainnet signable set from these 7 symbols to 26 — the registry is the swap READ path's table,
+ * guarded there by ADR-018, and nothing on the signing path consults that guard. The 7-symbol set
+ * below is pinned by price-feed.test.ts; widening it is a deliberate, rule-#9-verified PR.
  */
 export function getChainlinkFeeds(chainId: number): Record<string, FeedEntry> {
   return chainId === 1 ? MAINNET_FEEDS : NO_FEEDS

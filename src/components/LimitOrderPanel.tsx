@@ -13,7 +13,7 @@ import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 // leg. This is the SAME function the merged DCA fix uses — called here, never re-implemented,
 // never wrapped in a local helper with its own failure behaviour.
 import { resolveSignableToken } from '@/lib/chains/tokens'
-import { getChainlinkFeed } from '@/lib/chains/chainlink-feeds'
+import { resolveOrderPriceFeed } from '@/lib/order-engine/price-feed'
 import {
   OrderType,
   PriceCondition,
@@ -53,9 +53,8 @@ function isStablecoin(token: Token): boolean {
 // ── Map token to Chainlink feed ──────────────────────────
 /**
  * [fix/limit-sltp-chain-aware-price-feed — Auditor H2 on merge 227a7f2] `order.priceFeed` resolved
- * through the ONE chain-aware, ADDRESS-keyed registry: `getChainlinkFeed(token, chainId)`
- * (chains/chainlink-feeds.ts:100). It is not re-implemented, copied or wrapped in a second
- * look-up here — a second copy of a feed map is exactly what produced this finding.
+ * through the ONE shared, chain-aware resolver (order-engine/price-feed.ts) — not re-implemented,
+ * copied or wrapped in a second look-up here; a second copy of a feed map is what bred this bug.
  *
  * WHAT WAS WRONG: this read `getChainlinkFeeds(chainId)`, which took the chainId and DISCARDED it,
  * always returning the MAINNET symbol-keyed map. Limit/TP are Base-only (limit-launch.ts:45), so
@@ -63,19 +62,17 @@ function isStablecoin(token: Token): boolean {
  * `_checkPriceCondition` reverts on the extcodesize guard (TeraSwapOrderExecutorV3.sol:1117, from
  * the call site at :504) and every fill reverts. The orders would be permanently unfillable.
  *
- * The PR #490 wrapped-native fallback that used to sit here is GONE, not layered on: it existed
- * only because the mainnet SYMBOL map published 'ETH/USD' and never 'WETH/USD'. The address-keyed
- * helper has no symbol to miss — it maps the native sentinel AND each chain's wrapped-native
- * address onto that chain's ETH/USD proxy itself. Proven, not assumed, by
- * `LimitOrderPanel.chain-aware-price-feed.test.tsx` ("the #490 wrapped-native fallback is
- * redundant"), which drives a wrapped-native sell leg through to signature on both chains.
+ * WHAT THE RESOLVER DOES: mainnet keeps EXACTLY the origin/main behaviour (symbol table + the #490
+ * wrapped-native fallback — the mainnet signable set is pinned by price-feed.test.ts, 0 gained /
+ * 0 lost / 0 changed); every other chain resolves through the per-chain, ADDRESS-keyed registry
+ * `getChainlinkFeed(token, chainId)`, fail-closed on a chain or token it does not cover.
  *
  * Returns '' when there is no feed — the caller refuses on that BEFORE approve/sign. '' never
  * degrades to address(0): the contract reads address(0) as "no price condition, execute
  * unconditionally" (V3:1105-1108), so a zero feed on a Limit/TP order would strip its trigger.
  */
 function findPriceFeed(token: Token, chainId: number): string {
-  return getChainlinkFeed(token.address, chainId) ?? ''
+  return resolveOrderPriceFeed(token, chainId)
 }
 
 /**

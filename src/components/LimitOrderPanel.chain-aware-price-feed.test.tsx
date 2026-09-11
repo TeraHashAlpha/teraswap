@@ -11,12 +11,16 @@
  * reached from the call site at :504) — Solidity's extcodesize guard reverts, so EVERY fill reverts
  * before any swap. Signed orders would be permanently unfillable, cancel-only.
  *
- * The fix points `findPriceFeed` at the chain-aware, ADDRESS-keyed `getChainlinkFeed(token, chainId)`
- * that already existed at chains/chainlink-feeds.ts:100 and was unused here.
+ * The fix routes `findPriceFeed` through `resolveOrderPriceFeed` (order-engine/price-feed.ts):
+ * every non-mainnet chain resolves through the chain-aware, ADDRESS-keyed
+ * `getChainlinkFeed(token, chainId)` (chains/chainlink-feeds.ts:100); mainnet keeps EXACTLY its
+ * origin/main symbol-table behaviour (NARROWED — see price-feed.test.ts, which pins the set).
  *
  * EVERY expected feed address in this file is read from `getChainlinkFeed` at assertion time. There
  * is not one feed-address literal in an assertion — a test that hardcoded 0x71041ddd… would pass
- * just as well against a second, drifting copy of the map, which is the bug class itself.
+ * just as well against a second, drifting copy of the map, which is the bug class itself. On
+ * mainnet that expectation doubles as a cross-check: the symbol table's ETH/USD and the registry's
+ * CHAINLINK_ETH_USD must be the same aggregator.
  *
  * The two chain ids straddle the v2/v3 signing fork on purpose (Base = v3, mainnet = v2), so the
  * resolution is proved to sit ahead of the fork rather than inside one branch.
@@ -281,11 +285,12 @@ describe('LimitOrderPanel — order.priceFeed is the feed for THE CHAIN BEING SI
   })
 })
 
-describe('LimitOrderPanel — the #490 wrapped-native fallback is redundant', () => {
-  // PR #490 added a second look-up inside findPriceFeed because the MAINNET symbol map had
-  // 'ETH/USD' and no 'WETH/USD'. The address-keyed helper has no symbol to miss: it maps both the
-  // native sentinel AND the chain's wrapped-native ADDRESS onto that chain's ETH/USD proxy. These
-  // two tests are the proof that deleting the fallback loses nothing.
+describe('LimitOrderPanel — selling the wrapped native directly resolves a feed on every chain', () => {
+  // PR #490 added a second look-up inside findPriceFeed because the MAINNET symbol map has
+  // 'ETH/USD' and no 'WETH/USD'. [NARROWED] On mainnet that fallback is kept verbatim and is the
+  // mechanism here; on Base the address-keyed helper has no symbol to miss — it maps both the
+  // native sentinel AND the chain's wrapped-native ADDRESS onto that chain's ETH/USD proxy. Same
+  // observable result down two different paths; both are driven to signature.
   for (const chainId of [8453, 1]) {
     it(`chain ${chainId}: SELLING the wrapped native directly still resolves a feed`, async () => {
       await renderOn(chainId)

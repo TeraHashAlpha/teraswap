@@ -71,3 +71,28 @@ for the Limit file's Base negative control. Both fixtures moved to sell legs wit
 sell leg to the **raw** pick, so the native sentinel can still land in `tokenIn`. `getChainlinkFeed`
 resolves the sentinel correctly so the feed is right either way, but whether the sentinel should reach
 the signed `order.tokenIn` belongs to the H1/H3 PR (`useOrderEngine.ts:695-697`).
+
+## Feedback — NARROWING (owner's SPLIT decision, on top of 29d9519)
+
+### Concern — the first cut widened the mainnet signing set as a side effect
+- 29d9519 pointed both panels at the address-keyed `getChainlinkFeed` for EVERY chain. Measured over the
+  real catalog: mainnet went 7 → 26 signable (19 gained). One gained feed, PEPE's `0x02DE28aB…`, returns
+  `0x` from `eth_getCode` on five independent mainnet RPCs (publicnode, drpc, 1rpc, merkle, flashbots).
+  ADR-018's `getFeedExpectation` gate runs on the READ path only; `findPriceFeed` never consulted it.
+- Narrowed: `resolveOrderPriceFeed` (order-engine/price-feed.ts) — mainnet = origin/main body verbatim
+  (symbol table + #490 wrapped-native fallback); every other chain = `getChainlinkFeed`. Mainnet vs
+  origin/main over the catalog: **0 gained / 0 lost / 0 changed** (ETH, WETH, USDC, DAI, LINK, UNI, AAVE).
+  No denylist, no known-dead list: the mainnet path simply never reads the address-keyed map.
+
+### Test gap — nothing described the signable set
+- `price-feed.test.ts` pins symbol → feed per chain (mainnet 7, Base 4, Arbitrum 6) and proves
+  structurally that every mainnet answer is one of the 7 table addresses. Re-widening to 29d9519's
+  behaviour fails 3 of its 7 tests (`expected {…(26)} to deeply equal {…(7)}`, `USDT signed a non-table
+  feed`, PEPE `expected '0x02DE28aB…' to be ''`).
+
+### Edge case — Arbitrum is also newly signable, not only Base
+- The chain-aware path makes Arbitrum's 5 registry feeds signable where origin/main signed mainnet
+  aggregators. All 8 newly signable addresses (3 Base + 5 Arbitrum) verified on their OWN chain, two RPCs
+  each: code 9571 bytes, `description()` = expected pair, `decimals()` 8, `latestRoundData()` > 0.
+  Nothing failed, nothing removed. Base UNI (`0xc3De…3C83`) still "loses" its mainnet aggregator — it
+  never worked; a Base UNI feed is a separate rule-#9 PR.
