@@ -28,7 +28,7 @@
  *   4. npm start  (or use pm2 / systemd for production)
  *
  * REQUIRED ENV VARS:
- *   RPC_URL                     -- Ethereum RPC endpoint
+ *   RPC_URL                     -- RPC endpoint of the chain named by CHAIN_ID
  *   EXECUTOR_PRIVATE_KEY        -- Private key for the executor wallet (pays gas)
  *   SUPABASE_URL                -- Supabase project URL
  *   SUPABASE_SERVICE_ROLE_KEY   -- Supabase service role key (server-side)
@@ -37,8 +37,14 @@
  *                                  chain, e.g. Arbitrum One); at least ONE of
  *                                  the two must be configured.
  *   TERASWAP_API_URL            -- (optional) Base URL for swap route API
- *   CHAIN_ID                    -- (optional) Chain ID, defaults to 1 (mainnet). One keeper
- *                                  INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum One).
+ *   CHAIN_ID                    -- REQUIRED, no default [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY].
+ *                                  One keeper INSTANCE per chain: 1, 8453 (Base), 42161 (Arbitrum
+ *                                  One). Missing / empty / non-integer ⇒ FATAL naming CHAIN_ID,
+ *                                  before any client exists (boot-config.js). It used to default
+ *                                  to 1, which made an unconfigured process a MAINNET keeper.
+ *   EXECUTOR_ENV_FILE           -- (optional, shell/pm2 env only) which env file env.js loads;
+ *                                  default .env.executor. Each pm2 app names its own (see
+ *                                  ecosystem.config.cjs) so two chains never share a file.
  *
  * BOOT REFUSAL [FIX-KEEPER-BOOT-CHAIN-VERIFICATION]: before any work, main() asks the chain to
  * confirm this config (chain-verify.js) — eth_chainId must equal CHAIN_ID, the executor address
@@ -46,6 +52,11 @@
  * unreachable/slow RPC or a malformed answer exits non-zero after a bounded retry; the keeper never
  * warns and continues. "Keeper won't start" with a FATAL chain-verify line is that gate, not a bug:
  * fix RPC_URL / CHAIN_ID / ORDER_EXECUTOR_ADDRESS so they describe the same chain.
+ * [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] Then, once the signer address is derived (KMS), the
+ * INSTANCE is proven too: whitelistedExecutors(signer) must be true on every configured executor,
+ * or the boot refuses — the right contract with the wrong key never reaches an order.
+ * Boot order: env file → CHAIN_ID parse → env presence → eth_chainId/code/ORDER_TYPEHASH → signer →
+ * whitelistedExecutors(signer) → balance → servers → first cycle (Supabase chain_id=eq.CHAIN_ID).
  *
  * FREEZE-OBSERVABILITY (all OPTIONAL, safe defaults; alerts only fire when Telegram is set):
  *   OUTFLOW_THRESHOLD_ETH       -- (optional) unexplained ETH outflow "full alarm" (default 0.01)
@@ -59,6 +70,8 @@
  *
  * SIGNING (prefer a managed signer over a plaintext key -- required on every production chain):
  *   KMS_KEY_ID                  -- (recommended) AWS KMS key id for signing
+ *   KMS_REGION                  -- REQUIRED with KMS_KEY_ID, no default: the region selects WHICH
+ *                                  key a bare id/alias names (a us-east-1 default was identity-bearing)
  *   VAULT_ADDR                  -- HashiCorp Vault signer address
  *   ALLOW_PLAINTEXT_KEY         -- bypass the production-chain plaintext-key refusal (DANGEROUS)
  *   ALLOW_PLAINTEXT_KEY_MAINNET -- back-compat alias for ALLOW_PLAINTEXT_KEY (either enables the bypass)
@@ -69,6 +82,7 @@
 // module scope (alert.js, retry-policy.js, deviation-guard.js). Pinned by
 // env-order.test.mjs.
 import "./env.js"
+import { ENV_FILE } from "./env.js" // same module instance as the line above; only the path is read
 import {
   createPublicClient,
   createWalletClient,
@@ -190,10 +204,16 @@ import { resolveEthUsdFeed } from "./eth-usd-feed.js"
 // deployer/nonce lands on the same address on every chain.
 import {
   verifyChainBinding,
+  verifyExecutorWhitelist,
   createRpcProbe,
   EXPECTED_ORDER_TYPEHASH_V2,
   EXPECTED_ORDER_TYPEHASH_V3,
 } from "./chain-verify.js"
+// [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] Strict, default-free CHAIN_ID parse (pure, unit-tested in
+// boot-identity.test.mjs). Applied at module scope below because CHAIN_ID is consumed at module scope
+// (feed resolution, the viem chain object) — a bad value must exit before any of that, and before
+// any client exists.
+import { parseChainIdEnv } from "./boot-config.js"
 
 // ---- Configuration -----------------------------------------------------
 // .env.executor is loaded by ./env.js (the FIRST import above), so every read
@@ -211,7 +231,16 @@ const CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_ADDRESS
 const V3_CONTRACT_ADDRESS = process.env.ORDER_EXECUTOR_V3_ADDRESS || ""
 const FEE_COLLECTOR_ADDRESS = process.env.FEE_COLLECTOR_ADDRESS || ""
 const API_URL = process.env.TERASWAP_API_URL || ""
-const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1") // Default to mainnet
+// [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] NO default. This line used to parseInt the variable
+// with a fallback of 1: an unset variable made a MAINNET keeper and "8453abc" made a Base one. Refuse here, at module scope, before any client exists — the chain id decides
+// which orders are polled, which per-chain tables apply and which chain the RPC must prove it is.
+const CHAIN_ID_RESOLUTION = parseChainIdEnv(process.env.CHAIN_ID)
+if (!CHAIN_ID_RESOLUTION.ok) {
+  console.error(`FATAL: ${CHAIN_ID_RESOLUTION.reason}`)
+  console.error(`   (env file: ${ENV_FILE}) Refusing to boot.`)
+  process.exit(1)
+}
+const CHAIN_ID = CHAIN_ID_RESOLUTION.chainId
 
 // [CHORE-EXECUTOR-KEY-GUARD] Chains where a plaintext EXECUTOR_PRIVATE_KEY is acceptable (dev/testnet
 // only -- no real funds). Every OTHER chain (mainnet 1, Base 8453, and any future production chain)
@@ -330,6 +359,8 @@ const chain = {
   id: CHAIN_ID,
   name: "ethereum",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  // `|| ""` only keeps this literal well-formed at module scope; validateConfig() refuses an unset
+  // or blank RPC_URL before this object is ever handed to a transport.
   rpcUrls: { default: { http: [RPC_URL || ""] } },
 }
 
@@ -342,13 +373,17 @@ function validateConfig() {
     SUPABASE_SERVICE_ROLE_KEY: SUPABASE_KEY,
   }
 
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] Blank counts as missing: a whitespace-only value is
+  // present to `!v` but useless to a transport, and would otherwise surface as a confusing
+  // transport error instead of the variable's name.
+  const isBlank = (v) => v === undefined || v === null || String(v).trim() === ""
   const missing = Object.entries(required)
-    .filter(([, v]) => !v)
+    .filter(([, v]) => isBlank(v))
     .map(([k]) => k)
 
   if (missing.length > 0) {
     console.error(`FATAL: Missing required env vars: ${missing.join(", ")}`)
-    console.error("   Copy .env.executor.example -> .env.executor and fill in values")
+    console.error(`   (env file: ${ENV_FILE}) Copy .env.executor.example -> ${ENV_FILE} and fill in values`)
     process.exit(1)
   }
 
@@ -370,14 +405,23 @@ function validateConfig() {
   // [CHORE-KEEPER-HARDENING / P5a] An unwired VAULT_ADDR does NOT count as a
   // managed signer (signer-guard.VAULT_WIRED=false), so it can neither satisfy
   // "a signer exists" on its own nor suppress the plaintext-key FATAL below.
-  const hasKms = !!process.env.KMS_KEY_ID
-  const hasVault = !!process.env.VAULT_ADDR
-  const hasKey = !!PRIVATE_KEY
+  const hasKms = !isBlank(process.env.KMS_KEY_ID)
+  const hasVault = !isBlank(process.env.VAULT_ADDR)
+  const hasKey = !isBlank(PRIVATE_KEY)
   const signerKind = resolveSignerKind({ hasKms, hasVaultConfigured: hasVault, hasKey })
 
   if (signerKind === "none") {
     console.error("FATAL: No usable signing method configured.")
     console.error("   Set KMS_KEY_ID (recommended) or EXECUTOR_PRIVATE_KEY (VAULT_ADDR is not yet wired).")
+    process.exit(1)
+  }
+
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] KMS_REGION has no default any more. kms-signer.js used
+  // to fall back to us-east-1, and the region is identity-bearing: a bare key id or alias names a
+  // DIFFERENT key (or none) in every region, and two keepers on one host each have their own key.
+  if (hasKms && isBlank(process.env.KMS_REGION)) {
+    console.error("FATAL: Missing required env vars: KMS_REGION (required with KMS_KEY_ID — no default region)")
+    console.error(`   (env file: ${ENV_FILE}) Set KMS_REGION to the region of the KMS key this instance signs with.`)
     process.exit(1)
   }
 
@@ -2183,6 +2227,30 @@ async function main() {
   // [C-02/B-01] Use KMS/Vault account if configured, otherwise plaintext key
   const account = await createExecutorAccount()
 
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] PROVE THE INSTANCE. verifyChainBinding above proved the
+  // contract is the right TYPE on the right CHAIN; nothing yet proves this process's key is one that
+  // contract accepts — and executeOrder is gated on whitelistedExecutors[msg.sender]. Two keepers on
+  // one host, each with its own KMS key, is exactly how the right contract meets the wrong key. Read
+  // whitelistedExecutors(<our signer>) on every configured executor; anything but a literal true
+  // exits here, before the wallet client, the balance read, the servers and the first cycle.
+  try {
+    await verifyExecutorWhitelist({
+      provider: createRpcProbe(publicClient),
+      chainId: CHAIN_ID,
+      contracts: gateContracts.map(({ label, address }) => ({ label, address })),
+      signer: account.address,
+      log,
+    })
+  } catch (err) {
+    console.error(err.message)
+    console.error(
+      `   Refusing to boot: this process's signer ${account.address} is not an executor the configured ` +
+        `contract accepts on CHAIN_ID=${CHAIN_ID}. Check KMS_KEY_ID / KMS_REGION name the key whitelisted for ` +
+        `THIS chain (docs/DEPLOYMENTS.md § Keeper registry), or execute the pending executor change on-chain.`,
+    )
+    process.exit(1)
+  }
+
   // Create wallet client for sending transactions
   const walletClient = createWalletClient({
     account,
@@ -2208,6 +2276,7 @@ async function main() {
 
   const balance = await publicClient.getBalance({ address: account.address })
 
+  log(`Env file: ${ENV_FILE}`)
   log(`Executor wallet: ${account.address}`)
   log(`Chain: ${CHAIN_ID}`)
   log(`Balance: ${formatEther(balance)} ETH`)
