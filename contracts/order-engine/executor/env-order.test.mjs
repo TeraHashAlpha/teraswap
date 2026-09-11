@@ -204,3 +204,63 @@ test("executor.js no longer loads .env.executor in its module body", () => {
   assert.doesNotMatch(src, /loadEnv\(join\(process\.cwd\(\)/, "the inline loadEnv call must be gone")
   assert.doesNotMatch(src, /^function loadEnv\(/m, "loadEnv now lives in env.js only")
 })
+
+// ─── [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] Per-process env file ────────────
+// Two keepers (Base + Arbitrum) run from the SAME directory under pm2, so each needs its own
+// env file. EXECUTOR_ENV_FILE (set by pm2's per-app `env` block, i.e. shell env, so it is
+// present BEFORE env.js evaluates) selects the file; unset ⇒ `.env.executor`, byte-for-byte
+// today's behaviour for the Base process. The proof is the same one as above: a module-scope
+// reader in the child sees the SELECTED file's value, because env.js is still the first import.
+
+test("EXECUTOR_ENV_FILE selects the env file; module-scope readers see THAT file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "teraswap-envorder-"))
+  try {
+    writeFileSync(join(dir, ".env.executor"), ["CHAIN_ID=8453", "MAX_CYCLE_FAILURES=5"].join("\n"))
+    writeFileSync(join(dir, ".env.executor.arbitrum"), ["CHAIN_ID=42161", "MAX_CYCLE_FAILURES=6"].join("\n"))
+    const res = spawnSync(process.execPath, ["--input-type=module", "-e", CHILD_SCRIPT], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, EXECUTOR_ENV_FILE: ".env.executor.arbitrum" },
+    })
+    assert.equal(res.status, 0, `child exited ${res.status}: ${res.stderr}`)
+    const out = JSON.parse(res.stdout)
+    assert.equal(out.chainAtModuleScope, "42161", "the SELECTED file's CHAIN_ID, not .env.executor's")
+    assert.equal(out.MAX_CYCLE_FAILURES, 6, "retry-policy's module-scope read saw the selected file")
+    assert.doesNotMatch(res.stderr, /WARNING: Could not load/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("EXECUTOR_ENV_FILE unset → .env.executor, exactly as before (the Base process is unchanged)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "teraswap-envorder-"))
+  try {
+    writeFileSync(join(dir, ".env.executor"), "CHAIN_ID=8453\n")
+    writeFileSync(join(dir, ".env.executor.arbitrum"), "CHAIN_ID=42161\n")
+    const res = runChild(CHILD_SCRIPT, dir)
+    assert.equal(JSON.parse(res.stdout).chainAtModuleScope, "8453")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("EXECUTOR_ENV_FILE pointing at a missing file warns visibly and names the file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "teraswap-envorder-"))
+  try {
+    const res = spawnSync(process.execPath, ["--input-type=module", "-e", CHILD_SCRIPT], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, EXECUTOR_ENV_FILE: ".env.executor.arbitrum" },
+    })
+    assert.equal(res.status, 0, res.stderr)
+    assert.match(res.stderr, /WARNING: Could not load .*\.env\.executor\.arbitrum/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("env.js exports the resolved env file path so the boot log can name it", async () => {
+  const { ENV_FILE } = await import("./env.js")
+  assert.equal(typeof ENV_FILE, "string")
+  assert.match(ENV_FILE, /\.env\.executor$/, "this test process has no EXECUTOR_ENV_FILE ⇒ the default")
+})

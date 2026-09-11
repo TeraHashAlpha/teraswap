@@ -15,10 +15,17 @@
  * process.env before any later import evaluates.
  *
  * Shell env always wins: loadEnv never overrides a variable that is already set.
+ *
+ * [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] WHICH file: `EXECUTOR_ENV_FILE` (relative to cwd, or
+ * absolute), default `.env.executor`. Two keeper processes (Base + Arbitrum One) run from this
+ * same directory under pm2, so each app names its own file in its pm2 `env` block — that is shell
+ * env from this module's point of view, so it is already set when this body runs, and the file it
+ * names is loaded before any later import evaluates (same guarantee as above; pinned by
+ * env-order.test.mjs). The Base process sets nothing and keeps `.env.executor`, byte-for-byte.
  */
 
 import { readFileSync } from "fs"
-import { join } from "path"
+import { resolve } from "path"
 
 // Exported for direct unit tests only (env-order.test.mjs) — no caller needs it.
 export function loadEnv(filePath) {
@@ -40,5 +47,7 @@ export function loadEnv(filePath) {
   }
 }
 
-// Use process.cwd() -- works with spaces in path
-loadEnv(join(process.cwd(), ".env.executor"))
+// Use process.cwd() -- works with spaces in path. `resolve` (not `join`) so an absolute
+// EXECUTOR_ENV_FILE is honoured as given.
+export const ENV_FILE = resolve(process.cwd(), process.env.EXECUTOR_ENV_FILE || ".env.executor")
+loadEnv(ENV_FILE)
