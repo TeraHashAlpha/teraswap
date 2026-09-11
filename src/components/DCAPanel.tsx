@@ -164,7 +164,7 @@ export function outputHasNoResolvableFeed(token: Token | null, chainId: number):
 
 export default function DCAPanel() {
   const { address, isConnected } = useAccount()
-  const _chainId = useChainId()
+  const chainId = useChainId()
   const {
     dcaOrders,
     activeOrders: _activeOrders,
@@ -291,6 +291,7 @@ export default function DCAPanel() {
           onCancel={cancelOrder}
           onCancelAll={cancelAllOrders}
           onRemove={removeOrder}
+          connectedChainId={chainId}
           onCreate={() => setTab('create')}
         />
       )}

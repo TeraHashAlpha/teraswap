@@ -12,6 +12,7 @@ const useChainIdMock = vi.fn(() => 8453)
 const useOrderEngineMock = vi.fn()
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))

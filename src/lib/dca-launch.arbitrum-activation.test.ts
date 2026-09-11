@@ -10,11 +10,13 @@
  * Arbitrum env vars really set via vi.stubEnv, and confirms:
  *   1. isChainActive(42161) really does flip to true once NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR is set
  *      (activation plumbing works end-to-end), and
- *   2. isDcaLive(42161) STILL returns false — with the v3 env var UNSET (block 1) AND, since
- *      INC-2026-08-26-001, with ALL THREE vars SET (block 2): v3 chain eligibility is a code
- *      decision (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, src/lib/order-engine/config.ts), so a populated
- *      NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM no longer makes getOrderExecutorV3(42161)
- *      non-null. Block 2 previously asserted the opposite and specified the defect.
+ *   2. isDcaLive(42161) returns false with the v3 env var UNSET (block 1 — env keeps the power to
+ *      DISABLE), and [feat/arbitrum-dca-gates] TRUE with all three vars SET (block 2): v3 chain
+ *      eligibility is a code decision (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, src/lib/order-engine/
+ *      config.ts) and that decision now includes 42161. Block 2's first case has flipped twice, each
+ *      time deliberately: Sprint 48 pinned "env lights it", INC-2026-08-26-001 pinned "env alone
+ *      cannot", and this branch pins "env lights it BECAUSE the code list allows it" — with a
+ *      per-term falsification on Arbitrum so no single var can be dropped without the gate closing.
  *
  * Modules read env vars at call time / module-load time, so each case re-imports fresh.
  */
@@ -86,13 +88,13 @@ describe('order-engine isolation on Arbitrum — REAL activated state (not mocke
   })
 })
 
-// [INC-2026-08-26-001] The block above proves the unset state end-to-end (real modules, no mocks).
-// This block pins the state that was ACTUALLY in Production from 2026-08-04 to 2026-08-26 —
-// NEXT_PUBLIC_DCA_ENABLED, NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR and
-// NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM all SET — and proves it does NOT make DCA live on
-// Arbitrum: v3 chain eligibility is decided in code (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS), not by env.
-// The previous version of this block asserted the opposite ("ALL FOUR real conditions satisfied ⇒
-// isDcaLive(42161) is true") — it specified the defect, and it was green for the whole incident.
+// [INC-2026-08-26-001 → feat/arbitrum-dca-gates] The block above proves the unset state end-to-end
+// (real modules, no mocks). This block pins the state that was in Production from 2026-08-04 to
+// 2026-08-26 — NEXT_PUBLIC_DCA_ENABLED, NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR and
+// NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM all SET. During the incident that shape lit DCA
+// with nobody having decided it; the incident fix pinned it dark; this branch makes the decision in
+// code, so the same shape now lights DCA on Arbitrum — and the assertion that carries the weight is
+// the LAST one: it is the allowlist, not env, that says yes.
 //
 // Real modules throughout (never mocking isChainActive/getOrderExecutorV3 themselves — a mock is a
 // bet the consumer keeps calling it the same way; stubbing the env underneath the real modules
@@ -112,11 +114,15 @@ describe('dca-launch — env alone cannot light a chain: the 2026-08-04 → 08-2
     NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE: BASE_V3_STUB,
   }
 
-  it('all three Arbitrum vars SET ⇒ the env reaches the real modules (chain active, raw v3 slot populated, 42161 in DCA_CHAINS) yet getOrderExecutorV3(42161) is null and isDcaLive(42161) is false', async () => {
+  const ARBITRUM_ALL_SET: Record<string, string> = {
+    NEXT_PUBLIC_DCA_ENABLED: 'true',
+    NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR: FEE_COLLECTOR_STUB,
+    NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM: ARBITRUM_V3_STUB,
+  }
+
+  it('[feat/arbitrum-dca-gates] all three Arbitrum vars SET ⇒ the env reaches the real modules (chain active, raw v3 slot populated, 42161 in DCA_CHAINS), getOrderExecutorV3(42161) resolves and isDcaLive(42161) is TRUE — because 42161 is on the code allowlist', async () => {
     vi.resetModules()
-    vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
-    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', FEE_COLLECTOR_STUB)
-    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', ARBITRUM_V3_STUB)
+    for (const [key, value] of Object.entries(ARBITRUM_ALL_SET)) vi.stubEnv(key, value)
 
     const { isChainActive } = await import('@/lib/chains')
     const { getOrderExecutorV3, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } =
@@ -132,12 +138,24 @@ describe('dca-launch — env alone cannot light a chain: the 2026-08-04 → 08-2
     expect(isChainActive(42161)).toBe(true)
     expect(DCA_CHAINS.includes(42161)).toBe(true)
     expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBe(ARBITRUM_V3_STUB)
-    // ...and the gate still says no. Against a config.ts where env alone can enable a chain, THIS
-    // is the assertion that fails (`expected '0x5555…' to be null`) — the incident, as a test.
-    expect(getOrderExecutorV3(42161)).toBeNull()
+    // ...and the gate says yes — through the code list, not around it.
+    expect(getOrderExecutorV3(42161)).toBe(ARBITRUM_V3_STUB)
+    expect(isDcaLive(42161)).toBe(true)
+    // The code-level decision is what lets env light it. Remove 42161 from the allowlist and the
+    // three lines above flip back to the incident-fix shape (null / false).
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(42161)).toBe(true)
+  })
+
+  it.each([
+    ['NEXT_PUBLIC_DCA_ENABLED', 'launch flag'],
+    ['NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', 'FeeCollector / isChainActive'],
+    ['NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', 'v3 executor slot — the INC-2026-08-26-001 §2 containment'],
+  ])('[feat/arbitrum-dca-gates] env keeps the power to DISABLE on Arbitrum too — only %s unset (%s falsified) ⇒ isDcaLive(42161) is false', async (missing) => {
+    vi.resetModules()
+    for (const [key, value] of Object.entries(ARBITRUM_ALL_SET)) vi.stubEnv(key, key === missing ? undefined : value)
+
+    const { isDcaLive } = await import('./dca-launch')
     expect(isDcaLive(42161)).toBe(false)
-    // The code-level decision is what keeps it dark.
-    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(42161)).toBe(false)
   })
 
   it('positive control — the gate CAN open, on the eligible chain: all three Base vars SET ⇒ isDcaLive(8453) is true', async () => {

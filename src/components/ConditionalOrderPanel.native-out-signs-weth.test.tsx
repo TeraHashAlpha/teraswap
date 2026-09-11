@@ -61,6 +61,7 @@ const USDC: Record<number, { address: string; symbol: string; decimals: number }
 }
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => CHAIN_ID,
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),

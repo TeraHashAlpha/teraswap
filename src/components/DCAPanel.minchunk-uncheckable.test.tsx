@@ -43,6 +43,7 @@ const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
 const BASE_USDC_USD_FEED = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),
