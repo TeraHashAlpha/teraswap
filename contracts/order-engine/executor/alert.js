@@ -56,7 +56,10 @@ export async function sendTelegramAlert(message) {
   // [KEEPER-ENV-ORDER] Read at SEND time, like token/chatId above — a module-scope
   // capture ran before .env.executor was loaded and froze the "1" default (a Base
   // keeper alerting "Chain: 1"). Lazy reads are evaluation-order-proof.
-  const chainId = process.env.CHAIN_ID || "1"
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] No "1" fallback any more: an unset CHAIN_ID
+  // cannot reach this line from the keeper (executor.js refuses to boot without it), and a
+  // direct caller with no chain must not be stamped as mainnet — say "unset" instead.
+  const chainId = process.env.CHAIN_ID || "unset"
 
   if (!token || !chatId) {
     console.warn("[ALERT] Telegram not configured, skipping alert")

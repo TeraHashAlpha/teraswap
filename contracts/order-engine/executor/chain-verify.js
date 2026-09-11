@@ -30,6 +30,19 @@
  * also separates v2 from v3 by construction (v3 inserts `uint16 maxSlippageBps`), catching a v2/v3
  * address swap in the env.
  *
+ * [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] WHAT THE THREE CHECKS ABOVE DO NOT PROVE: the INSTANCE.
+ * They establish that the address is a TeraSwapOrderExecutor of the expected shape on the expected
+ * chain — the right contract — but say nothing about whether THIS process's signing key is the one
+ * that contract accepts. `executeOrder` is gated by `whitelistedExecutors[msg.sender]` (v2
+ * TeraSwapOrderExecutor.sol:395, v3 TeraSwapOrderExecutorV3.sol:434), so the right contract with
+ * the WRONG KMS key — the exact mistake two keepers on one host invite — booted green and reverted
+ * NotExecutor() on every fill. `verifyExecutorWhitelist` (below) closes that: once the signer
+ * address is derived from KMS it reads `whitelistedExecutors(signer)` on EVERY configured executor
+ * and refuses on anything but a literal `true`. It runs after `verifyChainBinding` (which needs
+ * no signer and so stays BEFORE the signer is created) and before any balance read, server or
+ * cycle. There is still no `paused()` boot read: pause is a runtime state the keeper must be
+ * RUNNING to observe (event-watcher.js), so a paused executor is a reason to idle, not to refuse.
+ *
  * FAIL CLOSED. Every failure mode — mismatch, empty code, unreachable RPC, timeout, malformed
  * response, a client that cannot answer at all — refuses the boot. Retries are bounded and the
  * terminal state after they are exhausted is still refusal. There is no warn-and-continue path, no
@@ -51,6 +64,19 @@ export const ORDER_TYPEHASH_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "bytes32" }],
+  },
+]
+
+// [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] The instance read: the auto-generated getter for
+// `mapping(address => bool) public whitelistedExecutors`, identical on v2 (line 158) and v3 (line
+// 185). This is the exact predicate `executeOrder` applies to msg.sender.
+export const WHITELISTED_EXECUTORS_ABI = [
+  {
+    name: "whitelistedExecutors",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
   },
 ]
 
@@ -445,4 +471,113 @@ export async function verifyChainBinding({
   }
 
   return { chainId: expectedChainId, contracts: verified }
+}
+
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] Verify, against the live chain, that THIS process's
+ * signer is an executor the configured contract(s) will accept: `whitelistedExecutors(signer)`
+ * must be a literal `true` on every entry. Anything else — false, a malformed answer, an RPC that
+ * throws or hangs past the bounded retry, an invalid signer or an empty contract list — refuses.
+ *
+ * Runs AFTER the signer address exists (it is the argument) and BEFORE any fund-moving path, so a
+ * keeper holding the wrong key never reaches an order. Same port, retry and redaction discipline as
+ * verifyChainBinding; the two are separate functions because they run on either side of the signer.
+ *
+ * @param {object}   opts
+ * @param {object}   opts.provider   { readContract({...}) } — the createRpcProbe port
+ * @param {number}   opts.chainId    the (already verified) CHAIN_ID, for messages only
+ * @param {Array<{label: string, address: string}>} opts.contracts  every configured executor
+ * @param {string}   opts.signer     the address this process will send executeOrder from
+ * @returns {Promise<{signer: string, contracts: Array<{label, address, whitelisted: true}>}>}
+ * @throws  {ChainVerificationError} on any failure — the boot must not continue
+ */
+export async function verifyExecutorWhitelist({
+  provider,
+  chainId,
+  contracts,
+  signer,
+  attempts = DEFAULT_ATTEMPTS,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  sleep = defaultSleep,
+  log = () => {},
+} = {}) {
+  if (!provider || typeof provider.readContract !== "function") {
+    throw new ChainVerificationError(
+      `FATAL: cannot verify the executor whitelist on chain ${chainId} — no usable RPC provider (readContract) was supplied`,
+      { check: "provider", chainId, value: null },
+    )
+  }
+  if (typeof signer !== "string" || !ADDRESS.test(signer)) {
+    throw new ChainVerificationError(
+      `FATAL: cannot verify the executor whitelist on chain ${chainId} — the signer address is not a valid ` +
+        `address (${describeValue(signer ?? null)}); the signing key did not resolve to an account. Refusing to boot.`,
+      { check: "whitelist", chainId, value: signer ?? null },
+    )
+  }
+  if (!Array.isArray(contracts) || contracts.length === 0) {
+    throw new ChainVerificationError(
+      `FATAL: no executor address to check the signer ${signer} against on chain ${chainId} — refusing to boot`,
+      { check: "config", chainId, value: contracts ?? null },
+    )
+  }
+  for (const entry of contracts) {
+    const label = (entry && entry.label) || "executor"
+    const address = entry && entry.address
+    if (typeof address !== "string" || !ADDRESS.test(address)) {
+      throw new ChainVerificationError(
+        `FATAL: ${label} is not a valid address (${describeValue(address ?? null)}) on chain ${chainId} — refusing to boot`,
+        { check: "address", chainId, value: address ?? null },
+      )
+    }
+  }
+  const retry = { attempts: Math.max(1, attempts), retryDelayMs, timeoutMs, sleep }
+
+  const verified = []
+  for (const entry of contracts) {
+    const label = entry.label || "executor"
+    const address = entry.address
+    let answer
+    try {
+      answer = await callWithRetry(
+        () =>
+          provider.readContract({
+            address,
+            abi: WHITELISTED_EXECUTORS_ABI,
+            functionName: "whitelistedExecutors",
+            args: [signer],
+          }),
+        retry,
+      )
+    } catch (err) {
+      throw new ChainVerificationError(
+        `FATAL: could not read whitelistedExecutors(${signer}) from ${label} ${address} on chain ` +
+          `${chainId} after ${retry.attempts} attempt(s): ${errText(err)} — refusing to boot`,
+        { check: "whitelist", chainId, value: address },
+      )
+    }
+    if (typeof answer !== "boolean") {
+      throw new ChainVerificationError(
+        `FATAL: ${label} ${address} on chain ${chainId} returned a malformed whitelistedExecutors ` +
+          `answer (${describeValue(answer)}) for signer ${signer} — refusing to boot`,
+        { check: "whitelist", chainId, value: answer },
+      )
+    }
+    if (answer !== true) {
+      throw new ChainVerificationError(
+        `FATAL: signer ${signer} is NOT a whitelisted executor on ${label} ${address} (chain ${chainId}) — ` +
+          `whitelistedExecutors(signer) = false. The configured signing key (KMS_KEY_ID / EXECUTOR_PRIVATE_KEY) ` +
+          `does not belong to this executor instance: every executeOrder would revert NotExecutor(). Either ` +
+          `this process is running with another chain's key, or the executor change has not been executed ` +
+          `on-chain yet. Refusing to boot.`,
+        { check: "whitelist", chainId, value: signer },
+      )
+    }
+    log(`[chain-verify] signer ${signer} — whitelistedExecutors = true on ${label} ${address} (chain ${chainId})`)
+    verified.push({ label, address, whitelisted: true })
+  }
+
+  return { signer, contracts: verified }
 }
