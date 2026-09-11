@@ -150,7 +150,9 @@ function formatSweepQueued(args, txHash) {
 }
 
 function txLink(txHash) {
-  const base = explorerBase(process.env.CHAIN_ID || "1")
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] No "1" fallback: an unset CHAIN_ID resolves to no
+  // explorer (explorerBase(undefined) → null → raw hash below), never to etherscan.io.
+  const base = explorerBase(process.env.CHAIN_ID)
   if (!base) {
     // Unknown chain: show the raw hash rather than a wrong-explorer link.
     return `Tx: <code>${txHash}</code>`

@@ -204,12 +204,18 @@ function decodeDerSignature(der) {
  */
 export async function createExecutorAccount() {
   const kmsKeyId = process.env.KMS_KEY_ID
-  const kmsRegion = process.env.KMS_REGION || "us-east-1"
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] No "us-east-1" default: the region is part of the
+  // key's identity (a bare id/alias names a different key, or none, per region). executor.js's
+  // validateConfig refuses first; this guard covers direct callers (the runbook's signer check).
+  const kmsRegion = process.env.KMS_REGION
   const vaultAddr = process.env.VAULT_ADDR
   const privateKey = process.env.EXECUTOR_PRIVATE_KEY
 
   // Priority: KMS > Vault > Plaintext key
   if (kmsKeyId) {
+    if (!kmsRegion || !String(kmsRegion).trim()) {
+      throw new Error("[C-02] KMS_KEY_ID is set but KMS_REGION is not — there is no default region; set KMS_REGION to the key's region.")
+    }
     console.log("[C-02] Using AWS KMS signer (key never leaves HSM)")
     const account = await createKmsAccount(kmsKeyId, kmsRegion)
     console.log(`[C-02] KMS executor address: ${account.address}`)

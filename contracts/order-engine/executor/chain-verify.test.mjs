@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { toFunctionSelector, encodeAbiParameters } from "viem"
 
 import {
   verifyChainBinding,
@@ -1074,6 +1075,15 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
   const DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
   const WRONG_TYPEHASH = "0x" + "11".repeat(32)
   const SOME_CODE = "0x60806040" + "00".repeat(64)
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] The boot now makes a SECOND eth_call per executor —
+  // whitelistedExecutors(<signer>), after the signer exists — so the double dispatches eth_call by
+  // selector: identity reads get `typehash`, whitelist reads get `true` (this file is about the
+  // chain/type gate; the instance gate has its own positive/negative boots in
+  // boot-identity.test.mjs). `targets` tags each eth_call with its function so the "exactly one
+  // identity read" assertions below count identity reads, not every eth_call.
+  const SEL_ORDER_TYPEHASH = toFunctionSelector("ORDER_TYPEHASH()")
+  const SEL_WHITELISTED = toFunctionSelector("whitelistedExecutors(address)")
+  const BOOL_TRUE = encodeAbiParameters([{ type: "bool" }], [true])
 
   // bootExecutor's mkdtempSync cwd is never used past the boot it belongs to — swept once after
   // this describe block finishes rather than one-by-one, so a mid-test rmSync failure can never
@@ -1123,9 +1133,15 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
               return { jsonrpc: "2.0", id: call.id, result: code }
             }
             case "eth_call": {
-              const to = Array.isArray(call.params) && call.params[0] ? call.params[0].to : undefined
-              targets.push({ method: "eth_call", address: String(to).toLowerCase() })
-              const result = typeof typehash === "function" ? typehash(String(to).toLowerCase()) : typehash
+              const tx = Array.isArray(call.params) && call.params[0] ? call.params[0] : {}
+              const to = String(tx.to).toLowerCase()
+              const data = String(tx.data || "")
+              if (data.startsWith(SEL_WHITELISTED)) {
+                targets.push({ method: "eth_call", fn: "whitelistedExecutors", address: to })
+                return { jsonrpc: "2.0", id: call.id, result: BOOL_TRUE }
+              }
+              targets.push({ method: "eth_call", fn: data.startsWith(SEL_ORDER_TYPEHASH) ? "ORDER_TYPEHASH" : data.slice(0, 10), address: to })
+              const result = typeof typehash === "function" ? typehash(to) : typehash
               return { jsonrpc: "2.0", id: call.id, result }
             }
             default:
@@ -1289,7 +1305,9 @@ describe("chain-verify — the real executor.js boot, observed through its RPC",
   // signer's eth_getBalance, whether ANY RPC happens at all), never on log strings alone. Every
   // relaxation is justified by an address being ABSENT: the fifth test proves a configured-but-
   // wrong v3 still refuses exactly as before.
-  const gateReadsFor = (boot, method) => boot.targets.filter((t) => t.method === method)
+  // eth_call is counted per FUNCTION: identity reads only (the whitelist read is a separate gate).
+  const gateReadsFor = (boot, method) =>
+    boot.targets.filter((t) => t.method === method && (method !== "eth_call" || t.fn === "ORDER_TYPEHASH"))
 
   test("v3-only config → the gate verifies exactly ONE contract (the v3), boot proceeds", { timeout: 60_000 }, async () => {
     const boot = await bootExecutor({

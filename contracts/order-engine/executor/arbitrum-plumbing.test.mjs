@@ -71,8 +71,15 @@ describe("order query + RPC client are CHAIN_ID-parameterized (nothing to add fo
     assert.match(executorSource, /rpcUrls:\s*\{\s*default:\s*\{\s*http:\s*\[RPC_URL/)
   })
 
-  test("CHAIN_ID is read from env with the mainnet default (an Arbitrum instance is pure config)", () => {
-    assert.match(executorSource, /const CHAIN_ID = parseInt\(process\.env\.CHAIN_ID \|\| "1"\)/)
+  // [FIX-KEEPER-MULTICHAIN-INSTANCE-IDENTITY] This used to pin `parseInt(process.env.CHAIN_ID || "1")`
+  // — the mainnet default that made an UNconfigured process a mainnet keeper. An Arbitrum instance is
+  // still pure config, but the config is now mandatory: the id comes from the strict, default-free
+  // parser (boot-config.js) and a missing/junk value exits at module scope (boot-identity.test.mjs).
+  test("CHAIN_ID is read from env through the strict parser — NO mainnet default (an Arbitrum instance is pure config)", () => {
+    assert.match(executorSource, /const CHAIN_ID_RESOLUTION = parseChainIdEnv\(process\.env\.CHAIN_ID\)/)
+    assert.match(executorSource, /const CHAIN_ID = CHAIN_ID_RESOLUTION\.chainId/)
+    assert.doesNotMatch(executorSource, /process\.env\.CHAIN_ID \|\| "1"/, "the mainnet default must not come back")
+    assert.doesNotMatch(executorSource, /parseInt\(process\.env\.CHAIN_ID/, "parseInt accepted junk suffixes")
   })
 })
 
