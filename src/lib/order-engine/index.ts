@@ -7,7 +7,7 @@
 export { ORDER_EXECUTOR_ABI,
   // [SPRINT-V3-P3] cancel/invalidate write path only (cancelOrder, invalidateUnorderedNonces).
   ORDER_EXECUTOR_V3_ABI } from './abi'
-export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, CHAINLINK_FEEDS, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
+export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getOrderExecutorDomain, CANCEL_ORDER_TYPES, WHITELISTED_ROUTERS, getWhitelistedRouters, getDefaultRouter, MAINNET_FEEDS_BY_SYMBOL, getChainlinkFeeds, EXPIRY_PRESETS, DCA_INTERVAL_PRESETS, DCA_TOTAL_PRESETS, MAX_EXPIRY_DAYS, MAX_ACTIVE_ORDERS, ORDER_POLL_INTERVAL_MS, MIN_ORDER_AMOUNT,
   // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] ORDER_EXECUTOR_V3_BY_CHAIN is deliberately
   // NOT re-exported here. It is the raw, env-only slot map — config.ts's own comment above its
   // definition says "Never read this map directly for a signing / execution / API decision", but a
