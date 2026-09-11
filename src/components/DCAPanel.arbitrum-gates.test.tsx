@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * [feat/arbitrum-dca-gates] DCAPanel on Arbitrum One (42161) — the two gates this branch opens, and
+ * [feat/arbitrum-dca-gates] DCAPanel on Arbitrum One (42161) — the three gates this branch opens, and
  * the one it deliberately leaves in front of the user.
  *
  * Opened: `ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS` now lists 42161 and `ROUTERS_BY_CHAIN` carries a
@@ -20,16 +20,22 @@
  *                                 button sends the approval to the DEPLOYMENTS.md executor — the
  *                                 panel-level identity proof for the spender.
  *
- * FOUND WHILE WRITING THE POSITIVE CASE — a THIRD gate the branch prompt did not list, and this PR
- * deliberately does NOT open: `useOrderEngine.confirmOrder` (:757) and `confirmCancel` (:1073)
- * refuse when `getOrderExecutor(chainId)` — the **v2** executor — is null, and the CancelOrder
- * EIP-712 domain is `getOrderExecutorDomain` (v2) on both the client and `api/orders/[id]`. Base
- * has a v2 executor, so none of that ever fired there; Arbitrum is v3-ONLY (ORDER_EXECUTOR_BY_CHAIN
- * has no 42161 entry, pinned by config.test.ts). Opening creation alone would mint orders that the
- * UI could neither sign a cancel for nor cancel on-chain — the INC-2026-08-26-001 class. So the
- * last case pins where the flow stops today: after the approval, at that v2 precondition, with no
- * EIP-712 signature requested. The follow-up that makes the lifecycle version-aware is the
- * remaining merge precondition beside the feed execution (see this branch's feedback).
+ * FOUND WHILE WRITING THE POSITIVE CASE — a THIRD gate the branch prompt did not list, opened by the
+ * follow-up commit on this branch: `useOrderEngine.confirmOrder` and `confirmCancel` used to refuse
+ * when `getOrderExecutor(chainId)` — the **v2** executor — was null, and the CancelOrder EIP-712
+ * ownership-proof domain was `getOrderExecutorDomain` (v2) on both the client and `api/orders/[id]`.
+ * Base has a v2 executor, so none of that ever fired there; Arbitrum is v3-ONLY
+ * (ORDER_EXECUTOR_BY_CHAIN has no 42161 entry, pinned by config.test.ts). It was NOT opened for
+ * creation alone — that would have minted orders the UI could neither sign a cancel for nor cancel
+ * on-chain, the INC-2026-08-26-001 class. Now: both preconditions resolve the executor from the
+ * ORDER's version (resolveSigningExecutor — the same resolver the approval spender uses), and the
+ * proof domain is the one chain-level rule getCancelOrderDomain (v2's where v2 exists, else v3's)
+ * on client and API alike. The third-gate case below pins the new truth at the panel: after the
+ * approval to the DEPLOYMENTS.md executor, the EIP-712 signature is requested under
+ * {name:'TeraSwapOrderExecutor', version:'3', chainId:42161, verifyingContract:<that executor>} and
+ * the order is POSTed for 42161. The cancel half (on-chain cancelOrder on the same executor, proof
+ * under the same domain) is pinned at the hook in useOrderEngine.v3-only-chain.test.ts and at the
+ * API in orders-cancel.arbitrum-v3-only.test.ts.
  *
  * The chain-unavailable banner must NOT render in any state: the executor exists. And the
  * order-map gate (ADR-020) must not fire either: a router is committed, and it is the Arbitrum set's
@@ -303,8 +309,10 @@ describe('[feat/arbitrum-dca-gates] the #484 no-feed guard is what gates the pan
     expect(approval.address.toLowerCase()).toBe(WETH) // the spend leg's ERC-20
   })
 
-  it('THE THIRD GATE (not opened here): after the approval, confirmOrder stops at useOrderEngine\'s v2-executor precondition — no EIP-712 signature is requested on the v3-only chain', async () => {
-    // Pinned as the current truth, not as the desired one. Arbitrum has no v2 executor:
+  it('THE THIRD GATE (opened): after the approval, confirmOrder signs under the V3 domain of the DEPLOYMENTS.md executor (version "3", chainId 42161) and POSTs the order for 42161 — the v2 precondition is gone', async () => {
+    // Flipped deliberately from the predecessor's "flow stops here" pin, with the cancel half proven
+    // in the same change (hook + API suites named in the header). Arbitrum STILL has no v2 executor —
+    // the gate opened because the precondition became version-aware, not because v2 appeared:
     expect(getOrderExecutor(ARBITRUM)).toBeNull()
     expect(getOrderExecutorV3(ARBITRUM)).toBe(ARBITRUM_V3)
 
@@ -313,19 +321,35 @@ describe('[feat/arbitrum-dca-gates] the #484 no-feed guard is what gates the pan
     enterAmount('100')
     await driveCreationAsFarAsTheUiAllows()
 
-    // Approval happened (previous case); the sign step did not, and the panel says why — the v2
-    // wording from useOrderEngine.confirmOrder, not the v3 one and not the feed guard's.
+    // Approval happened (previous case) …
     expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
-    expect(mockSignTypedDataAsync).not.toHaveBeenCalled()
-    expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
+    const approval = mockWriteContractAsync.mock.calls[0][0] as { args: readonly unknown[] }
+    expect(String(approval.args[0]).toLowerCase()).toBe(ARBITRUM_V3.toLowerCase())
+    // … and so did the sign step, under the v3 domain of the SAME executor the approval went to.
+    expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)
+    const typed = mockSignTypedDataAsync.mock.calls[0][0] as {
+      domain: { name: string; version: string; chainId: number; verifyingContract: string }
+      primaryType: string
+      types: { Order: Array<{ name: string; type: string }> }
+      message: Record<string, unknown>
+    }
+    expect(typed.domain).toEqual({
+      name: 'TeraSwapOrderExecutor', version: '3', chainId: ARBITRUM, verifyingContract: ARBITRUM_V3,
+    })
+    expect(typed.primaryType).toBe('Order')
+    expect(typed.types.Order.some(f => f.name === 'maxSlippageBps' && f.type === 'uint16')).toBe(true)
+    expect(typeof typed.message.maxSlippageBps).toBe('number')
+    expect(String(typed.message.router).toLowerCase()).toBe(getDefaultRouter(ARBITRUM)!.address.toLowerCase())
+    // The order reached the API for the chain it was signed under, tagged v3.
+    expect(mockCreateOrderInSupabase).toHaveBeenCalledTimes(1)
+    const posted = mockCreateOrderInSupabase.mock.calls[0][0] as { chainId: number; maxSlippageBps?: number }
+    expect(posted.chainId).toBe(ARBITRUM)
+    expect(posted.maxSlippageBps).toBe(typed.message.maxSlippageBps)
+    // Neither the feed guard nor the old v2 wording fired.
     expect(screen.queryByTestId('dca-submit-block')).toBeNull()
     await waitFor(() =>
-      expect(document.body.textContent).toMatch(/Conditional orders are not yet available on chain 42161\./),
+      expect(document.body.textContent).not.toMatch(/Conditional orders are not yet available on chain 42161\./),
     )
-    // The day useOrderEngine becomes version-aware (resolveSigningExecutor for the confirm guard, a
-    // v3 CancelOrder domain on client + api/orders/[id]) this case flips to "signs with domain
-    // {name:'TeraSwapOrderExecutor', version:'3', chainId:42161, verifyingContract:<DEPLOYMENTS>}"
-    // — and must be flipped deliberately, with the cancel path proven in the same change.
   })
 
   it('registered for ONE leg only ⇒ still refused, naming the other leg (the feed pair must be complete)', async () => {

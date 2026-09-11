@@ -49,6 +49,12 @@ vi.mock('@/lib/order-engine', async () => {
       if (chainId !== 1) throw new Error(`No OrderExecutorV3 deployed on chain ${chainId}`)
       return { name: 'TeraSwapOrderExecutor' as const, version: '3' as const, chainId, verifyingContract: V3_ADDRESS }
     },
+    // [feat/arbitrum-dca-gates — third gate] confirmOrder / confirmCancel now resolve the order's
+    // executor by version through resolveSigningExecutor, which — like the domain fn above — calls
+    // config's OWN getOrderExecutorV3, so this file's "v3 on chain 1" simulation must cover it too
+    // or every v3 order here is refused before signing. Same shape as the real one (config.ts:171).
+    resolveSigningExecutor: (chainId: number, isV3Order: boolean) =>
+      isV3Order ? (chainId === 1 ? V3_ADDRESS : null) : actual.getOrderExecutor(chainId),
   }
 })
 

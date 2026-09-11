@@ -192,12 +192,37 @@ export function getOrderExecutorV3Domain(chainId: number) {
   }
 }
 
+/**
+ * [feat/arbitrum-dca-gates — third gate] The EIP-712 domain the CancelOrder OWNERSHIP PROOF
+ * (CANCEL_ORDER_TYPES below) is signed under by the client (useOrderEngine confirmCancel) and
+ * recovered under by PATCH /api/orders/[id]. That proof never reaches a contract: its domain is a
+ * per-chain namespace that binds the signature to (chainId, executor), not a call target. So it is
+ * resolved per CHAIN, not per order version, by ONE rule shared by both sides:
+ *   the chain's v2 executor where one exists (Mainnet, Base — byte-identical to before: the same
+ *   getOrderExecutorDomain object, so every deployed client/server pair keeps agreeing),
+ *   else the chain's v3 executor (Arbitrum One is v3-only — ORDER_EXECUTOR_BY_CHAIN has no 42161),
+ *   else throw — fail-closed: with no executor no order can exist there, so there is nothing to
+ *   prove ownership of (callers catch: the API answers 400, the client swallows in
+ *   cancelOrderInSupabase).
+ * Before this helper the client and the API both hard-coded getOrderExecutorDomain (v2), which
+ * throws on Arbitrum: a v3 DCA there could be cancelled on-chain but never marked cancelled in
+ * Supabase. The ORDER's executor (approve spender, signing domain, on-chain cancel target) is a
+ * different question with a different answer — resolveSigningExecutor, by version — never this.
+ */
+export function getCancelOrderDomain(chainId: number) {
+  if (getOrderExecutor(chainId)) return getOrderExecutorDomain(chainId)
+  if (getOrderExecutorV3(chainId)) return getOrderExecutorV3Domain(chainId)
+  throw new Error(
+    `No OrderExecutor deployed on chain ${chainId} — conditional orders are unavailable there`,
+  )
+}
+
 // ── EIP-712 cancel-order types [FULL-H-01] ───────────────
 // The PATCH /api/orders/[id] cancel endpoint requires a cryptographic
 // proof of ownership. The frontend signs this typed-data message and the
 // server recovers the signer via recoverTypedDataAddress, comparing it to
-// the order owner. Re-uses getOrderExecutorDomain(chainId) — same contract,
-// same chain binding as order creation.
+// the order owner. Both sides use getCancelOrderDomain(chainId) — the same
+// chain binding as order creation (v2's domain where v2 exists, else v3's).
 export const CANCEL_ORDER_TYPES = {
   CancelOrder: [
     { name: 'id', type: 'string' },     // Supabase order UUID

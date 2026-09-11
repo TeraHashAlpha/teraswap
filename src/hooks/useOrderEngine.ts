@@ -23,6 +23,11 @@ import {
   ORDER_EIP712_TYPES,
   CANCEL_ORDER_TYPES,
   getOrderExecutorDomain,
+  // [feat/arbitrum-dca-gates — third gate] The executor an order is signed / cancelled against is
+  // resolved from the ORDER's version (never from v2's presence); the CancelOrder ownership proof
+  // is namespaced by ONE chain-level rule shared with PATCH /api/orders/[id].
+  resolveSigningExecutor,
+  getCancelOrderDomain,
   OrderType,
   PriceCondition,
   ORDER_POLL_INTERVAL_MS,
@@ -752,9 +757,22 @@ export function useOrderEngine() {
       setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: 'Order expired before signing — please recreate it.' })
       return
     }
+    // [SPRINT-V3-P2] order.maxSlippageBps defined ⇒ this order was built for v3 (createOrder
+    // already gated that on orderExecutorV3 !== null) — everything below branches on it: the
+    // precondition, the domain (version "3") and the typed-data schema, so a v3 order can never
+    // verify against v2 and vice-versa. v2 orders take the exact path they always have.
+    const isV3Order = p.order.maxSlippageBps !== undefined
     // [CHORE-ORDER-EXEC-PREP A] Fail-closed: never sign an order on a chain with no OrderExecutor
-    // (e.g. Base — the same address is the FeeCollector there, not an executor).
-    if (!orderExecutor) {
+    // (e.g. Base before its executor — the same address is the FeeCollector there, not an executor).
+    // [feat/arbitrum-dca-gates — third gate] "No OrderExecutor" means the executor THIS order will
+    // be signed against, resolved from the order's own version through resolveSigningExecutor —
+    // the single source of truth the pre-sign approval spender already uses (useOrderApproval), so
+    // the contract that was approved and the contract that is signed for cannot diverge here. The
+    // old `!orderExecutor` (v2) precondition was vestigial on Base (v2 and v3 both exist, and the
+    // domain below is chosen by version, not by v2) and wrong on Arbitrum One (v3-only): it refused
+    // every v3 DCA after the approval had already gone to the v3 executor. A chain with no executor
+    // for this order's version is still refused, with the same message as before.
+    if (!resolveSigningExecutor(chainId, isV3Order)) {
       setPendingOrder(null)
       setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: `Conditional orders are not yet available on chain ${chainId}.` })
       return
@@ -813,14 +831,11 @@ export function useOrderEngine() {
       // chainId makes the sent == signed invariant explicit — a future refactor cannot let them
       // diverge.
       const signedChainId = chainId
-      // [SPRINT-V3-P2] order.maxSlippageBps defined ⇒ this order was built for v3 (createOrder
-      // already gated that on orderExecutorV3 !== null) — sign with the v3 domain (version "3")
-      // and typed-data schema so it can never verify against v2, and vice-versa. v2 orders take
-      // the exact path they always have (getOrderExecutorDomain, ORDER_EIP712_TYPES).
-      const isV3Order = order.maxSlippageBps !== undefined
-      // [CHORE-ORDER-EXEC-PREP A] EIP-712 domain via the per-chain resolver. Mainnet (chainId 1) is
-      // byte-identical to the previous inline domain; it throws on a chain with no executor — but the
-      // fail-closed guard above already returned for that case, so this is reached only when valid.
+      // [CHORE-ORDER-EXEC-PREP A] EIP-712 domain via the per-chain resolver, chosen by the order's
+      // version (isV3Order above): v3 ⇒ version "3" + the v3 typed-data schema, v2 ⇒ the path it
+      // always had (getOrderExecutorDomain, ORDER_EIP712_TYPES). Mainnet (chainId 1) is byte-identical
+      // to the previous inline domain; it throws on a chain with no executor for this version — but
+      // the fail-closed guard above already returned for that case, so this is reached only when valid.
       const domain = isV3Order ? getOrderExecutorV3Domain(signedChainId) : getOrderExecutorDomain(signedChainId)
 
       // Sign the FROZEN order
@@ -963,7 +978,7 @@ export function useOrderEngine() {
       setIsSubmitting(false)
       creatingRef.current = false // [P213] release the create mutex
     }
-  }, [pendingOrder, address, chainId, orderExecutor, signTypedDataAsync, refetchNonce])
+  }, [pendingOrder, address, chainId, signTypedDataAsync, refetchNonce])
 
   // [SPRINT-9U U2] Cancel a pending review without signing (modal "Cancel").
   const clearPendingOrder = useCallback(() => setPendingOrder(null), [])
@@ -1068,24 +1083,32 @@ export function useOrderEngine() {
     setPendingCancel(null) // consume the review (also serialises double-confirms)
 
     // [CHORE-ORDER-EXEC-PREP A] Fail-closed: no OrderExecutor on this chain → no on-chain cancel/
-    // invalidate (and getOrderExecutorDomain would throw). On such chains no order could have been
-    // created, so this is defensive; it also narrows `orderExecutor` to non-null below.
-    if (!orderExecutor) {
-      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: `Conditional orders are not available on chain ${chainId}.` })
-      return
-    }
+    // invalidate. [feat/arbitrum-dca-gates — third gate] "No OrderExecutor" is asked PER LEG of the
+    // frozen plan, by that leg's version — never as a blanket v2 precondition. The old
+    // `!orderExecutor` (v2) gate here was vestigial on Base (the target below was already chosen by
+    // version) and wrong on Arbitrum One (v3-only): it refused the on-chain cancel of every v3 DCA,
+    // which is exactly the uncancellable-order class INC-2026-08-26-001 describes.
 
     if (p.action === 'cancel') {
       const { orderId, order, orderStruct, isV3 } = p
       // [SPRINT-V3-P3] Re-check at confirm time (chain may have changed since the freeze —
       // the [9R defense] chainId guard above already covers the common case, this is
-      // belt-and-suspenders for a v3 order specifically). Never send a v3 struct to v2's
-      // cancelOrder — different typehash, would either no-op or hash-mismatch.
-      if (isV3 && !orderExecutorV3) {
-        setLatestEvent({ type: 'order_error', orderId, error: `v3 conditional orders are not yet available on chain ${chainId}.` })
+      // belt-and-suspenders). Never send a v3 struct to v2's cancelOrder — different typehash,
+      // would either no-op or hash-mismatch — and never a v2 struct to v3's. resolveSigningExecutor
+      // is the SAME resolver the order's signing domain came from, so cancelOrder() lands on the
+      // very contract whose domain separator verified the signature: V3.sol:636 marks
+      // cancelledOrders[getOrderHash(order)] on address(this), the :449 verifier's domain.
+      const cancelExecAddress = resolveSigningExecutor(chainId, isV3)
+      if (!cancelExecAddress) {
+        setLatestEvent({
+          type: 'order_error',
+          orderId,
+          error: isV3
+            ? `v3 conditional orders are not yet available on chain ${chainId}.`
+            : `Conditional orders are not available on chain ${chainId}.`,
+        })
         return
       }
-      const cancelExecAddress = isV3 ? orderExecutorV3! : orderExecutor
       const cancelExecAbi = isV3 ? ORDER_EXECUTOR_V3_ABI : ORDER_EXECUTOR_ABI
       try {
         // Cancel on-chain — contract verifies msg.sender == order.owner, then marks hash as
@@ -1103,10 +1126,12 @@ export function useOrderEngine() {
         // recover the signer and confirm ownership. A declined signature is
         // swallowed by cancelOrderInSupabase (returns false) — the on-chain
         // cancel above is authoritative, so the order is still cancelled.
-        // Domain uses the ACTIVE chainId (chain-agnostic, [H-05]).
+        // Domain uses the ACTIVE chainId (chain-agnostic, [H-05]) through the ONE rule the API
+        // recovers under (getCancelOrderDomain: v2's where v2 exists, else v3's) — never the v2
+        // domain by name, which throws on a v3-only chain.
         await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
           const signature = await signTypedDataAsync({
-            domain: getOrderExecutorDomain(chainId),
+            domain: getCancelOrderDomain(chainId),
             types: CANCEL_ORDER_TYPES,
             primaryType: 'CancelOrder',
             message: { id: rowId, action: 'cancel' },
@@ -1128,6 +1153,14 @@ export function useOrderEngine() {
     }
 
     // p.action === 'invalidate'
+    // [feat/arbitrum-dca-gates — third gate] The v2 leg (invalidateNonces) exists only when there
+    // are v2 orders to cover (newNonce non-null) and needs the v2 executor only then; the v3 legs
+    // need the v3 executor. Neither version's absence blocks the other's cancel — on the v3-only
+    // Arbitrum a v3 DCA mass-cancel proceeds, and a plan with a v2 leg there is refused as before.
+    if (p.newNonce !== null && !orderExecutor) {
+      setLatestEvent({ type: 'order_error', orderId: 'all', error: `Conditional orders are not available on chain ${chainId}.` })
+      return
+    }
     // [SPRINT-V3-P3] A v3 batch/DCA plan needs the v3 executor — belt-and-suspenders re-check
     // (mirrors the single-cancel re-check above); unreachable in practice since cancelAllOrders
     // only ever builds a non-empty v3 plan when orderExecutorV3 was already truthy.
@@ -1137,10 +1170,11 @@ export function useOrderEngine() {
     }
     try {
       // v2 sequential mass-cancel — unchanged from #299, skipped entirely when there's nothing
-      // v2 to cancel (newNonce is null).
+      // v2 to cancel (newNonce is null). `orderExecutor!` is the guard above, same idiom as the
+      // `orderExecutorV3!` legs below.
       if (p.newNonce !== null) {
         await writeContractAsync({
-          address: orderExecutor,
+          address: orderExecutor!,
           abi: ORDER_EXECUTOR_ABI,
           functionName: 'invalidateNonces',
           args: [p.newNonce], // the FROZEN nonce the user reviewed
@@ -1181,7 +1215,7 @@ export function useOrderEngine() {
       for (const order of p.affectedOrders) {
         await cancelOrderInSupabase(address, order.orderHash, async (rowId) => {
           const signature = await signTypedDataAsync({
-            domain: getOrderExecutorDomain(chainId),
+            domain: getCancelOrderDomain(chainId), // the ONE proof-domain rule (see single cancel)
             types: CANCEL_ORDER_TYPES,
             primaryType: 'CancelOrder',
             message: { id: rowId, action: 'cancel' },

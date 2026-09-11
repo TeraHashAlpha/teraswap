@@ -187,6 +187,8 @@ describe('PATCH /api/orders/[id] — [FULL-H-01] owner-only EIP-712 auth', () =>
     await PATCH(patchReq(validPatchBody({ chainId: 1 })), ctx(ORDER_ID))
     expect(mockRecover).toHaveBeenCalledTimes(1)
     const arg = mockRecover.mock.calls[0][0] as Record<string, unknown>
+    // [feat/arbitrum-dca-gates — third gate] The route now calls getCancelOrderDomain, which on a
+    // chain WITH a v2 executor returns this exact getOrderExecutorDomain object — pinned as such.
     expect(arg.domain).toEqual(getOrderExecutorDomain(1))
     // Sanity-pin the mainnet verifyingContract inside that domain.
     expect((arg.domain as { verifyingContract: string }).verifyingContract).toBe(
@@ -198,9 +200,14 @@ describe('PATCH /api/orders/[id] — [FULL-H-01] owner-only EIP-712 auth', () =>
     expect(arg.signature).toBe(SIG)
   })
 
-  it('an UNWIRED chain (42161) → getOrderExecutorDomain throws → caught → 400 "Invalid cancel signature" (never verifies against a non-existent executor)', async () => {
-    // chainId 42161 (Arbitrum) is not in ORDER_EXECUTOR_BY_CHAIN. The domain
-    // factory throws synchronously inside the try, so recover is never reached.
+  it('a chain with NEITHER executor (42161 with its v3 env slot UNSET in this file) → getCancelOrderDomain throws → caught → 400 "Invalid cancel signature" (never verifies against a non-existent executor)', async () => {
+    // [feat/arbitrum-dca-gates — third gate] chainId 42161 (Arbitrum) is not in
+    // ORDER_EXECUTOR_BY_CHAIN (v2) and NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM is
+    // unset here, so getCancelOrderDomain (v2's domain where v2 exists, else v3's)
+    // has nothing to resolve and throws synchronously inside the try — recover is
+    // never reached. With the slot SET, 42161 recovers under the v3 domain instead:
+    // orders-cancel.arbitrum-v3-only.test.ts.
+    expect(process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM).toBeUndefined()
     mockRecover.mockResolvedValue(WALLET) // would pass if it were ever called
     const res = await PATCH(patchReq(validPatchBody({ chainId: 42161 })), ctx())
     expect(res.status).toBe(400)

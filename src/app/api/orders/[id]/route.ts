@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { recoverTypedDataAddress } from 'viem'
-import { CANCEL_ORDER_TYPES, getOrderExecutorDomain } from '@/lib/order-engine/config'
+import { CANCEL_ORDER_TYPES, getCancelOrderDomain } from '@/lib/order-engine/config'
 import {
   verifyOrdersReadAccess,
   PUBLIC_ORDER_STATUSES,
@@ -107,9 +107,15 @@ export async function PATCH(
   // [FULL-H-01] Recover the signer from the CancelOrder typed-data message
   // and require it to match the declared wallet. Mirrors the create-order
   // verification in orders/route.ts.
+  // [feat/arbitrum-dca-gates — third gate] The domain is the ONE rule the client signs under
+  // (getCancelOrderDomain, shared through config.ts): the chain's v2 executor where one exists —
+  // Mainnet and Base recover under the exact getOrderExecutorDomain object they always did — else
+  // its v3 executor (Arbitrum One is v3-only), else it throws into the catch below (400, never
+  // verified against a non-existent executor). Hard-coding the v2 domain here made every Arbitrum
+  // cancel a 400 while the on-chain cancel had already landed: DB/chain divergence.
   try {
     const recovered = await recoverTypedDataAddress({
-      domain: getOrderExecutorDomain(chainId),
+      domain: getCancelOrderDomain(chainId),
       types: CANCEL_ORDER_TYPES,
       primaryType: 'CancelOrder',
       message: { id, action: 'cancel' },
