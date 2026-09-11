@@ -118,6 +118,24 @@ export const ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS: readonly number[] = [
   // Base (8453): OrderExecutor V3 deployed + verified, LIVE since the 2026-07-21 cutover
   // (docs/DEPLOYMENTS.md, README); the one chain a keeper polls (CHAIN_ID=8453).
   8453,
+  // Arbitrum One (42161) [feat/arbitrum-dca-gates]. Against the three criteria above:
+  //   1. OrderExecutorV3 at the docs/DEPLOYMENTS.md "OrderExecutor V3 · Arbitrum One" row — byte-proven
+  //      (INC-2026-08-26-001 §11.3) and re-read 2026-09-11 on arb1.arbitrum.io/rpc + publicnode:
+  //      18,247 B, keccak 0x363faecf…e0426d, ORDER_TYPEHASH() equal to the Base V3's (positive
+  //      control), TIMELOCK_DELAY() reverts and ORDER_TYPEHASH() on the Arbitrum FeeCollector
+  //      sibling reverts (negative controls); bootstrapped() true, paused() false.
+  //   2. Keeper: PR #494 adds the `teraswap-keeper-arbitrum` pm2 app (CHAIN_ID=42161, own env
+  //      file/KMS key, boot-gated on whitelistedExecutors(signer)); the DEPLOYMENTS.md keeper-registry
+  //      signer reads whitelistedExecutors = true on both RPCs. Whether the process is RUNNING is an
+  //      ops fact the repo cannot prove — owner attests at merge (docs/Runbooks/EC2-EXECUTOR-HOST.md
+  //      §Second process).
+  //   3. Env slot exists below; NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM is set for Production
+  //      only at go-live (unset ⇒ null: the ops kill-switch INC §2 already used once).
+  // Eligibility is NOT "DCA works": the FIX-DCA-NOFEED-FAIL-CLOSED gate (executor-feed-registry.ts)
+  // refuses every DCA whose legs the executor cannot price — tokenUsdFeeds(WETH/USDC) read
+  // registered=false on 2026-09-11 (registrations queued on-chain, executable 2026-09-13T14:53Z),
+  // so the panel refuses until those execute. Limit/TP stay Base-only (limit-launch.ts).
+  42161,
 ]
 
 /** True when `chainId` may resolve a v3 executor at all — the code-level allowlist above. */
@@ -247,6 +265,37 @@ const BASE_ROUTERS: Record<string, RouterEntry> = {
   },
 }
 
+// ── Arbitrum One (42161) whitelisted routers ─────────────
+// [feat/arbitrum-dca-gates / ADR-020 (b)] Derived, not typed. On 2026-09-11 every address in the
+// swap-path whitelist `chains/routers.ts` ROUTER_WHITELIST_BY_CHAIN[42161] was probed with
+// `whitelistedRouters(addr)` on the deployed Arbitrum OrderExecutorV3 (docs/DEPLOYMENTS.md row) on
+// TWO RPCs (arb1.arbitrum.io/rpc + arbitrum-one-rpc.publicnode.com; the chain's WETH read `false`
+// on both as the negative control, curve read `false` with no code) and intersected with what the
+// keeper can actually build calldata for — `contracts/order-engine/executor/swap-route.js`
+// ROUTER_SOURCE, the same intersection Base uses. Only two survive both halves:
+//   augustusV6  ← source `velora`     whitelisted true/true · served in production on 42161
+//                                     (FeeCollector SwapWithFee router=0x6A00…1068, event-derived)
+//   uniswapV3   ← source `uniswapv3`  whitelisted true/true · served in production on 42161 (×2)
+// Reported, NOT added: 1inch v6 (whitelisted, keeper maps it by its cross-chain address, but
+// /api/swap serveability on 42161 is unrecorded and Base excluded it for exactly that — PR #225);
+// kyberswap (whitelisted AND served in production, but the keeper has no ROUTER_SOURCE entry for it
+// — adding one is a keeper change, out of scope); 0x, cowswap, sushiswap, bebop (whitelisted, no
+// keeper source); odos/balancer/openocean (DISABLED_SOURCES). The on-chain surplus stays whitelisted
+// on the contract (INC-2026-08-26-001 §11.7.7 / B1) and unreachable from this signing map.
+// Same key names as BASE_ROUTERS so CANONICAL_ROUTE_ROUTER_KEY resolves — that does NOT open
+// Limit/TP here: isLimitLive pins chainId === LIMIT_TP_CHAIN_ID (8453) and /api/orders refuses
+// non-DCA v3 orders off that chain.
+const ARBITRUM_ROUTERS: Record<string, RouterEntry> = {
+  augustusV6: {
+    address: '0x6A000F20005980200259B80c5102003040001068' as `0x${string}`,
+    label: 'ParaSwap Augustus v6',
+  },
+  uniswapV3: {
+    address: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45' as `0x${string}`,
+    label: 'Uniswap SwapRouter02',
+  },
+}
+
 // [ADR-020] A chain is present here ONLY when its set has been derived from that chain's DEPLOYED
 // executor whitelist (the executor's own Bootstrap / RouterChanged events) AND intersected with
 // what /api/swap can actually serve there. Entries are never typed from a runbook, from a sibling
@@ -256,13 +305,15 @@ const BASE_ROUTERS: Record<string, RouterEntry> = {
 const ROUTERS_BY_CHAIN: Record<number, Record<string, RouterEntry>> = {
   1: MAINNET_ROUTERS,
   8453: BASE_ROUTERS,
+  42161: ARBITRUM_ROUTERS, // [feat/arbitrum-dca-gates] derivation above; ADR-020 table updated
 }
 
 // The router-map key whose entry is committed by default at order creation. A chain absent here
 // has no default — there is deliberately no cross-chain fallback key (ADR-020).
 const DEFAULT_ROUTER_KEY_BY_CHAIN: Record<number, string> = {
-  1: '1inch',         // mainnet unchanged
-  8453: 'augustusV6', // Base → Augustus V6 (serveable via /api/swap `velora`)
+  1: '1inch',          // mainnet unchanged
+  8453: 'augustusV6',  // Base → Augustus V6 (serveable via /api/swap `velora`)
+  42161: 'augustusV6', // Arbitrum → Augustus V6 (same source path the Base keeper fills through)
 }
 
 // [ADR-020] The single fail-closed answer for a chain ROUTERS_BY_CHAIN does not know. Frozen and

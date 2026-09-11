@@ -22,7 +22,7 @@
  *       That last one is the negative control: it fails on the pre-fix code, which is the only
  *       reason to trust that it means anything on the post-fix code.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   getWhitelistedRouters,
   getDefaultRouter,
@@ -32,15 +32,19 @@ import {
 } from './config'
 import { isLimitLive } from './limit-launch'
 
-/** The chains config.ts actually carries an order-engine router set for. */
-const KNOWN_CHAINS = [1, 8453] as const
+/**
+ * The chains config.ts actually carries an order-engine router set for. [feat/arbitrum-dca-gates]
+ * 42161 moved here from UNKNOWN_CHAINS: its set is now DERIVED (whitelistedRouters() true on two
+ * Arbitrum RPCs, intersected with the keeper route builder — see config.ts ARBITRUM_ROUTERS and
+ * ADR-020's table), which is the only way a chain is allowed to leave the unknown list.
+ */
+const KNOWN_CHAINS = [1, 8453, 42161] as const
 
 /**
- * Chains config.ts has no entry for. 42161 is the one that matters (a real OrderExecutorV3 IS
- * deployed there — inventory §2 — with 11 whitelisted routers that are NOT mainnet's four); the
- * rest are ordinary unknowns, plus the degenerate ids that a coerced/absent chainId produces.
+ * Chains config.ts has no entry for: ordinary unknowns, plus the degenerate ids that a
+ * coerced/absent chainId produces. (42161 used to head this list — see KNOWN_CHAINS.)
  */
-const UNKNOWN_CHAINS = [42161, 10, 137, 56, 0, -1, 999999] as const
+const UNKNOWN_CHAINS = [10, 137, 56, 0, -1, 999999] as const
 
 // ── (a) chains 1 + 8453 — unchanged ──────────────────────────────────────────────────────────
 
@@ -83,6 +87,24 @@ describe('[ADR-020] mainnet (1) and Base (8453) are byte-identical to the pre-fi
     `)
   })
 
+  // [feat/arbitrum-dca-gates] Captured from the derived set (config.ts ARBITRUM_ROUTERS). Unlike the
+  // two above this is not a PRE-change capture — the chain had no set before — it is the exact
+  // on-chain-whitelisted ∩ keeper-buildable pair, pinned so a later edit is a visible diff here.
+  it('Arbitrum One whitelisted-router map', () => {
+    expect(getWhitelistedRouters(42161)).toMatchInlineSnapshot(`
+      {
+        "augustusV6": {
+          "address": "0x6A000F20005980200259B80c5102003040001068",
+          "label": "ParaSwap Augustus v6",
+        },
+        "uniswapV3": {
+          "address": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+          "label": "Uniswap SwapRouter02",
+        },
+      }
+    `)
+  })
+
   it('mainnet default router (the entry order creation commits)', () => {
     expect(getDefaultRouter(1)).toMatchInlineSnapshot(`
       {
@@ -119,6 +141,25 @@ describe('[ADR-020] mainnet (1) and Base (8453) are byte-identical to the pre-fi
     `)
   })
 
+  it('Arbitrum One default router (the entry order creation commits) — Augustus V6, never the cross-chain 1inch coincidence', () => {
+    expect(getDefaultRouter(42161)).toMatchInlineSnapshot(`
+      {
+        "address": "0x6A000F20005980200259B80c5102003040001068",
+        "label": "ParaSwap Augustus v6",
+      }
+    `)
+    expect(getDefaultRouter(42161)!.address).not.toBe(getWhitelistedRouters(1)['1inch'].address)
+  })
+
+  it('Arbitrum One canonical-route router is ITS OWN SwapRouter02, not the mainnet SwapRouter B6 leaked', () => {
+    expect(getCanonicalRouteRouter(42161)).toMatchInlineSnapshot(`
+      {
+        "address": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+        "label": "Uniswap SwapRouter02",
+      }
+    `)
+  })
+
   it.each(KNOWN_CHAINS)(
     'chain %i still accepts every address in its OWN map, checksummed or lowercased',
     chainId => {
@@ -139,6 +180,26 @@ describe('[ADR-020] mainnet (1) and Base (8453) are byte-identical to the pre-fi
     for (const entry of Object.values(getWhitelistedRouters(8453))) {
       expect(isWhitelistedRouter(1, entry.address)).toBe(false)
     }
+  })
+
+  it('mainnet and Arbitrum do not accept each other routers either — in particular B6\'s mainnet SwapRouter is still refused on 42161', () => {
+    for (const entry of Object.values(getWhitelistedRouters(1))) {
+      expect(isWhitelistedRouter(42161, entry.address)).toBe(false)
+    }
+    for (const entry of Object.values(getWhitelistedRouters(42161))) {
+      expect(isWhitelistedRouter(1, entry.address)).toBe(false)
+    }
+  })
+
+  it('Base and Arbitrum share exactly ONE address (Augustus V6, a canonical cross-chain deploy) and differ on SwapRouter02', () => {
+    // Both entries were derived from their OWN executor; sharing an address is allowed only when
+    // each chain's whitelist says so independently — which is the case here, and only here.
+    const base = getWhitelistedRouters(8453)
+    const arb = getWhitelistedRouters(42161)
+    expect(base.augustusV6.address).toBe(arb.augustusV6.address)
+    expect(base.uniswapV3.address).not.toBe(arb.uniswapV3.address)
+    expect(isWhitelistedRouter(42161, base.uniswapV3.address)).toBe(false)
+    expect(isWhitelistedRouter(8453, arb.uniswapV3.address)).toBe(false)
   })
 
   it.each(KNOWN_CHAINS)(
@@ -206,25 +267,30 @@ describe('[ADR-020] an unknown chain gets nothing — never a sibling chain answ
     },
   )
 
-  it('Arbitrum One (42161): the exact B6 leak is closed', () => {
+  it('Arbitrum One (42161): the exact B6 leak stays closed now that the chain HAS a set', () => {
     // B6: getCanonicalRouteRouter(42161) used to resolve to mainnet's uniswapV3 entry, an address
-    // the deployed Arbitrum OrderExecutorV3 reads `whitelistedRouters = false` for (§2.7).
+    // the deployed Arbitrum OrderExecutorV3 reads `whitelistedRouters = false` for (§2.7). With a
+    // derived set in place the canonical router is Arbitrum's OWN SwapRouter02 — and mainnet's
+    // SwapRouter is still refused there.
     const mainnetCanonical = getWhitelistedRouters(1)[CANONICAL_ROUTE_ROUTER_KEY]
     expect(mainnetCanonical).toBeDefined()
-    expect(getCanonicalRouteRouter(42161)).toBeNull()
+    expect(getCanonicalRouteRouter(42161)).not.toBeNull()
+    expect(getCanonicalRouteRouter(42161)!.address.toLowerCase()).not.toBe(mainnetCanonical.address.toLowerCase())
     expect(isWhitelistedRouter(42161, mainnetCanonical.address)).toBe(false)
     // …and the default router B6 called out as "happens to be whitelisted, cross-chain address"
-    // is no longer offered either. A coincidence is not a whitelist.
-    expect(getDefaultRouter(42161)).toBeNull()
+    // is STILL not offered: 1inch is not in the Arbitrum set. A coincidence is not a whitelist.
+    expect(getDefaultRouter(42161)!.address).not.toBe(getWhitelistedRouters(1)['1inch'].address)
+    expect(isWhitelistedRouter(42161, getWhitelistedRouters(1)['1inch'].address)).toBe(false)
   })
 
   it('does not hand back a sibling chain map object', () => {
-    expect(getWhitelistedRouters(42161)).not.toBe(getWhitelistedRouters(1))
-    expect(getWhitelistedRouters(42161)).not.toBe(getWhitelistedRouters(8453))
+    expect(getWhitelistedRouters(10)).not.toBe(getWhitelistedRouters(1))
+    expect(getWhitelistedRouters(10)).not.toBe(getWhitelistedRouters(8453))
+    expect(getWhitelistedRouters(10)).not.toBe(getWhitelistedRouters(42161))
   })
 
   it('the empty map is frozen and shared — a caller cannot poison the fail-closed answer', () => {
-    const first = getWhitelistedRouters(42161)
+    const first = getWhitelistedRouters(10)
     expect(Object.isFrozen(first)).toBe(true)
     // Same object for every unknown chain, so there is exactly one thing to reason about.
     expect(getWhitelistedRouters(999999)).toBe(first)
@@ -237,8 +303,8 @@ describe('[ADR-020] an unknown chain gets nothing — never a sibling chain answ
     } catch {
       /* frozen objects throw on write in strict mode — either outcome is acceptable */
     }
-    expect(getWhitelistedRouters(42161)).toEqual({})
-    expect(isWhitelistedRouter(42161, getWhitelistedRouters(1)['1inch'].address)).toBe(false)
+    expect(getWhitelistedRouters(10)).toEqual({})
+    expect(isWhitelistedRouter(10, getWhitelistedRouters(1)['1inch'].address)).toBe(false)
   })
 })
 
@@ -248,5 +314,38 @@ describe('[ADR-020] downstream gates inherit the fail-closed answer', () => {
   it.each(UNKNOWN_CHAINS)('isLimitLive(%i) is false — now also because no route can be pinned', chainId => {
     expect(isLimitLive(chainId)).toBe(false)
     expect(getCanonicalRouteRouter(chainId)).toBeNull()
+  })
+})
+
+// ── [feat/arbitrum-dca-gates] Limit / Take-Profit stay Base-only ─────────────────────────────
+// Widening the v3 eligibility list and giving 42161 a router set removes TWO of isLimitLive's four
+// conditions on Arbitrum (executor non-null, canonical router non-null). The pin that remains is
+// `chainId === LIMIT_TP_CHAIN_ID` (limit-launch.ts) — this proves it is that pin, and only that pin,
+// still holding the gate shut, under the MOST permissive environment the flag and env can produce.
+describe('[feat/arbitrum-dca-gates] an Arbitrum Limit/TP order still cannot be created — LIMIT_TP_CHAIN_ID is the surviving pin', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('flag ON + Arbitrum v3 env SET ⇒ executor and canonical router both resolve on 42161, yet isLimitLive(42161) is false; Base under the same env is true', async () => {
+    const V3_STUB = '0x5555555555555555555555555555555555555555'
+    const BASE_STUB = '0x6666666666666666666666666666666666666666'
+    vi.stubEnv('NEXT_PUBLIC_LIMIT_ENABLED', 'true')
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', V3_STUB)
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE', BASE_STUB)
+    vi.resetModules()
+    const cfg = await import('./config')
+    const launch = await import('./limit-launch')
+
+    // Every OTHER condition of isLimitLive holds on Arbitrum now…
+    expect(launch.isLimitLaunchEnabled()).toBe(true)
+    expect(cfg.getOrderExecutorV3(42161)).toBe(V3_STUB)
+    expect(cfg.getCanonicalRouteRouter(42161)).not.toBeNull()
+    // …and the gate is still shut, by the chain pin alone.
+    expect(launch.LIMIT_TP_CHAIN_ID).toBe(8453)
+    expect(launch.isLimitLive(42161)).toBe(false)
+    // Positive control: the identical environment opens the gate on the pinned chain.
+    expect(launch.isLimitLive(8453)).toBe(true)
   })
 })
