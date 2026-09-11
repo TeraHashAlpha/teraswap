@@ -34,3 +34,34 @@ Arbitrum Limit pin: `router-map-fail-closed.test.ts` › "flag ON + Arbitrum v3 
 `config.test.ts` allowlist `[8453]→[8453,42161]`, "env does NOT wire 42161"→"env wires 42161 because the list allows it", unwired-chain example 42161→10 · `router-map-fail-closed.test.ts` 42161 UNKNOWN→KNOWN + snapshots · `dca-launch.arbitrum-activation.test.ts` all-set ⇒ true + per-var falsification · `page.arbitrum-dark.test.tsx` Production shape ⇒ opens, v3-unset ⇒ teaser · `orders-v3-eligibility-integration.test.ts` split into env-set / env-unset / mainnet · `DCAPanel.router-fail-closed`, `LimitOrderPanel`, `ConditionalOrderPanel` no-set fixture 42161→10 (+ Arbitrum positive control in the DCA one).
 
 ### Edge case — `route-source.ts` has no row for `0x68b3…fc45` (badge falls back to "Aggregated"; audit I-3, cosmetic, not changed).
+
+## Feedback — the third gate (8487d2b)
+
+**Merge precondition (3) above is MET by this commit.** (1) and (2) are unchanged: the queued feeds execute 2026-09-13T14:53Z; the owner attests the `teraswap-keeper-arbitrum` process at merge.
+
+### Assumption that turned out wrong — "add v3 support" was the wrong framing; Base DCA never touches v2 as a contract
+| Base DCA step | v2 / v3 | file:line |
+|---|---|---|
+| Approve spender (pre-sign) | v3 | `useOrderApproval.ts:30-41` → `resolveSigningExecutor` (`config.ts:171`) |
+| Struct build (`signV3`) | v3 | `useOrderEngine.ts:710` |
+| **confirmOrder precondition** | **v2 — vestigial** | `useOrderEngine.ts:757` (pre-commit) |
+| EIP-712 signing domain | v3, version "3" | `useOrderEngine.ts:824` → `config.ts:180-193` |
+| Order nonce source | v2 `nonces()` read (a counter v3 never advances) | `useOrderEngine.ts:479-484, 568-576` |
+| API create: executor + domain | v3 | `api/orders/route.ts:299, 308` |
+| Keeper fill target | v3 (`order_data.maxSlippageBps`) | `executor.js:1427-1441` `resolveExecutorRouting` |
+| cancelOrder Phase A guard | v3 | `useOrderEngine.ts:982-989` |
+| **confirmCancel precondition** | **v2 — vestigial** | `useOrderEngine.ts:1073` (pre-commit) |
+| On-chain `cancelOrder` target + ABI | v3 | `useOrderEngine.ts:1091-1098` → `V3.sol:636` (owner-only, `getOrderHash` :1149, same contract as the :449 verifier) |
+| **CancelOrder ownership proof — client** | **v2 domain** (off-chain namespace) | `useOrderEngine.ts:1109, 1184` (pre-commit) |
+| **CancelOrder ownership proof — API** | **v2 domain** | `api/orders/[id]/route.ts:112` (pre-commit) |
+
+So the rule implemented is **"nothing requires v2 any more"**: an order's executor (guard, signing domain, cancel target) is resolved from the order's own version via `resolveSigningExecutor`; the chain-level ownership-proof domain is `getCancelOrderDomain` = v2's where v2 exists (Mainnet/Base byte-identical), else v3's (Arbitrum), else throw — one helper, both sides. Domain identity between signing and cancel on 42161 is pinned by an equal `hashTypedData` digest over the signed message and the cancelled struct under the same `{name, "3", 42161, <Arbitrum V3>}`.
+
+### Concern — cross-chain cancel is reachable, and this commit widens where (pre-existing, NOT fixed here)
+`orders` state is per-wallet, not per-chain (`fetchUserOrders(address)`; `AutonomousOrder.chainId` is display-only, `useOrderEngine.ts:294`). Single cancel freezes with the ACTIVE `chainId` and never compares it to `order.chainId` (`:1017`); `cancelAllOrders` walks every active order regardless of chain (`:1027-1029`); `OrderDashboard.tsx` lists all of them. A Base order cancelled while connected to Arbitrum therefore sends its struct to the Arbitrum V3 (`msg.sender == owner` passes, an irrelevant hash is marked), proves under the Arbitrum domain, and the Supabase row flips to `cancelled` while the Base order stays valid on-chain — DB/chain divergence, no fund loss (only the whitelisted keeper executes, and it reads `status`). This already held for Base↔mainnet v2; the v2 precondition happened to block it on Arbitrum, and this commit removes that accident. Not changed: a new gate (`p.order.chainId !== p.chainId ⇒ refuse` in `confirmCancel`, plus a chain filter in `cancelAllOrders`) alters Base behaviour and was out of scope. Recommend a follow-up before Arbitrum go-live; RICE-wise it is small (two guards + two pins).
+
+### Edge case — nonce source on a v3-only chain (unchanged, reported)
+With v2 null the `nonces()` read is disabled (`address: undefined, enabled: false` — pinned) so `currentNonce` is `undefined ⇒ 0n` and the session-local counter takes over (`:568-576`). That is the SAME sequence a Base wallet with no v2 history sees (v2 `nonces()` reads 0 there, and v3 orders never advance it). DCA never consumes the bitmap (`V3.sol:377`), and the nonce only disambiguates `getOrderHash`, which `expiry` (per-second) already does across sessions. A proper v3 nonce source is a design decision, not this gate.
+
+### Test gap closed — the four "v3 on chain N" fixtures simulated the domain but not the resolver
+`useOrderEngine.v3`, `DCAPanel.v3`, `DCAPanel.chain-availability`, `DCAPanel.oracle-fail-closed` mock `getOrderExecutorV3` + `getOrderExecutorV3Domain` on the barrel; the guard now goes through `resolveSigningExecutor`, which (like the domain fn) calls config's own lookup, so those v3 orders were refused before signing until the resolver was simulated the same way (6 lines each, same shape as `config.ts:171`). The real-config suites needed nothing. Tests added: `useOrderEngine.v3-only-chain.test.ts` (13), `orders-cancel.arbitrum-v3-only.test.ts` (6); flipped: `DCAPanel.arbitrum-gates` › "THE THIRD GATE (opened)…"; re-pinned: `orders-cancel.test.ts` › "a chain with NEITHER executor…". Mutation-checked in both directions (restoring the v2 precondition / v2 proof domain fails exactly the Arbitrum pins; Base and mainnet pins hold).
