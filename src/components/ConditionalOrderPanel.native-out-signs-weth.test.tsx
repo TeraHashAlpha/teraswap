@@ -145,6 +145,15 @@ vi.mock('@/components/TokenSelector', () => ({
         data-testid="pick-usdc"
         onClick={() => onSelect({ ...USDC[CHAIN_ID], name: 'USD Coin', logoURI: '', category: 'Stablecoin', chainId: CHAIN_ID })}
       >pick-usdc</button>
+      {/* [fix/limit-sltp-chain-aware-price-feed] The chain's wrapped native, picked directly —
+          the negative control's Base sell leg, see the note on SELL_LEG below. */}
+      <button
+        data-testid="pick-weth"
+        onClick={() => onSelect({
+          address: getWrappedNative(CHAIN_ID), symbol: 'WETH', name: 'Wrapped Ether',
+          decimals: 18, logoURI: '', category: 'Native', chainId: CHAIN_ID,
+        })}
+      >pick-weth</button>
     </div>
   ),
 }))
@@ -193,9 +202,19 @@ async function renderOn(chainId: number) {
   await act(async () => { await Promise.resolve() })
 }
 
+/**
+ * [fix/limit-sltp-chain-aware-price-feed — Auditor H2] The SELL leg is this panel's Chainlink feed
+ * token, so it must have a feed ON THE CHAIN UNDER TEST. LINK does on mainnet; on Base it has NO
+ * entry in CHAINLINK_FEEDS_BY_CHAIN[8453]. Every Base test here used to sell LINK and reached a
+ * signature only because the old symbol-keyed findPriceFeed answered with the MAINNET LINK
+ * aggregator — i.e. this file was silently exercising the defect on every Base run. USDC is the
+ * Base sell leg with a genuine Base feed; the tokenOut assertions are untouched and still the point.
+ */
+const SELL_LEG: Record<number, string> = { 8453: 'pick-usdc', 1: 'pick-link' }
+
 /** Pick the pair, then let the USD-price effect settle so the trigger price is auto-filled. */
-async function pickPair(buyTestId: string) {
-  fireEvent.click(sell('pick-link'))
+async function pickPair(buyTestId: string, sellTestId: string = SELL_LEG[CHAIN_ID]) {
+  fireEvent.click(sell(sellTestId))
   fireEvent.click(buy(buyTestId))
   await act(async () => { await Promise.resolve() })
   await waitFor(() => expect(screen.getAllByPlaceholderText('0.00')[1]).toHaveValue(24))
@@ -260,7 +279,9 @@ describe('ConditionalOrderPanel — a native-ETH output is SIGNED as the chain\'
 
   it('NEGATIVE CONTROL — a non-native tokenOut is passed through completely untouched', async () => {
     await renderOn(8453)
-    await pickPair('pick-usdc')
+    // Sells WETH, not the chain's SELL_LEG default: this test BUYS USDC, so USDC cannot also be
+    // the sell leg. WETH is the other Base token with a genuine Base feed.
+    await pickPair('pick-usdc', 'pick-weth')
     enterAmount('10')
 
     await driveToSignature()

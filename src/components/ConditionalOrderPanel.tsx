@@ -13,14 +13,13 @@ import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 // leg. This is the SAME function the merged DCA fix uses — called here, never re-implemented,
 // never wrapped in a local helper with its own failure behaviour.
 import { resolveSignableToken } from '@/lib/chains/tokens'
-import { getWrappedNative, getChainConfig } from '@/lib/chains/registry'
+import { resolveOrderPriceFeed } from '@/lib/order-engine/price-feed'
 import {
   OrderType,
   PriceCondition,
   EXPIRY_PRESETS,
   getDefaultRouter,
   NO_ROUTER_FOR_CHAIN_REASON,
-  getChainlinkFeeds,
   // [SPRINT-P1B / ADR-014 (a)] v3 pinned-route signing for Take-Profit.
   getOrderExecutorV3,
   getCanonicalRouteRouter,
@@ -54,26 +53,28 @@ function isStablecoin(token: Token): boolean {
 }
 
 // ── Map token to Chainlink feed ──────────────────────────
-// Returns empty string if no feed found — callers must check before submitting.
+/**
+ * [fix/limit-sltp-chain-aware-price-feed — Auditor H2 on merge 227a7f2] `order.priceFeed` resolved
+ * through the ONE shared, chain-aware resolver (order-engine/price-feed.ts) — not re-implemented,
+ * copied or wrapped in a second look-up here; a second copy of a feed map is what bred this bug.
+ *
+ * WHAT WAS WRONG: this read `getChainlinkFeeds(chainId)`, which took the chainId and DISCARDED it,
+ * always returning the MAINNET symbol-keyed map. Limit/TP are Base-only (limit-launch.ts:45), so
+ * every Base order signed a mainnet aggregator — no code at that address on Base, so
+ * `_checkPriceCondition` reverts on the extcodesize guard (TeraSwapOrderExecutorV3.sol:1117, from
+ * the call site at :504) and every fill reverts. The orders would be permanently unfillable.
+ *
+ * WHAT THE RESOLVER DOES: mainnet keeps EXACTLY the origin/main behaviour (symbol table + the #490
+ * wrapped-native fallback — the mainnet signable set is pinned by price-feed.test.ts, 0 gained /
+ * 0 lost / 0 changed); every other chain resolves through the per-chain, ADDRESS-keyed registry
+ * `getChainlinkFeed(token, chainId)`, fail-closed on a chain or token it does not cover.
+ *
+ * Returns '' when there is no feed — the caller refuses on that BEFORE approve/sign. '' never
+ * degrades to address(0): the contract reads address(0) as "no price condition, execute
+ * unconditionally" (V3:1105-1108), so a zero feed on a Limit/TP order would strip its trigger.
+ */
 function findPriceFeed(token: Token, chainId: number): string {
-  const feeds = getChainlinkFeeds(chainId)
-  const direct = feeds[`${token.symbol}/USD`]?.address
-  if (direct) return direct
-  // [fix/native-out-signs-weth-limit-sltp] This panel feeds the SELL leg to Chainlink, and the
-  // resolved BUY leg reaches the sell slot through `handleSwapTokens` / `handleTokenInSelect`
-  // below — both of which now move the RESOLVED (wrapped) token, not the raw pick. Chainlink
-  // publishes `ETH/USD` and never `WETH/USD`; they are the same number off the same aggregator
-  // (config.ts:355). Without this the swap button would silently make a previously creatable
-  // order refuse with "No Chainlink price feed available for WETH".
-  // Fail-soft on an unknown chain, mirroring getWrappedNative's own shape (registry.ts:199-206):
-  // getChainConfig THROWS there, and a throw inside handleSubmit lands after startWaitingSound()
-  // and would strand the panel in its waiting state.
-  if (token.address.toLowerCase() === getWrappedNative(chainId).toLowerCase()) {
-    try {
-      return feeds[`${getChainConfig(chainId).nativeCurrency.symbol}/USD`]?.address ?? ''
-    } catch { return '' }
-  }
-  return ''
+  return resolveOrderPriceFeed(token, chainId)
 }
 
 /**

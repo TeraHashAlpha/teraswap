@@ -14,8 +14,9 @@
  *   - getOrderExecutorDomain(unwired) throws with the SPECIFIC message the callers grep.
  *   - CANCEL_ORDER_TYPES.CancelOrder structure ([FULL-H-01]) — recoverTypedDataAddress
  *     depends on this exact field order/types.
- *   - getChainlinkFeeds still IGNORES chainId and always returns the mainnet map — asserted
- *     here so a future per-chain change can't silently land unnoticed.
+ *   - getChainlinkFeeds is CHAIN-AWARE and fail-closed: mainnet gets the mainnet map, every other
+ *     chain gets an EMPTY one. It used to take the chainId and DISCARD it (Auditor H2 on merge
+ *     227a7f2) — the assertions below are inverted from the ones that pinned that behaviour.
  *   - [ADR-020] getWhitelistedRouters / getDefaultRouter no longer do: an unknown chain gets
  *     an EMPTY map and a null default instead of mainnet's. The exhaustive fail-closed surface
  *     (every unknown chain, both siblings, the negative controls, and the pre-fix snapshots of
@@ -43,6 +44,9 @@ import {
   // [INC-2026-08-26-001] v3 chain eligibility is a code decision, never env alone.
   ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS,
 } from './config'
+// [fix/limit-sltp-chain-aware-price-feed] The per-chain, ADDRESS-keyed registry this file's
+// symbol-keyed mainnet table defers to for every non-mainnet chain.
+import { getChainlinkFeed } from '../chains/chainlink-feeds'
 
 // Byte-identical, checksummed mainnet-behaviour constants (must match config.ts exactly).
 const MAINNET_EXECUTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
@@ -51,6 +55,8 @@ const ONEINCH_V6 = '0x111111125421cA6dc452d289314280a0f8842A65'
 const BASE_AUGUSTUS_V6 = '0x6A000F20005980200259B80c5102003040001068'
 const BASE_SWAPROUTER02 = '0x2626664c2603336E57B271c5C0b26F421741e481'
 const ETH_USD_FEED = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+/** Base's canonical WETH — the token key CHAINLINK_FEEDS_BY_CHAIN[8453] maps to Base ETH/USD. */
+const BASE_WETH = '0x4200000000000000000000000000000000000006'
 
 describe('getOrderExecutor — wired chains', () => {
   it('chain 1 resolves to the exact checksummed mainnet OrderExecutor', () => {
@@ -195,7 +201,7 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
   })
 })
 
-describe('getChainlinkFeeds — mainnet-only (chainId ignored)', () => {
+describe('getChainlinkFeeds — chain-aware, mainnet-only table, fail-closed elsewhere', () => {
   it('returns the mainnet ETH/USD feed with exact address + 8 decimals', () => {
     const feeds = getChainlinkFeeds(1)
     expect(feeds['ETH/USD']).toEqual({
@@ -205,11 +211,34 @@ describe('getChainlinkFeeds — mainnet-only (chainId ignored)', () => {
     })
   })
 
-  it('IGNORES chainId — every chain gets the SAME mainnet feed map', () => {
+  // [fix/limit-sltp-chain-aware-price-feed — Auditor H2] The inversion of the old
+  // "IGNORES chainId" test. This table describes MAINNET; handing a Base order a mainnet
+  // aggregator is what made every Base fill revert (TeraSwapOrderExecutorV3.sol:1117, reached
+  // from :504). A chain this table does not describe now gets NOTHING, never a sibling's feeds.
+  it('a non-mainnet chain gets an EMPTY map — never the mainnet one', () => {
     const mainnet = getChainlinkFeeds(1)
-    expect(getChainlinkFeeds(8453)).toBe(mainnet)
-    expect(getChainlinkFeeds(42161)).toBe(mainnet)
-    expect(getChainlinkFeeds(-1)).toBe(mainnet)
+    expect(Object.keys(mainnet).length).toBeGreaterThan(0)
+    for (const chainId of [8453, 42161, 10, -1]) {
+      expect(getChainlinkFeeds(chainId)).not.toBe(mainnet)
+      expect(getChainlinkFeeds(chainId)).toEqual({})
+    }
+  })
+
+  it('every non-mainnet chain shares ONE frozen empty map — it cannot be mutated into feeds', () => {
+    const empty = getChainlinkFeeds(8453)
+    expect(getChainlinkFeeds(42161)).toBe(empty)
+    expect(Object.isFrozen(empty)).toBe(true)
+    expect(() => {
+      ;(empty as Record<string, unknown>)['ETH/USD'] = { address: ETH_USD_FEED, label: 'x', decimals: 8 }
+    }).toThrow()
+    expect(getChainlinkFeeds(8453)).toEqual({})
+  })
+
+  // The per-chain, ADDRESS-keyed registry is the source of truth the order panels resolve
+  // `order.priceFeed` through; this table is deliberately NOT grown per chain to match it.
+  it('is NOT the per-chain feed source — chains/chainlink-feeds.ts covers Base', () => {
+    expect(getChainlinkFeeds(8453)).toEqual({})
+    expect(getChainlinkFeed(BASE_WETH, 8453)).not.toBeNull()
   })
 })
 

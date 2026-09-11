@@ -363,10 +363,38 @@ const MAINNET_FEEDS: Record<string, FeedEntry> = {
 
 // [H-01] Sepolia Chainlink feeds removed for mainnet deployment.
 
-/** Get Chainlink feeds for a given chainId */
-export function getChainlinkFeeds(_chainId: number): Record<string, FeedEntry> {
-  // Only mainnet feeds supported in production
-  return MAINNET_FEEDS
+// [ADR-020 shape] The single fail-closed answer for a chain this MAINNET table does not describe.
+// Frozen and shared, like NO_ROUTERS above: one "we have no feeds for this chain" object, which a
+// caller cannot mutate into a non-empty map.
+const NO_FEEDS = Object.freeze({}) as Record<string, FeedEntry>
+
+/**
+ * Chainlink feeds for a given chainId — SYMBOL-keyed, and MAINNET IS THE ONLY CHAIN THIS TABLE
+ * DESCRIBES.
+ *
+ * [fix/limit-sltp-chain-aware-price-feed — Auditor H2 on merge 227a7f2] This function used to take
+ * `_chainId` and DISCARD it, returning MAINNET_FEEDS for every chain. The signature promised
+ * chain-awareness the body did not deliver, which is precisely why the defect survived review: at
+ * both call sites `getChainlinkFeeds(chainId)` READS as chain-correct. Limit/TP are Base-only
+ * (limit-launch.ts:45), so every Base order signed a MAINNET aggregator into `order.priceFeed` — an
+ * address with no code on Base, so `_checkPriceCondition` reverts on Solidity's extcodesize guard
+ * (TeraSwapOrderExecutorV3.sol:1117, from the call site at :504) and EVERY fill reverts.
+ *
+ * The chainId is now load-bearing and the answer is fail-closed: an unknown chain gets NO feeds
+ * rather than another chain's. This table is NOT extended per chain — the per-chain,
+ * ADDRESS-keyed registry `getChainlinkFeed(token, chainId)` (chains/chainlink-feeds.ts:100) is the
+ * single source of truth for every OTHER chain. Growing a second, symbol-keyed per-chain map here
+ * is the duplication that bred this bug.
+ *
+ * [NARROWED — owner's SPLIT decision] On MAINNET this table is still the ONLY feed source the order
+ * panels sign from (order-engine/price-feed.ts), exactly as at origin/main. The first cut of this
+ * branch resolved mainnet through the address-keyed registry too, which silently widened the
+ * mainnet signable set from these 7 symbols to 26 — the registry is the swap READ path's table,
+ * guarded there by ADR-018, and nothing on the signing path consults that guard. The 7-symbol set
+ * below is pinned by price-feed.test.ts; widening it is a deliberate, rule-#9-verified PR.
+ */
+export function getChainlinkFeeds(chainId: number): Record<string, FeedEntry> {
+  return chainId === 1 ? MAINNET_FEEDS : NO_FEEDS
 }
 
 // Legacy export (mainnet default)
