@@ -8,7 +8,7 @@ import TokenAddressBadge from './TokenAddressBadge'
 import TokenLogo from './TokenLogo'
 import CategoryChips from './CategoryChips'
 import { useTokenImport } from '@/hooks/useTokenImport'
-import { useActiveChainId } from '@/hooks/useChainId'
+import { useQuoteChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { getChainTokenList, getPopularTokens, getSearchCatalog, rankSearchMatches, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
 
@@ -37,10 +37,17 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
   const inputRef = useRef<HTMLInputElement>(null)
   const { importToken, importing, error: importError } = useTokenImport()
   const { balances: balanceMap } = useTokenBalances()
-  // [P221] Per-chain token catalog. Mainnet keeps the full DEFAULT_TOKENS list
-  // (categories + balances) exactly as before; other chains browse their own
-  // catalog. Memoised so the dependent lists below stay referentially stable.
-  const activeChainId = useActiveChainId()
+  // [P221 / fix/token-selector-chain-aware] Per-chain token catalog. Mainnet keeps
+  // the full DEFAULT_TOKENS list (categories + balances) exactly as before; other
+  // chains browse their own catalog. Memoised so the dependent lists below stay
+  // referentially stable.
+  //
+  // useQuoteChainId (NOT useActiveChainId): the catalog must match SwapBox's quote
+  // chain in BOTH wallet states — disconnected visitors browse whatever chain they
+  // picked in ChainSelector, not a hardcoded mainnet default. While connected, the
+  // two hooks agree (both resolve to the wallet's chain), so nothing changes for
+  // the wallet-gated DCA/Limit/Conditional panels.
+  const activeChainId = useQuoteChainId()
   const isMainnet = activeChainId === DEFAULT_CHAIN_ID
   const catalog = useMemo(
     () => {
