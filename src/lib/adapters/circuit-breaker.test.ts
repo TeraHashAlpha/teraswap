@@ -28,6 +28,7 @@ import {
   resetAllCircuitBreakers,
   initFromKV,
   circuitKey,
+  DEFAULT_CB_CONFIG,
 } from './circuit-breaker'
 
 function status(id: string, state: 'active' | 'degraded' | 'disabled') {
@@ -244,4 +245,80 @@ describe('circuitKey + per-chain isolation [SPRINT-9S S3]', () => {
     expect(mainnetCb.getState()).toBe('OPEN')
     expect(getCircuitBreaker(circuitKey('bebop', 8453)).getState()).toBe('CLOSED')
   })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [T4 / fix/zerox-quote-hygiene] 429-aware breaker.
+// ─────────────────────────────────────────────────────────────
+describe('circuit-breaker — 429 immediate-open with longer cooldown [T4]', () => {
+  beforeEach(() => {
+    resetAllCircuitBreakers()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('classifyFailure extracts status 429 and retryAfterMs from an adapter error message', async () => {
+    const { classifyFailure } = await import('./circuit-breaker')
+    expect(classifyFailure(new Error('0x 429'))).toMatchObject({ errorClass: 'HttpError', status: 429 })
+    expect(classifyFailure(new Error('0x 429 retryAfterMs=15000'))).toMatchObject({
+      errorClass: 'HttpError', status: 429, retryAfterMs: 15000,
+    })
+  })
+
+  it('a SINGLE 429 opens the breaker immediately — no need to reach failureThreshold (3)', () => {
+    const cb = getCircuitBreaker('0x-429-single')
+    expect(cb.getState()).toBe('CLOSED')
+    cb.onFailure(new Error('0x 429'))
+    expect(cb.getState()).toBe('OPEN')
+    expect(cb.getInfo().consecutiveFailures).toBe(1) // proves it did NOT wait for 3
+  })
+
+  it('uses rateLimitCooldownMs (longer than the normal cooldownMs) when no Retry-After is present', () => {
+    const cb = getCircuitBreaker('0x-429-default-cooldown')
+    cb.onFailure(new Error('0x 429'))
+    expect(cb.isOpen()).toBe(true)
+    // Still OPEN just past the NORMAL cooldown (60s) — the 429 cooldown (300s) hasn't elapsed.
+    vi.advanceTimersByTime(DEFAULT_CB_CONFIG.cooldownMs + 1)
+    expect(cb.isOpen()).toBe(true)
+    // Past the rate-limit cooldown, it recovers to HALF_OPEN like any other open breaker.
+    vi.advanceTimersByTime(DEFAULT_CB_CONFIG.rateLimitCooldownMs - DEFAULT_CB_CONFIG.cooldownMs)
+    expect(cb.isOpen()).toBe(false)
+    expect(cb.getState()).toBe('HALF_OPEN')
+  })
+
+  it('honors an upstream Retry-After over the default rate-limit cooldown', () => {
+    const cb = getCircuitBreaker('0x-429-retry-after')
+    cb.onFailure(new Error('0x 429 retryAfterMs=5000')) // shorter than rateLimitCooldownMs
+    expect(cb.isOpen()).toBe(true)
+    vi.advanceTimersByTime(4999)
+    expect(cb.isOpen()).toBe(true)
+    vi.advanceTimersByTime(2) // past 5000ms
+    expect(cb.isOpen()).toBe(false)
+  })
+
+  it('a normal (non-429) failure still uses the short cooldownMs, unaffected by the 429 path', () => {
+    const cb = getCircuitBreaker('0x-normal-failure')
+    cb.onFailure(new Error('0x 502')); cb.onFailure(new Error('0x 502')); cb.onFailure(new Error('0x 502'))
+    expect(cb.getState()).toBe('OPEN')
+    vi.advanceTimersByTime(DEFAULT_CB_CONFIG.cooldownMs + 1)
+    expect(cb.isOpen()).toBe(false) // recovers at the normal (short) cooldown, not the 429 one
+  })
+
+  it('a 429 opens the breaker from HALF_OPEN too, not just CLOSED', () => {
+    const cb = getCircuitBreaker('0x-429-half-open')
+    cb.onFailure(new Error('0x 502')); cb.onFailure(new Error('0x 502')); cb.onFailure(new Error('0x 502'))
+    vi.advanceTimersByTime(DEFAULT_CB_CONFIG.cooldownMs + 1)
+    expect(cb.isOpen()).toBe(false) // → HALF_OPEN
+    expect(cb.getState()).toBe('HALF_OPEN')
+    cb.onFailure(new Error('0x 429 retryAfterMs=10000'))
+    expect(cb.getState()).toBe('OPEN')
+    vi.advanceTimersByTime(9999)
+    expect(cb.isOpen()).toBe(true)
+    vi.advanceTimersByTime(2)
+    expect(cb.isOpen()).toBe(false)
+  })
+
 })

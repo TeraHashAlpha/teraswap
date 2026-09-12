@@ -34,6 +34,21 @@ vi.mock('@/lib/circuit-breaker', () => ({
   isSystemHalted: () => mockIsSystemHalted(),
 }))
 
+// [fix/zerox-quote-hygiene T2] The route now resolves its meta-quote through
+// the shared KV cache (meta-quote-cache.ts) instead of calling fetchMetaQuote
+// directly. Stub it as a pure passthrough (always "miss", always calls the
+// fetcher) so every existing test below is unaffected — the cache's own
+// behaviour (hit/miss/dampener) is unit-tested in meta-quote-cache.test.ts
+// and in api/quote/route.test.ts; this file only pins that v1/quote WIRES
+// UP TO it with the right key shape (see the dedicated test near the bottom).
+const mockGetMetaQuoteCached = vi.fn(async (_key: unknown, fetcher: () => Promise<unknown>) => ({
+  result: await fetcher(),
+  cacheHeader: 'miss',
+}))
+vi.mock('@/lib/meta-quote-cache', () => ({
+  getMetaQuoteCached: (...args: [unknown, () => Promise<unknown>]) => mockGetMetaQuoteCached(...args),
+}))
+
 // ── Import route after mocks ─────────────────────────────
 
 import { GET, OPTIONS } from './route'
@@ -236,6 +251,25 @@ describe('GET /api/v1/quote — happy path', () => {
     expect(body.meta.mevProtected).toBe(false) // 1inch is not MEV-protected
     expect(body.meta.slippage).toBe(0.5) // default
     expect(body.meta.chainId).toBe(1)
+  })
+
+  // [fix/zerox-quote-hygiene T2] Pins that the route actually wires through
+  // the shared cache (not just that fetchMetaQuote eventually gets called
+  // via the mock's passthrough default) — same key shape /api/quote uses,
+  // so an identical pair queried through either endpoint shares one entry.
+  it('[T2] resolves the meta-quote via the shared cache with the mainnet key shape (18/18 decimals, chainId 1)', async () => {
+    mockFetchMetaQuote.mockResolvedValueOnce(metaQuoteFixture('1inch'))
+    await GET(makeRequest({
+      tokenIn: VALID_TOKEN_IN,
+      tokenOut: VALID_TOKEN_OUT,
+      amount: '1000000000000000000',
+    }))
+    expect(mockGetMetaQuoteCached).toHaveBeenCalledTimes(1)
+    const [keyInput] = mockGetMetaQuoteCached.mock.calls[0]
+    expect(keyInput).toMatchObject({
+      src: VALID_TOKEN_IN, dst: VALID_TOKEN_OUT, amount: '1000000000000000000',
+      srcDecimals: 18, dstDecimals: 18, chainId: 1,
+    })
   })
 
   it('mevProtected=true when best.source is cowswap', async () => {
