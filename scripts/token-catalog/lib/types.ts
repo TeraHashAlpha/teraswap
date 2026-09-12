@@ -33,10 +33,12 @@ export interface SourceEntry {
   source: SourceId
 }
 
-/** Market signal for one (chainId, address). Either field may be missing. */
+/** Market signal for one (chainId, address). Any field may be missing. */
 export interface MarketSignal {
-  /** 24h volume in USD (CoinGecko markets), when resolvable. */
+  /** 24h volume in USD (CoinGecko /coins/markets total_volume), when resolvable. */
   volume24hUsd?: number
+  /** Which source supplied volume24hUsd — provenance for the emitted catalog row. */
+  volumeSource?: SourceId
   /** Spot price in USD (DefiLlama coins API). */
   priceUsd?: number
   /** DefiLlama price confidence in [0, 1]. */
@@ -104,6 +106,14 @@ export interface CatalogRow {
   sources: SourceId[]
   /** Present + true only for the pinned core allowlist. */
   core?: boolean
+  /** [fix/token-search-ranking-squatting] 24h volume in USD, when a source resolved one.
+   *  NULL (never 0) when nothing resolved — a coerced 0 would outrank real zero-liquidity
+   *  squatters as "worse than worst", sinking a token we simply have no data for. */
+  volume24hUsd: number | null
+  /** Which source supplied volume24hUsd. Null exactly when volume24hUsd is null. */
+  volumeSource: SourceId | null
+  /** ISO date this build's volume snapshot was taken. Null exactly when volume24hUsd is null. */
+  volumeFetchedAt: string | null
 }
 
 export interface Rejection {
@@ -119,6 +129,20 @@ export interface Rejection {
     | 'symbol-conflict'
     | 'capped'
   detail?: string
+}
+
+/**
+ * [fix/token-search-ranking-squatting Task 3] A previously-verified (>=2-source agreement)
+ * catalog row kept this run even though it lost the vote(s) of a source that failed to
+ * report ANYTHING this run (rate limit / outage) — never a source that reported fine but
+ * simply stopped listing the token (that is real signal, not a flake). New candidates
+ * (no previous row) are never retained.
+ */
+export interface RetainedSeed {
+  address: `0x${string}`
+  symbol: string
+  /** Sources that contributed to the previous agreement but returned nothing this run. */
+  missingSources: SourceId[]
 }
 
 export interface SymbolConflict {
@@ -166,6 +190,8 @@ export interface AssembleInput {
   categoryFor: (chainId: number, address: string, symbol: string) => string
   /** logo resolver — local core asset or /api/token-logo route (both CSP 'self'). */
   logoFor: (chainId: number, address: string, symbol: string) => string
+  /** ISO date stamped onto every row's volumeFetchedAt (when volume24hUsd is non-null). */
+  builtAt: string
 }
 
 /** One source fetch's normalized output. `market` carries `${chainId}:${addrLower}` keys. */
@@ -186,6 +212,9 @@ export interface BuildReport {
   conflicts: SymbolConflict[]
   /** New tokens dropped by maxNewTokensPerChain (logged — no silent caps). */
   capped: Array<{ address: `0x${string}`; symbol: string }>
+  /** [fix/token-search-ranking-squatting Task 3] Seeds kept despite this run's vote drop
+   *  because the drop is attributable to a source outage, not delisting. */
+  retained: RetainedSeed[]
 }
 
 export class CoreTokenValidationError extends Error {

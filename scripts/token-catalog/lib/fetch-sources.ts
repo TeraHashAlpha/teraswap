@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { MarketSignal, SourceFetchResult } from './types'
-import { parseTokenList, parseOneInchMap, parseDefiLlamaCoins } from './sources'
+import { parseTokenList, parseOneInchMap, parseDefiLlamaCoins, parseCoingeckoMarkets } from './sources'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..', '..', '..')
@@ -151,6 +151,68 @@ export function makeMarketFetcher(chainId: number): (addresses: `0x${string}`[])
       entries,
       market,
       note: failures > 0 ? `${failures} batch(es) failed — partial market coverage` : undefined,
+    }
+  }
+}
+
+// [fix/token-search-ranking-squatting Task 2] CoinGecko's per-address volume endpoint
+// (simple/token_price?include_24hr_vol=true) caps free-tier requests at ONE contract
+// address each — hundreds of tokens would mean hundreds of sequential calls. Instead:
+// fetch the full /coins/list?include_platform=true snapshot ONCE (memoized for the life
+// of the process — build.ts calls makeVolumeFetcher once per chain, all 3 chains share
+// this) to map contract address → CoinGecko coin id, then batch id → 24h volume through
+// /coins/markets (up to 250 ids/request) — a handful of requests covers every chain.
+let coinsListPromise: Promise<Array<{ id: string; platforms?: Record<string, string> }>> | null = null
+function fetchCoinsList(): Promise<Array<{ id: string; platforms?: Record<string, string> }>> {
+  if (!coinsListPromise) {
+    coinsListPromise = fetchJson('https://api.coingecko.com/api/v3/coins/list?include_platform=true') as Promise<
+      Array<{ id: string; platforms?: Record<string, string> }>
+    >
+  }
+  return coinsListPromise
+}
+
+const CG_MARKETS_BATCH = 250
+
+/** Batched CoinGecko 24h-volume market signal over discovered addresses. Outage-tolerant
+ *  like makeMarketFetcher: a batch failure is logged and skipped, never fatal. */
+export function makeVolumeFetcher(chainId: number): (addresses: `0x${string}`[]) => Promise<SourceFetchResult> {
+  const platform = CG_PLATFORM[chainId]
+  return async (addresses) => {
+    const list = await fetchCoinsList()
+    const idByAddress = new Map<string, string>()
+    for (const coin of list) {
+      const addr = coin.platforms?.[platform]
+      if (addr) idByAddress.set(addr.toLowerCase(), coin.id)
+    }
+    const idToAddresses = new Map<string, string[]>()
+    for (const addr of addresses) {
+      const id = idByAddress.get(addr.toLowerCase())
+      if (!id) continue
+      const g = idToAddresses.get(id)
+      if (g) g.push(addr)
+      else idToAddresses.set(id, [addr])
+    }
+    const ids = [...idToAddresses.keys()]
+    const market = new Map<string, MarketSignal>()
+    let failures = 0
+    for (let i = 0; i < ids.length; i += CG_MARKETS_BATCH) {
+      const chunk = ids.slice(i, i + CG_MARKETS_BATCH)
+      try {
+        const raw = await fetchJson(
+          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${chunk.join(',')}&per_page=${CG_MARKETS_BATCH}&page=1`,
+        )
+        for (const [k, v] of parseCoingeckoMarkets(raw, chainId, idToAddresses)) market.set(k, v)
+      } catch {
+        failures += 1
+      }
+    }
+    if (failures > 0 && market.size === 0) throw new Error(`coingecko-volume: all ${failures} batch(es) failed`)
+    return {
+      source: 'coingecko',
+      entries: [],
+      market,
+      note: failures > 0 ? `${failures} batch(es) failed — partial volume coverage` : undefined,
     }
   }
 }

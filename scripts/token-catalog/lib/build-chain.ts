@@ -24,13 +24,16 @@ import type {
   SourceId,
 } from './types'
 import type { TokenIdentity } from './verdicts'
-import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, externalVoteCount } from './verify'
+import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, externalVoteCount, retainFlakySeeds } from './verify'
 import { deriveGuardOutcomes } from './guard-gate'
 
 export interface ChainBuildDeps {
   fetchSources: Array<() => Promise<SourceFetchResult>>
   /** Second-phase market fetch (DefiLlama) over the union of discovered addresses. */
   fetchMarket?: (addresses: `0x${string}`[]) => Promise<SourceFetchResult>
+  /** [fix/token-search-ranking-squatting Task 2] Third-phase 24h-volume fetch (CoinGecko
+   *  /coins/markets), same target addresses as fetchMarket. Outage-tolerant like it. */
+  fetchVolume?: (addresses: `0x${string}`[]) => Promise<SourceFetchResult>
   collectVerdicts: (tokens: TokenIdentity[]) => Promise<Verdict[]>
   allowlist: Allowlist
   /** Current-catalog seeds, keyed by LOWERCASE address. Never silently dropped. */
@@ -40,6 +43,12 @@ export interface ChainBuildDeps {
   categoryFor: (chainId: number, address: string, symbol: string) => string
   logoFor: (chainId: number, address: string, symbol: string) => string
   log: (msg: string) => void
+  /** [fix/token-search-ranking-squatting Task 3] The chain's PREVIOUSLY-committed catalog
+   *  rows, keyed by lowercase address — lets a single-source flake be told apart from a
+   *  real delisting. Omitted (e.g. in older tests) ⇒ no retention, previous behavior. */
+  previousCatalog?: Map<string, CatalogRow>
+  /** ISO date stamped onto every emitted row's volumeFetchedAt. Defaults to "now". */
+  builtAt?: string
 }
 
 export interface ChainBuildResult {
@@ -95,15 +104,16 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   // 3. merge by (chainId, checksummed address)
   const candidates = mergeByAddress(entries)
 
-  // 4. second-phase market fetch (DefiLlama batch) — only over candidates that can actually
-  // qualify (>= minSources external votes) plus seeds (whose defillama identity vote can
-  // legitimately promote them). Everything else gets rejected by crossVerify regardless, and
-  // a defillama price alone must not promote a single-list NEW token (price presence is
-  // near-automatic for anything with a pool — too weak as a second identity source).
+  // 4. second/third-phase market signal fetches — DefiLlama (price/identity) and CoinGecko
+  // (24h volume), both over candidates that can actually qualify (>= minSources external
+  // votes) plus seeds (whose signal can legitimately promote/retain them). Everything else
+  // gets rejected by crossVerify regardless, and a defillama price alone must not promote a
+  // single-list NEW token (price presence is near-automatic for anything with a pool — too
+  // weak as a second identity source).
+  const marketTargets = candidates.filter(
+    (c) => externalVoteCount(c.sources) >= config.minSources || seeds.has(c.address.toLowerCase()),
+  )
   if (deps.fetchMarket) {
-    const marketTargets = candidates.filter(
-      (c) => externalVoteCount(c.sources) >= config.minSources || seeds.has(c.address.toLowerCase()),
-    )
     try {
       const res = await deps.fetchMarket(marketTargets.map((c) => c.address))
       if (res.market) for (const [k, v] of res.market) market.set(k, { ...market.get(k), ...v })
@@ -119,13 +129,37 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
       log(`market fetch down (build continues): ${msg}`)
     }
   }
+  if (deps.fetchVolume) {
+    try {
+      const res = await deps.fetchVolume(marketTargets.map((c) => c.address))
+      if (res.market) for (const [k, v] of res.market) market.set(k, { ...market.get(k), ...v })
+      if (res.note) sourceNotes.push(`${res.source} volume: ${res.note}`)
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e)
+      sourceNotes.push(`DOWN volume: ${msg}`)
+      log(`volume fetch down (build continues): ${msg}`)
+    }
+  }
 
   // re-merge when the market phase added identity votes
   const merged = entries.length > candidates.length ? mergeByAddress(entries) : candidates
 
   // 5. cross-verify + symbol-conflict resolution
   const seedKeys = new Set([...seeds.keys()].map((a) => `${chainId}:${a}`))
-  const { qualified, rejected } = crossVerify(merged, market, seedKeys, config)
+  const crossVerified = crossVerify(merged, market, seedKeys, config)
+
+  // 5a''. [fix/token-search-ranking-squatting Task 3] Retain a previously-verified seed
+  // whose vote drop this run is attributable to a source outage, not a real delisting —
+  // logged as retained (never silent). New candidates are unaffected: retainFlakySeeds only
+  // ever pulls from `rejected`, and a brand-new candidate has no previousCatalog row to match.
+  const retention = deps.previousCatalog
+    ? retainFlakySeeds(crossVerified.rejected, merged, deps.previousCatalog, sourcesUsed, config)
+    : { qualified: [] as ReturnType<typeof retainFlakySeeds>['qualified'], rejected: crossVerified.rejected, retained: [] as ReturnType<typeof retainFlakySeeds>['retained'] }
+  for (const r of retention.retained) {
+    log(`retained from previous (source flake: ${r.missingSources.join(', ')}): ${r.symbol} ${r.address}`)
+  }
+  const qualified = [...crossVerified.qualified, ...retention.qualified]
+  const rejected = retention.rejected
   const conflictResult = resolveSymbolConflicts(qualified, market, config)
 
   // 5a. protect curated symbols BEFORE the guard audit (review finding): a NEW candidate
@@ -208,10 +242,12 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     config,
     categoryFor,
     logoFor,
+    builtAt: deps.builtAt ?? new Date().toISOString().slice(0, 10),
   })
   report.rejections.push(...rejected, ...conflictResult.rejected)
   report.conflicts.push(...conflictResult.conflicts)
   report.capped.push(...prunedCapped)
+  report.retained.push(...retention.retained)
 
   return { tokens, report, sourcesUsed, sourceNotes, verdicts, market }
 }
