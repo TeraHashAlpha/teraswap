@@ -20,10 +20,14 @@
  *
  * RPC endpoints reuse the guard's env overrides: GUARD_RPC_1 / GUARD_RPC_8453 / GUARD_RPC_42161.
  */
+import { getSupportedChainIds } from '@/lib/chains/registry'
 import type { CoreToken, PipelineConfig } from './types'
 
 export const PIPELINE_CONFIG: PipelineConfig = {
-  chains: [1, 8453, 42161],
+  // [fix/token-sync-cron-landing] Derived from the chain registry (same source
+  // catalog-address-guard.test.ts and verdicts.ts's GUARD_CHAINS use) — no second
+  // hand-maintained chain list to fall behind when a chain is added/removed.
+  chains: getSupportedChainIds(),
   minSources: 2,
   lowLiqMinSources: 3,
   liquidityFloorUsd: 100_000,
