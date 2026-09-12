@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 /**
- * [CHORE-47C-ARBITRUM-CATALOG] Generate the Arbitrum (42161) token-catalog addresses + the
+ * [CHORE-47C-ARBITRUM-CATALOG] SUPERSEDED by CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE —
+ * `npm run tokens:sync` (scripts/token-catalog/build.ts) now generates Arbitrum's full
+ * multi-source catalog (src/config/generated/token-catalog.42161.json), same pipeline as
+ * Base/mainnet. This script is kept, not deleted (repo convention — CLAUDE.md rule #4): its
+ * 5-token output feeds CORE_TOKENS[42161] in scripts/token-catalog/lib/config.ts (copied by
+ * hand from its last-generated arbitrum-catalog.generated.ts, never re-run automatically by
+ * tokens:sync), and arbitrum-catalog.ts / arbitrum-catalog.test.ts still consume its output
+ * directly as a manifest-fidelity regression guard. Do not wire this back into any CI job.
+ *
+ * Generate the Arbitrum (42161) token-catalog addresses + the
  * catalog-guard verdict cache FROM docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json — the manifest
  * emitted by scripts/verify-arbitrum-addresses.mjs (CHORE-47B). No hex literal is hand-typed
  * anywhere in this pipeline: this script reads the manifest and writes the generated files;

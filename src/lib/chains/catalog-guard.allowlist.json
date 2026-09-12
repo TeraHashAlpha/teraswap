@@ -263,6 +263,13 @@
       "symbol": "USDT",
       "onchainSymbol": "USD₮0",
       "reason": "CHORE-47C-ARBITRUM-CATALOG / AUDIT-ARBITRUM-46-47 adjudication: on-chain symbol() is Tether's newer LayerZero omnichain USDT0 standard, confirmed via GeckoTerminal as the dominant USDT-pegged token on Arbitrum by trading volume today. Catalog key/symbol stays USDT for cross-chain continuity."
+    },
+    {
+      "chainId": 42161,
+      "address": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+      "symbol": "USDC.e",
+      "onchainSymbol": "USDC",
+      "reason": "CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE: bridged USDC's on-chain symbol() literally returns \"USDC\" (verified on-chain 2026-09-12) — the \".e\" suffix is a tokenlist/UI convention (arbitrumBridge/uniswap/coingecko all tag it \"USDC.e\"/\"USDC.E\"), not the contract's own symbol. Catalog symbol stays USDC.e so it never collides with or is silently merged into native USDC (0xaf88d0…, a separate address)."
     }
   ],
   "knownDeprecated": [],

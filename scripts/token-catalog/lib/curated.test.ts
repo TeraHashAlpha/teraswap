@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { SeedToken } from './types'
-import { applyCuratedCorrections, correctSeed } from './curated'
+import { applyCuratedCorrections, correctSeed, CURATED_ARBITRUM_SEEDS } from './curated'
 
 const OHM_V1 = '0x383518188C0C6d7730D91b2c03a03C837814a899'
 const OHM_V2 = '0x64aa3364F17a4D01c6f1751Fd97C2BD3D7e7f1D5'
@@ -55,5 +55,37 @@ describe('applyCuratedCorrections — OHM/KNC on the source-entry path', () => {
       { chainId: 1, address: KNC_LEGACY as `0x${string}`, symbol: 'KNC', name: 'Kyber Network Crystal', decimals: 18, source: 'oneinch' },
     ])
     expect(entries.map((e) => e.address)).toEqual([OHM_V2, KNC_V2])
+  })
+})
+
+describe('[CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] Arbitrum USDT self-remap + USDC.e seed', () => {
+  const ARB_USDT = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+
+  it('a source tagging the Arbitrum USDT address "USDT0" is corrected to "USDT" (self-remap, same address)', () => {
+    const entries = applyCuratedCorrections([
+      { chainId: 42161, address: ARB_USDT as `0x${string}`, symbol: 'USDT0', name: 'USDT0', decimals: 6, source: 'uniswap' },
+    ])
+    expect(entries).toEqual([{ chainId: 42161, address: ARB_USDT, symbol: 'USDT', name: 'Tether USD', decimals: 6, logoURI: undefined, source: 'uniswap' }])
+  })
+
+  it('the same self-remap applies on the seed path', () => {
+    const s = correctSeed(42161, seed(ARB_USDT, 'USDT0', 6))
+    expect(s).toMatchObject({ address: ARB_USDT, symbol: 'USDT' })
+  })
+
+  it('the self-remap is chain-scoped — the same address on another chain is untouched', () => {
+    const entries = applyCuratedCorrections([
+      { chainId: 1, address: ARB_USDT as `0x${string}`, symbol: 'USDT0', name: 'USDT0', decimals: 6, source: 'uniswap' },
+    ])
+    expect(entries[0].symbol).toBe('USDT0')
+  })
+
+  it('CURATED_ARBITRUM_SEEDS pins bridged USDC.e distinct from native USDC (no silent merge)', () => {
+    expect(CURATED_ARBITRUM_SEEDS).toHaveLength(1)
+    expect(CURATED_ARBITRUM_SEEDS[0]).toMatchObject({
+      address: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
+      symbol: 'USDC.e',
+      decimals: 6,
+    })
   })
 })

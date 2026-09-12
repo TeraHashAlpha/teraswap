@@ -17,14 +17,16 @@ import type { Verdict } from '@/lib/chains/catalog-guard'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-export const GUARD_CHAINS = [1, 8453] as const
+export const GUARD_CHAINS = [1, 8453, 42161] as const
 
 export const GUARD_RPC: Record<number, string> = {
   1: process.env.GUARD_RPC_1 ?? 'https://ethereum-rpc.publicnode.com',
   8453: process.env.GUARD_RPC_8453 ?? 'https://base-rpc.publicnode.com',
+  42161: process.env.GUARD_RPC_42161 ?? 'https://arb1.arbitrum.io/rpc',
 }
 
-export const CG_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base' }
+// CoinGecko's platform slug is 'arbitrum-one' (its 'arbitrum' path 404s) — confirmed live 2026-09-12.
+export const CG_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum-one' }
 
 const DEAD = '0x000000000000000000000000000000000000dEaD'
 const FROM = '0x0000000000000000000000000000000000000001'

@@ -10998,12 +10998,2022 @@
   },
   {
    "chainId": 42161,
-   "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-   "symbol": "WETH",
+   "address": "0x7cb16cb78ea464aD35c8a50ABF95dff3c9e09d5d",
+   "symbol": "0xBTC",
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "WETH",
+   "onchainSymbol": "0xBTC",
+   "decimals": 8
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6314C31A7a1652cE482cffe247E9CB7c3f4BB9aF",
+   "symbol": "1INCH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "1INCH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xed242f35bf53ce7757C74ECB9E6De070157A74c0",
+   "symbol": "AAOIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AAOIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9d275685dC284C8eB1C79f6ABA7a63Dc75ec890a",
+   "symbol": "AAPLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AAPLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
+   "symbol": "AAVE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AAVE",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6362767DF5bf9D9B6C945D1ff5e2bf96188A1df1",
+   "symbol": "AAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xfBF2398dF672cEE4aFcC2A4A733222331c742a6A",
+   "symbol": "ABBVx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ABBVx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xC1566b43Ee3D9F507C75435C5eeA81De7E7515F3",
+   "symbol": "ABNBx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ABNBx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x89233399708C18Ac6887F90A2B4Cd8Ba5fEdD06e",
+   "symbol": "ABTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ABTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x03183Ce31b1656B72A55fa6056e287f50C35BbEB",
+   "symbol": "ACNx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ACNx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x53691596d1BCe8CEa565b84d4915e69e03d9C99d",
+   "symbol": "ACX",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ACX",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xCCc9e8d1182f64b15E350dB929fF6c6F98ebea29",
+   "symbol": "ADIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ADIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xe6D9b0127a5f742Bc79aF0b327D25624A9150C06",
+   "symbol": "ADMx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ADMx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xb207a53f551BFfacA2718911f30F86F888F42eBF",
+   "symbol": "ADPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ADPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x7320FF11b32baa599d44FC8c8Ecb31C7932443e1",
+   "symbol": "ADSKx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ADSKx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x0da1f9a13b0D65956E3CF34801445458d96cC8f4",
+   "symbol": "AEEx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AEEx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xCE3eC6D03C17c35A814444e079Bd6Aa5a14387e8",
+   "symbol": "AEPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AEPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xFbCdA977c2991eCfb3bF4d7AF2848E5510081b8F",
+   "symbol": "AFLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AFLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2a78b1E0F391C8A2Cc7AC092bCA2DaDa939384dC",
+   "symbol": "AIGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AIGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xDA5B4b4C469Bc34fE2493a980A2E017a4885B28f",
+   "symbol": "AITx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AITx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2d21247c1855D12A69024b596E7c630636Dc82b6",
+   "symbol": "AIZx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AIZx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x63e3E2C8d59Af0489a41Ee899117138cd2e575BC",
+   "symbol": "AJGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AJGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9D651601f24d162800B816b22BDE370e9B277E7F",
+   "symbol": "AKAMx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AKAMx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xD64cb407FE4E76f5676Ab656866f0e1de2ff4330",
+   "symbol": "ALABx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ALABx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x94164391DE9fa0204aEfD36A863743544dFa4f31",
+   "symbol": "ALBx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ALBx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xef0C9DE21450863f0F8B46F8d476f9Ef8Db69e39",
+   "symbol": "ALGNx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ALGNx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xB5439dB439A5A3cd33837331fFbF5fD62d24085b",
+   "symbol": "ALLYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ALLYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xD2AcDE8e0883FD38039D073Ae69228c7e8E0ed0d",
+   "symbol": "ALLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ALLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9CE59fc950eDA062492CECA15f2a13467fc388fE",
+   "symbol": "ALNYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ALNYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2f9a35aB5dDFBc49927BFdEab98A86c53DC6E763",
+   "symbol": "AMBRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AMBRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x0d9CAF20E33Fcb7ADf6Cb95C3F9bB012FdB2fD97",
+   "symbol": "AMEx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AMEx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xdCD6B813D01a45de8dA9367b36cB02B2E570fDFD",
+   "symbol": "AMGNx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AMGNx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2496da59F7b59801B862BB4667f0D4d7C2eb93f9",
+   "symbol": "AMPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AMPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x26Fa8748a658E51EbebDFBE2eEb813470F10c9BE",
+   "symbol": "AMTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AMTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x3557Ba345B01EFa20A1bdDC61F573BFD87195081",
+   "symbol": "AMZNx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AMZNx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x37a645648dF29205C6261289983FB04ECD70b4B3",
+   "symbol": "ANIME",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ANIME",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6006d2029F25549774d0684AA14b250E3e81c83E",
+   "symbol": "APAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "APAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2488583FD85DE034571F84609B978018dc72d3C2",
+   "symbol": "APDx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "APDx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xAB90d40660E6Fd89B4560ef11fB938dfB4D7da02",
+   "symbol": "APGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "APGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x7848475161802da675C321b250e0b25658FDf96c",
+   "symbol": "APHx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "APHx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x38c49e8236242Ec4dCE135775c2A8d525830fFc0",
+   "symbol": "APOx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "APOx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x50a1291F69D9d3853Def8209cFb1AF0b46927BE1",
+   "symbol": "APPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "APPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x912CE59144191C1204E64559FE8253a0e49E6548",
+   "symbol": "ARB",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ARB",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x96180d4B7c607816eEEe8D58228D05B009366852",
+   "symbol": "ARESx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ARESx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x0B5409F293F78a290a7e8d63C70963e2c06D5e07",
+   "symbol": "ARMKx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ARMKx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd15140134a81d3718c87a2D5c17145d324d874A6",
+   "symbol": "ARMx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ARMx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xAB24B29D230795Fb14F37042b40D003fE7ff7C3b",
+   "symbol": "ARWx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ARWx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xc87B37a581ec3257B734886d9d3a581F5A9d056c",
+   "symbol": "ATH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ATH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9d05846CeB65e27052AD783181cf8364460b1fab",
+   "symbol": "ATIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ATIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x93551be7e70231D9B8CDCE24218805d19A924f79",
+   "symbol": "ATOx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ATOx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xea986d33eF8a20A96120ecc44dBdD49830192043",
+   "symbol": "AUC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AUC",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+   "symbol": "AUSD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AUSD",
+   "decimals": 6
+  },
+  {
+   "chainId": 42161,
+   "address": "0x38BAC69cbBd28156796e4163B2B6dcb81E336565",
+   "symbol": "AVGOx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AVGOx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x66aA8475A988006c6B9E6297B2D0cA6021017A08",
+   "symbol": "AVYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AVYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x12B4675E66D1c43ff8550FfA63251C6c2c99C2A9",
+   "symbol": "AWKx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AWKx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x23ee2343B892b1BB63503a4FAbc840E0e2C6810f",
+   "symbol": "AXL",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AXL",
+   "decimals": 6
+  },
+  {
+   "chainId": 42161,
+   "address": "0x98c04F53AeE02Cc622Ab49352f0165B4799aFb84",
+   "symbol": "AXONx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AXONx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x5D642505FE1a28897eb3BaBA665F454755D8daA2",
+   "symbol": "AZNx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AZNx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xb68396Bb3D29447019F360E2106996Fd23856BD4",
+   "symbol": "AZOx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "AZOx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x933B254AEd47BDc03b19CaDCd0b0D4ca038D974F",
+   "symbol": "Ax",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "Ax",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x314938c596F5ce31C3f75307d2979338C346D7F2",
+   "symbol": "BACx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BACx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xBfa641051Ba0a0Ad1b0AcF549a89536A0D76472E",
+   "symbol": "BADGER",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BADGER",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x040d1EdC9569d4Bab2D15287Dc5A4F10F56a56B8",
+   "symbol": "BAL",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BAL",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x60143Db3B316A95771435b5cF6A1d71b7A09bBed",
+   "symbol": "BALLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BALLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd629f4cf39b225EDcd94c075DD17bCF37FA2C068",
+   "symbol": "BAMx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BAMx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x5e5e6aA595f5Ba2E12D3120810B9Fe607735aC8C",
+   "symbol": "BAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x44BE932030afB9FccD22621f5F5f5C2Fe72EFc5c",
+   "symbol": "BBYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BBYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x83a53e205CD5DBA6Ca2EeA5CB2345638279dDBBc",
+   "symbol": "BDXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BDXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xdCF5F4a677514c293474556133dcfd3276F5E998",
+   "symbol": "BEx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BEx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xa68Ec98D7ca870cF1Dd0b00EBbb7c4bF60A8e74d",
+   "symbol": "BICO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BICO",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xB954C3C643050CB532A4082D3Def7FC29eCed300",
+   "symbol": "BIIBx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BIIBx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xE1435b2f302edf42AE84a306a5e1948b270B6CCb",
+   "symbol": "BITXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BITXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xA5E265e9A992eAeCC06a6C4C787f73743cb01f35",
+   "symbol": "BJx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BJx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xAC63197eaD820A810141b942Ebe593abDBB1d07F",
+   "symbol": "BKRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BKRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x20641E4790423744b42d5aF39C7A50bc1d815931",
+   "symbol": "BMYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BMYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xB972542e747aF613e8cF824a405EE92B6304397c",
+   "symbol": "BNYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BNYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x0D81E50bC677fa67341c44D7eaA9228DEE64A4e1",
+   "symbol": "BOND",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BOND",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x1f2C8792148e4DC81A86109504810f2d5f2F26e4",
+   "symbol": "BOTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BOTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x12992613fDd35aBe95DEc5a4964331b1ee23B50d",
+   "symbol": "BRK.Bx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BRK.Bx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8B992e525990069BAE4eBCF52Cb76Ca50358D5E6",
+   "symbol": "BROx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BROx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x44A81c9D99b59BCc19ee2B852aC2ABDf81062869",
+   "symbol": "BRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x7796F4E23a62eF3653829c21032A9E24bEaf4Cf5",
+   "symbol": "BSPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BSPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x5fe45d4B2CAd6eB5Ef6Bda8626764817FdB4E940",
+   "symbol": "BSXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BSXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x22E1991e5f82736A2a990322a46aac0e95826c5B",
+   "symbol": "BTBTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BTBTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xBBc5399873223b7B4Aa877685e57837643e54ce4",
+   "symbol": "BURLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BURLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xDeDdf43e79fA035bD86D976751BfdaE474A29580",
+   "symbol": "BWAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BWAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xD66C91211925caF1DCF694ADb5FC9B13fFa92A0D",
+   "symbol": "BWXTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BWXTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xC0B359593633c8bdb05Cd838d6b23CeF42ac7d03",
+   "symbol": "BXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "BXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x09199d9A5F4448D0848e4395D065e1ad9c4a1F74",
+   "symbol": "Bonk",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "Bonk",
+   "decimals": 5
+  },
+  {
+   "chainId": 42161,
+   "address": "0x1BB280D8702180860C03319AC920388BB77487f2",
+   "symbol": "CAHx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CAHx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x1b896893dfc86bb67Cf57767298b9073D2c1bA2c",
+   "symbol": "CAKE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "Cake",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x46464de7eC96039CC22b58eBBcB718Ed3E7B6957",
+   "symbol": "CARRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CARRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xEeD0831dAAf44Eec5fA82B067F1828F23A996024",
+   "symbol": "CASYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CASYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x54D883064B634390C30b780D0CaD761be8bFaAe9",
+   "symbol": "CATx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CATx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x16f1967565aaD72DD77588a332CE445e7cEF752b",
+   "symbol": "CAW",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CAW",
+   "decimals": 0
+  },
+  {
+   "chainId": 42161,
+   "address": "0xc7acC638da6A8F61559342A36Bfb3ce8D5032Cb4",
+   "symbol": "CBREx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CBREx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x874C1986ede15f6520686652268E0d62d9A10618",
+   "symbol": "CBRSx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CBRSx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2E2d7Cb3E0936Ac6aA76bf91EC597986Fbe63BFD",
+   "symbol": "CCIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CCIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2219785c22c0e38c675515f0010E7443F0EB9487",
+   "symbol": "CDNSx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CDNSx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xC191Fc475a0a45EF598FF42E1ae72917582dBEAA",
+   "symbol": "CDWx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CDWx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x3a8B787f78D775AECFEEa15706D4221B40F345AB",
+   "symbol": "CELR",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CELR",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x010D5e78A62879Ebc58F04Cb9EAdedd73A4E43e6",
+   "symbol": "CFGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CFGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xfF0b421a304faC14F9CC1d8837E4c7F5D0792710",
+   "symbol": "CFx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CFx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd08e2086a3a2D49f0A7E7fc91A40a3D58e50CA4A",
+   "symbol": "CGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8a0D5dECCD1193105B2ED895b4ed7542D54e7519",
+   "symbol": "CHDx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CHDx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xEd6DA309DD1E1C12b09D7e7f03282f9581850804",
+   "symbol": "CHRWx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CHRWx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xef0A450dC85989ca228FA7198e17c834218C5334",
+   "symbol": "CHTRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CHTRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9d18FE6C68e62E97FAa14EF736879ED3b5449a3D",
+   "symbol": "CIENx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CIENx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x600aa2917F0223aB6623cE8bF95e9BCaFFD8499D",
+   "symbol": "CINFx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CINFx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x40bF69F64ee34A535568bE85e80e126c4282EcF3",
+   "symbol": "CIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x7a1C7312Aa5AB60D6deD33bb5cF23e1B15430b65",
+   "symbol": "CLHx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CLHx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8e38Da2ed94E3779Da83075D8c73ea98fbf934F4",
+   "symbol": "CLXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CLXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9D13e2a71d55497241AeE64b48992A2Ce3bbf98e",
+   "symbol": "CLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xBC7170a1280Be28513B4e940C681537EB25e39f4",
+   "symbol": "CMCSAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CMCSAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x388Bd41Aaf969D13e3538d62c051d08302a7fa6E",
+   "symbol": "CMEx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CMEx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xDad1865dD327fD305DF6ec6aCCEDE2B5fAAEC9cA",
+   "symbol": "CMGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CMGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xaf79388D25A99c3806fc44e937b9eA3B503A9394",
+   "symbol": "CMIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CMIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd7C595a1C093BD21284E1acC036f37CDD429E536",
+   "symbol": "CMSx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CMSx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x65f3D5C5cb7989130dA4f84DBdc8B431670B1745",
+   "symbol": "CNCx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CNCx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x5c6dc244b258d71c55eee3bE0C3cbb6B443CB73D",
+   "symbol": "CNPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CNPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xf6d5373B0CAfC08da97CCb0a38Db60C73494D586",
+   "symbol": "COFx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COFx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8bB9F6047997bF5fD679c6649833f8D89503Ae6E",
+   "symbol": "COHRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COHRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x364f210f430eC2448Fc68A49203040F6124096F0",
+   "symbol": "COINx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COINx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x354A6dA3fcde098F8389cad84b0182725c6C91dE",
+   "symbol": "COMP",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COMP",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6655a43472C21583bd1590ab66fa670A27D7BB7e",
+   "symbol": "COOx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COOx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xF50631342BB3b83CD2bE267c11dA3A97d803dC27",
+   "symbol": "COPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd7Ed2c1A0264cF3967cDfdc698EbaE895f66C856",
+   "symbol": "CORx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CORx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xcb8b5CD20BdCaea9a010aC1F8d835824F5C87A04",
+   "symbol": "COW",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "COW",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x4e30b8A21d1e8A5581e3226D8e85eD03fC1c4732",
+   "symbol": "CPAYx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CPAYx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x60CB8C81bdb4AE6e2bc66de8713B52C68148E5Ac",
+   "symbol": "CPNGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CPNGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x154D7C2A6C4E17037060C84c4132C86140aD0c74",
+   "symbol": "CPRTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CPRTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x1fC9ecC975c1CC50A372634A5039f4f3b4180aC5",
+   "symbol": "CPTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CPTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xfEbDEd1B0986a8ee107f5AB1a1c5a813491DeCEB",
+   "symbol": "CRCLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CRCLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xf4D48Ce3ee1Ac3651998971541bAdbb9A14D7234",
+   "symbol": "CREAM",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CREAM",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x4A4073f2EAF299A1be22254DCD2C41727F6F54a2",
+   "symbol": "CRMx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CRMx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x7FedAC22A2E1369eB3D850cCe752067dbB93588F",
+   "symbol": "CRSx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CRSx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x11cDb42B0EB46D95f990BeDD4695A6e3fA034978",
+   "symbol": "CRV",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CRV",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x214151022C2a5E380aB80CdaC31f23Ae554a7345",
+   "symbol": "CRWDx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CRWDx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x16314D1032E6476c9451d1F02ba365A249fF36c7",
+   "symbol": "CRWVx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CRWVx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x053C784cD87B74f42e0c089f98643E79c1A3ff16",
+   "symbol": "CSCOx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CSCOx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd5a68aD7413EacC211F2382F55BCBBCF8F30030a",
+   "symbol": "CSGPx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CSGPx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x77Bc8f5AEaCf2dED90307C9207Da1746cA1E9241",
+   "symbol": "CSLx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CSLx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x41d7f18d1967D20e13c7949b954C50ff697f40cc",
+   "symbol": "CSXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CSXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x671b6083bf2f77844DD61F4376A4FE900270c5E4",
+   "symbol": "CTASx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CTASx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x853c65ef470689195a52fFCB85874B901A181B58",
+   "symbol": "CTSHx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CTSHx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x319f865b287fCC10b30d8cE6144e8b6D1b476999",
+   "symbol": "CTSI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CTSI",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x708E74a00C49cA0CBBf892eBBb9efDE84e9844DD",
+   "symbol": "CTVAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CTVAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x3783c4704B2fB000B8426250661A3959441DeC2C",
+   "symbol": "CVNAx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CVNAx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6E6Dabe27FeB2E21Ac6A8Bc15F20f2878B146c41",
+   "symbol": "CVSx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CVSx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xad5cdc3340904285B8159089974A99a1A09EB4C0",
+   "symbol": "CVXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CVXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x88829e4e48eB5e41a7EB0118603036B75F0C685F",
+   "symbol": "CWx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "CWx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xb9A403dc62154512C3B2b366aa2CA3E094aD3e60",
+   "symbol": "Cx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "Cx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+   "symbol": "DAI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DAI",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x978a8aE09a7f7b5A39afB288bc2a63b4Aa4feB45",
+   "symbol": "DALx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DALx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xF38665a4a42A1E7eEB36A5f26D1757B788E64A4F",
+   "symbol": "DASHx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DASHx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xFe7B11D43cfD9fd6010f1b3F9cC86e5BCDb2bc78",
+   "symbol": "DAXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DAXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x84BB81e42faBBdFC7A760a19f73983Da1bD90080",
+   "symbol": "DDOGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DDOGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xAfD798910608fD531912F9262c2A5Eb1EbE78E07",
+   "symbol": "DECKx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DECKx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6b530E7df5A66422672632CA1a3277C497F0AfcB",
+   "symbol": "DEx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DEx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xaE6aab43C4f3E0cea4Ab83752C278f8dEbabA689",
+   "symbol": "DF",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DF",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x521860bB5dF5468358875266B89BFE90d990C6e7",
+   "symbol": "DFDVx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DFDVx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x12C2dE43878FB1A06C1Ead481f11E0C693a719c7",
+   "symbol": "DGAI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DGAI",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x14c7A3738Fd283e04D1082dB86f3410DE2354e2d",
+   "symbol": "DGXx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DGXx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xE4F827151471Be4C2f0e5C754E74F89F3D6888c0",
+   "symbol": "DGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xcE50D7B79f1a4243754CCD4B4740547ECB54339E",
+   "symbol": "DHIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DHIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xdbA228936F4079DaF9Aa906fd48a87f2300405F4",
+   "symbol": "DHRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DHRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8038F3C971414FD1FC220bA727F2D4A0fC98cb65",
+   "symbol": "DHT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DHT",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xb07F6ED1496Aa9bb751Dc3cB901328Dc08A64ac4",
+   "symbol": "DISx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DISx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xfBf32f87bd0eaa8c8bB290cf1C5650648A36aa18",
+   "symbol": "DKNGx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DKNGx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8e2fb41b55937ea5F939723a2B9E4a55632fD8Dd",
+   "symbol": "DKSx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DKSx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9E350c07ab5bfC75f684DccB4D392403A1641d9b",
+   "symbol": "DLRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DLRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xF52835d4163e4F37547dDB40876578a2d6d9d319",
+   "symbol": "DLTRx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DLTRx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2b51b5162d39a20Ae5cA52B89E5D12526D63e4DC",
+   "symbol": "DOCx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DOCx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x69Eb4FA4a2fbd498C257C57Ea8b7655a2559A581",
+   "symbol": "DODO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DODO",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x4425742F1EC8D98779690b5A3A6276Db85Ddc01A",
+   "symbol": "DOG",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DOG",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2181335979aFF9af53C1805A3EDE635629F392Cc",
+   "symbol": "DOVx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DOVx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x2e6EF35624EB900E7e537FC45F523cff49D274b4",
+   "symbol": "DOWx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DOWx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd80840F51367e5F22d29C2DE161D86fE992eBF77",
+   "symbol": "DRIx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DRIx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x77b7787a09818502305C95d68A2571F090abb135",
+   "symbol": "DRV",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DRV",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x573833074A35e5cCf1835646F0D4A15ced7527d7",
+   "symbol": "DTEx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DTEx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd3a40e90234F9389a772868D3421ea4a26A048eA",
+   "symbol": "DTx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DTx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xaF8C938647F517AEc81638B90313C414B3F71087",
+   "symbol": "DUKx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DUKx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x384557a6946952b37AAd045b189C3C1FE9f6Fb53",
+   "symbol": "DVNx",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "DVNx",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xFA5Ed56A203466CbBC2430a43c66b9D8723528E7",
+   "symbol": "EURA",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "EURA",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a",
+   "symbol": "GMX",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "GMX",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xa0b862F60edEf4452F25B4160F177db44DeB6Cf1",
+   "symbol": "GNO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "GNO",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x9623063377AD1B27544C965cCd7342f7EA7e88C7",
+   "symbol": "GRT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "GRT",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60",
+   "symbol": "LDO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "LDO",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4",
+   "symbol": "LINK",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "LINK",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x46d0cE7de6247b0A95f67b43B589b4041BaE7fbE",
+   "symbol": "LRC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "LRC",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x539bdE0d7Dbd336b79148AA742883198BBF60342",
+   "symbol": "MAGIC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MAGIC",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x99F40b01BA9C469193B360f72740E416B17Ac332",
+   "symbol": "MATH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MATH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x4e352cF164E64ADCBad318C3a1e222E9EBa4Ce42",
+   "symbol": "MCB",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MCB",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x0c880f6761F1af8d9Aa9C466984b80DAb9a8c9e8",
+   "symbol": "PENDLE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "PENDLE",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x753D224bCf9AAFaCD81558c32341416df61D3DAC",
+   "symbol": "PERP",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "PERP",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x51fC0f6660482Ea73330E414eFd7808811a57Fa2",
+   "symbol": "PREMIA",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "PREMIA",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xef888bcA6AB6B1d26dbeC977C455388ecd794794",
+   "symbol": "RGT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "RGT",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xB766039cc6DB368759C1E56B79AFfE831d0Cc507",
+   "symbol": "RPL",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "RPL",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x3E6648C5a70A150A88bCE65F4aD4d506Fe15d2AF",
+   "symbol": "SPELL",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "SPELL",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x1337420dED5ADb9980CFc35f8f2B054ea86f8aB1",
+   "symbol": "SQD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "SQD",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xd4d42F0b6DEF4CE0383636770eF773390d85c61A",
+   "symbol": "SUSHI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "SUSHI",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0",
+   "symbol": "UNI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "UNI",
    "decimals": 18
   },
   {
@@ -11018,6 +13028,26 @@
   },
   {
    "chainId": 42161,
+   "address": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+   "symbol": "USDC.e",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "USDC",
+   "decimals": 6
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6491c05A82219b8D1479057361ff1654749b876b",
+   "symbol": "USDS",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "USDS",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
    "address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
    "symbol": "USDT",
    "inTrustedList": true,
@@ -11028,16 +13058,6 @@
   },
   {
    "chainId": 42161,
-   "address": "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-   "symbol": "DAI",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "DAI",
-   "decimals": 18
-  },
-  {
-   "chainId": 42161,
    "address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
    "symbol": "WBTC",
    "inTrustedList": true,
@@ -11045,6 +13065,196 @@
    "transferable": true,
    "onchainSymbol": "WBTC",
    "decimals": 8
+  },
+  {
+   "chainId": 42161,
+   "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+   "symbol": "WETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xcAFcD85D8ca7Ad1e1C6F82F651fA15E33AEfD07b",
+   "symbol": "WOO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WOO",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x82e3A8F066a6989666b031d916c43672085b1582",
+   "symbol": "YFI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "YFI",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xf329e36C7bF6E5E86ce2150875a84Ce77f477375",
+   "symbol": "aArbAAVE",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbAAVE",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6533afac2E7BCCB20dca161449A13A32D391fb00",
+   "symbol": "aArbARB",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbARB",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x82E64f49Ed5EC1bC6e43DAD4FC8Af9bb3A2312EE",
+   "symbol": "aArbDAI",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbDAI",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x38d693cE1dF5AaDF7bC62595A37D667aD57922e5",
+   "symbol": "aArbFRAX",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbFRAX",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x191c10Aa4AF7C30e871E70C95dB0E4eb77237530",
+   "symbol": "aArbLINK",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbLINK",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8ffDf2DE812095b1D19CB146E4c004587C0A0692",
+   "symbol": "aArbLUSD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbLUSD",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x625E7708f30cA75bfd92586e17077590C60eb4cD",
+   "symbol": "aArbUSDC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbUSDC",
+   "decimals": 6
+  },
+  {
+   "chainId": 42161,
+   "address": "0x724dc807b04555b71ed48a6896b6F41593b8C637",
+   "symbol": "aArbUSDCn",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbUSDCn",
+   "decimals": 6
+  },
+  {
+   "chainId": 42161,
+   "address": "0x6ab707Aca953eDAeFBc4fD23bA73294241490620",
+   "symbol": "aArbUSDT",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbUSDT",
+   "decimals": 6
+  },
+  {
+   "chainId": 42161,
+   "address": "0x078f358208685046a11C85e8ad32895DED33A249",
+   "symbol": "aArbWBTC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbWBTC",
+   "decimals": 8
+  },
+  {
+   "chainId": 42161,
+   "address": "0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8",
+   "symbol": "aArbWETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbWETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x8Eb270e296023E9D92081fdF967dDd7878724424",
+   "symbol": "aArbrETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbrETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x513c7E3a9c69cA3e22550eF58AC1C0088e918FFf",
+   "symbol": "aArbwstETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "aArbwstETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+   "symbol": "cbBTC",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "cbBTC",
+   "decimals": 8
+  },
+  {
+   "chainId": 42161,
+   "address": "0x1DEBd73E752bEaF79865Fd6446b0c970EaE7732f",
+   "symbol": "cbETH",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "cbETH",
+   "decimals": 18
+  },
+  {
+   "chainId": 42161,
+   "address": "0x498Bf2B1e120FeD3ad3D42EA2165E9b73f99C1e5",
+   "symbol": "crvUSD",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "crvUSD",
+   "decimals": 18
   }
  ]
 }

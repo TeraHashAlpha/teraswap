@@ -34,7 +34,7 @@ import type { SeedToken } from './lib/types'
 import { buildChainCatalog } from './lib/build-chain'
 import { makeFetchers, makeMarketFetcher } from './lib/fetch-sources'
 import { makeCategoryResolver } from './lib/category'
-import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS } from './lib/curated'
+import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS } from './lib/curated'
 import { collectVerdicts, writeTrustFixture, GUARD_CHAINS } from './lib/verdicts'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
@@ -92,6 +92,7 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
     push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
   }
   if (chainId === 8453) for (const s of CURATED_BASE_SEEDS) push(s)
+  if (chainId === 42161) for (const s of CURATED_ARBITRUM_SEEDS) push(s)
   for (const t of GENERATED_TOKEN_CATALOG[chainId] ?? []) {
     if (!t.verified) continue // post-baseline additions persist only while verified
     push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
@@ -104,6 +105,9 @@ function categoryResolver() {
   for (const t of DEFAULT_TOKENS) seedCategories.set(`1:${t.address.toLowerCase()}`, t.category)
   for (const s of CURATED_BASE_SEEDS) {
     if (s.category) seedCategories.set(`8453:${s.address.toLowerCase()}`, s.category)
+  }
+  for (const s of CURATED_ARBITRUM_SEEDS) {
+    if (s.category) seedCategories.set(`42161:${s.address.toLowerCase()}`, s.category)
   }
   const overrides = new Map<string, string>()
   for (const [addr, cat] of Object.entries(CATEGORY_OVERRIDES)) overrides.set(`1:${addr.toLowerCase()}`, cat)

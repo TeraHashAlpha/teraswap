@@ -48,6 +48,16 @@ const REMAPS: Record<string, Omit<SourceEntry, 'source'>> = {
   '1:0xdd974d5c2e2928dea5f71b9825b8b646686bd200': {
     chainId: 1, address: '0xdeFA4e8a7bcBA345F687a2f1456F5Edd9CE97202' as `0x${string}`, symbol: 'KNC', name: 'Kyber Network Crystal', decimals: 18,
   },
+  // [CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] Self-remap (same address, corrected symbol/name):
+  // every tokenlist source (Uniswap included) tags this address 'USDT0' — Tether's newer
+  // LayerZero omnichain standard, which is what on-chain symbol() actually returns ("USD₮0").
+  // The catalog key/symbol stays 'USDT' for continuity with mainnet/Base (pre-existing
+  // CHORE-47C-ARBITRUM-CATALOG decision; catalog-guard.allowlist.json's symbolMismatchExempt
+  // pins the onchainSymbol/catalog-symbol mismatch this creates). Without this remap, 3+
+  // sources voting 'USDT0' would outvote the single curated 'USDT' seed in consensus().
+  '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': {
+    chainId: 42161, address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9' as `0x${string}`, symbol: 'USDT', name: 'Tether USD', decimals: 6,
+  },
 }
 
 // DECIMALS_OVERRIDES — same address, CORRECTED decimals (each value = on-chain decimals(),
@@ -107,6 +117,25 @@ export const CURATED_BASE_SEEDS: SeedToken[] = [
     address: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2' as `0x${string}`,
     symbol: 'USDT',
     name: 'Tether USD',
+    decimals: 6,
+    category: 'Stablecoin',
+  },
+]
+
+// [CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] Bridged USDC ("USDC.e") on Arbitrum — normally
+// clears >=5 external source votes on its own (uniswap/coingecko/oneinch/trustwallet/
+// arbitrumBridge all list it distinctly from native USDC), but a measured tokens:sync run
+// (2026-09-12, 3-chain pass) dropped it to 'insufficient-sources' — a transient source-fetch
+// hiccup deep into a long multi-chain run. Task requirement (no silent merge, no silent drop
+// of native USDC vs bridged USDC.e) makes this exactly the case CURATED_BASE_SEEDS exists
+// for: pin it as a never-drop seed, sourced from the SAME canonical arbitrumBridge list entry
+// (address/decimals verified there — see fetch-sources.ts). Distinct symbol from native USDC
+// (0xaf88d0…, CORE_TOKENS[42161]) by construction — never merged, never silently dropped.
+export const CURATED_ARBITRUM_SEEDS: SeedToken[] = [
+  {
+    address: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8' as `0x${string}`,
+    symbol: 'USDC.e',
+    name: 'Bridged USDC',
     decimals: 6,
     category: 'Stablecoin',
   },
