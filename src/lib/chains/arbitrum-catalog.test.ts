@@ -1,9 +1,15 @@
 /**
- * [CHORE-47C-ARBITRUM-CATALOG] Arbitrum (42161) launch catalog — resolution + dark-state tests.
+ * [CHORE-47C-ARBITRUM-CATALOG, superseded by CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE]
+ * Arbitrum (42161) launch catalog — resolution + dark-state tests.
  *
- * Closes AUDIT-ARBITRUM-46-47 M-01: CHAIN_TOKENS[42161] was empty (Preview smoke impossible).
- * These tests confirm the 5-token launch catalog resolves correctly WITHOUT touching
- * isChainActive (the chain must stay dark — populating the catalog is additive only).
+ * Originally closed AUDIT-ARBITRUM-46-47 M-01 (CHAIN_TOKENS[42161] was empty). Since
+ * CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE, CHAIN_TOKENS[42161] is the pipeline's curated
+ * "Suggested" subset (bigger than 6 — see tokens.ts ARBITRUM_SUGGESTED_SYMBOLS), not the
+ * bare 5-manifest-token set — the exact-length assertions below were relaxed accordingly.
+ * The manifest's 5 launch tokens are now CORE_TOKENS[42161] (always present, still
+ * guard-validated at these exact addresses) rather than the catalog's only content, so every
+ * invariant that matters here (addresses match the manifest, dark-state, verified ✓) still
+ * holds and is still asserted.
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -24,9 +30,10 @@ const LAUNCH_SYMBOLS = ['WETH', 'USDC', 'USDT', 'DAI', 'WBTC']
 const CATALOG_SYMBOLS = ['ETH', ...LAUNCH_SYMBOLS]
 
 describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
-  it('CHAIN_TOKENS[42161] is the 5-token manifest launch set plus native ETH (adding a 7th requires updating this test)', () => {
-    expect(CHAIN_TOKENS[42161]).toHaveLength(6)
-    expect(new Set(CHAIN_TOKENS[42161].map((t) => t.symbol))).toEqual(new Set(CATALOG_SYMBOLS))
+  it('CHAIN_TOKENS[42161] contains the 5-token manifest launch set plus native ETH (now a subset of the pipeline suggested set, not the whole catalog)', () => {
+    expect(CHAIN_TOKENS[42161].length).toBeGreaterThanOrEqual(6)
+    const symbols = new Set(CHAIN_TOKENS[42161].map((t) => t.symbol))
+    for (const s of CATALOG_SYMBOLS) expect(symbols, `missing ${s}`).toContain(s)
   })
 
   it('does NOT include wstETH (deferred, owner decision — no Chainlink feed in the manifest)', () => {
@@ -46,9 +53,10 @@ describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
     }
   })
 
-  it('getPopularTokens(42161) resolves the 6-token set (Preview smoke can find WETH→USDC)', () => {
+  it('getPopularTokens(42161) includes the launch majors (Preview smoke can find WETH→USDC)', () => {
     const popular = getPopularTokens(42161)
-    expect(popular).toHaveLength(6)
+    expect(popular.length).toBeGreaterThanOrEqual(6)
+    expect(popular.length).toBeLessThanOrEqual(12)
     expect(popular.some((t) => t.symbol === 'WETH')).toBe(true)
     expect(popular.some((t) => t.symbol === 'USDC')).toBe(true)
     expect(popular.some((t) => t.symbol === 'ETH')).toBe(true)
@@ -62,7 +70,7 @@ describe('Arbitrum (42161) launch catalog [CHORE-47C-ARBITRUM-CATALOG]', () => {
 
   it('getChainTokenList(42161) carries decimals + category through to the rich Token shape', () => {
     const list = getChainTokenList(42161)
-    expect(list).toHaveLength(6)
+    expect(list.length).toBeGreaterThanOrEqual(6)
     const eth = list.find((t) => t.symbol === 'ETH')!
     expect(eth.decimals).toBe(18)
     expect(eth.category).toBe('Native')

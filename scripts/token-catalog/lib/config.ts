@@ -13,21 +13,26 @@
  * - CORE_TOKENS: fee/routing-critical allowlist — ALWAYS included, still on-chain-validated
  *   (a core failing on-chain validation FAILS the build; a source outage can never drop one).
  *   Addresses are copied from the pinned majors fixtures in src/lib/chains/token-catalog.test.ts
- *   (themselves sourced from the pinned Uniswap snapshot) — NEVER hand-typed.
+ *   (themselves sourced from the pinned Uniswap snapshot) — NEVER hand-typed. Arbitrum's 5
+ *   cores are copied from the ALREADY on-chain-verified `docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json`
+ *   / `src/lib/chains/registry.ts` ARBITRUM.tokens (CHORE-47B remediation) — same bar as the
+ *   other two chains, no new verification invented here.
  *
- * RPC endpoints reuse the guard's env overrides: GUARD_RPC_1 / GUARD_RPC_8453.
+ * RPC endpoints reuse the guard's env overrides: GUARD_RPC_1 / GUARD_RPC_8453 / GUARD_RPC_42161.
  */
 import type { CoreToken, PipelineConfig } from './types'
 
 export const PIPELINE_CONFIG: PipelineConfig = {
-  chains: [1, 8453],
+  chains: [1, 8453, 42161],
   minSources: 2,
   lowLiqMinSources: 3,
   liquidityFloorUsd: 100_000,
   defillamaConfidenceMin: 0.9,
-  maxNewTokensPerChain: { 1: 400, 8453: 250 },
+  maxNewTokensPerChain: { 1: 400, 8453: 250, 42161: 220 },
   requiredSourceForNew: 'coingecko',
-  sourcePriority: ['curated', 'superchain', 'uniswap', 'coingecko', 'oneinch', 'trustwallet', 'defillama'],
+  // 'arbitrumBridge' sits with 'superchain' — both are a chain's canonical bridged-token
+  // registry, trusted like a tokenlist source but only fetched for their own chain.
+  sourcePriority: ['curated', 'superchain', 'arbitrumBridge', 'uniswap', 'coingecko', 'oneinch', 'trustwallet', 'defillama'],
 }
 
 /** Native ETH sentinel (matches src/lib/constants NATIVE_ETH — kept literal so the
@@ -52,5 +57,18 @@ export const CORE_TOKENS: Record<number, CoreToken[]> = {
     { address: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', symbol: 'cbETH', name: 'Coinbase Wrapped Staked ETH', decimals: 18 },
     // AERO backs the fee-usd oracle fallback path on Base — routing-critical.
     { address: '0x940181a94A35A4569E4529A3CDfB74e38FD98631', symbol: 'AERO', name: 'Aerodrome', decimals: 18 },
+  ],
+  // [CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] The 5 CHORE-47C launch-catalog tokens
+  // (docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json, registry.ts ARBITRUM.tokens) — verified on
+  // two independent Arbitrum RPCs. USDT's on-chain symbol() is "USD₮0" (LayerZero omnichain
+  // standard); the catalog key/symbol stays 'USDT' for continuity (curated.ts self-remap +
+  // catalog-guard.allowlist.json symbolMismatchExempt pin this, same as before this pipeline).
+  42161: [
+    { address: NATIVE_ETH_SENTINEL, symbol: 'ETH', name: 'Ethereum', decimals: 18, native: true },
+    { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
+    { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+    { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
+    { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', name: 'Dai Stablecoin', decimals: 18 },
+    { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', name: 'Wrapped BTC', decimals: 8 },
   ],
 }

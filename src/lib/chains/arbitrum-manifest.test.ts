@@ -122,9 +122,13 @@ describe('Arbitrum (42161) — CATALOG addresses match the manifest [CHORE-47C-A
     },
   )
 
-  it('the catalog is EXACTLY the 5 manifest tokens plus native ETH — a 7th requires updating this test', () => {
-    // [fix/arbitrum-native-eth] Native ETH is added directly in tokens.ts, not the manifest —
-    // a native asset has no ERC-20 contract to manifest. See arbitrum-catalog.test.ts.
-    expect(CHAIN_TOKENS[42161]).toHaveLength(6)
+  it('the catalog contains at least the 5 manifest tokens plus native ETH', () => {
+    // [CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] CHAIN_TOKENS[42161] is now the pipeline's
+    // curated "Suggested" subset (bigger than 6 — the 5 manifest/core tokens are still ALWAYS
+    // present, guard-validated, per CORE_TOKENS[42161]), not the bare manifest set. See
+    // arbitrum-catalog.test.ts.
+    expect(CHAIN_TOKENS[42161].length).toBeGreaterThanOrEqual(6)
+    const symbols = new Set(CHAIN_TOKENS[42161].map((t) => t.symbol))
+    for (const s of ['ETH', 'WETH', 'USDC', 'USDT', 'DAI', 'WBTC']) expect(symbols, `missing ${s}`).toContain(s)
   })
 })

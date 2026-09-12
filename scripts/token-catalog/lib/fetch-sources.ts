@@ -14,8 +14,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..', '..', '..')
 const VENDORED_UNISWAP = join(ROOT, 'scripts', 'token-lists', 'uniswap-default-v21.3.0.json')
 
-/** chainId → platform slug (identical for CoinGecko, DefiLlama and Trust Wallet). */
-const PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base' }
+/**
+ * chainId → per-source platform slug. Mainnet/Base happen to share one spelling across
+ * CoinGecko, DefiLlama and Trust Wallet ('ethereum'/'base') — Arbitrum does NOT: CoinGecko
+ * lists it as 'arbitrum-one' (its 'arbitrum' path 404s), DefiLlama's coins API and Trust
+ * Wallet's blockchains folder are both 'arbitrum' (confirmed live 2026-09-12). Kept as
+ * separate maps rather than reusing PLATFORM so a future chain's mismatch fails loudly
+ * (a missing key) instead of silently sharing the wrong slug.
+ */
+const CG_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum-one' }
+const TW_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum' }
+const LLAMA_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum' }
 
 const FETCH_TIMEOUT_MS = 30_000
 
@@ -40,7 +49,8 @@ export interface ChainFetchers {
 
 export function makeFetchers(chainId: number): ChainFetchers {
   let cgSet: Set<string> | null = null
-  const platform = PLATFORM[chainId]
+  const cgPlatform = CG_PLATFORM[chainId]
+  const twPlatform = TW_PLATFORM[chainId]
 
   const uniswap = async (): Promise<SourceFetchResult> => {
     try {
@@ -58,7 +68,7 @@ export function makeFetchers(chainId: number): ChainFetchers {
   }
 
   const coingecko = async (): Promise<SourceFetchResult> => {
-    const raw = await fetchJson(`https://tokens.coingecko.com/${platform}/all.json`)
+    const raw = await fetchJson(`https://tokens.coingecko.com/${cgPlatform}/all.json`)
     // The trusted-list set mirrors verdicts.ts cgAddressSet EXACTLY (every string address,
     // no tokenlist validation) so tokens:sync and guard:refresh compute inTrustedList from
     // identical semantics — the identity ENTRIES below still go through full validation.
@@ -86,7 +96,7 @@ export function makeFetchers(chainId: number): ChainFetchers {
 
   const trustwallet = async (): Promise<SourceFetchResult> => {
     const raw = await fetchJson(
-      `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${platform}/tokenlist.json`,
+      `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${twPlatform}/tokenlist.json`,
     )
     return { source: 'trustwallet', entries: parseTokenList(raw, chainId, 'trustwallet') }
   }
@@ -98,16 +108,27 @@ export function makeFetchers(chainId: number): ChainFetchers {
     return { source: 'superchain', entries: parseTokenList(raw, chainId, 'superchain') }
   }
 
+  // OffchainLabs' canonical Arbitrum bridged-token registry ("Arb Whitelist Era" — the SAME
+  // list bridge.arbitrum.io itself renders). Lists BOTH L1 and L2 legs per bridged token, so
+  // parseTokenList's chainId filter is load-bearing here (drops the L1 rows). This is where
+  // 'USDC.e' ("Bridged USDC") is sourced from as a distinct, list-tagged entry — native USDC
+  // (Circle-issued, not bridged) is never in this list, only in uniswap/coingecko/etc.
+  const arbitrumBridge = async (): Promise<SourceFetchResult> => {
+    const raw = await fetchJson('https://bridge.arbitrum.io/token-list-42161.json')
+    return { source: 'arbitrumBridge', entries: parseTokenList(raw, chainId, 'arbitrumBridge') }
+  }
+
   const fetchers = [uniswap, coingecko, oneinch, trustwallet]
   // The Superchain list is the canonical bridged-token registry for OP-stack chains (Base).
   if (chainId === 8453) fetchers.push(superchain)
+  if (chainId === 42161) fetchers.push(arbitrumBridge)
 
   return { fetchers, getCgSet: () => cgSet }
 }
 
 /** DefiLlama coins API — batched market signal + identity votes over discovered addresses. */
 export function makeMarketFetcher(chainId: number): (addresses: `0x${string}`[]) => Promise<SourceFetchResult> {
-  const platform = PLATFORM[chainId]
+  const platform = LLAMA_PLATFORM[chainId]
   const BATCH = 100
   return async (addresses) => {
     const entries: SourceFetchResult['entries'] = []

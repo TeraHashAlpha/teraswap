@@ -56,9 +56,11 @@ jobs:
         env:
           GUARD_RPC_1_OVERRIDE: ${{ secrets.GUARD_RPC_1 }}
           GUARD_RPC_8453_OVERRIDE: ${{ secrets.GUARD_RPC_8453 }}
+          GUARD_RPC_42161_OVERRIDE: ${{ secrets.GUARD_RPC_42161 }}
         run: |
           if [ -n "$GUARD_RPC_1_OVERRIDE" ]; then export GUARD_RPC_1="$GUARD_RPC_1_OVERRIDE"; fi
           if [ -n "$GUARD_RPC_8453_OVERRIDE" ]; then export GUARD_RPC_8453="$GUARD_RPC_8453_OVERRIDE"; fi
+          if [ -n "$GUARD_RPC_42161_OVERRIDE" ]; then export GUARD_RPC_42161="$GUARD_RPC_42161_OVERRIDE"; fi
           npm run tokens:sync
 
       - name: Gate the regenerated catalogs (same no-network guards as CI)

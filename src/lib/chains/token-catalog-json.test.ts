@@ -20,10 +20,12 @@ import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.ge
 import { CORE_TOKENS } from '../../../scripts/token-catalog/lib/config'
 import catalog1 from '@/config/generated/token-catalog.1.json'
 import catalog8453 from '@/config/generated/token-catalog.8453.json'
+import catalog42161 from '@/config/generated/token-catalog.42161.json'
 
 const FILES: Array<[number, { schemaVersion: number; chainId: number; counts: { included: number; verified: number } }]> = [
   [1, catalog1],
   [8453, catalog8453],
+  [42161, catalog42161],
 ]
 
 // External (agreement-counting) sources — 'curated'/'native' are provenance markers and

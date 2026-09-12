@@ -14,6 +14,7 @@
 export type SourceId =
   | 'curated' // repo-curated seed (DEFAULT_TOKENS / previous pinned catalog) — NOT an agreement vote
   | 'superchain'
+  | 'arbitrumBridge' // OffchainLabs' canonical Arbitrum bridged-token list (Arbitrum only)
   | 'uniswap'
   | 'coingecko'
   | 'oneinch'
