@@ -16,6 +16,24 @@ const REMOVALS = new Set([
   '1:0x36e66fbbce51e4cd5bd3c62b637eb411b18949d4', // OMNI — rebranded/redenominated to NOM; successor non-routable → remove.
   '1:0x1985365e9f78359a9b6ad760e32412f4a445e862', // REP — deprecated v1; REPv2 is a separate entry → remove (would duplicate).
   '1:0xb59490ab09a0f526cc7305822ac65f2ab12f9723', // LIT — Litentry (deprecated → Heima); Lighter holds the canonical "LIT".
+
+  // [fix/token-sync-cron-landing — CoinGecko trusted-list drift triage, verified 2026-09-12]
+  // sUSD (Synthetix) — CoinGecko no longer lists a "susd"/"nusd" coin at all (search + direct
+  // coin-id lookup both 404). On-chain: contract still deployed but totalSupply() == 0 — the
+  // ENTIRE circulating supply has been burned/migrated away. No DefiLlama price. Dead token,
+  // not a curation gap → remove.
+  '1:0x57ab1ec28d129707052df4df418d58a2d46d5f51',
+  // MV (GensoKishi Metaverse) — not on CoinGecko (search returns nothing) and zero DEX pairs
+  // on ANY chain (DexScreener), no DefiLlama price. Contract alive with nonzero supply but
+  // completely untraded — abandoned in the market → remove.
+  '1:0xae788f80f2756a86aa2f410c651f2af83639b95b',
+  // KAT "Katana" (Base) — TICKER COLLISION, not the real project: CoinGecko's canonical KAT
+  // (id "katana-network-token", rank 979, ~$15.2M mcap) is deployed ONLY on its own "katana"
+  // L2 chain (platform map has no Base entry at all). This Base contract is a same-named but
+  // unrelated token with ~$3.4k total DEX liquidity across 3 pools (Uniswap/Aerodrome) and
+  // ~$510/day combined volume — far below our own $100k liquidity floor, and exactly the
+  // symbol-squatting risk profile flagged in fix/token-search-ranking-squatting → remove.
+  '8453:0xd5390300c5db71f80d46f0fa9983fc72d4d1e3da',
 ])
 
 // REMAPS — replace a deprecated address with the verified canonical token (full metadata):

@@ -191,6 +191,18 @@
       "address": "0x3bB4445D30AC020a84c1b5A8A2C6248ebC9779D0",
       "symbol": "ZRX",
       "reason": "Real deployed token (hasBytecode + on-chain symbol() verified) from the pinned Uniswap Labs Default list; absent from CoinGecko per-chain all.json (curation gap, not a bad address)."
+    },
+    {
+      "chainId": 1,
+      "address": "0x904567252D8F48555b7447c67dCA23F0372E16be",
+      "symbol": "KITE",
+      "reason": "[fix/token-sync-cron-landing, verified 2026-09-12] Real deployed token (hasBytecode + on-chain symbol()/name()/decimals() verified: KITE/Kite/18) — curation gap, not a bad address. CoinGecko's per-chain ethereum list currently maps the ticker's coin (id kite-2, rank 149, ~$254M mcap) to a DIFFERENT Ethereum address (0x118b70df4f06fa5678e7d543e6066e028c8ea0c0), but CoinGecko's own coin API lists THIS address as the canonical avalanche/binance-smart-chain contract for the SAME kite-2 project, and its on-chain totalSupply() (~9.7588e27) matches kite-2's reported 10B total supply almost exactly (same multichain deployment, CG just doesn't record an ethereum platform entry for it). DefiLlama prices this address identically (same $0.1063, confidence 0.99) to CG's tracked ethereum contract."
+    },
+    {
+      "chainId": 8453,
+      "address": "0x000096630066820566162C94874A776532705231",
+      "symbol": "IDRISS",
+      "reason": "[fix/token-sync-cron-landing, verified 2026-09-12] Real, live, liquid token — CoinGecko has fully delisted it (no search hit, no coin id at all under 'idriss'), but our OWN independent liquidity/price bar is satisfied: an active Aerodrome pool with $304,571 on-chain liquidity (> our $100k liquidityFloorUsd) and a DefiLlama price with confidence 0.94 (> our own 0.9 defillamaConfidenceMin). CoinGecko dropping coverage of a niche/low-volume token is not itself proof of a bad address when our own two independent signals both clear the bar — curation gap, not a bad address."
     }
   ],
   "symbolMismatchExempt": [
