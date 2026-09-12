@@ -4,6 +4,25 @@ import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
 /**
+ * [fix/zerox-quote-hygiene T4] Build the error thrown for a non-OK 0x
+ * response. On a 429, reads `Retry-After` (seconds, per RFC 6585 — 0x
+ * does not use the HTTP-date form) and embeds it as `retryAfterMs=<n>`
+ * so circuit-breaker.ts's classifyFailure can honor the upstream's own
+ * requested backoff instead of always falling back to the fixed
+ * rateLimitCooldownMs.
+ */
+function zeroXHttpError(prefix: string, res: Response): Error {
+  if (res.status === 429) {
+    const retryAfterHeader = res.headers.get('retry-after')
+    const retryAfterSec = retryAfterHeader ? Number(retryAfterHeader) : NaN
+    if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+      return new Error(`${prefix} ${res.status} retryAfterMs=${Math.round(retryAfterSec * 1000)}`)
+    }
+  }
+  return new Error(`${prefix} ${res.status}`)
+}
+
+/**
  * [SPRINT-9T T1] Attach TeraSwap's uniform partner fee to a 0x v2 swap request.
  *
  * 0x is FEE_INCOMPATIBLE (Permit2 pull model — can't wrap via the FeeCollector), so its
@@ -75,7 +94,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
       Accept: 'application/json',
     },
   })
-  if (!res.ok) throw new Error(`0x ${res.status}`)
+  if (!res.ok) throw zeroXHttpError('0x', res)
   const data = await parseJsonOrThrow<any>(res, '0x')
 
   return {
@@ -118,7 +137,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
       Accept: 'application/json',
     },
   })
-  if (!res.ok) throw new Error(`0x swap ${res.status}`)
+  if (!res.ok) throw zeroXHttpError('0x swap', res)
   const data = await parseJsonOrThrow<any>(res, '0x')
 
   return {
