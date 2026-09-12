@@ -47,6 +47,11 @@ import {
   type OnChainScanResult,
 } from './on-chain-monitor'
 import { maybeSendWeeklyReport } from './surplus-report'
+import {
+  checkAllKeeperChains,
+  alertOnKeeperTrouble,
+  type KeeperChainHealth,
+} from './keeper-health-monitor'
 
 // ── Heartbeat keys ──────────────────────────────────────
 
@@ -122,6 +127,9 @@ export interface MonitoringTickResult {
   circuitBreaker?: CircuitBreakerResult
   /** On-chain event scan result (present on every 5th tick). */
   onChainScan?: OnChainScanResult
+  /** [Auditor M2 / PR #497] Per-chain keeper liveness (gas balance + overdue-fill signal). Runs
+   *  every tick — see keeper-health-monitor.ts. */
+  keeperHealth?: KeeperChainHealth[]
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
   /** True when tick was skipped due to concurrent lock. */
@@ -196,6 +204,20 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
       if (!result.ok) failures++
     })
   )
+
+  // ── Keeper liveness (per chain, every tick) ───────────
+  // [Auditor M2 / PR #497] Gas balance + overdue-DCA-fill signal for every chain in
+  // KEEPER_CHAINS. Cheap (one RPC balance read + one lightweight Supabase query per chain), so
+  // this runs every tick rather than being gated like the on-chain event scan below. A monitored
+  // chain in trouble alerts loudly via emitTransitionAlert inside alertOnKeeperTrouble; an
+  // unmonitored chain is still reported (never silently dropped) via keeperHealth.
+  let keeperHealth: KeeperChainHealth[] | undefined
+  try {
+    keeperHealth = await checkAllKeeperChains()
+    await alertOnKeeperTrouble(keeperHealth)
+  } catch (err) {
+    console.warn('[MONITOR] Keeper health check failed:', err instanceof Error ? err.message : err)
+  }
 
   // ── H2: TLS + DNS baseline validation ─────────────────
   // [CHORE-POLISH-4 P2 / CHORE-HYGIENE-1 A] Fail-closed when there is no usable baseline, but
@@ -343,6 +365,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(quorumResult ? { quorum: quorumResult } : {}),
     ...(circuitBreakerResult ? { circuitBreaker: circuitBreakerResult } : {}),
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
+    ...(keeperHealth ? { keeperHealth } : {}),
     ...(warmup ? { warmup: true } : {}),
     ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
     ...(h2Status ? { h2Status, h2Reason } : {}),
