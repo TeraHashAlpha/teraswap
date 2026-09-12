@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { fetchSwapFromSource, usesFeeCollector } from '@/lib/api'
+import { fetchSwapFromSource, usesFeeCollector, ZeroXQuoteCapExceededError } from '@/lib/api'
 import { AGGREGATOR_APIS, type AggregatorName } from '@/lib/constants'
 import { validateSwapPrice, fetchDefiLlamaPrice, HIGH_VALUE_THRESHOLD_USD } from '@/lib/defillama'
 import { computeTokenAmountUsd } from '@/lib/chainlink'
@@ -181,19 +181,37 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const result = await fetchSwapFromSource(
-      source as AggregatorName,
-      src,
-      dst,
-      amount,
-      from,
-      slippageNum,
-      srcDecimals,
-      dstDecimals,
-      quoteMeta,
-      chainId ? Number(chainId) : undefined,
-      recipient,
-    )
+    let result
+    try {
+      result = await fetchSwapFromSource(
+        source as AggregatorName,
+        src,
+        dst,
+        amount,
+        from,
+        slippageNum,
+        srcDecimals,
+        dstDecimals,
+        quoteMeta,
+        chainId ? Number(chainId) : undefined,
+        recipient,
+        // [fix/zerox-quote-hygiene T3] Client IP scopes the 0x quote-build
+        // cap; no-op for every other source (fetchSwapFromSource only
+        // consults it when source === '0x').
+        ip,
+      )
+    } catch (err) {
+      // [T3] Cap exceeded — 429 with a message the client can act on (pick a
+      // different already-fetched quote). Never a 502: this isn't 0x itself
+      // failing, it's our own self-imposed throttle protecting the 0x key.
+      if (err instanceof ZeroXQuoteCapExceededError) {
+        return NextResponse.json(
+          { error: err.message, code: 'ZEROX_QUOTE_CAP_EXCEEDED' },
+          { status: 429 },
+        )
+      }
+      throw err
+    }
 
     // [SC-04] Server-side defense-in-depth — mirrors frontend KNOWN_SWAP_SELECTORS
     if (result.tx?.data) {
