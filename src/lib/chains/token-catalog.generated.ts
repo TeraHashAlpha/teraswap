@@ -33,6 +33,13 @@ export interface GeneratedToken {
   sources: string[]
   /** Pinned fee/routing-critical core (always present, fail-closed validated). */
   core?: boolean
+  /** [fix/token-search-ranking-squatting] 24h volume in USD, when a source resolved one.
+   *  NULL (never 0) when nothing resolved — see scripts/token-catalog/lib/verify.ts. */
+  volume24hUsd?: number | null
+  /** Which source supplied volume24hUsd. Null exactly when volume24hUsd is null. */
+  volumeSource?: string | null
+  /** ISO date this build's volume snapshot was taken. Null exactly when volume24hUsd is null. */
+  volumeFetchedAt?: string | null
 }
 
 interface CatalogFile {

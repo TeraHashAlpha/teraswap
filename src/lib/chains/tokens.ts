@@ -48,7 +48,19 @@ export interface ChainToken {
   sources?: string[]
   /** Pipeline-resolved category (curated > overrides > heuristic). */
   category?: TokenCategory
+  /** [fix/token-search-ranking-squatting] 24h volume in USD from the pipeline, when
+   *  resolvable. undefined/null means "no data", never zero — see rankSearchMatches. */
+  liquidityUsd?: number | null
 }
+
+/**
+ * [fix/token-search-ranking-squatting] 24h-volume floor (USD) under which a token counts
+ * as "low liquidity" for the search-results divider — the SAME threshold the catalog
+ * pipeline uses to gate inclusion (scripts/token-catalog/lib/config.ts liquidityFloorUsd).
+ * Kept in sync manually: both are pinned to $100k because that is the number the pipeline
+ * itself already treats as "can't show evidence this token trades".
+ */
+export const LOW_LIQUIDITY_FLOOR_USD = 100_000
 
 /** [SPRINT-9Y] Max search results rendered at once — keeps a broad query snappy. */
 export const SEARCH_RESULT_LIMIT = 80
@@ -124,6 +136,7 @@ const BASE_FULL: ChainToken[] = GENERATED_TOKEN_CATALOG[8453].map((t): ChainToke
   verified: t.verified,
   sources: t.sources,
   category: generatedCategory(t),
+  liquidityUsd: t.volume24hUsd ?? null,
 }))
 
 function toChainToken(t: Token): ChainToken {
@@ -137,6 +150,7 @@ function toChainToken(t: Token): ChainToken {
     verified: t.verified,
     sources: t.sources,
     category: t.category,
+    liquidityUsd: t.liquidityUsd,
   }
 }
 
@@ -184,6 +198,7 @@ const ARBITRUM_FULL: ChainToken[] = GENERATED_TOKEN_CATALOG[42161].map((t): Chai
   verified: t.verified,
   sources: t.sources,
   category: generatedCategory(t),
+  liquidityUsd: t.volume24hUsd ?? null,
 }))
 
 export const CHAIN_TOKENS: Record<number, ChainToken[]> = {
@@ -242,6 +257,7 @@ function chainTokenToToken(t: ChainToken, chainId: number): Token {
     category: t.category ?? inferCategory(t.symbol, chainId),
     verified: t.verified,
     sources: t.sources,
+    liquidityUsd: t.liquidityUsd,
   }
 }
 
@@ -274,13 +290,14 @@ const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
     category: generatedCategory(t) ?? inferCategory(t.symbol, 1),
     verified: t.verified,
     sources: t.sources,
+    liquidityUsd: t.volume24hUsd ?? null,
   }))
 
 // DEFAULT_TOKENS annotated with the pipeline's verified/sources (the hand list keeps its
 // metadata/order; a curated entry the pipeline could NOT verify stays honestly ⚠).
 const MAINNET_CURATED: Token[] = DEFAULT_TOKENS.map((t) => {
   const g = GENERATED_BY_ADDR[1]?.get(t.address.toLowerCase())
-  return { ...t, verified: g?.verified === true, sources: g?.sources }
+  return { ...t, verified: g?.verified === true, sources: g?.sources, liquidityUsd: g?.volume24hUsd ?? null }
 })
 
 // Precomputed full catalogs (stable references → cheap memoisation downstream).
@@ -318,14 +335,33 @@ export function getSearchCatalog(chainId: number): Token[] {
 }
 
 /**
- * [fix/token-search-ranking] Ranks token search matches so an EXACT case-insensitive
- * symbol match (e.g. "USDC") outranks a substring match (e.g. "aUSDC", "waEthUSDC"),
- * and among equally-tiered matches, more `sources` (catalog-pipeline cross-verification
- * count) ranks higher. Both signals come from the catalog rows themselves — never a
- * hardcoded symbol or address list, so any lookalike is ranked correctly by construction.
- * Does not filter: every match stays in the returned array, just reordered.
+ * [fix/token-search-ranking-squatting] 3-tier liquidity comparator key: known-positive
+ * liquidity (2) ranks above unknown/null (1), which ranks above a CONFIRMED zero (0).
+ * Treating null as "worse than zero" (e.g. `?? -Infinity`) would sink every token the
+ * pipeline hasn't priced yet (Task 2's pre-existing gap) below actual zero-liquidity
+ * squatters — the opposite of what the signal is for. Unknown is charitable, not damning.
  */
-export function rankSearchMatches<T extends { symbol: string; sources?: string[] }>(
+function liquidityTier(v: number | null | undefined): 0 | 1 | 2 {
+  if (v == null) return 1
+  return v > 0 ? 2 : 0
+}
+
+/**
+ * [fix/token-search-ranking / fix/token-search-ranking-squatting] Ranks token search
+ * matches:
+ *  1. an EXACT case-insensitive symbol match (e.g. "USDC") outranks a substring match
+ *     (e.g. "aUSDC", "waEthUSDC");
+ *  2. among matches that share the SAME symbol (case-insensitively — the squatting case:
+ *     several addresses claiming one ticker), higher `liquidityUsd` wins, then CoinGecko
+ *     trusted-list membership (`sources` includes 'coingecko' — the same list the catalog
+ *     guard already gates on), so a real, liquid token outranks its zero-liquidity clones;
+ *  3. otherwise (different symbols, e.g. USDC vs USDC.e — native/bridged pairs are NOT
+ *     squatting), falls back to more `sources` (cross-verification count), as before.
+ * Every signal comes from the catalog rows themselves — never a hardcoded symbol or
+ * address list, so any lookalike is ranked correctly by construction. Does not filter:
+ * every match stays in the returned array, just reordered.
+ */
+export function rankSearchMatches<T extends { symbol: string; sources?: string[]; liquidityUsd?: number | null }>(
   matches: T[],
   query: string,
 ): T[] {
@@ -334,10 +370,54 @@ export function rankSearchMatches<T extends { symbol: string; sources?: string[]
     const aExact = a.symbol.toLowerCase() === q
     const bExact = b.symbol.toLowerCase() === q
     if (aExact !== bExact) return aExact ? -1 : 1
+
+    if (a.symbol.toLowerCase() === b.symbol.toLowerCase()) {
+      const tierDiff = liquidityTier(b.liquidityUsd) - liquidityTier(a.liquidityUsd)
+      if (tierDiff !== 0) return tierDiff
+      const liqDiff = (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0)
+      if (liqDiff !== 0) return liqDiff
+      const aTrusted = a.sources?.includes('coingecko') ?? false
+      const bTrusted = b.sources?.includes('coingecko') ?? false
+      if (aTrusted !== bTrusted) return aTrusted ? -1 : 1
+    }
+
     const aSources = a.sources?.length ?? 0
     const bSources = b.sources?.length ?? 0
     return bSources - aSources
   })
+}
+
+/**
+ * [fix/token-search-ranking-squatting] Which already-ranked matches to render under the
+ * "low liquidity / unverified" divider: entries below LOW_LIQUIDITY_FLOOR_USD (or with no
+ * liquidity data at all) that share a case-insensitive symbol with another match AT OR
+ * ABOVE the floor — i.e. a same-ticker clone of a token we have evidence actually trades.
+ * Demotes, never hides (every match stays reachable, just visually deprioritized).
+ * Native/bridged pairs (USDC vs USDC.e) never collide here — their symbols differ.
+ * A group where NOTHING clears the floor is left alone: with no "real" token to be a
+ * clone OF, there's nothing to demote against.
+ */
+export function computeLowLiquidityDemotions<T extends { symbol: string; liquidityUsd?: number | null }>(
+  matches: T[],
+  floorUsd: number = LOW_LIQUIDITY_FLOOR_USD,
+): Set<T> {
+  const bySymbol = new Map<string, T[]>()
+  for (const t of matches) {
+    const k = t.symbol.toLowerCase()
+    const g = bySymbol.get(k)
+    if (g) g.push(t)
+    else bySymbol.set(k, [t])
+  }
+  const demoted = new Set<T>()
+  for (const group of bySymbol.values()) {
+    if (group.length < 2) continue
+    const hasCleared = group.some((t) => (t.liquidityUsd ?? 0) >= floorUsd)
+    if (!hasCleared) continue
+    for (const t of group) {
+      if ((t.liquidityUsd ?? 0) < floorUsd) demoted.add(t)
+    }
+  }
+  return demoted
 }
 
 /**

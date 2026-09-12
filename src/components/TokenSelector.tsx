@@ -10,10 +10,14 @@ import CategoryChips from './CategoryChips'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { getChainTokenList, getPopularTokens, getSearchCatalog, rankSearchMatches, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
+import { getChainTokenList, getPopularTokens, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
+
+// [fix/token-search-ranking-squatting] Stable empty-array reference (never a fresh [] per
+// render) for the common case of no demoted matches.
+const EMPTY_TOKENS: Token[] = []
 
 
 interface Props {
@@ -100,6 +104,12 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
     // rankSearchMatches. Ranking never filters, so lookalikes stay reachable, just lower.
     return rankSearchMatches(matches, q).slice(0, SEARCH_RESULT_LIMIT)
   }, [isSearching, q, disabledAddress, activeChainId, activeCategory, hideNativeInput])
+
+  // [fix/token-search-ranking-squatting] Same-symbol clones below the liquidity floor —
+  // demoted under a divider below, never hidden. See computeLowLiquidityDemotions.
+  const lowLiquiditySet = useMemo(() => computeLowLiquidityDemotions(filtered), [filtered])
+  const normalMatches = lowLiquiditySet.size === 0 ? filtered : filtered.filter((t) => !lowLiquiditySet.has(t))
+  const lowLiquidityMatches = lowLiquiditySet.size === 0 ? EMPTY_TOKENS : filtered.filter((t) => lowLiquiditySet.has(t))
 
   // Tokens with balance — sorted highest first, shown above categories
   const tokensWithBalance = useMemo(() => {
@@ -278,9 +288,22 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                         : `${filtered.length} result${filtered.length !== 1 ? 's' : ''}`}
                     </p>
                   )}
-                  {filtered.map((token) => (
+                  {normalMatches.map((token) => (
                     <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
                   ))}
+
+                  {/* [fix/token-search-ranking-squatting] Same-symbol clones below the
+                      liquidity floor — demoted here, never hidden (still selectable). */}
+                  {lowLiquidityMatches.length > 0 && (
+                    <div className="mt-2">
+                      <p className="border-t border-cream-08 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
+                        Low liquidity / unverified
+                      </p>
+                      {lowLiquidityMatches.map((token) => (
+                        <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
+                      ))}
+                    </div>
+                  )}
 
                   {/* Import custom token by address */}
                   {filtered.length === 0 && isAddressSearch && (
