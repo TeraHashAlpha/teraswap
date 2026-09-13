@@ -35,6 +35,21 @@ vi.mock('./kv-rate-limiter', async (importOriginal) => {
   return { ...actual, checkRateLimit: (...a: unknown[]) => mockCheckRateLimit(...a) }
 })
 
+// [pre-existing flake, surfaced full-suite-only — see FEEDBACK] withCircuitBreaker's
+// cold-start KV pre-seed (circuit-breaker.ts initFromKV → this module's getAllStatuses →
+// @upstash/redis) hits a REAL, unconfigured-in-tests Redis client, which retries 5x with
+// exponential backoff (~4.3s total, node_modules/@upstash/redis) before giving up. Every
+// test here does vi.resetModules(), so every test re-triggers that ~4.3-5s round trip —
+// right at vitest's 5000ms default timeout, and over it under full-suite CPU contention.
+// A timed-out test's abandoned promise can then resolve LATE into the NEXT test's mock
+// call count. Mocking getAllStatuses to resolve empty (== today's real KV-unavailable
+// fallback, just instant) removes the real delay without changing breaker behaviour: no
+// KV rows means no breaker gets force-opened either way. Production code untouched.
+vi.mock('@/lib/source-state-machine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/source-state-machine')>()
+  return { ...actual, getAllStatuses: async () => [] }
+})
+
 const ALLOWED = {
   allowed: true,
   remaining: 10,
