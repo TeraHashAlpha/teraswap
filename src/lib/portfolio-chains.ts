@@ -19,10 +19,11 @@
 export const ALCHEMY_BASE_BY_CHAIN: Record<number, string> = {
   1: 'https://eth-mainnet.g.alchemy.com/v2',
   8453: 'https://base-mainnet.g.alchemy.com/v2',
+  42161: 'https://arb-mainnet.g.alchemy.com/v2',
 }
 
 /** Chains the Portfolio tab supports — derived from the endpoint map so the
- * two can never drift apart. Today: {1, 8453}. */
+ * two can never drift apart. Today: {1, 8453, 42161}. */
 export const PORTFOLIO_SUPPORTED_CHAINS: readonly number[] = Object.keys(ALCHEMY_BASE_BY_CHAIN)
   .map(Number)
   .sort((a, b) => a - b)
