@@ -146,23 +146,130 @@ export async function alertNewDcaPosition(
   return body
 }
 
-/**
- * Alert: the executor wallet is low on gas.
- * @param {{balanceEth:string|number, gasUsdValue:string|number}} p
- * @param {number} score — freeze-urgency score 0..20
- * @returns {Promise<string>} the HTML body that was sent
- */
-export async function alertLowGas({ balanceEth, gasUsdValue }, score) {
-  const body = [
-    `⛽ <b>Low gas balance</b>`,
-    `Balance: ${esc(balanceEth)} ETH`,
-    `≈ $${esc(gasUsdValue)} for gas`,
-    ``,
-    ...scoreLines(score),
-  ].join("\n")
+// ─── Low-gas alert: per-process cooldown + recovery ──────────────────────────
+// [fix/keeper-alert-cooldown-and-dca-debug-read] Seen in production 2026-09-13 (Arbitrum keeper,
+// day one): alertLowGas had NO cooldown and executor.js called it every cycle the USD gas value
+// sat under LOW_GAS_USD_THRESHOLD — with an active order a cycle is 30 s, so a signer at $4.98
+// sent one Telegram message every 30 s for hours (Base never showed it only because its signer
+// is above $5). The alerter below is per-process state — one process = one chain
+// (ecosystem.config.cjs), so there is no per-chain map — and the Host/Time/Chain envelope stays
+// sendTelegramAlert's. executor.js calls alertLowGas EVERY cycle the USD value is known, breach
+// or not, passing the threshold; the alerter decides:
+//   first breach                     ⇒ send
+//   breach inside the cooldown       ⇒ suppress + count (returns null)
+//   breach once the cooldown elapsed ⇒ send, with "N suppressed since HH:MM UTC", count reset
+//   first reading back ≥ threshold   ⇒ send ONE "Gas balance recovered" (+ pending count), reset
+//   healthy with no prior breach     ⇒ nothing
 
-  await sendTelegramAlert(body)
-  return body
+/** Default re-send interval while a breach persists: 1 hour. */
+export const LOW_GAS_ALERT_COOLDOWN_MS_DEFAULT = 3_600_000
+
+/**
+ * LOW_GAS_ALERT_COOLDOWN_MS from the env: a non-negative integer number of milliseconds
+ * (0 ⇒ every breach sends, the pre-cooldown behaviour). Blank / non-numeric / negative /
+ * fractional ⇒ the default. Read at ALERT time, never at module scope — env.js loads
+ * .env.executor after this module is imported (see the note in sendTelegramAlert).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+export function readLowGasCooldownMs(env = process.env) {
+  const raw = env.LOW_GAS_ALERT_COOLDOWN_MS
+  if (raw === undefined || !/^\d+$/.test(String(raw).trim())) return LOW_GAS_ALERT_COOLDOWN_MS_DEFAULT
+  return Number(String(raw).trim())
+}
+
+/** "HH:MM UTC" for the suppressed-since stamp — same clock as the Time: header (ISO, UTC). */
+function hhmmUtc(ms) {
+  return `${new Date(ms).toISOString().slice(11, 16)} UTC`
+}
+
+/** A USD number renders with 2 decimals; a pre-formatted string renders verbatim (legacy callers). */
+function usd(v) {
+  return typeof v === "number" ? v.toFixed(2) : String(v)
+}
+
+/**
+ * Build a low-gas alerter with its own cooldown/recovery state (unit-tested in alert.test.mjs
+ * with a faked Date; the module-level alertLowGas below is the keeper's single instance).
+ * @param {{ cooldownMs?: number }} [opts] — cooldownMs: fixed interval; omitted ⇒
+ *   LOW_GAS_ALERT_COOLDOWN_MS from the env, read at alert time (default 1 h).
+ * @returns {{ alert: (p: {balanceEth:string|number, gasUsdValue:string|number, thresholdUsd?:string|number},
+ *   score:number) => Promise<string|null> }}
+ */
+export function createLowGasAlerter({ cooldownMs } = {}) {
+  let inBreach = false
+  let lastSentAt = 0
+  let suppressed = 0
+  let suppressedSince = 0
+
+  const suppressedLine = () =>
+    suppressed > 0 ? [`${suppressed} suppressed since ${hhmmUtc(suppressedSince)}`] : []
+
+  /**
+   * @param {{balanceEth:string|number, gasUsdValue:string|number, thresholdUsd?:string|number}} p —
+   *   thresholdUsd omitted ⇒ the caller already decided this is a breach (the pre-cooldown contract).
+   * @param {number} score — freeze-urgency score 0..20
+   * @returns {Promise<string|null>} the HTML body that was sent, or null when nothing was sent
+   */
+  async function alert({ balanceEth, gasUsdValue, thresholdUsd }, score) {
+    const now = Date.now()
+    const breached = thresholdUsd === undefined ? true : Number(gasUsdValue) < Number(thresholdUsd)
+    const thresholdTail = thresholdUsd === undefined ? "" : ` (threshold $${esc(thresholdUsd)})`
+
+    if (!breached) {
+      if (!inBreach) return null
+      const body = [
+        `✅ <b>Gas balance recovered</b>`,
+        `Balance: ${esc(balanceEth)} ETH`,
+        `≈ $${esc(usd(gasUsdValue))} for gas${thresholdTail}`,
+        ...suppressedLine(),
+        ``,
+        ...scoreLines(score),
+      ].join("\n")
+      inBreach = false
+      lastSentAt = 0
+      suppressed = 0
+      suppressedSince = 0
+      await sendTelegramAlert(body)
+      return body
+    }
+
+    if (inBreach && now - lastSentAt < (cooldownMs ?? readLowGasCooldownMs())) {
+      suppressed += 1
+      if (suppressed === 1) suppressedSince = now
+      return null
+    }
+
+    const body = [
+      `⛽ <b>Low gas balance</b>`,
+      `Balance: ${esc(balanceEth)} ETH`,
+      `≈ $${esc(usd(gasUsdValue))} for gas${thresholdTail}`,
+      ...suppressedLine(),
+      ``,
+      ...scoreLines(score),
+    ].join("\n")
+    inBreach = true
+    lastSentAt = now
+    suppressed = 0
+    suppressedSince = 0
+    await sendTelegramAlert(body)
+    return body
+  }
+
+  return { alert }
+}
+
+const lowGasAlerter = createLowGasAlerter()
+
+/**
+ * Alert: the executor wallet is low on gas — cooled down + recovery-aware (createLowGasAlerter).
+ * Call it EVERY cycle the USD value is known, breach or not; it decides whether anything is sent.
+ * @param {{balanceEth:string|number, gasUsdValue:string|number, thresholdUsd?:string|number}} p
+ * @param {number} score — freeze-urgency score 0..20
+ * @returns {Promise<string|null>} the HTML body that was sent, or null when nothing was sent
+ */
+export async function alertLowGas(p, score) {
+  return lowGasAlerter.alert(p, score)
 }
 
 /**
