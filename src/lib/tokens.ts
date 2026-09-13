@@ -41,6 +41,10 @@ export interface Token {
   /** Sources that agreed on this (chainId, address) at build time (e.g. uniswap,
    *  coingecko, oneinch; 'native' for the ETH sentinel, 'curated' for pinned cores). */
   sources?: string[]
+  /** [fix/token-search-ranking-squatting] 24h volume in USD from the catalog pipeline
+   *  (CoinGecko /coins/markets), when resolvable — the search-ranking squatter signal.
+   *  undefined/null means "no data", NOT zero liquidity; see rankSearchMatches. */
+  liquidityUsd?: number | null
 }
 
 // ── Logo helper (server-side CoinGecko-first resolver route, chainId-aware) ───

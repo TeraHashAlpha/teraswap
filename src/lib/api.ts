@@ -23,6 +23,8 @@ import {
 import { withCircuitBreaker, getCircuitBreaker, getAllCircuitStates, circuitKey } from './adapters/circuit-breaker'
 import { withSwapBuildRetry } from './adapters/swap-build-retry'
 import { applyLowQuorumSanityWithReference, getLowQuorumMaxDeviationBps } from './quote-quorum'
+import { checkRateLimit, ZEROX_QUOTE_BUILD_MINUTE_LIMIT, ZEROX_QUOTE_BUILD_HOUR_LIMIT } from './kv-rate-limiter'
+import { recordQuoteBuildAttempt, classifyQuoteBuildOutcome } from './quote-build-monitor'
 
 // [CHORE-QUOTE-QUORUM / W7-L-02] Count display demotions/drops per source so
 // the monitor's outlier detector can page on a systematic mis-scale (the
@@ -527,8 +529,43 @@ export function validateFeeIntegrity(
 //  SWAP DISPATCHER
 // ══════════════════════════════════════════════════════════
 
+// [fix/zerox-quote-hygiene T3] Thrown when the per-identity 0x quote-build
+// cap (ZEROX_QUOTE_BUILD_MINUTE_LIMIT / _HOUR_LIMIT) is exceeded. Callers
+// map this to a 429 with an actionable message — the swap itself is never
+// blocked, since the caller already has other quotes to pick from (see
+// fetchMetaQuote's fan-out); only 0x specifically is skipped for this request.
+export class ZeroXQuoteCapExceededError extends Error {
+  constructor() {
+    super('0x quote-build cap exceeded for this identity — choose a different source and retry.')
+    this.name = 'ZeroXQuoteCapExceededError'
+  }
+}
+
+/**
+ * [T3] Self-imposed ceiling on 0x FIRM /quote (swap-build) calls, scoped to
+ * `callerIdentity` (client IP for the in-app /api/swap route; an API key id
+ * for a future /v1/swap caller — see FEEDBACK for why /v1/swap can't reach
+ * this today). Exists purely to keep OUR key under 0x's own throttling
+ * threshold — never a security control, so it fails OPEN (allows the
+ * build) on a KV error, matching checkRateLimit's own fail-open contract.
+ */
+async function checkZeroXQuoteBuildCap(callerIdentity: string): Promise<boolean> {
+  const [perMinute, perHour] = await Promise.all([
+    checkRateLimit(`zerox-quote-build:min:${callerIdentity}`, ZEROX_QUOTE_BUILD_MINUTE_LIMIT.limit, ZEROX_QUOTE_BUILD_MINUTE_LIMIT.windowMs),
+    checkRateLimit(`zerox-quote-build:hour:${callerIdentity}`, ZEROX_QUOTE_BUILD_HOUR_LIMIT.limit, ZEROX_QUOTE_BUILD_HOUR_LIMIT.windowMs),
+  ])
+  return perMinute.allowed && perHour.allowed
+}
+
 /**
  * Fetch swap tx data from the WINNING aggregator.
+ *
+ * [T1] Every call records a fire-and-forget quote-build attempt (source,
+ * chain, pair, amount bucket, outcome, request id) — see
+ * quote-build-monitor.ts. [T3] When `source` is '0x' and `callerIdentity`
+ * is supplied, a per-identity build cap is checked first; on exceed, 0x is
+ * skipped (ZeroXQuoteCapExceededError, recorded as outcome '429') without
+ * ever calling the adapter.
  */
 export async function fetchSwapFromSource(
   source: AggregatorName,
@@ -543,27 +580,63 @@ export async function fetchSwapFromSource(
   chainId?: number,
   /** [P101] Optional output destination. Defaults to `from`. */
   recipient?: string,
+  /** [T3] Caller identity (IP or API-key id) for the 0x quote-build cap. */
+  callerIdentity?: string,
 ): Promise<NormalizedQuote> {
-  if (DISABLED_SOURCES[source]) throw new Error(`${source} is disabled: ${DISABLED_SOURCES[source]}`)
-  const adapter = ADAPTER_REGISTRY.find(a => a.name === source)
-  if (!adapter) throw new Error(`Unknown source: ${source}`)
+  // [server-side] globalThis.crypto.randomUUID() — same convention as the
+  // other server route that generates request-scoped ids (telegram/webhook).
+  const requestId = globalThis.crypto.randomUUID()
+  const resolvedChainId = chainId ?? DEFAULT_CHAIN_ID
+  const recordAttempt = (outcome: import('./quote-build-monitor').QuoteBuildOutcome) =>
+    recordQuoteBuildAttempt({
+      source, chainId: resolvedChainId, sellToken: src, buyToken: dst, amount,
+      outcome, requestId, wallet: from,
+    })
 
-  // [SPRINT-9J J2] Bound + retry the build so a slow upstream fails fast as a
-  // clean JSON error instead of the function running to a platform HTML 504.
-  // The build is idempotent (no on-chain broadcast) so the retry is safe; the
-  // circuit breaker sees only the final outcome of the retried attempt.
-  const result = await withCircuitBreaker(circuitKey(source, chainId), () => // [9S S3] per-chain breaker
-    withSwapBuildRetry((signal) => adapter.fetchSwapData({
-      src, dst, amount, from, slippage,
-      srcDecimals, dstDecimals,
-      quoteMeta,
-      chainId,
-      recipient,
-      signal,
-    }))
-  )
-  if (!result) throw new Error(`${source}: no swap data returned`)
-  return result
+  if (DISABLED_SOURCES[source]) {
+    recordAttempt('sim-failed')
+    throw new Error(`${source} is disabled: ${DISABLED_SOURCES[source]}`)
+  }
+  const adapter = ADAPTER_REGISTRY.find(a => a.name === source)
+  if (!adapter) {
+    recordAttempt('sim-failed')
+    throw new Error(`Unknown source: ${source}`)
+  }
+
+  // [T3] 0x-only, and only when the caller supplied an identity to scope it
+  // to. Checked BEFORE the circuit breaker / adapter call so an exceeded cap
+  // never counts against the breaker's failure streak (it isn't an upstream
+  // failure) and never burns an actual 0x request.
+  if (source === '0x' && callerIdentity) {
+    const withinCap = await checkZeroXQuoteBuildCap(callerIdentity)
+    if (!withinCap) {
+      recordAttempt('429')
+      throw new ZeroXQuoteCapExceededError()
+    }
+  }
+
+  try {
+    // [SPRINT-9J J2] Bound + retry the build so a slow upstream fails fast as a
+    // clean JSON error instead of the function running to a platform HTML 504.
+    // The build is idempotent (no on-chain broadcast) so the retry is safe; the
+    // circuit breaker sees only the final outcome of the retried attempt.
+    const result = await withCircuitBreaker(circuitKey(source, chainId), () => // [9S S3] per-chain breaker
+      withSwapBuildRetry((signal) => adapter.fetchSwapData({
+        src, dst, amount, from, slippage,
+        srcDecimals, dstDecimals,
+        quoteMeta,
+        chainId,
+        recipient,
+        signal,
+      }))
+    )
+    if (!result) throw new Error(`${source}: no swap data returned`) // caught below → classified 'sim-failed'
+    recordAttempt('built')
+    return result
+  } catch (err) {
+    recordAttempt(classifyQuoteBuildOutcome(err))
+    throw err
+  }
 }
 
 // ══════════════════════════════════════════════════════════

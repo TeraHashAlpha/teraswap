@@ -1,5 +1,13 @@
 /**
- * [CHORE-47C-ARBITRUM-CATALOG] Arbitrum One (42161) launch token catalog — plain data.
+ * [CHORE-47C-ARBITRUM-CATALOG] SUPERSEDED by CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE —
+ * `tokens.ts` no longer imports ARBITRUM_CATALOG for CHAIN_TOKENS[42161] (it now sources
+ * ARBITRUM_FULL from the shared multi-source `tokens:sync` pipeline, same as Base). Kept
+ * verbatim, not deleted (repo convention — see CLAUDE.md rule #4): the 5 tokens here are
+ * still the CORE_TOKENS[42161] the pipeline forces present + guard-validates
+ * (scripts/token-catalog/lib/config.ts), and arbitrum-catalog.test.ts / arbitrum-manifest.test.ts
+ * still exercise this module directly as a manifest-fidelity regression guard.
+ *
+ * Arbitrum One (42161) launch token catalog — plain data.
  *
  * Closes AUDIT-ARBITRUM-46-47 M-01: `CHAIN_TOKENS[42161]` was empty, so the Arbitrum token
  * selector had nothing to show and the deploy runbook's Preview smoke (WETH→USDC) had no

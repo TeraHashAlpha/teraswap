@@ -36,10 +36,17 @@ const mockFetchSwapFromSource = vi.fn()
 // [FULL-M-01] The route now derives routeViaFeeCollector from usesFeeCollector(source)
 // to decide whether the FeeCollector is an acceptable calldata recipient.
 const mockUsesFeeCollector = vi.fn().mockReturnValue(true)
-vi.mock('@/lib/api', () => ({
-  fetchSwapFromSource: (...args: unknown[]) => mockFetchSwapFromSource(...args),
-  usesFeeCollector: (...args: unknown[]) => mockUsesFeeCollector(...args),
-}))
+// [fix/zerox-quote-hygiene T3] Keep the REAL ZeroXQuoteCapExceededError class
+// (via importOriginal) so the route's `instanceof` check still works against
+// a mocked module — only fetchSwapFromSource/usesFeeCollector are stubbed.
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>()
+  return {
+    ...actual,
+    fetchSwapFromSource: (...args: unknown[]) => mockFetchSwapFromSource(...args),
+    usesFeeCollector: (...args: unknown[]) => mockUsesFeeCollector(...args),
+  }
+})
 
 const mockIsKnownSwapSelector = vi.fn().mockReturnValue(true)
 vi.mock('@/lib/swap-selectors', () => ({
@@ -345,6 +352,22 @@ describe('POST /api/swap — V12 upstream fetch error [P127]', () => {
     expect(res.status).toBe(502)
     const body = await res.json()
     expect(body.error).toContain('1inch API timeout')
+  })
+})
+
+// [fix/zerox-quote-hygiene T3] The 0x quote-build cap is enforced inside
+// fetchSwapFromSource (api.ts, unit-tested there) — here we only pin the
+// ROUTE's mapping of that specific error to a clean, actionable 429 (never
+// the generic 502 every other fetchSwapFromSource failure gets).
+describe('POST /api/swap — 0x quote-build cap exceeded [T3]', () => {
+  it('maps ZeroXQuoteCapExceededError to 429 with a retry-with-another-source message, not a 502', async () => {
+    const { ZeroXQuoteCapExceededError } = await import('@/lib/api')
+    mockFetchSwapFromSource.mockRejectedValueOnce(new ZeroXQuoteCapExceededError())
+    const res = await POST(makeRequest({ source: '0x', ...VALID_BASE }))
+    expect(res.status).toBe(429)
+    const body = await res.json()
+    expect(body.code).toBe('ZEROX_QUOTE_CAP_EXCEEDED')
+    expect(body.error).toMatch(/different source/i)
   })
 })
 

@@ -2,7 +2,7 @@
  * [P224] Per-chain token catalog (P221).
  */
 import { describe, it, expect } from 'vitest'
-import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches, getCanonicalUsdc } from './tokens'
+import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, LOW_LIQUIDITY_FLOOR_USD, getCanonicalUsdc } from './tokens'
 import { DEFAULT_TOKENS, findToken, addCustomToken } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getChainlinkFeed } from './chainlink-feeds'
@@ -183,6 +183,82 @@ describe('rankSearchMatches — data-driven ranking, no hardcoded allowlist [fix
     ]
     const ranked = rankSearchMatches(tokens, 'foo')
     expect(ranked.map((t) => t.symbol)).toEqual(['FOOBAR', 'FOOBAZ'])
+  })
+})
+
+// [fix/token-search-ranking-squatting] Base symbol-squatting recon: 11 addresses share the
+// ticker LAPTOP, one real ($1.6M liquidity), the rest near-zero. Synthetic here (same
+// convention as the block above) — resolveSymbolConflicts already keeps only one address
+// per (chainId, symbol) in the SHIPPED catalog, so multiple same-symbol rows only coexist
+// in search results via a session import; this proves the ranking/demotion rule generically.
+describe('rankSearchMatches — liquidity + trusted-list tie-break among symbol duplicates [fix/token-search-ranking-squatting]', () => {
+  it('Base LAPTOP search: the real (liquid) token ranks first among 10 near-zero clones', () => {
+    const real = { symbol: 'LAPTOP', liquidityUsd: 1_600_000, sources: ['coingecko', 'uniswap'] }
+    const clones = Array.from({ length: 10 }, (_, i) => ({
+      symbol: 'LAPTOP',
+      liquidityUsd: 0,
+      sources: ['uniswap'],
+      _i: i,
+    }))
+    const ranked = rankSearchMatches([...clones, real], 'laptop')
+    expect(ranked[0]).toBe(real)
+    expect(ranked).toHaveLength(11) // every clone stays reachable, just lower
+  })
+
+  it('native/bridged pairs are NOT squatting — different symbols never trigger the tie-break', () => {
+    const usdc = { symbol: 'USDC', liquidityUsd: 50_000, sources: ['coingecko', 'uniswap', 'oneinch'] }
+    const usdcE = { symbol: 'USDC.e', liquidityUsd: 5_000_000, sources: ['arbitrumBridge'] }
+    const ranked = rankSearchMatches([usdc, usdcE], 'usdc')
+    // USDC wins the exact-match tier over the substring match "USDC.e" regardless of
+    // liquidity — they are different symbols, so the same-symbol tie-break never applies.
+    expect(ranked[0]).toBe(usdc)
+    expect(ranked[1]).toBe(usdcE)
+  })
+
+  it('null liquidity (no data yet) does not sort below a CONFIRMED zero-liquidity squatter', () => {
+    const unknown = { symbol: 'FOO', liquidityUsd: null, sources: ['uniswap'] }
+    const zeroSquatter = { symbol: 'FOO', liquidityUsd: 0, sources: ['uniswap', 'oneinch'] }
+    const ranked = rankSearchMatches([zeroSquatter, unknown], 'foo')
+    expect(ranked[0]).toBe(unknown)
+  })
+
+  it('among tied liquidity, CoinGecko trusted-list membership breaks the tie', () => {
+    const trusted = { symbol: 'BAR', liquidityUsd: 500, sources: ['coingecko'] }
+    const untrusted = { symbol: 'BAR', liquidityUsd: 500, sources: ['uniswap'] }
+    const ranked = rankSearchMatches([untrusted, trusted], 'bar')
+    expect(ranked[0]).toBe(trusted)
+  })
+})
+
+describe('computeLowLiquidityDemotions — the "low liquidity / unverified" divider [fix/token-search-ranking-squatting]', () => {
+  it('demotes near-zero LAPTOP clones under the $100k floor, never the real token', () => {
+    const real = { symbol: 'LAPTOP', liquidityUsd: 1_600_000 }
+    const clones = Array.from({ length: 10 }, (_, i) => ({ symbol: 'LAPTOP', liquidityUsd: i === 0 ? null : 0 }))
+    const demoted = computeLowLiquidityDemotions([real, ...clones])
+    expect(demoted.has(real)).toBe(false)
+    expect(clones.every((c) => demoted.has(c))).toBe(true)
+    expect(demoted.size).toBe(clones.length) // demoted, not hidden — count matches, none dropped
+  })
+
+  it('the documented floor is $100k, matching the pipeline liquidityFloorUsd', () => {
+    expect(LOW_LIQUIDITY_FLOOR_USD).toBe(100_000)
+  })
+
+  it('does not demote a group where NOTHING clears the floor — no "real" token to be a clone of', () => {
+    const a = { symbol: 'FOO', liquidityUsd: 10 }
+    const b = { symbol: 'FOO', liquidityUsd: 5 }
+    expect(computeLowLiquidityDemotions([a, b]).size).toBe(0)
+  })
+
+  it('never demotes a solo low-liquidity match — no duplicate to be a clone of', () => {
+    const solo = { symbol: 'FOO', liquidityUsd: 0 }
+    expect(computeLowLiquidityDemotions([solo]).size).toBe(0)
+  })
+
+  it('native/bridged pairs never collide in the divider — symbols differ', () => {
+    const usdc = { symbol: 'USDC', liquidityUsd: 5_000_000 }
+    const usdcE = { symbol: 'USDC.e', liquidityUsd: 0 }
+    expect(computeLowLiquidityDemotions([usdc, usdcE]).size).toBe(0)
   })
 })
 

@@ -37,6 +37,8 @@ vi.mock('@/hooks/useTokenImport', () => ({
 
 import { renderWithProviders, fireEvent, screen, within } from '@/test-utils/render'
 import TokenSelector from './TokenSelector'
+import { useDisconnectedChainSelection } from '@/hooks/useChainId'
+import { getFullCatalog, getChainTokenList } from '@/lib/chains/tokens'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -374,5 +376,136 @@ describe('[chore/category-scroll-fix] category chip row — DOM contract (struct
     expect(within(chipRow).getByText('Stablecoin')).toBeInTheDocument()
     expect(within(chipRow).getByText('Memecoin')).toBeInTheDocument()
     expect(within(chipRow).queryAllByRole('button').length).toBeGreaterThan(2)
+  })
+})
+
+describe('[fix/token-selector-chain-aware] catalog follows useQuoteChainId, not useActiveChainId', () => {
+  // [fix/arbitrum-token-catalog-pipeline] "No mainnet leak" negative controls are
+  // COMPUTED from the generated catalogs, not typed as a symbol literal. A hardcoded
+  // "LINK is mainnet-only" assumption went stale the moment Arbitrum's catalog grew
+  // from 5 to 227 real tokens and LINK became a genuine Arbitrum-suggested major
+  // (tokens.ts ARBITRUM_SUGGESTED_SYMBOLS) — the old assertion would then be testing
+  // a product regression that isn't one. A candidate must be absent from the other
+  // chain by BOTH address and symbol, since these assertions can only observe
+  // rendered text (the symbol), not the address itself.
+  function chainExclusiveSymbol(presentChainId: number, absentChainId: number): string {
+    const present = getFullCatalog(presentChainId)
+    const absentAddrs = new Set(getFullCatalog(absentChainId).map((t) => t.address.toLowerCase()))
+    const absentSymbols = new Set(getFullCatalog(absentChainId).map((t) => t.symbol.toUpperCase()))
+    const candidate = present.find(
+      (t) => !absentAddrs.has(t.address.toLowerCase()) && !absentSymbols.has(t.symbol.toUpperCase()),
+    )
+    if (!candidate) {
+      throw new Error(
+        `chainExclusiveSymbol(${presentChainId}, ${absentChainId}): every token in chain ` +
+          `${presentChainId}'s catalog also exists (by address or symbol) in chain ` +
+          `${absentChainId}'s catalog — no valid negative control exists. Fix the test, ` +
+          `don't let it pass vacuously.`,
+      )
+    }
+    return candidate.symbol
+  }
+
+  // Negative controls: genuinely absent (by address AND symbol) from the other chain.
+  const MAINNET_ONLY_VS_BASE = chainExclusiveSymbol(1, 8453)
+  const MAINNET_ONLY_VS_ARBITRUM = chainExclusiveSymbol(1, 42161)
+  const BASE_ONLY_VS_ARBITRUM = chainExclusiveSymbol(8453, 42161)
+
+  // Positive control: a symbol genuinely in Arbitrum's rendered default catalog.
+  const arbitrumDefaultCatalog = getChainTokenList(42161)
+  if (arbitrumDefaultCatalog.length === 0) {
+    throw new Error('getChainTokenList(42161) is empty — no positive control available')
+  }
+  const ARBITRUM_RENDERED_SYMBOL = arbitrumDefaultCatalog[0].symbol
+
+  // ETH/WETH/USDC/USDT/DAI/WBTC are Arbitrum's structurally-guaranteed CORE_TOKENS
+  // launch set (scripts/token-catalog/lib/config.ts) — always present by design,
+  // guard-validated at fixed addresses, so asserting them by symbol here tests a
+  // permanent invariant rather than a chain-exclusivity assumption that can drift.
+  async function setWallet(opts: { isConnected: boolean; chainId?: number }) {
+    const wagmi = await import('wagmi')
+    ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue(
+      opts.isConnected
+        ? { address: '0x1111111111111111111111111111111111111111', isConnected: true, chain: { id: opts.chainId, name: 'chain' } }
+        : { address: undefined, isConnected: false, chain: undefined },
+    )
+  }
+
+  afterEach(async () => {
+    await setWallet({ isConnected: true, chainId: 1 })
+    useDisconnectedChainSelection.setState({ chainId: null })
+  })
+
+  function openModal() {
+    fireEvent.click(screen.getByText('Select'))
+  }
+
+  function modal() {
+    return screen.getByText(/Select token/i).closest('div')!.parentElement! as HTMLElement
+  }
+
+  it('disconnected + ChainSelector=Base shows the Base catalog (Base-only token present, mainnet-only token absent)', async () => {
+    await setWallet({ isConnected: false })
+    useDisconnectedChainSelection.setState({ chainId: 8453 })
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    expect(within(modal()).getAllByText('AERO').length).toBeGreaterThan(0)
+    expect(within(modal()).queryByText(MAINNET_ONLY_VS_BASE)).toBeNull()
+  })
+
+  it('disconnected + ChainSelector=Arbitrum shows the 6-token launch catalog', async () => {
+    await setWallet({ isConnected: false })
+    useDisconnectedChainSelection.setState({ chainId: 42161 })
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    const m = modal()
+    for (const sym of ['ETH', 'WETH', 'USDC', 'USDT', 'DAI', 'WBTC']) {
+      expect(within(m).getAllByText(sym).length).toBeGreaterThan(0)
+    }
+    expect(within(m).queryByText(BASE_ONLY_VS_ARBITRUM)).toBeNull()
+  })
+
+  it.each([
+    [1, 'LINK'],
+    [8453, 'AERO'],
+    [42161, 'WBTC'],
+  ])('connected on chain %i shows that chain catalog (%s present)', async (chainId, expectedSymbol) => {
+    await setWallet({ isConnected: true, chainId })
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    expect(within(modal()).getAllByText(expectedSymbol).length).toBeGreaterThan(0)
+  })
+
+  it('wallet connects while a non-matching chain was picked: list re-syncs, mainnet never flashes', async () => {
+    await setWallet({ isConnected: false })
+    useDisconnectedChainSelection.setState({ chainId: 8453 })
+    const { rerender } = renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    expect(within(modal()).queryByText(MAINNET_ONLY_VS_BASE)).toBeNull() // disconnected + Base picked: no mainnet leak
+
+    // Wallet connects on a DIFFERENT chain than the disconnected pick.
+    await setWallet({ isConnected: true, chainId: 42161 })
+    rerender(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    expect(within(modal()).queryByText(MAINNET_ONLY_VS_ARBITRUM)).toBeNull() // mainnet never flashed mid-transition
+    expect(within(modal()).getAllByText(ARBITRUM_RENDERED_SYMBOL).length).toBeGreaterThan(0) // now shows Arbitrum's catalog
+  })
+
+  it('Base search reaches the FULL catalog while disconnected, not just the suggested subset (ZRX)', async () => {
+    await setWallet({ isConnected: false })
+    useDisconnectedChainSelection.setState({ chainId: 8453 })
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    fireEvent.change(screen.getByPlaceholderText(/search name, symbol/i), { target: { value: 'ZRX' } })
+    expect(screen.getAllByText('ZRX').length).toBeGreaterThan(0)
+  })
+
+  it('pin: connected on Base renders what DCAPanel/LimitOrderPanel/ConditionalOrderPanel embed unchanged (those panels require a wallet and pass no chain prop, so useQuoteChainId === useActiveChainId there — see useChainId.test.ts)', async () => {
+    await setWallet({ isConnected: true, chainId: 8453 })
+    renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
+    openModal()
+    const m = modal()
+    expect(within(m).getAllByText('AERO').length).toBeGreaterThan(0)
+    expect(within(m).getAllByText('DEGEN').length).toBeGreaterThan(0)
+    expect(within(m).queryByText(MAINNET_ONLY_VS_BASE)).toBeNull()
   })
 })

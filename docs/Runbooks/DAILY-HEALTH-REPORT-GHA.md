@@ -27,11 +27,20 @@ Settings → Secrets and variables → Actions → New repository secret. Exact 
 | `MONITOR_SECRET` | Same value as the `MONITOR_SECRET` Vercel production env var | `Authorization: Bearer` header on `GET /api/monitor` |
 | `HEALTH_RPC_URL_BASE` | A Base mainnet JSON-RPC URL | One read-only `eth_getBalance` call (no key, no signing, nothing sent on-chain) |
 | `KEEPER_ADDRESS_BASE` | The Base keeper wallet's address | Which balance to read |
+| `HEALTH_RPC_URL_ARBITRUM` | An Arbitrum One JSON-RPC URL — **optional** | Same read-only `eth_getBalance` contract as `HEALTH_RPC_URL_BASE`, for the Arbitrum keeper row |
+| `KEEPER_ADDRESS_ARBITRUM` | The Arbitrum keeper wallet's address — **optional** | Which balance to read on Arbitrum (`docs/DEPLOYMENTS.md` § Keeper registry, Arbitrum One row — never hand-typed here) |
 
 Deliberately a **separate** RPC secret from anything the app or keeper use in production — this
 workflow only ever reads a balance and should never share a credential with something that can
-sign or spend. `KEEPER_ADDRESS_BASE` is a public on-chain address, not sensitive; it is kept as a
-secret alongside the other two for one-place ops config rather than split into a repo variable.
+sign or spend. `KEEPER_ADDRESS_BASE` / `KEEPER_ADDRESS_ARBITRUM` are public on-chain addresses, not
+sensitive; they're kept as secrets alongside the RPC URLs for one-place ops config rather than
+split into repo variables.
+
+[Auditor M2 / PR #497] `HEALTH_RPC_URL_ARBITRUM` / `KEEPER_ADDRESS_ARBITRUM` are optional and set
+**together** — one without the other is treated as unset. Until both are set, Arbitrum is reported
+as `42161: not monitored` (its own explicit state, distinct from healthy/warning/critical — see
+"What it checks" below) rather than silently absent from the report. Set both once the Arbitrum
+keeper is actually polling (`docs/DEPLOYMENTS.md` § Keeper registry — today only Base polls).
 
 Any secret left unset is **not a failure** — the corresponding check is skipped and reported as
 such (⚠️, with a "Requires Attention" bullet naming which secret to add), never silently treated
@@ -41,10 +50,22 @@ as healthy.
 
 Same shape as the pre-existing Daily report convention: Site, API Health (which doubles as the
 prod secret-set status — 200 means `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` ARE set on Vercel,
-503 means they are not), SSL certificate expiry, the protected Monitor endpoint, keeper gas on
-Base against a 0.01 ETH warning / 0.002 ETH critical threshold (the convention already used in
-recent reports — not derived from `freeze-score.js`'s USD-denominated thresholds, which drive a
-different signal for a different consumer), and `origin/main` git activity in the last 24h.
+503 means they are not), SSL certificate expiry, the protected Monitor endpoint, keeper gas
+**per chain** (one row per chain in the workflow's `CHAINS` table — not derived from
+`freeze-score.js`'s USD-denominated thresholds, which drive a different signal for a different
+consumer), and `origin/main` git activity in the last 24h.
+
+[Auditor M2 / PR #497] Keeper gas is chain-aware: Base against 0.01 ETH warning / 0.002 ETH
+critical (the pre-existing, measured convention — see `docs/Prompts/FIX-KEEPER-GAS-TIER-BASE.md`),
+Arbitrum against 0.002 ETH warning / 0.0004 ETH critical (1/5 of Base's — no real Arbitrum fill
+exists yet to calibrate against; full derivation in the workflow's `env:` block comment and mirrored
+in `src/lib/keeper-health-monitor.ts`). A chain whose secrets aren't set reports its own explicit
+`{chainId}: not monitored` row — never silently dropped, never folded into "healthy". The
+same-cadence, real-time counterpart to this daily snapshot — gas balance AND overdue-DCA-fill
+liveness, alerting within ~2 keeper-poll-intervals via Telegram/Email/Discord — is
+`src/lib/keeper-health-monitor.ts`, wired into every `runMonitoringTick()` call; this GHA report
+does not (and, lacking prod Supabase credentials by design — see the secrets table above — cannot)
+duplicate the overdue-fill signal, only the gas-balance one.
 
 ## Where reports land
 

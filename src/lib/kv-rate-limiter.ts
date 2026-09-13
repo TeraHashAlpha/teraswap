@@ -43,6 +43,25 @@ export const LOG_RATE_LIMIT = { limit: 120, windowMs: 60_000 }
 // Complements (does not replace) the per-wallet DB limit in the orders route.
 export const ORDER_CREATE_RATE_LIMIT = { limit: 10, windowMs: 60_000 }
 
+// [fix/zerox-quote-hygiene T3] Per-identity ceiling on 0x FIRM /quote builds
+// (adapters/zerox.ts fetchSwapData, invoked from api.ts's fetchSwapFromSource
+// — the swap-BUILD step, gated on a Swap click / an authenticated /v1/swap
+// POST). Distinct from QUOTE_RATE_LIMIT above, which bounds the /price
+// meta-fan-out (every source, every poll tick) — this is 0x-specific and
+// exists solely to keep our 0x key under 0x's own throttling threshold
+// (0x's 2026-09-12 warning), never to protect our own infra.
+//
+// Sizing: a real user builds a 0x quote once per deliberate Swap click on a
+// 0x-routed pair, occasionally a couple more times (adjusting slippage,
+// retrying after a wallet rejection). SPLIT_MAX_LEGS (split-router.ts) is 3,
+// but 0x occupies at most ONE leg per split swap (each leg is a distinct
+// source), so a split swap never multiplies this count. 8/min and 40/hour
+// give a single active user roughly 5-8x headroom over that real pattern
+// while bounding a script that hammers /api/swap with source=0x and never
+// confirms — exactly the pattern 0x flagged.
+export const ZEROX_QUOTE_BUILD_MINUTE_LIMIT = { limit: 8, windowMs: 60_000 }
+export const ZEROX_QUOTE_BUILD_HOUR_LIMIT = { limit: 40, windowMs: 3_600_000 }
+
 interface RateLimitResult {
   allowed: boolean
   remaining: number

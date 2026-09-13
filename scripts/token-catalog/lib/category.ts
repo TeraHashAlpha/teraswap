@@ -8,7 +8,7 @@
 // Light symbol heuristic — cosmetic grouping only (mirrors chains/tokens.ts inferCategory,
 // extended with the current DEFAULT_TOKENS stable/staking sets).
 const STABLES = new Set([
-  'USDC', 'USDT', 'DAI', 'USDbC', 'USDe', 'FRAX', 'LUSD', 'EURC', 'PYUSD', 'USDS', 'GHO', 'crvUSD', 'BOLD', 'TUSD', 'USDP',
+  'USDC', 'USDT', 'DAI', 'USDbC', 'USDC.e', 'USDe', 'FRAX', 'LUSD', 'EURC', 'PYUSD', 'USDS', 'GHO', 'crvUSD', 'BOLD', 'TUSD', 'USDP',
 ])
 const LIQUID_STAKING = new Set([
   'cbETH', 'wstETH', 'stETH', 'rETH', 'weETH', 'rsETH', 'sfrxETH', 'ezETH', 'mETH', 'ETHx', 'swETH',

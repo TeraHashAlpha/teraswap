@@ -31,7 +31,6 @@ import { NATIVE_ETH } from '@/lib/constants'
 import { DEFAULT_CHAIN_ID, getChainConfig, getWrappedNative } from '@/lib/chains/registry'
 import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.generated'
 import { isStablecoinCategorySymbol } from './stablecoins'
-import { ARBITRUM_CATALOG } from './arbitrum-catalog'
 
 export interface ChainToken {
   address: `0x${string}`
@@ -49,7 +48,19 @@ export interface ChainToken {
   sources?: string[]
   /** Pipeline-resolved category (curated > overrides > heuristic). */
   category?: TokenCategory
+  /** [fix/token-search-ranking-squatting] 24h volume in USD from the pipeline, when
+   *  resolvable. undefined/null means "no data", never zero — see rankSearchMatches. */
+  liquidityUsd?: number | null
 }
+
+/**
+ * [fix/token-search-ranking-squatting] 24h-volume floor (USD) under which a token counts
+ * as "low liquidity" for the search-results divider — the SAME threshold the catalog
+ * pipeline uses to gate inclusion (scripts/token-catalog/lib/config.ts liquidityFloorUsd).
+ * Kept in sync manually: both are pinned to $100k because that is the number the pipeline
+ * itself already treats as "can't show evidence this token trades".
+ */
+export const LOW_LIQUIDITY_FLOOR_USD = 100_000
 
 /** [SPRINT-9Y] Max search results rendered at once — keeps a broad query snappy. */
 export const SEARCH_RESULT_LIMIT = 80
@@ -125,6 +136,7 @@ const BASE_FULL: ChainToken[] = GENERATED_TOKEN_CATALOG[8453].map((t): ChainToke
   verified: t.verified,
   sources: t.sources,
   category: generatedCategory(t),
+  liquidityUsd: t.volume24hUsd ?? null,
 }))
 
 function toChainToken(t: Token): ChainToken {
@@ -138,63 +150,63 @@ function toChainToken(t: Token): ChainToken {
     verified: t.verified,
     sources: t.sources,
     category: t.category,
+    liquidityUsd: t.liquidityUsd,
   }
 }
 
-// [CHORE-47C-ARBITRUM-CATALOG] Launch catalog: 5 Chainlink-feed-covered manifest tokens
-// (WETH, USDC, USDT, DAI, WBTC — owner decision, L-01 adjudication). Addresses/decimals come
-// from arbitrum-catalog.ts (generated from the manifest, zero hex here). Reuses the same
-// bundled local logo assets mainnet/Base already use for these majors (CORE_LOCAL_LOGO,
-// coverage/fallback pattern) — no new logo assets. Chain stays DARK (feeCollector env unset);
-// populating this catalog is additive only, see arbitrum-catalog.ts for the full rationale.
-// [CHORE-ARBITRUM-UI-POLISH] `verified` carries through from the manifest-sourced catalog
-// (arbitrum-catalog.generated.ts) the same way BASE_FULL carries the pipeline's `verified`.
+// [CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] Arbitrum (42161) — now the SAME multi-source
+// cross-verified pipeline as Base (uniswap / coingecko / 1inch / trustwallet /
+// arbitrumBridge[Arbitrum-only, the canonical OffchainLabs bridged-token list] + the
+// DefiLlama market signal; >=2-source agreement; catalog-guard PASS — see
+// scripts/token-catalog/build.ts). Supersedes the CHORE-47C-ARBITRUM-CATALOG single-source
+// manifest pipeline (arbitrum-catalog.ts / arbitrum-catalog.generated.ts /
+// scripts/generate-arbitrum-catalog.mjs) — kept, not deleted, and marked superseded there
+// (repo convention, never delete). The manifest's 5 on-chain-verified launch tokens are now
+// CORE_TOKENS[42161] (scripts/token-catalog/lib/config.ts): ALWAYS present, still
+// guard-validated, at the EXACT addresses docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json
+// verified — a source outage can never drop them, same guarantee as before. Native ETH is no
+// longer special-cased here either: it comes through as CORE_TOKENS[42161]'s native sentinel
+// row, exactly like mainnet/Base (assembleCatalog step 4). Chain stays DARK (feeCollector env
+// unset, isChainActive(42161) === false) — populating the full catalog is additive only.
 //
-// [fix/arbitrum-native-eth] Native ETH is prepended here — NOT in arbitrum-catalog.generated.ts
-// or ARBITRUM-ADDRESS-MANIFEST.json, since a native asset has no ERC-20 contract and so can
-// never appear in a manifest built from on-chain symbol()/decimals() reads. It satisfies the
-// CHORE-47C-ARBITRUM-CATALOG launch rule (launch set ⊆ Chainlink-feed-covered set):
-// getChainlinkFeed maps NATIVE_ETH on an L2 to that chain's nativeCurrency.wrappedAddress,
-// which for 42161 is the WETH address already covered by the WETH → ETH/USD feed
-// (chainlink-feeds.ts, pinned by the "native ETH sentinel maps through..." test). Treatment
-// mirrors mainnet (DEFAULT_TOKENS' first entry) and Base (GENERATED_TOKEN_CATALOG[8453]'s
-// sentinel row, sources: ['native']): address is the shared NATIVE_ETH sentinel (no chain-
-// specific hex), category 'Native', the bundled local logo, and popular/suggested/verified
-// all true — listed first, same as both other chains.
-const ARBITRUM_NATIVE_ETH: ChainToken = {
-  address: NATIVE_ETH,
-  symbol: 'ETH',
-  name: 'Ethereum',
-  decimals: 18,
-  logoURI: CORE_LOCAL_LOGO.ETH,
-  popular: true,
-  suggested: true,
-  verified: true,
-  sources: ['native'],
-  category: 'Native',
-}
-const ARBITRUM_FULL: ChainToken[] = [
-  ARBITRUM_NATIVE_ETH,
-  ...ARBITRUM_CATALOG.map((t): ChainToken => ({
-    address: t.address,
-    symbol: t.key,
-    name: t.name,
-    decimals: t.decimals,
-    logoURI: CORE_LOCAL_LOGO[t.key] ?? '',
-    popular: true,
-    suggested: true,
-    verified: t.verified,
-    sources: ['manifest'],
-    category: t.key === 'WETH' ? 'Native' : isStablecoinCategorySymbol(t.key, 42161) ? 'Stablecoin' : t.key === 'WBTC' ? 'Wrapped BTC' : undefined,
-  })),
-]
+// Suggested-set rule (mirrors BASE_SUGGESTED_SYMBOLS): the 5 CHORE-47C launch/core tokens
+// (ETH, WETH, USDC, USDT, DAI, WBTC) ∪ Arbitrum-native/long-tail majors picked from the
+// pipeline's qualified, guard-passed candidates (tokens:sync run 2026-09-12, 227 tokens) —
+// ARB (the chain's own governance token), GMX, PENDLE, MAGIC, LINK, UNI, GRT, LDO, CRV, WOO,
+// SUSHI, BAL, AAVE, COMP, YFI. Every symbol here was checked present in the generated
+// token-catalog.42161.json before picking it (the pipeline's growth-cap ranking currently
+// ties on vote count and breaks alphabetically — volume24hUsd is never populated by any
+// fetcher, a pre-existing pipeline gap shared with Base/mainnet, not introduced here — so a
+// plausible-sounding symbol can miss the cap; see PR feedback). Symbols are a curation
+// choice; addresses come only from the validated generated catalog — never hand-typed.
+const ARBITRUM_SUGGESTED_SYMBOLS = new Set([
+  'ETH', 'WETH', 'USDC', 'USDC.e', 'USDT', 'DAI', 'WBTC',
+  'ARB', 'GMX', 'PENDLE', 'MAGIC', 'LINK', 'UNI', 'GRT', 'LDO', 'CRV', 'WOO', 'SUSHI', 'BAL', 'AAVE', 'COMP', 'YFI',
+])
+const ARBITRUM_POPULAR_SYMBOLS = new Set(['ETH', 'WETH', 'USDC', 'USDT', 'DAI', 'WBTC', 'ARB'])
+const ARBITRUM_SUGGESTED_UPPER = upper(ARBITRUM_SUGGESTED_SYMBOLS)
+const ARBITRUM_POPULAR_UPPER = upper(ARBITRUM_POPULAR_SYMBOLS)
+
+const ARBITRUM_FULL: ChainToken[] = GENERATED_TOKEN_CATALOG[42161].map((t): ChainToken => ({
+  address: t.address,
+  symbol: t.symbol,
+  name: t.name,
+  decimals: t.decimals,
+  logoURI: CORE_LOCAL_LOGO[t.symbol] ?? t.logoURI,
+  popular: ARBITRUM_POPULAR_UPPER.has(t.symbol.toUpperCase()),
+  suggested: ARBITRUM_SUGGESTED_UPPER.has(t.symbol.toUpperCase()),
+  verified: t.verified,
+  sources: t.sources,
+  category: generatedCategory(t),
+  liquidityUsd: t.volume24hUsd ?? null,
+}))
 
 export const CHAIN_TOKENS: Record<number, ChainToken[]> = {
   1: DEFAULT_TOKENS.map(toChainToken),
   // [SPRINT-9Y] Base default view = the curated "Suggested" subset of the full
   // catalog. The long tail stays reachable via getSearchCatalog / getFullCatalog.
   8453: BASE_FULL.filter((t) => t.suggested),
-  42161: ARBITRUM_FULL,
+  42161: ARBITRUM_FULL.filter((t) => t.suggested),
 }
 
 /** Popular tokens for a chain (falls back to the whole list if none flagged). */
@@ -245,6 +257,7 @@ function chainTokenToToken(t: ChainToken, chainId: number): Token {
     category: t.category ?? inferCategory(t.symbol, chainId),
     verified: t.verified,
     sources: t.sources,
+    liquidityUsd: t.liquidityUsd,
   }
 }
 
@@ -257,27 +270,11 @@ const GENERATED_BY_ADDR: Record<number, Map<string, GeneratedToken>> = Object.fr
   ]),
 )
 
-// [CHORE-ARBITRUM-UI-POLISH] Arbitrum (42161) has no generated pipeline catalog yet (no
-// token-catalog.42161.json), so isVerifiedToken's lookup above found nothing and the 5
-// manifest-verified launch tokens rendered the "unverified" ⚠ badge despite being
-// on-chain checked (docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json). Seed the SAME lookup map
-// this function already reads from the manifest-sourced catalog — isVerifiedToken's logic
-// is unchanged; it simply now has data for chain 42161 too.
-GENERATED_BY_ADDR[42161] = new Map(
-  ARBITRUM_FULL.map((t) => [
-    t.address.toLowerCase(),
-    {
-      address: t.address,
-      symbol: t.symbol,
-      name: t.name,
-      decimals: t.decimals,
-      logoURI: t.logoURI,
-      category: t.category ?? 'Other',
-      verified: t.verified === true,
-      sources: t.sources ?? [],
-    },
-  ]),
-)
+// [CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] Arbitrum (42161) now HAS a generated pipeline
+// catalog (src/config/generated/token-catalog.42161.json via GENERATED_TOKEN_CATALOG[42161]),
+// so the generic population above already covers it — no more per-chain override needed
+// (superseded the CHORE-ARBITRUM-UI-POLISH seed that plugged this gap for the old
+// manifest-only catalog).
 
 // Mainnet long tail = generated chain-1 catalog minus what DEFAULT_TOKENS already curates
 // (DEFAULT_TOKENS wins on metadata/ordering; verified/sources come from the pipeline).
@@ -293,27 +290,33 @@ const MAINNET_LONGTAIL: Token[] = GENERATED_TOKEN_CATALOG[1]
     category: generatedCategory(t) ?? inferCategory(t.symbol, 1),
     verified: t.verified,
     sources: t.sources,
+    liquidityUsd: t.volume24hUsd ?? null,
   }))
 
 // DEFAULT_TOKENS annotated with the pipeline's verified/sources (the hand list keeps its
 // metadata/order; a curated entry the pipeline could NOT verify stays honestly ⚠).
 const MAINNET_CURATED: Token[] = DEFAULT_TOKENS.map((t) => {
   const g = GENERATED_BY_ADDR[1]?.get(t.address.toLowerCase())
-  return { ...t, verified: g?.verified === true, sources: g?.sources }
+  return { ...t, verified: g?.verified === true, sources: g?.sources, liquidityUsd: g?.volume24hUsd ?? null }
 })
 
 // Precomputed full catalogs (stable references → cheap memoisation downstream).
 const MAINNET_FULL: Token[] = [...MAINNET_CURATED, ...MAINNET_LONGTAIL]
 const BASE_FULL_TOKENS: Token[] = BASE_FULL.map((t) => chainTokenToToken(t, 8453))
+const ARBITRUM_FULL_TOKENS: Token[] = ARBITRUM_FULL.map((t) => chainTokenToToken(t, 42161))
 
 /**
  * [SPRINT-9Y] The FULL pinned catalog for a chain (curated + long tail), as Token[].
  * Backs search and the verified-✓ badge. Excludes user-imported custom tokens (those
- * stay ⚠). chainId 1 = DEFAULT_TOKENS ∪ Uniswap long tail; 8453 = Base full catalog.
+ * stay ⚠). chainId 1 = DEFAULT_TOKENS ∪ Uniswap long tail; 8453/42161 = the chain's full
+ * generated-pipeline catalog (CHAIN_TOKENS holds only the curated "Suggested" subset for
+ * both, so a pasted long-tail address still resolves to its verified ✓ token here instead
+ * of re-importing — same reason BASE_FULL_TOKENS bypasses CHAIN_TOKENS below).
  */
 export function getFullCatalog(chainId: number): Token[] {
   if (chainId === DEFAULT_CHAIN_ID) return MAINNET_FULL
   if (chainId === 8453) return BASE_FULL_TOKENS
+  if (chainId === 42161) return ARBITRUM_FULL_TOKENS
   return getChainTokenList(chainId)
 }
 
@@ -332,14 +335,33 @@ export function getSearchCatalog(chainId: number): Token[] {
 }
 
 /**
- * [fix/token-search-ranking] Ranks token search matches so an EXACT case-insensitive
- * symbol match (e.g. "USDC") outranks a substring match (e.g. "aUSDC", "waEthUSDC"),
- * and among equally-tiered matches, more `sources` (catalog-pipeline cross-verification
- * count) ranks higher. Both signals come from the catalog rows themselves — never a
- * hardcoded symbol or address list, so any lookalike is ranked correctly by construction.
- * Does not filter: every match stays in the returned array, just reordered.
+ * [fix/token-search-ranking-squatting] 3-tier liquidity comparator key: known-positive
+ * liquidity (2) ranks above unknown/null (1), which ranks above a CONFIRMED zero (0).
+ * Treating null as "worse than zero" (e.g. `?? -Infinity`) would sink every token the
+ * pipeline hasn't priced yet (Task 2's pre-existing gap) below actual zero-liquidity
+ * squatters — the opposite of what the signal is for. Unknown is charitable, not damning.
  */
-export function rankSearchMatches<T extends { symbol: string; sources?: string[] }>(
+function liquidityTier(v: number | null | undefined): 0 | 1 | 2 {
+  if (v == null) return 1
+  return v > 0 ? 2 : 0
+}
+
+/**
+ * [fix/token-search-ranking / fix/token-search-ranking-squatting] Ranks token search
+ * matches:
+ *  1. an EXACT case-insensitive symbol match (e.g. "USDC") outranks a substring match
+ *     (e.g. "aUSDC", "waEthUSDC");
+ *  2. among matches that share the SAME symbol (case-insensitively — the squatting case:
+ *     several addresses claiming one ticker), higher `liquidityUsd` wins, then CoinGecko
+ *     trusted-list membership (`sources` includes 'coingecko' — the same list the catalog
+ *     guard already gates on), so a real, liquid token outranks its zero-liquidity clones;
+ *  3. otherwise (different symbols, e.g. USDC vs USDC.e — native/bridged pairs are NOT
+ *     squatting), falls back to more `sources` (cross-verification count), as before.
+ * Every signal comes from the catalog rows themselves — never a hardcoded symbol or
+ * address list, so any lookalike is ranked correctly by construction. Does not filter:
+ * every match stays in the returned array, just reordered.
+ */
+export function rankSearchMatches<T extends { symbol: string; sources?: string[]; liquidityUsd?: number | null }>(
   matches: T[],
   query: string,
 ): T[] {
@@ -348,10 +370,54 @@ export function rankSearchMatches<T extends { symbol: string; sources?: string[]
     const aExact = a.symbol.toLowerCase() === q
     const bExact = b.symbol.toLowerCase() === q
     if (aExact !== bExact) return aExact ? -1 : 1
+
+    if (a.symbol.toLowerCase() === b.symbol.toLowerCase()) {
+      const tierDiff = liquidityTier(b.liquidityUsd) - liquidityTier(a.liquidityUsd)
+      if (tierDiff !== 0) return tierDiff
+      const liqDiff = (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0)
+      if (liqDiff !== 0) return liqDiff
+      const aTrusted = a.sources?.includes('coingecko') ?? false
+      const bTrusted = b.sources?.includes('coingecko') ?? false
+      if (aTrusted !== bTrusted) return aTrusted ? -1 : 1
+    }
+
     const aSources = a.sources?.length ?? 0
     const bSources = b.sources?.length ?? 0
     return bSources - aSources
   })
+}
+
+/**
+ * [fix/token-search-ranking-squatting] Which already-ranked matches to render under the
+ * "low liquidity / unverified" divider: entries below LOW_LIQUIDITY_FLOOR_USD (or with no
+ * liquidity data at all) that share a case-insensitive symbol with another match AT OR
+ * ABOVE the floor — i.e. a same-ticker clone of a token we have evidence actually trades.
+ * Demotes, never hides (every match stays reachable, just visually deprioritized).
+ * Native/bridged pairs (USDC vs USDC.e) never collide here — their symbols differ.
+ * A group where NOTHING clears the floor is left alone: with no "real" token to be a
+ * clone OF, there's nothing to demote against.
+ */
+export function computeLowLiquidityDemotions<T extends { symbol: string; liquidityUsd?: number | null }>(
+  matches: T[],
+  floorUsd: number = LOW_LIQUIDITY_FLOOR_USD,
+): Set<T> {
+  const bySymbol = new Map<string, T[]>()
+  for (const t of matches) {
+    const k = t.symbol.toLowerCase()
+    const g = bySymbol.get(k)
+    if (g) g.push(t)
+    else bySymbol.set(k, [t])
+  }
+  const demoted = new Set<T>()
+  for (const group of bySymbol.values()) {
+    if (group.length < 2) continue
+    const hasCleared = group.some((t) => (t.liquidityUsd ?? 0) >= floorUsd)
+    if (!hasCleared) continue
+    for (const t of group) {
+      if ((t.liquidityUsd ?? 0) < floorUsd) demoted.add(t)
+    }
+  }
+  return demoted
 }
 
 /**

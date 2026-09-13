@@ -20,10 +20,12 @@ import { GENERATED_TOKEN_CATALOG, type GeneratedToken } from './token-catalog.ge
 import { CORE_TOKENS } from '../../../scripts/token-catalog/lib/config'
 import catalog1 from '@/config/generated/token-catalog.1.json'
 import catalog8453 from '@/config/generated/token-catalog.8453.json'
+import catalog42161 from '@/config/generated/token-catalog.42161.json'
 
 const FILES: Array<[number, { schemaVersion: number; chainId: number; counts: { included: number; verified: number } }]> = [
   [1, catalog1],
   [8453, catalog8453],
+  [42161, catalog42161],
 ]
 
 // External (agreement-counting) sources — 'curated'/'native' are provenance markers and
@@ -35,7 +37,12 @@ describe.each(FILES)('token-catalog.%i.json — committed catalog invariants', (
   const tokens: GeneratedToken[] = GENERATED_TOKEN_CATALOG[chainId]
 
   it('has the expected schema and chain', () => {
-    expect(file.schemaVersion).toBe(1)
+    // [fix/token-sync-cron-landing] build.ts has emitted schemaVersion 2 since
+    // fix/token-search-ranking-squatting (volume24hUsd/volumeSource/volumeFetchedAt fields) —
+    // this assertion was never bumped, so ANY regen (regardless of the GUARD_CHAINS/trusted-
+    // list fixes in this branch) would fail the gate here on schema mismatch alone. See
+    // FEEDBACK: this is a third, independent contributor to the cron's failure streak.
+    expect(file.schemaVersion).toBe(2)
     expect(file.chainId).toBe(chainId)
     expect(file.counts.included).toBe(tokens.length)
     expect(file.counts.verified).toBe(tokens.filter((t) => t.verified).length)

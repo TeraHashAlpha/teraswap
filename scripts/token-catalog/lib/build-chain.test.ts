@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { Allowlist, Verdict } from '@/lib/chains/catalog-guard'
-import type { MarketSignal, SeedToken, SourceEntry, SourceFetchResult } from './types'
+import type { CatalogRow, MarketSignal, SeedToken, SourceEntry, SourceFetchResult } from './types'
 import { PIPELINE_CONFIG } from './config'
 import { buildChainCatalog, type ChainBuildDeps } from './build-chain'
 
@@ -140,5 +140,102 @@ describe('buildChainCatalog — wiring', () => {
     // the impostor never reached the guard audit
     const asked = spy.mock.calls[0][0].map((t: { address: string }) => t.address.toLowerCase())
     expect(asked).not.toContain(DAI.toLowerCase())
+  })
+})
+
+// [fix/token-search-ranking-squatting Task 2] volume24hUsd was previously populated by
+// NO fetcher (see fetch-sources.ts makeVolumeFetcher) — every catalog row sorted/capped on
+// an always-0/undefined signal. These prove real volume now drives ranking + is persisted.
+describe('buildChainCatalog — volume signal [fix/token-search-ranking-squatting Task 2]', () => {
+  const HIGH = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const LOW = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+  it('growth cap keeps the higher-VOLUME new candidate, not the alphabetically-first one', async () => {
+    // Both have equal votes (3) and equal alphabetical tiebreak potential reversed
+    // (ALOW < ZHIGH) — only real volume data can make ZHIGH win, proving the pre-existing
+    // "volume24hUsd never populated ⇒ ties fall through to alphabetical" bug is fixed.
+    const highVol = new Map<string, MarketSignal>([[`1:${HIGH.toLowerCase()}`, { volume24hUsd: 5_000_000, volumeSource: 'coingecko' }]])
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [
+        ok('uniswap', [entry('uniswap', HIGH, 'ZHIGH'), entry('uniswap', LOW, 'ALOW')]),
+        ok('coingecko', [entry('coingecko', HIGH, 'ZHIGH'), entry('coingecko', LOW, 'ALOW')], highVol),
+        ok('oneinch', [entry('oneinch', HIGH, 'ZHIGH'), entry('oneinch', LOW, 'ALOW')]),
+      ],
+      config: { ...PIPELINE_CONFIG, liquidityFloorUsd: 100_000, maxNewTokensPerChain: { 1: 1, 8453: 250, 42161: 220 } },
+    }))
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['ZHIGH'])
+    expect(result.report.capped.map((c) => c.symbol)).toEqual(['ALOW'])
+  })
+
+  it('persists volume24hUsd + volumeSource + volumeFetchedAt on the emitted row when resolved', async () => {
+    // Volume clears liquidityFloorUsd so 2 sources is enough to qualify (isLowLiquidity=false).
+    const vol = new Map<string, MarketSignal>([[`1:${WETH.toLowerCase()}`, { volume24hUsd: 500_000, volumeSource: 'coingecko' }]])
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap')]), ok('coingecko', [entry('coingecko')], vol)],
+      builtAt: '2026-09-12',
+    }))
+    expect(result.tokens[0]).toMatchObject({ volume24hUsd: 500_000, volumeSource: 'coingecko', volumeFetchedAt: '2026-09-12' })
+  })
+
+  it('an entry with NO volume data gets an explicit null, never a 0 (which would sort as "worst")', async () => {
+    // 3 sources so it clears lowLiqMinSources without needing any volume/price signal.
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap')]), ok('coingecko', [entry('coingecko')]), ok('oneinch', [entry('oneinch')])],
+    }))
+    expect(result.tokens[0]).toMatchObject({ volume24hUsd: null, volumeSource: null, volumeFetchedAt: null })
+  })
+})
+
+// [fix/token-search-ranking-squatting Task 3] A single flaky source must not churn a
+// previously-verified token to unverified on the very next weekly tokens:sync run.
+describe('buildChainCatalog — retain-on-flake [fix/token-search-ranking-squatting Task 3]', () => {
+  function prevRow(overrides: Partial<CatalogRow> = {}): CatalogRow {
+    return {
+      address: WETH as `0x${string}`,
+      symbol: 'WETH',
+      name: 'Wrapped Ether',
+      decimals: 18,
+      category: 'Native',
+      logoURI: '/tokens/weth.png',
+      verified: true,
+      sources: ['uniswap', 'coingecko'],
+      volume24hUsd: null,
+      volumeSource: null,
+      volumeFetchedAt: null,
+      ...overrides,
+    }
+  }
+
+  it('retains a previously >=2-source-verified row when ONE of its sources is down this run, and logs it', async () => {
+    const log = vi.fn()
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('coingecko', [entry('coingecko')]), down('uniswap')],
+      previousCatalog: new Map([[WETH.toLowerCase(), prevRow()]]),
+      log,
+    }))
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['WETH'])
+    expect(result.tokens[0].verified).toBe(true)
+    expect(result.tokens[0].sources).toEqual(['uniswap', 'coingecko'])
+    expect(result.report.retained).toEqual([{ address: WETH, symbol: 'WETH', missingSources: ['uniswap'] }])
+    expect(log.mock.calls.flat().some((m) => String(m).includes('retained from previous'))).toBe(true)
+  })
+
+  it('does NOT retain a brand-new candidate with no previous row — it still needs full agreement', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('coingecko', [entry('coingecko', DAI, 'DAI')]), down('uniswap')],
+      previousCatalog: new Map(),
+    }))
+    expect(result.tokens).toHaveLength(0)
+    expect(result.report.rejections.some((r) => r.address === DAI && r.reason === 'insufficient-sources')).toBe(true)
+    expect(result.report.retained).toEqual([])
+  })
+
+  it('does NOT retain when both previous sources report fine but simply stopped listing it (real delisting, not a flake)', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', []), ok('coingecko', [])],
+      previousCatalog: new Map([[WETH.toLowerCase(), prevRow()]]),
+    }))
+    expect(result.tokens).toHaveLength(0)
+    expect(result.report.retained).toEqual([])
   })
 })

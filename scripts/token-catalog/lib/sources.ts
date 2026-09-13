@@ -96,3 +96,27 @@ export function parseDefiLlamaCoins(
   }
   return { entries, market }
 }
+
+/**
+ * [fix/token-search-ranking-squatting Task 2] CoinGecko /coins/markets shape:
+ * an array of { id, total_volume }. Volume is keyed by CG coin id, not address — the
+ * caller (fetch-sources.ts makeVolumeFetcher) resolves id → address(es) via the
+ * /coins/list?include_platform=true snapshot and passes that mapping in here.
+ */
+export function parseCoingeckoMarkets(
+  raw: unknown,
+  chainId: number,
+  idToAddresses: Map<string, string[]>,
+): Map<string, MarketSignal> {
+  const market = new Map<string, MarketSignal>()
+  if (!Array.isArray(raw)) return market
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const { id, total_volume: volume } = row as Record<string, unknown>
+    if (typeof id !== 'string' || typeof volume !== 'number') continue
+    for (const addr of idToAddresses.get(id) ?? []) {
+      market.set(`${chainId}:${addr.toLowerCase()}`, { volume24hUsd: volume, volumeSource: 'coingecko' })
+    }
+  }
+  return market
+}

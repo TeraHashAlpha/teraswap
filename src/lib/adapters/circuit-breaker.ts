@@ -35,12 +35,23 @@ export interface CircuitBreakerConfig {
   cooldownMs: number
   /** Max test requests in HALF_OPEN before deciding */
   halfOpenMaxAttempts: number
+  /**
+   * [fix/zerox-quote-hygiene T4] Cooldown applied when a failure is
+   * classified as HTTP 429 (see classifyFailure/onFailure below). Longer
+   * than `cooldownMs` because a 429 is the upstream explicitly asking us
+   * to back off — 3 quick retries (the normal failureThreshold path)
+   * would just draw a second/third 429 and dig the hole deeper. Used only
+   * when the upstream response carries no `Retry-After` value; when it
+   * does, that value wins (see onFailure).
+   */
+  rateLimitCooldownMs: number
 }
 
 export const DEFAULT_CB_CONFIG: CircuitBreakerConfig = {
   failureThreshold: 3,
   cooldownMs: 60_000,     // 60 seconds
   halfOpenMaxAttempts: 1,
+  rateLimitCooldownMs: 300_000, // 5 minutes — see rateLimitCooldownMs doc above
 }
 
 // ── [dead-sources-are-loud] Failure classification ──────────
@@ -55,23 +66,36 @@ export const DEFAULT_CB_CONFIG: CircuitBreakerConfig = {
 export interface FailureClassification {
   errorClass: string
   status?: number
+  /**
+   * [fix/zerox-quote-hygiene T4] Upstream-requested backoff, in ms, when the
+   * adapter could read a `Retry-After` header off a 429 response (see
+   * zerox.ts). Undefined when absent — callers fall back to
+   * rateLimitCooldownMs.
+   */
+  retryAfterMs?: number
 }
 
 // 3-digit token with a non-word boundary on both sides — matches "0x 401"
 // or "Odos 502: ..." but not a run of digits like "chain 42161" (no boundary
 // between adjacent digits) or a status baked into an alphanumeric key.
 const HTTP_STATUS_RE = /\b([1-5]\d{2})\b/
+// [T4] Adapters that can read a Retry-After header embed it in the thrown
+// error message as `retryAfterMs=<n>` (see zerox.ts) — every other adapter's
+// message simply won't match, so retryAfterMs stays undefined for them.
+const RETRY_AFTER_RE = /retryAfterMs=(\d+)/
 
 export function classifyFailure(err: unknown): FailureClassification {
   if (!(err instanceof Error)) return { errorClass: 'UnknownError' }
   const msg = err.message
   const statusMatch = msg.match(HTTP_STATUS_RE)
   const status = statusMatch ? Number(statusMatch[1]) : undefined
+  const retryAfterMatch = msg.match(RETRY_AFTER_RE)
+  const retryAfterMs = retryAfterMatch ? Number(retryAfterMatch[1]) : undefined
 
   if (msg === 'Timeout') return { errorClass: 'TimeoutError' }
   if (/invalid response \(non-json\)/i.test(msg)) return { errorClass: 'ParseError' }
   if (/<!doctype|<html/i.test(msg)) return { errorClass: 'HTMLResponse', status }
-  if (status !== undefined) return { errorClass: 'HttpError', status }
+  if (status !== undefined) return { errorClass: 'HttpError', status, retryAfterMs }
   if (/failed to fetch|network ?error|econnrefused|enotfound/i.test(msg)) return { errorClass: 'NetworkError' }
   return { errorClass: 'UpstreamError' }
 }
@@ -90,10 +114,18 @@ export class CircuitBreaker {
   private lastFailureAt = 0
   private halfOpenAttempts = 0
   private config: CircuitBreakerConfig
+  /**
+   * [T4] The cooldown actually in effect for the CURRENT open period.
+   * Normally equals config.cooldownMs; a 429 failure overrides it (to
+   * config.rateLimitCooldownMs, or the upstream's own Retry-After when
+   * present) for that one open period, then it resets.
+   */
+  private currentCooldownMs: number
 
   constructor(name: string, config: Partial<CircuitBreakerConfig> = {}) {
     this.name = name
     this.config = { ...DEFAULT_CB_CONFIG, ...config }
+    this.currentCooldownMs = this.config.cooldownMs
   }
 
   /**
@@ -102,7 +134,7 @@ export class CircuitBreaker {
    */
   isOpen(): boolean {
     if (this.state === 'OPEN') {
-      if (Date.now() - this.lastFailureAt >= this.config.cooldownMs) {
+      if (Date.now() - this.lastFailureAt >= this.currentCooldownMs) {
         this.state = 'HALF_OPEN'
         console.log(`[CB] ${this.name}: OPEN → HALF_OPEN (cooldown elapsed)`)
         return false // Allow test request
@@ -122,6 +154,7 @@ export class CircuitBreaker {
     }
     this.consecutiveFailures = 0
     this.halfOpenAttempts = 0
+    this.currentCooldownMs = this.config.cooldownMs
   }
 
   /**
@@ -129,21 +162,47 @@ export class CircuitBreaker {
    * [dead-sources-are-loud] `err` is optional so existing direct callers
    * (tests, the [SPRINT-9S S3] per-chain tests) keep working; passing it
    * puts the reason on the OPEN transition log line.
+   *
+   * [T4 / fix/zerox-quote-hygiene] A 429 is NOT run through the normal
+   * failureThreshold counting — the upstream has explicitly told us to
+   * back off, so the very first 429 opens the circuit immediately (no
+   * 2 more failures needed first) with the longer rate-limit cooldown
+   * (config.rateLimitCooldownMs, or the upstream's own Retry-After when
+   * the adapter could read one — see classifyFailure). This applies from
+   * CLOSED or HALF_OPEN alike, since a 429 during a HALF_OPEN probe is
+   * just as clear a "not yet" signal as one during normal traffic.
    */
   onFailure(err?: unknown): void {
     this.consecutiveFailures++
     this.lastFailureAt = Date.now()
 
+    const { status, retryAfterMs } = classifyFailure(err)
+    if (status === 429) {
+      this.currentCooldownMs = retryAfterMs && retryAfterMs > 0 ? retryAfterMs : this.config.rateLimitCooldownMs
+      const wasOpen = this.state === 'OPEN'
+      this.state = 'OPEN'
+      this.halfOpenAttempts = 0
+      if (!wasOpen) {
+        console.warn(
+          `[CB] ${this.name}: → OPEN immediately (429) — cooldown ${this.currentCooldownMs}ms` +
+          (retryAfterMs ? ' (honoring Retry-After)' : ''),
+        )
+      }
+      return
+    }
+
     if (this.state === 'HALF_OPEN') {
       this.halfOpenAttempts++
       if (this.halfOpenAttempts >= this.config.halfOpenMaxAttempts) {
         this.state = 'OPEN'
+        this.currentCooldownMs = this.config.cooldownMs
         console.warn(`[CB] ${this.name}: HALF_OPEN → OPEN (test failed) — ${formatFailureSuffix(err)}`)
         this.halfOpenAttempts = 0
       }
     } else if (this.state === 'CLOSED') {
       if (this.consecutiveFailures >= this.config.failureThreshold) {
         this.state = 'OPEN'
+        this.currentCooldownMs = this.config.cooldownMs
         console.warn(`[CB] ${this.name}: CLOSED → OPEN (${this.consecutiveFailures} consecutive failures) — ${formatFailureSuffix(err)}`)
       }
     }
@@ -163,6 +222,7 @@ export class CircuitBreaker {
     this.state = 'OPEN'
     this.consecutiveFailures = this.config.failureThreshold
     this.lastFailureAt = Date.now()
+    this.currentCooldownMs = this.config.cooldownMs
     console.warn(`[CB] ${this.name}: pre-seeded OPEN from KV (${reason})`)
   }
 
@@ -174,7 +234,7 @@ export class CircuitBreaker {
   /** Debugging/metrics info */
   getInfo() {
     const cooldownRemaining = this.state === 'OPEN'
-      ? Math.max(0, this.config.cooldownMs - (Date.now() - this.lastFailureAt))
+      ? Math.max(0, this.currentCooldownMs - (Date.now() - this.lastFailureAt))
       : 0
     return {
       name: this.name,

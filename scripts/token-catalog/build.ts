@@ -32,12 +32,32 @@ import { PIPELINE_CONFIG, CORE_TOKENS } from './lib/config'
 import seedBaseline from './seed-baseline.json'
 import type { SeedToken } from './lib/types'
 import { buildChainCatalog } from './lib/build-chain'
-import { makeFetchers, makeMarketFetcher } from './lib/fetch-sources'
+import { makeFetchers, makeMarketFetcher, makeVolumeFetcher } from './lib/fetch-sources'
+import type { CatalogRow } from './lib/types'
 import { makeCategoryResolver } from './lib/category'
-import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS } from './lib/curated'
-import { collectVerdicts, writeTrustFixture, GUARD_CHAINS } from './lib/verdicts'
+import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS } from './lib/curated'
+import { collectVerdicts, writeTrustFixture } from './lib/verdicts'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
+
+/**
+ * [fix/token-sync-cron-landing] Optional single/multi-chain scope, so the cron's per-chain
+ * matrix can regenerate ONE chain per job — a failing chain's build no longer needs to block
+ * (or re-run) the others. `TOKENS_SYNC_CHAINS` (comma-separated chain ids) restricts
+ * PIPELINE_CONFIG.chains; unset ⇒ every chain, exactly today's behavior. writeTrustFixture's
+ * per-chain merge (see verdicts.ts) means a scoped run only ever touches its own chain's rows.
+ */
+function chainsToRun(): number[] {
+  const raw = process.env.TOKENS_SYNC_CHAINS?.trim()
+  if (!raw) return PIPELINE_CONFIG.chains
+  const requested = raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n))
+  const supported = new Set(PIPELINE_CONFIG.chains)
+  const unknown = requested.filter((c) => !supported.has(c))
+  if (unknown.length > 0) {
+    throw new Error(`TOKENS_SYNC_CHAINS names unsupported chain(s): ${unknown.join(', ')} (supported: ${PIPELINE_CONFIG.chains.join(', ')})`)
+  }
+  return requested
+}
 
 // Mirrors the runtime CORE_LOCAL_LOGO in src/lib/chains/tokens.ts — bundled, validated,
 // never-404 brand assets. Everything else uses the /api/token-logo route (CoinGecko-first
@@ -92,6 +112,7 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
     push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
   }
   if (chainId === 8453) for (const s of CURATED_BASE_SEEDS) push(s)
+  if (chainId === 42161) for (const s of CURATED_ARBITRUM_SEEDS) push(s)
   for (const t of GENERATED_TOKEN_CATALOG[chainId] ?? []) {
     if (!t.verified) continue // post-baseline additions persist only while verified
     push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
@@ -99,11 +120,25 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
   return seeds
 }
 
+// [fix/token-search-ranking-squatting Task 3] The chain's PREVIOUSLY-committed catalog rows
+// (before THIS run overwrites the file) — lets retainFlakySeeds tell a single-source flake
+// apart from a real delisting.
+function previousCatalogFor(chainId: number): Map<string, CatalogRow> {
+  const map = new Map<string, CatalogRow>()
+  for (const t of GENERATED_TOKEN_CATALOG[chainId] ?? []) {
+    map.set(t.address.toLowerCase(), t as unknown as CatalogRow)
+  }
+  return map
+}
+
 function categoryResolver() {
   const seedCategories = new Map<string, string>()
   for (const t of DEFAULT_TOKENS) seedCategories.set(`1:${t.address.toLowerCase()}`, t.category)
   for (const s of CURATED_BASE_SEEDS) {
     if (s.category) seedCategories.set(`8453:${s.address.toLowerCase()}`, s.category)
+  }
+  for (const s of CURATED_ARBITRUM_SEEDS) {
+    if (s.category) seedCategories.set(`42161:${s.address.toLowerCase()}`, s.category)
   }
   const overrides = new Map<string, string>()
   for (const [addr, cat] of Object.entries(CATEGORY_OVERRIDES)) overrides.set(`1:${addr.toLowerCase()}`, cat)
@@ -116,8 +151,11 @@ async function run() {
   const categoryFor = categoryResolver()
   const allVerdicts: Verdict[] = []
   fs.mkdirSync(OUT_DIR, { recursive: true })
+  const builtAt = new Date().toISOString().slice(0, 10)
+  const chains = chainsToRun()
+  if (chains.length !== PIPELINE_CONFIG.chains.length) log(`scoped run: chain(s) ${chains.join(', ')} (of ${PIPELINE_CONFIG.chains.join(', ')})`)
 
-  for (const chainId of PIPELINE_CONFIG.chains) {
+  for (const chainId of chains) {
     log(`\n━━ chain ${chainId} ━━`)
     const { fetchers, getCgSet } = makeFetchers(chainId)
     const result = await buildChainCatalog(chainId, {
@@ -126,6 +164,7 @@ async function run() {
         return { ...r, entries: applyCuratedCorrections(r.entries) }
       }),
       fetchMarket: makeMarketFetcher(chainId),
+      fetchVolume: makeVolumeFetcher(chainId),
       collectVerdicts: (tokens) => {
         const cg = getCgSet()
         return collectVerdicts(tokens, { log, cgSets: cg ? new Map([[chainId, cg]]) : undefined })
@@ -137,6 +176,8 @@ async function run() {
       categoryFor,
       logoFor,
       log,
+      previousCatalog: previousCatalogFor(chainId),
+      builtAt,
     })
 
     // keep only verdicts for tokens that actually shipped (the guard gate audits the
@@ -150,7 +191,9 @@ async function run() {
         'AUTO-GENERATED by scripts/token-catalog/build.ts (npm run tokens:sync) — DO NOT EDIT BY HAND. ' +
         'Cross-verified multi-source token catalog; see docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md. ' +
         'verified:true = >=minSources independent sources agreed on this (chainId, EIP-55 address) AND the catalog guard passed it on-chain.',
-      schemaVersion: 1,
+      // v2 [fix/token-search-ranking-squatting]: rows carry volume24hUsd/volumeSource/
+      // volumeFetchedAt (null, never a misleading 0, when no source resolved a volume).
+      schemaVersion: 2,
       chainId,
       config: {
         minSources: PIPELINE_CONFIG.minSources,
@@ -167,7 +210,9 @@ async function run() {
     fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n')
 
     // ── build report (feeds FEEDBACK) ──
+    const populatedVolume = result.tokens.filter((t) => t.volume24hUsd != null).length
     log(`\nwrote ${file}`)
+    log(`  volume24hUsd populated: ${populatedVolume}/${result.tokens.length}`)
     log(`  sources used: ${payload.sourcesUsed.join(', ') || 'NONE'}`)
     for (const n of result.sourceNotes) log(`  note: ${n}`)
     log(`  included: ${result.report.included} (verified: ${result.report.verified})`)
@@ -180,12 +225,16 @@ async function run() {
       for (const c of result.report.conflicts) log(`    ${c.symbol}: kept ${c.kept}, rejected ${c.rejected.join(', ')}`)
     }
     if (result.report.capped.length) log(`  capped (over maxNewTokensPerChain): ${result.report.capped.length}`)
+    if (result.report.retained.length) {
+      log(`  retained from previous (source flake — FEEDBACK):`)
+      for (const r of result.report.retained) log(`    ${r.symbol} ${r.address} — missing: ${r.missingSources.join(', ')}`)
+    }
     const byReason = new Map<string, number>()
     for (const r of result.report.rejections) byReason.set(r.reason, (byReason.get(r.reason) ?? 0) + 1)
     for (const [reason, n] of byReason) log(`  rejected ${reason}: ${n}`)
   }
 
-  const { file, count } = writeTrustFixture(allVerdicts, GUARD_CHAINS)
+  const { file, count } = writeTrustFixture(allVerdicts, chains)
   log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
 }
 

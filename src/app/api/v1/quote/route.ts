@@ -9,8 +9,11 @@
  *
  * Internal /api/quote (which the frontend still uses) is deliberately
  * left untouched: it has IP-based rate limiting and no auth, which is
- * correct for the in-app surface. The two endpoints share fetchMetaQuote
- * but nothing else.
+ * correct for the in-app surface. [fix/zerox-quote-hygiene T2] The two
+ * endpoints now ALSO share the meta-quote-cache.ts KV cache + single-flight
+ * dampener — identical pairs collapse onto one upstream fan-out regardless
+ * of which endpoint asked first — but everything else (auth, rate limiting,
+ * response shape) stays fully independent.
  *
  * Response shape is documented in the spec and frozen for v1:
  *   { best, quotes, gasless, meta: { timestamp, sourcesQueried, sourcesResponded, mevProtected } }
@@ -25,6 +28,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { fetchMetaQuote, type NormalizedQuote } from '@/lib/api'
+import { getMetaQuoteCached } from '@/lib/meta-quote-cache'
 import { verifyApiKey } from '@/lib/api-auth'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { isValidAddress } from '@/lib/validation'
@@ -154,9 +158,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // 4. Run the meta-quote. fetchMetaQuote handles per-source circuit
   //    breakers, timeouts, and outlier filtering internally; we only
   //    need to map adapter-side errors → API error responses.
+  // [T2] Shared KV cache + single-flight dampener — same cache key shape
+  // (chain + pair + amount + decimals + excludes) as /api/quote, so an
+  // identical pair queried through either endpoint collapses onto the
+  // same upstream fetch. srcDecimals/dstDecimals default to fetchMetaQuote's
+  // own 18/18 — v1/quote has no decimals params, matching prior behaviour.
   let meta
   try {
-    meta = await fetchMetaQuote(tokenIn, tokenOut, amount)
+    meta = await getMetaQuoteCached(
+      { src: tokenIn, dst: tokenOut, amount, srcDecimals: 18, dstDecimals: 18, chainId: CHAIN_ID },
+      () => fetchMetaQuote(tokenIn, tokenOut, amount),
+    ).then((r) => r.result)
   } catch (err) {
     // [11-M-02] Keep err.message in server logs only — public catch
     // paths must not leak adapter / limiter implementation details

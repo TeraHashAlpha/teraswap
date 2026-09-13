@@ -73,6 +73,7 @@ function assembleInput(p: Partial<Parameters<typeof assembleCatalog>[0]>) {
     config: CFG,
     categoryFor: noCategory,
     logoFor: noLogo,
+    builtAt: '2026-01-01',
     ...p,
   }
 }

@@ -15,6 +15,7 @@ import type {
   MarketSignal,
   PipelineConfig,
   Rejection,
+  RetainedSeed,
   SourceEntry,
   SourceId,
   SymbolConflict,
@@ -116,6 +117,62 @@ export function isLowLiquidity(m: MarketSignal | undefined, cfg: PipelineConfig)
 /** External-source agreement votes (curated/native/defillama do not count — see NON_VOTING). */
 export function externalVoteCount(sources: SourceId[]): number {
   return sources.filter((s) => !NON_VOTING.has(s)).length
+}
+
+/**
+ * [fix/token-search-ranking-squatting Task 3] A previous-catalog row with >=2-source
+ * agreement that this run rejected for insufficient-sources(-low-liquidity) is retained
+ * when the shortfall is attributable to a source that returned NOTHING this run (down/rate
+ * limited) — never a source that ran fine but simply stopped listing the token, which is
+ * real signal. Brand-new candidates (no previous row) are never retained; they still need
+ * full agreement. Pure and unit-testable: sourcesUsedThisRun is exactly what the caller's
+ * source-fetch phase actually returned data for.
+ */
+export function retainFlakySeeds(
+  rejected: Rejection[],
+  merged: Candidate[],
+  previousCatalog: Map<string, CatalogRow>,
+  sourcesUsedThisRun: SourceId[],
+  config: PipelineConfig,
+): { qualified: Candidate[]; rejected: Rejection[]; retained: RetainedSeed[] } {
+  const qualified: Candidate[] = []
+  const stillRejected: Rejection[] = []
+  const retained: RetainedSeed[] = []
+  const usedThisRun = new Set(sourcesUsedThisRun)
+  for (const r of rejected) {
+    if (r.reason !== 'insufficient-sources' && r.reason !== 'insufficient-sources-low-liquidity') {
+      stillRejected.push(r)
+      continue
+    }
+    const prev = previousCatalog.get(r.address.toLowerCase())
+    const prevSources = (prev?.sources ?? []) as SourceId[]
+    if (!prev || !prev.verified || externalVoteCount(prevSources) < config.minSources) {
+      stillRejected.push(r)
+      continue
+    }
+    const missing = prevSources.filter((s) => !NON_VOTING.has(s) && !usedThisRun.has(s))
+    if (missing.length === 0) {
+      // nothing that previously voted is down this run — the drop is real, not a flake
+      stillRejected.push(r)
+      continue
+    }
+    const existing = merged.find((c) => c.address.toLowerCase() === r.address.toLowerCase())
+    const candidate: Candidate = existing
+      ? { ...existing, sources: prevSources }
+      : {
+          chainId: r.chainId,
+          address: prev.address,
+          sources: prevSources,
+          symbol: prev.symbol,
+          name: prev.name,
+          decimals: prev.decimals,
+          decimalsDisagree: false,
+          logoURI: prev.logoURI,
+        }
+    qualified.push(candidate)
+    retained.push({ address: prev.address, symbol: prev.symbol, missingSources: missing })
+  }
+  return { qualified, rejected: stillRejected, retained }
 }
 
 function voteCount(c: Candidate): number {
@@ -236,6 +293,19 @@ function guardReason(outcome: GuardOutcome | undefined): Rejection['reason'] | n
 
 const cp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
+/** [fix/token-search-ranking-squatting Task 2] volume24hUsd/volumeSource/volumeFetchedAt
+ *  for one row — NULL across all three when no source resolved a volume (never a 0, which
+ *  would sort as "worse than a confirmed zero-liquidity squatter"). */
+function volumeFields(
+  addrLower: string,
+  market: Map<string, MarketSignal>,
+  builtAt: string,
+): Pick<CatalogRow, 'volume24hUsd' | 'volumeSource' | 'volumeFetchedAt'> {
+  const m = market.get(addrLower)
+  if (m?.volume24hUsd == null) return { volume24hUsd: null, volumeSource: null, volumeFetchedAt: null }
+  return { volume24hUsd: m.volume24hUsd, volumeSource: m.volumeSource ?? null, volumeFetchedAt: builtAt }
+}
+
 /**
  * Assemble the final per-chain catalog:
  *  - qualified candidates that PASS the (reused) catalog guard → verified:true (+sources)
@@ -247,7 +317,7 @@ const cp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
  *  - the new-token growth cap keeps highest-volume tokens; overflow is reported
  */
 export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; report: BuildReport } {
-  const { chainId, qualified, guard, seeds, cores, market, config, categoryFor, logoFor } = input
+  const { chainId, qualified, guard, seeds, cores, market, config, categoryFor, logoFor, builtAt } = input
   const rows = new Map<string, CatalogRow>()
   const report: BuildReport = {
     chainId,
@@ -257,6 +327,7 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
     rejections: [],
     conflicts: [],
     capped: [],
+    retained: [],
   }
 
   // 1. qualified candidates → guard gate (the existing catalog guard, reused)
@@ -274,11 +345,12 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
         logoURI: logoFor(chainId, c.address, c.symbol),
         verified: true,
         sources: c.sources,
+        ...volumeFields(addrLower, market, builtAt),
       })
     } else if (seeds.has(addrLower)) {
       // seed failed the guard — keep it, honest ⚠, loudly flagged
       const seed = seeds.get(addrLower)!
-      rows.set(addrLower, seedRow(chainId, seed, c.sources, categoryFor, logoFor))
+      rows.set(addrLower, seedRow(chainId, seed, c.sources, categoryFor, logoFor, market, builtAt))
       report.unverifiedSeeds.push({ address: seed.address, symbol: seed.symbol, reason: failure })
     } else {
       report.rejections.push({ chainId, address: c.address, symbol: c.symbol, reason: failure, detail: outcome?.detail })
@@ -308,7 +380,7 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
   // 3. seeds that never qualified — keep, honest ⚠, flagged
   for (const [addrLower, seed] of seeds) {
     if (rows.has(addrLower)) continue
-    rows.set(addrLower, seedRow(chainId, seed, ['curated'], categoryFor, logoFor))
+    rows.set(addrLower, seedRow(chainId, seed, ['curated'], categoryFor, logoFor, market, builtAt))
     report.unverifiedSeeds.push({ address: seed.address, symbol: seed.symbol, reason: 'insufficient-sources' })
   }
 
@@ -342,6 +414,9 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
         verified: true,
         sources: ['native'],
         core: true,
+        volume24hUsd: null,
+        volumeSource: null,
+        volumeFetchedAt: null,
       })
       continue
     }
@@ -366,6 +441,7 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
         verified: true,
         sources: ['curated'],
         core: true,
+        ...volumeFields(addrLower, market, builtAt),
       })
     }
   }
@@ -389,6 +465,8 @@ function seedRow(
   sources: SourceId[],
   categoryFor: AssembleInput['categoryFor'],
   logoFor: AssembleInput['logoFor'],
+  market: Map<string, MarketSignal>,
+  builtAt: string,
 ): CatalogRow {
   return {
     address: seed.address,
@@ -399,6 +477,7 @@ function seedRow(
     logoURI: seed.logoURI ?? logoFor(chainId, seed.address, seed.symbol),
     verified: false,
     sources,
+    ...volumeFields(seed.address.toLowerCase(), market, builtAt),
   }
 }
 

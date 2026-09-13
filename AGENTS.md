@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: bf2b19a9a0f1ab97f088620a9866b4415f379530012922135b78866756868b7f -->
+<!-- claude-md-sha256: 90b87df7ca92da32a0bf70b7c19af90f0ffabdb23c7a522cbbf1bc84d1359d5d -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -54,11 +54,15 @@ substitute for this rule.
 
 ## What a Grok Build task must never touch
 
-`contracts/**`, `keeper/**`, any path or symbol containing `executor`, `src/lib/chains/**`, or any
-swap/gate/signer code path — these are fund-flow-adjacent and stay Claude/Opus + Auditor territory unless a
-specific prompt says otherwise. `scripts/grok-dispatch.sh` refuses to dispatch a spec whose "Files affected"
-list matches these paths in non-interactive (`--always-approve`) mode; see the dispatcher's own refusal
-checks for the exact patterns.
+`contracts/**`, `keeper/**`, any path or symbol containing `executor`, `src/lib/chains/**`, any
+swap/gate/signer code path, `scripts/token-catalog/**`, or `src/config/generated/token-catalog.*.json` —
+these are fund-flow-adjacent and stay Claude/Opus + Auditor territory unless a specific prompt says
+otherwise. The token-catalog pipeline and its generated JSON are address-hygiene-critical (they are the
+sole source of the addresses `src/lib/chains/tokens.ts` renders and swaps against, across all three
+chains — see CLAUDE.md's Token catalog note) and fall under the same Address hygiene rule above: a wrong
+or hand-edited address here routes a real swap to the wrong contract. `scripts/grok-dispatch.sh` refuses to
+dispatch a spec whose "Files affected" list matches these paths in non-interactive (`--always-approve`)
+mode; see the dispatcher's own refusal checks for the exact patterns.
 
 ## Drift guard
 

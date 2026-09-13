@@ -8,14 +8,23 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { MarketSignal, SourceFetchResult } from './types'
-import { parseTokenList, parseOneInchMap, parseDefiLlamaCoins } from './sources'
+import { parseTokenList, parseOneInchMap, parseDefiLlamaCoins, parseCoingeckoMarkets } from './sources'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..', '..', '..')
 const VENDORED_UNISWAP = join(ROOT, 'scripts', 'token-lists', 'uniswap-default-v21.3.0.json')
 
-/** chainId → platform slug (identical for CoinGecko, DefiLlama and Trust Wallet). */
-const PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base' }
+/**
+ * chainId → per-source platform slug. Mainnet/Base happen to share one spelling across
+ * CoinGecko, DefiLlama and Trust Wallet ('ethereum'/'base') — Arbitrum does NOT: CoinGecko
+ * lists it as 'arbitrum-one' (its 'arbitrum' path 404s), DefiLlama's coins API and Trust
+ * Wallet's blockchains folder are both 'arbitrum' (confirmed live 2026-09-12). Kept as
+ * separate maps rather than reusing PLATFORM so a future chain's mismatch fails loudly
+ * (a missing key) instead of silently sharing the wrong slug.
+ */
+const CG_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum-one' }
+const TW_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum' }
+const LLAMA_PLATFORM: Record<number, string> = { 1: 'ethereum', 8453: 'base', 42161: 'arbitrum' }
 
 const FETCH_TIMEOUT_MS = 30_000
 
@@ -40,7 +49,8 @@ export interface ChainFetchers {
 
 export function makeFetchers(chainId: number): ChainFetchers {
   let cgSet: Set<string> | null = null
-  const platform = PLATFORM[chainId]
+  const cgPlatform = CG_PLATFORM[chainId]
+  const twPlatform = TW_PLATFORM[chainId]
 
   const uniswap = async (): Promise<SourceFetchResult> => {
     try {
@@ -58,7 +68,7 @@ export function makeFetchers(chainId: number): ChainFetchers {
   }
 
   const coingecko = async (): Promise<SourceFetchResult> => {
-    const raw = await fetchJson(`https://tokens.coingecko.com/${platform}/all.json`)
+    const raw = await fetchJson(`https://tokens.coingecko.com/${cgPlatform}/all.json`)
     // The trusted-list set mirrors verdicts.ts cgAddressSet EXACTLY (every string address,
     // no tokenlist validation) so tokens:sync and guard:refresh compute inTrustedList from
     // identical semantics — the identity ENTRIES below still go through full validation.
@@ -86,7 +96,7 @@ export function makeFetchers(chainId: number): ChainFetchers {
 
   const trustwallet = async (): Promise<SourceFetchResult> => {
     const raw = await fetchJson(
-      `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${platform}/tokenlist.json`,
+      `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${twPlatform}/tokenlist.json`,
     )
     return { source: 'trustwallet', entries: parseTokenList(raw, chainId, 'trustwallet') }
   }
@@ -98,16 +108,27 @@ export function makeFetchers(chainId: number): ChainFetchers {
     return { source: 'superchain', entries: parseTokenList(raw, chainId, 'superchain') }
   }
 
+  // OffchainLabs' canonical Arbitrum bridged-token registry ("Arb Whitelist Era" — the SAME
+  // list bridge.arbitrum.io itself renders). Lists BOTH L1 and L2 legs per bridged token, so
+  // parseTokenList's chainId filter is load-bearing here (drops the L1 rows). This is where
+  // 'USDC.e' ("Bridged USDC") is sourced from as a distinct, list-tagged entry — native USDC
+  // (Circle-issued, not bridged) is never in this list, only in uniswap/coingecko/etc.
+  const arbitrumBridge = async (): Promise<SourceFetchResult> => {
+    const raw = await fetchJson('https://bridge.arbitrum.io/token-list-42161.json')
+    return { source: 'arbitrumBridge', entries: parseTokenList(raw, chainId, 'arbitrumBridge') }
+  }
+
   const fetchers = [uniswap, coingecko, oneinch, trustwallet]
   // The Superchain list is the canonical bridged-token registry for OP-stack chains (Base).
   if (chainId === 8453) fetchers.push(superchain)
+  if (chainId === 42161) fetchers.push(arbitrumBridge)
 
   return { fetchers, getCgSet: () => cgSet }
 }
 
 /** DefiLlama coins API — batched market signal + identity votes over discovered addresses. */
 export function makeMarketFetcher(chainId: number): (addresses: `0x${string}`[]) => Promise<SourceFetchResult> {
-  const platform = PLATFORM[chainId]
+  const platform = LLAMA_PLATFORM[chainId]
   const BATCH = 100
   return async (addresses) => {
     const entries: SourceFetchResult['entries'] = []
@@ -130,6 +151,68 @@ export function makeMarketFetcher(chainId: number): (addresses: `0x${string}`[])
       entries,
       market,
       note: failures > 0 ? `${failures} batch(es) failed — partial market coverage` : undefined,
+    }
+  }
+}
+
+// [fix/token-search-ranking-squatting Task 2] CoinGecko's per-address volume endpoint
+// (simple/token_price?include_24hr_vol=true) caps free-tier requests at ONE contract
+// address each — hundreds of tokens would mean hundreds of sequential calls. Instead:
+// fetch the full /coins/list?include_platform=true snapshot ONCE (memoized for the life
+// of the process — build.ts calls makeVolumeFetcher once per chain, all 3 chains share
+// this) to map contract address → CoinGecko coin id, then batch id → 24h volume through
+// /coins/markets (up to 250 ids/request) — a handful of requests covers every chain.
+let coinsListPromise: Promise<Array<{ id: string; platforms?: Record<string, string> }>> | null = null
+function fetchCoinsList(): Promise<Array<{ id: string; platforms?: Record<string, string> }>> {
+  if (!coinsListPromise) {
+    coinsListPromise = fetchJson('https://api.coingecko.com/api/v3/coins/list?include_platform=true') as Promise<
+      Array<{ id: string; platforms?: Record<string, string> }>
+    >
+  }
+  return coinsListPromise
+}
+
+const CG_MARKETS_BATCH = 250
+
+/** Batched CoinGecko 24h-volume market signal over discovered addresses. Outage-tolerant
+ *  like makeMarketFetcher: a batch failure is logged and skipped, never fatal. */
+export function makeVolumeFetcher(chainId: number): (addresses: `0x${string}`[]) => Promise<SourceFetchResult> {
+  const platform = CG_PLATFORM[chainId]
+  return async (addresses) => {
+    const list = await fetchCoinsList()
+    const idByAddress = new Map<string, string>()
+    for (const coin of list) {
+      const addr = coin.platforms?.[platform]
+      if (addr) idByAddress.set(addr.toLowerCase(), coin.id)
+    }
+    const idToAddresses = new Map<string, string[]>()
+    for (const addr of addresses) {
+      const id = idByAddress.get(addr.toLowerCase())
+      if (!id) continue
+      const g = idToAddresses.get(id)
+      if (g) g.push(addr)
+      else idToAddresses.set(id, [addr])
+    }
+    const ids = [...idToAddresses.keys()]
+    const market = new Map<string, MarketSignal>()
+    let failures = 0
+    for (let i = 0; i < ids.length; i += CG_MARKETS_BATCH) {
+      const chunk = ids.slice(i, i + CG_MARKETS_BATCH)
+      try {
+        const raw = await fetchJson(
+          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${chunk.join(',')}&per_page=${CG_MARKETS_BATCH}&page=1`,
+        )
+        for (const [k, v] of parseCoingeckoMarkets(raw, chainId, idToAddresses)) market.set(k, v)
+      } catch {
+        failures += 1
+      }
+    }
+    if (failures > 0 && market.size === 0) throw new Error(`coingecko-volume: all ${failures} batch(es) failed`)
+    return {
+      source: 'coingecko',
+      entries: [],
+      market,
+      note: failures > 0 ? `${failures} batch(es) failed — partial volume coverage` : undefined,
     }
   }
 }

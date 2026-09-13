@@ -198,6 +198,19 @@ describe('/api/quote — L2 sequencer gate mapping [E-2]', () => {
 // ── [E2-AUDIT] POST handler: chainId coercion + sequencer mapping ────────────
 
 describe('POST /api/quote — chainId coercion + sequencer mapping [E2-AUDIT]', () => {
+  // [T2] POST now shares the KV cache with GET (meta-quote-cache.ts) — reset
+  // module state + the fake KV store per test so one test's cached result
+  // (or a queued mock rejection left unconsumed by a cache hit) can't leak
+  // into the next test in this describe, which previously couldn't happen
+  // because POST had no caching at all.
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+    fakeKvStore.clear()
+    kvShouldFail = false
+    fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
+  })
+
   async function callPOST(body: Record<string, unknown>) {
     const { POST } = await import('./route')
     const req = new NextRequest('http://localhost/api/quote', {
@@ -272,6 +285,51 @@ describe('GET /api/quote — shared cache [feat/quote-before-wallet acceptance 5
     const res = await callGET({ src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual(META_RESULT)
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// [fix/zerox-quote-hygiene T2] POST previously bypassed this cache entirely
+// (it called fetchMetaQuote directly) — now it shares the exact same KV
+// cache as GET via meta-quote-cache.ts.
+describe('POST /api/quote — shared cache [T2]', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+    fakeKvStore.clear()
+    kvShouldFail = false
+    fetchMetaQuoteMock.mockResolvedValue(META_RESULT)
+  })
+
+  async function callPOST(body: Record<string, unknown>) {
+    const { POST } = await import('./route')
+    const req = new NextRequest('http://localhost/api/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return POST(req)
+  }
+
+  it('N identical POST requests within the TTL produce exactly 1 upstream fetchMetaQuote call', async () => {
+    const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: 1 }
+    for (let i = 0; i < 5; i++) {
+      const res = await callPOST(params)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('X-Quote-Cache')).toBe(i === 0 ? 'miss' : 'hit')
+    }
+    expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a GET and a POST for the identical pair share ONE cache entry — the POST warms it, the GET hits', async () => {
+    const { GET } = await import('./route')
+    const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: 1 }
+    const postRes = await callPOST(params)
+    expect(postRes.headers.get('X-Quote-Cache')).toBe('miss')
+
+    const getReq = new NextRequest(url({ src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' }))
+    const getRes = await GET(getReq)
+    expect(getRes.headers.get('X-Quote-Cache')).toBe('hit')
     expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
   })
 })
