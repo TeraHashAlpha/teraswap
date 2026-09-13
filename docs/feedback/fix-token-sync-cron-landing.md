@@ -59,3 +59,43 @@ a GitHub issue titled `[token-catalog-guard] chain <id> is failing the gate`, wi
 strings). Initially spliced via `${{ steps.diff.outputs.summary }}` directly into a `run:`
 block; moved through an `env:` var instead before pushing, since a symbol like `"; curl evil #`
 would otherwise execute as shell code in the Actions runner.
+
+---
+
+## Feedback — CI-red follow-up (commits `8c1a36f`, `0b78121`)
+
+**CodeQL fix:** `verdicts.test.ts`'s `tmpFixture()` built a temp path by hand under
+`os.tmpdir()` (pid + `Math.random()` — guessable, racy). Replaced with
+`fs.mkdtempSync(path.join(os.tmpdir(), 'ts-verdicts-'))` (0o700 dir) + `fs.chmodSync(file,
+0o600)` after each write. Cleanup is `fs.rmSync(dir, {recursive:true,force:true})` in the
+existing `afterEach`.
+
+**Diagnosis table** (`fetchSwapFromSource.test.ts` T1-sim-failed, `zerox-breaker-fanout.test.ts`
+T4, plus a **3rd failure not in the original ask**: `fetchSwapFromSource.test.ts`'s "a
+successful build..." test):
+
+| Test | Alone / branch | Alone / origin/main (c1e298c) | Full CI-command run |
+|---|---|---|---|
+| All 3 | ✓ pass, ~4.3–4.9s each | ✓ pass, ~4.3–4.9s each (identical) | ✗ fail, ~5003ms timeout (identical on both branch and main) |
+
+**Root cause (production code, untouched):** `withCircuitBreaker` → `ensureInitialized()` →
+`initFromKV()` → `source-state-machine.getAllStatuses()` → a real, unconfigured
+`@upstash/redis` client. Its SDK retries 5× with exponential backoff
+(`node_modules/@upstash/redis`: `Math.exp(retryCount)*50ms` ≈ 50+136+370+1005+2730 ≈ 4291ms —
+matches the observed durations exactly). Both files call `vi.resetModules()` per test, so
+every test re-pays this real round trip. Under full-suite CPU contention it tips past vitest's
+5000ms default timeout; the abandoned promise resolves later in the background and calls
+`recordQuoteBuildAttempt` into the *next* test's mock — that's the "expected 1, got 2".
+**Classification: (ii) pre-existing flake**, byte-identical on origin/main, predates this PR
+(circuit-breaker's KV pre-seed is P112/M-02).
+
+**Fix:** mocked `@/lib/source-state-machine`'s `getAllStatuses` to resolve `[]` in both files —
+behaviorally identical to today's real KV-unavailable fallback, just instant. Real breaker
+logic (429 opens it, fan-out filters, stays OPEN) still exercised unmocked. 9 tests: 1ms–493ms
+now (was up to 5003ms).
+
+`git diff --stat origin/main -- src/lib/api.ts src/lib/adapters/circuit-breaker.ts` → **empty**.
+
+**Suite summary (exact CI command, `CI=true npx vitest run --reporter=verbose --reporter=json
+--outputFile=...`):** `Test Files 279 passed (279)` / `Tests 3971 passed (3971)`. Lint: 94
+warnings/0 errors (baseline). Typecheck: clean. HEAD: `0b78121`.
