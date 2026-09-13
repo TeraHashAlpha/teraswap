@@ -36,9 +36,28 @@ import { makeFetchers, makeMarketFetcher, makeVolumeFetcher } from './lib/fetch-
 import type { CatalogRow } from './lib/types'
 import { makeCategoryResolver } from './lib/category'
 import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS } from './lib/curated'
-import { collectVerdicts, writeTrustFixture, GUARD_CHAINS } from './lib/verdicts'
+import { collectVerdicts, writeTrustFixture } from './lib/verdicts'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
+
+/**
+ * [fix/token-sync-cron-landing] Optional single/multi-chain scope, so the cron's per-chain
+ * matrix can regenerate ONE chain per job — a failing chain's build no longer needs to block
+ * (or re-run) the others. `TOKENS_SYNC_CHAINS` (comma-separated chain ids) restricts
+ * PIPELINE_CONFIG.chains; unset ⇒ every chain, exactly today's behavior. writeTrustFixture's
+ * per-chain merge (see verdicts.ts) means a scoped run only ever touches its own chain's rows.
+ */
+function chainsToRun(): number[] {
+  const raw = process.env.TOKENS_SYNC_CHAINS?.trim()
+  if (!raw) return PIPELINE_CONFIG.chains
+  const requested = raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n))
+  const supported = new Set(PIPELINE_CONFIG.chains)
+  const unknown = requested.filter((c) => !supported.has(c))
+  if (unknown.length > 0) {
+    throw new Error(`TOKENS_SYNC_CHAINS names unsupported chain(s): ${unknown.join(', ')} (supported: ${PIPELINE_CONFIG.chains.join(', ')})`)
+  }
+  return requested
+}
 
 // Mirrors the runtime CORE_LOCAL_LOGO in src/lib/chains/tokens.ts — bundled, validated,
 // never-404 brand assets. Everything else uses the /api/token-logo route (CoinGecko-first
@@ -133,8 +152,10 @@ async function run() {
   const allVerdicts: Verdict[] = []
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const builtAt = new Date().toISOString().slice(0, 10)
+  const chains = chainsToRun()
+  if (chains.length !== PIPELINE_CONFIG.chains.length) log(`scoped run: chain(s) ${chains.join(', ')} (of ${PIPELINE_CONFIG.chains.join(', ')})`)
 
-  for (const chainId of PIPELINE_CONFIG.chains) {
+  for (const chainId of chains) {
     log(`\n━━ chain ${chainId} ━━`)
     const { fetchers, getCgSet } = makeFetchers(chainId)
     const result = await buildChainCatalog(chainId, {
@@ -213,7 +234,7 @@ async function run() {
     for (const [reason, n] of byReason) log(`  rejected ${reason}: ${n}`)
   }
 
-  const { file, count } = writeTrustFixture(allVerdicts, GUARD_CHAINS)
+  const { file, count } = writeTrustFixture(allVerdicts, chains)
   log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
 }
 

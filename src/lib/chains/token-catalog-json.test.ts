@@ -37,7 +37,12 @@ describe.each(FILES)('token-catalog.%i.json — committed catalog invariants', (
   const tokens: GeneratedToken[] = GENERATED_TOKEN_CATALOG[chainId]
 
   it('has the expected schema and chain', () => {
-    expect(file.schemaVersion).toBe(1)
+    // [fix/token-sync-cron-landing] build.ts has emitted schemaVersion 2 since
+    // fix/token-search-ranking-squatting (volume24hUsd/volumeSource/volumeFetchedAt fields) —
+    // this assertion was never bumped, so ANY regen (regardless of the GUARD_CHAINS/trusted-
+    // list fixes in this branch) would fail the gate here on schema mismatch alone. See
+    // FEEDBACK: this is a third, independent contributor to the cron's failure streak.
+    expect(file.schemaVersion).toBe(2)
     expect(file.chainId).toBe(chainId)
     expect(file.counts.included).toBe(tokens.length)
     expect(file.counts.verified).toBe(tokens.filter((t) => t.verified).length)
