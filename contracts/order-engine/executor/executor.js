@@ -96,6 +96,7 @@ import {
   formatUnits,
   formatEther,
   zeroHash,
+  zeroAddress,
 } from "viem"
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
@@ -1501,16 +1502,24 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}, executor=${isV3 ? 'v3' : 'v2'}`)
 
       // Debug: read current Chainlink price
-      try {
-        const [, answer] = await publicClient.readContract({
-          address: orderStruct.priceFeed,
-          abi: PRICE_FEED_ABI,
-          functionName: "latestRoundData",
-        })
-        log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
-        log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
-      } catch (e) {
-        log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+      // [fix/keeper-alert-cooldown-and-dca-debug-read] A DCA order has no feed (priceFeed = zero
+      // address): skip the read — it logged `Could not read Chainlink price: … returned no data
+      // ("0x")` on every DCA cycle, noise that reads like a feed outage. Limit / SL / TP orders
+      // keep the read exactly as before (pinned by chainlink-debug-read.test.mjs).
+      if (orderStruct.priceFeed === zeroAddress) {
+        log(`  Price feed: none (DCA)`)
+      } else {
+        try {
+          const [, answer] = await publicClient.readContract({
+            address: orderStruct.priceFeed,
+            abi: PRICE_FEED_ABI,
+            functionName: "latestRoundData",
+          })
+          log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
+          log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
+        } catch (e) {
+          log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+        }
       }
 
       // Check via contract [SPRINT-V3-P2] execAddress/execAbi resolved per-order above.
