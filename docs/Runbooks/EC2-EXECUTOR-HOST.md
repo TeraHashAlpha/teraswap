@@ -382,6 +382,13 @@ ts_host_guard && pm2 logs teraswap-keeper-arbitrum --lines 60 --nostream
 Any `FATAL:` line ⇒ the refusal names the variable or check; fix the env file, `pm2 restart
 teraswap-keeper-arbitrum`, re-read from line 1. Never work around a refusal with an override.
 
+**Low-gas alert (per app).** The keeper's rule is USD-based — `LOW_GAS_USD_THRESHOLD` (default $5)
+on the signer's native balance — and independent of the monitor repo's ETH thresholds (0.002 /
+0.0004 on Arbitrum); keep every signer at >= $10 of native gas. It repeats at most hourly
+(`LOW_GAS_ALERT_COOLDOWN_MS`, default 3600000) with a suppressed count, plus one "gas balance
+recovered" message. Applying either variable is `pm2 restart <app>` for that app only — never
+`restart all`, never `--update-env` (S2.4).
+
 ### S2.6 — logrotate coverage
 
 pm2 does not rotate the ecosystem apps' `./logs/*.log`, and the Base app's `~/.pm2/logs/` files
