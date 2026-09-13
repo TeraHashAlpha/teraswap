@@ -153,6 +153,13 @@ describe('GET /api/portfolio/prices — chain-aware slug [E-3]', () => {
     expect(chain).toBe('base')
   })
 
+  it("maps chainId=42161 to the 'arbitrum' slug via the chain registry", async () => {
+    mockFetchDefiLlamaPrices.mockResolvedValueOnce(new Map())
+    const res = await GET(makeRequest(`?tokens=${USDC}&chainId=42161`))
+    expect(res.status).toBe(200)
+    const [, chain] = mockFetchDefiLlamaPrices.mock.calls[0]
+    expect(chain).toBe('arbitrum')
+  })
 
   it('[CHORE-POLISH-3 P2] accepts exactly the shared PORTFOLIO_SUPPORTED_CHAINS set (same source as tokens route)', async () => {
     // Parameterized over the SHARED allowlist module — the same constant the
@@ -162,8 +169,9 @@ describe('GET /api/portfolio/prices — chain-aware slug [E-3]', () => {
       const res = await GET(makeRequest(`?tokens=${USDC}&chainId=${chainId}`))
       expect(res.status).toBe(200)
     }
-    // A real chain outside the set (Arbitrum) is rejected before DefiLlama.
-    const res = await GET(makeRequest(`?tokens=${USDC}&chainId=42161`))
+    // A real chain outside the set (Optimism) is rejected before DefiLlama —
+    // negative control proving the allowlist actually gates, not just accepts everything.
+    const res = await GET(makeRequest(`?tokens=${USDC}&chainId=10`))
     expect(res.status).toBe(400)
   })
 
