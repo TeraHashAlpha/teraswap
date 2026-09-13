@@ -16,9 +16,14 @@
  * was set, NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR had been set since 2026-07-20 and
  * NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM was set from 2026-08-04 to 2026-08-26. The suite
  * was green against a world that no longer existed (INC-2026-08-26-001: DCA reachable on Arbitrum
- * for 22 days on a chain with no keeper). The third case below IS that Production shape; it holds
- * only because v3 chain eligibility is now a code decision (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS in
- * src/lib/order-engine/config.ts) and it FAILS against a config.ts where env alone can enable a chain.
+ * for 22 days on a chain with no keeper). The third case below IS that Production shape. It was
+ * pinned DARK by the incident fix (v3 chain eligibility became a code decision —
+ * ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS in src/lib/order-engine/config.ts); [feat/arbitrum-dca-gates]
+ * it is now pinned OPEN, because that code decision includes 42161. What makes the flip safe is the
+ * case right after it: the same shape with only the v3 var UNSET (the INC §2 containment) is still
+ * the teaser — env keeps the power to disable, and page.tsx's wiring to isDcaLive is unchanged.
+ * Once mounted, <DCAPanel> itself gates on the executor's feed registry
+ * (DCAPanel.arbitrum-gates.test.tsx) — this file is about reachability only.
  *
  * The order-engine config and the chain registry read env at MODULE LOAD, so every case resets the
  * module registry and imports the page fresh AFTER its env stubs (the pattern
@@ -134,24 +139,43 @@ describe('Home — real Arbitrum gate (no mocked dca-launch / order-engine / reg
     expectDcaTabIsTheTeaser()
   })
 
-  it('flag SET, FeeCollector SET, v3 address SET — the Production shape 2026-08-04 → 2026-08-26 ⇒ STILL the teaser: eligibility is a code decision, not env', async () => {
+  it('[feat/arbitrum-dca-gates] flag SET, FeeCollector SET, v3 address SET — the Production shape 2026-08-04 → 2026-08-26 ⇒ the DCA tab now OPENS and <DCAPanel> mounts: 42161 is on the code allowlist', async () => {
     vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
     vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', FEE_COLLECTOR_STUB)
     vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', V3_EXECUTOR_STUB)
 
-    // Sanity: the env genuinely reached the REAL modules — the chain is active and the raw v3 env
-    // slot is populated. The only thing standing between this state and <DCAPanel> is the
-    // code-level allowlist; if these two lines ever fail the case would be passing vacuously.
-    // [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] The raw map is deliberately not
-    // re-exported from '@/lib/order-engine' (the public barrel) — imported from '@/lib/order-engine/config'
-    // instead, the one place it is meant to be read directly.
+    // Sanity: the env genuinely reached the REAL modules, and it is the ALLOWLIST that turns the
+    // populated slot into a resolved executor — not env alone (the case after this one proves the
+    // converse). [FIX-CLOSE-COMMENT-ENFORCED-BOUNDARIES / #424 L-1] The raw map is deliberately not
+    // re-exported from '@/lib/order-engine' — imported from '@/lib/order-engine/config' instead.
     vi.resetModules()
     const { isChainActive } = await import('@/lib/chains')
-    const { getOrderExecutorV3 } = await import('@/lib/order-engine')
+    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } = await import('@/lib/order-engine')
     const { ORDER_EXECUTOR_V3_BY_CHAIN } = await import('@/lib/order-engine/config')
     expect(isChainActive(42161)).toBe(true)
     expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBe(V3_EXECUTOR_STUB)
-    expect(getOrderExecutorV3(42161)).toBeNull()
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS).toContain(42161)
+    expect(getOrderExecutorV3(42161)).toBe(V3_EXECUTOR_STUB)
+
+    await renderSwapView()
+    const tab = dcaTab()
+    expect(tab).not.toBeDisabled()
+    expect(within(tab).queryByText('Soon')).not.toBeInTheDocument()
+    fireEvent.click(tab)
+    expect(await screen.findByTestId('dca-panel')).toBeInTheDocument()
+  })
+
+  it('[feat/arbitrum-dca-gates] flag SET, FeeCollector SET, v3 address UNSET — the INC-2026-08-26-001 §2 containment shape ⇒ STILL the teaser: env keeps the power to disable an eligible chain', async () => {
+    vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
+    vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', FEE_COLLECTOR_STUB)
+    // NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM deliberately unset (deleted in beforeEach).
+
+    vi.resetModules()
+    const { isChainActive } = await import('@/lib/chains')
+    const { getOrderExecutorV3, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS } = await import('@/lib/order-engine')
+    expect(isChainActive(42161)).toBe(true)
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS).toContain(42161) // eligible in code…
+    expect(getOrderExecutorV3(42161)).toBeNull()               // …dark by env
 
     await renderSwapView()
     expectDcaTabIsTheTeaser()

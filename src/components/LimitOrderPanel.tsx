@@ -13,6 +13,7 @@ import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 // leg. This is the SAME function the merged DCA fix uses — called here, never re-implemented,
 // never wrapped in a local helper with its own failure behaviour.
 import { resolveSignableToken } from '@/lib/chains/tokens'
+import { getChainName } from '@/lib/chains/registry'
 import { resolveOrderPriceFeed } from '@/lib/order-engine/price-feed'
 import {
   OrderType,
@@ -882,6 +883,12 @@ function OrderCard({
 }) {
   const [currentPrice, setCurrentPrice] = useState<number | null>(null)
   const chainId = useChainId()
+  // [fix/cross-chain-order-cancel] The order's own chain, always visible; flagged if it doesn't
+  // match the connected wallet before the Cancel click. Limit/TP orders are Base-pinned at
+  // creation (LIMIT_TP_CHAIN_ID), so this is defense/consistency, not the common case.
+  const orderChainId = order.chainId ?? 1
+  const chainMismatch = orderChainId !== chainId
+  const orderChainName = getChainName(orderChainId)
 
   const statusColors: Record<string, string> = {
     signing: 'text-yellow-400',
@@ -968,6 +975,16 @@ function OrderCard({
           <span className="text-sm font-medium text-cream">
             {order.tokenOutSymbol}
           </span>
+          {/* [fix/cross-chain-order-cancel] The order's own chain — flagged if it doesn't match
+              the connected wallet, before the Cancel click. */}
+          <span
+            data-testid="order-chain-badge"
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+              chainMismatch ? 'bg-amber-400/15 text-amber-300' : 'bg-cream-08 text-cream-50'
+            }`}
+          >
+            {orderChainName}
+          </span>
         </div>
         <span className={`text-[11px] font-semibold ${statusColors[order.status] || 'text-cream-50'}`}>
           {statusLabels[order.status] || order.status}
@@ -1040,9 +1057,10 @@ function OrderCard({
         {onCancel && isActive && (
           <button
             onClick={() => { onCancel(order.id); playClick() }}
+            title={chainMismatch ? `This order is on ${orderChainName} — switching your wallet is required to cancel it` : undefined}
             className="rounded-lg border border-danger/30 px-3 py-1.5 text-[11px] text-danger/70 hover:text-danger transition-colors"
           >
-            Cancel
+            {chainMismatch ? `Switch to ${orderChainName}` : 'Cancel'}
           </button>
         )}
         {onRemove && !isActive && (

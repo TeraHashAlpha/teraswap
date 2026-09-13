@@ -1,9 +1,10 @@
 # ADR-020 — The order-engine router map fails closed
 
-- **Status:** Accepted — 2026-09-02
+- **Status:** Accepted — 2026-09-02 · **Amended 2026-09-11** (§Amendment below: the 42161 entry §(d)
+  deferred is now populated, by the derivation §(b) prescribes)
 - **Context finding:** `Audits/Sprint/ARBITRUM-V3-STATE-2026-08-26.md` §4 **B6** — the order-engine
   router map has no 42161 entry, and answered for it anyway
-- **Implemented by:** `fix/order-router-map-fail-closed`
+- **Implemented by:** `fix/order-router-map-fail-closed`; amendment by `feat/arbitrum-dca-gates`
 
 ## Context
 
@@ -123,7 +124,7 @@ against routers the executor rejects; narrowing the swap map to match the order 
 instant swaps for no reason. Where they disagree, neither is wrong — they are answering different
 questions. The order map, and only the order map, is bound by (b).
 
-### (d) Adding 42161 to the order map is out of scope
+### (d) Adding 42161 to the order map is out of scope — *executed by the 2026-09-11 amendment below*
 
 This ADR closes the *silent substitution*. It does not add Arbitrum routers, and deliberately
 leaves Arbitrum with an empty set. Populating it is its own audited change and depends on decisions
@@ -183,3 +184,60 @@ Enforced at three levels, in decreasing order of strength:
   (§2.2 events, §2.7 discriminating router probes, §4 B1/B5/B6).
 - `Audits/Incidents/INC-2026-08-26-001.md` — the eligibility gate that kept B6 latent, and the reason
   "protected by an unrelated allowlist" is not a control.
+
+## Amendment — 2026-09-11 · `ROUTERS_BY_CHAIN[42161]` populated (`feat/arbitrum-dca-gates`)
+
+*Appended, not rewritten: the table in Context is the state at decision time and stays as written.*
+
+§(d) deferred the Arbitrum entry until it could be **derived** per §(b). It now is. The order map
+carries **2** entries for 42161 — the same two the Arbitrum runbook and
+`Audits/Sprint/AUDIT-ARBITRUM-V3-PREDEPLOY.md` audited — out of the **11** the deployed executor
+whitelists. Nothing was typed: the candidate set is `chains/routers.ts`
+`ROUTER_WHITELIST_BY_CHAIN[42161]` (what `/api/swap` may return as `tx.to` there), each probed on the
+deployed `TeraSwapOrderExecutorV3` (`docs/DEPLOYMENTS.md`, OrderExecutor V3 · Arbitrum One row —
+identity re-read the same day: 18,247 B, `keccak256` `0x363faecf…e0426d` on both RPCs,
+`ORDER_TYPEHASH()` equal to the Base V3's, `TIMELOCK_DELAY()` reverting) with `whitelistedRouters(addr)`
+on **two** RPCs, then intersected with the keeper's route builder
+(`contracts/order-engine/executor/swap-route.js` `ROUTER_SOURCE` — the map that turns a signed
+`order.router` into the `/api/swap` source the keeper requests), and with the source's enablement.
+
+| `routers.ts` key | Address | `whitelistedRouters` arb1 / publicnode | `eth_getCode` | Keeper `ROUTER_SOURCE` | Served in production on 42161 (FeeCollector `SwapWithFee`, event-derived) | In order map |
+|---|---|---|---|---|---|---|
+| `velora` | `0x6A000F20005980200259B80c5102003040001068` | **true / true** | 24,562 B | `velora` | **yes** (×1) | **`augustusV6`** — default |
+| `uniswapv3` | `0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45` | **true / true** | 24,497 B | `uniswapv3` | **yes** (×2) | **`uniswapV3`** — canonical |
+| `1inch` | `0x111111125421cA6dc452d289314280a0f8842A65` | true / true | 24,294 B | `1inch` (cross-chain address) | no (0) | **no** — `/api/swap` serveability on 42161 unrecorded; Base excluded it for exactly that (PR #225) |
+| `kyberswap` | `0x6131B5fae19EA4f9D964eAc0408E4408b66337b5` | true / true | 18,652 B | — | yes (×2) | **no** — keeper has no source for it; adding one is a keeper change |
+| `0x` | `0x0000000000001fF3684f28c67538d4D072C22734` | true / true | 1,009 B | — | no | no — no keeper source |
+| `cowswap` | `0xC92E8bdf79f0507f65a392b0ab4667716BFE0110` | true / true | 4,590 B | — | no | no — approval spender, not a swap router; no keeper source |
+| `sushiswap` | `0xAC4c6e212A361c968F1725b4d055b47E63F80b75` | true / true | 4,978 B | — | no | no — no keeper source |
+| `bebop` | `0xbeb0b0623f66bE8cE162EbDfA2ec543A522F4ea6` | true / true | 24,433 B | — | no | no — disabled source (INC-2026-09-03-001); no keeper source |
+| `odos` | `0x19cEeAd7105607Cd444F5ad10dd51356436095a1` | true / true | 20,290 B | — | no | no — permanently disabled source |
+| `openocean` | `0x6352a56caadC4F1E25CD6c75970Fa768A3304e64` | true / true | 2,092 B | — | no | no — disabled source (INC-2026-09-03-001) |
+| `balancer` | `0xBA12222222228d8Ba445958a75a0704d566BF2C8` | true / true | 24,512 B | — | no | no — disabled source |
+| `curve` | `0xf0d4C12e3C5589b1de35eaF85B163Cc23827e854` | **false / false** | **0 B** | — | no | no — not whitelisted, no code (already flagged in `ARBITRUM-ROUTER-VERIFICATION.md`) |
+| *negative control* WETH | `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1` | **false / false** | 2,092 B | — | — | — (a token; proves the read discriminates) |
+
+Method: read-only `eth_chainId` / `eth_getCode` / `eth_call` / `eth_getLogs` on
+`https://arb1.arbitrum.io/rpc` and `https://arbitrum-one-rpc.publicnode.com` (publicnode refused the
+`SwapWithFee` log range, so that column is from arb1 only), 2026-09-11; every address extracted from
+`routers.ts`, `swap-route.js`, `registry.ts`, `constants.ts` and `DEPLOYMENTS.md` by script, with a
+failed extraction exiting 42 before any read. No server, no `.env`, no transaction.
+
+Consequences of the amendment:
+
+- The updated state table row for the order-engine map reads **4 / 2 / 2** (chains 1 / 8453 / 42161).
+  The swap-path row (12 / 12 / 12) and the executor row (11 on Arbitrum) are unchanged — the two
+  sets remain different on purpose, per §(c).
+- The on-chain surplus (B1: 9 routers beyond the audited two) is **unreachable from the signing
+  map** — that is this amendment's answer to the stranding rationale. Whether to *prune* the surplus
+  from the contract via the 48 h timelock remains an owner decision (INC-2026-08-26-001 §11.7.7)
+  and is unaffected here.
+- `getCanonicalRouteRouter(42161)` now resolves Arbitrum's own SwapRouter02 — **not** an opening
+  for Limit/TP: `isLimitLive` still pins `chainId === LIMIT_TP_CHAIN_ID` (8453) and, from the same
+  branch, `/api/orders` refuses non-DCA v3 orders off that chain server-side (the eligibility list
+  is shared with DCA, so the client-only pin was no longer enough).
+- The 42161 rows in `router-map-fail-closed.test.ts` moved from the *unknown* list to the *known*
+  list with their own inline snapshots; `config.test.ts` pins the map as a subset of both
+  `ROUTER_WHITELIST_BY_CHAIN[42161]` and the keeper's `ROUTER_SOURCE`, reading both at test time.
+- `route-source.ts` (the analytics badge twin of `ROUTER_SOURCE`) still has no row for
+  `0x68b3…fc45` — the "Aggregated" fallback, cosmetic, already noted as audit I-3. Not changed here.

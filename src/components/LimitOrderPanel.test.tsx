@@ -30,6 +30,7 @@ vi.mock('@/hooks/useOrderEngine', () => ({
   useOrderEngine: () => useOrderEngineMock(),
 }))
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
 }))
@@ -270,7 +271,7 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
 // order that can never execute. Nothing about config.ts is mocked here — the chain lookup IS the
 // module under test.
 describe('LimitOrderPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
-  const ARBITRUM_CHAIN_ID = 42161
+  const UNKNOWN_CHAIN_ID = 10 // [feat/arbitrum-dca-gates] was 42161, which now has a derived router set
 
   async function enterAmountAndPrice() {
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '1' } })
@@ -278,14 +279,14 @@ describe('LimitOrderPanel — [ADR-020] refuses to sign on a chain with no route
   }
 
   beforeEach(() => {
-    useChainIdMock.mockReturnValue(ARBITRUM_CHAIN_ID)
+    useChainIdMock.mockReturnValue(UNKNOWN_CHAIN_ID)
   })
   afterEach(() => {
     useChainIdMock.mockReturnValue(1) // restore this file's default for any later suite
   })
 
-  it('sanity: chain 42161 really has no default router (otherwise the tests below are vacuous)', () => {
-    expect(getDefaultRouter(ARBITRUM_CHAIN_ID)).toBeNull()
+  it('sanity: chain 10 (no order-engine set) really has no default router (otherwise the tests below are vacuous)', () => {
+    expect(getDefaultRouter(UNKNOWN_CHAIN_ID)).toBeNull()
     expect(getDefaultRouter(1)).not.toBeNull()
   })
 

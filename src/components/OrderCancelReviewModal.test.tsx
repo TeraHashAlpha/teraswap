@@ -85,6 +85,7 @@ function makeInvalidateReview(): Extract<PendingCancelReview, { action: 'invalid
     v3Batches: [],
     v3DcaOrders: [],
     affectedOrders: v2AffectedOrders,
+    skippedOrders: [],
     chainId: 8453,
     account: ACCOUNT,
   }
@@ -134,6 +135,7 @@ function makeMixedInvalidateReview(): Extract<PendingCancelReview, { action: 'in
       { order: dcaOrder2, orderStruct: makeStruct({ nonce: 5n }) },
     ],
     affectedOrders: [v2AffectedOrders[0], dcaOrder1, dcaOrder2],
+    skippedOrders: [],
     chainId: 8453,
     account: ACCOUNT,
   }
@@ -170,6 +172,7 @@ describe('OrderCancelReviewModal [BUG-MASS-CANCEL-DCA-ONCHAIN] — mixed batch (
         { order: dcaOrder2, orderStruct: makeStruct({ nonce: 5n }) },
       ],
       affectedOrders: [dcaOrder1, dcaOrder2],
+      skippedOrders: [],
       chainId: 8453,
       account: ACCOUNT,
     }

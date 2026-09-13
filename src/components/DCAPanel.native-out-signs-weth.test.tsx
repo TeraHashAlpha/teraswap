@@ -81,6 +81,7 @@ const BASE_TOKEN_USD_FEEDS: Record<string, readonly [string, number, number, big
 const UNREGISTERED = ['0x0000000000000000000000000000000000000000', 0, 0, 0n, false] as const
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => CHAIN_ID,
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),

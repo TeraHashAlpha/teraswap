@@ -13,6 +13,7 @@ import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 // leg. This is the SAME function the merged DCA fix uses — called here, never re-implemented,
 // never wrapped in a local helper with its own failure behaviour.
 import { resolveSignableToken } from '@/lib/chains/tokens'
+import { getChainName } from '@/lib/chains/registry'
 import { resolveOrderPriceFeed } from '@/lib/order-engine/price-feed'
 import {
   OrderType,
@@ -827,6 +828,13 @@ function ConditionalOrderCard({
   const isSL = order.order?.condition === PriceCondition.BELOW
   const typeColor = isSL ? 'text-red-400' : 'text-green-400'
   const typeLabel = isSL ? 'Stop Loss' : 'Take Profit'
+  // [fix/cross-chain-order-cancel] The order's own chain, always visible; flagged if it doesn't
+  // match the connected wallet before the Cancel click. SL/TP creation is Base-pinned
+  // (LIMIT_TP_CHAIN_ID), so this is defense/consistency, not the common case.
+  const chainId = useChainId()
+  const orderChainId = order.chainId ?? 1
+  const chainMismatch = orderChainId !== chainId
+  const orderChainName = getChainName(orderChainId)
 
   const statusColors: Record<string, string> = {
     signing: 'text-yellow-400',
@@ -874,6 +882,16 @@ function ConditionalOrderCard({
           </span>
           <span className="text-cream-35">→</span>
           <span className="text-sm text-cream-50">{order.tokenOutSymbol}</span>
+          {/* [fix/cross-chain-order-cancel] The order's own chain — flagged if it doesn't match
+              the connected wallet, before the Cancel click. */}
+          <span
+            data-testid="order-chain-badge"
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+              chainMismatch ? 'bg-amber-400/15 text-amber-300' : 'bg-cream-08 text-cream-50'
+            }`}
+          >
+            {orderChainName}
+          </span>
         </div>
         <span className={`text-[11px] font-semibold ${statusColors[order.status] || 'text-cream-50'}`}>
           {statusLabels[order.status] || order.status}
@@ -910,9 +928,10 @@ function ConditionalOrderCard({
         {onCancel && isActive && (
           <button
             onClick={() => { onCancel(order.id); playClick() }}
+            title={chainMismatch ? `This order is on ${orderChainName} — switching your wallet is required to cancel it` : undefined}
             className="rounded-lg border border-cream-08 px-3 py-1.5 text-[11px] text-cream-50 transition hover:border-red-400 hover:text-red-400"
           >
-            Cancel
+            {chainMismatch ? `Switch to ${orderChainName}` : 'Cancel'}
           </button>
         )}
         {onRemove && !isActive && (

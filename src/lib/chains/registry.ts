@@ -186,6 +186,20 @@ export function getSupportedChainIds(): number[] {
 }
 
 /**
+ * [fix/cross-chain-order-cancel] Safe chain display name — never throws, unlike getChainConfig.
+ * UI labels (chain badges, cancel-refusal copy) need a name for ANY order.chain_id that ever hit
+ * the DB, including a chain this registry hasn't been told about; a signing/execution decision
+ * must still go through getChainConfig/getOrderExecutor and fail closed, so this is display-only.
+ */
+export function getChainName(chainId: number): string {
+  try {
+    return getChainConfig(chainId).name
+  } catch {
+    return `Chain ${chainId}`
+  }
+}
+
+/**
  * [SPRINT-9W] Chain-aware wrapped-native (WETH) address, from each chain's registry config:
  * mainnet → 0xC02a…6Cc2 (WETH_ADDRESS), Base → 0x4200…0006. Falls back to mainnet WETH on an
  * unsupported chain so a native→wrapped mapping on the hot path never throws.

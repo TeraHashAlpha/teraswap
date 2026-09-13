@@ -27,6 +27,7 @@ const mockCancelOrderInSupabase = vi.fn()
 const mockSubscribeToOrders = vi.fn()
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: vi.fn(() => ({
     address: '0x1111111111111111111111111111111111111111',
   })),

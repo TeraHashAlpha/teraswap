@@ -14,6 +14,8 @@
 import { OrderType } from '@/lib/order-engine'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import type { PendingCancelReview } from '@/hooks/useOrderEngine'
+import { getChainName } from '@/lib/chains/registry'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { truncAddr, fmtAmount, fmtTime, TYPE_LABEL } from './OrderReviewModal'
 
 interface Props {
@@ -132,6 +134,16 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
                   </div>
                 ))}
               </div>
+
+              {/* [fix/cross-chain-order-cancel] "Cancel All" only ever executes against the active
+                  chain's group — orders on any other chain are listed here, never silently dropped. */}
+              {review.skippedOrders.length > 0 && (
+                <div data-testid="invalidate-skipped" className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[11px] text-amber-300">
+                  {review.skippedOrders.length} order{review.skippedOrders.length > 1 ? 's' : ''} on other
+                  chains ({[...new Set(review.skippedOrders.map(o => getChainName(o.chainId ?? DEFAULT_CHAIN_ID)))].join(', ')}) were
+                  NOT included — switch your wallet to that chain and run Cancel All again to cancel them.
+                </div>
+              )}
 
               <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
                 {cancelTxCount > 0 ? (

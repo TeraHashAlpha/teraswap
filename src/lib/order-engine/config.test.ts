@@ -47,6 +47,11 @@ import {
 // [fix/limit-sltp-chain-aware-price-feed] The per-chain, ADDRESS-keyed registry this file's
 // symbol-keyed mainnet table defers to for every non-mainnet chain.
 import { getChainlinkFeed } from '../chains/chainlink-feeds'
+// [feat/arbitrum-dca-gates] The swap-path whitelist the Arbitrum order map must be a subset of, and
+// the keeper route builder it is intersected with (read as text: the keeper is plain ESM JS).
+import { ROUTER_WHITELIST_BY_CHAIN } from '../chains/routers'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // Byte-identical, checksummed mainnet-behaviour constants (must match config.ts exactly).
 const MAINNET_EXECUTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
@@ -194,10 +199,73 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
   // mainnet map and mainnet's default router. That fallback was finding B6: on Arbitrum One the
   // app would have offered, signed and self-validated mainnet routers the deployed Arbitrum
   // OrderExecutorV3 does not whitelist. A chain map that does not know the chain must fail closed.
+  // [feat/arbitrum-dca-gates] 42161 is no longer the unwired example — it carries its own derived
+  // set now (below). Optimism (10) has no entry in ROUTERS_BY_CHAIN and stands in for "unknown".
   it('an unwired chain gets NOTHING — no map, no default router (never mainnet\'s)', () => {
-    expect(getWhitelistedRouters(42161)).toEqual({})
-    expect(getWhitelistedRouters(42161)).not.toBe(getWhitelistedRouters(1))
-    expect(getDefaultRouter(42161)).toBeNull()
+    expect(getWhitelistedRouters(10)).toEqual({})
+    expect(getWhitelistedRouters(10)).not.toBe(getWhitelistedRouters(1))
+    expect(getDefaultRouter(10)).toBeNull()
+  })
+
+  // ── [feat/arbitrum-dca-gates / ADR-020 (b)] Arbitrum One (42161) — derived on-chain, then intersected ──
+  // Every address below is READ from the swap-path whitelist (chains/routers.ts) and the keeper's
+  // route builder (contracts/order-engine/executor/swap-route.js ROUTER_SOURCE) at test time, never
+  // typed here. The on-chain half (whitelistedRouters(addr) true on two Arbitrum RPCs, WETH false as
+  // the negative control) is recorded in config.ts beside ARBITRUM_ROUTERS and in ADR-020's table;
+  // it cannot be re-read hermetically, so what this pins is that the ORDER map never carries a
+  // router the swap path could not return as tx.to or the keeper could not build calldata for.
+  describe('Arbitrum One (42161) — the order map is a subset of the swap whitelist AND of the keeper route builder', () => {
+    const ARBITRUM = 42161
+    const swapWhitelist = ROUTER_WHITELIST_BY_CHAIN[ARBITRUM]
+    const keeperRouteBuilder = readFileSync(
+      resolve(__dirname, '../../../contracts/order-engine/executor/swap-route.js'), 'utf8',
+    )
+    const keeperSourceFor = (address: string): string | null => {
+      const m = keeperRouteBuilder.match(new RegExp(`"${address.toLowerCase()}":\\s*"([a-z0-9]+)"`))
+      return m ? m[1] : null
+    }
+
+    it('carries exactly the two audited routers, under the SAME keys as Base (augustusV6, uniswapV3)', () => {
+      expect(Object.keys(getWhitelistedRouters(ARBITRUM)).sort()).toEqual(['augustusV6', 'uniswapV3'])
+    })
+
+    it('augustusV6 is the swap-path `velora` router on 42161 and the keeper builds it via source `velora`', () => {
+      const entry = getWhitelistedRouters(ARBITRUM).augustusV6
+      expect(entry.address).toBe(swapWhitelist.velora)
+      expect(keeperSourceFor(entry.address)).toBe('velora')
+    })
+
+    it('uniswapV3 is the swap-path `uniswapv3` router (SwapRouter02) on 42161 and the keeper builds it via source `uniswapv3`', () => {
+      const entry = getWhitelistedRouters(ARBITRUM).uniswapV3
+      expect(entry.address).toBe(swapWhitelist.uniswapv3)
+      expect(keeperSourceFor(entry.address)).toBe('uniswapv3')
+      // NOT mainnet's original SwapRouter — the B6 address the Arbitrum executor does not whitelist.
+      expect(entry.address.toLowerCase()).not.toBe(getWhitelistedRouters(1).uniswapV3.address.toLowerCase())
+    })
+
+    it('every Arbitrum order-map entry is in the swap whitelist AND has a keeper source — the intersection, never wider', () => {
+      const swapAddresses = new Set(Object.values(swapWhitelist).map(a => a.toLowerCase()))
+      for (const entry of Object.values(getWhitelistedRouters(ARBITRUM))) {
+        expect(swapAddresses.has(entry.address.toLowerCase())).toBe(true)
+        expect(keeperSourceFor(entry.address)).not.toBeNull()
+      }
+    })
+
+    it('reported-not-added: 1inch (unrecorded /api/swap serveability on 42161) and kyberswap (no keeper source) are NOT offered', () => {
+      const offered = Object.values(getWhitelistedRouters(ARBITRUM)).map(e => e.address.toLowerCase())
+      expect(offered).not.toContain(swapWhitelist['1inch'].toLowerCase())
+      expect(offered).not.toContain(swapWhitelist.kyberswap.toLowerCase())
+      // …and the two sanity facts that make those exclusions decisions rather than accidents:
+      // 1inch IS in the keeper builder (cross-chain address) yet is excluded on serveability;
+      // kyberswap is a swap-path router yet has no keeper source at all.
+      expect(keeperSourceFor(swapWhitelist['1inch'])).toBe('1inch')
+      expect(keeperSourceFor(swapWhitelist.kyberswap)).toBeNull()
+    })
+
+    it('getDefaultRouter(42161) commits Augustus V6 — the same source path the Base keeper fills through', () => {
+      expect(getDefaultRouter(ARBITRUM)).toEqual(getWhitelistedRouters(ARBITRUM).augustusV6)
+      expect(getDefaultRouter(ARBITRUM)?.address).not.toBe(ONEINCH_V6)
+    })
   })
 })
 
@@ -385,8 +453,10 @@ describe('getOrderExecutorV3Domain — once configured on an ELIGIBLE chain (env
   })
 })
 
-// ── [SPRINT-48-ARBITRUM-DCA-PREP] Arbitrum (42161) v3 plumbing — shipped DARK ───────────────
-describe('getOrderExecutorV3 — Arbitrum (42161) dark-state regression', () => {
+// ── [SPRINT-48-ARBITRUM-DCA-PREP → feat/arbitrum-dca-gates] Arbitrum (42161) v3 plumbing ──────
+// Shipped DARK in Sprint 48; ELIGIBLE since feat/arbitrum-dca-gates. The env slot now decides
+// between "wired" and "dark" — env can disable, and the code list is what lets env enable.
+describe('getOrderExecutorV3 — Arbitrum (42161): eligible in code, wired only while env says so', () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
     vi.resetModules()
@@ -407,22 +477,27 @@ describe('getOrderExecutorV3 — Arbitrum (42161) dark-state regression', () => 
     expect(() => getOrderExecutorV3Domain(42161)).toThrow(/No OrderExecutorV3 deployed on chain 42161/)
   })
 
-  // [INC-2026-08-26-001] This case used to be named "setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
-  // wires 42161 without disturbing mainnet/Base" and asserted getOrderExecutorV3(42161) === the env
-  // value — i.e. it SPECIFIED the defect: one Vercel env var (set 2026-08-04, All Environments) was
-  // enough to light DCA on a chain with no keeper for 22 days. It now pins the opposite.
-  it('setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM populates the RAW slot but does NOT wire 42161 — getOrderExecutorV3 stays null, the domain still throws, the v3 signing executor is null', async () => {
+  // [INC-2026-08-26-001 → feat/arbitrum-dca-gates] This case has now flipped TWICE, each time on
+  // purpose. Sprint 48 pinned "env wires 42161"; the incident fix inverted it to "env populates the
+  // slot but does NOT wire 42161", because nobody had decided to enable the chain. That decision is
+  // now made in code (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS cites the evidence), so env wiring 42161 is
+  // once more the correct behaviour — with the difference that this time it holds ONLY because the
+  // allowlist says so (the data-driven block below fails the day 42161 leaves it).
+  it('setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM wires 42161 (eligible in code) — the domain binds chainId 42161 to that address, the v3 signing executor resolves, and no other chain is touched', async () => {
     const V3_ARBITRUM = '0x5555555555555555555555555555555555555555'
     process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM = V3_ARBITRUM
     vi.resetModules()
     const fresh = await import('./config')
-    // Env plumbing genuinely reached the slot — this is exactly the Production state of the incident.
     expect(fresh.ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBe(V3_ARBITRUM)
-    // ...and the gate still says no: 42161 is not in ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.
-    expect(fresh.getOrderExecutorV3(42161)).toBeNull()
-    expect(() => fresh.getOrderExecutorV3Domain(42161)).toThrow(/No OrderExecutorV3 deployed on chain 42161/)
-    expect(fresh.resolveSigningExecutor(42161, true)).toBeNull()
-    // An unrelated chain's env var never implicitly wires another chain either.
+    expect(fresh.isOrderExecutorV3EligibleChain(42161)).toBe(true)
+    expect(fresh.getOrderExecutorV3(42161)).toBe(V3_ARBITRUM)
+    expect(fresh.getOrderExecutorV3Domain(42161)).toEqual({
+      name: 'TeraSwapOrderExecutor', version: '3', chainId: 42161, verifyingContract: V3_ARBITRUM,
+    })
+    expect(fresh.resolveSigningExecutor(42161, true)).toBe(V3_ARBITRUM)
+    // v2 stays unwired on Arbitrum — DCA signs v3 only; there is no v2 executor to fall back to.
+    expect(fresh.resolveSigningExecutor(42161, false)).toBeNull()
+    // An unrelated chain's env var never implicitly wires another chain.
     expect(fresh.getOrderExecutorV3(1)).toBeNull()
     expect(fresh.getOrderExecutorV3(8453)).toBeNull()
   })
@@ -470,11 +545,14 @@ describe('getOrderExecutorV3 — ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS gates EVERY e
     vi.resetModules()
   })
 
-  it('the allowlist is exactly the set intended today — Base (8453) only; changing it is a reviewed code change, never an env flip', () => {
-    // Base: OrderExecutor V3 deployed + verified + LIVE (docs/DEPLOYMENTS.md, README) and the one
-    // chain a keeper polls (CHAIN_ID=8453 in every keeper runbook). Mainnet: deferred template, no v3
-    // deploy. Arbitrum: pre-deploy audit only, and the keeper is single-chain — no keeper polls 42161.
-    expect([...ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS]).toEqual([8453])
+  it('the allowlist is exactly the set intended today — Base (8453) + Arbitrum One (42161); changing it is a reviewed code change, never an env flip', () => {
+    // Base: OrderExecutor V3 deployed + verified + LIVE (docs/DEPLOYMENTS.md, README), keeper
+    // CHAIN_ID=8453. Arbitrum [feat/arbitrum-dca-gates]: V3 byte-proven on-chain (DEPLOYMENTS.md row,
+    // INC-2026-08-26-001 §11.3, re-read 2026-09-11 on two RPCs), a second keeper process shipped in
+    // PR #494 whose signer reads whitelistedExecutors=true. Mainnet: deferred template, no v3 deploy
+    // — absent, and pinned absent by the data-driven cases below.
+    expect([...ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS]).toEqual([8453, 42161])
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS).not.toContain(1)
   })
 
   it('every eligible chain has an env slot in ORDER_EXECUTOR_V3_BY_CHAIN (an allowlisted chain with no slot could never resolve)', () => {

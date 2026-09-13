@@ -19,6 +19,9 @@ export { ORDER_EXECUTOR_BY_CHAIN, getOrderExecutor, ORDER_EXECUTOR_ADDRESS, getO
   // page.arbitrum-dark.test.tsx and dca-launch.arbitrum-activation.test.ts do) imports it from
   // '@/lib/order-engine/config' directly, not from this public barrel.
   getOrderExecutorV3, getOrderExecutorV3Domain, resolveSigningExecutor,
+  // [feat/arbitrum-dca-gates — third gate] The ONE CancelOrder ownership-proof domain rule shared by
+  // useOrderEngine and PATCH /api/orders/[id]: v2's domain where v2 exists, else v3's, else throw.
+  getCancelOrderDomain,
   // [INC-2026-08-26-001] v3 chain eligibility is a code decision — getOrderExecutorV3 is null
   // unless the chain is on this allowlist AND its env slot is set (env can disable, never enable).
   ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, isOrderExecutorV3EligibleChain,

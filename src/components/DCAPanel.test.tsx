@@ -37,6 +37,7 @@ vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => us
 const DEPEG_OK = { mode: 'ok' as const, divergence: 0, symbol: '', message: null }
 
 vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
   useAccount: () => useAccountMock(),
   useChainId: () => useChainIdMock(),
   useSignTypedData: () => ({ signTypedDataAsync: mockSignTypedDataAsync }),

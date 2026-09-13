@@ -13,7 +13,10 @@
  *     Because the contract uses OrderType.STOP_LOSS for BOTH SL and Take-Profit, the gate keys on
  *     the CONDITION — 'below' is an SL, 'above' is a TP — so TP must keep working.
  *
- * Mirrors orders-v3.test.ts's mocking conventions (v3 simulated on chain 1 for this file only).
+ * Mirrors orders-v3.test.ts's mocking conventions. [feat/arbitrum-dca-gates] The v3 fixture chain
+ * is Base (8453) — where v3 is actually live — not the earlier "v3 simulated on chain 1": the route
+ * now refuses non-DCA v3 orders off LIMIT_TP_CHAIN_ID server-side, so a chain-1 fixture would be
+ * testing that gate instead of this file's subject. Every assertion below is otherwise unchanged.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -41,16 +44,15 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
   return { ...actual, checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, resetAt: Date.now() + 60_000 })) }
 })
 
-const V3_MAINNET = '0x3333333333333333333333333333333333333333'
-// [ADR-020] Arbitrum One is wired in this mock ON PURPOSE, and only here: it simulates the day
-// 42161 joins ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, which is precisely when finding B6 stops being
-// latent. The ROUTER MAP is deliberately NOT mocked (only the executor getters are), so the API's
-// router gate reads the real, fail-closed set for that chain. No other test in this file uses
-// 42161, and chain 1 is byte-identical to before.
+const V3_BASE = '0x3333333333333333333333333333333333333333'
+// [ADR-020 → feat/arbitrum-dca-gates] Arbitrum One is wired in this mock ON PURPOSE: 42161 is now
+// on ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS for DCA, and the [ADR-020] block at the bottom pins that a
+// NON-DCA order still cannot be created there. The ROUTER MAP is deliberately NOT mocked (only the
+// executor getters are), so the API reads the real per-chain sets. Base (8453) is the fixture chain
+// for every other case; chain 1 is not v3-eligible in production and is not simulated as such.
 const V3_ARBITRUM = '0x4444444444444444444444444444444444444444'
-const V3_BY_CHAIN: Record<number, string> = { 1: V3_MAINNET, 42161: V3_ARBITRUM }
-// The mainnet whitelisted set includes the UniV3 SwapRouter — the pinned-route router.
-const SERVED_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564'
+const LIMIT_CHAIN = 8453
+const V3_BY_CHAIN: Record<number, string> = { [LIMIT_CHAIN]: V3_BASE, 42161: V3_ARBITRUM }
 const UNSERVED_ROUTER = '0x9999999999999999999999999999999999999999'
 vi.mock('@/lib/order-engine/config', async () => {
   const actual = await vi.importActual<typeof import('@/lib/order-engine/config')>('@/lib/order-engine/config')
@@ -79,6 +81,11 @@ vi.mock('@/lib/chainlink', () => ({
 }))
 
 import { POST } from './route'
+import { getCanonicalRouteRouter, getWhitelistedRouters } from '@/lib/order-engine/config'
+
+// Base's pinned-route router (SwapRouter02) — READ from the real Base map, never typed, so this
+// fixture cannot drift from the set the route validates against.
+const SERVED_ROUTER = getCanonicalRouteRouter(LIMIT_CHAIN)!.address
 
 const WALLET = '0x1111111111111111111111111111111111111111'
 const TOKEN_IN = '0x2222222222222222222222222222222222222222'
@@ -127,7 +134,7 @@ function tpBody(overrides: Record<string, unknown> = {}) {
   }
   return {
     wallet: WALLET,
-    chainId: 1,
+    chainId: LIMIT_CHAIN,
     tokenIn: TOKEN_IN,
     tokenOut: TOKEN_OUT,
     router: SERVED_ROUTER,
@@ -363,12 +370,14 @@ describe('POST /api/orders [FIX-DCA-NOFEED-CONSENT] — non-DCA no-feed output s
   })
 })
 
-// [ADR-020 / finding B6] The server-side half of the fail-closed router map. B6 is latent only
-// because ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS is [8453]; the day a chain with no order-engine router
-// set becomes eligible, the question is whether the API still accepts an order carrying another
-// chain's router. It must not — `isWhitelistedRouter` reads THAT chain's set, which is now empty,
-// so every router is refused there rather than validated against mainnet's.
-describe('POST /api/orders [ADR-020] — a chain with no router set can have no order created on it', () => {
+// [ADR-020 / finding B6 → feat/arbitrum-dca-gates] The day this block was written, 42161 had no
+// order-engine router set and the pin was "every router is refused there". 42161 now HAS a derived
+// set (config.ts ARBITRUM_ROUTERS — augustusV6 + uniswapV3, whitelisted on the deployed executor),
+// and is v3-eligible for DCA. The server-side question therefore moves one gate earlier: a NON-DCA
+// v3 order (Limit / Take-Profit) is Base-only (limit-launch.ts LIMIT_TP_CHAIN_ID), and the route
+// must refuse it on 42161 whichever router it commits — mainnet's, Arbitrum's own served
+// SwapRouter02, or an unknown one — BEFORE the router gate is even consulted. Base is byte-identical.
+describe('POST /api/orders [feat/arbitrum-dca-gates] — a non-DCA v3 order cannot be created off the Limit/TP chain', () => {
   const ARBITRUM_CHAIN_ID = 42161
 
   function tpOn(chainId: number, router: string) {
@@ -376,22 +385,42 @@ describe('POST /api/orders [ADR-020] — a chain with no router set can have no 
     return tpBody({ chainId, router, orderData: od })
   }
 
-  it("refuses a pinned Take-Profit on 42161 that commits MAINNET's served router", async () => {
-    const { status, json } = await post(tpOn(ARBITRUM_CHAIN_ID, SERVED_ROUTER))
-    expect(status).toBe(400)
-    expect(String(json.error)).toMatch(/not served on chain 42161/i)
+  it('sanity: 42161 now resolves a v3 executor AND has a served canonical router — the refusal below is the chain gate, nothing upstream', () => {
+    expect(V3_BY_CHAIN[ARBITRUM_CHAIN_ID]).toBeTruthy()
+    expect(getCanonicalRouteRouter(ARBITRUM_CHAIN_ID)).not.toBeNull()
+    expect(Object.keys(getWhitelistedRouters(ARBITRUM_CHAIN_ID)).length).toBeGreaterThan(0)
   })
 
-  it('refuses EVERY router on 42161 — the set is empty, not "mainnet\'s minus a few"', async () => {
-    for (const router of [SERVED_ROUTER, UNSERVED_ROUTER, SERVED_ROUTER.toLowerCase()]) {
+  it("refuses a pinned Take-Profit on 42161 that commits Arbitrum's OWN served router (SwapRouter02, read from the real map)", async () => {
+    const arbitrumCanonical = getCanonicalRouteRouter(ARBITRUM_CHAIN_ID)!.address
+    const { status, json } = await post(tpOn(ARBITRUM_CHAIN_ID, arbitrumCanonical))
+    expect(status).toBe(400)
+    expect(String(json.error)).toMatch(/Limit\/Take-Profit orders are not available on chain 42161/i)
+  })
+
+  it('refuses EVERY router on 42161 — the chain gate fires before the router gate, so no router can smuggle a Limit/TP onto Arbitrum', async () => {
+    const arbitrumCanonical = getCanonicalRouteRouter(ARBITRUM_CHAIN_ID)!.address
+    for (const router of [SERVED_ROUTER, UNSERVED_ROUTER, arbitrumCanonical, arbitrumCanonical.toLowerCase()]) {
       const { status, json } = await post(tpOn(ARBITRUM_CHAIN_ID, router))
       expect(status).toBe(400)
-      expect(String(json.error)).toMatch(/not served on chain 42161/i)
+      expect(String(json.error)).toMatch(/not available on chain 42161/i)
+      expect(String(json.error)).not.toMatch(/not served on chain/i)
     }
   })
 
-  it('the identical body on chain 1 is still ACCEPTED — the refusal is the chain, not the router', async () => {
-    const { status } = await post(tpOn(1, SERVED_ROUTER))
+  it('a DCA on 42161 is NOT refused by this gate (DCA is what the eligibility widening is for)', async () => {
+    const od = { ...(tpBody().orderData as Record<string, unknown>), router: UNSERVED_ROUTER, routerDataHash: ZERO_HASH, routerData: undefined }
+    const { status, json } = await post(tpBody({
+      chainId: ARBITRUM_CHAIN_ID, orderType: 'dca', priceCondition: 'above', targetPrice: '0',
+      priceFeed: '0x0000000000000000000000000000000000000000', routerDataHash: ZERO_HASH,
+      dcaInterval: 3600, dcaTotal: 3, router: UNSERVED_ROUTER, orderData: od,
+    }))
+    expect(String(json.error ?? '')).not.toMatch(/not available on chain 42161/i)
+    expect(status).not.toBe(400)
+  })
+
+  it('the identical body on Base (8453) is still ACCEPTED — the refusal is the chain, not the router', async () => {
+    const { status } = await post(tpOn(LIMIT_CHAIN, SERVED_ROUTER))
     expect(status).toBe(201)
   })
 })

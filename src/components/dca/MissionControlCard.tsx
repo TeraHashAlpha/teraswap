@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import type { AutonomousOrder, OrderEngineEvent } from '@/lib/order-engine'
 import { nextBuyAtMs, isDue, failedOrderReason } from '@/lib/order-engine'
 import { useOrderExecutions } from '@/hooks/useOrderExecutions'
+import { getChainName } from '@/lib/chains/registry'
 import NextBuyRing from './NextBuyRing'
 import CountdownCenter from './CountdownCenter'
 import OrbitStatRow from './OrbitStatRow'
@@ -35,12 +36,16 @@ const STATUS_PILL: Record<string, { label: string; cls: string }> = {
 }
 
 export default function MissionControlCard({
-  order, latestEvent, onCancel, onRemove,
+  order, latestEvent, onCancel, onRemove, connectedChainId,
 }: {
   order: AutonomousOrder
   latestEvent?: OrderEngineEvent | null
   onCancel?: () => void
   onRemove?: () => void
+  // [fix/cross-chain-order-cancel] The wallet's ACTIVE chain, for showing a mismatch before the
+  // click — optional and defaults to this order's own chain (assume no mismatch) so existing
+  // callers/tests that don't pass it render exactly as before.
+  connectedChainId?: number
 }) {
   const status = order.status
   const isLive = status === 'active' || status === 'executing' || status === 'partially_filled'
@@ -48,6 +53,9 @@ export default function MissionControlCard({
   const isFailed = status === 'error' || !!order.error
   const isSigning = status === 'signing'
   const chainId = order.chainId ?? 1
+  const activeChainId = connectedChainId ?? chainId
+  const chainMismatch = isLive && activeChainId !== chainId
+  const chainName = getChainName(chainId)
 
   const { executions, lastFillAtMs } = useOrderExecutions(order.id, order.order.owner, {
     enabled: isLive,
@@ -104,15 +112,26 @@ export default function MissionControlCard({
           chainId={chainId}
         />
         <div className="flex items-center gap-2">
+          {/* [fix/cross-chain-order-cancel] The order's own chain, always visible — a mismatch
+              against the connected wallet is called out BEFORE the Cancel click, not after. */}
+          <span
+            data-testid="order-chain-badge"
+            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+              chainMismatch ? 'bg-amber-400/15 text-amber-300' : 'bg-cream-08 text-cream-40'
+            }`}
+          >
+            {chainName}
+          </span>
           <span data-testid="status-pill" className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${pill.cls}`}>
             {pill.label}
           </span>
           {isLive && onCancel && (
             <button
               onClick={onCancel}
+              title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}
               className="inline-flex min-h-[44px] items-center rounded-lg border border-danger/30 px-3 text-xs text-danger/70 transition-colors hover:text-danger"
             >
-              Cancel
+              {chainMismatch ? `Switch to ${chainName}` : 'Cancel'}
             </button>
           )}
           {!isLive && !isSigning && onRemove && (

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useAccount, useReadContract } from 'wagmi'
+import { useAccount, useChainId, useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
@@ -9,6 +9,7 @@ import type { AutonomousOrder, AutonomousOrderStatus } from '@/lib/order-engine'
 import { chainlinkAggregatorAbi } from '@/lib/chainlink'
 import { failedOrderReason } from '@/lib/order-engine/failed-reason'
 import { explorerTxUrl } from '@/lib/chains/tokens'
+import { getChainName } from '@/lib/chains/registry'
 import ExecutionTimeline from './ExecutionTimeline'
 import DCAPositionStats from './dca/DCAPositionStats'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
@@ -33,6 +34,9 @@ type FilterType = 'active' | 'completed' | 'cancelled'
 // ── Main component ─────────────────────────────────────
 export default function OrderDashboard() {
   const { address } = useAccount()
+  // [fix/cross-chain-order-cancel] The wallet's active chain — passed to each OrderCard so it can
+  // show the order's own chain and flag a mismatch before the Cancel click.
+  const connectedChainId = useChainId()
   const {
     orders, activeOrders, historyOrders: _historyOrders,
     cancelOrder, cancelAllOrders, removeOrder,
@@ -159,6 +163,7 @@ export default function OrderDashboard() {
               onToggle={() => setExpandedId(prev => prev === order.id ? null : order.id)}
               onCancel={() => cancelOrder(order.id)}
               onRemove={() => removeOrder(order.id)}
+              connectedChainId={connectedChainId}
             />
           ))}
         </div>
@@ -202,17 +207,24 @@ function LivePrice({ priceFeed, targetPrice, decimals = 8 }: {
 
 // ── Order Card ─────────────────────────────────────────
 function OrderCard({
-  order, expanded, onToggle, onCancel, onRemove,
+  order, expanded, onToggle, onCancel, onRemove, connectedChainId,
 }: {
   order: AutonomousOrder
   expanded: boolean
   onToggle: () => void
   onCancel: () => void
   onRemove: () => void
+  // [fix/cross-chain-order-cancel] Optional, defaults to this order's own chain (assume no
+  // mismatch) so a caller that doesn't pass it renders exactly as before.
+  connectedChainId?: number
 }) {
   const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.error
   const isActive = ['signing', 'active', 'executing', 'partially_filled'].includes(order.status)
   const isDCA = order.orderType === OrderType.DCA
+  const orderChainId = order.chainId ?? 1
+  const activeChainId = connectedChainId ?? orderChainId
+  const chainMismatch = isActive && activeChainId !== orderChainId
+  const chainName = getChainName(orderChainId)
   const dcaProgress = isDCA && order.dcaTotal > 0
     ? Math.min((order.dcaExecuted ?? 0) / order.dcaTotal, 1)
     : 0
@@ -287,6 +299,16 @@ function OrderCard({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
             <span className="rounded bg-cream-08 px-1.5 py-0.5 font-medium text-cream-50">
               {typeCfg.label}
+            </span>
+            {/* [fix/cross-chain-order-cancel] The order's own chain — always visible, flagged when
+                it doesn't match the connected wallet (before the Cancel click, not after). */}
+            <span
+              data-testid="order-chain-badge"
+              className={`rounded px-1.5 py-0.5 font-medium ${
+                chainMismatch ? 'bg-amber-400/15 text-amber-300' : 'bg-cream-08 text-cream-50'
+              }`}
+            >
+              {chainName}
             </span>
             {/* [Melhoria 2] Target price badge */}
             {targetLabel && (
@@ -439,9 +461,10 @@ function OrderCard({
             {isActive && (
               <button
                 onClick={(e) => { e.stopPropagation(); playTouchMP3(); onCancel() }}
+                title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}
                 className="min-h-[44px] flex-1 rounded-xl border border-red-500/20 bg-red-500/10 py-2.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20"
               >
-                Cancel Order
+                {chainMismatch ? `Switch to ${chainName}` : 'Cancel Order'}
               </button>
             )}
             {!isActive && (

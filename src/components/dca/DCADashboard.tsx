@@ -21,9 +21,12 @@ interface Props {
   onRemove: (id: string) => void
   /** Switch the panel to the create form (empty-state CTA). */
   onCreate?: () => void
+  /** [fix/cross-chain-order-cancel] The wallet's active chain — threaded to MissionControlCard so
+   *  it can show a chain badge and flag a mismatch before the Cancel click. */
+  connectedChainId?: number
 }
 
-export default function DCADashboard({ active, history, latestEvent, onCancel, onCancelAll, onRemove, onCreate }: Props) {
+export default function DCADashboard({ active, history, latestEvent, onCancel, onCancelAll, onRemove, onCreate, connectedChainId }: Props) {
   if (active.length === 0 && history.length === 0) {
     return (
       <div className="relative overflow-hidden rounded-2xl border border-cream-08 bg-surface-secondary p-8 text-center">
@@ -62,6 +65,7 @@ export default function DCADashboard({ active, history, latestEvent, onCancel, o
                 order={order}
                 latestEvent={latestEvent}
                 onCancel={() => { playClick(); onCancel(order.id) }}
+                connectedChainId={connectedChainId}
               />
             </div>
           ))}

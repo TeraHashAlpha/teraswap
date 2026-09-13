@@ -187,6 +187,8 @@ describe('PATCH /api/orders/[id] — [FULL-H-01] owner-only EIP-712 auth', () =>
     await PATCH(patchReq(validPatchBody({ chainId: 1 })), ctx(ORDER_ID))
     expect(mockRecover).toHaveBeenCalledTimes(1)
     const arg = mockRecover.mock.calls[0][0] as Record<string, unknown>
+    // [feat/arbitrum-dca-gates — third gate] The route now calls getCancelOrderDomain, which on a
+    // chain WITH a v2 executor returns this exact getOrderExecutorDomain object — pinned as such.
     expect(arg.domain).toEqual(getOrderExecutorDomain(1))
     // Sanity-pin the mainnet verifyingContract inside that domain.
     expect((arg.domain as { verifyingContract: string }).verifyingContract).toBe(
@@ -198,9 +200,14 @@ describe('PATCH /api/orders/[id] — [FULL-H-01] owner-only EIP-712 auth', () =>
     expect(arg.signature).toBe(SIG)
   })
 
-  it('an UNWIRED chain (42161) → getOrderExecutorDomain throws → caught → 400 "Invalid cancel signature" (never verifies against a non-existent executor)', async () => {
-    // chainId 42161 (Arbitrum) is not in ORDER_EXECUTOR_BY_CHAIN. The domain
-    // factory throws synchronously inside the try, so recover is never reached.
+  it('a chain with NEITHER executor (42161 with its v3 env slot UNSET in this file) → getCancelOrderDomain throws → caught → 400 "Invalid cancel signature" (never verifies against a non-existent executor)', async () => {
+    // [feat/arbitrum-dca-gates — third gate] chainId 42161 (Arbitrum) is not in
+    // ORDER_EXECUTOR_BY_CHAIN (v2) and NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM is
+    // unset here, so getCancelOrderDomain (v2's domain where v2 exists, else v3's)
+    // has nothing to resolve and throws synchronously inside the try — recover is
+    // never reached. With the slot SET, 42161 recovers under the v3 domain instead:
+    // orders-cancel.arbitrum-v3-only.test.ts.
+    expect(process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM).toBeUndefined()
     mockRecover.mockResolvedValue(WALLET) // would pass if it were ever called
     const res = await PATCH(patchReq(validPatchBody({ chainId: 42161 })), ctx())
     expect(res.status).toBe(400)
@@ -258,10 +265,36 @@ describe('PATCH /api/orders/[id] — atomic cancel outcomes', () => {
 
   it('UPDATE matched nothing + probe order is owned but already filled → 409 "Cannot cancel order in status"', async () => {
     selectResult = { data: [], error: null }
-    singleResult = { data: { wallet: WALLET.toLowerCase(), status: 'filled' }, error: null }
+    singleResult = { data: { wallet: WALLET.toLowerCase(), status: 'filled', chain_id: 1 }, error: null }
     const res = await PATCH(patchReq(validPatchBody()), ctx())
     expect(res.status).toBe(409)
     expect((await res.json()).error).toBe('Cannot cancel order in status: filled')
+  })
+
+  it('[fix/cross-chain-order-cancel] a proof recovered under the wrong chain\'s domain never flips the order: the UPDATE (gated on chain_id = the declared chainId) matches nothing, the probe shows the order really lives on a DIFFERENT chain, and the response is 400 — never a silent cancel', async () => {
+    // The order really lives on chain 8453, but the client declared chainId 1 — the ownership
+    // proof still recovers fine (the wallet DID sign that CancelOrder message under SOME domain;
+    // mockRecover is unconditional here), but the atomic UPDATE's extra .eq('chain_id', chainId)
+    // can only ever match a row whose real chain_id is 1, so it matches nothing.
+    selectResult = { data: [], error: null }
+    singleResult = { data: { wallet: WALLET.toLowerCase(), status: 'active', chain_id: 8453 }, error: null }
+    const res = await PATCH(patchReq(validPatchBody({ chainId: 1 })), ctx())
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('This order is on chain 8453, not chain 1')
+    const eqArgs = calls.eq.mock.calls.map((c) => c)
+    expect(eqArgs).toContainEqual(['chain_id', 1])
+    // The UPDATE was attempted (chain_id gate included) but its terminal .select('id') resolved to
+    // zero rows (selectResult above) — nothing was actually written.
+    expect(calls.update).toHaveBeenCalledWith({ status: 'cancelled' })
+  })
+
+  it('[fix/cross-chain-order-cancel] matching chainId (the honest case) still cancels normally — the chain_id gate is a no-op when the client got it right', async () => {
+    selectResult = { data: [{ id: ORDER_ID }], error: null }
+    const res = await PATCH(patchReq(validPatchBody({ chainId: 8453 })), ctx())
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    const eqArgs = calls.eq.mock.calls.map((c) => c)
+    expect(eqArgs).toContainEqual(['chain_id', 8453])
   })
 })
 

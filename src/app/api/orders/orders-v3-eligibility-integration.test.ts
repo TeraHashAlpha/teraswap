@@ -12,17 +12,17 @@
  * ORDER_EXECUTOR_V3_BY_CHAIN[42161] non-null, and nothing composed that with the eligibility
  * decision until a human looked.
  *
- * This file sets the REAL Arbitrum v3 env var, imports the REAL config module (not a vi.mock'd
- * one) and the REAL route.ts, and posts a v3-shaped order for chain 42161. Both halves are
- * verified independently before the composition is trusted:
- *   1. the raw env slot reached the module (ORDER_EXECUTOR_V3_BY_CHAIN[42161] is non-null) —
- *      imported from '@/lib/order-engine/config' directly, never from the public barrel (L-1);
- *   2. getOrderExecutorV3(42161) is still null because 42161 is not on
- *      ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS;
- * only then is the route's 400 asserted. If either sanity check ever fails, the 400 assertion
- * would be passing for the wrong reason (or vacuously), and this file is deliberately built so a
- * regression in the ALLOWLIST — not just the route — makes it fail. See "Prove the test bites"
- * below, and the FEEDBACK for this branch for the demonstration transcript.
+ * This file imports the REAL config module (not a vi.mock'd one) and the REAL route.ts, and posts
+ * a v3-shaped DCA order for chain 42161 under both env states. Each half is verified independently
+ * before the composition is trusted (raw slot via '@/lib/order-engine/config' directly, never the
+ * public barrel — L-1; then the allowlist; then the getter; only then the route).
+ *
+ * [feat/arbitrum-dca-gates] 42161 JOINED ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS. The original case here
+ * pinned "env SET + not eligible ⇒ 400"; it is deliberately inverted, not deleted, into the two
+ * halves that now matter: env SET ⇒ the chain-eligibility 400 no longer fires (the code decision
+ * was made), and env UNSET ⇒ it still does (env keeps the power to DISABLE — the exact containment
+ * INC-2026-08-26-001 §2 applied, and the documented rollback). Mainnet (1) stays the
+ * "env set, not eligible ⇒ 400" example, so the allowlist composition itself is still exercised.
  *
  * Module-load-time env reads (config.ts reads process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_*
  * at the top level, exactly like dca-launch.arbitrum-activation.test.ts and
@@ -110,32 +110,64 @@ afterEach(() => {
 })
 
 describe('POST /api/orders — real getOrderExecutorV3 composition (#424 L-2, nothing mocked in order-engine/config)', () => {
-  it('the Arbitrum v3 env var SET + 42161 not on the eligibility allowlist ⇒ the REAL route composes to 400', async () => {
-    // The exact INC-2026-08-26-001 shape: the env slot for a non-eligible chain is populated.
+  it('[feat/arbitrum-dca-gates] the Arbitrum v3 env var SET + 42161 ON the allowlist ⇒ the REAL route no longer fails closed on chain eligibility', async () => {
     vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', ARBITRUM_V3_STUB)
     vi.resetModules()
 
-    // ── Sanity, BEFORE trusting the 400: the env genuinely reached the REAL modules ──
-    // 1. The raw slot is populated — imported from the internal module, never the public barrel
-    //    (order-engine/index.ts deliberately does not re-export this map — L-1 of this branch).
+    // ── Sanity, BEFORE trusting the route: the env genuinely reached the REAL modules ──
     const { ORDER_EXECUTOR_V3_BY_CHAIN, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, getOrderExecutorV3 } =
       await import('@/lib/order-engine/config')
     expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBe(ARBITRUM_V3_STUB)
-    // 2. 42161 is not on the eligibility allowlist today (the code-level decision this test must
-    //    never widen — the Do NOT list forbids touching ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS itself).
-    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(42161)).toBe(false)
-    // 3. Therefore the REAL getter — the same one the route imports — is null for 42161, with the
-    //    populated slot proving this isn't null for lack of an address.
+    // The code-level decision: 42161 is eligible (config.ts cites the on-chain evidence).
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(42161)).toBe(true)
+    expect(getOrderExecutorV3(42161)).toBe(ARBITRUM_V3_STUB)
+
+    const { POST } = await import('./route')
+    const res = await POST(req(v3BodyForChain(42161)))
+    // It may still fail later in the pipeline (this fixture never produces a real EIP-712
+    // signature), but it must not be the chain-eligibility 400 — that gate is what this PR opened.
+    if (res.status === 400) {
+      const json = (await res.json()) as { error?: string }
+      expect(json.error).not.toMatch(/not yet available on chain/)
+    }
+  })
+
+  it('[feat/arbitrum-dca-gates] the Arbitrum v3 env var UNSET ⇒ the REAL route still composes to 400 — eligibility lets env DISABLE, never enable', async () => {
+    // The INC-2026-08-26-001 §2 containment shape (Vercel var re-scoped away from Production) and
+    // the documented ops rollback: with the slot empty, an eligible chain still resolves null.
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', undefined)
+    vi.resetModules()
+
+    const { ORDER_EXECUTOR_V3_BY_CHAIN, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, getOrderExecutorV3 } =
+      await import('@/lib/order-engine/config')
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(42161)).toBe(true)
+    expect(ORDER_EXECUTOR_V3_BY_CHAIN[42161]).toBeNull()
     expect(getOrderExecutorV3(42161)).toBeNull()
 
-    // ── Now the composition under test: the route, dynamically imported AFTER the env stub and
-    //    module reset, so it resolves the SAME real config module instance just verified above. ──
     const { POST } = await import('./route')
     const res = await POST(req(v3BodyForChain(42161)))
     const json = (await res.json()) as { error?: string }
-
     expect(res.status).toBe(400)
     expect(json.error).toMatch(/not yet available on chain 42161/)
+  })
+
+  it('mainnet: its v3 env var SET + chain 1 NOT on the allowlist ⇒ the REAL route composes to 400 (the allowlist still gates a populated slot)', async () => {
+    // Keeps the original composition proof alive on the chain that is still not eligible: a
+    // populated slot on a non-allowlisted chain is refused by the SAME real getter the route uses.
+    vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS', ARBITRUM_V3_STUB)
+    vi.resetModules()
+
+    const { ORDER_EXECUTOR_V3_BY_CHAIN, ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS, getOrderExecutorV3 } =
+      await import('@/lib/order-engine/config')
+    expect(ORDER_EXECUTOR_V3_BY_CHAIN[1]).toBe(ARBITRUM_V3_STUB)
+    expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS.includes(1)).toBe(false)
+    expect(getOrderExecutorV3(1)).toBeNull()
+
+    const { POST } = await import('./route')
+    const res = await POST(req(v3BodyForChain(1)))
+    const json = (await res.json()) as { error?: string }
+    expect(res.status).toBe(400)
+    expect(json.error).toMatch(/not yet available on chain 1$/)
   })
 
   it('positive control — the same real composition on Base (8453, the eligible chain) does NOT fail closed here', async () => {
