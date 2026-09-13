@@ -19,17 +19,29 @@ function hash(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-const tmpFiles: string[] = []
+// [CodeQL: Insecure temporary file] A hand-built os.tmpdir() path (pid + Math.random(), not
+// cryptographically random) is guessable and racy — another process/user could pre-create or
+// symlink that exact path before this test writes it. fs.mkdtempSync atomically creates a
+// directory with a cryptographically random suffix (mode 0o700 — owner-only), closing that
+// race; the fixed 'trust.json' name inside it is then safe because the ENCLOSING directory is
+// exclusive to this process. write() additionally locks the file itself to 0o600.
+const tmpDirs: string[] = []
 function tmpFixture(): string {
-  const f = path.join(os.tmpdir(), `catalog-guard.trust.${process.pid}.${Math.random().toString(36).slice(2)}.json`)
-  tmpFiles.push(f)
-  return f
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-verdicts-'))
+  tmpDirs.push(dir)
+  return path.join(dir, 'trust.json')
+}
+
+function write(verdicts: Verdict[], chains: readonly number[], file: string): { file: string; count: number } {
+  const result = writeTrustFixture(verdicts, chains, file)
+  fs.chmodSync(file, 0o600)
+  return result
 }
 
 afterEach(() => {
-  while (tmpFiles.length) {
-    const f = tmpFiles.pop()!
-    fs.rmSync(f, { force: true })
+  while (tmpDirs.length) {
+    const d = tmpDirs.pop()!
+    fs.rmSync(d, { recursive: true, force: true })
   }
 })
 
@@ -70,14 +82,14 @@ describe('writeTrustFixture — per-chain merge', () => {
   it('a run for chain 8453 leaves a fixture containing 42161 rows byte-identical', () => {
     const file = tmpFixture()
     // seed the fixture as if a prior full run had written both chains
-    writeTrustFixture([arbRow, mainnetRowOld], [42161, 1], file)
+    write([arbRow, mainnetRowOld], [42161, 1], file)
     const before = JSON.parse(fs.readFileSync(file, 'utf8')) as { tokens: Verdict[] }
     const arbRowsBefore = before.tokens.filter((t) => t.chainId === 42161)
     expect(arbRowsBefore).toHaveLength(1)
     const hashBefore = hash(arbRowsBefore)
 
     // a chain-8453-scoped run must not touch the 42161 rows
-    writeTrustFixture([baseRowNew], [8453], file)
+    write([baseRowNew], [8453], file)
     const after = JSON.parse(fs.readFileSync(file, 'utf8')) as { tokens: Verdict[] }
     const arbRowsAfter = after.tokens.filter((t) => t.chainId === 42161)
     expect(hash(arbRowsAfter)).toBe(hashBefore)
@@ -91,9 +103,9 @@ describe('writeTrustFixture — per-chain merge', () => {
   it('the scoped chain (8453) rows ARE replaced by the new run', () => {
     const file = tmpFixture()
     const staleBase: Verdict = { ...baseRowNew, inTrustedList: false } // pretend a stale prior verdict
-    writeTrustFixture([arbRow, staleBase], [42161, 8453], file)
+    write([arbRow, staleBase], [42161, 8453], file)
 
-    writeTrustFixture([baseRowNew], [8453], file)
+    write([baseRowNew], [8453], file)
     const after = JSON.parse(fs.readFileSync(file, 'utf8')) as { tokens: Verdict[] }
     const baseRows = after.tokens.filter((t) => t.chainId === 8453)
     expect(baseRows).toEqual([baseRowNew])
@@ -101,8 +113,8 @@ describe('writeTrustFixture — per-chain merge', () => {
 
   it('a chain missing from this run keeps zero rows if it had none, and gains none', () => {
     const file = tmpFixture()
-    writeTrustFixture([mainnetRowOld], [1], file)
-    writeTrustFixture([baseRowNew], [8453], file)
+    write([mainnetRowOld], [1], file)
+    write([baseRowNew], [8453], file)
     const after = JSON.parse(fs.readFileSync(file, 'utf8')) as { tokens: Verdict[] }
     expect(after.tokens.filter((t) => t.chainId === 1)).toEqual([mainnetRowOld])
     expect(after.tokens.filter((t) => t.chainId === 8453)).toEqual([baseRowNew])
@@ -111,15 +123,15 @@ describe('writeTrustFixture — per-chain merge', () => {
 
   it('generatedFromChains reflects every chain represented in the merged fixture', () => {
     const file = tmpFixture()
-    writeTrustFixture([mainnetRowOld], [1], file)
-    writeTrustFixture([baseRowNew], [8453], file)
+    write([mainnetRowOld], [1], file)
+    write([baseRowNew], [8453], file)
     const after = JSON.parse(fs.readFileSync(file, 'utf8')) as { generatedFromChains: number[] }
     expect(after.generatedFromChains).toEqual([1, 8453])
   })
 
   it('a first-ever run (no existing fixture) still writes cleanly', () => {
     const file = tmpFixture() // never written to
-    const { count } = writeTrustFixture([arbRow], [42161], file)
+    const { count } = write([arbRow], [42161], file)
     expect(count).toBe(1)
     const after = JSON.parse(fs.readFileSync(file, 'utf8')) as { tokens: Verdict[] }
     expect(after.tokens).toEqual([arbRow])
