@@ -316,6 +316,14 @@ describe('GET /api/portfolio/tokens — chain-aware discovery [E-3]', () => {
     for (const u of urls) expect(u).toContain('https://base-mainnet.g.alchemy.com/v2')
   })
 
+  it('uses the Arbitrum Alchemy endpoint for chainId=42161', async () => {
+    const { mock, urls } = captureUrlMock({ balances: [] })
+    vi.stubGlobal('fetch', mock)
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=42161`))
+    expect(res.status).toBe(200)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(u).toContain('https://arb-mainnet.g.alchemy.com/v2')
+  })
 
   it('[CHORE-POLISH-3 P2] accepts exactly the shared PORTFOLIO_SUPPORTED_CHAINS set', async () => {
     // Parameterized over the SHARED allowlist module — the same constant the
@@ -325,8 +333,9 @@ describe('GET /api/portfolio/tokens — chain-aware discovery [E-3]', () => {
       const res = await GET(makeRequest(`?address=${WALLET}&chainId=${chainId}`))
       expect(res.status).toBe(200)
     }
-    // A real chain outside the set (Arbitrum) is rejected before any upstream call.
-    const res = await GET(makeRequest(`?address=${WALLET}&chainId=42161`))
+    // A real chain outside the set (Optimism) is rejected before any upstream call —
+    // negative control proving the allowlist actually gates, not just accepts everything.
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=10`))
     expect(res.status).toBe(400)
   })
 
@@ -349,6 +358,22 @@ describe('GET /api/portfolio/tokens — chain-aware discovery [E-3]', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as { tokens: Array<{ address: string; isDefault: boolean; symbol: string }> }
     const usdc = body.tokens.find(t => t.address.toLowerCase() === BASE_USDC.toLowerCase())
+    expect(usdc).toBeTruthy()
+    expect(usdc!.isDefault).toBe(true)
+    expect(usdc!.symbol).toBe('USDC')
+  })
+
+  it('curates isDefault from the ARBITRUM token list on chainId=42161 (not the mainnet list)', async () => {
+    // Arbitrum native USDC — resolved via the Arbitrum generated catalog's curated
+    // "suggested" subset (getChainTokenList(42161)), not mainnet DEFAULT_TOKENS.
+    const ARBITRUM_USDC = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+    vi.stubGlobal('fetch', makeFetchMock({
+      balances: [{ contractAddress: ARBITRUM_USDC, tokenBalance: '0x0de0b6b3a7640000' }],
+    }))
+    const res = await GET(makeRequest(`?address=${WALLET}&chainId=42161`))
+    expect(res.status).toBe(200)
+    const body = await res.json() as { tokens: Array<{ address: string; isDefault: boolean; symbol: string }> }
+    const usdc = body.tokens.find(t => t.address.toLowerCase() === ARBITRUM_USDC.toLowerCase())
     expect(usdc).toBeTruthy()
     expect(usdc!.isDefault).toBe(true)
     expect(usdc!.symbol).toBe('USDC')

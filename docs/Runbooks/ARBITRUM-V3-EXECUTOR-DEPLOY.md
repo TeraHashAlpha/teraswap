@@ -250,6 +250,20 @@ Arbitrum-specific deltas.
 - [ ] Phase-0 keeper floor (`order-floor.js`/`submission-policy.js`) confirmed active for Arbitrum in the
       merged multi-chain keeper (gate condition 4).
 
+## 8. Portfolio on Arbitrum (server env precondition)
+
+`42161` was added to `ALCHEMY_BASE_BY_CHAIN` (`src/lib/portfolio-chains.ts`) — the Portfolio tab and
+per-position DCA stats now call Alchemy on Arbitrum One. The server-side `ALCHEMY_API_KEY` env var (same
+key used for mainnet/Base) must belong to an Alchemy app with the **Arbitrum Mainnet** network enabled in
+the Alchemy dashboard, or every Arbitrum discovery call 502s. **Verify after deploy:** open the Portfolio
+tab with the wallet on Arbitrum One — it should list balances, not show "Portfolio isn't available"; or
+hit `GET /api/portfolio/tokens?chainId=42161&address=<wallet>` directly and confirm **200** with a
+`tokens` array, not a 4xx/5xx. **Rollback:** remove the `42161` entry from `ALCHEMY_BASE_BY_CHAIN` — the
+Portfolio tab falls back to its "isn't available on Arbitrum One yet" state, byte-identical to before
+this change; no env var needs touching.
+
+---
+
 ## Cross-reference
 - `docs/Runbooks/V3-EXECUTOR-DEPLOY.md` — the Base deploy this mirrors; read its §1/§4–§7 for detail
   not repeated here.
