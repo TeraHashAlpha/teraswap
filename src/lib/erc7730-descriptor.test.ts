@@ -168,6 +168,35 @@ describe('ERC-7730 FeeCollector V2 descriptor', () => {
     },
   )
 
+  // PR #2561 review round (2026-09-19): the runners printed the raw wei
+  // integer for @.value because "tokenAmount" needs a token/tokenPath to
+  // resolve a ticker, and neither was set. "amount" formats native-currency
+  // values directly, so no params are needed.
+  it('swapETHWithFee "@.value" field uses the amount format with no params', () => {
+    const format = descriptor.display.formats[
+      'swapETHWithFee(address router,bytes routerData,address tokenOut,uint256 minimumOutput)'
+    ]
+    const valueField = format.fields.find((f) => f.path === '@.value')
+    expect(valueField, '@.value field missing').toBeDefined()
+    expect(valueField!.format).toBe('amount')
+    expect(valueField!.params).toBeUndefined()
+  })
+
+  // The contract treats tokenOut === address(0) as native ETH out, so the
+  // formatter needs nativeCurrencyAddress alongside tokenPath to resolve
+  // "Minimum Output" for that case instead of failing to find a token.
+  it('swapTokenWithFee "minimumOutput" field resolves tokenOut === address(0) as native ETH', () => {
+    const format = descriptor.display.formats[
+      'swapTokenWithFee(address token,uint256 totalAmount,address router,bytes routerData,address tokenOut,uint256 minimumOutput)'
+    ]
+    const minimumOutputField = format.fields.find((f) => f.path === 'minimumOutput')
+    expect(minimumOutputField, 'minimumOutput field missing').toBeDefined()
+    expect(minimumOutputField!.params?.tokenPath).toBe('tokenOut')
+    expect(minimumOutputField!.params?.nativeCurrencyAddress).toBe(
+      '0x0000000000000000000000000000000000000000',
+    )
+  })
+
   it('descriptor ABI agrees with the frontend FEE_COLLECTOR_ABI on every function signature', () => {
     const frontendSigs = new Set(
       FEE_COLLECTOR_ABI
