@@ -99,6 +99,12 @@ Anthropic-style "do this for the user" is intentionally out of the code
 agent's scope — submitting to an external repo is a manual step with
 account-level implications.
 
+## Review history
+
+- **2026-09-19** — [PR #2561][pr-2561] review round: fixed `@.value` on `swapETHWithFee` to use the `amount`
+  format instead of an unresolvable `tokenAmount`, and added `nativeCurrencyAddress` to `minimumOutput` on
+  `swapTokenWithFee` so `tokenOut === address(0)` (native ETH out) resolves instead of failing to find a token.
+
 ## References
 
 - ERC-7730 standard: <https://eips.ethereum.org/EIPS/eip-7730>
@@ -112,3 +118,4 @@ account-level implications.
 
 [erc7730]: https://eips.ethereum.org/EIPS/eip-7730
 [registry]: https://github.com/LedgerHQ/clear-signing-erc7730-registry
+[pr-2561]: https://github.com/ethereum/clear-signing-erc7730-registry/pull/2561

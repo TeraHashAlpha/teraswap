@@ -66,6 +66,9 @@
  *                                  known aggregator disables the Chainlink read (fail-closed) —
  *                                  never another chain's feed.
  *   LOW_GAS_USD_THRESHOLD       -- (optional) USD gas-value below which a low-gas alert fires (default 5)
+ *   LOW_GAS_ALERT_COOLDOWN_MS   -- (optional) while the breach persists, re-alert at most once per this
+ *                                  many ms with a suppressed count; one recovery message when the
+ *                                  balance is back above the threshold (default 3600000 = 1 h)
  *   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -- (optional) Telegram alert sink (see alert.js)
  *
  * SIGNING (prefer a managed signer over a plaintext key -- required on every production chain):
@@ -93,6 +96,7 @@ import {
   formatUnits,
   formatEther,
   zeroHash,
+  zeroAddress,
 } from "viem"
 import { createServer } from "http"
 import { createExecutorAccount } from "./kms-signer.js"  // [C-02/B-01] HSM/KMS support
@@ -295,6 +299,8 @@ const ETH_PRICED_ADDRESSES = new Set(
 //                             per chain (eth-usd-feed.js); unknown chain ⇒ no read.
 //   LOW_GAS_USD_THRESHOLD  -- USD value of the wallet's ETH below which we emit a
 //                             low-gas alert. Default 5 (matches freeze-score GAS_LOW_USD).
+//   LOW_GAS_ALERT_COOLDOWN_MS -- read by alert.js at alert time: re-alert cadence while the
+//                             breach persists (default 3600000 = 1 h) + one recovery message.
 const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0.01")
 // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware, FAIL-CLOSED ETH/USD aggregator resolution
 // (eth-usd-feed.js, pinned to the app's chainlink-feeds.ts by a drift test). Replaces the previous
@@ -1223,16 +1229,18 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
   } catch { /* never throw */ }
 
   // ETH/USD for the low-gas signal (cached for the cycle; non-fatal on failure).
+  // [fix/keeper-alert-cooldown-and-dca-debug-read] alertLowGas runs EVERY cycle the USD value is
+  // known — breach or not — with the threshold passed in; it cools down (LOW_GAS_ALERT_COOLDOWN_MS)
+  // and sends one recovery message itself (alert.js). A caller-side `if (< threshold)` here would
+  // hide the healthy cycles from it, so the recovery could never fire.
   try {
     ctx.ethUsd = await readEthUsd(publicClient)
     if (typeof ctx.ethUsd === "number" && ctx.cycleStartBalanceWei !== null) {
       const gasUsdValue = ctx.walletBalanceEth * ctx.ethUsd
-      if (gasUsdValue < LOW_GAS_USD_THRESHOLD) {
-        await alertLowGas(
-          { balanceEth: ctx.walletBalanceEth.toFixed(6), gasUsdValue: gasUsdValue.toFixed(2) },
-          scoreFromContext(ctx),
-        )
-      }
+      await alertLowGas(
+        { balanceEth: ctx.walletBalanceEth.toFixed(6), gasUsdValue, thresholdUsd: LOW_GAS_USD_THRESHOLD },
+        scoreFromContext(ctx),
+      )
     }
   } catch { /* never throw */ }
 
@@ -1494,16 +1502,24 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}, executor=${isV3 ? 'v3' : 'v2'}`)
 
       // Debug: read current Chainlink price
-      try {
-        const [, answer] = await publicClient.readContract({
-          address: orderStruct.priceFeed,
-          abi: PRICE_FEED_ABI,
-          functionName: "latestRoundData",
-        })
-        log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
-        log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
-      } catch (e) {
-        log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+      // [fix/keeper-alert-cooldown-and-dca-debug-read] A DCA order has no feed (priceFeed = zero
+      // address): skip the read — it logged `Could not read Chainlink price: … returned no data
+      // ("0x")` on every DCA cycle, noise that reads like a feed outage. Limit / SL / TP orders
+      // keep the read exactly as before (pinned by chainlink-debug-read.test.mjs).
+      if (orderStruct.priceFeed === zeroAddress) {
+        log(`  Price feed: none (DCA)`)
+      } else {
+        try {
+          const [, answer] = await publicClient.readContract({
+            address: orderStruct.priceFeed,
+            abi: PRICE_FEED_ABI,
+            functionName: "latestRoundData",
+          })
+          log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
+          log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
+        } catch (e) {
+          log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+        }
       }
 
       // Check via contract [SPRINT-V3-P2] execAddress/execAbi resolved per-order above.

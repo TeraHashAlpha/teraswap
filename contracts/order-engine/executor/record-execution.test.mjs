@@ -25,11 +25,12 @@ import {
 
 // ---- fixtures ----------------------------------------------------------
 
-const CONTRACT = "0x000000000000000000000000000000000000c0de"
+export const CONTRACT = "0x000000000000000000000000000000000000c0de"
 
 // Build a real OrderExecuted log the way the OrderExecutor contract emits it,
 // so decodeOrderExecuted round-trips it through viem's decodeEventLog.
-function makeOrderExecutedLog({
+// Exported for reuse by list-missing-fills.test.mjs (same decode fixture, no ABI redeclaration).
+export function makeOrderExecutedLog({
   address = CONTRACT,
   orderHash = "0x" + "ab".repeat(32),
   owner = "0x2222222222222222222222222222222222222222",

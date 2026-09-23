@@ -11,8 +11,8 @@ import { PORTFOLIO_SUPPORTED_CHAINS, ALCHEMY_BASE_BY_CHAIN, isPortfolioSupported
 import { getSupportedChainIds, getChainConfig } from '@/lib/chains/registry'
 
 describe('portfolio-chains [CHORE-POLISH-3 P2]', () => {
-  it('supports exactly mainnet + Base today (behaviour-identical pin)', () => {
-    expect([...PORTFOLIO_SUPPORTED_CHAINS].sort((a, b) => a - b)).toEqual([1, 8453])
+  it('supports exactly mainnet + Base + Arbitrum One today', () => {
+    expect([...PORTFOLIO_SUPPORTED_CHAINS].sort((a, b) => a - b)).toEqual([1, 8453, 42161])
   })
 
   it('the chain list and the Alchemy endpoint map are the SAME set (no drift possible)', () => {

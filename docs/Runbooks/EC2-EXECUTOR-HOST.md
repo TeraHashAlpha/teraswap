@@ -382,6 +382,13 @@ ts_host_guard && pm2 logs teraswap-keeper-arbitrum --lines 60 --nostream
 Any `FATAL:` line ⇒ the refusal names the variable or check; fix the env file, `pm2 restart
 teraswap-keeper-arbitrum`, re-read from line 1. Never work around a refusal with an override.
 
+**Low-gas alert (per app).** The keeper's rule is USD-based — `LOW_GAS_USD_THRESHOLD` (default $5)
+on the signer's native balance — and independent of the monitor repo's ETH thresholds (0.002 /
+0.0004 on Arbitrum); keep every signer at >= $10 of native gas. It repeats at most hourly
+(`LOW_GAS_ALERT_COOLDOWN_MS`, default 3600000) with a suppressed count, plus one "gas balance
+recovered" message. Applying either variable is `pm2 restart <app>` for that app only — never
+`restart all`, never `--update-env` (S2.4).
+
 ### S2.6 — logrotate coverage
 
 pm2 does not rotate the ecosystem apps' `./logs/*.log`, and the Base app's `~/.pm2/logs/` files
@@ -423,3 +430,48 @@ group/world-readable through rotation.
 ```bash
 ts_host_guard && pm2 delete teraswap-keeper-arbitrum && pm2 save
 ```
+
+## Recover fills missing from order_executions [CHORE-KEEPER-LIST-MISSING-FILLS]
+
+`order_executions.next_best_out` (migration `20260723231005`) was unapplied in Supabase from
+2026-07-23 to 2026-09-14: every keeper insert 400'd and the failure was swallowed, so any fill
+executed in that window may be missing its `order_executions` row even though it succeeded
+on-chain. `list-missing-fills.mjs` re-derives the missing tx hashes from `eth_getLogs` (read-only);
+`backfill-execution.mjs` then writes them, dry-run first.
+
+Two commands per app — run from `contracts/order-engine/executor`, each with that app's own env
+file (never `export EXECUTOR_ENV_FILE`; pass it inline per command, per S2.0 above):
+
+```bash
+# 1. List — Base, from the start of the affected window (2026-07-23T00:00:00Z = 1784764800)
+EXECUTOR_ENV_FILE=.env.executor node list-missing-fills.mjs --from-ts 1784764800 \
+  --out missing-fills.8453.txt
+
+# 2. Backfill — dry run first (prints every row it WOULD write, writes nothing)
+EXECUTOR_ENV_FILE=.env.executor node -e '
+  const fs = await import("node:fs")
+  const hashes = fs.readFileSync("missing-fills.8453.txt", "utf-8").trim().split("\n").filter(Boolean)
+  for (const h of hashes) {
+    const { execSync } = await import("node:child_process")
+    execSync(`node backfill-execution.mjs ${h}`, { stdio: "inherit", env: process.env })
+  }
+'
+# then, once every row above looks correct:
+BACKFILL_APPLY=1 EXECUTOR_ENV_FILE=.env.executor node -e '
+  const fs = await import("node:fs")
+  const hashes = fs.readFileSync("missing-fills.8453.txt", "utf-8").trim().split("\n").filter(Boolean)
+  for (const h of hashes) {
+    const { execSync } = await import("node:child_process")
+    execSync(`node backfill-execution.mjs ${h}`, { stdio: "inherit", env: process.env })
+  }
+'
+```
+
+For Arbitrum, repeat with `EXECUTOR_ENV_FILE=.env.executor.arbitrum` and `--out
+missing-fills.42161.txt` (Arbitrum's 6 lost fills were already recovered 2026-09-19 from pm2 log
+hashes — this is for anything the log-based recovery missed).
+
+**Rule:** after any migration PR merges, apply it in Supabase and verify the column list before the
+keeper's next restart. This exact gap (migration merged, never applied, restart happened anyway)
+is why `next_best_out` was silently missing for almost two months (2026-07-23 → 2026-09-14) — the
+keeper does not check its own table's schema at boot.

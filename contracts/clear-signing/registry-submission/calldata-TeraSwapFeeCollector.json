@@ -73,7 +73,7 @@
             "path": "minimumOutput",
             "label": "Minimum Output",
             "format": "tokenAmount",
-            "params": { "tokenPath": "tokenOut" }
+            "params": { "tokenPath": "tokenOut", "nativeCurrencyAddress": "0x0000000000000000000000000000000000000000" }
           },
           {
             "path": "router",
@@ -95,13 +95,7 @@
           {
             "path": "@.value",
             "label": "ETH Amount",
-            "format": "tokenAmount",
-            "params": {
-              "nativeCurrencyAddress": [
-                "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-                "0x0000000000000000000000000000000000000000"
-              ]
-            }
+            "format": "amount"
           },
           {
             "path": "tokenOut",
