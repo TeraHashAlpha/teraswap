@@ -127,9 +127,16 @@ export function perChunkAmountIn(dbOrder) {
 // entirely (not written as explicit NULL) unless BOTH are present together —
 // an amount without its source label (or vice versa) is a malformed pair and
 // is dropped rather than persisted half-formed.
+// [FIX-BACKFILL-EXECUTION-NUMBER-AND-TIMESTAMP] blockTimestamp (unix seconds, optional) is the
+// CONFIRMED tx's block timestamp — when given, created_at is set to it so a row reflects when the
+// fill actually happened on-chain rather than when it was inserted. The live keeper path does not
+// pass it: `receipt` (from waitForTransactionReceipt) has no timestamp field, and fetching the
+// block would add an extra RPC call on every fill for a cosmetic column — so the live path is
+// unchanged and created_at keeps defaulting to insert time there. backfill-execution.mjs already
+// fetches the block for dca_last_exec, so passing that same timestamp here is free.
 export function buildExecutionRow({
   dbOrder, txHash, receipt, decoded, executionNumber, priceAtExecution,
-  nextBestOut, nextBestSource,
+  nextBestOut, nextBestSource, blockTimestamp,
 }) {
   const execNum = executionNumber ?? executionNumberFor(dbOrder)
   const amountIn = decoded?.amountIn ?? perChunkAmountIn(dbOrder)
@@ -145,6 +152,7 @@ export function buildExecutionRow({
     gas_used: receipt && receipt.gasUsed != null ? receipt.gasUsed.toString() : "0",
     status: "confirmed",
   }
+  if (blockTimestamp != null) row.created_at = new Date(Number(blockTimestamp) * 1000).toISOString()
   if (priceAtExecution != null) row.price_at_execution = String(priceAtExecution)
   if (nextBestOut != null && nextBestSource != null) {
     row.next_best_out = String(nextBestOut)
