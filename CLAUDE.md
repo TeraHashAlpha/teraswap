@@ -87,6 +87,7 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 12. **NEVER commit without a GPG/SSH signature** — every commit on every branch must be cryptographically signed; `main` rejects unsigned commits at branch protection. Setup: `docs/Runbooks/SIGNED-COMMITS.md`.
 13. **NEVER invoke credential helpers or read the keychain** (`git credential-*`, `security find-*`) for any purpose; if an action needs auth the session lacks, report the manual step and stop. Why: two agent sessions independently reached for the macOS keychain, one nearly self-merging a PR (keychain near-miss, 2026-07-09).
 14. **NEVER treat "PR open" as a goal's exit condition** — exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the PR and must be green before merge — PR creation is never the agent's job. Why: a stop-hook deadlocked 9 cycles requiring "PR open" when PR creation is owner-manual (stop-hook deadlock, 2026-07-09); a follow-up deadlocked again requiring "CI green" pre-PR when this repo's CI only triggers on push/PR to `main` (CHORE-HYGIENE-2, 2026-07-11).
+15. **STOP only if blocked or before anything irreversible** (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action. Why: a session died 2026-09-19 before writing its feedback file, and the run's evidence was lost.
 
 ---
 
@@ -97,6 +98,10 @@ squash/rebase merge does not honor the `merge=union` git attribute (tried in `CH
 so every PR touching it paid a rebase tax. Each PR now carries its **own** feedback instead: either a
 `## Feedback` section in the PR body, or a per-PR file at `docs/feedback/<branch-name>.md`. Never append to
 the old shared `FEEDBACK.md` (archived, see below) — a new PR never has a reason to touch it.
+
+**Feedback file lifecycle:** Create `docs/feedback/<branch>.md` in the FIRST commit with this goal's task checklist.
+Tick items and add findings as you go. The final FEEDBACK is the last edit of that file, not a report written at
+the end. **Why:** compaction kills interim feedback; session death before final report loses the evidence.
 
 When implementing a prompt, if you encounter any of the following, document it in the PR's own feedback
 (PR body section or `docs/feedback/<branch>.md`):
