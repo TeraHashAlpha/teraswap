@@ -475,3 +475,30 @@ hashes — this is for anything the log-based recovery missed).
 keeper's next restart. This exact gap (migration merged, never applied, restart happened anyway)
 is why `next_best_out` was silently missing for almost two months (2026-07-23 → 2026-09-14) — the
 keeper does not check its own table's schema at boot.
+
+### Repair a row backfilled before [FIX-BACKFILL-EXECUTION-NUMBER-AND-TIMESTAMP]
+
+Before this fix, `backfill-execution.mjs` hard-coded `execution_number: 1` for every row it wrote
+(wrong for any order's 2nd+ chunk — the Arbitrum recovery above produced three "Fill #1" rows per
+order) and never set `created_at` (it silently defaulted to insert time, not when the fill actually
+happened on-chain). Both are now derived from the chain: `execution_number` is this tx's 1-based
+rank among every `OrderExecuted` log for its order hash, ordered by `(blockNumber, logIndex)`;
+`created_at` is the tx's own block timestamp.
+
+**Any row written by `backfill-execution.mjs` before this fix must be repaired once** — re-run the
+same tx hash with `--repair`, which patches ONLY `execution_number`/`created_at` on the existing row
+(never amounts, status, or the parent order). Refuses unless exactly one `order_executions` row
+matches the tx hash. Dry-run by default, same `BACKFILL_APPLY=1` gate as a normal backfill:
+
+```bash
+# Dry run — prints the chain-derived execution_number/created_at and the patch it WOULD apply.
+EXECUTOR_ENV_FILE=.env.executor node backfill-execution.mjs <txHash> --repair
+
+# Apply, once the printed patch looks correct.
+BACKFILL_APPLY=1 EXECUTOR_ENV_FILE=.env.executor node backfill-execution.mjs <txHash> --repair
+```
+
+For Arbitrum, use `EXECUTOR_ENV_FILE=.env.executor.arbitrum`. A brand-new backfill (row does not
+exist yet) still uses the plain form (no `--repair`) shown above — it now writes the chain-derived
+`execution_number`/`created_at` on first insert, so no repair pass is needed for anything backfilled
+from this fix onward.
