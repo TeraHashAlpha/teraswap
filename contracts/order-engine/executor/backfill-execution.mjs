@@ -88,6 +88,15 @@ export function computeOrderPatch({ order, executionNumber, blockIso }) {
   return patch
 }
 
+// --repair guard: never patch execution_number alone. If the block timestamp couldn't be fetched
+// (blockTimestamp null — the try/catch around client.getBlock() below caught something), created_at
+// would be missing from the patch while execution_number still changed, leaving the row internally
+// inconsistent (a new fill index next to a stale insert-time created_at). --repair refuses instead;
+// a normal (non-repair) backfill is unaffected — it already tolerates a missing block timestamp.
+export function canRepair(blockTimestamp) {
+  return blockTimestamp != null
+}
+
 // --repair guard: exactly one existing order_executions row for this tx_hash, or refuse. Narrow by
 // design — --repair only ever patches execution_number/created_at on a row it can uniquely identify.
 export function resolveRepairTarget(existingRows) {
@@ -219,6 +228,14 @@ async function main() {
   console.log("order_executions row to write:", execRow)
 
   if (REPAIR) {
+    if (!canRepair(blockTimestamp)) {
+      console.error(
+        "FATAL: --repair could not fetch this tx's block timestamp — refusing to patch " +
+          "execution_number without created_at (never patch half of the pair).",
+      )
+      process.exit(1)
+    }
+
     const existingRes = await supabaseFetch(`order_executions?tx_hash=eq.${txHash}&select=id`)
     if (!existingRes.ok) {
       console.error(`FATAL: order_executions lookup failed: HTTP ${existingRes.status} ${await existingRes.text()}`)

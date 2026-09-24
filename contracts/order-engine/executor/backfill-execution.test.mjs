@@ -8,7 +8,7 @@
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 
-import { computeExecutionNumber, computeOrderPatch, resolveRepairTarget } from "./backfill-execution.mjs"
+import { computeExecutionNumber, computeOrderPatch, resolveRepairTarget, canRepair } from "./backfill-execution.mjs"
 
 // ---- (a) + (b) computeExecutionNumber — chain-derived, order-of-input-independent ------------
 
@@ -111,6 +111,13 @@ describe("resolveRepairTarget — --repair only ever patches a uniquely-identifi
     const r = resolveRepairTarget(null)
     assert.equal(r.ok, false)
     assert.equal(r.count, 0)
+  })
+})
+
+describe("canRepair — --repair refuses to patch execution_number without created_at", () => {
+  test("refuses when the block timestamp could not be fetched (null), allows when present", () => {
+    assert.equal(canRepair(null), false)
+    assert.equal(canRepair(1577836800), true)
   })
 })
 
