@@ -1306,14 +1306,6 @@ describe('calldata-recipient', () => {
 
     // ── The captures themselves ──
 
-    it('VELORA_DEFAULT_PARTNER is the DIRECT capture’s partner, and the FEE-ROUTED capture’s too', () => {
-      const partnerOf = (calldata: string) =>
-        getAddress(toHex(decodeUniV3(calldata)[1] >> PARTNER_SHIFT, { size: 20 }))
-      expect(VELORA_DEFAULT_PARTNER).not.toBe(zeroAddress)
-      expect(partnerOf(VELORA_UNIV3_ARB_DIRECT_CALLDATA)).toBe(VELORA_DEFAULT_PARTNER)
-      expect(partnerOf(VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA)).toBe(VELORA_DEFAULT_PARTNER)
-    })
-
     for (const { shape, calldata } of CAPTURES) {
       it(`${shape} capture pins Velora’s fee fields: partnerAndFee = VELORA_DEFAULT_PARTNER | IS_CAP_SURPLUS | 1 bps, quotedAmount >= toAmount > 0`, () => {
         // Fails first if the adapter or Velora changes what it writes here.

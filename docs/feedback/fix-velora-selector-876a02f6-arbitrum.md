@@ -60,8 +60,7 @@ the HIGH 160 bits, AugustusFees.sol:720-731), 1 bps, IS_CAP_SURPLUS (bit 92). Ve
   Pre-existing for every group, ends in an on-chain revert, out of scope; v1 unchanged.
 
 ### Concern
-- `VELORA_DEFAULT_PARTNER` is derived from the DIRECT fixture at module load, as specified: the first production import of
-  a `__fixtures__` file. If Velora rotates its partner, those routes fail closed (400): availability, not funds.
+- `VELORA_DEFAULT_PARTNER` now lives in `src/lib/velora-partner.ts` (checksummed literal), pinned to both captures by `velora-partner.test.ts`.
 - The UI hard-codes "Minimum output" (TransactionPreview.tsx:211/218, SplitReviewModal.tsx:102); rendering
   `amountOutMinLabel` there is a one-line follow-up outside this diff. (c) is defence in depth: the router already reverts
   `InvalidToAmount` (UniswapV3SwapExactAmountIn.sol:54).
