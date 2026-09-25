@@ -27,11 +27,15 @@ shared export between api.ts and minimum-output.ts (api.ts pulls server-only ada
 client hook must not bundle) — the list is duplicated and kept in sync manually, same trade-off
 already accepted for `FEE_INCOMPATIBLE_SOURCES` vs `FEE_NATIVE_SOURCES` in constants.ts.
 
-### quoteToAmount availability (useSwap.ts)
-Single call site: `SwapBox.tsx:232` → `useSwap(..., meta?.best.toAmount, ...)`. Undefined while a
-quote is loading/refreshing or absent. On that path the new check is skipped with one structured
-`console.warn` and the swap proceeds unblocked (pre-existing behaviour, not newly gated). CoW's own
-flow (`executeCowSwap`) never threads `quoteToAmount` at all — moot anyway, `cowswap` is skip-listed.
+### quoteToAmount availability (useSwap.ts) — CORRECTED in round 2
+~~Undefined only while a quote is loading/refreshing; warn and proceed.~~ **Wrong, and it made the
+check dead code.** `SwapBox.tsx:232` does pass `meta?.best.toAmount`, but `executeStandardSwap` is
+memoized and its dep array omitted `quoteToAmount`, so the closure kept whatever the value was when
+the callback was last rebuilt — token/amount/slippage change rebuilds it, a resolving quote does
+not, so on the normal path it held `undefined` (or the previous amount's quote) forever. Fixed:
+`quoteToAmount` (and `chainId`, missing from the same array) are now dependencies, and a missing
+quote is a refusal, not a warning. CoW is unaffected either way — `executeCowSwap` is a separate
+flow that never reaches this function.
 
 ### C3 — UX
 `errorMessage` already flows into SwapBox.tsx's generic error box (line 870, `effectiveError`) — the
@@ -49,19 +53,22 @@ Pinned by "does NOT trigger the 9O fallback walk" (useSwap.test.ts).
 `deriveMinimumOutput`. Fallback exclusion: `useSwap.ts` catch block, `!(err instanceof
 StaleOrTamperedSwapError)` added alongside the existing `PriceGuardError` exclusion.
 
-**2. Tests** — `minimum-output.test.ts`: 44 tests, was 16 on origin/main (+28 for the new function —
-boundary at 0/5/49.99% slippage, skip list, AGGREGATOR_META positive control, malformed-input parity).
-`useSwap.test.ts`: 40 tests, was 25 on origin/main (+15 — block, pass, no-fallback, 13-source
-positive-control loop via `it.each`, plus the pre-existing `swapResponse().toAmount` override fix).
-Combined 85/85 passing. Full suite: 4238/4238 passing (284 files) on this branch. `npx eslint` on all
-4 touched files: 0 new warnings — `useSwap.ts` unchanged at 8 pre-existing warnings (none on touched
-lines, verified via `git stash` diff against origin/main), the other 3 files at 0. `tsc --noEmit`: clean.
+**2. Tests** — `minimum-output.test.ts`: 44 tests, was 16 on origin/main. `useSwap.test.ts`: ~~40~~
+**41** tests (measured at 4da633e), was 25 on origin/main. Combined 85/85 passing. Full suite:
+4238/4238 (284 files); base af2da77 measures 4194/4194. See round 2 for the current figures.
 
-**3. Source × quoteToAmount × checked?**
+~~`npx eslint`: 0 new warnings — none on touched lines.~~ **Materially incomplete.** The count was
+0-delta, but `useSwap.ts:726` already carried `react-hooks/exhaustive-deps`: *"React Hook useCallback
+has missing dependencies: 'chainId' and 'quoteToAmount'"* — i.e. the linter had already named the
+exact defect this branch shipped, 20 lines below the new call site, and the evidence paragraph
+reported "no warnings on touched lines" instead of reading it. Lesson recorded: a lint *count* delta
+is not lint evidence when the change depends on a value a warning names.
 
-| source | quoteToAmount reaches useSwap? | checked by assertSwapConsistentWithQuote? | reason |
+**3. Source × quoteToAmount × checked?** (round-2 state)
+
+| source | accepted quote reaches the check? | checked? | reason |
 |---|---|---|---|
-| 1inch, 0x, velora, odos, kyberswap, uniswap, openocean, sushiswap, balancer, bebop, teraswap_order_engine | yes, via `SwapBox.tsx:232` `meta?.best.toAmount` (may be `undefined` pre-quote/refresh → warn+proceed) | yes | default path |
-| uniswapv3 | yes, same as above | no (skip list) | live on-chain pool — quote can legitimately go stale by execution time |
-| curve | yes, same as above | no (skip list) | same as uniswapv3 |
-| cowswap | never — `executeCowSwap` doesn't thread `quoteToAmount` at all | no (architecturally out of scope + skip list) | intent-based; solver fill above/below indicative quote is not tampering |
+| 1inch, 0x, velora, odos, kyberswap, uniswap, openocean, sushiswap, balancer, bebop, teraswap_order_engine, **curve** | yes — `SwapBox.tsx:232` `meta?.best.toAmount`, now in `executeStandardSwap`'s deps; split legs via `leg.quote.toAmount` | yes | default path; missing quote = refusal |
+| uniswapv3 | yes, same | no (skip list) | the /swap build RE-DETECTS the fee tier (`adapters/uniswapv3.ts:247-271`), so quote and swap can measure two different pools — structural, not drift |
+| cowswap | never — `execute()` dispatches it to `executeCowSwap` (`useSwap.ts:1058-1059`); excluded from `SPLIT_ELIGIBLE_SOURCES` (`split-routing-types.ts:96`) | n/a | unreachable, so no longer skip-listed either (a dead exemption reads as a checked carve-out) |
+| split total | yes — `source: null`, source-agnostic | yes | bounds a split even when a leg is exempt |

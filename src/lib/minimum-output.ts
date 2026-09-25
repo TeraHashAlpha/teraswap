@@ -74,21 +74,34 @@ export function deriveMinimumOutput(toAmount: unknown, slippagePercent: number):
  *  tolerate an aggregator's output landing anywhere UP TO a real price move. */
 export const SWAP_QUOTE_TOLERANCE_BPS = 50
 
-// Mirrors api.ts validateFeeIntegrity's `skipSources` EXACTLY. These are
-// sources where quote-vs-build divergence is expected and NOT a tampering
-// signal:
-//   - 'uniswapv3' / 'curve'  direct on-chain pools — the build reads live
-//     reserves at execution time, so a quote taken seconds earlier can
-//     legitimately land outside a tight floor on a fast-moving pool.
-//   - 'cowswap'              intent-based; a solver can fill ABOVE (surplus)
-//     or, for a partial/competitive fill, at a different price than the
-//     indicative quote. Neither is tampering.
-// No shared export to import from: api.ts pulls in server-only adapter/
-// rate-limiter modules this client hook must not bundle. Kept in sync
-// manually — same trade-off already accepted for FEE_INCOMPATIBLE_SOURCES
-// vs FEE_NATIVE_SOURCES in constants.ts (measured coincidence, not a
-// definition, per that file's own comment).
-const QUOTE_FLOOR_SKIP_SOURCES: readonly AggregatorName[] = ['uniswapv3', 'curve', 'cowswap']
+// ── Skip list ────────────────────────────────────────────────────────────
+// Sources exempt from the floor. This deliberately NO LONGER mirrors api.ts
+// `validateFeeIntegrity`'s `skipSources`: that list guards a CEILING for
+// partner-fee sources, and copying it onto the floor side did not survive
+// review (Auditor M-01/M-02 on this branch). Per entry:
+//   - 'uniswapv3'  KEPT — structural divergence, not market drift. The /swap
+//     build RE-DETECTS the fee tier and returns THAT tier's output
+//     (src/lib/adapters/uniswapv3.ts:247-271 — both branches overwrite the
+//     quote's tier with `detection.bestFee`), so when the best tier changes
+//     between /price and /swap, quote and swap are measuring two DIFFERENT
+//     pools. The gap is then a fee-tier delta plus another pool's depth,
+//     which no market-drift tolerance can bound, and it is a legitimate
+//     re-route to the best available pool — not a tampering signal.
+//   - 'curve'      REMOVED (Auditor M-02: the stated reason did not hold).
+//     Quote and build resolve the SAME statically-mapped pool through the
+//     same `findPool` lookup (src/lib/adapters/curve.ts:172 quote, :234
+//     build) and both read `get_dy` on it, so the only divergence is
+//     ordinary market drift — the same class every aggregator has, already
+//     absorbed by slippage + SWAP_QUOTE_TOLERANCE_BPS. Now checked wherever
+//     a Curve swap step exists, on every chain that has one.
+//   - 'cowswap'    REMOVED (Auditor M-01: dead exemption). It cannot reach
+//     this function on any path — useSwap's execute() dispatches it to
+//     executeCowSwap before executeStandardSwap (src/hooks/useSwap.ts:
+//     1058-1059), and SPLIT_ELIGIBLE_SOURCES excludes it
+//     (src/lib/split-routing-types.ts:96) so it is never a split leg either.
+//     An entry that can only ever be unreachable is worse than no entry: it
+//     reads as a considered carve-out for a path nobody has checked.
+const QUOTE_FLOOR_SKIP_SOURCES: readonly AggregatorName[] = ['uniswapv3']
 
 export class StaleOrTamperedSwapError extends Error {
   /** Positive percentage the swap output landed below the accepted quote, or

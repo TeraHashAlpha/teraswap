@@ -110,7 +110,8 @@ function callAssert(
   quoteToAmount: unknown,
   swapToAmount: unknown,
   slippagePercent: number,
-  source: AggregatorName = NON_SKIP_SOURCE,
+  // `null` = the source-agnostic aggregate (a split's total) — never skipped.
+  source: AggregatorName | null = NON_SKIP_SOURCE,
 ) {
   assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount, slippagePercent, source })
 }
@@ -172,12 +173,29 @@ describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () 
     }
   })
 })
-describe('assertSwapConsistentWithQuote — skip list mirrors validateFeeIntegrity exactly', () => {
-  const SKIP_SOURCES: AggregatorName[] = ['uniswapv3', 'curve', 'cowswap']
+describe('assertSwapConsistentWithQuote — skip list is uniswapv3 ONLY [Auditor M-01/M-02]', () => {
+  // The list no longer mirrors validateFeeIntegrity's. 'cowswap' was dropped
+  // as a dead exemption (M-01): execute() dispatches it to executeCowSwap
+  // before executeStandardSwap (useSwap.ts:1058-1059) and
+  // SPLIT_ELIGIBLE_SOURCES excludes it (split-routing-types.ts:96), so it can
+  // never reach this function. 'curve' was dropped because its reason did not
+  // hold (M-02): quote and build resolve the SAME statically mapped pool and
+  // both read get_dy on it (curve.ts:172 / :234), so its divergence is
+  // ordinary market drift. 'uniswapv3' stays on a structural reason: the
+  // build RE-DETECTS the fee tier (uniswapv3.ts:247-271), so quote and swap
+  // can be measuring two different pools.
+  const SKIP_SOURCES: AggregatorName[] = ['uniswapv3']
 
   it.each(SKIP_SOURCES)('%s bypasses the floor entirely — even a near-zero output passes', (source) => {
     expect(() => callAssert('1000000', '1', 0, source)).not.toThrow()
   })
+
+  it.each(['curve', 'cowswap'] as AggregatorName[])(
+    '%s is NO LONGER exempt — a halved swap output blocks',
+    (source) => {
+      expect(() => callAssert('1000000', '500000', 0.5, source)).toThrow(StaleOrTamperedSwapError)
+    },
+  )
 
   it('every OTHER registered source in AGGREGATOR_META IS checked (positive control)', () => {
     for (const source of Object.keys(AGGREGATOR_META) as AggregatorName[]) {
@@ -187,6 +205,11 @@ describe('assertSwapConsistentWithQuote — skip list mirrors validateFeeIntegri
       // Tampered to half the quote: every checked source blocks it.
       expect(() => callAssert('1000000', '500000', 0.5, source)).toThrow(StaleOrTamperedSwapError)
     }
+  })
+
+  it('the split AGGREGATE (source: null) is never skip-listed', () => {
+    expect(() => callAssert('1000000', '500000', 0.5, null)).toThrow(StaleOrTamperedSwapError)
+    expect(() => callAssert('1000000', '1000000', 0.5, null)).not.toThrow()
   })
 })
 
@@ -241,6 +264,6 @@ describe('assertSwapConsistentWithQuote — an unusable SWAP amount throws Unusa
   })
 
   it('a malformed input on a SKIP-listed source still bypasses (skip check runs first)', () => {
-    expect(() => callAssert('not-a-number', 'also-not-a-number', 0.5, 'cowswap')).not.toThrow()
+    expect(() => callAssert('not-a-number', 'also-not-a-number', 0.5, 'uniswapv3')).not.toThrow()
   })
 })
