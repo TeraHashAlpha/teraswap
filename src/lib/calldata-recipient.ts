@@ -34,7 +34,9 @@ import { decodeAbiParameters, getAddress, toFunctionSelector, toHex, zeroAddress
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { resolveZeroxSettlers } from '@/lib/zerox-settler-registry'
-import { VELORA_UNIV3_ARB_DIRECT_CALLDATA } from '@/lib/__fixtures__/velora-augustus-uniswapv3-arbitrum'
+import { VELORA_DEFAULT_PARTNER } from '@/lib/velora-partner'
+
+export { VELORA_DEFAULT_PARTNER }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -794,16 +796,6 @@ const AUGUSTUS_MAX_PARTNER_FEE_BPS = 10n
 
 const augustusPartnerOf = (partnerAndFee: bigint): Address =>
   getAddress(toHex(partnerAndFee >> AUGUSTUS_PARTNER_SHIFT, { size: 20 }))
-
-/**
- * [Group H] The partner Velora writes into `partnerAndFee` by itself — our
- * adapter sends no partner parameter. DERIVED at module load from the DIRECT
- * capture's word, never typed; the tests pin it to the FEE-ROUTED capture too.
- * If Velora rotates it, its routes fail closed here and the reason logs the word.
- */
-export const VELORA_DEFAULT_PARTNER: Address = augustusPartnerOf(
-  decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, `0x${VELORA_UNIV3_ARB_DIRECT_CALLDATA.slice(10)}`)[1],
-)
 
 /**
  * Rule (a): why `partnerAndFee` is not admissible, or null when it is. The
