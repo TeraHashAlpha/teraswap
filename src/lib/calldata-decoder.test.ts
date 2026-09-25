@@ -7,14 +7,24 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { decodeAbiParameters, encodeAbiParameters, toFunctionSelector, zeroAddress, type Hex } from 'viem'
+import { decodeAbiParameters, encodeAbiParameters, toFunctionSelector, zeroAddress, type AbiParameter, type Hex } from 'viem'
 import { decodeTransactionPreview, SELECTOR_INFO } from './calldata-decoder'
 import {
   VALIDATED_SELECTORS,
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
   AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
   AUGUSTUS_UNIV3_ARG_TYPES,
+  AUGUSTUS_GENERIC_ARG_TYPES,
+  AUGUSTUS_CURVE_V1_ARG_TYPES,
+  AUGUSTUS_CURVE_V2_ARG_TYPES,
 } from './calldata-recipient'
+import {
+  VELORA_GENERIC_MAINNET_FEE_ROUTED_CALLDATA,
+  VELORA_CURVE_V1_MAINNET_FEE_ROUTED_CALLDATA,
+  VELORA_CURVE_V2_MAINNET_FEE_ROUTED_CALLDATA,
+  VELORA_V62_MAINNET_TO,
+  VELORA_V62_MAINNET_USER,
+} from './__fixtures__/velora-augustus-v62-exact-in-mainnet'
 import { ZEROX_ALLOWANCE_HOLDER } from '@/lib/constants'
 import {
   ZEROX_MAINNET_EXEC_CALLDATA,
@@ -368,6 +378,55 @@ describe('decodeTransactionPreview', () => {
         decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, `0x${VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA.slice(10)}` as Hex)[0].toAmount.toString(),
       )
     })
+  })
+
+  // ── [R1 Group I] Augustus V6.2 swapExactAmountIn / Curve V1 / Curve V2 preview ─
+
+  describe('[Group I] Augustus V6.2 swapExactAmountIn / Curve V1 / Curve V2 preview', () => {
+    const METHODS = [
+      { name: 'swapExactAmountIn', literal: '0xe3ead59e', dex: 'ParaSwap V6', argTypes: AUGUSTUS_GENERIC_ARG_TYPES, structArg: 1, feeRouted: VELORA_GENERIC_MAINNET_FEE_ROUTED_CALLDATA },
+      { name: 'swapExactAmountInOnCurveV1', literal: '0x1a01c532', dex: 'Velora V6.2', argTypes: AUGUSTUS_CURVE_V1_ARG_TYPES, structArg: 0, feeRouted: VELORA_CURVE_V1_MAINNET_FEE_ROUTED_CALLDATA },
+      { name: 'swapExactAmountInOnCurveV2', literal: '0xe37ed256', dex: 'Velora V6.2', argTypes: AUGUSTUS_CURVE_V2_ARG_TYPES, structArg: 0, feeRouted: VELORA_CURVE_V2_MAINNET_FEE_ROUTED_CALLDATA },
+    ] as const
+    type Struct = { beneficiary: string; fromAmount: bigint; toAmount: bigint }
+
+    for (const m of METHODS) {
+      const types = m.argTypes as readonly AbiParameter[]
+      const args = [...decodeAbiParameters(types, `0x${m.feeRouted.slice(10)}` as Hex)]
+      const struct = args[m.structArg] as Struct
+
+      it(`${m.name}: shows the decoded beneficiary as extracted, toAmount as the router minimum — REAL Velora calldata`, () => {
+        const preview = decodeTransactionPreview(m.feeRouted, VELORA_V62_MAINNET_TO, 'velora')
+        expect(preview.selector).toBe(m.literal)
+        expect(preview.functionName).toBe(m.name)
+        expect(preview.sourceDex).toBe(m.dex)
+        expect(preview.validated).toBe(true)
+        expect(preview.recipientType).toBe('extracted')
+        expect(preview.recipient?.toLowerCase()).toBe(VELORA_V62_MAINNET_USER.toLowerCase())
+        expect(preview.amountIn).toBe(struct.fromAmount.toString())
+        expect(preview.amountOutMin).toBe(struct.toAmount.toString())
+        expect(preview.amountOutMinLabel).toBe('router minimum (before router fees)')
+      })
+
+      it(`${m.name}: zero beneficiary → recipientType invalid and unvalidated, never shown as extracted`, () => {
+        const zeroedArgs = [...args]
+        zeroedArgs[m.structArg] = { ...struct, beneficiary: zeroAddress }
+        const zeroed = m.feeRouted.slice(0, 10) + encodeAbiParameters(types, zeroedArgs).slice(2)
+        const preview = decodeTransactionPreview(zeroed, VELORA_V62_MAINNET_TO, 'velora')
+        expect(preview.recipientType).toBe('invalid')
+        expect(preview.validated).toBe(false)
+        expect(preview.validationReason).toContain('address(0)')
+      })
+
+      it(`${m.name}: undecodable (truncated) → invalid and unvalidated, never 'implicit'`, () => {
+        const preview = decodeTransactionPreview(m.feeRouted.slice(0, 2 + 200 * 2), VELORA_V62_MAINNET_TO, 'velora')
+        expect(preview.selector).toBe(m.literal)
+        expect(preview.recipient).toBeNull()
+        expect(preview.recipientType).toBe('invalid')
+        expect(preview.validated).toBe(false)
+        expect(preview.validationReason).toContain('does not decode')
+      })
+    }
   })
 
   // ── SELECTOR_INFO completeness ────────────────────
