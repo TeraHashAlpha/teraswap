@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { SeedToken } from './types'
-import { applyCuratedCorrections, correctSeed, CURATED_ARBITRUM_SEEDS } from './curated'
+import { applyCuratedCorrections, correctSeed, CURATED_ARBITRUM_SEEDS, isCuratedRemoval } from './curated'
 
 const OHM_V1 = '0x383518188C0C6d7730D91b2c03a03C837814a899'
 const OHM_V2 = '0x64aa3364F17a4D01c6f1751Fd97C2BD3D7e7f1D5'
@@ -14,6 +14,7 @@ const KNC_LEGACY = '0xdd974D5C2e2928deA5F71b9825b8b646686BD200'
 const KNC_V2 = '0xdeFA4e8a7bcBA345F687a2f1456F5Edd9CE97202'
 const LOOM_REMOVED = '0xA4e8C3Ec456107eA67d3075bF9e3DF3A75823DB0'
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+const HANU = '0x72E5390EDb7727E3d4e3436451DADafF675dBCC0'
 
 const seed = (address: string, symbol: string, decimals = 18): SeedToken => ({
   address: address as `0x${string}`,
@@ -87,5 +88,33 @@ describe('[CHORE-ARBITRUM-TOKEN-CATALOG-PIPELINE] Arbitrum USDT self-remap + USD
       symbol: 'USDC.e',
       decimals: 6,
     })
+  })
+})
+
+// [fix/catalog-continuity-drop-on-trust-loss — issue #518] HANU left CoinGecko's ethereum list
+// between the 2026-09-14 and 2026-09-21 refreshes, flipping inTrustedList to false and freezing
+// every chain-1 refresh on the trusted-list FATAL. Removed (no exemption — Do-NOT rule #9), so
+// it can neither be re-fetched by a stale list nor ride back in on the continuity-seed path.
+describe('[fix/catalog-continuity-drop-on-trust-loss] HANU removal (issue #518)', () => {
+  it('HANU is a curated REMOVAL on chain 1', () => {
+    expect(isCuratedRemoval(1, HANU)).toBe(true)
+    expect(isCuratedRemoval(1, HANU.toLowerCase())).toBe(true)
+  })
+
+  it('a stale upstream list still carrying HANU cannot resurrect it', () => {
+    const entries = applyCuratedCorrections([
+      { chainId: 1, address: HANU as `0x${string}`, symbol: 'HANU', name: 'Hanu Yokia', decimals: 12, source: 'oneinch' },
+      { chainId: 1, address: WETH as `0x${string}`, symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, source: 'uniswap' },
+    ])
+    expect(entries.map((e) => e.address)).toEqual([WETH])
+  })
+
+  it('the continuity-seed path drops HANU too (seedsFor runs every seed through correctSeed)', () => {
+    expect(correctSeed(1, seed(HANU, 'HANU', 12))).toBeNull()
+  })
+
+  it('the removal is chain-scoped — the same address on Base/Arbitrum is untouched', () => {
+    expect(isCuratedRemoval(8453, HANU)).toBe(false)
+    expect(correctSeed(42161, seed(HANU, 'HANU', 12))).toMatchObject({ address: HANU })
   })
 })
