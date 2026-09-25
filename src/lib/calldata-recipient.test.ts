@@ -1223,11 +1223,22 @@ describe('calldata-recipient', () => {
   // ── VALIDATED_SELECTORS allowlist ──────────────────────
 
   describe('VALIDATED_SELECTORS allowlist', () => {
-    it('contains exactly 23 selectors', () => {
+    it('contains exactly 24 selectors', () => {
       // [SPRINT-9H] 20 → 22: + Augustus V6.2 swapExactAmountInOnCurveV1/V2.
       // [R1 Group G] 22 → 23: + AllowanceHolder.exec, which this gate can now
       // decode. ADR-021's one-release divergence from SC-04 is closed.
-      expect(VALIDATED_SELECTORS.size).toBe(23)
+      // [R1 Group H] 23 → 24: + Augustus V6.2 swapExactAmountInOnUniswapV3,
+      // admitted together with SC-04 and only with its beneficiary decoded.
+      expect(VALIDATED_SELECTORS.size).toBe(24)
+    })
+
+    it('the Group H entry is the derived swapExactAmountInOnUniswapV3 selector', () => {
+      expect(VALIDATED_SELECTORS.has(AUGUSTUS_UNIV3_EXACT_IN_SELECTOR)).toBe(true)
+      expect(AUGUSTUS_UNIV3_EXACT_IN_SELECTOR).toBe(
+        toFunctionSelector(
+          'swapExactAmountInOnUniswapV3((address,address,uint256,uint256,uint256,bytes32,address,bytes),uint256,bytes)',
+        ),
+      )
     })
 
     it('matches KNOWN_SWAP_SELECTORS exactly — the R1 ≡ SC-04 invariant', async () => {

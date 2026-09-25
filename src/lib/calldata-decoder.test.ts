@@ -9,12 +9,21 @@
 import { describe, it, expect } from 'vitest'
 import { encodeAbiParameters, toFunctionSelector } from 'viem'
 import { decodeTransactionPreview, SELECTOR_INFO } from './calldata-decoder'
-import { VALIDATED_SELECTORS, ALLOWANCE_HOLDER_EXEC_SELECTOR } from './calldata-recipient'
+import {
+  VALIDATED_SELECTORS,
+  ALLOWANCE_HOLDER_EXEC_SELECTOR,
+  AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
+} from './calldata-recipient'
 import { ZEROX_ALLOWANCE_HOLDER } from '@/lib/constants'
 import {
   ZEROX_MAINNET_EXEC_CALLDATA,
   ZEROX_MAINNET_EXEC_TAKER,
 } from './__fixtures__/zerox-allowance-holder-mainnet'
+import {
+  VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA,
+  VELORA_UNIV3_ARB_TO,
+  VELORA_UNIV3_ARB_USER,
+} from './__fixtures__/velora-augustus-uniswapv3-arbitrum'
 
 // ── Test helpers ───────────────────────────────────────
 
@@ -314,6 +323,29 @@ describe('decodeTransactionPreview', () => {
       expect(preview.selector).toBe(ALLOWANCE_HOLDER_EXEC_SELECTOR)
       expect(preview.recipient).toBeNull()
       expect(preview.recipientType).toBe('implicit')
+    })
+  })
+
+  // ── [R1 Group H] Augustus V6.2 swapExactAmountInOnUniswapV3 preview ─
+
+  describe('[Group H] Augustus V6.2 swapExactAmountInOnUniswapV3 preview', () => {
+    it('shows the decoded beneficiary as extracted, never as implicit — REAL Velora calldata', () => {
+      const preview = decodeTransactionPreview(VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA, VELORA_UNIV3_ARB_TO, 'velora')
+      expect(preview.selector).toBe(AUGUSTUS_UNIV3_EXACT_IN_SELECTOR)
+      expect(preview.functionName).toBe('swapExactAmountInOnUniswapV3')
+      expect(preview.sourceDex).toBe('Velora V6.2')
+      expect(preview.validated).toBe(true)
+      expect(preview.recipientType).toBe('extracted')
+      expect(preview.recipient?.toLowerCase()).toBe(VELORA_UNIV3_ARB_USER.toLowerCase())
+      expect(preview.amountIn).toBe('10000000000000000')
+      expect(BigInt(preview.amountOutMin ?? '0')).toBeGreaterThan(0n)
+    })
+
+    it('degrades to no recipient (never throws) on truncated calldata', () => {
+      const truncated = VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA.slice(0, 2 + 200 * 2)
+      const preview = decodeTransactionPreview(truncated, VELORA_UNIV3_ARB_TO, 'velora')
+      expect(preview.selector).toBe(AUGUSTUS_UNIV3_EXACT_IN_SELECTOR)
+      expect(preview.recipient).toBeNull()
     })
   })
 

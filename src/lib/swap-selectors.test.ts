@@ -13,7 +13,7 @@
  * exactly, confirming the method.
  */
 import { describe, it, expect } from 'vitest'
-import { toFunctionSelector } from 'viem'
+import { keccak256, slice, toFunctionSelector, toHex } from 'viem'
 import { KNOWN_SWAP_SELECTORS, isKnownSwapSelector } from './swap-selectors'
 
 const CALLDATA = (selector: string) => `${selector}${'0'.repeat(128)}`
@@ -90,9 +90,50 @@ describe('KNOWN_SWAP_SELECTORS — mainnet selector set preserved [SPRINT-9H]', 
     for (const sel of PRE_9H) expect(KNOWN_SWAP_SELECTORS.has(sel)).toBe(true)
   })
 
-  it('adds exactly the two verified Curve selectors + the one 0x v2 selector (23 total, no accidental widening)', () => {
-    // +2 Curve (SPRINT-9H) +1 AllowanceHolder.exec (ADR-021).
-    expect(KNOWN_SWAP_SELECTORS.size).toBe(PRE_9H.length + 2 + 1)
+  it('adds exactly the two Curve + one 0x v2 + one Augustus UniswapV3 selector (24 total, no accidental widening)', () => {
+    // +2 Curve (SPRINT-9H) +1 AllowanceHolder.exec (ADR-021)
+    // +1 swapExactAmountInOnUniswapV3 (R1 Group H).
+    expect(KNOWN_SWAP_SELECTORS.size).toBe(PRE_9H.length + 2 + 1 + 1)
+  })
+})
+
+// ── [R1 Group H] Augustus V6.2 swapExactAmountInOnUniswapV3 ─────────────────
+//
+// The selector the Arbitrum keeper rejected on 2026-09-14 17:33–17:34 UTC (x2):
+//   Swap API error: 400 {"error":"Unknown swap function selector","selector":"0x876a02f6"} (source=velora)
+// An OBSERVATION copied from the log, kept on the actual side of every assertion;
+// the keccak-derived value goes on the expected side (same method as ADR-021).
+const OBSERVED_IN_KEEPER_LOG = '0x876a02f6'
+
+/** Canonical ABI signature — Sourcify-verified AugustusV6 on Arbitrum, src/AugustusV6Types.sol UniswapV3Data. */
+const UNIV3_EXACT_IN_SIG =
+  'swapExactAmountInOnUniswapV3((address,address,uint256,uint256,uint256,bytes32,address,bytes),uint256,bytes)'
+
+describe('KNOWN_SWAP_SELECTORS — Augustus V6.2 swapExactAmountInOnUniswapV3 [R1 Group H]', () => {
+  it('0x876a02f6 IS swapExactAmountInOnUniswapV3 — derived, not asserted', () => {
+    expect(OBSERVED_IN_KEEPER_LOG).toBe(toFunctionSelector(UNIV3_EXACT_IN_SIG))
+  })
+
+  it('allows it — the Velora single-pool Uniswap V3 route the Arbitrum keeper was losing', () => {
+    const sel = toFunctionSelector(UNIV3_EXACT_IN_SIG)
+    expect(KNOWN_SWAP_SELECTORS.has(sel)).toBe(true)
+    expect(isKnownSwapSelector(CALLDATA(sel))).toBe(true)
+  })
+
+  it('does not widen to its Augustus siblings (none of them verified or recipient-checked)', () => {
+    for (const sig of [
+      'swapExactAmountOutOnUniswapV3((address,address,uint256,uint256,uint256,bytes32,address,bytes),uint256,bytes)',
+      'swapExactAmountInOnUniswapV2((address,address,uint256,uint256,uint256,bytes32,address,bytes),uint256,bytes)',
+      'swapExactAmountInOnBalancerV2((uint256,uint256,uint256,bytes32,uint256),uint256,bytes,bytes)',
+    ]) {
+      expect(isKnownSwapSelector(CALLDATA(toFunctionSelector(sig)))).toBe(false)
+    }
+  })
+
+  it('negative control: an arbitrary (hash-derived) 4-byte selector is still unknown', () => {
+    const arbitrary = slice(keccak256(toHex('teraswap/sc-04/arbitrary-negative-control')), 0, 4)
+    expect(KNOWN_SWAP_SELECTORS.has(arbitrary)).toBe(false)
+    expect(isKnownSwapSelector(CALLDATA(arbitrary))).toBe(false)
   })
 })
 

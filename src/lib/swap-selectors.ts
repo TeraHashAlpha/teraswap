@@ -10,7 +10,7 @@
  * Zero dependencies. No imports.
  */
 
-// ── Known swap function selectors (23 total) ────────────────
+// ── Known swap function selectors (24 total) ────────────────
 
 export const KNOWN_SWAP_SELECTORS: Set<string> = new Set([
   // 1inch
@@ -54,6 +54,17 @@ export const KNOWN_SWAP_SELECTORS: Set<string> = new Set([
   // the canonical signature (which reproduced the known 0xe3ead59e exactly).
   '0x1a01c532', // swapExactAmountInOnCurveV1  (CurveV1StableNg — the Base failure)
   '0xe37ed256', // swapExactAmountInOnCurveV2  (Curve crypto pools)
+  // [R1 Group H] Paraswap / Velora (Augustus V6.2 — single-DEX Uniswap V3 method).
+  // Arbitrum Velora routes through a single Uniswap V3 pool (e.g. WETH→USDC, the
+  // DCA pair) encode this method, NOT swapExactAmountIn — the Arbitrum keeper was
+  // blocked on it as "Unknown swap function selector" on 2026-09-14. Verified 3
+  // ways against the live Augustus V6.2 (0x6a00…1068, same address on Ethereum,
+  // Base and Arbitrum): local viem toFunctionSelector over the canonical
+  // signature (which also reproduced 0xe3ead59e/0x1a01c532/0xe37ed256 exactly),
+  // the Sourcify-verified Arbitrum ABI plus a PUSH4 in its eth_getCode dispatch
+  // table, and openchain.xyz + 4byte.directory. Admitted ONLY because R1 decodes
+  // its beneficiary (calldata-recipient.ts Group H) — unlike the Curve methods.
+  '0x876a02f6', // swapExactAmountInOnUniswapV3
   // Odos
   '0x83800a8e',
   // KyberSwap

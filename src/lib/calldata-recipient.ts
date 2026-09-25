@@ -207,6 +207,9 @@ export const AUGUSTUS_UNIV3_EXACT_IN_SELECTOR: string = toFunctionSelector(
  *
  * Validated-by-unwrapping (recipient decoded out of one nested `bytes` arg):
  *   Group G: 0x v2 AllowanceHolder.exec
+ *
+ * Validated-by-extraction, Augustus V6.2 (beneficiary decoded, zero rejected):
+ *   Group H: swapExactAmountInOnUniswapV3
  */
 export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // Group A — msg.sender implicit
@@ -243,6 +246,9 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // ADR-021 had to break for one release: KNOWN_SWAP_SELECTORS and this set are
   // pinned equal again by calldata-recipient.test.ts.
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
+  // Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (uniData.beneficiary
+  // decoded). Derived above, not typed; added together with its SC-04 entry.
+  AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
 ])
 
 // ---------------------------------------------------------------------------
