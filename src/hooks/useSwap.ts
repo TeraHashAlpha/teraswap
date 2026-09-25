@@ -13,7 +13,7 @@ import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, C
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
-import { deriveMinimumOutput } from '@/lib/minimum-output'
+import { deriveMinimumOutput, assertSwapConsistentWithQuote } from '@/lib/minimum-output'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import type { CowOrderParams } from '@/lib/adapters/types'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -484,6 +484,28 @@ export function useSwap(
       // try's catch → normal error + 9O fallback walk to the next source)
       // instead of the old 10-L-01 fallback to minimumOutput = 0n, which
       // silently disabled the on-chain InsufficientOutput check.
+      // [fix/swap-toamount-lower-bound-vs-quote / Architect ruling on #524
+      // Auditor H-01] Floor counterpart to the M-01 ceiling check above:
+      // deriveMinimumOutput derives the on-chain floor from THIS SAME
+      // swapData.toAmount, so a tampered or degraded /swap response with a
+      // tiny toAmount would otherwise produce a tiny floor unopposed for
+      // every source (M-01 above only fires for FEE_NATIVE_SOURCES and only
+      // catches an implausibly HIGH output). Runs for every source not on
+      // assertSwapConsistentWithQuote's own skip list, independent of
+      // routeViaFeeCollector — a stale/tampered response is a risk to the
+      // user's fill regardless of which contract enforces the floor.
+      //
+      // quoteToAmount is only absent on paths that never had a /price quote
+      // to compare against (SwapBox.tsx:232 passes `meta?.best.toAmount`,
+      // which is undefined while a quote is loading/refreshing or absent
+      // entirely) — those flows predate this check and must not be newly
+      // blocked, so we log once and proceed rather than throw.
+      if (quoteToAmount) {
+        assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount: swapData.toAmount, slippagePercent: slippage, source })
+      } else {
+        console.warn('[TeraSwap] assertSwapConsistentWithQuote skipped — no quoteToAmount available', { source })
+      }
+
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
       const minimumOutput = routeViaFeeCollector
         ? deriveMinimumOutput(swapData.toAmount, slippage)
