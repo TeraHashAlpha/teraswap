@@ -18,8 +18,10 @@ import {
   decodeFunctionData,
   encodeAbiParameters,
   encodeFunctionData,
+  getAddress,
   parseAbi,
   toFunctionSelector,
+  toHex,
   zeroAddress,
   type Hex,
 } from 'viem'
@@ -31,6 +33,8 @@ import {
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
   ALLOWANCE_HOLDER_INNER_SELECTORS,
   AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
+  AUGUSTUS_UNIV3_ARG_TYPES,
+  VELORA_DEFAULT_PARTNER,
 } from './calldata-recipient'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
@@ -1217,6 +1221,242 @@ describe('calldata-recipient', () => {
         const result = validateCallDataRecipient(sibling + '0'.repeat(128), USER_ADDRESS)
         expect(result).toEqual({ valid: true, extracted: null, implicitRecipient: true })
       }
+    })
+  })
+
+  // ── Group H — fee fields (Auditor round 1: H-01 / M-01) ─
+
+  /**
+   * [R1 Group H] Augustus applies its fees AFTER the toAmount check, so the
+   * beneficiary is bounded by toAmount only if partnerAndFee, quotedAmount and
+   * toAmount are bounded too.
+   *
+   * `partnerAndFee` layout, restated from the verified source rather than
+   * imported from calldata-recipient.ts, so the implementation is checked
+   * against AugustusFees.sol and not against itself:
+   *   src/fees/AugustusFees.sol:720-731  parsePartnerAndFeeData
+   *     partner := shr(96, partnerAndFee)                         → bits 255..96
+   *     feeData := and(partnerAndFee, 0xFFFFFFFFFFFFFFFFFFFFFFFF) → bits  95..0
+   *   :39      FEE_PERCENT_IN_BASIS_POINTS_MASK = 0x3FFF          → fee bps, bits 13..0
+   *            (capped at MAX_FEE_PERCENT = 200, :30, :886-892)
+   *   :40-45   IS_USER_SURPLUS 1<<90 · IS_DIRECT_TRANSFER 1<<91 · IS_CAP_SURPLUS 1<<92 ·
+   *            IS_SKIP_BLACKLIST 1<<93 · IS_REFERRAL 1<<94 · IS_TAKE_SURPLUS 1<<95
+   *   bits 89..14 are read by nothing in AugustusFees.
+   *
+   * Every vector is a real capture re-encoded through the exported
+   * AUGUSTUS_UNIV3_ARG_TYPES with only the named fields changed.
+   */
+  describe('[Group H] Augustus fee fields — partnerAndFee, quotedAmount, toAmount', () => {
+    const ARBITRUM = 42161
+    const PARTNER_SHIFT = 96n
+    const FLAG = {
+      IS_USER_SURPLUS: 1n << 90n,
+      IS_DIRECT_TRANSFER: 1n << 91n,
+      IS_CAP_SURPLUS: 1n << 92n,
+      IS_SKIP_BLACKLIST: 1n << 93n,
+      IS_REFERRAL: 1n << 94n,
+      IS_TAKE_SURPLUS: 1n << 95n,
+    } as const
+    /** Pack a word the way parsePartnerAndFeeData unpacks it. */
+    const packWord = (partner: string, feeBps: bigint, flags = 0n): bigint =>
+      (BigInt(partner) << PARTNER_SHIFT) | flags | feeBps
+
+    const decodeUniV3 = (calldata: string) =>
+      decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, `0x${calldata.slice(10)}` as Hex)
+
+    /** Re-encode a real capture through the exported ABI with only the named fields changed. */
+    function mutate(
+      calldata: string,
+      edit: { partnerAndFee?: bigint; quotedAmount?: bigint; toAmount?: bigint; beneficiary?: Hex },
+    ): string {
+      const [uniData, partnerAndFee, permit] = decodeUniV3(calldata)
+      const encoded = encodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, [
+        {
+          ...uniData,
+          ...(edit.quotedAmount !== undefined && { quotedAmount: edit.quotedAmount }),
+          ...(edit.toAmount !== undefined && { toAmount: edit.toAmount }),
+          ...(edit.beneficiary !== undefined && { beneficiary: edit.beneficiary }),
+        },
+        edit.partnerAndFee ?? partnerAndFee,
+        permit,
+      ])
+      return calldata.slice(0, 10) + encoded.slice(2)
+    }
+
+    const CAPTURES = [
+      { shape: 'DIRECT', calldata: VELORA_UNIV3_ARB_DIRECT_CALLDATA, expected: VELORA_UNIV3_ARB_TAKER, viaFeeCollector: false },
+      { shape: 'FEE-ROUTED', calldata: VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA, expected: VELORA_UNIV3_ARB_USER, viaFeeCollector: true },
+    ] as const
+
+    /**
+     * /api/swap blocks on any `valid: false`. /api/v1/swap calls the async entry
+     * with (calldata, expectedRecipient) only and blocks only when
+     * `!valid && extracted` (src/app/api/v1/swap/route.ts:520-524). A Group H
+     * rejection must satisfy both.
+     */
+    async function expectBlockedByBothRoutes(calldata: string, expected: string, viaFeeCollector: boolean) {
+      const inApp = validateCallDataRecipient(calldata, expected, viaFeeCollector, ARBITRUM)
+      expect(inApp.valid).toBe(false)
+      const v1 = await validateCallDataRecipientAsync(calldata, expected)
+      expect(v1.valid).toBe(false)
+      expect(v1.extracted).not.toBeNull()
+      expect(v1.extracted?.toLowerCase()).toBe(decodeUniV3(calldata)[0].beneficiary.toLowerCase())
+      return inApp
+    }
+
+    // ── The captures themselves ──
+
+    it('VELORA_DEFAULT_PARTNER is the DIRECT capture’s partner, and the FEE-ROUTED capture’s too', () => {
+      const partnerOf = (calldata: string) =>
+        getAddress(toHex(decodeUniV3(calldata)[1] >> PARTNER_SHIFT, { size: 20 }))
+      expect(VELORA_DEFAULT_PARTNER).not.toBe(zeroAddress)
+      expect(partnerOf(VELORA_UNIV3_ARB_DIRECT_CALLDATA)).toBe(VELORA_DEFAULT_PARTNER)
+      expect(partnerOf(VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA)).toBe(VELORA_DEFAULT_PARTNER)
+    })
+
+    for (const { shape, calldata } of CAPTURES) {
+      it(`${shape} capture pins Velora’s fee fields: partnerAndFee = VELORA_DEFAULT_PARTNER | IS_CAP_SURPLUS | 1 bps, quotedAmount >= toAmount > 0`, () => {
+        // Fails first if the adapter or Velora changes what it writes here.
+        const [uniData, partnerAndFee] = decodeUniV3(calldata)
+        expect(partnerAndFee).toBe(packWord(VELORA_DEFAULT_PARTNER, 1n, FLAG.IS_CAP_SURPLUS))
+        expect(uniData.toAmount).toBeGreaterThan(0n)
+        expect(uniData.quotedAmount).toBeGreaterThanOrEqual(uniData.toAmount)
+        // The mutation helper is a byte-exact round trip when nothing is edited.
+        expect(mutate(calldata, {})).toBe(calldata)
+      })
+    }
+
+    // ── Rule (a): partnerAndFee ──
+
+    const DISALLOWED_FLAGS = (Object.keys(FLAG) as (keyof typeof FLAG)[]).filter((f) => f !== 'IS_CAP_SURPLUS')
+    for (const flag of DISALLOWED_FLAGS) {
+      it(`NEGATIVE (a): ${flag} set on Velora’s own word → rejected`, async () => {
+        const word = packWord(VELORA_DEFAULT_PARTNER, 1n, FLAG.IS_CAP_SURPLUS | FLAG[flag])
+        const tampered = mutate(VELORA_UNIV3_ARB_DIRECT_CALLDATA, { partnerAndFee: word })
+        const result = await expectBlockedByBothRoutes(tampered, VELORA_UNIV3_ARB_TAKER, false)
+        expect(result.reason).toContain(toHex(word, { size: 32 }))
+        expect(result.reason).toContain('outside {fee bps, IS_CAP_SURPLUS}')
+      })
+    }
+
+    const RULE_A_NEGATIVES = [
+      {
+        name: 'fee 11 bps with the right partner',
+        word: packWord(VELORA_DEFAULT_PARTNER, 11n, FLAG.IS_CAP_SURPLUS),
+        why: 'fee 11 bps exceeds 10 bps',
+      },
+      {
+        name: 'fee 0x3FFF bps with the right partner (M-01; the router caps it at 200)',
+        word: packWord(VELORA_DEFAULT_PARTNER, 0x3fffn, FLAG.IS_CAP_SURPLUS),
+        why: 'fee 16383 bps exceeds 10 bps',
+      },
+      {
+        name: 'unknown high bit 89 (highest bit AugustusFees never reads)',
+        word: packWord(VELORA_DEFAULT_PARTNER, 1n, FLAG.IS_CAP_SURPLUS | (1n << 89n)),
+        why: 'outside {fee bps, IS_CAP_SURPLUS}',
+      },
+      {
+        name: 'unknown bit 14 (first bit above the fee mask)',
+        word: packWord(VELORA_DEFAULT_PARTNER, 1n, FLAG.IS_CAP_SURPLUS | (1n << 14n)),
+        why: 'outside {fee bps, IS_CAP_SURPLUS}',
+      },
+      {
+        name: 'attacker partner with Velora’s exact 1 bps + IS_CAP_SURPLUS shape',
+        word: packWord(ATTACKER_ADDRESS, 1n, FLAG.IS_CAP_SURPLUS),
+        why: 'is neither 0 nor VELORA_DEFAULT_PARTNER',
+      },
+      {
+        name: 'attacker partner + IS_TAKE_SURPLUS (H-01’s surplus split)',
+        word: packWord(ATTACKER_ADDRESS, 0n, FLAG.IS_TAKE_SURPLUS),
+        why: 'is neither 0 nor VELORA_DEFAULT_PARTNER',
+      },
+      {
+        // The round-1 brief's literal layout. Augustus reads partner = word >> 96,
+        // i.e. the attacker's top 64 bits, and the rest as fee bits.
+        name: 'attacker address in the LOW 160 bits + IS_TAKE_SURPLUS',
+        word: BigInt(ATTACKER_ADDRESS) | FLAG.IS_TAKE_SURPLUS,
+        why: 'is neither 0 nor VELORA_DEFAULT_PARTNER',
+      },
+    ]
+    for (const { name, word, why } of RULE_A_NEGATIVES) {
+      for (const { shape, calldata, expected, viaFeeCollector } of CAPTURES) {
+        it(`NEGATIVE (a): ${name} — ${shape} → rejected, word in the reason`, async () => {
+          const tampered = mutate(calldata, { partnerAndFee: word })
+          const result = await expectBlockedByBothRoutes(tampered, expected, viaFeeCollector)
+          expect(result.reason).toContain(`partnerAndFee ${toHex(word, { size: 32 })}`)
+          expect(result.reason).toContain(why)
+        })
+      }
+    }
+
+    // ── Rules (b) and (c): quotedAmount, toAmount ──
+
+    it('NEGATIVE (b): quotedAmount = 1 → rejected', async () => {
+      const tampered = mutate(VELORA_UNIV3_ARB_DIRECT_CALLDATA, { quotedAmount: 1n })
+      const result = await expectBlockedByBothRoutes(tampered, VELORA_UNIV3_ARB_TAKER, false)
+      expect(result.reason).toContain('quotedAmount below toAmount enables surplus capture')
+    })
+
+    it('NEGATIVE (b): quotedAmount = toAmount - 1 → rejected (the boundary)', async () => {
+      const [uniData] = decodeUniV3(VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA)
+      const tampered = mutate(VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA, { quotedAmount: uniData.toAmount - 1n })
+      const result = await expectBlockedByBothRoutes(tampered, VELORA_UNIV3_ARB_USER, true)
+      expect(result.reason).toContain(`quotedAmount ${uniData.toAmount - 1n} < toAmount ${uniData.toAmount}`)
+    })
+
+    it('NEGATIVE (c): toAmount = 0 → rejected', async () => {
+      const tampered = mutate(VELORA_UNIV3_ARB_DIRECT_CALLDATA, { toAmount: 0n })
+      const result = await expectBlockedByBothRoutes(tampered, VELORA_UNIV3_ARB_TAKER, false)
+      expect(result.reason).toContain('zero toAmount disables Augustus output check')
+    })
+
+    it('NEGATIVE: H-01 as the Auditor ran it (quotedAmount = 1 + attacker partner + IS_TAKE_SURPLUS) → rejected', async () => {
+      const word = packWord(ATTACKER_ADDRESS, 0n, FLAG.IS_TAKE_SURPLUS)
+      const tampered = mutate(VELORA_UNIV3_ARB_DIRECT_CALLDATA, { partnerAndFee: word, quotedAmount: 1n })
+      await expectBlockedByBothRoutes(tampered, VELORA_UNIV3_ARB_TAKER, false)
+    })
+
+    it('checks run in the specified order: zero beneficiary, (a), (b), (c)', () => {
+      const reasonOf = (edit: Parameters<typeof mutate>[1]) =>
+        validateCallDataRecipient(mutate(VELORA_UNIV3_ARB_DIRECT_CALLDATA, edit), VELORA_UNIV3_ARB_TAKER, false, ARBITRUM).reason
+      const badWord = packWord(ATTACKER_ADDRESS, 1n)
+      // Each step removes the failure that won the step before.
+      expect(reasonOf({ beneficiary: zeroAddress, partnerAndFee: badWord, quotedAmount: 0n, toAmount: 1n })).toContain('address(0)')
+      expect(reasonOf({ partnerAndFee: badWord, quotedAmount: 0n, toAmount: 1n })).toContain('partnerAndFee')
+      expect(reasonOf({ quotedAmount: 0n, toAmount: 1n })).toContain('quotedAmount 0 < toAmount 1')
+      expect(reasonOf({ quotedAmount: 0n, toAmount: 0n })).toContain('zero toAmount')
+    })
+
+    // ── Positive controls ──
+
+    for (const { shape, calldata, expected, viaFeeCollector } of CAPTURES) {
+      it(`POSITIVE: ${shape} capture unmodified → valid`, () => {
+        const result = validateCallDataRecipient(calldata, expected, viaFeeCollector, ARBITRUM)
+        expect(result).toEqual({ valid: true, extracted: getAddress(expected), implicitRecipient: false })
+      })
+    }
+
+    const POSITIVES = [
+      { name: 'partnerAndFee = 0 (no partner, no fee, no flags)', edit: { partnerAndFee: 0n } },
+      { name: 'right partner with 10 bps (the ceiling) + IS_CAP_SURPLUS', edit: { partnerAndFee: packWord(VELORA_DEFAULT_PARTNER, 10n, FLAG.IS_CAP_SURPLUS) } },
+      // Superseded round-1 negative: partner 0 + 1 bps. AugustusFees.sol:255 skips
+      // the partner branch when partner == 0, so no fee is taken.
+      { name: 'partnerAndFee = 1 (partner 0, 1 bps)', edit: { partnerAndFee: 1n } },
+    ] as const
+    for (const { name, edit } of POSITIVES) {
+      for (const { shape, calldata, expected, viaFeeCollector } of CAPTURES) {
+        it(`POSITIVE (a): ${name} — ${shape} → valid`, () => {
+          const result = validateCallDataRecipient(mutate(calldata, edit), expected, viaFeeCollector, ARBITRUM)
+          expect(result.valid).toBe(true)
+          expect(result.extracted?.toLowerCase()).toBe(expected.toLowerCase())
+        })
+      }
+    }
+
+    it('POSITIVE (b): quotedAmount == toAmount → valid (the boundary)', () => {
+      const [uniData] = decodeUniV3(VELORA_UNIV3_ARB_DIRECT_CALLDATA)
+      const edited = mutate(VELORA_UNIV3_ARB_DIRECT_CALLDATA, { quotedAmount: uniData.toAmount })
+      expect(validateCallDataRecipient(edited, VELORA_UNIV3_ARB_TAKER, false, ARBITRUM).valid).toBe(true)
     })
   })
 
