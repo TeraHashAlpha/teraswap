@@ -88,3 +88,24 @@ describe('deriveGuardOutcomes', () => {
     expect(out.get(NATIVE.toLowerCase())).toEqual({ status: 'pass' })
   })
 })
+
+// [fix/catalog-continuity-drop-on-trust-loss — issue #518] The trusted-list FATAL is UNTOUCHED:
+// an audited trust-lost address is still fatal. The continuity policy (build-chain.ts,
+// CONTINUITY_DROP_ON_TRUST_LOSS) clears the gate by REMOVING the dropped row from the committed
+// catalog — never by weakening this check.
+describe('deriveGuardOutcomes — trust loss [fix/catalog-continuity-drop-on-trust-loss]', () => {
+  const lostTrust = verdict({ address: DAI, symbol: 'DAI', onchainSymbol: 'DAI', inTrustedList: false })
+
+  it('a trust-lost address is STILL fatal while it is in the audited set', () => {
+    const out = deriveGuardOutcomes(1, [token(DAI, 'DAI', 18)], [lostTrust], AL)
+    expect(out.get(DAI.toLowerCase())?.status).toBe('fatal')
+    expect(out.get(DAI.toLowerCase())?.detail).toContain('trusted-list')
+  })
+
+  it('once the dropped row is out of the audited set there is NO fatal — a stale verdict alone never reds the gate', () => {
+    const out = deriveGuardOutcomes(1, [token(WETH, 'WETH', 18)], [verdict({}), lostTrust], AL)
+    expect([...out.values()].some((o) => o.status === 'fatal')).toBe(false)
+    expect(out.get(WETH.toLowerCase())).toEqual({ status: 'pass' })
+    expect(out.has(DAI.toLowerCase())).toBe(false)
+  })
+})
