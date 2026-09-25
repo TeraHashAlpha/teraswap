@@ -27,6 +27,16 @@ const REMOVALS = new Set([
   // on ANY chain (DexScreener), no DefiLlama price. Contract alive with nonzero supply but
   // completely untraded — abandoned in the market → remove.
   '1:0xae788f80f2756a86aa2f410c651f2af83639b95b',
+  // [fix/catalog-continuity-drop-on-trust-loss — issue #518 triage, verified 2026-09-25]
+  // HANU (Hanu Yokia, 12 decimals) — CoinGecko dropped the address from its ethereum token
+  // list between the 2026-09-14 and 2026-09-21 refreshes, so `inTrustedList` flipped to false
+  // and the trusted-list FATAL froze every chain-1 refresh from 09-21 on. The contract is live
+  // and unchanged (nothing migrated, no successor) — it is simply market-dead: ~$15/day volume,
+  // far below the $100k liquidity floor. Entered on 2026-07-01 with 2 source votes and survived
+  // only through continuity seeding, which is exactly the ratchet CONTINUITY_DROP_ON_TRUST_LOSS
+  // (build-chain.ts) now prevents. No allowlist exemption (Do-NOT rule #9) → remove. Re-listable
+  // by a future run: drop this line once >=2 external sources carry the address again.
+  '1:0x72e5390edb7727e3d4e3436451dadaff675dbcc0',
   // KAT "Katana" (Base) — TICKER COLLISION, not the real project: CoinGecko's canonical KAT
   // (id "katana-network-token", rank 979, ~$15.2M mcap) is deployed ONLY on its own "katana"
   // L2 chain (platform map has no Base entry at all). This Base contract is a same-named but
