@@ -15,7 +15,13 @@ for **Group I** (decoded, Group H policy via Group H's own helpers). SC-04 list,
 
    All three map beneficiary 0 → msg.sender, check received ≥ toAmount, then pay via `processSwapExactAmountInFeesAndTransfer`
    (AugustusFees.sol:70-214) — branch-for-branch the UniV3 variant (:224-367), so Group H's bound (≥ toAmount − 10 bps) carries over.
-2. **Fixtures** — _pending (commit 2)._
+2. **Fixtures — all 6 CAPTURED, 0 synthetic** (`__fixtures__/velora-augustus-v62-exact-in-mainnet.ts`, Ethereum mainnet):
+   unmodified `velora.ts` `fetchSwapData` → Velora `/transactions/1` (ignoreChecks; nothing signed/sent), DIRECT + FEE-ROUTED per
+   method, verbatim `tx.data`, `tx.to` = routers.ts `1.velora`, stand-ins = Group H's labels. Forced by appending
+   `includeContractMethods=<method>` to the adapter's `/prices` URL; the Curve pair also needed `includeDEXS=CurveV1|CurveV2`
+   (without it: `400 "No contract method available for the requested setup"`). Generic 0.01 WETH→USDC (uniswapv4 via executor
+   `0x006D…B000`) · CurveV1 1000 USDC→USDT (3pool `0xbebc…1c7`) · CurveV2 0.01 WETH→USDT (tricrypto2 `0xf5f5…2B4`).
+   All 6: beneficiary = requested receiver; partnerAndFee = VELORA_DEFAULT_PARTNER | IS_CAP_SURPLUS | 1 bps (the Group H word).
 3. **Mutations** — _pending (commit 3)._
 4. **Diff / suite / lint** — _pending._ Baseline origin/main `70a6899`: 284 files / 4086 tests, lint 0 err / 94 warn.
 
