@@ -24,9 +24,13 @@
  * path stays synchronous and pure; `validateCallDataRecipientAsync` is the
  * entry point that resolves it first. Group G fails closed when no set is
  * supplied, so a caller that forgets cannot accidentally fail open.
+ *
+ * [R1 Group H] Augustus V6.2 `swapExactAmountInOnUniswapV3` is the one Augustus
+ * method admitted with its recipient DECODED (`uniData.beneficiary`) rather than
+ * trusted like its Group F siblings — see AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE.
  */
 
-import { decodeAbiParameters, toFunctionSelector, type Hex } from 'viem'
+import { decodeAbiParameters, toFunctionSelector, zeroAddress, type Hex } from 'viem'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { resolveZeroxSettlers } from '@/lib/zerox-settler-registry'
@@ -146,6 +150,43 @@ export const ALLOWANCE_HOLDER_EXEC_SELECTOR: string = toFunctionSelector(
 export const ALLOWANCE_HOLDER_INNER_SELECTORS: ReadonlySet<string> = new Set([
   toFunctionSelector(SETTLER_EXECUTE_SIGNATURE),
 ])
+
+/**
+ * Group H — Augustus V6.2 `swapExactAmountInOnUniswapV3`: the recipient is
+ * DECODED, not trusted.
+ *
+ * Velora's single-DEX Uniswap V3 route — the Arbitrum WETH→USDC keeper fill
+ * SC-04 blocked on 2026-09-14. Shape from the Sourcify-verified AugustusV6
+ * source on Arbitrum One (full match, solc 0.8.22; same address on mainnet and
+ * Base):
+ *   src/AugustusV6Types.sol
+ *     struct UniswapV3Data { IERC20 srcToken; IERC20 destToken; uint256 fromAmount;
+ *       uint256 toAmount; uint256 quotedAmount; bytes32 metadata;
+ *       address payable beneficiary; bytes pools; }
+ *   src/routers/swapExactAmountIn/direct/UniswapV3SwapExactAmountIn.sol
+ *     function swapExactAmountInOnUniswapV3(UniswapV3Data calldata uniData,
+ *       uint256 partnerAndFee, bytes calldata permit)
+ *
+ * `uniData.beneficiary` (tuple field [6]) is the ONLY destination of the
+ * output: every pool leg's swap recipient is hard-wired to Augustus itself
+ * (`mstore(add(ptr, 4), address())` in src/util/UniswapV3Utils.sol), the pools
+ * are CREATE2-derived from the factory constant, and the proceeds (less the
+ * partner/protocol fee) are transferred to `beneficiary`. The contract reads it
+ * through a Solidity calldata-struct access — it follows the same ABI offsets
+ * viem's decoder follows; there is no fixed-offset assembly read to diverge from.
+ *
+ * On-chain, `beneficiary == address(0)` becomes `msg.sender`. Calldata cannot
+ * prove who msg.sender will be, so a zero beneficiary is REJECTED. Velora never
+ * emits one: it writes the requested receiver explicitly (captured in
+ * __fixtures__/velora-augustus-uniswapv3-arbitrum.ts).
+ */
+const AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE =
+  'swapExactAmountInOnUniswapV3((address,address,uint256,uint256,uint256,bytes32,address,bytes),uint256,bytes)'
+
+/** [Group H] Derived, never typed; the tests pin it to the keeper-log observation and to SC-04. */
+export const AUGUSTUS_UNIV3_EXACT_IN_SELECTOR: string = toFunctionSelector(
+  AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE,
+)
 
 /**
  * [API-M-02] Complete allowlist of validated selectors — union of all groups.
@@ -686,6 +727,66 @@ function decodeAllowanceHolderExecRecipient(
 }
 
 // ---------------------------------------------------------------------------
+// Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (beneficiary decoded)
+// ---------------------------------------------------------------------------
+
+/** ABI of the method's three arguments — mirrors AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE. */
+export const AUGUSTUS_UNIV3_ARG_TYPES = [
+  {
+    name: 'uniData',
+    type: 'tuple',
+    components: [
+      { name: 'srcToken', type: 'address' },
+      { name: 'destToken', type: 'address' },
+      { name: 'fromAmount', type: 'uint256' },
+      { name: 'toAmount', type: 'uint256' },
+      { name: 'quotedAmount', type: 'uint256' },
+      { name: 'metadata', type: 'bytes32' },
+      { name: 'beneficiary', type: 'address' },
+      { name: 'pools', type: 'bytes' },
+    ],
+  },
+  { name: 'partnerAndFee', type: 'uint256' },
+  { name: 'permit', type: 'bytes' },
+] as const
+
+/**
+ * Validate `uniData.beneficiary`. A malformed tuple throws and is caught by
+ * validateCallDataRecipientInner as a decode error — never read as "no
+ * recipient". `extracted` is set on every rejection, the zero case included,
+ * so /api/v1/swap (which only blocks when a recipient was extracted) blocks too.
+ */
+function decodeAugustusUniswapV3Recipient(
+  data: Hex,
+  expectedAddress: string,
+  routeViaFeeCollector: boolean,
+  chainId: number,
+): RecipientCheckResult {
+  const [uniData] = decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, data)
+  const beneficiary = uniData.beneficiary
+
+  if (beneficiary.toLowerCase() === zeroAddress) {
+    return {
+      valid: false,
+      extracted: beneficiary,
+      implicitRecipient: false,
+      reason: 'Augustus beneficiary is address(0), which resolves to msg.sender on-chain — not provable from calldata (fail-closed)',
+    }
+  }
+
+  // Same recipient rule as every other group — no separate policy.
+  const valid = isValidRecipient(beneficiary, expectedAddress, routeViaFeeCollector, chainId)
+  return {
+    valid,
+    extracted: beneficiary,
+    implicitRecipient: false,
+    ...(!valid && {
+      reason: `Recipient ${beneficiary} does not match expected ${expectedAddress}`,
+    }),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Internal recursive entry point
 // ---------------------------------------------------------------------------
 
@@ -770,6 +871,11 @@ function validateCallDataRecipientInner(
     // Group G — 0x v2 AllowanceHolder.exec (recipient inside the `data` arg)
     if (selector === ALLOWANCE_HOLDER_EXEC_SELECTOR) {
       return decodeAllowanceHolderExecRecipient(data, expectedAddress, routeViaFeeCollector, chainId, options)
+    }
+
+    // Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (uniData.beneficiary)
+    if (selector === AUGUSTUS_UNIV3_EXACT_IN_SELECTOR) {
+      return decodeAugustusUniswapV3Recipient(data, expectedAddress, routeViaFeeCollector, chainId)
     }
 
     // [API-M-02] Unknown selector — fail closed
