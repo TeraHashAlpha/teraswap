@@ -1,0 +1,76 @@
+/**
+ * [R1 Group H] Golden vectors — REAL Velora (ParaSwap Augustus V6.2) calldata for
+ * `swapExactAmountInOnUniswapV3` (selector 0x876a02f6) on Arbitrum One (42161),
+ * captured, not synthesised.
+ *
+ * Produced on 2026-09-25 by running THIS repo's adapter, src/lib/adapters/velora.ts
+ * `fetchSwapData`, unmodified, against Velora's build endpoint
+ * (`/transactions/42161?ignoreChecks=true`) — no transaction was signed or sent.
+ * Velora chose the method on its own (no `includeContractMethods` forcing):
+ * priceRoute.contractMethod = "swapExactAmountInOnUniswapV3".
+ *
+ *   pair    10000000000000000 wei WETH → USDC, slippage 0.5% — both token addresses
+ *           read from CHAIN_TOKENS[42161] (src/lib/chains/tokens.ts)
+ *   tx.to   0x6a000f20005980200259b80c5102003040001068  (=== ROUTER_WHITELIST_BY_CHAIN[42161].velora)
+ *
+ * Two request shapes, identical except for who receives the output:
+ *   DIRECT     `from` only (the keeper's shape — the 2026-09-14 failure); the
+ *              adapter sends receiver = from → beneficiary = TAKER.
+ *   FEE-ROUTED `from` + distinct `recipient` (the FeeCollector shape); the
+ *              adapter sends receiver = recipient → beneficiary = USER.
+ * In both, Velora writes `uniData.beneficiary` EXPLICITLY — never address(0).
+ *
+ * The stand-in addresses are not typed: each is the last 20 bytes of
+ * keccak256(label), so they are reproducible from the labels below and owned
+ * by nobody.
+ */
+import { getAddress, keccak256, slice, toHex, type Address } from 'viem'
+
+const deriveFixtureAddress = (label: string): Address => getAddress(slice(keccak256(toHex(label)), 12))
+
+/** Plays `from` — the keeper's executor on DIRECT, the FeeCollector on FEE-ROUTED. */
+export const VELORA_UNIV3_ARB_TAKER = deriveFixtureAddress('teraswap/r1-fixture/taker')
+
+/** Plays the end-user wallet passed as `recipient` on FEE-ROUTED. */
+export const VELORA_UNIV3_ARB_USER = deriveFixtureAddress('teraswap/r1-fixture/user')
+
+/** `tx.to` of both captures, verbatim. */
+export const VELORA_UNIV3_ARB_TO = '0x6a000f20005980200259b80c5102003040001068' as const
+
+/** DIRECT: verbatim `tx.data`; beneficiary === VELORA_UNIV3_ARB_TAKER. */
+export const VELORA_UNIV3_ARB_DIRECT_CALLDATA =
+  '0x' +
+  '876a02f600000000000000000000000000000000000000000000000000000000000000' +
+  '6045a6e007c874ffc6321d6fb90eac272dd6864bfa1000000000000000000000010000' +
+  '0000000000000000000000000000000000000000000000000000000001e00000000000' +
+  '0000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000' +
+  '00000000af88d065e77c8cc2239327c5edb3a432268e58310000000000000000000000' +
+  '00000000000000000000000000002386f26fc100000000000000000000000000000000' +
+  '000000000000000000000000000001993a630000000000000000000000000000000000' +
+  '0000000000000000000000019b48d5300f0a4c69b04741b2de8c4ddbad4d2a00000000' +
+  '00000000000000001e5272b6000000000000000000000000b98447a8ac71d6369550ca' +
+  '7d69a28f889e1030760000000000000000000000000000000000000000000000000000' +
+  '0000000001000000000000000000000000000000000000000000000000000000000000' +
+  '00006080000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1' +
+  '000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831000000' +
+  '0000000000000000000000000000000000000000000000000000000064000000000000' +
+  '0000000000000000000000000000000000000000000000000000'
+
+/** FEE-ROUTED: verbatim `tx.data`; beneficiary === VELORA_UNIV3_ARB_USER. */
+export const VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA =
+  '0x' +
+  '876a02f600000000000000000000000000000000000000000000000000000000000000' +
+  '6045a6e007c874ffc6321d6fb90eac272dd6864bfa1000000000000000000000010000' +
+  '0000000000000000000000000000000000000000000000000000000001e00000000000' +
+  '0000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000' +
+  '00000000af88d065e77c8cc2239327c5edb3a432268e58310000000000000000000000' +
+  '00000000000000000000000000002386f26fc100000000000000000000000000000000' +
+  '000000000000000000000000000001993a630000000000000000000000000000000000' +
+  '0000000000000000000000019b48d5ab24eeda644b4f9db381c8db18b13e7800000000' +
+  '00000000000000001e5272b90000000000000000000000009eb314858bf3d3e4f1fd7f' +
+  'c5d69bd1e61de700c30000000000000000000000000000000000000000000000000000' +
+  '0000000001000000000000000000000000000000000000000000000000000000000000' +
+  '00006080000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1' +
+  '000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831000000' +
+  '0000000000000000000000000000000000000000000000000000000064000000000000' +
+  '0000000000000000000000000000000000000000000000000000'
