@@ -14,7 +14,7 @@
    | `swapExactAmountInOnCurveV2(CurveV2Data, uint256 partnerAndFee, bytes permit)` direct/CurveV2SwapExactAmountIn.sol:40-44 | CurveV2Data :152-164 — curveData, i, j, poolAddress, + the 7 above | `0xe37ed256` |
 
    All three: beneficiary 0 → msg.sender, revert if received < toAmount, then pay via `processSwapExactAmountInFeesAndTransfer`
-   (AugustusFees.sol:70-214), branch-for-branch the UniV3 variant (:224-367) — so Group H's bound (≥ toAmount − 10 bps) holds.
+   (AugustusFees.sol:70-214), branch-for-branch the UniV3 variant (:224-367) — so Group H's bound (≥ toAmount − 10 bps − 1 wei, I-01) holds.
 2. **Fixtures — 6/6 CAPTURED, 0 SYNTHETIC** (`__fixtures__/velora-augustus-v62-exact-in-mainnet.ts`, **mainnet**): unmodified
    `fetchSwapData` → Velora `/transactions/1` (nothing signed/sent), DIRECT + FEE-ROUTED, verbatim `tx.data`, `tx.to` = routers.ts `1.velora`.
    Forced via `includeContractMethods` on the adapter's `/prices` URL; Curve also needed `includeDEXS` (else `400 "No contract method
@@ -34,15 +34,17 @@
    Preview: `extracted` + "router minimum (before router fees)"; zero beneficiary or undecodable → `invalid`.
 4. `git diff --stat origin/main` (`70a6899`):
    ```
-   docs/feedback/fix-r1-augustus-v6-group-f-decoded.md          |  53 +++++++++
+   docs/feedback/fix-r1-augustus-v6-group-f-decoded.md          |  64 +++++++++++
    src/lib/__fixtures__/velora-augustus-v62-exact-in-mainnet.ts | 219 +++++++++++++++++++++++++++++++++++++
    src/lib/calldata-decoder.test.ts                             |  61 ++++++++++-
    src/lib/calldata-decoder.ts                                  |  51 ++++++++-
    src/lib/calldata-recipient.test.ts                           | 298 ++++++++++++++++++++++++++++++++++++++++++++++++++-
    src/lib/calldata-recipient.ts                                | 280 ++++++++++++++++++++++++++++++++++++++++++++---
-   6 files changed, 938 insertions(+), 24 deletions(-)
+   6 files changed, 949 insertions(+), 24 deletions(-)
    ```
-   Suite 284 files / **4194** vs origin/main 284 / 4086 (**+108**); `tsc` clean. Lint 0 err / 94 warn on both, identical set → **delta 0**.
+   Suite 284 files / **4192** vs origin/main 4084 (**+108**, Auditor's count). Not reproduced here: this worktree counts 4194 vs 4086
+   at both `70a6899` and `d071b94` (same +108, 0 skipped), so the 2-test offset is environmental. `tsc` clean. Lint 0 err / 94 warn on
+   both, identical set → **delta 0**.
 
 ## Feedback — 58adfda (decode) · f75ea43 (fixtures) · tests
 ### Edge case
@@ -51,3 +53,12 @@
 - The venue is response-controlled and R1 does not bound it: `swapExactAmountIn`'s `executor` receives `amountIn`
   (GenericSwapExactAmountIn.sol:71/74/79); Curve's pool is `curveData`/`poolAddress`. Only floor: `toAmount` (R1: ≠ 0). Auditor call.
 - Augustus **V5** `simpleSwap`/`multiSwap`/`megaSwap` (SimpleData/SellData) also carry `beneficiary`; still Group F — separate triage.
+
+## Architect ruling — Auditor H-01 (executor/pool chosen by calldata)
+**ACCEPTED, no pin.** The output floor is enforced outside R1: (1) the server-side oracle guard — `validateSwapPrice` blocks at −8% on
+the response's own `toAmount`; (2) FeeCollector `minimumOutput` on the only user route for Velora (not in `FEE_INCOMPATIBLE` on any
+chain); (3) the V3 executor's `max(scaledMin, oracleFloor)` on the keeper route. Residual exposure = capture above that floor — the same
+class as Group H's pools. (Recorded as ruled; not re-verified on this branch.)
+- **Follow-up:** generic lower-bound check in `useSwap`: `swapData.toAmount >= quoteToAmount × (1 − slippage − tolerance)`.
+- **I-01 (1 wei dust):** `_transferAndLeaveDust` (AugustusFees.sol:922-927) sends `amount − 1`, so the bound under (a)–(c) is
+  `toAmount − 10 bps − 1 wei` (Evidence 1 corrected).
