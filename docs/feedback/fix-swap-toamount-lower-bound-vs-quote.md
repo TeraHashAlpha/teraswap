@@ -158,3 +158,26 @@ throw stays reachable for skip-listed sources, so it is defence-in-depth rather 
 The round-2 prompt scoped `src/hooks/useSplitRoute.ts` (+test). That hook only *analyses* the split
 (it never sees a `/swap` response); the executing hook is `src/hooks/useSplitSwap.ts`, which is where
 H-02 had to land. `useSplitRoute.ts` is unchanged.
+
+### Answer — the 9O fallback now compares a fallback source to the BEST source's quote
+Raised in the audit record, not in the round-2 prompt, and **deliberately left as-is.** The fallback
+recursion re-enters `executeStandardSwap(next, rest)` (`useSwap.ts:718`) with the same closure, so
+source B's `/swap` output is floored against source A's accepted quote; an honest B that is, say, 2%
+worse than A is refused, and because the refusal is a `StaleOrTamperedSwapError` the walk stops there
+(`:712`). That is the conservative outcome, not a defect: the figure the user accepted is A's output,
+and a route that cannot come within slippage + 0.5% of it should show the user the new price rather
+than fill silently — which is exactly what the message says. The cost is a lost auto-recovery.
+If the Architect wants auto-recovery back, the correct fix is **not** exempting fallbacks (that would
+leave a tampered fallback response unchecked): pass a per-source quote map from `SwapBox.tsx:232`
+(`meta.all`) and floor each source against ITS OWN quote. One call-site change plus a lookup at
+`useSwap.ts:503`; say the word and it ships.
+
+### Discrepancy to resolve before round 2
+The round-2 prompt lists M-01 = `cowswap` dead exemption, M-02 = `curve` reason. The audit record from
+the review session lists a different pair: the **`uniswapv3`** skip reason ("same-pool re-quote,
+FeeCollector-routed") and the 9O fallback point above. I worked the prompt's version and answered the
+other here. If the Auditor's `uniswapv3` reading is the ruling, the change is one line —
+`QUOTE_FLOOR_SKIP_SOURCES` in `minimum-output.ts` becomes `[]` and its comment block drops the KEPT
+entry; the tier-re-detection evidence I kept it on is `adapters/uniswapv3.ts:247-271` (both branches
+overwrite the quote's tier with `detection.bestFee`, so a tier switch has quote and swap measuring
+different pools). Two tests move columns: the `SKIP_SOURCES` `it.each` and the table's `uniswapv3` row.
