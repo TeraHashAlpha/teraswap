@@ -1214,12 +1214,15 @@ describe('calldata-recipient', () => {
       expect(result.extracted?.toLowerCase()).toBe(ATTACKER_ADDRESS.toLowerCase())
     })
 
-    it('is extraction-validated, never trust-only — and its Augustus siblings keep their Group F treatment', () => {
+    it('is extraction-validated, never trust-only — and so, since Group I, are its Augustus V6.2 siblings', () => {
       expect(TRUSTED_ROUTER_SELECTORS.has(AUGUSTUS_UNIV3_EXACT_IN_SELECTOR)).toBe(false)
-      // Unchanged by this group: same implicit-recipient answer as before.
+      // [R1 Group I] Auditor round 2 of #523: the siblings were Group F trust-only
+      // (valid, extracted null). They are decoded now, so 64 zero bytes — which
+      // decode to nothing — are rejected with `extracted` set.
       for (const sibling of ['0xe3ead59e', '0x1a01c532', '0xe37ed256']) {
+        expect(TRUSTED_ROUTER_SELECTORS.has(sibling)).toBe(false)
         const result = validateCallDataRecipient(sibling + '0'.repeat(128), USER_ADDRESS)
-        expect(result).toEqual({ valid: true, extracted: null, implicitRecipient: true })
+        expect(result).toMatchObject({ valid: false, extracted: zeroAddress, implicitRecipient: false })
       }
     })
   })

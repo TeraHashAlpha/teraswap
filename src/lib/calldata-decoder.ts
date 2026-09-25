@@ -22,6 +22,10 @@ import {
   ALLOWANCE_HOLDER_INNER_SELECTORS,
   AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
   AUGUSTUS_UNIV3_ARG_TYPES,
+  AUGUSTUS_GENERIC_EXACT_IN_SELECTOR,
+  AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR,
+  AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR,
+  decodeAugustusV62ExactIn,
 } from '@/lib/calldata-recipient'
 
 // ── Types ──────────────────────────────────────────────
@@ -65,11 +69,11 @@ export const SELECTOR_INFO: Record<string, { functionName: string; dexLabel: str
   '0x3598d8ab': { functionName: 'megaSwap', dexLabel: 'ParaSwap' },
   '0xa94e78ef': { functionName: 'multiSwap', dexLabel: 'ParaSwap' },
   '0x46c67b6d': { functionName: 'simpleSwap', dexLabel: 'ParaSwap' },
-  // ParaSwap (Augustus V6)
-  '0xe3ead59e': { functionName: 'swapExactAmountIn', dexLabel: 'ParaSwap V6' },
-  // [SPRINT-9H] ParaSwap / Velora (Augustus V6.2 — single-DEX Curve methods)
-  '0x1a01c532': { functionName: 'swapExactAmountInOnCurveV1', dexLabel: 'Velora V6.2' },
-  '0xe37ed256': { functionName: 'swapExactAmountInOnCurveV2', dexLabel: 'Velora V6.2' },
+  // [R1 Group I] ParaSwap / Velora (Augustus V6.2 — generic + single-DEX Curve).
+  // Keys derived in calldata-recipient.ts, never typed, so the two cannot drift.
+  [AUGUSTUS_GENERIC_EXACT_IN_SELECTOR]: { functionName: 'swapExactAmountIn', dexLabel: 'ParaSwap V6' },
+  [AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR]: { functionName: 'swapExactAmountInOnCurveV1', dexLabel: 'Velora V6.2' },
+  [AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR]: { functionName: 'swapExactAmountInOnCurveV2', dexLabel: 'Velora V6.2' },
   // [R1 Group H] Velora (Augustus V6.2 — single-DEX Uniswap V3). Key derived in
   // calldata-recipient.ts, never typed, so the two cannot drift.
   [AUGUSTUS_UNIV3_EXACT_IN_SELECTOR]: { functionName: 'swapExactAmountInOnUniswapV3', dexLabel: 'Velora V6.2' },
@@ -216,6 +220,39 @@ function tryDecodeAugustusUniswapV3(data: Hex): Partial<TransactionPreview> {
     }
     return params
   } catch { return {} }
+}
+
+/**
+ * [R1 Group I] Augustus V6.2 swapExactAmountIn / swapExactAmountInOnCurveV1 / V2 —
+ * shown like Group H, read through R1's own decodeAugustusV62ExactIn so the two
+ * cannot drift. Calldata that does not decode is shown as 'invalid', not left
+ * to fall back to 'implicit': R1 rejects it.
+ */
+function tryDecodeAugustusV62ExactIn(selector: string, data: Hex): Partial<TransactionPreview> {
+  try {
+    const call = decodeAugustusV62ExactIn(selector, data)
+    const params: Partial<TransactionPreview> = {
+      tokenIn: call.srcToken,
+      tokenOut: call.destToken,
+      amountIn: call.fromAmount.toString(),
+      amountOutMin: call.toAmount.toString(),
+      amountOutMinLabel: 'router minimum (before router fees)',
+      recipient: call.beneficiary,
+      recipientType: 'extracted',
+    }
+    if (call.beneficiary.toLowerCase() === zeroAddress) {
+      params.recipientType = 'invalid'
+      params.validated = false
+      params.validationReason = 'Augustus beneficiary is address(0) — resolves to msg.sender on-chain; rejected by R1'
+    }
+    return params
+  } catch {
+    return {
+      recipientType: 'invalid',
+      validated: false,
+      validationReason: 'Augustus calldata does not decode — no recipient is provable; rejected by R1',
+    }
+  }
 }
 
 function tryDecodeV3ExactInput(data: Hex): Partial<TransactionPreview> {
@@ -480,6 +517,10 @@ export function decodeTransactionPreview(
       params = tryDecodeAllowanceHolderExec(data); break
     case AUGUSTUS_UNIV3_EXACT_IN_SELECTOR:
       params = tryDecodeAugustusUniswapV3(data); break
+    case AUGUSTUS_GENERIC_EXACT_IN_SELECTOR:
+    case AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR:
+    case AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR:
+      params = tryDecodeAugustusV62ExactIn(selector, data); break
     // Groups A & F: no additional params decodable from proprietary calldata
   }
 

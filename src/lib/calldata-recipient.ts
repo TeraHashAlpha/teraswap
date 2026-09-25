@@ -25,9 +25,12 @@
  * entry point that resolves it first. Group G fails closed when no set is
  * supplied, so a caller that forgets cannot accidentally fail open.
  *
- * [R1 Group H] Augustus V6.2 `swapExactAmountInOnUniswapV3` is the one Augustus
- * method admitted with its recipient DECODED (`uniData.beneficiary`) rather than
- * trusted like its Group F siblings — see AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE.
+ * [R1 Group H] Augustus V6.2 `swapExactAmountInOnUniswapV3` is admitted with its
+ * recipient DECODED (`uniData.beneficiary`) — see AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE.
+ *
+ * [R1 Group I] Its V6.2 siblings `swapExactAmountIn`, `swapExactAmountInOnCurveV1`
+ * and `swapExactAmountInOnCurveV2` were trusted (Group F) until Auditor round 2 of
+ * #523; they are now decoded under the same policy — see AUGUSTUS_V62_DECODED_SELECTORS.
  */
 
 import { decodeAbiParameters, getAddress, toFunctionSelector, toHex, zeroAddress, type Address, type Hex } from 'viem'
@@ -79,9 +82,15 @@ export const MSG_SENDER_SELECTORS = new Set([
  * recipient from calldata, but trust the router's behavior.
  *
  * Trusted-by-design (msg.sender delivery, not extractable from calldata):
- *   - Odos, KyberSwap, ParaSwap
+ *   - Odos, KyberSwap, ParaSwap (Augustus V5)
  *
  * If a source is added here, document why its router is trusted.
+ *
+ * [R1 Group I] The Augustus V6.2 methods swapExactAmountIn (0xe3ead59e) and
+ * swapExactAmountInOnCurveV1/V2 (0x1a01c532/0xe37ed256) were listed here as
+ * "beneficiary not attacker-settable from the response". That was false — each
+ * carries `beneficiary`, `quotedAmount` and `toAmount` in its struct and
+ * `partnerAndFee` as an argument — so they moved to Group I (decoded).
  */
 export const TRUSTED_ROUTER_SELECTORS = new Set([
   '0x83800a8e', // Odos — swap(): proprietary encoding, router sends to msg.sender
@@ -89,13 +98,6 @@ export const TRUSTED_ROUTER_SELECTORS = new Set([
   '0x3598d8ab', // ParaSwap megaSwap: proprietary encoding, router sends to msg.sender
   '0xa94e78ef', // ParaSwap multiSwap: proprietary encoding, router sends to msg.sender
   '0x46c67b6d', // ParaSwap simpleSwap: proprietary encoding, router sends to msg.sender
-  '0xe3ead59e', // ParaSwap Augustus V6 swapExactAmountIn: beneficiary defaults to msg.sender (our adapter never sets it)
-  // [SPRINT-9H] Augustus V6.2 single-DEX Curve methods — same trust class as
-  // swapExactAmountIn (Augustus delivers to msg.sender / the receiver our
-  // adapter requests; beneficiary not attacker-settable from the response).
-  // Selectors verified vs the live V6.2 ABI (codeslaw + openchain + viem).
-  '0x1a01c532', // swapExactAmountInOnCurveV1 (CurveV1StableNg)
-  '0xe37ed256', // swapExactAmountInOnCurveV2 (Curve crypto pools)
 ])
 
 /**
@@ -211,6 +213,56 @@ export const AUGUSTUS_UNIV3_EXACT_IN_SELECTOR: string = toFunctionSelector(
 )
 
 /**
+ * Group I — Augustus V6.2 decoded (generic + Curve): the recipient is DECODED,
+ * not trusted, under Group H's policy.
+ *
+ * Same Sourcify-verified AugustusV6 source as Group H (full match, solc 0.8.22,
+ * identical sources on 1 / 8453 / 42161 at routers.ts `velora`). Structs from
+ * src/AugustusV6Types.sol, methods from src/routers/swapExactAmountIn/:
+ *   :22-30   struct GenericData { IERC20 srcToken; IERC20 destToken; uint256 fromAmount;
+ *              uint256 toAmount; uint256 quotedAmount; bytes32 metadata; address payable beneficiary; }
+ *   :113-123 struct CurveV1Data { uint256 curveData; uint256 curveAssets; IERC20 srcToken;
+ *              IERC20 destToken; uint256 fromAmount; uint256 toAmount; uint256 quotedAmount;
+ *              bytes32 metadata; address payable beneficiary; }
+ *   :152-164 struct CurveV2Data { uint256 curveData; uint256 i; uint256 j; address poolAddress;
+ *              IERC20 srcToken; IERC20 destToken; uint256 fromAmount; uint256 toAmount;
+ *              uint256 quotedAmount; bytes32 metadata; address payable beneficiary; }
+ *   GenericSwapExactAmountIn.sol:31-37          swapExactAmountIn(address executor,
+ *     GenericData calldata swapData, uint256 partnerAndFee, bytes calldata permit, bytes calldata executorData)
+ *   direct/CurveV1SwapExactAmountIn.sol:40-44   swapExactAmountInOnCurveV1(CurveV1Data calldata
+ *     curveV1Data, uint256 partnerAndFee, bytes calldata permit)
+ *   direct/CurveV2SwapExactAmountIn.sol:40-44   swapExactAmountInOnCurveV2(CurveV2Data calldata
+ *     curveV2Data, uint256 partnerAndFee, bytes calldata permit)
+ *
+ * All three turn a zero `beneficiary` into msg.sender (Generic :52-54, CurveV1
+ * :66-68, CurveV2 :68-70), revert only when received < toAmount (Generic :85-87,
+ * CurveV1 :135-137, CurveV2 :137-139), and THEN pay out through
+ * processSwapExactAmountInFeesAndTransfer (src/fees/AugustusFees.sol:70-214) —
+ * the same partner / surplus / fixed-fee logic Group H's UniV3 variant runs
+ * (:224-367). So the Group H bound and its checks carry over unchanged:
+ * zero beneficiary, (a) partnerAndFee, (b) quotedAmount >= toAmount,
+ * (c) toAmount != 0, then the shared recipient rule.
+ */
+const AUGUSTUS_GENERIC_EXACT_IN_SIGNATURE =
+  'swapExactAmountIn(address,(address,address,uint256,uint256,uint256,bytes32,address),uint256,bytes,bytes)'
+const AUGUSTUS_CURVE_V1_EXACT_IN_SIGNATURE =
+  'swapExactAmountInOnCurveV1((uint256,uint256,address,address,uint256,uint256,uint256,bytes32,address),uint256,bytes)'
+const AUGUSTUS_CURVE_V2_EXACT_IN_SIGNATURE =
+  'swapExactAmountInOnCurveV2((uint256,uint256,uint256,address,address,address,uint256,uint256,uint256,bytes32,address),uint256,bytes)'
+
+/** [Group I] Derived, never typed; the tests pin each to its literal and to SC-04. */
+export const AUGUSTUS_GENERIC_EXACT_IN_SELECTOR: string = toFunctionSelector(AUGUSTUS_GENERIC_EXACT_IN_SIGNATURE)
+export const AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR: string = toFunctionSelector(AUGUSTUS_CURVE_V1_EXACT_IN_SIGNATURE)
+export const AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR: string = toFunctionSelector(AUGUSTUS_CURVE_V2_EXACT_IN_SIGNATURE)
+
+/** [Group I] The three decoded Augustus V6.2 methods. */
+export const AUGUSTUS_V62_DECODED_SELECTORS: ReadonlySet<string> = new Set([
+  AUGUSTUS_GENERIC_EXACT_IN_SELECTOR,
+  AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR,
+  AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR,
+])
+
+/**
  * [API-M-02] Complete allowlist of validated selectors — union of all groups.
  * Any selector NOT in this set is blocked (fail-closed). This list can be
  * audited to understand exactly which calldata patterns are permitted.
@@ -232,6 +284,7 @@ export const AUGUSTUS_UNIV3_EXACT_IN_SELECTOR: string = toFunctionSelector(
  *
  * Validated-by-extraction, Augustus V6.2 (beneficiary decoded, zero rejected):
  *   Group H: swapExactAmountInOnUniswapV3
+ *   Group I: swapExactAmountIn, swapExactAmountInOnCurveV1, swapExactAmountInOnCurveV2
  */
 export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // Group A — msg.sender implicit
@@ -259,10 +312,6 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   '0x3598d8ab', // ParaSwap megaSwap
   '0xa94e78ef', // ParaSwap multiSwap
   '0x46c67b6d', // ParaSwap simpleSwap
-  '0xe3ead59e', // ParaSwap Augustus V6 swapExactAmountIn
-  // [SPRINT-9H] Augustus V6.2 single-DEX Curve methods (verified vs live ABI)
-  '0x1a01c532', // swapExactAmountInOnCurveV1 (CurveV1StableNg)
-  '0xe37ed256', // swapExactAmountInOnCurveV2
   // Group G — 0x v2 AllowanceHolder.exec (recipient unwrapped from inner `data`).
   // Derived above, not typed. This entry restores the R1 ≡ SC-04 equality that
   // ADR-021 had to break for one release: KNOWN_SWAP_SELECTORS and this set are
@@ -271,6 +320,9 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (uniData.beneficiary
   // decoded). Derived above, not typed; added together with its SC-04 entry.
   AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
+  // Group I — Augustus V6.2 swapExactAmountIn / swapExactAmountInOnCurveV1 / V2
+  // (beneficiary decoded). Moved from Group F; derived above, same SC-04 literals.
+  ...AUGUSTUS_V62_DECODED_SELECTORS,
 ])
 
 // ---------------------------------------------------------------------------
@@ -888,6 +940,199 @@ function decodeAugustusUniswapV3Recipient(
 }
 
 // ---------------------------------------------------------------------------
+// Group I — Augustus V6.2 swapExactAmountIn + Curve V1/V2 (beneficiary decoded)
+// ---------------------------------------------------------------------------
+
+/** ABI of swapExactAmountIn — GenericData is src/AugustusV6Types.sol:22-30. */
+export const AUGUSTUS_GENERIC_ARG_TYPES = [
+  { name: 'executor', type: 'address' },
+  {
+    name: 'swapData',
+    type: 'tuple',
+    components: [
+      { name: 'srcToken', type: 'address' },
+      { name: 'destToken', type: 'address' },
+      { name: 'fromAmount', type: 'uint256' },
+      { name: 'toAmount', type: 'uint256' },
+      { name: 'quotedAmount', type: 'uint256' },
+      { name: 'metadata', type: 'bytes32' },
+      { name: 'beneficiary', type: 'address' },
+    ],
+  },
+  { name: 'partnerAndFee', type: 'uint256' },
+  { name: 'permit', type: 'bytes' },
+  { name: 'executorData', type: 'bytes' },
+] as const
+
+/** ABI of swapExactAmountInOnCurveV1 — CurveV1Data is src/AugustusV6Types.sol:113-123. */
+export const AUGUSTUS_CURVE_V1_ARG_TYPES = [
+  {
+    name: 'curveV1Data',
+    type: 'tuple',
+    components: [
+      { name: 'curveData', type: 'uint256' },
+      { name: 'curveAssets', type: 'uint256' },
+      { name: 'srcToken', type: 'address' },
+      { name: 'destToken', type: 'address' },
+      { name: 'fromAmount', type: 'uint256' },
+      { name: 'toAmount', type: 'uint256' },
+      { name: 'quotedAmount', type: 'uint256' },
+      { name: 'metadata', type: 'bytes32' },
+      { name: 'beneficiary', type: 'address' },
+    ],
+  },
+  { name: 'partnerAndFee', type: 'uint256' },
+  { name: 'permit', type: 'bytes' },
+] as const
+
+/** ABI of swapExactAmountInOnCurveV2 — CurveV2Data is src/AugustusV6Types.sol:152-164. */
+export const AUGUSTUS_CURVE_V2_ARG_TYPES = [
+  {
+    name: 'curveV2Data',
+    type: 'tuple',
+    components: [
+      { name: 'curveData', type: 'uint256' },
+      { name: 'i', type: 'uint256' },
+      { name: 'j', type: 'uint256' },
+      { name: 'poolAddress', type: 'address' },
+      { name: 'srcToken', type: 'address' },
+      { name: 'destToken', type: 'address' },
+      { name: 'fromAmount', type: 'uint256' },
+      { name: 'toAmount', type: 'uint256' },
+      { name: 'quotedAmount', type: 'uint256' },
+      { name: 'metadata', type: 'bytes32' },
+      { name: 'beneficiary', type: 'address' },
+    ],
+  },
+  { name: 'partnerAndFee', type: 'uint256' },
+  { name: 'permit', type: 'bytes' },
+] as const
+
+const AUGUSTUS_V62_METHOD_NAMES: Readonly<Record<string, string>> = {
+  [AUGUSTUS_GENERIC_EXACT_IN_SELECTOR]: 'swapExactAmountIn',
+  [AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR]: 'swapExactAmountInOnCurveV1',
+  [AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR]: 'swapExactAmountInOnCurveV2',
+}
+
+/** The fields Group I reads, whichever of its three methods carries them. */
+export interface AugustusV62ExactIn {
+  method: string
+  srcToken: Address
+  destToken: Address
+  fromAmount: bigint
+  toAmount: bigint
+  quotedAmount: bigint
+  beneficiary: Address
+  partnerAndFee: bigint
+}
+
+type AugustusExactInStruct = Omit<AugustusV62ExactIn, 'method' | 'partnerAndFee'>
+
+const augustusExactInFields = (s: AugustusExactInStruct): AugustusExactInStruct => ({
+  srcToken: s.srcToken,
+  destToken: s.destToken,
+  fromAmount: s.fromAmount,
+  toAmount: s.toAmount,
+  quotedAmount: s.quotedAmount,
+  beneficiary: s.beneficiary,
+})
+
+/**
+ * Decode a Group I call (`data` without its selector). Throws on a malformed
+ * tuple or a selector outside Group I. Exported so the preview decoder reads
+ * the same fields through the same ABI.
+ */
+export function decodeAugustusV62ExactIn(selector: string, data: Hex): AugustusV62ExactIn {
+  const method = AUGUSTUS_V62_METHOD_NAMES[selector]
+  switch (selector) {
+    case AUGUSTUS_GENERIC_EXACT_IN_SELECTOR: {
+      const [, swapData, partnerAndFee] = decodeAbiParameters(AUGUSTUS_GENERIC_ARG_TYPES, data)
+      return { method, ...augustusExactInFields(swapData), partnerAndFee }
+    }
+    case AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR: {
+      const [curveV1Data, partnerAndFee] = decodeAbiParameters(AUGUSTUS_CURVE_V1_ARG_TYPES, data)
+      return { method, ...augustusExactInFields(curveV1Data), partnerAndFee }
+    }
+    case AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR: {
+      const [curveV2Data, partnerAndFee] = decodeAbiParameters(AUGUSTUS_CURVE_V2_ARG_TYPES, data)
+      return { method, ...augustusExactInFields(curveV2Data), partnerAndFee }
+    }
+    default:
+      throw new Error(`Unknown Group I selector: ${selector}`)
+  }
+}
+
+/**
+ * Group H's policy for the three Group I methods, through Group H's own helpers
+ * (augustusPartnerAndFeeViolation for rule (a), rejectAugustusUniV3 for the
+ * rejection shape). Order: zero beneficiary, (a), (b), (c), recipient.
+ *
+ * Every rejection sets `extracted`, so /api/v1/swap (which only blocks when a
+ * recipient was extracted) blocks too — including calldata that does not
+ * decode. That case is caught HERE, not by validateCallDataRecipientInner's
+ * catch (which returns `extracted: null`), and reports address(0): no
+ * recipient is provable, the same verdict as an explicit zero beneficiary.
+ */
+function decodeAugustusV62Recipient(
+  selector: string,
+  data: Hex,
+  expectedAddress: string,
+  routeViaFeeCollector: boolean,
+  chainId: number,
+): RecipientCheckResult {
+  const method = AUGUSTUS_V62_METHOD_NAMES[selector]
+  let call: AugustusV62ExactIn
+  try {
+    call = decodeAugustusV62ExactIn(selector, data)
+  } catch (err) {
+    const message = (err as { shortMessage?: string })?.shortMessage ?? (err instanceof Error ? err.message : String(err))
+    return rejectAugustusUniV3(zeroAddress, `${method} calldata does not decode (${message}) — no recipient is provable`)
+  }
+  const { beneficiary, partnerAndFee, quotedAmount, toAmount } = call
+
+  if (beneficiary.toLowerCase() === zeroAddress) {
+    return rejectAugustusUniV3(
+      beneficiary,
+      `${method} beneficiary is address(0), which resolves to msg.sender on-chain — not provable from calldata`,
+    )
+  }
+
+  // (a) Fees are applied after toAmount — bound who and how much.
+  const feeViolation = augustusPartnerAndFeeViolation(partnerAndFee)
+  if (feeViolation) {
+    return rejectAugustusUniV3(
+      beneficiary,
+      `${method} partnerAndFee ${toHex(partnerAndFee, { size: 32 })}: ${feeViolation}; fees are applied after toAmount`,
+    )
+  }
+
+  // (b) Surplus is measured from quotedAmount — it must not sit below toAmount.
+  if (quotedAmount < toAmount) {
+    return rejectAugustusUniV3(
+      beneficiary,
+      `${method} quotedAmount ${quotedAmount} < toAmount ${toAmount}: quotedAmount below toAmount enables surplus capture`,
+    )
+  }
+
+  // (c) Defence in depth: all three already revert InvalidToAmount on it
+  // (Generic :57-59, CurveV1 :61-63, CurveV2 :63-65).
+  if (toAmount === 0n) {
+    return rejectAugustusUniV3(beneficiary, `${method} toAmount 0: zero toAmount disables Augustus output check`)
+  }
+
+  // Same recipient rule as every other group — no separate policy.
+  const valid = isValidRecipient(beneficiary, expectedAddress, routeViaFeeCollector, chainId)
+  return {
+    valid,
+    extracted: beneficiary,
+    implicitRecipient: false,
+    ...(!valid && {
+      reason: `Recipient ${beneficiary} does not match expected ${expectedAddress}`,
+    }),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Internal recursive entry point
 // ---------------------------------------------------------------------------
 
@@ -977,6 +1222,11 @@ function validateCallDataRecipientInner(
     // Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (uniData.beneficiary)
     if (selector === AUGUSTUS_UNIV3_EXACT_IN_SELECTOR) {
       return decodeAugustusUniswapV3Recipient(data, expectedAddress, routeViaFeeCollector, chainId)
+    }
+
+    // Group I — Augustus V6.2 swapExactAmountIn / Curve V1 / Curve V2 (beneficiary)
+    if (AUGUSTUS_V62_DECODED_SELECTORS.has(selector)) {
+      return decodeAugustusV62Recipient(selector, data, expectedAddress, routeViaFeeCollector, chainId)
     }
 
     // [API-M-02] Unknown selector — fail closed
