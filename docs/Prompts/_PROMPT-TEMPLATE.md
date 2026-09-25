@@ -3,7 +3,7 @@
 > **What this is.** The standard shape of every Architect prompt in `docs/Prompts/`, plus the TeraSwap invariants that
 > keep prompts accurate. This file is the *reference* — the **`/goal` paste itself always stays ≤ 4000 chars** and pulls
 > in **only the facts relevant to that task**. Purpose: minimum credit burn, right-sized model, correct guardrails.
-> PT-PT to the owner; **EN in every prompt/goal**.
+> PT-PT to the owner; **EN in every prompt/goal**. Updated 2026-09-23 per Anthropic's Opus 5.5 guidance (https://claude.dev/blog/getting-the-most-out-of-opus-5-5/).
 
 ---
 
@@ -31,9 +31,22 @@ only for broad tasks.
 
 ```
 CONTROL: model <Haiku|Sonnet|Opus> · effort <low|medium|high> · NO CI-poll (push + report, don't watch) · read ONLY <the listed files> · FEEDBACK <= 1 screen.
+STOP only if blocked or before anything irreversible (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action.
 ```
 
 NEVER invoke credential helpers or read the keychain (git credential-*, security find-*) for any purpose; if an action needs auth the session lacks, report the manual step and stop.
+
+---
+
+## 1b. Finish line — explicit exit condition in the CONTROL line
+
+Every goal states `Exit = <one testable sentence>` in the CONTROL line itself (e.g., `Exit = branch pushed + compare link reported`). Never use "PR open" or "CI green" as exit conditions — rule #14 forbids both. A testable exit condition is verifiable at the moment the agent completes work, not something that requires the owner to act first or wait for external systems.
+
+---
+
+## 1c. What NOT to write in the `/goal` itself
+
+Never write "think carefully", "step by step", "explain your reasoning", or other prose that asks the agent to reproduce its reasoning. The `effort` setting on the `/goal` command is the tool that controls reasoning depth — `medium` or `high` handle that. In `/goal` text, ask for EVIDENCE: commands and their output, file:line citations, commit hashes, sha256 digests. Make the work verifiable.
 
 ---
 
@@ -44,6 +57,9 @@ NEVER invoke credential helpers or read the keychain (git credential-*, security
 - **display / docs / read-only / frontend-only** → **no Auditor**.
 - **gate-adjacent but strictly tightening** (e.g. threading `chainId` into a value gate) → **Auditor note** (can ride a
   future review).
+- **Auditor scope > ~15 files:** split by module into subagents, each returning C/H/M/L with file:line; the parent
+  re-verifies every C and H itself before reporting. **For recon goals with several questions:** answer each question
+  once; later questions reuse earlier answers, never re-derive.
 
 ---
 
@@ -97,8 +113,12 @@ NEVER invoke credential helpers or read the keychain (git credential-*, security
 ## Do NOT                  (explicit guardrails — the "never" list)
 ## Files affected (read ONLY these)   (the allow-list that scopes the agent)
 ## Expected output         (branch name, SSH-signed, push+report-not-poll, tests, FEEDBACK <= 1 screen)
+   Create docs/feedback/<branch>.md in the FIRST commit with this goal's task checklist; tick items and add
+   findings as you go; the final FEEDBACK is the last edit of that file, not a report written at the end.
    Exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the
    PR and must be green before merge — PR creation is never the agent's job.
+   **Why:** compaction kills interim feedback; session death before final report loses the evidence. A
+   file updated as you go survives both.
 ## Quality criteria        (the acceptance bar)
 
 ---
@@ -128,6 +148,14 @@ NEVER invoke credential helpers or read the keychain (git credential-*, security
 - **SSH-signed commits, noreply committer** (rule #12) — `main` rejects unsigned.
 - **Per-PR feedback** (PR body or `docs/feedback/<branch>.md`), **not** the shared append-only `FEEDBACK.md`.
 - **PT-PT to the owner, EN in prompts.**
+
+---
+
+## 6a. UI goals — design habits to leave out
+
+For any frontend or UI goal, list the visual habits you do NOT want: decorative gradients, cards-inside-cards nesting, icons without function, placeholder copy, or other details that add visual noise or bulk without user value.
+
+---
 
 *(Memory: `feedback_architect_prompt_template`, `feedback_agent_cost_optimization`, `feedback_goal_char_limit`,
 `feedback_commit_prompt_specs`; project memories under `project_*`.)*

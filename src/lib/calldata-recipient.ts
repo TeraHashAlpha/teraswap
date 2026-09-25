@@ -24,12 +24,19 @@
  * path stays synchronous and pure; `validateCallDataRecipientAsync` is the
  * entry point that resolves it first. Group G fails closed when no set is
  * supplied, so a caller that forgets cannot accidentally fail open.
+ *
+ * [R1 Group H] Augustus V6.2 `swapExactAmountInOnUniswapV3` is the one Augustus
+ * method admitted with its recipient DECODED (`uniData.beneficiary`) rather than
+ * trusted like its Group F siblings — see AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE.
  */
 
-import { decodeAbiParameters, toFunctionSelector, type Hex } from 'viem'
+import { decodeAbiParameters, getAddress, toFunctionSelector, toHex, zeroAddress, type Address, type Hex } from 'viem'
 import { FEE_COLLECTOR_ADDRESS, FEE_COLLECTOR_V1_ADDRESS } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { resolveZeroxSettlers } from '@/lib/zerox-settler-registry'
+import { VELORA_DEFAULT_PARTNER } from '@/lib/velora-partner'
+
+export { VELORA_DEFAULT_PARTNER }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,6 +155,62 @@ export const ALLOWANCE_HOLDER_INNER_SELECTORS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Group H — Augustus V6.2 `swapExactAmountInOnUniswapV3`: the recipient is
+ * DECODED, not trusted.
+ *
+ * Velora's single-DEX Uniswap V3 route — the Arbitrum WETH→USDC keeper fill
+ * SC-04 blocked on 2026-09-14. Shape from the Sourcify-verified AugustusV6
+ * source on Arbitrum One (full match, solc 0.8.22; same address on mainnet and
+ * Base):
+ *   src/AugustusV6Types.sol
+ *     struct UniswapV3Data { IERC20 srcToken; IERC20 destToken; uint256 fromAmount;
+ *       uint256 toAmount; uint256 quotedAmount; bytes32 metadata;
+ *       address payable beneficiary; bytes pools; }
+ *   src/routers/swapExactAmountIn/direct/UniswapV3SwapExactAmountIn.sol
+ *     function swapExactAmountInOnUniswapV3(UniswapV3Data calldata uniData,
+ *       uint256 partnerAndFee, bytes calldata permit)
+ *
+ * `uniData.beneficiary` (tuple field [6]) is the ONLY destination of the
+ * output: every pool leg's swap recipient is hard-wired to Augustus itself
+ * (`mstore(add(ptr, 4), address())` in src/util/UniswapV3Utils.sol), the pools
+ * are CREATE2-derived from the factory constant, and the proceeds (net of
+ * fees, below) are transferred to `beneficiary`. The contract reads it
+ * through a Solidity calldata-struct access — it follows the same ABI offsets
+ * viem's decoder follows; there is no fixed-offset assembly read to diverge from.
+ *
+ * On-chain, `beneficiary == address(0)` becomes `msg.sender`. Calldata cannot
+ * prove who msg.sender will be, so a zero beneficiary is REJECTED. Velora never
+ * emits one: it writes the requested receiver explicitly (captured in
+ * __fixtures__/velora-augustus-uniswapv3-arbitrum.ts).
+ *
+ * Fees are applied AFTER the router's output check (Auditor round 1, H-01/M-01).
+ * UniswapV3SwapExactAmountIn.sol:87 reverts when received < toAmount, and only
+ * then does :97 hand the proceeds to processSwapExactAmountInFeesAndTransferUniV3
+ * (src/fees/AugustusFees.sol:239-340). That function takes a fixed partner fee
+ * of up to MAX_FEE_PERCENT = 200 bps (:30), or splits the surplus
+ * `received - quotedAmount` between the partner and ParaSwap; with no partner,
+ * ParaSwap's fee wallet takes all of it (:346-367). The beneficiary is bounded
+ * by `toAmount` only when the fee fields are bounded too, so after the
+ * zero-beneficiary check Group H also requires, in this order:
+ *   (a) `partnerAndFee` admissible — partner ∈ {0, VELORA_DEFAULT_PARTNER},
+ *       fee ≤ 10 bps, and no feeData bit set outside the fee field and
+ *       IS_CAP_SURPLUS (layout: AUGUSTUS_PARTNER_SHIFT and below);
+ *   (b) `quotedAmount >= toAmount` — otherwise surplus capture pays out below toAmount;
+ *   (c) `toAmount != 0` — the deployed router already reverts InvalidToAmount
+ *       (UniswapV3SwapExactAmountIn.sol:54); this is defence in depth.
+ * Under (a)–(c) the beneficiary receives at least toAmount − 10 bps: every
+ * surplus path leaves it at least quotedAmount, and the fixed fee takes at most
+ * 10 bps of an amount the router has already checked against toAmount.
+ */
+const AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE =
+  'swapExactAmountInOnUniswapV3((address,address,uint256,uint256,uint256,bytes32,address,bytes),uint256,bytes)'
+
+/** [Group H] Derived, never typed; the tests pin it to the keeper-log observation and to SC-04. */
+export const AUGUSTUS_UNIV3_EXACT_IN_SELECTOR: string = toFunctionSelector(
+  AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE,
+)
+
+/**
  * [API-M-02] Complete allowlist of validated selectors — union of all groups.
  * Any selector NOT in this set is blocked (fail-closed). This list can be
  * audited to understand exactly which calldata patterns are permitted.
@@ -166,6 +229,9 @@ export const ALLOWANCE_HOLDER_INNER_SELECTORS: ReadonlySet<string> = new Set([
  *
  * Validated-by-unwrapping (recipient decoded out of one nested `bytes` arg):
  *   Group G: 0x v2 AllowanceHolder.exec
+ *
+ * Validated-by-extraction, Augustus V6.2 (beneficiary decoded, zero rejected):
+ *   Group H: swapExactAmountInOnUniswapV3
  */
 export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // Group A — msg.sender implicit
@@ -202,6 +268,9 @@ export const VALIDATED_SELECTORS: ReadonlySet<string> = new Set([
   // ADR-021 had to break for one release: KNOWN_SWAP_SELECTORS and this set are
   // pinned equal again by calldata-recipient.test.ts.
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
+  // Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (uniData.beneficiary
+  // decoded). Derived above, not typed; added together with its SC-04 entry.
+  AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
 ])
 
 // ---------------------------------------------------------------------------
@@ -686,6 +755,139 @@ function decodeAllowanceHolderExecRecipient(
 }
 
 // ---------------------------------------------------------------------------
+// Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (beneficiary decoded)
+// ---------------------------------------------------------------------------
+
+/** ABI of the method's three arguments — mirrors AUGUSTUS_UNIV3_EXACT_IN_SIGNATURE. */
+export const AUGUSTUS_UNIV3_ARG_TYPES = [
+  {
+    name: 'uniData',
+    type: 'tuple',
+    components: [
+      { name: 'srcToken', type: 'address' },
+      { name: 'destToken', type: 'address' },
+      { name: 'fromAmount', type: 'uint256' },
+      { name: 'toAmount', type: 'uint256' },
+      { name: 'quotedAmount', type: 'uint256' },
+      { name: 'metadata', type: 'bytes32' },
+      { name: 'beneficiary', type: 'address' },
+      { name: 'pools', type: 'bytes' },
+    ],
+  },
+  { name: 'partnerAndFee', type: 'uint256' },
+  { name: 'permit', type: 'bytes' },
+] as const
+
+// `partnerAndFee` layout, from src/fees/AugustusFees.sol (Sourcify full match):
+//   bits 255..96  partner     `partner := shr(96, partnerAndFee)`       :720-731
+//   bits  95..90  flags       95 TAKE_SURPLUS · 94 REFERRAL · 93 SKIP_BLACKLIST ·
+//                             92 CAP_SURPLUS · 91 DIRECT_TRANSFER · 90 USER_SURPLUS   :40-45
+//   bits  89..14  not read by AugustusFees
+//   bits  13..0   fee bps     `and(feeData, 0x3FFF)`, capped at 200     :39, :886-892
+
+/** feeData is the low 96 bits; the partner is everything above (AugustusFees.sol:720-731). */
+const AUGUSTUS_PARTNER_SHIFT = 96n
+/** FEE_PERCENT_IN_BASIS_POINTS_MASK (AugustusFees.sol:39). */
+const AUGUSTUS_FEE_BPS_MASK = 0x3fffn
+/** IS_CAP_SURPLUS_MASK (AugustusFees.sol:42) — the ONLY flag Group H admits. */
+const AUGUSTUS_IS_CAP_SURPLUS = 1n << 92n
+/** Highest partner fee Group H admits; Velora's own default is 1 bps. */
+const AUGUSTUS_MAX_PARTNER_FEE_BPS = 10n
+
+const augustusPartnerOf = (partnerAndFee: bigint): Address =>
+  getAddress(toHex(partnerAndFee >> AUGUSTUS_PARTNER_SHIFT, { size: 20 }))
+
+/**
+ * Rule (a): why `partnerAndFee` is not admissible, or null when it is. The
+ * partner must be 0 or VELORA_DEFAULT_PARTNER, the fee at most 10 bps, and no
+ * feeData bit may be set outside the fee field and IS_CAP_SURPLUS — so
+ * IS_TAKE_SURPLUS, IS_REFERRAL, every other flag and every unread bit are zero.
+ */
+function augustusPartnerAndFeeViolation(partnerAndFee: bigint): string | null {
+  const partner = augustusPartnerOf(partnerAndFee)
+  if (partner !== zeroAddress && partner !== VELORA_DEFAULT_PARTNER) {
+    return `partner ${partner} is neither 0 nor VELORA_DEFAULT_PARTNER`
+  }
+  const feeData = partnerAndFee & ((1n << AUGUSTUS_PARTNER_SHIFT) - 1n)
+  const feeBps = feeData & AUGUSTUS_FEE_BPS_MASK
+  if (feeBps > AUGUSTUS_MAX_PARTNER_FEE_BPS) {
+    return `fee ${feeBps} bps exceeds ${AUGUSTUS_MAX_PARTNER_FEE_BPS} bps`
+  }
+  const otherBits = feeData & ~(AUGUSTUS_FEE_BPS_MASK | AUGUSTUS_IS_CAP_SURPLUS)
+  if (otherBits !== 0n) {
+    return `bits ${toHex(otherBits)} set outside {fee bps, IS_CAP_SURPLUS}`
+  }
+  return null
+}
+
+/** One rejection shape for Group H: `extracted` set, so /api/v1/swap blocks too. */
+function rejectAugustusUniV3(beneficiary: string, detail: string): RecipientCheckResult {
+  return {
+    valid: false,
+    extracted: beneficiary,
+    implicitRecipient: false,
+    reason: `Augustus ${detail} (fail-closed)`,
+  }
+}
+
+/**
+ * Validate `uniData.beneficiary` and the fields that bound what it receives.
+ * A malformed tuple throws and is caught by validateCallDataRecipientInner as
+ * a decode error — never read as "no recipient". `extracted` is set on every
+ * rejection, so /api/v1/swap (which only blocks when a recipient was
+ * extracted) blocks too. Order: zero beneficiary, (a), (b), (c), recipient.
+ */
+function decodeAugustusUniswapV3Recipient(
+  data: Hex,
+  expectedAddress: string,
+  routeViaFeeCollector: boolean,
+  chainId: number,
+): RecipientCheckResult {
+  const [uniData, partnerAndFee] = decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, data)
+  const beneficiary = uniData.beneficiary
+
+  if (beneficiary.toLowerCase() === zeroAddress) {
+    return rejectAugustusUniV3(
+      beneficiary,
+      'beneficiary is address(0), which resolves to msg.sender on-chain — not provable from calldata',
+    )
+  }
+
+  // (a) Fees are applied after toAmount — bound who and how much.
+  const feeViolation = augustusPartnerAndFeeViolation(partnerAndFee)
+  if (feeViolation) {
+    return rejectAugustusUniV3(
+      beneficiary,
+      `partnerAndFee ${toHex(partnerAndFee, { size: 32 })}: ${feeViolation}; fees are applied after toAmount`,
+    )
+  }
+
+  // (b) Surplus is measured from quotedAmount — it must not sit below toAmount.
+  if (uniData.quotedAmount < uniData.toAmount) {
+    return rejectAugustusUniV3(
+      beneficiary,
+      `quotedAmount ${uniData.quotedAmount} < toAmount ${uniData.toAmount}: quotedAmount below toAmount enables surplus capture`,
+    )
+  }
+
+  // (c) Defence in depth: the deployed router reverts on it already.
+  if (uniData.toAmount === 0n) {
+    return rejectAugustusUniV3(beneficiary, 'toAmount 0: zero toAmount disables Augustus output check')
+  }
+
+  // Same recipient rule as every other group — no separate policy.
+  const valid = isValidRecipient(beneficiary, expectedAddress, routeViaFeeCollector, chainId)
+  return {
+    valid,
+    extracted: beneficiary,
+    implicitRecipient: false,
+    ...(!valid && {
+      reason: `Recipient ${beneficiary} does not match expected ${expectedAddress}`,
+    }),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Internal recursive entry point
 // ---------------------------------------------------------------------------
 
@@ -770,6 +972,11 @@ function validateCallDataRecipientInner(
     // Group G — 0x v2 AllowanceHolder.exec (recipient inside the `data` arg)
     if (selector === ALLOWANCE_HOLDER_EXEC_SELECTOR) {
       return decodeAllowanceHolderExecRecipient(data, expectedAddress, routeViaFeeCollector, chainId, options)
+    }
+
+    // Group H — Augustus V6.2 swapExactAmountInOnUniswapV3 (uniData.beneficiary)
+    if (selector === AUGUSTUS_UNIV3_EXACT_IN_SELECTOR) {
+      return decodeAugustusUniswapV3Recipient(data, expectedAddress, routeViaFeeCollector, chainId)
     }
 
     // [API-M-02] Unknown selector — fail closed

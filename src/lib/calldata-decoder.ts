@@ -12,7 +12,7 @@
  * with validated=false and partial information. Never throws.
  */
 
-import { decodeAbiParameters, type Hex } from 'viem'
+import { decodeAbiParameters, zeroAddress, type Hex } from 'viem'
 import { getSelector } from '@/lib/swap-selectors'
 import {
   VALIDATED_SELECTORS,
@@ -20,6 +20,8 @@ import {
   TRUSTED_ROUTER_SELECTORS,
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
   ALLOWANCE_HOLDER_INNER_SELECTORS,
+  AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
+  AUGUSTUS_UNIV3_ARG_TYPES,
 } from '@/lib/calldata-recipient'
 
 // ── Types ──────────────────────────────────────────────
@@ -29,11 +31,17 @@ export interface TransactionPreview {
   functionName: string
   selector: string
   recipient: string | null
-  recipientType: 'extracted' | 'implicit'
+  /** 'invalid': a recipient was decoded but R1 rejects it outright (e.g. Augustus address(0)). */
+  recipientType: 'extracted' | 'implicit' | 'invalid'
   tokenIn?: string
   tokenOut?: string
   amountIn?: string
   amountOutMin?: string
+  /**
+   * What `amountOutMin` actually is, when it is NOT the net minimum the
+   * recipient receives — e.g. a router minimum its own fees are taken after.
+   */
+  amountOutMinLabel?: string
   deadline?: number
   validated: boolean
   validationReason?: string
@@ -62,6 +70,9 @@ export const SELECTOR_INFO: Record<string, { functionName: string; dexLabel: str
   // [SPRINT-9H] ParaSwap / Velora (Augustus V6.2 — single-DEX Curve methods)
   '0x1a01c532': { functionName: 'swapExactAmountInOnCurveV1', dexLabel: 'Velora V6.2' },
   '0xe37ed256': { functionName: 'swapExactAmountInOnCurveV2', dexLabel: 'Velora V6.2' },
+  // [R1 Group H] Velora (Augustus V6.2 — single-DEX Uniswap V3). Key derived in
+  // calldata-recipient.ts, never typed, so the two cannot drift.
+  [AUGUSTUS_UNIV3_EXACT_IN_SELECTOR]: { functionName: 'swapExactAmountInOnUniswapV3', dexLabel: 'Velora V6.2' },
   // Odos
   '0x83800a8e': { functionName: 'swap', dexLabel: 'Odos' },
   // KyberSwap
@@ -172,6 +183,38 @@ function tryDecodeAllowanceHolderExec(data: Hex): Partial<TransactionPreview> {
       recipient: slippage.recipient,
       recipientType: 'extracted',
     }
+  } catch { return {} }
+}
+
+/**
+ * [R1 Group H] Augustus V6.2 swapExactAmountInOnUniswapV3 — `uniData.beneficiary`
+ * is where calldata-recipient.ts reads the recipient, so the modal shows it as
+ * extracted. Reuses R1's ABI so the two cannot drift. Display only — R1 remains
+ * the gate.
+ *
+ * [Audit round 1, L-02] A zero beneficiary (msg.sender on-chain, rejected by R1)
+ * is shown as 'invalid' and unvalidated, never as an extracted recipient.
+ * `toAmount` is labelled as the router minimum: Augustus checks it BEFORE taking
+ * its fees (AugustusFees.sol:239-340), so it is not the net amount received.
+ */
+function tryDecodeAugustusUniswapV3(data: Hex): Partial<TransactionPreview> {
+  try {
+    const [uniData] = decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, data)
+    const params: Partial<TransactionPreview> = {
+      tokenIn: uniData.srcToken,
+      tokenOut: uniData.destToken,
+      amountIn: uniData.fromAmount.toString(),
+      amountOutMin: uniData.toAmount.toString(),
+      amountOutMinLabel: 'router minimum (before router fees)',
+      recipient: uniData.beneficiary,
+      recipientType: 'extracted',
+    }
+    if (uniData.beneficiary.toLowerCase() === zeroAddress) {
+      params.recipientType = 'invalid'
+      params.validated = false
+      params.validationReason = 'Augustus beneficiary is address(0) — resolves to msg.sender on-chain; rejected by R1'
+    }
+    return params
   } catch { return {} }
 }
 
@@ -435,6 +478,8 @@ export function decodeTransactionPreview(
       params = tryDecodeMulticall(selector, data); break
     case ALLOWANCE_HOLDER_EXEC_SELECTOR:
       params = tryDecodeAllowanceHolderExec(data); break
+    case AUGUSTUS_UNIV3_EXACT_IN_SELECTOR:
+      params = tryDecodeAugustusUniswapV3(data); break
     // Groups A & F: no additional params decodable from proprietary calldata
   }
 

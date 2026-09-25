@@ -232,6 +232,34 @@ describe("buildExecutionRow — schema-valid row (all NOT-NULL cols, no phantom 
   })
 })
 
+// ---- [FIX-BACKFILL-EXECUTION-NUMBER-AND-TIMESTAMP] blockTimestamp → created_at ----------------
+
+describe("buildExecutionRow — optional blockTimestamp sets created_at", () => {
+  const dbOrder = { id: "order-uuid", order_type: "limit" }
+  const receipt = { status: "success", gasUsed: 21000n, logs: [] }
+  const decoded = { amountIn: "1000", amountOut: "2000", fee: "1" }
+
+  test("(b) created_at equals the block timestamp, not now()", () => {
+    // 2020-01-01T00:00:00.000Z — chosen to be nowhere near "now" so a regression to
+    // insert-time would fail this assertion, not merely land within a tolerance window.
+    const blockTimestamp = 1577836800
+    const row = buildExecutionRow({ dbOrder, txHash: "0xfeed", receipt, decoded, blockTimestamp })
+    assert.equal(row.created_at, "2020-01-01T00:00:00.000Z")
+  })
+
+  test("(d) live path — omitting blockTimestamp produces the same row as before (no created_at key)", () => {
+    // executor.js's call site never passes blockTimestamp (receipt has no timestamp field and
+    // fetching the block would add an RPC call to the live keeper path) — this pins that the row
+    // shape is byte-identical to the pre-fix row: same keys, no created_at.
+    const row = buildExecutionRow({ dbOrder, txHash: "0xfeed", receipt, decoded })
+    assert.equal("created_at" in row, false)
+    assert.deepEqual(Object.keys(row).sort(), [
+      "amount_in", "amount_out", "execution_number", "fee_amount",
+      "gas_used", "order_id", "status", "tx_hash",
+    ].sort())
+  })
+})
+
 // ---- [CHORE-DCA-AGGREGATION-VALUE] next_best_out / next_best_source ----
 
 describe("buildExecutionRow — additive next_best_out/next_best_source (CHORE-DCA-AGGREGATION-VALUE)", () => {
