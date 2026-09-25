@@ -495,16 +495,29 @@ export function useSwap(
       // routeViaFeeCollector — a stale/tampered response is a risk to the
       // user's fill regardless of which contract enforces the floor.
       //
-      // quoteToAmount is only absent on paths that never had a /price quote
-      // to compare against (SwapBox.tsx:232 passes `meta?.best.toAmount`,
-      // which is undefined while a quote is loading/refreshing or absent
-      // entirely) — those flows predate this check and must not be newly
-      // blocked, so we log once and proceed rather than throw.
-      if (quoteToAmount) {
-        assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount: swapData.toAmount, slippagePercent: slippage, source })
-      } else {
-        console.warn('[TeraSwap] assertSwapConsistentWithQuote skipped — no quoteToAmount available', { source })
-      }
+      // [Auditor H-01] FAIL-CLOSED, and reached on every real swap. Two
+      // things were wrong with the first cut:
+      //   1. `quoteToAmount` never arrived. This callback is memoized and its
+      //      dep array omitted it (the `:726` react-hooks/exhaustive-deps
+      //      warning named it), so the closure froze whatever the value was
+      //      when the callback was last rebuilt — on the normal path that is
+      //      BEFORE the /price quote resolves (the callback rebuilds on
+      //      token/amount/slippage change; a resolving quote rebuilds
+      //      nothing), i.e. `undefined`, or worse the PREVIOUS amount's
+      //      quote. `quoteToAmount` is now in that dep array, so the value
+      //      read here is the one the render that handled the click was
+      //      showing — exactly the output the user accepted
+      //      (SwapBox.tsx:485-487 renders it; :232 passes it in).
+      //   2. Missing meant warn-and-proceed, so the guard could not fire.
+      //      There is no legitimate quote-less flow into this function:
+      //      SwapBox reaches it only via handleApproveAndSwap /
+      //      handleSwap, both gated on `meta?.best.source`
+      //      (SwapBox.tsx:637, :664), and `meta.best.toAmount` is the very
+      //      field the UI renders as the expected output. A missing quote
+      //      here is therefore a wiring failure or tampering — the helper
+      //      refuses it (StaleOrTamperedSwapError, "no accepted quote to
+      //      compare against"). No warn path survives.
+      assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount: swapData.toAmount, slippagePercent: slippage, source })
 
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
       const minimumOutput = routeViaFeeCollector
@@ -723,7 +736,15 @@ export function useSwap(
         metadata: err instanceof PriceGuardError ? { deviation: err.deviation } : undefined,
       })
     }
-  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction])
+    // [Auditor H-01] `quoteToAmount` MUST be here: without it this memoized
+    // callback kept the value from the render before the quote resolved, so
+    // the accepted quote never reached assertSwapConsistentWithQuote (nor
+    // validateFeeIntegrity above) on the normal path. `chainId` was missing
+    // from the same array and is read throughout this callback
+    // (isExecutableSource / usesFeeCollector / getChainConfig /
+    // validateRouterAddress / buildSimulationTx), so a swap started after a
+    // chain switch could have been built against the previous chain's config.
+  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction, quoteToAmount, chainId])
   // [SPRINT-9O Part B] Keep the ref pointed at the latest closure for the fallback recursion.
   executeStandardSwapRef.current = executeStandardSwap
 

@@ -171,6 +171,14 @@ const TOKEN_OUT: Token = {
 const KNOWN_SELECTOR = Array.from(KNOWN_SWAP_SELECTORS)[0]
 const ROUTER = '0x111111125421ca6dc452d289314280a0f8842a65'
 
+// [Auditor H-01] The accepted /price quote every standard-path render must
+// now supply: a swap with no accepted quote to compare against is REFUSED
+// (assertSwapConsistentWithQuote, fail-closed), so a 4-arg useSwap() here
+// would model a flow SwapBox cannot produce — it only reaches execute()
+// with a resolved quote (SwapBox.tsx:637, :664, both gated on meta?.best).
+// Matches swapResponse()'s default toAmount exactly → no drift, no block.
+const ACCEPTED_QUOTE = '2950000000'
+
 /** Build a /api/swap response. Defaults pass all earlier gates so the
  *  caller can inject failure at the layer they want. */
 function swapResponse(
@@ -401,7 +409,7 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
 
   it('clears pendingSwap and returns to idle when the account switches', async () => {
     vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
-    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await driveToConfirming(result)
 
     // Switch to a different wallet — stale pendingSwap must NOT survive.
@@ -414,7 +422,7 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
 
   it('clears swap state on disconnect', async () => {
     vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
-    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await driveToConfirming(result)
 
     vi.mocked(useAccount).mockReturnValue({ address: undefined } as unknown as ReturnType<typeof useAccount>)
@@ -454,7 +462,7 @@ describe('useSwap — [P219] swap-state reset on chain switch', () => {
   it('clears pendingSwap/status when the active chain changes mid-flow', async () => {
     vi.mocked(useAccount).mockReturnValue({ address: ADDR, chain: { id: 1 } } as unknown as ReturnType<typeof useAccount>)
     mockSwapFetch(swapResponse())
-    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await act(async () => { await result.current.execute('1inch') })
     expect(result.current.status).toBe('confirming')
     expect(result.current.pendingSwap).not.toBeNull()
@@ -495,7 +503,7 @@ describe('useSwap — back-to-back swaps each require their own tx before succes
     vi.mocked(submitCowOrder).mockResolvedValue('order-uid-1')
     vi.mocked(pollCowOrderStatus).mockResolvedValue({ status: 'fulfilled', txHash: ('0x' + 'b'.repeat(64)) as `0x${string}` })
 
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await act(async () => { await result.current.execute('cowswap') })
     await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
     await act(async () => { await result.current.confirmCowOrder() })
@@ -523,7 +531,7 @@ describe('useSwap — [P209] simulation fail-open warning', () => {
     mockSwapFetch(swapResponse())
     // Inconclusive sim: proceeds (success) but unsimulated.
     mockSimulateSwapTx.mockResolvedValueOnce({ success: true, simulated: false })
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await act(async () => {
       await result.current.execute('1inch')
     })
@@ -537,7 +545,7 @@ describe('useSwap — [P209] simulation fail-open warning', () => {
     mockSwapFetch(swapResponse())
     // First swap: inconclusive → flag set.
     mockSimulateSwapTx.mockResolvedValueOnce({ success: true, simulated: false })
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await act(async () => {
       await result.current.execute('1inch')
     })
@@ -581,7 +589,7 @@ describe('useSwap — chain-id source of truth [SPRINT-9G G6]', () => {
 describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal integrity)', () => {
   it('freezes source, token pair and amounts into pendingSwap at confirm time', async () => {
     mockSwapFetch(swapResponse()) // toAmount = 2950000000
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
     await act(async () => { await result.current.execute('1inch') })
     expect(result.current.status).toBe('confirming')
     const ps = result.current.pendingSwap
@@ -600,7 +608,7 @@ describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal i
   it('the snapshot is immune to a live amountIn change while confirming (no drift under the open modal)', async () => {
     mockSwapFetch(swapResponse())
     const { result, rerender } = renderHook(
-      ({ amt }) => useSwap(TOKEN_IN, TOKEN_OUT, amt, 0.5),
+      ({ amt }) => useSwap(TOKEN_IN, TOKEN_OUT, amt, 0.5, ACCEPTED_QUOTE),
       { initialProps: { amt: '1' } },
     )
     await act(async () => { await result.current.execute('1inch') })

@@ -91,13 +91,18 @@ export const SWAP_QUOTE_TOLERANCE_BPS = 50
 const QUOTE_FLOOR_SKIP_SOURCES: readonly AggregatorName[] = ['uniswapv3', 'curve', 'cowswap']
 
 export class StaleOrTamperedSwapError extends Error {
-  /** Positive percentage the swap output landed below the accepted quote. */
-  readonly deviationPercent: number
+  /** Positive percentage the swap output landed below the accepted quote, or
+   *  null when there was NO usable accepted quote to compare against. */
+  readonly deviationPercent: number | null
 
-  constructor(deviationPercent: number) {
+  /** @param deviationPercent null = no accepted quote at all (fail-closed). */
+  constructor(deviationPercent: number | null) {
     super(
-      `Swap output is below the quote you accepted (−${deviationPercent.toFixed(1)}%). ` +
-        'The route was refreshed — please review and try again.',
+      deviationPercent === null
+        ? 'No accepted quote to compare this swap against — swap refused. ' +
+            'Please refresh the quote and try again.'
+        : `Swap output is below the quote you accepted (−${deviationPercent.toFixed(1)}%). ` +
+            'The route was refreshed — please review and try again.',
     )
     this.name = 'StaleOrTamperedSwapError'
     this.deviationPercent = deviationPercent
@@ -124,7 +129,14 @@ export interface AssertSwapConsistentWithQuoteParams {
  * sources only); this one catches an implausibly LOW output (floor, every
  * source not on the skip list above).
  *
- * @throws UnusableQuoteError when either amount is missing/non-numeric —
+ * FAIL-CLOSED: a missing/unusable `quoteToAmount` is a refusal, not a skip.
+ * Every call site runs after the user accepted a quote, so "no quote" is a
+ * wiring failure or tampering — and a warn-and-proceed branch there made the
+ * whole check a no-op on the normal path (Auditor H-01 on this branch).
+ *
+ * @throws StaleOrTamperedSwapError with `deviationPercent === null` when
+ *         there is no usable accepted quote to compare against.
+ * @throws UnusableQuoteError when the SWAP amount is missing/non-numeric —
  *         the same refusal shape `deriveMinimumOutput` already uses, so
  *         callers see one consistent "unusable quote" failure mode.
  * @throws StaleOrTamperedSwapError when `swapToAmount` is below the floor.
@@ -134,10 +146,14 @@ export function assertSwapConsistentWithQuote(params: AssertSwapConsistentWithQu
   if (QUOTE_FLOOR_SKIP_SOURCES.includes(source)) return
 
   const quotedBn = safeBigInt(quoteToAmount)
+  if (quotedBn === null || quotedBn <= 0n) throw new StaleOrTamperedSwapError(null)
+
+  // Only the SWAP side can still be unusable at this point, so the
+  // diagnostic carries the swap amount — the value that actually failed to
+  // parse. It previously reported `swapToAmount` for a malformed QUOTE too
+  // (Auditor L on minimum-output.ts:139).
   const swappedBn = safeBigInt(swapToAmount)
-  if (quotedBn === null || quotedBn <= 0n || swappedBn === null || swappedBn < 0n) {
-    throw new UnusableQuoteError(swapToAmount)
-  }
+  if (swappedBn === null || swappedBn < 0n) throw new UnusableQuoteError(swapToAmount)
 
   const slippageBpsBn = BigInt(Math.max(0, Math.round(slippagePercent * 100)))
   const combinedBpsBn = slippageBpsBn + BigInt(SWAP_QUOTE_TOLERANCE_BPS)

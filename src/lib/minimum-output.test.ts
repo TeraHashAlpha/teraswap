@@ -172,7 +172,6 @@ describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () 
     }
   })
 })
-
 describe('assertSwapConsistentWithQuote — skip list mirrors validateFeeIntegrity exactly', () => {
   const SKIP_SOURCES: AggregatorName[] = ['uniswapv3', 'curve', 'cowswap']
 
@@ -191,26 +190,54 @@ describe('assertSwapConsistentWithQuote — skip list mirrors validateFeeIntegri
   })
 })
 
-describe('assertSwapConsistentWithQuote — malformed inputs throw UnusableQuoteError, as deriveMinimumOutput does', () => {
-  const malformed: Array<[string, unknown]> = [
-    ['non-numeric string', 'not-a-number'],
-    ['empty string', ''],
-    ['undefined', undefined],
-    ['null', null],
-    ['decimal string', '1.5'],
-    ['negative', '-5'],
-  ]
+const malformedAmounts: Array<[string, unknown]> = [
+  ['non-numeric string', 'not-a-number'],
+  ['empty string', ''],
+  ['undefined', undefined],
+  ['null', null],
+  ['decimal string', '1.5'],
+  ['negative', '-5'],
+]
 
-  it.each(malformed)('malformed quoteToAmount = %s → throws UnusableQuoteError', (_label, bad) => {
-    expect(() => callAssert(bad, '1000000', 0.5)).toThrow(UnusableQuoteError)
+describe('assertSwapConsistentWithQuote — a missing ACCEPTED QUOTE fails closed [Auditor H-01]', () => {
+  it.each(malformedAmounts)(
+    'quoteToAmount = %s → throws StaleOrTamperedSwapError (nothing to compare against)',
+    (_label, bad) => {
+      expect(() => callAssert(bad, '1000000', 0.5)).toThrow(StaleOrTamperedSwapError)
+    },
+  )
+
+  it('zero quoteToAmount → refused (never a 0-based floor every output clears)', () => {
+    expect(() => callAssert('0', '1000000', 0.5)).toThrow(StaleOrTamperedSwapError)
   })
 
-  it.each(malformed)('malformed swapToAmount = %s → throws UnusableQuoteError', (_label, bad) => {
+  it('the refusal carries deviationPercent null and names the missing quote', () => {
+    try {
+      callAssert(undefined, '1000000', 0.5)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(StaleOrTamperedSwapError)
+      const e = err as StaleOrTamperedSwapError
+      expect(e.deviationPercent).toBeNull()
+      expect(e.message).toMatch(/no accepted quote to compare/i)
+      expect(e.message).not.toContain('NaN') // never formats a null deviation
+    }
+  })
+})
+
+describe('assertSwapConsistentWithQuote — an unusable SWAP amount throws UnusableQuoteError, as deriveMinimumOutput does', () => {
+  it.each(malformedAmounts)('swapToAmount = %s → throws UnusableQuoteError', (_label, bad) => {
     expect(() => callAssert('1000000', bad, 0.5)).toThrow(UnusableQuoteError)
   })
 
-  it('zero quoteToAmount → throws UnusableQuoteError (never a 0-based floor)', () => {
-    expect(() => callAssert('0', '1000000', 0.5)).toThrow(UnusableQuoteError)
+  it('[Auditor L] the diagnostic carries the SWAP amount that failed to parse', () => {
+    try {
+      callAssert('1000000', 'not-a-number', 0.5)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnusableQuoteError)
+      expect((err as UnusableQuoteError).rawToAmount).toBe('not-a-number')
+    }
   })
 
   it('a malformed input on a SKIP-listed source still bypasses (skip check runs first)', () => {
