@@ -40,6 +40,67 @@ not merge before 0C/0H. Gate order (SC-04 → R1 → simulation) and every exist
 - `docs/Prompts/SPRINT-9H*.md` does not exist (9G → 9I). The precedent exists only in code comments and tests.
 
 ### Concern
-- `/api/v1/swap` runs no SC-04 and lets an unextracted R1 failure through. Group H sets `extracted` on every rejection, so v1 blocks it.
+- `/api/v1/swap` runs no SC-04 and lets an unextracted R1 failure through. Group H sets `extracted` on every rejection, so v1 blocks it. *(Wrong for decode errors — see Audit round 1, L-01.)*
 - R1 does not check `partnerAndFee` (true of every Augustus selector). Augustus applies that fee AFTER its
-  `toAmount` check (verified source), so the backstop is the executor/FeeCollector balance-delta check. Worth an Auditor look.
+  `toAmount` check (verified source), so the backstop is the executor/FeeCollector balance-delta check. Worth an Auditor look. *(Now checked for Group H — Audit round 1, rule (a).)*
+
+## Audit round 1 — fixes (8273f48 · 8f3031c · this commit)
+
+**Brief premise corrected → rule (a) is structured, not literal (owner decision, 2026-09-25).** Both REAL captures carry
+`partnerAndFee = 0x45a6e007c874ffc6321d6fb90eac272dd6864bfa100000000000000000000001`: partner `0x45a6…4bfa` (= word >> 96,
+the HIGH 160 bits, AugustusFees.sol:720-731), 1 bps, IS_CAP_SURPLUS (bit 92). Velora injects it; `velora.ts` sends no partner.
+
+- **H-01 / M-01 (8273f48):** zero beneficiary → (a) partner ∈ {0, `VELORA_DEFAULT_PARTNER`}, fee ≤ 10 bps, no feeData bit
+  outside fee|IS_CAP_SURPLUS → (b) quotedAmount ≥ toAmount → (c) toAmount ≠ 0 → recipient match. Every rejection sets
+  `extracted`; (a)'s reason logs the word in hex. Worst case now: beneficiary ≥ toAmount − 10 bps.
+- **L-02 (this commit):** a zero beneficiary previews as `recipientType: 'invalid'`, `validated: false`; toAmount carries
+  `amountOutMinLabel: 'router minimum (before router fees)'`.
+- **L-01 (correction):** decode errors (truncated calldata, alone or inside a multicall) return `extracted: null`
+  (calldata-recipient.ts:1003-1008), and v1 blocks only on `!valid && extracted` (route.ts:524), so it logs and proceeds.
+  Pre-existing for every group, ends in an on-chain revert, out of scope; v1 unchanged.
+
+### Concern
+- `VELORA_DEFAULT_PARTNER` is derived from the DIRECT fixture at module load, as specified: the first production import of
+  a `__fixtures__` file. If Velora rotates its partner, those routes fail closed (400): availability, not funds.
+- The UI hard-codes "Minimum output" (TransactionPreview.tsx:211/218, SplitReviewModal.tsx:102); rendering
+  `amountOutMinLabel` there is a one-line follow-up outside this diff. (c) is defence in depth: the router already reverts
+  `InvalidToAmount` (UniswapV3SwapExactAmountIn.sol:54).
+
+### Evidence
+1. Commit 1, rule hunk, comment and blank lines trimmed (`git show 8273f48` for the rest):
+```diff
+@@ -768,16 +851,36 @@ function decodeAugustusUniswapV3Recipient(
++  const feeViolation = augustusPartnerAndFeeViolation(partnerAndFee)
++  if (feeViolation) {
++    return rejectAugustusUniV3(
++      beneficiary,
++      `partnerAndFee ${toHex(partnerAndFee, { size: 32 })}: ${feeViolation}; fees are applied after toAmount`,
++    )
++  }
++  if (uniData.quotedAmount < uniData.toAmount) {
++    return rejectAugustusUniV3(
++      beneficiary,
++      `quotedAmount ${uniData.quotedAmount} < toAmount ${uniData.toAmount}: quotedAmount below toAmount enables surplus capture`,
++    )
++  }
++  if (uniData.toAmount === 0n) {
++    return rejectAugustusUniV3(beneficiary, 'toAmount 0: zero toAmount disables Augustus output check')
+```
+2. **38 new, 38/38 pass.** `calldata-recipient` `[Group H] Augustus fee fields` (36): NEG (a) IS_USER_SURPLUS · IS_DIRECT_TRANSFER ·
+   IS_SKIP_BLACKLIST · IS_REFERRAL · IS_TAKE_SURPLUS; and ×DIRECT/FEE-ROUTED: fee 11 bps · fee 0x3FFF · unread bit 89 · unread
+   bit 14 · attacker partner + 1 bps/CAP · attacker + TAKE_SURPLUS · attacker in low 160 bits; NEG (b) quotedAmount = 1 ·
+   = toAmount − 1; NEG (c) toAmount = 0; H-01 as run; check order. POS both captures unmodified; ×2: word 0 · right partner
+   at 10 bps · partnerAndFee = 1 (partner 0); quotedAmount == toAmount. Pins: partner = both captures' · each word exact.
+   `calldata-decoder` (2): [L-02] zero beneficiary → invalid · toAmount label. Mutants (one rule off at a time) fail:
+   (a) 20 · (b) 3 · (c) 2 · fee cap 4 · flag bits 9 · partner 7.
+3. `git diff --stat b3f9e38`:
+```
+ docs/feedback/fix-velora-selector-876a02f6-arbitrum.md |  65 ++++++++++++-
+ src/lib/calldata-decoder.test.ts                       |  23 ++++-
+ src/lib/calldata-decoder.ts                            |  26 ++++-
+ src/lib/calldata-recipient.test.ts                     | 240 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/lib/calldata-recipient.ts                          | 131 +++++++++++++++++++++++---
+ 5 files changed, 464 insertions(+), 21 deletions(-)
+```
+4. Suite 283 files / **4086** vs origin/main `447913f` 283 / 4030 (+56: 18 earlier on this branch, 38 here). Lint 0 err /
+   94 warn on both, identical warning set (file × rule) → **delta 0**. `tsc --noEmit` clean.

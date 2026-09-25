@@ -7,12 +7,13 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { encodeAbiParameters, toFunctionSelector } from 'viem'
+import { decodeAbiParameters, encodeAbiParameters, toFunctionSelector, zeroAddress, type Hex } from 'viem'
 import { decodeTransactionPreview, SELECTOR_INFO } from './calldata-decoder'
 import {
   VALIDATED_SELECTORS,
   ALLOWANCE_HOLDER_EXEC_SELECTOR,
   AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
+  AUGUSTUS_UNIV3_ARG_TYPES,
 } from './calldata-recipient'
 import { ZEROX_ALLOWANCE_HOLDER } from '@/lib/constants'
 import {
@@ -346,6 +347,26 @@ describe('decodeTransactionPreview', () => {
       const preview = decodeTransactionPreview(truncated, VELORA_UNIV3_ARB_TO, 'velora')
       expect(preview.selector).toBe(AUGUSTUS_UNIV3_EXACT_IN_SELECTOR)
       expect(preview.recipient).toBeNull()
+    })
+
+    it('[L-02] zero beneficiary → recipientType invalid and unvalidated, never shown as extracted', () => {
+      // The real capture with ONLY the beneficiary zeroed, through R1's own ABI.
+      const cd = VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA
+      const [uniData, partnerAndFee, permit] = decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, `0x${cd.slice(10)}` as Hex)
+      const zeroed = cd.slice(0, 10)
+        + encodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, [{ ...uniData, beneficiary: zeroAddress }, partnerAndFee, permit]).slice(2)
+      const preview = decodeTransactionPreview(zeroed, VELORA_UNIV3_ARB_TO, 'velora')
+      expect(preview.recipientType).toBe('invalid')
+      expect(preview.validated).toBe(false)
+      expect(preview.validationReason).toContain('address(0)')
+    })
+
+    it('[L-02] labels toAmount as the router minimum (before router fees), not the net minimum out', () => {
+      const preview = decodeTransactionPreview(VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA, VELORA_UNIV3_ARB_TO, 'velora')
+      expect(preview.amountOutMinLabel).toBe('router minimum (before router fees)')
+      expect(preview.amountOutMin).toBe(
+        decodeAbiParameters(AUGUSTUS_UNIV3_ARG_TYPES, `0x${VELORA_UNIV3_ARB_FEE_ROUTED_CALLDATA.slice(10)}` as Hex)[0].toAmount.toString(),
+      )
     })
   })
 
