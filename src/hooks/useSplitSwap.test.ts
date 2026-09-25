@@ -839,3 +839,85 @@ describe('useSplitSwap — Base split legMinOutput freshness [CHORE-SPLITROUTE-C
     expect(decoded.args?.[3]).toBe(expectedMin)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [Auditor H-02] The quote-vs-swap floor on the split path. Each leg derives
+// its own on-chain minimumOutput from its own /swap toAmount, so before this
+// the only thing between a tampered leg response and a signed leg was the
+// ceiling-side, partner-fee-only validateFeeIntegrity.
+// ─────────────────────────────────────────────────────────────
+describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on the total', () => {
+  const QUOTED = '500000000' // each leg's quoted share
+  const HALVED = '250000000'
+
+  /** A leg for any source (makeLeg's union is narrower than AggregatorName). */
+  function legFor(source: SplitLeg['source'], percent: number, quoted: string): SplitLeg {
+    return {
+      source,
+      percent,
+      inputAmount: '500000000000000000',
+      outputAmount: quoted,
+      gasUsd: 3,
+      quote: makeQuote({ toAmount: quoted }),
+    }
+  }
+
+  it('every leg at its quoted share freezes the plan for review (no false positive)', async () => {
+    mockSwapFetch(() => makeQuote({ toAmount: QUOTED }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, QUOTED), legFor('0x', 50, QUOTED)))
+    })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.plannedLegs.map(l => l.status)).toEqual(['reviewed', 'reviewed'])
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('ONE leg below its floor blocks the WHOLE split — no partial execution', async () => {
+    // Leg 1 (1inch) is honest and is planned first; leg 2 (0x) comes back at
+    // half its quoted share. The whole plan must be discarded, not just that
+    // leg skipped: a partial fill would execute half the trade at a price the
+    // user never accepted.
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === '0x' ? HALVED : QUOTED }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, QUOTED), legFor('0x', 50, QUOTED)))
+    })
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/split blocked/i)
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.plannedLegs).toEqual([]) // nothing signable survives
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+    // The review modal opens on 'awaiting-review' only — it never opens here.
+    expect(result.current.status).not.toBe('awaiting-review')
+  })
+
+  it('a leg with no quoted share is refused, not silently planned (fail-closed)', async () => {
+    mockSwapFetch(() => makeQuote({ toAmount: QUOTED }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, QUOTED), legFor('0x', 50, '')))
+    })
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/no accepted quote to compare/i)
+    expect(result.current.plannedLegs).toEqual([])
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('the AGGREGATE catches what a skip-listed leg bypasses', async () => {
+    // uniswapv3 is exempt per leg (its /swap build re-detects the fee tier,
+    // adapters/uniswapv3.ts:247-271) so an 80%-low uniswapv3 leg clears its
+    // own floor. Only the source-agnostic total (source: null) still bounds
+    // it: 1_000_000_000 quoted vs 600_000_000 planned = 40% below.
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === 'uniswapv3' ? '100000000' : QUOTED }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('uniswapv3', 50, QUOTED), legFor('1inch', 50, QUOTED)))
+    })
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/split blocked/i)
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.plannedLegs).toEqual([])
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+})

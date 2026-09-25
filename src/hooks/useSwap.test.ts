@@ -791,3 +791,151 @@ describe('useSwap — [fix/swap-toamount-lower-bound-vs-quote] positive control,
     expect(result.current.errorMessage).toBeNull()
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [Auditor H-01] The check must RUN on the path a real user takes. The first
+// cut could not: executeStandardSwap is memoized and `quoteToAmount` was not
+// in its dep array, so the closure kept the value from before the /price
+// quote resolved — `undefined` — and a missing quote only warned. These two
+// tests are the wiring, not the formula (that is minimum-output.test.ts):
+// disable the call in useSwap.ts and the first one goes green-to-red.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the NORMAL flow', () => {
+  const QUOTE = '3000000000'
+
+  it('a quote that resolves AFTER the first render still bounds the swap (no stale closure)', async () => {
+    mockSwapFetch(swapResponse({ toAmount: '1500000000' })) // half the accepted quote
+    let quote: string | undefined // /price still in flight on the first render
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quote))
+    expect(result.current.status).toBe('idle')
+
+    // The real SwapBox sequence: the quote resolves and re-renders the hook.
+    // Nothing else changes — and before the dep-array fix that meant
+    // executeStandardSwap was NOT rebuilt, so the accepted quote never
+    // reached the check and this swap sailed through.
+    quote = QUOTE
+    rerender()
+
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.errorMessage).toMatch(/50\.0%/)
+    expect(mockSimulateSwapTx).not.toHaveBeenCalled() // blocked BEFORE simulation
+    expect(mockSendTransaction).not.toHaveBeenCalled()
+    expect(result.current.pendingSwap).toBeNull() // no review modal, nothing to confirm
+  })
+
+  it('no accepted quote at all is a refusal, not a warning (fail-closed)', async () => {
+    mockSwapFetch(swapResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/no accepted quote to compare/i)
+    expect(mockSimulateSwapTx).not.toHaveBeenCalled()
+    expect(mockSendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('the accepted quote also reaches validateFeeIntegrity (the ceiling) on the same fix', async () => {
+    // Same stale closure starved the M-01 ceiling: with FEE_NATIVE_SOURCES
+    // mocked to ['1inch'], the validator is only called when the quote
+    // arrives. A late-resolving quote must still call it.
+    mockSwapFetch(swapResponse({ toAmount: QUOTE }))
+    let quote: string | undefined
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quote))
+    quote = QUOTE
+    rerender()
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    expect(mockValidateFeeIntegrity).toHaveBeenCalledWith(QUOTE, QUOTE, '1inch')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [Auditor H-01] Outcome table — every registered source × quote state.
+// Runs on chain 42161 (no QUOTE_ONLY_SOURCES_BY_CHAIN entry) so
+// isExecutableSource never interferes; this is about the floor, not the
+// per-chain executable-source scoping.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [Auditor H-01] every AGGREGATOR_META source × quote state', () => {
+  const ADDR = '0x1111111111111111111111111111111111111111'
+  const EXECUTABLE_CHAIN = 42161
+  const QUOTE = '3000000000'
+  const HALVED = '1500000000'
+  // The only skip-listed source: its /swap build RE-DETECTS the fee tier
+  // (adapters/uniswapv3.ts:247-271), so quote and swap can measure two
+  // different pools. 'curve' and 'cowswap' are no longer exempt (M-01/M-02).
+  const SKIPPED: AggregatorName[] = ['uniswapv3']
+
+  beforeEach(() => {
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR, chain: { id: EXECUTABLE_CHAIN } } as unknown as ReturnType<typeof useAccount>)
+  })
+  afterEach(() => {
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR } as unknown as ReturnType<typeof useAccount>)
+  })
+
+  const table = (Object.keys(AGGREGATOR_META) as AggregatorName[])
+    .filter((source) => source !== 'cowswap') // separate flow — asserted below
+    .map((source) => ({
+      source,
+      halved: SKIPPED.includes(source) ? 'proceeds' : 'blocked',
+      missing: SKIPPED.includes(source) ? 'proceeds' : 'blocked',
+    }))
+
+  it.each(table)('$source: swap at half the quote → $halved; no accepted quote → $missing', async ({ source, halved, missing }) => {
+    mockSwapFetch(swapResponse({ toAmount: HALVED }))
+    const tampered = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    await act(async () => {
+      await tampered.result.current.execute(source as AggregatorName)
+    })
+    if (halved === 'blocked') {
+      expect(tampered.result.current.status).toBe('error')
+      expect(tampered.result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    } else {
+      expect(tampered.result.current.status).toBe('confirming')
+      expect(tampered.result.current.errorMessage).toBeNull()
+    }
+
+    mockSwapFetch(swapResponse({ toAmount: QUOTE }))
+    const quoteless = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    await act(async () => {
+      await quoteless.result.current.execute(source as AggregatorName)
+    })
+    if (missing === 'blocked') {
+      expect(quoteless.result.current.status).toBe('error')
+      expect(quoteless.result.current.errorMessage).toMatch(/no accepted quote to compare/i)
+    } else {
+      expect(quoteless.result.current.status).toBe('confirming')
+    }
+  })
+
+  it('cowswap reaches no floor at all — execute() dispatches it before executeStandardSwap', async () => {
+    // Why it is NOT skip-listed (Auditor M-01): a halved fill AND a missing
+    // quote both proceed to the CoW review gate, because useSwap.ts:1058-1059
+    // routes cowswap to executeCowSwap before any floor check exists. A
+    // skip-list entry for it could only ever be unreachable.
+    const params = {
+      sellToken: TOKEN_IN.address, buyToken: TOKEN_OUT.address, receiver: ADDR,
+      sellAmount: '1000000000000000000', buyAmount: '1500000000', // half — not blocked
+      validTo: Math.floor(Date.now() / 1000) + 600,
+      appData: '{"version":"1.1.0","appCode":"TeraSwap"}', appDataHash: '0x' + 'a'.repeat(64),
+      feeAmount: '500000000000000', kind: 'sell', partiallyFillable: false,
+      sellTokenBalance: 'erc20', buyTokenBalance: 'erc20', from: ADDR, quoteId: 1,
+      signingScheme: 'eip712',
+    }
+    mockSwapFetch({ source: 'cowswap', toAmount: params.buyAmount, estimatedGas: 0, gasUsd: 0, routes: [], cowOrderParams: params })
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5)) // no quote either
+    await act(async () => {
+      await result.current.execute('cowswap')
+    })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    expect(result.current.errorMessage).toBeNull()
+  })
+})
