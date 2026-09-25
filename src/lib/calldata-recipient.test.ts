@@ -9,6 +9,7 @@
  *  - Short/empty calldata → valid: false
  *  - Recipient mismatch → valid: false
  *  - Group H: Augustus V6.2 swapExactAmountInOnUniswapV3 beneficiary, on REAL Velora calldata
+ *  - Group I: Augustus V6.2 swapExactAmountIn + Curve V1/V2 beneficiary, on REAL Velora calldata
  *  - VALIDATED_SELECTORS allowlist matches KNOWN_SWAP_SELECTORS
  */
 
@@ -23,6 +24,9 @@ import {
   toFunctionSelector,
   toHex,
   zeroAddress,
+  type Abi,
+  type AbiFunction,
+  type AbiParameter,
   type Hex,
 } from 'viem'
 import {
@@ -34,6 +38,13 @@ import {
   ALLOWANCE_HOLDER_INNER_SELECTORS,
   AUGUSTUS_UNIV3_EXACT_IN_SELECTOR,
   AUGUSTUS_UNIV3_ARG_TYPES,
+  AUGUSTUS_GENERIC_EXACT_IN_SELECTOR,
+  AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR,
+  AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR,
+  AUGUSTUS_GENERIC_ARG_TYPES,
+  AUGUSTUS_CURVE_V1_ARG_TYPES,
+  AUGUSTUS_CURVE_V2_ARG_TYPES,
+  AUGUSTUS_V62_DECODED_SELECTORS,
   VELORA_DEFAULT_PARTNER,
 } from './calldata-recipient'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
@@ -67,6 +78,17 @@ import {
   VELORA_UNIV3_ARB_TO,
   VELORA_UNIV3_ARB_USER,
 } from './__fixtures__/velora-augustus-uniswapv3-arbitrum'
+import {
+  VELORA_GENERIC_MAINNET_DIRECT_CALLDATA,
+  VELORA_GENERIC_MAINNET_FEE_ROUTED_CALLDATA,
+  VELORA_CURVE_V1_MAINNET_DIRECT_CALLDATA,
+  VELORA_CURVE_V1_MAINNET_FEE_ROUTED_CALLDATA,
+  VELORA_CURVE_V2_MAINNET_DIRECT_CALLDATA,
+  VELORA_CURVE_V2_MAINNET_FEE_ROUTED_CALLDATA,
+  VELORA_V62_MAINNET_TAKER,
+  VELORA_V62_MAINNET_TO,
+  VELORA_V62_MAINNET_USER,
+} from './__fixtures__/velora-augustus-v62-exact-in-mainnet'
 
 // [ADR-023] The registry is MOCKED everywhere in this file — no test issues an
 // RPC. The addresses fed in are the real per-chain answers read on 2026-09-03,
@@ -1455,6 +1477,271 @@ describe('calldata-recipient', () => {
     })
   })
 
+  // ── Group I — Augustus V6.2 decoded (generic + Curve) ─
+
+  /**
+   * [R1 Group I] Auditor round 2 of #523: swapExactAmountIn and the two
+   * single-DEX Curve methods were Group F trust-only (valid, extracted null)
+   * although each struct carries beneficiary, quotedAmount and toAmount and
+   * partnerAndFee is an argument. They now get Group H's policy.
+   *
+   * Structs restated from the verified source (src/AugustusV6Types.sol
+   * :22-30 GenericData · :113-123 CurveV1Data · :152-164 CurveV2Data) rather
+   * than imported, so the exported ARG_TYPES are checked against the source and
+   * not against themselves. Every vector is a REAL mainnet capture or an edit of
+   * one re-encoded through the exported ARG_TYPES, never a hand-built blob.
+   */
+  describe('[Group I] Augustus V6.2 decoded — swapExactAmountIn, swapExactAmountInOnCurveV1/V2', () => {
+    const MAINNET = 1
+    const IS_CAP_SURPLUS = 1n << 92n
+    const IS_TAKE_SURPLUS = 1n << 95n
+    /** Pack a word the way AugustusFees.sol:720-731 unpacks it (partner = word >> 96). */
+    const packWord = (partner: string, feeBps: bigint, flags = 0n): bigint => (BigInt(partner) << 96n) | flags | feeBps
+    const VELORA_WORD = packWord(VELORA_DEFAULT_PARTNER, 1n, IS_CAP_SURPLUS)
+
+    const TAIL = 'address srcToken; address destToken; uint256 fromAmount; uint256 toAmount; uint256 quotedAmount; bytes32 metadata; address beneficiary;'
+    const METHODS = [
+      {
+        name: 'swapExactAmountIn',
+        literal: '0xe3ead59e',
+        selector: AUGUSTUS_GENERIC_EXACT_IN_SELECTOR,
+        argTypes: AUGUSTUS_GENERIC_ARG_TYPES as readonly AbiParameter[],
+        structArg: 1,
+        feeArg: 2,
+        solidity: [
+          `struct GenericData { ${TAIL} }`,
+          'function swapExactAmountIn(address executor, GenericData swapData, uint256 partnerAndFee, bytes permit, bytes executorData)',
+        ],
+        direct: VELORA_GENERIC_MAINNET_DIRECT_CALLDATA,
+        feeRouted: VELORA_GENERIC_MAINNET_FEE_ROUTED_CALLDATA,
+      },
+      {
+        name: 'swapExactAmountInOnCurveV1',
+        literal: '0x1a01c532',
+        selector: AUGUSTUS_CURVE_V1_EXACT_IN_SELECTOR,
+        argTypes: AUGUSTUS_CURVE_V1_ARG_TYPES as readonly AbiParameter[],
+        structArg: 0,
+        feeArg: 1,
+        solidity: [
+          `struct CurveV1Data { uint256 curveData; uint256 curveAssets; ${TAIL} }`,
+          'function swapExactAmountInOnCurveV1(CurveV1Data curveV1Data, uint256 partnerAndFee, bytes permit)',
+        ],
+        direct: VELORA_CURVE_V1_MAINNET_DIRECT_CALLDATA,
+        feeRouted: VELORA_CURVE_V1_MAINNET_FEE_ROUTED_CALLDATA,
+      },
+      {
+        name: 'swapExactAmountInOnCurveV2',
+        literal: '0xe37ed256',
+        selector: AUGUSTUS_CURVE_V2_EXACT_IN_SELECTOR,
+        argTypes: AUGUSTUS_CURVE_V2_ARG_TYPES as readonly AbiParameter[],
+        structArg: 0,
+        feeArg: 1,
+        solidity: [
+          `struct CurveV2Data { uint256 curveData; uint256 i; uint256 j; address poolAddress; ${TAIL} }`,
+          'function swapExactAmountInOnCurveV2(CurveV2Data curveV2Data, uint256 partnerAndFee, bytes permit)',
+        ],
+        direct: VELORA_CURVE_V2_MAINNET_DIRECT_CALLDATA,
+        feeRouted: VELORA_CURVE_V2_MAINNET_FEE_ROUTED_CALLDATA,
+      },
+    ]
+    type Method = (typeof METHODS)[number]
+    type Edit = { beneficiary?: Hex; partnerAndFee?: bigint; quotedAmount?: bigint; toAmount?: bigint }
+    type Struct = { beneficiary: string; toAmount: bigint; quotedAmount: bigint; fromAmount: bigint }
+
+    const decodeArgs = (m: Method, calldata: string) =>
+      [...decodeAbiParameters(m.argTypes, `0x${calldata.slice(10)}` as Hex)]
+    const fieldsOf = (m: Method, calldata: string) => {
+      const args = decodeArgs(m, calldata)
+      return { struct: args[m.structArg] as Struct, partnerAndFee: args[m.feeArg] as bigint }
+    }
+
+    /** Re-encode a real capture through the exported ABI with only the named fields changed. */
+    function mutate(m: Method, calldata: string, edit: Edit): string {
+      const args = decodeArgs(m, calldata)
+      args[m.structArg] = {
+        ...(args[m.structArg] as Struct),
+        ...(edit.beneficiary !== undefined && { beneficiary: edit.beneficiary }),
+        ...(edit.quotedAmount !== undefined && { quotedAmount: edit.quotedAmount }),
+        ...(edit.toAmount !== undefined && { toAmount: edit.toAmount }),
+      }
+      if (edit.partnerAndFee !== undefined) args[m.feeArg] = edit.partnerAndFee
+      return calldata.slice(0, 10) + encodeAbiParameters(m.argTypes, args).slice(2)
+    }
+
+    const inMulticall = (inner: string) =>
+      `0xac9650d8${encodeAbiParameters([{ name: 'data', type: 'bytes[]' }], [[inner as Hex]]).slice(2)}`
+    const inMulticallWithDeadline = (inner: string) =>
+      `0x5ae401dc${encodeAbiParameters(
+        [{ name: 'deadline', type: 'uint256' }, { name: 'data', type: 'bytes[]' }],
+        [4102444800n, [inner as Hex]],
+      ).slice(2)}`
+
+    /**
+     * /api/swap blocks on any `valid: false`. /api/v1/swap calls the async entry
+     * with (calldata, expectedRecipient) only and blocks only when
+     * `!valid && extracted` (src/app/api/v1/swap/route.ts:520-524). A Group I
+     * rejection must satisfy both, with `extracted` = what the calldata names.
+     */
+    async function expectBlockedByBothRoutes(
+      calldata: string,
+      expected: string,
+      viaFeeCollector: boolean,
+      extracted: string,
+    ) {
+      const inApp = validateCallDataRecipient(calldata, expected, viaFeeCollector, MAINNET)
+      expect(inApp.valid).toBe(false)
+      expect(inApp.implicitRecipient).toBe(false)
+      expect(inApp.extracted?.toLowerCase()).toBe(extracted.toLowerCase())
+      const v1 = await validateCallDataRecipientAsync(calldata, expected)
+      expect(v1.valid).toBe(false)
+      expect(v1.extracted?.toLowerCase()).toBe(extracted.toLowerCase())
+      const v1Blocks = !v1.valid && Boolean(v1.extracted)
+      expect(v1Blocks).toBe(true)
+      return inApp
+    }
+
+    for (const m of METHODS) {
+      describe(`${m.name} (${m.literal})`, () => {
+        const CAPTURES = [
+          { shape: 'DIRECT', calldata: m.direct, expected: VELORA_V62_MAINNET_TAKER, viaFeeCollector: false },
+          { shape: 'FEE-ROUTED', calldata: m.feeRouted, expected: VELORA_V62_MAINNET_USER, viaFeeCollector: true },
+        ] as const
+
+        it('the selector is derived, never typed: = its literal, = the verified Solidity signature, = the exported ARG_TYPES', () => {
+          // Derived values on the expected side; the literal on the actual side.
+          expect(m.literal).toBe(m.selector)
+          const fromSource = (parseAbi(m.solidity) as Abi).find((i): i is AbiFunction => i.type === 'function')
+          expect(m.literal).toBe(toFunctionSelector(fromSource!))
+          expect(m.literal).toBe(toFunctionSelector({ type: 'function', name: m.name, inputs: m.argTypes, outputs: [], stateMutability: 'payable' }))
+        })
+
+        it('is decoded (Group I), no longer trusted (Group F), and still admitted', () => {
+          expect(TRUSTED_ROUTER_SELECTORS.has(m.literal)).toBe(false)
+          expect(AUGUSTUS_V62_DECODED_SELECTORS.has(m.literal)).toBe(true)
+          expect(VALIDATED_SELECTORS.has(m.literal)).toBe(true)
+        })
+
+        it('both captures target the whitelisted mainnet Augustus V6.2, carry this selector, and pin Velora’s fee fields', () => {
+          expect(VELORA_V62_MAINNET_TO.toLowerCase()).toBe(ROUTER_WHITELIST_BY_CHAIN[MAINNET].velora.toLowerCase())
+          for (const { calldata } of CAPTURES) {
+            expect(calldata.slice(0, 10)).toBe(m.literal)
+            const { struct, partnerAndFee } = fieldsOf(m, calldata)
+            // Fails first if the adapter or Velora changes what it writes here.
+            expect(partnerAndFee).toBe(VELORA_WORD)
+            expect(struct.toAmount).toBeGreaterThan(0n)
+            expect(struct.quotedAmount).toBeGreaterThanOrEqual(struct.toAmount)
+            // The mutation helper is a byte-exact round trip when nothing is edited.
+            expect(mutate(m, calldata, {})).toBe(calldata)
+          }
+        })
+
+        // ── Positive controls ──
+
+        for (const { shape, calldata, expected, viaFeeCollector } of CAPTURES) {
+          it(`POSITIVE: ${shape} capture unmodified → valid, beneficiary extracted`, () => {
+            const result = validateCallDataRecipient(calldata, expected, viaFeeCollector, MAINNET)
+            expect(result).toEqual({ valid: true, extracted: getAddress(expected), implicitRecipient: false })
+          })
+
+          it(`POSITIVE: ${shape} with partnerAndFee = 0 (word 0) → valid`, () => {
+            const result = validateCallDataRecipient(mutate(m, calldata, { partnerAndFee: 0n }), expected, viaFeeCollector, MAINNET)
+            expect(result).toEqual({ valid: true, extracted: getAddress(expected), implicitRecipient: false })
+          })
+        }
+
+        // ── Mutations ──
+
+        const MUTATIONS: { name: string; edit: (calldata: string) => Edit; why: (word: bigint) => string[]; attacker?: true; zero?: true }[] = [
+          { name: 'attacker beneficiary', edit: () => ({ beneficiary: ATTACKER_ADDRESS }), why: () => ['does not match'], attacker: true },
+          { name: 'zero beneficiary', edit: () => ({ beneficiary: zeroAddress }), why: () => [`${m.name} beneficiary is address(0)`], zero: true },
+          {
+            name: 'IS_TAKE_SURPLUS + quotedAmount = 1',
+            edit: () => ({ partnerAndFee: VELORA_WORD | IS_TAKE_SURPLUS, quotedAmount: 1n }),
+            why: (w) => [`partnerAndFee ${toHex(w, { size: 32 })}`, 'outside {fee bps, IS_CAP_SURPLUS}'],
+          },
+          {
+            name: 'fee 0x3FFF bps, Velora partner',
+            edit: () => ({ partnerAndFee: packWord(VELORA_DEFAULT_PARTNER, 0x3fffn, IS_CAP_SURPLUS) }),
+            why: (w) => [`partnerAndFee ${toHex(w, { size: 32 })}`, 'fee 16383 bps exceeds 10 bps'],
+          },
+          {
+            name: 'attacker partner, 1 bps',
+            edit: () => ({ partnerAndFee: packWord(ATTACKER_ADDRESS, 1n, IS_CAP_SURPLUS) }),
+            why: (w) => [`partnerAndFee ${toHex(w, { size: 32 })}`, 'is neither 0 nor VELORA_DEFAULT_PARTNER'],
+          },
+          {
+            name: 'Velora partner, 11 bps',
+            edit: () => ({ partnerAndFee: packWord(VELORA_DEFAULT_PARTNER, 11n, IS_CAP_SURPLUS) }),
+            why: (w) => [`partnerAndFee ${toHex(w, { size: 32 })}`, 'fee 11 bps exceeds 10 bps'],
+          },
+          {
+            name: 'unknown bit 89',
+            edit: () => ({ partnerAndFee: VELORA_WORD | (1n << 89n) }),
+            why: (w) => [`partnerAndFee ${toHex(w, { size: 32 })}`, 'outside {fee bps, IS_CAP_SURPLUS}'],
+          },
+          {
+            name: 'quotedAmount = toAmount - 1',
+            edit: (cd) => ({ quotedAmount: fieldsOf(m, cd).struct.toAmount - 1n }),
+            why: () => ['quotedAmount below toAmount enables surplus capture'],
+          },
+          { name: 'toAmount 0', edit: () => ({ toAmount: 0n }), why: () => ['zero toAmount disables Augustus output check'] },
+        ]
+
+        for (const { name, edit, why, attacker, zero } of MUTATIONS) {
+          for (const { shape, calldata, expected, viaFeeCollector } of CAPTURES) {
+            it(`NEGATIVE: ${name} — ${shape} → rejected, extracted set, blocked by /api/v1/swap too`, async () => {
+              const e = edit(calldata)
+              const tampered = mutate(m, calldata, e)
+              const extracted = attacker ? ATTACKER_ADDRESS : zero ? zeroAddress : fieldsOf(m, calldata).struct.beneficiary
+              const result = await expectBlockedByBothRoutes(tampered, expected, viaFeeCollector, extracted)
+              for (const fragment of why(e.partnerAndFee ?? VELORA_WORD)) expect(result.reason).toContain(fragment)
+            })
+          }
+        }
+
+        for (const { shape, calldata, expected, viaFeeCollector } of CAPTURES) {
+          it(`NEGATIVE: truncated to 200 bytes — ${shape} → rejected with extracted = address(0) (no provable recipient)`, async () => {
+            const result = await expectBlockedByBothRoutes(calldata.slice(0, 2 + 200 * 2), expected, viaFeeCollector, zeroAddress)
+            expect(result.reason).toContain(`${m.name} calldata does not decode`)
+          })
+
+          it(`NEGATIVE: last word cut — ${shape} → rejected with extracted = address(0)`, async () => {
+            const result = await expectBlockedByBothRoutes(calldata.slice(0, -64), expected, viaFeeCollector, zeroAddress)
+            expect(result.reason).toContain(`${m.name} calldata does not decode`)
+          })
+        }
+
+        it('NEGATIVE: attacker beneficiary inside multicall(bytes[]) → rejected, extracted = attacker', async () => {
+          const inner = mutate(m, m.direct, { beneficiary: ATTACKER_ADDRESS })
+          await expectBlockedByBothRoutes(inMulticall(inner), VELORA_V62_MAINNET_TAKER, false, ATTACKER_ADDRESS)
+        })
+
+        it('NEGATIVE: IS_TAKE_SURPLUS + quotedAmount = 1 inside multicall(uint256,bytes[]) → rejected', async () => {
+          const inner = mutate(m, m.feeRouted, { partnerAndFee: VELORA_WORD | IS_TAKE_SURPLUS, quotedAmount: 1n })
+          const result = await expectBlockedByBothRoutes(inMulticallWithDeadline(inner), VELORA_V62_MAINNET_USER, true, VELORA_V62_MAINNET_USER)
+          expect(result.reason).toContain('outside {fee bps, IS_CAP_SURPLUS}')
+        })
+
+        it('checks run in the specified order: zero beneficiary, (a), (b), (c)', () => {
+          const reasonOf = (e: Edit) =>
+            validateCallDataRecipient(mutate(m, m.direct, e), VELORA_V62_MAINNET_TAKER, false, MAINNET).reason
+          const badWord = packWord(ATTACKER_ADDRESS, 1n)
+          // Each step removes the failure that won the step before.
+          expect(reasonOf({ beneficiary: zeroAddress, partnerAndFee: badWord, quotedAmount: 0n, toAmount: 1n })).toContain('address(0)')
+          expect(reasonOf({ partnerAndFee: badWord, quotedAmount: 0n, toAmount: 1n })).toContain('partnerAndFee')
+          expect(reasonOf({ quotedAmount: 0n, toAmount: 1n })).toContain('quotedAmount 0 < toAmount 1')
+          expect(reasonOf({ quotedAmount: 0n, toAmount: 0n })).toContain('zero toAmount')
+        })
+
+        it('uses the shared FeeCollector policy: FeeCollector beneficiary rejected on a direct route, accepted when fee-routed', () => {
+          const toFeeCollector = mutate(m, m.direct, { beneficiary: FEE_COLLECTOR_ADDRESS as Hex })
+          expect(validateCallDataRecipient(toFeeCollector, USER_ADDRESS, false, MAINNET).valid).toBe(false)
+          expect(validateCallDataRecipient(toFeeCollector, USER_ADDRESS, true, MAINNET).valid).toBe(true)
+        })
+      })
+    }
+  })
+
   // ── VALIDATED_SELECTORS allowlist ──────────────────────
 
   describe('VALIDATED_SELECTORS allowlist', () => {
@@ -1464,6 +1751,8 @@ describe('calldata-recipient', () => {
       // decode. ADR-021's one-release divergence from SC-04 is closed.
       // [R1 Group H] 23 → 24: + Augustus V6.2 swapExactAmountInOnUniswapV3,
       // admitted together with SC-04 and only with its beneficiary decoded.
+      // [R1 Group I] 24 → 24: swapExactAmountIn + Curve V1/V2 move from
+      // Group F (trusted) to Group I (decoded); the set itself is unchanged.
       expect(VALIDATED_SELECTORS.size).toBe(24)
     })
 
