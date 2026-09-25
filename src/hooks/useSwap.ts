@@ -13,7 +13,7 @@ import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, C
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
-import { deriveMinimumOutput, assertSwapConsistentWithQuote } from '@/lib/minimum-output'
+import { deriveMinimumOutput, assertSwapConsistentWithQuote, StaleOrTamperedSwapError } from '@/lib/minimum-output'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import type { CowOrderParams } from '@/lib/adapters/types'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -686,9 +686,17 @@ export function useSwap(
       // can't execute — must not dead-end the user. Walk to the next-best source
       // that simulates OK. Deliberate price-guard blocks and user-actionable
       // errors (approval needed) stop instead of silently switching.
+      //
+      // [fix/swap-toamount-lower-bound-vs-quote] A StaleOrTamperedSwapError
+      // gets the SAME treatment as PriceGuardError: never silently walk to
+      // the next source. The whole point of the check is that this /swap
+      // response can't be trusted — auto-retrying would just repeat the
+      // fetch that already produced it, and the user should see WHY before
+      // anything is retried (copy: "please review and try again").
       if (
         fallbacks.length > 0 &&
         !(err instanceof PriceGuardError) &&
+        !(err instanceof StaleOrTamperedSwapError) &&
         shouldFallbackToNextSource(err)
       ) {
         const [next, ...rest] = fallbacks

@@ -334,6 +334,19 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
     expect(mockSendTransaction).not.toHaveBeenCalled()
   })
 
+  it('a StaleOrTamperedSwapError does NOT trigger the 9O fallback walk — same as PriceGuardError', async () => {
+    const QUOTE = '3000000000'
+    const fetchSpy = mockSwapFetch(swapResponse({ toAmount: String(BigInt(QUOTE) / 2n) }))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    await act(async () => {
+      await result.current.execute('1inch', ['0x', 'velora'])
+    })
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.fallbackNotice).toBeNull() // never announced a fallback switch
+    expect(fetchSpy).toHaveBeenCalledTimes(1) // no retry fetch for '0x' or 'velora'
+  })
+
   it('passes when swapData.toAmount is quote×0.996 (inside 0.5% slippage + 0.5% tolerance)', async () => {
     const QUOTE = 3_000_000_000n
     const swapToAmount = (QUOTE * 996n) / 1000n // -0.4% — inside the 1% combined floor band
