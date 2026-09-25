@@ -12,7 +12,14 @@
  * run in CI — single-file guards only).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { deriveMinimumOutput, UnusableQuoteError } from './minimum-output'
+import {
+  deriveMinimumOutput,
+  UnusableQuoteError,
+  assertSwapConsistentWithQuote,
+  StaleOrTamperedSwapError,
+  SWAP_QUOTE_TOLERANCE_BPS,
+} from './minimum-output'
+import { AGGREGATOR_META, type AggregatorName } from './constants'
 
 let warnSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
@@ -79,5 +86,134 @@ describe('deriveMinimumOutput — unusable quotes REFUSE the swap [W2-L-01]', ()
 
   it('zero toAmount refuses even at 0% slippage (a 0-output quote is never executable)', () => {
     expect(() => deriveMinimumOutput('0', 0)).toThrow(UnusableQuoteError)
+  })
+})
+
+/**
+ * [fix/swap-toamount-lower-bound-vs-quote — Architect ruling on #524
+ * Auditor H-01] assertSwapConsistentWithQuote — the FLOOR counterpart to
+ * api.ts's validateFeeIntegrity (a CEILING check, +2%, FEE_NATIVE_SOURCES
+ * only). Pins the exact formula:
+ *
+ *   floor ⟺ quoteToAmount * (10000 - slippageBps - TOLERANCE_BPS) / 10000
+ *   throws StaleOrTamperedSwapError ⟺ swapToAmount < floor
+ *
+ * TOLERANCE_BPS = 50 (0.5%) absorbs quote age (the gap between /price and
+ * /swap) and ordinary routing drift, calibrated the same way as the ceiling
+ * side's 2% tolerance but far tighter because this is a floor: a legitimate
+ * swap should track its own quote closely, while the ceiling has to
+ * tolerate an aggregator output landing anywhere up to a real price move.
+ */
+const NON_SKIP_SOURCE: AggregatorName = '1inch'
+
+function callAssert(
+  quoteToAmount: unknown,
+  swapToAmount: unknown,
+  slippagePercent: number,
+  source: AggregatorName = NON_SKIP_SOURCE,
+) {
+  assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount, slippagePercent, source })
+}
+
+describe('assertSwapConsistentWithQuote — TOLERANCE_BPS is the pinned constant', () => {
+  it('is 50 bps (0.5%)', () => {
+    expect(SWAP_QUOTE_TOLERANCE_BPS).toBe(50)
+  })
+})
+
+describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () => {
+  const QUOTED = '1000000' // clean divisor for 10_000 bps arithmetic
+
+  it('0% slippage: floor = quote * 9950/10000 — AT the floor passes', () => {
+    expect(() => callAssert(QUOTED, '995000', 0)).not.toThrow()
+  })
+
+  it('0% slippage: 1 wei BELOW the floor throws StaleOrTamperedSwapError', () => {
+    expect(() => callAssert(QUOTED, '994999', 0)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('5% slippage: floor = quote * 9450/10000 — AT the floor passes', () => {
+    expect(() => callAssert(QUOTED, '945000', 5)).not.toThrow()
+  })
+
+  it('5% slippage: 1 wei BELOW the floor throws', () => {
+    expect(() => callAssert(QUOTED, '944999', 5)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('49.99% slippage: floor = quote * 4951/10000 — AT the floor passes', () => {
+    expect(() => callAssert(QUOTED, '495100', 49.99)).not.toThrow()
+  })
+
+  it('49.99% slippage: 1 wei BELOW the floor throws', () => {
+    expect(() => callAssert(QUOTED, '495099', 49.99)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('one wei ABOVE the floor always passes (only < floor throws, not <=)', () => {
+    expect(() => callAssert(QUOTED, '995001', 0)).not.toThrow()
+  })
+
+  it('an identical quote/swap amount always passes, at any slippage', () => {
+    expect(() => callAssert(QUOTED, QUOTED, 0)).not.toThrow()
+    expect(() => callAssert(QUOTED, QUOTED, 49.99)).not.toThrow()
+  })
+
+  it('the thrown error carries the deviation percent and the specified copy', () => {
+    try {
+      callAssert(QUOTED, '500000', 0) // 50% below quote, well past the 0.5% floor
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(StaleOrTamperedSwapError)
+      const e = err as StaleOrTamperedSwapError
+      expect(e.name).toBe('StaleOrTamperedSwapError')
+      expect(e.deviationPercent).toBeCloseTo(50, 1)
+      expect(e.message).toContain('below the quote you accepted')
+      expect(e.message).toContain('50.0%')
+      expect(e.message).toMatch(/route was refreshed.*review and try again/i)
+    }
+  })
+})
+
+describe('assertSwapConsistentWithQuote — skip list mirrors validateFeeIntegrity exactly', () => {
+  const SKIP_SOURCES: AggregatorName[] = ['uniswapv3', 'curve', 'cowswap']
+
+  it.each(SKIP_SOURCES)('%s bypasses the floor entirely — even a near-zero output passes', (source) => {
+    expect(() => callAssert('1000000', '1', 0, source)).not.toThrow()
+  })
+
+  it('every OTHER registered source in AGGREGATOR_META IS checked (positive control)', () => {
+    for (const source of Object.keys(AGGREGATOR_META) as AggregatorName[]) {
+      if (SKIP_SOURCES.includes(source)) continue
+      // Identical quote/swap output: never a false positive for any checked source.
+      expect(() => callAssert('1000000', '1000000', 0.5, source)).not.toThrow()
+      // Tampered to half the quote: every checked source blocks it.
+      expect(() => callAssert('1000000', '500000', 0.5, source)).toThrow(StaleOrTamperedSwapError)
+    }
+  })
+})
+
+describe('assertSwapConsistentWithQuote — malformed inputs throw UnusableQuoteError, as deriveMinimumOutput does', () => {
+  const malformed: Array<[string, unknown]> = [
+    ['non-numeric string', 'not-a-number'],
+    ['empty string', ''],
+    ['undefined', undefined],
+    ['null', null],
+    ['decimal string', '1.5'],
+    ['negative', '-5'],
+  ]
+
+  it.each(malformed)('malformed quoteToAmount = %s → throws UnusableQuoteError', (_label, bad) => {
+    expect(() => callAssert(bad, '1000000', 0.5)).toThrow(UnusableQuoteError)
+  })
+
+  it.each(malformed)('malformed swapToAmount = %s → throws UnusableQuoteError', (_label, bad) => {
+    expect(() => callAssert('1000000', bad, 0.5)).toThrow(UnusableQuoteError)
+  })
+
+  it('zero quoteToAmount → throws UnusableQuoteError (never a 0-based floor)', () => {
+    expect(() => callAssert('0', '1000000', 0.5)).toThrow(UnusableQuoteError)
+  })
+
+  it('a malformed input on a SKIP-listed source still bypasses (skip check runs first)', () => {
+    expect(() => callAssert('not-a-number', 'also-not-a-number', 0.5, 'cowswap')).not.toThrow()
   })
 })

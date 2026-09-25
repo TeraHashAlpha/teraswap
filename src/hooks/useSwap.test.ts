@@ -141,6 +141,7 @@ import { useAccount } from 'wagmi'
 import { submitCowOrder, pollCowOrderStatus } from '@/lib/api'
 import { useSwap } from './useSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
+import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 import { parseUnits, formatUnits } from 'viem'
 
 // ─── Fixtures ───
@@ -177,7 +178,7 @@ function swapResponse(
 ) {
   return {
     source: '1inch',
-    toAmount: '2950000000',
+    toAmount: overrides.toAmount ?? '2950000000',
     estimatedGas: 150_000,
     gasUsd: 5,
     routes: [],
@@ -318,6 +319,31 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.priceGuardBlocked).toBe(true)
     expect(result.current.priceGuardDeviation).toBeCloseTo(-0.18, 2)
+  })
+
+  it('blocks the swap when swapData.toAmount is far below the accepted quote (StaleOrTamperedSwapError)', async () => {
+    const QUOTE = '3000000000'
+    mockSwapFetch(swapResponse({ toAmount: String(BigInt(QUOTE) / 2n) })) // -50%, well past the floor
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.pendingSwap).toBeNull()
+    expect(mockSendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('passes when swapData.toAmount is quote×0.996 (inside 0.5% slippage + 0.5% tolerance)', async () => {
+    const QUOTE = 3_000_000_000n
+    const swapToAmount = (QUOTE * 996n) / 1000n // -0.4% — inside the 1% combined floor band
+    mockSwapFetch(swapResponse({ toAmount: swapToAmount.toString() }))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE.toString()))
+    await act(async () => {
+      await result.current.execute('1inch')
+    })
+    expect(result.current.status).toBe('confirming')
+    expect(result.current.pendingSwap).not.toBeNull()
   })
 
   it('reset() returns the hook to idle and clears errors', async () => {
@@ -703,5 +729,44 @@ describe('useSwap — [SPRINT-9U U1] CoW order review gate', () => {
     expect(mockSignTypedData).not.toHaveBeenCalled()
     expect(result.current.status).toBe('error')
     expect(result.current.pendingCowOrder).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [fix/swap-toamount-lower-bound-vs-quote] End-to-end positive control: a
+// realistic (untampered) swap must never be blocked by
+// assertSwapConsistentWithQuote, for EVERY registered source. Runs on chain
+// 137 (not in QUOTE_ONLY_SOURCES_BY_CHAIN) so isExecutableSource never
+// interferes — this loop is about the NEW floor check, not the unrelated
+// per-chain executable-source scoping.
+//
+// 'cowswap' is excluded: execute('cowswap') dispatches to the separate
+// executeCowSwap flow (useSwap.ts ~1050), which never threads quoteToAmount
+// and never calls assertSwapConsistentWithQuote at all — architecturally
+// out of scope for this check, not merely skip-listed. Its bypass is
+// exercised directly (skip-list) in minimum-output.test.ts instead.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [fix/swap-toamount-lower-bound-vs-quote] positive control, every AGGREGATOR_META source', () => {
+  const ADDR = '0x1111111111111111111111111111111111111111'
+  const EXECUTABLE_CHAIN = 42161 // Arbitrum — supported chain, no QUOTE_ONLY_SOURCES_BY_CHAIN entry → every source is executable here
+
+  beforeEach(() => {
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR, chain: { id: EXECUTABLE_CHAIN } } as unknown as ReturnType<typeof useAccount>)
+  })
+  afterEach(() => {
+    vi.mocked(useAccount).mockReturnValue({ address: ADDR } as unknown as ReturnType<typeof useAccount>)
+  })
+
+  const sources = (Object.keys(AGGREGATOR_META) as AggregatorName[]).filter((s) => s !== 'cowswap')
+
+  it.each(sources)('%s: an untampered quote never blocks the swap', async (source) => {
+    const QUOTE = '3000000000'
+    mockSwapFetch(swapResponse({ toAmount: QUOTE })) // identical to the quote — no drift at all
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    await act(async () => {
+      await result.current.execute(source)
+    })
+    expect(result.current.status).toBe('confirming')
+    expect(result.current.errorMessage).toBeNull()
   })
 })
