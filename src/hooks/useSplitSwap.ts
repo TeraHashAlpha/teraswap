@@ -17,12 +17,13 @@ import {
 } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase } from '@/lib/analytics'
-import { deriveMinimumOutput } from '@/lib/minimum-output'
+import { deriveMinimumOutput, assertSwapConsistentWithQuote, StaleOrTamperedSwapError } from '@/lib/minimum-output'
 import type { SplitRoute } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
+import { safeBigInt } from '@/lib/utils'
 
 // ── Types ──
 
@@ -322,6 +323,22 @@ export function useSplitSwap(
           }
         }
 
+        // [fix/swap-toamount-lower-bound-vs-quote / Auditor H-02] Floor
+        // counterpart, per leg. The single-swap path got this in c08cceb;
+        // split legs reached NOTHING — each leg derives its own on-chain
+        // minimumOutput from its own swapData.toAmount below, so a tampered
+        // or degraded leg response produced a tiny per-leg floor with only
+        // the (ceiling-only, partner-fee-only) check above in its way.
+        // Same helper, same formula, no second arithmetic: the leg's swap
+        // output must clear its QUOTED share × (1 − slippage − tolerance).
+        // Fail-closed on a missing leg quote, exactly as the single path.
+        assertSwapConsistentWithQuote({
+          quoteToAmount: leg.quote?.toAmount,
+          swapToAmount: swapData.toAmount,
+          slippagePercent: slippage,
+          source,
+        })
+
         // [P207] Pre-leg simulation — eth_call the exact transaction before review,
         // mirroring the single-swap path. Catches reverts (stale routing, FeeCollector
         // InsufficientOutput) so a doomed leg is SKIPPED (not signed), not aborted.
@@ -413,6 +430,21 @@ export function useSplitSwap(
         updateLeg(i, { status: 'reviewed', simulated })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
+        // [Auditor H-02] A quote-vs-swap floor breach is NOT a per-leg skip.
+        // Every other pre-flight failure here means "this leg can't execute,
+        // run the rest"; this one means the /swap responses for this pair
+        // can't be trusted, so no leg may sign — a partial fill would
+        // execute part of the trade at a price the user never accepted.
+        // Abort the whole plan: no frozen plan, nothing signable, and the
+        // review modal (status 'awaiting-review') never opens. Mirrors the
+        // single-swap refusal, which likewise does not walk to another source.
+        if (err instanceof StaleOrTamperedSwapError) {
+          updateLeg(i, { status: 'error', error: msg.slice(0, 100) })
+          setPlannedLegs([])
+          setStatus('error')
+          setErrorMessage(`Split blocked — ${msg}`)
+          return
+        }
         updateLeg(i, { status: 'error', error: msg.slice(0, 100) })
         planned.push({
           source, percent: leg.percent, legAmount, routeViaFeeCollector, isNativeIn,
@@ -432,6 +464,36 @@ export function useSplitSwap(
       setErrorMessage('No split leg can execute — every leg failed pre-flight checks.')
       return
     }
+    // [Auditor H-02] Aggregate floor — the SAME helper applied once to the
+    // plan as a whole, with source: null (source-agnostic, so never
+    // skip-listed). That is what makes it more than a restatement of the
+    // per-leg checks: a skip-listed leg (uniswapv3) bypasses its own floor,
+    // and only this total still bounds it. Summed over the legs that will
+    // actually sign, so a leg legitimately skipped by a reverting simulation
+    // does not drag the total below its own quote. A malformed amount
+    // anywhere in the sum collapses that side to null → the helper's
+    // fail-closed refusal, never a silently smaller total.
+    const sumOrNull = (values: string[]): bigint | null =>
+      values.reduce<bigint | null>((acc, value) => {
+        if (acc === null) return null
+        const parsed = safeBigInt(value)
+        return parsed === null || parsed < 0n ? null : acc + parsed
+      }, 0n)
+    try {
+      assertSwapConsistentWithQuote({
+        quoteToAmount: sumOrNull(signable.map(p => p.outputAmount)),
+        swapToAmount: sumOrNull(signable.map(p => p.expectedOut)),
+        slippagePercent: slippage,
+        source: null,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setPlannedLegs([])
+      setStatus('error')
+      setErrorMessage(`Split blocked — ${msg}`)
+      return
+    }
+
     // Stamp the chain + account this plan was built/validated for, so confirmPlan can reject
     // a stale cross-chain/cross-account signature even if the reset effect hasn't fired yet.
     planContextRef.current = { chainId, address }

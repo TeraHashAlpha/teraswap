@@ -589,12 +589,18 @@ describe('useSplitSwap — unusable quote refusal [W2-L-01]', () => {
     // [W2-L-01] Previously (10-L-01) a toAmount that can't be parsed as bigint
     // fell back to legMinOutput = 0n and the leg still broadcast — silently
     // disabling the FeeCollector's on-chain InsufficientOutput check for that
-    // leg. deriveMinimumOutput now throws UnusableQuoteError instead: the leg
-    // is skipped, nothing is signed, and the plan errors out.
+    // leg. UnusableQuoteError is thrown instead: the leg is skipped, nothing
+    // is signed, and the plan errors out.
+    // [Auditor H-02] The leg keeps a VALID quoted share, so the refusal is
+    // about the malformed /swap amount alone — the same UnusableQuoteError,
+    // now raised one step earlier by assertSwapConsistentWithQuote's
+    // swap-side guard instead of deriveMinimumOutput's. A malformed leg
+    // QUOTE is a different, stronger outcome (whole split aborted), pinned
+    // separately below.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockSwapFetch(() => makeQuote({ toAmount: 'not-a-number' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
-    const route = makeSplitRoute(makeLeg('1inch', 100, 'not-a-number'))
+    const route = makeSplitRoute(makeLeg('1inch', 100))
     await runSplit(result, route)
     await waitFor(() => expect(result.current.status).toBe('error'))
     // No wallet prompt was ever shown — the refusal happened pre-signature.

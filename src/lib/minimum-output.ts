@@ -116,7 +116,11 @@ export interface AssertSwapConsistentWithQuoteParams {
   swapToAmount: unknown
   /** User's slippage tolerance, percentage (e.g. 0.5 = 0.5%). */
   slippagePercent: number
-  source: AggregatorName
+  /** The source whose /swap response is being bounded, or `null` for a
+   *  source-agnostic aggregate (a split's total). `null` is NEVER skip-listed
+   *  — that is the point: the aggregate still bounds the total of a split
+   *  that contains an exempt leg. */
+  source: AggregatorName | null
 }
 
 /**
@@ -143,7 +147,7 @@ export interface AssertSwapConsistentWithQuoteParams {
  */
 export function assertSwapConsistentWithQuote(params: AssertSwapConsistentWithQuoteParams): void {
   const { quoteToAmount, swapToAmount, slippagePercent, source } = params
-  if (QUOTE_FLOOR_SKIP_SOURCES.includes(source)) return
+  if (source !== null && QUOTE_FLOOR_SKIP_SOURCES.includes(source)) return
 
   const quotedBn = safeBigInt(quoteToAmount)
   if (quotedBn === null || quotedBn <= 0n) throw new StaleOrTamperedSwapError(null)
