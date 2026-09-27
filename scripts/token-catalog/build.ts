@@ -120,6 +120,30 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
   return seeds
 }
 
+/**
+ * [fix/catalog-continuity-drop-on-trust-loss] The subset of seedsFor() that a HUMAN pinned in
+ * this repo — mainnet DEFAULT_TOKENS plus the curated Base/Arbitrum additions. Everything else
+ * in the seed map is a continuity row (the programmatically-extracted seed baseline, or a
+ * still-verified previous-run addition) and is therefore subject to
+ * CONTINUITY_DROP_ON_TRUST_LOSS. Addresses are post-correctSeed (a remap moves the address) and
+ * lowercased, matching the key space build-chain.ts compares against.
+ */
+function handCuratedSeedsFor(chainId: number): Set<string> {
+  const out = new Set<string>()
+  const push = (raw: SeedToken) => {
+    const s = correctSeed(chainId, raw)
+    if (s) out.add(s.address.toLowerCase())
+  }
+  if (chainId === 1) {
+    for (const t of DEFAULT_TOKENS) {
+      push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, category: t.category, logoURI: t.logoURI })
+    }
+  }
+  if (chainId === 8453) for (const s of CURATED_BASE_SEEDS) push(s)
+  if (chainId === 42161) for (const s of CURATED_ARBITRUM_SEEDS) push(s)
+  return out
+}
+
 // [fix/token-search-ranking-squatting Task 3] The chain's PREVIOUSLY-committed catalog rows
 // (before THIS run overwrites the file) — lets retainFlakySeeds tell a single-source flake
 // apart from a real delisting.
@@ -171,6 +195,7 @@ async function run() {
       },
       allowlist,
       seeds: seedsFor(chainId),
+      handCuratedSeeds: handCuratedSeedsFor(chainId),
       cores: CORE_TOKENS[chainId],
       config: PIPELINE_CONFIG,
       categoryFor,
@@ -219,6 +244,10 @@ async function run() {
     if (result.report.unverifiedSeeds.length) {
       log(`  UNVERIFIED SEEDS (kept, honest ⚠ — flag in FEEDBACK):`)
       for (const s of result.report.unverifiedSeeds) log(`    ${s.symbol} ${s.address} — ${s.reason}`)
+    }
+    if (result.report.trustLost.length) {
+      log(`  REMOVED (trust lost — continuity drop, FEEDBACK):`)
+      for (const t of result.report.trustLost) log(`    ${t.symbol} ${t.address} — ${t.reason}`)
     }
     if (result.report.conflicts.length) {
       log(`  symbol conflicts (kept canonical, rejected rest):`)

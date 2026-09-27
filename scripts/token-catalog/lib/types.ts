@@ -145,6 +145,19 @@ export interface RetainedSeed {
   missingSources: SourceId[]
 }
 
+/**
+ * [fix/catalog-continuity-drop-on-trust-loss] A continuity seed (previous-catalog row, NOT
+ * hand-curated and NOT a core) dropped this run because its fresh verdict says the address
+ * left every trusted list AND it no longer reaches `minSources` external agreement. Reported,
+ * never silent — see CONTINUITY_DROP_ON_TRUST_LOSS in build-chain.ts.
+ */
+export interface TrustLostSeed {
+  address: `0x${string}`
+  symbol: string
+  /** Human-readable cause, e.g. "not in any trusted list, 1 external vote < 2 required". */
+  reason: string
+}
+
 export interface SymbolConflict {
   chainId: number
   symbol: string
@@ -215,6 +228,9 @@ export interface BuildReport {
   /** [fix/token-search-ranking-squatting Task 3] Seeds kept despite this run's vote drop
    *  because the drop is attributable to a source outage, not delisting. */
   retained: RetainedSeed[]
+  /** [fix/catalog-continuity-drop-on-trust-loss] Continuity seeds DROPPED because they lost
+   *  their trusted-list membership and their external agreement (no freeze, no silence). */
+  trustLost: TrustLostSeed[]
 }
 
 export class CoreTokenValidationError extends Error {

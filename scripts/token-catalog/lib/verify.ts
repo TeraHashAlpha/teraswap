@@ -328,6 +328,7 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
     conflicts: [],
     capped: [],
     retained: [],
+    trustLost: [],
   }
 
   // 1. qualified candidates → guard gate (the existing catalog guard, reused)

@@ -22,10 +22,36 @@ import type {
   SourceEntry,
   SourceFetchResult,
   SourceId,
+  TrustLostSeed,
 } from './types'
 import type { TokenIdentity } from './verdicts'
 import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, externalVoteCount, retainFlakySeeds } from './verify'
 import { deriveGuardOutcomes } from './guard-gate'
+
+/**
+ * [fix/catalog-continuity-drop-on-trust-loss — issue #518] CONTINUITY POLICY: drop on trust
+ * loss, never freeze.
+ *
+ * Continuity seeding (`deps.seeds`, step 2 below) exists so a source outage can never silently
+ * drop a live catalog row. It must NOT also mean a row can never LEAVE: a continuity seed whose
+ * fresh verdict says `inTrustedList === false` AND that no longer reaches `minSources` external
+ * agreement is DROPPED here and reported in `report.trustLost` — loudly, never silently.
+ *
+ * Why: the trusted-list FATAL (catalog-guard.ts:139-143) exists to stop an untrusted address
+ * ENTERING the catalog. Applied to a row that merely LOST its listing, it froze the whole chain's
+ * refresh instead (chain 1 from 2026-09-21, HANU) — the guard's purpose inverted. This is strictly
+ * a NARROWING: fewer tokens can persist, and nothing new can enter more easily.
+ *
+ * Deliberately UNCHANGED by this policy:
+ *  - a NEW address failing the trusted-list check is still fatal (no previous row ⇒ no seed);
+ *  - cores are still forced and still throw on any guard failure (verify.ts assembleCatalog);
+ *  - hand-curated seeds (`deps.handCuratedSeeds`) are never dropped — a human pinned them;
+ *  - `inTrustedList === null` (CoinGecko unreachable) stays warn-only, so an outage drops nothing;
+ *  - a seed that still has >= minSources external votes is KEPT (and, being untrusted, still
+ *    reds the gate — a human decides: allowlist entry or curated REMOVAL);
+ *  - curated REMOVALS win outright — a removed token never reaches this code as a seed.
+ */
+export const CONTINUITY_DROP_ON_TRUST_LOSS = 'continuity-drop-on-trust-loss' as const
 
 export interface ChainBuildDeps {
   fetchSources: Array<() => Promise<SourceFetchResult>>
@@ -47,6 +73,10 @@ export interface ChainBuildDeps {
    *  rows, keyed by lowercase address — lets a single-source flake be told apart from a
    *  real delisting. Omitted (e.g. in older tests) ⇒ no retention, previous behavior. */
   previousCatalog?: Map<string, CatalogRow>
+  /** [fix/catalog-continuity-drop-on-trust-loss] Lowercase addresses pinned BY HAND in this
+   *  repo (mainnet DEFAULT_TOKENS, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS) — exempt from
+   *  CONTINUITY_DROP_ON_TRUST_LOSS. Omitted ⇒ every seed is a continuity seed. */
+  handCuratedSeeds?: ReadonlySet<string>
   /** ISO date stamped onto every emitted row's volumeFetchedAt. Defaults to "now". */
   builtAt?: string
 }
@@ -226,6 +256,44 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   const verdicts = await deps.collectVerdicts(auditList)
   const guard = deriveGuardOutcomes(chainId, auditList, verdicts, allowlist)
 
+  // 6b. CONTINUITY_DROP_ON_TRUST_LOSS (see the constant above) — a continuity seed that lost
+  // BOTH its trusted-list membership and its external agreement leaves now, reported, instead
+  // of riding along as an untrusted row that reds the gate and freezes the chain's refresh.
+  const verdictByAddr = new Map<string, Verdict>()
+  for (const v of verdicts) {
+    if (v.chainId === chainId) verdictByAddr.set(v.address.toLowerCase(), v)
+  }
+  const handCurated = deps.handCuratedSeeds ?? new Set<string>()
+  const votesFor = (addrLower: string): number => {
+    const inKept = conflictResult.kept.find((c) => c.address.toLowerCase() === addrLower)
+    const inMerged = merged.find((c) => c.address.toLowerCase() === addrLower)
+    return Math.max(
+      inKept ? externalVoteCount(inKept.sources) : 0,
+      inMerged ? externalVoteCount(inMerged.sources) : 0,
+    )
+  }
+  const trustLost: TrustLostSeed[] = []
+  const dropped = new Set<string>()
+  for (const [addrLower, seed] of seeds) {
+    if (coreAddrSet.has(addrLower)) continue // cores are forced, never dropped
+    if (handCurated.has(addrLower)) continue // a human pinned this one
+    // inTrustedList true ⇒ nothing to do; null ⇒ warn-only (CoinGecko unreachable at refresh)
+    if (verdictByAddr.get(addrLower)?.inTrustedList !== false) continue
+    const votes = votesFor(addrLower)
+    if (votes >= config.minSources) continue // still independently agreed — a human decides
+    dropped.add(addrLower)
+    trustLost.push({
+      address: seed.address,
+      symbol: seed.symbol,
+      reason: `not in any trusted list, ${votes} external vote(s) < ${config.minSources} required`,
+    })
+    log(`removed (trust lost: ${trustLost[trustLost.length - 1].reason}): ${seed.symbol} ${seed.address}`)
+  }
+  const liveSeeds = dropped.size === 0 ? seeds : new Map([...seeds].filter(([k]) => !dropped.has(k)))
+  if (dropped.size > 0) {
+    conflictResult.kept = conflictResult.kept.filter((c) => !dropped.has(c.address.toLowerCase()))
+  }
+
   // 7. assemble — cores forced (throw on guard failure), seeds preserved, caps logged
   const marketByAddr = new Map<string, MarketSignal>()
   for (const [k, v] of market) {
@@ -236,7 +304,7 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     chainId,
     qualified: conflictResult.kept,
     guard,
-    seeds,
+    seeds: liveSeeds,
     cores,
     market: marketByAddr,
     config,
@@ -248,6 +316,7 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   report.conflicts.push(...conflictResult.conflicts)
   report.capped.push(...prunedCapped)
   report.retained.push(...retention.retained)
+  report.trustLost.push(...trustLost)
 
   return { tokens, report, sourcesUsed, sourceNotes, verdicts, market }
 }

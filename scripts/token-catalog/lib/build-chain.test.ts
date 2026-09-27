@@ -4,8 +4,9 @@
  * these tests run with ZERO network. Covers the source-outage-tolerant-build criterion.
  */
 import { describe, it, expect, vi } from 'vitest'
-import type { Allowlist, Verdict } from '@/lib/chains/catalog-guard'
+import { auditChain, fatal, type Allowlist, type Verdict } from '@/lib/chains/catalog-guard'
 import type { CatalogRow, MarketSignal, SeedToken, SourceEntry, SourceFetchResult } from './types'
+import { CoreTokenValidationError } from './types'
 import { PIPELINE_CONFIG } from './config'
 import { buildChainCatalog, type ChainBuildDeps } from './build-chain'
 
@@ -237,5 +238,110 @@ describe('buildChainCatalog — retain-on-flake [fix/token-search-ranking-squatt
     }))
     expect(result.tokens).toHaveLength(0)
     expect(result.report.retained).toEqual([])
+  })
+})
+
+// [fix/catalog-continuity-drop-on-trust-loss — issue #518] Continuity seeding must not become a
+// ratchet: a previous-catalog row that LOSES its trusted-list listing has to leave, loudly. Before
+// this policy it could not, so one delisted micro-cap (HANU) froze every chain-1 refresh on the
+// trusted-list FATAL — a check whose job is to stop untrusted addresses ENTERING.
+describe('buildChainCatalog — CONTINUITY_DROP_ON_TRUST_LOSS [fix/catalog-continuity-drop-on-trust-loss]', () => {
+  const seedTok = (address: string, symbol: string): SeedToken =>
+    ({ address: address as `0x${string}`, symbol, name: symbol, decimals: 18 })
+
+  /** Clean verdicts, with per-address overrides (keys lowercase). */
+  const verdictsWith = (overrides: Record<string, Partial<Verdict>>) =>
+    async (tokens: Array<{ chainId: number; address: string; symbol: string }>): Promise<Verdict[]> =>
+      tokens.map((t) => ({
+        chainId: t.chainId, address: t.address, symbol: t.symbol,
+        inTrustedList: true, hasBytecode: true, transferable: true, onchainSymbol: t.symbol, decimals: 18,
+        ...(overrides[t.address.toLowerCase()] ?? {}),
+      }))
+
+  /** Price signal strong enough that 2 sources suffice (not low-liquidity). */
+  const healthy = (addr: string) =>
+    new Map<string, MarketSignal>([[`1:${addr.toLowerCase()}`, { priceUsd: 1, priceConfidence: 0.99 }]])
+
+  /** The gate: audit exactly the rows this run would COMMIT. */
+  const gateFatals = (r: { tokens: CatalogRow[]; verdicts: Verdict[] }) =>
+    fatal(auditChain(1, r.tokens.map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals })), r.verdicts, AL))
+
+  it('(a) a seed that lost its listing AND its agreement is DROPPED, reported, and the gate goes GREEN', async () => {
+    const log = vi.fn()
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')])], // 1 external vote left
+      seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
+      log,
+    }))
+    expect(result.tokens).toHaveLength(0)
+    expect(result.report.trustLost).toEqual([
+      { address: DAI, symbol: 'DAI', reason: 'not in any trusted list, 1 external vote(s) < 2 required' },
+    ])
+    // it LEFT — it is not kept as an unverified seed row (the pre-policy behaviour that froze the gate)
+    expect(result.report.unverifiedSeeds).toEqual([])
+    expect(log.mock.calls.flat().some((m) => String(m).includes('removed (trust lost:'))).toBe(true)
+    expect(gateFatals(result)).toEqual([])
+  })
+
+  it('(b) a NEW address (no seed) failing the trusted-list check is still FATAL — unchanged', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')]), ok('coingecko', [entry('coingecko', DAI, 'DAI')], healthy(DAI))],
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
+    }))
+    expect(result.tokens).toHaveLength(0)
+    expect(result.report.trustLost).toEqual([]) // never reported as a trust-loss drop
+    expect(result.report.rejections.some((r) => r.address === DAI && r.reason === 'guard-fatal')).toBe(true)
+    expect(gateFatals(result)).toEqual([]) // rejected ⇒ never reaches the committed catalog
+  })
+
+  it('(c) a CORE that lost its listing still throws CoreTokenValidationError — forced, never dropped (behaviour identical to today)', async () => {
+    // Today's behaviour, unchanged: the build FAILS LOUDLY rather than shipping or silently
+    // dropping an unvalidated core — even when the same address is also a seed.
+    await expect(
+      buildChainCatalog(1, deps({
+        fetchSources: [ok('uniswap', [entry('uniswap')])],
+        cores: [{ address: WETH as `0x${string}`, symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 }],
+        seeds: new Map([[WETH.toLowerCase(), seedTok(WETH, 'WETH')]]),
+        collectVerdicts: verdictsWith({ [WETH.toLowerCase()]: { inTrustedList: false } }),
+      })),
+    ).rejects.toThrow(CoreTokenValidationError)
+  })
+
+  it('(d) a seed that lost its listing but still has >= minSources external votes is KEPT (a human decides)', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')]), ok('coingecko', [entry('coingecko', DAI, 'DAI')], healthy(DAI))],
+      seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
+    }))
+    expect(result.report.trustLost).toEqual([])
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['DAI'])
+    expect(result.tokens[0].verified).toBe(false)
+    expect(result.report.unverifiedSeeds.map((u) => u.reason)).toEqual(['guard-fatal'])
+    // and it STILL reds the gate — deliberately: 2 lists carry it, so this needs a human
+    // (trustedListExempt entry or curated REMOVAL), not an automatic drop.
+    expect(gateFatals(result).map((f) => f.check)).toEqual(['trusted-list'])
+  })
+
+  it('(e) a HAND-CURATED seed is exempt — losing its listing never drops it', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')])],
+      seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      handCuratedSeeds: new Set([DAI.toLowerCase()]),
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
+    }))
+    expect(result.report.trustLost).toEqual([])
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['DAI'])
+  })
+
+  it('(f) inTrustedList === null (CoinGecko unreachable) stays warn-only — an outage drops nothing', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')])],
+      seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: null } }),
+    }))
+    expect(result.report.trustLost).toEqual([])
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['DAI'])
+    expect(gateFatals(result)).toEqual([])
   })
 })
