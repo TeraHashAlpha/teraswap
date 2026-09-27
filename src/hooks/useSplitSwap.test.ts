@@ -904,6 +904,39 @@ describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on th
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
   })
 
+  it('[R3-4] a uniswapv3 leg skips its own floor exactly like the single path', async () => {
+    // uniswapv3 comes back 80% under its quoted share and is NOT refused: the
+    // per-leg call passes `source`, so the same skip list the single path uses
+    // applies (its /swap build re-detects the fee tier, adapters/uniswapv3.ts:
+    // 247-271). The 1inch leg over-delivers, so the source-agnostic aggregate
+    // still clears and the plan freezes — which is only possible if the
+    // uniswapv3 leg was never floored.
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === 'uniswapv3' ? '100000000' : '900000000' }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('uniswapv3', 50, QUOTED), legFor('1inch', 50, QUOTED)))
+    })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.plannedLegs.map(l => l.status)).toEqual(['reviewed', 'reviewed'])
+  })
+
+  it('[R3-3] the aggregate basis nets FEE_BPS per leg, so a fee-routed split keeps its full tolerance', async () => {
+    // Both legs fee-routed (mockUsesFeeCollector defaults true), 0% slippage,
+    // and each leg comes back at 497_200 against a 500_000 quoted share.
+    // Netted basis 499_500 → per-leg floor 497_002, so this passes with ~44 bps
+    // of tolerance still unspent. Against the GROSS 500_000 the floor would be
+    // 497_500 and the same honest response would be refused — the numbers are
+    // chosen to sit between the two floors, so this test fails if the netting
+    // is removed. Aggregate: 994_400 swapped vs a 994_005 floor.
+    mockSwapFetch(() => makeQuote({ toAmount: '497200' }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, '500000'), legFor('0x', 50, '500000')))
+    })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.errorMessage).toBeNull()
+  })
+
   it('the AGGREGATE catches what a skip-listed leg bypasses', async () => {
     // uniswapv3 is exempt per leg (its /swap build re-detects the fee tier,
     // adapters/uniswapv3.ts:247-271) so an 80%-low uniswapv3 leg clears its

@@ -14,12 +14,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   deriveMinimumOutput,
+  feeAdjustedQuoteBasis,
   UnusableQuoteError,
   assertSwapConsistentWithQuote,
   StaleOrTamperedSwapError,
   SWAP_QUOTE_TOLERANCE_BPS,
 } from './minimum-output'
-import { AGGREGATOR_META, type AggregatorName } from './constants'
+import { AGGREGATOR_META, FEE_BPS, type AggregatorName } from './constants'
 
 let warnSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
@@ -268,5 +269,68 @@ describe('assertSwapConsistentWithQuote — an unusable SWAP amount throws Unusa
 
   it('a malformed input on a SKIP-listed source still bypasses (skip check runs first)', () => {
     expect(() => callAssert('not-a-number', 'also-not-a-number', 0.5, 'uniswapv3')).not.toThrow()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [Architect ruling R3-3] The fee-adjusted basis. The FeeCollector takes
+// FEE_BPS off the INPUT before the router prices the trade, so a fee-routed
+// swap's output is ~10 bps under the GROSS quote by construction. Round 2
+// floored against the gross quote, spending 10 of the 50 bps tolerance before
+// any real drift; these pin the netting and the boundary it moves.
+// ─────────────────────────────────────────────────────────────
+describe('feeAdjustedQuoteBasis — FEE_BPS netted out of the basis, once', () => {
+  it('nets FEE_BPS when the route goes via the FeeCollector', () => {
+    expect(feeAdjustedQuoteBasis(1_000_000n, true)).toBe(999_000n) // FEE_BPS = 10
+  })
+
+  it('is the identity for a direct route', () => {
+    expect(feeAdjustedQuoteBasis(1_000_000n, false)).toBe(1_000_000n)
+  })
+
+  it('matches FEE_BPS exactly, not a hardcoded 0.1%', () => {
+    expect(feeAdjustedQuoteBasis(10_000n, true)).toBe((10_000n * (10_000n - BigInt(FEE_BPS))) / 10_000n)
+  })
+
+  it('floor-divides like the rest of the bps arithmetic (never rounds up)', () => {
+    expect(feeAdjustedQuoteBasis(1n, true)).toBe(0n)
+  })
+})
+
+describe('assertSwapConsistentWithQuote — fee-adjusted boundary [Architect ruling R3-3]', () => {
+  const QUOTED = '1000000' // basis via FeeCollector = 999_000
+  const VIA_FEE_COLLECTOR = true
+
+  it('0% slippage, fee-routed: floor = 999000 * 9950/10000 = 994005 — AT the floor passes', () => {
+    expect(() => callAssert(QUOTED, '994005', 0, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).not.toThrow()
+  })
+
+  it('0% slippage, fee-routed: 1 wei BELOW that floor throws', () => {
+    expect(() => callAssert(QUOTED, '994004', 0, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('the SAME amount is refused on a direct route (floor 995000) — the flag is load-bearing', () => {
+    expect(() => callAssert(QUOTED, '994005', 0, NON_SKIP_SOURCE, false)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('5% slippage, fee-routed: floor = 999000 * 9450/10000 = 944055', () => {
+    expect(() => callAssert(QUOTED, '944055', 5, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).not.toThrow()
+    expect(() => callAssert(QUOTED, '944054', 5, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('a swap exactly FEE_BPS below its gross quote passes with zero tolerance spent', () => {
+    // The whole point: the fee alone no longer eats into SWAP_QUOTE_TOLERANCE_BPS.
+    expect(() => callAssert(QUOTED, '999000', 0, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).not.toThrow()
+  })
+
+  it('the deviation in the copy is measured against the GROSS quote, not the basis', () => {
+    try {
+      callAssert(QUOTED, '500000', 0, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      // 50% below the gross 1_000_000 (not 49.95% below the 999_000 basis):
+      // the user accepted the gross figure and the 0.1% fee is disclosed apart.
+      expect((err as StaleOrTamperedSwapError).deviationPercent).toBeCloseTo(50, 1)
+    }
   })
 })
