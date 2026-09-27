@@ -12,6 +12,10 @@
       whole split
 - [x] R2-C3 (3bf238c) — M-01/M-02 (skip list = `uniswapv3` only) + L (diagnostic) + claim corrections
 - [x] R2-C4 — tests (21 new) + this evidence
+- [x] R3-C1 (dc8acb1) — ruling (3): fee-adjusted basis, `routeViaFeeCollector` required at every call site
+- [x] R3-C2 (329ee74) — ruling (2): per-source quote map, fallbacks floored against their own quote
+- [x] R3-C3 (471cbe0) — rulings (3)/(4) tests + both probes
+- [x] R3-C4 — ruling (1): M-pair corrected, superseded round-2 answers replaced
 
 ### Why (Architect ruling on #524 Auditor H-01)
 `deriveMinimumOutput` derives the FeeCollector on-chain floor from `swapData.toAmount` — the SAME
@@ -83,17 +87,29 @@ is not lint evidence when the change depends on a value a warning names.
 
 ## Audit round 1 — findings
 
-0C / 2H / 2M / 3L. **The Auditor's verbatim report is not in this file: the owner had not pasted it
-when round 2 was implemented.** What was worked is the Architect's transcription in the round-2
-prompt — H-01 (`quoteToAmount` undefined in the normal SwapBox flow, so a guard wired as
-warn-and-proceed never ran), H-02 (split routes never reach the check), M-01 (`cowswap` is a dead
-exemption), M-02 (the `curve` skip reason does not hold), L (wrong `UnusableQuoteError` diagnostic;
-three wrong feedback claims; the unmentioned `:726` warning). Paste the verbatim report above this
-paragraph when available; every finding above is addressed and ticked.
+0C / 2H / 2M / 3L. **The Auditor's verbatim report is not in this file — the owner had not pasted it.**
+Paste it above this paragraph when available. The findings as ruled (Architect, round 3 (1), after the
+round-2 feedback flagged that the prompt's M-pair did not match the review record):
+
+- **H-01** — `quoteToAmount` never reached the check in the normal SwapBox flow, and a missing quote
+  only warned, so the guard could not fire for a real user.
+- **H-02** — split routes reached the check nowhere.
+- **M-01** — the `uniswapv3` skip reason did not hold as written. **Ruled: uniswapv3 STAYS
+  skip-listed**, on the tier-re-detection evidence below, and ruling (4) extends the same skip to
+  split legs. The reason, not the entry, was what needed fixing.
+- **M-02** — the 9O fallback walk floored a fallback source against the BEST source's quote. **Fixed
+  in round 3** (per-source quote map) — see below.
+- **L** — wrong `UnusableQuoteError` diagnostic; three wrong feedback claims; the unmentioned `:726`
+  warning.
+
+The round-2 prompt transcribed the M-pair as `cowswap` (dead exemption) and `curve` (reason does not
+hold) instead. Both of those changes were ordered and were made — they are real and they stand — but
+they are prompt-ordered changes, not the Auditor's M findings.
 
 ## Round 2 — evidence
 
-**1. H-01 call-site trace + the fail-closed hunk.** `SwapBox.tsx` needed **no change**: `:232`
+**1. H-01 call-site trace + the fail-closed hunk.** `SwapBox.tsx` needed no change *in round 2*
+(ruling (2) later replaced that argument with a per-source map — see Round 3): `:232`
 already passes `meta?.best.toAmount` — the same value `:485-487` renders as the expected output and
 `:637`/`:664` gate the swap buttons on. The break was one line lower, inside the hook:
 `executeStandardSwap`'s `useCallback` dep array (`useSwap.ts:747`) omitted `quoteToAmount`, so the
@@ -121,7 +137,7 @@ render still bounds the swap (no stale closure)"*, *"no accepted quote at all is
 warning"*, *"the accepted quote also reaches validateFeeIntegrity"*, a 12-source × (halved | missing)
 outcome table, and *"cowswap reaches no floor at all"*. `useSplitSwap.test.ts` 33 → 37: all-legs-good
 passes, one bad leg blocks the whole split, a quote-less leg is refused, and *"the AGGREGATE catches
-what a skip-listed leg bypasses"*. `minimum-output.test.ts` 44 → 50.
+what a skip-listed leg bypasses"*. `minimum-output.test.ts` 44 → **47** (the round-2 draft of this line said 50 — measured, wrong, corrected).
 
 *Non-vacuity, measured.* Disabling the `assertSwapConsistentWithQuote` call in `useSwap.ts`:
 `16 failed | 42 passed (58)` — both wiring tests, all 11 checked sources in the table, and the two
@@ -136,18 +152,21 @@ measured, not quoted). `tsc --noEmit` clean. Lint delta **0**: `useSwap.ts` 8 �
 'sendTransaction'" observation it had been masking took its place — pre-existing, left alone as out
 of scope), and the other 5 touched files at 0.
 
-### Concern — the effective tolerance is ~40 bps, not 50
+### ~~Concern — the effective tolerance is ~40 bps, not 50~~ — FIXED by ruling (3)
 On a fee-routed source the `/swap` build is fetched for the post-fee net amount (`useSwap.ts:339`,
 `useSplitSwap.ts` `apiAmount`) while the quote is gross, so a legitimate response already sits
 ~10 bps (`FEE_BPS`) below the accepted quote. That leaves ~40 bps for quote age plus routing drift
 on top of the user's slippage. A volatile pair with a slow confirm could reach it; the failure mode
 is a refusal with "refresh the quote and try again", never a bad fill. Raise
 `SWAP_QUOTE_TOLERANCE_BPS` or subtract `FEE_BPS` explicitly if telemetry shows false blocks.
+**Ruled: subtract it.** `feeAdjustedQuoteBasis` now nets `FEE_BPS` out of the basis at every call site,
+so the full 50 bps is available for quote age and real drift.
 
-### Concern — a uniswapv3 split leg can now block the whole split
+### Concern — a uniswapv3 split leg can still block the whole split (accepted)
 The aggregate is source-agnostic by design, so a legitimate uniswapv3 fee-tier switch mid-split
 (`adapters/uniswapv3.ts:247-271`) can drag the total past the floor and refuse the plan even though
-the leg itself is exempt. Fail-closed was the ruling; flagging the trade-off.
+the leg itself is exempt per ruling (4). Fail-closed and source-agnostic were both ruled; this is the
+residual trade-off they imply, restated here so it is on the record rather than open.
 
 ### Edge case — W2-L-01's throw site moved
 `deriveMinimumOutput`'s `UnusableQuoteError` for a malformed `/swap` `toAmount` is now raised one
@@ -159,25 +178,61 @@ The round-2 prompt scoped `src/hooks/useSplitRoute.ts` (+test). That hook only *
 (it never sees a `/swap` response); the executing hook is `src/hooks/useSplitSwap.ts`, which is where
 H-02 had to land. `useSplitRoute.ts` is unchanged.
 
-### Answer — the 9O fallback now compares a fallback source to the BEST source's quote
-Raised in the audit record, not in the round-2 prompt, and **deliberately left as-is.** The fallback
-recursion re-enters `executeStandardSwap(next, rest)` (`useSwap.ts:718`) with the same closure, so
-source B's `/swap` output is floored against source A's accepted quote; an honest B that is, say, 2%
-worse than A is refused, and because the refusal is a `StaleOrTamperedSwapError` the walk stops there
-(`:712`). That is the conservative outcome, not a defect: the figure the user accepted is A's output,
-and a route that cannot come within slippage + 0.5% of it should show the user the new price rather
-than fill silently — which is exactly what the message says. The cost is a lost auto-recovery.
-If the Architect wants auto-recovery back, the correct fix is **not** exempting fallbacks (that would
-leave a tampered fallback response unchecked): pass a per-source quote map from `SwapBox.tsx:232`
-(`meta.all`) and floor each source against ITS OWN quote. One call-site change plus a lookup at
-`useSwap.ts:503`; say the word and it ships.
+## Round 3 — Architect rulings (1)-(4)
 
-### Discrepancy to resolve before round 2
-The round-2 prompt lists M-01 = `cowswap` dead exemption, M-02 = `curve` reason. The audit record from
-the review session lists a different pair: the **`uniswapv3`** skip reason ("same-pool re-quote,
-FeeCollector-routed") and the 9O fallback point above. I worked the prompt's version and answered the
-other here. If the Auditor's `uniswapv3` reading is the ruling, the change is one line —
-`QUOTE_FLOOR_SKIP_SOURCES` in `minimum-output.ts` becomes `[]` and its comment block drops the KEPT
-entry; the tier-re-detection evidence I kept it on is `adapters/uniswapv3.ts:247-271` (both branches
-overwrite the quote's tier with `detection.bestFee`, so a tier switch has quote and swap measuring
-different pools). Two tests move columns: the `SKIP_SOURCES` `it.each` and the table's `uniswapv3` row.
+**(1) M-pair** — corrected in the findings section above. `uniswapv3` stays skip-listed; the ruling
+accepts the tier-re-detection reason (`adapters/uniswapv3.ts:247-271`, both branches overwrite the
+quote's tier with `detection.bestFee`, so a tier switch has quote and swap measuring different pools).
+
+**(2) Fallbacks floored against their own quote** — `useSwap`'s 5th argument is now the per-source map
+SwapBox already had, and the executing source resolves its own accepted quote:
+```
+-  quoteToAmount?: string,                                    // hook signature
++  quoteToAmountBySource?: QuoteToAmountBySource,
++      const quoteToAmount = quoteToAmountBySource?.[source]  // inside executeStandardSwap
+-    useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
++    const quoteToAmountBySource = useMemo<QuoteToAmountBySource>(
++      () => Object.fromEntries((meta?.all ?? []).map((q) => [q.source, q.toAmount])), [meta])
++    useSwap(tokenIn, tokenOut, amountIn, slippage, quoteToAmountBySource, bestNonCowGasUsd)
+```
+Fallback candidates come from that same `meta.all` (`orderExecutableFallbacks` → `swap-fallback.ts:35`),
+so every reachable source has its own quote; absent = refused, fail-closed, and unreachable in
+production. The ceiling reads the same resolved value, so a fallback is no longer measured against a
+higher quote than it gave — `validateFeeIntegrity`'s own formula and tolerance are untouched. Round-1
+fallback UX is otherwise unchanged (a `StaleOrTamperedSwapError` still never walks).
+
+**(3) Fee-adjusted basis** — `feeAdjustedQuoteBasis(quote, routeViaFeeCollector)`, one exported helper,
+reused by all three call sites:
+```
+  basis = routeViaFeeCollector ? quote * (10000 - FEE_BPS) / 10000 : quote
+  floor = basis * (10000 - slippageBps - SWAP_QUOTE_TOLERANCE_BPS) / 10000
+  throws  ⟺  swapToAmount < floor
+```
+`routeViaFeeCollector` is a REQUIRED param, so the compiler named all four call sites instead of a
+default picking silently. The split aggregate nets the fee **per leg** (a split can mix fee-routed and
+direct legs) and then passes `false` so the helper cannot net it twice. The deviation in the error copy
+still measures against the GROSS quote — that is the figure the user accepted.
+
+**(4) Split** — the per-leg call passes `source`, so a `uniswapv3` leg is skip-listed exactly as on the
+single path; the aggregate keeps `source: null` and stays source-agnostic.
+
+### Round-3 evidence
+16 new tests, all green. `useSwap.test.ts` 58 → 62 (honest −20% fallback executes; a fallback below its
+OWN quote is still refused; no quote in the map = refused; the ceiling sees the fallback's own quote).
+`minimum-output.test.ts` 47 → 57 (basis unit pins + fee-routed boundary at 994_005/994_004, and the
+same amount refused on a direct route). `useSplitSwap.test.ts` 37 → 39 (a uniswapv3 leg 80% low is not
+refused and the plan still freezes; a fee-routed split at 497_200 per leg, between the netted floor
+497_002 and the gross 497_500).
+
+*Probes.* Netting removed → 6 failures across both files, the split one included. Per-source resolution
+reverted to round-2 behaviour → exactly the 2 fallback tests fail. Suite **4278/4278 (284 files)** vs
+4194 at merge-base `af2da77`. `tsc` clean. Lint delta 0 on all 7 touched files (`useSwap.ts` 8 → 8,
+`SwapBox.tsx` 15 → 15 — measured against `ae205dd` — the rest 0).
+
+### Edge case — the aggregate can refuse by 1 wei where every leg passes
+The per-leg floor and the aggregate floor are both BigInt floor divisions, and flooring a sum is not
+the sum of floors. Two legs each sitting EXACTLY on their own floor can land 1 wei under the aggregate
+floor and refuse the plan (measured: 497_002 × 2 = 994_004 against a 994_005 aggregate floor). Left
+as-is — it is fail-closed, needs both legs to be wei-exact on the boundary, and the alternative
+(comparing against a sum of per-leg floors) would make the aggregate source-dependent, which ruling
+(4) rules out.
