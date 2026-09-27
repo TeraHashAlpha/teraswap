@@ -18,7 +18,7 @@
  * user setting, not a malformed quote (behaviour unchanged, UI caps apply).
  */
 import { safeBigInt } from '@/lib/utils'
-import type { AggregatorName } from '@/lib/constants'
+import { FEE_BPS, type AggregatorName } from '@/lib/constants'
 
 export class UnusableQuoteError extends Error {
   /** Raw toAmount as received (truncated) — for diagnostics, never re-parsed. */
@@ -103,6 +103,25 @@ export const SWAP_QUOTE_TOLERANCE_BPS = 50
 //     reads as a considered carve-out for a path nobody has checked.
 const QUOTE_FLOOR_SKIP_SOURCES: readonly AggregatorName[] = ['uniswapv3']
 
+/**
+ * The basis a /swap response is floored against.
+ *
+ * The FeeCollector takes FEE_BPS off the INPUT before the router ever prices
+ * the trade (`apiAmountBn` in useSwap.ts, `apiAmount` in useSplitSwap.ts), so a
+ * fee-routed swap's output sits ~FEE_BPS below the GROSS /price quote by
+ * construction. Flooring against the gross quote therefore spent 10 of the 50
+ * bps tolerance before any real drift, leaving ~40 — netting the fee out here
+ * makes SWAP_QUOTE_TOLERANCE_BPS mean what it says (Architect ruling, round 3).
+ *
+ * First-order by design: the fee scales the input and output scales ~linearly
+ * with input over a 10 bps step. This is not a pool-curve model and does not
+ * need to be — it only has to be right to well inside the tolerance it frees.
+ */
+export function feeAdjustedQuoteBasis(quoteToAmount: bigint, routeViaFeeCollector: boolean): bigint {
+  if (!routeViaFeeCollector) return quoteToAmount
+  return (quoteToAmount * (10_000n - BigInt(FEE_BPS))) / 10_000n
+}
+
 export class StaleOrTamperedSwapError extends Error {
   /** Positive percentage the swap output landed below the accepted quote, or
    *  null when there was NO usable accepted quote to compare against. */
@@ -134,12 +153,24 @@ export interface AssertSwapConsistentWithQuoteParams {
    *  — that is the point: the aggregate still bounds the total of a split
    *  that contains an exempt leg. */
   source: AggregatorName | null
+  /** true when this swap routes through the FeeCollector, which takes FEE_BPS
+   *  off the input before the router prices it — see feeAdjustedQuoteBasis.
+   *  Pass false when the basis handed in is ALREADY net of the fee (the split
+   *  aggregate nets it per leg, since legs can be mixed). */
+  routeViaFeeCollector: boolean
 }
 
 /**
  * Floor counterpart to `validateFeeIntegrity`'s ceiling: throws when a
  * /swap response's `toAmount` is lower than the /price quote can plausibly
- * explain — i.e. below `quoteToAmount * (1 - slippage - tolerance)`.
+ * explain. The formula, in full:
+ *
+ *   basis = routeViaFeeCollector ? quote * (10000 - FEE_BPS) / 10000 : quote
+ *   floor = basis * (10000 - slippageBps - SWAP_QUOTE_TOLERANCE_BPS) / 10000
+ *   throws  ⟺  swapToAmount < floor
+ *
+ * (BigInt floor division throughout, mirroring `deriveMinimumOutput`'s own bps
+ * arithmetic.)
  *
  * Complementary to `validateFeeIntegrity`, never a replacement for it:
  * that check catches an implausibly HIGH output (ceiling, partner-fee
@@ -159,7 +190,7 @@ export interface AssertSwapConsistentWithQuoteParams {
  * @throws StaleOrTamperedSwapError when `swapToAmount` is below the floor.
  */
 export function assertSwapConsistentWithQuote(params: AssertSwapConsistentWithQuoteParams): void {
-  const { quoteToAmount, swapToAmount, slippagePercent, source } = params
+  const { quoteToAmount, swapToAmount, slippagePercent, source, routeViaFeeCollector } = params
   if (source !== null && QUOTE_FLOOR_SKIP_SOURCES.includes(source)) return
 
   const quotedBn = safeBigInt(quoteToAmount)
@@ -172,11 +203,15 @@ export function assertSwapConsistentWithQuote(params: AssertSwapConsistentWithQu
   const swappedBn = safeBigInt(swapToAmount)
   if (swappedBn === null || swappedBn < 0n) throw new UnusableQuoteError(swapToAmount)
 
+  const basisBn = feeAdjustedQuoteBasis(quotedBn, routeViaFeeCollector)
   const slippageBpsBn = BigInt(Math.max(0, Math.round(slippagePercent * 100)))
   const combinedBpsBn = slippageBpsBn + BigInt(SWAP_QUOTE_TOLERANCE_BPS)
-  const floorBn = combinedBpsBn >= 10_000n ? 0n : (quotedBn * (10_000n - combinedBpsBn)) / 10_000n
+  const floorBn = combinedBpsBn >= 10_000n ? 0n : (basisBn * (10_000n - combinedBpsBn)) / 10_000n
 
   if (swappedBn < floorBn) {
+    // Reported against the GROSS quote, not the fee-adjusted basis: the figure
+    // the user accepted is the gross one, and the 0.1% fee is disclosed
+    // separately. The floor uses the basis; the copy quotes what they saw.
     const deviationPercent = Number(((quotedBn - swappedBn) * 10_000n) / quotedBn) / 100
     throw new StaleOrTamperedSwapError(deviationPercent)
   }

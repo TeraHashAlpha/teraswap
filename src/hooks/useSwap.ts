@@ -517,7 +517,18 @@ export function useSwap(
       //      here is therefore a wiring failure or tampering — the helper
       //      refuses it (StaleOrTamperedSwapError, "no accepted quote to
       //      compare against"). No warn path survives.
-      assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount: swapData.toAmount, slippagePercent: slippage, source })
+      // [Architect ruling R3-3] routeViaFeeCollector nets FEE_BPS out of the
+      // basis: the FeeCollector takes the fee off the INPUT (apiAmountBn
+      // above), so a fee-routed swap's output is ~10 bps under the gross
+      // quote by construction. Netting it here keeps the full 50 bps of
+      // SWAP_QUOTE_TOLERANCE_BPS available for quote age and real drift.
+      assertSwapConsistentWithQuote({
+        quoteToAmount,
+        swapToAmount: swapData.toAmount,
+        slippagePercent: slippage,
+        source,
+        routeViaFeeCollector,
+      })
 
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
       const minimumOutput = routeViaFeeCollector

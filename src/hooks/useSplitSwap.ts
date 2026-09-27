@@ -17,7 +17,12 @@ import {
 } from '@/lib/constants'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import { logSwapToSupabase } from '@/lib/analytics'
-import { deriveMinimumOutput, assertSwapConsistentWithQuote, StaleOrTamperedSwapError } from '@/lib/minimum-output'
+import {
+  deriveMinimumOutput,
+  assertSwapConsistentWithQuote,
+  feeAdjustedQuoteBasis,
+  StaleOrTamperedSwapError,
+} from '@/lib/minimum-output'
 import type { SplitRoute } from '@/lib/split-routing-types'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
@@ -332,11 +337,15 @@ export function useSplitSwap(
         // Same helper, same formula, no second arithmetic: the leg's swap
         // output must clear its QUOTED share × (1 − slippage − tolerance).
         // Fail-closed on a missing leg quote, exactly as the single path.
+        // [Architect ruling R3-4] `source` is passed, so a uniswapv3 leg is
+        // skip-listed exactly as on the single path. [R3-3] routeViaFeeCollector
+        // nets FEE_BPS out of this leg's basis (the fee comes off apiAmount above).
         assertSwapConsistentWithQuote({
           quoteToAmount: leg.quote?.toAmount,
           swapToAmount: swapData.toAmount,
           slippagePercent: slippage,
           source,
+          routeViaFeeCollector,
         })
 
         // [P207] Pre-leg simulation — eth_call the exact transaction before review,
@@ -473,18 +482,30 @@ export function useSplitSwap(
     // does not drag the total below its own quote. A malformed amount
     // anywhere in the sum collapses that side to null → the helper's
     // fail-closed refusal, never a silently smaller total.
-    const sumOrNull = (values: string[]): bigint | null =>
-      values.reduce<bigint | null>((acc, value) => {
-        if (acc === null) return null
-        const parsed = safeBigInt(value)
-        return parsed === null || parsed < 0n ? null : acc + parsed
-      }, 0n)
+    // [Architect ruling R3-3] The quoted basis is netted of FEE_BPS PER LEG
+    // (feeAdjustedQuoteBasis, the same helper the single path uses), because a
+    // split can mix fee-routed and direct legs — one boolean for the whole
+    // total would be wrong for either kind. The helper is then told
+    // routeViaFeeCollector: false so it does not net the fee a second time.
+    const quotedBasisTotal = signable.reduce<bigint | null>((acc, leg) => {
+      if (acc === null) return null
+      const parsed = safeBigInt(leg.outputAmount)
+      if (parsed === null || parsed <= 0n) return null
+      return acc + feeAdjustedQuoteBasis(parsed, leg.routeViaFeeCollector)
+    }, 0n)
+    const swappedTotal = signable.reduce<bigint | null>((acc, leg) => {
+      if (acc === null) return null
+      const parsed = safeBigInt(leg.expectedOut)
+      if (parsed === null || parsed < 0n) return null
+      return acc + parsed
+    }, 0n)
     try {
       assertSwapConsistentWithQuote({
-        quoteToAmount: sumOrNull(signable.map(p => p.outputAmount)),
-        swapToAmount: sumOrNull(signable.map(p => p.expectedOut)),
+        quoteToAmount: quotedBasisTotal,
+        swapToAmount: swappedTotal,
         slippagePercent: slippage,
         source: null,
+        routeViaFeeCollector: false,
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error'

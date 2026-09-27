@@ -112,8 +112,11 @@ function callAssert(
   slippagePercent: number,
   // `null` = the source-agnostic aggregate (a split's total) — never skipped.
   source: AggregatorName | null = NON_SKIP_SOURCE,
+  // Default false: the gross-quote basis these boundary cases were written
+  // against. The fee-adjusted basis has its own describe below.
+  routeViaFeeCollector = false,
 ) {
-  assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount, slippagePercent, source })
+  assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount, slippagePercent, source, routeViaFeeCollector })
 }
 
 describe('assertSwapConsistentWithQuote — TOLERANCE_BPS is the pinned constant', () => {
