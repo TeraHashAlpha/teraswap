@@ -193,6 +193,9 @@ interface UseSwapResult {
   reset: () => void
 }
 
+/** Accepted /price quote output, keyed by the source that quoted it. */
+export type QuoteToAmountBySource = Partial<Record<AggregatorName, string>>
+
 /**
  * Hook that executes the swap via the winning aggregator.
  * For CoW Protocol, uses EIP-712 signing instead of sendTransaction.
@@ -202,8 +205,13 @@ export function useSwap(
   tokenOut: Token | null,
   amountIn: string,
   slippage: number = DEFAULT_SLIPPAGE,
-  /** Quote-phase toAmount for fee integrity validation */
-  quoteToAmount?: string,
+  /** [Architect ruling R3-2] Quote-phase toAmount PER SOURCE, from the same
+   *  ranked `meta.all` the UI showed. Both the floor
+   *  (assertSwapConsistentWithQuote) and the ceiling (validateFeeIntegrity)
+   *  are applied against the quote of the source that ACTUALLY executes —
+   *  including a 9O fallback, which is priced by its own quote rather than the
+   *  best source's, so an honest next-best route no longer dead-ends the walk. */
+  quoteToAmountBySource?: QuoteToAmountBySource,
   /** [P104 / 13A-L-02] Raw adapter gas USD on the best non-CoW quote for
    *  the same pair. The server clamps + persists this as gas_savings_usd
    *  on CoW swaps; we never trust a client-derived "savings" figure. */
@@ -451,6 +459,15 @@ export function useSwap(
       //               GROSS and only the firm quote carries the fee, so
       //               swapToAmount <= quoteToAmount always.
       // Evidence: fee-integrity-armed.test.ts.
+      // [Architect ruling R3-2] The accepted quote for THIS source. On the
+      // primary path that is meta.best.toAmount — the figure the UI rendered.
+      // On a 9O fallback it is the fallback's OWN quote from the same ranked
+      // list, which is the whole point: before this, an honest next-best source
+      // was floored against the best source's (higher) quote and a legitimate
+      // -2% fallback dead-ended the walk. Absent → refused by the floor below
+      // (fail-closed); unreachable by construction, since the fallback list is
+      // built FROM meta.all (swap-fallback.ts:35).
+      const quoteToAmount = quoteToAmountBySource?.[source]
       const usesPartnerFee = FEE_NATIVE_SOURCES.includes(source)
       if (quoteToAmount && usesPartnerFee) {
         const feeCheck = validateFeeIntegrity(quoteToAmount, swapData.toAmount, source)
@@ -747,7 +764,7 @@ export function useSwap(
         metadata: err instanceof PriceGuardError ? { deviation: err.deviation } : undefined,
       })
     }
-    // [Auditor H-01] `quoteToAmount` MUST be here: without it this memoized
+    // [Auditor H-01] The quote map MUST be here: without it this memoized
     // callback kept the value from the render before the quote resolved, so
     // the accepted quote never reached assertSwapConsistentWithQuote (nor
     // validateFeeIntegrity above) on the normal path. `chainId` was missing
@@ -755,7 +772,7 @@ export function useSwap(
     // (isExecutableSource / usesFeeCollector / getChainConfig /
     // validateRouterAddress / buildSimulationTx), so a swap started after a
     // chain switch could have been built against the previous chain's config.
-  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction, quoteToAmount, chainId])
+  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction, quoteToAmountBySource, chainId])
   // [SPRINT-9O Part B] Keep the ref pointed at the latest closure for the fallback recursion.
   executeStandardSwapRef.current = executeStandardSwap
 

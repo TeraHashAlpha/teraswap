@@ -139,7 +139,7 @@ vi.mock('@/lib/constants', async () => {
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAccount } from 'wagmi'
 import { submitCowOrder, pollCowOrderStatus } from '@/lib/api'
-import { useSwap } from './useSwap'
+import { useSwap, type QuoteToAmountBySource } from './useSwap'
 import { KNOWN_SWAP_SELECTORS } from '@/lib/swap-selectors'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 import { parseUnits, formatUnits } from 'viem'
@@ -178,6 +178,10 @@ const ROUTER = '0x111111125421ca6dc452d289314280a0f8842a65'
 // with a resolved quote (SwapBox.tsx:637, :664, both gated on meta?.best).
 // Matches swapResponse()'s default toAmount exactly → no drift, no block.
 const ACCEPTED_QUOTE = '2950000000'
+
+/** The accepted-quote map SwapBox builds from `meta.all` (R3-2), for one
+ *  source. Real SwapBox passes every quoted source; a test only executes one. */
+const quotes = (source: AggregatorName, toAmount: string): QuoteToAmountBySource => ({ [source]: toAmount })
 
 /** Build a /api/swap response. Defaults pass all earlier gates so the
  *  caller can inject failure at the layer they want. */
@@ -305,7 +309,7 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
     })
     // useSwap only calls validateFeeIntegrity when quoteToAmount is set.
     const { result } = renderHook(() =>
-      useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, '2900000000'),
+      useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', '2900000000')),
     )
     await act(async () => {
       await result.current.execute('1inch')
@@ -332,7 +336,7 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
   it('blocks the swap when swapData.toAmount is far below the accepted quote (StaleOrTamperedSwapError)', async () => {
     const QUOTE = '3000000000'
     mockSwapFetch(swapResponse({ toAmount: String(BigInt(QUOTE) / 2n) })) // -50%, well past the floor
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', QUOTE)))
     await act(async () => {
       await result.current.execute('1inch')
     })
@@ -345,7 +349,7 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
   it('a StaleOrTamperedSwapError does NOT trigger the 9O fallback walk — same as PriceGuardError', async () => {
     const QUOTE = '3000000000'
     const fetchSpy = mockSwapFetch(swapResponse({ toAmount: String(BigInt(QUOTE) / 2n) }))
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', QUOTE)))
     await act(async () => {
       await result.current.execute('1inch', ['0x', 'velora'])
     })
@@ -359,7 +363,7 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
     const QUOTE = 3_000_000_000n
     const swapToAmount = (QUOTE * 996n) / 1000n // -0.4% — inside the 1% combined floor band
     mockSwapFetch(swapResponse({ toAmount: swapToAmount.toString() }))
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE.toString()))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', QUOTE.toString())))
     await act(async () => {
       await result.current.execute('1inch')
     })
@@ -409,7 +413,7 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
 
   it('clears pendingSwap and returns to idle when the account switches', async () => {
     vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
-    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await driveToConfirming(result)
 
     // Switch to a different wallet — stale pendingSwap must NOT survive.
@@ -422,7 +426,7 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
 
   it('clears swap state on disconnect', async () => {
     vi.mocked(useAccount).mockReturnValue({ address: WALLET_A } as unknown as ReturnType<typeof useAccount>)
-    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await driveToConfirming(result)
 
     vi.mocked(useAccount).mockReturnValue({ address: undefined } as unknown as ReturnType<typeof useAccount>)
@@ -462,7 +466,7 @@ describe('useSwap — [P219] swap-state reset on chain switch', () => {
   it('clears pendingSwap/status when the active chain changes mid-flow', async () => {
     vi.mocked(useAccount).mockReturnValue({ address: ADDR, chain: { id: 1 } } as unknown as ReturnType<typeof useAccount>)
     mockSwapFetch(swapResponse())
-    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await act(async () => { await result.current.execute('1inch') })
     expect(result.current.status).toBe('confirming')
     expect(result.current.pendingSwap).not.toBeNull()
@@ -503,7 +507,7 @@ describe('useSwap — back-to-back swaps each require their own tx before succes
     vi.mocked(submitCowOrder).mockResolvedValue('order-uid-1')
     vi.mocked(pollCowOrderStatus).mockResolvedValue({ status: 'fulfilled', txHash: ('0x' + 'b'.repeat(64)) as `0x${string}` })
 
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await act(async () => { await result.current.execute('cowswap') })
     await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
     await act(async () => { await result.current.confirmCowOrder() })
@@ -531,7 +535,7 @@ describe('useSwap — [P209] simulation fail-open warning', () => {
     mockSwapFetch(swapResponse())
     // Inconclusive sim: proceeds (success) but unsimulated.
     mockSimulateSwapTx.mockResolvedValueOnce({ success: true, simulated: false })
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await act(async () => {
       await result.current.execute('1inch')
     })
@@ -545,7 +549,7 @@ describe('useSwap — [P209] simulation fail-open warning', () => {
     mockSwapFetch(swapResponse())
     // First swap: inconclusive → flag set.
     mockSimulateSwapTx.mockResolvedValueOnce({ success: true, simulated: false })
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await act(async () => {
       await result.current.execute('1inch')
     })
@@ -589,7 +593,7 @@ describe('useSwap — chain-id source of truth [SPRINT-9G G6]', () => {
 describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal integrity)', () => {
   it('freezes source, token pair and amounts into pendingSwap at confirm time', async () => {
     mockSwapFetch(swapResponse()) // toAmount = 2950000000
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, ACCEPTED_QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
     await act(async () => { await result.current.execute('1inch') })
     expect(result.current.status).toBe('confirming')
     const ps = result.current.pendingSwap
@@ -608,7 +612,7 @@ describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal i
   it('the snapshot is immune to a live amountIn change while confirming (no drift under the open modal)', async () => {
     mockSwapFetch(swapResponse())
     const { result, rerender } = renderHook(
-      ({ amt }) => useSwap(TOKEN_IN, TOKEN_OUT, amt, 0.5, ACCEPTED_QUOTE),
+      ({ amt }) => useSwap(TOKEN_IN, TOKEN_OUT, amt, 0.5, quotes('1inch', ACCEPTED_QUOTE)),
       { initialProps: { amt: '1' } },
     )
     await act(async () => { await result.current.execute('1inch') })
@@ -783,7 +787,7 @@ describe('useSwap — [fix/swap-toamount-lower-bound-vs-quote] positive control,
   it.each(sources)('%s: an untampered quote never blocks the swap', async (source) => {
     const QUOTE = '3000000000'
     mockSwapFetch(swapResponse({ toAmount: QUOTE })) // identical to the quote — no drift at all
-    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes(source, QUOTE)))
     await act(async () => {
       await result.current.execute(source)
     })
@@ -805,7 +809,7 @@ describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the
 
   it('a quote that resolves AFTER the first render still bounds the swap (no stale closure)', async () => {
     mockSwapFetch(swapResponse({ toAmount: '1500000000' })) // half the accepted quote
-    let quote: string | undefined // /price still in flight on the first render
+    let quote: QuoteToAmountBySource | undefined // /price still in flight on the first render
     const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quote))
     expect(result.current.status).toBe('idle')
 
@@ -813,7 +817,7 @@ describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the
     // Nothing else changes — and before the dep-array fix that meant
     // executeStandardSwap was NOT rebuilt, so the accepted quote never
     // reached the check and this swap sailed through.
-    quote = QUOTE
+    quote = quotes('1inch', QUOTE)
     rerender()
 
     await act(async () => {
@@ -847,9 +851,9 @@ describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the
     // mocked to ['1inch'], the validator is only called when the quote
     // arrives. A late-resolving quote must still call it.
     mockSwapFetch(swapResponse({ toAmount: QUOTE }))
-    let quote: string | undefined
+    let quote: QuoteToAmountBySource | undefined
     const { result, rerender } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quote))
-    quote = QUOTE
+    quote = quotes('1inch', QUOTE)
     rerender()
     await act(async () => {
       await result.current.execute('1inch')
@@ -891,7 +895,7 @@ describe('useSwap — [Auditor H-01] every AGGREGATOR_META source × quote state
 
   it.each(table)('$source: swap at half the quote → $halved; no accepted quote → $missing', async ({ source, halved, missing }) => {
     mockSwapFetch(swapResponse({ toAmount: HALVED }))
-    const tampered = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, QUOTE))
+    const tampered = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes(source as AggregatorName, QUOTE)))
     await act(async () => {
       await tampered.result.current.execute(source as AggregatorName)
     })
@@ -937,5 +941,92 @@ describe('useSwap — [Auditor H-01] every AGGREGATOR_META source × quote state
     })
     await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
     expect(result.current.errorMessage).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [Architect ruling R3-2] A 9O fallback is floored against ITS OWN quote.
+// Round 2 floored every source against the BEST source's quote, so an honest
+// next-best route that was legitimately worse got refused and, because that
+// refusal never walks (:712), the whole fallback chain dead-ended. SwapBox now
+// passes the per-source map built from meta.all.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [Architect ruling R3-2] a fallback is floored against its own quote', () => {
+  /** Distinct /swap output per source, so a fallback is visibly worse. */
+  function mockPerSourceSwapFetch(bySource: Record<string, string>) {
+    return vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      return new Response(JSON.stringify(swapResponse({ toAmount: bySource[body.source] ?? '0' })), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+  }
+
+  it('an honest fallback 20% below the best quote EXECUTES (it clears its own floor)', async () => {
+    mockPerSourceSwapFetch({ '1inch': '3000000000', '0x': '2400000000' })
+    // The best route reverts its pre-swap sim → the 9O walk moves to 0x.
+    mockSimulateSwapTx.mockResolvedValueOnce({ success: false, error: 'execution reverted' })
+    const { result } = renderHook(() =>
+      useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, { '1inch': '3000000000', '0x': '2400000000' }),
+    )
+
+    await act(async () => {
+      await result.current.execute('1inch', ['0x'])
+    })
+
+    // Floored against 0x's own 2_400_000_000, not 1inch's 3_000_000_000 —
+    // against the best quote this is −20% and would have been refused.
+    expect(result.current.status).toBe('confirming')
+    expect(result.current.errorMessage).toBeNull()
+    expect(result.current.pendingSwap?.source).toBe('0x')
+    expect(result.current.fallbackNotice).toMatchObject({ from: '1inch', to: '0x' })
+  })
+
+  it('a fallback whose OWN output is below its OWN quote is still refused', async () => {
+    // Same walk, but 0x comes back at half of what 0x itself quoted.
+    mockPerSourceSwapFetch({ '1inch': '3000000000', '0x': '1200000000' })
+    mockSimulateSwapTx.mockResolvedValueOnce({ success: false, error: 'execution reverted' })
+    const { result } = renderHook(() =>
+      useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, { '1inch': '3000000000', '0x': '2400000000' }),
+    )
+
+    await act(async () => {
+      await result.current.execute('1inch', ['0x'])
+    })
+
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(mockSendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('a fallback source with no quote in the map is refused (fail-closed)', async () => {
+    // Unreachable in production — orderExecutableFallbacks builds the list FROM
+    // meta.all (swap-fallback.ts:35) — so this pins the defensive default.
+    mockPerSourceSwapFetch({ '1inch': '3000000000', '0x': '2400000000' })
+    mockSimulateSwapTx.mockResolvedValueOnce({ success: false, error: 'execution reverted' })
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, { '1inch': '3000000000' }))
+
+    await act(async () => {
+      await result.current.execute('1inch', ['0x'])
+    })
+
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/no accepted quote to compare/i)
+    expect(mockSendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('the ceiling also sees the fallback source own quote, not the best one', async () => {
+    mockPerSourceSwapFetch({ '1inch': '3000000000', '0x': '2400000000' })
+    mockSimulateSwapTx.mockResolvedValueOnce({ success: false, error: 'execution reverted' })
+    const { result } = renderHook(() =>
+      useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, { '1inch': '3000000000', '0x': '2400000000' }),
+    )
+    await act(async () => {
+      await result.current.execute('1inch', ['0x'])
+    })
+    // FEE_NATIVE_SOURCES is mocked to ['1inch'], so only the primary attempt
+    // reaches validateFeeIntegrity — and it must be called with 1inch's own quote.
+    expect(mockValidateFeeIntegrity).toHaveBeenCalledWith('3000000000', '3000000000', '1inch')
   })
 })
