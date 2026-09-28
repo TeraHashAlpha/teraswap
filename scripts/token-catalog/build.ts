@@ -30,7 +30,8 @@ import allowlistJson from '@/lib/chains/catalog-guard.allowlist.json'
 import { CATEGORY_OVERRIDES } from '../token-category-overrides'
 import { PIPELINE_CONFIG, CORE_TOKENS } from './lib/config'
 import seedBaseline from './seed-baseline.json'
-import type { SeedToken } from './lib/types'
+import type { SeedToken, SourceCounts } from './lib/types'
+import { OutageSuspectedError } from './lib/types'
 import { buildChainCatalog } from './lib/build-chain'
 import { makeFetchers, makeMarketFetcher, makeVolumeFetcher } from './lib/fetch-sources'
 import type { CatalogRow } from './lib/types'
@@ -125,8 +126,8 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
  * this repo — mainnet DEFAULT_TOKENS plus the curated Base/Arbitrum additions. Everything else
  * in the seed map is a continuity row (the programmatically-extracted seed baseline, or a
  * still-verified previous-run addition) and is therefore subject to
- * CONTINUITY_DROP_ON_TRUST_LOSS. Addresses are post-correctSeed (a remap moves the address) and
- * lowercased, matching the key space build-chain.ts compares against.
+ * CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS. Addresses are post-correctSeed (a remap moves the
+ * address) and lowercased, matching the key space build-chain.ts compares against.
  */
 function handCuratedSeedsFor(chainId: number): Set<string> {
   const out = new Set<string>()
@@ -153,6 +154,23 @@ function previousCatalogFor(chainId: number): Map<string, CatalogRow> {
     map.set(t.address.toLowerCase(), t as unknown as CatalogRow)
   }
   return map
+}
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] This chain's
+ * `counts.sourceCounts` from the PREVIOUSLY-committed catalog file, read straight off disk (the
+ * `GeneratedToken` import surface in token-catalog.generated.ts only re-exports `tokens`, not
+ * `counts` — see its CatalogFile type). Missing file / missing block / unparseable ⇒ undefined,
+ * which buildChainCatalog treats as "no baseline yet, record only" — never fatal here.
+ */
+function previousSourceCountsFor(chainId: number): SourceCounts | undefined {
+  const file = path.join(OUT_DIR, `token-catalog.${chainId}.json`)
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { counts?: { sourceCounts?: SourceCounts } }
+    return raw.counts?.sourceCounts
+  } catch {
+    return undefined
+  }
 }
 
 function categoryResolver() {
@@ -202,6 +220,7 @@ async function run() {
       logoFor,
       log,
       previousCatalog: previousCatalogFor(chainId),
+      previousSourceCounts: previousSourceCountsFor(chainId),
       builtAt,
     })
 
@@ -229,7 +248,7 @@ async function run() {
         requiredSourceForNew: PIPELINE_CONFIG.requiredSourceForNew,
       },
       sourcesUsed: [...result.sourcesUsed].sort(),
-      counts: { included: result.report.included, verified: result.report.verified },
+      counts: { included: result.report.included, verified: result.report.verified, sourceCounts: result.sourceCounts },
       tokens: result.tokens,
     }
     fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n')
@@ -268,6 +287,12 @@ async function run() {
 }
 
 run().catch((e) => {
-  console.error(`\nBUILD FAILED: ${e?.message ?? e}`)
+  const msg = String(e?.message ?? e)
+  console.error(`\nBUILD FAILED: ${msg}`)
+  // [fix/catalog-trust-loss-means-previously-verified] one ::error:: annotation line so the
+  // failure surfaces in the GitHub Actions run summary — no catalog written, no PR opened
+  // (the PR step only runs after this script exits 0). Not tied to any separate alert wiring.
+  const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : 'catalog build failed'
+  console.error(`::error::${label}: ${msg}`)
   process.exit(1)
 })

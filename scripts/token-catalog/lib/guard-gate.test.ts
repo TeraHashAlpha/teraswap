@@ -91,8 +91,8 @@ describe('deriveGuardOutcomes', () => {
 
 // [fix/catalog-continuity-drop-on-trust-loss — issue #518] The trusted-list FATAL is UNTOUCHED:
 // an audited trust-lost address is still fatal. The continuity policy (build-chain.ts,
-// CONTINUITY_DROP_ON_TRUST_LOSS) clears the gate by REMOVING the dropped row from the committed
-// catalog — never by weakening this check.
+// CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS) clears the gate by REMOVING the dropped row from the
+// committed catalog — never by weakening this check.
 describe('deriveGuardOutcomes — trust loss [fix/catalog-continuity-drop-on-trust-loss]', () => {
   const lostTrust = verdict({ address: DAI, symbol: 'DAI', onchainSymbol: 'DAI', inTrustedList: false })
 

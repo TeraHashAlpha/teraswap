@@ -149,7 +149,7 @@ export interface RetainedSeed {
  * [fix/catalog-continuity-drop-on-trust-loss] A continuity seed (previous-catalog row, NOT
  * hand-curated and NOT a core) dropped this run because its fresh verdict says the address
  * left every trusted list AND it no longer reaches `minSources` external agreement. Reported,
- * never silent — see CONTINUITY_DROP_ON_TRUST_LOSS in build-chain.ts.
+ * never silent — see CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS in build-chain.ts.
  */
 export interface TrustLostSeed {
   address: `0x${string}`
@@ -237,5 +237,30 @@ export class CoreTokenValidationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'CoreTokenValidationError'
+  }
+}
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] Per-source raw
+ * fetched-list size (step-1 `entries.length`, BEFORE seeds/merge), keyed by SourceId. Recorded
+ * into the committed catalog's `counts.sourceCounts` each run so the NEXT run can detect a
+ * source silently going dark (rate limit / vendor outage / a bad response the source itself
+ * doesn't error on) instead of the build quietly shipping a mass drop.
+ */
+export type SourceCounts = Partial<Record<SourceId, number>>
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] Thrown fail-closed
+ * when either breaker trips (see build-chain.ts SOURCE_OUTAGE_RATIO_THRESHOLD /
+ * TRUST_LOSS_DROP_ABS_FLOOR / TRUST_LOSS_DROP_PCT_THRESHOLD): a source's fetched-list size
+ * collapsed relative to the previous run, or an implausible number of continuity seeds lost
+ * trust in one run. Either shape looks like a source outage, not a real correction — the build
+ * refuses to write a catalog or open a PR on it, the same fail-closed contract as
+ * CoreTokenValidationError for a core token.
+ */
+export class OutageSuspectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'OutageSuspectedError'
   }
 }
