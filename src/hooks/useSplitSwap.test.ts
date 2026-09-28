@@ -133,6 +133,10 @@ import type { Token } from '@/lib/tokens'
 import type { SplitRoute, SplitLeg } from '@/lib/split-routing-types'
 import type { NormalizedQuote } from '@/lib/api'
 import { NATIVE_ETH } from '@/lib/constants'
+// [Auditor round 2, L-02] Real (unmocked) helpers — the boundary tests below compute their
+// expected floors from the SAME production formula rather than duplicating the arithmetic, so
+// they stay correct if FEE_BPS or SWAP_QUOTE_TOLERANCE_BPS ever change.
+import { feeAdjustedQuoteBasis, SWAP_QUOTE_TOLERANCE_BPS } from '@/lib/minimum-output'
 
 const KNOWN_SELECTOR = Array.from(KNOWN_SWAP_SELECTORS)[0]
 const ROUTER = '0x111111125421ca6dc452d289314280a0f8842a65'
@@ -946,6 +950,120 @@ describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on th
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     await act(async () => {
       await result.current.execute(makeSplitRoute(legFor('uniswapv3', 50, QUOTED), legFor('1inch', 50, QUOTED)))
+    })
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/split blocked/i)
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.plannedLegs).toEqual([])
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+})
+
+// [Auditor round 2, L-01] The existing "ONE leg below its floor blocks the WHOLE split" test
+// (above) passes even with the per-leg call (useSplitSwap.ts:343-349) disabled, because that
+// fixture's shortfall is ALSO visible in the aggregate (250M+500M=750M vs a ~990M floor) — it
+// pins the OUTCOME, not which check produced it. This test isolates the per-leg call: the two
+// legs' /swap responses are chosen so their SUM exactly matches the total quoted (the
+// source-agnostic aggregate sees zero shortfall and would freeze the plan on its own), while one
+// leg individually lands at 10% of its own quoted share — only reachable by the per-leg check.
+describe('useSplitSwap — [Auditor round 2, L-01] the per-leg floor is independently load-bearing', () => {
+  function legFor(source: SplitLeg['source'], percent: number, quoted: string): SplitLeg {
+    return {
+      source, percent,
+      inputAmount: '500000000000000000',
+      outputAmount: quoted,
+      gasUsd: 3,
+      quote: makeQuote({ toAmount: quoted }),
+    }
+  }
+
+  it('the 0x leg lands at 10% of its quote while the total still matches the aggregate — only the per-leg check refuses it', async () => {
+    const QUOTED = '500000000' // each leg's quoted share
+    // 1inch overshoots to 950M, 0x craters to 50M (10% of its 500M quote). Summed: 1_000_000_000,
+    // exactly 500M + 500M — the aggregate alone sees NO shortfall at all.
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === '0x' ? '50000000' : '950000000' }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, QUOTED), legFor('0x', 50, QUOTED)))
+    })
+    // If the per-leg assertSwapConsistentWithQuote call were disabled, both legs would reach
+    // 'reviewed' (the aggregate check that runs afterward would pass, per the comment above) and
+    // status would be 'awaiting-review' instead — this assertion is what catches that mutation.
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/split blocked/i)
+    expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
+    expect(result.current.plannedLegs).toEqual([]) // whole split aborted, nothing signable
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+})
+
+// [Auditor round 2, L-02] The aggregate floor (useSplitSwap.ts:490-509) sums a PER-LEG netted
+// basis (feeAdjustedQuoteBasis(leg.outputAmount, leg.routeViaFeeCollector)) and then floors that
+// sum ONCE more against the combined slippage+tolerance bps — routeViaFeeCollector: false on the
+// final call is what stops the fee being netted a SECOND time. Both boundary tests below use a
+// per-leg quoted share (333_333_337 — not a multiple of 10_000) chosen so neither the per-leg fee
+// netting nor the final floor division divides exactly; the expected floors are computed from the
+// REAL exported helpers (feeAdjustedQuoteBasis, SWAP_QUOTE_TOLERANCE_BPS), not hand-derived
+// numbers, so they can't silently drift from the production formula.
+describe('useSplitSwap — [Auditor round 2, L-02] aggregate: single netting + floor rounds down', () => {
+  const SLIPPAGE_PERCENT = 0.5
+  const COMBINED_BPS = BigInt(Math.round(SLIPPAGE_PERCENT * 100)) + BigInt(SWAP_QUOTE_TOLERANCE_BPS)
+  const Q = 333333337n // per-leg quoted share — deliberately not a multiple of 10_000
+
+  function legFor(source: SplitLeg['source'], percent: number, quoted: string): SplitLeg {
+    return {
+      source, percent,
+      inputAmount: '500000000000000000',
+      outputAmount: quoted,
+      gasUsd: 3,
+      quote: makeQuote({ toAmount: quoted }),
+    }
+  }
+
+  // Mirrors the production formula exactly (both legs fee-routed — mockUsesFeeCollector
+  // defaults true): basis = feeAdjustedQuoteBasis(quote, true) per leg; floor = basis *
+  // (10000 - combinedBps) / 10000n, BigInt (truncating, "round down") division throughout.
+  const perLegBasis = feeAdjustedQuoteBasis(Q, true)
+  const perLegFloor = (perLegBasis * (10000n - COMBINED_BPS)) / 10000n
+  const aggFloorSingleNet = (perLegBasis * 2n * (10000n - COMBINED_BPS)) / 10000n
+
+  it('[round-down] sanity: this boundary is only meaningful because the division does not divide exactly', () => {
+    expect((perLegBasis * (10000n - COMBINED_BPS)) % 10000n).not.toBe(0n)
+    expect((perLegBasis * 2n * (10000n - COMBINED_BPS)) % 10000n).not.toBe(0n)
+  })
+
+  it('[round-down] a response landing EXACTLY on the aggregate floor still clears — proves the floor rounds DOWN, not up', async () => {
+    // leg1 + leg2 === aggFloorSingleNet exactly, each individually >= its own per-leg floor (so
+    // the per-leg check above never fires and this genuinely exercises the aggregate).
+    const leg1 = (perLegFloor + 1n).toString()
+    const leg2 = perLegFloor.toString()
+    expect(BigInt(leg1) + BigInt(leg2)).toBe(aggFloorSingleNet)
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === '1inch' ? leg1 : leg2 }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', SLIPPAGE_PERCENT))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, Q.toString()), legFor('0x', 50, Q.toString())))
+    })
+    // A "round up" mutant of the floor division would push the true floor 1 unit above this
+    // response (the remainder is nonzero, per the sanity test above) and wrongly refuse it.
+    expect(result.current.status).toBe('awaiting-review')
+    expect(result.current.errorMessage).toBeNull()
+    expect(result.current.plannedLegs.map(l => l.status)).toEqual(['reviewed', 'reviewed'])
+  })
+
+  it('[single-netting] a response 1 unit below the aggregate floor still refuses even though BOTH legs individually clear their own floor', async () => {
+    // Both legs respond AT their own per-leg floor exactly (passes individually, per-leg check
+    // never fires). Their sum is 1 unit short of aggFloorSingleNet — flooring a sum is not the
+    // sum of floors, a documented trade-off (this IS the single leg's own floor rounding down
+    // twice independently). A "double-netting" mutant (the aggregate's final
+    // assertSwapConsistentWithQuote call passing routeViaFeeCollector: true instead of false,
+    // netting the already-netted quotedBasisTotal a second time) lowers the floor well below
+    // this sum and would wrongly let it through.
+    expect(perLegFloor * 2n).toBe(aggFloorSingleNet - 1n)
+    const legResponse = perLegFloor.toString()
+    mockSwapFetch(() => makeQuote({ toAmount: legResponse }))
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', SLIPPAGE_PERCENT))
+    await act(async () => {
+      await result.current.execute(makeSplitRoute(legFor('1inch', 50, Q.toString()), legFor('0x', 50, Q.toString())))
     })
     expect(result.current.status).toBe('error')
     expect(result.current.errorMessage).toMatch(/split blocked/i)

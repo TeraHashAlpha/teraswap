@@ -16,6 +16,9 @@
 - [x] R3-C2 (329ee74) — ruling (2): per-source quote map, fallbacks floored against their own quote
 - [x] R3-C3 (471cbe0) — rulings (3)/(4) tests + both probes
 - [x] R3-C4 — ruling (1): M-pair corrected, superseded round-2 answers replaced
+- [x] Auditor round 2 — L-01 pinning test (per-leg floor independently load-bearing)
+- [x] Auditor round 2 — L-02 pinning tests (aggregate single-netting + floor rounds down)
+- [x] Auditor round 2 — M-01 recorded as a follow-up (no production change this round)
 
 ### Why (Architect ruling on #524 Auditor H-01)
 `deriveMinimumOutput` derives the FeeCollector on-chain floor from `swapData.toAmount` — the SAME
@@ -236,3 +239,78 @@ floor and refuse the plan (measured: 497_002 × 2 = 994_004 against a 994_005 ag
 as-is — it is fail-closed, needs both legs to be wei-exact on the boundary, and the alternative
 (comparing against a sum of per-leg floors) would make the aggregate source-dependent, which ruling
 (4) rules out.
+
+## Auditor round 2 — 0C/0H/1M/2L, approvable. Tests-only follow-up (no production changes)
+
+**Auditor findings (2026-09-28, head `7cbc532`):**
+- **M-01** — a 9O fallback reads the quote map from the LATEST closure
+  (`executeStandardSwapRef`, `useSwap.ts:746/777`) while the fallback list is captured at click, so a
+  15s `useQuote` refresh that drops the fallback source mid-walk falsely refuses it ("no accepted
+  quote"). The `"unreachable by construction"` comment (`:467-469`) is wrong.
+- **L-01** — the per-leg split floor (`useSplitSwap.ts:343`) had no pinning test: disabled →
+  4278/4278 still green (the existing "one leg blocks the whole split" test passes via the
+  aggregate, not the per-leg call it was meant to pin).
+- **L-02** — aggregate double-netting and a ceil'd floor also survived 4278/4278.
+
+**M-01 — recorded as a follow-up, not fixed here (tests-only commit, no production changes).**
+`executeStandardSwapRef` closes over `quoteToAmountBySource` fresh on every render (ruling (2),
+round 3), but the 9O fallback walk's candidate LIST is captured once when the walk starts
+(`useSwap.ts:467-469`— comment claims this makes a stale-map read "unreachable by construction";
+the Auditor's read is that a `useQuote` refresh mid-walk can still drop a source from the map
+between candidate-list capture and that candidate's turn, and the ref read then sees the NEW map,
+not the one the fallback list was captured against — the candidate exists in the frozen list but
+not in the fresh map, and the walk reports a false "no accepted quote" refusal instead of trying
+the next candidate or accepting the fallback against ITS OWN accepted quote). Fix would need to
+freeze `quoteToAmountBySource` alongside the fallback candidate list at walk-start (or accept a
+race-loss as "quote changed, restart" rather than "no accepted quote") — a production change, out
+of scope for this tests-only round.
+
+### L-01 — the per-leg floor is independently load-bearing
+
+New test (`useSplitSwap.test.ts`, describe `[Auditor round 2, L-01]`): both legs quoted 500M; 1inch
+responds 950M (over), 0x responds 50M — exactly 10% of its own 500M quote. Summed: 950M + 50M =
+1_000_000_000, exactly 500M + 500M — the source-agnostic aggregate sees **zero** shortfall and
+would freeze the plan for review on its own. Only the per-leg call (`source` threaded through, so a
+skip-listed source like `uniswapv3` stays exempt) can see the 0x leg individually cratered.
+
+*Mutation probe, measured (temporarily edited `useSplitSwap.ts`, ran the suite, reverted — `git
+diff` clean afterward, confirmed below):* disabling the per-leg `assertSwapConsistentWithQuote`
+call (lines 343-349) → **exactly 1 failure**, this new test — `42 passed | 1 failed (43)`. The
+pre-existing "ONE leg below its floor blocks the WHOLE split" test (line ~876) stays green under
+the same mutation, confirming the Auditor's finding that it pins the OUTCOME, not the per-leg
+mechanism.
+
+### L-02 — aggregate: single netting, floor rounds down
+
+New describe block (`[Auditor round 2, L-02]`), 3 tests, all built on a per-leg quoted share of
+`333_333_337` (not a multiple of 10_000, so neither the per-leg fee-netting division nor the final
+floor division divides exactly) and expected floors computed from the REAL exported helpers
+(`feeAdjustedQuoteBasis`, `SWAP_QUOTE_TOLERANCE_BPS` — imported, not reimplemented, so the tests
+can't silently drift from the production formula):
+- **sanity** — asserts the chosen boundary's divisions actually have a nonzero remainder (otherwise
+  round-down vs round-up would be indistinguishable).
+- **[round-down]** — two leg responses summing to EXACTLY the aggregate floor (each individually
+  clearing its own per-leg floor, so the per-leg check never fires) still clears — `awaiting-review`.
+- **[single-netting]** — both legs respond AT their own per-leg floor exactly (passes individually);
+  their sum lands 1 unit BELOW the aggregate floor (flooring a sum ≠ summing floors, the same
+  documented trade-off as the round-3 edge case above) and is refused.
+
+*Mutation probes, measured (temporarily edited, ran, reverted — confirmed clean below):*
+- **Double-netting** (`useSplitSwap.ts:508`, `routeViaFeeCollector: false` → `true`, netting the
+  already-per-leg-netted `quotedBasisTotal` a second time): **exactly 1 failure**, the
+  `[single-netting]` test — `42 passed | 1 failed (43)`.
+- **Round up** (`minimum-output.ts:209`, floor division → `(numerator + 9_999n) / 10_000n`):
+  **exactly 1 failure**, the `[round-down]` test — `42 passed | 1 failed (43)`.
+
+Each mutant fails exactly the test built for it and nothing else — the three probes don't overlap
+(lesson from round 2: "run per-rule mutants on the FULL suite; a feedback probe of one rule says
+nothing about its sibling" — here each probe ran the full `useSplitSwap.test.ts` file, not a single
+`it`).
+
+### Evidence — counts
+
+`git diff --stat 7cbc532`: 2 files — `src/hooks/useSplitSwap.test.ts` (test code) and this feedback
+doc. `git diff --stat 7cbc532 -- ':!src/hooks/useSplitSwap.test.ts' ':!docs/feedback/...'` is empty
+— confirmed no production file touched. `useSplitSwap.test.ts`: **39 → 43** (4 new: L-01 ×1, L-02
+×3). Full suite: **4278 → 4282 (284 files, 0 fail)**. `tsc --noEmit` clean. `npx eslint
+src/hooks/useSplitSwap.test.ts`: 0 warnings, 0 errors.
