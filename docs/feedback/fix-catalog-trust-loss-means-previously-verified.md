@@ -8,7 +8,7 @@ unverified in the app, never audited by the guard). "not reaching" trust was mis
 trust. Base lost 11 the same way (#526/#530).
 
 - [x] C1 trust LOSS = previously verified, now not (`build-chain.ts`) + tests (a)/(b)/42161 replay
-- [ ] C2 outage circuit breaker (fail-closed) + tests
+- [x] C2 outage circuit breaker (fail-closed) + tests
 - [ ] C3 one open catalog PR per chain (workflow)
 - [ ] Evidence 1-4
 
@@ -48,3 +48,49 @@ out of the read/edit scope for this branch, left untouched).
 Full run: `npx vitest run scripts/token-catalog/lib/build-chain.test.ts` → **21 passed (21)**.
 `npx vitest run scripts/token-catalog/ src/lib/chains/catalog-address-guard.test.ts
 src/lib/chains/catalog-guard.test.ts` → **122 passed (9 files)**. `npx tsc --noEmit` clean.
+
+## Evidence 2 — outage circuit breaker hunks + tests
+
+`types.ts`: `SourceCounts` (`Partial<Record<SourceId, number>>`) + `OutageSuspectedError` (same
+fail-closed shape as `CoreTokenValidationError`). `build-chain.ts`: three named constants
+(`SOURCE_OUTAGE_RATIO_THRESHOLD = 0.7`, `TRUST_LOSS_DROP_ABS_FLOOR = 5`,
+`TRUST_LOSS_DROP_PCT_THRESHOLD = 0.05`). Two checkpoints:
+- **1b, before assembling** (right after step-1 fetch, before seeds join the pool): this run's
+  per-source `entries.length` (fulfilled fetches only) vs `deps.previousSourceCounts` — a source
+  absent from `sourceCounts` this run (rejected fetch OR simply not attempted) naturally compares
+  as 0, so no separate "which source rejected" tagging was needed (fetch-sources.ts untouched, as
+  required). `< 70% of previous` or `=== 0` (with a >0 previous baseline) ⇒ throw before any
+  merge/cross-verify/guard/verdict-collection work happens — also skips the network-heavy verdict
+  collector on a suspected-outage run. No baseline for a given source (first run, or a brand-new
+  source) ⇒ that source is skipped (record only).
+- **7b, after assembling**: `trustLost.length > max(5, ceil(0.05 * deps.seeds.size))` ⇒ throw —
+  catches the case where Commit 1's narrower, correctly-scoped policy still fires an implausible
+  number of times (e.g. the trusted-list source itself is what's actually down).
+
+Both throw `OutageSuspectedError`; `buildChainCatalog` never catches its own throw, so (same as
+today's `CoreTokenValidationError` for a core) the promise rejects, the per-chain loop in
+`build.ts` never reaches its `fs.writeFileSync` for that chain, and `run().catch` exits non-zero.
+
+`build.ts`: `previousSourceCountsFor(chainId)` reads `counts.sourceCounts` straight off the
+COMMITTED JSON file on disk (`token-catalog.generated.ts`'s `GeneratedToken` import surface only
+re-exports `tokens`, not `counts` — confirmed by reading it, not guessed); wired into
+`buildChainCatalog`'s new `previousSourceCounts` dep. `result.sourceCounts` is written back into
+the payload as `counts.sourceCounts` so next run has a baseline. `run().catch` now also prints one
+`::error::<label>: <message>` line (label distinguishes `catalog outage breaker tripped` from
+`catalog build failed` via `instanceof OutageSuspectedError`) — GitHub Actions run-summary
+annotation, independent of any separate alerting wiring (goal explicitly said not to depend on
+that).
+
+**build-chain.test.ts 21 → 29** tests (2 new describe blocks, 8 tests): source-count collapse
+(below-ratio throws; exactly-0 throws with the literal `50→0` message; a fully-rejected fetch
+compares as 0 and throws; at-or-above-ratio does NOT throw; no-baseline-first-run records counts
+and compares nothing) + trust-loss volume (beyond-threshold throws; AT-threshold, computed from
+the real constants not a hardcoded duplicate, does NOT throw; the baseline-first-run case — no
+`previousCatalog` at all, so 0 rows are provably previously-verified, so 0 drops, so the breaker
+never even evaluates).
+
+Full run: `npx vitest run scripts/token-catalog/lib/build-chain.test.ts` → **29 passed (29)**.
+`npx vitest run scripts/token-catalog/ src/lib/chains/catalog-address-guard.test.ts
+src/lib/chains/catalog-guard.test.ts` → **130 passed (9 files)**. `npx tsc --noEmit` clean.
+`npx eslint .` (full repo) → **94 warnings / 0 errors** — same baseline CLAUDE.md records for
+origin/main (delta 0).

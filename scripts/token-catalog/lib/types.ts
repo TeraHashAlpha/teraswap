@@ -239,3 +239,28 @@ export class CoreTokenValidationError extends Error {
     this.name = 'CoreTokenValidationError'
   }
 }
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] Per-source raw
+ * fetched-list size (step-1 `entries.length`, BEFORE seeds/merge), keyed by SourceId. Recorded
+ * into the committed catalog's `counts.sourceCounts` each run so the NEXT run can detect a
+ * source silently going dark (rate limit / vendor outage / a bad response the source itself
+ * doesn't error on) instead of the build quietly shipping a mass drop.
+ */
+export type SourceCounts = Partial<Record<SourceId, number>>
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] Thrown fail-closed
+ * when either breaker trips (see build-chain.ts SOURCE_OUTAGE_RATIO_THRESHOLD /
+ * TRUST_LOSS_DROP_ABS_FLOOR / TRUST_LOSS_DROP_PCT_THRESHOLD): a source's fetched-list size
+ * collapsed relative to the previous run, or an implausible number of continuity seeds lost
+ * trust in one run. Either shape looks like a source outage, not a real correction — the build
+ * refuses to write a catalog or open a PR on it, the same fail-closed contract as
+ * CoreTokenValidationError for a core token.
+ */
+export class OutageSuspectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'OutageSuspectedError'
+  }
+}

@@ -6,9 +6,15 @@
 import { describe, it, expect, vi } from 'vitest'
 import { auditChain, fatal, type Allowlist, type Verdict } from '@/lib/chains/catalog-guard'
 import type { CatalogRow, MarketSignal, SeedToken, SourceEntry, SourceFetchResult } from './types'
-import { CoreTokenValidationError } from './types'
+import { CoreTokenValidationError, OutageSuspectedError } from './types'
 import { PIPELINE_CONFIG } from './config'
-import { buildChainCatalog, type ChainBuildDeps } from './build-chain'
+import {
+  buildChainCatalog,
+  type ChainBuildDeps,
+  SOURCE_OUTAGE_RATIO_THRESHOLD,
+  TRUST_LOSS_DROP_ABS_FLOOR,
+  TRUST_LOSS_DROP_PCT_THRESHOLD,
+} from './build-chain'
 
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
 const DAI = '0x6B175474E89094C44Da98b954EedeAC495271d0F'
@@ -456,5 +462,140 @@ describe('buildChainCatalog — 42161-shape replay (281 included / 128 verified)
     expect(result.tokens).toHaveLength(VERIFIED_COUNT + UNVERIFIED_COUNT) // 281 included, unchanged
     expect(result.tokens.filter((t) => t.verified)).toHaveLength(VERIFIED_COUNT) // 128 verified, unchanged
     expect(result.report.unverifiedSeeds).toHaveLength(UNVERIFIED_COUNT) // honest ⚠, not dropped
+  })
+})
+
+// [fix/catalog-trust-loss-means-previously-verified] Outage circuit breaker, part 1: a source's
+// fetched-list size collapsing relative to its previous run looks like an outage/rate-limit, not
+// a real change — the build refuses to write a catalog rather than let a starved source manufacture
+// a wave of apparent trust loss (or otherwise silently thin the catalog).
+describe('buildChainCatalog — outage circuit breaker: source-count collapse [fix/catalog-trust-loss-means-previously-verified]', () => {
+  const addrN = (i: number): `0x${string}` => `0x${(4000 + i).toString(16).padStart(40, '0')}` as `0x${string}`
+  const listOf = (source: SourceEntry['source'], n: number): SourceEntry[] =>
+    Array.from({ length: n }, (_, i) => entry(source, addrN(i), `T${i}`))
+
+  it('a source below the ratio threshold of its previous run throws OutageSuspectedError — no result, no catalog written', async () => {
+    const prevCount = 100
+    const now = Math.floor(prevCount * SOURCE_OUTAGE_RATIO_THRESHOLD) - 1 // just under the floor
+    await expect(
+      buildChainCatalog(1, deps({
+        fetchSources: [ok('uniswap', listOf('uniswap', now))],
+        previousSourceCounts: { uniswap: prevCount },
+      })),
+    ).rejects.toThrow(OutageSuspectedError)
+  })
+
+  it('a previously-tracked source fetching 0 entries this run throws, message names source and before→after', async () => {
+    await expect(
+      buildChainCatalog(1, deps({
+        fetchSources: [ok('uniswap', [])],
+        previousSourceCounts: { uniswap: 50 },
+      })),
+    ).rejects.toThrow('source outage suspected: uniswap 50→0')
+  })
+
+  it('a source completely down (fetch rejects) this run compares as 0 against its previous baseline — throws', async () => {
+    await expect(
+      buildChainCatalog(1, deps({
+        fetchSources: [down('uniswap')],
+        previousSourceCounts: { uniswap: 50 },
+      })),
+    ).rejects.toThrow(OutageSuspectedError)
+  })
+
+  it('a source AT or ABOVE the ratio threshold does not trip the breaker — build succeeds', async () => {
+    const prevCount = 100
+    const now = Math.ceil(prevCount * SOURCE_OUTAGE_RATIO_THRESHOLD) // exactly at the floor
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', listOf('uniswap', now))],
+      previousSourceCounts: { uniswap: prevCount },
+    }))
+    expect(result.sourceCounts.uniswap).toBe(now)
+  })
+
+  it('first run without a baseline (no previousSourceCounts) records this run\'s counts and compares nothing', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap')]), ok('coingecko', [entry('coingecko')])],
+    }))
+    expect(result.sourceCounts).toEqual({ uniswap: 1, coingecko: 1 })
+  })
+})
+
+// [fix/catalog-trust-loss-means-previously-verified] Outage circuit breaker, part 2: even a
+// correctly-scoped drop (previously-verified only, per Commit 1) can still be implausibly large if
+// something upstream broke (e.g. the trusted-list source itself has the outage). Threshold:
+// max(TRUST_LOSS_DROP_ABS_FLOOR, ceil(TRUST_LOSS_DROP_PCT_THRESHOLD * seeds)).
+describe('buildChainCatalog — outage circuit breaker: trust-loss volume [fix/catalog-trust-loss-means-previously-verified]', () => {
+  const addrN = (i: number): `0x${string}` => `0x${(5000 + i).toString(16).padStart(40, '0')}` as `0x${string}`
+  const verifiedPrevRow = (address: `0x${string}`, symbol: string): CatalogRow => ({
+    address, symbol, name: symbol, decimals: 18, category: 'Other', logoURI: '',
+    verified: true, sources: ['uniswap', 'coingecko'],
+    volume24hUsd: null, volumeSource: null, volumeFetchedAt: null,
+  })
+
+  it('trust-loss drops beyond max(floor, pct-of-seeds) throws OutageSuspectedError', async () => {
+    const SEED_COUNT = 10 // threshold = max(5, ceil(0.05*10)=1) = 5
+    const seeds = new Map<string, SeedToken>()
+    const previousCatalog = new Map<string, CatalogRow>()
+    const overrides: Record<string, Partial<Verdict>> = {}
+    for (let i = 0; i < SEED_COUNT; i++) {
+      const a = addrN(i)
+      seeds.set(a.toLowerCase(), seedTok(a, `T${i}`))
+      previousCatalog.set(a.toLowerCase(), verifiedPrevRow(a, `T${i}`))
+      overrides[a.toLowerCase()] = { inTrustedList: false }
+    }
+    // all 10 previously-verified seeds lose their listing (real delisting: both sources run,
+    // list nothing) ⇒ 10 drops > threshold 5
+    await expect(
+      buildChainCatalog(1, deps({
+        fetchSources: [ok('uniswap', []), ok('coingecko', [])],
+        seeds,
+        previousCatalog,
+        collectVerdicts: verdictsWith(overrides),
+      })),
+    ).rejects.toThrow(OutageSuspectedError)
+  })
+
+  it('trust-loss drops AT the threshold (not beyond it) does NOT throw', async () => {
+    const SEED_COUNT = 10
+    // AT the real threshold, computed from the actual constants — not a hardcoded duplicate.
+    const DROP_COUNT = Math.max(TRUST_LOSS_DROP_ABS_FLOOR, Math.ceil(TRUST_LOSS_DROP_PCT_THRESHOLD * SEED_COUNT))
+    const seeds = new Map<string, SeedToken>()
+    const previousCatalog = new Map<string, CatalogRow>()
+    const overrides: Record<string, Partial<Verdict>> = {}
+    for (let i = 0; i < SEED_COUNT; i++) {
+      const a = addrN(100 + i)
+      seeds.set(a.toLowerCase(), seedTok(a, `T${i}`))
+      if (i < DROP_COUNT) {
+        previousCatalog.set(a.toLowerCase(), verifiedPrevRow(a, `T${i}`))
+        overrides[a.toLowerCase()] = { inTrustedList: false }
+      }
+      // remaining seeds stay healthy (default inTrustedList: true) — never reach the drop path
+    }
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', []), ok('coingecko', [])],
+      seeds,
+      previousCatalog,
+      collectVerdicts: verdictsWith(overrides),
+    }))
+    expect(result.report.trustLost).toHaveLength(DROP_COUNT)
+  })
+
+  it('the baseline-first-run case: no previousCatalog at all ⇒ nothing provably-verified ⇒ 0 drops, breaker never engages', async () => {
+    const SEED_COUNT = 20
+    const seeds = new Map<string, SeedToken>()
+    const overrides: Record<string, Partial<Verdict>> = {}
+    for (let i = 0; i < SEED_COUNT; i++) {
+      const a = addrN(200 + i)
+      seeds.set(a.toLowerCase(), seedTok(a, `T${i}`))
+      overrides[a.toLowerCase()] = { inTrustedList: false } // every seed "fails" trust, same as before
+    }
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', []), ok('coingecko', [])],
+      seeds,
+      // no previousCatalog dep at all — first run with this pipeline for this chain
+      collectVerdicts: verdictsWith(overrides),
+    }))
+    expect(result.report.trustLost).toEqual([])
   })
 })
