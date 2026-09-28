@@ -149,7 +149,7 @@ export interface RetainedSeed {
  * [fix/catalog-continuity-drop-on-trust-loss] A continuity seed (previous-catalog row, NOT
  * hand-curated and NOT a core) dropped this run because its fresh verdict says the address
  * left every trusted list AND it no longer reaches `minSources` external agreement. Reported,
- * never silent — see CONTINUITY_DROP_ON_TRUST_LOSS in build-chain.ts.
+ * never silent — see CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS in build-chain.ts.
  */
 export interface TrustLostSeed {
   address: `0x${string}`

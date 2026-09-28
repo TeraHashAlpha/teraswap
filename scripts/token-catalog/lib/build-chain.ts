@@ -29,18 +29,30 @@ import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, e
 import { deriveGuardOutcomes } from './guard-gate'
 
 /**
- * [fix/catalog-continuity-drop-on-trust-loss — issue #518] CONTINUITY POLICY: drop on trust
- * loss, never freeze.
+ * [fix/catalog-trust-loss-means-previously-verified — regression in #525] CONTINUITY POLICY:
+ * drop on VERIFIED trust loss, never freeze, never sweep up rows that were never verified.
  *
  * Continuity seeding (`deps.seeds`, step 2 below) exists so a source outage can never silently
- * drop a live catalog row. It must NOT also mean a row can never LEAVE: a continuity seed whose
- * fresh verdict says `inTrustedList === false` AND that no longer reaches `minSources` external
- * agreement is DROPPED here and reported in `report.trustLost` — loudly, never silently.
+ * drop a live catalog row. It must NOT also mean a row can never LEAVE: a continuity seed that
+ * WAS PREVIOUSLY VERIFIED (`deps.previousCatalog[addr].verified === true` — i.e. it once held
+ * >=minSources external agreement AND passed the catalog guard, which itself requires
+ * inTrustedList !== false at that time) and whose fresh verdict now says `inTrustedList ===
+ * false` AND that no longer reaches `minSources` external agreement is DROPPED here and
+ * reported in `report.trustLost` — loudly, never silently.
  *
- * Why: the trusted-list FATAL (catalog-guard.ts:139-143) exists to stop an untrusted address
- * ENTERING the catalog. Applied to a row that merely LOST its listing, it froze the whole chain's
- * refresh instead (chain 1 from 2026-09-21, HANU) — the guard's purpose inverted. This is strictly
- * a NARROWING: fewer tokens can persist, and nothing new can enter more easily.
+ * Why (original #525 intent): the trusted-list FATAL (catalog-guard.ts:139-143) exists to stop
+ * an untrusted address ENTERING the catalog. Applied to a row that merely LOST its listing, it
+ * froze the whole chain's refresh instead (chain 1 from 2026-09-21, HANU) — the guard's purpose
+ * inverted.
+ *
+ * Why this narrower rename (regression found in PRs #527/#529, chain 42161): #525's policy read
+ * "not reaching minSources" as LOSS regardless of history, so it also dropped continuity seeds
+ * that were NEVER independently verified in the first place — one-source bridge/continuity rows
+ * that the app has always shown unverified and the guard has never audited (they never reach
+ * `assembleCatalog`'s guard-consulting path — see step 3 there). Real runs: 281 included → 133,
+ * because 153 never-verified rows got swept into the drop alongside genuine trust losses. Those
+ * rows must persist exactly as they did before #525: kept, honestly unverified, never dropped,
+ * never fatal. Only a row that WAS verified and then LOST that verification is a real trust loss.
  *
  * Deliberately UNCHANGED by this policy:
  *  - a NEW address failing the trusted-list check is still fatal (no previous row ⇒ no seed);
@@ -49,9 +61,12 @@ import { deriveGuardOutcomes } from './guard-gate'
  *  - `inTrustedList === null` (CoinGecko unreachable) stays warn-only, so an outage drops nothing;
  *  - a seed that still has >= minSources external votes is KEPT (and, being untrusted, still
  *    reds the gate — a human decides: allowlist entry or curated REMOVAL);
- *  - curated REMOVALS win outright — a removed token never reaches this code as a seed.
+ *  - curated REMOVALS win outright — a removed token never reaches this code as a seed;
+ *  - a never-verified seed keeps the pre-#525 path: persists unverified, no fatal, no drop —
+ *    `deps.previousCatalog` omitted (e.g. older tests, or no previous file yet) means nothing
+ *    can be proven "previously verified", so nothing in this loop is ever dropped.
  */
-export const CONTINUITY_DROP_ON_TRUST_LOSS = 'continuity-drop-on-trust-loss' as const
+export const CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS = 'continuity-drop-on-verified-trust-loss' as const
 
 export interface ChainBuildDeps {
   fetchSources: Array<() => Promise<SourceFetchResult>>
@@ -75,7 +90,7 @@ export interface ChainBuildDeps {
   previousCatalog?: Map<string, CatalogRow>
   /** [fix/catalog-continuity-drop-on-trust-loss] Lowercase addresses pinned BY HAND in this
    *  repo (mainnet DEFAULT_TOKENS, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS) — exempt from
-   *  CONTINUITY_DROP_ON_TRUST_LOSS. Omitted ⇒ every seed is a continuity seed. */
+   *  CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS. Omitted ⇒ every seed is a continuity seed. */
   handCuratedSeeds?: ReadonlySet<string>
   /** ISO date stamped onto every emitted row's volumeFetchedAt. Defaults to "now". */
   builtAt?: string
@@ -256,9 +271,10 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   const verdicts = await deps.collectVerdicts(auditList)
   const guard = deriveGuardOutcomes(chainId, auditList, verdicts, allowlist)
 
-  // 6b. CONTINUITY_DROP_ON_TRUST_LOSS (see the constant above) — a continuity seed that lost
-  // BOTH its trusted-list membership and its external agreement leaves now, reported, instead
-  // of riding along as an untrusted row that reds the gate and freezes the chain's refresh.
+  // 6b. CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS (see the constant above) — a continuity seed that
+  // WAS PREVIOUSLY VERIFIED and lost BOTH its trusted-list membership and its external agreement
+  // leaves now, reported, instead of riding along as an untrusted row that reds the gate and
+  // freezes the chain's refresh. A seed that was NEVER verified is untouched by this block.
   const verdictByAddr = new Map<string, Verdict>()
   for (const v of verdicts) {
     if (v.chainId === chainId) verdictByAddr.set(v.address.toLowerCase(), v)
@@ -281,6 +297,11 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     if (verdictByAddr.get(addrLower)?.inTrustedList !== false) continue
     const votes = votesFor(addrLower)
     if (votes >= config.minSources) continue // still independently agreed — a human decides
+    // trust LOSS requires having HELD trust: a seed this build has never proven verified
+    // (no previous row, or the previous row itself was verified:false) keeps the pre-#525
+    // path — persists unverified, no fatal, no drop. Only a row that was ONCE verified and
+    // has now lost it is a real regression worth dropping.
+    if (!deps.previousCatalog?.get(addrLower)?.verified) continue
     dropped.add(addrLower)
     trustLost.push({
       address: seed.address,

@@ -125,8 +125,8 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
  * this repo — mainnet DEFAULT_TOKENS plus the curated Base/Arbitrum additions. Everything else
  * in the seed map is a continuity row (the programmatically-extracted seed baseline, or a
  * still-verified previous-run addition) and is therefore subject to
- * CONTINUITY_DROP_ON_TRUST_LOSS. Addresses are post-correctSeed (a remap moves the address) and
- * lowercased, matching the key space build-chain.ts compares against.
+ * CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS. Addresses are post-correctSeed (a remap moves the
+ * address) and lowercased, matching the key space build-chain.ts compares against.
  */
 function handCuratedSeedsFor(chainId: number): Set<string> {
   const out = new Set<string>()

@@ -245,19 +245,19 @@ describe('buildChainCatalog — retain-on-flake [fix/token-search-ranking-squatt
 // ratchet: a previous-catalog row that LOSES its trusted-list listing has to leave, loudly. Before
 // this policy it could not, so one delisted micro-cap (HANU) froze every chain-1 refresh on the
 // trusted-list FATAL — a check whose job is to stop untrusted addresses ENTERING.
-describe('buildChainCatalog — CONTINUITY_DROP_ON_TRUST_LOSS [fix/catalog-continuity-drop-on-trust-loss]', () => {
-  const seedTok = (address: string, symbol: string): SeedToken =>
-    ({ address: address as `0x${string}`, symbol, name: symbol, decimals: 18 })
+const seedTok = (address: string, symbol: string): SeedToken =>
+  ({ address: address as `0x${string}`, symbol, name: symbol, decimals: 18 })
 
-  /** Clean verdicts, with per-address overrides (keys lowercase). */
-  const verdictsWith = (overrides: Record<string, Partial<Verdict>>) =>
-    async (tokens: Array<{ chainId: number; address: string; symbol: string }>): Promise<Verdict[]> =>
-      tokens.map((t) => ({
-        chainId: t.chainId, address: t.address, symbol: t.symbol,
-        inTrustedList: true, hasBytecode: true, transferable: true, onchainSymbol: t.symbol, decimals: 18,
-        ...(overrides[t.address.toLowerCase()] ?? {}),
-      }))
+/** Clean verdicts, with per-address overrides (keys lowercase). */
+const verdictsWith = (overrides: Record<string, Partial<Verdict>>) =>
+  async (tokens: Array<{ chainId: number; address: string; symbol: string }>): Promise<Verdict[]> =>
+    tokens.map((t) => ({
+      chainId: t.chainId, address: t.address, symbol: t.symbol,
+      inTrustedList: true, hasBytecode: true, transferable: true, onchainSymbol: t.symbol, decimals: 18,
+      ...(overrides[t.address.toLowerCase()] ?? {}),
+    }))
 
+describe('buildChainCatalog — CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS [fix/catalog-continuity-drop-on-trust-loss, narrowed by fix/catalog-trust-loss-means-previously-verified]', () => {
   /** Price signal strong enough that 2 sources suffice (not low-liquidity). */
   const healthy = (addr: string) =>
     new Map<string, MarketSignal>([[`1:${addr.toLowerCase()}`, { priceUsd: 1, priceConfidence: 0.99 }]])
@@ -266,22 +266,60 @@ describe('buildChainCatalog — CONTINUITY_DROP_ON_TRUST_LOSS [fix/catalog-conti
   const gateFatals = (r: { tokens: CatalogRow[]; verdicts: Verdict[] }) =>
     fatal(auditChain(1, r.tokens.map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals })), r.verdicts, AL))
 
-  it('(a) a seed that lost its listing AND its agreement is DROPPED, reported, and the gate goes GREEN', async () => {
+  it('(a) a PREVIOUSLY-VERIFIED seed that lost its listing AND its agreement is DROPPED, reported, and the gate goes GREEN', async () => {
     const log = vi.fn()
     const result = await buildChainCatalog(1, deps({
-      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')])], // 1 external vote left
+      // both previously-agreeing sources ran fine this run but stopped listing DAI — a real
+      // delisting, not a source flake (retainFlakySeeds must NOT pull this back in: both sources
+      // are in sourcesUsedThisRun, so nothing is "missing" — see the retain-on-flake describe
+      // block above for the flake-vs-real-delisting distinction this depends on).
+      fetchSources: [ok('uniswap', []), ok('coingecko', [])],
       seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      // the previous catalog row proves this address WAS independently verified before —
+      // without this, [fix/catalog-trust-loss-means-previously-verified] keeps it (see below).
+      previousCatalog: new Map([[DAI.toLowerCase(), { address: DAI as `0x${string}`, symbol: 'DAI', name: 'DAI', decimals: 18, category: 'Other', logoURI: '', verified: true, sources: ['uniswap', 'coingecko'], volume24hUsd: null, volumeSource: null, volumeFetchedAt: null }]]),
       collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
       log,
     }))
     expect(result.tokens).toHaveLength(0)
     expect(result.report.trustLost).toEqual([
-      { address: DAI, symbol: 'DAI', reason: 'not in any trusted list, 1 external vote(s) < 2 required' },
+      { address: DAI, symbol: 'DAI', reason: 'not in any trusted list, 0 external vote(s) < 2 required' },
     ])
     // it LEFT — it is not kept as an unverified seed row (the pre-policy behaviour that froze the gate)
     expect(result.report.unverifiedSeeds).toEqual([])
+    expect(result.report.retained).toEqual([]) // not mistaken for a flake
     expect(log.mock.calls.flat().some((m) => String(m).includes('removed (trust lost:'))).toBe(true)
     expect(gateFatals(result)).toEqual([])
+  })
+
+  // [fix/catalog-trust-loss-means-previously-verified] THE REGRESSION FIX: #525 dropped this case
+  // too (any `inTrustedList === false` + low votes, regardless of history) — real runs lost 153
+  // never-verified rows on chain 42161 (281 → 133) and 11 on Base this way.
+  it('(a-never-verified) a seed that was NEVER independently verified is KEPT, not dropped, when it loses its listing — no previousCatalog at all', async () => {
+    const log = vi.fn()
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')])], // 1 external vote — same as (a)
+      seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      // no previousCatalog dep at all ⇒ nothing can be proven "previously verified"
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
+      log,
+    }))
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['DAI'])
+    expect(result.tokens[0].verified).toBe(false)
+    expect(result.report.trustLost).toEqual([]) // not dropped, not reported as a trust-loss drop
+    expect(result.report.unverifiedSeeds.map((s) => s.symbol)).toEqual(['DAI']) // pre-#525 path: honest ⚠
+    expect(log.mock.calls.flat().some((m) => String(m).includes('removed (trust lost:'))).toBe(false)
+  })
+
+  it('(a-never-verified-explicit) a seed with a previousCatalog row that was ITSELF verified:false is KEPT, not dropped', async () => {
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', DAI, 'DAI')])],
+      seeds: new Map([[DAI.toLowerCase(), seedTok(DAI, 'DAI')]]),
+      previousCatalog: new Map([[DAI.toLowerCase(), { address: DAI as `0x${string}`, symbol: 'DAI', name: 'DAI', decimals: 18, category: 'Other', logoURI: '', verified: false, sources: ['curated'], volume24hUsd: null, volumeSource: null, volumeFetchedAt: null }]]),
+      collectVerdicts: verdictsWith({ [DAI.toLowerCase()]: { inTrustedList: false } }),
+    }))
+    expect(result.tokens.map((t) => t.symbol)).toEqual(['DAI'])
+    expect(result.report.trustLost).toEqual([])
   })
 
   it('(b) a NEW address (no seed) failing the trusted-list check is still FATAL — unchanged', async () => {
@@ -343,5 +381,80 @@ describe('buildChainCatalog — CONTINUITY_DROP_ON_TRUST_LOSS [fix/catalog-conti
     expect(result.report.trustLost).toEqual([])
     expect(result.tokens.map((t) => t.symbol)).toEqual(['DAI'])
     expect(gateFatals(result)).toEqual([])
+  })
+})
+
+// [fix/catalog-trust-loss-means-previously-verified] Replays the exact shape of the chain-42161
+// regression: the committed catalog (src/config/generated/token-catalog.42161.json, current
+// origin/main) carries 281 included / 128 verified — i.e. 153 continuity seeds that were NEVER
+// independently verified. PRs #527/#529 (built under #525's unnarrowed policy) dropped 281 → 133,
+// sweeping up those 153 never-verified rows alongside real trust losses. This proves the fix: 0 of
+// them are dropped.
+describe('buildChainCatalog — 42161-shape replay (281 included / 128 verified) [fix/catalog-trust-loss-means-previously-verified]', () => {
+  const VERIFIED_COUNT = 128
+  const UNVERIFIED_COUNT = 153
+  const addr = (i: number): `0x${string}` => `0x${i.toString(16).padStart(40, '0')}` as `0x${string}`
+
+  it('0 drops: 128 previously-verified rows stay verified, 153 never-verified rows are kept unverified despite losing their listing', async () => {
+    const seeds = new Map<string, SeedToken>()
+    const previousCatalog = new Map<string, CatalogRow>()
+    const verdictOverrides: Record<string, Partial<Verdict>> = {}
+    const uniswapEntries: SourceEntry[] = []
+    const coingeckoEntries: SourceEntry[] = []
+    const oneinchEntries: SourceEntry[] = []
+    const market = new Map<string, MarketSignal>()
+
+    // 128 rows that were, and remain, independently verified (3-source agreement — no market
+    // signal supplied, so lowLiqMinSources(3) applies — trusted).
+    for (let i = 0; i < VERIFIED_COUNT; i++) {
+      const a = addr(1000 + i)
+      const sym = `VER${i}`
+      seeds.set(a.toLowerCase(), seedTok(a, sym))
+      previousCatalog.set(a.toLowerCase(), {
+        address: a, symbol: sym, name: sym, decimals: 18, category: 'Other', logoURI: '',
+        verified: true, sources: ['uniswap', 'coingecko', 'oneinch'],
+        volume24hUsd: null, volumeSource: null, volumeFetchedAt: null,
+      })
+      uniswapEntries.push(entry('uniswap', a, sym))
+      coingeckoEntries.push(entry('coingecko', a, sym))
+      oneinchEntries.push(entry('oneinch', a, sym))
+      market.set(`1:${a.toLowerCase()}`, { priceUsd: 1, priceConfidence: 0.99 })
+      // inTrustedList: true by default via verdictsWith's base — no override needed
+    }
+
+    // 153 continuity rows that were NEVER independently verified (one-source bridge/continuity
+    // rows) — shown unverified in the app, never audited by the guard — and now, this run, also
+    // fail the trusted-list check (the exact regression shape).
+    for (let i = 0; i < UNVERIFIED_COUNT; i++) {
+      const a = addr(2000 + i)
+      const sym = `UNV${i}`
+      seeds.set(a.toLowerCase(), seedTok(a, sym))
+      previousCatalog.set(a.toLowerCase(), {
+        address: a, symbol: sym, name: sym, decimals: 18, category: 'Other', logoURI: '',
+        verified: false, sources: ['curated'],
+        volume24hUsd: null, volumeSource: null, volumeFetchedAt: null,
+      })
+      verdictOverrides[a.toLowerCase()] = { inTrustedList: false }
+      // deliberately NOT listed by any fetch source this run (0 external votes) — the shape
+      // that #525's unnarrowed policy misread as a fresh trust LOSS.
+    }
+
+    expect(seeds.size).toBe(VERIFIED_COUNT + UNVERIFIED_COUNT) // 281 — sanity on the replay shape
+
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [
+        ok('uniswap', uniswapEntries, market),
+        ok('coingecko', coingeckoEntries),
+        ok('oneinch', oneinchEntries),
+      ],
+      seeds,
+      previousCatalog,
+      collectVerdicts: verdictsWith(verdictOverrides),
+    }))
+
+    expect(result.report.trustLost).toEqual([]) // 0 drops
+    expect(result.tokens).toHaveLength(VERIFIED_COUNT + UNVERIFIED_COUNT) // 281 included, unchanged
+    expect(result.tokens.filter((t) => t.verified)).toHaveLength(VERIFIED_COUNT) // 128 verified, unchanged
+    expect(result.report.unverifiedSeeds).toHaveLength(UNVERIFIED_COUNT) // honest ⚠, not dropped
   })
 })
