@@ -117,3 +117,62 @@ before): both `actionlint .github/workflows/token-catalog-refresh.yml` and a ful
 (all workflows) exit **0, no findings**.
 
 ## Evidence 4 — final numbers
+
+`git diff --stat origin/main`: **7 files, +557/-42** (6 code/test files + this feedback doc).
+
+Full suite, HEAD vs a clean `origin/main` worktree (9d4ce93, same recipe as
+[[teraswap-worktree-node-modules]] — symlinked `node_modules`, measured fresh, not in the main
+repo dir):
+- `npx vitest run` — **origin/main: 4206 passed (284 files, 0 fail) → HEAD: 4217 passed (284
+  files, 0 fail)**. Delta **+11**, all in `build-chain.test.ts` (18 → 29 `it(` blocks, grep-counted
+  both sides): 2 new Commit-1 tests (existing test (a) was edited in place, not duplicated) + 1
+  42161-shape replay + 5 source-count-collapse + 3 trust-loss-volume = 11.
+- `npx tsc --noEmit` — clean on HEAD.
+- `npx eslint .` — **origin/main: 94 warnings / 0 errors → HEAD: 94 warnings / 0 errors. Delta 0.**
+- `actionlint` (all workflows) — clean, exit 0 (installed via `brew install actionlint` for this
+  check, not previously in the repo/toolchain).
+
+### Auditor note (no separate Auditor run — restores prior behaviour + adds a fail-closed breaker)
+
+**Restored** (the actual regression fix — Commit 1): a continuity seed that was NEVER
+independently verified (`previousCatalog[addr].verified` false or absent) can no longer be
+dropped for trust loss — `build-chain.ts:346` — exactly the pre-#525 behaviour (persists
+unverified, no fatal, no drop). Proven by the 42161-shape replay test
+(`build-chain.test.ts`, `0 drops` on a synthetic 128-verified/153-unverified/281-total catalog
+matching the CURRENT committed `token-catalog.42161.json` `counts` block read this session).
+
+**Stricter, new this branch** (Commit 2 — nothing here existed on origin/main): two fail-closed
+breakers, both `OutageSuspectedError`, both refuse to write a catalog or open a PR:
+- `build-chain.ts:169-174` — a source's fetched-list size <70% of its previous run
+  (`SOURCE_OUTAGE_RATIO_THRESHOLD`, `:41`) or exactly 0, compared against
+  `counts.sourceCounts` now persisted per chain (`build.ts:166` reads it off disk;
+  `build.ts:251` writes it back).
+- `build-chain.ts:389-395` — trust-loss drops beyond `max(5, 5% of seeds)`
+  (`TRUST_LOSS_DROP_ABS_FLOOR`/`TRUST_LOSS_DROP_PCT_THRESHOLD`, `:43-45`) — a backstop on
+  Commit 1's OWN policy, in case the trusted-list source itself is what's actually down.
+- `build.ts:292-296` — one `::error::` annotation line on any build failure (not just the
+  breaker), labelled to distinguish an outage trip from an ordinary build failure.
+
+**Stricter, new this branch** (Commit 3 — nothing here existed on origin/main): the scheduled
+refresh workflow now closes any open `chore/token-catalog-refresh-<chain>-*` PR before opening a
+new one for that chain (`.github/workflows/token-catalog-refresh.yml`, "Open a PR..." step) —
+prevents two same-chain refresh PRs coexisting. Branches are kept, never deleted.
+
+**Unchanged, by design:** the trusted-list check itself (`catalog-guard.ts:139-143`, untouched);
+`verdicts.ts`/`fetch-sources.ts`/`sources.ts` (untouched — the source-count breaker reads
+`entries.length` from data those files already return, no fetch semantics changed);
+`seed-baseline.json`/`trust.json` (untouched); no `trustedListExempt`/allowlist entry added
+(Do-NOT rule). `handCuratedSeeds` exemption, core-forced-throw, `inTrustedList === null`
+warn-only, and the ≥minSources-votes-still-reds-the-gate case (#525's (d)) are all byte-identical
+to `origin/main` and re-verified green by the unmodified (c)/(d)/(e)/(f) tests.
+
+**Residual, by design, unchanged from #525:** a previously-verified seed that loses its listing
+while still ≥minSources external votes still reds the gate deliberately (test (d)) — a human
+decides (allowlist entry or curated REMOVAL), not an automatic drop.
+
+### Scope note
+`types.ts` was in the read list but had to change (as flagged for the same reason in the prior
+branch's feedback): `SourceCounts` and `OutageSuspectedError` are shared types `build-chain.ts`
+and `build.ts` both need; no existing type covered them. `curated.ts` still has one stale comment
+reference to the pre-rename constant name — out of the read/edit scope for this branch (not
+listed), left untouched; grep-verified it's the only remaining hit outside this branch's files.
