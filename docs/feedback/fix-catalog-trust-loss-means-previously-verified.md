@@ -9,8 +9,8 @@ trust. Base lost 11 the same way (#526/#530).
 
 - [x] C1 trust LOSS = previously verified, now not (`build-chain.ts`) + tests (a)/(b)/42161 replay
 - [x] C2 outage circuit breaker (fail-closed) + tests
-- [ ] C3 one open catalog PR per chain (workflow)
-- [ ] Evidence 1-4
+- [x] C3 one open catalog PR per chain (workflow)
+- [ ] Evidence 4 (final numbers + Auditor note)
 
 ## Evidence 1 — policy hunk + 42161 replay
 
@@ -94,3 +94,26 @@ Full run: `npx vitest run scripts/token-catalog/lib/build-chain.test.ts` → **2
 src/lib/chains/catalog-guard.test.ts` → **130 passed (9 files)**. `npx tsc --noEmit` clean.
 `npx eslint .` (full repo) → **94 warnings / 0 errors** — same baseline CLAUDE.md records for
 origin/main (delta 0).
+
+## Evidence 3 — workflow hunk + actionlint
+
+`.github/workflows/token-catalog-refresh.yml`, "Open a PR when this chain's catalog changed" step
+(only step touched, as scoped): before `git checkout -b "$BRANCH"` / `gh pr create`, lists every
+OPEN PR whose `headRefName` starts with `chore/token-catalog-refresh-${CHAIN}-` (`gh pr list --json
+number,headRefName --jq 'select(...| startswith(...))'`) and closes each with `gh pr close ...
+--comment "Superseded by the ${TODAY} refresh for chain ${CHAIN}"` — branches are never deleted
+(repo convention). `$TODAY` is computed once and reused for both the branch name and the comment
+(previously `$(date ...)` was inlined only into `BRANCH`). All new interpolation is through
+`CHAIN`/`TODAY`/`PREFIX` shell variables set from the step's existing `env:` block (`CHAIN`) or
+computed in-script — nothing new spliced from `${{ }}` template context into the script body
+except `${{ github.repository }}` / `${{ github.token }}`, both pre-existing patterns in this same
+file (neither is attacker-controllable — static repo identity / the job's own token).
+
+Only runs when the gate passed AND this chain's catalog actually changed this run (after the
+existing early-`exit 0`) — a no-op refresh never touches unrelated open PRs for other dates.
+
+`actionlint` (installed via `brew install actionlint` for this check — not present in the repo
+before): both `actionlint .github/workflows/token-catalog-refresh.yml` and a full `actionlint`
+(all workflows) exit **0, no findings**.
+
+## Evidence 4 — final numbers
