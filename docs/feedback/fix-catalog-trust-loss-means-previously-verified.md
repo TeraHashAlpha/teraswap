@@ -10,7 +10,7 @@ trust. Base lost 11 the same way (#526/#530).
 - [x] C1 trust LOSS = previously verified, now not (`build-chain.ts`) + tests (a)/(b)/42161 replay
 - [x] C2 outage circuit breaker (fail-closed) + tests
 - [x] C3 one open catalog PR per chain (workflow)
-- [ ] Evidence 4 (final numbers + Auditor note)
+- [x] Evidence 4 (final numbers + Auditor note)
 
 ## Evidence 1 — policy hunk + 42161 replay
 
