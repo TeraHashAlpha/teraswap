@@ -297,13 +297,19 @@ async function run() {
   log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
 }
 
-run().catch((e) => {
-  const msg = String(e?.message ?? e)
-  console.error(`\nBUILD FAILED: ${msg}`)
-  // [fix/catalog-trust-loss-means-previously-verified] one ::error:: annotation line so the
-  // failure surfaces in the GitHub Actions run summary — no catalog written, no PR opened
-  // (the PR step only runs after this script exits 0). Not tied to any separate alert wiring.
-  const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : 'catalog build failed'
-  console.error(`::error::${label}: ${msg}`)
-  process.exit(1)
-})
+// [fix/catalog-seeds-include-unverified-rows] CLI guard (same pattern as
+// scripts/check-product-claims.mjs / scripts/token-catalog/lib/fetch-sources.ts) — without it,
+// build.test.ts importing `seedsFor` would trigger the real network pipeline as an import
+// side effect. Only run() when this file is the entrypoint actually invoked, never on import.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run().catch((e) => {
+    const msg = String(e?.message ?? e)
+    console.error(`\nBUILD FAILED: ${msg}`)
+    // [fix/catalog-trust-loss-means-previously-verified] one ::error:: annotation line so the
+    // failure surfaces in the GitHub Actions run summary — no catalog written, no PR opened
+    // (the PR step only runs after this script exits 0). Not tied to any separate alert wiring.
+    const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : 'catalog build failed'
+    console.error(`::error::${label}: ${msg}`)
+    process.exit(1)
+  })
+}
