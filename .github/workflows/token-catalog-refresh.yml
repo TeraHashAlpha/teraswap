@@ -158,7 +158,23 @@ jobs:
             echo "chain ${CHAIN}: catalog unchanged — nothing to do"
             exit 0
           fi
-          BRANCH="chore/token-catalog-refresh-${CHAIN}-$(date -u +%Y-%m-%d)"
+          TODAY="$(date -u +%Y-%m-%d)"
+          BRANCH="chore/token-catalog-refresh-${CHAIN}-${TODAY}"
+
+          # [fix/catalog-trust-loss-means-previously-verified] one open catalog PR per chain: a
+          # missed/failed merge otherwise leaves last week's refresh PR open while this run opens
+          # ANOTHER one, and the two can conflict or ship stale counts. Close every open PR whose
+          # head matches this chain's prefix BEFORE opening the new one — branches are kept (repo
+          # convention: never delete), only the PR is closed, with a comment naming why.
+          PREFIX="chore/token-catalog-refresh-${CHAIN}-"
+          gh pr list --repo "${{ github.repository }}" --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | .number" |
+            while IFS= read -r SUPERSEDED_NUM; do
+              echo "closing superseded PR #${SUPERSEDED_NUM} for chain ${CHAIN} (branch kept)"
+              gh pr close "$SUPERSEDED_NUM" --repo "${{ github.repository }}" \
+                --comment "Superseded by the ${TODAY} refresh for chain ${CHAIN}"
+            done
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"

@@ -19,13 +19,70 @@ import type {
   MarketSignal,
   PipelineConfig,
   SeedToken,
+  SourceCounts,
   SourceEntry,
   SourceFetchResult,
   SourceId,
+  TrustLostSeed,
 } from './types'
+import { OutageSuspectedError } from './types'
 import type { TokenIdentity } from './verdicts'
 import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, externalVoteCount, retainFlakySeeds } from './verify'
 import { deriveGuardOutcomes } from './guard-gate'
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] A source whose
+ * fetched list falls below this fraction of its PREVIOUS run's size (or hits exactly 0) looks
+ * like an outage/rate-limit, not a real change in what that source lists — fail closed rather
+ * than let a silently-empty source cascade into mass drops (see CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS
+ * above: THAT policy only narrows an already-verified row losing trust, but a source outage can
+ * still starve `votesFor` across the whole chain and manufacture a wave of apparent trust loss).
+ */
+export const SOURCE_OUTAGE_RATIO_THRESHOLD = 0.7
+/** Absolute floor on tolerated trust-loss drops in one run, regardless of chain size. */
+export const TRUST_LOSS_DROP_ABS_FLOOR = 5
+/** Trust-loss drops beyond this fraction of the chain's continuity seeds also trip the breaker. */
+export const TRUST_LOSS_DROP_PCT_THRESHOLD = 0.05
+
+/**
+ * [fix/catalog-trust-loss-means-previously-verified — regression in #525] CONTINUITY POLICY:
+ * drop on VERIFIED trust loss, never freeze, never sweep up rows that were never verified.
+ *
+ * Continuity seeding (`deps.seeds`, step 2 below) exists so a source outage can never silently
+ * drop a live catalog row. It must NOT also mean a row can never LEAVE: a continuity seed that
+ * WAS PREVIOUSLY VERIFIED (`deps.previousCatalog[addr].verified === true` — i.e. it once held
+ * >=minSources external agreement AND passed the catalog guard, which itself requires
+ * inTrustedList !== false at that time) and whose fresh verdict now says `inTrustedList ===
+ * false` AND that no longer reaches `minSources` external agreement is DROPPED here and
+ * reported in `report.trustLost` — loudly, never silently.
+ *
+ * Why (original #525 intent): the trusted-list FATAL (catalog-guard.ts:139-143) exists to stop
+ * an untrusted address ENTERING the catalog. Applied to a row that merely LOST its listing, it
+ * froze the whole chain's refresh instead (chain 1 from 2026-09-21, HANU) — the guard's purpose
+ * inverted.
+ *
+ * Why this narrower rename (regression found in PRs #527/#529, chain 42161): #525's policy read
+ * "not reaching minSources" as LOSS regardless of history, so it also dropped continuity seeds
+ * that were NEVER independently verified in the first place — one-source bridge/continuity rows
+ * that the app has always shown unverified and the guard has never audited (they never reach
+ * `assembleCatalog`'s guard-consulting path — see step 3 there). Real runs: 281 included → 133,
+ * because 153 never-verified rows got swept into the drop alongside genuine trust losses. Those
+ * rows must persist exactly as they did before #525: kept, honestly unverified, never dropped,
+ * never fatal. Only a row that WAS verified and then LOST that verification is a real trust loss.
+ *
+ * Deliberately UNCHANGED by this policy:
+ *  - a NEW address failing the trusted-list check is still fatal (no previous row ⇒ no seed);
+ *  - cores are still forced and still throw on any guard failure (verify.ts assembleCatalog);
+ *  - hand-curated seeds (`deps.handCuratedSeeds`) are never dropped — a human pinned them;
+ *  - `inTrustedList === null` (CoinGecko unreachable) stays warn-only, so an outage drops nothing;
+ *  - a seed that still has >= minSources external votes is KEPT (and, being untrusted, still
+ *    reds the gate — a human decides: allowlist entry or curated REMOVAL);
+ *  - curated REMOVALS win outright — a removed token never reaches this code as a seed;
+ *  - a never-verified seed keeps the pre-#525 path: persists unverified, no fatal, no drop —
+ *    `deps.previousCatalog` omitted (e.g. older tests, or no previous file yet) means nothing
+ *    can be proven "previously verified", so nothing in this loop is ever dropped.
+ */
+export const CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS = 'continuity-drop-on-verified-trust-loss' as const
 
 export interface ChainBuildDeps {
   fetchSources: Array<() => Promise<SourceFetchResult>>
@@ -47,8 +104,17 @@ export interface ChainBuildDeps {
    *  rows, keyed by lowercase address — lets a single-source flake be told apart from a
    *  real delisting. Omitted (e.g. in older tests) ⇒ no retention, previous behavior. */
   previousCatalog?: Map<string, CatalogRow>
+  /** [fix/catalog-continuity-drop-on-trust-loss] Lowercase addresses pinned BY HAND in this
+   *  repo (mainnet DEFAULT_TOKENS, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS) — exempt from
+   *  CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS. Omitted ⇒ every seed is a continuity seed. */
+  handCuratedSeeds?: ReadonlySet<string>
   /** ISO date stamped onto every emitted row's volumeFetchedAt. Defaults to "now". */
   builtAt?: string
+  /** [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] This chain's
+   *  per-source fetched-list sizes from the PREVIOUS committed run (catalog JSON's
+   *  `counts.sourceCounts`). Omitted ⇒ no baseline yet (first run with the breaker, or a new
+   *  source) ⇒ the breaker records this run's counts but compares nothing. */
+  previousSourceCounts?: SourceCounts
 }
 
 export interface ChainBuildResult {
@@ -57,6 +123,9 @@ export interface ChainBuildResult {
   sourcesUsed: SourceId[]
   sourceNotes: string[]
   verdicts: Verdict[]
+  /** [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] This run's
+   *  per-source fetched-list sizes — the caller persists it as next run's baseline. */
+  sourceCounts: SourceCounts
   /** `${chainId}:${addrLower}`-keyed market signals (for reporting). */
   market: Map<string, MarketSignal>
 }
@@ -67,6 +136,7 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   const sourcesUsed: SourceId[] = []
   const entries: SourceEntry[] = []
   const market = new Map<string, MarketSignal>()
+  const sourceCounts: SourceCounts = {}
 
   // 1. fetch every source — an outage is logged and skipped, NEVER fatal
   const settled = await Promise.allSettled(deps.fetchSources.map((f) => f()))
@@ -75,6 +145,7 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
       const { source, entries: fetched, market: m, note } = s.value
       sourcesUsed.push(source)
       entries.push(...fetched)
+      sourceCounts[source] = (sourceCounts[source] ?? 0) + fetched.length
       if (m) for (const [k, v] of m) market.set(k, { ...market.get(k), ...v })
       if (note) {
         sourceNotes.push(`${source}: ${note}`)
@@ -84,6 +155,22 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
       const msg = String((s.reason as Error)?.message ?? s.reason)
       sourceNotes.push(`DOWN ${msg}`)
       log(`source down (build continues): ${msg}`)
+    }
+  }
+
+  // 1b. [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] BEFORE
+  // assembling: a source whose fetched list collapsed relative to its previous run looks like an
+  // outage, not a real change — refuse to build on it rather than let a starved vote count
+  // manufacture a wave of apparent trust loss (or silently thin the catalog some other way).
+  // Compared against `sourceCounts` above (fulfilled results only — a source that rejected this
+  // run has no entry there, so it compares as 0, exactly like a source that "fulfilled" empty).
+  // No baseline for a given source (first run, or a brand-new source) ⇒ that source is skipped —
+  // record only, per spec.
+  for (const [source, prevCount] of Object.entries(deps.previousSourceCounts ?? {})) {
+    if (!prevCount || prevCount <= 0) continue // nothing meaningful to compare against
+    const now = sourceCounts[source as SourceId] ?? 0
+    if (now === 0 || now < prevCount * SOURCE_OUTAGE_RATIO_THRESHOLD) {
+      throw new OutageSuspectedError(`source outage suspected: ${source} ${prevCount}→${now}`)
     }
   }
 
@@ -226,6 +313,50 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   const verdicts = await deps.collectVerdicts(auditList)
   const guard = deriveGuardOutcomes(chainId, auditList, verdicts, allowlist)
 
+  // 6b. CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS (see the constant above) — a continuity seed that
+  // WAS PREVIOUSLY VERIFIED and lost BOTH its trusted-list membership and its external agreement
+  // leaves now, reported, instead of riding along as an untrusted row that reds the gate and
+  // freezes the chain's refresh. A seed that was NEVER verified is untouched by this block.
+  const verdictByAddr = new Map<string, Verdict>()
+  for (const v of verdicts) {
+    if (v.chainId === chainId) verdictByAddr.set(v.address.toLowerCase(), v)
+  }
+  const handCurated = deps.handCuratedSeeds ?? new Set<string>()
+  const votesFor = (addrLower: string): number => {
+    const inKept = conflictResult.kept.find((c) => c.address.toLowerCase() === addrLower)
+    const inMerged = merged.find((c) => c.address.toLowerCase() === addrLower)
+    return Math.max(
+      inKept ? externalVoteCount(inKept.sources) : 0,
+      inMerged ? externalVoteCount(inMerged.sources) : 0,
+    )
+  }
+  const trustLost: TrustLostSeed[] = []
+  const dropped = new Set<string>()
+  for (const [addrLower, seed] of seeds) {
+    if (coreAddrSet.has(addrLower)) continue // cores are forced, never dropped
+    if (handCurated.has(addrLower)) continue // a human pinned this one
+    // inTrustedList true ⇒ nothing to do; null ⇒ warn-only (CoinGecko unreachable at refresh)
+    if (verdictByAddr.get(addrLower)?.inTrustedList !== false) continue
+    const votes = votesFor(addrLower)
+    if (votes >= config.minSources) continue // still independently agreed — a human decides
+    // trust LOSS requires having HELD trust: a seed this build has never proven verified
+    // (no previous row, or the previous row itself was verified:false) keeps the pre-#525
+    // path — persists unverified, no fatal, no drop. Only a row that was ONCE verified and
+    // has now lost it is a real regression worth dropping.
+    if (!deps.previousCatalog?.get(addrLower)?.verified) continue
+    dropped.add(addrLower)
+    trustLost.push({
+      address: seed.address,
+      symbol: seed.symbol,
+      reason: `not in any trusted list, ${votes} external vote(s) < ${config.minSources} required`,
+    })
+    log(`removed (trust lost: ${trustLost[trustLost.length - 1].reason}): ${seed.symbol} ${seed.address}`)
+  }
+  const liveSeeds = dropped.size === 0 ? seeds : new Map([...seeds].filter(([k]) => !dropped.has(k)))
+  if (dropped.size > 0) {
+    conflictResult.kept = conflictResult.kept.filter((c) => !dropped.has(c.address.toLowerCase()))
+  }
+
   // 7. assemble — cores forced (throw on guard failure), seeds preserved, caps logged
   const marketByAddr = new Map<string, MarketSignal>()
   for (const [k, v] of market) {
@@ -236,7 +367,7 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     chainId,
     qualified: conflictResult.kept,
     guard,
-    seeds,
+    seeds: liveSeeds,
     cores,
     market: marketByAddr,
     config,
@@ -248,6 +379,20 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   report.conflicts.push(...conflictResult.conflicts)
   report.capped.push(...prunedCapped)
   report.retained.push(...retention.retained)
+  report.trustLost.push(...trustLost)
 
-  return { tokens, report, sourcesUsed, sourceNotes, verdicts, market }
+  // 7b. [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] AFTER
+  // assembling: even a correctly-scoped drop (step 6b, previously-verified only) can still be
+  // implausibly large if something upstream is wrong (e.g. the trusted-list source itself is the
+  // one having an outage, flipping inTrustedList to false for rows that never lost anything).
+  // Same fail-closed shape as the source-count breaker above.
+  const dropThreshold = Math.max(TRUST_LOSS_DROP_ABS_FLOOR, Math.ceil(TRUST_LOSS_DROP_PCT_THRESHOLD * seeds.size))
+  if (trustLost.length > dropThreshold) {
+    throw new OutageSuspectedError(
+      `source outage suspected: trust-loss drops ${trustLost.length} > ${dropThreshold} ` +
+        `(max(${TRUST_LOSS_DROP_ABS_FLOOR}, ${TRUST_LOSS_DROP_PCT_THRESHOLD * 100}% of ${seeds.size} seeds))`,
+    )
+  }
+
+  return { tokens, report, sourcesUsed, sourceNotes, verdicts, market, sourceCounts }
 }
