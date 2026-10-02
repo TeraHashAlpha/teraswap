@@ -14,7 +14,7 @@ import SourceToggle from './SourceToggle'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
-import { useSwap, type SwapStatus } from '@/hooks/useSwap'
+import { useSwap, type SwapStatus, type QuoteToAmountBySource } from '@/hooks/useSwap'
 import { orderExecutableFallbacks, scopeToExecutable } from '@/lib/executable-sources'
 import { useApproval } from '@/hooks/useApproval'
 import Permit2EducationModal from '@/components/Permit2EducationModal'
@@ -228,8 +228,19 @@ export default function SwapBox() {
   // rather than the engine-computed gasSavingsUsd — the server clamps it
   // (max $500) and computes the persisted gas_savings_usd from there.
   const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
+  // [Architect ruling R3-2] Every source's accepted quote, not just the best
+  // one's. useSwap floors (and fee-checks) whichever source executes against
+  // ITS OWN quote — the 9O fallback walk picks its candidates from this same
+  // `meta.all` (orderExecutableFallbacks → swap-fallback.ts:35), so a
+  // legitimately worse next-best route is no longer measured against the best
+  // quote and refused. `meta.best` is `meta.all[0]`, so the primary path reads
+  // exactly the figure the UI rendered at :485-487.
+  const quoteToAmountBySource = useMemo<QuoteToAmountBySource>(
+    () => Object.fromEntries((meta?.all ?? []).map((q) => [q.source, q.toAmount])),
+    [meta],
+  )
   const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
-    useSwap(tokenIn, tokenOut, amountIn, slippage, meta?.best.toAmount, bestNonCowGasUsd)
+    useSwap(tokenIn, tokenOut, amountIn, slippage, quoteToAmountBySource, bestNonCowGasUsd)
 
   // [SPRINT-9S S2] Direction-agnostic execution price. Derive the USD price of the NON-stable
   // side from the stable side (≈$1): tokenOut stable → price of tokenIn (out/in); tokenIn stable

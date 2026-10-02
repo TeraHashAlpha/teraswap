@@ -13,7 +13,7 @@ import { DEFAULT_SLIPPAGE, AGGREGATOR_META, COW_SETTLEMENT, COW_VAULT_RELAYER, C
 import { buildFeeCollectorSwapArgs } from '@/lib/simulation'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
-import { deriveMinimumOutput } from '@/lib/minimum-output'
+import { deriveMinimumOutput, assertSwapConsistentWithQuote, StaleOrTamperedSwapError } from '@/lib/minimum-output'
 import { isNativeETH, type Token } from '@/lib/tokens'
 import type { CowOrderParams } from '@/lib/adapters/types'
 import { logSwapToSupabase, updateSwapStatus } from '@/lib/analytics'
@@ -193,6 +193,9 @@ interface UseSwapResult {
   reset: () => void
 }
 
+/** Accepted /price quote output, keyed by the source that quoted it. */
+export type QuoteToAmountBySource = Partial<Record<AggregatorName, string>>
+
 /**
  * Hook that executes the swap via the winning aggregator.
  * For CoW Protocol, uses EIP-712 signing instead of sendTransaction.
@@ -202,8 +205,13 @@ export function useSwap(
   tokenOut: Token | null,
   amountIn: string,
   slippage: number = DEFAULT_SLIPPAGE,
-  /** Quote-phase toAmount for fee integrity validation */
-  quoteToAmount?: string,
+  /** [Architect ruling R3-2] Quote-phase toAmount PER SOURCE, from the same
+   *  ranked `meta.all` the UI showed. Both the floor
+   *  (assertSwapConsistentWithQuote) and the ceiling (validateFeeIntegrity)
+   *  are applied against the quote of the source that ACTUALLY executes —
+   *  including a 9O fallback, which is priced by its own quote rather than the
+   *  best source's, so an honest next-best route no longer dead-ends the walk. */
+  quoteToAmountBySource?: QuoteToAmountBySource,
   /** [P104 / 13A-L-02] Raw adapter gas USD on the best non-CoW quote for
    *  the same pair. The server clamps + persists this as gas_savings_usd
    *  on CoW swaps; we never trust a client-derived "savings" figure. */
@@ -451,6 +459,15 @@ export function useSwap(
       //               GROSS and only the firm quote carries the fee, so
       //               swapToAmount <= quoteToAmount always.
       // Evidence: fee-integrity-armed.test.ts.
+      // [Architect ruling R3-2] The accepted quote for THIS source. On the
+      // primary path that is meta.best.toAmount — the figure the UI rendered.
+      // On a 9O fallback it is the fallback's OWN quote from the same ranked
+      // list, which is the whole point: before this, an honest next-best source
+      // was floored against the best source's (higher) quote and a legitimate
+      // -2% fallback dead-ended the walk. Absent → refused by the floor below
+      // (fail-closed); unreachable by construction, since the fallback list is
+      // built FROM meta.all (swap-fallback.ts:35).
+      const quoteToAmount = quoteToAmountBySource?.[source]
       const usesPartnerFee = FEE_NATIVE_SOURCES.includes(source)
       if (quoteToAmount && usesPartnerFee) {
         const feeCheck = validateFeeIntegrity(quoteToAmount, swapData.toAmount, source)
@@ -484,6 +501,52 @@ export function useSwap(
       // try's catch → normal error + 9O fallback walk to the next source)
       // instead of the old 10-L-01 fallback to minimumOutput = 0n, which
       // silently disabled the on-chain InsufficientOutput check.
+      // [fix/swap-toamount-lower-bound-vs-quote / Architect ruling on #524
+      // Auditor H-01] Floor counterpart to the M-01 ceiling check above:
+      // deriveMinimumOutput derives the on-chain floor from THIS SAME
+      // swapData.toAmount, so a tampered or degraded /swap response with a
+      // tiny toAmount would otherwise produce a tiny floor unopposed for
+      // every source (M-01 above only fires for FEE_NATIVE_SOURCES and only
+      // catches an implausibly HIGH output). Runs for every source not on
+      // assertSwapConsistentWithQuote's own skip list, independent of
+      // routeViaFeeCollector — a stale/tampered response is a risk to the
+      // user's fill regardless of which contract enforces the floor.
+      //
+      // [Auditor H-01] FAIL-CLOSED, and reached on every real swap. Two
+      // things were wrong with the first cut:
+      //   1. `quoteToAmount` never arrived. This callback is memoized and its
+      //      dep array omitted it (the `:726` react-hooks/exhaustive-deps
+      //      warning named it), so the closure froze whatever the value was
+      //      when the callback was last rebuilt — on the normal path that is
+      //      BEFORE the /price quote resolves (the callback rebuilds on
+      //      token/amount/slippage change; a resolving quote rebuilds
+      //      nothing), i.e. `undefined`, or worse the PREVIOUS amount's
+      //      quote. `quoteToAmount` is now in that dep array, so the value
+      //      read here is the one the render that handled the click was
+      //      showing — exactly the output the user accepted
+      //      (SwapBox.tsx:485-487 renders it; :232 passes it in).
+      //   2. Missing meant warn-and-proceed, so the guard could not fire.
+      //      There is no legitimate quote-less flow into this function:
+      //      SwapBox reaches it only via handleApproveAndSwap /
+      //      handleSwap, both gated on `meta?.best.source`
+      //      (SwapBox.tsx:637, :664), and `meta.best.toAmount` is the very
+      //      field the UI renders as the expected output. A missing quote
+      //      here is therefore a wiring failure or tampering — the helper
+      //      refuses it (StaleOrTamperedSwapError, "no accepted quote to
+      //      compare against"). No warn path survives.
+      // [Architect ruling R3-3] routeViaFeeCollector nets FEE_BPS out of the
+      // basis: the FeeCollector takes the fee off the INPUT (apiAmountBn
+      // above), so a fee-routed swap's output is ~10 bps under the gross
+      // quote by construction. Netting it here keeps the full 50 bps of
+      // SWAP_QUOTE_TOLERANCE_BPS available for quote age and real drift.
+      assertSwapConsistentWithQuote({
+        quoteToAmount,
+        swapToAmount: swapData.toAmount,
+        slippagePercent: slippage,
+        source,
+        routeViaFeeCollector,
+      })
+
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
       const minimumOutput = routeViaFeeCollector
         ? deriveMinimumOutput(swapData.toAmount, slippage)
@@ -664,9 +727,17 @@ export function useSwap(
       // can't execute — must not dead-end the user. Walk to the next-best source
       // that simulates OK. Deliberate price-guard blocks and user-actionable
       // errors (approval needed) stop instead of silently switching.
+      //
+      // [fix/swap-toamount-lower-bound-vs-quote] A StaleOrTamperedSwapError
+      // gets the SAME treatment as PriceGuardError: never silently walk to
+      // the next source. The whole point of the check is that this /swap
+      // response can't be trusted — auto-retrying would just repeat the
+      // fetch that already produced it, and the user should see WHY before
+      // anything is retried (copy: "please review and try again").
       if (
         fallbacks.length > 0 &&
         !(err instanceof PriceGuardError) &&
+        !(err instanceof StaleOrTamperedSwapError) &&
         shouldFallbackToNextSource(err)
       ) {
         const [next, ...rest] = fallbacks
@@ -693,7 +764,15 @@ export function useSwap(
         metadata: err instanceof PriceGuardError ? { deviation: err.deviation } : undefined,
       })
     }
-  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction])
+    // [Auditor H-01] The quote map MUST be here: without it this memoized
+    // callback kept the value from the render before the quote resolved, so
+    // the accepted quote never reached assertSwapConsistentWithQuote (nor
+    // validateFeeIntegrity above) on the normal path. `chainId` was missing
+    // from the same array and is read throughout this callback
+    // (isExecutableSource / usesFeeCollector / getChainConfig /
+    // validateRouterAddress / buildSimulationTx), so a swap started after a
+    // chain switch could have been built against the previous chain's config.
+  }, [tokenIn, tokenOut, address, amountIn, slippage, sendTransaction, quoteToAmountBySource, chainId])
   // [SPRINT-9O Part B] Keep the ref pointed at the latest closure for the fallback recursion.
   executeStandardSwapRef.current = executeStandardSwap
 
