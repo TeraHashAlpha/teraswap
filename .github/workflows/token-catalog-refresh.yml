@@ -166,6 +166,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CHAIN: ${{ matrix.chain }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # Piped through an env var, never spliced into the script text: the summary embeds
           # token symbols sourced from external token lists (attacker-choosable strings) — a
           # symbol like `"; curl evil #` interpolated via ${{ }} would run as shell code.
@@ -229,9 +230,16 @@ jobs:
               expectedHeadOid: $oid
             }' > "$PAYLOAD_FILE"
           gh api graphql -f query="$QUERY" -F input=@"$PAYLOAD_FILE"
+          # [chore/catalog-workflow-verified-commits-and-alerts] One line, sourced from the same
+          # env-provided DIFF_SUMMARY/RUN_URL as above (never spliced from ${{ }} into the script
+          # text) — states the gate result explicitly instead of leaving a reviewer to infer PASS
+          # from "a PR exists" (this step only runs on steps.gate.outcome == 'success').
+          COUNTS_LINE="$(printf '%s\n' "$DIFF_SUMMARY" | head -n1)"
           BODY_FILE=$(mktemp)
           {
             echo "Automated \`npm run tokens:sync\` refresh for chain **${CHAIN}** (cross-verified multi-source catalog + guard trust fixture). Gated by catalog-address-guard + catalog JSON invariants before this PR was opened. See docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md."
+            echo ""
+            echo "Guard: PASS (catalog-address-guard + no-network gates) — run ${RUN_URL} — ${COUNTS_LINE}"
             echo ""
             echo "### Counts"
             echo '```'
