@@ -159,20 +159,25 @@ jobs:
             exit 0
           fi
           TODAY="$(date -u +%Y-%m-%d)"
-          BRANCH="chore/token-catalog-refresh-${CHAIN}-${TODAY}"
+          # [chore/catalog-workflow-verified-commits-and-alerts] run-id suffix: two runs on the
+          # same UTC day for the same chain (a retry, or workflow_dispatch next to the cron) must
+          # never collide on the same branch name — a fresh unique name needs no force-push.
+          BRANCH="chore/token-catalog-refresh-${CHAIN}-${TODAY}-${{ github.run_id }}"
 
           # [fix/catalog-trust-loss-means-previously-verified] one open catalog PR per chain: a
           # missed/failed merge otherwise leaves last week's refresh PR open while this run opens
           # ANOTHER one, and the two can conflict or ship stale counts. Close every open PR whose
-          # head matches this chain's prefix BEFORE opening the new one — branches are kept (repo
-          # convention: never delete), only the PR is closed, with a comment naming why.
+          # head matches this chain's prefix BEFORE opening the new one, and delete its branch too
+          # — these are regenerable bot branches carrying no human work, now recreated fresh every
+          # run under a new run-id-suffixed name, so nothing is lost by removing the old one.
           PREFIX="chore/token-catalog-refresh-${CHAIN}-"
           gh pr list --repo "${{ github.repository }}" --state open --json number,headRefName \
-            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | .number" |
-            while IFS= read -r SUPERSEDED_NUM; do
-              echo "closing superseded PR #${SUPERSEDED_NUM} for chain ${CHAIN} (branch kept)"
+            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | [.number, .headRefName] | @tsv" |
+            while IFS=$'\t' read -r SUPERSEDED_NUM SUPERSEDED_BRANCH; do
+              echo "closing superseded PR #${SUPERSEDED_NUM} for chain ${CHAIN} (deleting branch ${SUPERSEDED_BRANCH})"
               gh pr close "$SUPERSEDED_NUM" --repo "${{ github.repository }}" \
                 --comment "Superseded by the ${TODAY} refresh for chain ${CHAIN}"
+              git push origin --delete "$SUPERSEDED_BRANCH" || true
             done
 
           git config user.name "github-actions[bot]"
