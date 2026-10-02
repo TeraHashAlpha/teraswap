@@ -55,27 +55,76 @@ layer up). `SeedToken` (`types.ts`) needed no new field — nothing downstream r
   `inTrustedList:true`, this run's only external vote is `coingecko` (1 < minSources 2) → 0
   drops, 153 `unverifiedSeeds`, 281 included, 128 verified, gate green (`gateFatals([])`).
 - NEW **"a previously-unverified seed that regains >=2 votes this run is promoted to
-  verified:true"** — one of the 153-shaped rows, this run gets `coingecko`+`oneinch` back →
-  `tokens.find(...).verified === true`, `sources` includes both, no longer in `unverifiedSeeds`.
+  verified:true"** — a 153-shaped row, this run gets `uniswap`+`coingecko` back →
+  `tokens[0].verified === true`, `sources === ['curated','uniswap','coingecko']` ('curated' is
+  the seed's own provenance, not a vote — rides along at top source-priority), no longer in
+  `unverifiedSeeds`.
 - (b)-equivalent — "previously-verified + inTrustedList:false + lost agreement → dropped,
   reported" — already covered by the pre-existing `(a)` test at `build-chain.test.ts:275-299`;
   not duplicated.
 
-NEW `scripts/token-catalog/build.test.ts` (none existed for `build.ts` before):
+NEW `scripts/token-catalog/build.test.ts` (none existed for `build.ts` before). Required
+CLI-guarding `build.ts`'s `run().catch(...)` behind `import.meta.url === process.argv[1]` (same
+pattern as `scripts/check-product-claims.mjs`) — otherwise importing `seedsFor` for a unit test
+would trigger the real network pipeline as an import side effect, which the goal's Do-NOT
+(no live `tokens:sync`) rules out:
 - **"seedsFor admits every row in the generated catalog, verified or not"** — mocks
   `@/lib/chains/token-catalog.generated` with a synthetic chain id (no overlap with real
   `DEFAULT_TOKENS`/`CURATED_*_SEEDS`) holding one `verified:true` and one `verified:false` row;
   asserts `seedsFor(chainId).size === 2` and both addresses present.
-- **Mutation check**: manually re-introduced `if (!t.verified) continue` and reran both the new
-  `seedsFor` test and the new inTrustedList:true 42161-replay test — both failed as expected
-  (seedsFor test: size 1 not 2; replay test: 153 rows missing from `result.tokens` instead of 0
-  drops). Reverted before committing.
+- **"an unknown chain id yields no seeds"** — sanity on the `?? []` fallback.
 
-Full counts: see `git diff --stat` and suite run below (Evidence 3).
+**Mutation check** (manually re-introduced `if (!t.verified) continue`, reran the full
+build.test.ts + build-chain.test.ts suite, then reverted): only the new **seedsFor** test failed
+(`seeds.size` 1 not 2), exactly as expected — it is the only test that exercises `seedsFor()`
+itself. The pre-existing AND new `build-chain.test.ts` replay tests construct the `seeds`/
+`previousCatalog` maps BY HAND and never call `seedsFor()`, so they stayed green under the
+mutation — this is precisely why the 42161-shape-replay test already in the suite (added by
+`fix/catalog-trust-loss-means-previously-verified`) did not catch the real bug: it proved
+`buildChainCatalog` behaves correctly GIVEN the right seeds, but nothing proved `seedsFor()`
+ever produced them. 33/33 tests pass with the actual fix in place.
 
 ## Evidence 3 — diff stat, full suite, lint, Auditor note
 
-(filled in after Commit 2/3 — see bottom of this file)
+`git diff --stat origin/main` (final, after Commits 1–3):
+```
+ .../feedback/fix-catalog-seeds-include-unverified-rows.md | 141 +++++++++++++++
+ scripts/token-catalog/build.test.ts                       |  61 +++++++
+ scripts/token-catalog/build.ts                            |  49 +++---
+ scripts/token-catalog/lib/build-chain.test.ts              |  93 ++++++++++
+ scripts/token-catalog/lib/category.ts                      |   3 +
+ 5 files changed, 331 insertions(+), 16 deletions(-)
+```
+
+Full suite (`npx vitest run`, whole repo, in this dedicated worktree): **285 test files, 4309
+tests, 0 failures** (includes the catalog-pipeline slice: 9 files / 118 tests, up from
+`origin/main`'s 8 files / 114 tests — +1 new file (`build.test.ts`, 2 tests) and +2 new tests in
+`build-chain.test.ts`, 29→31, verified by grepping `it(` on both revisions).
+`npx tsc --noEmit`: clean, 0 errors. `npx eslint . --max-warnings 94`: **94 problems (0 errors,
+94 warnings), exit 0** — exactly the repo's existing warning baseline, 0 new warnings introduced
+by this branch's 3 files (one `export` keyword, one CLI-entrypoint guard, two comments).
+
+**Auditor note** (no separate Auditor on this branch — restores documented behaviour,
+tightening-neutral; recorded here per the goal):
+- **Restored**: pre-#517 persistence of unverified continuity seeds across MULTIPLE refresh
+  cycles, not just one. `seedsFor()` (`build.ts:~109`) no longer filters `GENERATED_TOKEN_CATALOG`
+  rows by `verified` before admitting them as seeds — every committed row is a seed again,
+  matching the ORIGINAL (pre-"post-baseline additions persist only while verified") contract that
+  `CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS` (`build-chain.ts:85`) was written to police.
+- **Stays strict, unchanged**: a previously-verified row that genuinely loses trust (`inTrustedList
+  === false` AND `votes < minSources` AND `previousCatalog.verified === true`) is still DROPPED
+  and reported (`build-chain.ts:335-355`, `trustLost`/log) — this branch touches none of that
+  logic. A brand-new address with no previous row is still FATAL on a failed trusted-list check
+  (no seed ⇒ never reaches the continuity path). Cores are still forced
+  (`CoreTokenValidationError`) and hand-curated seeds are still exempt — untouched.
+- **New in this fix, not previously true**: a seed can now be PROMOTED back to `verified:true`
+  on a LATER run after a demotion (it couldn't before, because it was never re-admitted as a
+  seed at all past the first demotion) — see the new promotion test.
+- Out of scope, flagged for the Architect: 1inch's Arbitrum list contraction (≥201→129, −35%
+  between the 2026-09-12 activation build and PR #538/run #17) — the mechanism that demoted the
+  153 rows in the first place. No `sourceCounts` baseline existed for chain 42161 before PR #517
+  (the field postdates the activation build), so `SOURCE_OUTAGE_RATIO_THRESHOLD` never got a
+  chance to fire on it.
 
 ## Commit 3 — categorizer note
 
