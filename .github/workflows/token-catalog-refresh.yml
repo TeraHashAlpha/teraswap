@@ -154,7 +154,8 @@ jobs:
           DIFF_SUMMARY: ${{ steps.diff.outputs.summary }}
         run: |
           FILE="src/config/generated/token-catalog.${CHAIN}.json"
-          if git diff --quiet -- "$FILE" src/lib/chains/catalog-guard.trust.json; then
+          TRUST_FILE="src/lib/chains/catalog-guard.trust.json"
+          if git diff --quiet -- "$FILE" "$TRUST_FILE"; then
             echo "chain ${CHAIN}: catalog unchanged — nothing to do"
             exit 0
           fi
@@ -180,12 +181,36 @@ jobs:
               git push origin --delete "$SUPERSEDED_BRANCH" || true
             done
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add "$FILE" src/lib/chains/catalog-guard.trust.json
-          git commit -m "chore(catalog): scheduled tokens:sync refresh — chain ${CHAIN}"
-          git push origin "$BRANCH"
+          # [chore/catalog-workflow-verified-commits-and-alerts] Verified commit, no signing key:
+          # main requires every commit to carry a verified signature, but this job's GITHUB_TOKEN
+          # holds no signing key, so a plain `git commit` here can never be Verified — every prior
+          # catalog PR (#505/#516/#517) was blocked on main and had to be rebase-resigned by hand.
+          # GitHub's own GraphQL `createCommitOnBranch` authors + signs the commit itself, using
+          # only the existing GITHUB_TOKEN. The branch is created first, at the CURRENT main tip
+          # (no new commit yet — `git rev-parse HEAD` is still the checkout's base commit; the
+          # earlier tokens:sync step only modified the working tree, nothing has been committed),
+          # then that one call both creates the commit and advances the branch to it.
+          EXPECTED_HEAD_OID="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+
+          QUERY='mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }'
+          PAYLOAD_FILE=$(mktemp)
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "$BRANCH" \
+            --arg headline "chore(catalog): scheduled tokens:sync refresh — chain ${CHAIN}" \
+            --arg oid "$EXPECTED_HEAD_OID" \
+            --arg path1 "$FILE" \
+            --arg contents1 "$(base64 -w0 "$FILE")" \
+            --arg path2 "$TRUST_FILE" \
+            --arg contents2 "$(base64 -w0 "$TRUST_FILE")" \
+            '{
+              branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+              message: { headline: $headline },
+              fileChanges: { additions: [ { path: $path1, contents: $contents1 }, { path: $path2, contents: $contents2 } ] },
+              expectedHeadOid: $oid
+            }' > "$PAYLOAD_FILE"
+          gh api graphql -f query="$QUERY" -F input=@"$PAYLOAD_FILE"
           BODY_FILE=$(mktemp)
           {
             echo "Automated \`npm run tokens:sync\` refresh for chain **${CHAIN}** (cross-verified multi-source catalog + guard trust fixture). Gated by catalog-address-guard + catalog JSON invariants before this PR was opened. See docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md."
