@@ -212,6 +212,7 @@ jobs:
           EXPECTED_HEAD_OID="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/${BRANCH}"
 
+          # shellcheck disable=SC2016 # literal GraphQL variable syntax, not a shell expansion
           QUERY='mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }'
           PAYLOAD_FILE=$(mktemp)
           jq -n \
@@ -231,9 +232,9 @@ jobs:
             }' > "$PAYLOAD_FILE"
           gh api graphql -f query="$QUERY" -F input=@"$PAYLOAD_FILE"
           # [chore/catalog-workflow-verified-commits-and-alerts] One line, sourced from the same
-          # env-provided DIFF_SUMMARY/RUN_URL as above (never spliced from ${{ }} into the script
-          # text) — states the gate result explicitly instead of leaving a reviewer to infer PASS
-          # from "a PR exists" (this step only runs on steps.gate.outcome == 'success').
+          # env-provided DIFF_SUMMARY/RUN_URL as above, not re-templated from the job context —
+          # states the gate result explicitly instead of leaving a reviewer to infer PASS from
+          # "a PR exists" (this step only runs on steps.gate.outcome == 'success').
           COUNTS_LINE="$(printf '%s\n' "$DIFF_SUMMARY" | head -n1)"
           BODY_FILE=$(mktemp)
           {
