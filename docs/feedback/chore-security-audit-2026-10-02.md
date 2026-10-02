@@ -3,7 +3,7 @@
 ## Task checklist
 
 - [x] Commit 1 — triage table (no changes)
-- [ ] Commit 2 — fixes (overrides/dependency bumps + lockfile)
+- [x] Commit 2 — fixes (overrides/dependency bumps + lockfile)
 - [ ] Commit 3 — verification (audit, audit-gate, suite, tsc, build, keeper suite, `npm ls`)
 
 ## Commit 1 — triage table
@@ -39,3 +39,39 @@ pin above does not clear — left alone since moderates don't block the gate and
 needed high/critical fix wasn't asked for.
 
 Supersedes Dependabot PR #509 (next) for the GHSA-vcvr-r3jv-pc5j fix; other open Dependabot PRs untouched.
+
+## Commit 2 — fixes
+
+All four packages took path (a): raise the existing `overrides` pin, or (for `next`, a direct dependency)
+bump the version directly — then `npm install --package-lock-only` + `npm ci`. No new `overrides` keys
+added, no existing ones removed, no semver ranges widened — only the four exact pins/version changed.
+
+```diff
+ @@ dependencies @@
+-    "next": "16.3.3",
++    "next": "16.3.6",
+
+ @@ overrides @@
+     "minimatch@10.2.5": {
+-      "brace-expansion": "5.0.9"
++      "brace-expansion": "5.0.11"
+     },
+     "minimatch@3.1.5": {
+-      "brace-expansion": "1.1.18"
++      "brace-expansion": "1.1.20"
+     },
+     "js-yaml": "^5.2.1",
+-    "axios": "1.18.1",
++    "axios": "1.20.0",
+     ...
+-    "undici": "7.29.0",
++    "undici": "7.29.1",
+```
+
+`audit-allowlist.json` untouched (still `"allow": []`) — no entry needed since every patch had already
+aged past `min-release-age=7` (see Commit 1 table).
+
+`npm install --package-lock-only` resolved cleanly (108 lockfile lines changed — the 4 bumped packages +
+their lockfile-internal metadata, no unrelated dependency drift). `npm ci` then installed 1020 packages
+matching the new lockfile with no errors (only pre-existing deprecation warnings for `uuid@7.0.3` and
+pinned `@walletconnect/*` packages, unrelated to this change).
