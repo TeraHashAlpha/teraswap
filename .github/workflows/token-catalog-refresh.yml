@@ -77,6 +77,7 @@ jobs:
       - run: npm ci
 
       - name: Rebuild token catalog (chain ${{ matrix.chain }})
+        id: build
         # The GUARD_RPC_* secrets are OPTIONAL overrides. They are exported only when
         # non-empty: an undefined secret expands to "" and would otherwise DEFINE the env
         # var as empty — verdicts.ts uses `??`, which does not replace "", so the publicnode
@@ -109,27 +110,44 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Loud failure alert — never a silent skip (chain ${{ matrix.chain }})
-        if: failure() && steps.gate.outcome == 'failure'
+        # [chore/catalog-workflow-verified-commits-and-alerts] was `failure() &&
+        # steps.gate.outcome == 'failure'` — if the REBUILD step throws (the most likely
+        # failure), `gate` never runs, so its outcome is 'skipped', not 'failure', and no issue
+        # ever opened. `failure()` alone catches a failed build, gate, or diff step.
+        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          DIFF_OUTCOME: ${{ steps.diff.outcome }}
         run: |
           # First offending line from the guard's own output — [fatal] rows name the guard
           # check + address directly; an AssertionError (e.g. the mainnet size guard) is the
           # next best signal. Falls back to a generic marker so the alert is NEVER empty.
-          FIRST_ISSUE=$(grep -m1 -E '^\s*\[fatal\]' gate-output.log || grep -m1 'AssertionError' gate-output.log || echo 'see attached gate log for detail')
-          TITLE="[token-catalog-guard] chain ${{ matrix.chain }} is failing the gate"
+          # gate-output.log may not exist at all (build failed before the gate ran) — grep's
+          # own nonzero exit on a missing file still falls through the || chain.
+          FIRST_ISSUE=$(grep -m1 -E '^\s*\[fatal\]' gate-output.log 2>/dev/null || grep -m1 'AssertionError' gate-output.log 2>/dev/null || echo 'see attached gate log for detail')
+          FAILED_STEP="unknown step"
+          if [ "$BUILD_OUTCOME" = "failure" ]; then
+            FAILED_STEP="build (Rebuild token catalog)"
+          elif [ "$GATE_OUTCOME" = "failure" ]; then
+            FAILED_STEP="gate (no-network guard tests)"
+          elif [ "$DIFF_OUTCOME" = "failure" ]; then
+            FAILED_STEP="diff (report-diff.ts)"
+          fi
+          TITLE="[token-catalog-guard] chain ${{ matrix.chain }} refresh failed"
           BODY_FILE=$(mktemp)
           {
-            echo "The token-catalog-refresh cron's gate failed for **chain ${{ matrix.chain }}** on \`$(date -u +%Y-%m-%d)\`."
+            echo "The token-catalog-refresh cron FAILED for **chain ${{ matrix.chain }}** on \`$(date -u +%Y-%m-%d)\` — failed step: **${FAILED_STEP}**."
             echo ""
             echo "First offending finding:"
             echo '```'
             echo "$FIRST_ISSUE"
             echo '```'
             echo ""
-            echo "Full gate output (last 200 lines):"
+            echo "Full gate output (last 200 lines, if the gate step ran):"
             echo '```'
-            tail -n 200 gate-output.log
+            tail -n 200 gate-output.log 2>/dev/null || echo '(gate step did not run — the build step failed first)'
             echo '```'
             echo ""
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -141,7 +159,7 @@ jobs:
           else
             gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file "$BODY_FILE"
           fi
-          echo "::error::token-catalog-refresh gate FAILED for chain ${{ matrix.chain }}: $FIRST_ISSUE"
+          echo "::error::token-catalog-refresh FAILED for chain ${{ matrix.chain }} at step ${FAILED_STEP}: $FIRST_ISSUE"
 
       - name: Open a PR when this chain's catalog changed
         if: steps.gate.outcome == 'success'
