@@ -57,3 +57,5 @@ Lint (`eslint . --max-warnings 94`): 0 errors, 94 warnings (= cap). No lintable 
 - Full `npm audit` lists 7 high rows (braces, chokidar, micromatch, tailwindcss, fast-glob, eslint-config-next, @next/eslint-plugin-next). The gate counts **1 unique advisory**: all others propagate the same GHSA.
 - `npm audit`'s suggested fixes are not viable: `tailwindcss@4.3.3` (major) and `eslint-config-next@15.5.27` (downgrade). Not applied.
 - Policy tension: `audit-allowlist.json` `$comment` and the gate header say allowlist entries are only for *published* fixes held back by `min-release-age`. This advisory has **no** fix, so it falls outside that wording. Proceeding per the goal's explicit dated-justification exception.
+
+Follow-up: remove this entry when braces > 3.0.3 is published and >= 7 days old
