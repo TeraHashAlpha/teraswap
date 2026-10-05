@@ -16,5 +16,15 @@
     "`npm ci`/`npm install` install them cleanly while .npmrc keeps min-release-age=7 for all",
     "other (future) dependency resolution."
   ],
-  "allow": []
+  "allow": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "vulnerableRange": "<=3.0.3",
+      "fixedIn": "none",
+      "added": "2026-10-05",
+      "expires": "2026-11-05",
+      "reason": "No patched release exists (latest 3.0.3, 2024-05-21). Reachability: dev-only (tailwindcss devDependency -> chokidar/micromatch -> braces; lockfile \"dev\": true; absent from npm audit --omit=dev). Expansion inputs are build-time literals (tailwind.config.ts content glob), never user-controlled. Re-check for a patched release before expiry; pin via overrides the moment one is >= 7 days old."
+    }
+  ]
 }

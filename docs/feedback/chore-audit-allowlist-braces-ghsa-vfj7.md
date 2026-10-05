@@ -7,7 +7,7 @@ Goal: allowlist GHSA-vfj7-8cjw-p6xm (`braces` <=3.0.3, no patched release) so `C
 - [x] (b) production audit reachability
 - [x] (c) registry proof of no patched release
 - [x] (d) call-site grep + attacker-controllability
-- [ ] Commit 2: allowlist entry + gate PASS line
+- [x] Commit 2: allowlist entry + gate PASS line
 - [ ] Commit 3: follow-up marker
 - [ ] Push branch, report compare link
 
@@ -38,6 +38,20 @@ No version above 3.0.3 exists → `overrides` pin is impossible.
 `grep -rnE "micromatch|braces|fast-glob|chokidar" src scripts contracts/order-engine`: **no code imports or calls these packages.** Hits are prose only ("belt and braces") plus an error string (`scripts/verify-arbitrum-chainlink-feeds.mjs:108`). `contracts/order-engine/package-lock.json` has chokidar@4 and no braces entry.
 Only brace-expansion input in the chain: `tailwind.config.ts` `content: ['./src/**/*.{js,ts,jsx,tsx,mdx}']` — a fixed build-time literal, not attacker-controlled.
 **Verdict: no runtime attacker-controlled pattern.**
+
+## Commit 2 — allowlist entry
+
+Gate schema (`scripts/audit-gate.mjs`): matches on `id` (GHSA) only; reads `package`, `fixedIn`, `ageInOn`. **No `expires` enforcement** — the gate ignores `added`/`expires`; expiry is enforced by review only. Gate not changed.
+- `fixedIn: "none"` (no fix exists). `ageInOn` omitted so the STALE nudge cannot fire against a non-existent fix.
+- Cosmetic: the ALLOWLISTED line prints `ages in undefined` because `ageInOn` is absent.
+
+Gate output:
+```
+audit-gate: 1 high/critical advisory present, 1 allowlisted, 0 blocking.
+  ALLOWLISTED  HIGH     braces (GHSA-vfj7-8cjw-p6xm) — fix none, ages in undefined
+audit-gate PASSED — no un-allowlisted high/critical advisories.
+```
+Lint (`eslint . --max-warnings 94`): 0 errors, 94 warnings (= cap). No lintable file changed → delta 0.
 
 ## Observations for Architect (not acted on)
 - Full `npm audit` lists 7 high rows (braces, chokidar, micromatch, tailwindcss, fast-glob, eslint-config-next, @next/eslint-plugin-next). The gate counts **1 unique advisory**: all others propagate the same GHSA.
