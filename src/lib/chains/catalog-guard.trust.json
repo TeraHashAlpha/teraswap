@@ -11932,7 +11932,7 @@
    "symbol": "AAPLx",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "AAPLx",
    "decimals": 18
   },
@@ -11973,7 +11973,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ABNBx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -11983,7 +11983,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ABTx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -11993,7 +11993,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ACNx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -12013,7 +12013,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ADIx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -12022,7 +12022,7 @@
    "symbol": "ADMx",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": true,
+   "transferable": null,
    "onchainSymbol": "ADMx",
    "decimals": 18
   },
@@ -12033,7 +12033,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ADPx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -12043,7 +12043,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "ADSKx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -12053,7 +12053,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "AEEx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -12063,7 +12063,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": "AEPx",
+   "onchainSymbol": null,
    "decimals": 18
   },
   {
@@ -12162,7 +12162,7 @@
    "symbol": "ALLYx",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "ALLYx",
    "decimals": 18
   },
@@ -13163,7 +13163,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "COPx",
    "decimals": 18
   },
   {
@@ -13182,7 +13182,7 @@
    "symbol": "COW",
    "inTrustedList": true,
    "hasBytecode": true,
-   "transferable": null,
+   "transferable": true,
    "onchainSymbol": "COW",
    "decimals": 18
   },
@@ -14203,7 +14203,7 @@
    "inTrustedList": true,
    "hasBytecode": true,
    "transferable": true,
-   "onchainSymbol": null,
+   "onchainSymbol": "SUSHI",
    "decimals": 18
   },
   {
