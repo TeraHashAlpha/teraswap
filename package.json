@@ -34,11 +34,11 @@
     "test:e2e:mobile": "playwright test --config playwright.mobile.config.ts"
   },
   "dependencies": {
-    "@capacitor/android": "8.3.4",
+    "@capacitor/android": "8.5.2",
     "@capacitor/browser": "8.0.4",
-    "@capacitor/cli": "8.5.0",
-    "@capacitor/core": "8.4.2",
-    "@capacitor/ios": "8.4.1",
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
     "@capacitor/splash-screen": "8.0.1",
     "@capacitor/status-bar": "8.0.3",
     "@rainbow-me/rainbowkit": "2.2.10",
@@ -105,7 +105,7 @@
     "socket.io-parser": "4.2.7",
     "form-data": "4.0.6",
     "vite": "8.0.16",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "browserslist": "4.28.7"
   }
 }
