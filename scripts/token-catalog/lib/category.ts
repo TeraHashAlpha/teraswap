@@ -18,6 +18,9 @@ function heuristic(symbol: string): string {
   if (symbol === 'ETH' || symbol === 'WETH') return 'Native'
   if (STABLES.has(symbol)) return 'Stablecoin'
   if (LIQUID_STAKING.has(symbol)) return 'Liquid Staking'
+  // TODO: 0xBitcoin (Arbitrum 0x7cb16cb78ea464ad35c8a50abf95dff3c9e09d5d, symbol 0xBTC) is a
+  // distinct legitimate PoW token, not a wrapped-BTC bridge asset — this keyword match
+  // mis-buckets it. Separate triage; not fixed here (see fix/catalog-seeds-include-unverified-rows).
   if (symbol.toUpperCase().includes('BTC')) return 'Wrapped BTC'
   return 'Other'
 }
