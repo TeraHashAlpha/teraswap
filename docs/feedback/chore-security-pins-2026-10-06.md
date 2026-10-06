@@ -4,7 +4,7 @@ Unblock `CI / audit` + `Security Audit / audit` (3 advisories since 2026-10-06).
 
 ## Checklist
 - [x] C1 evidence (this file)
-- [ ] C2 Capacitor (A) lockstep bump
+- [x] C2 Capacitor (A) lockstep bump — core/android/ios/cli 8.4.2/8.3.4/8.4.1/8.5.0 → 8.5.2
 - [ ] C3 sharp (B) + source-map-js (C)
 - [ ] Verify: audit-gate, build, lint, vitest, diff --stat
 
@@ -30,3 +30,10 @@ ages in 2026-10-07T14:08Z under min-release-age=7.
 
 No other new high/critical: `npm audit` also lists tailwindcss/eslint-config-next/chokidar/micromatch/fast-glob,
 all `via` the already-allowlisted braces GHSA-vfj7-8cjw-p6xm.
+
+## 2. Resulting versions (`npm ls`, branch)
+- A: `@capacitor/android@8.5.2`, `@capacitor/ios@8.5.2`, `@capacitor/core@8.5.2`, `@capacitor/cli@8.5.2`
+  (android/ios 8.5.2 peer `@capacitor/core ^8.5.0` → core must move too); plugins dedupe to core 8.5.2.
+  `npm ls` exit 0, no invalid/ERESOLVE. Lockfile `--all` invalid count 16 = origin/main 16 (pre-existing ws/zod/
+  walletconnect override paths), delta 0. After C2: critical 2 → 0. `@capacitor/cli` stays a pre-existing
+  *moderate* (xcode→uuid, also on main) — not gate-blocking. `next` reappears as high **via sharp** (effect of B).
