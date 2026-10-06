@@ -210,7 +210,6 @@ jobs:
           # earlier tokens:sync step only modified the working tree, nothing has been committed),
           # then that one call both creates the commit and advances the branch to it.
           EXPECTED_HEAD_OID="$(git rev-parse HEAD)"
-          git push origin "HEAD:refs/heads/${BRANCH}"
 
           # shellcheck disable=SC2016 # literal GraphQL variable syntax, not a shell expansion
           QUERY='mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }'
@@ -244,6 +243,11 @@ jobs:
                 expectedHeadOid: $oid
               } }
             }' > "$PAYLOAD_FILE"
+          # [fix/catalog-workflow-jq-arg-too-long] Fail loudly (never a silent skip) BEFORE any remote
+          # side effect: an empty encoded file would commit an empty catalog. The branch is pushed only
+          # after this check, so a bad payload no longer leaves an orphan branch behind.
+          if [ ! -s "$CONTENTS1_FILE" ] || [ ! -s "$CONTENTS2_FILE" ]; then echo "::error::chain ${CHAIN}: encoded payload is empty (size 0) for ${FILE} or ${TRUST_FILE} — refusing to push the branch or call createCommitOnBranch"; exit 1; fi
+          git push origin "HEAD:refs/heads/${BRANCH}"
           gh api graphql --input "$PAYLOAD_FILE"
           # [chore/catalog-workflow-verified-commits-and-alerts] One line, sourced from the same
           # env-provided DIFF_SUMMARY/RUN_URL as above, not re-templated from the job context —
