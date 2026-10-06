@@ -64,3 +64,4 @@ Registry bulk-advisory API lists TWO ranges per pkg: android `>=7.0.0 <7.6.9` + 
 + `>=8.3.5 <8.4.3`. The brief quoted the 7.x row; the repo was already on 8 (ranges recorded pre-bump in 8401178).
 7.6.9 = major 8→7 downgrade, and breaks plugin peers (browser/splash-screen/status-bar need core `>=8.0.0`). 8.5.2
 fixes both 8.x ranges with no major change. Architect: confirm 8.5.2, or order the 8→7 downgrade explicitly.
+**Owner decision 2026-10-06: keep 8.5.2** (no 8→7 downgrade) — the "stay on major 7" premise did not match the repo.
