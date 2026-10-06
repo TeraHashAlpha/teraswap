@@ -58,3 +58,9 @@ package.json (10), package-lock.json (272), audit-allowlist.json (+10, C fell ba
 - On/after 2026-10-07T14:08Z: add `"source-map-js": "1.2.2"` to `overrides`, `npm install`, delete the
   GHSA-68fv-2mgg-jv7q allowlist entry (expires 2026-10-14).
 - Allowlist `$comment` still says "STATUS 2026-08-07: empty" — stale since the braces entry; not edited here.
+
+### Deviation (A) — why not "stay on major 7"
+Registry bulk-advisory API lists TWO ranges per pkg: android `>=7.0.0 <7.6.9` + `>=8.0.0 <=8.3.4`; ios `>=7.0.0 <7.6.9`
++ `>=8.3.5 <8.4.3`. The brief quoted the 7.x row; the repo was already on 8 (ranges recorded pre-bump in 8401178).
+7.6.9 = major 8→7 downgrade, and breaks plugin peers (browser/splash-screen/status-bar need core `>=8.0.0`). 8.5.2
+fixes both 8.x ranges with no major change. Architect: confirm 8.5.2, or order the 8→7 downgrade explicitly.
