@@ -25,16 +25,6 @@
       "added": "2026-10-05",
       "expires": "2026-11-05",
       "reason": "No patched release exists (latest 3.0.3, 2024-05-21). Reachability: dev-only (tailwindcss devDependency -> chokidar/micromatch -> braces; lockfile \"dev\": true; absent from npm audit --omit=dev). Expansion inputs are build-time literals (tailwind.config.ts content glob), never user-controlled. Re-check for a patched release before expiry; pin via overrides the moment one is >= 7 days old."
-    },
-    {
-      "id": "GHSA-68fv-2mgg-jv7q",
-      "package": "source-map-js",
-      "vulnerableRange": ">=1.0.0 <1.2.2",
-      "fixedIn": "1.2.2",
-      "ageInOn": "2026-10-07",
-      "added": "2026-10-06",
-      "expires": "2026-10-14",
-      "reason": "patched 1.2.2 published 2026-09-30, blocked by min-release-age until 2026-10-07; replace with overrides pin"
     }
   ]
 }
