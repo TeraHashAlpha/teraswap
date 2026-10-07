@@ -5,7 +5,7 @@ Dependabot triage 2026-10-07: three HIGH alerts under `contracts/order-engine`, 
 
 ## Checklist
 - [x] C1 evidence (paths, entry point, publish ages)
-- [ ] C2 executor: `ws` 8.18.3 → 8.21.0 via `overrides`
+- [x] C2 executor: `ws` 8.18.3 → 8.21.0 via `overrides`
 - [ ] C3 order-engine dev: `adm-zip` 0.4.16 → 0.6.1, `tmp` 0.0.33 → 0.2.6 via `overrides`
 - [ ] C4 host checklist (feedback only)
 
@@ -27,3 +27,9 @@ Dependabot triage 2026-10-07: three HIGH alerts under `contracts/order-engine`, 
 
 All ≥ 7d. Baseline executor suite on origin/main (`npm ci --ignore-scripts && node --test`, local node 25.6.1;
 CI uses node 20): **650 tests / 650 pass / 0 fail**.
+
+## 2–4. After C2 — executor/ (`npm install --ignore-scripts`)
+- `npm ls ws --all --package-lock-only`: `viem@2.47.10 → ws@8.21.0 overridden`, `isows → ws@8.21.0 deduped`; no `invalid`.
+- `node -e 'console.log(require("ws/package.json").version)'` → `8.21.0`.
+- Lockfile diff: 3 lines (ws version/resolved/integrity only). Suite: **650 / 650 pass / 0 fail** (= origin/main).
+- Chose 8.21.0 (the Dependabot target) rather than mirroring the parent's 8.21.1: the brief names 8.21.0; both are ≥ 7d.
