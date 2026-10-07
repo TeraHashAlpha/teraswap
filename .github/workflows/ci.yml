@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -54,7 +54,7 @@ jobs:
         run: npm run check:product-claims
 
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -69,7 +69,7 @@ jobs:
         run: npm run check:circular
 
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -91,7 +91,7 @@ jobs:
     # symbol per chain (no legacy+current duplicates like MORPHO). Reads a committed verdict
     # cache (src/lib/chains/catalog-guard.trust.json) refreshed by scripts/refresh-catalog-guard.ts
     # — NO network at gate time, so it is reproducible and never flaky.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -107,7 +107,7 @@ jobs:
     # suite is not run in CI (only single-file guards), so this pins the regression:
     # a non-oracle fee token (e.g. AERO) must be valued from the reliably-priced side
     # (~$0.002), never the fee amount × the other leg's ETH price (~$5.79).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -125,7 +125,7 @@ jobs:
     # pins: the canonical per-chain USD (~$1) membership + its catalog drift-guards, EURC
     # (EUR-pegged) staying category-only, every historical call site resolving to the
     # constant, and the chain-keyed auto-slippage behaviour.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -143,7 +143,7 @@ jobs:
     # side must BLOCK (422 `unpriceable`), never pass as "$0". The full vitest suite is
     # not run in CI (only single-file guards), so this pins the server route branch and
     # the client estimate helper.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -163,7 +163,7 @@ jobs:
     # response through unconverted; (C2) Balancer stays in DISABLED_SOURCES
     # (its SOR order endpoint is 404-dead) and is excluded from the quote
     # fan-out before it runs. Regression origin: T-SAF W7-L-02 coverage check.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -188,7 +188,7 @@ jobs:
     # untested in CI with no workflow signal. A new DCAPanel.*.test.tsx file is covered
     # automatically. src/components/ holds test files for many unrelated components, so
     # the glob is scoped to the DCAPanel* prefix, not the whole directory.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -205,7 +205,7 @@ jobs:
     # no Chainlink feed AND DefiLlama definitively has no price; a failed probe
     # fails open) + checkOracleCoverage's fail-open client policy. The DCAPanel
     # render wiring is covered by dca-resilience-guard (DCAPanel.routability.test.tsx).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -231,7 +231,7 @@ jobs:
     # test files, so the glob is unambiguous. src/lib/chains/ is a large shared directory
     # with many test files pinned by other unrelated guard jobs, so those 3 files stay
     # individually listed — a directory glob there would silently widen this job's scope.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -250,7 +250,7 @@ jobs:
     # which would disable the FeeCollector's on-chain InsufficientOutput floor
     # (see docs/security/DEPLOYED-SOURCES.md). Also pins the valid-quote floor and
     # the split-leg skip semantics.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -269,7 +269,7 @@ jobs:
     # the DISPLAYED best price. applyLowQuorumSanity bounds the winner to the
     # runner-up (500 bps default, LOW_QUORUM_MAX_DEVIATION_BPS override) and
     # demotes a winner beyond the band. Display-only — execution gates untouched.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -288,7 +288,7 @@ jobs:
     # rate-limited informational alert per source·kind per window through the
     # emitTransitionAlert fan-out; KV failures fail OPEN (monitoring never breaks
     # the monitor). Balancer/OpenOcean/Odos died invisibly before this existed.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -308,7 +308,7 @@ jobs:
     # when the connecting peer is inside Cloudflare's published ranges, so a direct-to-origin
     # attacker cannot nominate their own client IP, and a malformed value never reaches a Redis
     # rate-limit key. A refactor that widens either one now fails the PR instead of shipping.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -331,7 +331,7 @@ jobs:
     # recipe (TeraSwapFeeCollector.sol, solc 0.8.28, via-IR, 2-arg ctor).
     # Dependency-free and offline (no npm ci); the on-chain half is
     # scripts/verify-deployed-sources.mjs (manual/audit runs).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -350,7 +350,7 @@ jobs:
     # Supabase work — 429; (W6-L-01) every body route refuses oversized
     # payloads via the shared bodySizeGuard — 413. log-swap's insert-shape
     # suite rides along because that route now runs the ingestion guards.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -371,7 +371,7 @@ jobs:
     #   #3 src/lib/dca/position-stats.ts computes cost-basis / invested / received /
     #      %-complete / P&L-vs-spot purely from the fills; the golden completed DCA
     #      0x5449dea0 (WETH→ETHFI, 5/5) reconciles exactly, P&L uses a live price.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -398,7 +398,7 @@ jobs:
     # caller-side pin — an exact-literal assertion on the real EIP-712 signed minAmountOut — since
     # the derivation-level tests feed literals straight into the module and never bind the caller.
     # See Audits/Incidents/INC-2026-08-07-001.md for the full incident record.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -426,7 +426,7 @@ jobs:
     #
     # The additive full-suite job below also runs these, but it is whole-repo; this is the targeted,
     # individually-named PR check, matching the convention of the 15 guards above.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -445,7 +445,7 @@ jobs:
     # automatically with no workflow edit, closing the gap the per-file guards leave: 164 of
     # 220 test files (measured 2026-07-30, CI=true, no .env.local, all green, zero flake
     # across two back-to-back runs) are reachable from NONE of them today.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -468,7 +468,7 @@ jobs:
           node -e "const r=require('/tmp/vitest-report.json'); const n=r.testResults.length; const floor=220; if(n<floor){console.error('Coverage floor breached: '+n+' test files executed (floor '+floor+')'); process.exit(1)} console.log('Coverage floor OK: '+n+' test files (floor '+floor+')')"
 
   lockfile-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -488,7 +488,7 @@ jobs:
     # it locally. No path filter: this is meant to become a required check, and a required check
     # behind paths:/paths-ignore: never reports on PRs that miss the filter, permanently blocking
     # them from merging.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -506,7 +506,7 @@ jobs:
     # [CHORE-TEST-CONTRACTS-REAL-GATE] continue-on-error REMOVED: the suite is now
     # green (OrderExecutor 68/68 + FeeCollector 19/19), so a red contract suite MUST
     # fail the PR — this is a real regression gate again, not advisory noise.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -526,7 +526,7 @@ jobs:
 
   build:
     needs: [lint, typecheck, audit, lockfile-lint]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
