@@ -21,14 +21,17 @@
 # signed-commit protection applies to MERGE commits — merge via the GitHub UI
 # (squash), which produces a GitHub web-flow-signed commit.
 #
-# GITHUB_TOKEN limitations (known, accepted for P1):
-#  - `gh pr create` needs the repo/org setting "Allow GitHub Actions to create and
-#    approve pull requests" — flip it once, or the last step fails (the refreshed
-#    catalog is still gated + pushed to the branch).
-#  - Events created with the built-in GITHUB_TOKEN do NOT trigger other workflows,
-#    so ci.yml will NOT auto-run on the bot PR. The catalog-specific gates run
-#    IN-JOB below; re-trigger full CI by closing/reopening the PR (or pushing an
-#    empty commit), or upgrade this workflow to a GitHub App/PAT token later.
+# PR token [chore/catalog-workflow-pr-token-and-ordering]:
+#  - Events created with the built-in GITHUB_TOKEN do NOT trigger other workflows, so a
+#    PR it opens never runs ci.yml (PRs #547/#548/#549 sat BLOCKED at 2/2 checks until
+#    closed/reopened by hand). `gh pr create` therefore runs with the CATALOG_PR_TOKEN
+#    repo secret (fine-grained PAT, this repo only, Pull requests: write + Contents:
+#    read) — the ONLY call that uses it. Branch push, createCommitOnBranch, closing
+#    superseded PRs and the failure alert all stay on GITHUB_TOKEN.
+#  - CATALOG_PR_TOKEN empty/missing, or rejected (expired): falls back to GITHUB_TOKEN
+#    with a ::warning:: — the PR still opens but CI will NOT run on it; close/reopen it
+#    by hand. The fallback needs the repo setting "Allow GitHub Actions to create and
+#    approve pull requests".
 
 name: "Token catalog refresh"
 
@@ -48,7 +51,7 @@ concurrency:
 
 jobs:
   chains:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
@@ -67,7 +70,7 @@ jobs:
       fail-fast: false # one chain's failure must never cancel the others' jobs
       matrix:
         chain: ${{ fromJson(needs.chains.outputs.matrix) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -103,79 +106,34 @@ jobs:
         if: always()
         id: diff
         run: |
+          # [chore/catalog-workflow-pr-token-and-ordering] The same table also goes to the job log
+          # via tee — it used to land only in $GITHUB_OUTPUT, so the log showed nothing. pipefail:
+          # tee's own exit 0 must never mask a report-diff.ts failure.
+          set -o pipefail
+          REPORT_FILE=$(mktemp)
+          npx tsx --tsconfig tsconfig.json scripts/token-catalog/report-diff.ts ${{ matrix.chain }} | tee "$REPORT_FILE"
           {
             echo 'summary<<GATE_DIFF_EOF'
-            npx tsx --tsconfig tsconfig.json scripts/token-catalog/report-diff.ts ${{ matrix.chain }}
+            cat "$REPORT_FILE"
             echo 'GATE_DIFF_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Loud failure alert — never a silent skip (chain ${{ matrix.chain }})
-        # [chore/catalog-workflow-verified-commits-and-alerts] was `failure() &&
-        # steps.gate.outcome == 'failure'` — if the REBUILD step throws (the most likely
-        # failure), `gate` never runs, so its outcome is 'skipped', not 'failure', and no issue
-        # ever opened. `failure()` alone catches a failed build, gate, or diff step.
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
-          GATE_OUTCOME: ${{ steps.gate.outcome }}
-          DIFF_OUTCOME: ${{ steps.diff.outcome }}
-        run: |
-          # First offending line from the guard's own output — [fatal] rows name the guard
-          # check + address directly; an AssertionError (e.g. the mainnet size guard) is the
-          # next best signal. Falls back to a generic marker so the alert is NEVER empty.
-          # gate-output.log may not exist at all (build failed before the gate ran) — grep's
-          # own nonzero exit on a missing file still falls through the || chain.
-          FIRST_ISSUE=$(grep -m1 -E '^\s*\[fatal\]' gate-output.log 2>/dev/null || grep -m1 'AssertionError' gate-output.log 2>/dev/null || echo 'see attached gate log for detail')
-          FAILED_STEP="unknown step"
-          if [ "$BUILD_OUTCOME" = "failure" ]; then
-            FAILED_STEP="build (Rebuild token catalog)"
-          elif [ "$GATE_OUTCOME" = "failure" ]; then
-            FAILED_STEP="gate (no-network guard tests)"
-          elif [ "$DIFF_OUTCOME" = "failure" ]; then
-            FAILED_STEP="diff (report-diff.ts)"
-          fi
-          TITLE="[token-catalog-guard] chain ${{ matrix.chain }} refresh failed"
-          BODY_FILE=$(mktemp)
-          {
-            echo "The token-catalog-refresh cron FAILED for **chain ${{ matrix.chain }}** on \`$(date -u +%Y-%m-%d)\` — failed step: **${FAILED_STEP}**."
-            echo ""
-            echo "First offending finding:"
-            echo '```'
-            echo "$FIRST_ISSUE"
-            echo '```'
-            echo ""
-            echo "Full gate output (last 200 lines, if the gate step ran):"
-            echo '```'
-            tail -n 200 gate-output.log 2>/dev/null || echo '(gate step did not run — the build step failed first)'
-            echo '```'
-            echo ""
-            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          } > "$BODY_FILE"
-
-          EXISTING=$(gh issue list --search "in:title \"$TITLE\" is:open" --json number --jq '.[0].number' --repo "${{ github.repository }}" || true)
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --repo "${{ github.repository }}" --body-file "$BODY_FILE"
-          else
-            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file "$BODY_FILE"
-          fi
-          echo "::error::token-catalog-refresh FAILED for chain ${{ matrix.chain }} at step ${FAILED_STEP}: $FIRST_ISSUE"
-
-      - name: Open a PR when this chain's catalog changed
+      # [chore/catalog-workflow-pr-token-and-ordering] One step per remote side effect, in this
+      # order: push branch + verified commit → open the new PR → ONLY THEN close the superseded
+      # ones. Closing first (the old order) left the chain with NO open PR whenever a later call
+      # failed. Each step runs only if every earlier one succeeded (implicit success()).
+      - name: Push the refresh branch + verified commit (chain ${{ matrix.chain }})
         if: steps.gate.outcome == 'success'
+        id: commit
         env:
           GH_TOKEN: ${{ github.token }}
           CHAIN: ${{ matrix.chain }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          # Piped through an env var, never spliced into the script text: the summary embeds
-          # token symbols sourced from external token lists (attacker-choosable strings) — a
-          # symbol like `"; curl evil #` interpolated via ${{ }} would run as shell code.
-          DIFF_SUMMARY: ${{ steps.diff.outputs.summary }}
         run: |
           FILE="src/config/generated/token-catalog.${CHAIN}.json"
           TRUST_FILE="src/lib/chains/catalog-guard.trust.json"
           if git diff --quiet -- "$FILE" "$TRUST_FILE"; then
             echo "chain ${CHAIN}: catalog unchanged — nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           TODAY="$(date -u +%Y-%m-%d)"
@@ -183,22 +141,6 @@ jobs:
           # same UTC day for the same chain (a retry, or workflow_dispatch next to the cron) must
           # never collide on the same branch name — a fresh unique name needs no force-push.
           BRANCH="chore/token-catalog-refresh-${CHAIN}-${TODAY}-${{ github.run_id }}"
-
-          # [fix/catalog-trust-loss-means-previously-verified] one open catalog PR per chain: a
-          # missed/failed merge otherwise leaves last week's refresh PR open while this run opens
-          # ANOTHER one, and the two can conflict or ship stale counts. Close every open PR whose
-          # head matches this chain's prefix BEFORE opening the new one, and delete its branch too
-          # — these are regenerable bot branches carrying no human work, now recreated fresh every
-          # run under a new run-id-suffixed name, so nothing is lost by removing the old one.
-          PREFIX="chore/token-catalog-refresh-${CHAIN}-"
-          gh pr list --repo "${{ github.repository }}" --state open --json number,headRefName \
-            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | [.number, .headRefName] | @tsv" |
-            while IFS=$'\t' read -r SUPERSEDED_NUM SUPERSEDED_BRANCH; do
-              echo "closing superseded PR #${SUPERSEDED_NUM} for chain ${CHAIN} (deleting branch ${SUPERSEDED_BRANCH})"
-              gh pr close "$SUPERSEDED_NUM" --repo "${{ github.repository }}" \
-                --comment "Superseded by the ${TODAY} refresh for chain ${CHAIN}"
-              git push origin --delete "$SUPERSEDED_BRANCH" || true
-            done
 
           # [chore/catalog-workflow-verified-commits-and-alerts] Verified commit, no signing key:
           # main requires every commit to carry a verified signature, but this job's GITHUB_TOKEN
@@ -249,6 +191,26 @@ jobs:
           if [ ! -s "$CONTENTS1_FILE" ] || [ ! -s "$CONTENTS2_FILE" ]; then echo "::error::chain ${CHAIN}: encoded payload is empty (size 0) for ${FILE} or ${TRUST_FILE} — refusing to push the branch or call createCommitOnBranch"; exit 1; fi
           git push origin "HEAD:refs/heads/${BRANCH}"
           gh api graphql --input "$PAYLOAD_FILE"
+          {
+            echo "changed=true"
+            echo "branch=${BRANCH}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open a PR when this chain's catalog changed
+        if: steps.commit.outputs.changed == 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Step-level on purpose: used ONLY as GH_TOKEN for `gh pr create` below, never echoed.
+          CATALOG_PR_TOKEN: ${{ secrets.CATALOG_PR_TOKEN }}
+          CHAIN: ${{ matrix.chain }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Piped through an env var, never spliced into the script text: the summary embeds
+          # token symbols sourced from external token lists (attacker-choosable strings) — a
+          # symbol like `"; curl evil #` interpolated via ${{ }} would run as shell code.
+          DIFF_SUMMARY: ${{ steps.diff.outputs.summary }}
+        run: |
           # [chore/catalog-workflow-verified-commits-and-alerts] One line, sourced from the same
           # env-provided DIFF_SUMMARY/RUN_URL as above, not re-templated from the job context —
           # states the gate result explicitly instead of leaving a reviewer to infer PASS from
@@ -265,8 +227,107 @@ jobs:
             printf '%s\n' "$DIFF_SUMMARY"
             echo '```'
           } > "$BODY_FILE"
-          gh pr create \
-            --title "chore(catalog): scheduled token-catalog refresh — chain ${CHAIN}" \
-            --body-file "$BODY_FILE" \
-            --base main \
-            --head "$BRANCH"
+          # [chore/catalog-workflow-pr-token-and-ordering] Opened with the PAT so the PR's
+          # `pull_request` event triggers CI. Empty secret, or the PAT rejected (expired): fall
+          # back to GITHUB_TOKEN with a warning — the PR still opens, the token never fails the run.
+          PR_ARGS=(--title "chore(catalog): scheduled token-catalog refresh — chain ${CHAIN}" --body-file "$BODY_FILE" --base main --head "$BRANCH")
+          PR_TOKEN_WARNING="::warning::CATALOG_PR_TOKEN missing or expired — PR will not trigger CI; close/reopen it manually"
+          if [ -z "$CATALOG_PR_TOKEN" ]; then
+            echo "$PR_TOKEN_WARNING"
+            PR_URL="$(gh pr create "${PR_ARGS[@]}")"
+          elif ! PR_URL="$(GH_TOKEN="$CATALOG_PR_TOKEN" gh pr create "${PR_ARGS[@]}")"; then
+            echo "$PR_TOKEN_WARNING"
+            PR_URL="$(gh pr create "${PR_ARGS[@]}")"
+          fi
+          echo "chain ${CHAIN}: opened ${PR_URL}"
+          echo "url=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Close superseded refresh PRs for this chain (after the new PR exists)
+        if: steps.pr.outcome == 'success'
+        id: supersede
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHAIN: ${{ matrix.chain }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          # [fix/catalog-trust-loss-means-previously-verified] one open catalog PR per chain: a
+          # missed/failed merge otherwise leaves last week's refresh PR open next to this run's, and
+          # the two can conflict or ship stale counts. Close every OTHER open PR whose head matches
+          # this chain's prefix (the one just opened, head == $BRANCH, is skipped) and delete its
+          # branch too — regenerable bot branches carrying no human work, so nothing is lost.
+          # pipefail: a failed `gh pr list` must fail the step (→ alert), not feed an empty loop.
+          set -o pipefail
+          PREFIX="chore/token-catalog-refresh-${CHAIN}-"
+          gh pr list --repo "${{ github.repository }}" --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | select(.headRefName != \"${BRANCH}\") | [.number, .headRefName] | @tsv" |
+            while IFS=$'\t' read -r SUPERSEDED_NUM SUPERSEDED_BRANCH; do
+              echo "closing superseded PR #${SUPERSEDED_NUM} for chain ${CHAIN} (deleting branch ${SUPERSEDED_BRANCH})"
+              gh pr close "$SUPERSEDED_NUM" --repo "${{ github.repository }}" \
+                --comment "Superseded by ${PR_URL} (refresh for chain ${CHAIN})"
+              git push origin --delete "$SUPERSEDED_BRANCH" || true
+            done
+
+      - name: Loud failure alert — never a silent skip (chain ${{ matrix.chain }})
+        # [chore/catalog-workflow-verified-commits-and-alerts] was `failure() &&
+        # steps.gate.outcome == 'failure'` — if the REBUILD step throws (the most likely
+        # failure), `gate` never runs, so its outcome is 'skipped', not 'failure', and no issue
+        # ever opened. `failure()` alone catches a failed build, gate, or diff step.
+        # [chore/catalog-workflow-pr-token-and-ordering] Kept as the job's LAST step so
+        # `failure()` also covers push/PR/supersede — run 37505341116 failed in the PR step,
+        # which ran AFTER this alert, so nothing fired.
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          DIFF_OUTCOME: ${{ steps.diff.outcome }}
+          COMMIT_OUTCOME: ${{ steps.commit.outcome }}
+          PR_OUTCOME: ${{ steps.pr.outcome }}
+          SUPERSEDE_OUTCOME: ${{ steps.supersede.outcome }}
+        run: |
+          # First offending line from the guard's own output — [fatal] rows name the guard
+          # check + address directly; an AssertionError (e.g. the mainnet size guard) is the
+          # next best signal. Falls back to a generic marker so the alert is NEVER empty.
+          # gate-output.log may not exist at all (build failed before the gate ran) — grep's
+          # own nonzero exit on a missing file still falls through the || chain.
+          FIRST_ISSUE=$(grep -m1 -E '^\s*\[fatal\]' gate-output.log 2>/dev/null || grep -m1 'AssertionError' gate-output.log 2>/dev/null || echo 'see attached gate log for detail')
+          FAILED_STEP="unknown step"
+          if [ "$BUILD_OUTCOME" = "failure" ]; then
+            FAILED_STEP="build (Rebuild token catalog)"
+          elif [ "$GATE_OUTCOME" = "failure" ]; then
+            FAILED_STEP="gate (no-network guard tests)"
+          elif [ "$DIFF_OUTCOME" = "failure" ]; then
+            FAILED_STEP="diff (report-diff.ts)"
+          elif [ "$COMMIT_OUTCOME" = "failure" ]; then
+            FAILED_STEP="commit (push branch + createCommitOnBranch)"
+          elif [ "$PR_OUTCOME" = "failure" ]; then
+            FAILED_STEP="pr (gh pr create)"
+          elif [ "$SUPERSEDE_OUTCOME" = "failure" ]; then
+            FAILED_STEP="supersede (close superseded PRs)"
+          fi
+          TITLE="[token-catalog-guard] chain ${{ matrix.chain }} refresh failed"
+          BODY_FILE=$(mktemp)
+          {
+            echo "The token-catalog-refresh cron FAILED for **chain ${{ matrix.chain }}** on \`$(date -u +%Y-%m-%d)\` — failed step: **${FAILED_STEP}**."
+            echo ""
+            echo "First offending finding:"
+            echo '```'
+            echo "$FIRST_ISSUE"
+            echo '```'
+            echo ""
+            echo "Full gate output (last 200 lines, if the gate step ran):"
+            echo '```'
+            tail -n 200 gate-output.log 2>/dev/null || echo '(gate step did not run — the build step failed first)'
+            echo '```'
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "$BODY_FILE"
+
+          EXISTING=$(gh issue list --search "in:title \"$TITLE\" is:open" --json number --jq '.[0].number' --repo "${{ github.repository }}" || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "${{ github.repository }}" --body-file "$BODY_FILE"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file "$BODY_FILE"
+          fi
+          echo "::error::token-catalog-refresh FAILED for chain ${{ matrix.chain }} at step ${FAILED_STEP}: $FIRST_ISSUE"
