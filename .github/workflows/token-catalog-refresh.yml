@@ -21,14 +21,17 @@
 # signed-commit protection applies to MERGE commits — merge via the GitHub UI
 # (squash), which produces a GitHub web-flow-signed commit.
 #
-# GITHUB_TOKEN limitations (known, accepted for P1):
-#  - `gh pr create` needs the repo/org setting "Allow GitHub Actions to create and
-#    approve pull requests" — flip it once, or the last step fails (the refreshed
-#    catalog is still gated + pushed to the branch).
-#  - Events created with the built-in GITHUB_TOKEN do NOT trigger other workflows,
-#    so ci.yml will NOT auto-run on the bot PR. The catalog-specific gates run
-#    IN-JOB below; re-trigger full CI by closing/reopening the PR (or pushing an
-#    empty commit), or upgrade this workflow to a GitHub App/PAT token later.
+# PR token [chore/catalog-workflow-pr-token-and-ordering]:
+#  - Events created with the built-in GITHUB_TOKEN do NOT trigger other workflows, so a
+#    PR it opens never runs ci.yml (PRs #547/#548/#549 sat BLOCKED at 2/2 checks until
+#    closed/reopened by hand). `gh pr create` therefore runs with the CATALOG_PR_TOKEN
+#    repo secret (fine-grained PAT, this repo only, Pull requests: write + Contents:
+#    read) — the ONLY call that uses it. Branch push, createCommitOnBranch, closing
+#    superseded PRs and the failure alert all stay on GITHUB_TOKEN.
+#  - CATALOG_PR_TOKEN empty/missing, or rejected (expired): falls back to GITHUB_TOKEN
+#    with a ::warning:: — the PR still opens but CI will NOT run on it; close/reopen it
+#    by hand. The fallback needs the repo setting "Allow GitHub Actions to create and
+#    approve pull requests".
 
 name: "Token catalog refresh"
 
@@ -165,6 +168,8 @@ jobs:
         if: steps.gate.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Step-level on purpose: used ONLY as GH_TOKEN for `gh pr create` below, never echoed.
+          CATALOG_PR_TOKEN: ${{ secrets.CATALOG_PR_TOKEN }}
           CHAIN: ${{ matrix.chain }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # Piped through an env var, never spliced into the script text: the summary embeds
@@ -265,8 +270,15 @@ jobs:
             printf '%s\n' "$DIFF_SUMMARY"
             echo '```'
           } > "$BODY_FILE"
-          gh pr create \
-            --title "chore(catalog): scheduled token-catalog refresh — chain ${CHAIN}" \
-            --body-file "$BODY_FILE" \
-            --base main \
-            --head "$BRANCH"
+          # [chore/catalog-workflow-pr-token-and-ordering] Opened with the PAT so the PR's
+          # `pull_request` event triggers CI. Empty secret, or the PAT rejected (expired): fall
+          # back to GITHUB_TOKEN with a warning — the PR still opens, the token never fails the run.
+          PR_ARGS=(--title "chore(catalog): scheduled token-catalog refresh — chain ${CHAIN}" --body-file "$BODY_FILE" --base main --head "$BRANCH")
+          PR_TOKEN_WARNING="::warning::CATALOG_PR_TOKEN missing or expired — PR will not trigger CI; close/reopen it manually"
+          if [ -z "$CATALOG_PR_TOKEN" ]; then
+            echo "$PR_TOKEN_WARNING"
+            gh pr create "${PR_ARGS[@]}"
+          elif ! GH_TOKEN="$CATALOG_PR_TOKEN" gh pr create "${PR_ARGS[@]}"; then
+            echo "$PR_TOKEN_WARNING"
+            gh pr create "${PR_ARGS[@]}"
+          fi
