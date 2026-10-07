@@ -9898,6 +9898,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x9A86980D3625b4A6E69D8a4606D51cbc019e2002",
+   "symbol": "FOMO",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "FOMO",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0x7588310a7aBF34DC608ac98a1c4432F85e194Df5",
    "symbol": "FORT",
    "inTrustedList": true,
@@ -10298,6 +10308,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x8Fbd0648971d56f1f2c35Fa075Ff5Bc75fb0e39D",
+   "symbol": "MBS",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MBS",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0xc48823EC67720a04A9DFD8c7d109b2C3D6622094",
    "symbol": "MCADE",
    "inTrustedList": true,
@@ -10314,6 +10334,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "MEZO",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0x686015EbF044a1B8A4bE750346be00293a996071",
+   "symbol": "MINDS",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MINDS",
    "decimals": 18
   },
   {
@@ -10354,6 +10384,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "MRSMIGGLES",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0xe8b46b116D3BdFA787CE9CF3f5aCC78dc7cA380E",
+   "symbol": "MVTT10F",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MVTT10F",
    "decimals": 18
   },
   {
