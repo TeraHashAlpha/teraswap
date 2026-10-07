@@ -7,7 +7,7 @@ Dependabot triage 2026-10-07: three HIGH alerts under `contracts/order-engine`, 
 - [x] C1 evidence (paths, entry point, publish ages)
 - [x] C2 executor: `ws` 8.18.3 → 8.21.0 via `overrides`
 - [x] C3 order-engine dev: `adm-zip` 0.4.16 → 0.6.1, `tmp` 0.0.33 → 0.2.6 via `overrides`
-- [ ] C4 host checklist (feedback only)
+- [x] C4 host checklist (feedback only)
 
 ## 1. Dependency paths (origin/main bd64d8a)
 - **A `ws`** executor/: `viem@2.47.10 → ws@8.18.3` and `viem → isows@1.0.7 → ws (deduped)`. **prod** (viem is a runtime dep).
@@ -45,3 +45,18 @@ CI uses node 20): **650 tests / 650 pass / 0 fail**.
   so the downloader cannot be driven via the CLI. Smoke-tested its exact call instead (`downloader.js:264-268`:
   `new AdmZip(p).extractAllTo(dir)`) on 0.6.1 → ok; solc's only tmp call (`smtsolver.js:58` `tmp.fileSync`) on 0.2.6 → ok.
 - `package.json` `test` script is a stub (`exit 1`); nothing in CI runs order-engine npm scripts.
+
+## 6. Host checklist (from `docs/Runbooks/EC2-EXECUTOR-HOST.md` S2.4/S2.5; pm2 names from `executor/ecosystem.config.cjs`)
+Install command the host uses in executor/: `npm ci --ignore-scripts` (no `--omit=dev`; the manifest has no devDependencies).
+pm2 apps: `teraswap-executor` (Base, 8453) and `teraswap-keeper-arbitrum` (42161). **Nothing takes effect until each
+process is restarted** — pm2 keeps the old `node_modules` graph loaded. Never `pm2 restart all`, never `--update-env`.
+
+1. `ts_host_guard && cd ~/teraswap/contracts/order-engine/executor && git pull --ff-only`
+2. `npm ci --ignore-scripts`  (lockfile changed, so the S2.4 skip-guard runs it)
+3. `node -e 'console.log(require("ws/package.json").version)'`  → must print `8.21.0`
+4. `pm2 restart teraswap-keeper-arbitrum` → `pm2 logs teraswap-keeper-arbitrum --lines 60 --nostream` shows the S2.5 boot lines, no `FATAL:`
+5. `pm2 restart teraswap-executor` → `pm2 logs teraswap-executor --lines 60 --nostream` shows `Chain: 8453` boot lines, no `FATAL:`
+6. `pm2 describe teraswap-executor | grep -E 'status|restarts'` and same for `teraswap-keeper-arbitrum` → both `online`
+
+## 5. `git diff --stat origin/main...HEAD`
+See the final report (two package.json, two lockfiles, this file).
