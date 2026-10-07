@@ -463,6 +463,99 @@ describe('buildChainCatalog — 42161-shape replay (281 included / 128 verified)
     expect(result.tokens.filter((t) => t.verified)).toHaveLength(VERIFIED_COUNT) // 128 verified, unchanged
     expect(result.report.unverifiedSeeds).toHaveLength(UNVERIFIED_COUNT) // honest ⚠, not dropped
   })
+
+  // [fix/catalog-seeds-include-unverified-rows] The REAL PR #538/run #17 shape, as distinct from
+  // the #525-regression shape above: the 153 rows never left any trusted list (inTrustedList
+  // stays true — CoinGecko still carries every one of them today) and never reach the
+  // CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS block at all (it `continue`s on `inTrustedList !==
+  // false`). They were dropped one layer up, in build.ts's seedsFor(), which excluded any
+  // already-`verified:false` row from ever becoming a seed again — this describe block's fixture
+  // builds the `seeds`/`previousCatalog` maps by hand, so it could never catch that bug (see the
+  // new build.test.ts for the regression test on seedsFor() itself). This test proves
+  // buildChainCatalog's OWN behaviour is correct for this shape too, once given the right input.
+  it('0 drops, real #538 shape: 153 rows stay inTrustedList:true and only regain 1 vote (coingecko) — kept unverified, not dropped, gate green', async () => {
+    const seeds = new Map<string, SeedToken>()
+    const previousCatalog = new Map<string, CatalogRow>()
+    const uniswapEntries: SourceEntry[] = []
+    const coingeckoEntries: SourceEntry[] = []
+    const oneinchEntries: SourceEntry[] = []
+    const market = new Map<string, MarketSignal>()
+
+    for (let i = 0; i < VERIFIED_COUNT; i++) {
+      const a = addr(3000 + i)
+      const sym = `VER${i}`
+      seeds.set(a.toLowerCase(), seedTok(a, sym))
+      previousCatalog.set(a.toLowerCase(), {
+        address: a, symbol: sym, name: sym, decimals: 18, category: 'Other', logoURI: '',
+        verified: true, sources: ['uniswap', 'coingecko', 'oneinch'],
+        volume24hUsd: null, volumeSource: null, volumeFetchedAt: null,
+      })
+      uniswapEntries.push(entry('uniswap', a, sym))
+      coingeckoEntries.push(entry('coingecko', a, sym))
+      oneinchEntries.push(entry('oneinch', a, sym))
+      market.set(`1:${a.toLowerCase()}`, { priceUsd: 1, priceConfidence: 0.99 })
+    }
+
+    for (let i = 0; i < UNVERIFIED_COUNT; i++) {
+      const a = addr(4000 + i)
+      const sym = `UNV${i}`
+      seeds.set(a.toLowerCase(), seedTok(a, sym))
+      previousCatalog.set(a.toLowerCase(), {
+        address: a, symbol: sym, name: sym, decimals: 18, category: 'Other', logoURI: '',
+        verified: false, sources: ['curated'],
+        volume24hUsd: null, volumeSource: null, volumeFetchedAt: null,
+      })
+      // NOT overridden: inTrustedList stays true (cleanVerdicts default) — these rows never
+      // left CoinGecko's list, they lost the oneinch vote only (real #538 shape).
+      coingeckoEntries.push(entry('coingecko', a, sym)) // exactly 1 external vote: coingecko
+    }
+
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [
+        ok('uniswap', uniswapEntries, market),
+        ok('coingecko', coingeckoEntries),
+        ok('oneinch', oneinchEntries),
+      ],
+      seeds,
+      previousCatalog,
+      // cleanVerdicts: inTrustedList true for everyone — never reaches the trust-loss branch
+    }))
+
+    expect(result.report.trustLost).toEqual([]) // 0 drops
+    expect(result.tokens).toHaveLength(VERIFIED_COUNT + UNVERIFIED_COUNT)
+    expect(result.tokens.filter((t) => t.verified)).toHaveLength(VERIFIED_COUNT)
+    expect(result.report.unverifiedSeeds).toHaveLength(UNVERIFIED_COUNT)
+    const fatals = fatal(auditChain(1, result.tokens.map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals })), result.verdicts, AL))
+    expect(fatals).toEqual([])
+  })
+
+  // [fix/catalog-seeds-include-unverified-rows] The other half of the fix: a seed that was
+  // demoted to unverified must be able to come BACK once it genuinely regains agreement — the
+  // old `if (!t.verified) continue` would have permanently frozen it out of the seed set the
+  // moment it was first demoted, making every future promotion impossible too.
+  it('a previously-unverified seed that regains >=2 votes this run is promoted to verified:true', async () => {
+    const a = addr(6000)
+    const sym = 'PROMO'
+    const seeds = new Map<string, SeedToken>([[a.toLowerCase(), seedTok(a, sym)]])
+    const previousCatalog = new Map<string, CatalogRow>([[a.toLowerCase(), {
+      address: a, symbol: sym, name: sym, decimals: 18, category: 'Other', logoURI: '',
+      verified: false, sources: ['curated'],
+      volume24hUsd: null, volumeSource: null, volumeFetchedAt: null,
+    }]])
+    const market = new Map<string, MarketSignal>([[`1:${a.toLowerCase()}`, { priceUsd: 1, priceConfidence: 0.99 }]])
+    const result = await buildChainCatalog(1, deps({
+      fetchSources: [ok('uniswap', [entry('uniswap', a, sym)], market), ok('coingecko', [entry('coingecko', a, sym)])],
+      seeds,
+      previousCatalog,
+    }))
+    expect(result.tokens.map((t) => t.symbol)).toEqual([sym])
+    expect(result.tokens[0].verified).toBe(true)
+    // 'curated' is the seed's own provenance (step 2: seeds join the pool), not an agreement
+    // vote (externalVoteCount excludes it) — it rides along at top priority alongside the 2
+    // real external votes that promoted this row.
+    expect(result.tokens[0].sources).toEqual(['curated', 'uniswap', 'coingecko'])
+    expect(result.report.unverifiedSeeds).toEqual([])
+  })
 })
 
 // [fix/catalog-trust-loss-means-previously-verified] Outage circuit breaker, part 1: a source's

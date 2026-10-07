@@ -210,27 +210,45 @@ jobs:
           # earlier tokens:sync step only modified the working tree, nothing has been committed),
           # then that one call both creates the commit and advances the branch to it.
           EXPECTED_HEAD_OID="$(git rev-parse HEAD)"
-          git push origin "HEAD:refs/heads/${BRANCH}"
 
           # shellcheck disable=SC2016 # literal GraphQL variable syntax, not a shell expansion
           QUERY='mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }'
+          # [fix/catalog-workflow-jq-arg-too-long] File contents NEVER go through argv: Linux caps a
+          # single argv string at MAX_ARG_STRLEN (128 KiB), and `--arg contents "$(base64 …)"` died
+          # with `jq: Argument list too long` (exit 126) on every chain in run 37505341116. The base64
+          # goes to temp files that jq reads itself (--rawfile). The payload is the FULL request body
+          # ({query, variables}) sent via --input: `-F input=@file` sends the file as a JSON STRING
+          # (measured, gh 2.96), never the CreateCommitOnBranchInput object the mutation needs.
+          CONTENTS1_FILE=$(mktemp)
+          CONTENTS2_FILE=$(mktemp)
+          base64 -w0 "$FILE" > "$CONTENTS1_FILE"
+          base64 -w0 "$TRUST_FILE" > "$CONTENTS2_FILE"
           PAYLOAD_FILE=$(mktemp)
           jq -n \
+            --arg query "$QUERY" \
             --arg repo "${{ github.repository }}" \
             --arg branch "$BRANCH" \
             --arg headline "chore(catalog): scheduled tokens:sync refresh — chain ${CHAIN}" \
             --arg oid "$EXPECTED_HEAD_OID" \
             --arg path1 "$FILE" \
-            --arg contents1 "$(base64 -w0 "$FILE")" \
+            --rawfile contents1 "$CONTENTS1_FILE" \
             --arg path2 "$TRUST_FILE" \
-            --arg contents2 "$(base64 -w0 "$TRUST_FILE")" \
+            --rawfile contents2 "$CONTENTS2_FILE" \
             '{
-              branch: { repositoryNameWithOwner: $repo, branchName: $branch },
-              message: { headline: $headline },
-              fileChanges: { additions: [ { path: $path1, contents: $contents1 }, { path: $path2, contents: $contents2 } ] },
-              expectedHeadOid: $oid
+              query: $query,
+              variables: { input: {
+                branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+                message: { headline: $headline },
+                fileChanges: { additions: [ { path: $path1, contents: $contents1 }, { path: $path2, contents: $contents2 } ] },
+                expectedHeadOid: $oid
+              } }
             }' > "$PAYLOAD_FILE"
-          gh api graphql -f query="$QUERY" -F input=@"$PAYLOAD_FILE"
+          # [fix/catalog-workflow-jq-arg-too-long] Fail loudly (never a silent skip) BEFORE any remote
+          # side effect: an empty encoded file would commit an empty catalog. The branch is pushed only
+          # after this check, so a bad payload no longer leaves an orphan branch behind.
+          if [ ! -s "$CONTENTS1_FILE" ] || [ ! -s "$CONTENTS2_FILE" ]; then echo "::error::chain ${CHAIN}: encoded payload is empty (size 0) for ${FILE} or ${TRUST_FILE} — refusing to push the branch or call createCommitOnBranch"; exit 1; fi
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          gh api graphql --input "$PAYLOAD_FILE"
           # [chore/catalog-workflow-verified-commits-and-alerts] One line, sourced from the same
           # env-provided DIFF_SUMMARY/RUN_URL as above, not re-templated from the job context —
           # states the gate result explicitly instead of leaving a reviewer to infer PASS from

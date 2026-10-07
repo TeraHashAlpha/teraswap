@@ -86,15 +86,27 @@ function logoFor(chainId: number, address: string, symbol: string): string {
  *  - the committed SEED BASELINE (the pinned catalog at pipeline introduction — extracted
  *    programmatically, see seed-baseline.json)
  *  - curated Base additions
- *  - PLUS previous-run additions ONLY while they remain VERIFIED — an addition that later
- *    loses its source agreement washes out instead of ratcheting in as a permanent ⚠ row
- *    (adversarial-review follow-up: without the baseline, one loose run would seed the
- *    next forever).
+ *  - PLUS every post-baseline row in the committed catalog, VERIFIED OR NOT.
  *  Minus native ETH (core-handled). Every seed passes through correctSeed — the same
  *  curated removals/remaps as source entries — so a remapped deprecated address (OHM v1,
  *  KNC legacy) can never ride back in through the seed path [CHORE-OHM-KNC-REMAP].
+ *
+ * [fix/catalog-seeds-include-unverified-rows] Previously this last step did
+ * `if (!t.verified) continue` — "post-baseline additions persist only while verified" — so a
+ * row the PREVIOUS run had already demoted to `verified:false` (lost its source agreement,
+ * kept honestly unverified per CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS in build-chain.ts) could
+ * never become a seed again. Silently excluded here, it never reached build-chain.ts's seed
+ * map at all — bypassing that policy's own drop/keep decision entirely, with none of its
+ * logging, reporting, or circuit-breaker accounting. On chain 42161 this erased 153 rows in
+ * one run (281→131, PR #538) that were still independently listed by CoinGecko at the time —
+ * not a real delisting, just a seed that had already spent its one permitted demotion and
+ * could never re-qualify as a seed on the NEXT run. Survival of a seed (previously-verified
+ * row that lost trust → dropped + reported; never-verified/already-unverified row → kept,
+ * honest ⚠; row that regains agreement → promoted) is decided in exactly ONE place now:
+ * build-chain.ts's CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS block, using `previousCatalog`
+ * (never re-derived from `sources` here) — not this admission filter.
  */
-function seedsFor(chainId: number): Map<string, SeedToken> {
+export function seedsFor(chainId: number): Map<string, SeedToken> {
   const seeds = new Map<string, SeedToken>()
   const push = (raw: SeedToken) => {
     if (raw.address.toLowerCase() === NATIVE_ETH.toLowerCase()) return
@@ -115,7 +127,6 @@ function seedsFor(chainId: number): Map<string, SeedToken> {
   if (chainId === 8453) for (const s of CURATED_BASE_SEEDS) push(s)
   if (chainId === 42161) for (const s of CURATED_ARBITRUM_SEEDS) push(s)
   for (const t of GENERATED_TOKEN_CATALOG[chainId] ?? []) {
-    if (!t.verified) continue // post-baseline additions persist only while verified
     push({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals })
   }
   return seeds
@@ -286,13 +297,19 @@ async function run() {
   log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
 }
 
-run().catch((e) => {
-  const msg = String(e?.message ?? e)
-  console.error(`\nBUILD FAILED: ${msg}`)
-  // [fix/catalog-trust-loss-means-previously-verified] one ::error:: annotation line so the
-  // failure surfaces in the GitHub Actions run summary — no catalog written, no PR opened
-  // (the PR step only runs after this script exits 0). Not tied to any separate alert wiring.
-  const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : 'catalog build failed'
-  console.error(`::error::${label}: ${msg}`)
-  process.exit(1)
-})
+// [fix/catalog-seeds-include-unverified-rows] CLI guard (same pattern as
+// scripts/check-product-claims.mjs / scripts/token-catalog/lib/fetch-sources.ts) — without it,
+// build.test.ts importing `seedsFor` would trigger the real network pipeline as an import
+// side effect. Only run() when this file is the entrypoint actually invoked, never on import.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run().catch((e) => {
+    const msg = String(e?.message ?? e)
+    console.error(`\nBUILD FAILED: ${msg}`)
+    // [fix/catalog-trust-loss-means-previously-verified] one ::error:: annotation line so the
+    // failure surfaces in the GitHub Actions run summary — no catalog written, no PR opened
+    // (the PR step only runs after this script exits 0). Not tied to any separate alert wiring.
+    const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : 'catalog build failed'
+    console.error(`::error::${label}: ${msg}`)
+    process.exit(1)
+  })
+}
