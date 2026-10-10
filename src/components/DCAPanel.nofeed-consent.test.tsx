@@ -141,42 +141,52 @@ beforeEach(() => {
 const enterAmount = (v: string) => fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: v } })
 const startDca = () => fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
 
-describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED] — the golden ETHFI case, inverted', () => {
-  it('an output the executor cannot price is REFUSED — no consent modal, no order', async () => {
+describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (2026-09-09) became consent (2026-10-11)', () => {
+  it('an output the executor cannot price needs explicit consent — the order is not submitted until the checkbox + Continue', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
     startDca()
 
-    await waitFor(() => expect(screen.getByTestId('dca-submit-block')).toBeInTheDocument())
+    const dialog = await screen.findByTestId('floor-consent-dialog')
+    expect(dialog.getAttribute('data-tier')).toBe('unpriced') // DefiLlama is stubbed to null here
     expect(createOrderMock).not.toHaveBeenCalled()
-    // The consent modal has no DCA path any more — this is the assertion that inverts.
+    expect((screen.getByTestId('floor-consent-confirm') as HTMLButtonElement).disabled).toBe(true)
+    // The superseded modal still has no DCA path.
     expect(screen.queryByTestId('nofeed-consent-modal')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('floor-consent-checkbox'))
+    fireEvent.click(screen.getByTestId('floor-consent-confirm'))
+    await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
+    const config = createOrderMock.mock.calls[0][0] as { floorAck?: { tier: string } }
+    expect(config.floorAck?.tier).toBe('unpriced')
   })
 
-  it('the refusal names the leg and makes no protection claim of its own', async () => {
+  it('the dialog names the token, states the real consequence, and makes no "not unprotected" claim', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
     startDca()
 
-    const block = await screen.findByTestId('dca-submit-block')
-    expect(block.textContent).toMatch(/ETHFI/)
-    // The sentence this whole change exists to remove.
-    expect(block.textContent).not.toMatch(/not unprotected/i)
-    expect(block.textContent).not.toMatch(/referee/i)
+    const body = (await screen.findByTestId('floor-consent-body')).textContent ?? ''
+    expect(body).toMatch(/ETHFI/)
+    expect(body).toMatch(/ANY price/)
+    expect(body).not.toMatch(/not unprotected/i)
+    expect(body).not.toMatch(/referee/i)
   })
 
-  it('a second attempt is refused again — nothing about the first click banks consent', async () => {
+  it('consent is per attempt — a second Start asks again, nothing banks the first acknowledgement', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
     startDca()
-    await screen.findByTestId('dca-submit-block')
+    await screen.findByTestId('floor-consent-dialog')
+    fireEvent.click(screen.getByTestId('floor-consent-cancel'))
+    expect(screen.queryByTestId('floor-consent-dialog')).toBeNull()
 
     enterAmount('2')
     startDca()
-    await waitFor(() => expect(screen.getByTestId('dca-submit-block')).toBeInTheDocument())
+    await screen.findByTestId('floor-consent-dialog')
     expect(createOrderMock).not.toHaveBeenCalled()
   })
 })

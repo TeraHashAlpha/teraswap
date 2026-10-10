@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
 /**
+ * [FIX-DCA-NOFEED-FAIL-CLOSED -> FEAT-DCA-FLOOR-TIERS, owner decision 2026-10-11] DCAPanel — a DCA leg
+ * the EXECUTOR cannot price is no longer REFUSED: it is classified and needs informed consent, still
+ * before any wallet interaction. The wallet-silence assertions below are unchanged in spirit: nothing
+ * is approved/signed until the checkbox is ticked and Continue is pressed. (Original rationale follows.)
+ *
  * [FIX-DCA-NOFEED-FAIL-CLOSED] DCAPanel — a DCA leg the EXECUTOR cannot price is refused before any
  * wallet interaction.
  *
@@ -218,6 +223,7 @@ vi.mock('@/components/TokenSelector', () => ({
 import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import DCAPanel from './DCAPanel'
 import { EXECUTOR_FEED_REGISTRY_FN } from '@/lib/order-engine/executor-feed-registry'
+import { DCA_NO_PRICE_FILL_CAP_USD } from '@/lib/order-engine/dca-floor-tier'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = '0x' + 'cc'.repeat(65)
@@ -233,8 +239,14 @@ const enterAmount = (v: string) =>
  * the consent modal, the real Approve button and the real Confirm & Sign button, so the two
  * `not.toHaveBeenCalled()` assertions are the ones that break.
  */
-async function driveCreationAsFarAsTheUiAllows() {
+async function driveCreationAsFarAsTheUiAllows(opts: { consent?: boolean } = {}) {
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Start DCA/i })) })
+  // [FEAT-DCA-FLOOR-TIERS] The consent step, when (and only when) the pair needs it.
+  if (opts.consent) {
+    await screen.findByTestId('floor-consent-dialog')
+    fireEvent.click(screen.getByTestId('floor-consent-checkbox'))
+    await act(async () => { fireEvent.click(screen.getByTestId('floor-consent-confirm')) })
+  }
   // Pre-fix only: the no-feed consent modal stood here and Accept continued to signing. Post-fix
   // the modal has no DCA path at all, so this query simply finds nothing.
   const accept = screen.queryByTestId('nofeed-consent-accept')
@@ -277,7 +289,7 @@ beforeEach(() => {
 })
 
 describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wallet interaction', () => {
-  it('an unregistered tokenOut blocks creation: no approval tx, no signature', async () => {
+  it('an unregistered, unpriceable tokenOut asks for UNPRICED consent: nothing is approved/signed until the checkbox', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-unregistered-out'))
     enterAmount('100')
@@ -285,10 +297,57 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     await driveCreationAsFarAsTheUiAllows()
 
     expectNoWalletInteraction()
-    // Secondary, and only after the behaviour: the user is told WHICH leg is the problem.
-    const block = await screen.findByTestId('dca-submit-block')
-    expect(block.textContent).toMatch(/ETHFI/)
-    expect(block.textContent).toMatch(/buying/i)
+    const dialog = await screen.findByTestId('floor-consent-dialog')
+    expect(dialog.getAttribute('data-tier')).toBe('unpriced')
+    expect(screen.getByTestId('floor-consent-body').textContent).toBe(
+      `No price source for ETHFI. Buys may execute at ANY price; each buy is capped at $${DCA_NO_PRICE_FILL_CAP_USD} and flagged.`,
+    )
+    // Submit is blocked until the checkbox is ticked.
+    expect((screen.getByTestId('floor-consent-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('floor-consent-confirm'))
+    expectNoWalletInteraction()
+  })
+
+  it('a priceable-but-unregistered tokenOut asks for OFFCHAIN-PRICE consent, with the exact copy', async () => {
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 2.5, symbol: 'ETHFI', timestamp: 1, confidence: 0.99 })
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('pick-unregistered-out'))
+    enterAmount('100')
+
+    await driveCreationAsFarAsTheUiAllows()
+
+    const dialog = await screen.findByTestId('floor-consent-dialog')
+    expect(dialog.getAttribute('data-tier')).toBe('offchain-price')
+    expect(screen.getByTestId('floor-consent-body').textContent).toBe(
+      'No on-chain price feed for ETHFI. The contract cannot enforce a minimum; each buy is protected only by our off-chain price check.',
+    )
+    expectNoWalletInteraction()
+  })
+
+  it('ticking the checkbox and continuing signs, and POSTs the floorAck for the server tier', async () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('pick-unregistered-out'))
+    enterAmount('100')
+
+    await driveCreationAsFarAsTheUiAllows({ consent: true })
+    await waitFor(() => expect(mockCreateOrderInSupabase).toHaveBeenCalledTimes(1))
+
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)
+    expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)
+    const sent = mockCreateOrderInSupabase.mock.calls[0][0] as { floorAck?: { tier: string; acknowledgedAt: string } }
+    expect(sent.floorAck?.tier).toBe('unpriced')
+    expect(Number.isFinite(Date.parse(sent.floorAck!.acknowledgedAt))).toBe(true)
+  })
+
+  it('cancelling the dialog leaves the wallet untouched', async () => {
+    renderWithProviders(<DCAPanel />)
+    fireEvent.click(screen.getByTestId('pick-unregistered-out'))
+    enterAmount('100')
+    await driveCreationAsFarAsTheUiAllows()
+    await screen.findByTestId('floor-consent-dialog')
+    fireEvent.click(screen.getByTestId('floor-consent-cancel'))
+    expect(screen.queryByTestId('floor-consent-dialog')).toBeNull()
+    expectNoWalletInteraction()
   })
 
   it('NON-VACUITY — the same flow with a registered tokenOut reaches the real approve button', async () => {
@@ -302,11 +361,12 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     await driveCreationAsFarAsTheUiAllows()
 
     expect(screen.queryByTestId('dca-submit-block')).toBeNull()
+    expect(screen.queryByTestId('floor-consent-dialog')).toBeNull() // on-chain-feed: no dialog
     expect(mockWriteContractAsync).toHaveBeenCalledTimes(1)  // the real approve button was there
     expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)  // and so was the real sign button
   })
 
-  it('a registry it cannot READ also blocks — "could not check" is never "checked, fine"', async () => {
+  it('a registry it cannot READ is classified UNPRICED (strongest warning) — "could not check" is never "checked, fine"', async () => {
     registryThrows = true
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-registered-out'))
@@ -315,7 +375,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     await driveCreationAsFarAsTheUiAllows()
 
     expectNoWalletInteraction()
-    expect((await screen.findByTestId('dca-submit-block')).textContent).toMatch(/could not check/i)
+    expect((await screen.findByTestId('floor-consent-dialog')).getAttribute('data-tier')).toBe('unpriced')
   })
 
   it('a native-ETH output is asked about under the EXACT address that gets SIGNED', async () => {
@@ -391,16 +451,15 @@ describe('DCAPanel — the check is asked of the executor on the ACTIVE chain', 
   })
 })
 
-describe('DCAPanel — the no-feed consent modal is gone from the DCA flow', () => {
-  it('an unregistered output shows the refusal, never the "you\'re not unprotected" modal', async () => {
+describe('DCAPanel — the superseded no-feed modal stays out of the DCA flow', () => {
+  it('an unregistered output shows the NEW dialog, never the old "you\'re not unprotected" modal', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-unregistered-out'))
     enterAmount('100')
     await driveCreationAsFarAsTheUiAllows()
 
-    await waitFor(() => expect(screen.getByTestId('dca-submit-block')).toBeInTheDocument())
+    await screen.findByTestId('floor-consent-dialog')
     expect(screen.queryByTestId('nofeed-consent-modal')).toBeNull()
-    // …and the refusal makes no protection promise of its own.
-    expect(screen.getByTestId('dca-submit-block').textContent).not.toMatch(/not unprotected/i)
+    expect(screen.getByTestId('floor-consent-dialog').textContent).not.toMatch(/not unprotected/i)
   })
 })

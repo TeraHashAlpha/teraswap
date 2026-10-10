@@ -264,8 +264,8 @@ describe('[feat/arbitrum-dca-gates] the two gates are open on 42161 — REAL con
   })
 })
 
-describe('[feat/arbitrum-dca-gates] the #484 no-feed guard is what gates the panel on Arbitrum', () => {
-  it('registry EMPTY (the on-chain state until the queued feeds execute) ⇒ the no-registered-price-source block, no approval, no signature', async () => {
+describe('[feat/arbitrum-dca-gates -> FEAT-DCA-FLOOR-TIERS] the registry state decides the consent tier on Arbitrum', () => {
+  it('registry EMPTY (the on-chain state until the queued feeds execute) ⇒ consent required (USDC unpriceable here), no approval, no signature until acknowledged', async () => {
     registryMode = 'empty'
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -273,12 +273,13 @@ describe('[feat/arbitrum-dca-gates] the #484 no-feed guard is what gates the pan
     await driveCreationAsFarAsTheUiAllows()
 
     expectNoWalletInteraction()
-    const block = await screen.findByTestId('dca-submit-block')
-    expect(block.textContent).toMatch(/no registered price source/i)
-    expect(block.textContent).toMatch(/Arbitrum One/)
-    // Both legs are named as unregistered — WETH (spending) and USDC (buying) — today's exact state.
-    expect(block.textContent).toMatch(/WETH/)
-    expect(block.textContent).toMatch(/USDC/)
+    // WETH is the chain's wrapped native (priced via Chainlink); USDC has no DefiLlama price in this
+    // suite, so the strongest tier applies and names only the leg that cannot be priced.
+    const dialog = await screen.findByTestId('floor-consent-dialog')
+    expect(dialog.getAttribute('data-tier')).toBe('unpriced')
+    expect(screen.getByTestId('floor-consent-body').textContent).toMatch(/USDC/)
+    // …and the consent step, not a refusal, is what stands in front of the wallet.
+    expect(screen.queryByTestId('dca-submit-block')).toBeNull()
     // …and it was the ARBITRUM executor that was asked, for both signed legs.
     expect(clientCalls).toEqual([ARBITRUM])
     expect(registryCalls).toHaveLength(2)
@@ -353,7 +354,7 @@ describe('[feat/arbitrum-dca-gates] the #484 no-feed guard is what gates the pan
     )
   })
 
-  it('registered for ONE leg only ⇒ still refused, naming the other leg (the feed pair must be complete)', async () => {
+  it('registered for ONE leg only ⇒ still needs consent, naming the other leg (the feed pair must be complete)', async () => {
     registryMode = 'registered'
     registeredRows = { [WETH]: registeredRows[WETH] } // USDC still the zero struct
     renderWithProviders(<DCAPanel />)
@@ -362,9 +363,10 @@ describe('[feat/arbitrum-dca-gates] the #484 no-feed guard is what gates the pan
     await driveCreationAsFarAsTheUiAllows()
 
     expectNoWalletInteraction()
-    const block = await screen.findByTestId('dca-submit-block')
-    expect(block.textContent).toMatch(/USDC/)
-    expect(block.textContent).toMatch(/buying/i)
-    expect(block.textContent).not.toMatch(/WETH \(the token you're spending\)/)
+    const dialog = await screen.findByTestId('floor-consent-dialog')
+    expect(dialog.getAttribute('data-tier')).toBe('unpriced')
+    const body = screen.getByTestId('floor-consent-body').textContent ?? ''
+    expect(body).toMatch(/USDC/)
+    expect(body).not.toMatch(/WETH/)
   })
 })
