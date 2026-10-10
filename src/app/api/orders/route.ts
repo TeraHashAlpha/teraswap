@@ -16,6 +16,8 @@ import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
 import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine/limit-launch'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
+// [FEAT-DCA-FLOOR-TIERS] Server-side floor tier + the consent it requires.
+import { classifyDcaFloor, type DcaFloorTier } from '@/lib/order-engine/dca-floor-tier'
 import {
   verifyOrdersReadAccess,
   PUBLIC_ORDER_STATUSES,
@@ -485,6 +487,40 @@ export async function POST(req: NextRequest) {
     // not silently corrected or merely warned about. If the on-chain read itself fails, the floor
     // cannot be computed with any authority at all — fail closed exactly like the unpriceable
     // branch below (never fall back to the untrusted client figure).
+    // ── [FEAT-DCA-FLOOR-TIERS] Informed consent for a DCA the contract cannot fully floor ──────
+    // Owner decision 2026-10-11: DCA works for ANY token; the browser's hard block became consent.
+    // The SERVER is the authority: it classifies the pair itself (never from the body) and the
+    // body must carry an acknowledgement of EXACTLY that tier. Runs after signature recovery so an
+    // unauthenticated caller cannot make this route spend RPC / price-API calls. Any lookup failure
+    // classifies as `unpriced` (the strongest warning), so a degraded dependency can only ask for
+    // MORE consent. Scoped to v3 DCA; Limit/TP/SL and the v2 path are untouched.
+    let floorTier: DcaFloorTier | null = null
+    let floorAckAt: string | null = null
+    if (isV3Order && orderTypeEnum === ORDER_TYPE_DCA) {
+      floorTier = await classifyDcaFloor({ chainId, tokenIn: body.tokenIn, tokenOut: body.tokenOut })
+      if (floorTier !== 'onchain-feed') {
+        const ack = body.floorAck
+        if (!ack || typeof ack !== 'object' || ack.tier !== floorTier) {
+          return NextResponse.json(
+            {
+              error: `Acknowledgement required: this pair is "${floorTier}". Resubmit with floorAck.tier = "${floorTier}".`,
+              requiredTier: floorTier,
+            },
+            { status: 409 },
+          )
+        }
+        const ackMs = typeof ack.acknowledgedAt === 'string' ? Date.parse(ack.acknowledgedAt) : NaN
+        const now = Date.now()
+        if (!Number.isFinite(ackMs) || ackMs > now + 5 * 60_000 || ackMs < now - 24 * 3_600_000) {
+          return NextResponse.json(
+            { error: 'floorAck.acknowledgedAt must be an ISO timestamp from the last 24 hours', requiredTier: floorTier },
+            { status: 400 },
+          )
+        }
+        floorAckAt = new Date(ackMs).toISOString()
+      }
+    }
+
     if (isV3Order) {
       const dustFloorUsd = getDcaMinChunkUsd()
       const llamaChain = (() => {
@@ -665,6 +701,11 @@ export async function POST(req: NextRequest) {
         // so a Base order stores chain_id=8453 and mainnet stores chain_id=1 (= today's DEFAULT,
         // byte-identical). The keeper scopes its active-orders query by this column per chain.
         chain_id: chainId,
+        // [FEAT-DCA-FLOOR-TIERS] Only for a consent-requiring DCA, so every other insert is
+        // byte-identical (and unaffected if the nullable columns are not yet migrated).
+        ...(floorTier !== null && floorTier !== 'onchain-feed'
+          ? { floor_tier: floorTier, floor_ack_at: floorAckAt }
+          : {}),
         status: 'active',
       })
       .select()

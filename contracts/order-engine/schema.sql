@@ -87,6 +87,12 @@ CREATE TABLE IF NOT EXISTS orders (
     CONSTRAINT orders_consecutive_failures_nonneg CHECK (consecutive_failures >= 0),
   last_attempt_at TIMESTAMPTZ,
 
+  -- [FEAT-DCA-FLOOR-TIERS] DCA minimum-output tier the user consented to + when (nullable; NULL = no
+  -- consent required). See supabase/migrations/20261011120000_orders_floor_tier_consent.sql.
+  floor_tier TEXT
+    CONSTRAINT orders_floor_tier_valid CHECK (floor_tier IS NULL OR floor_tier IN ('onchain-feed', 'offchain-price', 'unpriced')),
+  floor_ack_at TIMESTAMPTZ,
+
   -- Router (part of signed order in v2)
   router      TEXT NOT NULL DEFAULT '',                -- DEX router from signed order
 
