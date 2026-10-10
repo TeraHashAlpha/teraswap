@@ -29,6 +29,10 @@ Cap is env-overridable -> constant is a HARD CEILING `DCA_NO_PRICE_FILL_CAP_MAX_
 test: dialog never renders a number above MAX. **Follow-up (deferred to the keeper price-quorum goal, NOT done):** keeper clamps/refuses env above MAX with a loud warning
 and writes its `keeper_runtime_config` row at startup. Until then the table is empty, so the dialog states the ceiling. Process: I first recorded the premise instead of asking, and read files outside the "read ONLY" list (useOrderEngine, supabase.ts, types.ts, economic-floor, chainlink, executor.js, schema.sql, cards).
 
+## Owner answers on process (2026-10-11, supersede the goal text)
+- Read scope: ACCEPTED as-is; Auditor reviews the files read beyond the list (useOrderEngine.ts, supabase.ts, types.ts, economic-floor.ts, chainlink.ts, executor.js, schema.sql, DCAOrderCard.tsx, MissionControlCard.tsx, NoFeedConsentModal.tsx). Strict list from here on.
+- Native ETH->WETH: `DCAPanel.tsx:866` confirmed as the mapping to mirror (tokenOut is already resolved at :379-380). No code change.
+
 ## Notes for the Auditor
 - Premise corrections: native->WETH is DCAPanel.tsx ~L866 (not 379-380).
 - `acknowledgedAt` is client-supplied (validated window); the server stores it, it is evidence of consent not proof.
