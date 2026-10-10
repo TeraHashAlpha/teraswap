@@ -56,10 +56,21 @@ async function defaultPriceUsd(address: string, slug: string): Promise<number | 
   return p && Number.isFinite(p.price) && p.price > 0 ? p.price : null
 }
 
-export async function classifyDcaFloor(
+export interface DcaFloorClassification {
+  tier: DcaFloorTier
+  /**
+   * The legs (addresses as SIGNED) that put the pair below `onchain-feed` (offchain-price) or that
+   * could not be priced (unpriced; BOTH legs when the lookup itself failed). Empty for onchain-feed.
+   * Display only — the tier is the decision.
+   */
+  affected: string[]
+}
+
+export async function classifyDcaFloorDetailed(
   params: ClassifyDcaFloorParams,
   deps: ClassifyDcaFloorDeps = {},
-): Promise<DcaFloorTier> {
+): Promise<DcaFloorClassification> {
+  let bothLegs: string[] = [params.tokenIn, params.tokenOut]
   try {
     const cfg = getChainConfig(params.chainId) // throws on an unsupported chain → unpriced
     const wrapped = cfg.nativeCurrency.wrappedAddress
@@ -68,6 +79,7 @@ export async function classifyDcaFloor(
       { role: 'spend' as const, symbol: 'tokenIn', address: sign(params.tokenIn) },
       { role: 'buy' as const, symbol: 'tokenOut', address: sign(params.tokenOut) },
     ]
+    bothLegs = legs.map(l => l.address)
 
     const coverage = await readExecutorFeedCoverage({
       reader: deps.reader ?? getPublicClientForChain(params.chainId),
@@ -75,22 +87,28 @@ export async function classifyDcaFloor(
       chainName: cfg.name,
       legs,
     })
-    if (coverage.ok) return 'onchain-feed'
+    if (coverage.ok) return { tier: 'onchain-feed', affected: [] }
     // Registry could not be READ (RPC down, no executor): we do not know the contract's coverage,
     // so claim nothing about the off-chain tier either.
-    if (coverage.unreadable) return 'unpriced'
+    if (coverage.unreadable) return { tier: 'unpriced', affected: bothLegs }
 
     // WETH is priced by the keeper through Chainlink on every supported chain.
     const priceUsd = deps.priceUsd ?? defaultPriceUsd
-    const priced = await Promise.all(
-      legs.map(async l =>
-        l.address.toLowerCase() === wrapped.toLowerCase()
-          ? true
-          : (await priceUsd(l.address, cfg.slug).catch(() => null)) !== null,
-      ),
-    )
-    return priced.every(Boolean) ? 'offchain-price' : 'unpriced'
+    const unpriced: string[] = []
+    for (const l of legs) {
+      if (l.address.toLowerCase() === wrapped.toLowerCase()) continue
+      if ((await priceUsd(l.address, cfg.slug).catch(() => null)) === null) unpriced.push(l.address)
+    }
+    if (unpriced.length > 0) return { tier: 'unpriced', affected: unpriced }
+    return { tier: 'offchain-price', affected: coverage.unregistered.map(l => l.address) }
   } catch {
-    return 'unpriced'
+    return { tier: 'unpriced', affected: bothLegs }
   }
+}
+
+export async function classifyDcaFloor(
+  params: ClassifyDcaFloorParams,
+  deps: ClassifyDcaFloorDeps = {},
+): Promise<DcaFloorTier> {
+  return (await classifyDcaFloorDetailed(params, deps)).tier
 }

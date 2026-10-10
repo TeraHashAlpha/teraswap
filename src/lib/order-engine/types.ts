@@ -2,6 +2,8 @@
  * TeraSwapOrderExecutor v2 — Type definitions
  */
 
+import type { DcaFloorTier } from './dca-floor-tier'
+
 // ── Enums matching Solidity contract ─────────────────────
 export enum OrderType {
   LIMIT = 0,
@@ -132,6 +134,8 @@ export interface AutonomousOrder {
   // DCA tracking
   dcaExecuted: number           // how many DCA fills completed
   dcaTotal: number              // total DCA executions
+  // [FEAT-DCA-FLOOR-TIERS] Consent tier recorded at creation; null/undefined = none required.
+  floorTier?: DcaFloorTier | null
   // Timestamps
   createdAt: number
   executedAt: number | null
@@ -185,6 +189,11 @@ export interface CreateOrderConfig {
   // DCA-specific
   dcaInterval?: number          // seconds between executions
   dcaTotal?: number             // total number of executions
+  /**
+   * [FEAT-DCA-FLOOR-TIERS] The user's acknowledgement of a DCA tier below `onchain-feed`. The SERVER
+   * re-classifies and rejects a missing/mismatched tier, so this is evidence, not authority.
+   */
+  floorAck?: { tier: Exclude<DcaFloorTier, 'onchain-feed'>; acknowledgedAt: string }
 }
 
 // ── Events for UI reactivity ─────────────────────────────

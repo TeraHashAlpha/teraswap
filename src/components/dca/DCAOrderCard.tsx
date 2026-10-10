@@ -12,6 +12,7 @@ import { formatUnits } from 'viem'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { failedOrderReason } from '@/lib/order-engine'
 import { explorerTxUrl } from '@/lib/chains/tokens'
+import FloorTierBadge from './FloorTierBadge'
 import SettlementReceiptModal, { isReceiptEligible } from './SettlementReceiptModal'
 
 export default function DCAOrderCard({
@@ -76,6 +77,7 @@ export default function DCAOrderCard({
             <span className={`h-1.5 w-1.5 rounded-full ${statusColor[order.status] || 'bg-cream-35'}`} />
             {statusLabel[order.status] || order.status}
           </span>
+          <FloorTierBadge tier={order.floorTier} />
         </div>
         {isActive && onCancel && (
           <button onClick={onCancel} className="inline-flex min-h-[44px] items-center rounded-lg border border-danger/30 px-3 text-xs text-danger/70 hover:text-danger transition-colors">

@@ -8,10 +8,10 @@ import TokenSelector from './TokenSelector'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
 import OrderReviewModal from './OrderReviewModal'
 import OrderCancelReviewModal from './OrderCancelReviewModal'
-// [FIX-DCA-NOFEED-FAIL-CLOSED] NoFeedConsentModal is deliberately NOT imported any more. Its whole
-// premise — "allow a no-price-feed DCA, gated by consent" — was reversed by the owner on
-// 2026-09-09: a leg the executor cannot price now BLOCKS creation (see the executor-registry gate
-// in handleCreate). The component file is retained, marked superseded, per rule #4.
+// [FIX-DCA-NOFEED-FAIL-CLOSED -> FEAT-DCA-FLOOR-TIERS] NoFeedConsentModal stays unimported and
+// retained (rule #4). The 2026-09-09 hard block was reversed by the owner on 2026-10-11: the pair is
+// classified (dca-floor-tier.ts) and below `onchain-feed` the NEW DcaFloorConsentDialog — whose copy
+// states the real consequence and cap — gates creation. See handleCreate.
 // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED L-2] resolveFeed, NOT getChainlinkFeed — see
 // outputHasNoResolvableFeed below for why the direct-only lookup was wrong post-ADR-018.
 import { resolveFeed } from '@/lib/chains/chainlink-feeds'
@@ -62,12 +62,12 @@ import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
 import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
-// [FIX-DCA-NOFEED-FAIL-CLOSED] Imported as its own module (like check-route above) rather than via
-// the order-engine barrel, so a suite can stub the on-chain read without restubbing the barrel.
-import { readExecutorFeedCoverage } from '@/lib/order-engine/executor-feed-registry'
-// The per-chain viem client the rest of the app already reads contracts through — chain-aware by
-// construction (guarded transport, registry RPCs), so this gate can never query the wrong chain.
-import { getPublicClientForChain } from '@/lib/chains/clients'
+// [FEAT-DCA-FLOOR-TIERS] Imported as its own module (like check-route above) so a suite can stub the
+// classification without restubbing the barrel. Replaces the 2026-09-09 hard block on a leg the
+// executor has no feed for: the pair is now classified and, below `onchain-feed`, confirmed.
+import { classifyDcaFloorDetailed } from '@/lib/order-engine/dca-floor-tier'
+import type { DcaFloorTier } from '@/lib/order-engine'
+import DcaFloorConsentDialog from './dca/DcaFloorConsentDialog'
 import DCADashboard from './dca/DCADashboard'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
@@ -469,6 +469,10 @@ function CreateDCAForm({
   // refusal earned on one chain says nothing about the next.
   const selectionKey = `${chainId}:${tokenIn?.address ?? ''}:${tokenOut?.address ?? ''}`
   const submitBlock = submitBlockFor?.key === selectionKey ? submitBlockFor.reason : null
+  // [FEAT-DCA-FLOOR-TIERS] The pending confirmation, keyed to the selection it was raised for so a
+  // changed pair/chain silently invalidates it (same pattern as submitBlockFor).
+  const [consentFor, setConsent] = useState<{ key: string; tier: Exclude<DcaFloorTier, 'onchain-feed'>; symbol: string } | null>(null)
+  const consent = consentFor?.key === selectionKey ? consentFor : null
 
   // [chore/oracle-less-advisory] Detect whether the BOUGHT token has an independent
   // price oracle (Chainlink feed OR DefiLlama coverage) on the active chain. When it
@@ -765,7 +769,7 @@ function CreateDCAForm({
 
   const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking && !oracleBlocked && !submitBlock
 
-  async function handleCreate() {
+  async function handleCreate(ack?: DcaFloorTier) {
     if (!canCreate || !tokenIn || !tokenOut) return
     // [chore/dca-resilience] Hard guard (defense-in-depth): never sign a DCA whose
     // schedule can't complete before it expires. canCreate already gates the
@@ -845,39 +849,34 @@ function CreateDCAForm({
       }
     }
 
-    // ── [FIX-DCA-NOFEED-FAIL-CLOSED] Executor fair-value-feed coverage, BEFORE approve ──
-    // The gap this closes, measured on Base 2026-09-09: a DCA WETH→ETHFI reached an on-chain
-    // approval AND an EIP-712 signature before anything refused it, because the only authoritative
-    // USD check lives server-side in api/orders/route.ts — inside the POST that happens AFTER
-    // OrderReviewModal's approve tx and useOrderEngine's signTypedDataAsync. "Before approve" here
-    // means before onSubmit is called at all: the approve button only exists inside the review
-    // modal that useOrderEngine.createOrder mounts by freezing pendingOrder.
+    // ── [FEAT-DCA-FLOOR-TIERS] Floor tier + informed consent, BEFORE approve ──
+    // Owner decision 2026-10-11: DCA works for ANY token. This used to refuse (2026-09-09,
+    // FIX-DCA-NOFEED-FAIL-CLOSED) any leg the executor's `tokenUsdFeeds` did not register; it now
+    // classifies the pair and, below `onchain-feed`, asks for an explicit acknowledgement before
+    // anything is approved or signed. The SERVER re-classifies and is the authority (api/orders
+    // answers 409 naming the tier it requires) — this is the same question asked early so the user
+    // is never made to approve + sign into a refusal.
     //
-    // Derived AT USE TIME from the executor's own registry on the ACTIVE chain — no frontend list,
-    // no env list, no hardcoded chain id. Armed on `v3Enabled` for the same reason `oracleBlocked`
-    // is (the v2 path has no tokenUsdFeeds registry and no oracle floor at all, and this panel is
-    // only ever rendered behind isDcaLive(chainId), which requires getOrderExecutorV3(chainId) !==
-    // null — so wherever a user can reach this panel, the gate is armed).
+    // Addresses EXACTLY as SIGNED (native ETH → the chain's wrapped native, nothing else), the
+    // fidelity rule of executor-feed-registry.ts. Any lookup failure classifies as `unpriced`, the
+    // strongest warning — never a weaker one. Armed on `v3Enabled` as the gate it replaces was.
+    let floorAck: CreateOrderConfig['floorAck']
     if (v3Enabled) {
-      // The addresses EXACTLY as they will be SIGNED — `_fairValueOut` is called with
-      // order.tokenIn / order.tokenOut, so anything else answers a question the contract never
-      // asks. useOrderEngine.createOrder resolves a native-ETH tokenIn to the chain's wrapped
-      // native and leaves tokenOut untouched; this mirrors that, and only that.
       const signedTokenIn = isNativeETH(tokenIn) ? getWrappedNative(chainId) : tokenIn.address
-      const coverage = await readExecutorFeedCoverage({
-        reader: getPublicClientForChain(chainId),
-        executor: getOrderExecutorV3(chainId),
-        chainName: chainDisplayName,
-        legs: [
-          { role: 'spend', symbol: tokenIn.symbol, address: signedTokenIn },
-          { role: 'buy', symbol: tokenOut.symbol, address: tokenOut.address },
-        ],
-      })
-      if (!coverage.ok) {
-        stopWaitingSound()
-        // Keyed to the selection this read was made for; a pair swapped mid-flight makes it inert.
-        setSubmitBlockFor({ key: selectionKey, reason: coverage.reason ?? '' })
-        return
+      const { tier, affected } = await classifyDcaFloorDetailed({
+        chainId, tokenIn: signedTokenIn, tokenOut: tokenOut.address,
+      }, { executor: getOrderExecutorV3(chainId) }) // the SAME executor this panel's v3Enabled rests on
+      if (tier !== 'onchain-feed') {
+        if (ack !== tier) {
+          stopWaitingSound()
+          const names = affected
+            .map(a => a.toLowerCase() === signedTokenIn.toLowerCase() ? tokenIn.symbol
+              : a.toLowerCase() === tokenOut.address.toLowerCase() ? tokenOut.symbol : null)
+            .filter((n, i, arr): n is string => !!n && arr.indexOf(n) === i)
+          setConsent({ key: selectionKey, tier, symbol: (names.length ? names : [tokenOut.symbol]).join(' / ') })
+          return
+        }
+        floorAck = { tier, acknowledgedAt: new Date().toISOString() }
       }
     }
 
@@ -965,17 +964,15 @@ function CreateDCAForm({
       priceInUsd: livePriceIn,
       dcaInterval: interval.seconds,
       dcaTotal: parts,
+      ...(floorAck ? { floorAck } : {}),
     }
 
     await onSubmit(config)
     setTotalDisplay('')
   }
 
-  // [FIX-DCA-NOFEED-FAIL-CLOSED] The no-feed CONSENT branch that used to live here is gone. It
-  // opened a modal telling the user "you're not unprotected" and then let them proceed; with an
-  // unregistered leg the on-chain floor is the ADR-013 dust fallback, so that sentence was not
-  // true. Consent is not the right instrument for a claim the code cannot deliver — the executor
-  // registry gate inside handleCreate refuses the order instead, and says which leg.
+  // [FEAT-DCA-FLOOR-TIERS] The tier classification + consent step lives inside handleCreate (it must
+  // run after the route check and before approve/sign); this wrapper stays a plain guard.
   async function handleCreateClick() {
     if (!canCreate) return
     await handleCreate()
@@ -1181,6 +1178,15 @@ function CreateDCAForm({
           that got PAST the oracle gate, so the two are never on screen together. Distinct testid
           and distinct copy from `dca-oracle-block`: "this token has no on-chain price source" and
           "our feed for this pair is broken" are different facts and must not be told as one. */}
+      {consent && (
+        <DcaFloorConsentDialog
+          tier={consent.tier}
+          symbol={consent.symbol}
+          onCancel={() => setConsent(null)}
+          onConfirm={() => { const t = consent.tier; setConsent(null); void handleCreate(t) }}
+        />
+      )}
+
       {submitBlock && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-submit-block">
           <span className="font-semibold">&#9888; DCA not started.</span> {submitBlock}

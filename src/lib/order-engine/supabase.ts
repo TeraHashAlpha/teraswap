@@ -45,6 +45,9 @@ export interface OrderRow {
   // by rowToOrder (hardcoded 18) → wrong amounts for non-18 tokens like USDC(6).
   token_in_decimals?: number | null
   token_out_decimals?: number | null
+  // [FEAT-DCA-FLOOR-TIERS] Nullable; set only for a consent-requiring DCA.
+  floor_tier?: string | null
+  floor_ack_at?: string | null
   amount_in: string
   min_amount_out: string
   target_price: string
@@ -100,6 +103,8 @@ export async function createOrderInSupabase(params: {
   // route: the server rebuilds the EIP-712 message for recovery and falls back to ZeroHash when
   // this is absent, so omitting it would fail recovery with "Signature mismatch".
   routerDataHash?: `0x${string}`
+  // [FEAT-DCA-FLOOR-TIERS] The user's acknowledgement; the server re-classifies and may refuse (409).
+  floorAck?: { tier: string; acknowledgedAt: string }
 }): Promise<OrderRow | null> {
   // Submitting order via API
 
@@ -137,6 +142,7 @@ export async function createOrderInSupabase(params: {
         // what was signed). Sent verbatim for a pinned non-DCA route so recovery uses the SIGNED
         // hash, and so the server can cross-check it against orderData.routerData.
         ...(params.routerDataHash !== undefined ? { routerDataHash: params.routerDataHash } : {}),
+        ...(params.floorAck !== undefined ? { floorAck: params.floorAck } : {}),
       }),
     })
 
