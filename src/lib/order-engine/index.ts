@@ -44,7 +44,7 @@ export type { MinOutFloorParams, MinOutFloorResult } from './economic-floor'
 // [FIX-DCA-NOFEED-FAIL-CLOSED] The executor's OWN tokenUsdFeeds registry — the source
 // _fairValueOut consults (V3:540-554). Panels import the module directly (like check-route) so it
 // can be stubbed per suite; re-exported here for parity with the other order-engine helpers.
-export { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_USD } from './dca-floor-tier'
+export { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd } from './dca-floor-tier'
 export type { DcaFloorTier, DcaFloorClassification } from './dca-floor-tier'
 export { readExecutorFeedCoverage, EXECUTOR_FEED_REGISTRY_FN } from './executor-feed-registry'
 export type { ExecutorFeedCoverage, ExecutorFeedLeg, ExecutorFeedReader,

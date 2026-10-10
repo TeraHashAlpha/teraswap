@@ -16,7 +16,7 @@ vi.mock('./config', async () => {
 vi.mock('@/lib/chains/clients', () => ({ getPublicClientForChain: () => { throw new Error('tests inject a reader') } }))
 vi.mock('@/lib/defillama', () => ({ fetchDefiLlamaPrice: vi.fn() }))
 
-import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_USD } from './dca-floor-tier'
+import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd } from './dca-floor-tier'
 
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 const WETH_BASE = '0x4200000000000000000000000000000000000006'
@@ -96,12 +96,23 @@ describe('classifyDcaFloor', () => {
   })
 })
 
-describe('DCA_NO_PRICE_FILL_CAP_USD', () => {
+describe('DCA_NO_PRICE_FILL_CAP_MAX_USD', () => {
   it('equals the keeper\'s DCA_FAIL_OPEN_MAX_USD (order-floor.js:188) — imported value AND source text', async () => {
     const path = resolve(__dirname, '../../../contracts/order-engine/executor/order-floor.js')
     const keeper = await import(/* @vite-ignore */ pathToFileURL(path).href)
-    expect(DCA_NO_PRICE_FILL_CAP_USD).toBe(keeper.DCA_FAIL_OPEN_MAX_USD)
+    expect(DCA_NO_PRICE_FILL_CAP_MAX_USD).toBe(keeper.DCA_FAIL_OPEN_MAX_USD)
     const m = readFileSync(path, 'utf8').match(/export const DCA_FAIL_OPEN_MAX_USD\s*=\s*(\d[\d_]*)/)
-    expect(Number(m?.[1].replace(/_/g, ''))).toBe(DCA_NO_PRICE_FILL_CAP_USD)
+    expect(Number(m?.[1].replace(/_/g, ''))).toBe(DCA_NO_PRICE_FILL_CAP_MAX_USD)
+  })
+})
+
+describe('effectiveNoPriceCapUsd', () => {
+  it('is min(row, MAX); MAX for no row / junk; never above MAX', () => {
+    expect(effectiveNoPriceCapUsd(100)).toBe(100)
+    expect(effectiveNoPriceCapUsd('100')).toBe(100)
+    expect(effectiveNoPriceCapUsd(10_000)).toBe(DCA_NO_PRICE_FILL_CAP_MAX_USD)
+    for (const junk of [undefined, null, 0, -5, NaN, Infinity, 'abc', {}]) {
+      expect(effectiveNoPriceCapUsd(junk)).toBe(DCA_NO_PRICE_FILL_CAP_MAX_USD)
+    }
   })
 })

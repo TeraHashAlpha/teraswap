@@ -10,7 +10,7 @@
  *   offchain-price  not both registered, but both legs have a price the keeper can read
  *                   (DefiLlama; the chain's WETH via Chainlink). The contract cannot enforce a
  *                   minimum; the keeper's off-chain check is the only protection.
- *   unpriced        otherwise. The keeper fills-and-flags up to DCA_NO_PRICE_FILL_CAP_USD, else delays.
+ *   unpriced        otherwise. The keeper fills-and-flags up to DCA_NO_PRICE_FILL_CAP_MAX_USD, else delays.
  *
  * FAIL CLOSED TO THE STRONGEST WARNING: any lookup failure (unsupported chain, no executor, RPC
  * down, unrecognised registry answer, price source down) yields `unpriced`, never a weaker tier.
@@ -30,12 +30,14 @@ import { NATIVE_ETH } from '@/lib/constants'
 export type DcaFloorTier = 'onchain-feed' | 'offchain-price' | 'unpriced'
 
 /**
- * Per-fill USD cap the keeper applies to a fill with no price reference.
- * MUST equal `DCA_FAIL_OPEN_MAX_USD` (contracts/order-engine/executor/order-floor.js:188) — the
- * default of a cap the keeper can override via the DCA_FAIL_OPEN_MAX_USD env var. Pinned equal by
- * dca-floor-tier.test.ts. The keeper is plain JS outside the Next bundle, hence the mirrored literal.
+ * HARD CEILING on the per-fill USD cap the keeper applies to a fill with no price reference.
+ * Equals the keeper's DEFAULT `DCA_FAIL_OPEN_MAX_USD` (contracts/order-engine/executor/order-floor.js:188),
+ * pinned by dca-floor-tier.test.ts. The keeper can override its cap via env, so this is a MAXIMUM,
+ * not a claim about the live value: the effective cap is min(keeper_runtime_config row, this).
+ * Owner decision 2026-10-11 (follow-up: keeper clamping env above this + writing the row is deferred
+ * to the keeper price-quorum goal). Mirrored literal: the keeper is plain JS outside the Next bundle.
  */
-export const DCA_NO_PRICE_FILL_CAP_USD = 250
+export const DCA_NO_PRICE_FILL_CAP_MAX_USD = 250
 
 export interface ClassifyDcaFloorParams {
   chainId: number
@@ -111,4 +113,14 @@ export async function classifyDcaFloor(
   deps: ClassifyDcaFloorDeps = {},
 ): Promise<DcaFloorTier> {
   return (await classifyDcaFloorDetailed(params, deps)).tier
+}
+
+/**
+ * Effective no-price fill cap: min(keeper_runtime_config.no_price_fill_cap_usd, MAX); MAX when there
+ * is no row or the value is not a finite positive number. Never exceeds the ceiling.
+ */
+export function effectiveNoPriceCapUsd(rowCap: unknown): number {
+  const n = typeof rowCap === 'string' ? Number(rowCap) : rowCap
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return DCA_NO_PRICE_FILL_CAP_MAX_USD
+  return Math.min(n, DCA_NO_PRICE_FILL_CAP_MAX_USD)
 }

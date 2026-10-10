@@ -1182,6 +1182,7 @@ function CreateDCAForm({
         <DcaFloorConsentDialog
           tier={consent.tier}
           symbol={consent.symbol}
+          chainId={chainId}
           onCancel={() => setConsent(null)}
           onConfirm={() => { const t = consent.tier; setConsent(null); void handleCreate(t) }}
         />

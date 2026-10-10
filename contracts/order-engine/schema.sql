@@ -273,3 +273,13 @@ CREATE TRIGGER orders_normalize_wallet
   BEFORE INSERT OR UPDATE ON orders
   FOR EACH ROW
   EXECUTE FUNCTION normalize_wallet();
+
+-- [FEAT-DCA-FLOOR-TIERS] Keeper-written runtime config (web app READ-ONLY). Shape only; the keeper
+-- writes it in a later goal. See supabase/migrations/20261011120000_orders_floor_tier_consent.sql.
+CREATE TABLE IF NOT EXISTS keeper_runtime_config (
+  chain_id              INTEGER PRIMARY KEY,
+  no_price_fill_cap_usd NUMERIC,
+  keeper_version        TEXT,
+  updated_at            TIMESTAMPTZ
+);
+ALTER TABLE keeper_runtime_config ENABLE ROW LEVEL SECURITY;

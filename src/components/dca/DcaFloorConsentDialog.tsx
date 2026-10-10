@@ -1,18 +1,27 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { DCA_NO_PRICE_FILL_CAP_USD, type DcaFloorTier } from '@/lib/order-engine'
+import { DCA_NO_PRICE_FILL_CAP_MAX_USD, type DcaFloorTier } from '@/lib/order-engine'
 
 /**
  * [FEAT-DCA-FLOOR-TIERS] Informed consent for a DCA whose minimum the contract cannot fully
  * enforce (owner decision 2026-10-11; replaces the 2026-09-09 hard block). Shown only for the two
- * weaker tiers. Copy is plain and exact; the cap comes from DCA_NO_PRICE_FILL_CAP_USD, never a
+ * weaker tiers. Copy is plain and exact; the cap comes from DCA_NO_PRICE_FILL_CAP_MAX_USD, never a
  * literal. Confirm stays disabled until the checkbox is ticked; Cancel is the safe default focus.
  */
-export function floorConsentCopy(tier: Exclude<DcaFloorTier, 'onchain-feed'>, symbol: string): string {
-  return tier === 'offchain-price'
-    ? `No on-chain price feed for ${symbol}. The contract cannot enforce a minimum; each buy is protected only by our off-chain price check.`
-    : `No price source for ${symbol}. Buys may execute at ANY price; each buy is capped at $${DCA_NO_PRICE_FILL_CAP_USD} and flagged.`
+export function floorConsentCopy(
+  tier: Exclude<DcaFloorTier, 'onchain-feed'>,
+  symbol: string,
+  effectiveCapUsd?: number | null,
+): string {
+  if (tier === 'offchain-price') {
+    return `No on-chain price feed for ${symbol}. The contract cannot enforce a minimum; each buy is protected only by our off-chain price check.`
+  }
+  const base = `No price source for ${symbol}. Buys may execute at ANY price; each buy is capped at up to $${DCA_NO_PRICE_FILL_CAP_MAX_USD} and flagged.`
+  // Never render a number above the ceiling, whatever the API returned.
+  const eff = typeof effectiveCapUsd === 'number' && Number.isFinite(effectiveCapUsd) && effectiveCapUsd > 0
+    ? Math.min(effectiveCapUsd, DCA_NO_PRICE_FILL_CAP_MAX_USD) : null
+  return eff !== null && eff < DCA_NO_PRICE_FILL_CAP_MAX_USD ? `${base} Currently $${eff}.` : base
 }
 
 export const FLOOR_CONSENT_CHECKBOX = 'I understand and want to proceed'
@@ -20,15 +29,27 @@ export const FLOOR_CONSENT_CHECKBOX = 'I understand and want to proceed'
 export default function DcaFloorConsentDialog({
   tier,
   symbol,
+  chainId,
   onConfirm,
   onCancel,
 }: {
   tier: Exclude<DcaFloorTier, 'onchain-feed'>
   symbol: string
+  chainId?: number
   onConfirm: () => void
   onCancel: () => void
 }) {
   const [checked, setChecked] = useState(false)
+  const [effectiveCap, setEffectiveCap] = useState<number | null>(null)
+  useEffect(() => {
+    if (tier !== 'unpriced' || chainId === undefined) return
+    let cancelled = false
+    fetch(`/api/dca-floor-cap?chainId=${chainId}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (!cancelled && j) setEffectiveCap(Number(j.effectiveUsd)) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [tier, chainId])
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -52,7 +73,7 @@ export default function DcaFloorConsentDialog({
         onClick={e => e.stopPropagation()}
       >
         <p id="floor-consent-body" data-testid="floor-consent-body" className="mb-4 text-[13px] leading-relaxed text-cream-70">
-          {floorConsentCopy(tier, symbol)}
+          {floorConsentCopy(tier, symbol, effectiveCap)}
         </p>
         <label className="mb-5 flex cursor-pointer items-center gap-2 text-[13px] text-cream">
           <input

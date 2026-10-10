@@ -223,7 +223,7 @@ vi.mock('@/components/TokenSelector', () => ({
 import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import DCAPanel from './DCAPanel'
 import { EXECUTOR_FEED_REGISTRY_FN } from '@/lib/order-engine/executor-feed-registry'
-import { DCA_NO_PRICE_FILL_CAP_USD } from '@/lib/order-engine/dca-floor-tier'
+import { DCA_NO_PRICE_FILL_CAP_MAX_USD } from '@/lib/order-engine/dca-floor-tier'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = '0x' + 'cc'.repeat(65)
@@ -300,7 +300,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     const dialog = await screen.findByTestId('floor-consent-dialog')
     expect(dialog.getAttribute('data-tier')).toBe('unpriced')
     expect(screen.getByTestId('floor-consent-body').textContent).toBe(
-      `No price source for ETHFI. Buys may execute at ANY price; each buy is capped at $${DCA_NO_PRICE_FILL_CAP_USD} and flagged.`,
+      `No price source for ETHFI. Buys may execute at ANY price; each buy is capped at up to $${DCA_NO_PRICE_FILL_CAP_MAX_USD} and flagged.`,
     )
     // Submit is blocked until the checkbox is ticked.
     expect((screen.getByTestId('floor-consent-confirm') as HTMLButtonElement).disabled).toBe(true)
