@@ -58,8 +58,28 @@ async function defaultPriceUsd(address: string, slug: string): Promise<number | 
   return p && Number.isFinite(p.price) && p.price > 0 ? p.price : null
 }
 
+/** What the classifier learned about ONE leg. null = not determined (lookup failed or never needed). */
+export interface DcaFloorLeg {
+  /** In the chain's OrderExecutorV3 `tokenUsdFeeds`. */
+  registered: boolean | null
+  /** Has a price the keeper can use (registered feed, the chain's WETH, or an off-chain price). */
+  priced: boolean | null
+}
+
+export interface DcaFloorLegs {
+  in: DcaFloorLeg
+  out: DcaFloorLeg
+}
+
+const UNKNOWN_LEGS = (): DcaFloorLegs => ({
+  in: { registered: null, priced: null },
+  out: { registered: null, priced: null },
+})
+
 export interface DcaFloorClassification {
   tier: DcaFloorTier
+  /** Per-leg facts behind the tier (display + GET /api/dca-floor-cap). Unknown legs are null, never guessed. */
+  legs: DcaFloorLegs
   /**
    * The legs (addresses as SIGNED) that put the pair below `onchain-feed` (offchain-price) or that
    * could not be priced (unpriced; BOTH legs when the lookup itself failed). Empty for onchain-feed.
@@ -89,22 +109,35 @@ export async function classifyDcaFloorDetailed(
       chainName: cfg.name,
       legs,
     })
-    if (coverage.ok) return { tier: 'onchain-feed', affected: [] }
+    if (coverage.ok) {
+      const both = { registered: true, priced: true }
+      return { tier: 'onchain-feed', affected: [], legs: { in: { ...both }, out: { ...both } } }
+    }
     // Registry could not be READ (RPC down, no executor): we do not know the contract's coverage,
     // so claim nothing about the off-chain tier either.
-    if (coverage.unreadable) return { tier: 'unpriced', affected: bothLegs }
+    if (coverage.unreadable) return { tier: 'unpriced', affected: bothLegs, legs: UNKNOWN_LEGS() }
 
     // WETH is priced by the keeper through Chainlink on every supported chain.
     const priceUsd = deps.priceUsd ?? defaultPriceUsd
     const unpriced: string[] = []
+    const priced = new Map<string, boolean>()
     for (const l of legs) {
-      if (l.address.toLowerCase() === wrapped.toLowerCase()) continue
-      if ((await priceUsd(l.address, cfg.slug).catch(() => null)) === null) unpriced.push(l.address)
+      let ok = true
+      if (l.address.toLowerCase() !== wrapped.toLowerCase()) {
+        ok = (await priceUsd(l.address, cfg.slug).catch(() => null)) !== null
+        if (!ok) unpriced.push(l.address)
+      }
+      priced.set(l.role, ok)
     }
-    if (unpriced.length > 0) return { tier: 'unpriced', affected: unpriced }
-    return { tier: 'offchain-price', affected: coverage.unregistered.map(l => l.address) }
+    const isUnreg = (a: string) => coverage.unregistered.some(u => u.address.toLowerCase() === a.toLowerCase())
+    const detail: DcaFloorLegs = {
+      in: { registered: !isUnreg(legs[0].address), priced: priced.get('spend') ?? null },
+      out: { registered: !isUnreg(legs[1].address), priced: priced.get('buy') ?? null },
+    }
+    if (unpriced.length > 0) return { tier: 'unpriced', affected: unpriced, legs: detail }
+    return { tier: 'offchain-price', affected: coverage.unregistered.map(l => l.address), legs: detail }
   } catch {
-    return { tier: 'unpriced', affected: bothLegs }
+    return { tier: 'unpriced', affected: bothLegs, legs: UNKNOWN_LEGS() }
   }
 }
 

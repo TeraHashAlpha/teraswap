@@ -53,7 +53,7 @@ describe('classifyDcaFloor', () => {
   it('unpriced: a leg with neither a registered feed nor an off-chain price', async () => {
     const r = reader([WETH_BASE])
     const out = await classifyDcaFloorDetailed({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: ETHFI }, { reader: r, priceUsd: priced([]) })
-    expect(out).toEqual({ tier: 'unpriced', affected: [ETHFI] })
+    expect(out).toMatchObject({ tier: 'unpriced', affected: [ETHFI] })
   })
 
   it('registry lookup failure ⇒ unpriced (never a weaker tier), even when prices exist', async () => {
@@ -128,7 +128,7 @@ describe('off-chain price path with captured DefiLlama responses', () => {
       urls.length = 0
       serve(captured(c.key, 'AAVE', 167.32572402703212))
       const out = await classifyDcaFloorDetailed({ chainId: c.chainId, tokenIn: c.weth, tokenOut: c.token }, { reader: reader([c.weth]) })
-      expect(out).toEqual({ tier: 'offchain-price', affected: [c.token] })
+      expect(out).toMatchObject({ tier: 'offchain-price', affected: [c.token] })
       expect(urls).toEqual([`https://coins.llama.fi/prices/current/${c.key}`])
     }
   })
@@ -136,7 +136,7 @@ describe('off-chain price path with captured DefiLlama responses', () => {
   it('the production failure mode: a browser-blocked fetch (CSP → TypeError) reads unpriced, naming only that leg', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
     const out = await classifyDcaFloorDetailed({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: UNI_BASE }, { reader: reader([WETH_BASE]) })
-    expect(out).toEqual({ tier: 'unpriced', affected: [UNI_BASE] })
+    expect(out).toMatchObject({ tier: 'unpriced', affected: [UNI_BASE] })
   })
 
   it('the origin the classifier fetches is allowed by the CSP connect-src in next.config.js', async () => {
