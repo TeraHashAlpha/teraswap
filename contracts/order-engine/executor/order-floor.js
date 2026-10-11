@@ -439,23 +439,60 @@ export function decideFloor({ builtExpectedOut, referenceExpectedOut, maxSlippag
 // fill, not wave it through unbounded). And even a feedless fail-open fill should
 // be bounded to SMALL notionals. This splits the two cases and adds a USD cap.
 
-/** Default USD notional cap for a fail-open (feedless) fill — only small fills
- *  proceed unbounded; larger ones delay. Auditor-tunable; clamped [0, 100000]
- *  (0 = never fail-open). */
+/** [ADR-024 scope addition, Architect/owner 2026-10-11] HARD CEILING on the no-price (single-
+ *  source) fill cap. The web side (28b, src/lib/order-engine/dca-floor-tier.ts) pins its
+ *  DCA_NO_PRICE_FILL_CAP_MAX_USD to the DCA_FAIL_OPEN_MAX_USD literal below (imported value AND
+ *  source regex), so both stay 250 and equal — pinned here too by order-floor.test.mjs. An env
+ *  DCA_FAIL_OPEN_MAX_USD above this is clamped DOWN with a loud boot warning; a value above the
+ *  ceiling is NEVER honoured. The effective (clamped) value is published to keeper_runtime_config
+ *  at boot (runtime-config.js) so the web app shows the same number. */
+export const DCA_NO_PRICE_FILL_CAP_MAX_USD = 250
+
+/** Default USD notional cap for a single-source fill (formerly the fail-open / feedless cap —
+ *  SAME constant, SAME value; the quorum changed who reaches it, not what it is). Only small fills
+ *  proceed on one source; larger ones delay. Env-overridable by name, clamped
+ *  [0, DCA_NO_PRICE_FILL_CAP_MAX_USD] (0 = never fill on a single source). */
 export const DCA_FAIL_OPEN_MAX_USD = 250
 export const DCA_FAIL_OPEN_MAX_USD_MIN = 0
-export const DCA_FAIL_OPEN_MAX_USD_MAX = 100_000
+/** SUPERSEDED as the upper clamp by DCA_NO_PRICE_FILL_CAP_MAX_USD (was 100_000). Kept as an export
+ *  at the ceiling's value so nothing importing it breaks; the two can never diverge. */
+export const DCA_FAIL_OPEN_MAX_USD_MAX = DCA_NO_PRICE_FILL_CAP_MAX_USD
 
-/** The active fail-open cap: `DCA_FAIL_OPEN_MAX_USD` env override clamped to
- *  [MIN, MAX], else the 250 default. */
-export function getFailOpenMaxUsd() {
-  const raw = process.env.DCA_FAIL_OPEN_MAX_USD
-  if (!raw) return DCA_FAIL_OPEN_MAX_USD
+/**
+ * Resolve the EFFECTIVE no-price fill cap from the env, with the clamp made visible so the keeper
+ * can be loud at boot. Pure (env injected).
+ * @param {object} [env]
+ * @returns {{ value: number, raw: string|null, clamped: boolean, source: 'default'|'env'|'env-clamped-ceiling'|'env-clamped-min', reason: string }}
+ */
+export function resolveFailOpenMaxUsd(env = process.env) {
+  const ceiling = DCA_NO_PRICE_FILL_CAP_MAX_USD
+  const raw = env && env.DCA_FAIL_OPEN_MAX_USD ? String(env.DCA_FAIL_OPEN_MAX_USD) : null
+  if (!raw) {
+    return { value: DCA_FAIL_OPEN_MAX_USD, raw: null, clamped: false, source: "default", reason: `default $${DCA_FAIL_OPEN_MAX_USD} (ceiling $${ceiling})` }
+  }
   const parsed = Number(raw)
-  if (!Number.isFinite(parsed)) return DCA_FAIL_OPEN_MAX_USD
-  if (parsed < DCA_FAIL_OPEN_MAX_USD_MIN) return DCA_FAIL_OPEN_MAX_USD_MIN
-  if (parsed > DCA_FAIL_OPEN_MAX_USD_MAX) return DCA_FAIL_OPEN_MAX_USD_MAX
-  return parsed
+  if (!Number.isFinite(parsed)) {
+    return { value: DCA_FAIL_OPEN_MAX_USD, raw, clamped: false, source: "default", reason: `DCA_FAIL_OPEN_MAX_USD='${raw}' is not a number — using the default $${DCA_FAIL_OPEN_MAX_USD}` }
+  }
+  if (parsed < DCA_FAIL_OPEN_MAX_USD_MIN) {
+    return { value: DCA_FAIL_OPEN_MAX_USD_MIN, raw, clamped: true, source: "env-clamped-min", reason: `DCA_FAIL_OPEN_MAX_USD=${raw} is below $${DCA_FAIL_OPEN_MAX_USD_MIN} — using $${DCA_FAIL_OPEN_MAX_USD_MIN}` }
+  }
+  if (parsed > ceiling) {
+    return {
+      value: ceiling,
+      raw,
+      clamped: true,
+      source: "env-clamped-ceiling",
+      reason: `DCA_FAIL_OPEN_MAX_USD=${raw} is ABOVE the hard ceiling $${ceiling} (DCA_NO_PRICE_FILL_CAP_MAX_USD) — using the ceiling; a value above it is never honoured`,
+    }
+  }
+  return { value: parsed, raw, clamped: false, source: "env", reason: `DCA_FAIL_OPEN_MAX_USD=${raw} (within the $${ceiling} ceiling)` }
+}
+
+/** The active no-price fill cap: `DCA_FAIL_OPEN_MAX_USD` env override clamped to
+ *  [0, DCA_NO_PRICE_FILL_CAP_MAX_USD], else the 250 default. */
+export function getFailOpenMaxUsd(env = process.env) {
+  return resolveFailOpenMaxUsd(env).value
 }
 
 /**

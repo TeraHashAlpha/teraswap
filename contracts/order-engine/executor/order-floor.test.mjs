@@ -225,13 +225,17 @@ describe("getFailOpenMaxUsd — env override, clamped, default 250", () => {
     assert.equal(DCA_FAIL_OPEN_MAX_USD, 250)
     assert.equal(getFailOpenMaxUsd(), 250)
   })
-  test("honours a valid override and clamps to [0, 100000]", () => {
+  // [ADR-024 scope addition 2026-10-11] The upper clamp is now the HARD CEILING
+  // DCA_NO_PRICE_FILL_CAP_MAX_USD (250), not 100000: an env above it is never honoured.
+  test("honours a valid override BELOW the ceiling and clamps to [0, DCA_NO_PRICE_FILL_CAP_MAX_USD]", () => {
+    process.env.DCA_FAIL_OPEN_MAX_USD = "100"
+    assert.equal(getFailOpenMaxUsd(), 100)
     process.env.DCA_FAIL_OPEN_MAX_USD = "500"
-    assert.equal(getFailOpenMaxUsd(), 500)
+    assert.equal(getFailOpenMaxUsd(), 250, "ABOVE the ceiling ⇒ the ceiling")
     process.env.DCA_FAIL_OPEN_MAX_USD = "-1"
     assert.equal(getFailOpenMaxUsd(), 0)
     process.env.DCA_FAIL_OPEN_MAX_USD = "999999999"
-    assert.equal(getFailOpenMaxUsd(), 100000)
+    assert.equal(getFailOpenMaxUsd(), 250)
     delete process.env.DCA_FAIL_OPEN_MAX_USD
   })
   test("falls back to the default on a non-numeric override", () => {

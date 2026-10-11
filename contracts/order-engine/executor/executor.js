@@ -188,8 +188,13 @@ import {
   decideSingleSourceCap,
   recordQuorumSkip,
   clearQuorumSkips,
+  resolveFailOpenMaxUsd,
+  DCA_NO_PRICE_FILL_CAP_MAX_USD,
 } from "./order-floor.js"
 import { createCycleQuoteContext } from "./price-sources.js"
+// [ADR-024 scope addition 2026-10-11] Boot-time publish of the effective (ceiling-clamped) no-price
+// fill cap to keeper_runtime_config — logged, never fatal, tolerates the table not existing yet.
+import { buildRuntimeConfigRow, publishRuntimeConfig, readKeeperVersion } from "./runtime-config.js"
 // [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
 // count as a managed signer (else it suppresses the plaintext-key FATAL).
 import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
@@ -2296,6 +2301,25 @@ async function main() {
   if (balance === 0n) {
     console.warn("WARNING: Executor wallet has 0 ETH -- transactions will fail!")
     console.warn("   Fund the wallet before starting execution.\n")
+  }
+
+  // [ADR-024 scope addition 2026-10-11] The no-price (single-source) fill cap THIS instance
+  // enforces: DCA_FAIL_OPEN_MAX_USD clamped to the hard ceiling DCA_NO_PRICE_FILL_CAP_MAX_USD —
+  // never above it, and LOUD when the env asked for more. Then publish the effective value to
+  // keeper_runtime_config so the web app shows the same number. Logged, never fatal: the table is
+  // created by the 28b migration and may not exist yet.
+  const capResolution = resolveFailOpenMaxUsd()
+  if (capResolution.clamped) {
+    console.warn(`WARNING: no-price fill cap CLAMPED -- ${capResolution.reason}`)
+    log(`  WARNING: no-price fill cap CLAMPED -- ${capResolution.reason}`)
+  }
+  log(`No-price fill cap: $${capResolution.value} [${capResolution.source}] (ceiling $${DCA_NO_PRICE_FILL_CAP_MAX_USD}; ${capResolution.reason})`)
+  try {
+    const runtimeRow = buildRuntimeConfigRow({ chainId: CHAIN_ID, noPriceFillCapUsd: capResolution.value, keeperVersion: readKeeperVersion(), nowIso: new Date().toISOString() })
+    if (!runtimeRow.ok) log(`  WARNING: keeper_runtime_config row not built (non-fatal): ${runtimeRow.reason}`)
+    await publishRuntimeConfig({ supabaseFetch, row: runtimeRow.row, log })
+  } catch (err) {
+    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${err?.message?.slice(0, 120)}`)
   }
 
   // Start health check server
