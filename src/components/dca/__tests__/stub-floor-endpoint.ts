@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { classifyDcaFloorDetailed } from '@/lib/order-engine/dca-floor-tier'
 import { getOrderExecutorV3 } from '@/lib/order-engine'
+import { fetchDefiLlamaPrice } from '@/lib/defillama'
 
 /**
  * [feat/dca-tier-server-side] The browser no longer classifies a DCA pair; it GETs
@@ -24,7 +25,12 @@ export function stubFloorEndpoint(opts: { registeredFeedCount?: number | null; f
     const chainId = Number(url.searchParams.get('chainId'))
     const c = await classifyDcaFloorDetailed(
       { chainId, tokenIn: url.searchParams.get('tokenIn')!, tokenOut: url.searchParams.get('tokenOut')! },
-      { executor: getOrderExecutorV3(chainId) }, // the executor each test's mocked barrel reports
+      {
+        executor: getOrderExecutorV3(chainId), // the executor each test's mocked barrel reports
+        // Each panel test already scripts its price answer through its `@/lib/defillama` mock; the
+        // production source (the DefiLlama + CoinGecko quorum) is covered by dca-price-quorum.test.ts.
+        priceUsd: async (address, slug) => (await fetchDefiLlamaPrice(address, slug))?.price ?? null,
+      },
     )
     const body = {
       tier: c.tier, legs: c.legs,

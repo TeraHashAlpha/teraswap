@@ -199,6 +199,13 @@ vi.mock('@/components/TokenSelector', () => ({
             })}
           >pick-unregistered</button>
           <button
+            data-testid="pick-uni-out"
+            onClick={() => onSelect({
+              address: '0xc3De830EA07524a0761646a6a4e4be0e114a3C83',
+              symbol: 'UNI', name: 'Uniswap', decimals: 18, logoURI: '', category: 'DeFi', chainId: 8453,
+            })}
+          >pick-uni</button>
+          <button
             data-testid="pick-registered-out"
             onClick={() => onSelect({
               address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
@@ -467,5 +474,94 @@ describe('DCAPanel — the superseded no-feed modal stays out of the DCA flow', 
     await screen.findByTestId('floor-consent-dialog')
     expect(screen.queryByTestId('nofeed-consent-modal')).toBeNull()
     expect(screen.getByTestId('floor-consent-dialog').textContent).not.toMatch(/not unprotected/i)
+  })
+})
+
+// ── [feat/dca-tier-server-side] The browser asks the server; it never classifies ──────────────────
+describe('DCAPanel [feat/dca-tier-server-side] — the pair tier comes from GET /api/dca-floor-cap', () => {
+  const urls: string[] = []
+  const leg = (registered: boolean | null, priced: boolean | null) => ({ registered, priced })
+  /** Canned server answer; the classifier is NOT run, so any registry read below is a browser one. */
+  const canned = (body: unknown) => vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+    urls.push(String(u))
+    return { ok: true, status: 200, json: async () => body }
+  }))
+  const startEnabled = () => waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled())
+  const start = async () => { await startEnabled(); await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Start DCA/i })) }) }
+  const pickUni = () => { fireEvent.click(screen.getByTestId('pick-uni-out')); enterAmount('100') }
+  beforeEach(() => { urls.length = 0 })
+
+  it('no fetch to a price or RPC host and no registry read during consent: only the same-origin endpoint', async () => {
+    canned({ tier: 'offchain-price', legs: { in: leg(true, true), out: leg(false, true) }, registeredFeedCount: 3, effectiveCap: 250, max: 250 })
+    renderWithProviders(<DCAPanel />)
+    pickUni()
+    await start()
+    await screen.findByTestId('floor-consent-dialog')
+
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) {
+      expect(u.startsWith('/api/dca-floor-cap?')).toBe(true)
+      expect(u).not.toMatch(/llama|coingecko|infura|alchemy|publicnode|rpc|arbitrum\.io|base\.org/i)
+    }
+    expect(urls.every(u => u.includes('chainId=8453') && u.includes('tokenIn=') && u.includes('tokenOut='))).toBe(true)
+    expect(registryCalls).toHaveLength(0) // the executor registry is not read from the browser
+    expect(clientCalls).toHaveLength(0)
+    expectNoWalletInteraction()
+  })
+
+  it('Start stays disabled until the server has answered the tier', async () => {
+    let answer!: (r: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(res => { answer = res })))
+    renderWithProviders(<DCAPanel />)
+    pickUni()
+    await waitFor(() => expect(answer).toBeTypeOf('function'))
+    expect(screen.getByRole('button', { name: /Start DCA/i })).toBeDisabled()
+    await act(async () => { answer({ ok: true, status: 200, json: async () => ({ tier: 'onchain-feed', legs: { in: leg(true, true), out: leg(true, true) } }) }) })
+    await startEnabled()
+  })
+
+  it('an endpoint error (network or 5xx) asks for UNPRICED consent: fail closed, never a weaker tier', async () => {
+    for (const failWith of ['network', 'status'] as const) {
+      const { unmount } = renderWithProviders(<DCAPanel />)
+      stubFloorEndpoint({ failWith })
+      pickUni()
+      await start()
+      const dialog = await screen.findByTestId('floor-consent-dialog')
+      expect(dialog.getAttribute('data-tier')).toBe('unpriced')
+      expect(screen.getByTestId('floor-consent-body').textContent).toContain('WETH and UNI don\'t, and at the moment')
+      expectNoWalletInteraction()
+      unmount()
+    }
+  })
+
+  it('grammar: two legs read "don\'t", one leg "doesn\'t"', async () => {
+    canned({ tier: 'offchain-price', legs: { in: leg(false, true), out: leg(false, true) }, registeredFeedCount: 3 })
+    const { unmount } = renderWithProviders(<DCAPanel />)
+    pickUni()
+    await start()
+    await screen.findByTestId('floor-consent-dialog')
+    expect(screen.getByTestId('floor-consent-body').textContent).toContain('WETH and UNI don\'t have one yet')
+    unmount()
+
+    canned({ tier: 'offchain-price', legs: { in: leg(true, true), out: leg(false, true) }, registeredFeedCount: 3 })
+    renderWithProviders(<DCAPanel />)
+    pickUni()
+    await start()
+    await screen.findByTestId('floor-consent-dialog')
+    expect(screen.getByTestId('floor-consent-body').textContent).toContain('UNI doesn\'t have one yet')
+  })
+
+  it('Base WETH -> UNI with the registry {WETH registered}: the copy names only UNI, never "WETH and UNI"', async () => {
+    mockFetchDefiLlamaPrice.mockResolvedValue({ price: 7.557, symbol: 'UNI', timestamp: 1, confidence: 0.99 })
+    stubFloorEndpoint({ registeredFeedCount: 3 }) // real classifier over this file's registry: WETH + USDC registered
+    renderWithProviders(<DCAPanel />)
+    pickUni()
+    await start()
+    const dialog = await screen.findByTestId('floor-consent-dialog')
+    expect(dialog.getAttribute('data-tier')).toBe('offchain-price')
+    const body = screen.getByTestId('floor-consent-body').textContent!
+    expect(body).toContain('3 tokens on this network have')
+    expect(body).toContain('UNI doesn\'t have one yet')
+    expect(body).not.toContain('WETH and UNI')
   })
 })

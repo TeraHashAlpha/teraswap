@@ -14,9 +14,7 @@ vi.mock('./config', async () => {
   return { ...actual, getOrderExecutorV3: (id: number) => (id === 8453 ? BASE_V3 : id === 42161 ? ARB_V3 : null) }
 })
 vi.mock('@/lib/chains/clients', () => ({ getPublicClientForChain: () => { throw new Error('tests inject a reader') } }))
-vi.mock('@/lib/defillama', () => ({ fetchDefiLlamaPrice: vi.fn() }))
 
-import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { resetQuorumQuoteCache } from './dca-price-quorum'
 import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd, floorAckCovers } from './dca-floor-tier'
 
