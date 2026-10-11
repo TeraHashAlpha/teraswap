@@ -65,9 +65,10 @@ import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
 // [FEAT-DCA-FLOOR-TIERS] Imported as its own module (like check-route above) so a suite can stub the
 // classification without restubbing the barrel. Replaces the 2026-09-09 hard block on a leg the
 // executor has no feed for: the pair is now classified and, below `onchain-feed`, confirmed.
-import { classifyDcaFloorDetailed } from '@/lib/order-engine/dca-floor-tier'
+// [feat/dca-tier-server-side] The browser no longer classifies: it asks the server (pair-floor-info.ts).
 import type { DcaFloorTier } from '@/lib/order-engine'
 import DcaFloorConsentDialog from './dca/DcaFloorConsentDialog'
+import { affectedSymbols, fetchPairFloorInfo, type PairFloorInfo } from './dca/pair-floor-info'
 import DCADashboard from './dca/DCADashboard'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
@@ -471,7 +472,10 @@ function CreateDCAForm({
   const submitBlock = submitBlockFor?.key === selectionKey ? submitBlockFor.reason : null
   // [FEAT-DCA-FLOOR-TIERS] The pending confirmation, keyed to the selection it was raised for so a
   // changed pair/chain silently invalidates it (same pattern as submitBlockFor).
-  const [consentFor, setConsent] = useState<{ key: string; tier: Exclude<DcaFloorTier, 'onchain-feed'>; symbols: string[] } | null>(null)
+  const [consentFor, setConsent] = useState<{
+    key: string; tier: Exclude<DcaFloorTier, 'onchain-feed'>; symbols: string[]
+    registeredFeedCount: number | null; effectiveCap: number | null
+  } | null>(null)
   const consent = consentFor?.key === selectionKey ? consentFor : null
 
   // [chore/oracle-less-advisory] Detect whether the BOUGHT token has an independent
@@ -499,6 +503,18 @@ function CreateDCAForm({
   // of Hooks — always called) but is a no-op: minAmountOut stays the existing '1' v2 path in
   // handleSubmit until v3Enabled flips true on a real deployment.
   const v3Enabled = getOrderExecutorV3(chainId) !== null
+
+  // [feat/dca-tier-server-side] The pair's floor tier, asked of the server on every pair/chain change.
+  // Until it answers (`pairFloor` null) submit stays disabled; a failed ask is `unpriced` (fail closed).
+  const [pairFloorFor, setPairFloorFor] = useState<{ key: string; info: PairFloorInfo } | null>(null)
+  const pairFloor = pairFloorFor?.key === selectionKey ? pairFloorFor.info : null
+  useEffect(() => {
+    if (!v3Enabled || !tokenIn || !tokenOut) return
+    const ctl = new AbortController()
+    void fetchPairFloorInfo({ chainId, tokenIn: tokenIn.address, tokenOut: tokenOut.address, signal: ctl.signal })
+      .then(info => { if (!ctl.signal.aborted) setPairFloorFor({ key: selectionKey, info }) })
+    return () => ctl.abort()
+  }, [v3Enabled, chainId, tokenIn, tokenOut, selectionKey])
   // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] The chain's own display name, from the registry — never a
   // literal. Falls back to a neutral phrase (not a hardcoded chain name) if the connected chain has
   // no registry entry at all, which `!v3Enabled` alone does not guarantee.
@@ -767,7 +783,7 @@ function CreateDCAForm({
     [interval, parts, expiry],
   )
 
-  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking && !oracleBlocked && !submitBlock
+  const canCreate = isConnected && tokenIn && tokenOut && Number(totalDisplay) > 0 && !isSubmitting && !paused && !checkingRoute && scheduleFit.fits && !minChunkGuard.blocked && !depegBlocking && !oracleBlocked && !submitBlock && (!v3Enabled || !!pairFloor)
 
   async function handleCreate(ack?: DcaFloorTier) {
     if (!canCreate || !tokenIn || !tokenOut) return
@@ -862,22 +878,23 @@ function CreateDCAForm({
     // strongest warning — never a weaker one. Armed on `v3Enabled` as the gate it replaces was.
     let floorAck: CreateOrderConfig['floorAck']
     if (v3Enabled) {
-      const signedTokenIn = isNativeETH(tokenIn) ? getWrappedNative(chainId) : tokenIn.address
-      const { tier, affected } = await classifyDcaFloorDetailed({
-        chainId, tokenIn: signedTokenIn, tokenOut: tokenOut.address,
-      }, { executor: getOrderExecutorV3(chainId) }) // the SAME executor this panel's v3Enabled rests on
-      if (tier !== 'onchain-feed') {
-        if (ack !== tier) {
+      // A confirmed ack is the tier the user just accepted (the server accepts it when >= its own and
+      // records ITS tier); a first submit asks the server afresh rather than trusting the preview.
+      let tier: DcaFloorTier
+      if (ack) tier = ack
+      else {
+        const info = await fetchPairFloorInfo({ chainId, tokenIn: tokenIn.address, tokenOut: tokenOut.address })
+        tier = info.tier
+        if (tier !== 'onchain-feed') {
           stopWaitingSound()
-          const names = affected
-            .map(a => a.toLowerCase() === signedTokenIn.toLowerCase() ? tokenIn.symbol
-              : a.toLowerCase() === tokenOut.address.toLowerCase() ? tokenOut.symbol : null)
-            .filter((n, i, arr): n is string => !!n && arr.indexOf(n) === i)
-          setConsent({ key: selectionKey, tier, symbols: names.length ? names : [tokenOut.symbol] }) // dialog renders "A and B"
+          setConsent({
+            key: selectionKey, tier, symbols: affectedSymbols(info, tokenIn.symbol, tokenOut.symbol), // dialog renders "A and B"
+            registeredFeedCount: info.registeredFeedCount, effectiveCap: info.effectiveCap,
+          })
           return
         }
-        floorAck = { tier, acknowledgedAt: new Date().toISOString() }
       }
+      if (tier !== 'onchain-feed') floorAck = { tier, acknowledgedAt: new Date().toISOString() }
     }
 
     // [SPRINT-V3-P2 / ADR-013 §1] v3 signing: derive a REAL absolute minAmountOut (never '1')
@@ -1182,7 +1199,8 @@ function CreateDCAForm({
         <DcaFloorConsentDialog
           tier={consent.tier}
           symbols={consent.symbols}
-          chainId={chainId}
+          registeredFeedCount={consent.registeredFeedCount}
+          effectiveCapUsd={consent.effectiveCap}
           onCancel={() => setConsent(null)}
           onConfirm={() => { const t = consent.tier; setConsent(null); void handleCreate(t) }}
         />

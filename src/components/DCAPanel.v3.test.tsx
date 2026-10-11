@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 import registrations from '@/config/dca-feed-registrations.json'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -166,6 +167,7 @@ function healthyEthUsdRound() {
 }
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   // [FIX-DCA-PANEL-ORACLE-FAIL-CLOSED] `chain` is now supplied. useChainlinkPrice resolves its chain
   // through useResolvedChainId (useAccount().chain?.id — deliberately NO mainnet fallback), so a
@@ -204,6 +206,7 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
 
+    await waitFor(() => expect(startDcaButton()).not.toBeDisabled()) // the server tier has answered
     fireEvent.click(startDcaButton())
     fireEvent.click(await screen.findByTestId('confirm-review'))
 
@@ -232,6 +235,7 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
 
+    await waitFor(() => expect(startDcaButton()).not.toBeDisabled()) // the server tier has answered
     fireEvent.click(startDcaButton())
     fireEvent.click(await screen.findByTestId('confirm-review'))
 
@@ -297,6 +301,7 @@ describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('0.00000000000005') // same sub-floor case as the v2 test
 
+    await waitFor(() => expect(startDcaButton()).not.toBeDisabled()) // the server tier has answered
     fireEvent.click(startDcaButton())
 
     await waitFor(() => expect(mockSignTypedDataAsync).not.toHaveBeenCalled())

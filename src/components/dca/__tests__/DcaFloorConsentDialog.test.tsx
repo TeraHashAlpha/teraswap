@@ -11,10 +11,12 @@ const api = (j: Record<string, unknown>) => mockFetch.mockResolvedValue({ ok: tr
 const body = () => screen.getByTestId('floor-consent-body').textContent ?? ''
 
 // Owner-chosen copy (2026-10-11), pinned verbatim.
+// Two legs ("A and B") take the plural verb.
+const verb = (sym: string) => (sym.includes(' and ') ? "don't" : "doesn't")
 const OFFCHAIN = (lead: string, sym: string) =>
-  `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${sym} doesn't have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
+  `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${sym} ${verb(sym)} have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
 const UNPRICED = (lead: string, sym: string, cap: number) =>
-  `${lead} a Chainlink price feed registered in our contract. ${sym} doesn't, and at the moment no market price source is answering for it, so the executor can't check the fill. To limit risk, each buy is capped at $${cap} and flagged. Buys resume normal protection when a price source comes back.`
+  `${lead} a Chainlink price feed registered in our contract. ${sym} ${verb(sym)}, and at the moment no market price source is answering for it, so the executor can't check the fill. To limit risk, each buy is capped at $${cap} and flagged. Buys resume normal protection when a price source comes back.`
 const FALLBACK_LEAD = 'A small set of tokens on this network have'
 
 describe('DcaFloorConsentDialog copy [fix/dca-consent-copy-and-tier-check]', () => {

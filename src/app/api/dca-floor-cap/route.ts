@@ -12,10 +12,52 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { clientIp } from '@/lib/body-limit'
+import { normalizeAddress } from '@/lib/order-engine/normalize-address'
 import { getChainTokenList } from '@/lib/chains/tokens'
-import { countRegisteredFeeds, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd } from '@/lib/order-engine/dca-floor-tier'
+import {
+  classifyDcaFloorDetailed,
+  countRegisteredFeeds,
+  DCA_NO_PRICE_FILL_CAP_MAX_USD,
+  effectiveNoPriceCapUsd,
+  type DcaFloorClassification,
+} from '@/lib/order-engine/dca-floor-tier'
 
+/**
+ * [feat/dca-tier-server-side] With `tokenIn` + `tokenOut` the response also carries the pair's floor
+ * tier, from the SAME classifier api/orders calls to decide its 409 (classifyDcaFloor wraps
+ * classifyDcaFloorDetailed), so the browser stops classifying and just asks. Never throws to the
+ * client: a classifier failure answers `tier: "unpriced"` with unknown legs, HTTP 200 (fail closed).
+ * Cached 30s per (chainId, tokenIn, tokenOut).
+ */
 const CACHE = { 'Cache-Control': 'public, max-age=60' }
+
+const PAIR_TTL_MS = 30_000
+const PAIR_CACHE_MAX = 500
+const pairCache = new Map<string, { c: DcaFloorClassification; expiresAt: number }>()
+const UNKNOWN: DcaFloorClassification = {
+  tier: 'unpriced',
+  affected: [],
+  legs: { in: { registered: null, priced: null }, out: { registered: null, priced: null } },
+}
+
+async function classifyPair(chainId: number, tokenIn: string, tokenOut: string): Promise<DcaFloorClassification> {
+  const key = `${chainId}:${tokenIn.toLowerCase()}:${tokenOut.toLowerCase()}`
+  const now = Date.now()
+  const hit = pairCache.get(key)
+  if (hit && now < hit.expiresAt) return hit.c
+  let c: DcaFloorClassification
+  try {
+    c = await classifyDcaFloorDetailed({ chainId, tokenIn, tokenOut })
+  } catch {
+    return UNKNOWN // not cached: the next call retries
+  }
+  if (pairCache.size >= PAIR_CACHE_MAX) {
+    for (const [k, v] of pairCache) if (v.expiresAt <= now) pairCache.delete(k)
+    if (pairCache.size >= PAIR_CACHE_MAX) pairCache.clear()
+  }
+  pairCache.set(key, { c, expiresAt: now + PAIR_TTL_MS })
+  return c
+}
 
 const FEED_COUNT_TTL_MS = 60_000
 const feedCountCache = new Map<number, { n: number; expiresAt: number }>()
@@ -41,10 +83,23 @@ export async function GET(req: NextRequest) {
   if (!Number.isInteger(chainId) || chainId <= 0) {
     return NextResponse.json({ error: 'Invalid chainId' }, { status: 400 })
   }
+  const rawIn = req.nextUrl.searchParams.get('tokenIn')
+  const rawOut = req.nextUrl.searchParams.get('tokenOut')
+  const wantsPair = rawIn !== null || rawOut !== null
+  const tokenIn = normalizeAddress(rawIn)
+  const tokenOut = normalizeAddress(rawOut)
+  if (wantsPair && !(tokenIn && tokenOut)) {
+    return NextResponse.json({ error: 'Invalid tokenIn/tokenOut' }, { status: 400 })
+  }
   // Read in parallel with the cap; a count failure never affects the cap answer.
   const count = registeredFeedCount(chainId).catch(() => null)
-  const respond = async (effectiveUsd: number) =>
-    NextResponse.json({ ...ceiling, effectiveUsd, registeredFeedCount: await count }, { headers: CACHE })
+  const pair = wantsPair ? classifyPair(chainId, tokenIn!, tokenOut!) : null
+  const respond = async (effectiveUsd: number) => {
+    const base = { ...ceiling, effectiveUsd, registeredFeedCount: await count }
+    if (!pair) return NextResponse.json(base, { headers: CACHE })
+    const { tier, legs } = await pair
+    return NextResponse.json({ tier, legs, ...base, effectiveCap: effectiveUsd, max: ceiling.maxUsd }, { headers: CACHE })
+  }
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) return respond(ceiling.maxUsd)

@@ -38,6 +38,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -205,6 +206,7 @@ const enterAmount = (v: string) =>
 
 /** Walk the create flow to the signature, clicking every control the UI actually offers. */
 async function driveToSignature() {
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()) // the server tier has answered
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Start DCA/i })) })
   const approve = screen.queryByTestId('order-approve')
   if (approve) await act(async () => { fireEvent.click(approve) })
@@ -220,6 +222,7 @@ function signedTokenOut(): string {
 }
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   CHAIN_ID = 8453
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: CHAIN_ID } })
@@ -304,6 +307,7 @@ describe('DCAPanel — the screen matches the signature', () => {
     fireEvent.click(screen.getByTestId('pick-usdc-in'))
     fireEvent.click(screen.getByTestId('pick-native-out'))
     enterAmount('100')
+    await waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()) // the server tier has answered
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Start DCA/i })) })
 
     const pair = await screen.findByTestId('order-pair')

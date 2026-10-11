@@ -18,6 +18,7 @@
  * DCAPanel.nofeed-fail-closed.test.tsx, which drives the real OrderReviewModal.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 
 const useAccountMock = vi.fn()
 const useChainIdMock = vi.fn(() => 8453)
@@ -131,6 +132,7 @@ import DCAPanel from './DCAPanel'
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true })
   useChainIdMock.mockReturnValue(8453)
@@ -139,14 +141,17 @@ beforeEach(() => {
 })
 
 const enterAmount = (v: string) => fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: v } })
-const startDca = () => fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
+const startDca = async () => {
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()) // the server tier has answered
+  fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
+}
 
 describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (2026-09-09) became consent (2026-10-11)', () => {
   it('an output the executor cannot price needs explicit consent — the order is not submitted until the checkbox + Continue', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
-    startDca()
+    await startDca()
 
     const dialog = await screen.findByTestId('floor-consent-dialog')
     expect(dialog.getAttribute('data-tier')).toBe('unpriced') // DefiLlama is stubbed to null here
@@ -166,7 +171,7 @@ describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (20
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
-    startDca()
+    await startDca()
 
     const body = (await screen.findByTestId('floor-consent-body')).textContent ?? ''
     expect(body).toMatch(/ETHFI/)
@@ -179,13 +184,13 @@ describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (20
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
-    startDca()
+    await startDca()
     await screen.findByTestId('floor-consent-dialog')
     fireEvent.click(screen.getByTestId('floor-consent-cancel'))
     expect(screen.queryByTestId('floor-consent-dialog')).toBeNull()
 
     enterAmount('2')
-    startDca()
+    await startDca()
     await screen.findByTestId('floor-consent-dialog')
     expect(createOrderMock).not.toHaveBeenCalled()
   })
@@ -196,7 +201,7 @@ describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED] — feed-covered tokens are unaf
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-feed-output'))
     enterAmount('1')
-    startDca()
+    await startDca()
 
     await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
     expect(screen.queryByTestId('nofeed-consent-modal')).not.toBeInTheDocument()
@@ -220,7 +225,7 @@ describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED] — feed-covered tokens are unaf
     // which is exactly the address fidelity `executor-feed-registry.ts` requires.
     renderWithProviders(<DCAPanel />)
     enterAmount('1')
-    startDca()
+    await startDca()
 
     await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
     expect(screen.queryByTestId('dca-submit-block')).not.toBeInTheDocument()

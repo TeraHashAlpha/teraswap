@@ -42,6 +42,7 @@
  * default (Augustus V6), read from the real map.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 
 // ── Env BEFORE any import: config.ts reads NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM at load ──
 const { ARBITRUM_V3 } = await vi.hoisted(async () => {
@@ -204,6 +205,7 @@ const enterAmount = (v: string) =>
 
 /** Drive creation as far as the UI allows — the same walk DCAPanel.nofeed-fail-closed.test.tsx uses. */
 async function driveCreationAsFarAsTheUiAllows() {
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()) // the server tier has answered
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Start DCA/i })) })
   const approve = screen.queryByTestId('order-approve')
   if (approve) await act(async () => { fireEvent.click(approve) })
@@ -220,6 +222,7 @@ function expectNoWalletInteraction() {
 }
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   registryCalls.length = 0
   clientCalls.length = 0
@@ -281,13 +284,14 @@ describe('[feat/arbitrum-dca-gates -> FEAT-DCA-FLOOR-TIERS] the registry state d
     // …and the consent step, not a refusal, is what stands in front of the wallet.
     expect(screen.queryByTestId('dca-submit-block')).toBeNull()
     // …and it was the ARBITRUM executor that was asked, for both signed legs.
-    expect(clientCalls).toEqual([ARBITRUM])
-    expect(registryCalls).toHaveLength(2)
+    expect([...new Set(clientCalls)]).toEqual([ARBITRUM])
+    expect(registryCalls.length % 2).toBe(0) // 2 legs per ask; asked on pair change and on submit
+    expect(registryCalls.length).toBeGreaterThanOrEqual(2)
     for (const call of registryCalls) {
       expect(call.address).toBe(ARBITRUM_V3)
       expect(call.functionName).toBe(EXECUTOR_FEED_REGISTRY_FN)
     }
-    expect(registryCalls.map(c => c.token).sort()).toEqual([WETH, USDC].sort())
+    expect([...new Set(registryCalls.map(c => c.token))].sort()).toEqual([WETH, USDC].sort())
   })
 
   it('registered=true for BOTH legs (the post-execute state) ⇒ the #484 guard PASSES: no block, the review modal mounts and the real Approve sends the approval to the DEPLOYMENTS.md executor', async () => {
@@ -300,8 +304,8 @@ describe('[feat/arbitrum-dca-gates -> FEAT-DCA-FLOOR-TIERS] the registry state d
     // The gate this PR leaves in front of the user did NOT fire…
     expect(screen.queryByTestId('dca-submit-block')).toBeNull()
     // …because both legs answered registered, on the Arbitrum executor.
-    expect(clientCalls).toEqual([ARBITRUM])
-    expect(registryCalls.map(c => c.token).sort()).toEqual([WETH, USDC].sort())
+    expect([...new Set(clientCalls)]).toEqual([ARBITRUM])
+    expect([...new Set(registryCalls.map(c => c.token))].sort()).toEqual([WETH, USDC].sort())
     for (const call of registryCalls) expect(call.address).toBe(ARBITRUM_V3)
     // The real approve button was there and was clicked: the approval goes to the SAME executor
     // the order would verify against (BUG-DCA-APPROVE-SPENDER-V3 — resolveSigningExecutor, real).

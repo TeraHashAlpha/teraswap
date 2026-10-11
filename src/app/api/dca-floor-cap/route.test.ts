@@ -31,8 +31,20 @@ vi.mock('@/lib/chains/clients', () => ({
   }),
 }))
 
+// The classifier is spied (same function the create route's classifyDcaFloor wraps) and its price source
+// scripted: the production quorum source is covered by dca-price-quorum.test.ts.
+const pricedTokens = new Set<string>()
+vi.mock('@/lib/order-engine/dca-price-quorum', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/order-engine/dca-price-quorum')>('@/lib/order-engine/dca-price-quorum')),
+  quorumPriceUsd: async (addr: string) => (pricedTokens.has(addr.toLowerCase()) ? 1 : null),
+}))
+vi.mock('@/lib/order-engine/dca-floor-tier', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/order-engine/dca-floor-tier')>('@/lib/order-engine/dca-floor-tier')
+  return { ...actual, classifyDcaFloorDetailed: vi.fn(actual.classifyDcaFloorDetailed) }
+})
+
 import { GET } from './route'
-import { DCA_NO_PRICE_FILL_CAP_MAX_USD as MAX } from '@/lib/order-engine/dca-floor-tier'
+import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD as MAX } from '@/lib/order-engine/dca-floor-tier'
 import { getChainTokenList } from '@/lib/chains/tokens'
 
 const baseAddr = (symbol: string) => getChainTokenList(8453).find(t => t.symbol === symbol)!.address.toLowerCase()
@@ -45,7 +57,8 @@ beforeEach(() => {
   mockRate.mockClear(); eq.mockClear(); row = null; throws = false
   process.env.SUPABASE_URL = 'https://x.supabase.co'; process.env.SUPABASE_SERVICE_ROLE_KEY = 'k'
   registered.clear(); registered.add(baseAddr('WETH')).add(baseAddr('USDC'))
-  registryDown = false; registryCalls.length = 0
+  registryDown = false; registryCalls.length = 0; pricedTokens.clear()
+  vi.mocked(classifyDcaFloorDetailed).mockClear()
   // Every test starts past the previous test's 60s count cache.
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(clock += 120_000)
 })
@@ -111,5 +124,92 @@ describe('GET /api/dca-floor-cap — registeredFeedCount [fix/dca-consent-copy-a
   it('also present when Supabase is not configured', async () => {
     delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SERVICE_ROLE_KEY; delete process.env.NEXT_PUBLIC_SUPABASE_URL
     expect((await call('?chainId=8453')).json).toEqual({ maxUsd: MAX, effectiveUsd: MAX, registeredFeedCount: 2 })
+  })
+})
+
+describe('GET /api/dca-floor-cap?tokenIn&tokenOut — the pair tier, decided server-side [feat/dca-tier-server-side]', () => {
+  const UNI = '0xc3De830EA07524a0761646a6a4e4be0e114a3C83'
+  const pair = (inn: string, out: string, chain = 8453) => `?chainId=${chain}&tokenIn=${inn}&tokenOut=${out}`
+
+  it('answers { tier, legs, registeredFeedCount, effectiveCap, max } and keeps the legacy fields', async () => {
+    pricedTokens.add(UNI.toLowerCase())
+    row = { no_price_fill_cap_usd: 75 }
+    const r = await call(pair(baseAddr('WETH'), UNI))
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({
+      tier: 'offchain-price',
+      legs: { in: { registered: true, priced: true }, out: { registered: false, priced: true } },
+      registeredFeedCount: 2, effectiveCap: 75, max: MAX, maxUsd: MAX, effectiveUsd: 75,
+    })
+    expect(r.cache).toBe('public, max-age=60')
+  })
+
+  it('uses the SAME classifier as the create route: identical tier for every scenario, called with the pair, normalized to lowercase', async () => {
+    const scenarios: Array<[string, string, string[]]> = [
+      [baseAddr('WETH'), baseAddr('USDC'), []],            // onchain-feed
+      [baseAddr('WETH'), UNI, [UNI.toLowerCase()]],         // offchain-price
+      [baseAddr('WETH'), UNI, []],                          // unpriced
+      [NATIVE, UNI, [UNI.toLowerCase()]],                   // native resolved to the wrapped native
+    ]
+    for (const [inn, out, priced] of scenarios) {
+      pricedTokens.clear(); priced.forEach(a => pricedTokens.add(a))
+      vi.mocked(classifyDcaFloorDetailed).mockClear()
+      const viaRoute = (await call(pair(inn, out, 8453) + `&n=${Math.random()}`)).json.tier
+      expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledWith({ chainId: 8453, tokenIn: inn.toLowerCase(), tokenOut: out.toLowerCase() })
+      expect(viaRoute).toBe(await classifyDcaFloor({ chainId: 8453, tokenIn: inn, tokenOut: out }))
+      clock += 120_000; vi.setSystemTime(clock) // past the 30s pair cache for the next scenario
+    }
+  })
+
+  it('junk -> 400, and the classifier is never reached', async () => {
+    const W = baseAddr('WETH')
+    for (const q of [
+      `?chainId=8453&tokenIn=${W}`, `?chainId=8453&tokenOut=${W}`, `?chainId=8453&tokenIn=&tokenOut=${W}`,
+      pair('0x123', W), pair(W, 'not-an-address'), pair(W, W + '00'), pair(W.replace('0x', '0z'), W), pair(W, `${W}%0a`),
+    ]) {
+      const r = await call(q)
+      expect(r.status, q).toBe(400)
+    }
+    expect((await call('?chainId=abc&tokenIn=x&tokenOut=y')).status).toBe(400)
+    expect(vi.mocked(classifyDcaFloorDetailed)).not.toHaveBeenCalled()
+  })
+
+  it('crafted path/URL values -> 400 and nothing is classified (request-forgery guard)', async () => {
+    const W = baseAddr('WETH')
+    for (const bad of ['0x..%2F..%2Fevil', '0x../../evil', `${W}/../x`, `${W}%2F..%2Fevil`, 'https://evil.example/x', `${W}?x=1`, `${W}#`, `//evil.example`]) {
+      const q = encodeURIComponent(bad)
+      expect((await call(pair(q, W))).status, bad).toBe(400)
+      expect((await call(pair(W, q))).status, bad).toBe(400)
+    }
+    expect(vi.mocked(classifyDcaFloorDetailed)).not.toHaveBeenCalled()
+  })
+
+  it('a classifier failure never reaches the client: 200, tier "unpriced", legs unknown', async () => {
+    vi.mocked(classifyDcaFloorDetailed).mockRejectedValueOnce(new Error('boom'))
+    const r = await call(pair(baseAddr('WETH'), baseAddr('USDC')))
+    expect(r.status).toBe(200)
+    expect(r.json).toMatchObject({ tier: 'unpriced', legs: { in: { registered: null, priced: null }, out: { registered: null, priced: null } } })
+    // and the failure was not cached: the next ask classifies again
+    expect((await call(pair(baseAddr('WETH'), baseAddr('USDC')))).json.tier).toBe('onchain-feed')
+  })
+
+  it('caches 30s per (chainId, tokenIn, tokenOut), case-insensitively; another pair or chain is a new key', async () => {
+    const W = baseAddr('WETH'), U = baseAddr('USDC')
+    await call(pair(W, U))
+    await call(pair(W.toUpperCase().replace('0X', '0x'), U))
+    expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledTimes(1)
+    await call(pair(W, UNI))
+    await call(pair(U, W))
+    await call(pair(W, U, 1))
+    expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledTimes(4)
+    vi.setSystemTime(clock + 29_000); await call(pair(W, U))
+    expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledTimes(4)
+    vi.setSystemTime(clock + 31_000); await call(pair(W, U))
+    expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledTimes(5)
+  })
+
+  it('without tokenIn/tokenOut the response is exactly the legacy shape (no classification)', async () => {
+    expect((await call('?chainId=8453')).json).toEqual({ maxUsd: MAX, effectiveUsd: MAX, registeredFeedCount: 2 })
+    expect(vi.mocked(classifyDcaFloorDetailed)).not.toHaveBeenCalled()
   })
 })

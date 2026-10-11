@@ -7,10 +7,11 @@
  *
  *   onchain-feed    both legs are registered in the chain's OrderExecutorV3 `tokenUsdFeeds`, so the
  *                   contract enforces max(oracleFloor, scaledMin) on every fill. No consent needed.
- *   offchain-price  not both registered, but both legs have a price the keeper can read
- *                   (DefiLlama; the chain's WETH via Chainlink). The contract cannot enforce a
- *                   minimum; the keeper's off-chain check is the only protection.
- *   unpriced        otherwise. The keeper fills-and-flags up to DCA_NO_PRICE_FILL_CAP_MAX_USD, else delays.
+ *   offchain-price  not both registered, but both legs have a price the keeper can reach QUORUM on
+ *                   (DefiLlama + CoinGecko agreeing; the chain's WETH via Chainlink — dca-price-quorum.ts).
+ *                   The contract cannot enforce a minimum; the keeper's off-chain check is the only protection.
+ *   unpriced        otherwise: one source, disagreeing sources or none — exactly the keeper's single / skip.
+ *                   The keeper fills-and-flags up to DCA_NO_PRICE_FILL_CAP_MAX_USD, else delays.
  *
  * FAIL CLOSED TO THE STRONGEST WARNING: any lookup failure (unsupported chain, no executor, RPC
  * down, unrecognised registry answer, price source down) yields `unpriced`, never a weaker tier.
@@ -22,7 +23,7 @@
 
 import { getOrderExecutorV3 } from './config'
 import { readExecutorFeedCoverage, type ExecutorFeedReader } from './executor-feed-registry'
-import { fetchDefiLlamaPrice } from '@/lib/defillama'
+import { quorumPriceUsd } from './dca-price-quorum'
 import { getChainConfig } from '@/lib/chains/registry'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { NATIVE_ETH } from '@/lib/constants'
@@ -53,13 +54,31 @@ export interface ClassifyDcaFloorDeps {
   priceUsd?: (address: string, slug: string) => Promise<number | null>
 }
 
-async function defaultPriceUsd(address: string, slug: string): Promise<number | null> {
-  const p = await fetchDefiLlamaPrice(address, slug)
-  return p && Number.isFinite(p.price) && p.price > 0 ? p.price : null
+/** [feat/dca-tier-server-side] "Priced" = the keeper can reach a price QUORUM for it (dca-price-quorum.ts). */
+const defaultPriceUsd = quorumPriceUsd
+
+/** What the classifier learned about ONE leg. null = not determined (lookup failed or never needed). */
+export interface DcaFloorLeg {
+  /** In the chain's OrderExecutorV3 `tokenUsdFeeds`. */
+  registered: boolean | null
+  /** Has a price the keeper can use (registered feed, the chain's WETH, or an off-chain price). */
+  priced: boolean | null
 }
+
+export interface DcaFloorLegs {
+  in: DcaFloorLeg
+  out: DcaFloorLeg
+}
+
+const UNKNOWN_LEGS = (): DcaFloorLegs => ({
+  in: { registered: null, priced: null },
+  out: { registered: null, priced: null },
+})
 
 export interface DcaFloorClassification {
   tier: DcaFloorTier
+  /** Per-leg facts behind the tier (display + GET /api/dca-floor-cap). Unknown legs are null, never guessed. */
+  legs: DcaFloorLegs
   /**
    * The legs (addresses as SIGNED) that put the pair below `onchain-feed` (offchain-price) or that
    * could not be priced (unpriced; BOTH legs when the lookup itself failed). Empty for onchain-feed.
@@ -89,22 +108,33 @@ export async function classifyDcaFloorDetailed(
       chainName: cfg.name,
       legs,
     })
-    if (coverage.ok) return { tier: 'onchain-feed', affected: [] }
+    if (coverage.ok) {
+      const both = { registered: true, priced: true }
+      return { tier: 'onchain-feed', affected: [], legs: { in: { ...both }, out: { ...both } } }
+    }
     // Registry could not be READ (RPC down, no executor): we do not know the contract's coverage,
     // so claim nothing about the off-chain tier either.
-    if (coverage.unreadable) return { tier: 'unpriced', affected: bothLegs }
+    if (coverage.unreadable) return { tier: 'unpriced', affected: bothLegs, legs: UNKNOWN_LEGS() }
 
     // WETH is priced by the keeper through Chainlink on every supported chain.
     const priceUsd = deps.priceUsd ?? defaultPriceUsd
     const unpriced: string[] = []
-    for (const l of legs) {
-      if (l.address.toLowerCase() === wrapped.toLowerCase()) continue
-      if ((await priceUsd(l.address, cfg.slug).catch(() => null)) === null) unpriced.push(l.address)
+    const priced = new Map<string, boolean>()
+    await Promise.all(legs.map(async l => { // legs asked in parallel: 2 sources x 2 legs must not stack their timeouts
+      const ok = l.address.toLowerCase() === wrapped.toLowerCase()
+        || (await priceUsd(l.address, cfg.slug).catch(() => null)) !== null
+      priced.set(l.role, ok)
+    }))
+    for (const l of legs) if (priced.get(l.role) === false) unpriced.push(l.address)
+    const isUnreg = (a: string) => coverage.unregistered.some(u => u.address.toLowerCase() === a.toLowerCase())
+    const detail: DcaFloorLegs = {
+      in: { registered: !isUnreg(legs[0].address), priced: priced.get('spend') ?? null },
+      out: { registered: !isUnreg(legs[1].address), priced: priced.get('buy') ?? null },
     }
-    if (unpriced.length > 0) return { tier: 'unpriced', affected: unpriced }
-    return { tier: 'offchain-price', affected: coverage.unregistered.map(l => l.address) }
+    if (unpriced.length > 0) return { tier: 'unpriced', affected: unpriced, legs: detail }
+    return { tier: 'offchain-price', affected: coverage.unregistered.map(l => l.address), legs: detail }
   } catch {
-    return { tier: 'unpriced', affected: bothLegs }
+    return { tier: 'unpriced', affected: bothLegs, legs: UNKNOWN_LEGS() }
   }
 }
 
