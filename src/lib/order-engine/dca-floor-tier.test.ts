@@ -17,6 +17,7 @@ vi.mock('@/lib/chains/clients', () => ({ getPublicClientForChain: () => { throw 
 vi.mock('@/lib/defillama', () => ({ fetchDefiLlamaPrice: vi.fn() }))
 
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
+import { resetQuorumQuoteCache } from './dca-price-quorum'
 import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd, floorAckCovers } from './dca-floor-tier'
 
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
@@ -98,27 +99,36 @@ describe('classifyDcaFloor', () => {
 })
 
 /**
- * [fix/dca-consent-copy-and-tier-check] Production showed `unpriced` for AAVE and UNI. These run the
- * REAL fetchDefiLlamaPrice (the classifier's default price source) against the responses DefiLlama
- * actually returned on 2026-10-11, so the whole off-chain path — coin key, parse, confidence — is the
- * production one; only the network and the executor registry are stubbed.
+ * [fix/dca-consent-copy-and-tier-check -> feat/dca-tier-server-side] Production showed `unpriced` for AAVE
+ * and UNI. These run the REAL default price source (the DefiLlama + CoinGecko quorum) against the
+ * DefiLlama responses captured on 2026-10-11 plus a CoinGecko answer in the same shape, so the whole
+ * off-chain path — coin key, parse, freshness, agreement — is the production one; only the network and
+ * the executor registry are stubbed.
  */
 describe('off-chain price path with captured DefiLlama responses', () => {
   const WETH_ARB = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
   const AAVE_ARB = '0xba5DdD1f9d7F570dc94a51479a000E3BCE967196'
   const AAVE_BASE = '0x63706e401c06ac8513145b7687A14804d17f814b'
   const UNI_BASE = '0xc3De830EA07524a0761646a6a4e4be0e114a3C83'
-  const captured = (key: string, symbol: string, price: number) =>
-    ({ coins: { [key]: { decimals: 18, symbol, price, timestamp: 1791713879, confidence: 0.99 } } })
+  const TS = 1791713879
   const urls: string[] = []
-  const serve = (body: unknown) => vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); return { ok: true, status: 200, json: async () => body } }))
+  /** DefiLlama answers `llama` for its key; CoinGecko answers `gecko` USD for the address (null = no answer). */
+  const serve = (key: string, llama: number | null, gecko: number | null) => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    urls.push(url)
+    if (url.startsWith('https://coins.llama.fi/')) {
+      return { ok: true, status: 200, json: async () => (llama === null ? { coins: {} } : { coins: { [key]: { symbol: 'X', price: llama, timestamp: TS, confidence: 0.99 } } }) }
+    }
+    const addr = new URL(url).searchParams.get('contract_addresses')!
+    return { ok: true, status: 200, json: async () => (gecko === null ? {} : { [addr]: { usd: gecko, last_updated_at: TS + 20 } }) }
+  }))
 
-  beforeEach(async () => {
+  beforeEach(() => {
     urls.length = 0
-    const actual = await vi.importActual<typeof import('@/lib/defillama')>('@/lib/defillama')
-    vi.mocked(fetchDefiLlamaPrice).mockImplementation(actual.fetchDefiLlamaPrice)
+    resetQuorumQuoteCache()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime((TS + 100) * 1000)
   })
-  afterEach(() => { vi.unstubAllGlobals(); vi.mocked(fetchDefiLlamaPrice).mockReset() })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   it('a real-priced token with no on-chain feed is offchain-price, never unpriced (AAVE on 42161 and 8453)', async () => {
     for (const c of [
@@ -126,25 +136,39 @@ describe('off-chain price path with captured DefiLlama responses', () => {
       { chainId: 8453, weth: WETH_BASE, token: AAVE_BASE, key: `base:${AAVE_BASE.toLowerCase()}` },
     ]) {
       urls.length = 0
-      serve(captured(c.key, 'AAVE', 167.32572402703212))
+      resetQuorumQuoteCache()
+      serve(c.key, 167.32572402703212, 167.4)
       const out = await classifyDcaFloorDetailed({ chainId: c.chainId, tokenIn: c.weth, tokenOut: c.token }, { reader: reader([c.weth]) })
       expect(out).toMatchObject({ tier: 'offchain-price', affected: [c.token] })
-      expect(urls).toEqual([`https://coins.llama.fi/prices/current/${c.key}`])
+      expect(urls).toContain(`https://coins.llama.fi/prices/current/${c.key}`)
     }
   })
 
-  it('the production failure mode: a browser-blocked fetch (CSP → TypeError) reads unpriced, naming only that leg', async () => {
+  it('one price source is not enough: DefiLlama alone (CoinGecko silent) is unpriced, exactly the keeper\'s single', async () => {
+    serve(`base:${UNI_BASE.toLowerCase()}`, 7.557, null)
+    const out = await classifyDcaFloorDetailed({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: UNI_BASE }, { reader: reader([WETH_BASE]) })
+    expect(out).toMatchObject({ tier: 'unpriced', affected: [UNI_BASE] })
+  })
+
+  it('two sources that disagree beyond the tolerance are unpriced, exactly the keeper\'s skip', async () => {
+    serve(`base:${UNI_BASE.toLowerCase()}`, 7.557, 9.0)
+    const out = await classifyDcaFloorDetailed({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: UNI_BASE }, { reader: reader([WETH_BASE]) })
+    expect(out).toMatchObject({ tier: 'unpriced', affected: [UNI_BASE] })
+  })
+
+  it('a failed fetch reads unpriced, naming only that leg', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
     const out = await classifyDcaFloorDetailed({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: UNI_BASE }, { reader: reader([WETH_BASE]) })
     expect(out).toMatchObject({ tier: 'unpriced', affected: [UNI_BASE] })
   })
 
-  it('the origin the classifier fetches is allowed by the CSP connect-src in next.config.js', async () => {
-    serve(captured(`base:${UNI_BASE.toLowerCase()}`, 'UNI', 7.557033308837781))
+  it('classification is server-side: price origins are NOT needed by the browser CSP, except the one DCAPanel still uses itself', async () => {
+    serve(`base:${UNI_BASE.toLowerCase()}`, 7.557, 7.56)
     await classifyDcaFloor({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: UNI_BASE }, { reader: reader([WETH_BASE]) })
     const connectSrc = readFileSync(resolve(__dirname, '../../../next.config.js'), 'utf8').match(/"connect-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
-    expect(urls).toHaveLength(1)
-    expect(connectSrc).toContain(new URL(urls[0]).origin)
+    expect(new Set(urls.map(u => new URL(u).origin))).toEqual(new Set(['https://coins.llama.fi', 'https://api.coingecko.com']))
+    expect(connectSrc).not.toContain('https://api.coingecko.com') // server-only source
+    expect(connectSrc).toContain('https://coins.llama.fi') // DCAPanel's own price preview (grep in feedback)
   })
 })
 

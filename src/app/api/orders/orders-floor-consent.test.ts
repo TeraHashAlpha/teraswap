@@ -79,6 +79,12 @@ vi.mock('@/lib/defillama', () => ({
   HIGH_VALUE_THRESHOLD_USD: 10_000,
   validateSwapPrice: vi.fn(),
 }))
+// [feat/dca-tier-server-side] The classifier's default price source is now the price QUORUM module
+// (DefiLlama + CoinGecko). Same per-address toggle: priced / unpriced.
+vi.mock('@/lib/order-engine/dca-price-quorum', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/order-engine/dca-price-quorum')>('@/lib/order-engine/dca-price-quorum')),
+  quorumPriceUsd: async (addr: string) => (await mockFetchDefiLlamaPrice(addr))?.price ?? null,
+}))
 vi.mock('@/lib/chainlink', () => ({
   computeTokenAmountUsd: vi.fn(async (addr: string) => (addr.toLowerCase() === TOKEN_OUT ? null : { usd: 100, price: 1, decimals: 18 })),
   fetchErc20Decimals: vi.fn(async () => 18),
