@@ -144,7 +144,7 @@ describe('GET /api/dca-floor-cap?tokenIn&tokenOut — the pair tier, decided ser
     expect(r.cache).toBe('public, max-age=60')
   })
 
-  it('uses the SAME classifier as the create route: identical tier for every scenario, called with the pair as given', async () => {
+  it('uses the SAME classifier as the create route: identical tier for every scenario, called with the pair, normalized to lowercase', async () => {
     const scenarios: Array<[string, string, string[]]> = [
       [baseAddr('WETH'), baseAddr('USDC'), []],            // onchain-feed
       [baseAddr('WETH'), UNI, [UNI.toLowerCase()]],         // offchain-price
@@ -155,7 +155,7 @@ describe('GET /api/dca-floor-cap?tokenIn&tokenOut — the pair tier, decided ser
       pricedTokens.clear(); priced.forEach(a => pricedTokens.add(a))
       vi.mocked(classifyDcaFloorDetailed).mockClear()
       const viaRoute = (await call(pair(inn, out, 8453) + `&n=${Math.random()}`)).json.tier
-      expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledWith({ chainId: 8453, tokenIn: inn, tokenOut: out })
+      expect(vi.mocked(classifyDcaFloorDetailed)).toHaveBeenCalledWith({ chainId: 8453, tokenIn: inn.toLowerCase(), tokenOut: out.toLowerCase() })
       expect(viaRoute).toBe(await classifyDcaFloor({ chainId: 8453, tokenIn: inn, tokenOut: out }))
       clock += 120_000; vi.setSystemTime(clock) // past the 30s pair cache for the next scenario
     }
@@ -171,6 +171,16 @@ describe('GET /api/dca-floor-cap?tokenIn&tokenOut — the pair tier, decided ser
       expect(r.status, q).toBe(400)
     }
     expect((await call('?chainId=abc&tokenIn=x&tokenOut=y')).status).toBe(400)
+    expect(vi.mocked(classifyDcaFloorDetailed)).not.toHaveBeenCalled()
+  })
+
+  it('crafted path/URL values -> 400 and nothing is classified (request-forgery guard)', async () => {
+    const W = baseAddr('WETH')
+    for (const bad of ['0x..%2F..%2Fevil', '0x../../evil', `${W}/../x`, `${W}%2F..%2Fevil`, 'https://evil.example/x', `${W}?x=1`, `${W}#`, `//evil.example`]) {
+      const q = encodeURIComponent(bad)
+      expect((await call(pair(q, W))).status, bad).toBe(400)
+      expect((await call(pair(W, q))).status, bad).toBe(400)
+    }
     expect(vi.mocked(classifyDcaFloorDetailed)).not.toHaveBeenCalled()
   })
 

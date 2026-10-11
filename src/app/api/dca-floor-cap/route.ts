@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { clientIp } from '@/lib/body-limit'
+import { normalizeAddress } from '@/lib/order-engine/normalize-address'
 import { getChainTokenList } from '@/lib/chains/tokens'
 import {
   classifyDcaFloorDetailed,
@@ -30,7 +31,6 @@ import {
  */
 const CACHE = { 'Cache-Control': 'public, max-age=60' }
 
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const PAIR_TTL_MS = 30_000
 const PAIR_CACHE_MAX = 500
 const pairCache = new Map<string, { c: DcaFloorClassification; expiresAt: number }>()
@@ -83,10 +83,12 @@ export async function GET(req: NextRequest) {
   if (!Number.isInteger(chainId) || chainId <= 0) {
     return NextResponse.json({ error: 'Invalid chainId' }, { status: 400 })
   }
-  const tokenIn = req.nextUrl.searchParams.get('tokenIn')
-  const tokenOut = req.nextUrl.searchParams.get('tokenOut')
-  const wantsPair = tokenIn !== null || tokenOut !== null
-  if (wantsPair && !(tokenIn && tokenOut && ADDRESS_RE.test(tokenIn) && ADDRESS_RE.test(tokenOut))) {
+  const rawIn = req.nextUrl.searchParams.get('tokenIn')
+  const rawOut = req.nextUrl.searchParams.get('tokenOut')
+  const wantsPair = rawIn !== null || rawOut !== null
+  const tokenIn = normalizeAddress(rawIn)
+  const tokenOut = normalizeAddress(rawOut)
+  if (wantsPair && !(tokenIn && tokenOut)) {
     return NextResponse.json({ error: 'Invalid tokenIn/tokenOut' }, { status: 400 })
   }
   // Read in parallel with the cap; a count failure never affects the cap answer.

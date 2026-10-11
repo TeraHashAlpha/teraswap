@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { normalizeAddress } from './normalize-address'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -125,5 +126,32 @@ describe('quorum constants are pinned to the keeper', () => {
   })
   it.skipIf(!branch)('equal the keeper on origin/feat/keeper-price-quorum (the unmerged source of truth)', () => {
     expect(consts(branch!.floor, branch!.sources)).toEqual(WEB)
+  })
+})
+
+describe('request-forgery guard: only the two fixed price origins are ever fetched', () => {
+  const ALLOWED = new Set(['https://coins.llama.fi', 'https://api.coingecko.com'])
+  const JUNK = ['0x..%2F..%2Fevil', '0x../../evil', 'https://evil.example/x', `${TOKEN}/../x`, `${TOKEN}?x=1`, '//evil.example', '', '0x123', ` ${TOKEN}`]
+
+  it('junk addresses never reach fetch (0 calls) and read as unpriced', async () => {
+    const urls = serve(llamaBody(7.5), geckoBody(7.5))
+    for (const bad of JUNK) expect(await quorumPriceUsd(bad, 'base'), bad).toBeNull()
+    expect(urls).toHaveLength(0)
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(0)
+  })
+  it('every URL actually fetched is on the allow-list, for a valid address on each chain', async () => {
+    const urls = serve(llamaBody(7.5), geckoBody(7.5))
+    for (const slug of ['ethereum', 'base', 'arbitrum']) { resetQuorumQuoteCache(); await quorumPriceUsd(TOKEN, slug) }
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(ALLOWED.has(new URL(u).origin), u).toBe(true)
+  })
+  it('a hostile slug cannot leave the origin (encoded or rejected, never a foreign host)', async () => {
+    const urls = serve(llamaBody(7.5), geckoBody(7.5))
+    for (const slug of ['../../evil', '@evil.example', 'x/../../y', '//evil.example']) { resetQuorumQuoteCache(); await quorumPriceUsd(TOKEN, slug) }
+    for (const u of urls) expect(ALLOWED.has(new URL(u).origin), u).toBe(true)
+  })
+  it('normalizeAddress: exactly 0x + 40 hex -> lowercase; everything else null', () => {
+    expect(normalizeAddress(TOKEN)).toBe(TOKEN.toLowerCase())
+    for (const bad of [...JUNK, null, undefined, 5, `${TOKEN}\n`, TOKEN.slice(2)]) expect(normalizeAddress(bad), String(bad)).toBeNull()
   })
 })

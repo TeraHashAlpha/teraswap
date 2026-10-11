@@ -22,6 +22,8 @@
  * both settled before this module is consulted (dca-floor-tier.ts).
  */
 
+import { normalizeAddress } from './normalize-address'
+
 /** Keeper `QUORUM_TOLERANCE_BPS` (order-floor.js). Two prices agree when their spread is <= this. */
 export const QUORUM_TOLERANCE_BPS = 300
 /** Keeper `MAX_PRICE_AGE_SEC` (order-floor.js). An older quote is absent, not stale-but-counted. */
@@ -35,6 +37,22 @@ export const QUOTE_CACHE_TTL_MS = 30_000
 
 /** CoinGecko asset-platform per DefiLlama chain slug — keeper COINGECKO_PLATFORM / DEFILLAMA_CHAIN_SLUG. */
 const COINGECKO_PLATFORM_BY_SLUG: Readonly<Record<string, string>> = { ethereum: 'ethereum', base: 'base', arbitrum: 'arbitrum-one' }
+
+/** Fixed origin of each price source. Every outbound URL is built against one of these and re-checked. */
+const DEFILLAMA_BASE = 'https://coins.llama.fi'
+const COINGECKO_BASE = 'https://api.coingecko.com'
+
+/**
+ * `new URL(path, base)` with the origin asserted unchanged. `path` is built by the callers only from a
+ * normalized address, a constant platform and constant segments (each through encodeURIComponent), so
+ * this is the backstop: a throw here is "source absent" for the caller.
+ */
+function buildSourceUrl(path: string, base: string, query?: Record<string, string>): string {
+  const url = new URL(path, base)
+  if (url.origin !== new URL(base).origin) throw new Error('price-source URL origin mismatch')
+  if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
+  return url.toString()
+}
 
 export interface OffchainQuote { price: number; source: 'defillama' | 'coingecko' }
 
@@ -92,8 +110,12 @@ async function getJson(url: string, headers: Record<string, string> = {}): Promi
 }
 
 async function defiLlamaQuote(address: string, slug: string, nowSec: number): Promise<OffchainQuote | null> {
-  const key = `${slug}:${address.toLowerCase()}`
-  const json = (await getJson(`https://coins.llama.fi/prices/current/${key}`)) as { coins?: Record<string, { price?: unknown; timestamp?: unknown }> } | null
+  const addr = normalizeAddress(address)
+  if (!addr) return null
+  const key = `${slug}:${addr}`
+  // The ':' separator stays literal (as before); both halves are encoded.
+  const url = buildSourceUrl(`/prices/current/${encodeURIComponent(slug)}:${encodeURIComponent(addr)}`, DEFILLAMA_BASE)
+  const json = (await getJson(url)) as { coins?: Record<string, { price?: unknown; timestamp?: unknown }> } | null
   const row = json?.coins?.[key]
   return freshQuote(row?.price, row?.timestamp, 'defillama', nowSec)
 }
@@ -101,10 +123,16 @@ async function defiLlamaQuote(address: string, slug: string, nowSec: number): Pr
 async function coinGeckoQuote(address: string, slug: string, nowSec: number): Promise<OffchainQuote | null> {
   const platform = COINGECKO_PLATFORM_BY_SLUG[slug]
   if (!platform) return null
-  const addr = address.toLowerCase()
+  const addr = normalizeAddress(address)
+  if (!addr) return null
   const apiKey = process.env.COINGECKO_API_KEY // optional, server-only; keyless works at the public rate limit
+  const url = buildSourceUrl(`/api/v3/simple/token_price/${encodeURIComponent(platform)}`, COINGECKO_BASE, {
+    contract_addresses: addr,
+    vs_currencies: 'usd',
+    include_last_updated_at: 'true',
+  })
   const json = (await getJson(
-    `https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${addr}&vs_currencies=usd&include_last_updated_at=true`,
+    url,
     apiKey ? { 'x-cg-demo-api-key': apiKey } : {},
   )) as Record<string, { usd?: unknown; last_updated_at?: unknown }> | null
   if (!json || typeof json !== 'object') return null
@@ -127,14 +155,16 @@ export function resetQuorumQuoteCache(): void {
  */
 export async function quorumPriceUsd(address: string, slug: string): Promise<number | null> {
   try {
-    const key = `${slug}:${address.toLowerCase()}`
+    const addr = normalizeAddress(address)
+    if (!addr) return null
+    const key = `${slug}:${addr}`
     const now = Date.now()
     let hit = cache.get(key)
     if (!hit || now >= hit.expiresAt) {
       const nowSec = Math.floor(now / 1000)
       const quotes = await Promise.all([
-        defiLlamaQuote(address, slug, nowSec).catch(() => null),
-        coinGeckoQuote(address, slug, nowSec).catch(() => null),
+        defiLlamaQuote(addr, slug, nowSec).catch(() => null),
+        coinGeckoQuote(addr, slug, nowSec).catch(() => null),
       ])
       if (cache.size >= CACHE_MAX) cache.clear()
       hit = { quotes, expiresAt: now + QUOTE_CACHE_TTL_MS }

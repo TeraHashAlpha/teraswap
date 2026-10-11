@@ -39,3 +39,12 @@ grammar; Base WETH→UNI names only UNI — UNI picker added to the mock). Mutat
 ## 6. Verification
 Suite 291 files / 4396 pass + 1 skipped (pin); origin/main 290 / 4371 pass + **1 failed** (not investigated; main run in a
 worktree with symlinked `node_modules`). `git diff --stat origin/main`: 20 files, +870 / −82. Lint 0 errors / 94 warnings = main. `tsc --noEmit` clean. No keeper, 409-rule or persistence change.
+
+## Feedback — CodeQL js/request-forgery (dca-price-quorum.ts)
+
+### Edge case
+- `normalizeAddress()` lowercases at the route boundary, so the classifier now receives lowercase addresses instead of "as given" (checksummed). The classifier and caches were already case-insensitive; the one test asserting "as given" now asserts lowercase.
+- DefiLlama's `slug:address` key keeps a literal `:` (each half encoded) so the URL is byte-identical to before; CoinGecko query order is unchanged.
+
+### Concern
+- Fix verified locally (4401 tests, tsc, eslint clean). CodeQL goes green only once it re-scans the pushed commit; alert is not dismissed.
