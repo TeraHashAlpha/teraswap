@@ -71,7 +71,7 @@ timestamp, is **absent** — never stale-but-counted. Every I/O is injected; the
 | ≥ 2 and every pair within `QUORUM_TOLERANCE_BPS` | `quorum` | conservative over the agreeing set | normal floor, `DCA_ORACLE_FLOOR_BPS` band |
 | 3, exactly one pair agrees | `quorum` | conservative over the pair; outlier dropped (the third breaks the tie) | normal floor |
 | 3 in a chain (A~B, B~C, A≁C) | `quorum` | the pair with the most-trusted members | normal floor |
-| exactly 1 | `single` | that price | **tighter** band (`singleSourceFloorBps` = half, never below the MIN clamp) + fill ≤ the no-price $ cap + flagged alert |
+| exactly 1 | `single` | that price | **tighter** band (`singleSourceFloorBps` = half, never below the MIN clamp) + fill ≤ the no-price $ cap + flagged alert; a chunk **above** the cap is **delayed** and counted in the skip streak (Auditor round 1, M — §Consequences) |
 | 0 | `skip` | — | **skip this cycle**: unlock to `active`, bump `consecutiveSkips`, log; alert at `SKIP_ALERT_CYCLES` (and every N); never cancel, never execute |
 | 2 that disagree beyond tolerance, no third | `skip` | — | same |
 | 3, no pair agrees | `skip` | — | same |
@@ -80,8 +80,11 @@ timestamp, is **absent** — never stale-but-counted. Every I/O is injected; the
 (what the user sells) takes the highest valuation, the `out` leg (what the user receives) the
 lowest — both raise the floor. A fill is `skip` if **either** leg is `skip`, `single` if either leg
 is `single`, else `quorum` (`combineLegModes`). A resolved pair whose reference cannot be computed
-(amount/decimals/precision) is a skip too. The streak resets the first cycle a price resolves and
-on any successful fill, and is dropped on expiry; it is in-memory only (a restart starts at 0).
+(amount/decimals/precision) is a skip too. The per-order streak counts every cycle the price
+machinery holds the fill back — a quorum skip **or a single-source cap-delay** (Auditor round 1, M)
+— and resets once it *releases* the fill (quorum, or single within the cap) and on any successful
+fill; it is dropped on expiry and in-memory only (a restart starts at 0). A floor breach is a
+route-quality rejection with its own per-cycle WARN: it neither bumps nor resets the streak.
 
 ### Constants — one production module (`order-floor.js`), env-overridable **by name**, clamped
 
@@ -127,20 +130,37 @@ retained as pure exports (no longer called by the executor) rather than deleted 
   That is a delay, not a drain, and spreads that wide signal a moment not to fill.
 - **Three requests per cycle, not per order** (one DefiLlama batch, one CoinGecko batch, one
   Chainlink read per token), so the keyless CoinGecko tier is comfortably within limits.
+- **A 28b-consented pair can land in `single` mode and be capped/delayed** (Auditor round 1, M,
+  2026-10-11). 28b classifies a pair at *creation* (`onchain-feed` / `offchain-price` / `unpriced`)
+  and today counts only DefiLlama as its off-chain source; the keeper decides at *execution* over
+  three sources. So a pair the user consented to as priced can, on a given cycle, have exactly one
+  fresh source on a leg → `single` → and if the chunk's notional exceeds the no-price cap
+  (`getFailOpenMaxUsd()`, ≤ `DCA_NO_PRICE_FILL_CAP_MAX_USD` = 250) it is **delayed**, not filled.
+  Before this round that delay was an info alert (score 0) every cycle with no streak, so a
+  persistently one-sourced order above the cap could stall silently. Now a cap-delay is **a skip
+  for streak purposes**: it bumps the same per-order streak, the `dca-floor-delay` alert escalates
+  to WARN at `SKIP_ALERT_CYCLES` (and every N) with the count, and the streak resets only when the
+  fill is released or succeeds (wiring pinned by `price-quorum-wiring.test.mjs` §4/§4b). The order
+  is still never cancelled; it resumes when a second source returns, the chunk shrinks, or the cap
+  is raised (never above the ceiling). The 28b tier ↔ quorum-mode mapping that would make the
+  consent and the execution agree is the open TODO at `order-floor.js` `resolveFloorPrice`.
 - **Both keepers must be restarted** to pick this up (Base `teraswap-executor`, Arbitrum
   `teraswap-keeper-arbitrum`); the quorum line `DCA price quorum: in=… out=… -> …` in the log is
   the proof it is live.
 
 ## Verification
 
-- `contracts/order-engine/executor`: `node --test` — 731 tests (origin/main 650), 0 fail:
-  `price-sources.test.mjs` (29, drift guard + sources, zero network), `order-floor.test.mjs` (+24:
-  the table above, tie-break, boundary, env-by-name), `price-quorum-wiring.test.mjs` (13: the skip
-  branch ends in `continue` before any execution-path call, touches no write / ladder / cancel,
-  only ever unlocks to `active`), `runtime-config.test.mjs` (12: clamp both directions, tolerant
-  upsert, boot wiring).
-- Mutation run: 15 rules flipped in place (tolerance, conservative pick, single-as-quorum, skip
+- `contracts/order-engine/executor`: `node --test` — 736 tests (origin/main 650; 731 before the
+  Auditor round-1 follow-up), 0 fail: `price-sources.test.mjs` (29, drift guard + sources, zero
+  network), `order-floor.test.mjs` (+24: the table above, tie-break, boundary, env-by-name),
+  `price-quorum-wiring.test.mjs` (18: the skip branch ends in `continue` before any execution-path
+  call, touches no write / ladder / cancel, only ever unlocks to `active`; §4b: a cap-delay bumps
+  the shared streak, escalates at `SKIP_ALERT_CYCLES`, ends in `continue`; the reset follows the
+  cap check; a breach neither bumps nor resets), `runtime-config.test.mjs` (12: clamp both
+  directions, tolerant upsert, boot wiring).
+- Mutation run: 18 rules flipped in place (tolerance, conservative pick, single-as-quorum, skip
   leg, stale counted, cap value, `continue` removed, alert cadence, reset-on-success, tie-break,
-  tighter band, cancel-instead-of-unlock, 0-as-single, V3 registry ignored, ceiling clamp) — each
-  caught by a named test; files restored and `git`-clean verified. Table in
-  `docs/feedback/feat-keeper-price-quorum.md`.
+  tighter band, cancel-instead-of-unlock, 0-as-single, V3 registry ignored, ceiling clamp; round-1
+  follow-up: cap-delay streak bump removed, cap-delay alert never escalates, reset moved back before
+  the cap check) — each caught by a named test; files restored and verified byte-identical. Table
+  in `docs/feedback/feat-keeper-price-quorum.md`.

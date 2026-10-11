@@ -10,8 +10,12 @@
  *   2. the SKIP branch NEVER reaches the execute path: it unlocks, counts, `continue`s — before
  *      fetchBestQuote / dcaDueSec / any write — and never touches the failure ladder or cancels;
  *   3. single mode uses the TIGHTER band and the SAME cap source as before (getFailOpenMaxUsd);
- *   4. the skip streak is reset when a price resolves and on a successful fill, and dropped on
- *      expiry; the alert is gated on the tracker's `alert` flag with its own kind;
+ *   4. the skip streak is reset ONLY once the price machinery releases the fill (after the
+ *      single-source cap check) and on a successful fill, and dropped on expiry; the alert is gated
+ *      on the tracker's `alert` flag with its own kind;
+ *   4b. [Auditor round-1 M] a single-source fill DELAYED by the $ cap is a skip for streak purposes:
+ *      it bumps the SAME per-order streak, escalates its alert to WARN at SKIP_ALERT_CYCLES, and
+ *      ends in `continue`; a floor BREACH (its own per-cycle WARN) neither bumps nor resets it;
  *   5. the old blind-fill plumbing (fetchReferencePriceUsd, classifyReference, decideFailOpen,
  *      inline DefiLlama) is gone from executor.js.
  *
@@ -24,7 +28,7 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 
-import { resolveFloorPrice, combineLegModes } from "./order-floor.js"
+import { resolveFloorPrice, combineLegModes, recordQuorumSkip, clearQuorumSkips } from "./order-floor.js"
 
 const src = readFileSync(new URL("./executor.js", import.meta.url), "utf-8")
 
@@ -46,6 +50,33 @@ function skipBranch() {
   assert.notEqual(end, -1, "a resolved price must reset the streak right after the skip branch")
   return block.slice(start, end)
 }
+
+/** The single-source CAP-DELAY branch: from `if (!cap.ok) {` to the flagged single-source log that follows it. */
+function capDelayBranch() {
+  const block = dcaFloorBlock()
+  const start = block.indexOf("if (!cap.ok) {")
+  assert.notEqual(start, -1, "the cap-delay branch must be keyed on cap.ok")
+  const marker = block.indexOf("DCA fill on a SINGLE price source", start)
+  assert.notEqual(marker, -1, "the flagged single-source fill must follow the cap-delay branch")
+  // cut at the START of the marker's line so the slice ends with the branch's closing brace
+  return block.slice(start, block.lastIndexOf("\n", marker))
+}
+
+/** The floor BREACH branch: from `if (!floorDecision.ok) {` to the single-mode block that follows it. */
+function breachBranch() {
+  const block = dcaFloorBlock()
+  const start = block.indexOf("if (!floorDecision.ok) {")
+  assert.notEqual(start, -1, "the breach branch must be keyed on floorDecision.ok")
+  const end = block.indexOf('if (quorumMode === "single") {', start)
+  assert.notEqual(end, -1, "the single-mode block must follow the breach branch")
+  return block.slice(start, end)
+}
+
+const EXECUTION_PATH_TOKENS = [
+  "writeContract", "executeOrder", "sendTransaction", "fetchBestQuote", "simulateContract",
+  "orderRetries", "handleExecutionFailure", "consecutiveExecFailures", "planFailureHandling",
+  '"failed"', '"cancelled"', "cancel", "patchOrderRow", "recordExecution",
+]
 
 /** Source with full-line comments removed, so a forbidden token in a COMMENT does not count. */
 function stripComments(s) {
@@ -84,7 +115,8 @@ describe("2. the SKIP branch never reaches the execute path", () => {
   })
   test("the skip branch precedes every execution-path call in the DCA block", () => {
     const block = dcaFloorBlock()
-    const skipEnd = block.indexOf("clearQuorumSkips(quorumSkips, dbOrder.id)")
+    const skipEnd = block.indexOf("// A price was resolved this cycle")
+    assert.notEqual(skipEnd, -1, "the skip branch must end at the resolved-price marker")
     for (const needle of ["fetchBestQuote(", "decideDcaExecution(", "computeReferenceExpectedOut({", "decideFloor({"]) {
       const at = src.indexOf(needle, src.indexOf("DCA price quorum:"))
       if (needle === "computeReferenceExpectedOut({" || needle === "decideFloor({") {
@@ -98,11 +130,7 @@ describe("2. the SKIP branch never reaches the execute path", () => {
   })
   test("the skip branch touches no write, no failure ladder, no cancel, no execution", () => {
     const branch = stripComments(skipBranch())
-    for (const forbidden of [
-      "writeContract", "executeOrder", "sendTransaction", "fetchBestQuote", "simulateContract",
-      "orderRetries", "handleExecutionFailure", "consecutiveExecFailures", "planFailureHandling",
-      '"failed"', '"cancelled"', "cancel", "patchOrderRow", "recordExecution",
-    ]) {
+    for (const forbidden of EXECUTION_PATH_TOKENS) {
       assert.ok(!branch.includes(forbidden), `skip branch must not contain ${forbidden}`)
     }
   })
@@ -137,13 +165,56 @@ describe("4. skip streak lifecycle + alert", () => {
     const branch = skipBranch()
     assert.match(branch, /if \(skip\.alert\) \{[\s\S]*kind: "dca-price-quorum-skip"[\s\S]*TIER_WARN_THRESHOLD/)
   })
-  test("reset: when a price resolves (right after the skip branch) AND on a successful fill; dropped on expiry", () => {
-    assert.match(dcaFloorBlock(), /continue\s*\}\s*\/\/[^\n]*\n\s*clearQuorumSkips\(quorumSkips, dbOrder\.id\)/)
+  test("reset: ONLY once the price machinery releases the fill (after the cap check, after every hold-back branch) AND on a successful fill; dropped on expiry", () => {
+    const block = dcaFloorBlock()
+    const clears = [...block.matchAll(/clearQuorumSkips\(quorumSkips, dbOrder\.id\)/g)]
+    assert.equal(clears.length, 1, "exactly one streak reset in the floor block")
+    const capAt = block.indexOf("decideSingleSourceCap(")
+    assert.notEqual(capAt, -1)
+    assert.ok(clears[0].index > capAt, "the reset must FOLLOW the single-source cap check — otherwise a cap-delay could never extend the streak")
+    assert.ok(clears[0].index > block.lastIndexOf("continue"), "the reset must follow every hold-back branch (skip / breach / cap-delay), so only a released fill resets")
     const successAt = src.indexOf("pinnedRouteReverts.delete(dbOrder.id)")
     assert.notEqual(successAt, -1)
     assert.match(src.slice(successAt, successAt + 300), /clearQuorumSkips\(quorumSkips, dbOrder\.id\)/, "a successful fill must reset the streak")
     assert.match(src, /updateOrderStatus\(dbOrder\.id, "expired"\)\s*\n\s*orderRetries\.delete\(dbOrder\.id\)\s*\n\s*quorumSkips\.delete\(dbOrder\.id\)/)
     assert.match(src, /const quorumSkips = new Map\(\)/)
+  })
+})
+
+describe("4b. a single-source CAP-DELAY is a skip for streak purposes (Auditor round-1 M)", () => {
+  test("cap-delay ⇒ recordQuorumSkip on the SAME per-order streak, unlock (active), skipped++, continue — and nothing else", () => {
+    const branch = capDelayBranch()
+    assert.match(branch, /const skip = recordQuorumSkip\(quorumSkips, dbOrder\.id\)/, "a cap-delay must bump the shared streak")
+    assert.match(branch, /updateOrderStatus\(dbOrder\.id, "active"\)/)
+    assert.match(branch, /skipped\+\+/)
+    assert.match(branch.trimEnd(), /continue\s*\}\s*$/, "the branch must END with `continue` — nothing below it may run")
+  })
+  test("cap-delay alert: kind dca-floor-delay, WARN at SKIP_ALERT_CYCLES (tracker's alert flag), info (score 0) otherwise", () => {
+    const branch = capDelayBranch()
+    assert.match(branch, /kind: "dca-floor-delay"/)
+    assert.match(branch, /skip\.alert \? TIER_WARN_THRESHOLD : 0/, "the delay alert must escalate on the streak, never stay a silent info forever")
+    assert.match(branch, /skip\.count/, "the alert / log must carry the consecutive count")
+  })
+  test("the cap-delay branch touches no write, no failure ladder, no cancel, no execution", () => {
+    const branch = stripComments(capDelayBranch())
+    for (const forbidden of EXECUTION_PATH_TOKENS) {
+      assert.ok(!branch.includes(forbidden), `cap-delay branch must not contain ${forbidden}`)
+    }
+  })
+  test("a floor BREACH neither bumps nor resets the streak — it is a route-quality rejection with its own per-cycle WARN", () => {
+    const branch = stripComments(breachBranch())
+    assert.ok(!branch.includes("recordQuorumSkip"), "a breach is not a price-availability hold")
+    assert.ok(!branch.includes("clearQuorumSkips"), "a breach does not release the fill either")
+    assert.match(branch, /kind: "dca-floor-breach"[\s\S]*TIER_WARN_THRESHOLD/)
+    assert.match(branch.trimEnd(), /continue\s*\}\s*$/)
+  })
+  test("behavioural: skip, cap-delay, skip on one order share ONE streak and alert exactly at SKIP_ALERT_CYCLES", () => {
+    const skips = new Map()
+    assert.deepEqual(recordQuorumSkip(skips, "o", 3), { count: 1, alert: false }, "cycle 1: quorum skip")
+    assert.deepEqual(recordQuorumSkip(skips, "o", 3), { count: 2, alert: false }, "cycle 2: single above the cap — same streak")
+    assert.deepEqual(recordQuorumSkip(skips, "o", 3), { count: 3, alert: true }, "cycle 3: quorum skip — WARN")
+    assert.equal(clearQuorumSkips(skips, "o"), true, "a released fill resets it")
+    assert.deepEqual(recordQuorumSkip(skips, "o", 3), { count: 1, alert: false })
   })
 })
 

@@ -50,6 +50,19 @@ Env NAMES: QUORUM_TOLERANCE_BPS · MAX_PRICE_AGE_SEC · SKIP_ALERT_CYCLES · DCA
 5. `pm2 restart teraswap-executor` (Base)          6. `select chain_id, no_price_fill_cap_usd from keeper_runtime_config` → 8453 + 42161
    (until the 28b migration is applied, step 6 shows instead the log line "table keeper_runtime_config is not there yet").
 
+## 7. Auditor round 1 (2026-10-11: 0C/0H/1M/4L) — follow-up, new commits only, same branch
+- [x] **M** cap-delay = skip for streak purposes (executor.js: `recordQuorumSkip` in the `!cap.ok` branch; `dca-floor-delay`
+      alert `skip.alert ? TIER_WARN_THRESHOLD : 0`; the single `clearQuorumSkips` moved AFTER the cap check, before `dueSec`;
+      a floor breach neither bumps nor resets). Wiring test §4 rewritten + §4b (5 tests); ADR-024 §Consequences bullet.
+- [ ] **L** 5 new env NAMES in `.env.executor.example` (names + defaults, no values)
+- [ ] **L** stale 28b refs in this file (head, line cite) corrected
+- [ ] **L (defer, note only)** per-feed V3 `maxStaleness` read-and-discarded → ADR-024 follow-up note, no code change
+- [ ] keeper suite + lint re-run, report
+Mutation (round-1 rules; restore by scratch COPY, not `git checkout` — the latter wiped the GREEN edits once, caught by diff):
+M16 cap-delay bump removed → "cap-delay ⇒ recordQuorumSkip on the SAME per-order streak" · M17 alert never escalates →
+"cap-delay alert: … WARN at SKIP_ALERT_CYCLES" · M18 reset moved back before the cap check → "reset: ONLY once the price
+machinery releases the fill". Suite 731 → **736**, 0 fail.
+
 ## Concerns / premises checked
 - **28b NOT merged** (`feat/dca-floor-tiers-consent` 5e01670): no `dca-floor-tier.ts`, no `keeper_runtime_config` on main.
   Mapping: onchain-feed ⇔ quorum with chainlink; offchain-price ⇔ quorum achievable (≥ 2 of the SAME list); unpriced ⇔ ≤ 1.

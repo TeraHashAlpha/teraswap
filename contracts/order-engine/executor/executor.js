@@ -1664,8 +1664,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           skipped++
           continue
         }
-        // A price was resolved this cycle ⇒ the consecutive-skip streak is broken (resume).
-        clearQuorumSkips(quorumSkips, dbOrder.id)
+        // A price was resolved this cycle — but the streak is NOT reset yet. [Auditor round-1 M,
+        // 2026-10-11] A single-source fill held back by the $ cap below is held back for the same
+        // reason a skip is (no price the keeper trusts for THIS size), so it shares the streak; the
+        // reset happens once the price machinery RELEASES the fill (after the cap check) and on a
+        // successful fill. A floor breach in between is a route-quality rejection with its own
+        // per-cycle WARN: it neither bumps nor resets the streak.
 
         const floorBps = quorumMode === "single" ? singleSourceFloorBps(getFloorMaxSlippageBps()) : getFloorMaxSlippageBps()
         const floorDecision = decideFloor({
@@ -1701,9 +1705,26 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           const notionalUsd = (Number(netAmount) / 10 ** srcDecimals) * floorIn.price
           const cap = decideSingleSourceCap({ notionalUsd, maxUsd: getFailOpenMaxUsd() })
           if (!cap.ok) {
-            log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill DELAYED -- ${cap.reason}`)
+            // [Auditor round-1 M] A cap-delay is a SKIP for streak purposes: bump the same per-order
+            // streak, WARN at SKIP_ALERT_CYCLES (and every N), info (score 0) in between — never a
+            // silent info forever. Reset on a released / successful fill, like a quorum skip.
+            const skip = recordQuorumSkip(quorumSkips, dbOrder.id)
+            log(
+              `  Order ${dbOrder.id.slice(0, 8)}... DCA fill DELAYED -- ${cap.reason} ` +
+                `-- consecutive skips=${skip.count}; order untouched, retry next cycle`,
+            )
             try {
-              await alertOps({ kind: "dca-floor-delay", detail: `Order ${dbOrder.id} DCA fill delayed: ${cap.reason}` }, 0)
+              await alertOps(
+                {
+                  kind: "dca-floor-delay",
+                  detail:
+                    `Order ${dbOrder.id} DCA fill delayed: ${cap.reason}` +
+                    (skip.alert
+                      ? ` -- held back ${skip.count} consecutive cycles on chain ${CHAIN_ID} (single price source, chunk above the no-price cap). Order untouched; resumes when a second source returns or the cap is raised.`
+                      : ""),
+                },
+                skip.alert ? TIER_WARN_THRESHOLD : 0,
+              )
             } catch {}
             await updateOrderStatus(dbOrder.id, "active")
             skipped++
@@ -1721,6 +1742,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           } catch {}
         }
         // else quorum pass → fall through to the deviation gate + execute.
+        // The price machinery RELEASED the fill (quorum, or single within the cap) ⇒ the
+        // consecutive-skip streak is broken (resume). [ADR-024; moved here from right after the skip
+        // branch per Auditor round-1 M so a cap-delay can extend the streak.]
+        clearQuorumSkips(quorumSkips, dbOrder.id)
 
         const dueSec = dcaDueSec(dbOrder)
         const { bestOut, nextBestOut, nextBestSource } = await fetchBestQuote(
