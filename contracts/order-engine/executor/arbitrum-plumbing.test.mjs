@@ -27,6 +27,9 @@ import { resolveExecutorRouting } from "./executor-routing.js"
 import { resolveGasTier, getGasTierConfig, assertTierOrdering, ARBITRUM_CHAIN_ID } from "./gas-tier.js"
 import { resolveSubmissionPolicy } from "./submission-policy.js"
 import { resolveEthUsdFeed } from "./eth-usd-feed.js"
+// [ADR-024] The DefiLlama slug map and the ETH-priced address set moved out of executor.js into
+// price-sources.js, so they are asserted as VALUES here (stronger than the source-regex they replace).
+import { DEFILLAMA_CHAIN_SLUG, ETH_PRICED_ADDRESSES, WRAPPED_NATIVE_BY_CHAIN, CHAINLINK_USD_FEED_BY_CHAIN } from "./price-sources.js"
 
 const ARBITRUM_ONE = 42161
 
@@ -84,23 +87,20 @@ describe("order query + RPC client are CHAIN_ID-parameterized (nothing to add fo
 })
 
 describe("oracle floor resolves for 42161", () => {
-  test("DefiLlama has an 'arbitrum' slug for 42161 — without it every non-ETH leg would read FEEDLESS", () => {
-    assert.match(executorSource, /const DEFILLAMA_CHAIN_SLUG = \{[^}]*42161:\s*"arbitrum"/)
+  test("DefiLlama has an 'arbitrum' slug for 42161 — without it the leg would lose one of its three sources", () => {
+    assert.equal(DEFILLAMA_CHAIN_SLUG[ARBITRUM_ONE], "arbitrum")
   })
 
   test("mainnet + Base slugs are untouched", () => {
-    assert.match(executorSource, /const DEFILLAMA_CHAIN_SLUG = \{ 1: "ethereum", 8453: "base", 42161: "arbitrum" \}/)
+    assert.deepEqual({ ...DEFILLAMA_CHAIN_SLUG }, { 1: "ethereum", 8453: "base", 42161: "arbitrum" })
   })
 
-  test("Arbitrum WETH is Chainlink-first priced, and its address is the manifest's", () => {
+  test("Arbitrum WETH is Chainlink-priced (ETH leg), and its address is the manifest's", () => {
     // Arbitrum does NOT reuse the OP-stack 0x42..06 WETH predeploy, so the leg needs its own entry.
-    assert.ok(
-      containsAddress(executorSource, MANIFEST.WETH),
-      `executor.js must list the manifest's Arbitrum WETH (${MANIFEST.WETH}) in ETH_PRICED_ADDRESSES`,
-    )
-    const ethPricedBlock = executorSource.match(/const ETH_PRICED_ADDRESSES = new Set\(([\s\S]*?)\)\n/)
-    assert.ok(ethPricedBlock, "could not locate ETH_PRICED_ADDRESSES")
-    assert.ok(containsAddress(ethPricedBlock[1], MANIFEST.WETH), "Arbitrum WETH must be INSIDE ETH_PRICED_ADDRESSES")
+    assert.equal(WRAPPED_NATIVE_BY_CHAIN[ARBITRUM_ONE].toLowerCase(), MANIFEST.WETH.toLowerCase(), "price-sources.js WRAPPED_NATIVE_BY_CHAIN[42161] must be the manifest's WETH")
+    assert.ok(ETH_PRICED_ADDRESSES.has(MANIFEST.WETH.toLowerCase()), "Arbitrum WETH must be INSIDE ETH_PRICED_ADDRESSES")
+    assert.ok(CHAINLINK_USD_FEED_BY_CHAIN[ARBITRUM_ONE][MANIFEST.WETH.toLowerCase()], "the 42161 Chainlink mirror must price the manifest's WETH")
+    assert.ok(!containsAddress(executorSource, MANIFEST.WETH), "executor.js must no longer hardcode the Arbitrum WETH literal (it lives in price-sources.js)")
   })
 
   // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] The per-chain ETH/USD map moved out of executor.js into

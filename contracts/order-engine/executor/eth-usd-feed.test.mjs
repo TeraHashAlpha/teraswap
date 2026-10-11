@@ -198,10 +198,17 @@ describe("executor.js wiring — the resolution is actually used, and fails clos
     assert.ok(fn[1].slice(0, guardEnd).includes("return null"), "the guard must return before any read")
   })
 
-  test("the reference-price fallback semantics are untouched (fetchReferencePriceUsd still fail-safe)", () => {
-    // readEthUsd returning null is the pre-existing path: fall through to DefiLlama, and for the
-    // ETH leg classify a miss as TRANSIENT. This fix must not have altered either.
-    assert.match(executorSource, /const eth = await readEthUsd\(publicClient\)\n\s*if \(eth != null\) return \{ price: eth, transient: false \}/)
-    assert.match(executorSource, /return \{ price: null, transient: ethPriced \}/)
+  test("[ADR-024] the SAME resolved ETH_USD_FEED is what prices the DCA ETH leg's Chainlink quote", () => {
+    // fetchReferencePriceUsd (Chainlink-first-else-DefiLlama) is gone: the DCA floor now takes a
+    // per-leg quorum from price-sources.js. The property this fix guards — an explicit
+    // ETH_USD_FEED wins, verbatim, and an unknown chain never reads another chain's feed — must
+    // survive the move, so the quote context must receive THIS resolution, not re-derive one.
+    assert.doesNotMatch(executorSource, /async function fetchReferencePriceUsd\(/, "the old single-reference fetch must not come back")
+    assert.doesNotMatch(executorSource, /coins\.llama\.fi/, "DefiLlama is fetched by price-sources.js now, not inline")
+    const ctx = executorSource.match(/createCycleQuoteContext\(\{([\s\S]*?)\}\)/)
+    assert.ok(ctx, "executor.js must create the per-cycle quote context")
+    assert.match(ctx[1], /ethUsdFeed:\s*ETH_USD_FEED\b/, "the quote context must be handed the resolved ETH_USD_FEED")
+    assert.match(ctx[1], /v3Address:\s*V3_CONTRACT_ADDRESS\b/, "…and the V3 address for the tokenUsdFeeds registry")
+    assert.match(ctx[1], /chainId:\s*CHAIN_ID\b/)
   })
 })
