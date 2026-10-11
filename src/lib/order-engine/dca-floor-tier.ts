@@ -108,11 +108,59 @@ export async function classifyDcaFloorDetailed(
   }
 }
 
+/** How strong a warning each tier carries. A stronger acknowledgement covers a weaker requirement. */
+const TIER_STRENGTH: Record<DcaFloorTier, number> = { 'onchain-feed': 0, 'offchain-price': 1, unpriced: 2 }
+
+/**
+ * [fix/dca-consent-copy-and-tier-check] Owner decision 2026-10-11: an acknowledgement of a tier EQUAL
+ * TO OR STRONGER than the server's classification satisfies it (a user who accepted `unpriced` has
+ * accepted everything `offchain-price` asks); a weaker or unknown tier never does. The browser and the
+ * server can disagree when a price source answers one and not the other; the caller still records the
+ * SERVER's tier.
+ */
+export function floorAckCovers(ackTier: unknown, required: DcaFloorTier): boolean {
+  if (typeof ackTier !== 'string' || !Object.prototype.hasOwnProperty.call(TIER_STRENGTH, ackTier)) return false
+  return TIER_STRENGTH[ackTier as DcaFloorTier] >= TIER_STRENGTH[required]
+}
+
 export async function classifyDcaFloor(
   params: ClassifyDcaFloorParams,
   deps: ClassifyDcaFloorDeps = {},
 ): Promise<DcaFloorTier> {
   return (await classifyDcaFloorDetailed(params, deps)).tier
+}
+
+/**
+ * [fix/dca-consent-copy-and-tier-check] How many of `tokens` the chain's OrderExecutorV3 has a feed
+ * registered for in `tokenUsdFeeds` — asked through the SAME registry helper the classifier uses, with
+ * the same signing rule (native ETH counts as the chain's wrapped native; duplicates count once).
+ * null when the registry cannot be read (no executor, RPC down, unrecognised answer, unsupported
+ * chain): the consent copy then shows no number at all rather than a guessed one.
+ */
+export async function countRegisteredFeeds(
+  params: { chainId: number; tokens: readonly string[] },
+  deps: Pick<ClassifyDcaFloorDeps, 'reader' | 'executor'> = {},
+): Promise<number | null> {
+  try {
+    const cfg = getChainConfig(params.chainId)
+    const wrapped = cfg.nativeCurrency.wrappedAddress
+    const byKey = new Map<string, string>()
+    for (const t of params.tokens) {
+      const signed = t.toLowerCase() === NATIVE_ETH.toLowerCase() ? wrapped : t
+      if (!byKey.has(signed.toLowerCase())) byKey.set(signed.toLowerCase(), signed)
+    }
+    const legs = [...byKey.values()].map(address => ({ role: 'buy' as const, symbol: address, address }))
+    const coverage = await readExecutorFeedCoverage({
+      reader: deps.reader ?? getPublicClientForChain(params.chainId),
+      executor: deps.executor !== undefined ? deps.executor : getOrderExecutorV3(params.chainId),
+      chainName: cfg.name,
+      legs,
+    })
+    if (coverage.unreadable) return null
+    return legs.length - coverage.unregistered.length
+  } catch {
+    return null
+  }
 }
 
 /**

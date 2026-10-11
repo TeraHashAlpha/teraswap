@@ -170,7 +170,7 @@ describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (20
 
     const body = (await screen.findByTestId('floor-consent-body')).textContent ?? ''
     expect(body).toMatch(/ETHFI/)
-    expect(body).toMatch(/ANY price/)
+    expect(body).toMatch(/the executor can't check the fill\. To limit risk, each buy is capped at \$\d+ and flagged\./)
     expect(body).not.toMatch(/not unprotected/i)
     expect(body).not.toMatch(/referee/i)
   })

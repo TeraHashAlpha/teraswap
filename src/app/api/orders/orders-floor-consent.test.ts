@@ -85,6 +85,7 @@ vi.mock('@/lib/chainlink', () => ({
 }))
 
 import { POST } from './route'
+import { classifyDcaFloor } from '@/lib/order-engine/dca-floor-tier'
 
 const ENV0 = { ...process.env }
 beforeEach(() => {
@@ -182,6 +183,37 @@ describe('POST /api/orders — DCA floor-tier consent [FEAT-DCA-FLOOR-TIERS]', (
     const ok = await post(body({ ...ack('unpriced') }))
     expect(ok.status).toBe(201)
     expect(insertedRow()).toMatchObject({ floor_tier: 'unpriced' })
+  })
+
+  it('a STRONGER ack covers a weaker tier: an unpriced ack on an offchain-price pair is 201 and the SERVER tier is persisted', async () => {
+    const { status } = await post(body(ack('unpriced')))
+    expect(status).toBe(201)
+    expect(insertedRow()).toMatchObject({ floor_tier: 'offchain-price', floor_ack_at: new Date(NOW_MS - 1000).toISOString() })
+  })
+
+  it('an unknown ack tier is never "stronger": 409 naming the required tier', async () => {
+    for (const tier of ['UNPRICED', 'none', '', 'toString']) {
+      const { status, json } = await post(body(ack(tier)))
+      expect(status).toBe(409)
+      expect(json.requiredTier).toBe('offchain-price')
+    }
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('production repro: the browser classifies unpriced (DefiLlama CSP-blocked), the user acks it, the server sees offchain-price → 201, not 409', async () => {
+    // Browser side: the REAL classifier, same executor + registry answer as the server, but every
+    // price lookup throws the way a CSP-blocked fetch does.
+    const blocked = async () => { throw new TypeError('Failed to fetch') }
+    const browserReader = { readContract: async () => ['0x0000000000000000000000000000000000000000', 0, 0, 0n, false] }
+    const browserTier = await classifyDcaFloor(
+      { chainId: 1, tokenIn: TOKEN_IN, tokenOut: TOKEN_OUT },
+      { reader: browserReader, executor: V3_MAINNET, priceUsd: blocked },
+    )
+    expect(browserTier).toBe('unpriced')
+    // Server side: price sources answer → offchain-price. The stronger browser ack must now satisfy it.
+    const { status } = await post(body(ack(browserTier)))
+    expect(status).toBe(201)
+    expect(insertedRow()).toMatchObject({ floor_tier: 'offchain-price' })
   })
 
   it('an ack timestamp that is stale, future or malformed is rejected (400)', async () => {
