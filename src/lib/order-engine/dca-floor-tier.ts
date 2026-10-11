@@ -131,6 +131,39 @@ export async function classifyDcaFloor(
 }
 
 /**
+ * [fix/dca-consent-copy-and-tier-check] How many of `tokens` the chain's OrderExecutorV3 has a feed
+ * registered for in `tokenUsdFeeds` — asked through the SAME registry helper the classifier uses, with
+ * the same signing rule (native ETH counts as the chain's wrapped native; duplicates count once).
+ * null when the registry cannot be read (no executor, RPC down, unrecognised answer, unsupported
+ * chain): the consent copy then shows no number at all rather than a guessed one.
+ */
+export async function countRegisteredFeeds(
+  params: { chainId: number; tokens: readonly string[] },
+  deps: Pick<ClassifyDcaFloorDeps, 'reader' | 'executor'> = {},
+): Promise<number | null> {
+  try {
+    const cfg = getChainConfig(params.chainId)
+    const wrapped = cfg.nativeCurrency.wrappedAddress
+    const byKey = new Map<string, string>()
+    for (const t of params.tokens) {
+      const signed = t.toLowerCase() === NATIVE_ETH.toLowerCase() ? wrapped : t
+      if (!byKey.has(signed.toLowerCase())) byKey.set(signed.toLowerCase(), signed)
+    }
+    const legs = [...byKey.values()].map(address => ({ role: 'buy' as const, symbol: address, address }))
+    const coverage = await readExecutorFeedCoverage({
+      reader: deps.reader ?? getPublicClientForChain(params.chainId),
+      executor: deps.executor !== undefined ? deps.executor : getOrderExecutorV3(params.chainId),
+      chainName: cfg.name,
+      legs,
+    })
+    if (coverage.unreadable) return null
+    return legs.length - coverage.unregistered.length
+  } catch {
+    return null
+  }
+}
+
+/**
  * Effective no-price fill cap: min(keeper_runtime_config.no_price_fill_cap_usd, MAX); MAX when there
  * is no row or the value is not a finite positive number. Never exceeds the ceiling.
  */
