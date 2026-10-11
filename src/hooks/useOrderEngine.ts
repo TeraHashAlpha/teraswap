@@ -298,6 +298,7 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     tokenOutDecimals: row.token_out_decimals ?? 18,
     dcaExecuted: row.dca_executed,
     dcaTotal: row.dca_total ?? 0,
+    floorTier: (row.floor_tier as AutonomousOrder['floorTier']) ?? null,
     createdAt: new Date(row.created_at).getTime(),
     executedAt: row.executed_at ? new Date(row.executed_at).getTime() : null,
     expiresAt: Number(row.expiry) * 1000,
@@ -825,6 +826,7 @@ export function useOrderEngine() {
       tokenOutDecimals: config.tokenOut.decimals,
       dcaExecuted: 0,
       dcaTotal: config.dcaTotal ?? 0,
+      floorTier: config.floorAck?.tier ?? null,
       createdAt: Date.now(),
       executedAt: null,
       expiresAt: Number(order.expiry) * 1000,
@@ -958,6 +960,8 @@ export function useOrderEngine() {
         // [SPRINT-P1B] Send the SIGNED hash so the server recovers against it. Without this the
         // server falls back to ZeroHash and a pinned-route order 400s on "Signature mismatch".
         routerDataHash: order.routerDataHash,
+        // [FEAT-DCA-FLOOR-TIERS] Evidence of consent; the server re-classifies and decides.
+        ...(config.floorAck ? { floorAck: config.floorAck } : {}),
       })
 
       const orderHash = row?.order_hash ?? computedHash

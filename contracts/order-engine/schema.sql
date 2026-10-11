@@ -87,6 +87,12 @@ CREATE TABLE IF NOT EXISTS orders (
     CONSTRAINT orders_consecutive_failures_nonneg CHECK (consecutive_failures >= 0),
   last_attempt_at TIMESTAMPTZ,
 
+  -- [FEAT-DCA-FLOOR-TIERS] DCA minimum-output tier the user consented to + when (nullable; NULL = no
+  -- consent required). See supabase/migrations/20261011120000_orders_floor_tier_consent.sql.
+  floor_tier TEXT
+    CONSTRAINT orders_floor_tier_valid CHECK (floor_tier IS NULL OR floor_tier IN ('onchain-feed', 'offchain-price', 'unpriced')),
+  floor_ack_at TIMESTAMPTZ,
+
   -- Router (part of signed order in v2)
   router      TEXT NOT NULL DEFAULT '',                -- DEX router from signed order
 
@@ -267,3 +273,13 @@ CREATE TRIGGER orders_normalize_wallet
   BEFORE INSERT OR UPDATE ON orders
   FOR EACH ROW
   EXECUTE FUNCTION normalize_wallet();
+
+-- [FEAT-DCA-FLOOR-TIERS] Keeper-written runtime config (web app READ-ONLY). Shape only; the keeper
+-- writes it in a later goal. See supabase/migrations/20261011120000_orders_floor_tier_consent.sql.
+CREATE TABLE IF NOT EXISTS keeper_runtime_config (
+  chain_id              INTEGER PRIMARY KEY,
+  no_price_fill_cap_usd NUMERIC,
+  keeper_version        TEXT,
+  updated_at            TIMESTAMPTZ
+);
+ALTER TABLE keeper_runtime_config ENABLE ROW LEVEL SECURITY;
