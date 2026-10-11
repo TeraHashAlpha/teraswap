@@ -24,6 +24,257 @@
 // Pure + never-throwing (mirrors deviation-guard.js / retry-policy.js): no I/O,
 // no Date.now, no provider — the caller passes the fetched prices in.
 
+/**
+ * Parse an env override as an integer clamped to [min, max]; unset/unparseable ⇒ the default.
+ * @param {string|undefined} raw
+ * @param {number} def
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+function clampedIntEnv(raw, def, min, max) {
+  if (!raw) return def
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed)) return def
+  if (parsed < min) return min
+  if (parsed > max) return max
+  return parsed
+}
+
+// ── [ADR-024 / feat/keeper-price-quorum] Price-quorum constants ──────────────
+// Owner decisions 2026-10-11. All three are env-overridable BY NAME (the env var is the
+// constant's name), clamped so a mis-set value can only land in a sane band.
+
+/** Price-source trust order, highest first. The quorum uses it ONLY to break a tie between two
+ *  equally sized agreeing clusters (price-sources.js documents each source). */
+export const PRICE_SOURCE_TRUST_ORDER = Object.freeze(["chainlink", "defillama", "coingecko"])
+
+/** A source quote older than this (seconds) is ABSENT for the quorum — never stale-but-counted. */
+export const MAX_PRICE_AGE_SEC = 600
+export const MAX_PRICE_AGE_SEC_MIN = 30
+export const MAX_PRICE_AGE_SEC_MAX = 86_400
+
+/** Active max quote age: `MAX_PRICE_AGE_SEC` env override clamped to [30, 86400], else 600. */
+export function getMaxPriceAgeSec(env = process.env) {
+  return clampedIntEnv(env.MAX_PRICE_AGE_SEC, MAX_PRICE_AGE_SEC, MAX_PRICE_AGE_SEC_MIN, MAX_PRICE_AGE_SEC_MAX)
+}
+
+/** Two sources AGREE when their spread is within this many basis points (300 = 3%). */
+export const QUORUM_TOLERANCE_BPS = 300
+export const QUORUM_TOLERANCE_BPS_MIN = 10
+export const QUORUM_TOLERANCE_BPS_MAX = 2000
+
+/** Active tolerance: `QUORUM_TOLERANCE_BPS` env override clamped to [10, 2000], else 300. */
+export function getQuorumToleranceBps(env = process.env) {
+  return clampedIntEnv(env.QUORUM_TOLERANCE_BPS, QUORUM_TOLERANCE_BPS, QUORUM_TOLERANCE_BPS_MIN, QUORUM_TOLERANCE_BPS_MAX)
+}
+
+/** Consecutive quorum SKIPS of one order before the keeper alert fires (and re-fires every N). */
+export const SKIP_ALERT_CYCLES = 3
+export const SKIP_ALERT_CYCLES_MIN = 1
+export const SKIP_ALERT_CYCLES_MAX = 1000
+
+/** Active alert cadence: `SKIP_ALERT_CYCLES` env override clamped to [1, 1000], else 3. */
+export function getSkipAlertCycles(env = process.env) {
+  return clampedIntEnv(env.SKIP_ALERT_CYCLES, SKIP_ALERT_CYCLES, SKIP_ALERT_CYCLES_MIN, SKIP_ALERT_CYCLES_MAX)
+}
+
+/**
+ * Spread between two positive prices in basis points, relative to the LOWER one (a 3% gap reads
+ * the same whichever side is higher). Non-positive input ⇒ +∞ (can never agree).
+ */
+export function spreadBps(a, b) {
+  const lo = Math.min(a, b)
+  const hi = Math.max(a, b)
+  if (!(lo > 0) || !Number.isFinite(hi)) return Number.POSITIVE_INFINITY
+  return ((hi - lo) / lo) * 10_000
+}
+
+function lexLess(a, b) {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i] < b[i]
+  }
+  return a.length < b.length
+}
+
+/**
+ * The PRICE QUORUM for one leg of a DCA fill (owner decisions 2026-10-11, ADR-024). Pure.
+ *
+ *   quorum  ≥ 2 independent sources agree within `toleranceBps` ⇒ normal floor, from the more
+ *           CONSERVATIVE price of the agreeing set. Conservative is leg-relative and always the
+ *           PROTECTIVE side for a floor: the 'in' leg (what the user sells) takes the HIGHEST
+ *           valuation, the 'out' leg (what the user receives) the LOWEST — both raise the floor,
+ *           never lower it. With three sources, any agreeing pair forms the quorum and the outlier
+ *           is dropped (the third source breaks the tie). Two equal-sized agreeing sets (A~B, B~C,
+ *           A≁C) are split by trust order (chainlink > defillama > coingecko).
+ *   single  exactly 1 source ⇒ the caller executes with a TIGHTER floor, capped at the no-price
+ *           $ cap, flagged (singleSourceFloorBps / decideSingleSourceCap).
+ *   skip    0 sources, or 2 that disagree beyond tolerance with no third to break the tie, or no
+ *           agreeing pair at all ⇒ SKIP THIS CYCLE. Never fill blind, never cancel the order.
+ *
+ * One quote per source counts (the first wins — callers pass them in trust order); a quote with a
+ * non-finite / non-positive price or no source name is ignored. An unknown leg is a skip (fail-safe).
+ *
+ * TODO(28b-alignment): src/lib/order-engine/dca-floor-tier.ts (branch feat/dca-floor-tiers-consent,
+ * NOT merged as of 2026-10-11) classifies a pair at creation as onchain-feed / offchain-price /
+ * unpriced. Once it merges, its tiers must map onto THIS function's modes over the SAME source list
+ * (price-sources.js, PRICE_SOURCE_TRUST_ORDER): `offchain-price` ⇔ a quorum is achievable (≥ 2 of
+ * chainlink / defillama / coingecko answer for every leg), `unpriced` ⇔ ≤ 1 source — pinned by a
+ * test that imports both. Today 28b counts only DefiLlama as its off-chain source; that is the one
+ * change it needs. Nothing is forked here: the keeper keeps the single implementation.
+ *
+ * @param {'in'|'out'} leg
+ * @param {Array<{ price: number, source: string }>} quotes
+ * @param {{ toleranceBps?: number, trustOrder?: readonly string[] }} [opts]
+ * @returns {{ mode: 'quorum'|'single'|'skip', price: number|null, reason: string, sources: string[], dropped: string[], spreadBps: number|null }}
+ */
+export function resolveFloorPrice(leg, quotes, { toleranceBps = getQuorumToleranceBps(), trustOrder = PRICE_SOURCE_TRUST_ORDER } = {}) {
+  const none = (reason, extra = {}) => ({ mode: "skip", price: null, reason, sources: [], dropped: [], spreadBps: null, ...extra })
+  if (leg !== "in" && leg !== "out") return none(`unknown leg '${String(leg)}' — skipping (fail-safe)`)
+
+  const seen = new Set()
+  const valid = []
+  for (const q of Array.isArray(quotes) ? quotes : []) {
+    if (!q || typeof q.source !== "string" || q.source === "") continue
+    const p = Number(q.price)
+    if (!Number.isFinite(p) || p <= 0) continue
+    if (seen.has(q.source)) continue
+    seen.add(q.source)
+    valid.push({ price: p, source: q.source })
+  }
+
+  const n = valid.length
+  if (n === 0) return none("no price source answered (0 of required 2)")
+  if (n === 1) {
+    return {
+      mode: "single",
+      price: valid[0].price,
+      reason: `single source (${valid[0].source}) — tighter floor, $-capped, flagged`,
+      sources: [valid[0].source],
+      dropped: [],
+      spreadBps: 0,
+    }
+  }
+
+  const tol = Number.isFinite(toleranceBps) && toleranceBps >= 0 ? toleranceBps : QUORUM_TOLERANCE_BPS
+  const agrees = (a, b) => spreadBps(a.price, b.price) <= tol
+  const rank = (s) => {
+    const i = trustOrder.indexOf(s)
+    return i === -1 ? trustOrder.length : i
+  }
+
+  // Largest subset in which EVERY pair agrees (n is tiny: 2-3 sources). Tie ⇒ the subset whose
+  // sorted trust ranks are lexicographically smallest (most-trusted members).
+  let best = null
+  for (let mask = 1; mask < 1 << n; mask++) {
+    const members = valid.filter((_, i) => mask & (1 << i))
+    if (members.length < 2) continue
+    let ok = true
+    for (let i = 0; i < members.length && ok; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        if (!agrees(members[i], members[j])) { ok = false; break }
+      }
+    }
+    if (!ok) continue
+    const ranks = members.map((m) => rank(m.source)).sort((a, b) => a - b)
+    if (!best || members.length > best.members.length || (members.length === best.members.length && lexLess(ranks, best.ranks))) {
+      best = { members, ranks }
+    }
+  }
+
+  if (!best) {
+    let worst = 0
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) worst = Math.max(worst, spreadBps(valid[i].price, valid[j].price))
+    const worstR = Math.round(worst)
+    const reason =
+      n === 2
+        ? `2 sources (${valid.map((v) => v.source).join(", ")}) disagree beyond ${tol} bps (spread ${worstR} bps), no third to break the tie`
+        : `no two of ${n} sources (${valid.map((v) => v.source).join(", ")}) agree within ${tol} bps (max spread ${worstR} bps)`
+    return none(reason, { sources: valid.map((v) => v.source), spreadBps: worstR })
+  }
+
+  const prices = best.members.map((m) => m.price)
+  const price = leg === "in" ? Math.max(...prices) : Math.min(...prices)
+  const used = best.members.map((m) => m.source)
+  const dropped = valid.map((v) => v.source).filter((s) => !used.includes(s))
+  const spread = Math.round(spreadBps(Math.min(...prices), Math.max(...prices)))
+  return {
+    mode: "quorum",
+    price,
+    reason:
+      `quorum ${used.join("+")} within ${spread} bps (tol ${tol}); conservative(${leg}) = ${leg === "in" ? "max" : "min"}` +
+      (dropped.length ? `; dropped outlier ${dropped.join(",")}` : ""),
+    sources: used,
+    dropped,
+    spreadBps: spread,
+  }
+}
+
+/**
+ * The fill-level mode from the two legs' modes: any skip ⇒ skip; else any single ⇒ single; else
+ * quorum. Unknown input ⇒ skip (fail-safe).
+ * @param {string} inMode
+ * @param {string} outMode
+ * @returns {'quorum'|'single'|'skip'}
+ */
+export function combineLegModes(inMode, outMode) {
+  const known = new Set(["quorum", "single", "skip"])
+  if (!known.has(inMode) || !known.has(outMode)) return "skip"
+  if (inMode === "skip" || outMode === "skip") return "skip"
+  if (inMode === "single" || outMode === "single") return "single"
+  return "quorum"
+}
+
+/**
+ * The TIGHTER floor band for a single-source fill: half the normal band, never below the floor's
+ * own MIN clamp (so it can never be disabled). 300 ⇒ 150 bps.
+ * @param {number} normalBps  getFloorMaxSlippageBps()
+ * @returns {number}
+ */
+export function singleSourceFloorBps(normalBps) {
+  const n = Number(normalBps)
+  if (!Number.isFinite(n) || n <= 0) return DCA_ORACLE_FLOOR_BPS_MIN
+  return Math.max(DCA_ORACLE_FLOOR_BPS_MIN, Math.floor(n / 2))
+}
+
+/**
+ * The $ cap on a single-source fill — the SAME cap the feedless fail-open path used
+ * (getFailOpenMaxUsd / DCA_FAIL_OPEN_MAX_USD, value unchanged). Unsizable ⇒ delay (never blind);
+ * within the cap ⇒ proceed flagged; above ⇒ delay.
+ * @param {{ notionalUsd: number|null, maxUsd: number }} p
+ * @returns {{ ok: boolean, action: 'delay'|'fill-flagged', flagged: boolean, reason: string }}
+ */
+export function decideSingleSourceCap({ notionalUsd, maxUsd }) {
+  if (notionalUsd === null || notionalUsd === undefined || !Number.isFinite(notionalUsd)) {
+    return { ok: false, action: "delay", flagged: false, reason: "single source, notional unsizable — delaying (never fill blind)" }
+  }
+  if (notionalUsd <= maxUsd) {
+    return { ok: true, action: "fill-flagged", flagged: true, reason: `single source, small fill ($${notionalUsd.toFixed(2)} <= $${maxUsd} cap) — proceeding flagged` }
+  }
+  return { ok: false, action: "delay", flagged: false, reason: `single source, fill above the $${maxUsd} cap ($${notionalUsd.toFixed(2)}) — delaying` }
+}
+
+/**
+ * Per-order CONSECUTIVE quorum-skip tracking (in-memory Map owned by the caller). Bump on a skip;
+ * `alert` is true when the streak hits `alertEvery` (and every multiple of it, so a long outage
+ * re-alerts rather than going silent). Never persisted: a restart starts the count fresh.
+ * @param {Map<string, number>} skips
+ * @param {string} orderId
+ * @param {number} [alertEvery]  getSkipAlertCycles()
+ * @returns {{ count: number, alert: boolean }}
+ */
+export function recordQuorumSkip(skips, orderId, alertEvery = getSkipAlertCycles()) {
+  const count = (skips.get(orderId) || 0) + 1
+  skips.set(orderId, count)
+  const every = Number.isInteger(alertEvery) && alertEvery > 0 ? alertEvery : SKIP_ALERT_CYCLES
+  return { count, alert: count % every === 0 }
+}
+
+/** Reset an order's skip streak — the cycle resolved a price (sources returned) or the fill succeeded. */
+export function clearQuorumSkips(skips, orderId) {
+  return skips.delete(orderId)
+}
+
 /** Default anti-manipulation floor band, in basis points (300 = 3%). Wide enough
  *  to clear legitimate DCA execution cost (pool fee + small price impact +
  *  oracle-vs-mid spread, typically <1%) while still catching gross manipulation
@@ -176,29 +427,72 @@ export function decideFloor({ builtExpectedOut, referenceExpectedOut, maxSlippag
 }
 
 // ── [CHORE-KEEPER-HARDENING / P1A-M-01] Bounded fail-open ────────────────────
+// [ADR-024 / feat/keeper-price-quorum] SUPERSEDED IN THE EXECUTOR: classifyReference and
+// decideFailOpen are no longer called by executor.js — the transient-vs-feedless split is
+// replaced by the price quorum above (0 or disagreeing sources ⇒ SKIP the cycle; exactly one ⇒
+// decideSingleSourceCap with the SAME cap). Both functions and their tests are retained unchanged
+// as the pure API surface (rule #4: nothing deleted); getFailOpenMaxUsd / DCA_FAIL_OPEN_MAX_USD
+// remain the live cap (28b's web-side DCA_NO_PRICE_FILL_CAP_MAX_USD pins to that literal).
 // decideFloor's "no reference ⇒ fill flagged" is fail-OPEN. That is right for a
 // pair with genuinely NO feed, but wrong for a TRANSIENT outage of a pair that
 // DOES have a feed (a momentary Chainlink RPC / DefiLlama blip should DELAY the
 // fill, not wave it through unbounded). And even a feedless fail-open fill should
 // be bounded to SMALL notionals. This splits the two cases and adds a USD cap.
 
-/** Default USD notional cap for a fail-open (feedless) fill — only small fills
- *  proceed unbounded; larger ones delay. Auditor-tunable; clamped [0, 100000]
- *  (0 = never fail-open). */
+/** [ADR-024 scope addition, Architect/owner 2026-10-11] HARD CEILING on the no-price (single-
+ *  source) fill cap. The web side (28b, src/lib/order-engine/dca-floor-tier.ts) pins its
+ *  DCA_NO_PRICE_FILL_CAP_MAX_USD to the DCA_FAIL_OPEN_MAX_USD literal below (imported value AND
+ *  source regex), so both stay 250 and equal — pinned here too by order-floor.test.mjs. An env
+ *  DCA_FAIL_OPEN_MAX_USD above this is clamped DOWN with a loud boot warning; a value above the
+ *  ceiling is NEVER honoured. The effective (clamped) value is published to keeper_runtime_config
+ *  at boot (runtime-config.js) so the web app shows the same number. */
+export const DCA_NO_PRICE_FILL_CAP_MAX_USD = 250
+
+/** Default USD notional cap for a single-source fill (formerly the fail-open / feedless cap —
+ *  SAME constant, SAME value; the quorum changed who reaches it, not what it is). Only small fills
+ *  proceed on one source; larger ones delay. Env-overridable by name, clamped
+ *  [0, DCA_NO_PRICE_FILL_CAP_MAX_USD] (0 = never fill on a single source). */
 export const DCA_FAIL_OPEN_MAX_USD = 250
 export const DCA_FAIL_OPEN_MAX_USD_MIN = 0
-export const DCA_FAIL_OPEN_MAX_USD_MAX = 100_000
+/** SUPERSEDED as the upper clamp by DCA_NO_PRICE_FILL_CAP_MAX_USD (was 100_000). Kept as an export
+ *  at the ceiling's value so nothing importing it breaks; the two can never diverge. */
+export const DCA_FAIL_OPEN_MAX_USD_MAX = DCA_NO_PRICE_FILL_CAP_MAX_USD
 
-/** The active fail-open cap: `DCA_FAIL_OPEN_MAX_USD` env override clamped to
- *  [MIN, MAX], else the 250 default. */
-export function getFailOpenMaxUsd() {
-  const raw = process.env.DCA_FAIL_OPEN_MAX_USD
-  if (!raw) return DCA_FAIL_OPEN_MAX_USD
+/**
+ * Resolve the EFFECTIVE no-price fill cap from the env, with the clamp made visible so the keeper
+ * can be loud at boot. Pure (env injected).
+ * @param {object} [env]
+ * @returns {{ value: number, raw: string|null, clamped: boolean, source: 'default'|'env'|'env-clamped-ceiling'|'env-clamped-min', reason: string }}
+ */
+export function resolveFailOpenMaxUsd(env = process.env) {
+  const ceiling = DCA_NO_PRICE_FILL_CAP_MAX_USD
+  const raw = env && env.DCA_FAIL_OPEN_MAX_USD ? String(env.DCA_FAIL_OPEN_MAX_USD) : null
+  if (!raw) {
+    return { value: DCA_FAIL_OPEN_MAX_USD, raw: null, clamped: false, source: "default", reason: `default $${DCA_FAIL_OPEN_MAX_USD} (ceiling $${ceiling})` }
+  }
   const parsed = Number(raw)
-  if (!Number.isFinite(parsed)) return DCA_FAIL_OPEN_MAX_USD
-  if (parsed < DCA_FAIL_OPEN_MAX_USD_MIN) return DCA_FAIL_OPEN_MAX_USD_MIN
-  if (parsed > DCA_FAIL_OPEN_MAX_USD_MAX) return DCA_FAIL_OPEN_MAX_USD_MAX
-  return parsed
+  if (!Number.isFinite(parsed)) {
+    return { value: DCA_FAIL_OPEN_MAX_USD, raw, clamped: false, source: "default", reason: `DCA_FAIL_OPEN_MAX_USD='${raw}' is not a number — using the default $${DCA_FAIL_OPEN_MAX_USD}` }
+  }
+  if (parsed < DCA_FAIL_OPEN_MAX_USD_MIN) {
+    return { value: DCA_FAIL_OPEN_MAX_USD_MIN, raw, clamped: true, source: "env-clamped-min", reason: `DCA_FAIL_OPEN_MAX_USD=${raw} is below $${DCA_FAIL_OPEN_MAX_USD_MIN} — using $${DCA_FAIL_OPEN_MAX_USD_MIN}` }
+  }
+  if (parsed > ceiling) {
+    return {
+      value: ceiling,
+      raw,
+      clamped: true,
+      source: "env-clamped-ceiling",
+      reason: `DCA_FAIL_OPEN_MAX_USD=${raw} is ABOVE the hard ceiling $${ceiling} (DCA_NO_PRICE_FILL_CAP_MAX_USD) — using the ceiling; a value above it is never honoured`,
+    }
+  }
+  return { value: parsed, raw, clamped: false, source: "env", reason: `DCA_FAIL_OPEN_MAX_USD=${raw} (within the $${ceiling} ceiling)` }
+}
+
+/** The active no-price fill cap: `DCA_FAIL_OPEN_MAX_USD` env override clamped to
+ *  [0, DCA_NO_PRICE_FILL_CAP_MAX_USD], else the 250 default. */
+export function getFailOpenMaxUsd(env = process.env) {
+  return resolveFailOpenMaxUsd(env).value
 }
 
 /**
