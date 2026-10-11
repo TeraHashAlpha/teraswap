@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 import registrations from '@/config/dca-feed-registrations.json'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -172,6 +173,7 @@ function mockIdentityMismatch() {
 }
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   mockSignTypedDataAsync.mockResolvedValue(FAKE_SIG)
   mockWriteContractAsync.mockResolvedValue('0x' + 'ff'.repeat(32))
@@ -220,6 +222,7 @@ describe('DCAPanel — chain-scoped availability vs. oracle price-verification [
 
     expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
     expect(screen.queryByTestId('dca-chain-unavailable')).toBeNull()
+    await waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()) // the server tier has answered
     fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
     fireEvent.click(await screen.findByTestId('confirm-review'))
 

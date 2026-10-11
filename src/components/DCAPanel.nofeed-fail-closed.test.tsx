@@ -28,6 +28,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 /** The approval transaction sender — `useOrderApproval.approve` calls exactly this. */
@@ -240,6 +241,7 @@ const enterAmount = (v: string) =>
  * `not.toHaveBeenCalled()` assertions are the ones that break.
  */
 async function driveCreationAsFarAsTheUiAllows(opts: { consent?: boolean } = {}) {
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()) // the server tier has answered
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Start DCA/i })) })
   // [FEAT-DCA-FLOOR-TIERS] The consent step, when (and only when) the pair needs it.
   if (opts.consent) {
@@ -271,6 +273,7 @@ function expectNoWalletInteraction() {
 }
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   registryCalls.length = 0
   clientCalls.length = 0
@@ -428,15 +431,17 @@ describe('DCAPanel — the check is asked of the executor on the ACTIVE chain', 
     enterAmount('100')
     await driveCreationAsFarAsTheUiAllows()
 
-    await waitFor(() => expect(registryCalls.length).toBe(2))
+    // [feat/dca-tier-server-side] Asked per pair/chain change and again on submit (2 legs per ask).
+    await waitFor(() => expect(registryCalls.length).toBeGreaterThanOrEqual(2))
+    expect(registryCalls.length % 2).toBe(0)
     // The client is built for the CONNECTED chain — no hardcoded id, no frontend list.
-    expect(clientCalls).toEqual([8453])
+    expect([...new Set(clientCalls)]).toEqual([8453])
     for (const call of registryCalls) {
       expect(call.address).toBe(V3_ADDRESS)
       expect(call.functionName).toBe(EXECUTOR_FEED_REGISTRY_FN)
     }
     // Spend leg (WETH, as signed) and buy leg (USDC) — both, because _fairValueOut needs both.
-    expect(registryCalls.map(c => c.token).sort()).toEqual(
+    expect([...new Set(registryCalls.map(c => c.token))].sort()).toEqual(
       [WETH_BASE.toLowerCase(), '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'].sort(),
     )
   })

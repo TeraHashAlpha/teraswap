@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 import registrations from '@/config/dca-feed-registrations.json'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -347,6 +348,7 @@ function mockIdentityMismatch() {
 }
 
 beforeEach(() => {
+  stubFloorEndpoint() // [feat/dca-tier-server-side] the pair tier now comes from the server
   vi.clearAllMocks()
   useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: 8453 } })
   useChainIdMock.mockReturnValue(8453)
@@ -369,6 +371,7 @@ describe('DCAPanel — oracle fail-closed: creation is blocked on an unverified 
     enterAmount('100')
 
     expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
+    await waitFor(() => expect(startDcaButton()).not.toBeDisabled()) // the server tier has answered
     fireEvent.click(startDcaButton())
     fireEvent.click(await screen.findByTestId('confirm-review'))
 
@@ -511,6 +514,7 @@ describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedl
     await waitFor(() => expect(screen.getByTestId('token-selector-out').textContent).toMatch(/cbETH/))
     expect(screen.queryByTestId('dca-oracle-block')).toBeNull()
 
+    await waitFor(() => expect(startDcaButton()).not.toBeDisabled()) // the server tier has answered
     fireEvent.click(startDcaButton())
     expect(await screen.findByTestId('confirm-review')).toBeInTheDocument()
     expect(screen.queryByTestId('nofeed-modal')).toBeNull()

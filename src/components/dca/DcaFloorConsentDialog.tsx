@@ -35,32 +35,39 @@ export function floorConsentCopy({
 }): string {
   const lead = registeredLead(registeredFeedCount)
   const symbol = symbols.join(' and ')
+  const doesnt = symbols.length > 1 ? "don't" : "doesn't"
   if (tier === 'offchain-price') {
-    return `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${symbol} doesn't have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
+    return `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${symbol} ${doesnt} have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
   }
   // Never render a number above the ceiling, whatever the API returned.
   const cap = typeof effectiveCapUsd === 'number' && Number.isFinite(effectiveCapUsd) && effectiveCapUsd > 0
     ? Math.min(effectiveCapUsd, DCA_NO_PRICE_FILL_CAP_MAX_USD) : DCA_NO_PRICE_FILL_CAP_MAX_USD
-  return `${lead} a Chainlink price feed registered in our contract. ${symbol} doesn't, and at the moment no market price source is answering for it, so the executor can't check the fill. To limit risk, each buy is capped at $${cap} and flagged. Buys resume normal protection when a price source comes back.`
+  return `${lead} a Chainlink price feed registered in our contract. ${symbol} ${doesnt}, and at the moment no market price source is answering for it, so the executor can't check the fill. To limit risk, each buy is capped at $${cap} and flagged. Buys resume normal protection when a price source comes back.`
 }
 
 export default function DcaFloorConsentDialog({
   tier,
   symbols,
   chainId,
+  registeredFeedCount,
+  effectiveCapUsd,
   onConfirm,
   onCancel,
 }: {
   tier: Exclude<DcaFloorTier, 'onchain-feed'>
   symbols: readonly string[]
+  /** Legacy: when given (and the numbers below are not), the dialog reads them from /api/dca-floor-cap. */
   chainId?: number
+  /** From the pair response the parent already holds; when provided the dialog fetches nothing. */
+  registeredFeedCount?: number | null
+  effectiveCapUsd?: number | null
   onConfirm: () => void
   onCancel: () => void
 }) {
   const [checked, setChecked] = useState(false)
   const [cap, setCap] = useState<{ effectiveUsd: number | null; registeredFeedCount: number | null }>({ effectiveUsd: null, registeredFeedCount: null })
   useEffect(() => {
-    if (chainId === undefined) return
+    if (chainId === undefined || registeredFeedCount !== undefined || effectiveCapUsd !== undefined) return
     let cancelled = false
     fetch(`/api/dca-floor-cap?chainId=${chainId}`)
       .then(r => (r.ok ? r.json() : null))
@@ -71,7 +78,7 @@ export default function DcaFloorConsentDialog({
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [chainId])
+  }, [chainId, registeredFeedCount, effectiveCapUsd])
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -99,7 +106,7 @@ export default function DcaFloorConsentDialog({
           {FLOOR_CONSENT_HEADING}
         </h2>
         <p id="floor-consent-body" data-testid="floor-consent-body" className="mb-4 text-[13px] leading-relaxed text-cream-70">
-          {floorConsentCopy({ tier, symbols, effectiveCapUsd: cap.effectiveUsd, registeredFeedCount: cap.registeredFeedCount })}
+          {floorConsentCopy({ tier, symbols, effectiveCapUsd: effectiveCapUsd ?? cap.effectiveUsd, registeredFeedCount: registeredFeedCount ?? cap.registeredFeedCount })}
         </p>
         <label className="mb-5 flex cursor-pointer items-center gap-2 text-[13px] text-cream">
           <input
