@@ -115,6 +115,14 @@ function lexLess(a, b) {
  * One quote per source counts (the first wins — callers pass them in trust order); a quote with a
  * non-finite / non-positive price or no source name is ignored. An unknown leg is a skip (fail-safe).
  *
+ * TODO(28b-alignment): src/lib/order-engine/dca-floor-tier.ts (branch feat/dca-floor-tiers-consent,
+ * NOT merged as of 2026-10-11) classifies a pair at creation as onchain-feed / offchain-price /
+ * unpriced. Once it merges, its tiers must map onto THIS function's modes over the SAME source list
+ * (price-sources.js, PRICE_SOURCE_TRUST_ORDER): `offchain-price` ⇔ a quorum is achievable (≥ 2 of
+ * chainlink / defillama / coingecko answer for every leg), `unpriced` ⇔ ≤ 1 source — pinned by a
+ * test that imports both. Today 28b counts only DefiLlama as its off-chain source; that is the one
+ * change it needs. Nothing is forked here: the keeper keeps the single implementation.
+ *
  * @param {'in'|'out'} leg
  * @param {Array<{ price: number, source: string }>} quotes
  * @param {{ toleranceBps?: number, trustOrder?: readonly string[] }} [opts]

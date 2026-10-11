@@ -17,3 +17,14 @@ Goal: DCA floor price QUORUM per fill, per leg (owner decisions 2026-10-11) + sc
   by source regex AND imported value → that literal stays exactly as is (250).
 - origin/main keeper suite: 650 tests / 124 suites, 0 fail (measured in this worktree after
   `npm ci --ignore-scripts` in `executor/`).
+
+## 28b alignment (C3) — 28b NOT merged, mapping recorded, no fork
+| 28b tier (`dca-floor-tier.ts`, creation time) | keeper mode (`order-floor.js` `resolveFloorPrice`, fill time) |
+|:--|:--|
+| `onchain-feed` (both legs registered in V3) | `quorum` with chainlink present (registry hit) |
+| `offchain-price` | quorum achievable: ≥ 2 of chainlink / defillama / coingecko answer for EVERY leg |
+| `unpriced` | ≤ 1 source on some leg → `single` (capped, flagged) or `skip` (0 / disagreement) |
+
+TODO pinned at `contracts/order-engine/executor/order-floor.js` (JSDoc of `resolveFloorPrice`,
+"TODO(28b-alignment)"): when 28b merges, its classifier must count the SAME source list
+(`PRICE_SOURCE_TRUST_ORDER`; today it counts only DefiLlama off-chain) and a pin test must import both.
