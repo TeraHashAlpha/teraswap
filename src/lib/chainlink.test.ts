@@ -13,6 +13,7 @@
  * decimals responses, which lets the REAL gate + decode logic run unchanged.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
+import registrations from '@/config/dca-feed-registrations.json'
 import { encodeFunctionData, encodeFunctionResult } from 'viem'
 import { fetchChainlinkPriceRaw, fetchHistoricalPrice, fetchErc20Decimals, computeTokenAmountUsd, getChainlinkFeed, getFeedStalenessSec, getFeedExpectation, chainlinkAggregatorAbi, evaluatePairOracle, _clearFeedIdentityCache, type PriceCheck } from './chainlink'
 import { getComposedFeed, getExchangeRatePair, getPreferredDirectUsdFeed } from './chains/chainlink-feeds'
@@ -313,7 +314,8 @@ describe('chainlink — multi-chain [P218]', () => {
   // [SPRINT-9S S1] Base feed addresses — verified 3 ways (Chainlink reference-data-directory +
   // on-chain description()/decimals() on Base + BaseScan EACAggregatorProxy).
   const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
-  const BASE_USDC_USD = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
+  // [FEAT-DCA-FEED-REGISTRATION-PHASE1] plain usdc-usd proxy (replaced the SVR proxy), from the registration config.
+  const BASE_USDC_USD = registrations.chains['8453'].rows.find(r => r.symbol === 'USDC')!.feed
   const BASE_DAI = '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'
   const BASE_DAI_USD = '0x591e79239a7d679378eC8c847e5038150364C78F'
   const BASE_CBETH = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
