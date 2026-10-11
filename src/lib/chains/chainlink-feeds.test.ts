@@ -20,6 +20,7 @@ import {
   type ResolvedFeed,
 } from './chainlink-feeds'
 import { CHAINLINK_FEEDS, CHAINLINK_ETH_USD } from '../constants'
+import registrations from '../../config/dca-feed-registrations.json'
 
 const ARBITRUM_TOKENS = {
   WETH: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
@@ -30,8 +31,13 @@ const ARBITRUM_TOKENS = {
 }
 
 describe('chainlink-feeds — Arbitrum (42161) [CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION]', () => {
-  it('registers exactly 5 core feeds keyed by Arbitrum token address', () => {
-    expect(Object.keys(CHAINLINK_FEEDS_BY_CHAIN[42161]).length).toBe(5)
+  it('registers the 5 core feeds PLUS exactly the enabled registration-config tokens, keyed by Arbitrum token address', () => {
+    // [FEAT-DCA-FEED-REGISTRATION-PHASE1] was "exactly 5": the enabled config rows are now mirrored in.
+    const keys = Object.keys(CHAINLINK_FEEDS_BY_CHAIN[42161])
+    const core = Object.values(ARBITRUM_TOKENS).map(a => a.toLowerCase())
+    const enabled = registrations.chains['42161'].rows.filter(r => r.enabled).map(r => r.token.toLowerCase())
+    for (const c of core) expect(keys).toContain(c)
+    expect(new Set(keys)).toEqual(new Set([...core, ...enabled]))
   })
 
   it('resolves each core token to its manifest-verified feed proxy (CORRECTED addresses)', () => {
@@ -374,5 +380,43 @@ describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => 
     const resolved = resolveFeed('0x4200000000000000000000000000000000000006', 8453)!
     expect(classify(resolved)).toBe('single')
     expect(classify(resolveFeed('0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', 8453)!)).toBe('preferred')
+  })
+})
+
+describe('dca-feed-registrations.json ↔ chainlink-feeds.ts [FEAT-DCA-FEED-REGISTRATION-PHASE1]', () => {
+  const chains = Object.entries(registrations.chains) as [string, { rows: Array<{
+    symbol: string; token: string; feed: string; description: string; decimals: number; heartbeat: number
+    maxStaleness: number | null; phase: number; enabled: boolean }> }][]
+
+  it('every ENABLED row is present in CHAINLINK_FEEDS_BY_CHAIN, heartbeat and expectation, all equal to the config (lowercase compare)', () => {
+    let checked = 0
+    for (const [chainId, { rows }] of chains) {
+      for (const r of rows.filter(x => x.enabled)) {
+        const id = Number(chainId)
+        expect(CHAINLINK_FEEDS_BY_CHAIN[id][r.token.toLowerCase()].toLowerCase(), `${chainId} ${r.symbol} feed`).toBe(r.feed.toLowerCase())
+        expect(getFeedHeartbeatSec(r.feed), `${chainId} ${r.symbol} heartbeat`).toBe(r.heartbeat)
+        expect(getFeedExpectation(r.feed), `${chainId} ${r.symbol} expectation`).toEqual({ description: r.description, decimals: r.decimals })
+        checked++
+      }
+    }
+    expect(checked).toBeGreaterThan(0)
+  })
+
+  it('phase 2 rows are disabled and contribute NO feed to the swap-side table', () => {
+    for (const [chainId, { rows }] of chains) {
+      for (const r of rows.filter(x => x.phase === 2)) {
+        expect(r.enabled, `${chainId} ${r.symbol}`).toBe(false)
+        expect(CHAINLINK_FEEDS_BY_CHAIN[Number(chainId)][r.token.toLowerCase()]).toBeUndefined()
+      }
+    }
+  })
+
+  it('every enabled phase-1 row has maxStaleness >= heartbeat (the contract-side staleness cannot undercut the feed)', () => {
+    for (const [, { rows }] of chains) {
+      for (const r of rows.filter(x => x.phase === 1 && x.enabled)) {
+        expect(r.maxStaleness).not.toBeNull()
+        expect(r.maxStaleness as number).toBeGreaterThanOrEqual(r.heartbeat)
+      }
+    }
   })
 })

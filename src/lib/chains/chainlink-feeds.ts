@@ -19,6 +19,29 @@
  */
 import { CHAINLINK_FEEDS, CHAINLINK_ETH_USD, NATIVE_ETH, WETH_ADDRESS } from '../constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
+import registrations from '../../config/dca-feed-registrations.json'
+
+/**
+ * [FEAT-DCA-FEED-REGISTRATION-PHASE1] Every ENABLED row of src/config/dca-feed-registrations.json
+ * (generated from the owner's directory inventory by scripts/dca-feeds/build-config.mjs) is mirrored
+ * into the three tables below by DERIVATION, so no feed address is hand-typed twice. Phase-2 rows
+ * are `enabled: false` and contribute nothing. Equality with the config is pinned by
+ * chainlink-feeds.test.ts.
+ */
+interface RegistrationRow {
+  symbol: string; token: string; feed: string; description: string
+  decimals: number; heartbeat: number; enabled: boolean
+}
+function enabledRegistrations(chainId: number): RegistrationRow[] {
+  const chain = (registrations.chains as Record<string, { rows: RegistrationRow[] }>)[String(chainId)]
+  return (chain?.rows ?? []).filter(r => r.enabled)
+}
+function registeredFeedMap(chainId: number): Record<string, `0x${string}`> {
+  return Object.fromEntries(enabledRegistrations(chainId).map(r => [r.token.toLowerCase(), r.feed as `0x${string}`]))
+}
+function registeredFeeds(): RegistrationRow[] {
+  return [8453, 42161].flatMap(enabledRegistrations)
+}
 
 export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string}`>> = {
   // Mainnet — reuse the canonical map (token address → feed proxy).
@@ -32,8 +55,8 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
   8453: {
     // WETH → ETH/USD   description() "ETH / USD", decimals() 8
     '0x4200000000000000000000000000000000000006': '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
-    // USDC → USDC/USD  description() "USDC / USD", decimals() 8  [SPRINT-9S S1]
-    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': '0x458138Fc0D67027E9A6778ef40a6ffC318c69061',
+    // USDC → supplied by the registration config below: the directory's PLAIN usdc-usd proxy, which
+    // REPLACES the SVR proxy (0x4581…) that stood here (owner decision 2026-10-11).
     // DAI  → DAI/USD   description() "DAI / USD", decimals() 8   [SPRINT-9S S1]
     '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': '0x591e79239a7d679378eC8c847e5038150364C78F',
     // NOT mapped HERE, by design (rule #9 — a wrong feed mis-prices swaps):
@@ -48,6 +71,8 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
     //    scripts/verify-base-cbeth-feeds.mjs.
     //  • USDbC (0xd9aA…b6CA): no Chainlink feed exists on Base (absent from the directory).
     //    Correctly falls through to null → multi-source compare + on-chain minimumOutput.
+    // [FEAT-DCA-FEED-REGISTRATION-PHASE1] enabled config rows (Base USDC plain proxy, USDT, cbBTC, EURC, COMP, VIRTUAL, …).
+    ...registeredFeedMap(8453),
   },
   // [SPRINT-46-ARBITRUM-CONFIG → CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] Arbitrum (42161) — 5 core
   // feeds. AUDIT-ARBITRUM-46-47 HIGH: ALL 5 recon-sourced feed addresses had ZERO on-chain code
@@ -89,6 +114,8 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
     // WBTC → WBTC/USD (key updated to the CORRECTED WBTC token address, see registry.ts;
     // dedicated WBTC feed — NOT the BTC/USD index feed)
     '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f': '0xd0C7101eACbB49F3deCcCc166d238410D6D46d57',
+    // [FEAT-DCA-FEED-REGISTRATION-PHASE1] enabled config rows (LINK, ARB, AAVE, COMP, CRV, LDO, MAGIC, PENDLE, SUSHI, UNI + the above).
+    ...registeredFeedMap(42161),
   },
 }
 
@@ -171,6 +198,8 @@ const FEED_HEARTBEAT_SEC: Record<string, number> = {
   '0xfdfd9c85ad200c506cf9e21f1fd8dd01932fbb23': 86400, // WBTC/BTC  (composed base leg)
   '0xd10abbc76679a20055e167bb80a24ac851b37056': 86400, // APE/USD   (direct)
   '0x9944d86ceb9160af5c5feb251fd671923323f8c3': 86400, // PAXG/USD  (direct)
+  // [FEAT-DCA-FEED-REGISTRATION-PHASE1] directory heartbeats of the enabled config rows.
+  ...Object.fromEntries(registeredFeeds().map(r => [r.feed.toLowerCase(), r.heartbeat])),
 }
 
 /** [SPRINT-9V V1] Heartbeat (seconds) for a feed PROXY address, or null when unknown. */
@@ -498,6 +527,8 @@ const FEED_EXPECTATIONS: Record<string, FeedExpectation> = {
   '0xc5c8e77b397e531b8ec06bfb0048328b30e9ecfb': { description: 'DAI / USD', decimals: 8 },
   '0x3f3f5df88dc9f13eac63df89ec16ef6e7e25dde7': { description: 'USDT / USD', decimals: 8 },
   '0xd0c7101eacbb49f3decccc166d238410d6d46d57': { description: 'WBTC / USD', decimals: 8 },
+  // [FEAT-DCA-FEED-REGISTRATION-PHASE1] description()/decimals() the enabled config rows were read with.
+  ...Object.fromEntries(registeredFeeds().map(r => [r.feed.toLowerCase(), { description: r.description, decimals: r.decimals }])),
 }
 
 /** [ADR-018] The description()/decimals() a feed proxy at `feed` must self-report, or null if the

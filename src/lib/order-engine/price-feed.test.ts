@@ -54,19 +54,36 @@ const MAINNET_SIGNABLE: Record<string, string> = {
   USDC: '0x8fffffd4afb6115b954bd326cbe7b4ba576818f6',
   WETH: '0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419',
 }
-// Base: CHAINLINK_FEEDS_BY_CHAIN[8453] (3 address-keyed entries; native sentinel → WETH's).
+// [FEAT-DCA-FEED-REGISTRATION-PHASE1] Re-pinned 2026-10-11 from the resolver's own output: Base USDC is now the
+// plain usdc-usd proxy, and the enabled phase-1 registration rows widen the set (deliberate, owner-approved).
+// Base: CHAINLINK_FEEDS_BY_CHAIN[8453] (address-keyed entries; native sentinel → WETH's).
 // Each verified on Base itself for this commit: eth_getCode 9571 bytes, description() names the
 // pair, decimals() 8, latestRoundData() fresh and > 0, on two independent RPCs.
 const BASE_SIGNABLE: Record<string, string> = {
+  COMP: '0x9dda783de64a9d1a60c49ca761ebe528c35ba428',
   DAI: '0x591e79239a7d679378ec8c847e5038150364c78f',
   ETH: '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70',
-  USDC: '0x458138fc0d67027e9a6778ef40a6ffc318c69061',
+  EURC: '0xdae398520e2b67cd3f27aef9cf14d93d927f8250',
+  USDC: '0x7e860098f58bbfc8648a4311b374b1d669a2bc6b',
+  USDT: '0xf19d560eb8d2adf07bd6d13ed03e1d11215721f9',
+  VIRTUAL: '0xeaf310161c9ef7c813a14f8fef6fb271434019f7',
   WETH: '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70',
+  cbBTC: '0x07da0e54543a844a80abe69c8a12f22b3aa59f9d',
 }
 // Arbitrum: CHAINLINK_FEEDS_BY_CHAIN[42161] (5 entries; same per-address verification on Arbitrum).
 const ARBITRUM_SIGNABLE: Record<string, string> = {
+  AAVE: '0xad1d5344aade45f43e596773bcc4c423eabdd034',
+  ARB: '0xb2a824043730fe05f3da2efafa1cbbe83fa548d6',
+  COMP: '0xe7c53ffd03eb6cef7d208bc4c13446c76d1e5884',
+  CRV: '0xaebda2c976cfd1ee1977eac079b4382acb849325',
   DAI: '0xc5c8e77b397e531b8ec06bfb0048328b30e9ecfb',
   ETH: '0x639fe6ab55c921f74e7fac1ee960c0b6293ba612',
+  LDO: '0xa43a34030088e6510feccfb77e88ee5e7ed0fe64',
+  LINK: '0x86e53cf1b870786351da77a57575e79cb55812cb',
+  MAGIC: '0x47e55ccec6582838e173f252d08afd8116c2202d',
+  PENDLE: '0x66853e19d73c0f9301fe099c324a1e9726953433',
+  SUSHI: '0xb2a8ba74cbca38508ba1632761b56c897060147c',
+  UNI: '0x9c917083fdb403ab5adbec26ee294f6ecada2720',
   USDC: '0x50834f3163758fcc1df9973b6e91f0f0f0434ad3',
   USDT: '0x3f3f5df88dc9f13eac63df89ec16ef6e7e25dde7',
   WBTC: '0xd0c7101eacbb49f3decccc166d238410d6d46d57',

@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import registrations from '@/config/dca-feed-registrations.json'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -43,7 +44,8 @@ const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
 // [CHORE-DCA-DEFAULT-BUY-USDC] The buy leg now defaults to USDC (was native ETH → WETH), so the
 // healthy-path fixture below needs a real description() for the Base USDC/USD feed too — same
 // address/description pair as chainlink-feeds.ts's FEED_EXPECTATIONS entry for Base.
-const BASE_USDC_USD_FEED = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
+// [FEAT-DCA-FEED-REGISTRATION-PHASE1] Base USDC's feed is now the plain proxy; read from the registration config, never retyped.
+const BASE_USDC_USD_FEED = registrations.chains['8453'].rows.find(r => r.symbol === 'USDC')!.feed
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
