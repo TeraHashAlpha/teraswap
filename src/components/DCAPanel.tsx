@@ -471,7 +471,7 @@ function CreateDCAForm({
   const submitBlock = submitBlockFor?.key === selectionKey ? submitBlockFor.reason : null
   // [FEAT-DCA-FLOOR-TIERS] The pending confirmation, keyed to the selection it was raised for so a
   // changed pair/chain silently invalidates it (same pattern as submitBlockFor).
-  const [consentFor, setConsent] = useState<{ key: string; tier: Exclude<DcaFloorTier, 'onchain-feed'>; symbol: string } | null>(null)
+  const [consentFor, setConsent] = useState<{ key: string; tier: Exclude<DcaFloorTier, 'onchain-feed'>; symbols: string[] } | null>(null)
   const consent = consentFor?.key === selectionKey ? consentFor : null
 
   // [chore/oracle-less-advisory] Detect whether the BOUGHT token has an independent
@@ -873,7 +873,7 @@ function CreateDCAForm({
             .map(a => a.toLowerCase() === signedTokenIn.toLowerCase() ? tokenIn.symbol
               : a.toLowerCase() === tokenOut.address.toLowerCase() ? tokenOut.symbol : null)
             .filter((n, i, arr): n is string => !!n && arr.indexOf(n) === i)
-          setConsent({ key: selectionKey, tier, symbol: (names.length ? names : [tokenOut.symbol]).join(' / ') })
+          setConsent({ key: selectionKey, tier, symbols: names.length ? names : [tokenOut.symbol] }) // dialog renders "A and B"
           return
         }
         floorAck = { tier, acknowledgedAt: new Date().toISOString() }
@@ -1181,7 +1181,7 @@ function CreateDCAForm({
       {consent && (
         <DcaFloorConsentDialog
           tier={consent.tier}
-          symbol={consent.symbol}
+          symbols={consent.symbols}
           chainId={chainId}
           onCancel={() => setConsent(null)}
           onConfirm={() => { const t = consent.tier; setConsent(null); void handleCreate(t) }}

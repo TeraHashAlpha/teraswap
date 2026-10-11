@@ -300,7 +300,8 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     const dialog = await screen.findByTestId('floor-consent-dialog')
     expect(dialog.getAttribute('data-tier')).toBe('unpriced')
     expect(screen.getByTestId('floor-consent-body').textContent).toBe(
-      `No price source for ETHFI. Buys may execute at ANY price; each buy is capped at up to $${DCA_NO_PRICE_FILL_CAP_MAX_USD} and flagged.`,
+      // [fix/dca-consent-copy-and-tier-check] Owner copy; no registeredFeedCount here → no number.
+      `A small set of tokens on this network have a Chainlink price feed registered in our contract. ETHFI doesn't, and at the moment no market price source is answering for it, so the executor can't check the fill. To limit risk, each buy is capped at $${DCA_NO_PRICE_FILL_CAP_MAX_USD} and flagged. Buys resume normal protection when a price source comes back.`,
     )
     // Submit is blocked until the checkbox is ticked.
     expect((screen.getByTestId('floor-consent-confirm') as HTMLButtonElement).disabled).toBe(true)
@@ -319,7 +320,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     const dialog = await screen.findByTestId('floor-consent-dialog')
     expect(dialog.getAttribute('data-tier')).toBe('offchain-price')
     expect(screen.getByTestId('floor-consent-body').textContent).toBe(
-      'No on-chain price feed for ETHFI. The contract cannot enforce a minimum; each buy is protected only by our off-chain price check.',
+      'A small set of tokens on this network have a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ETHFI doesn\'t have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.',
     )
     expectNoWalletInteraction()
   })
