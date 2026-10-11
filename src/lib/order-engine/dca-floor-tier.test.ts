@@ -17,7 +17,7 @@ vi.mock('@/lib/chains/clients', () => ({ getPublicClientForChain: () => { throw 
 vi.mock('@/lib/defillama', () => ({ fetchDefiLlamaPrice: vi.fn() }))
 
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
-import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd } from './dca-floor-tier'
+import { classifyDcaFloor, classifyDcaFloorDetailed, DCA_NO_PRICE_FILL_CAP_MAX_USD, effectiveNoPriceCapUsd, floorAckCovers } from './dca-floor-tier'
 
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 const WETH_BASE = '0x4200000000000000000000000000000000000006'
@@ -145,6 +145,19 @@ describe('off-chain price path with captured DefiLlama responses', () => {
     const connectSrc = readFileSync(resolve(__dirname, '../../../next.config.js'), 'utf8').match(/"connect-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
     expect(urls).toHaveLength(1)
     expect(connectSrc).toContain(new URL(urls[0]).origin)
+  })
+})
+
+describe('floorAckCovers (ack ≥ server tier)', () => {
+  it('equal or stronger covers; weaker or unknown never does', () => {
+    expect(floorAckCovers('offchain-price', 'offchain-price')).toBe(true)
+    expect(floorAckCovers('unpriced', 'unpriced')).toBe(true)
+    expect(floorAckCovers('unpriced', 'offchain-price')).toBe(true)
+    expect(floorAckCovers('offchain-price', 'unpriced')).toBe(false)
+    expect(floorAckCovers('onchain-feed', 'offchain-price')).toBe(false)
+    for (const junk of [undefined, null, 2, {}, 'UNPRICED', 'toString', '__proto__']) {
+      expect(floorAckCovers(junk, 'offchain-price')).toBe(false)
+    }
   })
 })
 

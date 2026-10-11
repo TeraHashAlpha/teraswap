@@ -108,6 +108,21 @@ export async function classifyDcaFloorDetailed(
   }
 }
 
+/** How strong a warning each tier carries. A stronger acknowledgement covers a weaker requirement. */
+const TIER_STRENGTH: Record<DcaFloorTier, number> = { 'onchain-feed': 0, 'offchain-price': 1, unpriced: 2 }
+
+/**
+ * [fix/dca-consent-copy-and-tier-check] Owner decision 2026-10-11: an acknowledgement of a tier EQUAL
+ * TO OR STRONGER than the server's classification satisfies it (a user who accepted `unpriced` has
+ * accepted everything `offchain-price` asks); a weaker or unknown tier never does. The browser and the
+ * server can disagree when a price source answers one and not the other; the caller still records the
+ * SERVER's tier.
+ */
+export function floorAckCovers(ackTier: unknown, required: DcaFloorTier): boolean {
+  if (typeof ackTier !== 'string' || !Object.prototype.hasOwnProperty.call(TIER_STRENGTH, ackTier)) return false
+  return TIER_STRENGTH[ackTier as DcaFloorTier] >= TIER_STRENGTH[required]
+}
+
 export async function classifyDcaFloor(
   params: ClassifyDcaFloorParams,
   deps: ClassifyDcaFloorDeps = {},
