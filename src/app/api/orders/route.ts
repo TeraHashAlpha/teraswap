@@ -284,6 +284,23 @@ export async function POST(req: NextRequest) {
     // signer check below is what actually proves the order was signed under the claimed schema.
     const isV3Order = typeof body.maxSlippageBps === 'number'
 
+    // [FEAT-DCA-FLOOR-TIERS / Auditor L-01] A v3 DCA must carry the WRAPPED native as tokenOut, as
+    // the official client signs it (DCAPanel.tsx:865). The classifier prices/looks up the signed
+    // address verbatim, so the sentinel would classify as `unpriced` and consent to a pair the
+    // user never saw. Rejected, deliberately NOT mapped to WETH server-side: the signed leg and the
+    // classified leg must be the same address.
+    if (
+      isV3Order &&
+      orderTypeEnum === ORDER_TYPE_DCA &&
+      typeof body.tokenOut === 'string' &&
+      body.tokenOut.toLowerCase() === NATIVE_ETH.toLowerCase()
+    ) {
+      return NextResponse.json(
+        { error: 'Use WETH (not native ETH) as the DCA output' },
+        { status: 400 },
+      )
+    }
+
     if (isV3Order) {
       // [ADR-013 §1/N3] Mirrors the contract's immutable MAX_ORDER_SLIPPAGE_BPS cap — reject
       // absent/zero/out-of-range before any signature work (closes I-01 off-chain).

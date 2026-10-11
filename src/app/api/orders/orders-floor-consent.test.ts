@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
+import { keccak256 } from 'viem'
 
 const mockRecover = vi.fn()
 vi.mock('viem', async () => {
@@ -33,9 +34,10 @@ vi.mock('@/lib/order-engine/config', async () => {
   const actual = await vi.importActual<typeof import('@/lib/order-engine/config')>('@/lib/order-engine/config')
   return {
     ...actual,
-    getOrderExecutorV3: (chainId: number) => (chainId === 1 ? V3_MAINNET : null),
+    getOrderExecutorV3: (chainId: number) => (chainId === 1 || chainId === 8453 ? V3_MAINNET : null),
+    isWhitelistedRouter: () => true,
     getOrderExecutorV3Domain: (chainId: number) => {
-      if (chainId !== 1) throw new Error(`No OrderExecutorV3 deployed on chain ${chainId}`)
+      if (chainId !== 1 && chainId !== 8453) throw new Error(`No OrderExecutorV3 deployed on chain ${chainId}`)
       return { name: 'TeraSwapOrderExecutor' as const, version: '3' as const, chainId, verifyingContract: V3_MAINNET }
     },
   }
@@ -197,5 +199,34 @@ describe('POST /api/orders — DCA floor-tier consent [FEAT-DCA-FLOOR-TIERS]', (
     expect(status).toBe(201)
     expect(readerCalls).toHaveLength(0)
     expect(insertedRow()).not.toHaveProperty('floor_tier')
+  })
+
+  it('[L-01] a v3 DCA with the native sentinel as tokenOut is rejected 400, never mapped, never classified', async () => {
+    for (const sentinel of ['0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee']) {
+      const { status, json } = await post(body({ tokenOut: sentinel, ...ack('offchain-price') }))
+      expect(status).toBe(400)
+      expect(String(json.error)).toMatch(/WETH/)
+    }
+    expect(readerCalls).toHaveLength(0)
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('[L-02] Limit/TP v3 (Base) is outside the DCA scope: zero classifier calls, no 409, no tier recorded', async () => {
+    const routerData = '0x12345678'
+    for (const priceCondition of ['below', 'above']) { // limit-buy and take-profit share orderType 'limit'
+      registryMode = 'none' // would classify offchain-price and 409 if the DCA-only scope check were dropped
+      const { status, json } = await post(body({
+        chainId: 8453, orderType: 'limit', priceCondition, priceFeed: '0x6666666666666666666666666666666666666666', targetPrice: '1',
+        dcaInterval: 0, dcaTotal: 0, routerDataHash: keccak256(routerData), orderData: {
+          routerData, owner: WALLET, tokenIn: TOKEN_IN, tokenOut: TOKEN_OUT, router: ROUTER, amountIn: '1000000000000000000',
+          minAmountOut: (100n * 10n ** 18n).toString(), maxSlippageBps: 300, routerDataHash: keccak256(routerData),
+        },
+      }))
+      expect(json.error ?? null, 'unexpected rejection').toBeNull()
+      expect(status).toBe(201)
+      expect(readerCalls).toHaveLength(0)
+    }
+    expect(mockInsert).toHaveBeenCalledTimes(2)
+    expect(mockInsert.mock.calls.every(c => !('floor_tier' in c[0]) && !('floor_ack_at' in c[0]))).toBe(true)
   })
 })
