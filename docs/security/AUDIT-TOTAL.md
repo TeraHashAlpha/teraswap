@@ -1585,3 +1585,22 @@ Heartbeats were added from the directory's own `heartbeat` field and are regress
    the reads and remove a compounding-staleness leg, and is worth a follow-up.
 3. `description()` cannot distinguish a canonical feed from an SVR/shared-SVR sibling (identical strings);
    proving canonical-path selection still requires the reference-data directory.
+
+### AUDIT-DCA-FLOOR-TIERS-CONSENT — round 1: 0C/0H/1M/3L, fixes applied (2026-10-11)
+
+**Branch `feat/dca-floor-tiers-consent` (no PR). Reverses a standing control by owner decision.** The browser's hard
+block on a DCA with no on-chain price feed (fail-closed since `fix/dca-no-feed-fail-closed`, PR #484) is replaced by
+informed consent. The server classifies the pair itself (`onchain-feed` / `offchain-price` / `unpriced`; any lookup
+failure -> `unpriced`) and rejects a v3 DCA lacking an ack of exactly that tier (409 `requiredTier`; `acknowledgedAt`
+ISO, <= 24h old). Consent tiers store `orders.floor_tier` / `floor_ack_at` (migration `20261011120000`, NOT applied).
+Contract, keeper floor logic and the `DCA_FAIL_OPEN_MAX_USD` = 250 per-buy cap are untouched; the cap constant is now a ceiling.
+
+Round 1 findings, fixed in `ccb4c83` / `68806c6`:
+- **L-01** native-sentinel `tokenOut` on a v3 DCA: now 400, deliberately not mapped to WETH server-side.
+- **L-02** DCA-only scope unguarded by test: Limit/TP v3 test added, mutation-verified.
+- **L-03** `/api/dca-floor-cap` unthrottled/uncached: rate limit + `public, max-age=60`.
+- **M-01** keeper cap env could exceed the 250 ceiling: resolved by the keeper clamp in `feat/keeper-price-quorum`
+  (merges right after this); owner checklist item recorded in `docs/feedback/feat-dca-floor-tiers-consent.md`.
+
+Residual: `acknowledgedAt` is client-supplied (window-validated evidence, not proof). Verdict pending the Auditor's round 2.
+

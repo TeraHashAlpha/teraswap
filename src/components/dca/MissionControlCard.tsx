@@ -10,6 +10,7 @@
  * dcaExecuted) stays reactive via useOrderEngine. Cancel/Remove gating mirrors the existing card.
  */
 
+import FloorTierBadge from './FloorTierBadge'
 import { useEffect, useState } from 'react'
 import type { AutonomousOrder, OrderEngineEvent } from '@/lib/order-engine'
 import { nextBuyAtMs, isDue, failedOrderReason } from '@/lib/order-engine'
@@ -112,6 +113,7 @@ export default function MissionControlCard({
           chainId={chainId}
         />
         <div className="flex items-center gap-2">
+          <FloorTierBadge tier={order.floorTier} />
           {/* [fix/cross-chain-order-cancel] The order's own chain, always visible — a mismatch
               against the connected wallet is called out BEFORE the Cancel click, not after. */}
           <span
