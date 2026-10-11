@@ -1,8 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { normalizeAddress } from './normalize-address'
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   FUTURE_SKEW_SEC, MAX_PRICE_AGE_SEC, QUORUM_TOLERANCE_BPS, SOURCE_TIMEOUT_MS,
@@ -87,12 +86,12 @@ describe('off-chain price quorum (the keeper reaches quorum <=> offchain-price)'
 })
 
 /**
- * PIN to the keeper (ADR-024), "regex + value" like the cap pin. The quorum lives on
- * feat/keeper-price-quorum and is merged AFTER this branch (merge order 29 before 33), so:
- *  - frozen literals always run (the values as of 2026-10-11);
- *  - the working-tree pin runs as soon as order-floor.js / price-sources.js define the constants (after 33);
- *  - the branch pin reads the unmerged branch via `git show` when that ref exists locally.
- * Any drift in either place fails loudly.
+ * PIN to the keeper (ADR-024), "regex + value" like the cap pin. The keeper quorum is on main
+ * (#560: order-floor.js + price-sources.js), so both checks are unconditional:
+ *  - frozen literals (the values as of 2026-10-11);
+ *  - the working tree: regex on the keeper source text AND the imported value.
+ * No skip conditions: a moved/renamed keeper file fails here (ENOENT) instead of silently skipping,
+ * and any drift fails loudly.
  */
 const KEEPER_DIR = resolve(__dirname, '../../../contracts/order-engine/executor')
 const consts = (floor: string, sources: string) => ({
@@ -103,29 +102,17 @@ const consts = (floor: string, sources: string) => ({
 })
 const WEB = { tol: QUORUM_TOLERANCE_BPS, age: MAX_PRICE_AGE_SEC, skew: FUTURE_SKEW_SEC, timeout: SOURCE_TIMEOUT_MS }
 
-function branchSources(): { floor: string; sources: string } | null {
-  try {
-    const show = (f: string) => execFileSync('git', ['show', `origin/feat/keeper-price-quorum:contracts/order-engine/executor/${f}`], { cwd: KEEPER_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    return { floor: show('order-floor.js'), sources: show('price-sources.js') }
-  } catch { return null }
-}
-const treeHasQuorum = existsSync(resolve(KEEPER_DIR, 'price-sources.js')) && /export const QUORUM_TOLERANCE_BPS/.test(readFileSync(resolve(KEEPER_DIR, 'order-floor.js'), 'utf8'))
-const branch = branchSources()
-
 describe('quorum constants are pinned to the keeper', () => {
   it('frozen values (ADR-024, 2026-10-11): 300 bps, 600 s, 300 s skew, 5 s timeout', () => {
     expect(WEB).toEqual({ tol: 300, age: 600, skew: 300, timeout: 5000 })
   })
-  it.skipIf(!treeHasQuorum)('equal the keeper in this tree (regex on source text AND imported value)', async () => {
+  it('equal the keeper in this tree (regex on source text AND imported value)', async () => {
     const floor = readFileSync(resolve(KEEPER_DIR, 'order-floor.js'), 'utf8')
     const sources = readFileSync(resolve(KEEPER_DIR, 'price-sources.js'), 'utf8')
     expect(consts(floor, sources)).toEqual(WEB)
     const k = await import(/* @vite-ignore */ resolve(KEEPER_DIR, 'order-floor.js'))
     expect(k.QUORUM_TOLERANCE_BPS).toBe(QUORUM_TOLERANCE_BPS)
     expect(k.MAX_PRICE_AGE_SEC).toBe(MAX_PRICE_AGE_SEC)
-  })
-  it.skipIf(!branch)('equal the keeper on origin/feat/keeper-price-quorum (the unmerged source of truth)', () => {
-    expect(consts(branch!.floor, branch!.sources)).toEqual(WEB)
   })
 })
 

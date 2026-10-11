@@ -48,3 +48,12 @@ worktree with symlinked `node_modules`). `git diff --stat origin/main`: 20 files
 
 ### Concern
 - Fix verified locally (4401 tests, tsc, eslint clean). CodeQL goes green only once it re-scans the pushed commit; alert is not dismissed.
+
+## Feedback — CI full-suite "1 skipped" (dca-price-quorum.test.ts)
+
+### Edge case
+- The skip was the BRANCH pin (`git show origin/feat/keeper-price-quorum:…`), not the tree pin — CI full-suite log (run 38156091300, `8dbce34`): tree pin ✓, branch pin ↓. #560 merged and the remote branch is deleted, and CI checks out `fetch-depth: 1`, so that ref never exists there: the test was permanently dead. Removed it; the tree pin (now on main) is the single source of truth.
+- Tree pin is now unconditional (no `skipIf`): mutations verified — `QUORUM_TOLERANCE_BPS` 300→301 → AssertionError; `price-sources.js` removed → ENOENT. Both fail, neither skips.
+
+### Concern
+- Locally the branch pin RAN and passed (0 skipped) because a stale remote-tracking ref `origin/feat/keeper-price-quorum` survived the remote delete — a test whose outcome depends on local ref state hides CI skips. Avoid `git show <remote-branch>` pins.
