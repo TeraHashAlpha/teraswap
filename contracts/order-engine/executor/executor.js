@@ -171,18 +171,30 @@ import {
 } from "./deviation-guard.js"
 
 // [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] Oracle-bounded per-fill floor for DCA:
-// reject a fill whose built output is below an INDEPENDENT fair-value reference
-// (Chainlink/DefiLlama), closing the "on-chain minOut is 1 wei for DCA" gap that
-// let a compromised keeper / loose calldata drain a chunk to dust. Pure gate;
-// the reference is fetched by fetchReferencePriceUsd below. See order-floor.js.
+// reject a fill whose built output is below an INDEPENDENT fair-value reference,
+// closing the "on-chain minOut is 1 wei for DCA" gap that let a compromised
+// keeper / loose calldata drain a chunk to dust. Pure gate; see order-floor.js.
+// [ADR-024 / feat/keeper-price-quorum] The reference is now a per-leg PRICE
+// QUORUM over three independent sources (price-sources.js): quorum / single /
+// skip-the-cycle. The former transient-vs-feedless fail-open branch is gone.
 import {
   computeReferenceExpectedOut,
   decideFloor,
   getFloorMaxSlippageBps,
-  classifyReference,
-  decideFailOpen,
   getFailOpenMaxUsd,
+  resolveFloorPrice,
+  combineLegModes,
+  singleSourceFloorBps,
+  decideSingleSourceCap,
+  recordQuorumSkip,
+  clearQuorumSkips,
+  resolveFailOpenMaxUsd,
+  DCA_NO_PRICE_FILL_CAP_MAX_USD,
 } from "./order-floor.js"
+import { createCycleQuoteContext } from "./price-sources.js"
+// [ADR-024 scope addition 2026-10-11] Boot-time publish of the effective (ceiling-clamped) no-price
+// fill cap to keeper_runtime_config — logged, never fatal, tolerates the table not existing yet.
+import { buildRuntimeConfigRow, publishRuntimeConfig, readKeeperVersion } from "./runtime-config.js"
 // [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
 // count as a managed signer (else it suppresses the plaintext-key FATAL).
 import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
@@ -261,32 +273,10 @@ const FLASHBOTS_RPC = process.env.FLASHBOTS_RPC_URL || ""
 // OP-stack chains use their private sequencer mempool and need no override.
 const ALLOW_PUBLIC_MEMPOOL = process.env.ALLOW_PUBLIC_MEMPOOL === "true"
 
-// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] DefiLlama chain slugs for the keeper-side
-// fair-value reference (the #18/#248 price plumbing, keeper-side). Only chains we
-// actually run DCA on need an entry; an unmapped chain ⇒ no DefiLlama reference
-// ⇒ the fill is flagged (not blindly filled), never falsely rejected.
-// [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] 42161 -> "arbitrum" matches the app-side slug in
-// src/lib/chains/registry.ts (ethereum / base / arbitrum). Without the entry a 42161 keeper
-// would hit the "unmapped chain" branch below: every non-ETH leg would read as FEEDLESS, so
-// the oracle floor could never be applied and fills would fall to the capped fail-open path.
-const DEFILLAMA_CHAIN_SLUG = { 1: "ethereum", 8453: "base", 42161: "arbitrum" }
-
-// ETH/WETH (and the native-ETH sentinel) per chain — these legs are priced from
-// the trusted on-chain Chainlink ETH/USD feed (readEthUsd) FIRST, before falling
-// back to DefiLlama, honouring "Chainlink first, else DefiLlama".
-const ETH_PRICED_ADDRESSES = new Set(
-  [
-    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // native-ETH sentinel
-    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH mainnet
-    "0x4200000000000000000000000000000000000006", // WETH Base
-    // [SPRINT-KEEPER-MULTICHAIN-ARBITRUM] WETH Arbitrum One — Arbitrum does NOT reuse the
-    // OP-stack predeploy above, so without this entry the WETH leg of every Arbitrum DCA
-    // would skip Chainlink and fall straight to DefiLlama. Sourced from
-    // docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json (token:WETH), pinned by
-    // arbitrum-plumbing.test.mjs.
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH Arbitrum One
-  ].map((a) => a.toLowerCase()),
-)
+// [ADR-024 / feat/keeper-price-quorum] DEFILLAMA_CHAIN_SLUG and ETH_PRICED_ADDRESSES moved to
+// price-sources.js (exported; slug map + Arbitrum WETH still manifest-pinned by
+// arbitrum-plumbing.test.mjs there). The DCA reference price is now a per-leg quorum over
+// Chainlink / DefiLlama / CoinGecko, fetched once per cycle by createCycleQuoteContext.
 
 // [DCA-OBS] Freeze-observability env vars (all OPTIONAL, safe defaults; alerting
 // is non-blocking and only fires when Telegram is configured via alert.js).
@@ -305,10 +295,10 @@ const OUTFLOW_THRESHOLD_ETH = parseFloat(process.env.OUTFLOW_THRESHOLD_ETH || "0
 // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Chain-aware, FAIL-CLOSED ETH/USD aggregator resolution
 // (eth-usd-feed.js, pinned to the app's chainlink-feeds.ts by a drift test). Replaces the previous
 // "|| <mainnet address>" tail, which handed EVERY unlisted chain a codeless address — this is not
-// only the low-gas alert: readEthUsd feeds fetchReferencePriceUsd, i.e. the ETH leg of the DCA
-// Phase-0 oracle floor. An explicit ETH_USD_FEED still overrides, verbatim and first. A chain with
-// no known aggregator now resolves to NULL (readEthUsd skips the read; the existing DefiLlama /
-// no-reference fallback is untouched) rather than to another chain's feed.
+// only the low-gas alert: the SAME resolved feed is handed to the per-cycle quote context as the
+// ETH leg's Chainlink source for the DCA price quorum [ADR-024]. An explicit ETH_USD_FEED still
+// overrides, verbatim and first. A chain with no known aggregator now resolves to NULL (readEthUsd
+// skips the read; the quorum's other sources carry the leg) rather than to another chain's feed.
 const ETH_USD_FEED_RESOLUTION = resolveEthUsdFeed({ chainId: CHAIN_ID, envFeed: process.env.ETH_USD_FEED })
 const ETH_USD_FEED = ETH_USD_FEED_RESOLUTION.feed
 const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5")
@@ -343,6 +333,11 @@ const orderRetries = new Map()   // orderId -> { count, lastAttempt }  (backoff 
 // orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
 // order stays fillable until expiry. Cleared on any successful fill.
 const pinnedRouteReverts = new Map()
+// [ADR-024 / feat/keeper-price-quorum] orderId -> consecutive cycles SKIPPED for lack of a price
+// quorum (0 sources, or 2 that disagree with no third). In-memory only, never persisted, never a
+// failure-ladder input: a skip leaves the order untouched. Alert at SKIP_ALERT_CYCLES (order-
+// floor.js); cleared the first cycle a price resolves again, and on any successful fill.
+const quorumSkips = new Map()
 
 // [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
 //   seenDcaOrderIds          -- DCA order ids already announced via alertNewDcaPosition.
@@ -877,9 +872,10 @@ let ethUsdFeedMissingWarned = false
 // Number USD price, or null if the feed read fails (non-fatal; low-gas signal is
 // simply skipped that cycle). Never throws.
 // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] A null feed (unknown chain, ETH_USD_FEED unset) returns
-// null WITHOUT a read — fail-closed. Callers are unchanged: the low-gas signal skips that cycle,
-// and fetchReferencePriceUsd falls through to its existing DefiLlama path (and, for the ETH leg,
-// classifies a miss as TRANSIENT, so the fill is delayed/flagged rather than filled unbounded).
+// null WITHOUT a read — fail-closed: the low-gas signal skips that cycle.
+// [ADR-024] The DCA floor no longer calls this: the ETH leg's Chainlink quote comes from
+// price-sources.js (V3 registry, else the SAME resolved ETH_USD_FEED handed to the quote context,
+// else the chain mirror), alongside DefiLlama + CoinGecko, and the quorum decides.
 async function readEthUsd(publicClient) {
   if (!ETH_USD_FEED) {
     if (!ethUsdFeedMissingWarned) {
@@ -1012,72 +1008,12 @@ async function fetchBestQuote(tokenIn, tokenOut, amount, chainId, srcDecimals, d
   }
 }
 
-// [SPRINT-ORDER-ONCHAIN-FLOOR / P1a] Fair-value USD price for one leg, used to
-// build the oracle-bounded DCA floor. "Chainlink first, else DefiLlama":
-//   - ETH/WETH (and native-ETH) → the trusted on-chain Chainlink ETH/USD feed
-//     the keeper already reads (readEthUsd, chain-appropriate via ETH_USD_FEED).
-//   - everything else → DefiLlama current price by chain:address (the #18/#248
-//     price source), 8-dp-friendly float.
-// Fully FAIL-SAFE: any miss (unmapped chain, no coverage, HTTP/parse error,
-// timeout) ⇒ null. A null makes the floor gate treat the pair as "no reference"
-// (the fill is FLAGGED, never falsely rejected) — a reference outage can never
-// halt DCA, only drop it to the flagged path. Never throws.
-// [CHORE-KEEPER-HARDENING / P1A-M-01] Returns a DISCRIMINATED result so the floor
-// gate can tell a TRANSIENT outage of a feed-having pair (delay the fill) from a
-// pair with genuinely NO feed (fail-open, capped):
-//   { price: number }                 -- a usable fair-value price
-//   { price: null, transient: true }  -- a feed EXISTS but is momentarily down
-//                                        (RPC/HTTP/timeout/5xx/429) -> DELAY
-//   { price: null, transient: false } -- genuinely no feed for this pair on this
-//                                        chain (unmapped chain / DefiLlama 200-but-
-//                                        -absent / 4xx) -> feedless (capped fail-open)
-async function fetchReferencePriceUsd(token, chainId, publicClient) {
-  try {
-    if (!token || typeof token !== "string") return { price: null, transient: false }
-    const addr = token.toLowerCase()
-    const ethPriced = ETH_PRICED_ADDRESSES.has(addr)
-
-    // Chainlink-first for the ETH leg (most common DCA quote leg).
-    if (ethPriced) {
-      const eth = await readEthUsd(publicClient)
-      if (eth != null) return { price: eth, transient: false }
-      // else fall through to DefiLlama; if that also misses we know a feed EXISTS
-      // (ETH always has one), so the miss is TRANSIENT, not feedless.
-    }
-
-    const slug = DEFILLAMA_CHAIN_SLUG[Number(chainId)]
-    if (!slug) {
-      // Unmapped chain: no keeper feed config. For the ETH leg a feed still exists
-      // (transient); otherwise genuinely feedless.
-      return { price: null, transient: ethPriced }
-    }
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 5_000) // 5s cap — never stall a cycle
-    try {
-      const res = await fetch(`https://coins.llama.fi/prices/current/${slug}:${token}`, { signal: controller.signal })
-      if (!res.ok) {
-        // 5xx / 429 ⇒ transient; a 4xx (absent) ⇒ feedless. ETH leg: always transient.
-        const transient = ethPriced || res.status >= 500 || res.status === 429
-        return { price: null, transient }
-      }
-      const json = await res.json()
-      const price = json?.coins?.[`${slug}:${token}`]?.price
-      const num = Number(price)
-      if (Number.isFinite(num) && num > 0) return { price: num, transient: false }
-      // 200 but no price: DefiLlama authoritatively doesn't cover it ⇒ feedless
-      // (unless it's the ETH leg, which must have a feed ⇒ transient).
-      return { price: null, transient: ethPriced }
-    } catch {
-      // network / timeout / parse error ⇒ transient (a feed may well exist)
-      return { price: null, transient: true }
-    } finally {
-      clearTimeout(timer)
-    }
-  } catch {
-    return { price: null, transient: true } // fail-safe: unknown error ⇒ delay, don't fail-open
-  }
-}
+// [ADR-024 / feat/keeper-price-quorum] fetchReferencePriceUsd ("Chainlink first, else DefiLlama"
+// with the P1A-M-01 transient/feedless split) is REPLACED by price-sources.js
+// createCycleQuoteContext: every DCA leg now gets up to three independent, age-gated quotes
+// (Chainlink via the V3 registry or the chain mirror, DefiLlama, CoinGecko) and order-floor.js
+// resolveFloorPrice decides quorum / single / skip. The same DefiLlama endpoint and 5 s cap live
+// on in price-sources.js, batched once per cycle.
 
 // ---- Logging -----------------------------------------------------------
 
@@ -1369,6 +1305,20 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   log(`  Found ${orders.length} active order(s)`)
 
+  // [ADR-024 / feat/keeper-price-quorum] ONE price-quote context per cycle: the off-chain sources
+  // are fetched once for every active DCA token (one DefiLlama + one CoinGecko batch per 50
+  // tokens, cached for the cycle) and Chainlink reads are memoized per token. The ETH leg's
+  // Chainlink feed is the SAME resolved ETH_USD_FEED the low-gas signal reads (env wins, verbatim).
+  const quoteCtx = createCycleQuoteContext({
+    chainId: CHAIN_ID,
+    publicClient,
+    v3Address: V3_CONTRACT_ADDRESS,
+    ethUsdFeed: ETH_USD_FEED,
+  })
+  quoteCtx.registerTokens(
+    orders.filter((o) => o.order_type === "dca").flatMap((o) => [o.order_data?.tokenIn, o.order_data?.tokenOut]),
+  )
+
   let executed = 0
   let skipped = 0
   let errors = 0
@@ -1385,6 +1335,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       if (expiryTs < Math.floor(Date.now() / 1000)) {
         await updateOrderStatus(dbOrder.id, "expired")
         orderRetries.delete(dbOrder.id)
+        quorumSkips.delete(dbOrder.id) // [ADR-024] drop the skip streak too (no Map leak)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
         continue
       }
@@ -1645,102 +1596,156 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // alert. DCA still buys regardless of market price — this guards execution
       // QUALITY, not market timing.
       if (isDca) {
-        // ── Oracle-bounded per-fill floor ── [SPRINT-ORDER-ONCHAIN-FLOOR / P1a
-        // + CHORE-KEEPER-HARDENING / P1A-M-01]. DCA's on-chain minOut is a 1-wei
-        // no-op, so the keeper verifies the built output against an INDEPENDENT
-        // fair-value reference (Chainlink for ETH, else DefiLlama).
-        //   - both legs priced → REJECT a fill grossly below reference ×
-        //     (1 − maxSlippage) (drain-to-dust tail); a reject DELAYS (retry next
-        //     cycle), never fails and never force-executes — delay ≫ drain.
-        //   - a TRANSIENT reference outage on a feed-having pair → DELAY (do NOT
-        //     fail-open on a momentary blip).
-        //   - a genuinely FEEDLESS pair → proceed FLAGGED, but only for a SMALL
-        //     fill within the USD notional cap; larger/unsizable → DELAY.
-        // Reference fetch is fully fail-safe (any unknown error ⇒ transient ⇒ delay).
-        const [refIn, refOut] = await Promise.all([
-          fetchReferencePriceUsd(orderStruct.tokenIn, CHAIN_ID, publicClient),
-          fetchReferencePriceUsd(orderStruct.tokenOut, CHAIN_ID, publicClient),
+        // ── Oracle-bounded per-fill floor + PRICE QUORUM ── [ADR-024 / feat/keeper-price-quorum,
+        // on top of SPRINT-ORDER-ONCHAIN-FLOOR / P1a]. DCA's on-chain minOut is a 1-wei no-op, so
+        // the keeper verifies the built output against an INDEPENDENT fair-value reference. That
+        // reference now needs a QUORUM per leg (owner decisions 2026-10-11 — order-floor.js
+        // resolveFloorPrice; sources in price-sources.js):
+        //   - quorum  (>= 2 sources agree within QUORUM_TOLERANCE_BPS) → normal floor from the more
+        //     conservative price; a fill grossly below reference × (1 − maxSlippage) is REJECTED
+        //     (delayed, never forced — delay ≫ drain).
+        //   - single  (exactly 1 source on a leg) → TIGHTER floor (half band) + the SAME no-price
+        //     $ cap as before (getFailOpenMaxUsd, value unchanged) + flagged.
+        //   - skip    (0 sources, or 2 that disagree beyond tolerance with no third to break the
+        //     tie) → SKIP THIS CYCLE: no fill, order untouched (unlocked, retried next cycle),
+        //     per-order consecutive-skip count, keeper alert at SKIP_ALERT_CYCLES, automatic
+        //     resume when sources return. Never cancel the order, never fill blind.
+        // This REPLACES the former "no reference ⇒ fill-and-flag" / transient-vs-feedless branch.
+        const [quotesIn, quotesOut] = await Promise.all([
+          quoteCtx.legQuotes(orderStruct.tokenIn),
+          quoteCtx.legQuotes(orderStruct.tokenOut),
         ])
-        const bothPriced = refIn.price != null && refOut.price != null && swapData.toAmount != null
-        if (bothPriced) {
-          const referenceExpectedOut = computeReferenceExpectedOut({
+        const floorIn = resolveFloorPrice("in", quotesIn)
+        const floorOut = resolveFloorPrice("out", quotesOut)
+        const quorumMode = combineLegModes(floorIn.mode, floorOut.mode)
+        log(
+          `  Order ${dbOrder.id.slice(0, 8)}... DCA price quorum: in=${floorIn.mode}[${floorIn.sources.join("+") || "-"}] ` +
+            `out=${floorOut.mode}[${floorOut.sources.join("+") || "-"}] -> ${quorumMode}`,
+        )
+
+        let skipReason = null
+        let referenceExpectedOut = null
+        if (quorumMode === "skip") {
+          skipReason = `in: ${floorIn.reason}; out: ${floorOut.reason}`
+        } else {
+          referenceExpectedOut = computeReferenceExpectedOut({
             netAmountIn: netAmount,
             srcDecimals,
             dstDecimals,
-            priceInUsd: refIn.price,
-            priceOutUsd: refOut.price,
+            priceInUsd: floorIn.price,
+            priceOutUsd: floorOut.price,
           })
-          const floorDecision = decideFloor({
-            builtExpectedOut: swapData.toAmount,
-            referenceExpectedOut,
-            maxSlippageBps: getFloorMaxSlippageBps(),
-            hasReference: true,
-          })
-          if (!floorDecision.ok) {
-            log(
-              `  Order ${dbOrder.id.slice(0, 8)}... DCA FLOOR BREACH -- ${floorDecision.reason} (built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}) -- refusing to fill, retry next cycle`,
-            )
-            // Fund-adjacent: built output grossly below fair value. Page (warn).
+          // Prices resolved but no usable reference (amount/decimals/sub-1e-8 price): a floor
+          // cannot be computed, so this is a skip too — never fill blind.
+          if (referenceExpectedOut === null || referenceExpectedOut <= 0n) {
+            skipReason = `reference unusable from in=${floorIn.price} out=${floorOut.price} (amount/decimals/precision)`
+          }
+        }
+        if (skipReason !== null) {
+          const skip = recordQuorumSkip(quorumSkips, dbOrder.id)
+          log(
+            `  Order ${dbOrder.id.slice(0, 8)}... DCA fill SKIPPED (no price quorum) -- ${skipReason} ` +
+              `-- consecutive skips=${skip.count}; order untouched, retry next cycle`,
+          )
+          if (skip.alert) {
             try {
               await alertOps(
                 {
-                  kind: "dca-floor-breach",
-                  detail: `Order ${dbOrder.id} DCA fill rejected by oracle floor: ${floorDecision.reason}; built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}`,
+                  kind: "dca-price-quorum-skip",
+                  detail: `Order ${dbOrder.id} skipped ${skip.count} consecutive cycles: no price quorum on chain ${CHAIN_ID} (${skipReason}). Order untouched; resumes when sources return.`,
                 },
                 TIER_WARN_THRESHOLD,
               )
             } catch {}
-            // DELAY, never drain. NOT a failure (no orderRetries/'failed'/failure
-            // alert); and UNLIKE the deviation window-end path, NEVER executes-anyway.
-            await updateOrderStatus(dbOrder.id, "active")
-            skipped++
-            continue
           }
-          // else oracle-bounded pass → fall through to the deviation gate + execute.
-        } else {
-          // Not both priced: split TRANSIENT (delay) vs FEEDLESS (capped fail-open).
-          const statusOf = (r) => (r.price != null ? "ok" : r.transient ? "transient" : "feedless")
-          const referenceStatus = classifyReference({ inStatus: statusOf(refIn), outStatus: statusOf(refOut) })
-          // Size the fail-open fill from whichever leg IS priced (for the USD cap).
-          let notionalUsd = null
-          if (refIn.price != null) {
-            notionalUsd = (Number(netAmount) / 10 ** srcDecimals) * refIn.price
-          } else if (refOut.price != null && swapData.toAmount != null) {
-            notionalUsd = (Number(swapData.toAmount) / 10 ** dstDecimals) * refOut.price
-          }
-          const failOpen = decideFailOpen({
-            referenceStatus,
-            notionalUsd,
-            maxFailOpenUsd: getFailOpenMaxUsd(),
-          })
-          if (!failOpen.ok) {
-            // Transient outage, or a feedless fill above the cap / unsizable ⇒ DELAY.
-            // Not a breach → info alert; unlock + retry next cycle (never fill blind).
-            log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill DELAYED -- ${failOpen.reason}`)
+          // A SKIP is NOT a failure (no orderRetries / 'failed' / failure alert) and NEVER
+          // executes: unlock and leave the order exactly as it was.
+          await updateOrderStatus(dbOrder.id, "active")
+          skipped++
+          continue
+        }
+        // A price was resolved this cycle — but the streak is NOT reset yet. [Auditor round-1 M,
+        // 2026-10-11] A single-source fill held back by the $ cap below is held back for the same
+        // reason a skip is (no price the keeper trusts for THIS size), so it shares the streak; the
+        // reset happens once the price machinery RELEASES the fill (after the cap check) and on a
+        // successful fill. A floor breach in between is a route-quality rejection with its own
+        // per-cycle WARN: it neither bumps nor resets the streak.
+
+        const floorBps = quorumMode === "single" ? singleSourceFloorBps(getFloorMaxSlippageBps()) : getFloorMaxSlippageBps()
+        const floorDecision = decideFloor({
+          builtExpectedOut: swapData.toAmount,
+          referenceExpectedOut,
+          maxSlippageBps: floorBps,
+          hasReference: true,
+        })
+        if (!floorDecision.ok) {
+          log(
+            `  Order ${dbOrder.id.slice(0, 8)}... DCA FLOOR BREACH -- ${floorDecision.reason} (built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"}, band=${floorBps} bps, mode=${quorumMode}) -- refusing to fill, retry next cycle`,
+          )
+          // Fund-adjacent: built output grossly below fair value. Page (warn).
+          try {
+            await alertOps(
+              {
+                kind: "dca-floor-breach",
+                detail: `Order ${dbOrder.id} DCA fill rejected by oracle floor: ${floorDecision.reason}; built=${swapData.toAmount}, floor=${floorDecision.floorOut ?? "n/a"} (band ${floorBps} bps, ${quorumMode}: in ${floorIn.sources.join("+")}, out ${floorOut.sources.join("+")})`,
+              },
+              TIER_WARN_THRESHOLD,
+            )
+          } catch {}
+          // DELAY, never drain. NOT a failure (no orderRetries/'failed'/failure
+          // alert); and UNLIKE the deviation window-end path, NEVER executes-anyway.
+          await updateOrderStatus(dbOrder.id, "active")
+          skipped++
+          continue
+        }
+        if (quorumMode === "single") {
+          // Exactly one source on at least one leg: size the fill from the 'in' leg's price and
+          // apply the SAME no-price $ cap as before (value unchanged). Above it / unsizable ⇒
+          // DELAY (not a failure); within it ⇒ proceed FLAGGED so it is never silent.
+          const notionalUsd = (Number(netAmount) / 10 ** srcDecimals) * floorIn.price
+          const cap = decideSingleSourceCap({ notionalUsd, maxUsd: getFailOpenMaxUsd() })
+          if (!cap.ok) {
+            // [Auditor round-1 M] A cap-delay is a SKIP for streak purposes: bump the same per-order
+            // streak, WARN at SKIP_ALERT_CYCLES (and every N), info (score 0) in between — never a
+            // silent info forever. Reset on a released / successful fill, like a quorum skip.
+            const skip = recordQuorumSkip(quorumSkips, dbOrder.id)
+            log(
+              `  Order ${dbOrder.id.slice(0, 8)}... DCA fill DELAYED -- ${cap.reason} ` +
+                `-- consecutive skips=${skip.count}; order untouched, retry next cycle`,
+            )
             try {
               await alertOps(
-                { kind: "dca-floor-delay", detail: `Order ${dbOrder.id} DCA fill delayed: ${failOpen.reason}` },
-                0,
+                {
+                  kind: "dca-floor-delay",
+                  detail:
+                    `Order ${dbOrder.id} DCA fill delayed: ${cap.reason}` +
+                    (skip.alert
+                      ? ` -- held back ${skip.count} consecutive cycles on chain ${CHAIN_ID} (single price source, chunk above the no-price cap). Order untouched; resumes when a second source returns or the cap is raised.`
+                      : ""),
+                },
+                skip.alert ? TIER_WARN_THRESHOLD : 0,
               )
             } catch {}
             await updateOrderStatus(dbOrder.id, "active")
             skipped++
             continue
           }
-          // Small feedless fill within the USD cap: proceed on the aggregator's own
-          // flat calldata minReturn, surfaced (info) so it is never silent. Terminal
-          // fix for feedless pairs is the on-chain signed floor (ADR-013).
-          log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill NOT oracle-bounded -- ${failOpen.reason}`)
+          log(`  Order ${dbOrder.id.slice(0, 8)}... DCA fill on a SINGLE price source (floor band ${floorBps} bps) -- ${cap.reason}`)
           try {
             await alertOps(
               {
-                kind: "dca-floor-unverified",
-                detail: `Order ${dbOrder.id} DCA fill has no fair-value reference (${orderStruct.tokenIn} -> ${orderStruct.tokenOut} on chain ${CHAIN_ID}); ${failOpen.reason}`,
+                kind: "dca-floor-single-source",
+                detail: `Order ${dbOrder.id} DCA fill priced by a single source (in: ${floorIn.sources.join("+") || "-"}; out: ${floorOut.sources.join("+") || "-"}) on chain ${CHAIN_ID}; ${cap.reason}`,
               },
               0,
             )
           } catch {}
         }
+        // else quorum pass → fall through to the deviation gate + execute.
+        // The price machinery RELEASED the fill (quorum, or single within the cap) ⇒ the
+        // consecutive-skip streak is broken (resume). [ADR-024; moved here from right after the skip
+        // branch per Auditor round-1 M so a cap-delay can extend the streak.]
+        clearQuorumSkips(quorumSkips, dbOrder.id)
 
         const dueSec = dcaDueSec(dbOrder)
         const { bestOut, nextBestOut, nextBestSource } = await fetchBestQuote(
@@ -1899,6 +1904,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [SPRINT-P1B] A fill also clears the pinned-route revert streak (consecutive, not
         // cumulative) so the ops alert only fires on a genuinely stuck route.
         pinnedRouteReverts.delete(dbOrder.id)
+        // [ADR-024] ...and the price-quorum skip streak ("reset on success").
+        clearQuorumSkips(quorumSkips, dbOrder.id)
 
         const now = new Date().toISOString()
 
@@ -2319,6 +2326,25 @@ async function main() {
   if (balance === 0n) {
     console.warn("WARNING: Executor wallet has 0 ETH -- transactions will fail!")
     console.warn("   Fund the wallet before starting execution.\n")
+  }
+
+  // [ADR-024 scope addition 2026-10-11] The no-price (single-source) fill cap THIS instance
+  // enforces: DCA_FAIL_OPEN_MAX_USD clamped to the hard ceiling DCA_NO_PRICE_FILL_CAP_MAX_USD —
+  // never above it, and LOUD when the env asked for more. Then publish the effective value to
+  // keeper_runtime_config so the web app shows the same number. Logged, never fatal: the table is
+  // created by the 28b migration and may not exist yet.
+  const capResolution = resolveFailOpenMaxUsd()
+  if (capResolution.clamped) {
+    console.warn(`WARNING: no-price fill cap CLAMPED -- ${capResolution.reason}`)
+    log(`  WARNING: no-price fill cap CLAMPED -- ${capResolution.reason}`)
+  }
+  log(`No-price fill cap: $${capResolution.value} [${capResolution.source}] (ceiling $${DCA_NO_PRICE_FILL_CAP_MAX_USD}; ${capResolution.reason})`)
+  try {
+    const runtimeRow = buildRuntimeConfigRow({ chainId: CHAIN_ID, noPriceFillCapUsd: capResolution.value, keeperVersion: readKeeperVersion(), nowIso: new Date().toISOString() })
+    if (!runtimeRow.ok) log(`  WARNING: keeper_runtime_config row not built (non-fatal): ${runtimeRow.reason}`)
+    await publishRuntimeConfig({ supabaseFetch, row: runtimeRow.row, log })
+  } catch (err) {
+    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${err?.message?.slice(0, 120)}`)
   }
 
   // Start health check server
