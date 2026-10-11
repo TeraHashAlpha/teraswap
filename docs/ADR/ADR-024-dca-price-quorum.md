@@ -148,6 +148,25 @@ retained as pure exports (no longer called by the executor) rather than deleted 
   `teraswap-keeper-arbitrum`); the quorum line `DCA price quorum: in=… out=… -> …` in the log is
   the proof it is live.
 
+## Follow-ups (Auditor round 1, 2026-10-11 — noted, deliberately not changed here)
+
+- **Per-feed V3 `maxStaleness` is read and discarded.** `price-sources.js` `readChainlinkUsd`
+  reads `tokenUsdFeeds(token)` from OrderExecutorV3 — `(feed, feedDecimals, tokenDecimals,
+  maxStaleness, registered)` — and uses only `feed`, `feedDecimals` and `registered`; the
+  per-feed `maxStaleness` the owner configured on-chain is destructured away, and the quote's
+  freshness is gated solely by the global `MAX_PRICE_AGE_SEC` (600 s default) that every source
+  shares. The two can disagree in both directions: a feed registered with a 24 h staleness bound
+  (a long-heartbeat stable) is *absent* under the 600 s gate even though the contract would accept
+  it, and a feed registered with a bound tighter than 600 s is *counted* by the keeper for up to
+  600 s even though the contract would reject it at execution. The global gate is the stricter of
+  the two in the common case, so this is a liveness cost, not a safety hole — but it should be
+  resolved. Proposed shape (next round, not this one): for a `v3-registry` quote, gate on
+  `min(MAX_PRICE_AGE_SEC, maxStaleness)` so the keeper is never looser than the contract, and
+  consider letting an *explicit* per-feed bound above the global gate count for that feed alone.
+  Needs its own test row (registry bound tighter / looser than the global gate) and an owner
+  decision on the second half. Not changed now: it alters which legs are present for the quorum
+  on live Base/Arbitrum pairs, which is a fund-adjacent behaviour change outside the round-1 scope.
+
 ## Verification
 
 - `contracts/order-engine/executor`: `node --test` — 736 tests (origin/main 650; 731 before the

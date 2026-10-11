@@ -58,8 +58,12 @@ Env NAMES: QUORUM_TOLERANCE_BPS · MAX_PRICE_AGE_SEC · SKIP_ALERT_CYCLES · DCA
       COINGECKO_API_KEY · KEEPER_VERSION — names + defaults + clamps, no values; plus the pre-existing DCA_FAIL_OPEN_MAX_USD,
       which was also undocumented and whose ceiling clamp is new on this branch — one line beyond the 5, flagged here)
 - [x] **L** stale 28b refs in this file corrected (head 5e01670 → 74b8480; `order-floor.js:188` cite on 28b vs `:455` here)
-- [ ] **L (defer, note only)** per-feed V3 `maxStaleness` read-and-discarded → ADR-024 follow-up note, no code change
-- [ ] keeper suite + lint re-run, report
+- [x] **L (defer, note only)** per-feed V3 `maxStaleness` read-and-discarded → ADR-024 "Follow-ups" section (gate is the global
+      600 s only; proposed `min(MAX_PRICE_AGE_SEC, maxStaleness)` for `v3-registry` quotes + owner decision on the looser half);
+      no code change — it would alter which legs are present on live pairs, outside round-1 scope
+- [x] keeper suite + lint re-run on the final tree: `node --test` **736/736** (731 + 5 wiring), 0 fail; root `npm run lint`
+      0 errors / 94 warnings = baseline; `node --check` clean on executor.js / wiring test / order-floor.js / price-sources.js.
+Round-1 follow-up commits (SSH-signed, same branch, no PR): a671abe M · 3b93b5b L env+feedback · (this) L defer note + final.
 Mutation (round-1 rules; restore by scratch COPY, not `git checkout` — the latter wiped the GREEN edits once, caught by diff):
 M16 cap-delay bump removed → "cap-delay ⇒ recordQuorumSkip on the SAME per-order streak" · M17 alert never escalates →
 "cap-delay alert: … WARN at SKIP_ALERT_CYCLES" · M18 reset moved back before the cap check → "reset: ONLY once the price
