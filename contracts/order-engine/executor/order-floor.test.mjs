@@ -240,3 +240,245 @@ describe("getFailOpenMaxUsd — env override, clamped, default 250", () => {
     delete process.env.DCA_FAIL_OPEN_MAX_USD
   })
 })
+
+// ── [ADR-024 / feat/keeper-price-quorum] Price quorum ────────────────────────────────────────────
+// Owner decisions 2026-10-11: (A) >= 2 sources agreeing within tolerance ⇒ quorum, floor from the
+// more conservative price; (B) exactly 1 ⇒ single (tighter floor, $-capped, flagged); (C) 0, or 2
+// that disagree with no third to break the tie ⇒ SKIP the cycle. Never cancel, never fill blind.
+import {
+  resolveFloorPrice,
+  combineLegModes,
+  singleSourceFloorBps,
+  decideSingleSourceCap,
+  recordQuorumSkip,
+  clearQuorumSkips,
+  spreadBps,
+  getQuorumToleranceBps,
+  getMaxPriceAgeSec,
+  getSkipAlertCycles,
+  QUORUM_TOLERANCE_BPS,
+  MAX_PRICE_AGE_SEC,
+  SKIP_ALERT_CYCLES,
+  PRICE_SOURCE_TRUST_ORDER,
+} from "./order-floor.js"
+
+const CL = (price) => ({ price, ts: 1, source: "chainlink" })
+const DL = (price) => ({ price, ts: 1, source: "defillama" })
+const CG = (price) => ({ price, ts: 1, source: "coingecko" })
+const TOL = { toleranceBps: 300 }
+
+describe("resolveFloorPrice — mode (A) quorum", () => {
+  test("two sources within tolerance ⇒ quorum; 'in' takes the HIGHER, 'out' the LOWER price (conservative = protective)", () => {
+    const quotes = [CL(3000), DL(3030)] // 100 bps apart
+    const inRes = resolveFloorPrice("in", quotes, TOL)
+    const outRes = resolveFloorPrice("out", quotes, TOL)
+    assert.equal(inRes.mode, "quorum")
+    assert.equal(inRes.price, 3030)
+    assert.equal(outRes.mode, "quorum")
+    assert.equal(outRes.price, 3000)
+    assert.deepEqual(inRes.sources, ["chainlink", "defillama"])
+    assert.deepEqual(inRes.dropped, [])
+    assert.equal(inRes.spreadBps, 100)
+    assert.match(inRes.reason, /quorum chainlink\+defillama/)
+  })
+
+  test("three sources all agreeing ⇒ quorum over all three", () => {
+    const r = resolveFloorPrice("out", [CL(3000), DL(3010), CG(2995)], TOL)
+    assert.equal(r.mode, "quorum")
+    assert.equal(r.price, 2995)
+    assert.deepEqual(r.sources, ["chainlink", "defillama", "coingecko"])
+  })
+
+  test("THIRD SOURCE BREAKS THE TIE: two agree, the outlier is dropped, mode is quorum", () => {
+    const r = resolveFloorPrice("in", [CL(3000), DL(3600), CG(3005)], TOL) // DL is 20% off
+    assert.equal(r.mode, "quorum")
+    assert.deepEqual(r.sources, ["chainlink", "coingecko"])
+    assert.deepEqual(r.dropped, ["defillama"])
+    assert.equal(r.price, 3005)
+    assert.match(r.reason, /dropped outlier defillama/)
+  })
+
+  test("tolerance boundary is INCLUSIVE: exactly 300 bps agrees, 301 does not", () => {
+    assert.equal(resolveFloorPrice("in", [CL(10000), DL(10300)], TOL).mode, "quorum")
+    assert.equal(resolveFloorPrice("in", [CL(10000), DL(10301)], TOL).mode, "skip")
+  })
+
+  test("chain case A~B, B~C, A≁C: the equal-sized clusters are split by trust order (chainlink wins)", () => {
+    // CL 10000, DL 10250 (250 bps from CL), CG 10500 (244 bps from DL, 500 from CL)
+    const r = resolveFloorPrice("out", [CL(10000), DL(10250), CG(10500)], TOL)
+    assert.equal(r.mode, "quorum")
+    assert.deepEqual(r.sources, ["chainlink", "defillama"])
+    assert.deepEqual(r.dropped, ["coingecko"])
+  })
+
+  test("quorum needs INDEPENDENT sources: a duplicated source name counts once", () => {
+    assert.equal(resolveFloorPrice("in", [DL(3000), DL(3001)], TOL).mode, "single")
+  })
+
+  test("tolerance comes from QUORUM_TOLERANCE_BPS by name (default 300) when not passed", () => {
+    assert.equal(QUORUM_TOLERANCE_BPS, 300)
+    assert.equal(getQuorumToleranceBps({}), 300)
+    assert.equal(resolveFloorPrice("in", [CL(10000), DL(10300)]).mode, "quorum")
+    process.env.QUORUM_TOLERANCE_BPS = "100"
+    try {
+      assert.equal(getQuorumToleranceBps(), 100)
+      assert.equal(resolveFloorPrice("in", [CL(10000), DL(10300)]).mode, "skip")
+    } finally {
+      delete process.env.QUORUM_TOLERANCE_BPS
+    }
+  })
+})
+
+describe("resolveFloorPrice — mode (B) single", () => {
+  test("exactly one source ⇒ single, its price, flagged reason", () => {
+    const r = resolveFloorPrice("in", [DL(3000)], TOL)
+    assert.equal(r.mode, "single")
+    assert.equal(r.price, 3000)
+    assert.deepEqual(r.sources, ["defillama"])
+    assert.match(r.reason, /single source \(defillama\)/)
+  })
+  test("junk quotes do not count towards the quorum (non-positive / NaN price, missing source)", () => {
+    const r = resolveFloorPrice("in", [CL(3000), DL(0), CG(NaN), { price: 3000 }, null, { price: 3000, source: "" }], TOL)
+    assert.equal(r.mode, "single")
+    assert.deepEqual(r.sources, ["chainlink"])
+  })
+})
+
+describe("resolveFloorPrice — mode (C) skip", () => {
+  test("ZERO sources ⇒ skip with no price", () => {
+    for (const q of [[], null, undefined, [null, { price: -1, source: "x" }]]) {
+      const r = resolveFloorPrice("in", q, TOL)
+      assert.equal(r.mode, "skip")
+      assert.equal(r.price, null)
+      assert.match(r.reason, /no price source answered/)
+    }
+  })
+  test("TWO sources disagreeing beyond tolerance with NO third ⇒ skip (never fill on a coin-flip)", () => {
+    const r = resolveFloorPrice("in", [CL(3000), DL(3200)], TOL) // 667 bps
+    assert.equal(r.mode, "skip")
+    assert.equal(r.price, null)
+    assert.match(r.reason, /2 sources .* disagree beyond 300 bps .* no third to break the tie/)
+    assert.equal(r.spreadBps, 667)
+  })
+  test("THREE sources, no two agreeing ⇒ skip", () => {
+    const r = resolveFloorPrice("out", [CL(3000), DL(3200), CG(2800)], TOL)
+    assert.equal(r.mode, "skip")
+    assert.match(r.reason, /no two of 3 sources/)
+  })
+  test("unknown leg ⇒ skip (fail-safe), even with a perfect quorum", () => {
+    assert.equal(resolveFloorPrice("sideways", [CL(3000), DL(3000)], TOL).mode, "skip")
+  })
+  test("deterministic and side-effect-free", () => {
+    const q = [CL(3000), DL(3600), CG(3005)]
+    const first = resolveFloorPrice("in", q, TOL)
+    for (let i = 0; i < 25; i++) assert.deepEqual(resolveFloorPrice("in", q, TOL), first)
+    assert.deepEqual(q, [CL(3000), DL(3600), CG(3005)], "input must not be mutated")
+  })
+})
+
+describe("spreadBps + combineLegModes + singleSourceFloorBps", () => {
+  test("spreadBps is relative to the LOWER price and symmetric", () => {
+    assert.equal(Math.round(spreadBps(100, 103)), 300)
+    assert.equal(Math.round(spreadBps(103, 100)), 300)
+    assert.equal(spreadBps(0, 100), Number.POSITIVE_INFINITY)
+  })
+  test("combineLegModes: any skip ⇒ skip; else any single ⇒ single; else quorum; unknown ⇒ skip", () => {
+    assert.equal(combineLegModes("quorum", "quorum"), "quorum")
+    assert.equal(combineLegModes("quorum", "single"), "single")
+    assert.equal(combineLegModes("single", "quorum"), "single")
+    assert.equal(combineLegModes("single", "single"), "single")
+    assert.equal(combineLegModes("skip", "quorum"), "skip")
+    assert.equal(combineLegModes("single", "skip"), "skip")
+    assert.equal(combineLegModes("quorum", "bogus"), "skip")
+  })
+  test("single-source floor is TIGHTER: half the band, never below the MIN clamp", () => {
+    assert.equal(singleSourceFloorBps(300), 150)
+    assert.equal(singleSourceFloorBps(2000), 1000)
+    assert.equal(singleSourceFloorBps(60), DCA_ORACLE_FLOOR_BPS_MIN) // 30 would be below MIN (50)
+    assert.equal(singleSourceFloorBps("junk"), DCA_ORACLE_FLOOR_BPS_MIN)
+    assert.ok(singleSourceFloorBps(300) < 300, "must be strictly tighter than the normal band")
+  })
+})
+
+describe("decideSingleSourceCap — the SAME cap as the old feedless path, value unchanged", () => {
+  test("cap source is DCA_FAIL_OPEN_MAX_USD = 250 (getFailOpenMaxUsd default) — unchanged by the quorum", () => {
+    assert.equal(DCA_FAIL_OPEN_MAX_USD, 250)
+    assert.equal(getFailOpenMaxUsd(), 250)
+  })
+  test("within the cap ⇒ fill-flagged; above ⇒ delay; boundary inclusive; unsizable ⇒ delay", () => {
+    const maxUsd = getFailOpenMaxUsd()
+    assert.deepEqual(decideSingleSourceCap({ notionalUsd: 100, maxUsd }).action, "fill-flagged")
+    assert.equal(decideSingleSourceCap({ notionalUsd: 100, maxUsd }).flagged, true)
+    assert.equal(decideSingleSourceCap({ notionalUsd: maxUsd, maxUsd }).ok, true)
+    assert.equal(decideSingleSourceCap({ notionalUsd: maxUsd + 0.01, maxUsd }).action, "delay")
+    assert.equal(decideSingleSourceCap({ notionalUsd: 100000, maxUsd }).ok, false)
+    assert.equal(decideSingleSourceCap({ notionalUsd: null, maxUsd }).action, "delay")
+    assert.equal(decideSingleSourceCap({ notionalUsd: NaN, maxUsd }).action, "delay")
+  })
+  test("single-mode decisions agree with the legacy decideFailOpen feedless path for the same cap (parity)", () => {
+    for (const n of [0.5, 100, 250, 251, 9999, null]) {
+      const legacy = decideFailOpen({ referenceStatus: "feedless", notionalUsd: n, maxFailOpenUsd: 250 })
+      const now = decideSingleSourceCap({ notionalUsd: n, maxUsd: 250 })
+      assert.equal(now.ok, legacy.ok, `notional ${n}`)
+      assert.equal(now.action, legacy.action, `notional ${n}`)
+    }
+  })
+})
+
+describe("recordQuorumSkip / clearQuorumSkips — alert at N, re-alert every N, reset", () => {
+  test("counts consecutively per order; alert fires exactly at N (default 3) and at 2N, not between", () => {
+    assert.equal(SKIP_ALERT_CYCLES, 3)
+    const skips = new Map()
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 1, alert: false })
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 2, alert: false })
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 3, alert: true })
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 4, alert: false })
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 5, alert: false })
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 6, alert: true })
+    assert.deepEqual(recordQuorumSkip(skips, "b"), { count: 1, alert: false }, "orders are independent")
+  })
+  test("reset: after clear the next skip starts at 1 (consecutive, not cumulative)", () => {
+    const skips = new Map()
+    recordQuorumSkip(skips, "a")
+    recordQuorumSkip(skips, "a")
+    assert.equal(clearQuorumSkips(skips, "a"), true)
+    assert.equal(skips.has("a"), false)
+    assert.deepEqual(recordQuorumSkip(skips, "a"), { count: 1, alert: false })
+    assert.equal(clearQuorumSkips(skips, "never-seen"), false)
+  })
+  test("SKIP_ALERT_CYCLES env override by name (clamped [1, 1000])", () => {
+    process.env.SKIP_ALERT_CYCLES = "1"
+    try {
+      assert.equal(getSkipAlertCycles(), 1)
+      assert.deepEqual(recordQuorumSkip(new Map(), "a"), { count: 1, alert: true })
+      process.env.SKIP_ALERT_CYCLES = "0"
+      assert.equal(getSkipAlertCycles(), 1)
+      process.env.SKIP_ALERT_CYCLES = "99999"
+      assert.equal(getSkipAlertCycles(), 1000)
+      process.env.SKIP_ALERT_CYCLES = "banana"
+      assert.equal(getSkipAlertCycles(), SKIP_ALERT_CYCLES)
+    } finally {
+      delete process.env.SKIP_ALERT_CYCLES
+    }
+  })
+})
+
+describe("quorum constants — one production module, env-overridable BY NAME, clamped", () => {
+  test("defaults: QUORUM_TOLERANCE_BPS=300, MAX_PRICE_AGE_SEC=600, SKIP_ALERT_CYCLES=3; trust order chainlink > defillama > coingecko", () => {
+    assert.equal(getQuorumToleranceBps({}), 300)
+    assert.equal(getMaxPriceAgeSec({}), 600)
+    assert.equal(MAX_PRICE_AGE_SEC, 600)
+    assert.equal(getSkipAlertCycles({}), 3)
+    assert.deepEqual([...PRICE_SOURCE_TRUST_ORDER], ["chainlink", "defillama", "coingecko"])
+    assert.ok(Object.isFrozen(PRICE_SOURCE_TRUST_ORDER))
+  })
+  test("clamps: tolerance [10, 2000], age [30, 86400]; junk ⇒ default", () => {
+    assert.equal(getQuorumToleranceBps({ QUORUM_TOLERANCE_BPS: "1" }), 10)
+    assert.equal(getQuorumToleranceBps({ QUORUM_TOLERANCE_BPS: "5000" }), 2000)
+    assert.equal(getQuorumToleranceBps({ QUORUM_TOLERANCE_BPS: "x" }), 300)
+    assert.equal(getMaxPriceAgeSec({ MAX_PRICE_AGE_SEC: "1" }), 30)
+    assert.equal(getMaxPriceAgeSec({ MAX_PRICE_AGE_SEC: "999999" }), 86400)
+    assert.equal(getMaxPriceAgeSec({ MAX_PRICE_AGE_SEC: "120" }), 120)
+    assert.equal(getMaxPriceAgeSec({ MAX_PRICE_AGE_SEC: "nope" }), 600)
+  })
+})
