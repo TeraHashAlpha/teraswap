@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import registrations from '@/config/dca-feed-registrations.json'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -47,7 +48,8 @@ const BASE_ETH_USD_FEED = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70'
 // [CHORE-DCA-DEFAULT-BUY-USDC] The real Base USDC/USD feed. tokenOut (the buy leg) now defaults to
 // USDC (was native ETH → WETH, which read BASE_ETH_USD_FEED above). Its genuine FEED_EXPECTATIONS
 // entry is { description: 'USDC / USD', decimals: 8 } (ADR-018).
-const BASE_USDC_USD_FEED = '0x458138Fc0D67027E9A6778ef40a6ffC318c69061'
+// [FEAT-DCA-FEED-REGISTRATION-PHASE1] Base USDC's feed is now the plain proxy; read from the registration config, never retyped.
+const BASE_USDC_USD_FEED = registrations.chains['8453'].rows.find(r => r.symbol === 'USDC')!.feed
 // [L-2] The base leg of Base cbETH's COMPOSED feed (cbETH/USD = cbETH/ETH × ETH/USD). Its genuine
 // FEED_EXPECTATIONS entry is { description: 'CBETH / ETH', decimals: 18 } — a DIFFERENT identity and
 // a DIFFERENT decimal count from the quote leg, which is why the per-address mock below exists: a

@@ -45,6 +45,11 @@ vi.mock('@/lib/order-engine/config', async () => {
 })
 
 const mockFetchDefiLlamaPrice = vi.fn()
+// [FEAT-DCA-FLOOR-TIERS] These suites predate the consent gate: classify as feed-covered so the
+// pre-existing assertions stay about what they were written for (consent has its own suite).
+vi.mock('@/lib/order-engine/dca-floor-tier', () => ({
+  classifyDcaFloor: vi.fn().mockResolvedValue('onchain-feed'),
+}))
 vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
   HIGH_VALUE_THRESHOLD_USD: 10_000,

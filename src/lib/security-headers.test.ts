@@ -39,6 +39,24 @@ function nextConfigCoop(): string | undefined {
   return src.match(/'Cross-Origin-Opener-Policy',\s*value:\s*'([^']+)'/)?.[1]
 }
 
+/** connect-src sources declared in next.config.js (the only CSP layer: vercel.json mirrors all but CSP). */
+function nextConfigConnectSrc(): string[] {
+  const src = readFileSync(join(ROOT, 'next.config.js'), 'utf-8')
+  return src.match(/"connect-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
+}
+
+describe('[fix/dca-consent-copy-and-tier-check] CSP connect-src', () => {
+  it('allows the DefiLlama price origin the browser-side DCA floor classifier fetches', () => {
+    // dca-floor-tier.ts → fetchDefiLlamaPrice → https://coins.llama.fi/prices/current/<chain>:<addr>.
+    // Without it the browser blocks the call and every token with no on-chain feed reads `unpriced`.
+    expect(nextConfigConnectSrc()).toContain('https://coins.llama.fi')
+  })
+
+  it('allows it as that exact origin, never a llama.fi wildcard', () => {
+    expect(nextConfigConnectSrc().filter(s => s.includes('llama.fi'))).toEqual(['https://coins.llama.fi'])
+  })
+})
+
 describe('[9N] Cross-Origin-Opener-Policy', () => {
   it('vercel.json sets COOP to same-origin-allow-popups (popups keep window.opener)', () => {
     expect(vercelCoop()).toBe(EXPECTED_COOP)

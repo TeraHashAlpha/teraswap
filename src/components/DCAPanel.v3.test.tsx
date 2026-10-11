@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import registrations from '@/config/dca-feed-registrations.json'
 
 const mockSignTypedDataAsync = vi.fn<(args: unknown) => Promise<string>>()
 const mockWriteContractAsync = vi.fn<(args: unknown) => Promise<string>>()
@@ -186,7 +187,7 @@ beforeEach(() => {
       // [CHORE-DCA-DEFAULT-BUY-USDC] The buy leg now defaults to USDC (was native ETH → WETH),
       // so both legs' feeds need a real identity here — real Base USDC/USD feed + description,
       // same pair as chainlink-feeds.ts's FEED_EXPECTATIONS entry.
-      const isUsdcFeed = (address ?? '').toLowerCase() === '0x458138fc0d67027e9a6778ef40a6ffc318c69061'
+      const isUsdcFeed = (address ?? '').toLowerCase() === registrations.chains['8453'].rows.find(r => r.symbol === 'USDC')!.feed.toLowerCase()
       return { data: isUsdcFeed ? 'USDC / USD' : 'ETH / USD', isLoading: false, refetch: mockRefetchNonce }
     }
     return { data: undefined, isLoading: false, refetch: mockRefetchNonce }
