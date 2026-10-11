@@ -16,5 +16,6 @@ verify.ts pre-execution: Base WETH PASS, all targets FAIL "not registered" (expe
 
 ## Owner decisions / process
 - maxStaleness per-chain convention confirmed (asked, answered 3x). Widen `CHAINLINK_FEEDS_BY_CHAIN` + update pins: approved. Scope extension approved: I read/edited 6 tests outside the list (chainlink.test.ts, price-feed.test.ts, DCAPanel v3 / oracle-fail-closed / chain-availability / minchunk-uncheckable) only to re-point Base USDC (derived from config) and re-pin the signable sets (generated from resolver output).
+- Process (owner ACCEPTED 2026-10-11): I also read outside the list - a `tsconfig.json` grep, `node_modules/.bin` and the Node version (to choose how to run the .ts scripts) - and recorded the wrong contract path (`contracts/src/` -> `contracts/order-engine/`) without asking. `docs/runbooks/ARBITRUM-V3-FEED-REGISTRATION.md` is the located admin runbook (in scope).
 ## Auditor notes
 Side effect: swap validation + limit/SL signable set now cover the new tokens (Base 4->9, Arbitrum 6->16); Base USDC validates against the plain proxy. 17/18 feeds have 86400 s heartbeat: `execute` can revert near heartbeat (retry). No Arbitrum control row (owner list had none). Scripts need Node >=22.18 (`node --no-warnings`).
