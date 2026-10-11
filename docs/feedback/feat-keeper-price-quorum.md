@@ -100,3 +100,19 @@ machinery releases the fill". Suite 731 → **736**, 0 fail.
 - Still a guard (scratch mutations of price-sources.js, restored afterwards):
   - Remove the Base COMP entry: `✖ chain 8453: key set AND every feed address equal chainlink-feeds.ts` — `AssertionError: token key set drifted`
   - Change one hex digit of the Arbitrum LINK feed (…86E53… -> …86E54…): `✖ chain 42161: key set AND every feed address equal chainlink-feeds.ts` — `AssertionError: feed for 0xf97f4df75117a78c1a5a0dbb814af92458539fb4 drifted`
+
+### Follow-up evidence (second commit; the first, 2e1b720, is already pushed and is not amended)
+- Node 20: the full keeper suite was also run under the CI version, `npx -y node@20 --test` in contracts/order-engine/executor (Node v20.20.2): `# tests 736 / # pass 736 / # fail 0`. (The Node v25.6.1 line above is the earlier local run.)
+- Why the effective sets are 8 (Base) and 15 (Arbitrum): the app source excludes nothing that is enabled — the effective set is the literal entries in chainlink-feeds.ts plus the enabled rows of dca-feed-registrations.json, merged by token address, so tokens present in both (Base: WETH; Arbitrum: DAI, USDT, WBTC) count once; only the config's `enabled:false` phase-2 rows are absent, from the app's maps and the mirror alike.
+- Mutation 1 — one Base entry (COMP) removed from the mirror, raw output:
+```
+  ✖ chain 8453: key set AND every feed address equal chainlink-feeds.ts (1.790125ms)
+✖ chain 8453: key set AND every feed address equal chainlink-feeds.ts (1.790125ms)
+  AssertionError [ERR_ASSERTION]: token key set drifted
+```
+- Mutation 2 — one hex digit of the Arbitrum LINK feed altered (…86E53… -> …86E54…), raw output:
+```
+  ✖ chain 42161: key set AND every feed address equal chainlink-feeds.ts (0.607708ms)
+✖ chain 42161: key set AND every feed address equal chainlink-feeds.ts (0.607708ms)
+  AssertionError [ERR_ASSERTION]: feed for 0xf97f4df75117a78c1a5a0dbb814af92458539fb4 drifted
+```
