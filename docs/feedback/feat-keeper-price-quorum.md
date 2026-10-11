@@ -54,8 +54,10 @@ Env NAMES: QUORUM_TOLERANCE_BPS · MAX_PRICE_AGE_SEC · SKIP_ALERT_CYCLES · DCA
 - [x] **M** cap-delay = skip for streak purposes (executor.js: `recordQuorumSkip` in the `!cap.ok` branch; `dca-floor-delay`
       alert `skip.alert ? TIER_WARN_THRESHOLD : 0`; the single `clearQuorumSkips` moved AFTER the cap check, before `dueSec`;
       a floor breach neither bumps nor resets). Wiring test §4 rewritten + §4b (5 tests); ADR-024 §Consequences bullet.
-- [ ] **L** 5 new env NAMES in `.env.executor.example` (names + defaults, no values)
-- [ ] **L** stale 28b refs in this file (head, line cite) corrected
+- [x] **L** 5 new env NAMES in `.env.executor.example` (QUORUM_TOLERANCE_BPS · MAX_PRICE_AGE_SEC · SKIP_ALERT_CYCLES ·
+      COINGECKO_API_KEY · KEEPER_VERSION — names + defaults + clamps, no values; plus the pre-existing DCA_FAIL_OPEN_MAX_USD,
+      which was also undocumented and whose ceiling clamp is new on this branch — one line beyond the 5, flagged here)
+- [x] **L** stale 28b refs in this file corrected (head 5e01670 → 74b8480; `order-floor.js:188` cite on 28b vs `:455` here)
 - [ ] **L (defer, note only)** per-feed V3 `maxStaleness` read-and-discarded → ADR-024 follow-up note, no code change
 - [ ] keeper suite + lint re-run, report
 Mutation (round-1 rules; restore by scratch COPY, not `git checkout` — the latter wiped the GREEN edits once, caught by diff):
@@ -64,7 +66,11 @@ M16 cap-delay bump removed → "cap-delay ⇒ recordQuorumSkip on the SAME per-o
 machinery releases the fill". Suite 731 → **736**, 0 fail.
 
 ## Concerns / premises checked
-- **28b NOT merged** (`feat/dca-floor-tiers-consent` 5e01670): no `dca-floor-tier.ts`, no `keeper_runtime_config` on main.
+- **28b NOT merged** (`feat/dca-floor-tiers-consent`, head **74b8480** as of the round-1 follow-up — was 5e01670 when §1–6
+  were written): no `dca-floor-tier.ts`, no `keeper_runtime_config` on main. Line cite drift: 28b's `dca-floor-tier.ts:34`
+  and its test name cite `order-floor.js:188` (the literal's line on main); on THIS branch the literal sits at
+  `order-floor.js:455`. The pin itself is by source regex (`export const DCA_FAIL_OPEN_MAX_USD\s*=\s*(\d…)`) + imported
+  value, not by line, so it holds either way — whichever branch merges second should refresh the cite.
   Mapping: onchain-feed ⇔ quorum with chainlink; offchain-price ⇔ quorum achievable (≥ 2 of the SAME list); unpriced ⇔ ≤ 1.
   TODO at `order-floor.js` `resolveFloorPrice` JSDoc; 28b must count CoinGecko too. Its pin `DCA_NO_PRICE_FILL_CAP_MAX_USD`
   → `DCA_FAIL_OPEN_MAX_USD` literal (regex + value) holds; keeper test pins ceiling == literal == 250. Publish tolerates the
