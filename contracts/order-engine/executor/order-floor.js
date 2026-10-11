@@ -24,6 +24,41 @@
 // Pure + never-throwing (mirrors deviation-guard.js / retry-policy.js): no I/O,
 // no Date.now, no provider — the caller passes the fetched prices in.
 
+/**
+ * Parse an env override as an integer clamped to [min, max]; unset/unparseable ⇒ the default.
+ * @param {string|undefined} raw
+ * @param {number} def
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+function clampedIntEnv(raw, def, min, max) {
+  if (!raw) return def
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed)) return def
+  if (parsed < min) return min
+  if (parsed > max) return max
+  return parsed
+}
+
+// ── [ADR-024 / feat/keeper-price-quorum] Price-quorum constants ──────────────
+// Owner decisions 2026-10-11. All three are env-overridable BY NAME (the env var is the
+// constant's name), clamped so a mis-set value can only land in a sane band.
+
+/** Price-source trust order, highest first. The quorum uses it ONLY to break a tie between two
+ *  equally sized agreeing clusters (price-sources.js documents each source). */
+export const PRICE_SOURCE_TRUST_ORDER = Object.freeze(["chainlink", "defillama", "coingecko"])
+
+/** A source quote older than this (seconds) is ABSENT for the quorum — never stale-but-counted. */
+export const MAX_PRICE_AGE_SEC = 600
+export const MAX_PRICE_AGE_SEC_MIN = 30
+export const MAX_PRICE_AGE_SEC_MAX = 86_400
+
+/** Active max quote age: `MAX_PRICE_AGE_SEC` env override clamped to [30, 86400], else 600. */
+export function getMaxPriceAgeSec(env = process.env) {
+  return clampedIntEnv(env.MAX_PRICE_AGE_SEC, MAX_PRICE_AGE_SEC, MAX_PRICE_AGE_SEC_MIN, MAX_PRICE_AGE_SEC_MAX)
+}
+
 /** Default anti-manipulation floor band, in basis points (300 = 3%). Wide enough
  *  to clear legitimate DCA execution cost (pool fee + small price impact +
  *  oracle-vs-mid spread, typically <1%) while still catching gross manipulation
