@@ -85,3 +85,18 @@ machinery releases the fill". Suite 731 → **736**, 0 fail.
 - `classifyReference` / `decideFailOpen` retained unused (rule #4). ARCHITECT-INDEX had no ADR-023 row before this (pre-existing).
 - Commit layout: the brief's "Commit 5" became 5 (scope addition) + 6 (ADR); the `tokenUsdFeeds` ABI is mirrored from
   `src/lib/order-engine/abi.ts` (feed, feedDecimals, tokenDecimals, maxStaleness, registered).
+
+## Feedback — drift-guard mirror regeneration after #558 (post-merge of origin/main)
+
+### Concern
+- The DRIFT GUARD failed because `chainlink-feeds.ts` now builds most Base/Arbitrum entries via `...registeredFeedMap(N)` from `src/config/dca-feed-registrations.json`; the mirror was stale AND the test's text parser could not see the derived entries. Both fixed in one commit: the mirror was regenerated programmatically (script read the TS literals + enabled config rows + FEED_EXPECTATIONS/row descriptions; no hand-typed hex), and the test now computes the app's effective set = literals + enabled rows (row wins on a shared token), per chain, with the same address-equality and decimals/pair checks.
+- Mirror entries carry only { feed, decimals, pair } — no maxStaleness/heartbeat field exists in the mirror, so none to align (the config's heartbeat/maxStaleness feed the app's staleness tables, not the keeper mirror).
+
+### Evidence
+- Per-chain counts (measured): Base 3 -> 8, Arbitrum 5 -> 15. These are NOT 9/16: the effective set is literals ∪ enabled rows with overlaps merged by token (Base: DAI literal + 7 enabled rows, WETH is in both; USDC literal removed from the TS and replaced by the row. Arbitrum: 5 literals + 13 enabled rows, DAI/USDT/WBTC in both = 15). No enabled feed is excluded from the mirror. Only the config's `enabled:false` phase-2 rows (Base 8: AERO, DEGEN, MOG, MORPHO, WELL, YFI, ZRO, cbETH; Arbitrum 4: GMX, GRT, WOO, YFI) are absent, and they are equally absent from the app's maps. I could not reproduce 9/16 from the source.
+- Base USDC feed changed 0x4581… (SVR proxy) -> 0x7e86… (plain proxy), per the 2026-10-11 owner decision recorded in chainlink-feeds.ts.
+- Drift guard passing: chain 8453 and chain 42161 key-set/address tests, decimals+pair test all ✔.
+- Full keeper suite (`node --test` in contracts/order-engine/executor, the keeper-tests.yml command): 736 tests, 736 pass, 0 fail. Run under Node v25.6.1 (Node 20 unavailable locally; CI uses 20.20.2).
+- Still a guard (scratch mutations of price-sources.js, restored afterwards):
+  - Remove the Base COMP entry: `✖ chain 8453: key set AND every feed address equal chainlink-feeds.ts` — `AssertionError: token key set drifted`
+  - Change one hex digit of the Arbitrum LINK feed (…86E53… -> …86E54…): `✖ chain 42161: key set AND every feed address equal chainlink-feeds.ts` — `AssertionError: feed for 0xf97f4df75117a78c1a5a0dbb814af92458539fb4 drifted`

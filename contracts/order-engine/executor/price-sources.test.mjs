@@ -97,7 +97,9 @@ function fakeFetch(routes) {
 // ── 1. Drift guard ───────────────────────────────────────────────────────────────────────────────
 const feedsSource = readFileSync(new URL("../../../src/lib/chains/chainlink-feeds.ts", import.meta.url), "utf-8")
 const constantsSource = readFileSync(new URL("../../../src/lib/constants.ts", import.meta.url), "utf-8")
-const PAIR_RE = /'(0x[0-9a-fA-F]{40})'\s*:\s*'(0x[0-9a-fA-F]{40})'/g
+const registrations = JSON.parse(readFileSync(new URL("../../../src/config/dca-feed-registrations.json", import.meta.url), "utf-8"))
+const enabledRows = (chainId) => registrations.chains[String(chainId)].rows.filter((r) => r.enabled)
+const PAIR_RE =/'(0x[0-9a-fA-F]{40})'\s*:\s*'(0x[0-9a-fA-F]{40})'/g
 
 function appFeedsForChain(chainId) {
   const start = feedsSource.indexOf(`\n  ${chainId}: {`)
@@ -106,6 +108,9 @@ function appFeedsForChain(chainId) {
   const block = feedsSource.slice(start, end)
   const map = {}
   for (const m of block.matchAll(PAIR_RE)) map[m[1].toLowerCase()] = m[2].toLowerCase()
+  // chainlink-feeds.ts spreads `...registeredFeedMap(N)` (the enabled config rows) after the literals,
+  // so the app's EFFECTIVE set is literals + enabled rows, the row winning on a shared token.
+  for (const r of enabledRows(chainId)) map[r.token.toLowerCase()] = r.feed.toLowerCase()
   return map
 }
 function appMainnetFeeds() {
@@ -122,8 +127,11 @@ function appMainnetFeeds() {
 function appExpectation(feed) {
   const re = new RegExp(`'${feed}':\\s*\\{\\s*description:\\s*'([^']+)',\\s*decimals:\\s*(\\d+)`, "i")
   const m = feedsSource.match(re)
-  assert.ok(m, `FEED_EXPECTATIONS has no entry for ${feed}`)
-  return { pair: m[1], decimals: Number(m[2]) }
+  if (m) return { pair: m[1], decimals: Number(m[2]) }
+  // FEED_EXPECTATIONS also spreads the enabled config rows' { description, decimals }.
+  const row = [8453, 42161].flatMap(enabledRows).find((r) => r.feed.toLowerCase() === feed)
+  assert.ok(row, `FEED_EXPECTATIONS has no entry for ${feed}`)
+  return { pair: row.description, decimals: row.decimals }
 }
 
 describe("DRIFT GUARD — the keeper's Chainlink mirror equals the app's source of truth", () => {

@@ -82,8 +82,13 @@ export const CHAINLINK_USD_FEED_BY_CHAIN = Object.freeze({
   }),
   8453: Object.freeze({
     "0x4200000000000000000000000000000000000006": { feed: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70", decimals: 8, pair: "ETH / USD" },
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": { feed: "0x458138Fc0D67027E9A6778ef40a6ffC318c69061", decimals: 8, pair: "USDC / USD" },
     "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": { feed: "0x591e79239a7d679378eC8c847e5038150364C78F", decimals: 8, pair: "DAI / USD" },
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": { feed: "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B", decimals: 8, pair: "USDC / USD" },
+    "0x9e1028f5f1d5ede59748ffcee5532509976840e0": { feed: "0x9DDa783DE64A9d1A60c49ca761EbE528C35BA428", decimals: 8, pair: "COMP / USD" },
+    "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42": { feed: "0xDAe398520e2B67cd3f27aeF9Cf14D93D927f8250", decimals: 8, pair: "EURC / USD" },
+    "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": { feed: "0xf19d560eB8d2ADf07BD6D13ed03e1D11215721F9", decimals: 8, pair: "USDT / USD" },
+    "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b": { feed: "0xEaf310161c9eF7c813A14f8FEF6Fb271434019F7", decimals: 8, pair: "VIRTUAL / USD" },
+    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": { feed: "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D", decimals: 8, pair: "cbBTC / USD" },
   }),
   42161: Object.freeze({
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": { feed: "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", decimals: 8, pair: "ETH / USD" },
@@ -91,6 +96,16 @@ export const CHAINLINK_USD_FEED_BY_CHAIN = Object.freeze({
     "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": { feed: "0xc5C8E77B397E531B8EC06BFb0048328B30E9eCfB", decimals: 8, pair: "DAI / USD" },
     "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": { feed: "0x3f3f5dF88dC9F13eac63DF89EC16ef6e7E25DdE7", decimals: 8, pair: "USDT / USD" },
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": { feed: "0xd0C7101eACbB49F3deCcCc166d238410D6D46d57", decimals: 8, pair: "WBTC / USD" },
+    "0xba5ddd1f9d7f570dc94a51479a000e3bce967196": { feed: "0xaD1d5344AaDE45F43E596773Bcc4c423EAbdD034", decimals: 8, pair: "AAVE / USD" },
+    "0x912ce59144191c1204e64559fe8253a0e49e6548": { feed: "0xb2A824043730FE05F3DA2efaFa1CBbe83fa548D6", decimals: 8, pair: "ARB / USD" },
+    "0x354a6da3fcde098f8389cad84b0182725c6c91de": { feed: "0xe7C53FFd03Eb6ceF7d208bC4C13446c76d1E5884", decimals: 8, pair: "COMP / USD" },
+    "0x11cdb42b0eb46d95f990bedd4695a6e3fa034978": { feed: "0xaebDA2c976cfd1eE1977Eac079B4382acb849325", decimals: 8, pair: "CRV / USD" },
+    "0x13ad51ed4f1b7e9dc168d8a00cb3f4ddd85efa60": { feed: "0xA43A34030088E6510FecCFb77E88ee5e7ed0fE64", decimals: 8, pair: "LDO / USD" },
+    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4": { feed: "0x86E53CF1B870786351Da77A57575e79CB55812CB", decimals: 8, pair: "LINK / USD" },
+    "0x539bde0d7dbd336b79148aa742883198bbf60342": { feed: "0x47E55cCec6582838E173f252D08Afd8116c2202d", decimals: 8, pair: "MAGIC / USD" },
+    "0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8": { feed: "0x66853E19d73c0F9301fe099c324A1E9726953433", decimals: 8, pair: "PENDLE / USD" },
+    "0xd4d42f0b6def4ce0383636770ef773390d85c61a": { feed: "0xb2A8BA74cbca38508BA1632761b56C897060147C", decimals: 8, pair: "SUSHI / USD" },
+    "0xfa7f8980b0f1e64a2062791cc3b0871572f1f7f0": { feed: "0x9C917083fDb403ab5ADbEC26Ee294f6EcAda2720", decimals: 8, pair: "UNI / USD" },
   }),
 })
 
