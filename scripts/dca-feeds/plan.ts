@@ -9,6 +9,7 @@
  * window. actionId = keccak256(abi.encode(actionHash, queueBlockTimestamp)) so it is only known after queueing
  * (the TimelockQueued event); the execute payload is emitted as a template with that placeholder.
  */
+// @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
 import { ABI, SentinelError, buildContext, parseArgs, readOnchain, readTokenDecimals, checkFeedLive, encodeFunctionData, actionHash, eq } from './lib.ts'
 
 const { chains } = parseArgs(process.argv.slice(2))

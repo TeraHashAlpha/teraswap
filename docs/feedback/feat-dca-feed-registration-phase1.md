@@ -1,44 +1,20 @@
 # feat/dca-feed-registration-phase1 — FEEDBACK (no PR, NO tx, NO signing)
-Inventory CSV (outside repo): /Users/tiagocruz/TeraSwap-Workspace/queue/dca-feed-inventory-2026-10-11.csv (45 rows).
+CSV (outside repo): /Users/tiagocruz/TeraSwap-Workspace/queue/dca-feed-inventory-2026-10-11.csv. Commits 9aa09e2, 8da5673, 608616a, 26867a5 + this file.
 
-## Checklist
-- [x] C1 contract facts + heartbeat check
-- [ ] C2 config + chainlink-feeds.ts + pin test
-- [ ] C3 scripts plan.ts / verify.ts + dry-run
-- [ ] C4 runbook
+**1. Contract facts** (`contracts/order-engine/TeraSwapOrderExecutorV3.sol`; goal's `contracts/src/` path was wrong). No `setTokenUsdFeed` function: `queueTokenUsdFeed(token,feed,tokenDecimals,maxStaleness)` L962 ->
+48h (`TIMELOCK_ORACLE_CHANGE`=172800 s read on-chain) -> `executeTokenUsdFeed(actionId,…)` L986, 7d grace, both `msg.sender==admin`. Admin `0x9A38…C73C` = plain EOA (DEPLOYMENTS + runbook); NO external timelock.
+Per-feed `maxStaleness` is a parameter (uncapped, never validated; 0 => global 300 s). `actionId=keccak(actionHash,queueTimestamp)` => known only from the `TimelockQueued` event. Feed decimals read on-chain (8|18); execute needs answer>0 and age<86400 s.
+Owner rule: Arbitrum `2*(hb+13)+60`, Base `hb+3600`. **Heartbeat check, ALL PASS** (hb <= maxStaleness; CSV age < 86400): Base 86400->90000 (USDT EURC COMP VIRTUAL, USDC replace); Base 1200->4800 (cbBTC);
+Arb 255->596 (USDT); 1755->3596 (LINK); 3600->7286 (COMP CRV); 86400->172886 (DAI WBTC ARB AAVE LDO MAGIC PENDLE SUSHI UNI).
+**2. Config** `src/config/dca-feed-registrations.json` (built by `scripts/dca-feeds/build-config.mjs` from the CSV + token `decimals()`): Base 15 rows = phase1 enabled 6 (5 register + USDC replace), phase0 control 1 (WETH), phase2 disabled 8 (incl. MOG 18-dec feed);
+Arbitrum 17 = phase1 enabled 13, phase2 disabled 4 (GMX GRT WOO YFI).
+**3. plan.ts dry-run** (mainnet state 2026-10-11): Base: USDC replace `0x4581…`->`0x7e86…`; COMP EURC USDT VIRTUAL cbBTC register (all `plan`, live ok). Arbitrum: 13 register (all `plan`, live ok), none unchanged. Queue calldata + execute template + actionHash emitted per row; nothing sent.
+verify.ts pre-execution: Base WETH PASS, all targets FAIL "not registered" (expected). Both exit codes as designed.
+**4. Controls** positive: Base WETH registered feed == config, live ok, left unchanged (PASS). Negative: computed dead address `0xc382…F6E8` FAILs the live check ("no contract code") as required. Any sentinel failure => exit 2, no output.
+**5. Pin tests** `chainlink-feeds.test.ts`: "every ENABLED row is present in CHAINLINK_FEEDS_BY_CHAIN, heartbeat and expectation, all equal to the config (lowercase compare)" (+ phase-2 absent, maxStaleness>=heartbeat).
+**6. Verify** vitest 285 files/4312 tests (main 84da8a3: 285/4309); eslint 94w/0e (delta 0); tsc clean; 15 files +1077/-11 (plus this file). Runbook: `docs/runbooks/dca-feed-registration.md`.
 
-## 1. Contract facts (`contracts/order-engine/TeraSwapOrderExecutorV3.sol`; goal said `contracts/src/…` — wrong path)
-- **No `setTokenUsdFeed` function.** `queueTokenUsdFeed(address token,address feed,uint8 tokenDecimals,uint256 maxStaleness)` (L962) then
-  `executeTokenUsdFeed(bytes32 actionId,address token,address feed,uint8 tokenDecimals,uint256 maxStaleness)` (L986); both `msg.sender == admin`. "setTokenUsdFeed" is only the actionHash string.
-- Per-feed `maxStaleness` IS a parameter (stored, UNCAPPED, never validated); 0 = global `MAX_STALENESS = 300` (L133) -> would fail every feed. Fill-time: `block.timestamp - updatedAt > staleness` => no-feed (L1057).
-- Delay `TIMELOCK_ORACLE_CHANGE = 48 hours` (L138), grace 7 days (L139). `actionId = keccak256(abi.encode(actionHash, block.timestamp))` => NOT derivable offline; execute needs it from the `TimelockQueued` event.
-- Feed decimals read on-chain at execute: `feed.decimals()` must be 8 or 18 (cached as feedDecimals); `tokenDecimals` 1..18 is caller-supplied, not read. Execute also requires answer > 0 and feed age < 86400 s at that moment.
-- Admin = `0x9A387f681a7674F10d255f5b2651EBc4c672C73C`, a plain EOA (`docs/DEPLOYMENTS.md`; runbook `docs/runbooks/ARBITRUM-V3-FEED-REGISTRATION.md` §: `eth_getCode`=0). NO external Timelock/Safe: the 48h delay is inside the executor. So the "timelock schedule/execute payloads" are queue + execute calldata from the admin EOA.
-
-## Owner decision (2026-10-11): maxStaleness rule
-Arbitrum: Option C `2*(heartbeat+13)+60`. Base: `heartbeat+3600` (matches Base USDC 90000). Phase 1 = low tier only.
-
-## Heartbeat check (directory heartbeat <= maxStaleness the contract will enforce; and age at execute < 86400)
-| chain | symbol | heartbeat s | maxStaleness s | CSV age s | result |
-|---|---|---|---|---|---|
-| Base | USDT | 86400 | 90000 | 38702 | PASS |
-| Base | cbBTC | 1200 | 4800 | 159 | PASS |
-| Base | EURC | 86400 | 90000 | 32748 | PASS |
-| Base | COMP | 86400 | 90000 | 8109 | PASS |
-| Base | VIRTUAL | 86400 | 90000 | 2968 | PASS |
-| Base | USDC | 86400 | 90000 | 38773 | PASS |
-| Arbitrum | USDT | 255 | 596 | 80 | PASS |
-| Arbitrum | DAI | 86400 | 172886 | 9404 | PASS |
-| Arbitrum | WBTC | 86400 | 172886 | 1241 | PASS |
-| Arbitrum | LINK | 1755 | 3596 | 497 | PASS |
-| Arbitrum | ARB | 86400 | 172886 | 90 | PASS |
-| Arbitrum | AAVE | 86400 | 172886 | 3041 | PASS |
-| Arbitrum | COMP | 3600 | 7286 | 961 | PASS |
-| Arbitrum | CRV | 3600 | 7286 | 1361 | PASS |
-| Arbitrum | LDO | 86400 | 172886 | 6857 | PASS |
-| Arbitrum | MAGIC | 86400 | 172886 | 422 | PASS |
-| Arbitrum | PENDLE | 86400 | 172886 | 2045 | PASS |
-| Arbitrum | SUSHI | 86400 | 172886 | 2707 | PASS |
-| Arbitrum | UNI | 86400 | 172886 | 1177 | PASS |
-
-FAILS: none
+## Owner decisions / process
+- maxStaleness per-chain convention confirmed (asked, answered 3x). Widen `CHAINLINK_FEEDS_BY_CHAIN` + update pins: approved. Scope extension approved: I read/edited 6 tests outside the list (chainlink.test.ts, price-feed.test.ts, DCAPanel v3 / oracle-fail-closed / chain-availability / minchunk-uncheckable) only to re-point Base USDC (derived from config) and re-pin the signable sets (generated from resolver output).
+## Auditor notes
+Side effect: swap validation + limit/SL signable set now cover the new tokens (Base 4->9, Arbitrum 6->16); Base USDC validates against the plain proxy. 17/18 feeds have 86400 s heartbeat: `execute` can revert near heartbeat (retry). No Arbitrum control row (owner list had none). Scripts need Node >=22.18 (`node --no-warnings`).

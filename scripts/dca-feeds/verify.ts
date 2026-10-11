@@ -5,6 +5,7 @@
  *
  *   node scripts/dca-feeds/verify.ts [--chain base|arbitrum]
  */
+// @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
 import { SentinelError, buildContext, parseArgs, readOnchain, readTokenDecimals, checkFeedLive, eq } from './lib.ts'
 
 const { chains } = parseArgs(process.argv.slice(2))
