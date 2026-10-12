@@ -8,7 +8,7 @@ Scope: CodeQL #1 `auth.ts:31`, #2 `api-auth.ts:94` (js/insufficient-password-has
 - [x] C2 #1 `auth.ts` → HMAC-SHA256 with per-process random key + tests
 - [x] C3 #2 `api-auth.ts` decision + dismissal text (comment-only)
 - [x] C4 #16 `swap/route.ts:242` → `forLog()` on the logged values + test
-- [ ] Verify: suite vs origin/main, lint delta 0, tsc, `diff --stat`, push + compare link
+- [x] Verify: suite vs origin/main, lint delta 0, tsc, `diff --stat`, push + compare link
 
 ## 1. Facts (read-only, origin/main e226962)
 **(a) Issuance.** One path: `src/app/api/admin/api-keys/route.ts:73-76` — `const body = randomBytes(32).toString('base64url')` / `` return `tsk_${body}` `` → 32 random bytes (256 bit), server-minted. POST reads only `name, tier, expiresAt, rateLimitPerMin, rateLimitPerDay` (L96-149); L162-163 `const plaintext = generatePlaintextKey()` / `const keyHash = hashApiKey(plaintext)` → L169 `key_hash: keyHash`. Only `api_keys` writers in the tree: this route (insert L168, soft-delete L269) and `api-auth.ts` usage counters (L128). No script, SQL seed or other `tsk_` producer. **No path accepts a caller-supplied key value.**
@@ -30,3 +30,8 @@ Dismissal text for the owner (alert #2, js/insufficient-password-hash, `api-auth
 Diff `src/app/api/swap/route.ts` = 3 lines: `+import { forLog } from '@/lib/log-sanitize'`; L243 `` `Expected: ${forLog(expectedRecipient)}, Got: ${forLog(recipientCheck.extracted)}` `` (was unwrapped). Control flow, R1 recipient guard, calldata validation and responses untouched — the validator still receives the raw value, same 400, same error string.
 Auditor note: `from` (L162) and `recipient` (L168) are `ADDRESS_RE`-validated before the R1 block, so CRLF cannot reach this line via POST; the wrap is a CodeQL-visible barrier for `expectedRecipient` and a real one for the upstream-derived `recipientCheck.extracted`.
 Tests `src/app/api/swap/route.test.ts`: existing V9 "returns 400 when recipient does not match requesting wallet" untouched; new "guard unchanged: still 400 with the same error, validator still receives the RAW expected recipient" and "log line receives the sanitised values: CR/LF flattened to spaces, nothing else altered" (RED 1/36 before the wrap, GREEN 36/36 after).
+
+## 5. Verify (measured 2026-10-12 23:52–23:57)
+Suite: branch 294 files / 4418 tests pass vs origin/main 294 / 4412 (+6 = 4 auth + 2 swap; 0 failures). Lint `eslint . --max-warnings 94`: 94 warnings / 0 errors on both (delta 0). `tsc --noEmit`: 0 errors on both. Baseline ran in a detached worktree `~/ts-worktrees/codeql-auth-swap-base` (e226962, own `npm ci`), left in place.
+`git diff --stat origin/main..HEAD` (code): `src/lib/auth.ts` 30 · `src/lib/auth.test.ts` 98 · `src/lib/api-auth.ts` 2 (comment only) · `src/app/api/swap/route.ts` 3 · `src/app/api/swap/route.test.ts` 54 · + this file. No new deps, env vars or secrets; no dismissals; no force-push; no PR.
+Commits (SSH-signed, noreply committer): ab903b9 C1 · 8a6858d C2 · 4c9236f C3 · 41fac8e C4 · C5 = this file. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/codeql-auth-swap
