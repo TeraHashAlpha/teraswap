@@ -10008,6 +10008,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x02300aC24838570012027E0A90D3FEcCEF3c51d2",
+   "symbol": "FOOM",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "FOOM",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0x7588310a7aBF34DC608ac98a1c4432F85e194Df5",
    "symbol": "FORT",
    "inTrustedList": true,
@@ -10398,6 +10408,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x45D9C101a3870Ca5024582fd788F4E1e8F7971c3",
+   "symbol": "MASQ",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "MASQ",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0x24fcFC492C1393274B6bcd568ac9e225BEc93584",
    "symbol": "MAVIA",
    "inTrustedList": true,
@@ -10468,6 +10488,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x2Da56AcB9Ea78330f947bD57C54119Debda7AF71",
+   "symbol": "MOG",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "Mog",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842",
    "symbol": "MORPHO",
    "inTrustedList": true,
@@ -10494,16 +10524,6 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "MVTT10F",
-   "decimals": 18
-  },
-  {
-   "chainId": 8453,
-   "address": "0x2Da56AcB9Ea78330f947bD57C54119Debda7AF71",
-   "symbol": "Mog",
-   "inTrustedList": true,
-   "hasBytecode": true,
-   "transferable": true,
-   "onchainSymbol": "Mog",
    "decimals": 18
   },
   {
@@ -10944,6 +10964,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "SEAM",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0xD1917629B3E6A72E6772Aab5dBe58Eb7FA3C2F33",
+   "symbol": "SEXY",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "SEXY",
    "decimals": 18
   },
   {
@@ -11584,6 +11614,16 @@
    "hasBytecode": true,
    "transferable": true,
    "onchainSymbol": "ZBU",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
+   "address": "0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553",
+   "symbol": "ZCHF",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "ZCHF",
    "decimals": 18
   },
   {
