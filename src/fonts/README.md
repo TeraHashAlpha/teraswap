@@ -1,7 +1,7 @@
 # Self-hosted fonts (next/font/local)
 
 Loaded by `src/app/layout.tsx`. Replaces `next/font/google` so builds never fetch from Google.
-Both families: SIL Open Font License 1.1 (`OFL.txt` alongside each family).
+Inter and JetBrains Mono: SIL Open Font License 1.1 (`OFL.txt` alongside each family). Clash Display: ITF FFL 2.0 (below).
 
 | File | Source | Version | SHA-256 |
 |---|---|---|---|
@@ -9,6 +9,11 @@ Both families: SIL Open Font License 1.1 (`OFL.txt` alongside each family).
 | `jetbrains-mono/JetBrainsMono-Regular.woff2` | https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip (`fonts/webfonts/`) | v2.304 | a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2 |
 | `jetbrains-mono/JetBrainsMono-Medium.woff2` | same | v2.304 | 086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353 |
 | `jetbrains-mono/JetBrainsMono-SemiBold.woff2` | same | v2.304 | 918edad542a1da608fd2ba8daebaff9ac802309103fe760eed465b8b4e47faf1 |
+| `clash-display/ClashDisplay-Variable.woff2` | https://api.fontshare.com/v2/fonts/download/clash-display (`ClashDisplay_Complete/Fonts/WEB/fonts/`, downloaded 2026-10-12) | Fontshare current (wght 200–700) | dbe4b338d40d727ba0f342228d3c53d5429995264cf031fd975f6265a57da662 |
+
+Clash Display licence: **ITF Free Font License (FFL) 2.0** (`clash-display/FFL.txt`, sha256 145e7fe2…f554), not OFL. Quote (§01):
+"You may self-host the Font Software on your own servers or infrastructure for use on your own websites and applications, including through standard webfont technologies such as CSS @font-face."
+Commercial use is permitted (§01); re-hosting for third parties is not (§02).
 
 ## Inter subsetting
 

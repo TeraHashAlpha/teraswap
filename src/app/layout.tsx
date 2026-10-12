@@ -14,6 +14,14 @@ const inter = localFont({
   variable: '--font-inter',
 })
 
+// Clash Display (ITF FFL 2.0 permits self-hosting). Previously a runtime CDN fetch.
+const clashDisplay = localFont({
+  src: '../fonts/clash-display/ClashDisplay-Variable.woff2',
+  weight: '200 700',
+  display: 'swap',
+  variable: '--font-clash',
+})
+
 const jetbrainsMono = localFont({
   src: [
     { path: '../fonts/jetbrains-mono/JetBrainsMono-Regular.woff2', weight: '400', style: 'normal' },
@@ -83,24 +91,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable} ${clashDisplay.variable}`} suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#080B10" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        {/* Preconnect — critical external origins */}
-        <link rel="preconnect" href="https://cdn.fontshare.com" crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href="https://cdn.fontshare.com" />
-        {/* Preload Clash Display for instant headline rendering */}
-        <link
-          rel="preload"
-          href="https://cdn.fontshare.com/wf/BPYOJXAOZVHRZK2YLFWMFWU5HEA2GNLK/TPHK4DOJQVNZWU3XPQAESXNV6DGY7PEZ/LUVMMEVY6IOL4R6YQIMAHLHVH33LNQHD.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
       </head>
       <body>
         <ServiceWorkerRegistration />

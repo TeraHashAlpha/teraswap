@@ -24,4 +24,11 @@ describe('no next/font/google under src/', () => {
     const offenders = walk(SRC).filter(f => /next\/font\/google/.test(readFileSync(f, 'utf8')))
     expect(offenders.map(f => f.slice(SRC.length + 1))).toEqual([])
   })
+
+  it('no runtime font CDN (fontshare) in layout, globals.css, tailwind or CSP', () => {
+    const root = join(__dirname, '..')
+    const files = ['src/app/layout.tsx', 'src/app/globals.css', 'tailwind.config.ts', 'next.config.js']
+    const offenders = files.filter(f => /fontshare/i.test(readFileSync(join(root, f), 'utf8')))
+    expect(offenders).toEqual([])
+  })
 })

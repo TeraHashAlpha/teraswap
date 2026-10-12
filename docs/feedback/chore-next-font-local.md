@@ -1,32 +1,38 @@
 # chore/next-font-local — feedback
 
-- [x] C1 inventory · [x] C2 self-host · [x] C3 guard · [x] verify
+## Owner answers (recorded)
+- `src/lib/security-headers.ts` doesn't exist; CSP is in `next.config.js` → accepted.
+- Reads outside list accepted: tailwind.config.ts, globals.css, vitest.config.*, repo/.next greps.
+- Added scope: self-host anything loaded from cdn.fontshare.com and drop it from CSP.
 
 ## 1. Inventory before
-Only importer of `next/font/google`: `src/app/layout.tsx`. Variables set on `<html>`; consumed by
-`tailwind.config.ts` (sans/display/mono) and `globals.css` body — unchanged.
-Inter: latin, 400-800, swap, `--font-inter` · JetBrains Mono: latin, 400/500/600, swap, `--font-mono`.
+`next/font/google` only in `src/app/layout.tsx`: Inter (latin, 400-800, swap, `--font-inter`), JetBrains Mono
+(latin, 400/500/600, swap, `--font-mono`); consumers tailwind `sans/mono/display` + globals.css body.
+Runtime CDN: Clash Display `@font-face` (globals.css, wght 400-800) + preload/preconnect (layout.tsx) → cdn.fontshare.com.
 
-## 2. Files added (`src/fonts/`, see README there for URLs/hashes/OFL)
-- Inter v4.1 `InterVariable-latin.woff2` 105,176 B — c06b669f…a952 (upstream variable, latin-subset with
-  fonttools; unsubset was 352 KB, which pushed total to 618 KB > 600 KB limit)
-- JetBrains Mono v2.304 Regular/Medium/SemiBold woff2 (92,164 / 93,824 / 94,472 B) — a9cb1cd8…45f2 / 086c48df…a353 / 918edad5…faf1
-  (v2.304 variable font is TTF-only, so static woff2 for the 3 weights in use)
-- Total woff2: 385,636 B ≈ 377 KB (+ two OFL.txt, README). Inter weight range now `100 900` (superset of 400-800).
+## 2. Files (`src/fonts/`; URLs, full SHA-256, licences in `src/fonts/README.md`)
+- Inter v4.1 variable, latin-subset: 105,176 B · c06b669f…a952 (unsubset 352 KB would be 618 KB total > 600 KB)
+- JetBrains Mono v2.304 Regular/Medium/SemiBold: 92,164 / 93,824 / 94,472 B (variable is TTF-only upstream)
+- Clash Display variable (Fontshare zip, wght 200-700): 29,428 B · dbe4b338…a662
+- Total 415,064 B ≈ 405 KB. Licences: Inter/JBM = OFL 1.1; Clash = ITF FFL 2.0, §01: "You may self-host the Font
+  Software on your own servers or infrastructure for use on your own websites and applications, including through
+  standard webfont technologies such as CSS @font-face."
 
 ## 3. Offline build
-`https_proxy/HTTP_PROXY=http://127.0.0.1:9 npm run build` → exit 0 (curl through same proxy: connection refused).
-Output CSS/HTML: 0 refs to fonts.gstatic/googleapis; 4 woff2 served from `/_next/static/media/`.
+`https_proxy/HTTP_PROXY=http://127.0.0.1:9 npm run build` → exit 0 (curl via same proxy refused). 5 woff2 emitted to
+`/_next/static/media/` (not `/fonts/`: next/font/local bundles src files). 0 fontshare/gstatic/googleapis refs in our CSS/HTML.
+Only hit: a wallet-modal lib chunk injects a Google Fonts `@import` at runtime; not ours, already blocked by CSP.
 
 ## 4. Guard + CSP
-`__tests__/no-next-font-google.test.ts` — fails on layout.tsx with the google import (verified), passes now.
-CSP unchanged: it lives in `next.config.js` (goal named `src/lib/security-headers.ts`, which doesn't exist);
-`font-src 'self' data: https://cdn.fontshare.com` has no Google origins, so nothing to remove.
+`__tests__/no-next-font-google.test.ts` (2 tests): no `next/font/google` under src/ (fails on old layout, verified);
+no `fontshare` in layout/globals/tailwind/next.config.
+CSP diff: `font-src 'self' data: https://cdn.fontshare.com` → `font-src 'self' data:`; also removed dead
+`https://cdn.fontshare.com` from `connect-src` (fonts don't use connect-src). No existing CSP test referenced it.
 
 ## 5. Checks
-tsc clean · lint 94 warnings/0 errors (= baseline 94) · vitest 4402 pass vs origin/main(e4b2def) 4401 (+1 guard).
+tsc clean · lint 94 warn/0 err (= baseline) · vitest 4403 pass (origin/main 4401; +2 guards) · diff --stat: 17 files.
 
-## Deviations / notes
-- Fonts in `src/fonts/` not `public/fonts/`: `next/font/local` emits to `/_next/static/media/`, so built CSS never
-  says `/fonts/`; public/ would hold unused duplicates.
-- Not touched: Clash Display preload from cdn.fontshare.com (runtime browser fetch, not build-time).
+## ⚠ Visual change (decide before merge)
+The old Clash Display URL **returns 404 today** (checked 2026-10-12) → production headlines already fall back to
+Inter. With the working self-hosted font, `font-display` headlines now actually render Clash Display. Intended design,
+but it IS a visible change. Tailwind `display` now `var(--font-clash)` (one-line change). Revert that line to keep Inter.
