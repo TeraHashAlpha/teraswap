@@ -10,7 +10,7 @@ Inter: latin, 400-800, swap, `--font-inter` · JetBrains Mono: latin, 400/500/60
 ## 2. Files added (`src/fonts/`, see README there for URLs/hashes/OFL)
 - Inter v4.1 `InterVariable-latin.woff2` 105,176 B — c06b669f…a952 (upstream variable, latin-subset with
   fonttools; unsubset was 352 KB, which pushed total to 618 KB > 600 KB limit)
-- JetBrains Mono v2.304 Regular/Medium/SemiBold woff2 (92,164 / 93,824 / 94,472 B) — a9cb1cd8…45f2 / 086c48df…5353 / 918edad5…faf1
+- JetBrains Mono v2.304 Regular/Medium/SemiBold woff2 (92,164 / 93,824 / 94,472 B) — a9cb1cd8…45f2 / 086c48df…a353 / 918edad5…faf1
   (v2.304 variable font is TTF-only, so static woff2 for the 3 weights in use)
 - Total woff2: 385,636 B ≈ 377 KB (+ two OFL.txt, README). Inter weight range now `100 900` (superset of 400-800).
 
