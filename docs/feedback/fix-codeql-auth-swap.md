@@ -6,7 +6,7 @@ Scope: CodeQL #1 `auth.ts:31`, #2 `api-auth.ts:94` (js/insufficient-password-has
 ## Checklist
 - [x] C1 facts (a)(b)(c) — this file, no code
 - [x] C2 #1 `auth.ts` → HMAC-SHA256 with per-process random key + tests
-- [ ] C3 #2 `api-auth.ts` decision + dismissal text (comment-only)
+- [x] C3 #2 `api-auth.ts` decision + dismissal text (comment-only)
 - [ ] C4 #16 `swap/route.ts:242` → `forLog()` on the logged values + test
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc, `diff --stat`, push + compare link
 
@@ -21,3 +21,7 @@ Out-of-list reads, recorded: `swap/route.ts` import block (L1-15, to add the imp
 `auth.ts`: `createHash('sha256')` → `createHmac('sha256', COMPARISON_KEY)` on both sides; `COMPARISON_KEY = randomBytes(32)` at module load (memory only — no env var, no persisted format, no migration). Signature and verdicts unchanged; 7 callers untouched.
 Tests `src/lib/auth.test.ts` — 15 (11 existing + 4 new; RED 4/15 before the change, GREEN after). Valid secret: "returns true for matching Bearer token"; wrong secret: "returns false for mismatched tokens (same length)"; new: "draws a 32-byte random comparison key at module load (in-memory only, no env var)", "MACs both sides with the same in-process key, then compares the two 32-byte MACs", "length mismatch never short-circuits: both sides are MAC’d and timingSafeEqual still sees 32 vs 32 bytes", "a second module instance draws a different key, produces different MACs, and returns the same verdicts".
 Auditor note: CodeQL models `createHmac(...).update(x)` with the same CryptographicOperation sink as `createHash`, and the flagged source is the `*secret*`-named parameter, which still flows into `.update()` — alert #1 may remain open after this PR. If so, the remaining action is the owner's dismissal: "Not credential storage — a constant-time comparator whose inputs are machine-generated 256-bit tokens (`openssl rand -hex 32`); nothing is persisted; a work-factor hash would add latency with no security gain." `admin/api-keys/route.ts:9` still says "SHA-256-comparison helper" (comment only, file out of scope).
+
+## 3. #2 — decision: NO code change (C3)
+Per fact (a) every `key_hash` is SHA-256 of a server-minted `tsk_` + base64url(`randomBytes(32)`) token (256 random bits) and no caller-supplied key path exists. Only the dead `// codeql[js/insufficient-key-size]` (wrong rule id) at `api-auth.ts:93` became a one-line pointer; `hashApiKey` and its digest tests (incl. the sha256("") vector) are untouched.
+Dismissal text for the owner (alert #2, js/insufficient-password-hash, `api-auth.ts:94`, reason "false positive"): "hashApiKey() is a lookup digest of a 256-bit random API token minted server-side (admin/api-keys/route.ts generatePlaintextKey: randomBytes(32)); no human-chosen or caller-supplied value ever reaches it. Password hashes (bcrypt/scrypt/argon2/PBKDF2) exist to slow brute force of low-entropy secrets; a 2^256 keyspace cannot be brute-forced, so plain SHA-256 is the correct primitive and the industry standard for API-key storage (Stripe, GitHub, AWS). A keyed HMAC would also invalidate every stored digest and force rotation of all issued keys."

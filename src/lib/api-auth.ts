@@ -90,7 +90,7 @@ const DAY_WINDOW_MS = 24 * 60 * 60 * 1000
  * (the timing leak would only reveal a hash, not the plaintext).
  */
 export function hashApiKey(plaintext: string): string {
-  // codeql[js/insufficient-key-size] SHA-256 is appropriate for hashing high-entropy 256-bit API keys (not passwords). Industry standard — Stripe, GitHub, AWS use the same pattern. bcrypt / scrypt are work-factor hashes designed for low-entropy passwords and would add latency to every API call with no security gain here.
+  // Unkeyed SHA-256 is intentional: lookup digest of a server-minted 256-bit random token (admin/api-keys/route.ts generatePlaintextKey), not a password. CodeQL js/insufficient-password-hash (#2) is an owner dismissal — rationale in docs/feedback/fix-codeql-auth-swap.md §3.
   return createHash('sha256').update(plaintext).digest('hex')
 }
 
