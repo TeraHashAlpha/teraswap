@@ -1,0 +1,18 @@
+# Feedback — fix/codeql-auth-swap
+
+Base `origin/main` e226962 (PR #566 `fix/codeql-log-injection` merged — its `forLog` is reused). Worktree `~/ts-worktrees/codeql-auth-swap`, real `npm ci`.
+Scope: CodeQL #1 `auth.ts:31`, #2 `api-auth.ts:94` (js/insufficient-password-hash), #16 `swap/route.ts:242` (js/log-injection). The agent dismissed nothing.
+
+## Checklist
+- [x] C1 facts (a)(b)(c) — this file, no code
+- [ ] C2 #1 `auth.ts` → HMAC-SHA256 with per-process random key + tests
+- [ ] C3 #2 `api-auth.ts` decision + dismissal text (comment-only)
+- [ ] C4 #16 `swap/route.ts:242` → `forLog()` on the logged values + test
+- [ ] Verify: suite vs origin/main, lint delta 0, tsc, `diff --stat`, push + compare link
+
+## 1. Facts (read-only, origin/main e226962)
+**(a) Issuance.** One path: `src/app/api/admin/api-keys/route.ts:73-76` — `const body = randomBytes(32).toString('base64url')` / `` return `tsk_${body}` `` → 32 random bytes (256 bit), server-minted. POST reads only `name, tier, expiresAt, rateLimitPerMin, rateLimitPerDay` (L96-149); L162-163 `const plaintext = generatePlaintextKey()` / `const keyHash = hashApiKey(plaintext)` → L169 `key_hash: keyHash`. Only `api_keys` writers in the tree: this route (insert L168, soft-delete L269) and `api-auth.ts` usage counters (L128). No script, SQL seed or other `tsk_` producer. **No path accepts a caller-supplied key value.**
+**(b) `ADMIN_API_KEYS_SECRET`.** `.env.example:101-105`: "Pepper used to derive the SHA-256 hash for admin API keys (per-key storage avoids ever persisting the plaintext). Generate via: `openssl rand -hex 32`. Rotation requires re-hashing every key in the KV admin index." → 32 random bytes / 64 hex chars. Doc drift (read-only, not fixed): in code it is a plain Bearer token (`api-keys/route.ts:43-47` → `verifyBearerToken`); `hashApiKey` is unkeyed and `api_keys` lives in Supabase — there is no pepper and no KV index.
+**(c) `auth.ts:30-32`.** `const hashA = createHash('sha256').update(token).digest()` / `const hashB = createHash('sha256').update(expectedSecret).digest()` (L31, flagged) / `return timingSafeEqual(hashA, hashB)`. `token` = Authorization header minus `Bearer `; `expectedSecret` = env secret from 7 callers (admin/api-keys, admin/dca-freeze, admin/kill-switch, monitor/heartbeat/admin, monitor/tick, monitor/validate-execution, quote). Nothing is persisted; the digests only give `timingSafeEqual` equal-length inputs.
+
+Out-of-list reads, recorded: `swap/route.ts` import block (L1-15, to add the import) and L63-85/L150-175 via targeted grep (`ADDRESS_RE` validates `from` L162 and `recipient` L168 before the R1 block); `package.json` scripts (verification commands); `supabase/api-keys.sql` header + `key_hash` column comment (hit by the key_hash grep); `docs/feedback/` listing (file naming).
