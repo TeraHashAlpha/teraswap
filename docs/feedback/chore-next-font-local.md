@@ -30,7 +30,7 @@ CSP diff: `font-src 'self' data: https://cdn.fontshare.com` → `font-src 'self'
 `https://cdn.fontshare.com` from `connect-src` (fonts don't use connect-src). No existing CSP test referenced it.
 
 ## 5. Checks
-tsc clean · lint 94 warn/0 err (= baseline) · vitest 4403 pass (origin/main 4401; +2 guards) · diff --stat: 17 files.
+tsc clean · lint 94 warn/0 err (= baseline) · vitest 4403 pass (origin/main 4401; +2 guards) · diff --stat vs origin/main: 15 files, +448/-31.
 
 ## ⚠ Visual change (decide before merge)
 The old Clash Display URL **returns 404 today** (checked 2026-10-12) → production headlines already fall back to
