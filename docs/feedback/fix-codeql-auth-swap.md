@@ -7,7 +7,7 @@ Scope: CodeQL #1 `auth.ts:31`, #2 `api-auth.ts:94` (js/insufficient-password-has
 - [x] C1 facts (a)(b)(c) — this file, no code
 - [x] C2 #1 `auth.ts` → HMAC-SHA256 with per-process random key + tests
 - [x] C3 #2 `api-auth.ts` decision + dismissal text (comment-only)
-- [ ] C4 #16 `swap/route.ts:242` → `forLog()` on the logged values + test
+- [x] C4 #16 `swap/route.ts:242` → `forLog()` on the logged values + test
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc, `diff --stat`, push + compare link
 
 ## 1. Facts (read-only, origin/main e226962)
@@ -25,3 +25,8 @@ Auditor note: CodeQL models `createHmac(...).update(x)` with the same Cryptograp
 ## 3. #2 — decision: NO code change (C3)
 Per fact (a) every `key_hash` is SHA-256 of a server-minted `tsk_` + base64url(`randomBytes(32)`) token (256 random bits) and no caller-supplied key path exists. Only the dead `// codeql[js/insufficient-key-size]` (wrong rule id) at `api-auth.ts:93` became a one-line pointer; `hashApiKey` and its digest tests (incl. the sha256("") vector) are untouched.
 Dismissal text for the owner (alert #2, js/insufficient-password-hash, `api-auth.ts:94`, reason "false positive"): "hashApiKey() is a lookup digest of a 256-bit random API token minted server-side (admin/api-keys/route.ts generatePlaintextKey: randomBytes(32)); no human-chosen or caller-supplied value ever reaches it. Password hashes (bcrypt/scrypt/argon2/PBKDF2) exist to slow brute force of low-entropy secrets; a 2^256 keyspace cannot be brute-forced, so plain SHA-256 is the correct primitive and the industry standard for API-key storage (Stripe, GitHub, AWS). A keyed HMAC would also invalidate every stored digest and force rotation of all issued keys."
+
+## 4. #16 — swap route (C4)
+Diff `src/app/api/swap/route.ts` = 3 lines: `+import { forLog } from '@/lib/log-sanitize'`; L243 `` `Expected: ${forLog(expectedRecipient)}, Got: ${forLog(recipientCheck.extracted)}` `` (was unwrapped). Control flow, R1 recipient guard, calldata validation and responses untouched — the validator still receives the raw value, same 400, same error string.
+Auditor note: `from` (L162) and `recipient` (L168) are `ADDRESS_RE`-validated before the R1 block, so CRLF cannot reach this line via POST; the wrap is a CodeQL-visible barrier for `expectedRecipient` and a real one for the upstream-derived `recipientCheck.extracted`.
+Tests `src/app/api/swap/route.test.ts`: existing V9 "returns 400 when recipient does not match requesting wallet" untouched; new "guard unchanged: still 400 with the same error, validator still receives the RAW expected recipient" and "log line receives the sanitised values: CR/LF flattened to spaces, nothing else altered" (RED 1/36 before the wrap, GREEN 36/36 after).
