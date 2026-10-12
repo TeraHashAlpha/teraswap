@@ -255,7 +255,7 @@ describe('[CodeQL log-injection] only the LOG line is sanitised — keys and lim
     await checkRateLimit(HOSTILE, 4, 60_000)
     await checkRateLimit(HOSTILE, 4, 60_000)
     await checkRateLimit(HOSTILE, 4, 60_000) // BLOCKED line
-    const lines = warnSpy.mock.calls.map((c) => String(c[0]))
+    const lines = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]))
     expect(lines.length).toBe(3)
     for (const l of lines) expect(l).not.toMatch(/[\r\n\x1b]/)
   })
