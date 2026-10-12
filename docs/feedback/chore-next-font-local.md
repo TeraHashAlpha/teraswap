@@ -24,7 +24,7 @@ Runtime CDN: Clash Display `@font-face` (globals.css, wght 400-800) + preload/pr
 Only hit: a wallet-modal lib chunk injects a Google Fonts `@import` at runtime; not ours, already blocked by CSP.
 
 ## 4. Guard + CSP
-`__tests__/no-next-font-google.test.ts` (2 tests): no `next/font/google` under src/ (fails on old layout, verified);
+`__tests__/no-next-font-google.test.ts` (2 tests; +1 display-font test, 3 new total): no `next/font/google` under src/ (fails on old layout, verified);
 no `fontshare` in layout/globals/tailwind/next.config.
 CSP diff: `font-src 'self' data: https://cdn.fontshare.com` → `font-src 'self' data:`; also removed dead
 `https://cdn.fontshare.com` from `connect-src` (fonts don't use connect-src). No existing CSP test referenced it.
@@ -32,7 +32,8 @@ CSP diff: `font-src 'self' data: https://cdn.fontshare.com` → `font-src 'self'
 ## 5. Checks
 tsc clean · lint 94 warn/0 err (= baseline) · vitest 4403 pass (origin/main 4401; +2 guards) · diff --stat vs origin/main: 15 files, +448/-31.
 
-## ⚠ Visual change (decide before merge)
-The old Clash Display URL **returns 404 today** (checked 2026-10-12) → production headlines already fall back to
-Inter. With the working self-hosted font, `font-display` headlines now actually render Clash Display. Intended design,
-but it IS a visible change. Tailwind `display` now `var(--font-clash)` (one-line change). Revert that line to keep Inter.
+## Visual change: none (owner decision)
+Old Clash Display URL 404s today, so production headlines render Inter. Per owner, tailwind `display` stays
+`['var(--font-inter)', 'sans-serif']`; Clash Display (29 KB) is self-hosted but unapplied (`preload: false`, comment:
+"reserved for the visual redesign; not applied"). `__tests__/display-font-is-inter.test.ts` pins this.
+Final: tsc clean · lint 94 (= baseline) · vitest 4404 pass.

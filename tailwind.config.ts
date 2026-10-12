@@ -53,7 +53,7 @@ const config: Config = {
         },
       },
       fontFamily: {
-        display: ['var(--font-clash)', 'var(--font-inter)', 'sans-serif'],
+        display: ['var(--font-inter)', 'sans-serif'],
         sans: ['var(--font-inter)', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         mono: ['var(--font-mono)', 'Fira Code', 'monospace'],
       },

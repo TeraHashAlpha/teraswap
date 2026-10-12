@@ -14,12 +14,13 @@ const inter = localFont({
   variable: '--font-inter',
 })
 
-// Clash Display (ITF FFL 2.0 permits self-hosting). Previously a runtime CDN fetch.
+// Clash Display (ITF FFL 2.0 permits self-hosting): reserved for the visual redesign; not applied
 const clashDisplay = localFont({
   src: '../fonts/clash-display/ClashDisplay-Variable.woff2',
   weight: '200 700',
   display: 'swap',
   variable: '--font-clash',
+  preload: false,
 })
 
 const jetbrainsMono = localFont({
