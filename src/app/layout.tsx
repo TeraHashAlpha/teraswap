@@ -1,21 +1,25 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
 import ClientProviders from './client-providers'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import { SITE_META_DESCRIPTION } from '@/config/product-claims'
 import './globals.css'
 
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+// Self-hosted (src/fonts/README.md) — builds must not depend on a third-party font fetch.
+const inter = localFont({
+  src: '../fonts/inter/InterVariable-latin.woff2',
+  weight: '100 900',
   display: 'swap',
   variable: '--font-inter',
 })
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
+const jetbrainsMono = localFont({
+  src: [
+    { path: '../fonts/jetbrains-mono/JetBrainsMono-Regular.woff2', weight: '400', style: 'normal' },
+    { path: '../fonts/jetbrains-mono/JetBrainsMono-Medium.woff2', weight: '500', style: 'normal' },
+    { path: '../fonts/jetbrains-mono/JetBrainsMono-SemiBold.woff2', weight: '600', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-mono',
 })
