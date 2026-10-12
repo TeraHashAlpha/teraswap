@@ -154,7 +154,7 @@ export async function POST(
     if (result.severity === 'critical') {
       console.error(`[VALIDATE-EXECUTION] CRITICAL: ${result.source} tx=${result.txHash} — ${result.reason}`)
     } else if (result.severity === 'warning') {
-      // codeql[js/log-injection] Server-side log only. result.source is a known aggregator id from a closed-set enum (AggregatorName), result.txHash was validated at the request boundary, result.reason is an internal validator message — none are rendered to a browser or interpreted as commands downstream.
+      // Alert #33 (js/log-injection) is an owner dismissal, bearer-guarded route — see ~/TeraSwap-Workspace/queue/codeql-triage-2026-10-12.md.
       console.warn(`[VALIDATE-EXECUTION] WARNING: ${result.source} tx=${result.txHash} — ${result.reason}`)
     }
 
