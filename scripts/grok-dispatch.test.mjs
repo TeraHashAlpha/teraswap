@@ -4,7 +4,7 @@
 // exercise a passing --execute path, since that would actually shell out to `grok` and hit the
 // xAI API, which is explicitly out of scope for this change.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -319,7 +319,7 @@ describe('grok-dispatch.sh — CHORE-GROK-DENY-FLAGS: deny flags on every invoca
     const mutatedDir = mkdtempSync(path.join(tmpdir(), 'grok-dispatch-mutant-'))
     specDirs.push(mutatedDir)
     const mutatedScript = path.join(mutatedDir, 'grok-dispatch.sh')
-    const original = execFileSync('cat', [SCRIPT], { encoding: 'utf8' })
+    const original = readFileSync(SCRIPT, 'utf8')
     const mutated = original.replace('  --deny "Bash(security*)"\n', '')
     expect(mutated).not.toBe(original) // sanity: the replace actually matched something
     writeFileSync(mutatedScript, mutated, { mode: 0o755 })

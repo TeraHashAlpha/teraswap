@@ -35,6 +35,7 @@
  * in-flight probe. See the TTL constants below for the re-verification intervals and why.
  */
 import { sanitizeUpstreamError } from '@/lib/sanitize-error'
+import { forLog } from '@/lib/log-sanitize'
 
 /**
  * How long a VERIFIED verdict stands before we ask again. 30 minutes.
@@ -141,27 +142,15 @@ const errText = (err: unknown): string =>
   sanitizeUpstreamError(err instanceof Error ? err.message : String(err))
 
 /**
- * [CodeQL js/log-injection] The barrier this file's two `console.*` sinks read through.
+ * [CodeQL js/log-injection] Both `console.*` sinks below route through the shared `forLog`
+ * (src/lib/log-sanitize.ts), called inline at the sink with `sanitizeUpstreamError` applied first.
  *
- * `verdict.reason` (the unverified path) is genuinely upstream — it can carry the endpoint URL
- * verbatim (a JSON-RPC error envelope's `message`, a transport rejection's `.message`), and that
- * URL can carry a provider key in its path or query. `errText` above already runs it through
- * `sanitizeUpstreamError` (secrets: URL path/query, Bearer tokens, key/secret/token/password
- * assignments) before it is stored on the verdict — but that redaction does not touch `\r`/`\n`,
- * because it was written for a CLIENT-facing error body (sanitize-error.ts is shared and
- * read-only here), where a literal newline is cosmetic, not a forged log line. A raw newline
- * surviving into a `console.*` call is exactly what CodeQL's log-injection query is right to flag
- * regardless: upstream text with an embedded `\n[chain-identity] fake verdict` could otherwise
- * masquerade as a second, independent log entry. So every upstream-derived string is routed
- * through sanitizeUpstreamError AGAIN (idempotent — it already was, once) immediately adjacent to
- * its `console.*` call, then has any `\r`/`\n` neutralized, right here at the sink.
- *
- * `verdict.message` (the mismatch path) is composed by US, not upstream — it is routed through
- * this same barrier so the scanner sees one consistent pattern at both sinks, but by construction
- * it contains no URL, no Bearer token, no key/secret/token/password/authorization assignment, and
- * no newline, so this is a no-op on it: pinned byte-for-byte by a test.
+ * `verdict.reason` (unverified path) is genuinely upstream and can carry a provider key in an
+ * endpoint URL; `sanitizeUpstreamError` redacts that (it does not touch CR/LF, as it was written
+ * for client-facing bodies). `forLog` then neutralises CR/LF/C0 so upstream text cannot forge a
+ * second log line. `Infinity` = no truncation: the mismatch message is composed by us, longer
+ * than forLog's default 200, and pinned byte-for-byte by a test.
  */
-const forLog = (text: string): string => sanitizeUpstreamError(text).replace(/[\r\n]/g, ' ')
 
 /** Reject if `run()` has not settled within `timeoutMs` — an accepted-then-silent endpoint. */
 function withProbeTimeout<T>(run: () => Promise<T>, timeoutMs: number): Promise<T> {
@@ -277,11 +266,11 @@ export async function assertChainIdentity({
     const verdict = await verifyChainIdentity({ expectedChainId, probe, timeoutMs })
     verdictCache.set(key, { verdict, expiresAt: now() + ttlFor(verdict.status) })
     if (verdict.status === 'mismatch') {
-      console.error(`[chain-identity] ${forLog(verdict.message)}`)
+      console.error(`[chain-identity] ${forLog(sanitizeUpstreamError(verdict.message), Infinity)}`)
     } else if (verdict.status === 'unverified') {
       // Not a refusal — an outage. Warn so it is visible, and carry on falling through.
       console.warn(
-        `[chain-identity] could not verify the RPC for chain ${expectedChainId}: ${forLog(verdict.reason)} ` +
+        `[chain-identity] could not verify the RPC for chain ${expectedChainId}: ${forLog(sanitizeUpstreamError(verdict.reason), Infinity)} ` +
           '— treating as an outage and falling through',
       )
     }

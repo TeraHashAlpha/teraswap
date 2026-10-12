@@ -17,6 +17,7 @@
 import { kv } from '@/lib/kv'
 import type { SourceState } from './source-state-machine'
 import { isP0Reason } from './p0-reasons'
+import { forLog } from './log-sanitize'
 import { isInGracePeriodAsync } from './grace-period'
 import { sendTelegramAlert } from './alert-channels/telegram'
 import { sendEmailAlert } from './alert-channels/email'
@@ -265,7 +266,7 @@ export async function emitTransitionAlert(
       timestamp: new Date().toISOString(),
     }
     const category = `${sourceId}:${from}->${to}`
-    console.log(`[ALERT] grace-tagged (all channels) ${category}`)
+    console.log(`[ALERT] grace-tagged (all channels) ${forLog(category)}`)
 
     // Increment the per-category grace counter; the next post-grace
     // alert flushes a summary built from these counts.
@@ -284,7 +285,7 @@ export async function emitTransitionAlert(
           { grace: true },
         ).catch((err) => {
           console.error(
-            `[ALERT:${ch.name}] grace delivery failed for ${sourceId}: ${err instanceof Error ? err.message : err}`,
+            `[ALERT:${ch.name}] grace delivery failed for ${forLog(sourceId)}: ${forLog(err instanceof Error ? err.message : err)}`,
           )
         }),
       ),
@@ -295,7 +296,7 @@ export async function emitTransitionAlert(
   // ② Counter-based dedup — suppress after MAX_ALERTS_PER_WINDOW (P0 bypasses)
   const ttl = critical ? DEDUP_TTL_P0_SECONDS : DEDUP_TTL_SECONDS
   if (!critical && await shouldSuppress(sourceId, from, to)) {
-    console.log(`[ALERT] dedup suppressed (≥${MAX_ALERTS_PER_WINDOW} in window), skipping ${sourceId}: ${from} → ${to}`)
+    console.log(`[ALERT] dedup suppressed (≥${MAX_ALERTS_PER_WINDOW} in window), skipping ${forLog(sourceId)}: ${from} → ${to}`)
     return
   }
 
@@ -320,7 +321,7 @@ export async function emitTransitionAlert(
   const results = await Promise.allSettled(
     CHANNELS.map(ch =>
       ch.send(payload).catch(err => {
-        console.error(`[ALERT:${ch.name}] delivery failed for ${sourceId}: ${err instanceof Error ? err.message : err}`)
+        console.error(`[ALERT:${ch.name}] delivery failed for ${forLog(sourceId)}: ${forLog(err instanceof Error ? err.message : err)}`)
         throw err // re-throw so allSettled marks it as "rejected"
       }),
     ),
@@ -329,7 +330,7 @@ export async function emitTransitionAlert(
   // ⑥ Log summary
   const succeeded = results.filter(r => r.status === 'fulfilled').length
   const failed = results.filter(r => r.status === 'rejected').length
-  console.log(`[ALERT] ${sourceId}: ${from} → ${to} — ${succeeded}/${CHANNELS.length} channels delivered${failed ? `, ${failed} failed` : ''}`)
+  console.log(`[ALERT] ${forLog(sourceId)}: ${from} → ${to} — ${succeeded}/${CHANNELS.length} channels delivered${failed ? `, ${failed} failed` : ''}`)
 }
 
 // ── Test helpers (exported for unit tests only) ──────────
