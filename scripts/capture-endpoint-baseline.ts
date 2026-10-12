@@ -50,7 +50,7 @@ interface BaselineFile {
 
 function captureTLS(hostname: string, timeoutMs = 10_000): Promise<TLSInfo | null> {
   return new Promise((resolve) => {
-    // codeql[js/disabling-certificate-validation] Dev-only baseline script: same pattern as fingerprint-validator — accepting untrusted certs at the socket layer is required to capture the fingerprint for pinning. Never used in production code.
+    // rejectUnauthorized:false is intentional (fingerprint capture only) — alert #11 is an owner dismissal, see ~/TeraSwap-Workspace/queue/codeql-triage-2026-10-12.md.
     const socket = tls.connect(443, hostname, { servername: hostname, rejectUnauthorized: false }, () => {
       try {
         const cert = socket.getPeerCertificate(true)
@@ -237,7 +237,7 @@ async function main() {
 
   // Write
   const dir = path.dirname(outputPath)
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(outputPath, JSON.stringify(baseline, null, 2) + '\n')
   console.log(`✅ Baseline written to ${path.relative(process.cwd(), outputPath)}\n`)
 }

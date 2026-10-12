@@ -217,3 +217,46 @@ describe('[H-01] in-memory fallback on KV failure', () => {
     expect(r.resetAt).toBeLessThanOrEqual(Date.now() + 60_000)
   })
 })
+
+describe('[CodeQL log-injection] only the LOG line is sanitised — keys and limit math unchanged', () => {
+  const HOSTILE = 'swap:1.2.3.4\n[RATE-LIMIT] forged\r\x1b[31m'
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    _internal.reset()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('KV path: Redis key stays byte-identical (ratelimit:<raw key>)', async () => {
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(10)) // at limit → zrem(redisKey, member)
+    await checkRateLimit(HOSTILE, 10, 60_000)
+    expect(mockZrem).toHaveBeenCalledTimes(1)
+    expect(mockZrem.mock.calls[0][0]).toBe(`ratelimit:${HOSTILE}`)
+  })
+
+  it('fallback path: map key is the raw key and ceil(limit/2) math is unchanged', async () => {
+    mockPipelineExec.mockRejectedValue(new Error('kv down'))
+    const r1 = await checkRateLimit(HOSTILE, 4, 60_000) // fallbackLimit = 2
+    const r2 = await checkRateLimit(HOSTILE, 4, 60_000)
+    const r3 = await checkRateLimit(HOSTILE, 4, 60_000)
+    expect([r1.allowed, r1.remaining]).toEqual([true, 1])
+    expect([r2.allowed, r2.remaining]).toEqual([true, 0])
+    expect([r3.allowed, r3.remaining]).toEqual([false, 0])
+    expect([..._internal.getFallbackMap().keys()]).toEqual([HOSTILE])
+  })
+
+  it('fallback log lines carry no CR/LF/ESC from the key', async () => {
+    mockPipelineExec.mockRejectedValue(new Error('kv down'))
+    await checkRateLimit(HOSTILE, 4, 60_000)
+    await checkRateLimit(HOSTILE, 4, 60_000)
+    await checkRateLimit(HOSTILE, 4, 60_000) // BLOCKED line
+    const lines = warnSpy.mock.calls.map((c) => String(c[0]))
+    expect(lines.length).toBe(3)
+    for (const l of lines) expect(l).not.toMatch(/[\r\n\x1b]/)
+  })
+})
