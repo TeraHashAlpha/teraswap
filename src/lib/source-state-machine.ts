@@ -22,6 +22,7 @@
 import { kv } from '@/lib/kv'
 import { emitTransitionAlert } from './alert-wrapper'
 import { isP0Reason } from './p0-reasons'
+import { forLog } from './log-sanitize'
 import thresholdsJson from '../../data/source-thresholds.json'
 
 // ── Types ───────────────────────────────────────────────
@@ -81,15 +82,15 @@ function validateThresholds(t: SourceThresholds, sourceId: string): SourceThresh
   if (!Number.isInteger(failuresToDegraded) || failuresToDegraded < 1 ||
       !Number.isInteger(failuresToDisabled) || failuresToDisabled < 1 ||
       !Number.isInteger(successesToActive) || successesToActive < 1) {
-    console.warn(`[STATE] Invalid thresholds for ${sourceId}: values must be positive integers, using defaults`)
+    console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: values must be positive integers, using defaults`)
     return HARDCODED_DEFAULTS
   }
   if (failuresToDisabled <= failuresToDegraded) {
-    console.warn(`[STATE] Invalid thresholds for ${sourceId}: failuresToDisabled must exceed failuresToDegraded, using defaults`)
+    console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: failuresToDisabled must exceed failuresToDegraded, using defaults`)
     return HARDCODED_DEFAULTS
   }
   if (p95LatencyThresholdMs !== undefined && (!Number.isInteger(p95LatencyThresholdMs) || p95LatencyThresholdMs < 100)) {
-    console.warn(`[STATE] Invalid thresholds for ${sourceId}: p95LatencyThresholdMs must be >= 100, using defaults`)
+    console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: p95LatencyThresholdMs must be >= 100, using defaults`)
     return HARDCODED_DEFAULTS
   }
   return t
@@ -190,9 +191,8 @@ async function loadFromKV(id: string): Promise<SourceStatus> {
     tickCache.set(id, status)
     return status
   } catch (err) {
-    // CodeQL: js/code-injection — FALSE POSITIVE:
-    // `id` is an internal SourceId constant from the SOURCES enum, never user input.
-    console.warn(`[STATE] KV unavailable for ${id}, using default:`, err instanceof Error ? err.message : err)
+    // `id` can also come from kv.smembers(INDEX_KEY), so it is sanitised for the log (CodeQL js/tainted-format-string, js/log-injection).
+    console.warn('[STATE] KV unavailable for %s, using default:', forLog(id), forLog(err instanceof Error ? err.message : err))
     // KV unavailable → fail open (treat as active)
     const status = defaultStatus(id)
     tickCache.set(id, status)
@@ -215,7 +215,7 @@ async function saveToKV(status: SourceStatus): Promise<void> {
 
 function alertKVFailure(sourceId: string, operation: string, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err)
-  console.error(`[STATE] KV ${operation} failed for ${sourceId}: ${message}`)
+  console.error(`[STATE] KV ${operation} failed for ${forLog(sourceId)}: ${forLog(message)}`)
 
   // Route through the standard alert pipeline (fans out to all channels, HTML-escaped).
   // 'kv-store-failure' is a P0 reason → bypasses grace period and uses short dedup TTL.
@@ -243,14 +243,13 @@ function transition(status: SourceStatus, newState: SourceState, reason: string)
   if (from === newState) return
   status.state = newState
   status.lastTransitionAt = Date.now()
-  console.log(`[STATE] ${status.id}: ${from} → ${newState} (${reason})`)
+  console.log(`[STATE] ${forLog(status.id)}: ${from} → ${newState} (${forLog(reason)})`)
 
   // Sole alert path — fans out to Telegram/Email/Discord via alert-wrapper
   // with dedup, grace period, and HTML escaping. Fire-and-forget to never block.
   emitTransitionAlert(status.id, from, newState, reason).catch(err => {
-    // CodeQL: js/code-injection — FALSE POSITIVE:
-    // `status.id` is an internal SourceId from the state machine, never user input.
-    console.error(`[STATE] alert emission failed for ${status.id}:`, err instanceof Error ? err.message : err)
+    // `status.id` is KV-loaded, so it is sanitised for the log (CodeQL js/tainted-format-string, js/log-injection).
+    console.error('[STATE] alert emission failed for %s:', forLog(status.id), forLog(err instanceof Error ? err.message : err))
   })
 }
 

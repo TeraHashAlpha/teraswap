@@ -53,13 +53,13 @@ const nextConfig = {
               // renders it as a same-origin blob: object URL in an <img>. Without blob: here, every
               // wallet icon is CSP-blocked (img-src) → generic placeholder. Mirrors media-src's blob:.
               "img-src 'self' data: blob: https://tokens.1inch.io https://assets.coingecko.com https://raw.githubusercontent.com",
-              // Fonts: self (Inter/JetBrains Mono via next/font) + Fontshare CDN (Clash Display)
-              "font-src 'self' data: https://cdn.fontshare.com",
+              // Fonts: all self-hosted via next/font/local (Inter, JetBrains Mono, Clash Display)
+              "font-src 'self' data:",
               // Connect: aggregator APIs + RPC + WalletConnect + CoW + Etherscan
               // [fix/dca-consent-copy-and-tier-check] https://coins.llama.fi (exact origin, read-only
               // public GET): the DCA floor-tier classifier runs in the BROWSER (DCAPanel → dca-floor-tier
               // → fetchDefiLlamaPrice). Blocked here, every token with no on-chain feed fell to `unpriced`.
-              "connect-src 'self' https://api.1inch.dev https://api.0x.org https://api.paraswap.io https://aggregator-api.kyberswap.com https://api.cow.fi https://open-api.openocean.finance https://api.sushi.com https://api-v3.balancer.fi https://eth.llamarpc.com https://*.infura.io https://*.alchemy.com wss://*.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://explorer-api.walletconnect.com https://rpc.walletconnect.com https://relay.walletconnect.com https://metamask-sdk.api.cx.metamask.io wss://metamask-sdk.api.cx.metamask.io https://api.etherscan.io https://api.web3modal.org https://api.web3modal.com https://*.supabase.co wss://*.supabase.co https://rpc.ankr.com https://ethereum-rpc.publicnode.com https://eth.merkle.io https://*.ingest.sentry.io https://cdn.fontshare.com https://coins.llama.fi",
+              "connect-src 'self' https://api.1inch.dev https://api.0x.org https://api.paraswap.io https://aggregator-api.kyberswap.com https://api.cow.fi https://open-api.openocean.finance https://api.sushi.com https://api-v3.balancer.fi https://eth.llamarpc.com https://*.infura.io https://*.alchemy.com wss://*.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://explorer-api.walletconnect.com https://rpc.walletconnect.com https://relay.walletconnect.com https://metamask-sdk.api.cx.metamask.io wss://metamask-sdk.api.cx.metamask.io https://api.etherscan.io https://api.web3modal.org https://api.web3modal.com https://*.supabase.co wss://*.supabase.co https://rpc.ankr.com https://ethereum-rpc.publicnode.com https://eth.merkle.io https://*.ingest.sentry.io https://coins.llama.fi",
               // Media: self (local sound files in /public/sounds/)
               "media-src 'self' blob:",
               // Frames: none (clickjacking protection)

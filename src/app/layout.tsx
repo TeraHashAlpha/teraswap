@@ -1,21 +1,34 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
 import ClientProviders from './client-providers'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import { SITE_META_DESCRIPTION } from '@/config/product-claims'
 import './globals.css'
 
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+// Self-hosted (src/fonts/README.md) — builds must not depend on a third-party font fetch.
+const inter = localFont({
+  src: '../fonts/inter/InterVariable-latin.woff2',
+  weight: '100 900',
   display: 'swap',
   variable: '--font-inter',
 })
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
+// Clash Display (ITF FFL 2.0 permits self-hosting): reserved for the visual redesign; not applied
+const clashDisplay = localFont({
+  src: '../fonts/clash-display/ClashDisplay-Variable.woff2',
+  weight: '200 700',
+  display: 'swap',
+  variable: '--font-clash',
+  preload: false,
+})
+
+const jetbrainsMono = localFont({
+  src: [
+    { path: '../fonts/jetbrains-mono/JetBrainsMono-Regular.woff2', weight: '400', style: 'normal' },
+    { path: '../fonts/jetbrains-mono/JetBrainsMono-Medium.woff2', weight: '500', style: 'normal' },
+    { path: '../fonts/jetbrains-mono/JetBrainsMono-SemiBold.woff2', weight: '600', style: 'normal' },
+  ],
   display: 'swap',
   variable: '--font-mono',
 })
@@ -79,24 +92,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable} ${clashDisplay.variable}`} suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#080B10" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        {/* Preconnect — critical external origins */}
-        <link rel="preconnect" href="https://cdn.fontshare.com" crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href="https://cdn.fontshare.com" />
-        {/* Preload Clash Display for instant headline rendering */}
-        <link
-          rel="preload"
-          href="https://cdn.fontshare.com/wf/BPYOJXAOZVHRZK2YLFWMFWU5HEA2GNLK/TPHK4DOJQVNZWU3XPQAESXNV6DGY7PEZ/LUVMMEVY6IOL4R6YQIMAHLHVH33LNQHD.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
       </head>
       <body>
         <ServiceWorkerRegistration />
