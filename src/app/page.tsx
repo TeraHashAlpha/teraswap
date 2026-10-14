@@ -164,7 +164,7 @@ export default function Home() {
             <div className="w-full max-w-[460px]">
               {/* [SPRINT-DCA-UNGATE] Functional DCA panel — only reachable when the launch flag is on
                   and the wallet is on Base (the tab is otherwise disabled, so this is defensive too). */}
-              <DCAPanel />
+              <DCAPanel key={chainId} />
             </div>
           ) : swapMode === 'limit' && limitLive ? (
             <div className="w-full max-w-[460px]">

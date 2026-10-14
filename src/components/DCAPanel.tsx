@@ -393,9 +393,22 @@ function CreateDCAForm({
   // writes a block keyed to the OLD selection, which the derived value below simply ignores.
   const [submitBlockFor, setSubmitBlockFor] = useState<{ key: string; reason: string } | null>(null)
 
-  // [CHORE-DCA-WETH-INPUT] Keep the spend token pinned to the active chain's WETH. Also
-  // recovers if the input ever became native ETH (it can't via the selector, which hides
-  // it — this is belt-and-suspenders) so the signed struct's tokenIn is always an ERC-20.
+  // [fix/dca-chain-switch] A token selection never outlives the chain it was made on. Reset DURING
+  // render (React re-renders before any effect or fetch sees the stale pair): the previous
+  // effect-based pin kept the OLD chain's WETH, and `buySelection` was never reset at all, so an
+  // Arbitrum WETH/ARB pair was sent in a Base request. tokenIn -> the new chain's WETH; the buy side
+  // -> empty (the user must choose again). page.tsx also keys the panel by chainId; this is the
+  // inside-the-component guarantee for any other mount site.
+  const [selectionChainId, setSelectionChainId] = useState(chainId)
+  if (selectionChainId !== chainId) {
+    setSelectionChainId(chainId)
+    setTokenIn(wethFor(chainId))
+    setBuySelection(null)
+  }
+
+  // [CHORE-DCA-WETH-INPUT] Keep the spend token an ERC-20: recovers if the input ever became native
+  // ETH (it can't via the selector, which hides it — this is belt-and-suspenders). Chain changes are
+  // handled by the render-time reset above.
   useEffect(() => {
     setTokenIn(prev => (prev && !isNativeETH(prev) ? prev : wethFor(chainId)))
   }, [chainId])
