@@ -6,6 +6,8 @@
  * stateful (KV, network, React) belongs elsewhere.
  */
 
+import { forLog } from './log-sanitize'
+
 // ── safeBigInt ─────────────────────────────────────────────────
 //
 // [10-L-01] Defensive replacement for bare `BigInt(value)` calls.
@@ -40,7 +42,7 @@ function warn(reason: string, value: unknown): void {
   console.warn(
     `[safeBigInt] rejected (${reason}):`,
     // Quote strings so empty / whitespace-only values are visible.
-    typeof value === 'string' ? JSON.stringify(value) : value,
+    typeof value === 'string' ? JSON.stringify(value) : forLog(value),
   )
 }
 

@@ -53,6 +53,8 @@ scripts/*.sh
 # CHORE-GROK-DENY-FLAGS: same reasoning — a reviewed, versioned credential guard, not a local
 # convenience script.
 !scripts/grok-guard.sh
+# CHORE-CODEQL-LOCAL: reviewed local CodeQL harness (documented, idempotent), not a throwaway script.
+!scripts/codeql-local.sh
 tools/
 TeraSwap_OrderEngine_SecurityAudit.pdf
 

@@ -30,6 +30,7 @@ import { verifyBearerToken } from '@/lib/auth'
 import { validateExecution, type ValidateExecutionParams, type ExecutionValidation } from '@/lib/post-execution-validator'
 import { getSupabase } from '@/lib/supabase'
 import { getSupportedChainIds } from '@/lib/chains/registry'
+import { forLog } from '@/lib/log-sanitize'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 15 // Receipt fetch + RPC calls
@@ -152,10 +153,10 @@ export async function POST(
 
     // Log critical/warning results server-side for observability
     if (result.severity === 'critical') {
-      console.error(`[VALIDATE-EXECUTION] CRITICAL: ${result.source} tx=${result.txHash} — ${result.reason}`)
+      console.error(`[VALIDATE-EXECUTION] CRITICAL: ${forLog(result.source)} tx=${forLog(result.txHash)} — ${forLog(result.reason)}`)
     } else if (result.severity === 'warning') {
       // Alert #33 (js/log-injection) is an owner dismissal, bearer-guarded route — see ~/TeraSwap-Workspace/queue/codeql-triage-2026-10-12.md.
-      console.warn(`[VALIDATE-EXECUTION] WARNING: ${result.source} tx=${result.txHash} — ${result.reason}`)
+      console.warn(`[VALIDATE-EXECUTION] WARNING: ${forLog(result.source)} tx=${forLog(result.txHash)} — ${forLog(result.reason)}`)
     }
 
     // [P117/Sprint 16B] Persist surplus to swaps.mev_savings_actual for ALL

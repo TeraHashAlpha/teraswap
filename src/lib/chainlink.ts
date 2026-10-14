@@ -9,6 +9,7 @@ import { isSequencerUp } from './chains/sequencer-check'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
 import { getPublicClientForChain } from './chains/clients'
 import { getRpcUrlForChain } from './adapters/shared'
+import { forLog } from './log-sanitize'
 
 // [P218] getChainlinkFeed moved to the per-chain registry; re-export so
 // existing `import { getChainlinkFeed } from '@/lib/chainlink'` keeps working.
@@ -535,7 +536,7 @@ export async function fetchChainlinkPriceRaw(
   if (chainId !== DEFAULT_CHAIN_ID) {
     const seqUp = await isSequencerUp(chainId, getPublicClientForChain(chainId))
     if (!seqUp) {
-      console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${chainId}`)
+      console.warn(`[TeraSwap] Sequencer down or in grace period on chain ${forLog(chainId)}`)
       return null
     }
   }

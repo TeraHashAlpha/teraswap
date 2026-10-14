@@ -270,7 +270,7 @@ export async function assertChainIdentity({
     } else if (verdict.status === 'unverified') {
       // Not a refusal — an outage. Warn so it is visible, and carry on falling through.
       console.warn(
-        `[chain-identity] could not verify the RPC for chain ${expectedChainId}: ${forLog(sanitizeUpstreamError(verdict.reason), Infinity)} ` +
+        `[chain-identity] could not verify the RPC for chain ${forLog(expectedChainId)}: ${forLog(sanitizeUpstreamError(verdict.reason), Infinity)} ` +
           '— treating as an outage and falling through',
       )
     }
