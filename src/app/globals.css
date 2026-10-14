@@ -2,14 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Clash Display — loaded via CDN (self-hosted fallback: Inter 800) */
-@font-face {
-  font-family: 'Clash Display';
-  src: url('https://cdn.fontshare.com/wf/BPYOJXAOZVHRZK2YLFWMFWU5HEA2GNLK/TPHK4DOJQVNZWU3XPQAESXNV6DGY7PEZ/LUVMMEVY6IOL4R6YQIMAHLHVH33LNQHD.woff2') format('woff2');
-  font-weight: 400 800;
-  font-display: swap;
-}
-
 /* ── Dark theme (default) ── */
 html, html.dark {
   color-scheme: dark;

@@ -8,6 +8,7 @@ import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { computeTokenAmountUsd } from '@/lib/chainlink'
 import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
+import { forLog } from '@/lib/log-sanitize'
 
 // [AUDIT-W6 / W6-M-02 + W6-L-01] Shared guards for both handlers: body cap +
 // the per-IP budget shared by all log-* routes, BEFORE any parse/DB work.
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
       const drift = Math.abs(clientInUsdNum - serverInUsd) / serverInUsd
       if (drift > 0.05) {
         console.warn(
-          `[log-swap] USD drift on tokenIn: client=$${clientInUsdNum.toFixed(2)} server=$${serverInUsd.toFixed(2)} (drift=${(drift * 100).toFixed(1)}%) for ${tokenInSymbol} (${tokenIn})`,
+          `[log-swap] USD drift on tokenIn: client=$${clientInUsdNum.toFixed(2)} server=$${serverInUsd.toFixed(2)} (drift=${(drift * 100).toFixed(1)}%) for ${forLog(tokenInSymbol)} (${forLog(tokenIn)})`,
         )
       }
     }

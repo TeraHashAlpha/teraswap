@@ -22,6 +22,7 @@
 // degraded mode).
 
 import { kv } from '@/lib/kv'
+import { forLog } from '@/lib/log-sanitize'
 
 export const SWAP_RATE_LIMIT = { limit: 20, windowMs: 60_000 }
 export const QUOTE_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
@@ -127,11 +128,11 @@ function fallbackRateLimit(
   }
 
   if (entry.count > fallbackLimit) {
-    console.warn(`[RATE-LIMIT] KV unavailable, in-memory fallback BLOCKED request for ${key}`)
+    console.warn(`[RATE-LIMIT] KV unavailable, in-memory fallback BLOCKED request for ${forLog(key)}`)
     return { allowed: false, remaining: 0, resetAt: entry.windowStart + windowMs }
   }
 
-  console.warn(`[RATE-LIMIT] KV unavailable, using in-memory fallback for ${key}: ${entry.count}/${fallbackLimit}`)
+  console.warn(`[RATE-LIMIT] KV unavailable, using in-memory fallback for ${forLog(key)}: ${entry.count}/${fallbackLimit}`)
   return {
     allowed: true,
     remaining: fallbackLimit - entry.count,
