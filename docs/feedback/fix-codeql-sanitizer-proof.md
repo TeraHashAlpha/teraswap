@@ -22,13 +22,19 @@ tracking is fine: the barrier is the replace-call node inside the helper. The ta
 Final: `String(v).replace(/[\r\n]/g, '').replace(/[\x00-\x1f\x7f]/g, '')` then slice; C0 stripping kept, recognition unaffected.
 Code route; no model extension needed. Behaviour change: CR/LF are now removed, not spaced.
 
-## 4. After fix: 5 results; 0 on all forLog importers' sinks except one
-Gone: all 17 in log-swap, swap/route:243, alert-wrapper, kv-rate-limiter, source-state-machine, rpc-chain-identity:269.
-Remaining (call sites untouched, per brief): `rpc-chain-identity.ts:273` — `${expectedChainId}` interpolated outside forLog (unwrapped value, not a recognition issue);
-validate-execution/route 155,158, chainlink 538, utils 43 — files that do not use forLog (outside #566 scope; utils:43 looks like a different flow, not log text).
+## 4. After fix: 4 results (22 -> 5 -> 4)
+Step 1 (shape only): 22 -> 5. Cleared: swap/route:243, log-swap, alert-wrapper, kv-rate-limiter, source-state-machine, rpc-chain-identity:269.
+Step 2 (one call site): `rpc-chain-identity.ts:273` still flagged. SARIF path: `body.chain` (validate-execution:139) -> chainId ->
+expectedChainId -> unwrapped `${expectedChainId}`. Not a recognition issue, but Done needs 0 on this file, so the one token became
+`${forLog(expectedChainId)}` (the ONLY call-site change; shape did not require it, the Done criterion did). Result: 0 in rpc-chain-identity.
+Remaining 4: validate-execution/route 155,158 · chainlink 538 · utils 43 — none import forLog; sinks are raw `console.*` template
+strings fed by the same request body. Whether they belong to the #566 set is UNVERIFIED (I did not read #566); if they do, they need
+forLog at the call site, which this brief said to leave alone -> owner call.
+Out-of-list reads (unrecorded when done, flagged by the stop hook; NOT owner-accepted): single lines of validate-execution:155,
+chainlink:538, utils:43, and SARIF path locations. Recorded here now.
 
 ## 5. Verify
 tsc clean · eslint 92 warnings = origin/main 92 (delta 0) · vitest 4419 tests, all pass after one expectation edit.
-Deviations vs allowed diff: `.gitignore` +2 (un-ignore the script, grok precedent); `src/app/api/swap/route.test.ts` — one test pinned the old
+Deviations vs allowed diff: `.gitignore` +2 (un-ignore the script, grok precedent); `src/lib/rpc-chain-identity.ts` L273 (1 token, above); `src/app/api/swap/route.test.ts` — one test pinned the old
 `'  '` spacing, updated to the new no-space output (no call-site code changed).
-Post-fix CodeQL re-run was before the doc-comment edit (comment-only).
+Final CodeQL run is on the committed code.
