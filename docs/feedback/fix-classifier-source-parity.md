@@ -4,7 +4,7 @@
 
 ### Checklist
 - [x] Worktree `~/ts-worktrees/classifier-source-parity` off origin/main `dd1dffa`, real `npm ci` (exit 0)
-- [x] Commit 1 — facts (this file) · [ ] Commit 2 — parity · [ ] Commit 3 — tests ← **STOPPED: the keeper also fails quorum** (goal §Commit 1 (c))
+- [x] Commit 1 — facts (this file) · [ ] Commit 2 — parity · [ ] Commit 3 — tests ← **STOPPED: the keeper also fails quorum** (goal §Commit 1 (c)); owner confirmed "Stop here" (§5)
 - [x] Reads outside the list, recorded: `git log` (history only); `head -30 docs/feedback/sprint-p1b-limit-tp-v3.md` (format); live GETs: Chainlink `feeds-ethereum-mainnet-base-1.json`, CoinGecko `coins/uniswap`
 
 ### 1. Facts
@@ -30,5 +30,6 @@
 
 ### 5. Verification · Q for the owner
 - `git diff --stat` vs origin/main = this file only, so every test/lint/tsc input equals origin/main. On this tree: `npm test` 299 files / 4452 passed / 0 failed; `npm run lint` 0 errors / 93 warnings (budget 94); `npm run typecheck` 0 errors. Focused: `dca-price-quorum` + `dca-floor-tier` + `dca-floor-cap/route` tests → 54 passed.
-- **Q (blocks Commit 2/3):** UNI/Base cannot reach quorum anywhere (no Chainlink feed, no CoinGecko mapping). (1) Build the parity module anyway (helps mirror-covered tokens only; UNI/Base stays `unpriced`)? (2) Accept `unpriced` ≡ keeper `single` as correct and change copy/expectation instead? (3) Other (e.g. a consented single-source tier under the $250 cap)?
+- **Q (blocked Commit 2/3):** UNI/Base cannot reach quorum anywhere (no Chainlink feed, no CoinGecko mapping) — (1) parity module anyway (mirror-covered tokens only)? (2) accept `unpriced` ≡ keeper `single` and change copy/expectation elsewhere? (3) other (consented single-source tier)?
+- **Owner's answer (2026-10-14, in-session, supersedes the goal text): "Stop here"** — (2): `unpriced` ≡ keeper `single` for UNI/Base is correct; this branch stays facts-only; any copy/expectation change is a separate prompt. Commit 2/3 not built.
 - Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/classifier-source-parity
