@@ -17,6 +17,7 @@ import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 // [FEAT-DCA-FLOOR-TIERS] Server-side floor tier + the consent it requires.
+import { checkTokenOnChain } from '@/lib/order-engine/token-on-chain'
 import { classifyDcaFloor, floorAckCovers, type DcaFloorTier } from '@/lib/order-engine/dca-floor-tier'
 import {
   verifyOrdersReadAccess,
@@ -322,6 +323,31 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
+    // [fix/dca-chain-switch] A v3 DCA may only name tokens that exist on the ORDER'S chain. A stale
+    // client once put Arbitrum's WETH/ARB in a Base request and the server classified, then accepted,
+    // it. Known-map hits cost nothing; an unknown address needs code at it (eth_getCode on chainId,
+    // cached 10 min). Before signature recovery so a refused order never reaches signing or insert;
+    // the only RPC an unauthenticated caller can cause is one cached getCode per unknown address.
+    // Native-sentinel rules are unchanged (checkTokenOnChain passes it; the WETH-only rule above
+    // still rejects it as a DCA output).
+    if (isV3Order && orderTypeEnum === ORDER_TYPE_DCA) {
+      for (const leg of ['tokenIn', 'tokenOut'] as const) {
+        const v = await checkTokenOnChain(chainId, body[leg])
+        if (v.onChain === false) {
+          return NextResponse.json(
+            { error: `${leg} is not a token on chain ${chainId}`, code: 'token_not_on_chain', leg, reason: v.reason },
+            { status: 400 },
+          )
+        }
+        if (v.onChain === null) {
+          return NextResponse.json(
+            { error: `Cannot verify ${leg} on chain ${chainId} right now. Try again shortly.`, code: 'token_check_unavailable', leg },
+            { status: 503 },
+          )
+        }
+      }
+    }
+
     {
       try {
         const domain = isV3Order ? getOrderExecutorV3Domain(chainId) : getOrderExecutorDomain(chainId)

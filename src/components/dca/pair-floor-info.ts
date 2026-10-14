@@ -1,4 +1,4 @@
-import type { DcaFloorTier } from '@/lib/order-engine'
+import { DCA_NO_PRICE_FILL_CAP_MAX_USD, type DcaFloorTier } from '@/lib/order-engine'
 
 /**
  * [feat/dca-tier-server-side] The browser no longer classifies a DCA pair. It asks
@@ -70,4 +70,21 @@ export function affectedSymbols(info: PairFloorInfo, inSymbol: string, outSymbol
   const uniq = (a: string[]) => a.filter((n, i) => a.indexOf(n) === i)
   const out = uniq(names)
   return out.length ? out : uniq([inSymbol, outSymbol])
+}
+
+/**
+ * [fix/dca-chain-switch / P3] The one-line note under the BUY selector, driven by the SAME server tier
+ * the consent dialog uses (so the two can never disagree). `null` = no note (on-chain feed, or the tier
+ * has not been answered yet).
+ */
+export function floorTierHint(info: PairFloorInfo | null): string | null {
+  if (!info) return null
+  if (info.tier === 'offchain-price') return 'Protected by executor price checks (no Chainlink feed registered yet)'
+  if (info.tier === 'unpriced') {
+    const c = info.effectiveCap
+    const cap = typeof c === 'number' && Number.isFinite(c) && c > 0
+      ? Math.min(c, DCA_NO_PRICE_FILL_CAP_MAX_USD) : DCA_NO_PRICE_FILL_CAP_MAX_USD
+    return `No market price source right now — buys capped at $${cap} and flagged`
+  }
+  return null
 }

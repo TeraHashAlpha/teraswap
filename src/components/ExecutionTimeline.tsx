@@ -230,7 +230,9 @@ export default function ExecutionTimeline({
           {aggregate.avgPriceLabel && (
             <span>Avg {aggregate.avgPriceLabel}</span>
           )}
-          {aggregate.gasLabel && (
+          {isDca ? (
+            <span>⛽ gas paid by executor</span>
+          ) : aggregate.gasLabel && (
             <span>⛽ {aggregate.gasLabel}</span>
           )}
         </div>
@@ -298,7 +300,11 @@ export default function ExecutionTimeline({
                         <span>↗</span>
                       </a>
                     )}
-                    {gasLabel && (
+                    {/* [fix/dca-chain-switch / P4] A DCA fill's gas is paid by the executor, not the user, and
+                        on an L2 it rounds to a misleading "0 ETH" — say who pays instead of a number. */}
+                    {isDca ? (
+                      <span className="text-[10px] text-cream-30" data-testid="exec-gas-note">⛽ gas paid by executor</span>
+                    ) : gasLabel && (
                       <span className="text-[10px] text-cream-30">⛽ {gasLabel}</span>
                     )}
                   </div>

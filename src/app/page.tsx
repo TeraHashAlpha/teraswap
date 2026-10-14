@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useChainId } from 'wagmi'
+import { useQuoteChainId } from '@/hooks/useChainId'
+import ComingSoonPanel, { type ComingSoonMode } from '@/components/ComingSoonPanel'
 import ParticleNetwork from '@/components/ParticleNetwork'
 import LandingPage from '@/components/LandingPage'
 import ScrollSpy from '@/components/ScrollSpy'
@@ -29,7 +30,7 @@ import SwapErrorBoundary from '@/components/SwapErrorBoundary'
 import HelpButton from '@/components/HelpButton'
 import NotificationBanner from '@/components/NotificationBanner'
 import { playTouchMP3 } from '@/lib/sounds'
-import { isDcaLive } from '@/lib/dca-launch'
+import { isDcaLive, isDcaLaunchEnabled, DCA_CHAINS } from '@/lib/dca-launch'
 import { isLimitLive } from '@/lib/order-engine'
 
 // /docs, /privacy, and /terms each have their own Next.js route, so they
@@ -44,33 +45,6 @@ export type SwapMode = 'instant' | 'portfolio' | 'dca' | 'limit' | 'sltp' | 'ord
 
 const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
 
-const COMING_SOON_META: Record<string, { icon: string; title: string; desc: string }> = {
-  dca:  { icon: '⟳', title: 'Smart DCA Engine', desc: 'Automated dollar-cost averaging with price-aware buying windows. Coming to L2 soon.' },
-  limit: { icon: '◇', title: 'Limit Orders', desc: 'Set your price and let the order execute autonomously on-chain. Coming to L2 soon.' },
-  sltp: { icon: '◆', title: 'Take Profit', desc: 'Lock in gains automatically when your target is hit. Coming to L2 soon.' },
-}
-
-function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void }) {
-  const meta = COMING_SOON_META[mode]
-  if (!meta) return null
-  return (
-    <div className="flex flex-col items-center gap-5 rounded-2xl border border-cream-08 bg-surface-secondary/60 px-6 py-12 text-center backdrop-blur-md">
-      <span className="text-5xl">{meta.icon}</span>
-      <h3 className="text-xl font-bold text-cream">{meta.title}</h3>
-      <p className="max-w-xs text-sm text-cream-50">{meta.desc}</p>
-      <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-1.5 text-xs font-semibold text-amber-300">
-        Coming Soon on L2
-      </span>
-      <button
-        onClick={onSwap}
-        className="mt-2 rounded-xl bg-cream-gold px-6 py-2.5 text-sm font-bold text-[#080B10] transition-transform hover:scale-105"
-      >
-        Swap Now →
-      </button>
-    </div>
-  )
-}
-
 export default function Home() {
   const [page, setPage] = useState<AppPage>('landing')
   const [swapMode, setSwapMode] = useState<SwapMode>('instant')
@@ -78,8 +52,16 @@ export default function Home() {
   // [SPRINT-DCA-UNGATE] DCA is offered only when the launch flag is on AND the wallet is on Base
   // with a wired OrderExecutor (see isDcaLive). Default (flag off / not Base) ⇒ false ⇒ the DCA tab
   // stays the "Soon" teaser, byte-identical to today.
-  const chainId = useChainId()
+  //
+  // [fix/dca-chain-switch / P2] The SELECTOR chain (useQuoteChainId), not wagmi's useChainId(): with no
+  // wallet connected wagmi reports its config default (mainnet), so a visitor who picked Base in
+  // ChainSelector still got the "Soon" teaser. Connected, the two agree.
+  const chainId = useQuoteChainId()
   const dcaLive = isDcaLive(chainId)
+  // [fix/dca-chain-switch / P2] Flag on but the selector sits on a chain DCA does not run on (Ethereum):
+  // the tab stays selectable and its panel says where DCA runs + offers the switch. Flag off, or a DCA
+  // chain whose executor is not wired (Arbitrum pinned dark), keeps the disabled "Soon" teaser.
+  const dcaWrongChain = isDcaLaunchEnabled() && !DCA_CHAINS.includes(chainId)
   // [SPRINT-P1B] Same fail-closed shape as dcaLive — false ⇒ the Limit/SL·TP tabs stay "Soon".
   const limitLive = isLimitLive(chainId)
 
@@ -137,7 +119,7 @@ export default function Home() {
               // Each gated mode leaves the "Soon" teaser only when its own launch gate is open.
               comingSoon:
                 COMING_SOON_MODES.has(mode) &&
-                !(mode === 'dca' && dcaLive) &&
+                !(mode === 'dca' && (dcaLive || dcaWrongChain)) &&
                 !((mode === 'limit' || mode === 'sltp') && limitLive),
             }))}
             active={swapMode}
@@ -164,7 +146,7 @@ export default function Home() {
             <div className="w-full max-w-[460px]">
               {/* [SPRINT-DCA-UNGATE] Functional DCA panel — only reachable when the launch flag is on
                   and the wallet is on Base (the tab is otherwise disabled, so this is defensive too). */}
-              <DCAPanel />
+              <DCAPanel key={chainId} chainId={chainId} />
             </div>
           ) : swapMode === 'limit' && limitLive ? (
             <div className="w-full max-w-[460px]">
@@ -179,7 +161,7 @@ export default function Home() {
             </div>
           ) : COMING_SOON_MODES.has(swapMode) ? (
             <div className="w-full max-w-[460px]">
-              <ComingSoonPanel mode={swapMode} onSwap={() => setSwapMode('instant')} />
+              <ComingSoonPanel mode={swapMode as ComingSoonMode} chainId={chainId} onSwap={() => setSwapMode('instant')} />
             </div>
           ) : swapMode === 'orders' ? (
             <div className="w-full max-w-[460px]">

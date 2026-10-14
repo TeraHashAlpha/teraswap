@@ -3,6 +3,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const mockRate = vi.fn(async () => ({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }))
+// [fix/dca-chain-switch] This suite's fixture tokens are arbitrary hex with no bytecode, so presence is
+// scripted: everything is on-chain unless a test puts `${chainId}:${address}` in `notOnChain`. The real
+// helper (known-map / eth_getCode / cache) is covered by order-engine/token-on-chain.test.ts.
+const notOnChain = new Set<string>()
+vi.mock('@/lib/order-engine/token-on-chain', () => ({
+  checkTokenOnChain: vi.fn(async (chainId: number, address: string) =>
+    notOnChain.has(`${chainId}:${address.toLowerCase()}`)
+      ? { onChain: false, reason: `no contract at ${address} on chain ${chainId}` }
+      : { onChain: true }),
+  _clearTokenOnChainCache: vi.fn(),
+}))
 vi.mock('@/lib/kv-rate-limiter', async () => ({ ...(await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')), checkRateLimit: () => mockRate() }))
 let row: unknown = null
 let throws = false
@@ -138,10 +149,41 @@ describe('GET /api/dca-floor-cap?tokenIn&tokenOut — the pair tier, decided ser
     expect(r.status).toBe(200)
     expect(r.json).toEqual({
       tier: 'offchain-price',
-      legs: { in: { registered: true, priced: true }, out: { registered: false, priced: true } },
+      legs: { in: { registered: true, priced: true, onChain: true }, out: { registered: false, priced: true, onChain: true } },
       registeredFeedCount: 2, effectiveCap: 75, max: MAX, maxUsd: MAX, effectiveUsd: 75,
     })
     expect(r.cache).toBe('public, max-age=60')
+  })
+
+  it('[fix/dca-chain-switch] a foreign token address: 200, tier unpriced, that leg onChain:false + reason, classifier not asked', async () => {
+    const FOREIGN = '0x912ce59144191c1204e64559fe8253a0e49e6548' // Arbitrum ARB, asked about under chainId 8453
+    notOnChain.add(`8453:${FOREIGN}`)
+    vi.mocked(classifyDcaFloorDetailed).mockClear()
+    const r = await call(pair(baseAddr('WETH'), FOREIGN))
+    expect(r.status).toBe(200)
+    expect(r.json.tier).toBe('unpriced')
+    expect(r.json.legs.out.onChain).toBe(false)
+    expect(r.json.legs.out.reason).toMatch(/no contract at .* on chain 8453/)
+    expect(r.json.legs.in.onChain).toBe(true)
+    expect(vi.mocked(classifyDcaFloorDetailed)).not.toHaveBeenCalled()
+    notOnChain.clear()
+  })
+
+  it('[fix/dca-chain-switch] BOTH legs foreign (the production symptom) names both, onChain:false each', async () => {
+    const A = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', B = '0x912ce59144191c1204e64559fe8253a0e49e6548'
+    notOnChain.add(`8453:${A}`); notOnChain.add(`8453:${B}`)
+    const r = await call(pair(A, B))
+    expect(r.json.tier).toBe('unpriced')
+    expect(r.json.legs.in.onChain).toBe(false)
+    expect(r.json.legs.out.onChain).toBe(false)
+    notOnChain.clear()
+  })
+
+  it('[fix/dca-chain-switch] a valid Base token with no feed is unchanged: classified normally, onChain:true', async () => {
+    pricedTokens.add(UNI.toLowerCase())
+    const r = await call(pair(baseAddr('WETH'), UNI))
+    expect(r.json.tier).toBe('offchain-price')
+    expect(r.json.legs.out.onChain).toBe(true)
   })
 
   it('uses the SAME classifier as the create route: identical tier for every scenario, called with the pair, normalized to lowercase', async () => {

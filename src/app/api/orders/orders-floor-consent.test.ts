@@ -9,6 +9,12 @@ import { NextRequest } from 'next/server'
 import { keccak256 } from 'viem'
 
 const mockRecover = vi.fn()
+// [fix/dca-chain-switch] This suite's fixture tokens are arbitrary hex with no bytecode; token
+// presence on the order's chain is covered by token-on-chain.test.ts / orders-token-on-chain.test.ts.
+vi.mock('@/lib/order-engine/token-on-chain', () => ({
+  checkTokenOnChain: vi.fn(async () => ({ onChain: true })),
+  _clearTokenOnChainCache: vi.fn(),
+}))
 vi.mock('viem', async () => {
   const actual = await vi.importActual<typeof import('viem')>('viem')
   return { ...actual, recoverTypedDataAddress: (...args: unknown[]) => mockRecover(...args) }

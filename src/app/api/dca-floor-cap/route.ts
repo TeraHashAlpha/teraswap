@@ -14,6 +14,7 @@ import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { clientIp } from '@/lib/body-limit'
 import { normalizeAddress } from '@/lib/order-engine/normalize-address'
 import { getChainTokenList } from '@/lib/chains/tokens'
+import { checkTokenOnChain, type TokenOnChain } from '@/lib/order-engine/token-on-chain'
 import {
   classifyDcaFloorDetailed,
   countRegisteredFeeds,
@@ -93,7 +94,24 @@ export async function GET(req: NextRequest) {
   }
   // Read in parallel with the cap; a count failure never affects the cap answer.
   const count = registeredFeedCount(chainId).catch(() => null)
-  const pair = wantsPair ? classifyPair(chainId, tokenIn!, tokenOut!) : null
+  // [fix/dca-chain-switch] A leg whose address is not a token on this chain is never classified
+  // against it: tier `unpriced`, that leg `onChain:false` + reason (HTTP 200 — an answer, not an error).
+  const presence: Promise<[TokenOnChain, TokenOnChain]> | null = wantsPair
+    ? Promise.all([checkTokenOnChain(chainId, tokenIn!), checkTokenOnChain(chainId, tokenOut!)])
+    : null
+  const pair = wantsPair
+    ? presence!.then(async ([pin, pout]) => {
+        const flags = { in: pin, out: pout }
+        const foreign = pin.onChain === false || pout.onChain === false
+        const c = foreign ? UNKNOWN : await classifyPair(chainId, tokenIn!, tokenOut!)
+        const withPresence = (l: DcaFloorClassification['legs']['in'], v: TokenOnChain) =>
+          ({ ...l, onChain: v.onChain, ...(v.onChain === true ? {} : { reason: v.reason }) })
+        return {
+          tier: c.tier,
+          legs: { in: withPresence(c.legs.in, flags.in), out: withPresence(c.legs.out, flags.out) },
+        }
+      })
+    : null
   const respond = async (effectiveUsd: number) => {
     const base = { ...ceiling, effectiveUsd, registeredFeedCount: await count }
     if (!pair) return NextResponse.json(base, { headers: CACHE })
