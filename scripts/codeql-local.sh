@@ -18,6 +18,8 @@ SARIF="$OUT/result.sarif"
 
 mkdir -p "$OUT"
 gh codeql version
+# The CLI does not bundle the query packs; fetch (idempotent, cached) the one the query lives in.
+gh codeql pack download codeql/javascript-queries
 
 gh codeql database create "$DB" --language=javascript-typescript --source-root="$ROOT" --overwrite
 gh codeql database analyze "$DB" "$QUERY" --format=sarif-latest --output="$SARIF" --rerun

@@ -640,7 +640,7 @@ describe('POST /api/swap — R1 mismatch log line is CRLF-safe [CodeQL #16]', ()
     }
   })
 
-  it('log line receives the sanitised values: CR/LF flattened to spaces, nothing else altered', async () => {
+  it('log line receives the sanitised values: CR/LF removed, nothing else altered', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       armMismatch()
@@ -649,7 +649,7 @@ describe('POST /api/swap — R1 mismatch log line is CRLF-safe [CodeQL #16]', ()
       expect(r1).toBeDefined()
       const expectedGot = String(r1![1])
       expect(expectedGot).toBe(
-        `Expected: ${RECIPIENT}, Got: 0xAttAckEr000000000000000000000000DeAdBeEf  [R1] Recipient validated: 0xAttAckEr... (1inch)`,
+        `Expected: ${RECIPIENT}, Got: 0xAttAckEr000000000000000000000000DeAdBeEf[R1] Recipient validated: 0xAttAckEr... (1inch)`,
       )
       expect(expectedGot).not.toMatch(/[\r\n]/)
     } finally {
