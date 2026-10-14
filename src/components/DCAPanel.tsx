@@ -61,14 +61,13 @@ import type { PriceCheck } from '@/lib/chainlink'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
 import { checkRoute } from '@/lib/order-engine/check-route'
-import { checkOracleCoverage } from '@/lib/order-engine/check-oracle'
 // [FEAT-DCA-FLOOR-TIERS] Imported as its own module (like check-route above) so a suite can stub the
 // classification without restubbing the barrel. Replaces the 2026-09-09 hard block on a leg the
 // executor has no feed for: the pair is now classified and, below `onchain-feed`, confirmed.
 // [feat/dca-tier-server-side] The browser no longer classifies: it asks the server (pair-floor-info.ts).
 import type { DcaFloorTier } from '@/lib/order-engine'
 import DcaFloorConsentDialog from './dca/DcaFloorConsentDialog'
-import { affectedSymbols, fetchPairFloorInfo, type PairFloorInfo } from './dca/pair-floor-info'
+import { affectedSymbols, fetchPairFloorInfo, floorTierHint, type PairFloorInfo } from './dca/pair-floor-info'
 import DCADashboard from './dca/DCADashboard'
 import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { trackTrade } from '@/lib/analytics-tracker'
@@ -163,9 +162,12 @@ export function outputHasNoResolvableFeed(token: Token | null, chainId: number):
 //  DCA PANEL — Autonomous DCA via TeraSwapOrderExecutor v2
 // ══════════════════════════════════════════════════════════
 
-export default function DCAPanel() {
+export default function DCAPanel({ chainId: chainIdProp }: { chainId?: number } = {}) {
   const { address, isConnected } = useAccount()
-  const chainId = useChainId()
+  // [fix/dca-chain-switch / P2] page.tsx passes the SELECTOR chain (the one the tab gate and the
+  // TokenSelector catalog use); without a wallet wagmi reports its config default instead.
+  const wagmiChainId = useChainId()
+  const chainId = chainIdProp ?? wagmiChainId
   const {
     dcaOrders,
     activeOrders: _activeOrders,
@@ -283,6 +285,7 @@ export default function DCAPanel() {
           isSubmitting={isSubmitting}
           paused={frozen}
           onSubmit={createOrder}
+          chainId={chainId}
         />
       ) : (
         <DCADashboard
@@ -326,13 +329,16 @@ function CreateDCAForm({
   isSubmitting,
   paused,
   onSubmit,
+  chainId: chainIdProp,
 }: {
   isConnected: boolean
   isSubmitting: boolean
   paused: boolean
   onSubmit: (config: CreateOrderConfig) => Promise<void>
+  chainId?: number
 }) {
-  const chainId = useChainId()
+  const wagmiChainId = useChainId()
+  const chainId = chainIdProp ?? wagmiChainId
   // [CHORE-DCA-WETH-INPUT] DCA spends an ERC-20: default the INPUT to the chain's WETH
   // (never native ETH). See [CHORE-DCA-DEFAULT-BUY-USDC] below for why the OUTPUT no longer
   // defaults to native ETH (it used to be RESOLVED to this same wrapped native, below — the
@@ -491,25 +497,6 @@ function CreateDCAForm({
   } | null>(null)
   const consent = consentFor?.key === selectionKey ? consentFor : null
 
-  // [chore/oracle-less-advisory] Detect whether the BOUGHT token has an independent
-  // price oracle (Chainlink feed OR DefiLlama coverage) on the active chain. When it
-  // does NOT, we render a NEUTRAL, informational heads-up (never blocks submission).
-  // Debounced + seq-guarded like the routability check; fails OPEN so a transient
-  // probe outage never shows a false note.
-  const [oracleLess, setOracleLess] = useState(false)
-  const oracleCheckSeq = useRef(0)
-  useEffect(() => {
-    setOracleLess(false)
-    const seq = ++oracleCheckSeq.current
-    const addr = tokenOut?.address
-    if (!addr) return
-    const t = setTimeout(async () => {
-      const { hasOracle } = await checkOracleCoverage({ token: addr, chainId })
-      if (oracleCheckSeq.current === seq) setOracleLess(!hasOracle)
-    }, 400)
-    return () => clearTimeout(t)
-  }, [tokenOut, chainId])
-
   // ── [SPRINT-V3-P2 / ADR-013 §1] v3 signing derivation — fail-closed, inert while unconfigured ──
   // v3Enabled is ONLY true once a real per-chain OrderExecutorV3 address is configured
   // (getOrderExecutorV3). It is null on every chain today, so every hook below still runs (Rules
@@ -521,6 +508,7 @@ function CreateDCAForm({
   // Until it answers (`pairFloor` null) submit stays disabled; a failed ask is `unpriced` (fail closed).
   const [pairFloorFor, setPairFloorFor] = useState<{ key: string; info: PairFloorInfo } | null>(null)
   const pairFloor = pairFloorFor?.key === selectionKey ? pairFloorFor.info : null
+  const floorHint = floorTierHint(pairFloor)
   useEffect(() => {
     if (!v3Enabled || !tokenIn || !tokenOut) return
     const ctl = new AbortController()
@@ -1107,14 +1095,12 @@ function CreateDCAForm({
             Best price at each execution
           </span>
         </div>
-        {/* [chore/oracle-less-advisory] NEUTRAL, informational note (plain text +
-            bold only — deliberately NO warning colours/icons/callout) shown when
-            the bought token has no independent price oracle. Informational only —
-            it never disables submit. */}
-        {oracleLess && tokenOut && (
-          <p className="mt-2 text-[11px] leading-relaxed text-cream-50" data-testid="dca-oracle-note">
-            <span className="font-semibold text-cream">{tokenOut.symbol} has no price oracle</span>{' '}
-            — fills use the best available DEX route, so the execution price depends on on-chain liquidity.
+        {/* [fix/dca-chain-switch / P3] NEUTRAL, informational note driven by the server's floor tier
+            (the same answer the consent dialog reads) — it replaced a Chainlink-only "has no price
+            oracle" line that contradicted the offchain-price tier. Never disables submit. */}
+        {tokenOut && floorHint && (
+          <p className="mt-2 text-[11px] leading-relaxed text-cream-50" data-testid="dca-tier-hint" data-tier={pairFloor?.tier}>
+            {floorHint}
           </p>
         )}
       </div>

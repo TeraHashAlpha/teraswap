@@ -26,8 +26,18 @@ const useChainIdMock = vi.fn(() => 8453)
 const isDcaLiveMock = vi.fn<(chainId: number) => boolean>()
 const isLimitLiveMock = vi.fn<(chainId: number) => boolean>()
 
-vi.mock('wagmi', () => ({ useChainId: () => useChainIdMock() }))
-vi.mock('@/lib/dca-launch', () => ({ isDcaLive: (id: number) => isDcaLiveMock(id) }))
+const switchChainMock = vi.fn()
+// [fix/dca-chain-switch / P2] The page reads the SELECTOR chain (useQuoteChainId → useAccount); a
+// connected wallet reports the same chain wagmi's useChainId does.
+vi.mock('wagmi', () => ({
+  useChainId: () => useChainIdMock(),
+  useAccount: () => ({ isConnected: true, chain: { id: useChainIdMock() } }),
+  useSwitchChain: () => ({ switchChain: switchChainMock }),
+}))
+vi.mock('@/lib/dca-launch', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/dca-launch')>('@/lib/dca-launch')),
+  isDcaLive: (id: number) => isDcaLiveMock(id),
+}))
 // [SPRINT-P1B] Only the launch gate is needed from the order-engine barrel here.
 vi.mock('@/lib/order-engine', () => ({ isLimitLive: (id: number) => isLimitLiveMock(id) }))
 vi.mock('@/lib/sounds', () => ({ playTouchMP3: vi.fn() }))

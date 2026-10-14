@@ -206,31 +206,5 @@ describe('DCAPanel — creation guard (schedule cannot finish before expiry)', (
   })
 })
 
-describe('DCAPanel — oracle-less advisory note', () => {
-  it('renders the neutral note (naming the token) when the bought token has no oracle', async () => {
-    checkOracleMock.mockResolvedValue({ hasOracle: false })
-    renderWithProviders(<DCAPanel />) // default buy token = ETH; effect fires on mount (debounced)
-    const note = await screen.findByTestId('dca-oracle-note')
-    expect(note).toHaveTextContent(/has no price oracle/i)
-    expect(note).toHaveTextContent(/best available DEX route/i)
-  })
-
-  it('does NOT render the note when the token has an oracle, and NEVER disables submit', async () => {
-    checkOracleMock.mockResolvedValue({ hasOracle: true })
-    renderWithProviders(<DCAPanel />)
-    enterAmount('100')
-    // Give the debounced probe time to resolve, then confirm no note + submit enabled.
-    await waitFor(() => expect(checkOracleMock).toHaveBeenCalled())
-    expect(screen.queryByTestId('dca-oracle-note')).toBeNull()
-    expect(screen.getByRole('button', { name: /Start DCA/i })).not.toBeDisabled()
-  })
-
-  it('is informational only — the note does NOT block submission (createOrder still fires)', async () => {
-    checkOracleMock.mockResolvedValue({ hasOracle: false })
-    renderWithProviders(<DCAPanel />) // curated ETH pair → no routability pre-check
-    await screen.findByTestId('dca-oracle-note') // note is showing
-    enterAmount('100')
-    startDca()
-    await waitFor(() => expect(createOrderMock).toHaveBeenCalledTimes(1))
-  })
-})
+// [fix/dca-chain-switch / P3] The oracle-less advisory (Chainlink-only "has no price oracle") was replaced by
+// the tier-driven hint — covered per tier in DCAPanel.tier-hint.test.tsx.

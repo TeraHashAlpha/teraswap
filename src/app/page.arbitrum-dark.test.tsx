@@ -35,7 +35,14 @@ import type { ReactNode } from 'react'
 
 const useChainIdMock = vi.fn(() => 42161)
 
-vi.mock('wagmi', () => ({ useChainId: () => useChainIdMock() }))
+const switchChainMock = vi.fn()
+// [fix/dca-chain-switch / P2] The page reads the SELECTOR chain (useQuoteChainId → useAccount); a
+// connected wallet reports the same chain wagmi's useChainId does.
+vi.mock('wagmi', () => ({
+  useChainId: () => useChainIdMock(),
+  useAccount: () => ({ isConnected: true, chain: { id: useChainIdMock() } }),
+  useSwitchChain: () => ({ switchChain: switchChainMock }),
+}))
 vi.mock('@/lib/sounds', () => ({ playTouchMP3: vi.fn() }))
 // '@/lib/dca-launch', '@/lib/order-engine' (getOrderExecutorV3 / isLimitLive) and '@/lib/chains'
 // (isChainActive) are intentionally NOT mocked here — the real gates run against real env.

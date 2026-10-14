@@ -13,6 +13,7 @@ import { stubFloorEndpoint } from './dca/__tests__/stub-floor-endpoint'
 
 const useAccountMock = vi.fn()
 const useChainIdMock = vi.fn(() => 8453)
+const currentChain: () => number = useChainIdMock // alias: the mock is not a hook, the lint rule only sees the name
 const createOrderMock = vi.fn()
 
 vi.mock('wagmi', () => ({
@@ -133,7 +134,7 @@ describe('DCAPanel [fix/dca-chain-switch] — selections never outlive the chain
     ['panel keyed by chainId (page.tsx)', true],
   ])('8453→42161→8453: every address sent to /api/dca-floor-cap belongs to the current chain — %s', async (_n, keyed) => {
     const { calls } = stubFloorEndpoint()
-    const ui = () => <DCAPanel key={keyed ? useChainIdMock() : 'static'} />
+    const ui = () => <DCAPanel key={keyed ? currentChain() : 'static'} />
     const { rerender } = renderWithProviders(ui())
 
     // Base: pick the Base alt token.

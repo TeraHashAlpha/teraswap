@@ -1,22 +1,25 @@
 # Feedback — fix/dca-chain-switch
 
-Recon: `~/TeraSwap-Workspace/queue/site-claims-bugs-2026-10-12.md` (P1–P4). Read-only extras recorded in-session:
-`src/components/dca/pair-floor-info.ts` (goal text said `lib/order-engine/`; it lives under `components/dca/`).
+Recon: `~/TeraSwap-Workspace/queue/site-claims-bugs-2026-10-12.md` (P1–P4). Extra read-only context (recorded): `components/dca/pair-floor-info.ts`
+(goal said `lib/order-engine/`), a grep of `app/swap/page.tsx`. Auditor-note: DCA create path = `api/orders/route.ts` (new pre-signature guard).
 
-## Checklist
-- [x] C1 client: selections never outlive the chain (key={chainId} + in-panel reset) — evidence 1
-- [x] C2 server: refuse foreign addresses (create 400 / floor-cap onChain:false) — evidence 2
-- [ ] C3 P2 / P3 / P4 — evidence 3, 4, 5
-- [ ] Suite / lint / tsc / diff --stat / compare link — evidence 6
+- [x] C1 client · [x] C2 server · [x] C3 P2/P3/P4 · [x] verify + push
 
 ## Evidence
-1. Chain-switch: `DCAPanel.chain-switch.test.tsx` (5 tests). 8453→42161→8453, both in-place rerender and keyed; every
-   `/api/dca-floor-cap` request's tokenIn/tokenOut asserted ∈ `getChainTokenList(request.chainId)`; consent body has AERO, not ARB;
-   signed order addresses ∈ Base map. Verified red on the old DCAPanel.tsx (in-place case fails), green with the fix.
-   Design note: reset happens DURING render (setState-in-render), so no effect/fetch ever sees the stale pair; buy side → null per owner text.
-2. Server refusal (`lib/order-engine/token-on-chain.ts`; known-map → `eth_getCode` on the order's chain → 10-min cache per (chainId,address)):
-   - `api/orders/route.ts`, v3 DCA only, BEFORE signature recovery: `false` → 400 `{code:'token_not_on_chain', leg, reason}`; `null` (RPC failed / unsupported chain) → 503 `token_check_unavailable` (fail closed, not cached).
-   - `api/dca-floor-cap`: foreign leg → 200, `tier:'unpriced'`, `legs.<x>.onChain:false` + `reason`, classifier not called; every pair answer now carries `legs.<x>.onChain`.
-   - Tests: `orders-token-on-chain.test.ts` (8; ARB addr + chainId 8453 → 400 with `mockRecover`/`mockInsert`/`mockRpc` NOT called; Arb WETH as tokenIn; cache + TTL; long-tail with code → 201; valid Base no-feed token → 201 with 0 getCode; getCode down → 503; native-sentinel rules unchanged), `token-on-chain.test.ts` (6), `dca-floor-cap/route.test.ts` (+3).
-   - Existing fixtures use codeless fake hex tokens: orders-floor-consent/p1b/v3 + dca-floor-cap route tests now stub the presence check (comment in each file).
-   - Concern: the guard runs pre-signature, so an unauthenticated caller can cause one cached `getCode` per unknown address (rate-limited; known-map tokens cost 0). Limit/TP/SL create is NOT covered (out of scope).
+1. **Chain switch** — `DCAPanel.chain-switch.test.tsx` (5): 8453→42161→8453, in-place rerender and keyed; every `/api/dca-floor-cap` request's addresses ∈ `getChainTokenList(request.chainId)`;
+   post-switch Base requests use Base WETH; consent body has AERO not ARB; signed order ∈ Base map. Red on old DCAPanel.tsx. Reset runs DURING render (no stale fetch).
+2. **Server refusal** — `token-on-chain.ts` (known-map → `eth_getCode` on order chain → 10-min cache per chain+addr; RPC failure = null, uncached).
+   Create (v3 DCA, before signature recovery): `false` → 400 `token_not_on_chain{leg,reason}`; `null` → 503 `token_check_unavailable`. Floor-cap: 200, `unpriced`, `legs.<x>.onChain:false`+`reason`, classifier not called.
+   Tests: `orders-token-on-chain.test.ts` (8: ARB addr@8453 → 400 with recover/insert/rpc mocks NOT called; Arb WETH tokenIn; cache+TTL; code→201; Base no-feed→201, 0 getCode; getCode down→503; native rules unchanged), `token-on-chain.test.ts` (6), floor-cap route (+3).
+3. **P2** before: gate = wagmi `useChainId()` (mainnet when no wallet) → Base-selected visitor saw "Soon" (new test red 4/5 on old page.tsx). After: `useQuoteChainId()`, panel gets `chainId` prop; Base/no wallet → live;
+   Ethereum + flag on → tab selectable, "DCA runs on Base and Arbitrum One" + Switch buttons (wagmi if connected, selector store if not); flag off / Arbitrum-dark → unchanged disabled "Soon". Static "Coming to L2 soon" removed. `page.selector-chain.test.tsx` (5).
+4. **P3 matrix** (`DCAPanel.tier-hint.test.tsx`, oracle probe stubbed "no oracle" throughout): onchain-feed → none · offchain-price → "Protected by executor price checks (no Chainlink feed registered yet)" · unpriced → "No market price source right now — buys capped at $250 and flagged" (cap = min(server, ceiling)). Dialog copy untouched.
+5. **P4** DCA fills (`dca_total>1`) show "⛽ gas paid by executor" (row + aggregate), no ETH figure; non-DCA keeps its figure. 2 tests in `ExecutionTimeline.test.tsx`.
+6. **Verify** — tsc clean · suite 4451/4451 (299 files) vs origin/main 4418/4418 (294) · eslint 93 warnings/0 errors vs main 94/0 (delta −1) · 409 ack rule, persistence, keeper, quorum constants untouched.
+   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/dca-chain-switch
+
+## Concerns / edge cases
+- `app/swap/page.tsx` has the same wagmi-chain gate + static "Coming to L2" copy (not in scope, untouched) — follow-up if that route is live.
+- Pre-signature guard lets an unauthenticated caller cause one cached `getCode` per unknown address (rate-limited; known-map tokens cost 0). Limit/TP/SL create is not covered.
+- Fixtures with codeless fake hex tokens (orders-floor-consent/p1b/v3, dca-floor-cap route) now stub the presence check; old "oracle-less advisory" tests in routability were retired (replaced by tier-hint).
+- `ComingSoonPanel` moved out of page.tsx; Limit/SL·TP tabs still disabled "Soon" (their copy no longer says "L2 soon").
