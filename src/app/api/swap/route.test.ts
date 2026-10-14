@@ -603,3 +603,57 @@ describe('POST /api/swap — fail-closed trade value [CHORE-ORACLE-VALUE-FAILCLO
     expect(mockComputeTokenAmountUsd).toHaveBeenCalledWith(WETH, VALID_BASE.amount, 8453)
   })
 })
+
+// ─────────────────────────────────────────────────────────
+// [fix/codeql-auth-swap, CodeQL #16] R1 mismatch log line is CRLF-safe
+// ─────────────────────────────────────────────────────────
+
+describe('POST /api/swap — R1 mismatch log line is CRLF-safe [CodeQL #16]', () => {
+  const RECIPIENT = '0x1111111111111111111111111111111111111111'
+  // What a hostile upstream could surface as the calldata recipient: an
+  // address followed by a CRLF and a forged "validated" log entry.
+  const FORGED_EXTRACTED =
+    '0xAttAckEr000000000000000000000000DeAdBeEf\r\n[R1] Recipient validated: 0xAttAckEr... (1inch)'
+
+  function armMismatch(): void {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockValidateCallDataRecipient.mockReturnValueOnce({
+      valid: false,
+      extracted: FORGED_EXTRACTED,
+      implicitRecipient: false,
+      reason: 'Recipient mismatch',
+    })
+  }
+
+  it('guard unchanged: still 400 with the same error, validator still receives the RAW expected recipient', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      armMismatch()
+      const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, recipient: RECIPIENT }))
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toContain('recipient does not match')
+      expect(mockValidateCallDataRecipient).toHaveBeenCalledTimes(1)
+      expect(mockValidateCallDataRecipient.mock.calls[0][1]).toBe(RECIPIENT)
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+
+  it('log line receives the sanitised values: CR/LF flattened to spaces, nothing else altered', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      armMismatch()
+      await POST(makeRequest({ source: '1inch', ...VALID_BASE, recipient: RECIPIENT }))
+      const r1 = errSpy.mock.calls.find((args) => String(args[0]).startsWith('[R1] BLOCKED'))
+      expect(r1).toBeDefined()
+      const expectedGot = String(r1![1])
+      expect(expectedGot).toBe(
+        `Expected: ${RECIPIENT}, Got: 0xAttAckEr000000000000000000000000DeAdBeEf  [R1] Recipient validated: 0xAttAckEr... (1inch)`,
+      )
+      expect(expectedGot).not.toMatch(/[\r\n]/)
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+})

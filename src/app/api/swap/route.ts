@@ -13,6 +13,7 @@ import { isSequencerUp, SequencerDownError } from '@/lib/chains/sequencer-check'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { sanitizeUpstreamError } from '@/lib/sanitize-error'
 import { trustedClientIp } from '@/lib/trusted-ip'
+import { forLog } from '@/lib/log-sanitize'
 
 // [SPRINT-9J J2] Give the function enough headroom that a slow swap-build never
 // hits the platform's default ceiling (which serves an HTML 504 the route never
@@ -239,7 +240,7 @@ export async function POST(req: NextRequest) {
         if (!recipientCheck.valid) {
           console.error(
             `[R1] BLOCKED: Recipient mismatch in ${source} calldata.`,
-            `Expected: ${expectedRecipient}, Got: ${recipientCheck.extracted}`,
+            `Expected: ${forLog(expectedRecipient)}, Got: ${forLog(recipientCheck.extracted)}`,
             `Reason: ${recipientCheck.reason}`,
           )
           return NextResponse.json(
