@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.7",
-    "@playwright/test": "1.63.0",
+    "@playwright/test": "1.64.0",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.3",
@@ -70,7 +70,7 @@
     "cuer": "0.0.3",
     "esbuild": "0.28.2",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.8",
+    "eslint-config-next": "16.4.0",
     "jsdom": "29.1.1",
     "postcss": "8.5.29",
     "tailwindcss": "3.4.19",
