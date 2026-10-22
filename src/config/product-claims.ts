@@ -12,11 +12,27 @@
  *       a file scan or filename blocklist would be one more hand-maintained fact)
  *   (b) chains that execute swaps = the chain registry
  *   (c) order-type availability = each type's launch flag (strict `'true'`)
+ *   (d) Chainlink feed count per chain = listConfiguredFeedTokens() (direct + composed)
+ *   (e) verification checks / thresholds = the constants that define them
  */
 
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
-import { DISABLED_SOURCES } from '@/lib/constants'
+import {
+  AGGREGATOR_META,
+  CHAINLINK_MAX_STALENESS_SEC,
+  DEPEG_DIVERGENCE_BLOCK,
+  DEPEG_DIVERGENCE_WARN,
+  DISABLED_SOURCES,
+  PERMIT2_MAX_DEADLINE_SEC,
+  PERMIT2_MAX_EXPIRATION_SEC,
+  PRICE_DEVIATION_BLOCK,
+  PRICE_DEVIATION_WARN,
+  UNVERIFIED_SWAP_BLOCK_USD,
+  UNVERIFIED_SWAP_WARN_USD,
+  type AggregatorName,
+} from '@/lib/constants'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
+import { listConfiguredFeedTokens } from '@/lib/chains/chainlink-feeds'
 
 const SMALL_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
@@ -55,6 +71,26 @@ const QUOTING_ADAPTERS = ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name
 
 export const INTEGRATED_DEX_SOURCE_COUNT = QUOTING_ADAPTERS.length
 export const INTEGRATED_DEX_SOURCE_NAMES: readonly string[] = QUOTING_ADAPTERS.map((a) => a.name)
+
+/**
+ * (a) per chain. The adapter registry exposes NO chain-support field today (an entry is
+ * `{ name, fetchQuote, fetchSwapData }` — pinned by a test that fails the day that changes), so
+ * every chain gets the global list. The parameter is accepted now so call sites are already
+ * chain-shaped and the filter lands in one place once the registry can answer it.
+ */
+export function integratedSourcesFor(_chainId: number): readonly string[] {
+  return INTEGRATED_DEX_SOURCE_NAMES
+}
+
+/**
+ * Display labels (AGGREGATOR_META.label) for the same list — what a visitor reads, as opposed to
+ * the registry ids ("cowswap", "uniswapv3") that INTEGRATED_DEX_SOURCE_NAMES carries.
+ */
+export const INTEGRATED_DEX_SOURCE_LABELS: readonly string[] = [
+  ...new Set(
+    INTEGRATED_DEX_SOURCE_NAMES.map((name) => AGGREGATOR_META[name as AggregatorName]?.label ?? name),
+  ),
+]
 
 /** Claim string the registry proves: these adapters are integrated. */
 export const INTEGRATED_DEX_SOURCES_CLAIM = `${INTEGRATED_DEX_SOURCE_COUNT} integrated DEX sources`
@@ -103,3 +139,87 @@ export function isOrderTypeLive(type: OrderTypeId): boolean {
 export function orderTypeStatusLabel(type: OrderTypeId): 'Live' | 'Coming Soon' {
   return isOrderTypeLive(type) ? 'Live' : 'Coming Soon'
 }
+
+// ── (d) Chainlink feed count per chain ───────────────────────────────────────
+
+/** Fraction → display percent: 0.02 → "2%", 0.015 → "1.5%". */
+export function formatPercent(fraction: number): string {
+  return `${Number((fraction * 100).toFixed(2))}%`
+}
+
+export function chainNameFor(chainId: number): string {
+  return CHAIN_CONFIGS[chainId]?.name ?? `chain ${chainId}`
+}
+
+let feedCountByChain: Map<number, number> | null = null
+
+/**
+ * Tokens with a configured Chainlink price source on `chainId`, direct + composed (+ preferred
+ * direct, de-duplicated by token) — straight from the feed registries via
+ * listConfiguredFeedTokens(). Not a typed number.
+ */
+export function chainlinkFeedCountFor(chainId: number): number {
+  if (!feedCountByChain) {
+    feedCountByChain = new Map()
+    for (const { chainId: id } of listConfiguredFeedTokens()) {
+      feedCountByChain.set(id, (feedCountByChain.get(id) ?? 0) + 1)
+    }
+  }
+  return feedCountByChain.get(chainId) ?? 0
+}
+
+// ── (e) Verification stages / checks ─────────────────────────────────────────
+
+export const VERIFICATION_STAGES = ['pre-trade', 'post-execution'] as const
+export type VerificationStage = (typeof VERIFICATION_STAGES)[number]
+
+export interface VerificationCheck {
+  id: string
+  stage: VerificationStage
+  label: string
+  /** File that DECLARES the constant behind the check (enforcement sites are not claimed here). */
+  provedBy: string
+}
+
+/**
+ * Post-execution shortfall tolerance. post-execution-validator.ts declares it as the module-private
+ * `const WARNING_THRESHOLD = 0.02` in a server-only module (it imports kv + viem clients), so it
+ * can be neither imported into a client bundle nor re-exported without editing that file. This is
+ * the one slot that is typed here; product-claims.test.ts reads the validator source and fails
+ * the day the two differ.
+ */
+export const POST_EXECUTION_SHORTFALL_WARN = 0.02
+
+/**
+ * The checks the in-repo constants prove. Each is a declared threshold, so the list and its
+ * count cannot outgrow what the code defines; a check with no `provedBy` does not belong here.
+ */
+export const VERIFICATION_CHECKS: readonly VerificationCheck[] = [
+  { id: 'chainlink-deviation', stage: 'pre-trade', label: 'Chainlink price deviation (warn / block)', provedBy: 'src/lib/constants.ts' },
+  { id: 'chainlink-staleness', stage: 'pre-trade', label: 'Chainlink feed staleness limit', provedBy: 'src/lib/constants.ts' },
+  { id: 'lst-depeg', stage: 'pre-trade', label: 'Liquid-staking depeg divergence (warn / block)', provedBy: 'src/lib/constants.ts' },
+  { id: 'unverified-swap-gate', stage: 'pre-trade', label: 'Size gate on swaps without an independent price', provedBy: 'src/lib/constants.ts' },
+  { id: 'permit2-caps', stage: 'pre-trade', label: 'Permit2 signature deadline and allowance expiry caps', provedBy: 'src/lib/constants.ts' },
+  { id: 'post-execution-shortfall', stage: 'post-execution', label: 'Post-execution output vs expected', provedBy: 'src/lib/post-execution-validator.ts' },
+]
+
+export const VERIFICATION_STAGE_COUNT = VERIFICATION_STAGES.length
+export const VERIFICATION_CHECK_COUNT = VERIFICATION_CHECKS.length
+export const VERIFICATION_SUMMARY = `${VERIFICATION_STAGE_COUNT} stages · ${VERIFICATION_CHECK_COUNT} checks`
+
+// ── (e) Threshold copy slots ─────────────────────────────────────────────────
+
+export const PRICE_DEVIATION_WARN_PCT = formatPercent(PRICE_DEVIATION_WARN)
+export const PRICE_DEVIATION_BLOCK_PCT = formatPercent(PRICE_DEVIATION_BLOCK)
+export const DEPEG_DIVERGENCE_WARN_PCT = formatPercent(DEPEG_DIVERGENCE_WARN)
+export const DEPEG_DIVERGENCE_BLOCK_PCT = formatPercent(DEPEG_DIVERGENCE_BLOCK)
+export const POST_EXECUTION_SHORTFALL_WARN_PCT = formatPercent(POST_EXECUTION_SHORTFALL_WARN)
+export const CHAINLINK_MAX_STALENESS_MIN = CHAINLINK_MAX_STALENESS_SEC / 60
+export const UNVERIFIED_SWAP_WARN_USD_LABEL = `$${UNVERIFIED_SWAP_WARN_USD.toLocaleString('en-US')}`
+export const UNVERIFIED_SWAP_BLOCK_USD_LABEL = `$${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString('en-US')}`
+export const PERMIT2_MAX_DEADLINE_MIN = PERMIT2_MAX_DEADLINE_SEC / 60
+export const PERMIT2_MAX_EXPIRATION_HOURS = PERMIT2_MAX_EXPIRATION_SEC / 3600
+
+/** "Prices older than 60 min are rejected" — a limit, not a polling cadence. */
+export const CHAINLINK_STALENESS_CLAIM =
+  `Prices older than ${CHAINLINK_MAX_STALENESS_MIN} min are rejected (feeds with a published heartbeat use a per-feed limit).`

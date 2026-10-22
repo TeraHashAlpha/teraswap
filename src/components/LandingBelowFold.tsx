@@ -14,13 +14,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
 import {
+  CHAINLINK_STALENESS_CLAIM,
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
+  INTEGRATED_DEX_SOURCE_LABELS,
   INTEGRATED_DEX_SOURCE_NAMES,
+  POST_EXECUTION_SHORTFALL_WARN_PCT,
+  PRICE_DEVIATION_BLOCK_PCT,
+  PRICE_DEVIATION_WARN_PCT,
   SWAP_CHAIN_LIST_LABEL,
+  VERIFICATION_CHECK_COUNT,
+  chainNameFor,
+  chainlinkFeedCountFor,
+  formatChainList,
   isOrderTypeLive,
   type OrderTypeId,
 } from '@/config/product-claims'
+import { useQuoteChainId } from '@/hooks/useChainId'
 
 // ── Shared constants (mirrored from LandingPage.tsx) ──────
 
@@ -153,16 +163,20 @@ function AnimatedCounter({
   value,
   suffix = '',
   duration = 1500,
+  immediate = false,
 }: {
   value: number
   suffix?: string
   duration?: number
+  /** Render the final value on mount (SSR-safe) instead of counting up from 0. */
+  immediate?: boolean
 }) {
-  const [count, setCount] = useState(0)
+  const [count, setCount] = useState(immediate ? value : 0)
   const ref = useRef(null)
   const inView = useInView(ref, { once: true })
 
   useEffect(() => {
+    if (immediate) return
     if (!inView) return
     const start = Date.now()
     const tick = () => {
@@ -173,7 +187,7 @@ function AnimatedCounter({
       if (progress < 1) requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  }, [inView, value, duration])
+  }, [inView, value, duration, immediate])
 
   return <span ref={ref}>{count}{suffix}</span>
 }
@@ -424,7 +438,7 @@ function DifferentiationSection() {
       num: '02',
       icon: <DiffOracleShieldIcon />,
       title: 'Oracle-Verified Execution',
-      desc: 'Every quote is checked against Chainlink price feeds before execution. Deviations above 3% are blocked automatically — before your trade happens, not after.',
+      desc: `Every quote is checked against Chainlink price feeds before execution. Deviations above ${PRICE_DEVIATION_BLOCK_PCT} are blocked automatically — before your trade happens, not after.`,
     },
     {
       num: '03',
@@ -495,9 +509,12 @@ function DifferentiationSection() {
 // ══════════════════════════════════════════════════════════
 
 function SecuritySection() {
+  const chainId = useQuoteChainId()
+  const chainName = chainNameFor(chainId)
+  const feedCount = chainlinkFeedCountFor(chainId)
   const stats: { value: number; suffix: string; label: string; prefix?: string; isText?: boolean; textValue?: string }[] = [
-    { value: 7, suffix: '', label: 'Independent validation layers' },
-    { value: 29, suffix: '', label: 'Chainlink oracle price feeds' },
+    { value: VERIFICATION_CHECK_COUNT, suffix: '', label: 'Independent verification checks' },
+    { value: feedCount, suffix: '', label: `Chainlink token price feeds on ${chainName}` },
     { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓ Verified' },
   ]
 
@@ -592,7 +609,7 @@ function SecuritySection() {
             <div>
               <div className="mb-0.5 text-[14px] font-semibold text-cream">Chainlink Oracle Check</div>
               <p className="text-[13px] leading-relaxed text-cream-75">
-                29 token price feeds — warns at 2%+ deviation, blocks at 3%. Staleness check every hour.
+                {feedCount} token price feeds on {chainName} — warns at {PRICE_DEVIATION_WARN_PCT}+ deviation, blocks at {PRICE_DEVIATION_BLOCK_PCT}. {CHAINLINK_STALENESS_CLAIM}
               </p>
             </div>
           </li>
@@ -606,7 +623,7 @@ function SecuritySection() {
             <div>
               <div className="mb-0.5 text-[14px] font-semibold text-cream">Post-Execution Validation</div>
               <p className="text-[13px] leading-relaxed text-cream-75">
-                Transfer event logs verify actual output vs expected. Shortfall above 2% triggers a P0 alert and the source is auto-disabled.
+                Transfer event logs verify actual output vs expected. Shortfall above {POST_EXECUTION_SHORTFALL_WARN_PCT} triggers a P0 alert and the source is auto-disabled.
               </p>
             </div>
           </li>
@@ -625,7 +642,7 @@ function SecuritySection() {
             >
               <div className="mb-1 font-mono text-3xl font-bold text-cream">
                 {stat.isText ? stat.textValue : (
-                  <>{stat.prefix}<AnimatedCounter value={stat.value} suffix={stat.suffix} /></>
+                  <>{stat.prefix}<AnimatedCounter value={stat.value} suffix={stat.suffix} immediate /></>
                 )}
               </div>
               <div className="text-xs font-medium text-cream-75">{stat.label}</div>
@@ -799,7 +816,7 @@ const FEATURES: {
 }[] = [
   {
     title: `${INTEGRATED_DEX_SOURCE_COUNT} Liquidity Sources`,
-    desc: `Simultaneous queries across aggregator APIs and direct DEX protocols — 1inch, 0x, Velora, KyberSwap, CoW Protocol, OpenOcean, Uniswap V3, SushiSwap, Balancer V2, and Curve Finance.`,
+    desc: `Simultaneous queries across aggregator APIs and direct DEX protocols — ${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}.`,
     icon: <FeatNetworkIcon />,
   },
   {

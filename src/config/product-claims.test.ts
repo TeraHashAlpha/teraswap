@@ -4,9 +4,19 @@
  * DISABLED_SOURCES entries present in the registry — this file does
  * not hard-code it.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
-import { DISABLED_SOURCES } from '@/lib/constants'
+import {
+  AGGREGATOR_META,
+  CHAINLINK_MAX_STALENESS_SEC,
+  PRICE_DEVIATION_BLOCK,
+  PRICE_DEVIATION_WARN,
+  DISABLED_SOURCES,
+  type AggregatorName,
+} from '@/lib/constants'
+import { listConfiguredFeedTokens } from '@/lib/chains/chainlink-feeds'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
@@ -22,6 +32,21 @@ import {
   spellCount,
   capitalizeWord,
   formatChainList,
+  integratedSourcesFor,
+  INTEGRATED_DEX_SOURCE_LABELS,
+  chainlinkFeedCountFor,
+  chainNameFor,
+  formatPercent,
+  VERIFICATION_STAGES,
+  VERIFICATION_CHECKS,
+  VERIFICATION_STAGE_COUNT,
+  VERIFICATION_CHECK_COUNT,
+  VERIFICATION_SUMMARY,
+  POST_EXECUTION_SHORTFALL_WARN,
+  PRICE_DEVIATION_WARN_PCT,
+  PRICE_DEVIATION_BLOCK_PCT,
+  CHAINLINK_MAX_STALENESS_MIN,
+  CHAINLINK_STALENESS_CLAIM,
 } from './product-claims'
 
 const ORIG_DCA = process.env.NEXT_PUBLIC_DCA_ENABLED
@@ -187,5 +212,91 @@ describe('product-claims — helpers', () => {
     expect(formatChainList(['Ethereum', 'Base', 'Arbitrum One'])).toBe(
       'Ethereum, Base, and Arbitrum One',
     )
+  })
+})
+
+describe('product-claims — C1 integratedSourcesFor(chainId)', () => {
+  it('is the registry minus DISABLED_SOURCES on every swap chain', () => {
+    for (const id of getSupportedChainIds()) {
+      expect([...integratedSourcesFor(id)]).toEqual(
+        ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name]).map((a) => a.name),
+      )
+    }
+  })
+
+  it('stays global ONLY while the registry exposes no chain-support field (fails the day it does)', () => {
+    for (const adapter of ADAPTER_REGISTRY) {
+      expect(Object.keys(adapter).sort()).toEqual(['fetchQuote', 'fetchSwapData', 'name'])
+    }
+  })
+
+  it('labels come from AGGREGATOR_META and never name a disabled source', () => {
+    const expected = new Set(
+      INTEGRATED_DEX_SOURCE_NAMES.map((n) => AGGREGATOR_META[n as AggregatorName].label),
+    )
+    expect(new Set(INTEGRATED_DEX_SOURCE_LABELS)).toEqual(expected)
+    for (const name of Object.keys(DISABLED_SOURCES)) {
+      expect(INTEGRATED_DEX_SOURCE_LABELS).not.toContain(AGGREGATOR_META[name as AggregatorName]?.label)
+    }
+  })
+})
+
+describe('product-claims — C2 verification stages / checks', () => {
+  it('has the two stages and a summary built from the same lists', () => {
+    expect([...VERIFICATION_STAGES]).toEqual(['pre-trade', 'post-execution'])
+    expect(VERIFICATION_STAGE_COUNT).toBe(VERIFICATION_STAGES.length)
+    expect(VERIFICATION_CHECK_COUNT).toBe(VERIFICATION_CHECKS.length)
+    expect(VERIFICATION_SUMMARY).toBe(`${VERIFICATION_STAGES.length} stages · ${VERIFICATION_CHECKS.length} checks`)
+  })
+
+  it('every check sits in a declared stage and names an existing file as its proof', () => {
+    for (const check of VERIFICATION_CHECKS) {
+      expect(VERIFICATION_STAGES).toContain(check.stage)
+      expect(() => readFileSync(join(process.cwd(), check.provedBy), 'utf8')).not.toThrow()
+    }
+    expect(new Set(VERIFICATION_CHECKS.map((c) => c.id)).size).toBe(VERIFICATION_CHECKS.length)
+    expect(VERIFICATION_STAGES.every((st) => VERIFICATION_CHECKS.some((c) => c.stage === st))).toBe(true)
+  })
+})
+
+describe('product-claims — C3 chainlinkFeedCountFor(chainId)', () => {
+  it('equals the number of configured tokens the feed registry lists for that chain', () => {
+    for (const id of getSupportedChainIds()) {
+      expect(chainlinkFeedCountFor(id)).toBe(listConfiguredFeedTokens().filter((t) => t.chainId === id).length)
+    }
+  })
+
+  it('is chain-specific (no single global figure) and 0 for a chain with no feeds', () => {
+    const counts = getSupportedChainIds().map(chainlinkFeedCountFor)
+    expect(new Set(counts).size).toBeGreaterThan(1)
+    expect(chainlinkFeedCountFor(999_999)).toBe(0)
+    expect(chainNameFor(1)).toBe(CHAIN_CONFIGS[1].name)
+  })
+})
+
+describe('product-claims — C4 thresholds interpolate the constants', () => {
+  it('formats the deviation band from PRICE_DEVIATION_WARN / BLOCK', () => {
+    expect(PRICE_DEVIATION_WARN_PCT).toBe(`${PRICE_DEVIATION_WARN * 100}%`)
+    expect(PRICE_DEVIATION_BLOCK_PCT).toBe(formatPercent(PRICE_DEVIATION_BLOCK))
+    expect(formatPercent(0.015)).toBe('1.5%')
+  })
+
+  it('states staleness as a rejection limit in minutes, not a polling cadence', () => {
+    expect(CHAINLINK_MAX_STALENESS_MIN).toBe(CHAINLINK_MAX_STALENESS_SEC / 60)
+    expect(CHAINLINK_STALENESS_CLAIM).toContain(`older than ${CHAINLINK_MAX_STALENESS_SEC / 60} min are rejected`)
+    expect(CHAINLINK_STALENESS_CLAIM).not.toMatch(/every hour/i)
+  })
+
+  it('POST_EXECUTION_SHORTFALL_WARN equals the validator source constant (drift guard)', () => {
+    const src = readFileSync(join(process.cwd(), 'src/lib/post-execution-validator.ts'), 'utf8')
+    const m = src.match(/^const WARNING_THRESHOLD = ([0-9.]+)/m)
+    expect(m).not.toBeNull()
+    expect(Number(m![1])).toBe(POST_EXECUTION_SHORTFALL_WARN)
+  })
+
+  it('"auto-disabled + P0" is backed by the validator critical path', () => {
+    const src = readFileSync(join(process.cwd(), 'src/lib/post-execution-validator.ts'), 'utf8')
+    expect(src).toMatch(/await forceDisable\(source/)
+    expect(src).toMatch(/Emit P0 alert/)
   })
 })

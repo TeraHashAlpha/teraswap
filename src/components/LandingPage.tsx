@@ -23,6 +23,9 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
   SWAP_CHAIN_LIST_LABEL,
+  VERIFICATION_SUMMARY,
+  chainNameFor,
+  chainlinkFeedCountFor,
 } from '@/config/product-claims'
 import { useQuote } from '@/hooks/useQuote'
 import { useQuoteChainId } from '@/hooks/useChainId'
@@ -312,15 +315,14 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
 // ══════════════════════════════════════════════════════════
 
 function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
-  // Three anchor numbers pulled above the H1 (Stat-Led DNA).
-  // Values per docs/Prompts/SPRINT-27B.md → Prompt 69.
-  // NOTE: "2 verification layers" departs from the SecuritySection stats
-  // bar ("7 Independent validation layers"). Prompts 69 and 71 are both
-  // explicit; an Architect-side reconciliation is queued.
-  const ANCHOR_STATS: { v: number; label: string }[] = [
+  // Three anchor numbers pulled above the H1 (Stat-Led DNA). Every figure is a slot of
+  // product-claims.ts — the verification line reads the same VERIFICATION_CHECKS list as the
+  // Security section's stats bar, and the feed count is the active chain's own registry.
+  const chainId = useQuoteChainId()
+  const ANCHOR_STATS: { v?: number; text?: string; label: string }[] = [
     { v: INTEGRATED_DEX_SOURCE_COUNT, label: 'LIQUIDITY SOURCES' },
-    { v: 2,  label: 'VERIFICATION LAYERS' },
-    { v: 29, label: 'CHAINLINK ORACLES' },
+    { text: VERIFICATION_SUMMARY, label: 'VERIFICATION' },
+    { v: chainlinkFeedCountFor(chainId), label: `CHAINLINK ORACLES · ${chainNameFor(chainId)}` },
   ]
 
   return (
@@ -341,7 +343,11 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
                   className="font-display text-[40px] sm:text-[52px] md:text-[60px] font-bold leading-none text-cream"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
-                  <AnimatedCounter value={s.v} immediate />
+                  {s.text !== undefined ? (
+                    <span className="text-[20px] sm:text-[24px] md:text-[28px]">{s.text}</span>
+                  ) : (
+                    <AnimatedCounter value={s.v ?? 0} immediate />
+                  )}
                 </dd>
                 <dt className="mt-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
                   {s.label}

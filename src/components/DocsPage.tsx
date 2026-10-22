@@ -7,9 +7,15 @@ import { SUPPORT_EMAIL } from '@/lib/constants'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCES_CLAIM,
+  CHAINLINK_STALENESS_CLAIM,
+  PRICE_DEVIATION_BLOCK_PCT,
+  PRICE_DEVIATION_WARN_PCT,
   SWAP_CHAIN_LIST_LABEL,
+  chainNameFor,
+  chainlinkFeedCountFor,
   isOrderTypeLive,
 } from '@/config/product-claims'
+import { useQuoteChainId } from '@/hooks/useChainId'
 
 // ── Animation helpers ─────────────────────────────────────
 
@@ -170,6 +176,9 @@ function SourceCard({ name, type, desc }: { name: string; type: string; desc: st
 
 export default function DocsPage() {
   const [activeSection, setActiveSection] = useState('overview')
+  const chainId = useQuoteChainId()
+  const chainName = chainNameFor(chainId)
+  const feedCount = chainlinkFeedCountFor(chainId)
 
   // Track scroll position to highlight active sidebar item
   useEffect(() => {
@@ -354,7 +363,7 @@ export default function DocsPage() {
               { num: '02', title: 'Gas-Aware Ranking', desc: 'Quotes ranked by net output considering estimated gas costs in USD. When outputs are close, cheaper gas wins the tiebreak. CoW Protocol (gasless for users) naturally benefits.' },
               { num: '03', title: 'Statistical Outlier Detection', desc: 'True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above 3× median is rejected.' },
               { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: 'Automatically tests all 4 fee tiers (0.01%, 0.05%, 0.3%, 1%) and selects the pool with best output. Results are cached for faster subsequent quotes.' },
-              { num: '05', title: 'Oracle Validation', desc: 'Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above 2% trigger a warning; above 3% the swap is blocked. A second server-side check via DefiLlama blocks swaps >8% below fair market value.' },
+              { num: '05', title: 'Oracle Validation', desc: `Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above ${PRICE_DEVIATION_WARN_PCT} trigger a warning; above ${PRICE_DEVIATION_BLOCK_PCT} the swap is blocked. A second server-side check via DefiLlama blocks swaps >8% below fair market value.` },
               { num: '06', title: 'Cross-Quote Consensus', desc: 'The winning quote is compared against the median of all responding sources. If it deviates >5% from consensus, a warning is raised. Quotes >3× above median are automatically removed as outliers.' },
               { num: '07', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 15%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.' },
               { num: '08', title: 'Chain-Aware EIP-712', desc: 'EIP-712 signing binds to the wallet\'s current chainId dynamically. This is what lets the order engine operate per-chain today — a separate OrderExecutor is deployed on both Ethereum Mainnet and Base — rather than being mainnet-only.' },
@@ -386,7 +395,7 @@ export default function DocsPage() {
             variants={stagger} className="grid gap-4 sm:grid-cols-2"
           >
             {[
-              { title: 'Chainlink Oracle Validation', desc: 'Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The mainnet registry covers roughly 30 token feeds, with automatic deviation detection: warns at 2%, hard-blocks at 3%.', badge: 'Oracle' },
+              { title: 'Chainlink Oracle Validation', desc: `Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The ${chainName} registry covers ${feedCount} token feeds, with automatic deviation detection: warns at ${PRICE_DEVIATION_WARN_PCT}, hard-blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`, badge: 'Oracle' },
               { title: 'DefiLlama Server-Side Check', desc: 'A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >8% below fair market value. If this secondary oracle is unreachable, swaps estimated above $10,000 are blocked while small swaps fail open.', badge: 'Oracle' },
               { title: 'Cross-Quote Consensus', desc: 'The winning quote is validated against the median of all aggregator responses. Deviations >5% are flagged; quotes >3× above median are removed automatically.', badge: 'Safety' },
               { title: 'Privacy Proxy', desc: 'All blockchain reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external RPC providers or DEX APIs.', badge: 'Privacy' },
@@ -904,7 +913,7 @@ export default function DocsPage() {
               { phase: 'Phase 1', status: 'Live', color: '#4ADE80', items: [
                 `Instant swaps on ${SWAP_CHAIN_LIST_LABEL}`,
                 `Meta-aggregator with ${INTEGRATED_DEX_SOURCES_CLAIM}`,
-                'Chainlink oracle price validation (2% warn / 3% block)',
+                `Chainlink oracle price validation (${PRICE_DEVIATION_WARN_PCT} warn / ${PRICE_DEVIATION_BLOCK_PCT} block)`,
                 'DefiLlama server-side oracle validation',
                 'Cross-quote median consensus validation',
                 'Privacy proxy (IP hidden from all external services)',
