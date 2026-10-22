@@ -13,7 +13,7 @@
 | `fmtUsd(v, {sign,compact})` | `1234.56`→`$1·234.56` · `0.004`→`<$0.01` · `-12.3`→`−$12.30` |
 | `fmtPct(v, dp=2, {sign})` | `0.1234`→`0.12%` · `0.3`→`0.3%` · `0.25`+sign→`+0.25%` |
 | `fmtGas(eth)` / `fmtGasCost` | `0.0000012`→`0.0000012` · `0.0031`→`0.0031` · `(0.0000081,0.03)`→`~0.0000081 ETH ($0.03)` |
-| `fmtAddress(a,{short})` | `0xd8da…96045`→`0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045` (checksum) · short→`0xd8dA…6045` · `undefined`→`—` |
+| `fmtAddress(a,{short})` | lowercase `0xd8da…a96045` (40 hex)→`0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045` (checksum) · short→`0xd8dA…6045` · `undefined`→`—` |
 | `fmtInt` / `fmtFixed(v,dp)` | `1234567`→`1·234·567` · `-12345`→`−12·345` · `(1234.5678,2)`→`1·234.57` |
 | `fmtDate` / `fmtRelTime` | `12 Oct 2026, 14:05` · `5 Jan 2026, 03:07` · `2m ago` `3h ago` `5d ago` |
 NaN/null/undefined/garbage → `—` everywhere. `formatDisplay`, `formatFeeUsd` marked `@deprecated`, not removed.
