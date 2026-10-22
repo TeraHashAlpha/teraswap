@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtToken, fmtUsd } from '@/lib/format'
 import { useState, useEffect, useCallback } from 'react'
 import { useAccount } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -81,12 +82,7 @@ function formatHumanAmount(rawVal: string, symbol: string): string {
       ? n
       : Number(formatUnits(BigInt(rawVal.split('.')[0]), decimals))
 
-    if (humanVal >= 1_000_000) return `${(humanVal / 1_000_000).toFixed(2)}M`
-    if (humanVal >= 1_000) return `${(humanVal / 1_000).toFixed(2)}K`
-    if (humanVal >= 1) return humanVal.toFixed(2)
-    if (humanVal >= 0.0001) return humanVal.toFixed(4)
-    if (humanVal > 0) return '<0.0001'
-    return '0'
+    return fmtToken(humanVal)
   } catch {
     return rawVal
   }
@@ -265,7 +261,7 @@ export default function WalletHistory() {
                       <span>via {sourceLabel(swap.source)}</span>
                     )}
                     {swap.amount_in_usd != null && (
-                      <span>≈ ${Number(swap.amount_in_usd).toFixed(2)}</span>
+                      <span>≈ {fmtUsd(Number(swap.amount_in_usd))}</span>
                     )}
                   </div>
                 </div>

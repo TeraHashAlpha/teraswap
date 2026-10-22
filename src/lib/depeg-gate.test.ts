@@ -21,7 +21,7 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
     expect(r.divergence).toBeCloseTo(0.05, 6)
     expect(r.message).toContain('off its exchange rate')
     expect(r.message).toContain('possible depeg')
-    expect(r.message).toContain('5.0%')
+    expect(r.message).toContain('5%')
   })
 
   it('market 12% off ER → hard block (no click-through verdict)', () => {

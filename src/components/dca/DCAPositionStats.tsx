@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useOrderExecutions, type FillRow } from '@/hooks/useOrderExecutions'
 import { isPortfolioSupportedChain } from '@/lib/portfolio-chains'
+import { fmtToken, fmtUsd, fmtPct } from '@/lib/format'
 import {
   computePositionStats,
   computePositionPnl,
@@ -40,26 +41,8 @@ interface DCAPositionStatsProps {
 }
 
 // ── Formatters ─────────────────────────────────────────
-const USD_FMT = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-function fmtToken(n: number): string {
-  if (n === 0) return '0'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`
-  if (n >= 1) return n.toFixed(4).replace(/\.?0+$/, '')
-  if (n >= 0.0001) return n.toFixed(6).replace(/\.?0+$/, '')
-  return n.toPrecision(2)
-}
-
-function fmtUsd(n: number): string {
-  return `$${USD_FMT.format(n)}`
-}
-
 /** Realized rate (input per output) — usually a small number → keep precision. */
-function fmtPrice(n: number): string {
-  if (n >= 1) return n.toFixed(4).replace(/\.?0+$/, '')
-  return n.toPrecision(4)
-}
+const fmtPrice = fmtToken
 
 function fmtDate(iso: string): string {
   const d = new Date(iso)
@@ -171,7 +154,7 @@ export default function DCAPositionStats({
               {pnl.pnlPct != null && (
                 <span className="ml-1 text-cream-35">
                   ({pnl.pnlUsd >= 0 ? '+' : '−'}
-                  {Math.abs(pnl.pnlPct).toFixed(1)}%)
+                  {fmtPct(Math.abs(pnl.pnlPct), 1)})
                 </span>
               )}
             </span>

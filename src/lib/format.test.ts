@@ -201,3 +201,18 @@ describe('locale independence', () => {
     expect(fmtUsd(1234.5)).toBe(`$1${T}234.50`)
   })
 })
+
+describe('per-buy consistency (§3: same value, same formatter, summary == review)', () => {
+  // DCAPanel summary derives per-buy via perChunkRaw; OrderReviewModal via amountIn / dcaTotal.
+  it.each([
+    ['1', 18, 10],
+    ['100', 6, 3],
+    ['0.5', 18, 7],
+    ['1234.56789', 18, 9],
+  ])('total %s (%s dp) / %s buys renders identically', async (total, dec, buys) => {
+    const { parseUnits } = await import('viem')
+    const { perChunkRaw } = await import('./dca-quick-fill')
+    const raw = parseUnits(total, dec)
+    expect(fmtToken(perChunkRaw(raw, buys), dec)).toBe(fmtToken(raw / BigInt(buys), dec))
+  })
+})

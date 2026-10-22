@@ -6,6 +6,8 @@
  * Endpoint: https://coins.llama.fi/prices/current/{chain}:{address}
  */
 
+import { fmtInt, fmtPct } from '@/lib/format'
+
 const DEFILLAMA_BASE = 'https://coins.llama.fi/prices/current'
 const FETCH_TIMEOUT_MS = 3_000 // 3s — don't block swap flow
 
@@ -281,7 +283,7 @@ export async function validateSwapPrice(params: {
         oraclePriceIn: priceIn?.price ?? null,
         oraclePriceOut: priceOut?.price ?? null,
         estimatedValueUsd: valueUsd,
-        reason: `Price validation unavailable for high-value swap (~$${Math.round(valueUsd).toLocaleString()}). Secondary oracle (DefiLlama) is unreachable. Try again in a few moments.`,
+        reason: `Price validation unavailable for high-value swap (~$${fmtInt(valueUsd)}). Secondary oracle (DefiLlama) is unreachable. Try again in a few moments.`,
       }
     }
     return null // Small swaps: fail-open (current behaviour)
@@ -299,7 +301,7 @@ export async function validateSwapPrice(params: {
         oraclePriceIn: priceIn.price,
         oraclePriceOut: priceOut.price,
         estimatedValueUsd: valueUsd,
-        reason: `Price validation confidence too low for high-value swap (~$${Math.round(valueUsd).toLocaleString()}). Oracle data may be stale.`,
+        reason: `Price validation confidence too low for high-value swap (~$${fmtInt(valueUsd)}). Oracle data may be stale.`,
       }
     }
     return null
@@ -334,7 +336,7 @@ export async function validateSwapPrice(params: {
         oraclePriceIn: priceIn.price,
         oraclePriceOut: priceOut.price,
         estimatedValueUsd: params.estimatedValueUsd,
-        reason: `Swap output is ${Math.abs(deviation * 100).toFixed(1)}% below fair market value (DefiLlama oracle). Possible price manipulation or extreme slippage.`,
+        reason: `Swap output is ${fmtPct(Math.abs(deviation * 100), 1)} below fair market value (DefiLlama oracle). Possible price manipulation or extreme slippage.`,
       }
     }
 
