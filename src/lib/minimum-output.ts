@@ -17,6 +17,7 @@
  * Slippage >= 100% with a VALID toAmount still yields 0n: that is an explicit
  * user setting, not a malformed quote (behaviour unchanged, UI caps apply).
  */
+import { fmtPct } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
 import { FEE_BPS, type AggregatorName } from '@/lib/constants'
 
@@ -133,7 +134,7 @@ export class StaleOrTamperedSwapError extends Error {
       deviationPercent === null
         ? 'No accepted quote to compare this swap against — swap refused. ' +
             'Please refresh the quote and try again.'
-        : `Swap output is below the quote you accepted (−${deviationPercent.toFixed(1)}%). ` +
+        : `Swap output is below the quote you accepted (−${fmtPct(deviationPercent, 1)}). ` +
             'The route was refreshed — please review and try again.',
     )
     this.name = 'StaleOrTamperedSwapError'

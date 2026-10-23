@@ -17,6 +17,7 @@
  *    binding ceiling for interval × buys, since 10 days × 100 buys = 1000 days.
  */
 
+import { fmtUsd, fmtFixed } from '@/lib/format'
 import { MAX_EXPIRY_DAYS } from './config'
 
 export const DCA_CUSTOM_BUYS_MIN = 1
@@ -125,7 +126,7 @@ export function applyDcaMinChunkGuard(opts: {
   }
   return {
     buys: maxBuys,
-    warning: `${requestedBuys} buys at $${perChunkUsd.toFixed(2)} each is below the $${minChunkUsd} minimum — capped to ${maxBuys} buys.`,
+    warning: `${requestedBuys} buys at ${fmtUsd(perChunkUsd)} each is below the $${minChunkUsd} minimum — capped to ${maxBuys} buys.`,
     blocked: false,
   }
 }
@@ -140,6 +141,6 @@ export function customDcaSummary(opts: {
   const { buys, perBuyLabel, intervalLabel, expirySeconds } = opts
   const expiryLabel = expirySeconds < SECONDS_PER_DAY
     ? `${Math.round(expirySeconds / SECONDS_PER_HOUR)}h`
-    : `${(expirySeconds / SECONDS_PER_DAY).toFixed(1)}d`
+    : `${fmtFixed(expirySeconds / SECONDS_PER_DAY, 1)}d`
   return `${buys} buys of ${perBuyLabel} every ${intervalLabel}, ends ~${expiryLabel}.`
 }

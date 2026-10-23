@@ -170,7 +170,7 @@ describe('TransactionPreview — minimum output', () => {
     // "Minimum output" label visible
     expect(screen.getByText('Minimum output')).toBeInTheDocument()
     // The formatted 1 USDC amount visible
-    expect(screen.getByText(/1\s*USDC/i)).toBeInTheDocument()
+    expect(screen.getByText(/1\.0000\s*USDC/i)).toBeInTheDocument()
   })
 
   // ── T6 ── minimum output 0n → silently degraded (no row)

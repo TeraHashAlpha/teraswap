@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtUsd, fmtPct, fmtInt } from '@/lib/format'
 import { useState, useMemo, useEffect } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
@@ -33,9 +34,7 @@ function sourceLabel(s: AggregatorName): string {
 }
 
 function formatUsd(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}k`
-  return `$${n.toFixed(2)}`
+  return fmtUsd(n, { compact: true })
 }
 
 function timeAgo(ts: number): string {
@@ -82,7 +81,7 @@ function BestSources({ data }: { data: DashboardData['bySource'] }) {
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-cream-65">{sourceLabel(s.source)}</span>
-                <span className="tabular-nums text-cream-50">{s.winRate.toFixed(0)}% win rate</span>
+                <span className="tabular-nums text-cream-50">{fmtPct(s.winRate, 0)} win rate</span>
               </div>
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-cream-08">
                 <div
@@ -279,8 +278,8 @@ export default function AnalyticsDashboard() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatCard
               label="Gasless Swaps"
-              value={gasless.totalGaslessSwaps.toLocaleString()}
-              sub={`${(gasless.gaslessRatio * 100).toFixed(1)}% of all swaps`}
+              value={fmtInt(gasless.totalGaslessSwaps)}
+              sub={`${fmtPct(gasless.gaslessRatio * 100, 1)} of all swaps`}
             />
             <StatCard
               label="Total Gas Saved"
@@ -292,7 +291,7 @@ export default function AnalyticsDashboard() {
             />
             <StatCard
               label="Adoption"
-              value={`${(gasless.gaslessRatio * 100).toFixed(0)}%`}
+              value={fmtPct(gasless.gaslessRatio * 100, 0)}
               sub="of completed swaps"
             />
           </div>

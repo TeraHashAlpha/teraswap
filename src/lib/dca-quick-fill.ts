@@ -6,6 +6,7 @@
  * selects the exact full balance to the wei and partial presets never drift.
  */
 
+import { fmtUsd } from '@/lib/format'
 import { formatUnits } from 'viem'
 
 /**
@@ -37,7 +38,8 @@ export function perChunkRaw(totalRaw: bigint, parts: number): bigint {
 // flat 2dp format, which reads as broken, not small. 4dp only below a cent; ordinary amounts stay
 // at the familiar 2dp.
 function formatApproxUsd(usd: number): string {
-  return usd > 0 && usd < 0.01 ? usd.toFixed(4) : usd.toFixed(2)
+  // §3: below a cent the floor is "<$0.01" (already approximate — no "~" in front of it).
+  return usd > 0 && usd < 0.01 ? fmtUsd(usd) : `~${fmtUsd(usd)}`
 }
 
 /**
@@ -60,7 +62,7 @@ export function formatMinBuyUnit(
 ): string {
   const human = formatUnits(minBuyRaw, decimals)
   if (priceUsd == null) return `${human} ${symbol}`
-  return `${human} ${symbol} (~$${formatApproxUsd(Number(human) * priceUsd)})`
+  return `${human} ${symbol} (${formatApproxUsd(Number(human) * priceUsd)})`
 }
 
 export interface MinBuyMessageParams {
@@ -103,8 +105,8 @@ export function formatMinBuyMessage(params: MinBuyMessageParams): MinBuyMessage 
 
   const fixText = minTotalUsd != null
     ? (maxBuys >= 1
-        ? `Lower to ${maxBuys} buy${maxBuys === 1 ? '' : 's'}, or raise your total to ~$${formatApproxUsd(minTotalUsd)}.`
-        : `Raise your total to at least ~$${formatApproxUsd(minTotalUsd)}.`)
+        ? `Lower to ${maxBuys} buy${maxBuys === 1 ? '' : 's'}, or raise your total to ${formatApproxUsd(minTotalUsd)}.`
+        : `Raise your total to at least ${formatApproxUsd(minTotalUsd)}.`)
     : (maxBuys >= 1
         ? `Lower to ${maxBuys} buy${maxBuys === 1 ? '' : 's'}, or raise your total to ${minTotalHuman} ${symbol}.`
         : `Raise your total to at least ${minTotalHuman} ${symbol}.`)

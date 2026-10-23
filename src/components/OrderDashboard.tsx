@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtUsd, fmtPct, fmtFixed } from '@/lib/format'
 import { useState } from 'react'
 import { useAccount, useChainId, useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -199,8 +200,8 @@ function LivePrice({ priceFeed, targetPrice, decimals = 8 }: {
 
   return (
     <span className={`text-xs ${isClose ? 'text-amber-300' : 'text-cream-35'}`}>
-      Now ${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      {' '}({pctDiff >= 0 ? '+' : ''}{pctDiff.toFixed(1)}%)
+      Now {fmtUsd(currentPrice)}
+      {' '}({fmtPct(pctDiff, 1, { sign: true })})
     </span>
   )
 }
@@ -243,7 +244,7 @@ function OrderCard({
   const targetPriceStr = hasPrice ? (() => {
     try {
       const val = Number(formatUnits(BigInt(order.order.targetPrice.toString()), 8))
-      return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      return fmtFixed(val, 2)
     } catch { return null }
   })() : null
 
