@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
 import { COPYRIGHT_YEAR } from '@/config/product-claims'
+import { useQuoteChainId } from '@/hooks/useChainId'
+import { getChainConfig } from '@/lib/chains'
 
 // Mainnet block time is ~12s; polling faster only reissues eth_blockNumber
 // calls that cannot return new information.
@@ -13,12 +15,28 @@ export const FOOTER_BLOCK_POLL_MS = 12_000
 /** The one neutral risk line shown on every page (replaces the old banner and per-panel disclaimers). */
 export const FOOTER_RISK_LINE = 'Smart contracts have not been externally audited. Use at your own risk.'
 
+/** Name + explorer for the footer's block line; null for a chain outside the registry. */
+function footerChain(chainId: number): { name: string; blockExplorer: string } | null {
+  try {
+    const { name, blockExplorer } = getChainConfig(chainId)
+    return { name, blockExplorer }
+  } catch {
+    return null
+  }
+}
+
 export default function Footer() {
+  // [fix/functional-chain-ui F1] The block shown is the selected chain's: the
+  // wallet's chain when connected, the ChainSelector pick when disconnected.
+  // Without a chainId wagmi read mainnet's block while Base/Arbitrum was selected.
+  const chainId = useQuoteChainId()
+  const chain = footerChain(chainId)
   // [fix/footer-poll-hidden-tab] `watch:` is a viem watchBlockNumber subscription
   // that polls for the life of the tab regardless of visibility — a forgotten
   // background tab bills eth_blockNumber calls forever. TanStack Query's own
   // refetchInterval pauses while the tab is hidden and resumes on focus.
   const { data: blockNumber } = useBlockNumber({
+    chainId,
     query: { refetchInterval: FOOTER_BLOCK_POLL_MS, refetchIntervalInBackground: false },
   })
 
@@ -40,7 +58,18 @@ export default function Footer() {
           <span className="hidden text-cream-15 sm:inline">|</span>
           <span className="hidden items-center gap-1 sm:flex">
             <span className="h-1.5 w-1.5 rounded-full bg-success" />
-            Block #{fmtInt(blockNumber)}
+            {chain ? (
+              <a
+                href={`${chain.blockExplorer}/block/${blockNumber}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition hover:text-cream active:text-cream"
+              >
+                {chain.name} · Block #{fmtInt(blockNumber)}
+              </a>
+            ) : (
+              <>Block #{fmtInt(blockNumber)}</>
+            )}
           </span>
         </>
       )}

@@ -13,10 +13,12 @@
  *                                            core brands, else the Alchemy logoURI)
  *   2. /api/token-logo route, keyed by     (server-side: resolves via the per-chain
  *      chainId + LOWERCASE address           CoinGecko list — near-universal — and
- *                                            falls back to DefiLlama internally; 302
- *                                            redirect, cached at the edge)
- *   3. Trust Wallet assets CDN, keyed by   (a DIFFERENT per-chain source, so a route
- *      the EIP-55 CHECKSUMMED address        miss still has a real shot)
+ *                                            falls back to DefiLlama internally; the
+ *                                            image bytes are fetched server-side and
+ *                                            streamed back, cached at the edge)
+ *   3. Trust Wallet assets via the          (a DIFFERENT per-chain source, so a route
+ *      /api/proxy/logo route, keyed by       miss still has a real shot; fetched
+ *      the EIP-55 CHECKSUMMED address        server-side so the browser never calls GitHub)
  *   4. a GENERATED AVATAR                   (deterministic colour from the address
  *      (TRUE last resort, never blank)        + the symbol's initials — now rare)
  *
@@ -37,27 +39,24 @@ interface Props {
   className?: string
 }
 
-// chainId → Trust Wallet `blockchains/<chain>` folder. Default ethereum.
-const TRUST_WALLET_CHAIN: Record<number, string> = {
-  1: 'ethereum',
-  8453: 'base',
-}
-
 /**
  * The read-only `/api/token-logo` route URL. chainId-aware and keyed by the LOWERCASE
  * address (the EXACT byte-for-byte format the catalog `logo()` helper produces, so a
  * catalog token whose logoURI is already this URL dedupes to a single candidate). The
  * route resolves real logos via the per-chain CoinGecko list (near-universal) and
- * falls back to DefiLlama server-side. Defaults to mainnet when chainId is absent.
+ * falls back to DefiLlama server-side, then streams the image from our own origin — the
+ * browser never contacts those hosts. Defaults to mainnet when chainId is absent.
  */
 function routeLogo(address: string, chainId?: number): string {
   return `/api/token-logo?chainId=${chainId ?? 1}&address=${address.toLowerCase()}`
 }
 
 /**
- * Trust Wallet assets logo URL, keyed by the EIP-55 checksummed address. Returns
- * null when the address can't be checksummed (native ETH sentinel 0xeeee…eeee,
- * empty/garbage input) — the caller then skips straight to the generated avatar.
+ * Trust Wallet logo via the same-origin `/api/proxy/logo` route, keyed by the EIP-55
+ * checksummed address. [fix/functional-chain-ui C8] The route fetches the fixed Trust
+ * Wallet path server-side (chain folder chosen there), so the visitor's IP never reaches
+ * GitHub. Returns null when the address can't be checksummed (empty/
+ * garbage input) — the caller then skips straight to the generated avatar.
  */
 function trustWalletLogo(address: string, chainId?: number): string | null {
   let checksummed: string
@@ -66,8 +65,7 @@ function trustWalletLogo(address: string, chainId?: number): string | null {
   } catch {
     return null
   }
-  const chain = TRUST_WALLET_CHAIN[chainId ?? 1] ?? 'ethereum'
-  return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${chain}/assets/${checksummed}/logo.png`
+  return `/api/proxy/logo?chainId=${chainId ?? 1}&address=${checksummed}`
 }
 
 /** Deterministic hue (0–359) from the lowercase address character codes. */
@@ -88,7 +86,7 @@ export default function TokenLogo({ token, size = 32, className }: Props) {
   // Index === sources.length ⇒ generated avatar (the TRUE last resort).
   //   1. token.logoURI                     (catalog: local /tokens/*.png or Alchemy)
   //   2. /api/token-logo (chainId + lc)    (CoinGecko list → DefiLlama, server-side)
-  //   3. Trust Wallet (per-chain checksum) (a different source; skipped if not 0x)
+  //   3. /api/proxy/logo (Trust Wallet)    (a different source; skipped if not 0x)
   // Dedupe by exact URL string so a catalog logoURI that ALREADY equals the route URL
   // is not pushed (and retried) twice.
   const sources = useMemo(() => {

@@ -471,18 +471,23 @@ function buildDashboard(events: TradeEvent[]): DashboardResponse {
     wallet: e.wallet ? `${e.wallet.slice(0, 6)}...${e.wallet.slice(-4)}` : '',
   }))
 
-  // Daily volume (last 30 days)
-  const dailyMap = new Map<string, { volume: number; count: number }>()
+  // Daily volume (last 30 days), oldest → newest: the order Volume Trend draws left → right.
+  // [fix/functional-chain-ui F4] `events` arrive newest-first, so map insertion order put today on
+  // the LEFT edge. The "24 Jun" label carries no year and does not sort, so each bucket keeps its
+  // earliest timestamp as the sort key.
+  const dailyMap = new Map<string, { volume: number; count: number; firstTs: number }>()
   const cutoff30d = Date.now() - 30 * 24 * 60 * 60 * 1000
   for (const e of events) {
     if (e.timestamp < cutoff30d) continue
     const date = new Date(e.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-    const entry = dailyMap.get(date) || { volume: 0, count: 0 }
+    const entry = dailyMap.get(date) || { volume: 0, count: 0, firstTs: e.timestamp }
     entry.volume += e.volumeUsd
     entry.count++
+    entry.firstTs = Math.min(entry.firstTs, e.timestamp)
     dailyMap.set(date, entry)
   }
   const dailyVolume = Array.from(dailyMap.entries())
+    .sort(([, a], [, b]) => a.firstTs - b.firstTs)
     .map(([date, data]) => ({ date, volumeUsd: data.volume, tradeCount: data.count }))
 
   return {

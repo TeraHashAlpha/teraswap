@@ -14,16 +14,79 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 
 const useBlockNumberMock = vi.fn((_args?: unknown) => ({ data: 12345678n }))
+// No wallet by default — the F1 tests below drive the disconnected ChainSelector store.
+const useAccountMock = vi.fn((): { chain?: { id: number }; isConnected: boolean } => ({ chain: undefined, isConnected: false }))
 
 vi.mock('wagmi', () => ({
   useBlockNumber: (args?: unknown) => useBlockNumberMock(args),
+  useAccount: () => useAccountMock(),
 }))
 
 import Footer, { FOOTER_BLOCK_POLL_MS } from './Footer'
+import { useDisconnectedChainSelection } from '@/hooks/useChainId'
+
+/**
+ * [fix/functional-chain-ui F1] The footer block line read wagmi's default chain (mainnet) while
+ * Base/Arbitrum was selected. It now requests the selected chain's block and names/links that chain.
+ */
+describe('Footer follows the selected chain', () => {
+  const lastRequestedChainId = () =>
+    (useBlockNumberMock.mock.calls.at(-1)?.[0] as { chainId?: number } | undefined)?.chainId
+
+  beforeEach(() => {
+    useBlockNumberMock.mockClear()
+    useAccountMock.mockReturnValue({ chain: undefined, isConnected: false })
+    useDisconnectedChainSelection.getState().setChainId(null)
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('selector Base, no wallet → requests chainId 8453 and links the Base explorer', () => {
+    useDisconnectedChainSelection.getState().setChainId(8453)
+    render(<Footer />)
+
+    expect(lastRequestedChainId()).toBe(8453)
+    const link = screen.getByRole('link', { name: /^Base · Block #/ })
+    expect(link.getAttribute('href')).toBe('https://basescan.org/block/12345678')
+  })
+
+  it('switching the selector to 42161 re-requests on Arbitrum and updates name + explorer', () => {
+    useDisconnectedChainSelection.getState().setChainId(8453)
+    render(<Footer />)
+    expect(lastRequestedChainId()).toBe(8453)
+
+    act(() => useDisconnectedChainSelection.getState().setChainId(42161))
+
+    expect(lastRequestedChainId()).toBe(42161)
+    const link = screen.getByRole('link', { name: /^Arbitrum One · Block #/ })
+    expect(link.getAttribute('href')).toBe('https://arbiscan.io/block/12345678')
+    expect(screen.queryByRole('link', { name: /^Base · Block #/ })).toBeNull()
+  })
+
+  it('a connected wallet chain wins over the disconnected selector', () => {
+    useAccountMock.mockReturnValue({ chain: { id: 42161 }, isConnected: true })
+    useDisconnectedChainSelection.getState().setChainId(8453)
+    render(<Footer />)
+
+    expect(lastRequestedChainId()).toBe(42161)
+    expect(screen.getByRole('link', { name: /^Arbitrum One · Block #/ }).getAttribute('href'))
+      .toBe('https://arbiscan.io/block/12345678')
+  })
+
+  it('no wallet and no selection → mainnet block and Etherscan', () => {
+    render(<Footer />)
+
+    expect(lastRequestedChainId()).toBe(1)
+    expect(screen.getByRole('link', { name: /^Ethereum · Block #/ }).getAttribute('href'))
+      .toBe('https://etherscan.io/block/12345678')
+  })
+})
 
 describe('Footer block-number polling', () => {
   it('uses a query-based refetchInterval, not a bare watch subscription', () => {

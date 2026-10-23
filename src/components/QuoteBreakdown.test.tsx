@@ -481,3 +481,43 @@ describe('QuoteBreakdown — low-confidence quorum cue [CHORE-QUORUM-LOWCONFIDEN
     expect(box.textContent).toMatch(/minimum-output/i)
   })
 })
+
+describe('QuoteBreakdown — [fix/functional-chain-ui] route names (F2) and gas precision (F3)', () => {
+  const rowText = (label: string) => screen.getByText(label).parentElement?.textContent ?? ''
+
+  it('F3: an L2-sized 0.0000012 ETH gas cost renders "~0.0000012 ETH" (never "~0.0000 ETH"), USD first', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ gasEstimate: () => ({ eth: 0.0000012, usd: 0.0036 }) })} />)
+    const gas = rowText('Est. gas')
+    expect(gas).toContain('~0.0000012 ETH')
+    expect(gas).not.toContain('0.0000 ETH')
+    expect(gas.indexOf('<$0.01')).toBeGreaterThan(-1)
+    expect(gas.indexOf('<$0.01')).toBeLessThan(gas.indexOf('~0.0000012 ETH'))
+  })
+
+  it('F3: a mainnet-sized 0.0031 ETH gas cost renders "$9.30 (~0.0031 ETH)"', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ gasEstimate: () => ({ eth: 0.0031, usd: 9.3 }) })} />)
+    expect(rowText('Est. gas')).toBe('Est. gas$9.30 (~0.0031 ETH)')
+  })
+
+  it('F3: without a USD price only the ETH figure is shown', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ gasEstimate: () => ({ eth: 0.0031, usd: 0 }) })} />)
+    expect(rowText('Est. gas')).toBe('Est. gas~0.0031 ETH')
+  })
+
+  it('F2: a raw pool address in routes renders as the source name, never the address', () => {
+    const pool = '0xe0554a476a092703abdb3ef35c80e0d76d32939f' // recorded KyberSwap 1-WETH hop `pool`
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: makeMeta({ source: 'kyberswap', routes: [pool] }) })} />,
+    )
+    const route = rowText('Route')
+    expect(route).toBe('RouteKyberSwap')
+    expect(route).not.toContain('0x')
+  })
+
+  it('F2: named hops pass through unchanged', () => {
+    renderWithProviders(
+      <QuoteBreakdown {...makeProps({ meta: makeMeta({ source: 'kyberswap', routes: ['uniswapv3', 'fluid-dex-t1'] }) })} />,
+    )
+    expect(rowText('Route')).toBe('Routeuniswapv3 + fluid-dex-t1')
+  })
+})

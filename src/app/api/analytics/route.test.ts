@@ -10,6 +10,7 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 import { computeDashboard, executionToEvent } from './route'
+import { FIVE_DAY_NOW, FIVE_DAY_SWAPS } from '@/lib/__fixtures__/analytics-five-days'
 
 const WETH = 18
 const tenWeth = (10n * 10n ** BigInt(WETH)).toString()
@@ -173,5 +174,40 @@ describe('computeDashboard — DCA/order executions in analytics', () => {
     const sltp = executionToEvent(execRow({}, { order_type: 'stop_loss', dca_total: 1, amount_in: (1n * 10n ** 18n).toString() }))
     expect(limit?.type).toBe('limit_fill')
     expect(sltp?.type).toBe('sltp_trigger')
+  })
+})
+
+describe('computeDashboard — [fix/functional-chain-ui F4] five-day fixture ordering', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function fiveDays() {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(FIVE_DAY_NOW))
+    return computeDashboard(FIVE_DAY_SWAPS, [])
+  }
+
+  it('dailyVolume runs oldest → newest (chart left → right), one bucket per day', () => {
+    const d = fiveDays()
+    expect(d.dailyVolume.map((x) => x.date)).toEqual(['20 Jun', '21 Jun', '22 Jun', '23 Jun', '24 Jun'])
+    expect(d.dailyVolume.map((x) => x.volumeUsd)).toEqual([1000, 150, 2000, 5000, 20])
+    expect(d.dailyVolume.map((x) => x.tradeCount)).toEqual([1, 3, 1, 1, 2])
+  })
+
+  it('dailyVolume order does not depend on input row order', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(FIVE_DAY_NOW))
+    const reversed = computeDashboard([...FIVE_DAY_SWAPS].reverse(), [])
+    expect(reversed.dailyVolume.map((x) => x.date)).toEqual(['20 Jun', '21 Jun', '22 Jun', '23 Jun', '24 Jun'])
+  })
+
+  it('topPairs is ranked by volumeUsd — the metric PopularPairs now displays', () => {
+    const d = fiveDays()
+    expect(d.topPairs.map((p) => [p.pair, p.volumeUsd, p.tradeCount])).toEqual([
+      ['WBTC/USDC', 5000, 1],
+      ['WETH/USDC', 3000, 2],
+      ['WETH/DAI', 170, 5],
+    ])
   })
 })

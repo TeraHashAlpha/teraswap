@@ -12,7 +12,7 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { swapNotionalUsd, feeUsd } from '@/lib/fee-usd'
 import { safeBigInt } from '@/lib/utils'
-import { formatUnits } from 'viem'
+import { formatUnits, isAddress } from 'viem'
 import { formatWithSeparator, fmtToken, fmtUsd, fmtPct, fmtGas } from '@/lib/format'
 import InfoTooltip from './InfoTooltip'
 
@@ -54,6 +54,11 @@ interface Props {
 
 function sourceLabel(source: AggregatorName): string {
   return AGGREGATOR_META[source]?.label || source
+}
+
+/** [fix/functional-chain-ui F2] A route hop is shown by name — a raw pool address falls back to the source label. */
+function routeLabel(label: string, source: AggregatorName): string {
+  return isAddress(label, { strict: false }) ? sourceLabel(source) : label
 }
 
 function isMevProtected(source: AggregatorName): boolean {
@@ -415,7 +420,7 @@ export default function QuoteBreakdown({
         <div className="mb-2 flex items-center justify-between">
           <span className="text-cream-35">Route</span>
           <span className="max-w-[55%] truncate text-right text-xs text-cream-65 sm:max-w-[60%]">
-            {best.routes.join(' + ') || sourceLabel(best.source)}
+            {best.routes.map((r) => routeLabel(r, best.source)).join(' + ') || sourceLabel(best.source)}
           </span>
         </div>
 
@@ -478,9 +483,13 @@ export default function QuoteBreakdown({
               ? <span className="font-semibold text-purple-400">Free (solver-paid)</span>
               : (() => {
                   const cost = gasEstimate?.(best.estimatedGas)
-                  return cost
-                    ? <span>~{fmtGas(cost.eth)} ETH <span className="text-cream-50">({fmtUsd(cost.usd)})</span></span>
-                    : `~${formatWithSeparator(best.estimatedGas.toString())} gas`
+                  if (!cost) return `~${formatWithSeparator(best.estimatedGas.toString())} gas`
+                  // [fix/functional-chain-ui F3] USD first when priced — an L2 swap's ETH cost is
+                  // ~1e-6, so the dollar figure is the readable one; ETH keeps full precision via fmtGas.
+                  const eth = `~${fmtGas(cost.eth)} ETH`
+                  return Number.isFinite(cost.usd) && cost.usd > 0
+                    ? <span>{fmtUsd(cost.usd)} <span className="text-cream-50">({eth})</span></span>
+                    : <span>{eth}</span>
                 })()
             }
           </span>

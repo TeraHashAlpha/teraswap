@@ -27,6 +27,7 @@ import {
   INTEGRATED_DEX_SOURCES_CLAIM,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   SITE_META_DESCRIPTION,
+  PRIVACY_DIRECT_NOTE,
   SWAP_CHAIN_IDS,
   SWAP_CHAIN_NAMES,
   SWAP_CHAIN_LIST_LABEL,
@@ -118,7 +119,7 @@ describe('product-claims — source count from ADAPTER_REGISTRY minus DISABLED_S
 describe('product-claims — meta description', () => {
   it("embeds the derived count, not a handwritten digit", () => {
     expect(SITE_META_DESCRIPTION).toContain(
-      `queries ${QUOTING_COUNT} liquidity sources`,
+      `compares quotes across ${QUOTING_COUNT} liquidity sources`,
     )
   })
 
@@ -357,5 +358,28 @@ describe('product-claims — mirrored constants cannot drift from their declarin
     const c = MIRRORED_CONSTANTS.find((m) => m.id === 'ADMIN_TIMELOCK_HOURS')!
     const src = readFileSync(join(process.cwd(), c.file), 'utf8')
     expect([...src.matchAll(c.pattern)]).toHaveLength(4)
+  })
+})
+
+describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the browser still fetches directly', () => {
+  it('no longer lists a DefiLlama lookup (now /api/price/defillama)', () => {
+    expect(PRIVACY_DIRECT_NOTE).not.toMatch(/defillama/i)
+  })
+
+  it('still discloses token logos and the wallet connection, which remain browser-direct', () => {
+    expect(PRIVACY_DIRECT_NOTE).toMatch(/^Token logos and your wallet's own connection are requested directly by your browser/)
+  })
+})
+
+describe('[fix/functional-chain-ui C9] meta description claims only what the code does', () => {
+  it('drops the unprovable "best swap rate" / "Absolute protection" / "MEV-free" phrasing', () => {
+    expect(SITE_META_DESCRIPTION).not.toMatch(/best swap rate/i)
+    expect(SITE_META_DESCRIPTION).not.toMatch(/absolute protection/i)
+    expect(SITE_META_DESCRIPTION).not.toMatch(/MEV-free/i)
+  })
+
+  it('says it compares quotes across the derived source count, with MEV-protected routing via CoW', () => {
+    expect(SITE_META_DESCRIPTION).toContain(`compares quotes across ${QUOTING_COUNT} liquidity sources`)
+    expect(SITE_META_DESCRIPTION).toContain('MEV-protected routing via CoW Protocol')
   })
 })

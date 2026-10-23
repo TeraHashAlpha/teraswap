@@ -118,19 +118,20 @@ export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
 
 // ── Privacy claims, scoped to what the code does ─────────────────────────────
 // Proof: RPC reads go through /api/rpc and quotes through /api/quote (DocsPage "Privacy" table;
-// useTokenImport -> /api/rpc per the C8 recon row). NOT proxied (C8 recon row): token logos
-// (TokenLogo.tsx:70, raw.githubusercontent.com), the browser-side DefiLlama price lookup
-// (defillama.ts:9, DCAPanel.tsx:571), wallet connection. DocsPage "Graceful Degradation": the client
-// falls back to direct RPC when the proxy is unreachable. So "never exposed" / "zero leaks" are NOT
-// claimed anywhere.
+// useTokenImport -> /api/rpc per the C8 recon row). [fix/functional-chain-ui C8] The DCA DefiLlama
+// price lookup now goes through /api/price/defillama and Trust Wallet logos through /api/proxy/logo.
+// Still NOT proxied: other token logos (catalog logoURI; /api/token-logo answers with a 302 to the
+// logo CDN, which the browser then loads) and the wallet connection. DocsPage "Graceful Degradation":
+// the client falls back to direct RPC when the proxy is unreachable. So "never exposed" / "zero
+// leaks" are NOT claimed anywhere.
 export const PRIVACY_PROXY_CLAIM =
   "RPC reads and aggregator quote requests are routed through a server-side proxy, so those providers see our server's IP rather than yours."
 export const PRIVACY_DIRECT_NOTE =
-  "Token logos, a DefiLlama price lookup and your wallet's own connection are requested directly by your browser, and the client falls back to direct RPC if the proxy is unreachable."
+  "Token logos and your wallet's own connection are requested directly by your browser, and the client falls back to direct RPC if the proxy is unreachable."
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =
-  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that queries ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-protected routing via CoW Protocol, and a server-side proxy for RPC and quote requests.`
+  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama), MEV-protected routing via CoW Protocol, and a server-side proxy for RPC and quote requests.`
 
 export type OrderTypeId = 'instant' | 'dca' | 'limit' | 'takeProfit' | 'stopLoss'
 
