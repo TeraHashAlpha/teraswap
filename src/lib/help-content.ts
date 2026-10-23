@@ -1,3 +1,5 @@
+import { INTEGRATED_DEX_SOURCE_COUNT, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
+
 export interface HelpItem {
   q: string
   a: string
@@ -14,7 +16,8 @@ export const helpSections: HelpSection[] = [
     items: [
       {
         q: 'What is TeraSwap?',
-        a: 'TeraSwap is a DEX meta-aggregator that searches 10 liquidity sources simultaneously to find you the best swap rate on Ethereum. Instead of checking each DEX manually, TeraSwap does it in one click.',
+        // Count and chains come from product-claims (registry-derived) — never typed as prose here.
+        a: `TeraSwap is a DEX meta-aggregator that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources simultaneously on ${SWAP_CHAIN_LIST_LABEL}. Instead of checking each DEX manually, TeraSwap does it in one click.`,
       },
       {
         q: 'How do I connect my wallet?',

@@ -38,7 +38,7 @@ mock, same mock fn), `TokenLogo.test.tsx`, `api/{token-logo,portfolio/prices}`, 
 - Kyber label shows only the first split path (pre-existing `route[0]`); Arbitrum logos now use Trust Wallet `arbitrum` (was `ethereum`).
 
 ## Follow-up (commits 6–8, 2026-10-23, Sonnet 5.5)
-- [x] C6 CodeQL ReDoS on the grep test · [x] C7 rate limit · [ ] C8 token-logo stream + help-content · [ ] verify + push
+- [x] C6 CodeQL ReDoS on the grep test · [x] C7 rate limit · [x] C8 token-logo stream + help-content · [ ] verify + push
 Premises that were stale (owner may override): `/api/price/defillama` ALREADY had a 30/min/IP limit + 429 test (`route.ts:24,37`);
 CodeQL queries live at `Performance/ReDoS.ql` + `Performance/PolynomialReDoS.ql` (pack 2.4.8), not `Security/CWE-1333/`.
 Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter.ts` (the helper), `src/app/api/quote/route.ts:104-118`.
@@ -54,3 +54,13 @@ Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter
    `/api/price/defillama` already limited — only moved off its left-most `x-forwarded-for` read (client-writable → limit bypass) onto
    `trustedClientIp` + the shared constant (same 30/min). Tests: logo 30 pass → 31st 429 (fetch not called, headers, per-IP buckets,
    spoofed XFF ignored, 200 path keeps 24 h `public` cache); defillama same + N+1. 6 red on old routes, 46/46 green.
+3. **token-logo** (real network, `next dev`). DAI before: `302` · `location: https://assets.coingecko.com/coins/images/9956/large/Badge_Dai.png?…`
+   · `cache-control: public, s-maxage=86400, swr=604800`; no-logo addr before: `302` → `https://token-icons.llamao.fi/icons/tokens/1/0x…dead?h=48&w=48`.
+   After: DAI `200` · `content-type: image/png` · 7297 B · `cache-control: public, max-age=86400, s-maxage=86400, swr=604800` · `nosniff` · **no
+   Location**; no-logo `404` · `s-maxage=3600` · 0 B (→ `<TokenLogo>` next candidate). Shared `src/lib/logo-proxy.ts` (host allow-list, raster only,
+   ≤512 KB read incrementally, 5 s, redirects by hand ≤2 hops each re-checked); /api/proxy/logo now uses it too. A CoinGecko-list `logoURI` off the
+   allow-list (http, look-alike, creds, port, 169.254…) is never fetched → DefiLlama. `tokens.ts` PAXG/XAUt hard-coded CoinGecko URLs → `logo()` route
+   (both serve 200 PNG via route). Grep test now 6 hosts, client = 0, + token-logo has no redirect/30x/Location; 3 red on old code.
+4. **help-content.ts:17** before: "…searches 10 liquidity sources simultaneously to find you the best swap rate on Ethereum." → after: "…compares quotes
+   across 8 liquidity sources simultaneously on Ethereum, Base, and Arbitrum One." (`INTEGRATED_DEX_SOURCE_COUNT`, `SWAP_CHAIN_LIST_LABEL`).
+   `help-content.test.ts` (new): no `\b10\b`, no "best swap rate", and a mocked product-claims (3 / "Chain A and Chain B") changes the sentence.

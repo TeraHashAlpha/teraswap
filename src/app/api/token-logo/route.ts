@@ -6,17 +6,25 @@
  * (PENDLE/FRAX/LUSD/PYUSD, …). CoinGecko's comprehensive PER-CHAIN list
  * (`https://tokens.coingecko.com/<platform>/all.json`) DOES contain them with real
  * logoURIs — but it is ~1MB (eth) / ~0.5MB (base), so it must stay SERVER-SIDE
- * (never bundled/shipped to the client) and be served via this cached redirect.
+ * (never bundled/shipped to the client).
  *
  *   GET /api/token-logo?chainId=<any chain in the registry>&address=<0x..40hex>
- *     → 302 redirect to the resolved logo:
- *         • CoinGecko logoURI when the address is in the per-chain list (cached long),
- *         • else the DefiLlama by-address CDN (cached shorter — it may itself 404,
- *           at which point <TokenLogo> advances to its next candidate client-side).
+ *     → 200 the image bytes, fetched HERE and streamed back (raster image/* only):
+ *         • CoinGecko logoURI when the address is in the per-chain list (cached 24 h),
+ *         • else the DefiLlama by-address CDN (cached 1 h — it may itself 404).
+ *     → 404 neither source produced a small raster image; <TokenLogo> advances to its
+ *           next candidate (Trust Wallet via /api/proxy/logo, then a generated avatar).
  *     → 400 on a chainId the chain registry does not know, or a malformed address.
  *
- * Fail-safe: ANY fetch/parse error on the CoinGecko list falls back to the DefiLlama
- * redirect. This route NEVER 500s on a logo lookup — a missing logo is cosmetic.
+ * [fix/functional-chain-ui C8] This used to answer 302 to the CoinGecko / DefiLlama image
+ * host, so the visitor's browser connected to a third party and handed over its IP. The
+ * bytes are now fetched server-side through `@/lib/logo-proxy` (the same host allow-list,
+ * raster-only, size and time caps as /api/proxy/logo) and the response carries no
+ * `Location`. A logoURI that arrives from the CoinGecko list is only fetched if its host
+ * is on that allow-list; anything else falls through to DefiLlama.
+ *
+ * Fail-safe: ANY fetch/parse error on the CoinGecko list falls back to DefiLlama. This
+ * route NEVER 500s on a logo lookup — a missing logo is cosmetic.
  *
  * The per-chain list is cached IN MEMORY at module scope (one Map per chain, ~12h
  * TTL) so a warm instance fetches each ~1MB list at most once per TTL window.
@@ -31,6 +39,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupportedChainIds } from '@/lib/chains/registry'
+import {
+  fetchLogo,
+  logoMiss,
+  logoResponse,
+  LOGO_CACHE_CONTROL,
+  LOGO_FALLBACK_CACHE_CONTROL,
+} from '@/lib/logo-proxy'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,14 +84,6 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 // In-memory cache TTL for the per-chain CoinGecko list. 12h: the list changes
 // slowly (new listings) and a stale logo URL is harmless.
 const LIST_TTL_MS = 12 * 60 * 60 * 1000
-
-// Long cache for a CoinGecko hit (a confirmed real, stable CDN logo URL).
-const CG_CACHE_CONTROL =
-  'public, s-maxage=86400, stale-while-revalidate=604800'
-// Shorter cache for a DefiLlama fallback (the target may itself 404; don't pin it
-// at the edge for a day).
-const DL_CACHE_CONTROL =
-  'public, s-maxage=3600, stale-while-revalidate=86400'
 
 interface ChainListCache {
   map: Map<string, string>
@@ -166,13 +173,6 @@ function upgradeCoinGeckoLogo(url: string): string {
   return url
 }
 
-/** Build the 302 redirect with the given Cache-Control header. */
-function redirect(target: string, cacheControl: string): NextResponse {
-  const res = NextResponse.redirect(target, 302)
-  res.headers.set('Cache-Control', cacheControl)
-  return res
-}
-
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(req.url)
   const address = searchParams.get('address') ?? ''
@@ -192,9 +192,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const map = await getChainMap(chainId)
   const cgLogo = map?.get(lower)
   if (cgLogo) {
-    return redirect(upgradeCoinGeckoLogo(cgLogo), CG_CACHE_CONTROL)
+    // fetchLogo refuses a logoURI whose host is not allow-listed (the list is upstream data).
+    const logo = await fetchLogo(upgradeCoinGeckoLogo(cgLogo))
+    if (logo) return logoResponse(logo, LOGO_CACHE_CONTROL)
   }
 
-  // ③ Fall back to DefiLlama by-address (also covers a failed list fetch).
-  return redirect(defiLlamaUrl(chainId, lower), DL_CACHE_CONTROL)
+  // ③ Fall back to DefiLlama by-address (also covers a failed list fetch or a dead CoinGecko image).
+  const fallback = await fetchLogo(defiLlamaUrl(chainId, lower))
+  return fallback ? logoResponse(fallback, LOGO_FALLBACK_CACHE_CONTROL) : logoMiss()
 }

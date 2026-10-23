@@ -729,7 +729,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'PAXG',
     name: 'PAX Gold',
     decimals: 18,
-    logoURI: 'https://assets.coingecko.com/coins/images/9519/large/paxgold.png?1696509604',
+    logoURI: logo('0x45804880De22913dAFE09f4980848ECE6EcbAf78'),
     category: 'Gold',
   },
   {
@@ -740,7 +740,7 @@ export const DEFAULT_TOKENS: Token[] = [
     symbol: 'XAUT',
     name: 'Tether Gold',
     decimals: 6,
-    logoURI: 'https://assets.coingecko.com/coins/images/10481/large/logo.png?1774627372',
+    logoURI: logo('0x68749665FF8D2d112Fa859AA293F07A622782F38'),
     category: 'Gold',
   },
   {

@@ -1,8 +1,9 @@
 /**
- * [fix/functional-chain-ui C8] Grep guard: browser code never names the two third-party hosts that
- * used to receive visitors' IPs directly — GitHub's raw CDN (Trust Wallet logos, TokenLogo) and
- * DefiLlama's price API (DCAPanel's fallback). Both now go through same-origin routes
- * (/api/proxy/logo, /api/price/defillama), and next.config.js no longer allows either host.
+ * [fix/functional-chain-ui C8] Grep guard: browser code never names a third-party host that would
+ * receive visitors' IPs directly — GitHub's raw CDN (Trust Wallet logos), DefiLlama's price API
+ * (DCAPanel's fallback), and the logo image hosts (CoinGecko, DefiLlama icons) that /api/token-logo
+ * used to 302 the browser to. All of it now goes through same-origin routes (/api/proxy/logo,
+ * /api/token-logo, /api/price/defillama) that fetch server-side and stream the bytes back.
  *
  * "Client code" = everything under src/components and src/hooks, any module whose first statement
  * is 'use client', and the browser-side price helper. Outside it, a host may only appear in the
@@ -13,10 +14,19 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 const ROOT = join(__dirname, '..', '..')
-const HOSTS = ['raw.githubusercontent.com', 'coins.llama.fi']
+const HOSTS = [
+  'raw.githubusercontent.com',
+  'coins.llama.fi',
+  'assets.coingecko.com',
+  'coin-images.coingecko.com',
+  'tokens.coingecko.com',
+  'token-icons.llamao.fi',
+]
 
 const SERVER_ALLOWLIST = new Set([
   'src/app/api/proxy/logo/route.ts', // the Trust Wallet fetch itself
+  'src/app/api/token-logo/route.ts', // CoinGecko per-chain list + DefiLlama icon fallback (server-side)
+  'src/lib/logo-proxy.ts', // the logo fetch host allow-list
   'src/app/api/portfolio/prices/route.ts', // doc comment: why that route proxies DefiLlama
   'src/lib/defillama.ts', // server-side DefiLlama client (route handlers only)
   'src/lib/order-engine/dca-price-quorum.ts', // /api/dca-floor-cap price quorum
@@ -114,8 +124,23 @@ describe('[C8] no browser-direct third-party hosts', () => {
     expect(client.length).toBeGreaterThan(100)
   })
 
-  it('client code names neither raw.githubusercontent.com nor coins.llama.fi — grep = 0', () => {
+  it('client code names none of the third-party hosts (GitHub raw, DefiLlama price, CoinGecko, llamao icons) — grep = 0', () => {
     expect(hostHits(client)).toEqual([])
+  })
+
+  it('the token catalog (src/lib/tokens.ts) points logos at same-origin routes, never a third-party host', () => {
+    const tokens = SOURCES.find((f) => f.path === 'src/lib/tokens.ts')!
+    expect(hostHits([tokens])).toEqual([])
+    expect(tokens.text).toMatch(/\/api\/token-logo\?chainId=/)
+  })
+
+  it('/api/token-logo cannot redirect the browser anywhere: no NextResponse.redirect, no 30x, no Location', () => {
+    const route = SOURCES.find((f) => f.path === 'src/app/api/token-logo/route.ts')!
+    const code = route.text
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n')
+    expect(code).not.toMatch(/\.redirect\(|\b30[1278]\b|[Ll]ocation/)
   })
 
   it('client code takes no value import from the server-side DefiLlama module', () => {
