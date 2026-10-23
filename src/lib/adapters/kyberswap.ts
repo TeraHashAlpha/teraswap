@@ -2,6 +2,27 @@ import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
+const EMBEDDED_ADDRESS = /0x[0-9a-fA-F]{40}/
+
+/**
+ * [fix/functional-chain-ui F2] Display name for one route hop. A hop's `pool` is a pool ADDRESS
+ * (or a PMM / v4 id built from hex), never a name — it used to be rendered verbatim as the Route.
+ * The recorded response names the venue in `exchange` ("uniswapv3", "pmm-1/uniswapv3"), with
+ * `poolType` as the coarser fallback (src/lib/__fixtures__/kyberswap-routes-mainnet.ts). Anything
+ * missing or carrying a 0x address/id falls back to 'KyberSwap'.
+ */
+export function kyberHopLabel(hop: unknown): string {
+  const { exchange, poolType } = (hop ?? {}) as { exchange?: unknown; poolType?: unknown }
+  for (const name of [exchange, poolType]) {
+    if (typeof name === 'string' && name.trim() !== '' && !EMBEDDED_ADDRESS.test(name)) return name
+  }
+  return 'KyberSwap'
+}
+
+function kyberRouteLabels(routeSummary: any): string[] {
+  return routeSummary.route?.[0]?.map((hop: unknown) => kyberHopLabel(hop)) ?? ['KyberSwap']
+}
+
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, chainId = DEFAULT_CHAIN_ID } = params
   const base = getAdapterApiUrl('kyberswap', chainId)
@@ -30,9 +51,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     toAmount: route.amountOut,
     estimatedGas: Number(route.gasUsd ? 0 : route.gas || 0),
     gasUsd: Number(route.gasUsd || 0),
-    routes: route.route?.[0]?.map((r: any) =>
-      r.pool ? `${r.pool}` : 'KyberSwap'
-    ) ?? ['KyberSwap'],
+    routes: kyberRouteLabels(route),
   }
 }
 
@@ -87,9 +106,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     toAmount: routeSummary.amountOut,
     estimatedGas: Number(txData.gas || routeSummary.gas || 0),
     gasUsd: Number(routeSummary.gasUsd || 0),
-    routes: routeSummary.route?.[0]?.map((r: any) =>
-      r.pool ? `${r.pool}` : 'KyberSwap'
-    ) ?? ['KyberSwap'],
+    routes: kyberRouteLabels(routeSummary),
     tx: {
       to: txData.routerAddress,
       data: txData.data,
