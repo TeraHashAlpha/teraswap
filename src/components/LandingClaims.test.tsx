@@ -28,7 +28,7 @@ import { renderToString } from 'react-dom/server'
 import { render, screen } from '@/test-utils/render'
 import LandingPage from './LandingPage'
 import {
-  VERIFICATION_SUMMARY,
+  VERIFICATION_STAGE_COUNT,
   VERIFICATION_CHECK_COUNT,
   chainNameFor,
   chainlinkFeedCountFor,
@@ -45,9 +45,11 @@ beforeEach(() => {
 })
 
 describe('hero stats', () => {
-  it('reads "<stages> stages · <checks> checks" from the verification list', () => {
+  // [fix/hero-stat-layout] Same shape as its neighbours: <checks> is the numeral, <stages> rides in the label.
+  it('reads <checks> as the numeral and "<stages> STAGES" in the label from the verification list', () => {
     render(<LandingPage onLaunchApp={vi.fn()} />)
-    expect(screen.getByText(VERIFICATION_SUMMARY)).toBeInTheDocument()
+    const label = screen.getByText(`VERIFICATION CHECKS · ${VERIFICATION_STAGE_COUNT} STAGES`)
+    expect(label.previousElementSibling?.textContent).toBe(String(VERIFICATION_CHECK_COUNT))
   })
 
   it('shows the ACTIVE chain\'s feed count and name', () => {

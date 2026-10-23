@@ -26,7 +26,8 @@ import {
   PLATFORM_FEE_LABEL,
   PRIVACY_BADGE,
   SWAP_CHAIN_LIST_LABEL,
-  VERIFICATION_SUMMARY,
+  VERIFICATION_CHECKS,
+  VERIFICATION_STAGES,
   chainNameFor,
   chainlinkFeedCountFor,
 } from '@/config/product-claims'
@@ -318,12 +319,14 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   // Three anchor numbers pulled above the H1 (Stat-Led DNA). Every figure is a slot of
-  // product-claims.ts — the verification line reads the same VERIFICATION_CHECKS list as the
+  // product-claims.ts — the verification cell counts the same VERIFICATION_CHECKS list as the
   // Security section's stats bar, and the feed count is the active chain's own registry.
+  // [fix/hero-stat-layout] All three cells share one shape (numeral + label); the stage count
+  // lives in the label so the row keeps its rhythm.
   const chainId = useQuoteChainId()
-  const ANCHOR_STATS: { v?: number; text?: string; label: string }[] = [
+  const ANCHOR_STATS: { v: number; label: string }[] = [
     { v: INTEGRATED_DEX_SOURCE_COUNT, label: 'LIQUIDITY SOURCES' },
-    { text: VERIFICATION_SUMMARY, label: 'VERIFICATION' },
+    { v: VERIFICATION_CHECKS.length, label: `VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES` },
     { v: chainlinkFeedCountFor(chainId), label: `CHAINLINK ORACLES · ${chainNameFor(chainId)}` },
   ]
 
@@ -345,11 +348,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
                   className="font-display text-[40px] sm:text-[52px] md:text-[60px] font-bold leading-none text-cream"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
-                  {s.text !== undefined ? (
-                    <span className="text-[20px] sm:text-[24px] md:text-[28px]">{s.text}</span>
-                  ) : (
-                    <AnimatedCounter value={s.v ?? 0} immediate />
-                  )}
+                  <AnimatedCounter value={s.v} immediate />
                 </dd>
                 <dt className="mt-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
                   {s.label}
@@ -382,7 +381,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             style={{ textShadow: BODY_TEXT_SHADOW }}
           >
             TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade, verifies the price against
-            Chainlink oracles, and routes through MEV-protected execution.
+            Chainlink oracles, and offers MEV-protected routes via CoW Protocol.
           </motion.p>
 
           {/* CTA — flat fill, hairline focus ring, no gradient, no glow, no hover-scale */}
