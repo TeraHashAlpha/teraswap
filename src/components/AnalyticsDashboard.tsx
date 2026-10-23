@@ -146,19 +146,21 @@ function ActivityFeed({ trades }: { trades: DashboardData['recentTrades'] }) {
 }
 
 // ── Top Pairs ──
-function PopularPairs({ data }: { data: DashboardData['topPairs'] }) {
+// [fix/functional-chain-ui F4] /api/analytics ranks (and cuts to 10) by volumeUsd, so the row shows
+// volume — printing tradeCount made a correctly ranked list look unsorted. Trades stay in the tooltip.
+export function PopularPairs({ data }: { data: DashboardData['topPairs'] }) {
   if (data.length === 0) return null
   return (
     <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-4">
       <h3 className="mb-3 text-xs font-semibold text-cream-65">Popular Pairs</h3>
       <div className="space-y-1.5">
         {data.slice(0, 6).map((p, i) => (
-          <div key={p.pair} className="flex items-center justify-between text-xs">
+          <div key={p.pair} className="flex items-center justify-between text-xs" title={`${p.tradeCount} trades`}>
             <span className="flex items-center gap-2">
               <span className="w-4 text-right tabular-nums text-cream-35">{i + 1}</span>
               <span className="font-medium text-cream-65">{p.pair}</span>
             </span>
-            <span className="tabular-nums text-cream-50">{p.tradeCount} trades</span>
+            <span className="tabular-nums text-cream-50">{formatUsd(p.volumeUsd)}</span>
           </div>
         ))}
       </div>
@@ -167,7 +169,7 @@ function PopularPairs({ data }: { data: DashboardData['topPairs'] }) {
 }
 
 // ── Daily Volume Mini Chart ──
-function DailyVolumeChart({ data }: { data: DashboardData['dailyVolume'] }) {
+export function DailyVolumeChart({ data }: { data: DashboardData['dailyVolume'] }) {
   const maxVol = Math.max(...data.map(d => d.volumeUsd), 1)
   if (data.length === 0) return null
 

@@ -5,7 +5,7 @@ Display/plumbing only. Source rows: `site-claims-bugs-2026-10-12.md` F1–F4, C8
 ## Checklist
 - [x] C1 F1 footer follows the selected chain
 - [x] C2 F2 KyberSwap route names · F3 gas USD-first
-- [ ] C3 F4 Analytics pairs metric + volume trend order
+- [x] C3 F4 Analytics pairs metric + volume trend order
 - [ ] C4 C8 logo + DefiLlama proxies, CSP hosts removed
 - [ ] C5 C9 meta description
 - [ ] Verify: suite vs main, lint delta 0, tsc, diff --stat, push
@@ -29,3 +29,7 @@ Reads outside the list (recorded): `src/lib/chains/{registry,types,tokens,index}
    falls back to `sourceLabel(source)` (= 'KyberSwap' for Kyber; correct name if another source ever emits an address).
 3. F3 — "Est. gas" row: 0.0000012/$0.0036 → `<$0.01 (~0.0000012 ETH)`; 0.0031/$9.30 → `$9.30 (~0.0031 ETH)`;
    usd 0 → `~0.0031 ETH`.
+   F4 — chose DISPLAY VOLUME (server ranks + cuts top 10 by volumeUsd; re-sorting by trades would rank a
+   volume-cut list). 5-day fixture (`__fixtures__/analytics-five-days.ts`): pairs `WBTC/USDC $5.0K, WETH/USDC
+   $3.0K, WETH/DAI $170.00` (trades 1/2/5 → tooltip); dailyVolume `20 Jun…24 Jun` ascending, also for reversed
+   input (2/2 red on old route). Sort key = bucket's earliest timestamp (label "24 Jun" has no year).
