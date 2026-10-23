@@ -35,7 +35,7 @@ On the 4 surfaces at origin/main: **11 failed / 30 passed** (29, "0.1%", ">8%", 
 Non-test, excl. deprecated Beta* files: **0**. Test files: 34 lines = 23 dead `vi.mock('…BetaDisclaimer')` (left: tests outside accepted scope) + 11 in the new guard tests / `beta-disclaimer` testid.
 
 ## 5. Verify
-Suite 4452 (main) → **4587**, 302 files, 0 failed · lint 93 → 93 (delta 0, 0 errors) · tsc clean · 21 files, +646/−79 (`git diff --stat origin/main...HEAD`). One existing test flipped (LimitOrderPanel: disclaimer no longer rendered). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
+Suite 4452 (main) → **4587**, 302 files, 0 failed · lint 93 → 93 (delta 0, 0 errors) · tsc clean · 21 files, +813/−101 (`git diff --stat origin/main...HEAD`). One existing test flipped (LimitOrderPanel: disclaimer no longer rendered). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
 
 ## Left open
 Prose-only figures with no proof line: "100% through a single DEX" (illustrative), SL/TP slippage ordering ("wider" vs take profit) is design intent, not code-proven. "Zero data leaks"/"IP never exposed" vs C8 browser-direct logo/DefiLlama calls (not in this goal). `useApproval.ts` lines cited from recon only.
