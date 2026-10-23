@@ -10,6 +10,7 @@
  *     → 400 a chainId without a Trust Wallet folder, or a malformed address
  *     → 404 upstream miss / timeout / non-image / oversized body — a missing logo is cosmetic,
  *           <TokenLogo> advances to its generated avatar on any error status
+ *     → 429 past the per-IP limit (QUOTE_RATE_LIMIT, no-store)
  *
  * Not an open proxy: the upstream URL is a FIXED template. Only the chain folder (from a Map) and
  * the address (validated, then re-checksummed by viem) vary, so a caller cannot steer the fetch
@@ -20,6 +21,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAddress, isAddress } from 'viem'
+import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { trustedClientIp } from '@/lib/trusted-ip'
 
 /** chainId → Trust Wallet `blockchains/<folder>`. A Map so no key can reach a prototype property. */
 const TRUST_WALLET_CHAIN = new Map<number, string>([
@@ -54,6 +57,28 @@ function miss(): NextResponse {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  // Same limiter, limit and 429 shape as GET /api/quote (src/app/api/quote/route.ts:104-118). Edge-cached
+  // logos never reach this function, so only misses count; the 429 is no-store so a throttled
+  // request is never pinned in the CDN or the browser cache in place of the logo.
+  const rateCheck = await checkRateLimit(
+    `logo:${trustedClientIp(req)}`,
+    QUOTE_RATE_LIMIT.limit,
+    QUOTE_RATE_LIMIT.windowMs,
+  )
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Try again in a minute.' },
+      {
+        status: 429,
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
+    )
+  }
+
   const folder = trustWalletFolder(req.nextUrl.searchParams.get('chainId'))
   const rawAddress = req.nextUrl.searchParams.get('address') ?? ''
   if (!folder || !isAddress(rawAddress, { strict: false })) {

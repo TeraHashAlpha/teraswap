@@ -12,6 +12,7 @@ vi.mock('@/lib/defillama', () => ({
 }))
 const mockCheckRateLimit = vi.fn()
 vi.mock('@/lib/kv-rate-limiter', () => ({
+  QUOTE_RATE_LIMIT: { limit: 30, windowMs: 60_000 },
   checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
 }))
 
@@ -81,5 +82,38 @@ describe('/api/price/defillama — lookup', () => {
     expect(res.status).toBe(429)
     expect(mockCheckRateLimit.mock.calls[0][0]).toBe('defillama-price:203.0.113.7')
     expect(mockFetchDefiLlamaPrice).not.toHaveBeenCalled()
+  })
+
+  it('429 is no-store with the standard headers; the limit is the shared QUOTE_RATE_LIMIT', async () => {
+    mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: 123 })
+    const res = await GET(req({ chainId: '8453', address: UNI_BASE }))
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(res.headers.get('x-ratelimit-remaining')).toBe('0')
+    expect(res.headers.get('x-ratelimit-reset')).toBe('123')
+    expect(mockCheckRateLimit).toHaveBeenCalledWith('defillama-price:203.0.113.7', 30, 60_000)
+  })
+
+  it('keys on the trusted IP, not a client-written x-forwarded-for token', async () => {
+    const spoofed = new NextRequest(`http://localhost/api/price/defillama?chainId=8453&address=${UNI_BASE}`, {
+      headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.7', 'x-vercel-forwarded-for': '198.51.100.9' },
+    })
+    await GET(spoofed)
+    expect(mockCheckRateLimit.mock.calls[0][0]).toBe('defillama-price:198.51.100.9')
+  })
+
+  it('N+1 requests from one IP: the allowed path keeps its 30 s cache, the (N+1)th is 429', async () => {
+    const seen = new Map<string, number>()
+    mockCheckRateLimit.mockImplementation(async (key: string, limit: number) => {
+      const n = (seen.get(key) ?? 0) + 1
+      seen.set(key, n)
+      return { allowed: n <= limit, remaining: Math.max(0, limit - n), resetAt: 123 }
+    })
+    for (let i = 0; i < 30; i++) {
+      const ok = await GET(req({ chainId: '8453', address: UNI_BASE }))
+      expect(ok.status).toBe(200)
+      expect(ok.headers.get('cache-control')).toContain('s-maxage=30')
+    }
+    expect((await GET(req({ chainId: '8453', address: UNI_BASE }))).status).toBe(429)
+    expect(mockFetchDefiLlamaPrice).toHaveBeenCalledTimes(30)
   })
 })

@@ -17,11 +17,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { isAddress } from 'viem'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
-import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { trustedClientIp } from '@/lib/trusted-ip'
 import { getChainConfig, getSupportedChainIds } from '@/lib/chains/registry'
-
-// The panel asks for at most two tokens per pair change; 30/min per IP is generous for that.
-const DEFILLAMA_PRICE_RATE_LIMIT = { limit: 30, windowMs: 60_000 } as const
 
 const PRICE_CACHE_CONTROL = 'public, max-age=30, s-maxage=30'
 
@@ -33,16 +31,25 @@ function resolveChainId(raw: string | null): number | null {
 }
 
 export async function GET(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  // Same limiter, limit and 429 shape as GET /api/quote (src/app/api/quote/route.ts:104-118). The panel
+  // asks for at most two tokens per pair change, well under QUOTE_RATE_LIMIT. The IP is the trusted one:
+  // the left-most x-forwarded-for token is client-writable and would let a caller dodge the limit.
   const rateCheck = await checkRateLimit(
-    `defillama-price:${ip}`,
-    DEFILLAMA_PRICE_RATE_LIMIT.limit,
-    DEFILLAMA_PRICE_RATE_LIMIT.windowMs,
+    `defillama-price:${trustedClientIp(req)}`,
+    QUOTE_RATE_LIMIT.limit,
+    QUOTE_RATE_LIMIT.windowMs,
   )
   if (!rateCheck.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded. Try again in a minute.' },
-      { status: 429, headers: { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': String(rateCheck.resetAt) } },
+      {
+        status: 429,
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
     )
   }
 

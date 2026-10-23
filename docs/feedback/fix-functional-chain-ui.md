@@ -38,7 +38,7 @@ mock, same mock fn), `TokenLogo.test.tsx`, `api/{token-logo,portfolio/prices}`, 
 - Kyber label shows only the first split path (pre-existing `route[0]`); Arbitrum logos now use Trust Wallet `arbitrum` (was `ethereum`).
 
 ## Follow-up (commits 6–8, 2026-10-23, Sonnet 5.5)
-- [x] C6 CodeQL ReDoS on the grep test · [ ] C7 rate limit · [ ] C8 token-logo stream + help-content · [ ] verify + push
+- [x] C6 CodeQL ReDoS on the grep test · [x] C7 rate limit · [ ] C8 token-logo stream + help-content · [ ] verify + push
 Premises that were stale (owner may override): `/api/price/defillama` ALREADY had a 30/min/IP limit + 429 test (`route.ts:24,37`);
 CodeQL queries live at `Performance/ReDoS.ql` + `Performance/PolynomialReDoS.ql` (pack 2.4.8), not `Security/CWE-1333/`.
 Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter.ts` (the helper), `src/app/api/quote/route.ts:104-118`.
@@ -48,3 +48,9 @@ Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter
    (91 `'use client'`, 0 disagreements); 14 tests incl. `'//'.repeat(50_000)` < 2 s.
    Local CodeQL (`scripts/codeql-local.sh`, same DB for both): before ReDoS **2** (`no-browser-third-party.test.ts:40` ×2),
    PolynomialReDoS 0 → after ReDoS **0**, PolynomialReDoS **0**. No dismissals.
+2. **Rate limit.** Reused `checkRateLimit` (`src/lib/kv-rate-limiter.ts:155`) + `QUOTE_RATE_LIMIT` 30/min (`:28`) + `trustedClientIp`
+   (`src/lib/trusted-ip.ts`), copied from `GET /api/quote` (`src/app/api/quote/route.ts:104-118`; 429 + `X-RateLimit-Remaining/Reset`).
+   `/api/proxy/logo` new: key `logo:<ip>`, 429 is `no-store` (never CDN-pinned); validation after the check, edge hits never reach it.
+   `/api/price/defillama` already limited — only moved off its left-most `x-forwarded-for` read (client-writable → limit bypass) onto
+   `trustedClientIp` + the shared constant (same 30/min). Tests: logo 30 pass → 31st 429 (fetch not called, headers, per-IP buckets,
+   spoofed XFF ignored, 200 path keeps 24 h `public` cache); defillama same + N+1. 6 red on old routes, 46/46 green.
