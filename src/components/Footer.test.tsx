@@ -88,6 +88,35 @@ describe('Footer follows the selected chain', () => {
   })
 })
 
+/**
+ * [fix/fmtint-bigint] useBlockNumber returns a bigint. fmtInt scaled it as an 18-dp token
+ * amount (5e-11 → round → "0"), so production showed "Base · Block #0". The tests above mocked
+ * a bigint but only asserted the href (template-interpolated, never formatted) — this pins the text.
+ */
+describe('Footer renders the block number as a plain integer', () => {
+  beforeEach(() => {
+    useBlockNumberMock.mockReset()
+    useBlockNumberMock.mockReturnValue({ data: 52656825n })
+    useAccountMock.mockReturnValue({ chain: undefined, isConnected: false })
+    useDisconnectedChainSelection.getState().setChainId(8453)
+  })
+
+  afterEach(() => {
+    cleanup()
+    useDisconnectedChainSelection.getState().setChainId(null)
+    useBlockNumberMock.mockReset()
+    useBlockNumberMock.mockImplementation(() => ({ data: 12345678n }))
+  })
+
+  it('52656825n → "Base · Block #52 656 825" (thin-space grouped), explorer href ends /block/52656825', () => {
+    render(<Footer />)
+
+    const link = screen.getByRole('link', { name: /^Base · Block #/ })
+    expect(link.textContent).toBe('Base · Block #52\u2009656\u2009825')
+    expect(link.getAttribute('href')).toMatch(/\/block\/52656825$/)
+  })
+})
+
 describe('Footer block-number polling', () => {
   it('uses a query-based refetchInterval, not a bare watch subscription', () => {
     render(<Footer />)

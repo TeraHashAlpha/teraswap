@@ -58,7 +58,14 @@ const THIN_SPACE = '\u2009'
 const MINUS = '\u2212'
 const DASH = '\u2014'
 
-/** Input accepted by the numeric formatters. null/undefined/NaN render as "—". */
+/**
+ * Input accepted by the numeric formatters. null/undefined/NaN render as "—".
+ *
+ * bigint rule: a bigint is an exact INTEGER in the unit the formatter displays
+ * (a block number, a count) and is only ever scaled by 10^decimals where the
+ * formatter's signature takes `decimals` (`fmtToken`). `fmtInt`, `fmtFixed`,
+ * `fmtUsd`, `fmtPct` and `fmtGas` take no `decimals`, so their bigints are not scaled.
+ */
 export type FmtInput = number | string | bigint | null | undefined
 
 /** Shortest decimal string for a bigint scaled by 10^decimals (exact, no floats). */
@@ -70,8 +77,12 @@ function bigintToDecimalString(value: bigint, decimals: number): string {
   return `${neg ? '-' : ''}${intPart}${fracPart ? `.${fracPart}` : ''}`
 }
 
-/** Normalise any accepted input to a finite number, or null when not displayable. */
-function toFiniteNumber(value: FmtInput, decimals = 18): number | null {
+/**
+ * Normalise any accepted input to a finite number, or null when not displayable.
+ * `decimals` only scales a bigint and defaults to 0 (plain integer) — callers that
+ * mean a wei-style amount (`fmtToken`) must say so.
+ */
+function toFiniteNumber(value: FmtInput, decimals = 0): number | null {
   if (value === null || value === undefined) return null
   let n: number
   if (typeof value === 'bigint') n = Number(bigintToDecimalString(value, decimals))
