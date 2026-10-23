@@ -1,6 +1,10 @@
 import { SUPPORT_EMAIL } from '@/lib/constants'
 
 /**
+ * @deprecated No longer rendered (fix/site-claims): trading panels no longer repeat a per-panel
+ * disclaimer; the Footer carries one neutral risk line (FOOTER_RISK_LINE). Kept, not deleted —
+ * CLAUDE.md rule #4.
+ *
  * Muted footer disclaimer shown at the bottom of each trading panel.
  * Pure presentational — no state, no client directive needed.
  */

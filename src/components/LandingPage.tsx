@@ -22,7 +22,13 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
+  LANDING_PREVIEW_AMOUNT_IN,
+  PLATFORM_FEE_LABEL,
+  PRIVACY_BADGE,
   SWAP_CHAIN_LIST_LABEL,
+  VERIFICATION_SUMMARY,
+  chainNameFor,
+  chainlinkFeedCountFor,
 } from '@/config/product-claims'
 import { useQuote } from '@/hooks/useQuote'
 import { useQuoteChainId } from '@/hooks/useChainId'
@@ -186,7 +192,6 @@ function AnimatedCounter({
 // highest-traffic surface in the app — /api/quote's own server-side cache
 // (see the quote route) is what keeps N anonymous visitors here from each
 // fanning out to every liquidity source.
-const LANDING_PREVIEW_AMOUNT_IN = '0.5'
 
 /**
  * [fix/landing-preview-chain-aware] Resolve a preview leg against the GIVEN chain, the
@@ -258,7 +263,7 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
         <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
           <div className="flex items-center justify-between">
             <span className="text-2xl font-bold text-cream" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              0.5
+              {LANDING_PREVIEW_AMOUNT_IN}
             </span>
             <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
               <span className="text-sm font-semibold text-cream">ETH</span>
@@ -287,7 +292,7 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
             </div>
             <div className="mt-1 flex justify-between">
               <span>Platform fee</span>
-              <span>0.1%</span>
+              <span>{PLATFORM_FEE_LABEL}</span>
             </div>
           </div>
         )}
@@ -312,15 +317,14 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
 // ══════════════════════════════════════════════════════════
 
 function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
-  // Three anchor numbers pulled above the H1 (Stat-Led DNA).
-  // Values per docs/Prompts/SPRINT-27B.md → Prompt 69.
-  // NOTE: "2 verification layers" departs from the SecuritySection stats
-  // bar ("7 Independent validation layers"). Prompts 69 and 71 are both
-  // explicit; an Architect-side reconciliation is queued.
-  const ANCHOR_STATS: { v: number; label: string }[] = [
+  // Three anchor numbers pulled above the H1 (Stat-Led DNA). Every figure is a slot of
+  // product-claims.ts — the verification line reads the same VERIFICATION_CHECKS list as the
+  // Security section's stats bar, and the feed count is the active chain's own registry.
+  const chainId = useQuoteChainId()
+  const ANCHOR_STATS: { v?: number; text?: string; label: string }[] = [
     { v: INTEGRATED_DEX_SOURCE_COUNT, label: 'LIQUIDITY SOURCES' },
-    { v: 2,  label: 'VERIFICATION LAYERS' },
-    { v: 29, label: 'CHAINLINK ORACLES' },
+    { text: VERIFICATION_SUMMARY, label: 'VERIFICATION' },
+    { v: chainlinkFeedCountFor(chainId), label: `CHAINLINK ORACLES · ${chainNameFor(chainId)}` },
   ]
 
   return (
@@ -341,7 +345,11 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
                   className="font-display text-[40px] sm:text-[52px] md:text-[60px] font-bold leading-none text-cream"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
-                  <AnimatedCounter value={s.v} immediate />
+                  {s.text !== undefined ? (
+                    <span className="text-[20px] sm:text-[24px] md:text-[28px]">{s.text}</span>
+                  ) : (
+                    <AnimatedCounter value={s.v ?? 0} immediate />
+                  )}
                 </dd>
                 <dt className="mt-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.12em] text-cream-75">
                   {s.label}
@@ -420,7 +428,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         <span aria-hidden className="text-cream-35">·</span>
         <span>Powered by Chainlink</span>
         <span aria-hidden className="text-cream-35">·</span>
-        <span>IP-protected</span>
+        <span>{PRIVACY_BADGE}</span>
       </div>
     </section>
   )

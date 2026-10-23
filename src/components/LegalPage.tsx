@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 
 import { SUPPORT_EMAIL } from '@/lib/constants'
+import { INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
 
 type LegalType = 'privacy' | 'terms'
 
@@ -35,9 +36,8 @@ function PrivacyPolicy() {
       <P>
         TeraSwap is a non-custodial, client-side interface. We do not take custody of your digital
         assets at any time. All transactions are executed directly between your wallet and the
-        underlying smart contracts of third-party protocols (including but not limited to Uniswap,
-        1inch, 0x/Matcha, ParaSwap, Odos, KyberSwap, CoW Protocol, OpenOcean, SushiSwap, and
-        Balancer). Your private keys never leave your device.
+        underlying smart contracts of third-party protocols (including but not limited to
+        {formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}). Your private keys never leave your device.
       </P>
 
       <SectionTitle id="pp-collect">3. Information We Collect</SectionTitle>
@@ -194,9 +194,8 @@ function TermsOfService() {
       <P>
         TeraSwap is a decentralized exchange meta-aggregator that provides a client-side interface
         for comparing and executing token swaps across multiple decentralized exchange protocols
-        on the Ethereum network. The Interface queries third-party protocols including, but not
-        limited to, Uniswap V3, 1inch, 0x/Matcha, ParaSwap, Odos, KyberSwap, CoW Protocol,
-        OpenOcean, SushiSwap, and Balancer.
+        on {SWAP_CHAIN_LIST_LABEL}. The Interface queries third-party protocols including, but not
+        limited to, {formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}.
       </P>
       <P>
         The Interface is a front-end application only. We do not operate, control, or have custody

@@ -5,6 +5,9 @@ import { useState, useEffect, useRef } from 'react'
 const STORAGE_KEY = 'teraswap_beta_banner_dismissed'
 
 /**
+ * @deprecated No longer rendered (fix/site-claims): the UI carries one neutral risk line in the
+ * Footer instead (FOOTER_RISK_LINE). Kept, not deleted — CLAUDE.md rule #4.
+ *
  * Dismissible beta warning banner — sits above the fixed header.
  * Sets a CSS custom property --beta-banner-h on <html> so the header
  * (and anything else) can offset itself via `top: var(--beta-banner-h, 0px)`.

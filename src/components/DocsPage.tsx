@@ -3,13 +3,39 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
-import { SUPPORT_EMAIL } from '@/lib/constants'
+import { DISABLED_SOURCES, SUPPORT_EMAIL } from '@/lib/constants'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCES_CLAIM,
+  INTEGRATED_DEX_SOURCE_LABELS,
+  ADMIN_TIMELOCK_GRACE_DAYS,
+  ADMIN_TIMELOCK_HOURS,
+  ADMIN_TRANSFER_TIMELOCK_DAYS,
+  CHAINLINK_STALENESS_CLAIM,
+  CROSS_QUOTE_WARN_PCT,
+  DEFILLAMA_BLOCK_PCT,
+  DEFILLAMA_HIGH_VALUE_USD_LABEL,
+  OUTLIER_MEDIAN_MULTIPLE,
+  PLATFORM_FEE_BPS,
+  PLATFORM_FEE_LABEL,
+  PRIVACY_BADGE,
+  PRIVACY_DIRECT_NOTE,
+  PRIVACY_PROXY_CLAIM,
+  PRICE_DEVIATION_BLOCK_PCT,
+  PRICE_DEVIATION_WARN_PCT,
+  QUOTE_TIMEOUT_SEC,
+  SLIPPAGE_CLAMP_MAX_PCT,
+  SLIPPAGE_CLAMP_MIN_PCT,
+  SPLIT_MIN_IMPROVEMENT_BPS_SLOT,
+  SPLIT_MIN_IMPROVEMENT_PCT,
   SWAP_CHAIN_LIST_LABEL,
+  UNISWAP_FEE_TIER_COUNT,
+  UNISWAP_FEE_TIER_LABELS,
+  chainNameFor,
+  chainlinkFeedCountFor,
   isOrderTypeLive,
 } from '@/config/product-claims'
+import { useQuoteChainId } from '@/hooks/useChainId'
 
 // ── Animation helpers ─────────────────────────────────────
 
@@ -170,6 +196,9 @@ function SourceCard({ name, type, desc }: { name: string; type: string; desc: st
 
 export default function DocsPage() {
   const [activeSection, setActiveSection] = useState('overview')
+  const chainId = useQuoteChainId()
+  const chainName = chainNameFor(chainId)
+  const feedCount = chainlinkFeedCountFor(chainId)
 
   // Track scroll position to highlight active sidebar item
   useEffect(() => {
@@ -264,17 +293,16 @@ export default function DocsPage() {
             Every swap is validated against <strong className="text-cream">Chainlink price oracles</strong> and{' '}
             <strong className="text-cream">DefiLlama</strong> to protect against price manipulation, and intent-based
             execution via CoW Protocol provides <strong className="text-cream">MEV protection</strong> out of the box.
-            All external requests are routed through a <strong className="text-cream">server-side privacy proxy</strong> that
-            shields your IP from blockchain providers.
+            {PRIVACY_PROXY_CLAIM} See <em>Privacy</em> for what is not proxied.
           </p>
           <div className="flex flex-wrap gap-2">
             <Tag>Non-custodial</Tag>
             <Tag>Permissionless · no KYC</Tag>
             <Tag>{INTEGRATED_DEX_SOURCES_CLAIM}</Tag>
             <Tag>Multi-oracle verified</Tag>
-            <Tag>MEV protected</Tag>
-            <Tag>IP protected</Tag>
-            <Tag>Beta · unaudited</Tag>
+            <Tag>MEV protection on CoW routes</Tag>
+            <Tag>{PRIVACY_BADGE}</Tag>
+            <Tag>Not externally audited</Tag>
           </div>
         </AnimatedSection>
 
@@ -303,7 +331,7 @@ export default function DocsPage() {
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             TeraSwap integrates {INTEGRATED_DEX_SOURCE_COUNT} liquidity sources across three categories: API aggregators that
             themselves search hundreds of pools, direct on-chain protocols, and intent-based systems. Every
-            registered adapter is queried in parallel on each quote.
+            integrated adapter is queried in parallel on each quote; sources marked Disabled are listed for reference only and are never queried.
           </p>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">API Aggregators</h3>
@@ -313,9 +341,9 @@ export default function DocsPage() {
             <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching 400+ liquidity sources across DeFi." />
             <SourceCard name="0x / Matcha" type="Aggregator" desc="Professional-grade RFQ system; uses Permit2's pull model for allowances." />
             <SourceCard name="Velora (ParaSwap)" type="Aggregator" desc="Multi-path routing with MEV-aware execution strategies." />
-            <SourceCard name="Odos" type="Aggregator" desc="Smart order routing with atomic multi-hop path optimization." />
+            <SourceCard name="Odos" type="Disabled" desc={`Smart order routing with atomic multi-hop path optimization. Disabled: ${DISABLED_SOURCES.odos}.`} />
             <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across 100+ DEXs with auto-compounding." />
-            <SourceCard name="OpenOcean" type="Aggregator" desc="Cross-chain aggregation covering 40+ chains and 1000+ sources." />
+            <SourceCard name="OpenOcean" type="Disabled" desc={`Cross-chain aggregation covering 40+ chains and 1000+ sources. Disabled: ${DISABLED_SOURCES.openocean}.`} />
           </motion.div>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">Direct Protocols</h3>
@@ -324,7 +352,7 @@ export default function DocsPage() {
           >
             <SourceCard name="Uniswap V3" type="Direct" desc="On-chain concentrated liquidity with auto fee-tier detection across 4 pools." />
             <SourceCard name="SushiSwap" type="Direct" desc="RouteProcessor4 with smart routing across Sushi&apos;s native pools." />
-            <SourceCard name="Balancer" type="SOR" desc="Smart Order Router optimizing across weighted, stable, and boosted pools." />
+            <SourceCard name="Balancer" type="Disabled" desc={`Smart Order Router optimizing across weighted, stable, and boosted pools. Disabled: ${DISABLED_SOURCES.balancer}.`} />
             <SourceCard name="Curve Finance" type="On-Chain" desc="CurveRouterNG for optimized stablecoin and crypto pool swaps with minimal slippage." />
           </motion.div>
 
@@ -332,8 +360,8 @@ export default function DocsPage() {
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="grid gap-3 sm:grid-cols-2"
           >
-            <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order — full MEV protection, gasless execution." />
-            <SourceCard name="Bebop" type="RFQ" desc="Request-for-quote market makers via JAM settlement. Chain-aware adapter; participates when its partner key is configured." />
+            <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order — the MEV-protected route, with no gas paid by the user at execution." />
+            <SourceCard name="Bebop" type="Disabled" desc={`Request-for-quote market makers via JAM settlement. Disabled: ${DISABLED_SOURCES.bebop}.`} />
           </motion.div>
         </AnimatedSection>
 
@@ -350,13 +378,13 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'Parallel Fan-Out', desc: 'All registered sources are queried simultaneously, each with an independent 10-second timeout. No source blocks another — a slow API simply drops out of that round.' },
+              { num: '01', title: 'Parallel Fan-Out', desc: `All registered sources are queried simultaneously, each with an independent ${QUOTE_TIMEOUT_SEC}-second timeout. No source blocks another — a slow API simply drops out of that round.` },
               { num: '02', title: 'Gas-Aware Ranking', desc: 'Quotes ranked by net output considering estimated gas costs in USD. When outputs are close, cheaper gas wins the tiebreak. CoW Protocol (gasless for users) naturally benefits.' },
-              { num: '03', title: 'Statistical Outlier Detection', desc: 'True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above 3× median is rejected.' },
-              { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: 'Automatically tests all 4 fee tiers (0.01%, 0.05%, 0.3%, 1%) and selects the pool with best output. Results are cached for faster subsequent quotes.' },
-              { num: '05', title: 'Oracle Validation', desc: 'Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above 2% trigger a warning; above 3% the swap is blocked. A second server-side check via DefiLlama blocks swaps >8% below fair market value.' },
-              { num: '06', title: 'Cross-Quote Consensus', desc: 'The winning quote is compared against the median of all responding sources. If it deviates >5% from consensus, a warning is raised. Quotes >3× above median are automatically removed as outliers.' },
-              { num: '07', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 15%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.' },
+              { num: '03', title: 'Statistical Outlier Detection', desc: `True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above ${OUTLIER_MEDIAN_MULTIPLE}× median is rejected.` },
+              { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: `Automatically tests all ${UNISWAP_FEE_TIER_COUNT} fee tiers (${UNISWAP_FEE_TIER_LABELS.join(', ')}) and selects the pool with best output. Results are cached for faster subsequent quotes.` },
+              { num: '05', title: 'Oracle Validation', desc: `Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above ${PRICE_DEVIATION_WARN_PCT} trigger a warning; above ${PRICE_DEVIATION_BLOCK_PCT} the swap is blocked. A second server-side check via DefiLlama blocks swaps >${DEFILLAMA_BLOCK_PCT} below fair market value.` },
+              { num: '06', title: 'Cross-Quote Consensus', desc: `The winning quote is compared against the median of all responding sources. If it deviates >${CROSS_QUOTE_WARN_PCT} from consensus, a warning is raised. Quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are automatically removed as outliers.` },
+              { num: '07', title: 'Slippage Safety', desc: `User-configurable slippage clamped to [${SLIPPAGE_CLAMP_MIN_PCT}%, ${SLIPPAGE_CLAMP_MAX_PCT}%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.` },
               { num: '08', title: 'Chain-Aware EIP-712', desc: 'EIP-712 signing binds to the wallet\'s current chainId dynamically. This is what lets the order engine operate per-chain today — a separate OrderExecutor is deployed on both Ethereum Mainnet and Base — rather than being mainnet-only.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -386,17 +414,17 @@ export default function DocsPage() {
             variants={stagger} className="grid gap-4 sm:grid-cols-2"
           >
             {[
-              { title: 'Chainlink Oracle Validation', desc: 'Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The mainnet registry covers roughly 30 token feeds, with automatic deviation detection: warns at 2%, hard-blocks at 3%.', badge: 'Oracle' },
-              { title: 'DefiLlama Server-Side Check', desc: 'A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >8% below fair market value. If this secondary oracle is unreachable, swaps estimated above $10,000 are blocked while small swaps fail open.', badge: 'Oracle' },
-              { title: 'Cross-Quote Consensus', desc: 'The winning quote is validated against the median of all aggregator responses. Deviations >5% are flagged; quotes >3× above median are removed automatically.', badge: 'Safety' },
-              { title: 'Privacy Proxy', desc: 'All blockchain reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external RPC providers or DEX APIs.', badge: 'Privacy' },
-              { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where professional solvers compete — your trade is never exposed to sandwich attacks.', badge: 'MEV' },
+              { title: 'Chainlink Oracle Validation', desc: `Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The ${chainName} registry covers ${feedCount} token feeds, with automatic deviation detection: warns at ${PRICE_DEVIATION_WARN_PCT}, hard-blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`, badge: 'Oracle' },
+              { title: 'DefiLlama Server-Side Check', desc: `A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >${DEFILLAMA_BLOCK_PCT} below fair market value. If this secondary oracle is unreachable, swaps estimated above ${DEFILLAMA_HIGH_VALUE_USD_LABEL} are blocked while small swaps fail open.`, badge: 'Oracle' },
+              { title: 'Cross-Quote Consensus', desc: `The winning quote is validated against the median of all aggregator responses. Deviations >${CROSS_QUOTE_WARN_PCT} are flagged; quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are removed automatically.`, badge: 'Safety' },
+              { title: 'Privacy Proxy', desc: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE}`, badge: 'Privacy' },
+              { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where solvers compete, with no in-block ordering window for a sandwich bot to exploit. Other routes use the public mempool.', badge: 'MEV' },
               { title: 'Exact-Amount Approvals', desc: 'Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist — never an infinite/max-uint approval. (The 0x source uses Permit2\'s pull model, which still requires an on-chain approve to the Permit2 contract — TeraSwap does not ship gasless off-chain signature approvals as the general path.)', badge: 'Approval' },
               { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction — it never holds user funds between transactions.', badge: 'Trust' },
               { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
               { title: 'Token-Catalog Guard (CI)', desc: 'Every curated token is verified against its on-chain reality before it ships: contract bytecode must exist (no dead addresses), on-chain symbol() and decimals() must match the catalog entry (decimals are fund-affecting for swap sizing), the address must appear in a reputable per-chain token list, and no two catalog tokens may share a symbol on the same chain. This runs as a CI gate.', badge: 'Safety' },
-              { title: 'On-Chain Admin Timelocks', desc: 'Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a 48-hour delay (and expire if not executed within a 7-day grace window). An emergency pause is also available.', badge: 'Contract' },
-              { title: 'Beta · Unaudited', desc: 'TeraSwap is in beta and its smart contracts are unaudited — a site-wide banner and per-panel disclaimer say so. Contracts are deployed and verified on the block explorer; the underlying DEXs you route through have their own audited contracts.', badge: 'Notice' },
+              { title: 'On-Chain Admin Timelocks', desc: `Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a ${ADMIN_TIMELOCK_HOURS}-hour delay (and expire if not executed within a ${ADMIN_TIMELOCK_GRACE_DAYS}-day grace window). An emergency pause is also available.`, badge: 'Contract' },
+              { title: 'Audit Status', desc: 'TeraSwap\'s smart contracts have not been externally audited. Contracts are deployed and verified on the block explorer; the underlying DEXs you route through have their own audited contracts.', badge: 'Notice' },
             ].map((item) => (
               <motion.div key={item.title} variants={childFade}
                 whileHover={{ y: -2, borderColor: 'rgba(200,184,154,0.25)' }}
@@ -464,7 +492,7 @@ export default function DocsPage() {
             </li>
           </ul>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            For direct on-chain swaps (Uniswap V3, Curve, Balancer, SushiSwap), the trade does pass through
+            For direct on-chain swaps (Uniswap V3, Curve, SushiSwap), the trade does pass through
             the public mempool and isn&apos;t MEV-protected — that&apos;s why the price comparison
             explicitly accounts for the MEV-protected vs. public-mempool trade-off, and why CoW gets
             evaluated on every quote.
@@ -511,8 +539,8 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers — never yours.' },
-              { num: '02', title: 'API Proxy Layer', desc: 'All external aggregator API calls (1inch, 0x, CoW, Odos, KyberSwap, etc.) are also proxied server-side through /api/quote and /api/swap. Your browser never makes direct requests to these services.' },
+              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers while the proxy is reachable (see Graceful Degradation).' },
+              { num: '02', title: 'API Proxy Layer', desc: `All external aggregator API calls (${INTEGRATED_DEX_SOURCE_LABELS.join(', ')}) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services.` },
               { num: '03', title: 'Method Policy (Blacklist)', desc: 'The RPC proxy relays every read method by default and explicitly blocks only signing/transaction methods (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). A blacklist is used deliberately — a method whitelist devolves into whack-a-mole. Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
               { num: '04', title: 'Rate Limiting', desc: '300 requests per IP per minute on the RPC proxy to prevent abuse. The swap endpoint is limited to 20 requests per minute.' },
               { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
@@ -560,7 +588,7 @@ export default function DocsPage() {
           <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
             <span className="font-semibold text-cream-65">Note:</span> Your wallet&apos;s own RPC connection (MetaMask, Coinbase Wallet, etc.)
             and transaction signing are handled by your wallet directly and are not proxied. For maximum privacy,
-            configure a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect).
+            configure a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect). {PRIVACY_DIRECT_NOTE}
           </div>
         </AnimatedSection>
 
@@ -570,7 +598,7 @@ export default function DocsPage() {
         <AnimatedSection id="fee-structure">
           <SectionTitle icon="◇" title="Fee Structure" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap charges a flat <strong className="text-cream">0.1% (10 bps)</strong> platform fee, deducted from
+            TeraSwap charges a flat <strong className="text-cream">{PLATFORM_FEE_LABEL} ({PLATFORM_FEE_BPS} bps)</strong> platform fee, deducted from
             the input amount before the swap and collected on-chain by the <strong className="text-cream">TeraSwapFeeCollector</strong> contract.
             The collector pulls the input, takes the fee, forwards the net amount to the DEX router, and atomically
             refunds any leftover input and ETH in the same transaction — so it never holds your funds between
@@ -590,12 +618,12 @@ export default function DocsPage() {
               <tbody className="text-cream-50">
                 <tr style={{ borderTop: '1px solid #1E2530' }}>
                   <td className="px-5 py-3 font-medium text-cream">Platform fee</td>
-                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>0.1%</td>
+                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>{PLATFORM_FEE_LABEL}</td>
                   <td className="px-5 py-3">Deducted from input amount before swap. Fully transparent.</td>
                 </tr>
                 <tr style={{ borderTop: '1px solid #1E2530' }}>
                   <td className="px-5 py-3 font-medium text-cream">Pool fee (Uniswap V3)</td>
-                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>0.01% – 1%</td>
+                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>{UNISWAP_FEE_TIER_LABELS[0]} – {UNISWAP_FEE_TIER_LABELS[UNISWAP_FEE_TIER_LABELS.length - 1]}</td>
                   <td className="px-5 py-3">Charged by the liquidity pool. TeraSwap auto-selects the cheapest tier.</td>
                 </tr>
                 <tr style={{ borderTop: '1px solid #1E2530' }}>
@@ -642,7 +670,7 @@ export default function DocsPage() {
               { num: '03', title: 'On-Chain Validation (canExecute)', desc: 'Before any execution the contract independently re-checks the order signature, that it is not cancelled or nonce-invalidated, that it has not expired, the router whitelist, the schedule, the price condition, and that your balance and allowance still cover the amount. The same checks are re-enforced inside executeOrder — the gate is on-chain, not advisory.' },
               { num: '04', title: 'Chainlink Price Conditions', desc: 'Limit and stop-loss / take-profit orders carry a Chainlink price feed plus a target price and a direction (above / below). The order is only eligible once the on-chain feed crosses the trigger. (A pure DCA order carries no price condition — see the DCA section.)' },
               { num: '05', title: 'Cancel & Mass-Invalidate', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all of your pending orders at once. You stay in control of your own funds throughout.' },
-              { num: '06', title: 'Keeper Signs in an HSM', desc: 'The off-chain keeper that submits executions signs with a key held in a hardware security module (AWS KMS): the private key never leaves the HSM and only signatures are returned. Adding or rotating a keeper, changing the router whitelist, or sweeping funds is gated by a 48-hour on-chain timelock (admin transfer uses a longer 7-day delay), each with a 7-day grace window.' },
+              { num: '06', title: 'Keeper Signs in an HSM', desc: `The off-chain keeper that submits executions signs with a key held in a hardware security module (AWS KMS): the private key never leaves the HSM and only signatures are returned. Adding or rotating a keeper, changing the router whitelist, or sweeping funds is gated by a ${ADMIN_TIMELOCK_HOURS}-hour on-chain timelock (admin transfer uses a longer ${ADMIN_TRANSFER_TIMELOCK_DAYS}-day delay), each with a ${ADMIN_TIMELOCK_GRACE_DAYS}-day grace window.` },
               { num: '07', title: 'Fail-Closed, Chain-Aware', desc: 'The engine refuses to sign, read, or execute on any chain without a wired OrderExecutor, and the EIP-712 domain is bound to the connected chain. Order creation is rejected server-side — before the signature is even verified — for any chain whose executor is not in the fixed allowlist. Today only Ethereum Mainnet and Base are wired.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -818,7 +846,7 @@ export default function DocsPage() {
         <AnimatedSection id="split-routing">
           <SectionTitle icon="⫘" title="Split Routing" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            For large trades, routing 100% through a single DEX causes significant price impact.
+            For large trades, routing the whole trade through a single DEX causes significant price impact.
             TeraSwap&apos;s split routing engine automatically divides the trade across multiple
             sources to minimize slippage and maximize output.
           </p>
@@ -829,8 +857,8 @@ export default function DocsPage() {
             {[
               { num: '01', title: 'Quote Collection', desc: 'Split-eligible sources are queried at multiple sub-amounts in parallel (the set of percentages is derived from the candidate split configurations). Each source reports its output for each partial amount.' },
               { num: '02', title: 'Combinatorial Optimization', desc: 'The engine tests all 2-way and 3-way split configurations across eligible sources. Pre-defined splits (50/50, 60/40, 70/30, 80/20, 50/30/20, etc.) are evaluated for every pairwise and triple source combination.' },
-              { num: '03', title: 'Gas-Adjusted Comparison', desc: 'Each split candidate\'s total output is compared against the best single-source quote. Gas costs are factored in — a split that gains 0.1% but doubles gas cost may not be worth it.' },
-              { num: '04', title: 'Visualization & Execution', desc: 'When a split improves output by ≥0.1% (10 bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions — one per leg — with the pre-computed amounts.' },
+              { num: '03', title: 'Gas-Adjusted Comparison', desc: `Each split candidate's total output is compared against the best single-source quote. Gas costs are factored in — a split that gains ${SPLIT_MIN_IMPROVEMENT_PCT} but doubles gas cost may not be worth it.` },
+              { num: '04', title: 'Visualization & Execution', desc: `When a split improves output by ≥${SPLIT_MIN_IMPROVEMENT_PCT} (${SPLIT_MIN_IMPROVEMENT_BPS_SLOT} bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions — one per leg — with the pre-computed amounts.` },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
                 className="flex gap-4 rounded-xl border p-5"
@@ -904,10 +932,10 @@ export default function DocsPage() {
               { phase: 'Phase 1', status: 'Live', color: '#4ADE80', items: [
                 `Instant swaps on ${SWAP_CHAIN_LIST_LABEL}`,
                 `Meta-aggregator with ${INTEGRATED_DEX_SOURCES_CLAIM}`,
-                'Chainlink oracle price validation (2% warn / 3% block)',
+                `Chainlink oracle price validation (${PRICE_DEVIATION_WARN_PCT} warn / ${PRICE_DEVIATION_BLOCK_PCT} block)`,
                 'DefiLlama server-side oracle validation',
                 'Cross-quote median consensus validation',
-                'Privacy proxy (IP hidden from all external services)',
+                'Privacy proxy for RPC reads and aggregator quote / swap requests',
                 'MEV protection via CoW Protocol',
                 'Exact-amount approvals (no infinite approvals)',
                 'Active approvals manager with revoke',
@@ -928,7 +956,7 @@ export default function DocsPage() {
                 'Limit orders on the order engine (Chainlink-gated)',
                 'Stop loss + take profit (Chainlink-gated, adaptive slippage)',
                 'Base network activation for swaps',
-                'Bebop RFQ source',
+                `Bebop RFQ source (currently disabled: ${DISABLED_SOURCES.bebop})`,
               ] },
               { phase: 'Phase 3', status: 'Planned', color: 'rgba(200,184,154,0.4)', items: [
                 'Further multi-chain expansion (Arbitrum, Optimism)',

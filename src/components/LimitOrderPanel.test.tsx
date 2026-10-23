@@ -163,10 +163,10 @@ describe('LimitOrderPanel — connect prompt', () => {
   })
 })
 
-describe('LimitOrderPanel — beta disclaimer', () => {
-  it('renders the beta disclaimer regardless of tab', () => {
+describe('LimitOrderPanel — risk notice', () => {
+  it('does not repeat a per-panel disclaimer (the Footer carries the single risk line)', () => {
     renderWithProviders(<LimitOrderPanel />)
-    expect(screen.getByTestId('beta-disclaimer')).toBeInTheDocument()
+    expect(screen.queryByTestId('beta-disclaimer')).not.toBeInTheDocument()
   })
 })
 

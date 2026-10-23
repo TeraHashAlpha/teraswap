@@ -1,18 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { AGGREGATOR_META, DISABLED_SOURCES, type AggregatorName } from '@/lib/constants'
-import { ADAPTER_REGISTRY } from '@/lib/adapters'
+import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { INTEGRATED_DEX_SOURCE_NAMES } from '@/config/product-claims'
 
-// Sources shown in the toggle — every ADAPTER_REGISTRY adapter not present in
-// DISABLED_SOURCES. Derived (not hand-restated) so the list can never drift
-// from either the engine's real adapter set or the disabled-source registry:
-// a source that never quotes (odos, balancer, openocean, bebop — see
-// DISABLED_SOURCES in lib/constants.ts) would do nothing if toggled, so it
-// is never offered.
-export const TOGGLEABLE_SOURCES: AggregatorName[] = ADAPTER_REGISTRY
-  .map(adapter => adapter.name)
-  .filter(name => !DISABLED_SOURCES[name])
+// Sources shown in the toggle — the same product-claims list the landing page and the
+// "N integrated DEX sources" copy read (ADAPTER_REGISTRY minus DISABLED_SOURCES), so the
+// "x/y sources" label can never drift from either. A source that never quotes (odos, balancer,
+// openocean, bebop — see DISABLED_SOURCES in lib/constants.ts) would do nothing if toggled, so
+// it is never offered.
+export const TOGGLEABLE_SOURCES = [...INTEGRATED_DEX_SOURCE_NAMES] as AggregatorName[]
 
 interface SourceToggleProps {
   excludedSources: Set<string>

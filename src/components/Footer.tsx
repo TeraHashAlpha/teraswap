@@ -4,10 +4,14 @@ import { fmtInt } from '@/lib/format'
 import Link from 'next/link'
 import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
+import { COPYRIGHT_YEAR } from '@/config/product-claims'
 
 // Mainnet block time is ~12s; polling faster only reissues eth_blockNumber
 // calls that cannot return new information.
 export const FOOTER_BLOCK_POLL_MS = 12_000
+
+/** The one neutral risk line shown on every page (replaces the old banner and per-panel disclaimers). */
+export const FOOTER_RISK_LINE = 'Smart contracts have not been externally audited. Use at your own risk.'
 
 export default function Footer() {
   // [fix/footer-poll-hidden-tab] `watch:` is a viem watchBlockNumber subscription
@@ -47,7 +51,7 @@ export default function Footer() {
       <span className="text-cream-15">|</span>
       <a href={`mailto:${SUPPORT_EMAIL}`} className="py-2 text-cream-50 transition hover:text-cream active:text-cream sm:py-0" aria-label={`Email support at ${SUPPORT_EMAIL}`}>Contact</a>
       <span className="text-cream-15">|</span>
-      <span>&copy; 2026 TeraSwap</span>
+      <span>&copy; {COPYRIGHT_YEAR} TeraSwap</span>
       <span className="text-cream-15">|</span>
       <a
         href="https://terahelps.netlify.app/"
@@ -57,6 +61,7 @@ export default function Footer() {
       >
         TeraHelps
       </a>
+      <p className="basis-full text-center text-[10px] text-cream-35">{FOOTER_RISK_LINE}</p>
     </footer>
   )
 }
