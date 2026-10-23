@@ -30,9 +30,9 @@ export type SwapMode = 'instant' | 'portfolio' | 'dca' | 'limit' | 'sltp' | 'ord
 const COMING_SOON_MODES = new Set<SwapMode>(['dca', 'limit', 'sltp'])
 
 const COMING_SOON_META: Record<string, { icon: string; title: string; desc: string }> = {
-  dca:  { icon: '⟳', title: 'Smart DCA Engine', desc: 'Automated dollar-cost averaging with price-aware buying windows. Coming to L2 soon.' },
-  limit: { icon: '◇', title: 'Limit Orders', desc: 'Set your price and let the order execute autonomously on-chain. Coming to L2 soon.' },
-  sltp: { icon: '◆', title: 'Take Profit', desc: 'Lock in gains automatically when your target is hit. Coming to L2 soon.' },
+  dca:  { icon: '⟳', title: 'DCA', desc: 'Automated dollar-cost averaging on a fixed schedule, keeper-executed. Not available on this network yet.' },
+  limit: { icon: '◇', title: 'Limit Orders', desc: 'Set your price and let the order execute autonomously on-chain. Not available on this network yet.' },
+  sltp: { icon: '◆', title: 'Take Profit', desc: 'Lock in gains automatically when your target is hit. Not available on this network yet.' },
 }
 
 function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void }) {
@@ -44,7 +44,7 @@ function ComingSoonPanel({ mode, onSwap }: { mode: SwapMode; onSwap: () => void 
       <h3 className="text-xl font-bold text-cream">{meta.title}</h3>
       <p className="max-w-xs text-sm text-cream-50">{meta.desc}</p>
       <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-1.5 text-xs font-semibold text-amber-300">
-        Coming Soon on L2
+        Not live on this network
       </span>
       <button
         onClick={onSwap}

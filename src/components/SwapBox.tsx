@@ -52,7 +52,6 @@ import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
-import BetaDisclaimer from './BetaDisclaimer'
 
 export default function SwapBox() {
   const [tokenIn, setTokenIn] = useState<Token | null>(findToken('ETH') ?? null)
@@ -1223,8 +1222,6 @@ export default function SwapBox() {
         />
       )}
 
-      {/* Beta disclaimer */}
-      <BetaDisclaimer />
     </>
   )
 }

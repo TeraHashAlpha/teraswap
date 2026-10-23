@@ -39,7 +39,6 @@ import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
 import { ETHERSCAN_TX, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import TokenSelector from './TokenSelector'
-import BetaDisclaimer from './BetaDisclaimer'
 // [FEAT-DEPEG-GATE-ORDER-CREATION] The same, twice-audited cbETH depeg circuit-breaker SwapBox
 // uses — wired here so a Take-Profit (or, once live, Stop-Loss) order cannot be created against a
 // depegged/unverifiable pair with zero signal. Read-only reuse: neither the hook nor its
@@ -182,8 +181,6 @@ export default function ConditionalOrderPanel() {
         />
       )}
 
-      {/* Beta disclaimer */}
-      <BetaDisclaimer />
     </div>
   )
 }
