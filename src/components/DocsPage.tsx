@@ -17,6 +17,9 @@ import {
   OUTLIER_MEDIAN_MULTIPLE,
   PLATFORM_FEE_BPS,
   PLATFORM_FEE_LABEL,
+  PRIVACY_BADGE,
+  PRIVACY_DIRECT_NOTE,
+  PRIVACY_PROXY_CLAIM,
   PRICE_DEVIATION_BLOCK_PCT,
   PRICE_DEVIATION_WARN_PCT,
   QUOTE_TIMEOUT_SEC,
@@ -289,16 +292,15 @@ export default function DocsPage() {
             Every swap is validated against <strong className="text-cream">Chainlink price oracles</strong> and{' '}
             <strong className="text-cream">DefiLlama</strong> to protect against price manipulation, and intent-based
             execution via CoW Protocol provides <strong className="text-cream">MEV protection</strong> out of the box.
-            All external requests are routed through a <strong className="text-cream">server-side privacy proxy</strong> that
-            shields your IP from blockchain providers.
+            {PRIVACY_PROXY_CLAIM} See <em>Privacy</em> for what is not proxied.
           </p>
           <div className="flex flex-wrap gap-2">
             <Tag>Non-custodial</Tag>
             <Tag>Permissionless · no KYC</Tag>
             <Tag>{INTEGRATED_DEX_SOURCES_CLAIM}</Tag>
             <Tag>Multi-oracle verified</Tag>
-            <Tag>MEV protected</Tag>
-            <Tag>IP protected</Tag>
+            <Tag>MEV protection on CoW routes</Tag>
+            <Tag>{PRIVACY_BADGE}</Tag>
             <Tag>Not externally audited</Tag>
           </div>
         </AnimatedSection>
@@ -414,8 +416,8 @@ export default function DocsPage() {
               { title: 'Chainlink Oracle Validation', desc: `Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The ${chainName} registry covers ${feedCount} token feeds, with automatic deviation detection: warns at ${PRICE_DEVIATION_WARN_PCT}, hard-blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`, badge: 'Oracle' },
               { title: 'DefiLlama Server-Side Check', desc: `A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >${DEFILLAMA_BLOCK_PCT} below fair market value. If this secondary oracle is unreachable, swaps estimated above ${DEFILLAMA_HIGH_VALUE_USD_LABEL} are blocked while small swaps fail open.`, badge: 'Oracle' },
               { title: 'Cross-Quote Consensus', desc: `The winning quote is validated against the median of all aggregator responses. Deviations >${CROSS_QUOTE_WARN_PCT} are flagged; quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are removed automatically.`, badge: 'Safety' },
-              { title: 'Privacy Proxy', desc: 'All blockchain reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external RPC providers or DEX APIs.', badge: 'Privacy' },
-              { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where professional solvers compete — your trade is never exposed to sandwich attacks.', badge: 'MEV' },
+              { title: 'Privacy Proxy', desc: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE}`, badge: 'Privacy' },
+              { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where solvers compete, with no in-block ordering window for a sandwich bot to exploit. Other routes use the public mempool.', badge: 'MEV' },
               { title: 'Exact-Amount Approvals', desc: 'Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist — never an infinite/max-uint approval. (The 0x source uses Permit2\'s pull model, which still requires an on-chain approve to the Permit2 contract — TeraSwap does not ship gasless off-chain signature approvals as the general path.)', badge: 'Approval' },
               { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction — it never holds user funds between transactions.', badge: 'Trust' },
               { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
@@ -536,10 +538,10 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers — never yours.' },
-              { num: '02', title: 'API Proxy Layer', desc: 'All external aggregator API calls (1inch, 0x, CoW, Odos, KyberSwap, etc.) are also proxied server-side through /api/quote and /api/swap. Your browser never makes direct requests to these services.' },
+              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers while the proxy is reachable (see Graceful Degradation).' },
+              { num: '02', title: 'API Proxy Layer', desc: 'All external aggregator API calls (1inch, 0x, CoW, Odos, KyberSwap, etc.) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services.' },
               { num: '03', title: 'Method Policy (Blacklist)', desc: 'The RPC proxy relays every read method by default and explicitly blocks only signing/transaction methods (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). A blacklist is used deliberately — a method whitelist devolves into whack-a-mole. Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
-              { num: '04', title: 'Rate Limiting', desc: '300 requests per IP per minute on the RPC proxy to prevent abuse. The swap endpoint is limited to 20 requests per minute.' },
+              { num: '04', title: 'Rate Limiting', desc: 'The RPC proxy and the swap endpoint are rate-limited per IP to prevent abuse.' },
               { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -585,7 +587,7 @@ export default function DocsPage() {
           <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
             <span className="font-semibold text-cream-65">Note:</span> Your wallet&apos;s own RPC connection (MetaMask, Coinbase Wallet, etc.)
             and transaction signing are handled by your wallet directly and are not proxied. For maximum privacy,
-            configure a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect).
+            configure a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect). {PRIVACY_DIRECT_NOTE}
           </div>
         </AnimatedSection>
 
@@ -750,7 +752,7 @@ export default function DocsPage() {
               whitelisted DEX router.
             </p>
             <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
-              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses a <strong className="text-cream-65">wider default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses standard slippage like limit orders.
+              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop-Loss is deferred to the v4 executor; take profit is live.
             </div>
 
             <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
@@ -761,7 +763,7 @@ export default function DocsPage() {
                 { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'The trigger is evaluated against Chainlink on-chain price feeds — the industry standard for reliable, tamper-proof prices. The condition is checked on-chain inside the contract before any execution.' },
                 { num: '03', title: 'Automatic Execution', desc: 'You sign once upfront. When the trigger fires, the keeper executes the order on-chain via the OrderExecutor — no manual action needed at trigger time, and no gas paid by you at execution.' },
                 { num: '04', title: 'Whitelisted-Router Fill', desc: 'The triggered swap routes through a whitelisted DEX router (1inch by default), with a per-order minimum-output floor enforced on-chain.' },
-                { num: '05', title: 'Adaptive Slippage', desc: `Stop loss orders use a wider default slippage than take profit to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses standard slippage since there is no urgency to exit.` },
+                { num: '05', title: 'Adaptive Slippage', desc: `Orders carry a maximum-slippage bound. Stop-Loss is not live yet (deferred to the v4 executor); Take Profit is.` },
               ].map((step) => (
                 <motion.div key={step.num} variants={childFade}
                   className="flex gap-4 rounded-xl border p-5"
@@ -932,7 +934,7 @@ export default function DocsPage() {
                 `Chainlink oracle price validation (${PRICE_DEVIATION_WARN_PCT} warn / ${PRICE_DEVIATION_BLOCK_PCT} block)`,
                 'DefiLlama server-side oracle validation',
                 'Cross-quote median consensus validation',
-                'Privacy proxy (IP hidden from all external services)',
+                'Privacy proxy for RPC reads and aggregator quote / swap requests',
                 'MEV protection via CoW Protocol',
                 'Exact-amount approvals (no infinite approvals)',
                 'Active approvals manager with revoke',

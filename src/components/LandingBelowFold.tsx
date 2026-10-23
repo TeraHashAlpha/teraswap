@@ -20,7 +20,11 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_LABELS,
   INTEGRATED_DEX_SOURCE_NAMES,
+  OUTLIER_MEDIAN_MULTIPLE,
   POST_EXECUTION_SHORTFALL_WARN_PCT,
+  PRIVACY_BADGE,
+  PRIVACY_DIRECT_NOTE,
+  PRIVACY_PROXY_CLAIM,
   PRICE_DEVIATION_BLOCK_PCT,
   PRICE_DEVIATION_WARN_PCT,
   SWAP_CHAIN_LIST_LABEL,
@@ -588,12 +592,10 @@ function SecuritySection() {
             front-running and sandwich attacks depend on.
           </p>
           <p className="mt-4">
-            Your privacy matters too. All blockchain reads and aggregator API calls are routed through our{' '}
-            <span className="font-semibold">server-side privacy proxy</span> — your IP address is never exposed
-            to external infrastructure providers.
+            Your privacy matters too. {PRIVACY_PROXY_CLAIM} {PRIVACY_DIRECT_NOTE}
           </p>
           <p className="mt-4 text-center font-semibold text-cream">
-            Zero predatory extraction. Zero data leaks. Zero compromises.
+            MEV-protected CoW routes. Proxied RPC and quote requests.
           </p>
           <p className="mt-4">
             TeraSwap was built around one non-negotiable principle:{' '}
@@ -829,12 +831,12 @@ const FEATURES: {
   },
   {
     title: 'Statistical Outlier Detection',
-    desc: `True median-based filtering across all ${INTEGRATED_DEX_SOURCE_COUNT} sources removes manipulated quotes automatically. No bogus prices ever reach your screen.`,
+    desc: `True median-based filtering across all ${INTEGRATED_DEX_SOURCE_COUNT} sources automatically removes quotes more than ${OUTLIER_MEDIAN_MULTIPLE}× the median.`,
     icon: <FeatChartAlertIcon />,
   },
   {
     title: 'Privacy-First Architecture',
-    desc: 'All RPC reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external blockchain providers or DEX APIs.',
+    desc: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE}`,
     icon: <FeatLockIcon />,
   },
   {
@@ -983,7 +985,7 @@ function BottomCTASection({ onLaunchApp }: { onLaunchApp: () => void }) {
       </button>
 
       <div className="relative z-10 mt-6 text-[11px] font-medium uppercase tracking-[0.1em] text-cream-75">
-        Non-custodial · {SWAP_CHAIN_LIST_LABEL} · Powered by Chainlink · IP-protected
+        Non-custodial · {SWAP_CHAIN_LIST_LABEL} · Powered by Chainlink · {PRIVACY_BADGE}
       </div>
     </section>
   )

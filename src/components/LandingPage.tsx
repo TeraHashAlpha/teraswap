@@ -23,6 +23,7 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
   PLATFORM_FEE_LABEL,
+  PRIVACY_BADGE,
   SWAP_CHAIN_LIST_LABEL,
   VERIFICATION_SUMMARY,
   chainNameFor,
@@ -427,7 +428,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         <span aria-hidden className="text-cream-35">·</span>
         <span>Powered by Chainlink</span>
         <span aria-hidden className="text-cream-35">·</span>
-        <span>IP-protected</span>
+        <span>{PRIVACY_BADGE}</span>
       </div>
     </section>
   )

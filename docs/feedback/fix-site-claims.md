@@ -29,13 +29,14 @@ On the 4 surfaces at origin/main: **11 failed / 30 passed** (29, "0.1%", ">8%", 
 - Limit/SL-TP "CoW solvers…zero gas" / "CoW limit order auto-submitted" → OrderExecutor + keeper fill + 48-hour timelock · "Smart DCA Engine" → `DCA (…)` · "Engineered for the Ethereum Elite." → "Built for every EVM trader."
 - DCA card "price-aware…Chainlink" → "fixed schedule, keeper-executed" (DocsPage: DCA carries no price condition) · swap/page.tsx "Coming to L2 soon" → "Not available on this network yet"
 - DocsPage typed numbers (fee, >8%, >5%, 3×, $10,000, 10 s, 48 h/7 d, fee tiers, slippage clamp, split 0.1%) → slots · vendor "400+/100+/40+/1000+", "30-day", SL/TP "5%/2% slippage", limit "2% default" → reworded without figures (no proof line found)
+- Privacy/absolutes: "Your IP is never exposed" / "Zero data leaks" / "IP-protected" / "hides your IP from all external services" / "MEV-free" / "Absolute protection" / "Zero predatory extraction…" / "No bogus prices ever…" / "never exposed to sandwich attacks" / "300 requests…" → scoped to what is proven (`PRIVACY_*` slots: RPC + quote requests proxied; logos, DefiLlama lookup, wallet connection and proxy-down fallback are direct). Proof: DocsPage Privacy table + "Graceful Degradation", C8 recon row (TokenLogo.tsx:70, defillama.ts:9). SL/TP "wider slippage" → removed (Stop-Loss deferred: app/page.tsx).
 - Header `beta`, DocsPage "Beta · unaudited" → removed / "Not externally audited"; Beta* usages removed; Footer: `Smart contracts have not been externally audited. Use at your own risk.`
 
 ## 4. `grep -ri "beta\|experimental" src/components src/app`
 Non-test, excl. deprecated Beta* files: **0**. Test files: 34 lines = 23 dead `vi.mock('…BetaDisclaimer')` (left: tests outside accepted scope) + 11 in the new guard tests / `beta-disclaimer` testid.
 
 ## 5. Verify
-Suite 4452 (main) → **4587**, 302 files, 0 failed · lint 93 → 93 (delta 0, 0 errors) · tsc clean · 21 files, +813/−101 (`git diff --stat origin/main...HEAD`). One existing test flipped (LimitOrderPanel: disclaimer no longer rendered). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
+Suite 4452 (main) → **4607**, 302 files, 0 failed · lint 93 → 93 (delta 0, 0 errors) · tsc clean · 21 files, +813/−101 (`git diff --stat origin/main...HEAD`). One existing test flipped (LimitOrderPanel: disclaimer no longer rendered). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
 
 ## Left open
-Prose-only figures with no proof line: "100% through a single DEX" (illustrative), SL/TP slippage ordering ("wider" vs take profit) is design intent, not code-proven. "Zero data leaks"/"IP never exposed" vs C8 browser-direct logo/DefiLlama calls (not in this goal). `useApproval.ts` lines cited from recon only.
+Only illustrative prose ("100% through a single DEX"). `useApproval.ts` lines cited from recon only. DocsPage still names Odos in the API-proxy list (disabled source, not touched). Privacy wording is deliberately conservative; owner may restore stronger wording only with a code change that proxies logos and DefiLlama.
