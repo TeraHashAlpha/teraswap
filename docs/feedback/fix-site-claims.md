@@ -19,7 +19,7 @@ Hero stats & Security bar → slots, final value on SSR · Features card 10 name
 Non-test, excl. deprecated Beta*: **0**. Tests: 34 lines (23 dead `vi.mock('…BetaDisclaimer')` + guard tests).
 
 ## 5. Verify
-Suite 4452 (main) → **4621**, 0 failed · lint 93 → 93 · tsc clean · diff stat below · Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
+Suite 4452 (main) → **4621**, 0 failed · lint 93 → 93 · tsc clean · 22 files, +893/−135 · Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
 
 ## Appendix — ledger for a follow-up goal (file:line · claim · what would prove it)
 Method: TypeScript-AST extraction of every user-visible string on LandingPage, LandingBelowFold, DocsPage, Header, Footer, SourceToggle, app/page, swap/page; digit-bearing strings minus CSS/ids/standard names (EIP-712, ERC-20, V3…) and LegalPage contract text. Not in scope here, left as is.
