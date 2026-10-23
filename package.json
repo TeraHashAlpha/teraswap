@@ -36,7 +36,7 @@
   "dependencies": {
     "@capacitor/android": "8.5.2",
     "@capacitor/browser": "8.0.5",
-    "@capacitor/cli": "8.5.2",
+    "@capacitor/cli": "8.5.3",
     "@capacitor/core": "8.5.3",
     "@capacitor/ios": "8.5.2",
     "@capacitor/splash-screen": "8.0.2",
