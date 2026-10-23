@@ -45,15 +45,25 @@ function nextConfigConnectSrc(): string[] {
   return src.match(/"connect-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
 }
 
-describe('[fix/dca-consent-copy-and-tier-check] CSP connect-src', () => {
-  it('allows the DefiLlama price origin the browser-side DCA floor classifier fetches', () => {
-    // dca-floor-tier.ts → fetchDefiLlamaPrice → https://coins.llama.fi/prices/current/<chain>:<addr>.
-    // Without it the browser blocks the call and every token with no on-chain feed reads `unpriced`.
-    expect(nextConfigConnectSrc()).toContain('https://coins.llama.fi')
+/** img-src sources declared in next.config.js. */
+function nextConfigImgSrc(): string[] {
+  const src = readFileSync(join(ROOT, 'next.config.js'), 'utf-8')
+  return src.match(/"img-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
+}
+
+// [fix/functional-chain-ui C8] Supersedes the [fix/dca-consent-copy-and-tier-check] allowance: the
+// floor classifier moved server-side (/api/dca-floor-cap) and DCAPanel's own price fallback now goes
+// through /api/price/defillama, so no browser code may reach DefiLlama — or GitHub's raw host for
+// Trust Wallet logos (/api/proxy/logo) — directly.
+describe('[fix/functional-chain-ui C8] CSP — third parties stay behind /api', () => {
+  it('connect-src allows no DefiLlama origin', () => {
+    expect(nextConfigConnectSrc()).toEqual(expect.arrayContaining(["'self'"]))
+    expect(nextConfigConnectSrc().filter(s => s.includes('llama.fi'))).toEqual([])
   })
 
-  it('allows it as that exact origin, never a llama.fi wildcard', () => {
-    expect(nextConfigConnectSrc().filter(s => s.includes('llama.fi'))).toEqual(['https://coins.llama.fi'])
+  it('img-src allows no raw.githubusercontent.com', () => {
+    expect(nextConfigImgSrc()).toEqual(expect.arrayContaining(["'self'"]))
+    expect(nextConfigImgSrc().filter(s => s.includes('githubusercontent'))).toEqual([])
   })
 })
 

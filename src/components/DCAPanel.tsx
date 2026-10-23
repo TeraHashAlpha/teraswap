@@ -58,7 +58,7 @@ import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 // read-only — no second, parallel price decision is written in this component.
 import { evaluatePriceGate, type PriceGateReason } from '@/lib/price-gate'
 import type { PriceCheck } from '@/lib/chainlink'
-import { fetchDefiLlamaPrice } from '@/lib/defillama'
+import { fetchDefiLlamaPriceViaApi } from '@/lib/defillama-client'
 import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
 import { fmtToken, fmtFixed, fmtPct } from '@/lib/format'
 import { checkRoute } from '@/lib/order-engine/check-route'
@@ -560,14 +560,15 @@ function CreateDCAForm({
     // `oracleUnavailable`, so the fallback stays fully available where it is legitimate.
     if (!v3Enabled || !oracleFallbackAllowed) { setLlamaPriceIn(null); setLlamaPriceOut(null); return }
     let cancelled = false
-    const slug = (() => { try { return getChainConfig(chainId).slug } catch { return 'ethereum' } })()
+    // [fix/functional-chain-ui C8] Same DefiLlama price, fetched server-side via /api/price/defillama
+    // (the route maps chainId → slug) so the browser never calls DefiLlama directly.
     if (chainlinkPriceIn == null && tokenIn) {
-      fetchDefiLlamaPrice(tokenIn.address, slug).then(p => { if (!cancelled) setLlamaPriceIn(p?.price ?? null) }).catch(() => { if (!cancelled) setLlamaPriceIn(null) })
+      fetchDefiLlamaPriceViaApi(tokenIn.address, chainId).then(p => { if (!cancelled) setLlamaPriceIn(p?.price ?? null) }).catch(() => { if (!cancelled) setLlamaPriceIn(null) })
     } else {
       setLlamaPriceIn(null)
     }
     if (chainlinkPriceOut == null && tokenOut) {
-      fetchDefiLlamaPrice(tokenOut.address, slug).then(p => { if (!cancelled) setLlamaPriceOut(p?.price ?? null) }).catch(() => { if (!cancelled) setLlamaPriceOut(null) })
+      fetchDefiLlamaPriceViaApi(tokenOut.address, chainId).then(p => { if (!cancelled) setLlamaPriceOut(p?.price ?? null) }).catch(() => { if (!cancelled) setLlamaPriceOut(null) })
     } else {
       setLlamaPriceOut(null)
     }

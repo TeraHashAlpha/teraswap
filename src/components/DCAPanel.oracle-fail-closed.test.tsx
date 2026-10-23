@@ -117,6 +117,11 @@ vi.mock('@/lib/order-engine', async () => {
 vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
 }))
+// [fix/functional-chain-ui C8] The panel's own price fallback now goes through /api/price/defillama
+// (lib/defillama-client); script it with the same mock as the server-side lookup above.
+vi.mock('@/lib/defillama-client', () => ({
+  fetchDefiLlamaPriceViaApi: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
+}))
 
 // [FIX-DCA-NOFEED-FAIL-CLOSED] Creation now asks the ACTIVE chain's OrderExecutorV3 whether both
 // legs have a registered fair-value feed (`tokenUsdFeeds`) BEFORE approve — reading it through

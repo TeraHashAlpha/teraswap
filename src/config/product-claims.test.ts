@@ -27,6 +27,7 @@ import {
   INTEGRATED_DEX_SOURCES_CLAIM,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   SITE_META_DESCRIPTION,
+  PRIVACY_DIRECT_NOTE,
   SWAP_CHAIN_IDS,
   SWAP_CHAIN_NAMES,
   SWAP_CHAIN_LIST_LABEL,
@@ -357,5 +358,15 @@ describe('product-claims — mirrored constants cannot drift from their declarin
     const c = MIRRORED_CONSTANTS.find((m) => m.id === 'ADMIN_TIMELOCK_HOURS')!
     const src = readFileSync(join(process.cwd(), c.file), 'utf8')
     expect([...src.matchAll(c.pattern)]).toHaveLength(4)
+  })
+})
+
+describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the browser still fetches directly', () => {
+  it('no longer lists a DefiLlama lookup (now /api/price/defillama)', () => {
+    expect(PRIVACY_DIRECT_NOTE).not.toMatch(/defillama/i)
+  })
+
+  it('still discloses token logos and the wallet connection, which remain browser-direct', () => {
+    expect(PRIVACY_DIRECT_NOTE).toMatch(/^Token logos and your wallet's own connection are requested directly by your browser/)
   })
 })

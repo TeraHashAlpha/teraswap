@@ -125,6 +125,11 @@ vi.mock('@/lib/order-engine/check-oracle', () => ({
 vi.mock('@/lib/defillama', () => ({
   fetchDefiLlamaPrice: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
 }))
+// [fix/functional-chain-ui C8] The panel's own price fallback now goes through /api/price/defillama
+// (lib/defillama-client); script it with the same mock as the server-side lookup above.
+vi.mock('@/lib/defillama-client', () => ({
+  fetchDefiLlamaPriceViaApi: (...args: unknown[]) => mockFetchDefiLlamaPrice(...args),
+}))
 
 vi.mock('@/lib/order-engine', async () => {
   const actual = await vi.importActual<typeof import('@/lib/order-engine')>('@/lib/order-engine')

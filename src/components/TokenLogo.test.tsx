@@ -70,7 +70,7 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
     fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // logoURI → route
     fireEvent.error(screen.getByRole('img', { name: 'USDC' })) // route → Trust Wallet
     const src = screen.getByRole('img', { name: 'USDC' }).getAttribute('src') ?? ''
-    expect(src).toContain('trustwallet/assets')
+    expect(src).toContain('/api/proxy/logo?chainId=1') // [C8] same-origin proxy, never raw.githubusercontent.com
     expect(src).toContain(USDC) // checksummed (EIP-55) address preserved
   })
 
@@ -180,7 +180,7 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
     // One error must skip the duplicate and land on Trust Wallet — not the same URL.
     fireEvent.error(screen.getByRole('img', { name: 'USDC' }))
     const src = screen.getByRole('img', { name: 'USDC' }).getAttribute('src') ?? ''
-    expect(src).toContain('trustwallet/assets')
+    expect(src).toContain('/api/proxy/logo?chainId=1') // [C8] same-origin proxy, never raw.githubusercontent.com
     expect(src).not.toBe(route)
   })
 

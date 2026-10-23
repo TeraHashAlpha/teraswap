@@ -61,6 +61,9 @@ vi.mock('@/lib/order-engine/check-oracle', () => ({
   checkOracleCoverage: (...args: unknown[]) => checkOracleMock(...args),
 }))
 vi.mock('@/lib/defillama', () => ({ fetchDefiLlamaPrice: vi.fn(async () => null) }))
+// [fix/functional-chain-ui C8] The panel's own price fallback now goes through /api/price/defillama
+// (lib/defillama-client); script it with the same mock as the server-side lookup above.
+vi.mock('@/lib/defillama-client', () => ({ fetchDefiLlamaPriceViaApi: vi.fn(async () => null) }))
 // [FIX-DCA-NOFEED-FAIL-CLOSED] v3 live on Base — the shape of any chain a user can reach this panel
 // on, and the condition the new gate is armed under.
 vi.mock('@/lib/order-engine', async () => {

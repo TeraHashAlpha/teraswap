@@ -160,13 +160,14 @@ describe('off-chain price path with captured DefiLlama responses', () => {
     expect(out).toMatchObject({ tier: 'unpriced', affected: [UNI_BASE] })
   })
 
-  it('classification is server-side: price origins are NOT needed by the browser CSP, except the one DCAPanel still uses itself', async () => {
+  it('classification is server-side: neither price origin is in the browser CSP', async () => {
     serve(`base:${UNI_BASE.toLowerCase()}`, 7.557, 7.56)
     await classifyDcaFloor({ chainId: 8453, tokenIn: WETH_BASE, tokenOut: UNI_BASE }, { reader: reader([WETH_BASE]) })
     const connectSrc = readFileSync(resolve(__dirname, '../../../next.config.js'), 'utf8').match(/"connect-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
     expect(new Set(urls.map(u => new URL(u).origin))).toEqual(new Set(['https://coins.llama.fi', 'https://api.coingecko.com']))
     expect(connectSrc).not.toContain('https://api.coingecko.com') // server-only source
-    expect(connectSrc).toContain('https://coins.llama.fi') // DCAPanel's own price preview (grep in feedback)
+    // [fix/functional-chain-ui C8] DCAPanel's own preview now goes through /api/price/defillama.
+    expect(connectSrc).not.toContain('https://coins.llama.fi')
   })
 })
 
