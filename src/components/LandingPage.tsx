@@ -22,6 +22,7 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
+  PLATFORM_FEE_LABEL,
   SWAP_CHAIN_LIST_LABEL,
   VERIFICATION_SUMMARY,
   chainNameFor,
@@ -290,7 +291,7 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
             </div>
             <div className="mt-1 flex justify-between">
               <span>Platform fee</span>
-              <span>0.1%</span>
+              <span>{PLATFORM_FEE_LABEL}</span>
             </div>
           </div>
         )}

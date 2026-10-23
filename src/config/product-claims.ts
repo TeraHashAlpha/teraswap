@@ -23,10 +23,14 @@ import {
   DEPEG_DIVERGENCE_BLOCK,
   DEPEG_DIVERGENCE_WARN,
   DISABLED_SOURCES,
+  FEE_BPS,
+  FEE_PERCENT,
   PERMIT2_MAX_DEADLINE_SEC,
   PERMIT2_MAX_EXPIRATION_SEC,
   PRICE_DEVIATION_BLOCK,
   PRICE_DEVIATION_WARN,
+  QUOTE_TIMEOUT_MS,
+  UNISWAP_FEE_TIERS,
   UNVERIFIED_SWAP_BLOCK_USD,
   UNVERIFIED_SWAP_WARN_USD,
   type AggregatorName,
@@ -34,6 +38,7 @@ import {
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import { listConfiguredFeedTokens } from '@/lib/chains/chainlink-feeds'
 import { DCA_CHAINS, isDcaLive } from '@/lib/dca-launch'
+import { SPLIT_MIN_IMPROVEMENT_BPS } from '@/lib/split-routing-types'
 
 const SMALL_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
@@ -186,8 +191,7 @@ export interface VerificationCheck {
  * Post-execution shortfall tolerance. post-execution-validator.ts declares it as the module-private
  * `const WARNING_THRESHOLD = 0.02` in a server-only module (it imports kv + viem clients), so it
  * can be neither imported into a client bundle nor re-exported without editing that file. This is
- * the one slot that is typed here; product-claims.test.ts reads the validator source and fails
- * the day the two differ.
+ * a typed slot, mirrored and drift-checked via MIRRORED_CONSTANTS (section h).
  */
 export const POST_EXECUTION_SHORTFALL_WARN = 0.02
 
@@ -242,9 +246,64 @@ export function dcaFeatureTitle(): string {
   return names.length === 0 ? 'DCA' : `DCA (${names.join(', ')})`
 }
 
+// ── (g) Constants read straight from their declaring module ──────────────────
+
+/** Platform fee as shown on the swap preview — FEE_PERCENT, not a typed "0.1%". */
+export const PLATFORM_FEE_LABEL = `${FEE_PERCENT}%`
+export const PLATFORM_FEE_BPS = FEE_BPS
+/** Per-source quote timeout (api.ts wraps every source in withTimeout(…, QUOTE_TIMEOUT_MS)). */
+export const QUOTE_TIMEOUT_SEC = QUOTE_TIMEOUT_MS / 1000
+/** Uniswap V3 fee tiers, hundredths of a bip → percent (100 → "0.01%"). */
+export const UNISWAP_FEE_TIER_COUNT = UNISWAP_FEE_TIERS.length
+export const UNISWAP_FEE_TIER_LABELS: readonly string[] = UNISWAP_FEE_TIERS.map((t) => formatPercent(t / 1_000_000))
+export const SPLIT_MIN_IMPROVEMENT_BPS_SLOT = SPLIT_MIN_IMPROVEMENT_BPS
+export const SPLIT_MIN_IMPROVEMENT_PCT = formatPercent(SPLIT_MIN_IMPROVEMENT_BPS / 10_000)
+
+// ── (h) Constants that are NOT exported by their declaring module ────────────
+
 /**
- * Delay on OrderExecutor config changes (router whitelist, executor whitelist, fund sweeps).
- * Stated by the owner and by DocsPage "On-Chain Admin Timelocks"; the contract constant itself
- * lives outside this change's read list, so this is a typed slot — see FEEDBACK (unverified).
+ * Each of these is a function-local or contract constant, so it cannot be imported without editing
+ * logic. The value is typed ONCE here and MIRRORED_CONSTANTS says where it is declared and how to
+ * find it; product-claims.test.ts reads each file and fails the day the declaration differs.
  */
+export const DEFILLAMA_BLOCK_DEVIATION = 0.08
+/**
+ * Above this USD value DefiLlama validation is blocking. defillama.ts exports
+ * HIGH_VALUE_THRESHOLD_USD, but ~20 DCA panel tests vi.mock that module without the export, so it
+ * is mirrored (and drift-checked) rather than imported.
+ */
+export const DEFILLAMA_HIGH_VALUE_USD = 10_000
+export const DEFILLAMA_HIGH_VALUE_USD_LABEL = `$${DEFILLAMA_HIGH_VALUE_USD.toLocaleString('en-US')}`
+export const CROSS_QUOTE_WARN_THRESHOLD = 0.05
+export const OUTLIER_MEDIAN_MULTIPLE = 3
+export const SLIPPAGE_CLAMP_MIN_PCT = 0.01
+export const SLIPPAGE_CLAMP_MAX_PCT = 15
 export const ADMIN_TIMELOCK_HOURS = 48
+export const ADMIN_TIMELOCK_GRACE_DAYS = 7
+export const ADMIN_TRANSFER_TIMELOCK_DAYS = 7
+
+export const DEFILLAMA_BLOCK_PCT = formatPercent(DEFILLAMA_BLOCK_DEVIATION)
+export const CROSS_QUOTE_WARN_PCT = formatPercent(CROSS_QUOTE_WARN_THRESHOLD)
+
+export interface MirroredConstant {
+  id: string
+  value: number
+  /** Declaring file (repo-relative). */
+  file: string
+  /** Global regex over that file; capture group `group` is the number. Every match must equal `value`. */
+  pattern: RegExp
+  group: number
+}
+
+export const MIRRORED_CONSTANTS: readonly MirroredConstant[] = [
+  { id: 'POST_EXECUTION_SHORTFALL_WARN', value: POST_EXECUTION_SHORTFALL_WARN, file: 'src/lib/post-execution-validator.ts', pattern: /^const WARNING_THRESHOLD = ([0-9.]+)/gm, group: 1 },
+  { id: 'DEFILLAMA_BLOCK_DEVIATION', value: DEFILLAMA_BLOCK_DEVIATION, file: 'src/lib/defillama.ts', pattern: /const BLOCK_THRESHOLD = -([0-9.]+)/g, group: 1 },
+  { id: 'DEFILLAMA_HIGH_VALUE_USD', value: DEFILLAMA_HIGH_VALUE_USD, file: 'src/lib/defillama.ts', pattern: /export const HIGH_VALUE_THRESHOLD_USD = ([0-9_]+)/g, group: 1 },
+  { id: 'CROSS_QUOTE_WARN_THRESHOLD', value: CROSS_QUOTE_WARN_THRESHOLD, file: 'src/lib/api.ts', pattern: /const CROSS_QUOTE_WARN_THRESHOLD = ([0-9.]+)/g, group: 1 },
+  { id: 'OUTLIER_MEDIAN_MULTIPLE', value: OUTLIER_MEDIAN_MULTIPLE, file: 'src/lib/api.ts', pattern: /const threshold = median \* (\d+)n/g, group: 1 },
+  { id: 'SLIPPAGE_CLAMP_MIN_PCT', value: SLIPPAGE_CLAMP_MIN_PCT, file: 'src/lib/adapters/shared.ts', pattern: /Math\.min\(Math\.max\(s, ([0-9.]+)\), [0-9.]+\)/g, group: 1 },
+  { id: 'SLIPPAGE_CLAMP_MAX_PCT', value: SLIPPAGE_CLAMP_MAX_PCT, file: 'src/lib/adapters/shared.ts', pattern: /Math\.min\(Math\.max\(s, [0-9.]+\), ([0-9.]+)\)/g, group: 1 },
+  { id: 'ADMIN_TIMELOCK_HOURS', value: ADMIN_TIMELOCK_HOURS, file: 'contracts/order-engine/TeraSwapOrderExecutorV3.sol', pattern: /TIMELOCK_(?:ROUTER_CHANGE|SWEEP|EXECUTOR_CHANGE|ORACLE_CHANGE)\s*=\s*(\d+) hours/g, group: 1 },
+  { id: 'ADMIN_TIMELOCK_GRACE_DAYS', value: ADMIN_TIMELOCK_GRACE_DAYS, file: 'contracts/order-engine/TeraSwapOrderExecutorV3.sol', pattern: /TIMELOCK_GRACE\s*=\s*(\d+) days/g, group: 1 },
+  { id: 'ADMIN_TRANSFER_TIMELOCK_DAYS', value: ADMIN_TRANSFER_TIMELOCK_DAYS, file: 'contracts/order-engine/TeraSwapOrderExecutorV3.sol', pattern: /TIMELOCK_ADMIN_TRANSFER\s*=\s*(\d+) days/g, group: 1 },
+]

@@ -7,10 +7,26 @@ import { SUPPORT_EMAIL } from '@/lib/constants'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCES_CLAIM,
+  ADMIN_TIMELOCK_GRACE_DAYS,
+  ADMIN_TIMELOCK_HOURS,
+  ADMIN_TRANSFER_TIMELOCK_DAYS,
   CHAINLINK_STALENESS_CLAIM,
+  CROSS_QUOTE_WARN_PCT,
+  DEFILLAMA_BLOCK_PCT,
+  DEFILLAMA_HIGH_VALUE_USD_LABEL,
+  OUTLIER_MEDIAN_MULTIPLE,
+  PLATFORM_FEE_BPS,
+  PLATFORM_FEE_LABEL,
   PRICE_DEVIATION_BLOCK_PCT,
   PRICE_DEVIATION_WARN_PCT,
+  QUOTE_TIMEOUT_SEC,
+  SLIPPAGE_CLAMP_MAX_PCT,
+  SLIPPAGE_CLAMP_MIN_PCT,
+  SPLIT_MIN_IMPROVEMENT_BPS_SLOT,
+  SPLIT_MIN_IMPROVEMENT_PCT,
   SWAP_CHAIN_LIST_LABEL,
+  UNISWAP_FEE_TIER_COUNT,
+  UNISWAP_FEE_TIER_LABELS,
   chainNameFor,
   chainlinkFeedCountFor,
   isOrderTypeLive,
@@ -319,12 +335,12 @@ export default function DocsPage() {
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="mb-6 grid gap-3 sm:grid-cols-2"
           >
-            <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching 400+ liquidity sources across DeFi." />
+            <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching a broad set of liquidity sources across DeFi." />
             <SourceCard name="0x / Matcha" type="Aggregator" desc="Professional-grade RFQ system; uses Permit2's pull model for allowances." />
             <SourceCard name="Velora (ParaSwap)" type="Aggregator" desc="Multi-path routing with MEV-aware execution strategies." />
             <SourceCard name="Odos" type="Aggregator" desc="Smart order routing with atomic multi-hop path optimization." />
-            <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across 100+ DEXs with auto-compounding." />
-            <SourceCard name="OpenOcean" type="Aggregator" desc="Cross-chain aggregation covering 40+ chains and 1000+ sources." />
+            <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across many DEXs with auto-compounding." />
+            <SourceCard name="OpenOcean" type="Aggregator" desc="Cross-chain aggregation covering many chains and sources." />
           </motion.div>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">Direct Protocols</h3>
@@ -359,13 +375,13 @@ export default function DocsPage() {
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'Parallel Fan-Out', desc: 'All registered sources are queried simultaneously, each with an independent 10-second timeout. No source blocks another — a slow API simply drops out of that round.' },
+              { num: '01', title: 'Parallel Fan-Out', desc: `All registered sources are queried simultaneously, each with an independent ${QUOTE_TIMEOUT_SEC}-second timeout. No source blocks another — a slow API simply drops out of that round.` },
               { num: '02', title: 'Gas-Aware Ranking', desc: 'Quotes ranked by net output considering estimated gas costs in USD. When outputs are close, cheaper gas wins the tiebreak. CoW Protocol (gasless for users) naturally benefits.' },
-              { num: '03', title: 'Statistical Outlier Detection', desc: 'True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above 3× median is rejected.' },
-              { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: 'Automatically tests all 4 fee tiers (0.01%, 0.05%, 0.3%, 1%) and selects the pool with best output. Results are cached for faster subsequent quotes.' },
-              { num: '05', title: 'Oracle Validation', desc: `Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above ${PRICE_DEVIATION_WARN_PCT} trigger a warning; above ${PRICE_DEVIATION_BLOCK_PCT} the swap is blocked. A second server-side check via DefiLlama blocks swaps >8% below fair market value.` },
-              { num: '06', title: 'Cross-Quote Consensus', desc: 'The winning quote is compared against the median of all responding sources. If it deviates >5% from consensus, a warning is raised. Quotes >3× above median are automatically removed as outliers.' },
-              { num: '07', title: 'Slippage Safety', desc: 'User-configurable slippage clamped to [0.01%, 15%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.' },
+              { num: '03', title: 'Statistical Outlier Detection', desc: `True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above ${OUTLIER_MEDIAN_MULTIPLE}× median is rejected.` },
+              { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: `Automatically tests all ${UNISWAP_FEE_TIER_COUNT} fee tiers (${UNISWAP_FEE_TIER_LABELS.join(', ')}) and selects the pool with best output. Results are cached for faster subsequent quotes.` },
+              { num: '05', title: 'Oracle Validation', desc: `Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above ${PRICE_DEVIATION_WARN_PCT} trigger a warning; above ${PRICE_DEVIATION_BLOCK_PCT} the swap is blocked. A second server-side check via DefiLlama blocks swaps >${DEFILLAMA_BLOCK_PCT} below fair market value.` },
+              { num: '06', title: 'Cross-Quote Consensus', desc: `The winning quote is compared against the median of all responding sources. If it deviates >${CROSS_QUOTE_WARN_PCT} from consensus, a warning is raised. Quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are automatically removed as outliers.` },
+              { num: '07', title: 'Slippage Safety', desc: `User-configurable slippage clamped to [${SLIPPAGE_CLAMP_MIN_PCT}%, ${SLIPPAGE_CLAMP_MAX_PCT}%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.` },
               { num: '08', title: 'Chain-Aware EIP-712', desc: 'EIP-712 signing binds to the wallet\'s current chainId dynamically. This is what lets the order engine operate per-chain today — a separate OrderExecutor is deployed on both Ethereum Mainnet and Base — rather than being mainnet-only.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -396,15 +412,15 @@ export default function DocsPage() {
           >
             {[
               { title: 'Chainlink Oracle Validation', desc: `Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The ${chainName} registry covers ${feedCount} token feeds, with automatic deviation detection: warns at ${PRICE_DEVIATION_WARN_PCT}, hard-blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`, badge: 'Oracle' },
-              { title: 'DefiLlama Server-Side Check', desc: 'A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >8% below fair market value. If this secondary oracle is unreachable, swaps estimated above $10,000 are blocked while small swaps fail open.', badge: 'Oracle' },
-              { title: 'Cross-Quote Consensus', desc: 'The winning quote is validated against the median of all aggregator responses. Deviations >5% are flagged; quotes >3× above median are removed automatically.', badge: 'Safety' },
+              { title: 'DefiLlama Server-Side Check', desc: `A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >${DEFILLAMA_BLOCK_PCT} below fair market value. If this secondary oracle is unreachable, swaps estimated above ${DEFILLAMA_HIGH_VALUE_USD_LABEL} are blocked while small swaps fail open.`, badge: 'Oracle' },
+              { title: 'Cross-Quote Consensus', desc: `The winning quote is validated against the median of all aggregator responses. Deviations >${CROSS_QUOTE_WARN_PCT} are flagged; quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are removed automatically.`, badge: 'Safety' },
               { title: 'Privacy Proxy', desc: 'All blockchain reads and aggregator API calls are routed through a server-side proxy. Your IP address is never exposed to external RPC providers or DEX APIs.', badge: 'Privacy' },
               { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where professional solvers compete — your trade is never exposed to sandwich attacks.', badge: 'MEV' },
               { title: 'Exact-Amount Approvals', desc: 'Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist — never an infinite/max-uint approval. (The 0x source uses Permit2\'s pull model, which still requires an on-chain approve to the Permit2 contract — TeraSwap does not ship gasless off-chain signature approvals as the general path.)', badge: 'Approval' },
               { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction — it never holds user funds between transactions.', badge: 'Trust' },
               { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
               { title: 'Token-Catalog Guard (CI)', desc: 'Every curated token is verified against its on-chain reality before it ships: contract bytecode must exist (no dead addresses), on-chain symbol() and decimals() must match the catalog entry (decimals are fund-affecting for swap sizing), the address must appear in a reputable per-chain token list, and no two catalog tokens may share a symbol on the same chain. This runs as a CI gate.', badge: 'Safety' },
-              { title: 'On-Chain Admin Timelocks', desc: 'Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a 48-hour delay (and expire if not executed within a 7-day grace window). An emergency pause is also available.', badge: 'Contract' },
+              { title: 'On-Chain Admin Timelocks', desc: `Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a ${ADMIN_TIMELOCK_HOURS}-hour delay (and expire if not executed within a ${ADMIN_TIMELOCK_GRACE_DAYS}-day grace window). An emergency pause is also available.`, badge: 'Contract' },
               { title: 'Audit Status', desc: 'TeraSwap\'s smart contracts have not been externally audited. Contracts are deployed and verified on the block explorer; the underlying DEXs you route through have their own audited contracts.', badge: 'Notice' },
             ].map((item) => (
               <motion.div key={item.title} variants={childFade}
@@ -579,7 +595,7 @@ export default function DocsPage() {
         <AnimatedSection id="fee-structure">
           <SectionTitle icon="◇" title="Fee Structure" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap charges a flat <strong className="text-cream">0.1% (10 bps)</strong> platform fee, deducted from
+            TeraSwap charges a flat <strong className="text-cream">{PLATFORM_FEE_LABEL} ({PLATFORM_FEE_BPS} bps)</strong> platform fee, deducted from
             the input amount before the swap and collected on-chain by the <strong className="text-cream">TeraSwapFeeCollector</strong> contract.
             The collector pulls the input, takes the fee, forwards the net amount to the DEX router, and atomically
             refunds any leftover input and ETH in the same transaction — so it never holds your funds between
@@ -599,12 +615,12 @@ export default function DocsPage() {
               <tbody className="text-cream-50">
                 <tr style={{ borderTop: '1px solid #1E2530' }}>
                   <td className="px-5 py-3 font-medium text-cream">Platform fee</td>
-                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>0.1%</td>
+                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>{PLATFORM_FEE_LABEL}</td>
                   <td className="px-5 py-3">Deducted from input amount before swap. Fully transparent.</td>
                 </tr>
                 <tr style={{ borderTop: '1px solid #1E2530' }}>
                   <td className="px-5 py-3 font-medium text-cream">Pool fee (Uniswap V3)</td>
-                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>0.01% – 1%</td>
+                  <td className="px-5 py-3" style={{ color: '#C8B89A' }}>{UNISWAP_FEE_TIER_LABELS[0]} – {UNISWAP_FEE_TIER_LABELS[UNISWAP_FEE_TIER_LABELS.length - 1]}</td>
                   <td className="px-5 py-3">Charged by the liquidity pool. TeraSwap auto-selects the cheapest tier.</td>
                 </tr>
                 <tr style={{ borderTop: '1px solid #1E2530' }}>
@@ -651,7 +667,7 @@ export default function DocsPage() {
               { num: '03', title: 'On-Chain Validation (canExecute)', desc: 'Before any execution the contract independently re-checks the order signature, that it is not cancelled or nonce-invalidated, that it has not expired, the router whitelist, the schedule, the price condition, and that your balance and allowance still cover the amount. The same checks are re-enforced inside executeOrder — the gate is on-chain, not advisory.' },
               { num: '04', title: 'Chainlink Price Conditions', desc: 'Limit and stop-loss / take-profit orders carry a Chainlink price feed plus a target price and a direction (above / below). The order is only eligible once the on-chain feed crosses the trigger. (A pure DCA order carries no price condition — see the DCA section.)' },
               { num: '05', title: 'Cancel & Mass-Invalidate', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all of your pending orders at once. You stay in control of your own funds throughout.' },
-              { num: '06', title: 'Keeper Signs in an HSM', desc: 'The off-chain keeper that submits executions signs with a key held in a hardware security module (AWS KMS): the private key never leaves the HSM and only signatures are returned. Adding or rotating a keeper, changing the router whitelist, or sweeping funds is gated by a 48-hour on-chain timelock (admin transfer uses a longer 7-day delay), each with a 7-day grace window.' },
+              { num: '06', title: 'Keeper Signs in an HSM', desc: `The off-chain keeper that submits executions signs with a key held in a hardware security module (AWS KMS): the private key never leaves the HSM and only signatures are returned. Adding or rotating a keeper, changing the router whitelist, or sweeping funds is gated by a ${ADMIN_TIMELOCK_HOURS}-hour on-chain timelock (admin transfer uses a longer ${ADMIN_TRANSFER_TIMELOCK_DAYS}-day delay), each with a ${ADMIN_TIMELOCK_GRACE_DAYS}-day grace window.` },
               { num: '07', title: 'Fail-Closed, Chain-Aware', desc: 'The engine refuses to sign, read, or execute on any chain without a wired OrderExecutor, and the EIP-712 domain is bound to the connected chain. Order creation is rejected server-side — before the signature is even verified — for any chain whose executor is not in the fixed allowlist. Today only Ethereum Mainnet and Base are wired.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -687,7 +703,7 @@ export default function DocsPage() {
             <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
               A limit order (OrderType LIMIT) lets you set a target price; the order becomes eligible once a Chainlink
               price feed crosses your level, and the keeper then executes it on-chain through the order engine. Limit
-              orders use a <strong className="text-cream">2% default slippage</strong> floor and are ideal for precise
+              orders carry a <strong className="text-cream">maximum-slippage bound</strong> and are ideal for precise
               entry and exit targets. See the <strong className="text-cream">Order Engine</strong> section above for the
               shared signing, validation, and execution model.
             </p>
@@ -734,7 +750,7 @@ export default function DocsPage() {
               whitelisted DEX router.
             </p>
             <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
-              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses <strong className="text-cream-65">5% default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses <strong className="text-cream-65">2% slippage</strong> like limit orders.
+              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses a <strong className="text-cream-65">wider default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses standard slippage like limit orders.
             </div>
 
             <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
@@ -745,7 +761,7 @@ export default function DocsPage() {
                 { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'The trigger is evaluated against Chainlink on-chain price feeds — the industry standard for reliable, tamper-proof prices. The condition is checked on-chain inside the contract before any execution.' },
                 { num: '03', title: 'Automatic Execution', desc: 'You sign once upfront. When the trigger fires, the keeper executes the order on-chain via the OrderExecutor — no manual action needed at trigger time, and no gas paid by you at execution.' },
                 { num: '04', title: 'Whitelisted-Router Fill', desc: 'The triggered swap routes through a whitelisted DEX router (1inch by default), with a per-order minimum-output floor enforced on-chain.' },
-                { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
+                { num: '05', title: 'Adaptive Slippage', desc: `Stop loss orders use a wider default slippage than take profit to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses standard slippage since there is no urgency to exit.` },
               ].map((step) => (
                 <motion.div key={step.num} variants={childFade}
                   className="flex gap-4 rounded-xl border p-5"
@@ -838,8 +854,8 @@ export default function DocsPage() {
             {[
               { num: '01', title: 'Quote Collection', desc: 'Split-eligible sources are queried at multiple sub-amounts in parallel (the set of percentages is derived from the candidate split configurations). Each source reports its output for each partial amount.' },
               { num: '02', title: 'Combinatorial Optimization', desc: 'The engine tests all 2-way and 3-way split configurations across eligible sources. Pre-defined splits (50/50, 60/40, 70/30, 80/20, 50/30/20, etc.) are evaluated for every pairwise and triple source combination.' },
-              { num: '03', title: 'Gas-Adjusted Comparison', desc: 'Each split candidate\'s total output is compared against the best single-source quote. Gas costs are factored in — a split that gains 0.1% but doubles gas cost may not be worth it.' },
-              { num: '04', title: 'Visualization & Execution', desc: 'When a split improves output by ≥0.1% (10 bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions — one per leg — with the pre-computed amounts.' },
+              { num: '03', title: 'Gas-Adjusted Comparison', desc: `Each split candidate's total output is compared against the best single-source quote. Gas costs are factored in — a split that gains ${SPLIT_MIN_IMPROVEMENT_PCT} but doubles gas cost may not be worth it.` },
+              { num: '04', title: 'Visualization & Execution', desc: `When a split improves output by ≥${SPLIT_MIN_IMPROVEMENT_PCT} (${SPLIT_MIN_IMPROVEMENT_BPS_SLOT} bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions — one per leg — with the pre-computed amounts.` },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
                 className="flex gap-4 rounded-xl border p-5"
@@ -880,7 +896,7 @@ export default function DocsPage() {
               { n: 2, title: 'Aggregator Ranking', desc: 'Volume and win-rate per source, showing which DEX routes deliver the best execution for your trades.' },
               { n: 3, title: 'Hourly Heatmap', desc: 'Visual breakdown of volume by hour (UTC), revealing peak trading windows.' },
               { n: 4, title: 'Wallet Tracker', desc: 'Automatic wallet profiling with trade counts and volumes. Export snapshots for airdrop planning or loyalty programs.' },
-              { n: 5, title: 'Daily Volume Chart', desc: '30-day bar chart showing daily trading volume trends and trade frequency.' },
+              { n: 5, title: 'Daily Volume Chart', desc: `Bar chart showing daily trading volume trends and trade frequency.` },
             ].map((step) => (
               <motion.div key={step.n} variants={childFade}
                 className="flex gap-4 rounded-xl border p-4"

@@ -17,6 +17,8 @@ import {
   type AggregatorName,
 } from '@/lib/constants'
 import { DCA_CHAINS, isDcaLive } from '@/lib/dca-launch'
+import { FEE_PERCENT, QUOTE_TIMEOUT_MS, UNISWAP_FEE_TIERS } from '@/lib/constants'
+import { SPLIT_MIN_IMPROVEMENT_BPS } from '@/lib/split-routing-types'
 import { listConfiguredFeedTokens } from '@/lib/chains/chainlink-feeds'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import {
@@ -43,7 +45,13 @@ import {
   VERIFICATION_STAGE_COUNT,
   VERIFICATION_CHECK_COUNT,
   VERIFICATION_SUMMARY,
-  POST_EXECUTION_SHORTFALL_WARN,
+  MIRRORED_CONSTANTS,
+  PLATFORM_FEE_LABEL,
+  QUOTE_TIMEOUT_SEC,
+  DEFILLAMA_HIGH_VALUE_USD,
+  DEFILLAMA_HIGH_VALUE_USD_LABEL,
+  UNISWAP_FEE_TIER_LABELS,
+  SPLIT_MIN_IMPROVEMENT_PCT,
   PRICE_DEVIATION_WARN_PCT,
   PRICE_DEVIATION_BLOCK_PCT,
   CHAINLINK_MAX_STALENESS_MIN,
@@ -290,13 +298,6 @@ describe('product-claims — C4 thresholds interpolate the constants', () => {
     expect(CHAINLINK_STALENESS_CLAIM).not.toMatch(/every hour/i)
   })
 
-  it('POST_EXECUTION_SHORTFALL_WARN equals the validator source constant (drift guard)', () => {
-    const src = readFileSync(join(process.cwd(), 'src/lib/post-execution-validator.ts'), 'utf8')
-    const m = src.match(/^const WARNING_THRESHOLD = ([0-9.]+)/m)
-    expect(m).not.toBeNull()
-    expect(Number(m![1])).toBe(POST_EXECUTION_SHORTFALL_WARN)
-  })
-
   it('"auto-disabled + P0" is backed by the validator critical path', () => {
     const src = readFileSync(join(process.cwd(), 'src/lib/post-execution-validator.ts'), 'utf8')
     expect(src).toMatch(/await forceDisable\(source/)
@@ -328,5 +329,33 @@ describe('product-claims — C7 dcaFeatureTitle()', () => {
     }
     vi.doUnmock('@/lib/dca-launch')
     vi.resetModules()
+  })
+})
+
+describe('product-claims — slots read from their declaring export', () => {
+  it('fee, timeout, high-value gate, fee tiers and split threshold come from the constants', () => {
+    expect(PLATFORM_FEE_LABEL).toBe(`${FEE_PERCENT}%`)
+    expect(QUOTE_TIMEOUT_SEC).toBe(QUOTE_TIMEOUT_MS / 1000)
+    expect(DEFILLAMA_HIGH_VALUE_USD_LABEL).toBe(`$${DEFILLAMA_HIGH_VALUE_USD.toLocaleString('en-US')}`)
+    expect(UNISWAP_FEE_TIER_LABELS).toHaveLength(UNISWAP_FEE_TIERS.length)
+    expect([...UNISWAP_FEE_TIER_LABELS]).toEqual(['0.01%', '0.05%', '0.3%', '1%'])
+    expect(SPLIT_MIN_IMPROVEMENT_PCT).toBe(`${SPLIT_MIN_IMPROVEMENT_BPS / 100}%`)
+  })
+})
+
+describe('product-claims — mirrored constants cannot drift from their declaring file', () => {
+  for (const c of MIRRORED_CONSTANTS) {
+    it(`${c.id} = ${c.value} in ${c.file}`, () => {
+      const src = readFileSync(join(process.cwd(), c.file), 'utf8')
+      const matches = [...src.matchAll(c.pattern)]
+      expect(matches.length).toBeGreaterThan(0)
+      for (const m of matches) expect(Number(m[c.group].replace(/_/g, ''))).toBe(c.value)
+    })
+  }
+
+  it('the four contract timelocks are all covered (router, sweep, executor, oracle)', () => {
+    const c = MIRRORED_CONSTANTS.find((m) => m.id === 'ADMIN_TIMELOCK_HOURS')!
+    const src = readFileSync(join(process.cwd(), c.file), 'utf8')
+    expect([...src.matchAll(c.pattern)]).toHaveLength(4)
   })
 })
