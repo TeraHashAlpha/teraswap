@@ -8,6 +8,7 @@
  * Gracefully degrades on KV failure or network error.
  */
 
+import { fmtFixed, fmtPct } from '@/lib/format'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 
@@ -78,12 +79,12 @@ function overallIndicator(data: StatusData | null, error: boolean): { label: str
 function formatLatency(ms: number | null): string {
   if (ms === null) return '\u2014'
   if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  return `${fmtFixed(ms / 1000, 1)}s`
 }
 
 function formatUptime(pct: number | null): string {
   if (pct === null) return '\u2014'
-  return `${pct.toFixed(1)}%`
+  return fmtPct(pct, 1)
 }
 
 function timeAgo(iso: string | null): string {

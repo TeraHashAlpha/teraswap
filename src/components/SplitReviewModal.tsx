@@ -11,8 +11,8 @@
  * decode/validate anything itself beyond display — the gates already ran in Phase A.
  */
 
+import { fmtToken } from '@/lib/format'
 import { useMemo } from 'react'
-import { formatUnits } from 'viem'
 import { decodeTransactionPreview } from '@/lib/calldata-decoder'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 import type { Token } from '@/lib/tokens'
@@ -26,12 +26,7 @@ function truncAddr(addr: string): string {
 function fmtAmount(raw: string | bigint | undefined, token: Token | null): string {
   if (raw == null || !token) return '—'
   try {
-    const num = parseFloat(formatUnits(typeof raw === 'bigint' ? raw : BigInt(raw), token.decimals))
-    if (!isFinite(num)) return '—'
-    if (num === 0) return `0 ${token.symbol}`
-    return num < 0.001
-      ? `<0.001 ${token.symbol}`
-      : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${token.symbol}`
+    return `${fmtToken(typeof raw === 'bigint' ? raw : BigInt(raw), token.decimals)} ${token.symbol}`
   } catch {
     return '—'
   }

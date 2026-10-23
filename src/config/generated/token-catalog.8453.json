@@ -19,12 +19,12 @@
     "uniswap"
   ],
   "counts": {
-    "included": 286,
-    "verified": 275,
+    "included": 288,
+    "verified": 272,
     "sourceCounts": {
-      "uniswap": 158,
-      "coingecko": 2870,
-      "oneinch": 174,
+      "uniswap": 159,
+      "coingecko": 2900,
+      "oneinch": 173,
       "trustwallet": 8,
       "superchain": 326
     }
@@ -60,9 +60,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 73839,
+      "volume24hUsd": 54192,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc5fecC3a29Fb57B5024eEc8a2239d4621e111CBE",
@@ -80,9 +80,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 6089362,
+      "volume24hUsd": 6665424,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xaaa843fb2916c0B57454270418E121C626402AAa",
@@ -98,9 +98,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 834.68,
+      "volume24hUsd": 2817.83,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x63706e401c06ac8513145b7687A14804d17f814b",
@@ -117,9 +117,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 239009822,
+      "volume24hUsd": 187176402,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcf3D55c10DB69f28fD1A75Bd73f3D8A2d9c595ad",
@@ -137,7 +137,7 @@
       ],
       "volume24hUsd": 0,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0a1d576f3eFeF75b330424287a95A366e8281D54",
@@ -155,7 +155,7 @@
       ],
       "volume24hUsd": 0,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7",
@@ -173,7 +173,7 @@
       ],
       "volume24hUsd": 0,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xb20A4Bd059F5914a2F8B9c18881c637f79efb7df",
@@ -189,9 +189,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 298685,
+      "volume24hUsd": 512022,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
@@ -208,9 +208,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 55169674,
+      "volume24hUsd": 44918547,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12",
+      "volumeFetchedAt": "2026-10-19",
       "core": true
     },
     {
@@ -227,9 +227,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2470.65,
+      "volume24hUsd": 1702.44,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825",
@@ -246,9 +246,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2985186,
+      "volume24hUsd": 1948633,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7F05a7A9AF2f5a07D1e64877C8dC37a64a22508E",
@@ -261,9 +261,9 @@
       "sources": [
         "curated"
       ],
-      "volume24hUsd": 45,
+      "volume24hUsd": 1.32,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2F20Cf3466f80A5f7f532fCa553c8cbc9727FEf6",
@@ -279,9 +279,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1.32,
+      "volume24hUsd": 71.19,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x97c806e7665d3AFd84A8Fe1837921403D59F3Dcc",
@@ -298,9 +298,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 79614,
+      "volume24hUsd": 136011,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x13F4196cC779275888440b3000AE533BbBbC3166",
@@ -316,9 +316,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1.15,
+      "volume24hUsd": 2.42,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0Db510e79909666d6dEc7f5e49370838c16D950f",
@@ -327,13 +327,16 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x0db510e79909666d6dec7f5e49370838c16d950f",
-      "verified": false,
+      "verified": true,
       "sources": [
-        "curated"
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
       ],
-      "volume24hUsd": 135.59,
+      "volume24hUsd": 195.17,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD993935E13851dd7517af10687EC7e5022127228",
@@ -348,9 +351,9 @@
         "uniswap",
         "coingecko"
       ],
-      "volume24hUsd": 849871,
+      "volume24hUsd": 790130,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD3b0b58eC9516e4b875a075328E2CB059d4d54dB",
@@ -366,9 +369,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 6645.04,
+      "volume24hUsd": 419.06,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x58D75a1c4477914f9a98A8708fEaeD1DbE40b8a3",
@@ -384,9 +387,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 25.15,
+      "volume24hUsd": 78.75,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x032a7252B4932c44bdE89AEE6275744376a96BFF",
@@ -402,9 +405,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 451.02,
+      "volume24hUsd": 341.03,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x449B3317a6d1efb1Bc3ba0700C9EaA4FFFf4Ae65",
@@ -420,9 +423,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 7627.7,
+      "volume24hUsd": 77274,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1509706a6c66CA549ff0cB464de88231DDBe213B",
@@ -438,9 +441,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 0.00467145,
+      "volume24hUsd": 230.65,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
@@ -456,9 +459,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 3472614,
+      "volume24hUsd": 2265538,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x696F9436B67233384889472Cd7cD58A6fB5DF4f1",
@@ -474,9 +477,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 6937660,
+      "volume24hUsd": 3834565,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1B4617734C43F6159F3a70b7E06d883647512778",
@@ -492,9 +495,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1732084,
+      "volume24hUsd": 1378094,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9B700B043e9587ddE9a0c29A9483e2F8FA450d54",
@@ -503,12 +506,9 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x9b700b043e9587dde9a0c29a9483e2f8fa450d54",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
       "volume24hUsd": null,
       "volumeSource": null,
@@ -529,9 +529,9 @@
         "trustwallet",
         "defillama"
       ],
-      "volume24hUsd": 375180,
+      "volume24hUsd": 165471,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB3B32F9f8827D4634fE7d973Fa1034Ec9fdDB3B3",
@@ -548,9 +548,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 3773424,
+      "volume24hUsd": 5602707,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB200000000000000000000231d6C1F1CE455ba32",
@@ -566,9 +566,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 19.19,
+      "volume24hUsd": 36.07,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4158734D47Fc9692176B5085E0F52ee0Da5d47F1",
@@ -586,9 +586,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 336024,
+      "volume24hUsd": 365045,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x27D2DECb4bFC9C76F0309b8E88dec3a601Fe25a8",
@@ -604,9 +604,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2.63,
+      "volume24hUsd": 35.75,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD769d56f479E9E72a77bB1523e866A33098Feec5",
@@ -622,9 +622,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1046.93,
+      "volume24hUsd": 19719.58,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB2000000000000000000004c27f6523082f41D01",
@@ -640,9 +640,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 5568357,
+      "volume24hUsd": 1782511,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xa1832f7F4e534aE557f9B5AB76dE54B1873e498B",
@@ -658,9 +658,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 70576,
+      "volume24hUsd": 122669,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2a06A17CBC6d0032Cac2c6696DA90f29D39a1a29",
@@ -677,9 +677,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 404638,
+      "volume24hUsd": 552931,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB200000000000000000000cFbdF64a8706a94a01",
@@ -695,9 +695,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2376410,
+      "volume24hUsd": 1189263,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x22aF33FE49fD1Fa80c7149773dDe5890D3c76F3b",
@@ -714,9 +714,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1439410,
+      "volume24hUsd": 3088077,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1F9bD96DDB4Bd07d6061f8933e9bA9EDE9967550",
@@ -750,9 +750,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 256991,
+      "volume24hUsd": 45651,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x532f27101965dd16442E59d40670FaF5eBB142E4",
@@ -768,9 +768,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 4798697,
+      "volume24hUsd": 2483486,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8c81B4c816d66D36c4bF348BdeC01dBCbC70E987",
@@ -779,16 +779,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x8c81b4c816d66d36c4bf348bdec01dbcbc70e987",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "coingecko",
-        "oneinch",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 59.26,
+      "volume24hUsd": 4.79,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xCb327b99fF831bF8223cCEd12B1338FF3aA322Ff",
@@ -804,9 +801,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 885130,
+      "volume24hUsd": 219853,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x78a087d713Be963Bf307b18F2Ff8122EF9A63ae9",
@@ -822,9 +819,9 @@
         "trustwallet",
         "defillama"
       ],
-      "volume24hUsd": 5.18,
+      "volume24hUsd": 140.57,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xA7d68d155d17cB30e311367c2Ef1E82aB6022b67",
@@ -842,9 +839,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 17912.37,
+      "volume24hUsd": 40157,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x043eB4B75d0805c43D7C834902E335621983Cf03",
@@ -860,9 +857,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 61087,
+      "volume24hUsd": 49405,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3055913c90Fcc1A6CE9a358911721eEb942013A1",
@@ -878,9 +875,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 76225196,
+      "volume24hUsd": 51659917,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xdfBEA88C4842d30c26669602888d746D30F9D60d",
@@ -896,9 +893,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 16182.38,
+      "volume24hUsd": 10690.06,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcbADA732173e39521CDBE8bf59a6Dc85A9fc7b8c",
@@ -914,9 +911,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 305127,
+      "volume24hUsd": 260009,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
@@ -933,9 +930,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 336541245,
+      "volume24hUsd": 264485098,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcbD06E5A2B0C65597161de254AA074E489dEb510",
@@ -951,9 +948,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 31556,
+      "volume24hUsd": 47468,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
@@ -971,9 +968,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 8195266,
+      "volume24hUsd": 9746190,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12",
+      "volumeFetchedAt": "2026-10-19",
       "core": true
     },
     {
@@ -991,9 +988,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 111027,
+      "volume24hUsd": 452267,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcb17C9Db87B595717C857a08468793f5bAb6445F",
@@ -1009,9 +1006,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 159215,
+      "volume24hUsd": 152746,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcb111E6A2a3bde90856D299d61341ac302167D23",
@@ -1028,9 +1025,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 148839,
+      "volume24hUsd": 70996,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcb585250f852C6c6bf90434AB21A00f02833a4af",
@@ -1046,9 +1043,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1760000,
+      "volume24hUsd": 3138857,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB2000000000000000000008501b13360000cb2EC",
@@ -1065,9 +1062,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1697051,
+      "volume24hUsd": 2201981,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x20b048fA035D5763685D695e66aDF62c5D9F5055",
@@ -1083,9 +1080,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 159.62,
+      "volume24hUsd": 331.7,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9126236476eFBA9Ad8aB77855c60eB5BF37586Eb",
@@ -1101,9 +1098,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 868058,
+      "volume24hUsd": 151719,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0C1c1C109FE34733fca54b82d7B46B75CFb71F6e",
@@ -1119,9 +1116,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 33983752,
+      "volume24hUsd": 8737846,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1bc0c42215582d5A085795f4baDbaC3ff36d1Bcb",
@@ -1138,9 +1135,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 643344,
+      "volume24hUsd": 875090,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xa1F72459dfA10BAD200Ac160eCd78C6b77a747be",
@@ -1156,9 +1153,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 213.06,
+      "volume24hUsd": 13.12,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9e1028F5F1D5eDE59748FFceE5532509976840E0",
@@ -1176,9 +1173,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 18821080,
+      "volume24hUsd": 10866345,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xab964f7b7b6391bd6c4e8512eF00d01f255d9c0D",
@@ -1194,9 +1191,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 31.02,
+      "volume24hUsd": 2.55,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xC0041EF357B183448B235a8Ea73Ce4E4eC8c265F",
@@ -1212,9 +1209,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1363973,
+      "volume24hUsd": 1217209,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xe30C0801a516F0C67EbC0c4B45FfA7dCBd72ea9a",
@@ -1230,9 +1227,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 19.96,
+      "volume24hUsd": 776.85,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x001AAd84c21A5CD4d696C56d44866e9703c43F77",
@@ -1248,9 +1245,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1986215,
+      "volume24hUsd": 1989685,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8Ee73c484A26e0A5df2Ee2a4960B789967dd0415",
@@ -1268,9 +1265,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 76268001,
+      "volume24hUsd": 61374586,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x417Ac0e078398C154EdFadD9Ef675d30Be60Af93",
@@ -1287,9 +1284,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 23027054,
+      "volume24hUsd": 10147023,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x11030f79109269d796fd0FB956D6244e502757f7",
@@ -1306,9 +1303,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 6516157,
+      "volume24hUsd": 5715967,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x259Fac10c5CbFEFE3E710e1D9467f70a76138d45",
@@ -1325,9 +1322,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 9148551,
+      "volume24hUsd": 2967339,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xBB22Ff867F8Ca3D5F2251B4084F6Ec86D4666E14",
@@ -1344,9 +1341,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 30347,
+      "volume24hUsd": 11017.98,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB1E1f3Cc2B6fE4420C1Ac82022b457018Eb628ff",
@@ -1363,9 +1360,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 116931,
+      "volume24hUsd": 147195,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
@@ -1384,9 +1381,9 @@
         "trustwallet",
         "defillama"
       ],
-      "volume24hUsd": 32250,
+      "volume24hUsd": 63864,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12",
+      "volumeFetchedAt": "2026-10-19",
       "core": true
     },
     {
@@ -1404,9 +1401,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 3676295,
+      "volume24hUsd": 3577680,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xF4d97F2da56e8c3098f3a8D538DB630A2606a024",
@@ -1422,9 +1419,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1328910,
+      "volume24hUsd": 1048523,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xAfb89a09D82FBDE58f18Ac6437B3fC81724e4dF6",
@@ -1440,9 +1437,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 4987.53,
+      "volume24hUsd": 15861.41,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x881Ed0FCeF78120A135eC6cC66cEf2779FE95BBA",
@@ -1458,9 +1455,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2481.97,
+      "volume24hUsd": 1485.58,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x6921B130D297cc43754afba22e5EAc0FBf8Db75b",
@@ -1476,9 +1473,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 89425,
+      "volume24hUsd": 530482,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4621b7A9c75199271F773Ebd9A499dbd165c3191",
@@ -1495,9 +1492,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 960234,
+      "volume24hUsd": 294971,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB38266e0e9D9681b77aEB0A280E98131b953F865",
@@ -1513,9 +1510,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 16685.01,
+      "volume24hUsd": 9048.27,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3ec2156D4c0A9CBdAB4a016633b7BcF6a8d68Ea2",
@@ -1531,9 +1528,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 330148,
+      "volume24hUsd": 415181,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9d0E8f5b25384C7310CB8C6aE32C8fbeb645d083",
@@ -1549,9 +1546,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 14172364,
+      "volume24hUsd": 8120111,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xED6E000dEF95780fb89734c07EE2ce9F6dcAf110",
@@ -1568,9 +1565,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1869957,
+      "volume24hUsd": 1388408,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xea17Df5Cf6D172224892B5477A16ACb111182478",
@@ -1586,9 +1583,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 6144778,
+      "volume24hUsd": 4111210,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x29cC30f9D113B356Ce408667aa6433589CeCBDcA",
@@ -1605,9 +1602,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1631924,
+      "volume24hUsd": 19155139,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xe2c86869216aC578bd62a4b8313770d9EE359A05",
@@ -1623,9 +1620,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 100.97,
+      "volume24hUsd": 1743.16,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
@@ -1642,9 +1639,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 22980754,
+      "volume24hUsd": 29817494,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xCfA3Ef56d303AE4fAabA0592388F19d7C3399FB4",
@@ -1660,9 +1657,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2590258,
+      "volume24hUsd": 723663,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2C24497D4086490e7EaD87CC12597fb50c2E6eD6",
@@ -1678,9 +1675,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1837576,
+      "volume24hUsd": 1112205,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xb33Ff54b9F7242EF1593d2C9Bcd8f9df46c77935",
@@ -1696,9 +1693,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 435505,
+      "volume24hUsd": 724420,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xF1A7000000950C7ad8Aff13118Bb7aB561A448ee",
@@ -1714,9 +1711,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 806.44,
+      "volume24hUsd": 114.1,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x5aB3D4c385B400F3aBB49e80DE2fAF6a88A7B691",
@@ -1733,9 +1730,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2179986,
+      "volume24hUsd": 1528199,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x61E030A56D33e8260FdD81f03B162A79Fe3449Cd",
@@ -1751,9 +1748,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 3311460,
+      "volume24hUsd": 3611227,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xFF7F8F301F7A706E3CfD3D2275f5dc0b9EE8009B",
@@ -1769,9 +1766,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 903645,
+      "volume24hUsd": 1416788,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9A86980D3625b4A6E69D8a4606D51cbc019e2002",
@@ -1784,9 +1781,9 @@
       "sources": [
         "curated"
       ],
-      "volume24hUsd": 8.89,
+      "volume24hUsd": 17.51,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x02300aC24838570012027E0A90D3FEcCEF3c51d2",
@@ -1795,15 +1792,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x02300ac24838570012027e0a90d3feccef3c51d2",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 10.12,
+      "volume24hUsd": 1.96,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7588310a7aBF34DC608ac98a1c4432F85e194Df5",
@@ -1820,9 +1815,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 710197,
+      "volume24hUsd": 1177817,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x16EE7ecAc70d1028E7712751E2Ee6BA808a7dd92",
@@ -1838,9 +1833,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 190557,
+      "volume24hUsd": 381301,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9C7BEBa8F6eF6643aBd725e45a4E8387eF260649",
@@ -1856,9 +1851,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 8965887,
+      "volume24hUsd": 4620434,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x6FbF03Efa4363cA0aFe0C9C3906F7D610890B683",
@@ -1874,9 +1869,26 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 75984,
+      "volume24hUsd": 76747,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
+    },
+    {
+      "address": "0x2D189eABb667aA1ecFC01963a6a3A5d83960f558",
+      "symbol": "GALAXIS",
+      "name": "GALAXIS Token",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=8453&address=0x2d189eabb667aa1ecfc01963a6a3a5d83960f558",
+      "verified": true,
+      "sources": [
+        "superchain",
+        "coingecko",
+        "defillama"
+      ],
+      "volume24hUsd": 77.7,
+      "volumeSource": "coingecko",
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1db0c569ebb4a8b57AC01833B9792F526305e062",
@@ -1892,9 +1904,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 8.95,
+      "volume24hUsd": 8.8,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xcD2F22236DD9Dfe2356D7C543161D4d260FD9BcB",
@@ -1912,9 +1924,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 30875,
+      "volume24hUsd": 26289,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x09188484e1Ab980DAeF53a9755241D759C5B7d60",
@@ -1930,9 +1942,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 93.26,
+      "volume24hUsd": 32.52,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0f1cFD0Bb452DB90a3bFC0848349463010419AB2",
@@ -1948,9 +1960,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 81.45,
+      "volume24hUsd": 104.74,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3a38dde9824e18CC4C0A147824F95Bf5d608F0B3",
@@ -1966,9 +1978,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 10719.23,
+      "volume24hUsd": 1639.56,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xEF22cb48B8483dF6152e1423b19dF5553BbD818b",
@@ -1984,9 +1996,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 4649.53,
+      "volume24hUsd": 84713,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0578d8A44db98B23BF096A382e016e29a5Ce0ffe",
@@ -2002,9 +2014,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 446.51,
+      "volume24hUsd": 965.76,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4BfAa776991E85e5f8b1255461cbbd216cFc714f",
@@ -2020,9 +2032,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 5051853,
+      "volume24hUsd": 4910281,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc5102fE9359FD9a28f877a67E36B0F050d81a3CC",
@@ -2031,13 +2043,16 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0xc5102fe9359fd9a28f877a67e36b0f050d81a3cc",
-      "verified": false,
+      "verified": true,
       "sources": [
-        "curated"
+        "curated",
+        "superchain",
+        "coingecko",
+        "defillama"
       ],
-      "volume24hUsd": 4.48,
+      "volume24hUsd": 159.56,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x37f0c2915CeCC7e977183B8543Fc0864d03E064C",
@@ -2053,9 +2068,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 189889,
+      "volume24hUsd": 50689,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xC9d23ED2ADB0f551369946BD377f8644cE1ca5c4",
@@ -2071,9 +2086,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 8290798,
+      "volume24hUsd": 2698319,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x12418783e860997eb99e8aCf682DF952F721cF62",
@@ -2086,9 +2101,9 @@
       "sources": [
         "curated"
       ],
-      "volume24hUsd": 1.73,
+      "volume24hUsd": 3.95,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xE0Cd4cAcDdcBF4f36e845407CE53E87717b6601d",
@@ -2106,9 +2121,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1739198,
+      "volume24hUsd": 23365985,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x18Bc5bcC660cf2B9cE3cd51a404aFe1a0cBD3C22",
@@ -2124,9 +2139,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 6079.61,
+      "volume24hUsd": 15609.03,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xE7798f023fC62146e8Aa1b36Da45fb70855a77Ea",
@@ -2142,9 +2157,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1.045,
+      "volume24hUsd": 6.05,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xBCBAf311ceC8a4EAC0430193A528d9FF27ae38C1",
@@ -2161,9 +2176,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2349099,
+      "volume24hUsd": 3332659,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x833f973406E07830d494cBe5FaBBc3AE9c750c1F",
@@ -2179,9 +2194,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1666.95,
+      "volume24hUsd": 1645.97,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB00d803CB2367a7DA82351DCb9D213230da7B92A",
@@ -2190,16 +2205,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0xb00d803cb2367a7da82351dcb9d213230da7b92a",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 1.022,
+      "volume24hUsd": 1.69,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x50F88fe97f72CD3E75b9Eb4f747F59BcEBA80d59",
@@ -2215,9 +2227,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1156.95,
+      "volume24hUsd": 4005.43,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x97bE14Dd8f994A5364573BC035D85309E7CB34de",
@@ -2233,9 +2245,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 18688188,
+      "volume24hUsd": 16443762,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x98d0baa52b2D063E780DE12F615f963Fe8537553",
@@ -2252,9 +2264,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 10542651,
+      "volume24hUsd": 11756480,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9a26F5433671751C3276a065f57e5a02D2817973",
@@ -2270,9 +2282,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 637305,
+      "volume24hUsd": 62074,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x64cc19A52f4D631eF5BE07947CABA14aE00c52Eb",
@@ -2288,9 +2300,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 7634.91,
+      "volume24hUsd": 4486.58,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xC7DcCA0a3e69bD762C8DB257f868f76Be36c8514",
@@ -2306,9 +2318,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 22.47,
+      "volume24hUsd": 5522.35,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x946F8B0eF009F3F5B1b35E6511a82A58b09d8d4e",
@@ -2324,9 +2336,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 183.32,
+      "volume24hUsd": 476.53,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8f019931375454Fe4EE353427eB94E2E0C9e0a8C",
@@ -2342,9 +2354,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1188.94,
+      "volume24hUsd": 544.3,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xDAE49C25fAd3a62a8e8bFB6dA12c46bE611f9f7a",
@@ -2361,9 +2373,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 239660,
+      "volume24hUsd": 108706,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc0634090F2Fe6c6d75e61Be2b949464aBB498973",
@@ -2379,9 +2391,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 686456,
+      "volume24hUsd": 790005,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB095274743941e953c746F9C228DA9c18Bb6ec29",
@@ -2397,9 +2409,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 3756128,
+      "volume24hUsd": 335913,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc7837BE3d71E00fcbE76D77602BCf353Df859664",
@@ -2408,16 +2420,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0xc7837be3d71e00fcbe76d77602bcf353df859664",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 1.59,
+      "volume24hUsd": 3.4,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xF732A566121Fa6362E9E0FBdd6D66E5c8C925E49",
@@ -2433,9 +2442,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2476.22,
+      "volume24hUsd": 760.36,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9EadbE35F3Ee3bF3e28180070C429298a1b02F93",
@@ -2451,9 +2460,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 964601,
+      "volume24hUsd": 871548,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xd5b22dCfa9a919b28Afe164fc7Af10b832d4B022",
@@ -2469,9 +2478,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 11726.17,
+      "volume24hUsd": 2772.08,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB676f87A6E701f0DE8De5Ab91B56b66109766DB1",
@@ -2488,9 +2497,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 7560.88,
+      "volume24hUsd": 40656,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xac485391EB2d7D88253a7F1eF18C37f4242D1A24",
@@ -2508,9 +2517,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 7857327,
+      "volume24hUsd": 13321248,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x368181499736d0c0CC614DBB145E2EC1AC86b8c6",
@@ -2528,9 +2537,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 25036,
+      "volume24hUsd": 37130,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4837b18a6d7aF6159c8665505B90a2ed393255E0",
@@ -2546,9 +2555,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2480.5,
+      "volume24hUsd": 3937.82,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7300B37DfdfAb110d83290A29DfB31B1740219fE",
@@ -2564,9 +2573,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1453639,
+      "volume24hUsd": 1599492,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x45D9C101a3870Ca5024582fd788F4E1e8F7971c3",
@@ -2577,13 +2586,14 @@
       "logoURI": "/api/token-logo?chainId=8453&address=0x45d9c101a3870ca5024582fd788f4e1e8f7971c3",
       "verified": true,
       "sources": [
+        "curated",
         "superchain",
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 19.08,
+      "volume24hUsd": 36.27,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x24fcFC492C1393274B6bcd568ac9e225BEc93584",
@@ -2599,9 +2609,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 512358,
+      "volume24hUsd": 713365,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8Fbd0648971d56f1f2c35Fa075Ff5Bc75fb0e39D",
@@ -2610,16 +2620,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x8fbd0648971d56f1f2c35fa075ff5bc75fb0e39d",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 1.001,
+      "volume24hUsd": 5778.46,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc48823EC67720a04A9DFD8c7d109b2C3D6622094",
@@ -2635,9 +2642,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 22431,
+      "volume24hUsd": 20990,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8e4cbBcc33dB6c0a18561fDE1F6bA35906d4848b",
@@ -2653,9 +2660,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 59789,
+      "volume24hUsd": 41076,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x686015EbF044a1B8A4bE750346be00293a996071",
@@ -2664,16 +2671,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x686015ebf044a1b8a4be750346be00293a996071",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 5.64,
+      "volume24hUsd": 4.23,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7C298664BD6582f6f264c2Cb5a4B9cC09b6E3889",
@@ -2707,9 +2711,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 61673,
+      "volume24hUsd": 46375,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2Da56AcB9Ea78330f947bD57C54119Debda7AF71",
@@ -2727,9 +2731,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 10319617,
+      "volume24hUsd": 9660463,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842",
@@ -2747,9 +2751,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 21307595,
+      "volume24hUsd": 24748497,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xF0Cb96a4011A0A6F73d100c7080Bf8020D10F87a",
@@ -2765,9 +2769,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 41170,
+      "volume24hUsd": 40295,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x31b28012F61fc3600e1c076baFc9Fd997FB2DA90",
@@ -2776,16 +2780,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x31b28012f61fc3600e1c076bafc9fd997fb2da90",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 109.5,
+      "volume24hUsd": 34.7,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7Ba6F01772924a82D9626c126347A28299E98c98",
@@ -2801,9 +2802,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2336130,
+      "volume24hUsd": 1883464,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xe8b46b116D3BdFA787CE9CF3f5aCC78dc7cA380E",
@@ -2812,13 +2813,16 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0xe8b46b116d3bdfa787ce9cf3f5acc78dc7ca380e",
-      "verified": false,
+      "verified": true,
       "sources": [
-        "curated"
+        "curated",
+        "coingecko",
+        "oneinch",
+        "defillama"
       ],
-      "volume24hUsd": 112.95,
+      "volume24hUsd": 4.94,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xE6bAA3Fedb5Dc88b2c59ba4812388Bb0906D19dB",
@@ -2852,9 +2856,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 764.64,
+      "volume24hUsd": 148.45,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3Cf255a7A03d74B6F9D58456cBedbc0705626354",
@@ -2870,9 +2874,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 61220,
+      "volume24hUsd": 52231,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x13741C5dF9aB03E7Aa9Fb3Bf1f714551dD5A5F8a",
@@ -2881,16 +2885,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x13741c5df9ab03e7aa9fb3bf1f714551dd5a5f8a",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "curated",
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 4.49,
+      "volume24hUsd": 3.64,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9Cb41FD9dC6891BAe8187029461bfAADF6CC0C69",
@@ -2906,9 +2907,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 62608,
+      "volume24hUsd": 233354,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x08D7Ea3c148672C4b03999EB0D0467733Da2db6A",
@@ -2924,9 +2925,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 360.74,
+      "volume24hUsd": 259.21,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x182FA643E5f29d5EcA75e7b9CF9336A3fe4620b2",
@@ -2943,9 +2944,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2403219,
+      "volume24hUsd": 2272326,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xca73ed1815e5915489570014e024b7EbE65dE679",
@@ -2962,9 +2963,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 320751,
+      "volume24hUsd": 481860,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x752C5a95d202972E124390F30a50154409d3c858",
@@ -2980,9 +2981,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 674838,
+      "volume24hUsd": 942550,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7002458B1DF59EccB57387bC79fFc7C29E22e6f7",
@@ -3000,9 +3001,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 21091641,
+      "volume24hUsd": 17190561,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x54330d28ca3357F294334BDC454a032e7f353416",
@@ -3018,9 +3019,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 410517,
+      "volume24hUsd": 55052,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3792DBDD07e87413247DF995e692806aa13D3299",
@@ -3036,9 +3037,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 845754,
+      "volume24hUsd": 1256808,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xFbC2051AE2265686a469421b2C5A2D5462FbF5eB",
@@ -3054,9 +3055,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 9528388,
+      "volume24hUsd": 13408299,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9A6d24c02eC35ad970287eE8296D4D6552a31DbE",
@@ -3072,9 +3073,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 800.66,
+      "volume24hUsd": 835.31,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB2000000000000000000002fEb517dFeC7415344",
@@ -3090,9 +3091,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 416694,
+      "volume24hUsd": 243132,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x27E3Bc3a66E24CaD043aC3d93A12A8070E3897ba",
@@ -3108,9 +3109,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 89628,
+      "volume24hUsd": 275464,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xEF5997c2cf2f6c138196f8A6203afc335206b3c1",
@@ -3126,9 +3127,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 14083.79,
+      "volume24hUsd": 18872.8,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xba0Dda8762C24dA9487f5FA026a9B64b695A07Ea",
@@ -3144,9 +3145,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 5.84,
+      "volume24hUsd": 8.18,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xA99F6e6785Da0F5d6fB42495Fe424BCE029Eeb3E",
@@ -3163,9 +3164,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 46156997,
+      "volume24hUsd": 46840359,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB5068Ad7E4AD8f7fE2FcF5abe2c043ab8866569c",
@@ -3181,9 +3182,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 426.72,
+      "volume24hUsd": 277.93,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x853a7c99227499DbA9dB8C3A02aA691aFDeBf841",
@@ -3199,9 +3200,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1009890,
+      "volume24hUsd": 830549,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xeD664536023d8E4b1640C394777D34aBAFF1dF8F",
@@ -3217,9 +3218,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 38646657,
+      "volume24hUsd": 3299422,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xd652C5425aea2Afd5fb142e120FeCf79e18fafc3",
@@ -3235,9 +3236,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 97.57,
+      "volume24hUsd": 366.03,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3816dD4bd44c8830c2FA020A5605bAC72FA3De7A",
@@ -3253,9 +3254,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 102.75,
+      "volume24hUsd": 646,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xfA980cEd6895AC314E7dE34Ef1bFAE90a5AdD21b",
@@ -3273,9 +3274,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 189950,
+      "volume24hUsd": 284411,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x18dD5B087bCA9920562aFf7A0199b96B9230438b",
@@ -3293,9 +3294,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 784069,
+      "volume24hUsd": 430200,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x30c7235866872213F68cb1F08c37Cb9eCCB93452",
@@ -3312,9 +3313,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 4482989,
+      "volume24hUsd": 4051863,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8B7DdE054BE9D180c1Be7FaE0874697374A49832",
@@ -3331,9 +3332,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2197774,
+      "volume24hUsd": 4337997,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x38815A4455921667d673B4cb3d48F0383eE93400",
@@ -3351,7 +3352,7 @@
       ],
       "volume24hUsd": 15.43,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x5c97D726bf5130AE15408cE32bc764e458320D2f",
@@ -3382,9 +3383,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 666940,
+      "volume24hUsd": 1574406,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1a44233FAe8D50F1AeB3a5d58dd426ff4814Cb53",
@@ -3400,9 +3401,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 948888,
+      "volume24hUsd": 1034919,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x55365c9E68E70122020184F4441B498E8bf06AC6",
@@ -3418,9 +3419,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2346.39,
+      "volume24hUsd": 476.08,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1aA8fD5BCce2231C6100d55Bf8B377cff33Acfc3",
@@ -3437,9 +3438,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 711135,
+      "volume24hUsd": 990815,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1f16e03C1a5908818F47f6EE7bB16690b40D0671",
@@ -3455,9 +3456,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 5537510,
+      "volume24hUsd": 656104,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB3e3c89B8D9c88B1fe96856E382959eE6291ebbA",
@@ -3473,9 +3474,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 231113,
+      "volume24hUsd": 217450,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xFf8104251E7761163faC3211eF5583FB3F8583d6",
@@ -3491,9 +3492,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 51878,
+      "volume24hUsd": 47577,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c",
@@ -3511,9 +3512,9 @@
         "trustwallet",
         "defillama"
       ],
-      "volume24hUsd": 396837,
+      "volume24hUsd": 215853,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x5e64c9049455b3bB6E9fbDC33565fa313BAe9B53",
@@ -3529,9 +3530,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 218510,
+      "volume24hUsd": 207716,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xa53887F7e7c1bf5010b8627F1C1ba94fE7a5d6E0",
@@ -3548,9 +3549,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 126325,
+      "volume24hUsd": 25274,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xFbB75A59193A3525a8825BeBe7D4b56899E2f7e1",
@@ -3567,9 +3568,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 121826,
+      "volume24hUsd": 2713557,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xaB36452DbAC151bE02b16Ca17d8919826072f64a",
@@ -3586,9 +3587,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 208976742,
+      "volume24hUsd": 9443210,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xC729777d0470F30612B1564Fd96E8Dd26f5814E3",
@@ -3605,9 +3606,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1686079,
+      "volume24hUsd": 1830125,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD67EC255100Ef200A439D09FF865fbAA2Ad9C730",
@@ -3623,9 +3624,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 8901.79,
+      "volume24hUsd": 5458.77,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x99aC4484e8a1dbd6A185380B3A811913Ac884D87",
@@ -3641,9 +3642,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 27760,
+      "volume24hUsd": 57503,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x1C7a460413dD4e964f96D8dFC56E7223cE88CD85",
@@ -3661,9 +3662,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 28.16,
+      "volume24hUsd": 31.69,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD1917629B3E6A72E6772Aab5dBe58Eb7FA3C2F33",
@@ -3672,15 +3673,13 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0xd1917629b3e6a72e6772aab5dbe58eb7fa3c2f33",
-      "verified": true,
+      "verified": false,
       "sources": [
-        "superchain",
-        "coingecko",
-        "defillama"
+        "curated"
       ],
-      "volume24hUsd": 2.71,
+      "volume24hUsd": 8.2,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xFCa95aeb5bF44aE355806A5ad14659c940dC6BF7",
@@ -3696,9 +3695,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1907.01,
+      "volume24hUsd": 3267.75,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x6774DFC16e1D9B6cE5b0AeC4fFed37A0dAeF0602",
@@ -3707,13 +3706,16 @@
       "decimals": 18,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x6774dfc16e1d9b6ce5b0aec4ffed37a0daef0602",
-      "verified": false,
+      "verified": true,
       "sources": [
-        "curated"
+        "curated",
+        "superchain",
+        "coingecko",
+        "defillama"
       ],
-      "volume24hUsd": 1.17,
+      "volume24hUsd": 12.08,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x868FCEd65edBF0056c4163515dD840e9f287A4c3",
@@ -3729,9 +3731,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2319933,
+      "volume24hUsd": 2413897,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xE7399151B688A265F347693d358821a5A8c213Ec",
@@ -3747,9 +3749,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 12.27,
+      "volume24hUsd": 55.53,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x768BE13e1680b5ebE0024C42c896E3dB59ec0149",
@@ -3765,9 +3767,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 9148.51,
+      "volume24hUsd": 3595.19,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2974dC646e375e83bd1c0342625b49f288987fA4",
@@ -3783,9 +3785,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2830.03,
+      "volume24hUsd": 1021.22,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x22e6966B799c4D5B13BE962E1D117b56327FDa66",
@@ -3803,9 +3805,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 12059368,
+      "volume24hUsd": 4488145,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x311935Cd80B76769bF2ecC9D8Ab7635b2139cf82",
@@ -3821,9 +3823,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 17710593,
+      "volume24hUsd": 14169770,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x624e2e7fDc8903165F64891672267AB0FCB98831",
@@ -3840,9 +3842,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2185465,
+      "volume24hUsd": 3605430,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xCa4C2E10037ac1AF9f501eCB11A710776c87d2d5",
@@ -3858,9 +3860,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 486.41,
+      "volume24hUsd": 304.62,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8f2E6758C4D6570344bd5007DEc6301cd57590A0",
@@ -3869,13 +3871,16 @@
       "decimals": 9,
       "category": "Other",
       "logoURI": "/api/token-logo?chainId=8453&address=0x8f2e6758c4d6570344bd5007dec6301cd57590a0",
-      "verified": false,
+      "verified": true,
       "sources": [
-        "curated"
+        "curated",
+        "superchain",
+        "coingecko",
+        "defillama"
       ],
-      "volume24hUsd": 31.32,
+      "volume24hUsd": 23.4,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x50dA645f148798F68EF2d7dB7C1CB22A6819bb2C",
@@ -3892,9 +3897,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 6818995,
+      "volume24hUsd": 6765573,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xd4554BEa546EFa83C1E6B389ecac40EA999B3E78",
@@ -3910,9 +3915,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1174404,
+      "volume24hUsd": 1865678,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x858c50C3AF1913b0E849aFDB74617388a1a5340d",
@@ -3928,9 +3933,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1.61,
+      "volume24hUsd": 21.52,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xa69f80524381275A7fFdb3AE01c54150644c8792",
@@ -3946,9 +3951,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 25412,
+      "volume24hUsd": 12617.17,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xDBFeFD2e8460a6Ee4955A68582F85708BAEA60A3",
@@ -3965,9 +3970,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 108447,
+      "volume24hUsd": 179893,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x211Cc4DD073734dA055fbF44a2b4667d5E5fE5d2",
@@ -3983,9 +3988,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 3750129,
+      "volume24hUsd": 6610740,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7D49a065D17d6d4a55dc13649901fdBB98B2AFBA",
@@ -4003,9 +4008,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 4714092,
+      "volume24hUsd": 3743408,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x11dC28D01984079b7efE7763b533e6ed9E3722B9",
@@ -4022,9 +4027,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 584101,
+      "volume24hUsd": 233972,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xbd2DBb8eceA9743CA5B16423b4eAa26bDcfE5eD2",
@@ -4037,9 +4042,9 @@
       "sources": [
         "curated"
       ],
-      "volume24hUsd": 9.13,
+      "volume24hUsd": 1.73,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xFdCa15bd55F350a36E63C47661914d80411d2C22",
@@ -4055,9 +4060,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 832.32,
+      "volume24hUsd": 185.58,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x236aa50979D5f3De3Bd1Eeb40E81137F22ab794b",
@@ -4075,9 +4080,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1902951,
+      "volume24hUsd": 996608,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x09bE1692ca16e06f536F0038fF11D1dA8524aDB1",
@@ -4112,9 +4117,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 174.81,
+      "volume24hUsd": 82.25,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xe62bfbE57763ec24c0F130426F34DbCe11Fc5B06",
@@ -4130,9 +4135,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 31756,
+      "volume24hUsd": 27407,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x78b3C724A2F663D11373C4a1978689271895256f",
@@ -4148,9 +4153,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1820.65,
+      "volume24hUsd": 976.37,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xb8D98a102b0079B69FFbc760C8d857A31653e56e",
@@ -4166,9 +4171,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 5466.09,
+      "volume24hUsd": 1027.66,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4",
@@ -4185,9 +4190,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 2331990,
+      "volume24hUsd": 2287687,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xf7C1CEfCf7E1dd8161e00099facD3E1Db9e528ee",
@@ -4203,9 +4208,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 147303,
+      "volume24hUsd": 188096,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x00000000A22C618fd6b4D7E9A335C4B96B189a38",
@@ -4222,9 +4227,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1277226,
+      "volume24hUsd": 1235419,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xA81a52B4dda010896cDd386C7fBdc5CDc835ba23",
@@ -4241,9 +4246,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 3946194,
+      "volume24hUsd": 4063313,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x6cd905dF2Ed214b22e0d48FF17CD4200C1C6d8A3",
@@ -4259,9 +4264,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 480229,
+      "volume24hUsd": 1328879,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0d97F261b1e88845184f678e2d1e7a98D9FD38dE",
@@ -4277,9 +4282,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 4914.77,
+      "volume24hUsd": 1931,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc3De830EA07524a0761646a6a4e4be0e114a3C83",
@@ -4314,9 +4319,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 189.57,
+      "volume24hUsd": 1413.74,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x5b2193fDc451C1f847bE09CA9d13A4Bf60f8c86B",
@@ -4332,9 +4337,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1631232,
+      "volume24hUsd": 946298,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB79DD08EA68A908A97220C76d19A6aA9cBDE4376",
@@ -4347,9 +4352,9 @@
       "sources": [
         "curated"
       ],
-      "volume24hUsd": 56814,
+      "volume24hUsd": 29562,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xEFb97aaF77993922aC4be4Da8Fbc9A2425322677",
@@ -4365,9 +4370,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 7494.44,
+      "volume24hUsd": 6.71,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
@@ -4386,9 +4391,9 @@
         "trustwallet",
         "defillama"
       ],
-      "volume24hUsd": 413189,
+      "volume24hUsd": 181313,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12",
+      "volumeFetchedAt": "2026-10-19",
       "core": true
     },
     {
@@ -4407,9 +4412,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 14275012283,
+      "volume24hUsd": 14056734128,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12",
+      "volumeFetchedAt": "2026-10-19",
       "core": true
     },
     {
@@ -4426,9 +4431,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 36777613,
+      "volume24hUsd": 22236374,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4F604735c1cF31399C6E711D5962b2B3E0225AD3",
@@ -4444,9 +4449,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 8159.11,
+      "volume24hUsd": 19242.42,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x59D9356E565Ab3A36dD77763Fc0d87fEaf85508C",
@@ -4462,9 +4467,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 0.883973,
+      "volume24hUsd": 37.92,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x820C137fa70C8691f0e44Dc420a5e53c168921Dc",
@@ -4480,9 +4485,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 178514220,
+      "volume24hUsd": 54436644,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x26C358F7c5fEdB20a6ddEf108cD91Efb6B8Da0Cb",
@@ -4498,9 +4503,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 1653.38,
+      "volume24hUsd": 125348,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
@@ -4518,9 +4523,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 24789252,
+      "volume24hUsd": 24052519,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x9B8Df6E244526ab5F6e6400d331DB28C8fdDdb55",
@@ -4536,9 +4541,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 387025,
+      "volume24hUsd": 318337,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xb0505e5a99abd03d94a1169e638B78EDfEd26ea4",
@@ -4554,9 +4559,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 6855.5,
+      "volume24hUsd": 13423.72,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x731814e491571A2e9eE3c5b1F7f3b962eE8f4870",
@@ -4572,9 +4577,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 491.99,
+      "volume24hUsd": 2515.24,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xeFc2689D3E79252fBA37E889a1b5aD92cEDC6e4F",
@@ -4590,9 +4595,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 661.05,
+      "volume24hUsd": 87.95,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xbF927b841994731C573BDF09ceB0c6B0Aa887cDd",
@@ -4608,9 +4613,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 3851576,
+      "volume24hUsd": 2865651,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b",
@@ -4627,9 +4632,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 50152202,
+      "volume24hUsd": 33122662,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x490a4B510d0Ea9f835D2dF29Eb73b4FcA5071937",
@@ -4645,9 +4650,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 561.08,
+      "volume24hUsd": 2180.97,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",
@@ -4664,9 +4669,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 50956581,
+      "volume24hUsd": 37460527,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xB0fFa8000886e57F86dd5264b9582b2Ad87b2b91",
@@ -4682,9 +4687,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 383432097,
+      "volume24hUsd": 14658303,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x729F75Aff28c726e32403e80cef2aFb518CFbfa7",
@@ -4700,9 +4705,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 4320.14,
+      "volume24hUsd": 11940.64,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x88b1Cd4b430D95b406E382C3cDBaE54697a0286E",
@@ -4718,9 +4723,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 8750.81,
+      "volume24hUsd": 26099,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xC768c589647798a6EE01A91FdE98EF2ed046DBD6",
@@ -4736,9 +4741,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 4751.12,
+      "volume24hUsd": 14503.83,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xe298b938631f750DD409fB18227C4a23dCdaab9b",
@@ -4754,9 +4759,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 733.94,
+      "volume24hUsd": 3351.43,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0830820D1A9aa1554364752d6D8F55C836871B74",
@@ -4772,9 +4777,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 20.61,
+      "volume24hUsd": 40.44,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x0BbbEad62f7647AE8323d2cb243A0DB74B7C2b80",
@@ -4791,9 +4796,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 14344.65,
+      "volume24hUsd": 10242.62,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x489fe42C267fe0366B16b0c39e7AEEf977E841eF",
@@ -4811,9 +4816,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 130.44,
+      "volume24hUsd": 968.78,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xeF4461891DfB3AC8572cCf7C794664A8DD927945",
@@ -4829,9 +4834,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 5841358,
+      "volume24hUsd": 4983430,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xA88594D404727625A9437C3f886C7643872296AE",
@@ -4847,9 +4852,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 3271995,
+      "volume24hUsd": 1237506,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x4200000000000000000000000000000000000006",
@@ -4867,9 +4872,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 499524637,
+      "volume24hUsd": 403852977,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12",
+      "volumeFetchedAt": "2026-10-19",
       "core": true
     },
     {
@@ -4886,9 +4891,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 63879,
+      "volume24hUsd": 62662,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3d63825B0d8669307366E6c8202f656b9E91D368",
@@ -4904,9 +4909,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 3.03,
+      "volume24hUsd": 5.29,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xDf690C65d067035364a58369C26820D3696D7799",
@@ -4922,9 +4927,26 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 19.15,
+      "volume24hUsd": 76.45,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
+    },
+    {
+      "address": "0xeeee77bC7e82c0d4166d52F58239D4c5Bf41eeee",
+      "symbol": "WHUF",
+      "name": "Whuffie",
+      "decimals": 18,
+      "category": "Other",
+      "logoURI": "/api/token-logo?chainId=8453&address=0xeeee77bc7e82c0d4166d52f58239d4c5bf41eeee",
+      "verified": true,
+      "sources": [
+        "uniswap",
+        "coingecko",
+        "defillama"
+      ],
+      "volume24hUsd": 1852413,
+      "volumeSource": "coingecko",
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3d2EbA645c44BBD32A34b7c017667711eb5b173C",
@@ -4940,9 +4962,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 67.51,
+      "volume24hUsd": 3263,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3e31966d4f81C72D2a55310A6365A56A4393E98D",
@@ -4958,9 +4980,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 228787,
+      "volume24hUsd": 187276,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452",
@@ -4977,9 +4999,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1242977,
+      "volume24hUsd": 241637,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7FcD174E80f264448ebeE8c88a7C4476AAF58Ea6",
@@ -4997,7 +5019,7 @@
       ],
       "volume24hUsd": 0,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x07b3D902783c3C12b077508c3B5c00113d1291D0",
@@ -5013,9 +5035,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 194846979,
+      "volume24hUsd": 92088640,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x8Fe815417913a93Ea99049FC0718ee1647A2a07c",
@@ -5031,9 +5053,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1808.58,
+      "volume24hUsd": 4591.27,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD7B99ffB8B2afc6fe013a17207cbe50f223aDc94",
@@ -5070,9 +5092,9 @@
         "trustwallet",
         "defillama"
       ],
-      "volume24hUsd": 3246267,
+      "volume24hUsd": 2672954,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xaAC78d1219c08AecC8e37e03858FE885f5EF1799",
@@ -5089,9 +5111,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 3375109,
+      "volume24hUsd": 2426463,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x2C8C89C442436CC6C0a77943E09c8Daf49Da3161",
@@ -5107,9 +5129,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 1212.45,
+      "volume24hUsd": 1234.92,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553",
@@ -5120,13 +5142,14 @@
       "logoURI": "/api/token-logo?chainId=8453&address=0xd4dd9e2f021bb459d5a5f6c24c12fe09c5d45553",
       "verified": true,
       "sources": [
+        "curated",
         "uniswap",
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 2315938,
+      "volume24hUsd": 333429,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xf43eB8De897Fbc7F2502483B2Bef7Bb9EA179229",
@@ -5142,9 +5165,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 9011294,
+      "volume24hUsd": 7751055,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xdf49c226ED9CF05Be0e38cdb86Df4E8A945158B1",
@@ -5160,9 +5183,9 @@
         "coingecko",
         "defillama"
       ],
-      "volume24hUsd": 179678,
+      "volume24hUsd": 2363945,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x7297968FFb753dd12e4f6B1f18d9865c76707FC2",
@@ -5178,9 +5201,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 11793549,
+      "volume24hUsd": 1491536,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0xAA61bB7777bD01B684347961918f1E07fBbCe7CF",
@@ -5215,9 +5238,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 8437810,
+      "volume24hUsd": 8762768,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x6985884C4392D348587B19cb9eAAf157F13271cd",
@@ -5234,9 +5257,9 @@
         "oneinch",
         "defillama"
       ],
-      "volume24hUsd": 168827363,
+      "volume24hUsd": 78944521,
       "volumeSource": "coingecko",
-      "volumeFetchedAt": "2026-10-12"
+      "volumeFetchedAt": "2026-10-19"
     },
     {
       "address": "0x3bB4445D30AC020a84c1b5A8A2C6248ebC9779D0",

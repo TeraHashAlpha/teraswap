@@ -10,6 +10,7 @@
  * tone is plain numbers + tx links; no "free"/"gasless" claim anywhere, per the transparency brand.
  */
 
+import { fmtToken as fmtTokenValue, fmtPct, fmtGas, fmtDate } from '@/lib/format'
 import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -22,26 +23,23 @@ import {
 } from '@/lib/dca/settlement-receipt'
 
 function fmtToken(raw: string, decimals: number, symbol: string): string {
-  const num = Number(formatUnits(BigInt(raw), decimals))
-  if (!Number.isFinite(num)) return '—'
-  if (num === 0) return `0 ${symbol}`
-  return `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${symbol}`
+  return `${fmtTokenValue(BigInt(raw), decimals)} ${symbol}`
 }
 
 function fmtEth(wei: string): string {
   const num = Number(formatUnits(BigInt(wei), 18))
   if (!Number.isFinite(num) || num === 0) return '0 ETH'
-  return num < 0.000001 ? '<0.000001 ETH' : `${num.toLocaleString(undefined, { maximumFractionDigits: 8 })} ETH`
+  return `${fmtGas(num)} ETH`
 }
 
 function fmtPrice(price: number | null, tokenInSymbol: string, tokenOutSymbol: string): string {
   if (price == null) return '—'
-  return `${price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${tokenInSymbol} / ${tokenOutSymbol}`
+  return `${fmtTokenValue(price)} ${tokenInSymbol} / ${tokenOutSymbol}`
 }
 
 function fmtBps(bps: number | null): string {
   if (bps == null) return '—'
-  return `${(bps / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
+  return fmtPct(bps / 100)
 }
 
 // [CHORE-DCA-AGGREGATION-VALUE] "Our route"'s label — resolved from the ORDER's own committed
@@ -59,7 +57,7 @@ function fmtTimestamp(ms: number | null): string {
   if (ms == null) return '—'
   const d = new Date(ms)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return fmtDate(d)
 }
 
 /** Plain-text export — the only "share" affordance this slice ships (no PDF/export libs). */

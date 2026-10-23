@@ -119,8 +119,7 @@ vi.mock('@/lib/mev-preference', () => ({
 }))
 
 import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
-import { formatUnits } from 'viem'
-import { formatDisplay } from '@/lib/format'
+import { fmtToken } from '@/lib/format'
 import { useBalance } from 'wagmi'
 import SwapBox from './SwapBox'
 
@@ -825,7 +824,7 @@ describe('SwapBox — [SPRINT-9R R2] Review modal renders the frozen pendingSwap
     const probe = screen.getByTestId('tx-preview')
     expect(probe.getAttribute('data-source')).toBe('uniswapv3')
     expect(probe.getAttribute('data-calldata')).toBe('0xFROZENCALLDATA')
-    expect(probe.getAttribute('data-amount-in')).toBe(formatDisplay(formatUnits(FROZEN_PENDING.rawAmountBn, 18)))
-    expect(probe.getAttribute('data-expected-out')).toBe(formatDisplay(formatUnits(BigInt(FROZEN_PENDING.swapToAmount), 6)))
+    expect(probe.getAttribute('data-amount-in')).toBe(fmtToken(FROZEN_PENDING.rawAmountBn, 18))
+    expect(probe.getAttribute('data-expected-out')).toBe(fmtToken(BigInt(FROZEN_PENDING.swapToAmount), 6))
   })
 })

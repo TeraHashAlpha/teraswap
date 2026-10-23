@@ -10,6 +10,7 @@
  * Pure function — no side effects, callable from hooks, API routes, and tests.
  */
 
+import { fmtUsd, fmtPct } from '@/lib/format'
 import type { NormalizedQuote, GaslessQuoteOverlay } from './adapters'
 import { safeBigInt } from './utils'
 
@@ -120,13 +121,13 @@ export function analyzeGasless(
 
   if (cowIsBest && referenceGasUsd >= GASLESS_MIN_SAVINGS_USD) {
     recommended = true
-    reason = `Best price AND zero gas — save ~$${referenceGasUsd.toFixed(2)}`
+    reason = `Best price AND zero gas — save ~${fmtUsd(referenceGasUsd)}`
   } else if (cowIsBest) {
     recommended = true
     reason = 'Best price AND zero gas'
   } else if (savingsExceedGap) {
     recommended = true
-    reason = `Save ~$${referenceGasUsd.toFixed(2)} in gas fees`
+    reason = `Save ~${fmtUsd(referenceGasUsd)} in gas fees`
   } else if (withinThreshold) {
     // Within threshold but gas savings too small to advertise — still
     // technically available; surface a softer reason.
@@ -134,7 +135,7 @@ export function analyzeGasless(
     reason = 'Gasless available but gas savings are minimal'
   } else {
     recommended = false
-    reason = `CoW output is ${Math.abs(diffPct).toFixed(2)}% below best route`
+    reason = `CoW output is ${fmtPct(Math.abs(diffPct))} below best route`
   }
 
   return {

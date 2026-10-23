@@ -9,6 +9,7 @@
  * component can mount/unmount without re-running the aggregation.
  */
 
+import { fmtUsd, fmtPct, fmtInt } from '@/lib/format'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount } from 'wagmi'
 import Link from 'next/link'
@@ -18,9 +19,7 @@ import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 // ── helpers ────────────────────────────────────────────
 
 function formatUsd(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
-  return `$${n.toFixed(2)}`
+  return fmtUsd(n, { compact: true })
 }
 
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -65,7 +64,7 @@ function SourceWinRates({ rates }: { rates: Record<string, number> }) {
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-cream-65">{sourceLabel(source)}</span>
-                <span className="tabular-nums text-cream-50">{pct.toFixed(1)}%</span>
+                <span className="tabular-nums text-cream-50">{fmtPct(pct, 1)}</span>
               </div>
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-cream-08">
                 <div
@@ -198,7 +197,7 @@ export default function PersonalDashboard() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Swaps" value={data.totalSwaps.toLocaleString()} />
+        <StatCard label="Total Swaps" value={fmtInt(data.totalSwaps)} />
         <StatCard label="Total Volume" value={formatUsd(data.totalVolumeUsd)} />
         <StatCard
           label="Gas Saved"
@@ -207,7 +206,7 @@ export default function PersonalDashboard() {
         />
         <StatCard
           label="Gasless Ratio"
-          value={`${(data.gaslessRatio * 100).toFixed(1)}%`}
+          value={fmtPct(data.gaslessRatio * 100, 1)}
           sub={`${data.gaslessSwapCount} / ${data.totalSwaps}`}
         />
       </div>

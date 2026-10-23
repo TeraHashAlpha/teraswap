@@ -1,4 +1,5 @@
 import { encodeFunctionData, decodeFunctionResult } from 'viem'
+import { fmtPct } from '@/lib/format'
 import {
   PRICE_DEVIATION_WARN,
   PRICE_DEVIATION_BLOCK,
@@ -110,7 +111,7 @@ export function evaluateDeviation(
       executionPrice,
       deviation,
       level: 'danger',
-      message: `Warning: this swap price deviates ${(deviation * 100).toFixed(1)}% from market price (Chainlink). Possible price manipulation or low liquidity.`,
+      message: `Warning: this swap price deviates ${fmtPct(deviation * 100, 1)} from market price (Chainlink). Possible price manipulation or low liquidity.`,
       oracleUnavailable: false,
     }
   }
@@ -121,7 +122,7 @@ export function evaluateDeviation(
       executionPrice,
       deviation,
       level: 'warn',
-      message: `Price deviates ${(deviation * 100).toFixed(1)}% from Chainlink oracle. Make sure you're comfortable with this deviation.`,
+      message: `Price deviates ${fmtPct(deviation * 100, 1)} from Chainlink oracle. Make sure you're comfortable with this deviation.`,
       oracleUnavailable: false,
     }
   }

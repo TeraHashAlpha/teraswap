@@ -172,7 +172,7 @@ describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () 
       expect(e.name).toBe('StaleOrTamperedSwapError')
       expect(e.deviationPercent).toBeCloseTo(50, 1)
       expect(e.message).toContain('below the quote you accepted')
-      expect(e.message).toContain('50.0%')
+      expect(e.message).toContain('50%')
       expect(e.message).toMatch(/route was refreshed.*review and try again/i)
     }
   })
