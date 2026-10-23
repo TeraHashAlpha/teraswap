@@ -355,7 +355,7 @@ describe('QuoteBreakdown — platform fee USD (non-oracle fee token)', () => {
         })}
       />,
     )
-    expect(screen.getByText(/\$0\.002/)).toBeInTheDocument()
+    expect(screen.getByText(/<\$0\.01/)).toBeInTheDocument()
     // The bug valued the fee in the dollars, not sub-cent.
     expect(screen.queryByText(/\$5\.79/)).toBeNull()
     expect(screen.queryByText(/\$13\.9/)).toBeNull()

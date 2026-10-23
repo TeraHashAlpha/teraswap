@@ -10,7 +10,7 @@
  * payload. Confirm → confirmOrder(); a re-config or chain/account switch invalidates and re-presents.
  */
 
-import { formatUnits } from 'viem'
+import { fmtToken, fmtDate } from '@/lib/format'
 import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { PendingOrderReview } from '@/hooks/useOrderEngine'
 import { useOrderApproval } from '@/hooks/useOrderApproval'
@@ -22,17 +22,14 @@ export function truncAddr(addr: string): string {
 }
 
 export function fmtAmount(raw: bigint, decimals: number, symbol: string): string {
-  const num = parseFloat(formatUnits(raw, decimals))
-  if (!isFinite(num)) return '—'
-  if (num === 0) return `0 ${symbol}`
-  return num < 0.0001 ? `<0.0001 ${symbol}` : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${symbol}`
+  return `${fmtToken(raw, decimals)} ${symbol}`
 }
 
 export function fmtTime(expiry: bigint): string {
   const ms = Number(expiry) * 1000
   const d = new Date(ms)
   if (isNaN(d.getTime())) return `${expiry}`
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return fmtDate(d)
 }
 
 export const TYPE_LABEL: Record<number, string> = {
@@ -109,7 +106,7 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
           {!isDca && (
             <div className="flex items-center justify-between text-xs">
               <span className="text-cream-50">{priceLabel}</span>
-              <span className="font-mono text-cream" data-testid="order-price">{dir} {parseFloat(formatUnits(o.targetPrice, 8)).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+              <span className="font-mono text-cream" data-testid="order-price">{dir} {fmtToken(o.targetPrice, 8)}</span>
             </div>
           )}
           {isDca && (

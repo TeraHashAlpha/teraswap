@@ -12,15 +12,13 @@ import { formatUnits } from 'viem'
 import { fillUsd } from '@/lib/order-engine/usd'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import type { FillRow } from '@/hooks/useOrderExecutions'
-
-const AMOUNT_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 })
-const USD_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 })
+import { fmtToken, fmtUsd as fmtUsdValue } from '@/lib/format'
 
 function fmtAmount(raw: string | null | undefined, decimals: number, symbol: string): string {
   if (raw == null || raw === '') return '—'
   try {
     const n = Number(formatUnits(BigInt(String(raw).split('.')[0]), decimals))
-    return Number.isFinite(n) ? `${AMOUNT_FMT.format(n)} ${symbol}` : '—'
+    return Number.isFinite(n) ? `${fmtToken(n)} ${symbol}` : '—'
   } catch {
     return '—'
   }
@@ -30,7 +28,7 @@ function fmtUsd(raw: string | null | undefined, decimals: number, symbol: string
   const v = fillUsd(raw, decimals, symbol)
   if (v == null) return '—'
   if (v > 0 && v < 0.01) return '<$0.01'
-  return `~$${USD_FMT.format(v)}`
+  return `~${fmtUsdValue(v)}`
 }
 
 function relTime(iso: string | null | undefined): string {

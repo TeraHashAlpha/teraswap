@@ -698,7 +698,7 @@ describe('usePortfolio — chain-aware [E-3]', () => {
     expect(symbols).toContain('USDC') // the BASE-catalog USDC, not the mainnet one
     const usdc = result.current.tokens.find((t) => t.token.symbol === 'USDC')!
     expect(usdc.token.address.toLowerCase()).toBe(BASE_USDC)
-    expect(usdc.balanceFormatted).toBe('5')
+    expect(usdc.balanceFormatted).toBe('5.0000')
 
     // Discovery + prices were asked on the active chain.
     const tokenCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/tokens'))
