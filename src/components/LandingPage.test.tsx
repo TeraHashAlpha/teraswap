@@ -37,10 +37,12 @@ vi.mock('./LandingBelowFold', () => ({ default: () => null }))
 vi.mock('@/lib/sounds', () => ({ playTouchMP3: vi.fn() }))
 vi.mock('@/components/ParticleNetwork', () => ({ setParticleTurbo: vi.fn() }))
 
+import { renderToString } from 'react-dom/server'
 import { render, screen } from '@/test-utils/render'
 import LandingPage from './LandingPage'
 import { findToken } from '@/lib/tokens'
 import { getChainTokenList } from '@/lib/chains'
+import { VERIFICATION_CHECKS, VERIFICATION_STAGES, VERIFICATION_SUMMARY } from '@/config/product-claims'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -142,5 +144,64 @@ describe('LandingPage — SwapPreview follows the widget\'s chain [fix/landing-p
     const [tokenIn, tokenOut] = useQuoteMock.mock.calls[0]
     expect(tokenIn?.address.toLowerCase()).toBe(expectedEth?.address.toLowerCase())
     expect(tokenOut?.address.toLowerCase()).toBe(expectedUsdc?.address.toLowerCase())
+  })
+})
+
+// [fix/hero-stat-layout] The hero stat strip is three cells of ONE shape — a numeral <dd>
+// above an uppercase <dt> label. The verification cell used to render VERIFICATION_SUMMARY
+// ("2 stages · 6 checks") as wrapped body text, breaking the row's rhythm.
+function verificationCell(root: ParentNode) {
+  const label = Array.from(root.querySelectorAll('dt')).find((dt) =>
+    dt.textContent?.startsWith('VERIFICATION CHECKS'),
+  )
+  return { label, numeral: label?.previousElementSibling ?? null }
+}
+
+describe('LandingPage — hero stat strip [fix/hero-stat-layout]', () => {
+  beforeEach(() => {
+    useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
+  })
+
+  it('renders the verification cell as numeral VERIFICATION_CHECKS.length + a label carrying the stage count', () => {
+    const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
+    const { label, numeral } = verificationCell(container)
+
+    expect(numeral?.tagName).toBe('DD')
+    expect(numeral?.textContent).toBe(String(VERIFICATION_CHECKS.length))
+    expect(label?.textContent).toBe(`VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES`)
+    expect(screen.queryByText(VERIFICATION_SUMMARY)).not.toBeInTheDocument()
+  })
+
+  it('every cell in the strip has the same shape: a bare numeral, never body text', () => {
+    const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
+    const numerals = Array.from(container.querySelectorAll('dd')).map((dd) => dd.textContent)
+    expect(numerals).toHaveLength(3)
+    for (const n of numerals) expect(n).toMatch(/^\d+$/)
+  })
+
+  it('SSR markup already carries the final count (no count-up from 0)', () => {
+    const host = document.createElement('div')
+    host.innerHTML = renderToString(<LandingPage onLaunchApp={() => {}} />)
+    const { label, numeral } = verificationCell(host)
+
+    expect(numeral?.textContent).toBe(String(VERIFICATION_CHECKS.length))
+    expect(label?.textContent).toContain(`${VERIFICATION_STAGES.length} STAGES`)
+  })
+})
+
+// [fix/hero-stat-layout] Only CoW routes are MEV-protected (adapters/cow.ts) and the preference is
+// opt-in — the hero paragraph must not claim every route executes MEV-protected.
+describe('LandingPage — hero paragraph MEV wording [fix/hero-stat-layout]', () => {
+  beforeEach(() => {
+    useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
+  })
+
+  it('scopes MEV protection to CoW Protocol routes', () => {
+    const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
+    const paragraph = Array.from(container.querySelectorAll('p')).find((p) =>
+      p.textContent?.startsWith('TeraSwap compares'),
+    )
+    expect(paragraph?.textContent).toMatch(/Chainlink oracles, and offers MEV-protected routes via CoW Protocol\.$/)
+    expect(paragraph?.textContent).not.toContain('routes through MEV-protected execution')
   })
 })
