@@ -24,6 +24,12 @@ function stripComments(src: string): string {
 const FORBIDDEN: { name: string; re: RegExp }[] = [
   { name: 'literal 29 (Chainlink feeds)', re: /(?<![\w.#$/-])29(?![\w.%/-])/ },
   { name: 'literal "8/8" (sources)', re: /\b8\/8\b/ },
+  { name: 'literal "100% gasless"', re: /100%[\s\S]{0,80}?gasless/i },
+  { name: 'literal "Zero front-running"', re: /zero front-running/i },
+  { name: '"No approval gas fees, ever"', re: /no approval gas fees, ever/i },
+  { name: '"eliminate front-running"', re: /eliminate front-running/i },
+  { name: 'CoW-solver fill claim on Limit/SL-TP', re: /CoW Protocol solvers compete to fill/i },
+  { name: 'stale tagline', re: /Ethereum Elite/i },
   { name: 'literal "roughly 30" (feeds)', re: /roughly 30\b/i },
   { name: 'staleness "every hour"', re: /staleness check every hour/i },
 ]

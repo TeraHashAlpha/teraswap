@@ -16,6 +16,7 @@ import {
   DISABLED_SOURCES,
   type AggregatorName,
 } from '@/lib/constants'
+import { DCA_CHAINS, isDcaLive } from '@/lib/dca-launch'
 import { listConfiguredFeedTokens } from '@/lib/chains/chainlink-feeds'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import {
@@ -47,6 +48,8 @@ import {
   PRICE_DEVIATION_BLOCK_PCT,
   CHAINLINK_MAX_STALENESS_MIN,
   CHAINLINK_STALENESS_CLAIM,
+  dcaFeatureTitle,
+  dcaLiveChainNames,
 } from './product-claims'
 
 const ORIG_DCA = process.env.NEXT_PUBLIC_DCA_ENABLED
@@ -298,5 +301,32 @@ describe('product-claims — C4 thresholds interpolate the constants', () => {
     const src = readFileSync(join(process.cwd(), 'src/lib/post-execution-validator.ts'), 'utf8')
     expect(src).toMatch(/await forceDisable\(source/)
     expect(src).toMatch(/Emit P0 alert/)
+  })
+})
+
+describe('product-claims — C7 dcaFeatureTitle()', () => {
+  it('names exactly the chains isDcaLive says are live (no hand-typed chain list)', () => {
+    const live = DCA_CHAINS.filter((id) => isDcaLive(id)).map((id) => CHAIN_CONFIGS[id].name)
+    expect([...dcaLiveChainNames()]).toEqual(live)
+    expect(dcaFeatureTitle()).toBe(live.length ? `DCA (${live.join(', ')})` : 'DCA')
+  })
+
+  it('grows with the live set: Base only, then Base + Arbitrum One, then none', async () => {
+    const cases: [(id: number) => boolean, string][] = [
+      [(id) => id === 8453, 'DCA (Base)'],
+      [() => true, 'DCA (Base, Arbitrum One)'],
+      [() => false, 'DCA'],
+    ]
+    for (const [live, expected] of cases) {
+      vi.resetModules()
+      vi.doMock('@/lib/dca-launch', async (importOriginal) => ({
+        ...(await importOriginal<typeof import('@/lib/dca-launch')>()),
+        isDcaLive: live,
+      }))
+      const mod = await import('./product-claims')
+      expect(mod.dcaFeatureTitle()).toBe(expected)
+    }
+    vi.doUnmock('@/lib/dca-launch')
+    vi.resetModules()
   })
 })

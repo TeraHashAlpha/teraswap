@@ -33,6 +33,7 @@ import {
 } from '@/lib/constants'
 import { CHAIN_CONFIGS, getSupportedChainIds } from '@/lib/chains/registry'
 import { listConfiguredFeedTokens } from '@/lib/chains/chainlink-feeds'
+import { DCA_CHAINS, isDcaLive } from '@/lib/dca-launch'
 
 const SMALL_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
@@ -223,3 +224,27 @@ export const PERMIT2_MAX_EXPIRATION_HOURS = PERMIT2_MAX_EXPIRATION_SEC / 3600
 /** "Prices older than 60 min are rejected" — a limit, not a polling cadence. */
 export const CHAINLINK_STALENESS_CLAIM =
   `Prices older than ${CHAINLINK_MAX_STALENESS_MIN} min are rejected (feeds with a published heartbeat use a per-feed limit).`
+
+// ── (f) Order-type copy slots ────────────────────────────────────────────────
+
+/**
+ * Chains where DCA is actually live right now: DCA_CHAINS (built for) filtered by isDcaLive
+ * (flag + wired executor). Arbitrum stays out until its executor is wired, then appears here
+ * with no copy edit. Read at call time so tests and runtime see the current env.
+ */
+export function dcaLiveChainNames(): readonly string[] {
+  return DCA_CHAINS.filter((id) => isDcaLive(id)).map(chainNameFor)
+}
+
+/** "DCA (Base)" today; "DCA (Base, Arbitrum One)" once both executors are live; "DCA" if none. */
+export function dcaFeatureTitle(): string {
+  const names = dcaLiveChainNames()
+  return names.length === 0 ? 'DCA' : `DCA (${names.join(', ')})`
+}
+
+/**
+ * Delay on OrderExecutor config changes (router whitelist, executor whitelist, fund sweeps).
+ * Stated by the owner and by DocsPage "On-Chain Admin Timelocks"; the contract constant itself
+ * lives outside this change's read list, so this is a typed slot — see FEEDBACK (unverified).
+ */
+export const ADMIN_TIMELOCK_HOURS = 48

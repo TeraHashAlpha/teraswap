@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
 import {
   CHAINLINK_STALENESS_CLAIM,
+  ADMIN_TIMELOCK_HOURS,
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_LABELS,
@@ -26,6 +27,7 @@ import {
   VERIFICATION_CHECK_COUNT,
   chainNameFor,
   chainlinkFeedCountFor,
+  dcaFeatureTitle,
   formatChainList,
   isOrderTypeLive,
   type OrderTypeId,
@@ -443,8 +445,8 @@ function DifferentiationSection() {
     {
       num: '03',
       icon: <DiffMEVBotIcon />,
-      title: 'Active MEV Protection',
-      desc: 'Intent-based execution powered by CoW Protocol batch auctions — solvers compete to give you the best outcome. Zero front-running, zero sandwich attacks.',
+      title: 'MEV Protection on CoW Routes',
+      desc: 'When a swap routes through CoW Protocol, execution is an intent-based batch auction — solvers compete to give you the best outcome, with no in-block ordering window for a front-running or sandwich bot to exploit.',
     },
   ]
 
@@ -582,7 +584,8 @@ function SecuritySection() {
           <p>
             MEV bots never sleep — but neither does our protection. Through our native integration with
             CoW Protocol, real-time Chainlink price validation, and an independent DefiLlama oracle layer,
-            your trades are executed via batch auctions that eliminate front-running and slippage manipulation entirely.
+            swaps that route through CoW execute via batch auctions that remove the in-block ordering window
+            front-running and sandwich attacks depend on.
           </p>
           <p className="mt-4">
             Your privacy matters too. All blockchain reads and aggregator API calls are routed through our{' '}
@@ -687,8 +690,8 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
         >
           Forget high gas fees and slow approval flows. Our{' '}
           <span className="font-mono" style={{ color: '#C8B89A' }}>Permit2</span> technology delivers{' '}
-          <span className="font-mono" style={{ color: '#C8B89A' }}>100%</span> gasless
-          token approvals — sign off-chain and let the system handle everything else. All wrapped in a
+          gasless approvals for permit-capable tokens — sign off-chain and let the system handle everything
+          else (tokens without permit support need a one-time on-chain approval). All wrapped in a
           precision-crafted cream-on-black interface with a dynamic animated particle environment that
           responds to your every move. Because visual clarity is the first step toward financial clarity.
         </motion.p>
@@ -835,18 +838,18 @@ const FEATURES: {
     icon: <FeatLockIcon />,
   },
   {
-    title: 'Smart DCA Engine',
-    desc: 'Automated dollar-cost averaging with price-aware buying windows. Fully autonomous execution powered by Chainlink oracles — no browser required.',
+    title: 'DCA',
+    desc: 'Automated dollar-cost averaging on a fixed schedule. Keeper-executed on-chain — no browser required.',
     orderType: 'dca',
   },
   {
     title: 'Limit Orders',
-    desc: 'Set your target price and walk away. CoW Protocol solvers compete to fill your order — zero gas, MEV-protected, with partial fills and price improvement.',
+    desc: `Set your target price and walk away. Your signed order is filled on-chain by the OrderExecutor contract when a keeper sees your price reached — you pay no gas at fill time, and changes to the executor's configuration sit behind a ${ADMIN_TIMELOCK_HOURS}-hour timelock.`,
     orderType: 'limit',
   },
   {
     title: 'Stop Loss / Take Profit',
-    desc: 'Automated position protection powered by Chainlink oracles. Prices are monitored in real-time — when your trigger fires, a CoW limit order is auto-submitted.',
+    desc: `Automated position protection gated by Chainlink oracles. Prices are monitored in real-time — when your trigger is reached, a keeper fills the order on-chain through the OrderExecutor, behind the same ${ADMIN_TIMELOCK_HOURS}-hour configuration timelock.`,
     orderType: 'stopLoss',
   },
   {
@@ -861,7 +864,7 @@ const FEATURES: {
   },
   {
     title: 'Gasless Approvals',
-    desc: 'Permit2 and EIP-2612 off-chain signing keeps your ETH in your wallet where it belongs. No approval gas fees, ever.',
+    desc: 'Gasless approvals for permit-capable tokens; one-time on-chain approval otherwise. Permit2 and EIP-2612 off-chain signing keeps your ETH in your wallet where it belongs.',
     icon: <FeatPenIcon />,
   },
   {
@@ -874,6 +877,7 @@ const FEATURES: {
 function FeaturesSection() {
   const withStatus = FEATURES.map((f) => ({
     ...f,
+    title: f.orderType === 'dca' ? dcaFeatureTitle() : f.title,
     comingSoon: f.orderType ? !isOrderTypeLive(f.orderType) : false,
   }))
   const liveFeatures = withStatus.filter((f) => !f.comingSoon)
@@ -884,7 +888,7 @@ function FeaturesSection() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-12 max-w-2xl">
           <SectionHeadline className="mb-3 text-[24px] sm:text-[36px] md:text-[44px] leading-[1.15]">
-            Engineered for the Ethereum Elite.
+            Built for every EVM trader.
           </SectionHeadline>
           <p
             className="text-[15px] leading-relaxed text-cream-75"
