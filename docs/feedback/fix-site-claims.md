@@ -37,7 +37,7 @@ On the 4 surfaces at origin/main: **11 failed / 30 passed** (29, "0.1%", ">8%", 
 Non-test, excl. deprecated Beta* files: **0**. Test files: 34 lines = 23 dead `vi.mock('…BetaDisclaimer')` (left: tests outside accepted scope) + 11 in the new guard tests / `beta-disclaimer` testid.
 
 ## 5. Verify
-Suite 4452 (main) → **4646**, 302 files, 0 failed · lint 93 → 93 (delta 0, 0 errors) · tsc clean · 21 files, +857/−121 (the last docs-only commit adds a few more lines) (`git diff --stat origin/main...HEAD`). One existing test flipped (LimitOrderPanel: disclaimer no longer rendered). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
+Suite 4452 (main) → **4646**, 302 files, 0 failed · lint 93 → 93 (delta 0, 0 errors) · tsc clean · 22 files, +879/−139 (`git diff --stat origin/main...HEAD`). One existing test flipped (LimitOrderPanel: disclaimer no longer rendered). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
 
 ## Left open
 Nothing known. Privacy wording is deliberately conservative (restore stronger wording only with a code change that proxies logos/DefiLlama). Legal-page edits are copy-only; owner may want counsel to review them.
