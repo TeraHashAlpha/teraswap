@@ -6,15 +6,12 @@
  * here (per-fill USD lives in the timeline where it's grounded in real fills).
  */
 
-import { formatUnits } from 'viem'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import RouteBadge from './RouteBadge'
-
-const AMOUNT_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 })
+import { fmtToken } from '@/lib/format'
 
 function fmtAmount(raw: bigint, decimals: number): string {
-  const n = Number(formatUnits(raw, decimals))
-  return Number.isFinite(n) ? AMOUNT_FMT.format(n) : '—'
+  return fmtToken(raw, decimals)
 }
 
 function fmtExpiry(expiresAtMs: number): string {

@@ -55,7 +55,7 @@ describe('useTokenBalance — arbitrary ERC-20 (imported token)', () => {
     const { result } = renderHook(() => useTokenBalance(ETHFI, 8453))
     expect(result.current.raw).toBe(123_000000000000000000n)
     expect(result.current.hasValue).toBe(true)
-    expect(result.current.formatted).toBe('123')
+    expect(result.current.formatted).toBe('123.0000')
     expect(result.current.isLoading).toBe(false)
   })
 

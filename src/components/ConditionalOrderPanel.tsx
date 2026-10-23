@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtToken, fmtUsd, fmtPct } from '@/lib/format'
 import { useState, useEffect, useMemo } from 'react'
 import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
@@ -280,6 +281,7 @@ function CreateConditionalForm({
   useEffect(() => {
     if (currentUsdPrice > 0 && !triggerPrice) {
       const factor = orderType === 'stop_loss' ? DEFAULT_SL_FACTOR : DEFAULT_TP_FACTOR
+      // numeric-format-allow: input-field state (triggerPrice) parsed back into the signed order — not display
       setTriggerPrice((currentUsdPrice * factor).toFixed(2))
     }
   }, [currentUsdPrice, orderType])
@@ -480,6 +482,7 @@ function CreateConditionalForm({
   const applyPercentToTrigger = (percent: number) => {
     if (currentUsdPrice <= 0) return
     playClick()
+    // numeric-format-allow: input-field state (triggerPrice) parsed back into the signed order — not display
     setTriggerPrice((currentUsdPrice * (1 + percent / 100)).toFixed(2))
   }
 
@@ -578,7 +581,7 @@ function CreateConditionalForm({
           <TokenSelector selected={tokenOut} onSelect={handleTokenOutSelect} disabledAddress={tokenIn?.address} />
           <span className="flex-1 text-right text-sm text-cream-35">
             {currentUsdPrice > 0 && amount
-              ? `≈ ${(parseFloat(amount) * parseFloat(triggerPrice || '0')).toFixed(tokenOut && isStablecoin(tokenOut) ? 2 : 6)}`
+              ? `≈ ${fmtToken(parseFloat(amount) * parseFloat(triggerPrice || '0'))}`
               : 'Set trigger price below'}
           </span>
         </div>
@@ -628,7 +631,7 @@ function CreateConditionalForm({
       {currentUsdPrice > 0 && (
         <div className="mb-2 flex items-center justify-between rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2">
           <span className="text-[11px] text-cream-50">Current {tokenIn.symbol} price</span>
-          <span className="text-[12px] font-semibold text-cream">${currentUsdPrice.toFixed(2)}</span>
+          <span className="text-[12px] font-semibold text-cream">{fmtUsd(currentUsdPrice)}</span>
         </div>
       )}
 
@@ -640,7 +643,7 @@ function CreateConditionalForm({
           </label>
           {currentUsdPrice > 0 && (
             <span className="text-[10px] text-cream-35">
-              Current: ${currentUsdPrice.toFixed(2)}
+              Current: {fmtUsd(currentUsdPrice)}
             </span>
           )}
         </div>
@@ -683,7 +686,7 @@ function CreateConditionalForm({
                 ? 'text-red-400'
                 : 'text-cream-50'
           }`}>
-            {priceDiffPercent > 0 ? '+' : ''}{priceDiffPercent.toFixed(2)}% from current price
+            {fmtPct(priceDiffPercent, 2, { sign: true })} from current price
           </p>
         )}
       </div>
@@ -878,7 +881,7 @@ function ConditionalOrderCard({
         <div className="flex items-center gap-2">
           <span className={`text-[11px] font-bold ${typeColor}`}>{typeLabel}</span>
           <span className="text-sm font-medium text-cream">
-            {Number(amountIn).toFixed(4)} {order.tokenInSymbol}
+            {fmtToken(amountIn)} {order.tokenInSymbol}
           </span>
           <span className="text-cream-35">→</span>
           <span className="text-sm text-cream-50">{order.tokenOutSymbol}</span>
@@ -900,7 +903,7 @@ function ConditionalOrderCard({
 
       {/* Trigger price + expiry */}
       <div className="mb-2 flex items-center justify-between text-[11px] text-cream-50">
-        <span>Trigger: ${targetPriceUsd.toFixed(2)}</span>
+        <span>Trigger: {fmtUsd(targetPriceUsd)}</span>
         {isActive && timeLeft > 0 && (
           <span>{daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h`} left</span>
         )}

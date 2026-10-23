@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtUsd } from '@/lib/format'
 import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
 import {
@@ -16,13 +17,6 @@ import { getChainConfig } from '@/lib/chains/registry'
 interface PortfolioTabProps {
   onSwapToken?: (token: Token) => void
 }
-
-const usdFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
 
 // Lower-cased set of DEFAULT_TOKENS addresses. A discovered token whose
 // address is NOT in this set is rendered in the "Discovered in Wallet"
@@ -106,7 +100,7 @@ function PortfolioRow({
         <div className="text-right">
           <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
           <div className="text-xs text-cream-50 tabular-nums">
-            {valueUsd !== null ? usdFormatter.format(valueUsd) : '—'}
+            {valueUsd !== null ? fmtUsd(valueUsd) : '—'}
           </div>
         </div>
         {onSwapToken && (
@@ -166,7 +160,7 @@ function DiscoveredRow({
         <div className="text-right">
           <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
           <div className="text-xs text-cream-50 tabular-nums">
-            {valueUsd !== null ? usdFormatter.format(valueUsd) : '—'}
+            {valueUsd !== null ? fmtUsd(valueUsd) : '—'}
           </div>
         </div>
         {imported ? (
@@ -306,7 +300,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
               Total value
             </div>
             <div className="mt-1 text-2xl font-bold text-cream tabular-nums">
-              {totalValueUsd !== null ? usdFormatter.format(totalValueUsd) : '—'}
+              {totalValueUsd !== null ? fmtUsd(totalValueUsd) : '—'}
             </div>
             <div className="mt-1 text-[11px] text-cream-50">
               {lastUpdated ? `Last updated ${formatLastUpdated(lastUpdated, now)}` : 'Loading prices…'}
