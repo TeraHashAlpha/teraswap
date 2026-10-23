@@ -17,5 +17,15 @@
     "other (future) dependency resolution.",
     "braces (GHSA-vfj7-8cjw-p6xm) removed 2026-10-23: resolved upstream (no longer in npm audit)."
   ],
-  "allow": []
+  "allow": [
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "vulnerableRange": "<4.6.6 (3.x line)",
+      "fixedIn": "none for 3.x (4.6.6 only)",
+      "added": "2026-10-23",
+      "expires": "2026-11-22",
+      "reason": "Two transitive 3.x copies under @coinbase/cdp-sdk (^3.25.76) and @reown/appkit-wallet (3.22.4, exact) have no patched 3.x release; moving them to zod 4 is a breaking major for those packages. Reachability: both validate wallet/SDK messages with fixed-shape schemas, not attacker-sized collections; the root app copy is 4.6.6. Re-check weekly for a 3.x patch or upstream bumps of cdp-sdk/appkit; delete on first fix."
+    }
+  ]
 }
