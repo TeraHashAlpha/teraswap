@@ -25,10 +25,10 @@ describe('layout.tsx meta description', () => {
     const quotingCount = ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name]).length
     expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(quotingCount)
     expect(SITE_META_DESCRIPTION).toContain(
-      `queries ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources`,
+      `compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources`,
     )
     expect(SITE_META_DESCRIPTION).toContain(
-      `queries ${quotingCount} liquidity sources`,
+      `compares quotes across ${quotingCount} liquidity sources`,
     )
   })
 

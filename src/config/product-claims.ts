@@ -131,7 +131,7 @@ export const PRIVACY_DIRECT_NOTE =
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =
-  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that queries ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources to find the best swap rate — with multi-oracle price protection (Chainlink + DefiLlama), MEV-protected routing via CoW Protocol, and a server-side proxy for RPC and quote requests.`
+  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama), MEV-protected routing via CoW Protocol, and a server-side proxy for RPC and quote requests.`
 
 export type OrderTypeId = 'instant' | 'dca' | 'limit' | 'takeProfit' | 'stopLoss'
 

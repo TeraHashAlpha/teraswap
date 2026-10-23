@@ -119,7 +119,7 @@ describe('product-claims — source count from ADAPTER_REGISTRY minus DISABLED_S
 describe('product-claims — meta description', () => {
   it("embeds the derived count, not a handwritten digit", () => {
     expect(SITE_META_DESCRIPTION).toContain(
-      `queries ${QUOTING_COUNT} liquidity sources`,
+      `compares quotes across ${QUOTING_COUNT} liquidity sources`,
     )
   })
 
@@ -368,5 +368,18 @@ describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the brow
 
   it('still discloses token logos and the wallet connection, which remain browser-direct', () => {
     expect(PRIVACY_DIRECT_NOTE).toMatch(/^Token logos and your wallet's own connection are requested directly by your browser/)
+  })
+})
+
+describe('[fix/functional-chain-ui C9] meta description claims only what the code does', () => {
+  it('drops the unprovable "best swap rate" / "Absolute protection" / "MEV-free" phrasing', () => {
+    expect(SITE_META_DESCRIPTION).not.toMatch(/best swap rate/i)
+    expect(SITE_META_DESCRIPTION).not.toMatch(/absolute protection/i)
+    expect(SITE_META_DESCRIPTION).not.toMatch(/MEV-free/i)
+  })
+
+  it('says it compares quotes across the derived source count, with MEV-protected routing via CoW', () => {
+    expect(SITE_META_DESCRIPTION).toContain(`compares quotes across ${QUOTING_COUNT} liquidity sources`)
+    expect(SITE_META_DESCRIPTION).toContain('MEV-protected routing via CoW Protocol')
   })
 })
