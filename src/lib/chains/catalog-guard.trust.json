@@ -10148,6 +10148,16 @@
   },
   {
    "chainId": 8453,
+   "address": "0x2D189eABb667aA1ecFC01963a6a3A5d83960f558",
+   "symbol": "GALAXIS",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "GALAXIS",
+   "decimals": 18
+  },
+  {
+   "chainId": 8453,
    "address": "0x1db0c569ebb4a8b57AC01833B9792F526305e062",
    "symbol": "GENOME",
    "inTrustedList": true,
@@ -11625,6 +11635,16 @@
    "transferable": true,
    "onchainSymbol": "WGC",
    "decimals": 6
+  },
+  {
+   "chainId": 8453,
+   "address": "0xeeee77bC7e82c0d4166d52F58239D4c5Bf41eeee",
+   "symbol": "WHUF",
+   "inTrustedList": true,
+   "hasBytecode": true,
+   "transferable": true,
+   "onchainSymbol": "WHUF",
+   "decimals": 18
   },
   {
    "chainId": 8453,

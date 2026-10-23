@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtUsd, fmtPct, fmtInt, fmtFixed } from '@/lib/format'
 import { useState, useMemo, useCallback } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
 import { AGGREGATOR_META, ETHERSCAN_TX, type AggregatorName } from '@/lib/constants'
@@ -17,9 +18,7 @@ import type { DashboardData, PeriodMetrics, TradeEvent } from '@/lib/analytics-t
 // ── Helpers ──
 
 function formatUsd(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}k`
-  return `$${n.toFixed(2)}`
+  return fmtUsd(n, { compact: true })
 }
 
 function shortAddr(addr: string): string {
@@ -103,6 +102,7 @@ function Sparkline({ data, color = '#4fc3f7', height = 32, fill = false }: {
     x: (i / (data.length - 1)) * w,
     y: height - (v / max) * (height - 4) - 2,
   }))
+  // numeric-format-allow: SVG path coordinates (geometry), not display text
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   const fillD = `${pathD} L${w},${height} L0,${height} Z`
 
@@ -192,7 +192,7 @@ function DonutChart({ segments, size = 80 }: {
           <div key={i} className="flex items-center gap-1.5 text-[9px]">
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: seg.color }} />
             <span className="text-[#778899]">{seg.label}</span>
-            <span className="font-bold tabular-nums" style={{ color: seg.color }}>{((seg.value / total) * 100).toFixed(0)}%</span>
+            <span className="font-bold tabular-nums" style={{ color: seg.color }}>{fmtPct((seg.value / total) * 100, 0)}</span>
           </div>
         ))}
       </div>
@@ -305,8 +305,8 @@ function OverviewTab({ dashboard, metrics, period, allTrades }: {
         <StatCard label="Total Volume" value={formatUsd(metrics.totalVolume)} color="#4ADE80"
           sub={period !== 'all' ? period : undefined} />
         <StatCard label="Total Fees" value={formatUsd(metrics.totalFees)} color="#FBBF24" />
-        <StatCard label="Total Trades" value={metrics.tradeCount.toLocaleString()} color="#4fc3f7" />
-        <StatCard label="Unique Wallets" value={metrics.uniqueWallets.toLocaleString()} color="#A78BFA" />
+        <StatCard label="Total Trades" value={fmtInt(metrics.tradeCount)} color="#4fc3f7" />
+        <StatCard label="Unique Wallets" value={fmtInt(metrics.uniqueWallets)} color="#A78BFA" />
         <StatCard label="Avg Trade Size" value={formatUsd(avgTradeSize)} color="#F472B6" />
         <StatCard label="Fee / Trade" value={formatUsd(feePerTrade)} color="#FB923C" />
       </div>
@@ -317,7 +317,7 @@ function OverviewTab({ dashboard, metrics, period, allTrades }: {
           chart={<MiniBarChart data={dailyVolumes} color="#4ADE80" height={60}
             labels={dailyData.length > 0 ? [dailyData[0].date.slice(5), dailyData[dailyData.length - 1].date.slice(5)] : undefined} />}
         />
-        <StatCard label="Daily Trades (30d)" value={metrics.tradeCount.toLocaleString()} color="#4fc3f7"
+        <StatCard label="Daily Trades (30d)" value={fmtInt(metrics.tradeCount)} color="#4fc3f7"
           chart={<Sparkline data={dailyCounts} color="#4fc3f7" height={60} fill />}
         />
       </div>
@@ -326,7 +326,7 @@ function OverviewTab({ dashboard, metrics, period, allTrades }: {
         <StatCard label="Daily Fees (30d)" value={formatUsd(metrics.totalFees)} color="#FBBF24"
           chart={<MiniBarChart data={dailyFees} color="#FBBF24" height={60} />}
         />
-        <StatCard label="Active Wallets / Day" value={metrics.uniqueWallets.toLocaleString()} color="#A78BFA"
+        <StatCard label="Active Wallets / Day" value={fmtInt(metrics.uniqueWallets)} color="#A78BFA"
           chart={<Sparkline data={dailyWallets} color="#A78BFA" height={60} fill />}
         />
       </div>
@@ -415,7 +415,7 @@ function RevenueTab({ dashboard: _dashboard, allTrades, period }: { dashboard: D
         <StatCard label={`Total Fees (${periodLabel})`} value={formatUsd(totalFees)} color="#FBBF24" />
         <StatCard label={`Volume (${periodLabel})`} value={formatUsd(totalVolume)} color="#4ADE80" />
         <StatCard label="Avg Fee / Trade" value={formatUsd(avgFeePerTrade)} color="#FB923C" />
-        <StatCard label="Fee Rate" value={`${feeRate.toFixed(3)}%`} color="#A78BFA" sub={`${allTrades.length} trades`} />
+        <StatCard label="Fee Rate" value={fmtPct(feeRate, 3)} color="#A78BFA" sub={`${allTrades.length} trades`} />
       </div>
 
       {/* Daily Fees Chart */}
@@ -487,7 +487,7 @@ function RevenueTab({ dashboard: _dashboard, allTrades, period }: { dashboard: D
                   <td className="py-1.5 font-medium text-cream-65">{sourceLabel(s.source)}</td>
                   <td className="py-1.5 text-right text-[#4ADE80]">{formatUsd(s.volumeUsd)}</td>
                   <td className="py-1.5 text-right text-[#4fc3f7]">{s.tradeCount}</td>
-                  <td className="py-1.5 text-right text-[#A78BFA]">{s.winRate.toFixed(0)}%</td>
+                  <td className="py-1.5 text-right text-[#A78BFA]">{fmtPct(s.winRate, 0)}</td>
                   <td className="py-1.5 text-right text-cream-50">{s.tradeCount > 0 ? formatUsd(s.volumeUsd / s.tradeCount) : '-'}</td>
                   <td className="py-1.5 text-right font-bold text-[#FBBF24]">
                     {formatUsd(s.feeUsd)}
@@ -515,11 +515,11 @@ function SybilTab({ scores, clusters }: { scores: SybilScore[]; clusters: Wallet
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Total Wallets" value={scores.length.toString()} color="#4fc3f7" />
         <StatCard label="Clean" value={clean.length.toString()} color="#4ADE80"
-          sub={`${scores.length > 0 ? ((clean.length / scores.length) * 100).toFixed(0) : 0}%`} />
+          sub={scores.length > 0 ? fmtPct((clean.length / scores.length) * 100, 0) : '0%'} />
         <StatCard label="Suspicious" value={suspicious.length.toString()} color="#FBBF24"
-          sub={`${scores.length > 0 ? ((suspicious.length / scores.length) * 100).toFixed(0) : 0}%`} />
+          sub={scores.length > 0 ? fmtPct((suspicious.length / scores.length) * 100, 0) : '0%'} />
         <StatCard label="Likely Sybil" value={sybils.length.toString()} color="#EF4444"
-          sub={`${scores.length > 0 ? ((sybils.length / scores.length) * 100).toFixed(0) : 0}%`} />
+          sub={scores.length > 0 ? fmtPct((sybils.length / scores.length) * 100, 0) : '0%'} />
       </div>
 
       {/* Distribution Donut */}
@@ -602,7 +602,7 @@ function SybilTab({ scores, clusters }: { scores: SybilScore[]; clusters: Wallet
                 <span className="mt-0.5 text-[#FBBF24]">▸</span>
                 <span className="font-bold text-[#FBBF24]">{f.rule}</span>
                 <span className="text-cream-50">— {f.details || f.description}</span>
-                <span className="text-[#445566]">(+{f.weight.toFixed(0)})</span>
+                <span className="text-[#445566]">(+{fmtFixed(f.weight, 0)})</span>
               </div>
             ))}
           </div>
@@ -619,7 +619,7 @@ function SybilTab({ scores, clusters }: { scores: SybilScore[]; clusters: Wallet
             {clusters.slice(0, 10).map((c, i) => (
               <div key={i} className="flex items-center gap-2 text-[10px]">
                 <span className="rounded bg-[#EF4444]/10 px-1.5 py-0.5 text-[8px] font-bold text-[#EF4444]">
-                  {(c.confidence * 100).toFixed(0)}%
+                  {fmtPct(c.confidence * 100, 0)}
                 </span>
                 <span className="font-mono text-cream-50">
                   {c.wallets.map(w => shortAddr(w)).join(' ↔ ')}
@@ -667,10 +667,10 @@ function WalletsTab({ dashboard, allTrades, period }: { dashboard: DashboardData
     <div className="space-y-5">
       {/* Wallet KPIs */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label={`Wallets (${periodLabel})`} value={uniqueWallets.toLocaleString()} color="#A78BFA" />
-        <StatCard label={`Trades (${periodLabel})`} value={allTrades.length.toLocaleString()} color="#4fc3f7" />
+        <StatCard label={`Wallets (${periodLabel})`} value={fmtInt(uniqueWallets)} color="#A78BFA" />
+        <StatCard label={`Trades (${periodLabel})`} value={fmtInt(allTrades.length)} color="#4fc3f7" />
         <StatCard label={`Volume (${periodLabel})`} value={formatUsd(totalVol)} color="#4ADE80" />
-        <StatCard label="Whale Trades" value={whaleCount.toLocaleString()} color="#FBBF24" sub=">$10k" />
+        <StatCard label="Whale Trades" value={fmtInt(whaleCount)} color="#FBBF24" sub=">$10k" />
       </div>
 
       {/* Top Wallets + Cohorts */}
@@ -720,7 +720,7 @@ function WalletsTab({ dashboard, allTrades, period }: { dashboard: DashboardData
                       <td className="py-1.5 text-right font-bold" style={{
                         color: retention >= 50 ? '#4ADE80' : retention >= 25 ? '#FBBF24' : '#EF4444',
                       }}>
-                        {retention.toFixed(0)}%
+                        {fmtPct(retention, 0)}
                       </td>
                     </tr>
                   )
@@ -801,7 +801,7 @@ function ActivityTab({ trades, period: _period }: { trades: TradeEvent[]; period
             <StatCard
               key={type}
               label={label}
-              value={count.toLocaleString()}
+              value={fmtInt(count)}
               sub={formatUsd(vol)}
               color={typeColor[type] || '#4fc3f7'}
             />

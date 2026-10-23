@@ -1,8 +1,9 @@
 'use client'
 
+import { fmtToken } from '@/lib/format'
 import { useMemo } from 'react'
 import { useAccount, useBalance, useReadContracts } from 'wagmi'
-import { formatUnits, erc20Abi } from 'viem'
+import { erc20Abi } from 'viem'
 import { DEFAULT_TOKENS, isNativeETH } from '@/lib/tokens'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { isChainActive, DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -107,14 +108,7 @@ export function useTokenBalances(enabled: boolean = true) {
   }
 }
 
-// Format balance nicely: show up to 6 significant digits
+// Format balance for display (design README §3 via fmtToken)
 export function formatBalance(value: bigint, decimals: number): string {
-  if (value === 0n) return '0'
-  const full = formatUnits(value, decimals)
-  const num = parseFloat(full)
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`
-  if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`
-  if (num >= 1) return num.toFixed(4).replace(/\.?0+$/, '')
-  if (num >= 0.0001) return num.toFixed(6).replace(/\.?0+$/, '')
-  return '<0.0001'
+  return fmtToken(value, decimals)
 }

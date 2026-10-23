@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { formatUnits } from 'viem'
 import { explorerTxUrl } from '@/lib/chains/tokens'
+import { fmtToken, fmtUsd, fmtGas } from '@/lib/format'
 
 /** Raw row shape returned by GET /api/orders/:id/executions. */
 interface Execution {
@@ -48,10 +49,6 @@ interface ExecutionTimelineProps {
 
 // ── Formatters ─────────────────────────────────────────
 
-const AMOUNT_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 })
-const PRICE_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })
-const GAS_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 })
-
 /** Format a raw wei integer string with the given decimals + symbol. */
 function formatAmount(raw: string | null | undefined, decimals: number, symbol: string): string | null {
   if (raw == null || raw === '') return null
@@ -59,20 +56,20 @@ function formatAmount(raw: string | null | undefined, decimals: number, symbol: 
     const v = formatUnits(BigInt(raw), decimals)
     const num = Number(v)
     if (!Number.isFinite(num)) return `${v} ${symbol}`
-    return `${AMOUNT_FMT.format(num)} ${symbol}`
+    return `${fmtToken(num)} ${symbol}`
   } catch {
     return null
   }
 }
 
-/** Format Chainlink price (8 decimals) as "$1,234.56". */
+/** Format Chainlink price (8 decimals) as "$1 234.56". */
 function formatPrice(raw: string | null | undefined): string | null {
   if (raw == null || raw === '') return null
   try {
     const v = formatUnits(BigInt(raw), 8)
     const num = Number(v)
     if (!Number.isFinite(num) || num === 0) return null
-    return `$${PRICE_FMT.format(num)}`
+    return fmtUsd(num)
   } catch {
     return null
   }
@@ -85,7 +82,7 @@ function formatGasEth(raw: string | null | undefined): string | null {
     const v = formatUnits(BigInt(raw), 18)
     const num = Number(v)
     if (!Number.isFinite(num) || num === 0) return null
-    return `${GAS_FMT.format(num)} ETH`
+    return `${fmtGas(num)} ETH`
   } catch {
     return null
   }

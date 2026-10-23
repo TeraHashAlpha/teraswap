@@ -26,6 +26,7 @@
  * that stays frictionless. Only a token that HAS a pair, whose feeds we then failed to read, is
  * unverified. See useDepegCheck.
  */
+import { fmtPct } from '@/lib/format'
 import { DEPEG_DIVERGENCE_WARN, DEPEG_DIVERGENCE_BLOCK } from './constants'
 
 /**
@@ -122,14 +123,14 @@ export function evaluateDepeg(
   }
 
   const divergence = Math.abs(marketPrice - exchangeRate) / exchangeRate
-  const pct = (divergence * 100).toFixed(1)
+  const pct = fmtPct(divergence * 100, 1)
 
   if (divergence >= DEPEG_DIVERGENCE_BLOCK) {
     return {
       mode: 'block',
       divergence,
       symbol,
-      message: `${symbol} is trading ${pct}% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.`,
+      message: `${symbol} is trading ${pct} off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.`,
     }
   }
 
@@ -138,7 +139,7 @@ export function evaluateDepeg(
       mode: 'consent',
       divergence,
       symbol,
-      message: `${symbol} is trading ${pct}% off its exchange rate — possible depeg. Verify before swapping.`,
+      message: `${symbol} is trading ${pct} off its exchange rate — possible depeg. Verify before swapping.`,
     }
   }
 
