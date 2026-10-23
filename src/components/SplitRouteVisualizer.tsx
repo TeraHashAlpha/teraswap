@@ -3,7 +3,7 @@
 import { formatUnits } from 'viem'
 import type { SplitQuoteResult } from '@/lib/split-routing-types'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
-import { formatDisplay } from '@/lib/format'
+import { fmtToken, fmtUsd, fmtPct } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
 import type { Token } from '@/lib/tokens'
 
@@ -77,7 +77,7 @@ export default function SplitRouteVisualizer({
   const singleOutput = Number(formatUnits(singleBn, tokenOut.decimals))
   const splitOutput = Number(formatUnits(splitTotalBn, tokenOut.decimals))
   const diff = splitOutput - singleOutput
-  const improvementPercent = (bestSplit.improvementBps / 100).toFixed(2)
+  const improvementPercent = fmtPct(bestSplit.improvementBps / 100)
 
   return (
     <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-3">
@@ -157,7 +157,7 @@ export default function SplitRouteVisualizer({
                 <span className="text-cream-35">{leg.percent}%</span>
               </span>
               <span className="font-mono tabular-nums text-cream-65">
-                {formatDisplay(legOutput, 4)} {tokenOut.symbol}
+                {fmtToken(legOutput)} {tokenOut.symbol}
               </span>
             </div>
           )
@@ -169,25 +169,25 @@ export default function SplitRouteVisualizer({
         <div className="flex items-center justify-between text-xs">
           <span className="text-cream-35">Single source ({sourceLabel(bestSingle.source)})</span>
           <span className="font-mono tabular-nums text-cream-50">
-            {formatDisplay(singleOutput, 4)} {tokenOut.symbol}
+            {fmtToken(singleOutput)} {tokenOut.symbol}
           </span>
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-cream-65">Split total ({bestSplit.legs.length} sources)</span>
           <span className="font-mono tabular-nums font-semibold text-success">
-            {formatDisplay(splitOutput, 4)} {tokenOut.symbol}
+            {fmtToken(splitOutput)} {tokenOut.symbol}
           </span>
         </div>
         {diff > 0 && (
           <div className="mt-1 text-center text-[11px] font-semibold text-success">
-            +{formatDisplay(diff, 4)} {tokenOut.symbol} extra ({improvementPercent}% better)
+            +{fmtToken(diff)} {tokenOut.symbol} extra ({improvementPercent} better)
           </div>
         )}
 
         {/* Gas warning if split gas is significantly higher */}
         {bestSplit.totalGasUsd > bestSingle.gasUsd * 1.5 && bestSplit.totalGasUsd > 5 && (
           <div className="mt-1 text-center text-[10px] text-warning">
-            Note: Split uses ~${bestSplit.totalGasUsd.toFixed(2)} gas vs ~${bestSingle.gasUsd.toFixed(2)} single
+            Note: Split uses ~{fmtUsd(bestSplit.totalGasUsd)} gas vs ~{fmtUsd(bestSingle.gasUsd)} single
           </div>
         )}
       </div>

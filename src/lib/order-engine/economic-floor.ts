@@ -17,6 +17,7 @@
  * order. This helper narrows the failure window; it is not a security control.
  */
 
+import { fmtUsd } from '@/lib/format'
 import { getDcaMinChunkUsd } from './dca-custom'
 
 export interface MinOutFloorParams {
@@ -72,7 +73,7 @@ export function checkMinOutEconomicFloor(p: MinOutFloorParams): MinOutFloorResul
       minOutUsd,
       floorUsd,
       reason:
-        `Order too small: the guaranteed minimum output is about $${minOutUsd.toFixed(2)}, ` +
+        `Order too small: the guaranteed minimum output is about ${fmtUsd(minOutUsd)}, ` +
         `below the $${floorUsd} minimum. Increase the amount — a floor this small is dust and ` +
         `would not be economically meaningful protection.`,
     }

@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtToken } from '@/lib/format'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useBalance } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -61,14 +62,7 @@ interface DiscoveredToken {
 // ── Internal helpers ─────────────────────────────────────
 
 function formatBalance(value: bigint, decimals: number): string {
-  if (value === 0n) return '0'
-  const full = formatUnits(value, decimals)
-  const num = parseFloat(full)
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`
-  if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`
-  if (num >= 1) return num.toFixed(4).replace(/\.?0+$/, '')
-  if (num >= 0.0001) return num.toFixed(6).replace(/\.?0+$/, '')
-  return '<0.0001'
+  return fmtToken(value, decimals)
 }
 
 const DEFAULT_BY_ADDRESS = (() => {

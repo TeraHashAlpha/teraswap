@@ -67,8 +67,8 @@ describe('formatMinBuyUnit — token-unit + approx-USD floor label', () => {
     expect(formatMinBuyUnit(MIN_ORDER_AMOUNT, 6, 'USDC', 1)).toBe('0.01 USDC (~$0.01)')
   })
 
-  it('WETH (18 dec): 10,000 base units = 1e-14 WETH — sub-cent USD renders at 4dp, not "$0.00"', () => {
-    expect(formatMinBuyUnit(MIN_ORDER_AMOUNT, 18, 'WETH', 3500)).toBe('0.00000000000001 WETH (~$0.0000)')
+  it('WETH (18 dec): 10,000 base units = 1e-14 WETH — sub-cent USD renders as "<$0.01" (§3), not "$0.00"', () => {
+    expect(formatMinBuyUnit(MIN_ORDER_AMOUNT, 18, 'WETH', 3500)).toBe('0.00000000000001 WETH (<$0.01)')
   })
 
   it('price unavailable → token units only, no fabricated USD', () => {

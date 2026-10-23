@@ -157,9 +157,9 @@ describe('PortfolioTab', () => {
     expect(screen.getByText('ETH')).toBeTruthy()
     expect(screen.getByText('USDC')).toBeTruthy()
     // Total formatted as currency
-    expect(screen.getByText('$7,500.00')).toBeTruthy()
-    expect(screen.getByText('$6,000.00')).toBeTruthy()
-    expect(screen.getByText('$1,500.00')).toBeTruthy()
+    expect(screen.getByText(/^\$7\s500\.00$/)).toBeTruthy()
+    expect(screen.getByText(/^\$6\s000\.00$/)).toBeTruthy()
+    expect(screen.getByText(/^\$1\s500\.00$/)).toBeTruthy()
   })
 
   it('renders skeleton placeholders while loading and no tokens yet', () => {

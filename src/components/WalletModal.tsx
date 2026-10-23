@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtToken } from '@/lib/format'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useBalance, useDisconnect, useEnsName, useEnsAvatar } from 'wagmi'
 import { mainnet } from 'wagmi/chains'
@@ -175,7 +176,7 @@ export default function WalletModal({ open, onClose }: Props) {
           {/* Balance */}
           <div className="mt-3 flex items-baseline gap-1.5">
             <span className="font-display text-2xl font-bold text-cream">
-              {balance ? parseFloat(balance.formatted).toFixed(4) : '—'}
+              {balance ? fmtToken(balance.formatted) : '—'}
             </span>
             <span className="text-sm font-medium text-cream-50">
               {balance?.symbol ?? 'ETH'}

@@ -59,6 +59,9 @@ export function feeUsd(notionalUsd: number | null, feePercent: number): number |
  * Format a fee USD value. Cent-and-above uses 2 decimals ("$2.00"); sub-cent
  * uses 3 decimals so a tiny but real fee stays visible ("0.00187" → "0.002")
  * instead of collapsing to "0.00".
+ *
+ * @deprecated Superseded by `fmtUsd` (design README §3: `$` + 2 dp, `<$0.01` floor). Kept — not
+ * deleted — for its own tests; no component uses it any more.
  */
 export function formatFeeUsd(usd: number): string {
   if (usd >= 0.01) return usd.toFixed(2)

@@ -826,7 +826,7 @@ describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the
 
     expect(result.current.status).toBe('error')
     expect(result.current.errorMessage).toMatch(/below the quote you accepted/i)
-    expect(result.current.errorMessage).toMatch(/50\.0%/)
+    expect(result.current.errorMessage).toMatch(/50%/)
     expect(mockSimulateSwapTx).not.toHaveBeenCalled() // blocked BEFORE simulation
     expect(mockSendTransaction).not.toHaveBeenCalled()
     expect(result.current.pendingSwap).toBeNull() // no review modal, nothing to confirm
