@@ -38,7 +38,7 @@ mock, same mock fn), `TokenLogo.test.tsx`, `api/{token-logo,portfolio/prices}`, 
 - Kyber label shows only the first split path (pre-existing `route[0]`); Arbitrum logos now use Trust Wallet `arbitrum` (was `ethereum`).
 
 ## Follow-up (commits 6–8, 2026-10-23, Sonnet 5.5)
-- [x] C6 CodeQL ReDoS on the grep test · [x] C7 rate limit · [x] C8 token-logo stream + help-content · [ ] verify + push
+- [x] C6 CodeQL ReDoS on the grep test · [x] C7 rate limit · [x] C8 token-logo stream + help-content · [x] verify + push
 Premises that were stale (owner may override): `/api/price/defillama` ALREADY had a 30/min/IP limit + 429 test (`route.ts:24,37`);
 CodeQL queries live at `Performance/ReDoS.ql` + `Performance/PolynomialReDoS.ql` (pack 2.4.8), not `Security/CWE-1333/`.
 Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter.ts` (the helper), `src/app/api/quote/route.ts:104-118`.
@@ -64,3 +64,14 @@ Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter
 4. **help-content.ts:17** before: "…searches 10 liquidity sources simultaneously to find you the best swap rate on Ethereum." → after: "…compares quotes
    across 8 liquidity sources simultaneously on Ethereum, Base, and Arbitrum One." (`INTEGRATED_DEX_SOURCE_COUNT`, `SWAP_CHAIN_LIST_LABEL`).
    `help-content.test.ts` (new): no `\b10\b`, no "best swap rate", and a mocked product-claims (3 / "Chain A and Chain B") changes the sentence.
+5. **Verify.** Suite 312 files / 4864 pass vs origin/main `697970a` 304 / 4730; lint 93 → 93 warnings (0 errors); tsc clean both. New commits only
+   (`9074a88..HEAD`, excl. this file): 13 files, +754 −180 (7 source, 6 tests; commits `ea95261` `db1d9c7` `65932e8` `2ed7133`, all SSH-signed). Local CodeQL on the
+   final tree: ReDoS 0, PolynomialReDoS 0, full `javascript-code-scanning.qls` 6 (all pre-existing, none in a touched file, no request-forgery on logo-proxy).
+   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/functional-chain-ui (PR #591 exists; none opened). CI not polled (goal).
+
+### Concerns (not fixed — out of scope; the three C8 ones above are now resolved)
+- `/api/token-logo` is unrated and now streams bytes; edge cache absorbs repeats, but 30/min would break the token list → needs a higher dedicated limit.
+- CSP `img-src` still lists `https://assets.coingecko.com` (and 1inch); no repo code needs the first any more → candidate to drop (not done: CSP out of scope).
+- Next adds its global CSP header over the route's own `default-src 'none'; sandbox` on logo responses (seen via `next dev`; raster-only + `nosniff` hold).
+- `help-content.ts:29` "supports Ethereum Mainnet" and `:38` "queries 10 sources (… OpenOcean, Balancer …)" are the same stale claims; untouched (goal = line 17).
+- Dead-source icons are now a cached 404 (was a 302 to a 404): `<TokenLogo>` falls to Trust Wallet, then the avatar — same end state.
