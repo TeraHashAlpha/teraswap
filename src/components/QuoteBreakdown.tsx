@@ -10,10 +10,10 @@ import { feeMode, isFeeCollected } from '@/lib/fee-mode'
 import { isExecutableSource } from '@/lib/executable-sources'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
-import { swapNotionalUsd, feeUsd, formatFeeUsd } from '@/lib/fee-usd'
+import { swapNotionalUsd, feeUsd } from '@/lib/fee-usd'
 import { safeBigInt } from '@/lib/utils'
 import { formatUnits } from 'viem'
-import { formatDisplay, formatWithSeparator } from '@/lib/format'
+import { formatWithSeparator, fmtToken, fmtUsd, fmtPct, fmtGas } from '@/lib/format'
 import InfoTooltip from './InfoTooltip'
 
 interface Props {
@@ -98,12 +98,12 @@ export default function QuoteBreakdown({
   const outputAmountValid = bestAmountBn !== null
   const inputAmount = Number(amountIn)
   const rate = outputAmountValid && inputAmount > 0
-    ? formatDisplay(outputAmount / inputAmount, 4)
+    ? fmtToken(outputAmount / inputAmount)
     : '—'
   // [SPRINT-9Q Q2] Display-only inverse (1 tokenOut = N tokenIn). Guard zero output so a
-  // div-by-zero never produces Infinity; formatDisplay handles separators + tiny values.
+  // div-by-zero never produces Infinity; fmtToken handles separators + tiny values.
   const inverseRate = outputAmountValid && outputAmount > 0 && inputAmount > 0
-    ? formatDisplay(inputAmount / outputAmount, 4)
+    ? fmtToken(inputAmount / outputAmount)
     : '—'
   // [fix/zerox-partner-fee-armed] Name the mechanism that actually collects the
   // fee instead of OR-ing two unrelated conditions. The old expression was
@@ -144,7 +144,7 @@ export default function QuoteBreakdown({
     if (secondBn !== null) {
       const secondOutput = Number(formatUnits(secondBn, tokenOut.decimals))
       const diff = outputAmount - secondOutput
-      if (diff > 0) savingsVsSecond = `+${formatDisplay(diff, 4)} ${tokenOut.symbol} vs ${sourceLabel(secondBest.source)}`
+      if (diff > 0) savingsVsSecond = `+${fmtToken(diff)} ${tokenOut.symbol} vs ${sourceLabel(secondBest.source)}`
     }
   }
 
@@ -251,7 +251,7 @@ export default function QuoteBreakdown({
               <p className="text-sm font-semibold text-cream">Zero Gas Available</p>
               <p className="mt-0.5 text-xs text-cream-65">
                 {gasless.gasSavingsUsd >= 0.5
-                  ? `Save ~$${gasless.gasSavingsUsd.toFixed(2)} in gas fees by using CoW Protocol.`
+                  ? `Save ~${fmtUsd(gasless.gasSavingsUsd)} in gas fees by using CoW Protocol.`
                   : 'Use CoW Protocol for a fully gasless swap.'}
                 {' '}Your swap is fully MEV-protected.
               </p>
@@ -282,7 +282,7 @@ export default function QuoteBreakdown({
         >
           <span className="font-semibold">&#10003; You&apos;re using the gasless route</span>
           {gasless.gasSavingsUsd >= 0.5 && (
-            <span> — saving ~${gasless.gasSavingsUsd.toFixed(2)} in gas.</span>
+            <span> — saving ~{fmtUsd(gasless.gasSavingsUsd)} in gas.</span>
           )}
         </div>
       )}
@@ -377,7 +377,7 @@ export default function QuoteBreakdown({
                 : priceCheck.oracleUnavailable
                   ? `⚠ No Chainlink oracle for ${tokenIn.symbol} — price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
                   : priceCheck.chainlinkPrice != null
-                    ? `✓ Verified by Chainlink ($${priceCheck.chainlinkPrice.toFixed(2)})`
+                    ? `✓ Verified by Chainlink (${fmtUsd(priceCheck.chainlinkPrice)})`
                     : undefined
             }
           >
@@ -406,7 +406,7 @@ export default function QuoteBreakdown({
           >
             <span className="text-cream-35">Est. MEV savings</span>
             <span className="font-mono tabular-nums">
-              +{formatDisplay(mevSavings.amount, 4)} {tokenOut.symbol} ({mevSavings.pct.toFixed(2)}%)
+              +{fmtToken(mevSavings.amount)} {tokenOut.symbol} ({fmtPct(mevSavings.pct)})
             </span>
           </div>
         )}
@@ -479,7 +479,7 @@ export default function QuoteBreakdown({
               : (() => {
                   const cost = gasEstimate?.(best.estimatedGas)
                   return cost
-                    ? <span>~{cost.eth.toFixed(4)} ETH <span className="text-cream-50">(${cost.usd.toFixed(2)})</span></span>
+                    ? <span>~{fmtGas(cost.eth)} ETH <span className="text-cream-50">({fmtUsd(cost.usd)})</span></span>
                     : `~${formatWithSeparator(best.estimatedGas.toString())} gas`
                 })()
             }
@@ -497,9 +497,9 @@ export default function QuoteBreakdown({
           </span>
           {feeCollected ? (
             <span>
-              {formatDisplay(feeAbsolute, 6)} {tokenIn.symbol}
+              {fmtToken(feeAbsolute)} {tokenIn.symbol}
               {platformFeeUsd != null && (
-                <span className="ml-1 font-normal text-cream-50">(${formatFeeUsd(platformFeeUsd)})</span>
+                <span className="ml-1 font-normal text-cream-50">({fmtUsd(platformFeeUsd)})</span>
               )}
             </span>
           ) : (
@@ -531,7 +531,7 @@ export default function QuoteBreakdown({
               Price impact
               <InfoTooltip label="Price impact info" content="Estimated impact based on Chainlink oracle vs execution price. Higher impact means your trade is large relative to available liquidity." />
             </span>
-            <span>~{(priceCheck.deviation * 100).toFixed(2)}%</span>
+            <span>~{fmtPct(priceCheck.deviation * 100)}</span>
           </div>
         )}
 
@@ -540,7 +540,7 @@ export default function QuoteBreakdown({
         {/* Min output */}
         <div className="flex items-center justify-between">
           <span className="text-cream-35">Min. output</span>
-          <span className="font-mono font-semibold tabular-nums text-cream-95">{formatDisplay(minOutput, 4)} {tokenOut.symbol}</span>
+          <span className="font-mono font-semibold tabular-nums text-cream-95">{fmtToken(minOutput)} {tokenOut.symbol}</span>
         </div>
 
         {/* Savings */}
@@ -591,7 +591,7 @@ export default function QuoteBreakdown({
                     </span>
                   )}
                 </span>
-                <span className="font-mono tabular-nums">{out !== null ? `${formatDisplay(out, 4)} ${tokenOut.symbol}` : '—'}</span>
+                <span className="font-mono tabular-nums">{out !== null ? `${fmtToken(out)} ${tokenOut.symbol}` : '—'}</span>
               </div>
             )
           })}

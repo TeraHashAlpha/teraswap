@@ -80,8 +80,8 @@ describe('OrderReviewModal [SPRINT-9U U2]', () => {
     expect(screen.getByTestId('order-pair').textContent).toMatch(/WETH/)
     expect(screen.getByTestId('order-pair').textContent).toMatch(/USDC/)
     expect(screen.getByTestId('order-amountin').textContent).toMatch(/1.*WETH/)
-    expect(screen.getByTestId('order-minout').textContent).toMatch(/2[,.]?900.*USDC/)
-    expect(screen.getByTestId('order-price').textContent).toMatch(/3[,.]?000/) // 300000000000 @ 8dp
+    expect(screen.getByTestId('order-minout').textContent).toMatch(/2\u2009900\.0000 USDC/)
+    expect(screen.getByTestId('order-price').textContent).toMatch(/3\u2009000\.0000/) // 300000000000 @ 8dp
     expect(screen.getByTestId('order-router').textContent).toMatch(/0x1111\.\.\.2a65/)
     expect(screen.getByTestId('order-nonce').textContent).toBe('7')
     // [9U audit] the signed priceFeed (oracle) + routerDataHash are part of the trust surface.
@@ -111,7 +111,7 @@ describe('OrderReviewModal [SPRINT-9U U2]', () => {
     renderWithProviders(<OrderReviewModal order={makeReview({ orderType: OrderType.DCA })} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     // The amount row is now labelled "Total to spend" (not "Amount per buy") and shows the full total.
     expect(screen.getByText(/total to spend/i)).toBeTruthy()
-    expect(screen.getByTestId('order-amountin').textContent).toMatch(/1\s*WETH/)
+    expect(screen.getByTestId('order-amountin').textContent).toMatch(/1\.0000 WETH/)
     // Per-buy row = amountIn / dcaTotal = 0.1 WETH (locale may render the decimal as , or .).
     expect(screen.getByTestId('order-perbuy').textContent).toMatch(/0[.,]1\s*WETH/)
   })

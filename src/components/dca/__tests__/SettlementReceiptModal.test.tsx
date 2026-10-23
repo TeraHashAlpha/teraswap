@@ -115,7 +115,7 @@ describe('SettlementReceiptModal', () => {
 
     await waitFor(() => expect(screen.getByTestId('settlement-totals')).toBeInTheDocument())
     const totals = screen.getByTestId('settlement-totals')
-    expect(totals.textContent).toContain('1 USDC')
+    expect(totals.textContent).toContain('1.0000 USDC')
     expect(totals.textContent).toMatch(/0[.,]5 WETH/)
     expect(totals.textContent).toContain('Network cost — covered by TeraSwap')
   })

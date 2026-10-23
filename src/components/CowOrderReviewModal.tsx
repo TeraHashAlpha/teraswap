@@ -12,7 +12,7 @@
  * switch invalidates the frozen order and re-presents.
  */
 
-import { formatUnits } from 'viem'
+import { fmtToken } from '@/lib/format'
 import type { PendingCowOrder } from '@/hooks/useSwap'
 
 function truncAddr(addr: string): string {
@@ -21,10 +21,7 @@ function truncAddr(addr: string): string {
 }
 
 function fmtAmount(raw: bigint, decimals: number, symbol: string): string {
-  const num = parseFloat(formatUnits(raw, decimals))
-  if (!isFinite(num)) return '—'
-  if (num === 0) return `0 ${symbol}`
-  return num < 0.0001 ? `<0.0001 ${symbol}` : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${symbol}`
+  return `${fmtToken(raw, decimals)} ${symbol}`
 }
 
 function fmtDeadline(validTo: number): string {
