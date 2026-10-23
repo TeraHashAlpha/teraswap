@@ -13,8 +13,9 @@
  *                                            core brands, else the Alchemy logoURI)
  *   2. /api/token-logo route, keyed by     (server-side: resolves via the per-chain
  *      chainId + LOWERCASE address           CoinGecko list — near-universal — and
- *                                            falls back to DefiLlama internally; 302
- *                                            redirect, cached at the edge)
+ *                                            falls back to DefiLlama internally; the
+ *                                            image bytes are fetched server-side and
+ *                                            streamed back, cached at the edge)
  *   3. Trust Wallet assets via the          (a DIFFERENT per-chain source, so a route
  *      /api/proxy/logo route, keyed by       miss still has a real shot; fetched
  *      the EIP-55 CHECKSUMMED address        server-side so the browser never calls GitHub)
@@ -43,7 +44,8 @@ interface Props {
  * address (the EXACT byte-for-byte format the catalog `logo()` helper produces, so a
  * catalog token whose logoURI is already this URL dedupes to a single candidate). The
  * route resolves real logos via the per-chain CoinGecko list (near-universal) and
- * falls back to DefiLlama server-side. Defaults to mainnet when chainId is absent.
+ * falls back to DefiLlama server-side, then streams the image from our own origin — the
+ * browser never contacts those hosts. Defaults to mainnet when chainId is absent.
  */
 function routeLogo(address: string, chainId?: number): string {
   return `/api/token-logo?chainId=${chainId ?? 1}&address=${address.toLowerCase()}`
