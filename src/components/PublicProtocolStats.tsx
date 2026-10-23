@@ -6,6 +6,7 @@
  * Disabled and empty metrics say "not available yet" with a reason.
  */
 
+import { fmtUsd, fmtPct, fmtInt } from '@/lib/format'
 import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 import {
   protocolStatsGate,
@@ -24,9 +25,7 @@ function sourceLabel(s: string): string {
 }
 
 function formatUsd(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
-  return `$${n.toFixed(2)}`
+  return fmtUsd(n, { compact: true })
 }
 
 function UnavailableNote({
@@ -79,7 +78,7 @@ function CountCard({
   label,
   metric,
   testId,
-  format = (n: number) => n.toLocaleString(),
+  format = (n: number) => fmtInt(n),
 }: {
   label: string
   metric: UnavailableMetric | AvailableCount
@@ -115,7 +114,7 @@ function RankedList({
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-cream-65">{sourceLabel(source)}</span>
-                <span className="tabular-nums text-cream-50">{count.toLocaleString()}</span>
+                <span className="tabular-nums text-cream-50">{fmtInt(count)}</span>
               </div>
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-cream-08">
                 <div
@@ -245,7 +244,7 @@ function ReadyStats({ payload }: { payload: PublicStatsPayload }) {
             label="Gasless ratio"
             metric={gasless.gaslessRatio}
             testId="protocol-metric-gaslessRatio"
-            format={(n) => `${(n * 100).toFixed(1)}%`}
+            format={(n) => fmtPct(n * 100, 1)}
           />
           <CountCard
             label="Avg gas saved"

@@ -60,6 +60,7 @@ import { evaluatePriceGate, type PriceGateReason } from '@/lib/price-gate'
 import type { PriceCheck } from '@/lib/chainlink'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { quickFillRaw, perChunkRaw, formatMinBuyMessage } from '@/lib/dca-quick-fill'
+import { fmtToken, fmtFixed, fmtPct } from '@/lib/format'
 import { checkRoute } from '@/lib/order-engine/check-route'
 // [FEAT-DCA-FLOOR-TIERS] Imported as its own module (like check-route above) so a suite can stub the
 // classification without restubbing the barrel. Replaces the 2026-09-09 hard block on a leg the
@@ -696,7 +697,7 @@ function CreateDCAForm({
   const expiry = useMemo(() => {
     if (!customMode) return EXPIRY_PRESETS[expiryIdx]
     const seconds = deriveCustomExpirySeconds({ intervalSeconds: interval.seconds, buys: parts })
-    const label = seconds < 86_400 ? `${Math.round(seconds / 3600)}h` : `${(seconds / 86_400).toFixed(1)}d`
+    const label = seconds < 86_400 ? `${Math.round(seconds / 3600)}h` : `${fmtFixed(seconds / 86_400, 1)}d`
     return { label, seconds }
   }, [customMode, expiryIdx, interval.seconds, parts])
 
@@ -758,19 +759,25 @@ function CreateDCAForm({
 
   // Derived values
   const perPart = useMemo(() => {
-    const total = Number(totalDisplay)
-    if (!parts || !total || parts <= 0) return '0'
-    return (total / parts).toFixed(tokenIn?.decimals === 6 ? 2 : 6)
+    // Display-only. Same bigint floor split as OrderReviewModal / OrbitStatRow (perChunkRaw), rendered
+    // by the same fmtToken, so the per-buy figure is identical in panel, summary and review (§3).
+    if (!parts || parts <= 0 || !tokenIn) return '0'
+    try {
+      const raw = parseUnits(totalDisplay, tokenIn.decimals)
+      return raw > 0n ? fmtToken(perChunkRaw(raw, parts), tokenIn.decimals) : '0'
+    } catch {
+      return '0'
+    }
   }, [totalDisplay, parts, tokenIn])
 
   const totalDuration = useMemo(() => {
     if (!parts || parts <= 0) return ''
     const totalSec = parts * interval.seconds
     const hours = totalSec / 3600
-    if (hours < 24) return `${hours.toFixed(0)} hours`
+    if (hours < 24) return `${fmtFixed(hours, 0)} hours`
     const days = hours / 24
-    if (days < 30) return `${days.toFixed(1)} days`
-    return `${(days / 30).toFixed(1)} months`
+    if (days < 30) return `${fmtFixed(days, 1)} days`
+    return `${fmtFixed(days / 30, 1)} months`
   }, [parts, interval])
 
   // [chore/dca-resilience] Creation guard: a schedule that can't finish before
@@ -1451,7 +1458,7 @@ function CreateDCAForm({
                         : 'border-cream-08 text-cream-35 hover:text-cream-50'
                     }`}
                   >
-                    {(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%
+                    {fmtPct(bps / 100, 1)}
                   </button>
                 ))}
               </div>

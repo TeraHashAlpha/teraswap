@@ -389,10 +389,12 @@ function DiffHubIcon() {
         const r = (deg * Math.PI) / 180
         const x = 12 + RADIUS * Math.cos(r)
         const y = 12 + RADIUS * Math.sin(r)
+        // numeric-format-allow: SVG coordinates (geometry), not display text
+        const [fx, fy] = [x.toFixed(2), y.toFixed(2)]
         return (
           <g key={deg}>
-            <line x1="12" y1="12" x2={x.toFixed(2)} y2={y.toFixed(2)} />
-            <circle cx={x.toFixed(2)} cy={y.toFixed(2)} r="1.1" fill="currentColor" />
+            <line x1="12" y1="12" x2={fx} y2={fy} />
+            <circle cx={fx} cy={fy} r="1.1" fill="currentColor" />
           </g>
         )
       })}

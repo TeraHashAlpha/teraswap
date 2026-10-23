@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtInt } from '@/lib/format'
 import Link from 'next/link'
 import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
@@ -39,7 +40,7 @@ export default function Footer() {
           <span className="hidden text-cream-15 sm:inline">|</span>
           <span className="hidden items-center gap-1 sm:flex">
             <span className="h-1.5 w-1.5 rounded-full bg-success" />
-            Block #{blockNumber.toLocaleString()}
+            Block #{fmtInt(blockNumber)}
           </span>
         </>
       )}

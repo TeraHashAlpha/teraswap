@@ -1,5 +1,6 @@
 'use client'
 
+import { fmtToken, fmtUsd, fmtPct } from '@/lib/format'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useAccount, useChainId } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
@@ -362,7 +363,7 @@ function CreateLimitForm({
         : decDiff < 0
           ? expectedRaw / BigInt(10 ** Math.abs(decDiff))
           : expectedRaw
-      return Number(formatUnits(adjusted, tokenOut.decimals)).toFixed(tokenOut.decimals <= 6 ? 2 : 6)
+      return fmtToken(adjusted, tokenOut.decimals)
     } catch { return '' }
   }, [amount, targetPrice, tokenIn, tokenOut])
 
@@ -681,7 +682,7 @@ function CreateLimitForm({
           </button>
           {displayMarketPrice > 0 && (
             <button onClick={setMarketAsTarget} className="text-[10px] text-cream-gold hover:underline">
-              Market: {formatPrice(displayMarketPrice, quoteToken)}
+              Market: {fmtToken(displayMarketPrice)}
             </button>
           )}
         </div>
@@ -721,7 +722,7 @@ function CreateLimitForm({
                 ? 'text-warning'
                 : 'text-cream-50'
           }`}>
-            {priceDiffPercent > 0 ? '+' : ''}{priceDiffPercent.toFixed(2)}% vs market
+            {fmtPct(priceDiffPercent, 2, { sign: true })} vs market
           </p>
         )}
       </div>
@@ -966,7 +967,7 @@ function OrderCard({
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-cream">
-            {Number(amountIn).toFixed(4)} {order.tokenInSymbol}
+            {fmtToken(amountIn)} {order.tokenInSymbol}
           </span>
           <span className="text-cream-35">→</span>
           <span className="text-sm font-medium text-cream">
@@ -993,19 +994,19 @@ function OrderCard({
         <div className="mb-2 rounded-lg bg-cream-04 px-2.5 py-2">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-cream-50">Target ({conditionLabel})</span>
-            <span className="font-medium text-cream-gold">${targetPriceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="font-medium text-cream-gold">{fmtUsd(targetPriceUsd)}</span>
           </div>
           {currentPrice !== null && currentPrice > 0 && (
             <>
               <div className="mt-1 flex items-center justify-between text-[11px]">
                 <span className="text-cream-50">Current</span>
-                <span className="font-medium text-cream">${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="font-medium text-cream">{fmtUsd(currentPrice)}</span>
               </div>
               {priceInfo && (
                 <div className="mt-1.5">
                   <div className="mb-0.5 flex items-center justify-between text-[10px]">
                     <span className="text-cream-35">
-                      {priceInfo.absDiff < 0.5 ? '🟢 Almost there!' : `${priceInfo.absDiff.toFixed(1)}% away`}
+                      {priceInfo.absDiff < 0.5 ? '🟢 Almost there!' : `${fmtPct(priceInfo.absDiff, 1)} away`}
                     </span>
                   </div>
                   <div className="h-1 w-full overflow-hidden rounded-full bg-cream-08">
@@ -1078,8 +1079,9 @@ function OrderCard({
 // to null; formatting must not throw on the way to the refusal.
 function formatPrice(value: number, quoteToken: Token | null): string {
   if (value === 0) return '0'
-  if (quoteToken && isStablecoin(quoteToken)) return value.toFixed(2)
-  if (value < 0.001) return value.toFixed(8)
-  if (value < 1) return value.toFixed(6)
-  return value.toFixed(quoteToken && quoteToken.decimals <= 6 ? 2 : 6)
+  const dp = quoteToken && isStablecoin(quoteToken)
+    ? 2
+    : value < 0.001 ? 8 : value < 1 ? 6 : quoteToken && quoteToken.decimals <= 6 ? 2 : 6
+  // numeric-format-allow: input-field state (setTargetPrice / setDisplayPriceInput) parsed back into the signed order — not display
+  return value.toFixed(dp)
 }

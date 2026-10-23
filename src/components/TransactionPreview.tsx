@@ -11,8 +11,8 @@
  * warning. Never blocks the swap — the user can always proceed.
  */
 
+import { fmtToken } from '@/lib/format'
 import { useState, useMemo } from 'react'
-import { formatUnits } from 'viem'
 import { decodeTransactionPreview, type TransactionPreview as Preview } from '@/lib/calldata-decoder'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 import type { Token } from '@/lib/tokens'
@@ -60,12 +60,9 @@ function formatDecodedAmount(
   // Only format if the decoded token address matches (or no decoded address)
   if (decodedAddr && decodedAddr.toLowerCase() !== token.address.toLowerCase()) return null
   try {
-    const val = formatUnits(BigInt(raw), token.decimals)
-    const num = parseFloat(val)
-    if (num === 0) return null
-    return num < 0.001
-      ? `<0.001 ${token.symbol}`
-      : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${token.symbol}`
+    const wei = BigInt(raw)
+    if (wei === 0n) return null
+    return `${fmtToken(wei, token.decimals)} ${token.symbol}`
   } catch {
     return null
   }
@@ -121,12 +118,7 @@ export default function TransactionPreview({
   const enforcedMinOutDisplay = useMemo(() => {
     if (!routeViaFeeCollector || minimumOutput == null || minimumOutput <= 0n || !tokenOut) return null
     try {
-      const val = formatUnits(minimumOutput, tokenOut.decimals)
-      const num = parseFloat(val)
-      if (num === 0) return null
-      return num < 0.001
-        ? `<0.001 ${tokenOut.symbol}`
-        : `${num.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${tokenOut.symbol}`
+      return `${fmtToken(minimumOutput, tokenOut.decimals)} ${tokenOut.symbol}`
     } catch {
       return null
     }

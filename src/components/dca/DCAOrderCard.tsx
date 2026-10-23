@@ -7,6 +7,7 @@
  * hardcoded mainnet Etherscan URL. Active orders use the richer MissionControlCard.
  */
 
+import { fmtToken } from '@/lib/format'
 import { useState } from 'react'
 import { formatUnits } from 'viem'
 import type { AutonomousOrder } from '@/lib/order-engine'
@@ -100,7 +101,7 @@ export default function DCAOrderCard({
       </div>
       <div className="flex justify-between text-[11px] text-cream-35 mb-3">
         <span>{order.dcaExecuted} of {order.dcaTotal} buys</span>
-        <span>{Number(amountIn).toFixed(2)} {order.tokenInSymbol} total</span>
+        <span>{fmtToken(amountIn)} {order.tokenInSymbol} total</span>
       </div>
 
       {/* Time remaining */}

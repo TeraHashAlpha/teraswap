@@ -44,7 +44,7 @@ import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { updateSwapStatus } from '@/lib/analytics'
-import { formatWithSeparator, stripSeparator, formatDisplay } from '@/lib/format'
+import { formatWithSeparator, stripSeparator, fmtToken, fmtUsd, fmtPct, fmtInt } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
 import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
 import { playSwapConfirmMP3, playCancelOrderMP3, playQuoteReceived, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
@@ -358,9 +358,9 @@ export default function SwapBox() {
         const surplusTok = Number(formatUnits(realisedSurplusWei, tokenOut.decimals))
         const tokenPriceUsd = tokenOutPriceCheck.chainlinkPrice
         if (tokenPriceUsd != null && surplusTok * tokenPriceUsd >= 0.01) {
-          savingsLine = ` · You saved ~$${(surplusTok * tokenPriceUsd).toFixed(2)} vs public-mempool execution`
+          savingsLine = ` · You saved ~${fmtUsd(surplusTok * tokenPriceUsd)} vs public-mempool execution`
         } else if (surplusTok > 0) {
-          savingsLine = ` · You saved ~${formatDisplay(surplusTok, 4)} ${tokenOut.symbol} vs public-mempool execution`
+          savingsLine = ` · You saved ~${fmtToken(surplusTok)} ${tokenOut.symbol} vs public-mempool execution`
         }
       }
 
@@ -369,10 +369,11 @@ export default function SwapBox() {
       const successOutNum = successOutBig !== null
         ? Number(formatUnits(successOutBig, tokenOut.decimals))
         : null
-      const successOutDisplay = successOutNum !== null ? formatDisplay(successOutNum, 4) : '—'
+      const successOutDisplay = successOutNum !== null ? fmtToken(successOutNum) : '—'
       toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, duration: 10000 })
       swapToastId.current = null
 
+      // numeric-format-allow: stored in swap history (addRecord), not display
       const outAmount = successOutNum !== null ? successOutNum.toFixed(4) : '0'
       addRecord({
         id: txHash,
@@ -495,13 +496,13 @@ export default function SwapBox() {
   const outputDisplay = meta?.best && tokenOut
     ? (() => {
         const v = safeBigInt(meta.best.toAmount)
-        return v !== null ? formatDisplay(Number(formatUnits(v, tokenOut.decimals)), 4) : '—'
+        return v !== null ? fmtToken(v, tokenOut.decimals) : '—'
       })()
     : '0.0'
 
   // Format balance with separators
   const balanceDisplay = balanceIn
-    ? formatDisplay(Number(formatUnits(balanceIn.value, balanceIn.decimals)), 4)
+    ? fmtToken(balanceIn.value, balanceIn.decimals)
     : null
 
   function handleAmountChange(raw: string) {
@@ -791,7 +792,7 @@ export default function SwapBox() {
               <p className="mb-2 text-[11px] text-cream-50">
                 ✦ Smart-routed via CoW{' '}
                 {meta.gasless && meta.gasless.gasSavingsUsd >= 0.5
-                  ? `(gasless, ~$${meta.gasless.gasSavingsUsd.toFixed(2)} saved)`
+                  ? `(gasless, ~${fmtUsd(meta.gasless.gasSavingsUsd)} saved)`
                   : '(MEV protected)'}
               </p>
             )}
@@ -870,7 +871,7 @@ export default function SwapBox() {
         {priceGuardBlocked && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="font-semibold">&#128737; Swap blocked by server-side price protection.</span>{' '}
-            The swap output is {priceGuardDeviation != null ? `${(Math.abs(priceGuardDeviation) * 100).toFixed(1)}%` : 'significantly'} below the fair market price
+            The swap output is {priceGuardDeviation != null ? fmtPct(Math.abs(priceGuardDeviation) * 100, 1) : 'significantly'} below the fair market price
             verified by DefiLlama oracle. This may indicate extreme slippage, low liquidity, or a mispriced token.
             <span className="mt-1 block text-xs text-danger/80">
               Try a smaller amount, a different token pair, or wait for liquidity to stabilize. This protection cannot be overridden.
@@ -902,7 +903,7 @@ export default function SwapBox() {
             quote (cannot be clicked through). */}
         {isExtremeBlock && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {(pairCheck.deviation * 100).toFixed(1)}% from the Chainlink oracle — far beyond normal price impact.
+            <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {fmtPct(pairCheck.deviation * 100, 1)} from the Chainlink oracle — far beyond normal price impact.
             <span className="mt-1 block text-xs text-danger/80">
               This likely indicates price manipulation or a broken quote and cannot be overridden. Try a smaller amount or a different pair.
             </span>
@@ -915,7 +916,7 @@ export default function SwapBox() {
             by the on-chain minimum output. */}
         {priceImpactConsentNeeded && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-            <span className="font-semibold">&#9888; High price impact:</span> this route executes ~{(pairCheck.deviation * 100).toFixed(1)}% below the Chainlink reference price — expected slippage on a low-liquidity route, not an oracle problem.
+            <span className="font-semibold">&#9888; High price impact:</span> this route executes ~{fmtPct(pairCheck.deviation * 100, 1)} below the Chainlink reference price — expected slippage on a low-liquidity route, not an oracle problem.
             <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
               <input
                 type="checkbox"
@@ -986,7 +987,7 @@ export default function SwapBox() {
                 ) : (
                   <>
                     <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
-                    This token has no Chainlink price feed. Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} are disabled when the price cannot be independently verified.
+                    This token has no Chainlink price feed. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} are disabled when the price cannot be independently verified.
                     <span className="mt-1 block text-xs text-danger/80">
                       This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
                     </span>
@@ -997,7 +998,7 @@ export default function SwapBox() {
               <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
                 <span className="font-semibold">&#9888; No oracle verification — high value swap.</span>{' '}
                 This token has no Chainlink price feed. The quoted price cannot be independently verified.
-                Swaps above ${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString()} will be blocked.
+                Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} will be blocked.
                 <span className="mt-1 block text-xs text-warning/80">
                   Verify the price manually on CoinGecko or Etherscan before proceeding.
                 </span>
@@ -1046,7 +1047,7 @@ export default function SwapBox() {
             <span>
               Gasless option available
               {meta.gasless.gasSavingsUsd >= 0.5 && (
-                <> — save ~${meta.gasless.gasSavingsUsd.toFixed(2)}</>
+                <> — save ~{fmtUsd(meta.gasless.gasSavingsUsd)}</>
               )}
             </span>
           </button>
@@ -1133,9 +1134,9 @@ export default function SwapBox() {
               const bestOut = Number(formatUnits(bestBig, tokenOut.decimals))
               const worstOut = Number(formatUnits(worstBig, tokenOut.decimals))
               const savedPercent = worstOut > 0 ? ((bestOut - worstOut) / worstOut * 100) : 0
-              const savedDisplay = savedPercent > 0.01 ? savedPercent.toFixed(2) : null
+              const savedDisplay = savedPercent > 0.01 ? fmtPct(savedPercent) : null
               const shareText = savedDisplay
-                ? `I just saved ${savedDisplay}% on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`
+                ? `I just saved ${savedDisplay} on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`
                 : `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`
               return (
                 <button
@@ -1181,13 +1182,13 @@ export default function SwapBox() {
           userAddress={address}
           tokenIn={pendingSwap.tokenIn}
           tokenOut={pendingSwap.tokenOut}
-          amountInDisplay={formatDisplay(formatUnits(pendingSwap.rawAmountBn, pendingSwap.tokenIn.decimals))}
+          amountInDisplay={fmtToken(pendingSwap.rawAmountBn, pendingSwap.tokenIn.decimals)}
           expectedOutput={(() => {
             // [SPRINT-9R R2] Render Send/Receive from the FROZEN pendingSwap snapshot — never live
             // quote state — so the modal always matches the calldata being signed (incl. after a 9O
             // source fallback). [11-L-01] safeBigInt: malformed toAmount → "—".
             const v = safeBigInt(pendingSwap.swapToAmount)
-            return v !== null ? formatDisplay(formatUnits(v, pendingSwap.tokenOut.decimals)) : '—'
+            return v !== null ? fmtToken(v, pendingSwap.tokenOut.decimals) : '—'
           })()}
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
           minimumOutput={pendingSwap.minimumOutput}
