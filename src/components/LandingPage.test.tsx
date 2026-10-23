@@ -188,3 +188,20 @@ describe('LandingPage — hero stat strip [fix/hero-stat-layout]', () => {
     expect(label?.textContent).toContain(`${VERIFICATION_STAGES.length} STAGES`)
   })
 })
+
+// [fix/hero-stat-layout] Only CoW routes are MEV-protected (adapters/cow.ts) and the preference is
+// opt-in — the hero paragraph must not claim every route executes MEV-protected.
+describe('LandingPage — hero paragraph MEV wording [fix/hero-stat-layout]', () => {
+  beforeEach(() => {
+    useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
+  })
+
+  it('scopes MEV protection to CoW Protocol routes', () => {
+    const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
+    const paragraph = Array.from(container.querySelectorAll('p')).find((p) =>
+      p.textContent?.startsWith('TeraSwap compares'),
+    )
+    expect(paragraph?.textContent).toMatch(/Chainlink oracles, and offers MEV-protected routes via CoW Protocol\.$/)
+    expect(paragraph?.textContent).not.toContain('routes through MEV-protected execution')
+  })
+})

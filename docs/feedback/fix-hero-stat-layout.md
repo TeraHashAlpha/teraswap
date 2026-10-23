@@ -5,7 +5,7 @@ Base `origin/main` 96005c4 (#587) · worktree `~/ts-worktrees/hero-stat-layout` 
 ## Checklist
 - [x] C1 middle hero stat = numeral `VERIFICATION_CHECKS.length` + label `VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES`
 - [x] C1 tests: numeral === `VERIFICATION_CHECKS.length`, label has stage count, all 3 cells bare numerals, SSR final value
-- [ ] C2 hero paragraph last clause → "and offers MEV-protected routes via CoW Protocol."
+- [x] C2 hero paragraph last clause → "and offers MEV-protected routes via CoW Protocol." (+ wording test)
 - [ ] Suite vs main · lint delta 0 · tsc · diff --stat · push · compare link
 
 ## Scope notes
@@ -23,3 +23,6 @@ Base `origin/main` 96005c4 (#587) · worktree `~/ts-worktrees/hero-stat-layout` 
    { text: VERIFICATION_SUMMARY, label: 'VERIFICATION' }   // <dd>: <span className="text-[20px]…">{s.text}</span>
    { v: VERIFICATION_CHECKS.length, label: `VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES` }   // <dd>: <AnimatedCounter value={s.v} immediate />
    ```
+3. Hero paragraph — before → after (only the last clause; no test asserted it before, one now pins it)
+   - "…verifies the price against Chainlink oracles, and routes through MEV-protected execution."
+   - "…verifies the price against Chainlink oracles, and offers MEV-protected routes via CoW Protocol."

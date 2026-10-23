@@ -381,7 +381,7 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             style={{ textShadow: BODY_TEXT_SHADOW }}
           >
             TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade, verifies the price against
-            Chainlink oracles, and routes through MEV-protected execution.
+            Chainlink oracles, and offers MEV-protected routes via CoW Protocol.
           </motion.p>
 
           {/* CTA — flat fill, hairline focus ring, no gradient, no glow, no hover-scale */}
