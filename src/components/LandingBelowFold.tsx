@@ -690,10 +690,9 @@ function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
           className="mb-8 max-w-2xl text-[16px] leading-relaxed text-cream-75"
           style={{ textShadow: BODY_TEXT_SHADOW }}
         >
-          Forget high gas fees and slow approval flows. Our{' '}
-          <span className="font-mono" style={{ color: '#C8B89A' }}>Permit2</span> technology delivers{' '}
-          gasless approvals for permit-capable tokens — sign off-chain and let the system handle everything
-          else (tokens without permit support need a one-time on-chain approval). All wrapped in a
+          Forget slow approval flows. Approvals are{' '}
+          <span className="font-mono" style={{ color: '#C8B89A' }}>exact-amount</span>: one on-chain approval for
+          what each swap needs, never infinite, and the system handles everything else. All wrapped in a
           precision-crafted cream-on-black interface with a dynamic animated particle environment that
           responds to your every move. Because visual clarity is the first step toward financial clarity.
         </motion.p>
@@ -865,8 +864,8 @@ const FEATURES: {
     icon: <FeatBarChartIcon />,
   },
   {
-    title: 'Gasless Approvals',
-    desc: 'Gasless approvals for permit-capable tokens; one-time on-chain approval otherwise. Permit2 and EIP-2612 off-chain signing keeps your ETH in your wallet where it belongs.',
+    title: 'Exact-Amount Approvals',
+    desc: 'A one-time on-chain approval for exactly what each swap needs — never an infinite allowance. Revoke it later from the approvals manager.',
     icon: <FeatPenIcon />,
   },
   {

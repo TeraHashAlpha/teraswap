@@ -12,6 +12,7 @@ const SURFACES = [
   'src/components/LandingBelowFold.tsx',
   'src/components/DocsPage.tsx',
   'src/components/SourceToggle.tsx',
+  'src/components/LegalPage.tsx',
 ]
 
 function stripComments(src: string): string {
@@ -34,6 +35,8 @@ const FORBIDDEN: { name: string; re: RegExp }[] = [
   { name: 'absolute privacy claims', re: /never exposed|zero data leaks|hides your IP|IP hidden from all|IP[- ]protected|shields your IP from blockchain providers\./i },
   { name: 'absolute MEV/"zero" taglines', re: /zero predatory|zero compromises|MEV-free|never exposed to sandwich/i },
   { name: '"No bogus prices ever"', re: /no bogus prices/i },
+  { name: 'gasless-approval claim (useApproval.ts:105-117 always uses exact on-chain approve)', re: /gasless approvals|gasless\s+token approvals|Permit2['"]? technology|Permit2 and EIP-2612 off-chain/i },
+  { name: 'disabled source named as integrated in a source list', re: /Odos, KyberSwap|, OpenOcean,|and Balancer\b|Balancer\)/ },
   { name: 'typed rate limits', re: /300 requests|20 requests per minute/ },
   { name: 'unproven SL/TP "wider" slippage', re: /wider default slippage/ },
   { name: 'typed "10 bps" fee', re: /\b10 bps\b/ },

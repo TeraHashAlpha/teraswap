@@ -101,7 +101,8 @@ describe('below-the-fold claims', () => {
     const { container } = render(<BelowFold onLaunchApp={() => {}} />)
     const text = container.textContent ?? ''
     expect(text).not.toMatch(/zero front-running|eliminate front-running|entirely|100%|ever\.|Ethereum Elite|CoW Protocol solvers compete to fill|CoW limit order is auto-submitted/i)
-    expect(text).toContain('Gasless approvals for permit-capable tokens; one-time on-chain approval otherwise.')
+    expect(text).toContain('Exact-Amount Approvals')
+    expect(text).not.toMatch(/gasless approvals|Permit2 technology|off-chain signing/i)
     expect(text).toContain('When a swap routes through CoW Protocol')
     expect(text).toContain('OrderExecutor')
     expect(text).toContain('-hour timelock')

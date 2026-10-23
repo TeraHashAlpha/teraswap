@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
-import { SUPPORT_EMAIL } from '@/lib/constants'
+import { DISABLED_SOURCES, SUPPORT_EMAIL } from '@/lib/constants'
 import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCES_CLAIM,
+  INTEGRATED_DEX_SOURCE_LABELS,
   ADMIN_TIMELOCK_GRACE_DAYS,
   ADMIN_TIMELOCK_HOURS,
   ADMIN_TRANSFER_TIMELOCK_DAYS,
@@ -330,7 +331,7 @@ export default function DocsPage() {
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             TeraSwap integrates {INTEGRATED_DEX_SOURCE_COUNT} liquidity sources across three categories: API aggregators that
             themselves search hundreds of pools, direct on-chain protocols, and intent-based systems. Every
-            registered adapter is queried in parallel on each quote.
+            integrated adapter is queried in parallel on each quote; sources marked Disabled are listed for reference only and are never queried.
           </p>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">API Aggregators</h3>
@@ -340,9 +341,9 @@ export default function DocsPage() {
             <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching a broad set of liquidity sources across DeFi." />
             <SourceCard name="0x / Matcha" type="Aggregator" desc="Professional-grade RFQ system; uses Permit2's pull model for allowances." />
             <SourceCard name="Velora (ParaSwap)" type="Aggregator" desc="Multi-path routing with MEV-aware execution strategies." />
-            <SourceCard name="Odos" type="Aggregator" desc="Smart order routing with atomic multi-hop path optimization." />
+            <SourceCard name="Odos" type="Disabled" desc={`Smart order routing with atomic multi-hop path optimization. Disabled: ${DISABLED_SOURCES.odos}.`} />
             <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across many DEXs with auto-compounding." />
-            <SourceCard name="OpenOcean" type="Aggregator" desc="Cross-chain aggregation covering many chains and sources." />
+            <SourceCard name="OpenOcean" type="Disabled" desc={`Cross-chain aggregation covering many chains and sources. Disabled: ${DISABLED_SOURCES.openocean}.`} />
           </motion.div>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">Direct Protocols</h3>
@@ -351,7 +352,7 @@ export default function DocsPage() {
           >
             <SourceCard name="Uniswap V3" type="Direct" desc="On-chain concentrated liquidity with auto fee-tier detection across 4 pools." />
             <SourceCard name="SushiSwap" type="Direct" desc="RouteProcessor4 with smart routing across Sushi&apos;s native pools." />
-            <SourceCard name="Balancer" type="SOR" desc="Smart Order Router optimizing across weighted, stable, and boosted pools." />
+            <SourceCard name="Balancer" type="Disabled" desc={`Smart Order Router optimizing across weighted, stable, and boosted pools. Disabled: ${DISABLED_SOURCES.balancer}.`} />
             <SourceCard name="Curve Finance" type="On-Chain" desc="CurveRouterNG for optimized stablecoin and crypto pool swaps with minimal slippage." />
           </motion.div>
 
@@ -359,8 +360,8 @@ export default function DocsPage() {
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="grid gap-3 sm:grid-cols-2"
           >
-            <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order — full MEV protection, gasless execution." />
-            <SourceCard name="Bebop" type="RFQ" desc="Request-for-quote market makers via JAM settlement. Chain-aware adapter; participates when its partner key is configured." />
+            <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order — the MEV-protected route, with no gas paid by the user at execution." />
+            <SourceCard name="Bebop" type="Disabled" desc={`Request-for-quote market makers via JAM settlement. Disabled: ${DISABLED_SOURCES.bebop}.`} />
           </motion.div>
         </AnimatedSection>
 
@@ -491,7 +492,7 @@ export default function DocsPage() {
             </li>
           </ul>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            For direct on-chain swaps (Uniswap V3, Curve, Balancer, SushiSwap), the trade does pass through
+            For direct on-chain swaps (Uniswap V3, Curve, SushiSwap), the trade does pass through
             the public mempool and isn&apos;t MEV-protected — that&apos;s why the price comparison
             explicitly accounts for the MEV-protected vs. public-mempool trade-off, and why CoW gets
             evaluated on every quote.
@@ -539,7 +540,7 @@ export default function DocsPage() {
           >
             {[
               { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers while the proxy is reachable (see Graceful Degradation).' },
-              { num: '02', title: 'API Proxy Layer', desc: 'All external aggregator API calls (1inch, 0x, CoW, Odos, KyberSwap, etc.) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services.' },
+              { num: '02', title: 'API Proxy Layer', desc: `All external aggregator API calls (${INTEGRATED_DEX_SOURCE_LABELS.join(', ')}) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services.` },
               { num: '03', title: 'Method Policy (Blacklist)', desc: 'The RPC proxy relays every read method by default and explicitly blocks only signing/transaction methods (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). A blacklist is used deliberately — a method whitelist devolves into whack-a-mole. Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
               { num: '04', title: 'Rate Limiting', desc: 'The RPC proxy and the swap endpoint are rate-limited per IP to prevent abuse.' },
               { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
@@ -845,7 +846,7 @@ export default function DocsPage() {
         <AnimatedSection id="split-routing">
           <SectionTitle icon="⫘" title="Split Routing" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            For large trades, routing 100% through a single DEX causes significant price impact.
+            For large trades, routing the whole trade through a single DEX causes significant price impact.
             TeraSwap&apos;s split routing engine automatically divides the trade across multiple
             sources to minimize slippage and maximize output.
           </p>
@@ -955,7 +956,7 @@ export default function DocsPage() {
                 'Limit orders on the order engine (Chainlink-gated)',
                 'Stop loss + take profit (Chainlink-gated, adaptive slippage)',
                 'Base network activation for swaps',
-                'Bebop RFQ source',
+                `Bebop RFQ source (currently disabled: ${DISABLED_SOURCES.bebop})`,
               ] },
               { phase: 'Phase 3', status: 'Planned', color: 'rgba(200,184,154,0.4)', items: [
                 'Further multi-chain expansion (Arbitrum, Optimism)',
