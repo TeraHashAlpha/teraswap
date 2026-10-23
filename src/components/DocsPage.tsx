@@ -283,7 +283,7 @@ export default function DocsPage() {
             <Tag>Multi-oracle verified</Tag>
             <Tag>MEV protected</Tag>
             <Tag>IP protected</Tag>
-            <Tag>Beta · unaudited</Tag>
+            <Tag>Not externally audited</Tag>
           </div>
         </AnimatedSection>
 
@@ -405,7 +405,7 @@ export default function DocsPage() {
               { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
               { title: 'Token-Catalog Guard (CI)', desc: 'Every curated token is verified against its on-chain reality before it ships: contract bytecode must exist (no dead addresses), on-chain symbol() and decimals() must match the catalog entry (decimals are fund-affecting for swap sizing), the address must appear in a reputable per-chain token list, and no two catalog tokens may share a symbol on the same chain. This runs as a CI gate.', badge: 'Safety' },
               { title: 'On-Chain Admin Timelocks', desc: 'Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a 48-hour delay (and expire if not executed within a 7-day grace window). An emergency pause is also available.', badge: 'Contract' },
-              { title: 'Beta · Unaudited', desc: 'TeraSwap is in beta and its smart contracts are unaudited — a site-wide banner and per-panel disclaimer say so. Contracts are deployed and verified on the block explorer; the underlying DEXs you route through have their own audited contracts.', badge: 'Notice' },
+              { title: 'Audit Status', desc: 'TeraSwap\'s smart contracts have not been externally audited. Contracts are deployed and verified on the block explorer; the underlying DEXs you route through have their own audited contracts.', badge: 'Notice' },
             ].map((item) => (
               <motion.div key={item.title} variants={childFade}
                 whileHover={{ y: -2, borderColor: 'rgba(200,184,154,0.25)' }}

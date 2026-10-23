@@ -74,7 +74,6 @@ import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
 import { NATIVE_ETH, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
-import BetaDisclaimer from './BetaDisclaimer'
 // [FEAT-DEPEG-GATE-ORDER-CREATION] The same, twice-audited cbETH depeg circuit-breaker SwapBox
 // uses — wired here so a multi-day autonomous DCA cannot be started into a depegged/unverifiable
 // pair with zero signal. Read-only reuse: neither the hook nor its thresholds are modified.
@@ -305,8 +304,6 @@ export default function DCAPanel({ chainId: chainIdProp }: { chainId?: number } 
         <span className="font-semibold text-cream-gold">Autonomous execution</span> — DCA orders run 24/7 via Chainlink oracles. No browser required. Approve once, then sign — no infinite approvals, and the executor runs every buy automatically.
       </div>
 
-      {/* Beta disclaimer */}
-      <BetaDisclaimer />
     </div>
   )
 }

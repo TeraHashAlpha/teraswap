@@ -8,6 +8,9 @@ import { useBlockNumber } from 'wagmi'
 // calls that cannot return new information.
 export const FOOTER_BLOCK_POLL_MS = 12_000
 
+/** The one neutral risk line shown on every page (replaces the old banner and per-panel disclaimers). */
+export const FOOTER_RISK_LINE = 'Smart contracts have not been externally audited. Use at your own risk.'
+
 export default function Footer() {
   // [fix/footer-poll-hidden-tab] `watch:` is a viem watchBlockNumber subscription
   // that polls for the life of the tab regardless of visibility — a forgotten
@@ -56,6 +59,7 @@ export default function Footer() {
       >
         TeraHelps
       </a>
+      <p className="basis-full text-center text-[10px] text-cream-35">{FOOTER_RISK_LINE}</p>
     </footer>
   )
 }

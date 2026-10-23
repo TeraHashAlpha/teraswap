@@ -8,7 +8,7 @@ Owner rulings recorded in-session (supersede the goal text):
 ## Checklist
 - [x] Commit 1 — product-claims slots (C1–C4) + anti-hard-code test
 - [x] Commit 2 — copy C5–C7
-- [ ] Commit 3 — beta out, footer risk line
+- [x] Commit 3 — beta out, footer risk line
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc, diff --stat
 - [ ] Evidence 1–5 below filled, branch pushed, compare link
 

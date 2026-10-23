@@ -9,7 +9,6 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { ToastProvider } from '@/components/ToastProvider'
 import BackgroundMusic from '@/components/BackgroundMusic'
 import WalletSessionGuard from '@/components/WalletSessionGuard'
-import BetaBanner from '@/components/BetaBanner'
 import UsageTracker from '@/components/UsageTracker'
 import { assertEnv } from '@/lib/env-validation'
 
@@ -61,7 +60,6 @@ export default function Providers({ children }: { children: ReactNode }) {
             <ToastProvider>
               <BackgroundMusic />
               <WalletSessionGuard />
-              <BetaBanner />
               <UsageTracker />
               {children}
             </ToastProvider>
