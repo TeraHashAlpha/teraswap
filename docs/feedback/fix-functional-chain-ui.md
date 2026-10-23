@@ -36,3 +36,15 @@ mock, same mock fn), `TokenLogo.test.tsx`, `api/{token-logo,portfolio/prices}`, 
 - `/api/proxy/logo` has no rate limit (mirrors `/api/token-logo`); edge cache absorbs repeats.
 - `lib/help-content.ts:17` hard-codes "searches 10 liquidity sources … best swap rate on Ethereum" (stale count + same claim).
 - Kyber label shows only the first split path (pre-existing `route[0]`); Arbitrum logos now use Trust Wallet `arbitrum` (was `ethereum`).
+
+## Follow-up (commits 6–8, 2026-10-23, Sonnet 5.5)
+- [x] C6 CodeQL ReDoS on the grep test · [ ] C7 rate limit · [ ] C8 token-logo stream + help-content · [ ] verify + push
+Premises that were stale (owner may override): `/api/price/defillama` ALREADY had a 30/min/IP limit + 429 test (`route.ts:24,37`);
+CodeQL queries live at `Performance/ReDoS.ql` + `Performance/PolynomialReDoS.ql` (pack 2.4.8), not `Security/CWE-1333/`.
+Outside-list reads (recorded): `src/lib/trusted-ip.ts`, `src/lib/kv-rate-limiter.ts` (the helper), `src/app/api/quote/route.ts:104-118`.
+
+1. **ReDoS.** Old `/^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*['"]use client['"]/` → new `hasUseClientDirective()`, a linear
+   scan (skip `\s`, `//`→EOL via `indexOf`, `/*`→`*/` via `indexOf`, then `startsWith`). Same result on all 313 non-test src files
+   (91 `'use client'`, 0 disagreements); 14 tests incl. `'//'.repeat(50_000)` < 2 s.
+   Local CodeQL (`scripts/codeql-local.sh`, same DB for both): before ReDoS **2** (`no-browser-third-party.test.ts:40` ×2),
+   PolynomialReDoS 0 → after ReDoS **0**, PolynomialReDoS **0**. No dismissals.

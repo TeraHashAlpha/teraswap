@@ -37,14 +37,37 @@ const SOURCES = walk(join(ROOT, 'src'))
   .map((p) => ({ path: rel(p), text: readFileSync(p, 'utf8') }))
   .filter((f) => /\.tsx?$/.test(f.path) && !isTestOnly(f.path))
 
-const USE_CLIENT = /^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*['"]use client['"]/
+/**
+ * True when a module's first statement is a 'use client' directive, with only whitespace and
+ * comments before it. A linear scan on purpose: the regex this replaces nested `\s*` inside a
+ * repeated group beside two comment alternatives, so CodeQL (js/redos) found exponential
+ * backtracking on long runs of `//` or `/*`. Every step here only moves `i` forward.
+ */
+function hasUseClientDirective(text: string): boolean {
+  let i = 0
+  for (;;) {
+    while (i < text.length && /\s/.test(text[i])) i++
+    if (text.startsWith('//', i)) {
+      const eol = text.indexOf('\n', i)
+      if (eol === -1) return false
+      i = eol + 1
+    } else if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2)
+      if (end === -1) return false
+      i = end + 2
+    } else {
+      break
+    }
+  }
+  return text.startsWith("'use client'", i) || text.startsWith('"use client"', i)
+}
 
 function isClient(f: { path: string; text: string }): boolean {
   return (
     f.path.startsWith('src/components/') ||
     f.path.startsWith('src/hooks/') ||
     f.path === 'src/lib/defillama-client.ts' ||
-    USE_CLIENT.test(f.text)
+    hasUseClientDirective(f.text)
   )
 }
 
@@ -55,6 +78,30 @@ function hostHits(files: { path: string; text: string }[]): string[] {
     ),
   )
 }
+
+describe('[C8] hasUseClientDirective (linear scan, replaces a backtracking regex)', () => {
+  it.each([
+    ["'use client'\nimport x from 'y'", true],
+    ['"use client"', true],
+    ["// header\n/* block\n * comment */\n  'use client'", true],
+    ["/** a */ /** b */ // c\n'use client'", true],
+    ["import x from 'y'\n'use client'", false],
+    ["// 'use client' only inside a comment\nconst a = 1", false],
+    ["/* unterminated 'use client'", false],
+    ["// no newline, no directive", false],
+    ['', false],
+  ])('%j → %s', (text, expected) => {
+    expect(hasUseClientDirective(text)).toBe(expected)
+  })
+
+  it('stays linear on the inputs that made the regex backtrack', () => {
+    const started = Date.now()
+    for (const unit of ['//', '/*', '/**/', ' //\n', '\n/*']) {
+      expect(hasUseClientDirective(unit.repeat(50_000))).toBe(false)
+    }
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+})
 
 describe('[C8] no browser-direct third-party hosts', () => {
   const client = SOURCES.filter(isClient)
