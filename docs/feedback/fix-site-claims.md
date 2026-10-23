@@ -16,7 +16,7 @@
 Hero stats & Security bar → slots, final value on SSR · Features card 10 names → 8 labels · "check every hour" → "older than 60 min are rejected" · MEV "zero/entirely" → CoW routes only · "100% gasless" → exact-amount approvals · Limit/SL-TP "CoW solvers" → OrderExecutor + keeper + 48-hour timelock · "Ethereum Elite" → "Built for every EVM trader." · "Smart DCA Engine" → `DCA (…)` · swap page "Coming to L2 soon" → "Not available on this network yet" · landing privacy/"zero" lines scoped (`PRIVACY_*`: RPC + quotes proxied; logos, DefiLlama, wallet, direct-RPC fallback are not) · DocsPage: numbers slotted (content preserved), disabled sources marked "Disabled", Terms source list derived · Header badge, DocsPage "Beta · unaudited" → gone; Footer: `Smart contracts have not been externally audited. Use at your own risk.`
 
 ## 4. `grep -ri "beta\|experimental" src/components src/app`
-Non-test, excl. deprecated Beta*: **0**. Tests: 34 lines (23 dead `vi.mock('…BetaDisclaimer')` + guard tests).
+**Owner ruling: evidence 4 = non-test sources.** Non-test, excl. deprecated Beta*: **0**. Follow-up (not done, test files outside accepted scope): 34 test lines = 23 dead `vi.mock('…BetaDisclaimer')`, the `beta-disclaimer` test id in LimitOrderPanel.test.tsx, and RiskNotice.test.tsx's own wording.
 
 ## 5. Verify
 Suite 4452 (main) → **4621**, 0 failed · lint 93 → 93 · tsc clean · 22 files, +893/−135 · Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/site-claims — no PR.
