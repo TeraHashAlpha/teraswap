@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { FEE_PERCENT, SUPPORT_EMAIL } from '@/lib/constants'
 import { useBlockNumber } from 'wagmi'
+import { COPYRIGHT_YEAR } from '@/config/product-claims'
 
 // Mainnet block time is ~12s; polling faster only reissues eth_blockNumber
 // calls that cannot return new information.
@@ -49,7 +50,7 @@ export default function Footer() {
       <span className="text-cream-15">|</span>
       <a href={`mailto:${SUPPORT_EMAIL}`} className="py-2 text-cream-50 transition hover:text-cream active:text-cream sm:py-0" aria-label={`Email support at ${SUPPORT_EMAIL}`}>Contact</a>
       <span className="text-cream-15">|</span>
-      <span>&copy; 2026 TeraSwap</span>
+      <span>&copy; {COPYRIGHT_YEAR} TeraSwap</span>
       <span className="text-cream-15">|</span>
       <a
         href="https://terahelps.netlify.app/"

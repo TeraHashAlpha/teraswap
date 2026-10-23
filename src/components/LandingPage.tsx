@@ -22,6 +22,7 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP,
+  LANDING_PREVIEW_AMOUNT_IN,
   PLATFORM_FEE_LABEL,
   PRIVACY_BADGE,
   SWAP_CHAIN_LIST_LABEL,
@@ -191,7 +192,6 @@ function AnimatedCounter({
 // highest-traffic surface in the app — /api/quote's own server-side cache
 // (see the quote route) is what keeps N anonymous visitors here from each
 // fanning out to every liquidity source.
-const LANDING_PREVIEW_AMOUNT_IN = '0.5'
 
 /**
  * [fix/landing-preview-chain-aware] Resolve a preview leg against the GIVEN chain, the
@@ -263,7 +263,7 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
         <div className="mb-2 rounded-xl border border-cream-08 bg-surface p-4">
           <div className="flex items-center justify-between">
             <span className="text-2xl font-bold text-cream" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              0.5
+              {LANDING_PREVIEW_AMOUNT_IN}
             </span>
             <div className="flex items-center gap-2 rounded-full bg-surface-tertiary px-3 py-1.5">
               <span className="text-sm font-semibold text-cream">ETH</span>

@@ -338,12 +338,12 @@ export default function DocsPage() {
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="mb-6 grid gap-3 sm:grid-cols-2"
           >
-            <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching a broad set of liquidity sources across DeFi." />
+            <SourceCard name="1inch" type="Aggregator" desc="Pathfinder algorithm searching 400+ liquidity sources across DeFi." />
             <SourceCard name="0x / Matcha" type="Aggregator" desc="Professional-grade RFQ system; uses Permit2's pull model for allowances." />
             <SourceCard name="Velora (ParaSwap)" type="Aggregator" desc="Multi-path routing with MEV-aware execution strategies." />
             <SourceCard name="Odos" type="Disabled" desc={`Smart order routing with atomic multi-hop path optimization. Disabled: ${DISABLED_SOURCES.odos}.`} />
-            <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across many DEXs with auto-compounding." />
-            <SourceCard name="OpenOcean" type="Disabled" desc={`Cross-chain aggregation covering many chains and sources. Disabled: ${DISABLED_SOURCES.openocean}.`} />
+            <SourceCard name="KyberSwap" type="Aggregator" desc="Dynamic trade routing across 100+ DEXs with auto-compounding." />
+            <SourceCard name="OpenOcean" type="Disabled" desc={`Cross-chain aggregation covering 40+ chains and 1000+ sources. Disabled: ${DISABLED_SOURCES.openocean}.`} />
           </motion.div>
 
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-cream-50">Direct Protocols</h3>
@@ -542,7 +542,7 @@ export default function DocsPage() {
               { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers while the proxy is reachable (see Graceful Degradation).' },
               { num: '02', title: 'API Proxy Layer', desc: `All external aggregator API calls (${INTEGRATED_DEX_SOURCE_LABELS.join(', ')}) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services.` },
               { num: '03', title: 'Method Policy (Blacklist)', desc: 'The RPC proxy relays every read method by default and explicitly blocks only signing/transaction methods (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). A blacklist is used deliberately — a method whitelist devolves into whack-a-mole. Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
-              { num: '04', title: 'Rate Limiting', desc: 'The RPC proxy and the swap endpoint are rate-limited per IP to prevent abuse.' },
+              { num: '04', title: 'Rate Limiting', desc: '300 requests per IP per minute on the RPC proxy to prevent abuse. The swap endpoint is limited to 20 requests per minute.' },
               { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
@@ -706,7 +706,7 @@ export default function DocsPage() {
             <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
               A limit order (OrderType LIMIT) lets you set a target price; the order becomes eligible once a Chainlink
               price feed crosses your level, and the keeper then executes it on-chain through the order engine. Limit
-              orders carry a <strong className="text-cream">maximum-slippage bound</strong> and are ideal for precise
+              orders use a <strong className="text-cream">2% default slippage</strong> floor and are ideal for precise
               entry and exit targets. See the <strong className="text-cream">Order Engine</strong> section above for the
               shared signing, validation, and execution model.
             </p>
@@ -753,7 +753,7 @@ export default function DocsPage() {
               whitelisted DEX router.
             </p>
             <div className="mb-6 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
-              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop-Loss is deferred to the v4 executor; take profit is live.
+              <span className="font-semibold text-cream-65">Key difference from Limit Orders:</span> While limit orders let you target a specific price for a planned trade, SL/TP is designed to <strong className="text-cream-65">react to market movements</strong> and protect existing positions. Stop loss uses <strong className="text-cream-65">5% default slippage</strong> to prioritize fast execution during volatile drops, while take profit uses <strong className="text-cream-65">2% slippage</strong> like limit orders.
             </div>
 
             <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
@@ -764,7 +764,7 @@ export default function DocsPage() {
                 { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'The trigger is evaluated against Chainlink on-chain price feeds — the industry standard for reliable, tamper-proof prices. The condition is checked on-chain inside the contract before any execution.' },
                 { num: '03', title: 'Automatic Execution', desc: 'You sign once upfront. When the trigger fires, the keeper executes the order on-chain via the OrderExecutor — no manual action needed at trigger time, and no gas paid by you at execution.' },
                 { num: '04', title: 'Whitelisted-Router Fill', desc: 'The triggered swap routes through a whitelisted DEX router (1inch by default), with a per-order minimum-output floor enforced on-chain.' },
-                { num: '05', title: 'Adaptive Slippage', desc: `Orders carry a maximum-slippage bound. Stop-Loss is not live yet (deferred to the v4 executor); Take Profit is.` },
+                { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
               ].map((step) => (
                 <motion.div key={step.num} variants={childFade}
                   className="flex gap-4 rounded-xl border p-5"
@@ -899,7 +899,7 @@ export default function DocsPage() {
               { n: 2, title: 'Aggregator Ranking', desc: 'Volume and win-rate per source, showing which DEX routes deliver the best execution for your trades.' },
               { n: 3, title: 'Hourly Heatmap', desc: 'Visual breakdown of volume by hour (UTC), revealing peak trading windows.' },
               { n: 4, title: 'Wallet Tracker', desc: 'Automatic wallet profiling with trade counts and volumes. Export snapshots for airdrop planning or loyalty programs.' },
-              { n: 5, title: 'Daily Volume Chart', desc: `Bar chart showing daily trading volume trends and trade frequency.` },
+              { n: 5, title: 'Daily Volume Chart', desc: '30-day bar chart showing daily trading volume trends and trade frequency.' },
             ].map((step) => (
               <motion.div key={step.n} variants={childFade}
                 className="flex gap-4 rounded-xl border p-4"

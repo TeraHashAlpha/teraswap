@@ -259,6 +259,11 @@ export function dcaFeatureTitle(): string {
   return names.length === 0 ? 'DCA' : `DCA (${names.join(', ')})`
 }
 
+/** Amount the hero swap preview quotes and displays (ETH in). One value, shown and fetched. */
+export const LANDING_PREVIEW_AMOUNT_IN = '0.5'
+/** Footer copyright year — the current year, not a typed one. */
+export const COPYRIGHT_YEAR = new Date().getFullYear()
+
 // ── (g) Constants read straight from their declaring module ──────────────────
 
 /** Platform fee as shown on the swap preview — FEE_PERCENT, not a typed "0.1%". */
