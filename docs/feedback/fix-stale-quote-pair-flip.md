@@ -1,29 +1,29 @@
-# Feedback — fix/stale-quote-pair-flip (recon 58)
+# Feedback — fix/stale-quote-pair-flip (recon 58) — DONE, no PR (owner opens)
 
-Goal: quote carries identity; stale quotes never render; guard two-sided; flip request + Base USDC badge.
-No PR (owner opens). No change to useSwap, /api/swap, calldata, minimumOutput derivation, QUOTE_RATE_LIMIT, poll interval, copy.
+Commits: C1 `b98c542` · C2 `6dfe856` · C3 `65d8372` · C4 `e0327e3` (all SSH-signed). Untouched: useSwap, /api/swap, calldata, minimumOutput derivation, QUOTE_RATE_LIMIT, poll interval, copy.
 
-## Checklist
-- [x] C1 useQuote tags `meta` with identity; setMeta only on key match + !aborted; clear on flip/token/chain change; SwapBox uses quote's decimalsOut; gates read key-matching quote only
-- [x] C2 /api/quote echoes tokenIn/tokenOut/chainId/decimalsIn/decimalsOut/amountIn; client keys from echo
-- [x] C3 assertSwapConsistentWithQuote two-sided + pair/chain mismatch refusal
-- [x] C4 flip skips immediate refetch while debounce pending; TokenAddressBadge uses useQuoteChainId
-- [ ] Verify: suite vs origin/main (312 files / 4880 tests, lint 93 warn), tsc, diff --stat, push, compare link
+1. **Key/abort logic** (`useQuote.ts`): `meta` = `{…quote, identity{chainId,tokenIn,tokenOut,amountRaw,decimalsIn,decimalsOut,fetchedAt}}`.
+   Store only if `parseQuoteEcho(res)` ok ∧ `!signal.aborted` ∧ `sameQuoteKey(echo, currentKeyRef)`; stored quote dropped on pair change
+   (reset-in-render); exposed `meta` also filtered by `sameQuotePair` so the flip render never shows the old quote. SwapBox: one
+   `matchedRawMeta` choke point (display, oracle gates :248-267/:599-612, `quoteToAmountBySource`) + `quoteDecimalsOut` from the quote.
+   Tests: flip→meta null in the next render; flip-back doesn't resurrect; late old-pair + superseded-amount responses ignored (fail
+   when the check is removed); same-pair re-quote rendered; SwapBox flip → no RECEIVE/breakdown, gates `execIn` null, `useSwap` gets `{}`.
+2. **Response shape** — before: `{best, all, fetchedAt, crossQuote*, lowConfidence?}`. After (GET and POST, per-response copy, cache untouched):
+   same + `tokenIn, tokenOut, chainId (default 1), decimalsIn, decimalsOut, amountIn` — keys pinned in `route.test.ts`. No echo → client error, no quote.
+3. **Guard** (`minimum-output.ts`): ceiling `basis·(10000+slipBps+50)/10000` beside the floor; tolerance constant unchanged; uniswapv3 still skipped.
+   Tests (75): at/±1 wei both sides at 0%/5%/fee-routed (1_003_995), ⇅ shapes both directions, copy, aggregate (`null`) bounded, 4 mismatch kinds,
+   lone key refuses, skip list doesn't exempt a mismatch.
+4. **Requests per flip+type** (⇅ with amount cleared, then type 5): **before 2** (immediate refetch `amount=1000000` = old amount under new
+   decimals, then `5000000`), **after 1** (`5000000`). Same scenario run on origin/main vs branch, real debounce + fake timers.
+5. **Badge**: `TokenAddressBadge.base-chain.test.tsx` (real hooks + catalog, wagmi disconnected, Base picked): Base USDC → green ✓, no ⚠; failed before the fix.
+6. **Verify**: origin/main 312 files/4880 tests, lint 93 → branch **314 files/4938 tests pass**, lint **93 (Δ0)**, `tsc` clean. 16 files, +1005/−53 (`git diff --stat origin/main..HEAD`).
+   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/stale-quote-pair-flip
 
-## Baseline (origin/main 3a97f76)
-312 files / 4880 tests pass; eslint 93 warnings, 0 errors.
-
-## Scope record
-Reads outside the list: `src/lib/adapters/types.ts` (MetaQuoteResult shape, ~15 lines); grep-only for call sites of
-`useQuote`, `assertSwapConsistentWithQuote`, `selectBestWithMevPreference`/`scopeToExecutable` locations.
-Out-of-list EDIT (forced): `src/components/DigitRoller.test.tsx` — its SwapBox fixture mocks `useQuote` with a quote that has no
-identity; fail-closed SwapBox now (correctly) shows no quote, so one fixture line (identity) was added. No assertion changed.
-
-## Findings (C3 — Auditor-note: quote→swap guard, tightening only)
-- Ceiling = basis·(10000+slipBps+SWAP_QUOTE_TOLERANCE_BPS)/10000 (constant unchanged; fee-netted basis; uniswapv3 still skip-listed).
-  Liveness trade-off: a >1% FAVOURABLE move between quote and /swap build (at 0.5% slippage) now refuses ("review and try again").
-- `quotePair`/`swapPair` (mismatch refusal; one-without-the-other refuses) are optional params and NOT wired at the call sites —
-  useSwap/useSplitSwap are on the Do-NOT list. Inert in prod until a follow-up wires them. The stale-pair case is already refused
-  end-to-end: SwapBox passes `{}` as quoteToAmountBySource for a non-matching quote → existing fail-closed "No accepted quote".
-- 3 out-of-list useSplitSwap.test fixtures changed (they overshot a leg by +33%/+80%/+90%, impossible under a two-sided guard);
-  intent kept (fresh≠stale minOut; uniswapv3 leg unfloored; per-leg floor independent of aggregate), numbers now inside the window.
+## For the Auditor / follow-ups
+- **Guard liveness:** a >1% *favourable* move between quote and /swap build (0.5% slippage) now refuses ("review and try again"); was silent.
+- **Mismatch refusal is inert in prod:** `quotePair`/`swapPair` aren't passed by useSwap/useSplitSwap (Do-NOT list) — wire in a follow-up. The stale-pair case is
+  already refused today via SwapBox's `{}` quote map → existing "No accepted quote".
+- **Deploy skew:** new client + old server (no echo) → quotes fail closed with "Failed to fetch quotes"; ship together.
+- **Outside the list** (forced by fail-closed): read `adapters/types.ts` (MetaQuoteResult); fixtures edited in `DigitRoller.test.tsx` (identity) and 3 in
+  `useSplitSwap.test.ts` (legs overshot +33/+80/+90%; now inside the window, same intent). Not done: `QuoteBreakdown` still formats with `tokenOut.decimals`
+  (receives only matched quotes now); recon 58's unexplained 64 s delay and the tester's exact figure remain unreproduced.
