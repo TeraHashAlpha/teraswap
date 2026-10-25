@@ -350,7 +350,7 @@ describe('useQuote — [P208] AbortController', () => {
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
   })
 
-  it('ignores AbortError silently — no error state, no meta clear', async () => {
+  it('ignores AbortError silently — no error state, no meta clear (same pair)', async () => {
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
@@ -367,7 +367,28 @@ describe('useQuote — [P208] AbortController', () => {
     })
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
     expect(result.current.error).toBeNull()
-    expect(result.current.meta).not.toBeNull() // prior pair's quote retained
+    expect(result.current.meta).not.toBeNull() // same pair's quote retained
+  })
+
+  it('[fix/stale-quote-pair-flip] a pair change does NOT retain the prior pair\'s quote (inverts the old "retained" expectation)', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'))
+
+    const { result, rerender } = renderHook(
+      ({ tin, tout }: { tin: Token; tout: Token }) => useQuote(tin, tout, '1', true, undefined),
+      { initialProps: { tin: TOKEN_IN, tout: TOKEN_OUT } },
+    )
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    await act(async () => {
+      rerender({ tin: TOKEN_OUT, tout: TOKEN_IN })
+      await flush()
+    })
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+    expect(result.current.error).toBeNull()
+    expect(result.current.meta).toBeNull()
   })
 
   it('[fix/quote-identity-loop, acceptance 2] does NOT refetch when a caller hands a structurally identical but newly-allocated token object', async () => {
@@ -580,5 +601,141 @@ describe('useQuote — visibility-aware polling', () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
     expect(result.current.countdown).toBe(countdownAtHide)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [fix/stale-quote-pair-flip] A quote carries its identity
+// ─────────────────────────────────────────────────────────────
+describe('useQuote — [fix/stale-quote-pair-flip] quote identity', () => {
+  const flipProps = { tin: TOKEN_OUT, tout: TOKEN_IN }
+  const baseProps = { tin: TOKEN_IN, tout: TOKEN_OUT }
+  const render = (initial = baseProps, amount = '1') =>
+    renderHook(
+      ({ tin, tout }: { tin: Token; tout: Token }) => useQuote(tin, tout, amount, true, undefined),
+      { initialProps: initial },
+    )
+
+  it('tags the stored quote with the request identity (chain, pair, raw amount, decimals)', async () => {
+    mockFetchSuccess()
+    const { result } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+    expect(result.current.meta?.identity).toMatchObject({
+      chainId: 1,
+      tokenIn: TOKEN_IN.address.toLowerCase(),
+      tokenOut: TOKEN_OUT.address.toLowerCase(),
+      amountRaw: '1000000000000000000',
+      decimalsIn: 18,
+      decimalsOut: 6,
+    })
+  })
+
+  it('flip after a resolved quote → meta is null in the very next render (no stale number, no effect lag)', async () => {
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockReturnValue(new Promise<Response>(() => {})) // the flipped pair's quote never lands
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    // No act/await: the render triggered by the flip must already hide the old quote.
+    rerender(flipProps)
+    expect(result.current.meta).toBeNull()
+    await flush()
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('flipping back does NOT resurrect the earlier quote (cleared, not just hidden)', async () => {
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockReturnValue(new Promise<Response>(() => {}))
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    await act(async () => {
+      rerender(flipProps)
+      await flush()
+    })
+    await act(async () => {
+      rerender(baseProps)
+      await flush()
+    })
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('a LATE response for the old pair is ignored (even though the mocked fetch ignores the abort)', async () => {
+    let resolveOld: ((r: Response) => void) | undefined
+    const oldPair = new Promise<Response>((resolve) => { resolveOld = resolve })
+    vi.spyOn(global, 'fetch')
+      .mockReturnValueOnce(oldPair)
+      .mockReturnValue(new Promise<Response>(() => {}))
+    const { result, rerender } = render()
+    await Promise.resolve()
+
+    await act(async () => {
+      rerender(flipProps)
+      await flush()
+    })
+    await act(async () => {
+      resolveOld?.(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      await flush()
+    })
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('a same-pair re-quote IS rendered (refetch replaces the stored quote)', async () => {
+    const first = { ...VALID_RESPONSE, best: { ...VALID_RESPONSE.best, toAmount: '2950000000' } }
+    const second = { ...VALID_RESPONSE, best: { ...VALID_RESPONSE.best, toAmount: '2960000000' } }
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(first), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(second), { status: 200 }))
+    const { result } = render()
+    await waitFor(() => expect(result.current.meta?.best.toAmount).toBe('2950000000'))
+
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(result.current.meta?.best.toAmount).toBe('2960000000')
+  })
+
+  it('an amount change on the same pair keeps the current quote on screen until the re-quote lands', async () => {
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockReturnValue(new Promise<Response>(() => {}))
+    const { result, rerender } = renderHook(
+      ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+      { initialProps: { amt: '1' } },
+    )
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    await act(async () => {
+      rerender({ amt: '2' })
+      await flush()
+    })
+    expect(result.current.meta).not.toBeNull()
+  })
+
+  it('a late response for a SUPERSEDED amount is ignored', async () => {
+    let resolveOld: ((r: Response) => void) | undefined
+    const oldAmount = new Promise<Response>((resolve) => { resolveOld = resolve })
+    const newer = { ...VALID_RESPONSE, best: { ...VALID_RESPONSE.best, toAmount: '5900000000' } }
+    vi.spyOn(global, 'fetch')
+      .mockReturnValueOnce(oldAmount)
+      .mockResolvedValue(new Response(JSON.stringify(newer), { status: 200 }))
+    const { result, rerender } = renderHook(
+      ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+      { initialProps: { amt: '1' } },
+    )
+    await Promise.resolve()
+    await act(async () => {
+      rerender({ amt: '2' })
+      await flush()
+    })
+    await waitFor(() => expect(result.current.meta?.best.toAmount).toBe('5900000000'))
+
+    await act(async () => {
+      resolveOld?.(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      await flush()
+    })
+    expect(result.current.meta?.best.toAmount).toBe('5900000000')
   })
 })
