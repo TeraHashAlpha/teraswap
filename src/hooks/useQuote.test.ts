@@ -88,7 +88,25 @@ const TOKEN_OUT: Token = {
   category: 'Stablecoin',
 }
 
+/** [fix/stale-quote-pair-flip] The identity /api/quote echoes — here for WETH→USDC, 1 WETH, chain 1. */
+function echoFor(
+  tin: Token,
+  tout: Token,
+  amountIn: string,
+  chainId = 1,
+) {
+  return {
+    tokenIn: tin.address,
+    tokenOut: tout.address,
+    chainId,
+    decimalsIn: tin.decimals,
+    decimalsOut: tout.decimals,
+    amountIn,
+  }
+}
+
 const VALID_RESPONSE = {
+  ...echoFor(TOKEN_IN, TOKEN_OUT, '1000000000000000000'),
   best: { source: '1inch', toAmount: '2950000000', estimatedGas: 150000, gasUsd: 5, routes: [] },
   all: [
     { source: '1inch', toAmount: '2950000000', estimatedGas: 150000, gasUsd: 5, routes: [] },
@@ -717,7 +735,7 @@ describe('useQuote — [fix/stale-quote-pair-flip] quote identity', () => {
   it('a late response for a SUPERSEDED amount is ignored', async () => {
     let resolveOld: ((r: Response) => void) | undefined
     const oldAmount = new Promise<Response>((resolve) => { resolveOld = resolve })
-    const newer = { ...VALID_RESPONSE, best: { ...VALID_RESPONSE.best, toAmount: '5900000000' } }
+    const newer = { ...VALID_RESPONSE, ...echoFor(TOKEN_IN, TOKEN_OUT, '2000000000000000000'), best: { ...VALID_RESPONSE.best, toAmount: '5900000000' } }
     vi.spyOn(global, 'fetch')
       .mockReturnValueOnce(oldAmount)
       .mockResolvedValue(new Response(JSON.stringify(newer), { status: 200 }))
@@ -737,5 +755,34 @@ describe('useQuote — [fix/stale-quote-pair-flip] quote identity', () => {
       await flush()
     })
     expect(result.current.meta?.best.toAmount).toBe('5900000000')
+  })
+
+  it('[commit 2] keys the quote from the SERVER echo: a response that echoes a different pair than the current selection is ignored', async () => {
+    // The server answers for USDC→WETH although the client asked WETH→USDC (or the
+    // request was re-pointed mid-flight): the echoed identity, not the request, decides.
+    const wrong = { ...VALID_RESPONSE, ...echoFor(TOKEN_OUT, TOKEN_IN, '1000000') }
+    mockFetchSuccess(wrong)
+    const { result } = render()
+    await flush()
+    expect(result.current.meta).toBeNull()
+    expect(result.current.error).toBeNull()
+  })
+
+  it('[commit 2] a response with NO echo is unusable → clean error, no quote (fail closed)', async () => {
+    const { tokenIn: _a, tokenOut: _b, chainId: _c, decimalsIn: _d, decimalsOut: _e, amountIn: _f, ...noEcho } = VALID_RESPONSE
+    mockFetchSuccess(noEcho)
+    const { result } = render()
+    await waitFor(() => expect(result.current.error).toMatch(/failed to fetch quotes/i))
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('[commit 2] the stored identity is the echoed one and the echo fields are stripped from the quote object', async () => {
+    mockFetchSuccess()
+    const { result } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+    expect(result.current.meta?.identity).toMatchObject({ chainId: 1, decimalsIn: 18, decimalsOut: 6, amountRaw: '1000000000000000000' })
+    for (const k of ['tokenIn', 'tokenOut', 'chainId', 'decimalsIn', 'decimalsOut', 'amountIn']) {
+      expect(result.current.meta).not.toHaveProperty(k)
+    }
   })
 })

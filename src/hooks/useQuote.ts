@@ -13,6 +13,7 @@ import { useQuoteChainId } from './useChainId'
 import { isChainActive } from '@/lib/chains'
 import {
   makeQuoteKey,
+  parseQuoteEcho,
   sameQuoteKey,
   sameQuotePair,
   type QuoteIdentity,
@@ -32,6 +33,9 @@ class QuoteApiError extends Error {
     this.status = status
   }
 }
+
+/** [fix/stale-quote-pair-flip] Identity fields /api/quote echoes alongside the quote. */
+const QUOTE_ECHO_KEYS = ['tokenIn', 'tokenOut', 'chainId', 'decimalsIn', 'decimalsOut', 'amountIn'] as const
 
 /** [hotfix] Backoff ceiling on consecutive 429s. */
 const MAX_BACKOFF_MS = 120_000
@@ -280,14 +284,6 @@ export function useQuote(
     const startTime = Date.now()
     try {
       const rawAmount = parseUnits(debouncedAmount, tokenIn.decimals).toString()
-      const requestKey = makeQuoteKey({
-        chainId: activeChainId,
-        tokenIn: tokenIn.address,
-        tokenOut: tokenOut.address,
-        amountRaw: rawAmount,
-        decimalsIn: tokenIn.decimals,
-        decimalsOut: tokenOut.decimals,
-      })
       const result = await fetchQuoteViaApi(
         tokenIn.address,
         tokenOut.address,
@@ -309,13 +305,19 @@ export function useQuote(
       const refGasUsd = refGas?.usd ?? bestNonCow?.gasUsd ?? 0
       const gasless = analyzeGasless(result.all, refGasUsd)
 
-      // [fix/stale-quote-pair-flip] A response is only stored if its request was
-      // not superseded AND still matches the current selection. Without this a late
-      // old-pair response could repaint after a ⇅ flip (setMeta had no pair check).
-      if (signal.aborted || !currentKeyRef.current || !sameQuoteKey(requestKey, currentKeyRef.current)) {
+      // [fix/stale-quote-pair-flip] The response states what it answers (echoed by
+      // /api/quote). It is stored only if (a) it names a usable identity, (b) its
+      // request was not superseded, and (c) that identity IS the current selection +
+      // settled amount. Without (c) a late old-pair response repainted after a ⇅ flip.
+      const responseKey = parseQuoteEcho(result)
+      if (!responseKey) throw new QuoteApiError('Failed to fetch quotes', 502)
+      if (signal.aborted || !currentKeyRef.current || !sameQuoteKey(responseKey, currentKeyRef.current)) {
         return
       }
-      setMeta({ ...result, gasless, identity: { ...requestKey, fetchedAt: result.fetchedAt } })
+      // The echo fields are routing metadata, not part of the quote itself.
+      const quote: Record<string, unknown> = { ...result }
+      for (const k of QUOTE_ECHO_KEYS) delete quote[k]
+      setMeta({ ...(quote as unknown as MetaQuoteResult), gasless, identity: { ...responseKey, fetchedAt: result.fetchedAt } })
       // [hotfix] First success after backoff — snap back to the normal
       // cadence and clear the error in one shot (we skipped that reset
       // at the top of this call). If we weren't in backoff, the

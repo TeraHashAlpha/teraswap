@@ -82,3 +82,27 @@ export function quoteMatchesSelection(
     decimalsOut: selection.tokenOut.decimals,
   })
 }
+
+/**
+ * [fix/stale-quote-pair-flip] Build the key a RESPONSE claims to answer from the
+ * identity fields /api/quote echoes — the client never reuses what it believes it
+ * asked. Returns null for anything missing or malformed (callers treat that as an
+ * unusable quote, fail closed).
+ */
+export function parseQuoteEcho(data: unknown): QuoteKey | null {
+  if (typeof data !== 'object' || data === null) return null
+  const d = data as Record<string, unknown>
+  const isDecimals = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 255
+  if (typeof d.tokenIn !== 'string' || typeof d.tokenOut !== 'string') return null
+  if (!Number.isInteger(d.chainId) || (d.chainId as number) <= 0) return null
+  if (!isDecimals(d.decimalsIn) || !isDecimals(d.decimalsOut)) return null
+  if (typeof d.amountIn !== 'string' || !/^\d+$/.test(d.amountIn)) return null
+  return makeQuoteKey({
+    chainId: d.chainId as number,
+    tokenIn: d.tokenIn,
+    tokenOut: d.tokenOut,
+    amountRaw: d.amountIn,
+    decimalsIn: d.decimalsIn,
+    decimalsOut: d.decimalsOut,
+  })
+}
