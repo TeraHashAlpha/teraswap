@@ -18,6 +18,9 @@ export interface QuoteKey {
   decimalsOut: number
 }
 
+/** Chain + ordered pair + decimals — a quote's identity without the amount. */
+export type QuotePairRef = Pick<QuoteKey, 'chainId' | 'tokenIn' | 'tokenOut' | 'decimalsIn' | 'decimalsOut'>
+
 /** The key a stored quote is tagged with, plus when it was fetched. */
 export interface QuoteIdentity extends QuoteKey {
   fetchedAt: number
@@ -47,10 +50,7 @@ export function makeQuoteKey(p: {
 }
 
 /** Same chain, same ordered token pair, same decimals — amount ignored. */
-export function sameQuotePair(
-  a: Pick<QuoteKey, 'chainId' | 'tokenIn' | 'tokenOut' | 'decimalsIn' | 'decimalsOut'>,
-  b: Pick<QuoteKey, 'chainId' | 'tokenIn' | 'tokenOut' | 'decimalsIn' | 'decimalsOut'>,
-): boolean {
+export function sameQuotePair(a: QuotePairRef, b: QuotePairRef): boolean {
   return (
     a.chainId === b.chainId &&
     a.tokenIn.toLowerCase() === b.tokenIn.toLowerCase() &&
