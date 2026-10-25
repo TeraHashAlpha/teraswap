@@ -7,7 +7,7 @@ No PR (owner opens). No change to useSwap, /api/swap, calldata, minimumOutput de
 - [x] C1 useQuote tags `meta` with identity; setMeta only on key match + !aborted; clear on flip/token/chain change; SwapBox uses quote's decimalsOut; gates read key-matching quote only
 - [x] C2 /api/quote echoes tokenIn/tokenOut/chainId/decimalsIn/decimalsOut/amountIn; client keys from echo
 - [x] C3 assertSwapConsistentWithQuote two-sided + pair/chain mismatch refusal
-- [ ] C4 flip skips immediate refetch while debounce pending; TokenAddressBadge uses useQuoteChainId
+- [x] C4 flip skips immediate refetch while debounce pending; TokenAddressBadge uses useQuoteChainId
 - [ ] Verify: suite vs origin/main (312 files / 4880 tests, lint 93 warn), tsc, diff --stat, push, compare link
 
 ## Baseline (origin/main 3a97f76)

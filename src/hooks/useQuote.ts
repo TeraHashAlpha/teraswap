@@ -165,6 +165,11 @@ export function useQuote(
   const inBackoffRef = useRef(false)
 
   const debouncedAmount = useDebounce(amountIn, INPUT_DEBOUNCE_MS)
+  // [fix/stale-quote-pair-flip] Latest raw (undebounced) amount, for the pending-debounce check in doFetch.
+  const amountInRef = useRef(amountIn)
+  useEffect(() => {
+    amountInRef.current = amountIn
+  }, [amountIn])
   // [hotfix] Stable string form of excludeSources for the dep array —
   // the caller in SwapBox already memoises the array, but a missing
   // useMemo there would have re-triggered the whole effect chain. The
@@ -250,6 +255,13 @@ export function useQuote(
   }, [])
 
   const doFetch = useCallback(async () => {
+    // [fix/stale-quote-pair-flip] A debounce is pending (the typed amount hasn't settled): the
+    // settled amount is the PREVIOUS one, so a fetch now would quote it under the new pair's
+    // decimals (⇅ flip: 1 000 000 USDC re-read as ETH) and cost a /api/quote hit (30/min/IP) for
+    // a result we'd discard. The settle changes doFetch's identity and fetches exactly once.
+    // Read via ref so this doesn't churn doFetch's identity on every keystroke.
+    if (amountInRef.current !== debouncedAmount) return
+
     if (!tokenIn || !tokenOut || !debouncedAmount || Number(debouncedAmount) <= 0) {
       setMeta(null)
       return

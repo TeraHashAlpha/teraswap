@@ -41,11 +41,24 @@ vi.mock('./useEthGasCost', () => ({
   })),
 }))
 
-// Skip the debounce in tests — re-export passthrough so doFetch fires
-// synchronously on input change.
-vi.mock('./useDebounce', () => ({
-  useDebounce: <T,>(v: T) => v,
-}))
+// Skip the debounce in tests — passthrough so doFetch fires synchronously on input
+// change. [fix/stale-quote-pair-flip] `realDebounce` switches in a real (timer-based)
+// debounce for the flip+type request-count tests.
+let realDebounce = false
+vi.mock('./useDebounce', async () => {
+  const { useState, useEffect } = await import('react')
+  return {
+    useDebounce: <T,>(v: T, ms: number) => {
+      const [d, setD] = useState(v)
+      useEffect(() => {
+        if (!realDebounce) return
+        const t = setTimeout(() => setD(v), ms)
+        return () => clearTimeout(t)
+      }, [v, ms])
+      return realDebounce ? d : v
+    },
+  }
+})
 
 // analyzeGasless is a pure function — let it run but stub the import
 // so we don't pull the whole adapter graph.
@@ -68,7 +81,7 @@ vi.mock('@/lib/analytics', () => ({
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useQuote } from './useQuote'
 import type { Token } from '@/lib/tokens'
-import { QUOTE_REFRESH_MS } from '@/lib/constants'
+import { QUOTE_REFRESH_MS, INPUT_DEBOUNCE_MS } from '@/lib/constants'
 
 const TOKEN_IN: Token = {
   address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
@@ -784,5 +797,81 @@ describe('useQuote — [fix/stale-quote-pair-flip] quote identity', () => {
     for (const k of ['tokenIn', 'tokenOut', 'chainId', 'decimalsIn', 'decimalsOut', 'amountIn']) {
       expect(result.current.meta).not.toHaveProperty(k)
     }
+  })
+
+  describe('requests per flip + type [commit 4]', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      realDebounce = true
+    })
+    afterEach(() => {
+      realDebounce = false
+      vi.useRealTimers()
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    })
+
+    const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS) })
+
+    it('a ⇅ flip then typing a new amount costs ONE /api/quote request (was two: an immediate refetch with the old debounced amount, then the settle)', async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+      const fetchSpy = mockFetchSuccess()
+      const { rerender } = renderHook(
+        ({ tin, tout, amt }: { tin: Token; tout: Token; amt: string }) => useQuote(tin, tout, amt, true, undefined),
+        { initialProps: { tin: TOKEN_IN, tout: TOKEN_OUT, amt: '1' } },
+      )
+      await settle()
+      expect(fetchSpy).toHaveBeenCalledTimes(1) // the initial quote
+      fetchSpy.mockClear()
+
+      // ⇅ — SwapBox swaps the tokens AND clears the amount in the same render.
+      await act(async () => { rerender({ tin: TOKEN_OUT, tout: TOKEN_IN, amt: '' }) })
+      expect(fetchSpy).not.toHaveBeenCalled() // no immediate refetch on the stale debounced amount
+      await settle()
+      expect(fetchSpy).not.toHaveBeenCalled() // an empty amount never fetches
+
+      // The user types the new amount.
+      await act(async () => { rerender({ tin: TOKEN_OUT, tout: TOKEN_IN, amt: '5' }) })
+      expect(fetchSpy).not.toHaveBeenCalled() // still debouncing
+      await settle()
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const url = String(fetchSpy.mock.calls[0][0])
+      expect(url).toContain(`src=${TOKEN_OUT.address}`)
+      expect(url).toContain('amount=5000000') // 5 USDC at the NEW tokenIn decimals (6), never the old 1e18-scale amount
+    })
+
+    it('a poll tick while a typed amount is still debouncing does not fetch', async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+      const fetchSpy = mockFetchSuccess()
+      const { rerender } = renderHook(
+        ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+        { initialProps: { amt: '1' } },
+      )
+      await settle()
+      fetchSpy.mockClear()
+      // Type, then let the interval fire before the debounce settles: advance to 1ms before the
+      // poll tick, type, and cross the tick while the 500ms debounce is still pending.
+      await act(async () => { await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS - INPUT_DEBOUNCE_MS - 1 - 100) })
+      await act(async () => { rerender({ amt: '2' }) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS - 1) })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    })
+
+    it('typing on a stable pair still fetches exactly once per settled amount', async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+      const fetchSpy = mockFetchSuccess()
+      const { rerender } = renderHook(
+        ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+        { initialProps: { amt: '1' } },
+      )
+      await settle()
+      fetchSpy.mockClear()
+      for (const a of ['2', '23', '234']) {
+        await act(async () => { rerender({ amt: a }) })
+        await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      }
+      expect(fetchSpy).not.toHaveBeenCalled()
+      await settle()
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
   })
 })
