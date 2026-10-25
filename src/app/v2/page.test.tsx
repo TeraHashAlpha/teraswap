@@ -7,6 +7,8 @@ import { cleanup, render } from '@testing-library/react'
 
 const h = vi.hoisted(() => ({ version: 'v1' as 'v1' | 'v2' }))
 vi.mock('@/ui/v2/version', () => ({ getUiVersion: async () => h.version }))
+// next/font/local is a build-time (SWC) transform; it cannot run under vitest.
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
 vi.mock('next/navigation', () => ({
   notFound: () => {
     throw new Error('NEXT_NOT_FOUND')

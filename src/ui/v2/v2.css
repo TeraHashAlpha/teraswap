@@ -1,0 +1,5 @@
+/* [ADR-025] Single CSS entry for the v2 tree: tokens + v2-only Tailwind utilities (own config, see
+   tailwind.v2.config.ts). Imported by v2 routes only, so none of it reaches v1 pages. */
+@import './tokens.css';
+@config "../../../tailwind.v2.config.ts";
+@tailwind utilities;
