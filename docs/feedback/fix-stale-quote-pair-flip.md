@@ -24,6 +24,8 @@ Commits: C1 `b98c542` · C2 `6dfe856` · C3 `65d8372` · C4 `e0327e3` (all SSH-s
 - **Mismatch refusal is inert in prod:** `quotePair`/`swapPair` aren't passed by useSwap/useSplitSwap (Do-NOT list) — wire in a follow-up. The stale-pair case is
   already refused today via SwapBox's `{}` quote map → existing "No accepted quote".
 - **Deploy skew:** new client + old server (no echo) → quotes fail closed with "Failed to fetch quotes"; ship together.
-- **Outside the list** (forced by fail-closed): read `adapters/types.ts` (MetaQuoteResult); fixtures edited in `DigitRoller.test.tsx` (identity) and 3 in
-  `useSplitSwap.test.ts` (legs overshot +33/+80/+90%; now inside the window, same intent). Not done: `QuoteBreakdown` still formats with `tokenOut.decimals`
-  (receives only matched quotes now); recon 58's unexplained 64 s delay and the tester's exact figure remain unreproduced.
+- **Out-of-list reads (all read-only, none edited unless stated):** `adapters/types.ts` (MetaQuoteResult); `hooks/useSwap.ts` ~536-552 (guard call site) and ~726-750
+  (StaleOrTamperedSwapError handling); `hooks/useSplitSwap.ts` ~440-465 (same); `hooks/useSplitSwap.test.ts` ~760-1060 (fixtures); `components/DigitRoller.test.tsx` ~268-292;
+  grep-only: `useQuote`/`assertSwapConsistentWithQuote` call sites, `selectBestWithMevPreference`/`scopeToExecutable`, `deviationPercent` consumers.
+  **Edited (forced by fail-closed):** `DigitRoller.test.tsx` (identity line) and 3 fixtures in `useSplitSwap.test.ts` (legs overshot +33/+80/+90%; now inside the window, same intent).
+- Not done: `QuoteBreakdown` still formats with `tokenOut.decimals` (receives only matched quotes now); recon 58's unexplained 64 s delay and the tester's exact figure remain unreproduced.
