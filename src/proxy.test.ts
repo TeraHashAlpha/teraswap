@@ -4,9 +4,10 @@
  * [ADR-025] proxy.ts is the switch: `/` → `/v2` rewrite only for v2; direct `/v2/*` hits are a real 404
  * (rewrite to a non-existent path) unless the same rule says v2.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { config, proxy } from './proxy'
+import { isV2KitEnabled } from '@/ui/v2/kit-gate'
 import { signUiVersionCookie } from '@/ui/v2/ui-cookie'
 
 const SECRET = 'test-cookie-secret-abc123'
@@ -24,6 +25,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   process.env = { ...originalEnv }
+  vi.unstubAllEnvs()
 })
 
 describe('matcher', () => {
@@ -71,5 +73,48 @@ describe('direct requests to /v2/* (requirement: must NOT render v2 without env/
   })
   it('valid cookie → passes through', () => {
     expect(passes(proxy(req('/v2', signUiVersionCookie(SECRET))))).toBe(true)
+  })
+})
+
+describe('/v2/_kit (dev kit: Preview / next dev only, independent of the switch)', () => {
+  const cookie = () => signUiVersionCookie(SECRET)
+
+  it.each([
+    ['production', 'production', false],
+    ['production', '', false],
+    ['test', '', false],
+    ['production', 'preview', true],
+    ['development', '', true],
+  ])('isV2KitEnabled NODE_ENV=%s VERCEL_ENV=%s → %s', (nodeEnv, vercelEnv, expected) => {
+    vi.stubEnv('NODE_ENV', nodeEnv)
+    vi.stubEnv('VERCEL_ENV', vercelEnv)
+    expect(isV2KitEnabled()).toBe(expected)
+  })
+
+  it('production: real 404 even with the owner cookie or UI_V2_ENABLED=true', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'production')
+    expect(rewrittenTo(proxy(req('/v2/_kit')))).toBe('/v2-disabled')
+    expect(rewrittenTo(proxy(req('/v2/_kit', cookie())))).toBe('/v2-disabled')
+    process.env.UI_V2_ENABLED = 'true'
+    expect(rewrittenTo(proxy(req('/v2/_kit')))).toBe('/v2-disabled')
+  })
+
+  it('preview → passes through (no cookie needed)', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'preview')
+    expect(passes(proxy(req('/v2/_kit')))).toBe(true)
+  })
+
+  it('development → passes through', () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('VERCEL_ENV', '')
+    expect(passes(proxy(req('/v2/_kit')))).toBe(true)
+  })
+
+  it('does not open the rest of /v2 (preview is not the switch)', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'preview')
+    expect(rewrittenTo(proxy(req('/v2')))).toBe('/v2-disabled')
   })
 })
