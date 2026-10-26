@@ -2,7 +2,7 @@
 Off `d4b43db` (B0 merged). Commits `a0d2cf3` shell · `a7ac5c5` photos+fonts · `d9ef690` sounds+proxy+mobile · `7bc0079` fab fix. Files: `feat-ui-v2-shell/` (details: `NOTES.md`).
 - [x] C1 · [x] C2 · [x] C3 · [x] verify · [x] evidence 1–7
 
-**Owner answers (supersede goal):** one route file `src/app/v2/[tab]/page.tsx` · v1 proof = module-identical, byte-identical waived by owner (verbatim in `NOTES.md`) · Arbitrum text derives from `isDcaLive`.
+**Owner answers (supersede goal):** one route file `src/app/v2/[tab]/page.tsx` · v1 proof = module-identical, byte-identical explicitly WAIVED by owner: "Yes, waived" (verbatim in `NOTES.md`) · Arbitrum text derives from `isDcaLive`.
 
 1. **Screenshots** (`*.webp`; prod build, RPC mocked): desktop d1 header/tabs/footer, d2 dropdown, d3 Ethereum vs d4 Base tabs, d5 Arbitrum, d6 help, d7 connect;
    375 m1–m7 (m4: active tab in view, scrollLeft 431/774, fade L on/R off). Footer block follows the selected chain: d1 `ETHEREUM · BLOCK #23 541 870`, d4 `BASE · …36 612 405`, d5 `ARBITRUM ONE · …389 204 117`.

@@ -16,6 +16,10 @@ Answer chosen: **"Module-identical proof (Recommended)"** — option text: "Evid
 Not chosen: "Reduce sharing, re-measure"; "Stop: strict identity or nothing". So the byte-identical requirement is waived by the owner for this branch, replaced by the proof above
 (precision note: "same module set" is 1–4 small modules per page off, see the owner-decisions bullet and `v1-module-sets.txt`).
 
+### Explicit confirmation (2026-10-26, asked again to remove any ambiguity)
+Question: for feat/ui-v2-shell, is the requirement "v1 byte-identical (B0 method)" WAIVED and replaced by the module-identical proof (v1 source diff empty, 0 v2 code in
+v1-loaded chunks, same route table, initial JS ≤ +0.02%, chunk file names differ)?  Owner answer: **"Yes, waived."**  Evidence 7 is therefore satisfied by the module-identical proof.
+
 ## Decisions / reads
 - `useQuoteChainId` is in `src/hooks/useChainId.ts`. Out-of-list reads (none edited): `app/{page,swap/page,providers,layout}`, `ChainSelector`, `ChainIcon`,
   `lib/{chains/registry,format,constants,help-content}`, `order-engine/limit-launch`, `useOrderNotifications`, `next.config.js`, `tailwind.v2.config.ts`.
