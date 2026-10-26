@@ -76,6 +76,9 @@ export async function POST(req: NextRequest) {
        *  tokens here instead of `from`. Required when `from` is the
        *  FeeCollector contract but the user wallet receives tokens. */
       recipient,
+      /** [feat/swap-price-tiers D3] Informed consent for a pair with no reference price on EITHER
+       *  leg (DefiLlama or Chainlink): must be the boolean `true`, else the 409 below. */
+      unpricedAck,
     } = body
 
     if (!source || !src || !dst || !amount || !from) {
@@ -309,23 +312,33 @@ export async function POST(req: NextRequest) {
       }
 
       // [CHORE-ORACLE-VALUE-FAILCLOSED] Neither side priced on either source → the
-      // high-value gate cannot size the trade, so it must FIRE, never silently pass.
-      // A USD "safe size ceiling" is unimplementable without a USD measure, so the
-      // conservative policy is a block. Only exotic↔exotic pairs (both tokens outside
-      // DefiLlama AND Chainlink coverage — exactly the thin/manipulable class behind
-      // the aToken incident) reach this; a trade with ANY priceable side gets a real
-      // max(in,out) estimate and the normal >$10k threshold (unchanged) downstream.
+      // high-value gate cannot size the trade. A USD "safe size ceiling" is
+      // unimplementable without a USD measure. Only exotic↔exotic pairs (both tokens
+      // outside DefiLlama AND Chainlink coverage) reach this; a trade with ANY priceable
+      // side gets a real max(in,out) estimate and the normal >$10k threshold (unchanged)
+      // downstream.
+      //
+      // [feat/swap-price-tiers D3, owner 2026-10-26] The hard 422 block became informed
+      // CONSENT: without `unpricedAck: true` the answer is 409 `unpriced_ack_required`
+      // (the DCA floorAck shape — the client opens the consent dialog and re-asks); with it
+      // the swap proceeds with NO value-based limit (there is no value to limit), while
+      // SC-04 (selector), R1 (recipient) above and the on-chain minimum output are
+      // untouched. Deliberately NOT `priceGuard: true` — that flag is the client's
+      // non-overridable hard block.
       if (!valuePriced) {
-        console.warn('[PRICE-GUARD] Unpriceable trade (no DefiLlama/Chainlink coverage on either side) — failing closed')
-        return NextResponse.json(
-          {
-            error: 'Trade value cannot be verified: neither token has price coverage (DefiLlama or Chainlink). Unpriceable trades are blocked by high-value protection — use a pair with price coverage, or try again later.',
-            priceGuard: true,
-            blocked: true,
-            unpriceable: true,
-          },
-          { status: 422 },
-        )
+        if (unpricedAck !== true) {
+          console.warn('[PRICE-GUARD] Unpriceable trade (no DefiLlama/Chainlink coverage on either side) — acknowledgement required (409)')
+          return NextResponse.json(
+            {
+              error: 'No reference price for this pair: neither token has DefiLlama or Chainlink coverage, so the trade value cannot be verified. Resubmit with unpricedAck: true after informed consent.',
+              code: 'unpriced_ack_required',
+              requiredTier: 'unpriced',
+              unpriceable: true,
+            },
+            { status: 409 },
+          )
+        }
+        console.warn('[PRICE-GUARD] Unpriceable trade acknowledged by the user (unpricedAck) — proceeding without value-based limits; SC-04 / R1 / on-chain minimum output unchanged')
       }
 
       try {

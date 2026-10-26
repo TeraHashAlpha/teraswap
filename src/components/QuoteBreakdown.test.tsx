@@ -149,7 +149,9 @@ describe('QuoteBreakdown — render', () => {
     expect(screen.getByText(/significantly diverged/i)).toBeInTheDocument()
   })
 
-  it('renders the oracle-unavailable warning when priceCheck.oracleUnavailable=true', () => {
+  // [feat/swap-price-tiers] oracleUnavailable alone no longer renders the 9S S2 "No Chainlink oracle" amber —
+  // the notice follows the SERVER's tier (see the tier block below); with no tier known, nothing is claimed.
+  it('oracleUnavailable with no tier known renders NO oracle notice (the old amber is gone; the tier notice replaced it)', () => {
     renderWithProviders(
       <QuoteBreakdown
         {...makeProps({
@@ -157,7 +159,9 @@ describe('QuoteBreakdown — render', () => {
         })}
       />,
     )
-    expect(screen.getByText(/no chainlink oracle/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+    expect(screen.queryByTestId('price-tier-single-source')).toBeNull()
+    expect(screen.queryByTestId('price-tier-unpriced')).toBeNull()
   })
 
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that exists but could not be READ is also
@@ -277,47 +281,53 @@ describe('QuoteBreakdown — [SPRINT-9Q Q2] rate-invert toggle', () => {
 })
 
 describe('QuoteBreakdown — [SPRINT-9S S2] one calm, specific oracle notice', () => {
-  it('dedupes to a SINGLE notice when oracle is unavailable — suppresses the generic warn banner', () => {
-    renderWithProviders(
-      <QuoteBreakdown
-        {...makeProps({
-          priceCheck: {
-            ...idlePriceCheck,
-            level: 'warn',
-            message: 'GENERIC-STALE-BANNER',
-            oracleUnavailable: true,
-            oracleMissingSymbols: ['USDC'],
-          },
-        })}
-      />,
-    )
-    // The specific oracle notice renders once…
-    expect(screen.getAllByText(/no chainlink oracle/i)).toHaveLength(1)
-    // …and the redundant generic warn banner is gone (the two stacked yellow boxes are now one).
+  // [feat/swap-price-tiers] The 9S S2 "No Chainlink oracle … multi-source price comparison" amber is gone:
+  // it pre-dated the value gate and claimed a reference the client never had. The notice now follows the
+  // SERVER's tier (D1): single-source → the owner amber; unpriced → a heads-up that consent will be asked;
+  // priced or unknown → nothing.
+  const SINGLE = { tier: 'single-source' as const, legs: { in: { tier: 'single-source' as const, sources: ['defillama' as const], usd: 0.69 }, out: { tier: 'unpriced' as const, sources: [] } } }
+  const UNPRICED = { tier: 'unpriced' as const, legs: { in: { tier: 'unpriced' as const, sources: [] }, out: { tier: 'unpriced' as const, sources: [] } } }
+  const PRICED = { tier: 'priced' as const, legs: { in: { tier: 'priced' as const, sources: ['defillama' as const, 'coingecko' as const], usd: 0.69, agreementBps: 2 }, out: { tier: 'priced' as const, sources: ['defillama' as const, 'coingecko' as const], usd: 0.64, agreementBps: 3 } }, agreementBps: 3 }
+  const NO_FEED = { ...idlePriceCheck, level: 'warn' as const, message: 'GENERIC-STALE-BANNER', oracleUnavailable: true, oracleMissingSymbols: ['USDC'] }
+
+  it('single-source tier → the owner amber naming the vendor; the generic warn banner stays deduped', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ priceCheck: NO_FEED, priceTier: SINGLE })} />)
+    expect(screen.getByTestId('price-tier-single-source').textContent)
+      .toContain('Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.')
     expect(screen.queryByText('GENERIC-STALE-BANNER')).toBeNull()
-  })
-
-  it('NAMES the token actually missing a feed (direction-agnostic) + states the swap is still protected', () => {
-    // tokenIn is ETH, but the OUTPUT token (DAI here) is the one missing a feed — must name DAI.
-    renderWithProviders(
-      <QuoteBreakdown
-        {...makeProps({
-          priceCheck: { ...idlePriceCheck, level: 'warn', oracleUnavailable: true, oracleMissingSymbols: ['DAI'] },
-        })}
-      />,
-    )
-    const notice = screen.getByText(/no chainlink oracle/i).closest('div')!
-    expect(notice.textContent).toMatch(/DAI/)
-    expect(notice.textContent).not.toMatch(/\bETH\b/) // names the missing token, not the input
-    expect(notice.textContent).toMatch(/multi-source/i)
-    expect(notice.textContent).toMatch(/minimum-output/i)
-  })
-
-  it('shows NO oracle notice when both feeds exist (oracleUnavailable=false)', () => {
-    renderWithProviders(
-      <QuoteBreakdown {...makeProps({ priceCheck: { ...idlePriceCheck, oracleUnavailable: false } })} />,
-    )
     expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+    expect(screen.queryByTestId('price-tier-unpriced')).toBeNull()
+  })
+
+  it('unpriced tier → names BOTH tokens and says a confirmation will be asked; never the old "multi-source price comparison" claim', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ priceCheck: NO_FEED, priceTier: UNPRICED })} />)
+    const notice = screen.getByTestId('price-tier-unpriced')
+    expect(notice.textContent).toMatch(/No reference price for this pair/)
+    expect(notice.textContent).toMatch(/for ETH or USDC/)
+    expect(notice.textContent).toMatch(/asked to confirm before swapping/i)
+    expect(notice.textContent).not.toMatch(/multi-source/i)
+    expect(screen.queryByTestId('price-tier-single-source')).toBeNull()
+  })
+
+  it('priced tier → NO tier notice even with no Chainlink feed (the old amber is gone)', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ priceCheck: NO_FEED, priceTier: PRICED })} />)
+    expect(screen.queryByTestId('price-tier-single-source')).toBeNull()
+    expect(screen.queryByTestId('price-tier-unpriced')).toBeNull()
+    expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+    expect(screen.queryByText(/multi-source/i)).toBeNull()
+  })
+
+  it('unknown tier (not answered yet / fetch failed) → nothing: the client never guesses (D1)', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ priceCheck: NO_FEED, priceTier: null })} />)
+    expect(screen.queryByTestId('price-tier-single-source')).toBeNull()
+    expect(screen.queryByTestId('price-tier-unpriced')).toBeNull()
+    expect(screen.queryByText(/no chainlink oracle/i)).toBeNull()
+  })
+
+  it('shows NO tier notice when both feeds exist and the pair is priced', () => {
+    renderWithProviders(<QuoteBreakdown {...makeProps({ priceCheck: { ...idlePriceCheck, oracleUnavailable: false }, priceTier: PRICED })} />)
+    expect(screen.queryByTestId('price-tier-single-source')).toBeNull()
+    expect(screen.queryByTestId('price-tier-unpriced')).toBeNull()
   })
 })
 

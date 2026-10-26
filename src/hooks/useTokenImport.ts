@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { getAddress } from 'viem'
-import { addCustomToken, type Token } from '@/lib/tokens'
+import { addCustomToken, hydrateCustomTokens, importedTokenLogo, type Token } from '@/lib/tokens'
 import { findChainToken } from '@/lib/chains/tokens'
 import { useActiveChainId } from '@/hooks/useChainId'
 
@@ -51,8 +51,12 @@ export function useTokenImport() {
 
     // Check if already exists — chain-scoped so a colliding mainnet address
     // can't short-circuit a genuine Base import (and vice-versa).
+    // [fix/imported-tokens-persist] Saved imports are hydrated lazily; make sure this chain's are
+    // in the store so a re-paste of a persisted token short-circuits instead of re-importing.
+    hydrateCustomTokens(chainId)
     const existing = findChainToken(checksumAddr, chainId)
-    if (existing) return existing
+    // A saved import flagged unavailable is NOT returned as selectable — fall through and re-read it.
+    if (existing && !existing.unavailable) return existing
 
     setImporting(true)
     try {
@@ -110,7 +114,7 @@ export function useTokenImport() {
         symbol,
         name,
         decimals,
-        logoURI: `https://tokens.1inch.io/${address.toLowerCase()}.png`,
+        logoURI: importedTokenLogo(address),
         category: 'Imported',
         chainId, // [SPRINT-9P] tag the import so the store/lookups stay chain-scoped
       }
@@ -126,6 +130,30 @@ export function useTokenImport() {
   }, [chainId])
 
   return { importToken, importing, error }
+}
+
+/**
+ * [fix/imported-tokens-persist] Re-check a SAVED import on its chain, over the same `/api/rpc?chainId=`
+ * read path an import uses. Same rule as the import itself: only a SUCCESSFUL read may condemn the
+ * token — 'unreadable' (transport/proxy/JSON-RPC error) is a statement about us, not the token.
+ *   'ok'         symbol() and decimals() answer, and decimals still match what was saved
+ *   'invalid'    the chain answered with nothing (no code / not ERC-20), or decimals changed
+ *   'unreadable' no usable answer — caller must neither flag nor trust the token on this
+ */
+export async function probeImportedToken(
+  chainId: number,
+  address: string,
+  expectedDecimals: number,
+): Promise<'ok' | 'invalid' | 'unreadable'> {
+  const rpcUrl = `/api/rpc?chainId=${chainId}`
+  const to = address.toLowerCase()
+  const [symbolRes, decimalsRes] = await Promise.all([
+    callRpc(rpcUrl, to, '0x95d89b41'), // symbol()
+    callRpc(rpcUrl, to, '0x313ce567'), // decimals()
+  ])
+  if (unreadable(symbolRes) || unreadable(decimalsRes)) return 'unreadable'
+  if (!symbolRes.ok || !decimalsRes.ok) return 'invalid'
+  return parseInt(decimalsRes.value, 16) === expectedDecimals ? 'ok' : 'invalid'
 }
 
 // ── RPC helpers ──

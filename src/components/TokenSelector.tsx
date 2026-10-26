@@ -8,9 +8,10 @@ import TokenAddressBadge from './TokenAddressBadge'
 import TokenLogo from './TokenLogo'
 import CategoryChips from './CategoryChips'
 import { useTokenImport } from '@/hooks/useTokenImport'
+import { useImportedTokens } from '@/hooks/useImportedTokens'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { getChainTokenList, getPopularTokens, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
+import { getChainTokenList, getFullCatalog, getPopularTokens, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
@@ -53,14 +54,25 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
   // the wallet-gated DCA/Limit/Conditional panels.
   const activeChainId = useQuoteChainId()
   const isMainnet = activeChainId === DEFAULT_CHAIN_ID
+  // [fix/imported-tokens-persist] The user's saved imports for THIS chain (hydrated from
+  // localStorage). Merged into the browse list below so an import is still there after a
+  // reload, not only findable by pasting its address again.
+  const { tokens: importedTokens, remove: removeImported, revalidate: revalidateImported } = useImportedTokens(activeChainId)
   const catalog = useMemo(
     () => {
-      const base = isMainnet ? DEFAULT_TOKENS : getChainTokenList(activeChainId)
+      const base = [...(isMainnet ? DEFAULT_TOKENS : getChainTokenList(activeChainId)), ...importedTokens]
       // [CHORE-DCA-WETH-INPUT] Drop native ETH from the catalog when this is a spend/input
       // selector. `tokensWithBalance` and `groups` derive from `catalog`, so they inherit it.
       return hideNativeInput ? base.filter((t) => !isNativeETH(t)) : base
     },
-    [isMainnet, activeChainId, hideNativeInput],
+    [isMainnet, activeChainId, hideNativeInput, importedTokens],
+  )
+
+  const importedAddrs = useMemo(() => new Set(importedTokens.map((t) => t.address.toLowerCase())), [importedTokens])
+  // Symbols the chain's catalog already uses — an import sharing one is an impersonation risk.
+  const catalogSymbols = useMemo(
+    () => new Set(getFullCatalog(activeChainId).map((t) => t.symbol.toLowerCase())),
+    [activeChainId],
   )
 
   // [SPRINT token-selector-ux P4] Categories actually present in the active catalog,
@@ -76,6 +88,11 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 50)
   }, [open])
+
+  // [fix/imported-tokens-persist] Lazy re-validation: only when the picker opens, once per token per page-load.
+  useEffect(() => {
+    if (open) void revalidateImported()
+  }, [open, revalidateImported])
 
   const isSearching = search.length > 0
   const q = search.toLowerCase()
@@ -103,7 +120,9 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
     // [fix/token-search-ranking] Exact symbol match first, then more `sources` — see
     // rankSearchMatches. Ranking never filters, so lookalikes stay reachable, just lower.
     return rankSearchMatches(matches, q).slice(0, SEARCH_RESULT_LIMIT)
-  }, [isSearching, q, disabledAddress, activeChainId, activeCategory, hideNativeInput])
+    // `importedTokens` is the change signal: getSearchCatalog reads the (non-reactive) custom-token store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSearching, q, disabledAddress, activeChainId, activeCategory, hideNativeInput, importedTokens])
 
   // [fix/token-search-ranking-squatting] Same-symbol clones below the liquidity floor —
   // demoted under a divider below, never hidden. See computeLowLiquidityDemotions.
@@ -182,6 +201,21 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
   function handleSelect(token: Token) {
     onSelect(token)
     closeModal()
+  }
+
+  function renderRow(token: Token) {
+    const addr = token.address.toLowerCase()
+    const imported = importedAddrs.has(addr)
+    return (
+      <TokenRow
+        key={token.address}
+        token={token}
+        onSelect={handleSelect}
+        balance={balanceMap.get(addr)?.formatted}
+        symbolCollision={imported && catalogSymbols.has(token.symbol.toLowerCase())}
+        onRemove={imported ? removeImported : undefined}
+      />
+    )
   }
 
   async function handleImportToken() {
@@ -288,9 +322,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                         : `${filtered.length} result${filtered.length !== 1 ? 's' : ''}`}
                     </p>
                   )}
-                  {normalMatches.map((token) => (
-                    <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
-                  ))}
+                  {normalMatches.map(renderRow)}
 
                   {/* [fix/token-search-ranking-squatting] Same-symbol clones below the
                       liquidity floor — demoted here, never hidden (still selectable). */}
@@ -299,9 +331,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                       <p className="border-t border-cream-08 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
                         Low liquidity / unverified
                       </p>
-                      {lowLiquidityMatches.map((token) => (
-                        <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
-                      ))}
+                      {lowLiquidityMatches.map(renderRow)}
                     </div>
                   )}
 
@@ -343,14 +373,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                       <p className="sticky top-0 z-10 bg-[#0F1318] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-gold">
                         Your Tokens
                       </p>
-                      {tokensWithBalance.map((token) => (
-                        <TokenRow
-                          key={token.address}
-                          token={token}
-                          onSelect={handleSelect}
-                          balance={balanceMap.get(token.address.toLowerCase())?.formatted}
-                        />
-                      ))}
+                      {tokensWithBalance.map(renderRow)}
                     </div>
                   )}
 
@@ -360,9 +383,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                       <p className="bg-[#0F1318] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
                         {group.label}
                       </p>
-                      {group.tokens.map((token) => (
-                        <TokenRow key={token.address} token={token} onSelect={handleSelect} balance={balanceMap.get(token.address.toLowerCase())?.formatted} />
-                      ))}
+                      {group.tokens.map(renderRow)}
                     </div>
                   ))}
                 </>
@@ -377,17 +398,46 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
 }
 
 // ── Token row component ─────────────────────────────────────
-function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: Token) => void; balance?: string }) {
-  return (
+// [fix/imported-tokens-persist] An imported row carries an explicit Remove (the only way a saved
+// import leaves this browser) and, when its saved record no longer validates on the chain, is shown
+// disabled as unavailable instead of being dropped. Non-imported rows render exactly as before.
+function TokenRow({
+  token,
+  onSelect,
+  balance,
+  symbolCollision = false,
+  onRemove,
+}: {
+  token: Token
+  onSelect: (t: Token) => void
+  balance?: string
+  /** Imported token whose symbol is already used by a catalog token on this chain. */
+  symbolCollision?: boolean
+  onRemove?: (address: string) => void
+}) {
+  const unavailable = token.unavailable === true
+  const main = (
     <button
       onClick={() => onSelect(token)}
-      className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-[#1E2530]"
+      disabled={unavailable}
+      className={`flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-[#1E2530] ${unavailable ? 'cursor-not-allowed opacity-50' : ''}`}
     >
       <TokenLogo token={token} size={32} className="bg-surface-tertiary" />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-cream-gold">{token.symbol}</div>
         <div className="truncate text-xs text-cream-35">{token.name}</div>
-        <TokenAddressBadge address={token.address} size="sm" showExplorerLink={false} />
+        {/* A symbol clash with a listed token gets the full address treatment (copy + explorer link). */}
+        <TokenAddressBadge address={token.address} size={symbolCollision ? 'md' : 'sm'} showExplorerLink={symbolCollision} />
+        {symbolCollision && (
+          <div className="mt-0.5 text-[10px] leading-snug text-amber-300/80">
+            Same symbol as a listed token — verify the contract address
+          </div>
+        )}
+        {unavailable && (
+          <div className="mt-0.5 text-[10px] leading-snug text-danger">
+            Unavailable — this chain no longer returns a valid ERC-20 at this address
+          </div>
+        )}
       </div>
       {balance && (
         <div className="text-right">
@@ -395,5 +445,18 @@ function TokenRow({ token, onSelect, balance }: { token: Token; onSelect: (t: To
         </div>
       )}
     </button>
+  )
+  if (!onRemove) return main
+  return (
+    <div className="flex items-center">
+      <div className="min-w-0 flex-1">{main}</div>
+      <button
+        onClick={() => onRemove(token.address)}
+        aria-label={`Remove ${token.symbol}`}
+        className="ml-1 min-h-[44px] shrink-0 rounded-lg px-2 text-[11px] font-medium text-cream-50 transition hover:text-danger"
+      >
+        Remove
+      </button>
+    </div>
   )
 }
