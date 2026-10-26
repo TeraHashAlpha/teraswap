@@ -8,8 +8,10 @@
  *      (address, decimals, pair) and, for mainnet, src/lib/constants.ts. No address typed here.
  *   2. Chainlink resolution order: V3 registry (registered) → ETH_USD_FEED → mirror; integrity
  *      (answer > 0, answeredInRound >= roundId); stale ⇒ ABSENT.
- *   3. DefiLlama / CoinGecko: batched, parsed, stale/non-2xx/junk ⇒ absent, unmapped chain ⇒ no call.
- *   4. Cycle context: one off-chain batch per cycle, per-token Chainlink memo, trust-ordered quotes.
+ *   3. DefiLlama batched (50/request); CoinGecko ONE address per request, sequential, 429 honoured
+ *      (fix/unpriced-ack-paths) — parsed, stale/non-2xx/junk ⇒ absent, unmapped chain ⇒ no call.
+ *   4. Cycle context: one off-chain batch per cycle, per-token Chainlink memo, trust-ordered quotes,
+ *      and the per-cycle `chainlink=n defillama=n coingecko=n` summary line.
  *
  * Run: node --test contracts/order-engine/executor/price-sources.test.mjs
  */
@@ -25,6 +27,12 @@ import {
   DEFILLAMA_CHAIN_SLUG,
   COINGECKO_PLATFORM,
   FUTURE_SKEW_SEC,
+  BATCH_SIZE,
+  COINGECKO_ADDRESSES_PER_REQUEST,
+  COINGECKO_REQUEST_DELAY_MS,
+  COINGECKO_RETRY_DELAY_MS,
+  COINGECKO_RETRY_MAX_MS,
+  COINGECKO_CYCLE_BUDGET_MS,
   normalizeToken,
   isFresh,
   toQuote,
@@ -33,7 +41,14 @@ import {
   fetchCoinGeckoUsd,
   createCycleQuoteContext,
 } from "./price-sources.js"
-import { MAX_PRICE_AGE_SEC, PRICE_SOURCE_TRUST_ORDER } from "./order-floor.js"
+import {
+  MAX_PRICE_AGE_SEC,
+  PRICE_SOURCE_TRUST_ORDER,
+  QUORUM_TOLERANCE_BPS,
+  DCA_FAIL_OPEN_MAX_USD,
+  DCA_NO_PRICE_FILL_CAP_MAX_USD,
+  DCA_ORACLE_FLOOR_BPS,
+} from "./order-floor.js"
 
 // ── Zero-network tripwire ────────────────────────────────────────────────────────────────────────
 let realNetworkCalls = 0
@@ -88,7 +103,7 @@ function fakeFetch(routes) {
     fn.calls.push({ url, init })
     const r = routes(url, init)
     if (r instanceof Error) throw r
-    return { ok: r.ok ?? true, status: r.status ?? 200, json: async () => r.json }
+    return { ok: r.ok ?? true, status: r.status ?? 200, json: async () => r.json, headers: r.headers ?? null }
   }
   fn.calls = []
   return fn
@@ -319,36 +334,155 @@ describe("fetchDefiLlamaUsd — batched, parsed, fail-absent", () => {
 })
 
 // ── 3. CoinGecko ─────────────────────────────────────────────────────────────────────────────────
-describe("fetchCoinGeckoUsd — batched simple/token_price, optional demo key, fail-absent", () => {
-  test("ONE request per batch with include_last_updated_at; lowercase echo tolerated; stale absent", async () => {
-    const fetchImpl = fakeFetch(() => ({
-      json: {
-        [WETH_BASE]: { usd: 2999.9, last_updated_at: NOW - 60 },
-        [USDC_BASE.toUpperCase().replace("0X", "0x")]: { usd: 1, last_updated_at: NOW - MAX_AGE - 1 }, // stale
-      },
-    }))
-    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE })
-    assert.equal(fetchImpl.calls.length, 1)
-    assert.equal(
-      fetchImpl.calls[0].url,
-      `https://api.coingecko.com/api/v3/simple/token_price/base?contract_addresses=${WETH_BASE},${USDC_BASE}&vs_currencies=usd&include_last_updated_at=true`,
-    )
+// [fix/unpriced-ack-paths] The keyless tier rejects a batched `contract_addresses` list (HTTP 400,
+// error 10012 — observed 2026-10-26), so the batched request of feat/keeper-price-quorum made the whole
+// CoinGecko leg silently absent whenever ≥ 2 DCA tokens were registered, pushing cycles to
+// single-source ($250 cap) far more than designed. Now: ONE address per request, sequential, 429
+// honoured. `sleep` / `clock` are injected — zero real waiting below.
+const ONE_ADDRESS_URL = /\/simple\/token_price\/[a-z-]+\?contract_addresses=0x[0-9a-f]{40}&vs_currencies=usd&include_last_updated_at=true$/
+const noSleep = async () => {}
+function recordingSleep() {
+  const fn = async (ms) => { fn.waits.push(ms) }
+  fn.waits = []
+  return fn
+}
+const geckoRow = (usd, age = 60) => ({ usd, last_updated_at: NOW - age })
+/** Routes ONE CoinGecko request to the row for the single address in its URL (asserting it IS single). */
+function geckoRoutes(rowsByAddr, { statusByAddr = {} } = {}) {
+  return (url) => {
+    const a = url.match(/contract_addresses=([^&]+)/)?.[1]
+    assert.ok(a && !a.includes(","), `a batched CoinGecko URL must never be built: ${url}`)
+    const s = statusByAddr[a]
+    if (typeof s === "function") return s()
+    if (s) return s
+    return { json: rowsByAddr[a] ? { [a]: rowsByAddr[a] } : {} }
+  }
+}
+const ARB_WETH = WRAPPED_NATIVE_BY_CHAIN[ARB]
+
+describe("fetchCoinGeckoUsd — ONE address per request (keyless-tier limit), sequential, 429 honoured, fail-absent", () => {
+  test("3 tokens ⇒ 3 requests, each URL carries exactly ONE contract_addresses value, one pause BETWEEN requests", async () => {
+    const fetchImpl = fakeFetch(geckoRoutes({ [WETH_BASE]: geckoRow(2999.9), [USDC_BASE]: geckoRow(1, MAX_AGE + 1) /* stale */ }))
+    const sleep = recordingSleep()
+    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE, UNKNOWN, NATIVE_ETH_SENTINEL], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep })
+    assert.equal(fetchImpl.calls.length, 3, "one request per DISTINCT token (the sentinel is WETH)")
+    for (const c of fetchImpl.calls) assert.match(c.url, ONE_ADDRESS_URL)
+    assert.deepEqual(fetchImpl.calls.map((c) => c.url.match(/contract_addresses=([^&]+)/)[1]), [WETH_BASE, USDC_BASE, UNKNOWN])
+    assert.equal(fetchImpl.calls[0].url, `https://api.coingecko.com/api/v3/simple/token_price/base?contract_addresses=${WETH_BASE}&vs_currencies=usd&include_last_updated_at=true`)
     assert.deepEqual(fetchImpl.calls[0].init.headers, {}, "no key ⇒ no auth header")
+    assert.deepEqual(sleep.waits, [COINGECKO_REQUEST_DELAY_MS, COINGECKO_REQUEST_DELAY_MS], "a pause BETWEEN requests, none before the first")
     assert.deepEqual(m.get(WETH_BASE), { price: 2999.9, ts: NOW - 60, source: "coingecko" })
-    assert.equal(m.has(USDC_BASE), false)
+    assert.equal(m.has(USDC_BASE), false, "stale row ⇒ absent")
+    assert.equal(m.has(UNKNOWN), false)
+  })
+  test("requests are SEQUENTIAL: the next one is not sent until the previous one resolved", async () => {
+    const events = []
+    let release = null
+    const fetchImpl = async (url) => {
+      const a = url.match(/contract_addresses=([^&]+)/)[1]
+      events.push(`start ${a}`)
+      if (!release) await new Promise((r) => { release = r }) // hold the FIRST request open
+      events.push(`end ${a}`)
+      return { ok: true, status: 200, json: async () => ({}) }
+    }
+    const p = fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep })
+    await new Promise((r) => setImmediate(r))
+    assert.deepEqual(events, [`start ${WETH_BASE}`], "the second request waits for the first")
+    release()
+    await p
+    assert.deepEqual(events, [`start ${WETH_BASE}`, `end ${WETH_BASE}`, `start ${USDC_BASE}`, `end ${USDC_BASE}`])
+  })
+  test("lowercase echo tolerated (a checksummed key in the body still matches)", async () => {
+    const fetchImpl = fakeFetch(() => ({ json: { [WETH_BASE.toUpperCase().replace("0X", "0x")]: geckoRow(3001) } }))
+    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep })
+    assert.equal(m.get(WETH_BASE)?.price, 3001)
   })
   test("COINGECKO_API_KEY (when given) rides the demo header; Arbitrum uses the arbitrum-one platform", async () => {
     const fetchImpl = fakeFetch(() => ({ json: {} }))
-    await fetchCoinGeckoUsd({ tokens: [WRAPPED_NATIVE_BY_CHAIN[ARB]], chainId: ARB, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, apiKey: "k" })
+    await fetchCoinGeckoUsd({ tokens: [ARB_WETH], chainId: ARB, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, apiKey: "k", sleep: noSleep })
     assert.match(fetchImpl.calls[0].url, /\/simple\/token_price\/arbitrum-one\?/)
+    assert.match(fetchImpl.calls[0].url, ONE_ADDRESS_URL)
     assert.deepEqual(fetchImpl.calls[0].init.headers, { "x-cg-demo-api-key": "k" })
   })
-  test("429 / thrown / unmapped chain ⇒ empty, never throws", async () => {
-    assert.equal((await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: BASE, fetchImpl: fakeFetch(() => ({ ok: false, status: 429, json: {} })), nowSec: NOW, maxAgeSec: MAX_AGE })).size, 0)
-    assert.equal((await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: BASE, fetchImpl: fakeFetch(() => new Error("net")), nowSec: NOW, maxAgeSec: MAX_AGE })).size, 0)
+  test("429 ⇒ back off COINGECKO_RETRY_DELAY_MS and retry ONCE; a 200 on the retry counts; the next token is still asked", async () => {
+    let n = 0
+    const fetchImpl = fakeFetch(geckoRoutes({ [USDC_BASE]: geckoRow(1) }, { statusByAddr: { [WETH_BASE]: () => (n++ === 0 ? { ok: false, status: 429, json: {} } : { json: { [WETH_BASE]: geckoRow(3000) } }) } }))
+    const sleep = recordingSleep()
+    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep })
+    assert.equal(fetchImpl.calls.length, 3, "WETH twice (429 → retry), USDC once")
+    assert.deepEqual(sleep.waits, [COINGECKO_RETRY_DELAY_MS, COINGECKO_REQUEST_DELAY_MS])
+    assert.equal(m.get(WETH_BASE)?.price, 3000)
+    assert.equal(m.get(USDC_BASE)?.price, 1)
+  })
+  test("429 TWICE ⇒ that token is absent and the leg STOPS for the cycle (no further request), reason noted", async () => {
+    const fetchImpl = fakeFetch(geckoRoutes({ [USDC_BASE]: geckoRow(1) }, { statusByAddr: { [WETH_BASE]: { ok: false, status: 429, json: {} } } }))
+    const notes = []
+    const sleep = recordingSleep()
+    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep, onNote: (s) => notes.push(s) })
+    assert.equal(fetchImpl.calls.length, 2, "first request + ONE retry, nothing for USDC")
+    assert.equal(m.size, 0)
+    assert.deepEqual(sleep.waits, [COINGECKO_RETRY_DELAY_MS])
+    assert.deepEqual(notes, [`429 twice on ${WETH_BASE} — 2 of 2 token(s) absent`])
+  })
+  test("Retry-After is honoured on the back-off, clamped to [COINGECKO_RETRY_DELAY_MS, COINGECKO_RETRY_MAX_MS]", async () => {
+    for (const [header, expected] of [["3", 3000], ["1", COINGECKO_RETRY_DELAY_MS], ["600", COINGECKO_RETRY_MAX_MS], ["junk", COINGECKO_RETRY_DELAY_MS]]) {
+      const fetchImpl = fakeFetch(() => ({ ok: false, status: 429, json: {}, headers: { get: (k) => (k === "retry-after" ? header : null) } }))
+      const sleep = recordingSleep()
+      await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep })
+      assert.deepEqual(sleep.waits, [expected], `Retry-After: ${header}`)
+    }
+  })
+  test("HTTP 400 (the old batched-URL failure) on one token ⇒ that token absent, the NEXT token is still asked", async () => {
+    const notes = []
+    const fetchImpl = fakeFetch(geckoRoutes({ [USDC_BASE]: geckoRow(1) }, { statusByAddr: { [WETH_BASE]: { ok: false, status: 400, json: { status: { error_code: 10012 } } } } }))
+    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep, onNote: (s) => notes.push(s) })
+    assert.equal(fetchImpl.calls.length, 2)
+    assert.equal(m.has(WETH_BASE), false)
+    assert.equal(m.get(USDC_BASE)?.price, 1)
+    assert.deepEqual(notes, [`HTTP 400 on ${WETH_BASE}`])
+  })
+  test("the per-cycle budget bounds the sequential leg: tokens not reached in time are absent, reason noted", async () => {
+    let t = 0
+    const clock = () => t
+    const rows = geckoRoutes({ [WETH_BASE]: geckoRow(3000), [USDC_BASE]: geckoRow(1), [UNKNOWN]: geckoRow(5) })
+    const fetchImpl = fakeFetch((url) => { t += COINGECKO_CYCLE_BUDGET_MS / 2 + 1; return rows(url) })
+    const notes = []
+    const m = await fetchCoinGeckoUsd({ tokens: [WETH_BASE, USDC_BASE, UNKNOWN], chainId: BASE, fetchImpl, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep, clock, onNote: (s) => notes.push(s) })
+    assert.equal(fetchImpl.calls.length, 2, "the third token is past the budget")
+    assert.equal(m.size, 2)
+    assert.deepEqual(notes, [`budget ${COINGECKO_CYCLE_BUDGET_MS} ms exhausted, 1 of 3 token(s) not asked`])
+  })
+  test("thrown / junk body ⇒ absent, never throws (no retry — only a 429 is retried); unmapped chain ⇒ no request", async () => {
+    const thrown = fakeFetch(() => new Error("net"))
+    assert.equal((await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: BASE, fetchImpl: thrown, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep })).size, 0)
+    assert.equal(thrown.calls.length, 1)
+    assert.equal((await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: BASE, fetchImpl: fakeFetch(() => ({ json: "not json" })), nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep })).size, 0)
     const f = fakeFetch(() => ({ json: {} }))
-    assert.equal((await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: 999, fetchImpl: f, nowSec: NOW, maxAgeSec: MAX_AGE })).size, 0)
+    assert.equal((await fetchCoinGeckoUsd({ tokens: [WETH_BASE], chainId: 999, fetchImpl: f, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep })).size, 0)
     assert.equal(f.calls.length, 0)
+  })
+  test("51 tokens ⇒ 51 CoinGecko requests (never a chunk of 50) while DefiLlama still batches 50 + 1 — BATCH_SIZE is DefiLlama-only", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => `0x${(i + 1).toString(16).padStart(40, "0")}`)
+    const gecko = fakeFetch(() => ({ json: {} }))
+    await fetchCoinGeckoUsd({ tokens: many, chainId: BASE, fetchImpl: gecko, nowSec: NOW, maxAgeSec: MAX_AGE, sleep: noSleep })
+    assert.equal(gecko.calls.length, 51)
+    for (const c of gecko.calls) assert.match(c.url, ONE_ADDRESS_URL)
+    const llama = fakeFetch(() => ({ json: { coins: {} } }))
+    await fetchDefiLlamaUsd({ tokens: many, chainId: BASE, fetchImpl: llama, nowSec: NOW, maxAgeSec: MAX_AGE })
+    assert.equal(llama.calls.length, 2, "DefiLlama batching unchanged: ⌈51 / 50⌉")
+    assert.equal(BATCH_SIZE, 50)
+    assert.equal(COINGECKO_ADDRESSES_PER_REQUEST, 1)
+  })
+})
+
+// ── Quorum constants pin (untouched by this branch) ─────────────────────────────────────────────
+describe("quorum constants are untouched: 300 bps / 600 s / $250", () => {
+  test("QUORUM_TOLERANCE_BPS=300, MAX_PRICE_AGE_SEC=600, DCA_FAIL_OPEN_MAX_USD=250=DCA_NO_PRICE_FILL_CAP_MAX_USD, DCA_ORACLE_FLOOR_BPS=300", () => {
+    assert.equal(QUORUM_TOLERANCE_BPS, 300)
+    assert.equal(MAX_PRICE_AGE_SEC, 600)
+    assert.equal(DCA_FAIL_OPEN_MAX_USD, 250)
+    assert.equal(DCA_NO_PRICE_FILL_CAP_MAX_USD, 250)
+    assert.equal(DCA_ORACLE_FLOOR_BPS, 300)
   })
 })
 
@@ -367,10 +501,10 @@ describe("createCycleQuoteContext — one off-chain batch per cycle, memoized Ch
     return new Error(`unexpected url ${url}`)
   }
 
-  test("two legs, one DefiLlama + one CoinGecko request, Chainlink read once per token, trust-ordered", async () => {
+  test("two legs, one DefiLlama batch + one CoinGecko request PER TOKEN, Chainlink read once per token, trust-ordered", async () => {
     const client = fakeClient({ rounds: { [MIRROR_WETH_FEED]: round({ answer: 3_000_00000000n }), [MIRROR_USDC_FEED]: round({ answer: 1_00000000n }) } })
     const fetchImpl = fakeFetch(routes)
-    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: client, v3Address: "", fetchImpl, now: () => NOW, env: {} })
+    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: client, v3Address: "", fetchImpl, now: () => NOW, env: {}, sleep: noSleep })
     ctx.registerTokens([WETH_BASE, USDC_BASE, "junk"])
     const [weth, usdc, wethAgain] = await Promise.all([ctx.legQuotes(WETH_BASE), ctx.legQuotes(USDC_BASE), ctx.legQuotes(NATIVE_ETH_SENTINEL)])
     assert.deepEqual(weth.map((q) => q.source), ["chainlink", "defillama", "coingecko"])
@@ -379,7 +513,9 @@ describe("createCycleQuoteContext — one off-chain batch per cycle, memoized Ch
     assert.deepEqual(wethAgain, weth, "the native sentinel is the WETH leg")
     const urls = fetchImpl.calls.map((c) => c.url)
     assert.equal(urls.filter((u) => u.includes("llama.fi")).length, 1, "exactly one DefiLlama batch per cycle")
-    assert.equal(urls.filter((u) => u.includes("coingecko")).length, 1, "exactly one CoinGecko batch per cycle")
+    const geckoUrls = urls.filter((u) => u.includes("coingecko"))
+    assert.equal(geckoUrls.length, 2, "one CoinGecko request PER registered token per cycle (never a batch)")
+    for (const u of geckoUrls) assert.match(u, ONE_ADDRESS_URL)
     assert.match(urls.find((u) => u.includes("llama.fi")), new RegExp(`${WETH_BASE}.*${USDC_BASE}|${USDC_BASE}.*${WETH_BASE}`), "the batch carries every registered token")
     assert.equal(client.calls.filter((c) => c.functionName === "latestRoundData").length, 2, "one Chainlink read per token per cycle")
     assert.equal(ctx.maxAgeSec, MAX_PRICE_AGE_SEC)
@@ -387,7 +523,7 @@ describe("createCycleQuoteContext — one off-chain batch per cycle, memoized Ch
 
   test("a token first seen AFTER the main batch gets one supplementary batch (registration is an optimisation)", async () => {
     const fetchImpl = fakeFetch(routes)
-    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient(), v3Address: "", fetchImpl, now: () => NOW, env: {} })
+    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient(), v3Address: "", fetchImpl, now: () => NOW, env: {}, sleep: noSleep })
     ctx.registerTokens([WETH_BASE])
     await ctx.legQuotes(WETH_BASE)
     const usdc = await ctx.legQuotes(USDC_BASE)
@@ -398,7 +534,7 @@ describe("createCycleQuoteContext — one off-chain batch per cycle, memoized Ch
 
   test("MAX_PRICE_AGE_SEC env override (by name) tightens the gate; COINGECKO_API_KEY is read from env", async () => {
     const fetchImpl = fakeFetch(routes)
-    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient(), v3Address: "", fetchImpl, now: () => NOW, env: { MAX_PRICE_AGE_SEC: "30", COINGECKO_API_KEY: "demo" } })
+    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient(), v3Address: "", fetchImpl, now: () => NOW, env: { MAX_PRICE_AGE_SEC: "30", COINGECKO_API_KEY: "demo" }, sleep: noSleep })
     const weth = await ctx.legQuotes(WETH_BASE)
     assert.equal(ctx.maxAgeSec, 30)
     assert.deepEqual(weth.map((q) => q.source), ["defillama"], "CoinGecko's 40 s-old row is now stale ⇒ absent")
@@ -406,8 +542,28 @@ describe("createCycleQuoteContext — one off-chain batch per cycle, memoized Ch
   })
 
   test("every source down ⇒ an empty quote list (the quorum turns that into a SKIP), never a throw", async () => {
-    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient({ registryThrows: true }), v3Address: V3, fetchImpl: fakeFetch(() => new Error("down")), now: () => NOW, env: {} })
+    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient({ registryThrows: true }), v3Address: V3, fetchImpl: fakeFetch(() => new Error("down")), now: () => NOW, env: {}, sleep: noSleep })
     assert.deepEqual(await ctx.legQuotes(WETH_BASE), [])
     assert.deepEqual(await ctx.legQuotes("junk"), [])
+    assert.equal(await ctx.summaryLine(), "DCA price sources: tokens=1 chainlink=0 defillama=0 coingecko=0", "every source down is VISIBLE, not silent")
+  })
+
+  // [fix/unpriced-ack-paths] The one line per cycle the executor logs (pinned in price-quorum-wiring.test.mjs).
+  test("summaryLine(): DISTINCT-token counts per source for the cycle; null on an idle cycle (nothing asked)", async () => {
+    const client = fakeClient({ rounds: { [MIRROR_WETH_FEED]: round({ answer: 3_000_00000000n }), [MIRROR_USDC_FEED]: round({ answer: 1_00000000n }) } })
+    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: client, v3Address: "", fetchImpl: fakeFetch(routes), now: () => NOW, env: {}, sleep: noSleep })
+    ctx.registerTokens([WETH_BASE, USDC_BASE])
+    assert.equal(await ctx.summaryLine(), null, "registered but nothing asked yet ⇒ nothing to log")
+    await Promise.all([ctx.legQuotes(WETH_BASE), ctx.legQuotes(USDC_BASE), ctx.legQuotes(NATIVE_ETH_SENTINEL)])
+    assert.equal(await ctx.summaryLine(), "DCA price sources: tokens=2 chainlink=2 defillama=2 coingecko=1")
+    assert.deepEqual(await ctx.sourceSummary(), { tokens: 2, chainlink: 2, defillama: 2, coingecko: 1, notes: [] })
+  })
+  test("summaryLine() says WHY the CoinGecko leg is short (429 twice ⇒ coingecko=0 + reason) — a silent leg is visible", async () => {
+    const fetchImpl = fakeFetch((url) => (url.includes("coingecko") ? { ok: false, status: 429, json: {} } : routes(url)))
+    const ctx = createCycleQuoteContext({ chainId: BASE, publicClient: fakeClient(), v3Address: "", fetchImpl, now: () => NOW, env: {}, sleep: noSleep })
+    ctx.registerTokens([WETH_BASE, USDC_BASE])
+    await Promise.all([ctx.legQuotes(WETH_BASE), ctx.legQuotes(USDC_BASE)])
+    assert.equal(await ctx.summaryLine(), `DCA price sources: tokens=2 chainlink=0 defillama=2 coingecko=0 (coingecko: 429 twice on ${WETH_BASE} — 2 of 2 token(s) absent)`)
+    assert.equal(fetchImpl.calls.filter((c) => c.url.includes("coingecko")).length, 2, "first request + ONE retry, then the leg stopped")
   })
 })

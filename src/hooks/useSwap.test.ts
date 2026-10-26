@@ -1082,3 +1082,82 @@ describe('useSwap — [feat/swap-price-tiers] 409 unpriced_ack_required → cons
     expect(result.current.errorMessage).toMatch(/not yet available/)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [fix/unpriced-ack-paths M-1 / Auditor 64] The CoW path posts to the SAME /api/swap gate, so it must
+// forward the SAME ack and treat a 409 the SAME way: consent, not an error. Before this fix
+// execute('cowswap') never sent `unpricedAck` and its catch had no 409 branch — the user accepted the
+// dialog and got a raw "Swap API error 409" (fail-closed, nothing signed, but a dead end).
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [fix/unpriced-ack-paths M-1] CoW path: 409 → consent dialog; the ack rides execute(cowswap)', () => {
+  const ACK_409 = { error: 'No reference price for this pair', code: 'unpriced_ack_required', requiredTier: 'unpriced', unpriceable: true }
+  const ADDR = '0x1111111111111111111111111111111111111111'
+  const cowParams = () => ({
+    sellToken: TOKEN_IN.address, buyToken: TOKEN_OUT.address, receiver: ADDR,
+    sellAmount: '1000000000000000000', buyAmount: '2950000000',
+    validTo: Math.floor(Date.now() / 1000) + 600, // within the 30-min cap → not mutated
+    appData: '{"version":"1.1.0","appCode":"TeraSwap"}', appDataHash: '0x' + 'a'.repeat(64),
+    feeAmount: '500000000000000', kind: 'sell', partiallyFillable: false,
+    sellTokenBalance: 'erc20', buyTokenBalance: 'erc20', from: ADDR, quoteId: 1, signingScheme: 'eip712',
+  })
+  const cowResponse = () => ({ source: 'cowswap', toAmount: '2950000000', estimatedGas: 0, gasUsd: 0, routes: [], cowOrderParams: cowParams() })
+  const bodyOf = (f: ReturnType<typeof mockSwapFetch>, i: number) => JSON.parse(String((f.mock.calls[i][1] as RequestInit).body))
+
+  it('execute(cowswap) on a 409 unpriced_ack_required parks in idle with the flag up — no error, no frozen order, nothing signed', async () => {
+    const f = mockSwapFetch(ACK_409, 409)
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('cowswap', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('cowswap') })
+    expect(result.current.unpricedAckRequired).toBe(true)
+    expect(result.current.status).toBe('idle')
+    expect(result.current.errorMessage).toBeNull()
+    expect(result.current.pendingCowOrder).toBeNull()
+    expect(mockSignTypedData).not.toHaveBeenCalled()
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(bodyOf(f, 0).source).toBe('cowswap')
+    expect(bodyOf(f, 0)).not.toHaveProperty('unpricedAck')
+  })
+
+  it('execute(cowswap, [], { unpricedAck: true }) posts unpricedAck:true and FREEZES the CoW order for review (still no signature)', async () => {
+    const f = mockSwapFetch(cowResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('cowswap', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('cowswap', [], { unpricedAck: true }) })
+    expect(bodyOf(f, 0).source).toBe('cowswap')
+    expect(bodyOf(f, 0).unpricedAck).toBe(true)
+    expect(result.current.unpricedAckRequired).toBe(false)
+    expect(result.current.status).toBe('cow_awaiting_review')
+    expect(result.current.pendingCowOrder).not.toBeNull()
+    expect(mockSignTypedData).not.toHaveBeenCalled()
+  })
+
+  it('a priced pair ignores the ack: with or without it the SAME order is frozen; a plain execute sends no key', async () => {
+    const f = mockSwapFetch(cowResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('cowswap', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('cowswap', [], { unpricedAck: true }) })
+    const withAck = result.current.pendingCowOrder?.message
+    expect(withAck).toBeDefined()
+    await act(async () => { result.current.reset() })
+    await act(async () => { await result.current.execute('cowswap') })
+    expect(bodyOf(f, 1)).not.toHaveProperty('unpricedAck')
+    expect(result.current.status).toBe('cow_awaiting_review')
+    expect(result.current.pendingCowOrder?.message).toEqual(withAck)
+  })
+
+  it('reset() after a CoW 409 clears the flag (Cancel on the dialog)', async () => {
+    mockSwapFetch(ACK_409, 409)
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('cowswap', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('cowswap') })
+    expect(result.current.unpricedAckRequired).toBe(true)
+    await act(async () => { result.current.reset() })
+    expect(result.current.unpricedAckRequired).toBe(false)
+    expect(result.current.status).toBe('idle')
+  })
+
+  it('a CoW 409 with another code is still an ordinary error (the branch keys on the code, not the status)', async () => {
+    mockSwapFetch({ error: 'Chain 42161 is not yet available for swaps', code: 'CHAIN_COMING_SOON' }, 409)
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('cowswap', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('cowswap') })
+    expect(result.current.unpricedAckRequired).toBe(false)
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/not yet available/)
+  })
+})

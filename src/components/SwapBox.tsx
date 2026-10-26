@@ -120,9 +120,10 @@ export default function SwapBox() {
 
   // [feat/swap-price-tiers D3] Informed consent for a pair with NO reference price on either leg.
   // Requested by the Swap click when the server's tier is `unpriced`; the dialog is ALSO open while
-  // /api/swap's 409 `unpriced_ack_required` stands (useSwap.unpricedAckRequired — the server is the
-  // authority, D1; derived below, no effect). Per attempt, never remembered: Continue re-runs
-  // execute(…, { unpricedAck: true }), which clears the hook's flag; Cancel resets the hook.
+  // /api/swap's 409 `unpriced_ack_required` stands (useSwap.unpricedAckRequired or, for a split,
+  // useSplitSwap.unpricedAckRequired — the server is the authority, D1; derived below, no effect).
+  // Per attempt, never remembered: Continue re-runs execute(…, { unpricedAck: true }) on whichever
+  // hook owns the attempt, which clears that hook's flag; Cancel resets it. [fix/unpriced-ack-paths]
   const [unpricedConsentRequested, setUnpricedConsentRequested] = useState(false)
 
   const handleSourceToggle = useCallback((source: string) => {
@@ -320,6 +321,7 @@ export default function SwapBox() {
     totalLegs: splitTotal,
     errorMessage: splitSwapError,
     plannedLegs: splitPlannedLegs,
+    unpricedAckRequired: splitUnpricedAckRequired, // [fix/unpriced-ack-paths L-3]
     execute: executeSplitSwap,
     confirmPlan: confirmSplitPlan,
     reset: resetSplitSwap,
@@ -666,7 +668,8 @@ export default function SwapBox() {
   const unpricedPair = priceTier?.tier === 'unpriced'
   // [feat/swap-price-tiers D1] The server asked for consent (409) → the dialog is open even when the
   // client believed the pair was priced; the server's tier wins.
-  const unpricedConsentOpen = unpricedConsentRequested || unpricedAckRequired
+  // [fix/unpriced-ack-paths L-3] …and the split hook's 409 opens the same dialog.
+  const unpricedConsentOpen = unpricedConsentRequested || unpricedAckRequired || splitUnpricedAckRequired
 
   const handleApproveAndSwap = useCallback(async () => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -730,14 +733,14 @@ export default function SwapBox() {
     }
   }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId, unpricedPair])
 
-  // [feat/swap-price-tiers D3] Consent given → the same execution path, with the ack. Split legs post to
-  // /api/swap WITHOUT the ack today (useSplitSwap is outside this change): the server's 409 then surfaces
-  // as the split error — fail closed, never a blind fill.
+  // [feat/swap-price-tiers D3] Consent given → the same execution path, with the ack.
+  // [fix/unpriced-ack-paths] The ack is decided HERE, once, and rides every /api/swap call — the
+  // standard path and the CoW path (useSwap, M-1) and every split leg (useSplitSwap, L-3).
   const confirmUnpricedSwap = useCallback(() => {
     setUnpricedConsentRequested(false)
     startWaitingSound()
     if (isSplitActive && splitResult?.bestSplit) {
-      executeSplitSwap(splitResult.bestSplit)
+      executeSplitSwap(splitResult.bestSplit, { unpricedAck: true })
     } else if (meta?.best.source) {
       executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId), { unpricedAck: true })
     }
@@ -746,7 +749,8 @@ export default function SwapBox() {
     setUnpricedConsentRequested(false)
     stopWaitingSound()
     if (unpricedAckRequired) resetSwap() // clears the hook's ack-required state → closes the dialog
-  }, [unpricedAckRequired, resetSwap])
+    if (splitUnpricedAckRequired) resetSplitSwap() // [fix/unpriced-ack-paths L-3] same for a split 409
+  }, [unpricedAckRequired, resetSwap, splitUnpricedAckRequired, resetSplitSwap])
 
   // [feat/swap-price-tiers D3] The dialog's placeholders are REAL values from the live quote: {N} =
   // aggregator quotes that answered, {d} = their spread (max − min) / min, {minOut} = the on-chain

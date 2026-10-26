@@ -254,6 +254,7 @@ export function useSwap(
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   // [feat/swap-price-tiers D3] /api/swap wants the user's consent for an unpriced pair (409). The
   // ref carries the consent given to execute() into the fetch (and through the 9O fallback walk).
+  // [fix/unpriced-ack-paths M-1] The CoW path reads the SAME ref — one consent, every /api/swap call.
   const [unpricedAckRequired, setUnpricedAckRequired] = useState(false)
   const unpricedAckRef = useRef(false)
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
@@ -899,6 +900,8 @@ export function useSwap(
         tokenOut.decimals,
         undefined,
         chainId,
+        undefined, // recipient — a CoW order settles to the signer (receiver check below)
+        unpricedAckRef.current, // [fix/unpriced-ack-paths M-1] the SAME consent the standard path forwards
       )
 
       if (!swapData.cowOrderParams) {
@@ -978,6 +981,15 @@ export function useSwap(
       })
       setStatus('cow_awaiting_review')
     } catch (err) {
+      // [fix/unpriced-ack-paths M-1] Same 409 handling as the standard path: not a failed swap — park
+      // in idle (no error banner, no rejection event), raise the flag so SwapBox opens the consent
+      // dialog; Continue re-runs execute('cowswap', …, { unpricedAck: true }). Nothing was frozen or
+      // signed. Before this branch the user accepted the dialog and got a raw "Swap API error 409".
+      if (err instanceof UnpricedAckRequiredError) {
+        setStatus('idle')
+        setUnpricedAckRequired(true)
+        return
+      }
       setStatus('error')
       // Detect DefiLlama price guard block in CoW flow too
       if (err instanceof PriceGuardError) {

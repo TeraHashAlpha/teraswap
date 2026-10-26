@@ -237,3 +237,15 @@ describe("behavioural: no price ⇒ no fill (pure pieces, zero network)", () => 
     assert.equal(skip({ in: [q(3000, "chainlink"), q(3300, "defillama"), q(3010, "coingecko")], out: [q(1, "chainlink"), q(1, "defillama")] }), "quorum", "third breaks the tie")
   })
 })
+
+// ── [fix/unpriced-ack-paths] the per-cycle source tally is logged once, after the loop ───────────
+describe("6. [fix/unpriced-ack-paths] one `DCA price sources:` line per cycle, after the order loop", () => {
+  test("executor.js awaits quoteCtx.summaryLine() exactly once, after the loop and before `Cycle done`", () => {
+    assert.equal(src.split("quoteCtx.summaryLine()").length - 1, 1, "exactly one tally per cycle")
+    const at = src.indexOf("await quoteCtx.summaryLine()")
+    assert.notEqual(at, -1, "the tally must be awaited (it resolves the memoized reads)")
+    assert.ok(at > src.indexOf("for (const dbOrder of orders)"), "after the order loop starts")
+    assert.ok(at < src.indexOf("Cycle done:"), "before the cycle-done line")
+    assert.match(src.slice(at, at + 200), /if \(sourceLine\) log\(/, "logged only when a token was asked (idle cycles stay quiet)")
+  })
+})

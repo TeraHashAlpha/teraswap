@@ -29,6 +29,8 @@ import { validateCallDataRecipientAsync } from '@/lib/calldata-recipient'
 import { buildSimulationTx, simulateSwapTx } from '@/lib/swap-simulation'
 import { getChainConfig } from '@/lib/chains'
 import { safeBigInt } from '@/lib/utils'
+// [fix/unpriced-ack-paths L-3] ONE error class for the 409 consent shape — the single path's.
+import { UnpricedAckRequiredError } from './useSwap'
 
 // ── Types ──
 
@@ -94,8 +96,13 @@ interface UseSplitSwapResult {
   completedLegs: number
   totalLegs: number
   errorMessage: string | null
-  /** Phase A: build + freeze the plan, then await review. NEVER signs. */
-  execute: (splitRoute: SplitRoute) => Promise<void>
+  /** [fix/unpriced-ack-paths L-3] /api/swap answered 409 `unpriced_ack_required` on a leg: the pair has
+   *  no reference price on either side and needs the user's informed consent (SwapBox opens the dialog;
+   *  the plan was discarded, nothing is signable). Cleared by execute() and reset(). */
+  unpricedAckRequired: boolean
+  /** Phase A: build + freeze the plan, then await review. NEVER signs. `{ unpricedAck: true }` after the
+   *  consent dialog rides EVERY leg's /api/swap call; per attempt, never remembered. */
+  execute: (splitRoute: SplitRoute, opts?: { unpricedAck?: boolean }) => Promise<void>
   /** Phase B: sign the reviewed plan 1:1. Only runs from status 'awaiting-review'. */
   confirmPlan: () => Promise<void>
   reset: () => void
@@ -107,14 +114,26 @@ async function fetchSwapViaApi(
   source: string, src: string, dst: string, amount: string,
   from: string, slippage: number, srcDecimals: number, dstDecimals: number,
   chainId?: number, // [P221/43-I-01] target chain — undefined → mainnet (identical)
+  /** [fix/unpriced-ack-paths L-3] The user's informed consent for a pair with no reference price —
+   *  the SAME key, the SAME boolean-`true`-only rule as useSwap's fetchSwapViaApi. */
+  unpricedAck?: boolean,
 ): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, src, dst, amount, from, slippage, srcDecimals, dstDecimals, chainId }),
+    body: JSON.stringify({
+      source, src, dst, amount, from, slippage, srcDecimals, dstDecimals, chainId,
+      ...(unpricedAck === true ? { unpricedAck: true } : {}),
+    }),
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `Swap API error ${res.status}`)
+  if (!res.ok) {
+    // [fix/unpriced-ack-paths L-3] Consent required — the same 409 + code shape the single path handles.
+    if (res.status === 409 && data.code === 'unpriced_ack_required') {
+      throw new UnpricedAckRequiredError(data.error || 'No reference price for this pair — confirmation required.')
+    }
+    throw new Error(data.error || `Swap API error ${res.status}`)
+  }
   return data
 }
 
@@ -172,6 +191,8 @@ export function useSplitSwap(
   const [legs, setLegs] = useState<LegStatus[]>([])
   const [plannedLegs, setPlannedLegs] = useState<PlannedLeg[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // [fix/unpriced-ack-paths L-3] /api/swap wants the user's consent for an unpriced pair (409 on a leg).
+  const [unpricedAckRequired, setUnpricedAckRequired] = useState(false)
   const abortRef = useRef(false)
   // [SPRINT-9R audit] true while Phase B is broadcasting — blocks a concurrent rebuild
   // (a re-click of the swap button during 'executing', when the review modal is unmounted)
@@ -199,6 +220,7 @@ export function useSplitSwap(
     setLegs([])
     setPlannedLegs([])
     setErrorMessage(null)
+    setUnpricedAckRequired(false) // [fix/unpriced-ack-paths L-3] Cancel on the consent dialog
   }, [])
 
   // [SPRINT-9R audit / FULL-M-04 parity] Discard a frozen plan on account switch or
@@ -229,7 +251,7 @@ export function useSplitSwap(
   }, [chainId, reset])
 
   // ── Phase A — build + validate + simulate + FREEZE all legs (NO signing) ──
-  const execute = useCallback(async (splitRoute: SplitRoute) => {
+  const execute = useCallback(async (splitRoute: SplitRoute, opts?: { unpricedAck?: boolean }) => {
     if (!tokenIn || !tokenOut || !address || !amountIn || !splitRoute.isSplit) return
     // [SPRINT-9R audit] Refuse to rebuild while Phase B is mid-broadcast. The swap button
     // receives the single-swap status (idle during a split) so it stays clickable while the
@@ -239,6 +261,10 @@ export function useSplitSwap(
 
     abortRef.current = false
     setErrorMessage(null)
+    setUnpricedAckRequired(false)
+    // [fix/unpriced-ack-paths L-3] The consent given to THIS attempt rides every leg (same pair ⇒ the
+    // server would answer the same 409 on each). Boolean `true` only, never a default.
+    const unpricedAck = opts?.unpricedAck === true
     setStatus('planning')
 
     let totalRaw: bigint
@@ -292,6 +318,7 @@ export function useSplitSwap(
           tokenIn.decimals,
           tokenOut.decimals,
           chainId, // [P221/43-I-01] thread active chain to the adapter
+          unpricedAck, // [fix/unpriced-ack-paths L-3] the ack decided in SwapBox, on every leg
         )
 
         if (!swapData.tx) throw new Error('No transaction data returned')
@@ -439,6 +466,18 @@ export function useSplitSwap(
         updateLeg(i, { status: 'reviewed', simulated })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
+        // [fix/unpriced-ack-paths L-3] Same as the single path: NOT a failed split — the server wants
+        // informed consent first. Every leg posts the same pair, so every leg would get the same 409:
+        // discard the plan (nothing frozen, nothing signable, no "No split leg can execute" error),
+        // park in idle and raise the flag; SwapBox opens the consent dialog and Continue re-runs
+        // execute(route, { unpricedAck: true }). Before this branch the 409 was a per-leg error.
+        if (err instanceof UnpricedAckRequiredError) {
+          setLegs([])
+          setPlannedLegs([])
+          setStatus('idle')
+          setUnpricedAckRequired(true)
+          return
+        }
         // [Auditor H-02] A quote-vs-swap floor breach is NOT a per-leg skip.
         // Every other pre-flight failure here means "this leg can't execute,
         // run the rest"; this one means the /swap responses for this pair
@@ -623,6 +662,7 @@ export function useSplitSwap(
     completedLegs,
     totalLegs,
     errorMessage,
+    unpricedAckRequired,
     execute,
     confirmPlan,
     reset,
