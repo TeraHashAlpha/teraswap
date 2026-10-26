@@ -8,6 +8,7 @@ import { cleanup, render } from '@testing-library/react'
 const h = vi.hoisted(() => ({ version: 'v1' as 'v1' | 'v2' }))
 vi.mock('@/ui/v2/version', () => ({ getUiVersion: async () => h.version }))
 vi.mock('@/ui/v2/shell', () => ({ AppShell: ({ tab }: { tab: string }) => <div data-ts-ui="v2" data-shell-tab={tab} /> }))
+vi.mock('@/ui/v2/landing', () => ({ LandingV2: () => <div data-ts-ui="v2" data-landing /> }))
 vi.mock('next/navigation', () => ({
   notFound: () => {
     throw new Error('NEXT_NOT_FOUND')
@@ -24,10 +25,10 @@ describe('/v2 page', () => {
     await expect(V2Home()).rejects.toThrow('NEXT_NOT_FOUND')
   })
 
-  it('v2 → renders the v2 home, which is the Swap tab (owner review 26 Oct: it was an empty <main>)', async () => {
+  it('v2 → renders the v2 home: the landing for a visitor without app state (src/ui/v2/home.test.tsx covers the split)', async () => {
     h.version = 'v2'
     render(await V2Home())
     expect(document.querySelector('[data-ts-ui="v2"]')).not.toBeNull()
-    expect(document.querySelector('[data-shell-tab="swap"]')).not.toBeNull()
+    expect(document.querySelector('[data-landing]')).not.toBeNull()
   })
 })

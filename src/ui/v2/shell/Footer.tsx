@@ -36,10 +36,10 @@ const SEP = (
 /**
  * [ADR-025] Full footer (pack 01): every v1 footer item — Docs, GitHub, X, Fee, No infinite approvals, chain · block
  * with explorer link, Privacy, Terms, Contact, ©, TeraHelps — plus the risk line. The block is the SELECTED chain's
- * (wallet chain when connected, dropdown pick when not), polled like v1 (paused in hidden tabs). `photo` puts the photo
- * credit inside this container (left), away from the floating ? / ♫.
+ * (wallet chain when connected, dropdown pick when not), polled like v1 (paused in hidden tabs). `photos` puts their credit
+ * inside this container (left), away from the floating ? / ♫.
  */
-export function Footer({ photo }: { photo?: ShellPhoto }) {
+export function Footer({ photos }: { photos?: readonly ShellPhoto[] }) {
   const chainId = useQuoteChainId()
   const chain = footerChain(chainId)
   const { data: blockNumber } = useBlockNumber({
@@ -104,7 +104,7 @@ export function Footer({ photo }: { photo?: ShellPhoto }) {
             TeraHelps
           </a>
         </div>
-        {photo ? <PhotoCredit photo={photo} /> : null}
+        {photos?.length ? <PhotoCredit photos={photos} /> : null}
       </div>
     </footer>
   )

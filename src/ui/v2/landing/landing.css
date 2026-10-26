@@ -1,0 +1,13 @@
+/* [ADR-025] Landing-only rules (everything else is utilities + tokens). Reduced motion: tokens.css sets
+   `animation: none` for the whole `.ts-v2` tree, so the hero simply appears — and smooth anchor scrolling is only
+   switched on when the visitor has not asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html:has([data-ts-landing]) { scroll-behavior: smooth; }
+}
+
+.ts-v2-rise { animation: ts-v2-rise 280ms ease-out both; }
+
+@keyframes ts-v2-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}

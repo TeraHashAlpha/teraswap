@@ -9,11 +9,16 @@ import { NetworkMenu } from './NetworkMenu'
  * Search is not part of the header. The v1 tagline ("Meta-Aggregator") has no place in pack 01 and is kept as
  * screen-reader text on the logo link so no v1 content is lost.
  */
-export function Header() {
+export function Header({ onLogoClick }: { onLogoClick?: () => void }) {
   return (
     <header className="flex items-center justify-between gap-3 border-b border-v2-border px-4 py-4 sm:px-8">
       <Link
         href="/"
+        onClick={(e) => {
+          if (!onLogoClick) return
+          e.preventDefault()
+          onLogoClick()
+        }}
         className="border-l-[3px] border-v2-cream pl-3 font-v2-display text-2xl uppercase tracking-[3px] text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
       >
         TeraSwap

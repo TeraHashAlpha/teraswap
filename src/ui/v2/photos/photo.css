@@ -10,6 +10,7 @@
 }
 
 .ts-v2-photo { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; isolation: isolate; }
+.ts-v2-photo--section { position: absolute; z-index: 0; }
 .ts-v2-photo__img { object-fit: cover; filter: var(--photo-grade); }
 .ts-v2-photo__layer { position: absolute; inset: 0; }
 .ts-v2-photo__tone { background: #EADFB6; mix-blend-mode: multiply; }
