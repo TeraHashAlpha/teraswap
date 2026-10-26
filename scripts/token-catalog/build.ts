@@ -3,6 +3,7 @@
  * [CHORE-TOKEN-CATALOG-PIPELINE] tokens:sync — the build-time token-catalog pipeline.
  *
  *   npm run tokens:sync            (npx tsx --tsconfig tsconfig.json scripts/token-catalog/build.ts)
+ *   npm run tokens:sync -- --dry-run   (full pipeline, writes NOTHING; prints single-source would-be admissions)
  *
  * Per chain (mainnet 1 + Base 8453):
  *   fetch (uniswap [vendored fallback] / coingecko / 1inch / trustwallet / superchain[Base])
@@ -39,8 +40,13 @@ import type { CatalogRow } from './lib/types'
 import { makeCategoryResolver } from './lib/category'
 import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS } from './lib/curated'
 import { collectVerdicts, writeTrustFixture } from './lib/verdicts'
+import { formatSingleSourceDryRun } from './lib/dry-run'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
+
+/** `--dry-run`: run the whole pipeline (live sources + RPC reads) but write NOTHING — no catalog,
+ *  no trust fixture, no output dir — and print what the single-source volume rule would admit. */
+const DRY_RUN = process.argv.includes('--dry-run')
 
 /**
  * [fix/token-sync-cron-landing] Optional single/multi-chain scope, so the cron's per-chain
@@ -204,7 +210,7 @@ async function run() {
   const allowlist = allowlistJson as unknown as Allowlist
   const categoryFor = categoryResolver()
   const allVerdicts: Verdict[] = []
-  fs.mkdirSync(OUT_DIR, { recursive: true })
+  if (!DRY_RUN) fs.mkdirSync(OUT_DIR, { recursive: true })
   const builtAt = new Date().toISOString().slice(0, 10)
   const chains = chainsToRun()
   if (chains.length !== PIPELINE_CONFIG.chains.length) log(`scoped run: chain(s) ${chains.join(', ')} (of ${PIPELINE_CONFIG.chains.join(', ')})`)
@@ -236,6 +242,12 @@ async function run() {
       previousSourceCounts: previousSourceCountsFor(chainId),
       builtAt,
     })
+
+    if (DRY_RUN) {
+      log(`\nwould include ${result.report.included} token(s) (verified ${result.report.verified}) — dry run, ${path.join(OUT_DIR, `token-catalog.${chainId}.json`)} NOT written`)
+      for (const l of formatSingleSourceDryRun(chainId, result.tokens, result.report)) log(l)
+      continue
+    }
 
     // keep only verdicts for tokens that actually shipped (the guard gate audits the
     // final catalog; extra rows would go stale as sources churn)
@@ -296,6 +308,10 @@ async function run() {
     for (const [reason, n] of byReason) log(`  rejected ${reason}: ${n}`)
   }
 
+  if (DRY_RUN) {
+    log('\ndry run complete — no files written')
+    return
+  }
   const { file, count } = writeTrustFixture(allVerdicts, chains)
   log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
 }
