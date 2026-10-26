@@ -127,3 +127,33 @@ describe('estimateSwapUsd — fail-closed contract', () => {
       .toEqual({ usd: 0, priced: false })
   })
 })
+
+// [feat/swap-price-tiers D2] The server's per-leg reference price (GET /api/swap-price-tier, the ADR-024
+// quorum: a priced OR single-source leg) feeds the value estimate, so the value thresholds apply from
+// the priced value — and the single-source notice's "Value-based limits use that price" is literally true.
+describe('estimateSwapUsd — server reference price per side', () => {
+  it('uses the reference price for a side with no stable / Chainlink / ETH pricing', () => {
+    expect(estimateSwapUsd(base({ amountIn: 20_000, referencePriceIn: 0.5 })))
+      .toEqual({ usd: 10_000, priced: true })
+  })
+
+  it('… and for the OUTPUT side', () => {
+    expect(estimateSwapUsd(base({ amountOut: 1_000, referencePriceOut: 12 })))
+      .toEqual({ usd: 12_000, priced: true })
+  })
+
+  it('Chainlink wins over the reference price when both exist', () => {
+    expect(estimateSwapUsd(base({ amountIn: 1, chainlinkPriceIn: 3_000, referencePriceIn: 10 })))
+      .toEqual({ usd: 3_000, priced: true })
+  })
+
+  it('the reference price replaces the conservative ETH≈$2k fallback when present', () => {
+    expect(estimateSwapUsd(base({ tokenIn: tok('WETH'), amountIn: 1, referencePriceIn: 2_500 })))
+      .toEqual({ usd: 2_500, priced: true })
+  })
+
+  it('a null or non-positive reference price prices nothing (the fail-closed contract is unchanged)', () => {
+    expect(estimateSwapUsd(base({ amountIn: 1, referencePriceIn: 0 }))).toEqual({ usd: 0, priced: false })
+    expect(estimateSwapUsd(base({ amountIn: 1, referencePriceIn: null }))).toEqual({ usd: 0, priced: false })
+  })
+})
