@@ -120,3 +120,27 @@ export function parseCoingeckoMarkets(
   }
   return market
 }
+
+const DAY_MS = 86_400_000
+/** CoinGecko stamps its daily points at 00:00:00 UTC; tolerate a minute of skew. */
+const MIDNIGHT_SKEW_MS = 60_000
+
+/**
+ * [feat/catalog-single-source-volume] CoinGecko /coins/{id}/market_chart?vs_currency=usd&days=N&interval=daily:
+ * { total_volumes: [[ts, usd], ...] }. Each UTC-midnight point is the rolling 24h volume ending at
+ * that midnight (= the preceding COMPLETE day); the response also carries one trailing in-progress
+ * point stamped "now", which is dropped here (only midnight points are kept). Returns the values
+ * oldest → newest, or null for an alien/malformed payload (the caller treats that as a failed fetch).
+ * Without `interval=daily` the API answers hourly for days<=90 — never daily — so the URL must carry it.
+ */
+export function parseMarketChartDailyVolumes(raw: unknown): number[] | null {
+  const points = (raw as { total_volumes?: unknown })?.total_volumes
+  if (!Array.isArray(points)) return null
+  const out: Array<[number, number]> = []
+  for (const p of points) {
+    if (!Array.isArray(p) || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !Number.isFinite(p[1])) return null
+    if (p[0] % DAY_MS < MIDNIGHT_SKEW_MS) out.push([p[0], p[1]])
+  }
+  out.sort((a, b) => a[0] - b[0])
+  return out.map(([, v]) => v)
+}

@@ -40,6 +40,16 @@ export interface GeneratedToken {
   volumeSource?: string | null
   /** ISO date this build's volume snapshot was taken. Null exactly when volume24hUsd is null. */
   volumeFetchedAt?: string | null
+  /** [feat/catalog-single-source-volume] Present only on a row admitted on ONE source because its
+   *  24h volume cleared `minDailyVolumeUsd` on each of the last `days` days (see
+   *  scripts/token-catalog/lib/verify.ts evaluateSingleSource). Absent on every other row. */
+  admission?: {
+    rule: 'single-source-volume'
+    /** Per-day 24h USD volume, oldest → newest, exactly `days` entries. */
+    dailyVolumeUsd: number[]
+    minDailyVolumeUsd: number
+    days: number
+  }
 }
 
 interface CatalogFile {
