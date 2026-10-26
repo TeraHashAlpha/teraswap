@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import type { NarrativePhotoId } from '../photos/narrative'
 
 /**
@@ -59,3 +60,20 @@ export function pickActive(rects: readonly SectionRect[], viewportHeight: number
   if (!hit) hit = rects.find((r) => r.top > line && r.top < viewportHeight)
   return { photo: anyVisible && hit ? photoFor(hit.id, mobile) : null }
 }
+
+// ── entrance (MOTION-SPEC §4) ─────────────────────────────────────────────────────────────────────────────────
+
+/** 40 ms per element, capped at index 4: the last starts at 160 ms and the whole sequence ends by 320 ms. */
+export const STAGGER_MS = 40
+export const STAGGER_MAX_INDEX = 4
+export const staggerDelayMs = (index: number): number => Math.min(Math.max(index, 0), STAGGER_MAX_INDEX) * STAGGER_MS
+
+/** `style` for a `.ts-v2-rv` element: its place in the section's stagger (CSS reads `--i`). */
+export const rvAt = (index: number): CSSProperties => ({ '--i': index }) as CSSProperties
+
+/** The three "give me a flat page" preferences (MOTION-SPEC §5): no photo, no credit, flat `--bg`. */
+export const FLAT_QUERIES = ['(prefers-reduced-transparency: reduce)', '(prefers-contrast: more)', '(forced-colors: active)'] as const
+export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+/** `stack`: fixed cross-fading stack · `static`: each section paints its own photo (reduced motion) · `flat`: no photo. */
+export type NarrativeMode = 'stack' | 'static' | 'flat'

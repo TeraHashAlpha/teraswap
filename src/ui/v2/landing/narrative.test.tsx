@@ -6,10 +6,10 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NARRATIVE_PHOTOS } from '../photos/narrative'
-import { NarrativeStack } from './NarrativeStack'
+import { activeLayers, crossingIO, installBrowser, layer, mountPage, nearIO, scrollTo, section, setMobile, VH } from './narrative-harness'
 import {
   ACTIVE_LINE,
   ACTIVE_THRESHOLDS,
@@ -19,11 +19,8 @@ import {
   photoFor,
   photosFor,
   pickActive,
-  type NarrativeSectionId,
   type SectionRect,
 } from './narrative'
-
-const VH = 800
 
 // ── pure picker ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -99,67 +96,9 @@ describe('section → photo map (MOTION-SPEC §2)', () => {
 
 // ── the stack in a (mocked) browser ───────────────────────────────────────────────────────────────────────────
 
-class MockIO {
-  static all: MockIO[] = []
-  observed = new Set<Element>()
-  constructor(
-    public cb: IntersectionObserverCallback,
-    public options?: IntersectionObserverInit,
-  ) {
-    MockIO.all.push(this)
-  }
-  observe = (el: Element) => void this.observed.add(el)
-  unobserve = (el: Element) => void this.observed.delete(el)
-  disconnect = () => void this.observed.clear()
-  takeRecords = () => []
-  fire(entries: Partial<IntersectionObserverEntry>[]) {
-    this.cb(entries as IntersectionObserverEntry[], this as unknown as IntersectionObserver)
-  }
-}
-const nearIO = () => MockIO.all.find((o) => o.options?.rootMargin === NEAR_ROOT_MARGIN)!
-const crossingIO = () => MockIO.all.find((o) => Array.isArray(o.options?.threshold))!
-
-let mobile = false
-const rects: Partial<Record<NarrativeSectionId, { top: number; bottom: number }>> = {}
-const scrollTo = (y: number) => NARRATIVE_SECTIONS.forEach((id, i) => (rects[id] = { top: y + i * 900, bottom: y + (i + 1) * 900 }))
-const section = (id: string) => document.querySelector<HTMLElement>(`[data-ts-narrative="${id}"]`)!
-
-function mountPage() {
-  return render(
-    <div data-ts-landing="">
-      <NarrativeStack />
-      <main>
-        {NARRATIVE_SECTIONS.map((id) => (
-          <section key={id} id={id} data-ts-narrative={id} />
-        ))}
-      </main>
-    </div>,
-  )
-}
-const layer = (id: string) => document.querySelector<HTMLElement>(`.ts-v2-nar__layer[data-photo="${id}"]`)
-const activeLayers = () => Array.from(document.querySelectorAll('.ts-v2-nar__layer[data-active]')).map((l) => l.getAttribute('data-photo'))
 const settle = () => act(() => crossingIO().fire([]))
 
-beforeEach(() => {
-  MockIO.all = []
-  mobile = false
-  vi.stubGlobal('IntersectionObserver', MockIO)
-  vi.stubGlobal('innerHeight', VH)
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn((q: string) => ({
-      matches: q.includes('600px') ? mobile : false,
-      media: q,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  )
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    const r = rects[this.getAttribute('data-ts-narrative') as NarrativeSectionId] ?? { top: 99999, bottom: 100899 }
-    return { ...r, left: 0, right: 0, width: 0, height: r.bottom - r.top, x: 0, y: r.top, toJSON: () => ({}) }
-  })
-  scrollTo(2400) // scroll 0: the first narrative section starts well below the first screen
-})
+beforeEach(() => installBrowser())
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -247,7 +186,7 @@ describe('NarrativeStack: observers and lazy photos', () => {
   })
 
   it('mobile ≤ 600 px: three layers, and requesting every section never loads more than three photos', () => {
-    mobile = true
+    setMobile(true)
     mountPage()
     expect(Array.from(document.querySelectorAll('.ts-v2-nar__layer')).map((l) => l.getAttribute('data-photo'))).toEqual(['highway', 'tunnel', 'underpass'])
     act(() => nearIO().fire(NARRATIVE_SECTIONS.map((id) => ({ target: section(id), isIntersecting: true }))))

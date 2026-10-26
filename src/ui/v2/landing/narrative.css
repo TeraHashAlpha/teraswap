@@ -35,3 +35,39 @@
 @media (max-width: 600px) {
   .ts-v2-nar-credit { right: auto; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom)); transform: translate(-50%, 50%); }
 }
+
+/* ── Entrance (MOTION-SPEC §4) — plays once ────────────────────────────────────────────────────────────────────
+   A section is marked `data-nar-js` by NarrativeStack when it takes over; before that (SSR, no JS, no
+   IntersectionObserver) nothing is hidden. It gets `data-nar-in` when it crosses the 40 % line (or is already above it). */
+.ts-v2 { --enter-y: 12px; --stagger: 40ms; --stagger-max: 4; }
+
+[data-ts-narrative][data-nar-js] .ts-v2-rv { opacity: 0; transform: translateY(var(--enter-y)); }
+[data-ts-narrative][data-nar-js][data-nar-in] .ts-v2-rv {
+  opacity: 1; transform: none;
+  transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+  transition-delay: calc(min(var(--i, 0), var(--stagger-max)) * var(--stagger));
+}
+
+/* The hand underline draws once, left to right, over --t-underline, starting after --t-base. */
+[data-ts-narrative][data-nar-js] h2 svg { clip-path: inset(-50% 100% -50% -4px); }
+[data-ts-narrative][data-nar-js][data-nar-in] h2 svg {
+  clip-path: inset(-50% -4px -50% -4px);
+  transition: clip-path var(--t-underline) var(--ease-out) var(--t-base);
+}
+
+/* ── prefers-reduced-motion (§5): no stack; every section paints its own photo + veil; text and underline static ── */
+[data-ts-narrative][data-nar-static] { background: linear-gradient(var(--nar-veil), var(--nar-veil)), var(--nar-d) center / cover no-repeat; }
+@media (max-width: 600px) {
+  [data-ts-narrative][data-nar-static] { background: linear-gradient(var(--nar-veil), var(--nar-veil)), var(--nar-m) center / cover no-repeat; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-v2-nar, .ts-v2-nar-credit { display: none; }
+  [data-ts-narrative] .ts-v2-rv { opacity: 1 !important; transform: none !important; transition: none !important; }
+  [data-ts-narrative] h2 svg { clip-path: none !important; transition: none !important; }
+}
+
+/* ── reduced transparency / more contrast / forced colours (§5): flat --bg, no photo, no credit ──────────────── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  .ts-v2-nar, .ts-v2-nar-credit { display: none; }
+  [data-ts-narrative][data-nar-static] { background: none; }
+}
