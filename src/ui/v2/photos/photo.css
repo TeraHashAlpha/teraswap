@@ -1,0 +1,48 @@
+/* [ADR-025] Photo background (pack round4): the round-3 recipe as CSS layers over one photo, under the shell.
+   Recipe → layers: grade (grayscale · contrast 1.15 · brightness) → duotone (cream multiply) → veil → top/bottom
+   fades → 96 px solid footer band → cream halftone. Numbers are tokens (photo-tokens.ts pins them). */
+.ts-v2 {
+  --photo-veil: 0.45;
+  --photo-footer-band: 96px;
+  --photo-footer-band-alpha: 0.94;
+  --photo-grade: grayscale(1) contrast(1.15) brightness(0.5);
+  --plate-bg: rgba(11, 13, 15, 0.92);
+}
+
+.ts-v2-photo { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; isolation: isolate; }
+.ts-v2-photo__img { object-fit: cover; filter: var(--photo-grade); }
+.ts-v2-photo__layer { position: absolute; inset: 0; }
+.ts-v2-photo__tone { background: #EADFB6; mix-blend-mode: multiply; }
+.ts-v2-photo__veil { background: rgba(11, 13, 15, var(--photo-veil)); }
+.ts-v2-photo__fade {
+  background:
+    linear-gradient(to bottom, rgba(11, 13, 15, 0.88) 110px, rgba(11, 13, 15, 0) 300px),
+    linear-gradient(to top, rgba(11, 13, 15, 0.88), rgba(11, 13, 15, 0) 200px);
+}
+.ts-v2-photo__dots { background-image: radial-gradient(rgba(234, 223, 182, 0.05) 1px, transparent 1.25px); background-size: 6px 6px; }
+.ts-v2-photo__band {
+  position: absolute; inset-inline: 0; bottom: 0; height: var(--photo-footer-band);
+  background: rgba(11, 13, 15, var(--photo-footer-band-alpha));
+}
+
+/* Credit line (pack: "PHOTO {AUTHOR} / PEXELS", dim mono, right, just above the band) on a plate. */
+.ts-v2-photo-credit {
+  position: fixed; right: 1.25rem; bottom: calc(var(--photo-footer-band) + 2px); z-index: 5;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim);
+}
+
+/* Text on open photo gets a solid #0B0D0F plate (92%); contrast pairs are asserted in photo.test.ts. */
+.ts-v2-plate {
+  background: var(--plate-bg); border-radius: 6px; padding: 2px 8px;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+
+/* Fallback (pack round4): reduced transparency / more contrast / forced colours → flat --bg, no photo, no credit. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  .ts-v2-photo, .ts-v2-photo-credit { display: none; }
+}
+
+/* Mobile (pack round4): extra 35% veil over the photo (token), since the photo only shows behind header + tabs. */
+.ts-v2 { --photo-veil-mobile: 0.35; }
+.ts-v2-photo__veil-mobile { display: none; background: rgba(11, 13, 15, var(--photo-veil-mobile)); }
+@media (max-width: 639px) { .ts-v2-photo__veil-mobile { display: block; } }

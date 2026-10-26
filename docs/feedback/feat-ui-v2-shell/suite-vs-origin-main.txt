@@ -1,0 +1,4 @@
+origin/main 90eee44 (2026-10-26): 326 files / 5077 tests, lint 93, tsc clean
+origin/main + feat/ui-v2-shell (uncommitted merge, merges cleanly): 334 files / 5263 tests (+8 files, +186), lint 93 (=), tsc clean
+branch alone (base d4b43db): 331 files / 5231 tests; d4b43db: 323 / 5045
+v1 chunk/module comparison uses the merge-base build d4b43db on purpose: later main commits change v1 files (tokens), which would confound it

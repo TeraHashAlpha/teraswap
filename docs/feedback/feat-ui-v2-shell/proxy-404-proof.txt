@@ -1,0 +1,29 @@
+== gate OFF (no UI_V2_ENABLED, no cookie) — port 3113
+/v2              HTTP 404
+/v2/swap         HTTP 404
+/v2/portfolio    HTTP 404
+/v2/dca          HTTP 404
+/v2/limit        HTTP 404
+/v2/sltp         HTTP 404
+/v2/orders       HTTP 404
+/v2/history      HTTP 404
+/v2/analytics    HTTP 404
+/v2/_kit         HTTP 404
+/v2/anything     HTTP 404
+-- v1 pages under gate OFF (must be the v1 app, not v2):
+/                HTTP 200  v2-marker=0
+/swap            HTTP 200  v2-marker=0
+/analytics       HTTP 200  v2-marker=0
+/docs            HTTP 200  v2-marker=0
+== gate ON (UI_V2_ENABLED=true) — port 3112
+/swap            HTTP 200
+/portfolio       HTTP 200
+/dca             HTTP 200
+/limit           HTTP 200
+/sltp            HTTP 200
+/orders          HTTP 200
+/history         HTTP 200
+/analytics       HTTP 200
+/v2/swap         HTTP 200
+-- forged cookie, gate OFF:
+/v2/swap         HTTP 404
