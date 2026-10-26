@@ -39,6 +39,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupportedChainIds } from '@/lib/chains/registry'
+import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { trustedClientIp } from '@/lib/trusted-ip'
 import {
   fetchLogo,
   logoMiss,
@@ -48,6 +50,17 @@ import {
 } from '@/lib/logo-proxy'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * [chore/copy-leftovers] Per-IP budget. Since C8 this route streams bytes (it used to 302), so every
+ * cache MISS costs a server-side upstream fetch. Dedicated key + a higher ceiling than /api/quote's 30
+ * (a token list renders a logo per row: the shipped catalogs hold 987 / 311 / 296 tokens on
+ * Ethereum / Base / Arbitrum, so one full-list render on Base or Arbitrum is ~300 logo requests).
+ * 300/min is that burst, and matches RPC_RATE_LIMIT's 300/min for the same "read-only, UI-fan-out" shape.
+ * Only misses count: a logo already in the browser or Vercel edge cache (24 h) never reaches this
+ * function, so a repeat visit costs ~0. Degraded-mode fallback in checkRateLimit is 50% (150/min).
+ */
+const TOKEN_LOGO_RATE_LIMIT = { limit: 300, windowMs: 60_000 }
 
 /**
  * Validate the raw `chainId` param against the chain registry and return it as a NUMBER.
@@ -174,6 +187,26 @@ function upgradeCoinGeckoLogo(url: string): string {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const rateCheck = await checkRateLimit(
+    `token-logo:${trustedClientIp(req)}`,
+    TOKEN_LOGO_RATE_LIMIT.limit,
+    TOKEN_LOGO_RATE_LIMIT.windowMs,
+  )
+  if (!rateCheck.allowed) {
+    // no-store: a throttled answer must never be pinned in the CDN or browser cache in place of the logo.
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Try again in a minute.' },
+      {
+        status: 429,
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateCheck.resetAt),
+        },
+      },
+    )
+  }
+
   const { searchParams } = new URL(req.url)
   const address = searchParams.get('address') ?? ''
 

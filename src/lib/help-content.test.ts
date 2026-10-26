@@ -6,10 +6,13 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { helpSections } from './help-content'
-import { INTEGRATED_DEX_SOURCE_COUNT, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
+import { INTEGRATED_DEX_SOURCE_COUNT, INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
+import { DISABLED_SOURCES, AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 
 const whatIs = (sections = helpSections) =>
   sections.flatMap((s) => s.items).find((i) => i.q === 'What is TeraSwap?')!.a
+
+const answer = (q: string, sections = helpSections) => sections.flatMap((s) => s.items).find((i) => i.q === q)!.a
 
 afterEach(() => {
   vi.doUnmock('@/config/product-claims')
@@ -34,9 +37,34 @@ describe('help-content — "What is TeraSwap?"', () => {
     vi.resetModules()
     vi.doMock('@/config/product-claims', () => ({
       INTEGRATED_DEX_SOURCE_COUNT: 3,
+      INTEGRATED_DEX_SOURCE_LABELS: ['Alpha', 'Beta', 'Gamma'],
       SWAP_CHAIN_LIST_LABEL: 'Chain A and Chain B',
+      formatChainList: (names: readonly string[]) => names.join(' / '),
     }))
     const mocked = await import('./help-content')
     expect(whatIs(mocked.helpSections)).toContain('compares quotes across 3 liquidity sources simultaneously on Chain A and Chain B.')
+    expect(answer('How does the meta-aggregator work?', mocked.helpSections)).toContain('queries 3 sources (Alpha / Beta / Gamma) in parallel')
+    expect(answer('Which networks are supported?', mocked.helpSections)).toContain('supports Chain A and Chain B.')
+  })
+})
+
+describe('help-content — [chore/copy-leftovers] networks and sources are not typed as prose', () => {
+  it('"Which networks are supported?" lists the registry chains, not just Ethereum Mainnet', () => {
+    expect(answer('Which networks are supported?')).toContain(`supports ${SWAP_CHAIN_LIST_LABEL}.`)
+    expect(answer('Which networks are supported?')).not.toMatch(/supports Ethereum Mainnet/)
+  })
+
+  it('"How does the meta-aggregator work?" states the live count and exactly the quoting sources', () => {
+    const a = answer('How does the meta-aggregator work?')
+    expect(a).toContain(`queries ${INTEGRATED_DEX_SOURCE_COUNT} sources (${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}) in parallel`)
+    expect(a).not.toMatch(/\b10 sources\b/)
+  })
+
+  it('no help answer names a disabled source (odos / balancer / openocean / bebop …)', () => {
+    const text = helpSections.flatMap((s) => s.items).map((i) => `${i.q} ${i.a}`).join('\n')
+    for (const name of Object.keys(DISABLED_SOURCES)) {
+      const label = AGGREGATOR_META[name as AggregatorName]?.label ?? name
+      expect(text, `help text mentions disabled source "${label}"`).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'))
+    }
   })
 })

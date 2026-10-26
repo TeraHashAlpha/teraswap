@@ -12,6 +12,20 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
+// Stateful stand-in for the sliding-window limiter (same shape as /api/proxy/logo's test): counts per key and
+// honours the (limit, window) the route passes, so the test proves the route's wiring, not a canned answer.
+const hits = new Map<string, number>()
+const mockCheckRateLimit = vi.fn(async (key: string, limit: number, _windowMs: number) => {
+  const n = (hits.get(key) ?? 0) + 1
+  hits.set(key, n)
+  return n > limit
+    ? { allowed: false, remaining: 0, resetAt: 1_700_000_060_000 }
+    : { allowed: true, remaining: limit - n, resetAt: 0 }
+})
+vi.mock('@/lib/kv-rate-limiter', () => ({
+  checkRateLimit: (key: string, limit: number, windowMs: number) => mockCheckRateLimit(key, limit, windowMs),
+}))
+
 import { GET, __resetTokenLogoCache } from './route'
 import { getSupportedChainIds } from '@/lib/chains/registry'
 
@@ -26,9 +40,9 @@ const LIST_HOST = 'https://tokens.coingecko.com/'
 const dlUrl = (chainId: number | string, addr: string) =>
   `https://token-icons.llamao.fi/icons/tokens/${chainId}/${addr.toLowerCase()}?h=48&w=48`
 
-function req(params: Record<string, string>): NextRequest {
+function req(params: Record<string, string>, headers: Record<string, string> = {}): NextRequest {
   const qs = new URLSearchParams(params).toString()
-  return new NextRequest(`http://localhost/api/token-logo?${qs}`)
+  return new NextRequest(`http://localhost/api/token-logo?${qs}`, { headers })
 }
 
 type Override = (url: string) => Response | Promise<Response> | undefined
@@ -62,6 +76,8 @@ describe('GET /api/token-logo', () => {
   beforeEach(() => {
     __resetTokenLogoCache()
     vi.restoreAllMocks()
+    hits.clear()
+    mockCheckRateLimit.mockClear()
   })
 
   afterEach(() => {
@@ -328,5 +344,50 @@ describe('GET /api/token-logo', () => {
       expect(res.status, `chainId ${unsupported} must be rejected`).toBe(400)
     }
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/token-logo — [chore/copy-leftovers] per-IP rate limit (dedicated 300/min)', () => {
+  const ip = (addr: string) => ({ 'x-vercel-forwarded-for': addr })
+
+  beforeEach(() => {
+    __resetTokenLogoCache()
+    hits.clear()
+    mockCheckRateLimit.mockClear()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('lets 300 requests per IP through, answers the 301st with a no-store 429 and fetches nothing for it', async () => {
+    const fetchMock = stubNetwork()
+    for (let i = 0; i < 300; i++) {
+      const ok = await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('198.51.100.9')))
+      expect(ok.status).toBe(200)
+    }
+    const callsBefore = fetchMock.mock.calls.length
+
+    const limited = await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('198.51.100.9')))
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('cache-control')).toBe('no-store')
+    expect(limited.headers.get('x-ratelimit-remaining')).toBe('0')
+    expect(limited.headers.get('x-ratelimit-reset')).toBe('1700000060000')
+    expect(await limited.json()).toEqual({ error: 'Rate limit exceeded. Try again in a minute.' })
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+    expect(mockCheckRateLimit).toHaveBeenLastCalledWith('token-logo:198.51.100.9', 300, 60_000)
+  })
+
+  it('is per IP: a different client is unaffected by an exhausted one', async () => {
+    stubNetwork()
+    hits.set('token-logo:198.51.100.9', 300)
+    expect((await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('198.51.100.9')))).status).toBe(429)
+    expect((await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('203.0.113.7')))).status).toBe(200)
+  })
+
+  it('uses its own key — it does not spend the /api/proxy/logo ("logo:<ip>") budget', async () => {
+    stubNetwork()
+    await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('198.51.100.9')))
+    expect(mockCheckRateLimit.mock.calls[0][0]).toBe('token-logo:198.51.100.9')
+    expect(hits.has('logo:198.51.100.9')).toBe(false)
   })
 })
