@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { config, proxy } from './proxy'
-import { isV2KitEnabled } from '@/ui/v2/kit-gate'
+import { isV2EnableEnabled, isV2KitEnabled } from '@/ui/v2/kit-gate'
 import { V2_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
 import { signUiVersionCookie } from '@/ui/v2/ui-cookie'
 
@@ -49,7 +49,7 @@ describe('`/` (the v1 landing)', () => {
     expect(passes(proxy(req('/', 'f'.repeat(64))))).toBe(true)
     expect(passes(proxy(req('/', signUiVersionCookie('other-secret'))))).toBe(true)
   })
-  it('UI_V2_ENABLED=true → rewritten to /v2', () => {
+  it('UI_V2_ENABLED=true → rewritten to /v2 (whose home is the Swap tab — app/v2/page.test.tsx)', () => {
     process.env.UI_V2_ENABLED = 'true'
     expect(rewrittenTo(proxy(req('/')))).toBe('/v2')
   })
@@ -164,6 +164,49 @@ describe('/v2/_kit (dev kit: Preview / next dev only, independent of the switch)
   it('does not open the rest of /v2 (preview is not the switch)', () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('VERCEL_ENV', 'preview')
+    expect(rewrittenTo(proxy(req('/v2')))).toBe('/v2-disabled')
+  })
+})
+
+describe('/v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit)', () => {
+  const cookie = () => signUiVersionCookie(SECRET)
+
+  it.each([
+    ['production', 'production', false],
+    ['production', '', false],
+    ['test', '', false],
+    ['production', 'preview', true],
+    ['development', '', true],
+  ])('isV2EnableEnabled NODE_ENV=%s VERCEL_ENV=%s → %s', (nodeEnv, vercelEnv, expected) => {
+    vi.stubEnv('NODE_ENV', nodeEnv)
+    vi.stubEnv('VERCEL_ENV', vercelEnv)
+    expect(isV2EnableEnabled()).toBe(expected)
+    expect(isV2EnableEnabled()).toBe(isV2KitEnabled())
+  })
+
+  it('production: real 404 even with the owner cookie or UI_V2_ENABLED=true', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'production')
+    expect(rewrittenTo(proxy(req('/v2/_enable')))).toBe('/v2-disabled')
+    expect(rewrittenTo(proxy(req('/v2/_enable', cookie())))).toBe('/v2-disabled')
+    process.env.UI_V2_ENABLED = 'true'
+    expect(rewrittenTo(proxy(req('/v2/_enable')))).toBe('/v2-disabled')
+  })
+
+  it('preview with NO cookie (a v1 visitor) → passes through: this is how the cookie gets set', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'preview')
+    expect(passes(proxy(req('/v2/_enable')))).toBe(true)
+  })
+
+  it('development → passes through; look-alikes and the rest of /v2 stay behind the switch', () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('VERCEL_ENV', '')
+    expect(passes(proxy(req('/v2/_enable')))).toBe(true)
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'preview')
+    expect(rewrittenTo(proxy(req('/v2/_enable/extra')))).toBe('/v2-disabled')
+    expect(rewrittenTo(proxy(req('/v2/_enabled')))).toBe('/v2-disabled')
     expect(rewrittenTo(proxy(req('/v2')))).toBe('/v2-disabled')
   })
 })

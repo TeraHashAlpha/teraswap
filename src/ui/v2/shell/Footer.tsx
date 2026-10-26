@@ -7,6 +7,8 @@ import { useQuoteChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { fmtInt } from '@/lib/format'
+import { PhotoCredit } from '../photos/PhotoCredit'
+import type { ShellPhoto } from '../photos/photos'
 
 // Mainnet block time is ~12 s; polling faster only reissues eth_blockNumber calls (same value and rationale as v1).
 export const V2_FOOTER_BLOCK_POLL_MS = 12_000
@@ -34,9 +36,10 @@ const SEP = (
 /**
  * [ADR-025] Full footer (pack 01): every v1 footer item — Docs, GitHub, X, Fee, No infinite approvals, chain · block
  * with explorer link, Privacy, Terms, Contact, ©, TeraHelps — plus the risk line. The block is the SELECTED chain's
- * (wallet chain when connected, dropdown pick when not), polled like v1 (paused in hidden tabs).
+ * (wallet chain when connected, dropdown pick when not), polled like v1 (paused in hidden tabs). `photo` puts the photo
+ * credit inside this container (left), away from the floating ? / ♫.
  */
-export function Footer() {
+export function Footer({ photo }: { photo?: ShellPhoto }) {
   const chainId = useQuoteChainId()
   const chain = footerChain(chainId)
   const { data: blockNumber } = useBlockNumber({
@@ -101,6 +104,7 @@ export function Footer() {
             TeraHelps
           </a>
         </div>
+        {photo ? <PhotoCredit photo={photo} /> : null}
       </div>
     </footer>
   )

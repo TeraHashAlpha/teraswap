@@ -4,6 +4,8 @@
  * wagmi / RainbowKit / next are mocked at the module edge; everything under test is the real v2 shell + the real
  * v1 helpers it reuses (useQuoteChainId, registry, help-content, product-claims).
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -74,7 +76,7 @@ import { SUPPORT_EMAIL } from '@/lib/constants'
 import { AppShell } from './AppShell'
 import { resetMusicStateForTests } from './music'
 import { V2_RISK_LINE } from './Footer'
-import { shellChains } from './chains'
+import { NETWORK_SUBTITLE, shellChains } from './chains'
 
 beforeEach(() => {
   h.isConnected = false
@@ -126,14 +128,25 @@ describe('network dropdown', () => {
     expect(screen.queryByPlaceholderText(/search/i)).toBeNull()
   })
 
-  it('subtitles come from isDcaLive: Ethereum "Swap", Base "Swap · DCA", Arbitrum "Swap" until its executor is live', () => {
-    expect(shellChains().map((c) => [c.name, c.subtitle])).toEqual([
-      ['Ethereum', 'Swap'],
-      ['Base', 'Swap · DCA'],
-      ['Arbitrum One', 'Swap'],
-    ])
-    h.dcaLive = new Set([8453, 42161])
-    expect(shellChains().map((c) => c.subtitle)).toEqual(['Swap', 'Swap · DCA', 'Swap · DCA'])
+  it('subtitle is "Change" on every network — one slot constant, independent of isDcaLive', () => {
+    expect(NETWORK_SUBTITLE).toBe('Change')
+    for (const live of [new Set<number>(), new Set([8453]), new Set([8453, 42161])]) {
+      h.dcaLive = live
+      expect(shellChains().map((c) => [c.name, c.subtitle])).toEqual([
+        ['Ethereum', 'Change'],
+        ['Base', 'Change'],
+        ['Arbitrum One', 'Change'],
+      ])
+    }
+  })
+
+  it('renders "Change" under each of the 3 names and never "Swap" / "Swap · DCA"', () => {
+    const list = openMenu()
+    for (const name of ['Ethereum', 'Base', 'Arbitrum One']) {
+      const option = within(list).getByRole('option', { name: new RegExp(name) })
+      expect(option.textContent?.replace('✓', '')).toBe(`${name}Change`)
+    }
+    expect(list.textContent).not.toMatch(/Swap/)
   })
 
   it('marks the selected network; disconnected selection goes through the shared store (v1 semantics)', () => {
@@ -221,6 +234,113 @@ describe('DCA tab', () => {
     expect(screen.queryByText(/DCA runs on/)).toBeNull()
     expect(document.querySelector('[data-tab-pane="dca"]')?.textContent).not.toMatch(/soon/i)
     expect(screen.getByRole('tab', { name: 'DCA' }).textContent).not.toMatch(/soon/i)
+  })
+})
+
+describe('DCA tab · per selected network × live set (the gate, never the skeleton, when DCA runs elsewhere)', () => {
+  const NONE: number[] = []
+  const BASE_ONLY = [8453]
+  const BOTH = [8453, 42161]
+  const NAMES: Record<number, string> = { 1: 'Ethereum', 8453: 'Base', 42161: 'Arbitrum One' }
+
+  // [selected chain, live chains, heading or null (= plain pane), switch buttons]
+  const CASES: Array<[number, number[], string | null, string[]]> = [
+    [1, BASE_ONLY, 'DCA runs on Base.', ['Switch to Base']],
+    [1, BOTH, 'DCA runs on Base and Arbitrum One.', ['Switch to Base', 'Switch to Arbitrum One']],
+    [1, NONE, null, []],
+    [8453, BASE_ONLY, null, []],
+    [8453, BOTH, null, []],
+    // Arbitrum is in DCA_CHAINS: the gate is about the NETWORK not being a DCA network, so it never shows there.
+    [42161, BASE_ONLY, null, []],
+    [42161, BOTH, null, []],
+  ]
+
+  it.each(CASES)('chain %i, live %j → %j', (chainId, live, heading, buttons) => {
+    h.pathname = '/dca'
+    h.dcaLive = new Set(live)
+    useDisconnectedChainSelection.setState({ chainId })
+    render(<AppShell />)
+    const pane = document.querySelector('[data-tab-pane="dca"]')!
+    expect(pane).not.toBeNull()
+    if (heading === null) {
+      expect(document.querySelector('[data-dca-gate]')).toBeNull()
+      expect(screen.queryByText(/DCA runs on/)).toBeNull()
+      return
+    }
+    expect(document.querySelector('[data-dca-gate]')).not.toBeNull()
+    // The skeleton does not cover it: no busy pane, no skeleton blocks.
+    expect(pane.hasAttribute('aria-busy')).toBe(false)
+    expect(pane.querySelector('.ts-v2-skeleton')).toBeNull()
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(heading)
+    expect(screen.getByText(`${NAMES[chainId]} is selected. Switch network to create or manage DCA positions.`)).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /^Switch to / }).map((b) => b.textContent)).toEqual(buttons)
+  })
+
+  it('every switch button selects that network', () => {
+    h.pathname = '/dca'
+    h.dcaLive = new Set(BOTH)
+    render(<AppShell />)
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Arbitrum One' }))
+    expect(useDisconnectedChainSelection.getState().chainId).toBe(42161)
+  })
+
+  it('connected on Ethereum: the buttons call wagmi switchChain', () => {
+    h.pathname = '/dca'
+    h.isConnected = true
+    h.walletChainId = 1
+    render(<AppShell />)
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Base' }))
+    expect(h.switchChain).toHaveBeenCalledWith({ chainId: 8453 })
+  })
+})
+
+describe('photo credit placement (owner review 26 Oct: never over the floating ? / ♫)', () => {
+  const PHOTO_CSS = readFileSync(join(__dirname, '..', 'photos', 'photo.css'), 'utf8')
+
+  it('the credit is inside the footer container; the fabs and the photo layer are distinct containers', () => {
+    render(<AppShell tab="swap" />)
+    const footer = document.querySelector('[data-ts-footer]')!
+    const credit = screen.getByText('Photo Phil Evenden / Pexels')
+    expect(footer.contains(credit)).toBe(true)
+    const fabs = [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]
+    for (const fab of fabs) {
+      expect(footer.contains(fab)).toBe(false)
+      expect(fab.contains(credit) || credit.contains(fab)).toBe(false)
+    }
+    expect(document.querySelector('.ts-v2-photo')!.contains(credit)).toBe(false)
+  })
+
+  it('left-aligned, in flow: the credit CSS has no fixed/absolute positioning and no right offset', () => {
+    const rule = PHOTO_CSS.match(/\.ts-v2-photo-credit \{[^}]*\}/)![0]
+    expect(rule).not.toMatch(/position:\s*(fixed|absolute)/)
+    expect(rule).not.toMatch(/\bright:|\bbottom:/)
+  })
+
+  it('the fabs are the only fixed corner elements (viewport corners), the credit is not one of them', () => {
+    render(<AppShell tab="swap" />)
+    const fixed = Array.from(document.querySelectorAll('button')).filter((b) => /\bfixed\b/.test(b.className))
+    expect(fixed).toHaveLength(2)
+    expect(/\bfixed\b/.test(screen.getByText('Photo Phil Evenden / Pexels').className)).toBe(false)
+  })
+
+  it('under 640 px the fabs sit at the bottom edge (the footer reserves that space), from sm up above the photo band', () => {
+    render(<AppShell tab="swap" />)
+    for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
+      expect(fab.className).toContain('bottom-3')
+      expect(fab.className).toContain('sm:bottom-[calc(var(--photo-footer-band)+12px)]')
+    }
+    // the footer's own bottom padding is what keeps the credit / links clear of them
+    expect(document.querySelector('[data-ts-footer]')!.className).toContain('pb-20')
+  })
+
+  it.each([
+    ['swap', 'Phil Evenden'],
+    ['dca', 'Willbone Gallery'],
+    ['portfolio', 'Peter Dyllong'],
+    ['analytics', 'Yakup Gökdeniz'],
+  ] as const)('%s → credit names the photographer of that tab\'s photo', (tab, who) => {
+    render(<AppShell tab={tab} />)
+    expect(screen.getByText(`Photo ${who} / Pexels`)).toBeTruthy()
   })
 })
 

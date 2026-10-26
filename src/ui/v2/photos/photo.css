@@ -25,9 +25,10 @@
   background: rgba(11, 13, 15, var(--photo-footer-band-alpha));
 }
 
-/* Credit line (pack: "PHOTO {AUTHOR} / PEXELS", dim mono, right, just above the band) on a plate. */
+/* Credit line (pack: "PHOTO {AUTHOR} / PEXELS", dim mono) on a plate. It sits IN the footer (flow, left), not fixed to
+   the viewport: a fixed credit collided with the floating ? / ♫ (owner review, 26 Oct). Re-placed again in round 5. */
 .ts-v2-photo-credit {
-  position: fixed; right: 1.25rem; bottom: calc(var(--photo-footer-band) + 2px); z-index: 5;
+  display: inline-block; margin: 8px 0 0;
   font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim);
 }
 

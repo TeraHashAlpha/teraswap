@@ -86,7 +86,7 @@ describe('tokens (photo-tokens.ts ⇄ photo.css)', () => {
 })
 
 describe('<PhotoBackground>', () => {
-  it('one <picture>: AVIF 1080 (media) + AVIF 1920 sources, WebP <img>, decorative, with the credit line', () => {
+  it('one <picture>: AVIF 1080 (media) + AVIF 1920 sources, WebP <img>, decorative', () => {
     const { container } = render(<PhotoBackground tab="swap" />)
     const sources = container.querySelectorAll('picture source')
     expect(Array.from(sources).map((s) => [s.getAttribute('type'), s.getAttribute('media')])).toEqual([
@@ -99,7 +99,8 @@ describe('<PhotoBackground>', () => {
     expect(img.getAttribute('alt')).toBe('')
     expect(img.getAttribute('srcset') ?? '').toContain('.webp')
     expect(container.querySelector('[data-photo="zakim"]')?.getAttribute('aria-hidden')).toBe('true')
-    expect(screen.getByText('Photo Phil Evenden / Pexels')).toBeTruthy()
+    // The credit line is the footer's (PhotoCredit), not this layer's.
+    expect(screen.queryByText(/Pexels/)).toBeNull()
   })
 
   it('above the fold → eager + fetchPriority high; otherwise lazy and not high', () => {
@@ -109,7 +110,6 @@ describe('<PhotoBackground>', () => {
     rerender(<PhotoBackground tab="dca" aboveFold={false} />)
     img = container.querySelector('picture img')!
     expect([img.getAttribute('loading'), img.getAttribute('fetchpriority')]).toEqual(['lazy', 'auto'])
-    expect(screen.getByText('Photo Willbone Gallery / Pexels')).toBeTruthy()
   })
 
   it('does not use next/image `priority` (its preload would fetch the WebP while AVIF browsers use the <source>)', () => {
