@@ -9,6 +9,13 @@
 - **Arbitrum DCA is dark** (`isDcaLive(42161)` false). Asked: derive from `isDcaLive` (chosen) vs literal spec text. Today Arbitrum reads "Swap" and the
   Ethereum gate "DCA runs on Base."; both become the spec text ("Swap · DCA", "…Base and Arbitrum One.") with no edit once its executor is live.
 
+## Owner decision on evidence 7, verbatim (2026-10-26)
+Question: "v1 byte-identical (B0 method)" cannot hold at chunk-file level once the v2 shell shares wagmi/RainbowKit/v1 hooks … How should I record the v1 proof?
+Answer chosen: **"Module-identical proof (Recommended)"** — option text: "Evidence 7 = v1 source diff empty + 0 v2 code in any v1-loaded chunk + same route table
+(/, /swap, /analytics… all ○) + same module set, bytes ±0.02%; state plainly that chunk file names differ. Ships as built."
+Not chosen: "Reduce sharing, re-measure"; "Stop: strict identity or nothing". So the byte-identical requirement is waived by the owner for this branch, replaced by the proof above
+(precision note: "same module set" is 1–4 small modules per page off, see the owner-decisions bullet and `v1-module-sets.txt`).
+
 ## Decisions / reads
 - `useQuoteChainId` is in `src/hooks/useChainId.ts`. Out-of-list reads (none edited): `app/{page,swap/page,providers,layout}`, `ChainSelector`, `ChainIcon`,
   `lib/{chains/registry,format,constants,help-content}`, `order-engine/limit-launch`, `useOrderNotifications`, `next.config.js`, `tailwind.v2.config.ts`.
