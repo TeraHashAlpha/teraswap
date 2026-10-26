@@ -58,6 +58,22 @@ export interface Candidate {
   /** True when sources disagreed on decimals — on-chain is the arbiter, but we log it. */
   decimalsDisagree: boolean
   logoURI?: string
+  /** [feat/catalog-single-source-volume] Set only when the candidate was admitted on ONE source
+   *  via the 7-day volume rule — carried through to the emitted CatalogRow. */
+  admission?: SingleSourceAdmission
+}
+
+/**
+ * [feat/catalog-single-source-volume] Provenance of a token admitted on a single source because
+ * its 24h USD volume cleared the floor on EACH of the last `days` complete days. Emitted on the
+ * catalog row (optional key — absent on every two-source row).
+ */
+export interface SingleSourceAdmission {
+  rule: 'single-source-volume'
+  /** The per-day 24h USD volumes, oldest → newest, exactly `days` entries. */
+  dailyVolumeUsd: number[]
+  minDailyVolumeUsd: number
+  days: number
 }
 
 /**
@@ -114,6 +130,9 @@ export interface CatalogRow {
   volumeSource: SourceId | null
   /** ISO date this build's volume snapshot was taken. Null exactly when volume24hUsd is null. */
   volumeFetchedAt: string | null
+  /** [feat/catalog-single-source-volume] Present only on rows admitted on ONE source via the
+   *  7-day volume rule (verified:true there means volume + on-chain guard, not >=minSources). */
+  admission?: SingleSourceAdmission
 }
 
 export interface Rejection {
@@ -129,6 +148,11 @@ export interface Rejection {
     | 'symbol-conflict'
     | 'capped'
   detail?: string
+  /** [feat/catalog-single-source-volume] Set on an 'insufficient-sources' rejection of a
+   *  single-source candidate that WAS evaluated by the volume rule. 'below-floor' = at least one
+   *  day under the floor; 'fetch-failed' = history unavailable (fail-closed). The reason stays
+   *  'insufficient-sources' so retainFlakySeeds keeps treating it as a vote shortfall. */
+  singleSource?: 'below-floor' | 'fetch-failed'
 }
 
 /**
@@ -186,6 +210,23 @@ export interface PipelineConfig {
   requiredSourceForNew: SourceId
   /** Canonical priority for symbol-conflict resolution + metadata tiebreaks (first wins). */
   sourcePriority: SourceId[]
+  /** [feat/catalog-single-source-volume] Default single-source admission rule (see SingleSourceConfig). */
+  singleSource: SingleSourceConfig
+  /** Per-chain overrides, merged over `singleSource` (partial — unset keys inherit the default). */
+  singleSourceByChain?: Record<number, Partial<SingleSourceConfig>>
+}
+
+/**
+ * [feat/catalog-single-source-volume] Admit a token present in exactly ONE source (CoinGecko) when
+ * its 24h USD volume was >= minDailyVolumeUsd on EACH of the last `days` complete UTC days.
+ * Two-source tokens never touch this rule. See docs/Runbooks/token-catalog-single-source-volume.md.
+ */
+export interface SingleSourceConfig {
+  enabled: boolean
+  minDailyVolumeUsd: number
+  days: number
+  /** true = every one of the `days` values must clear the floor (the owner decision). */
+  requireEveryDay: boolean
 }
 
 /** Everything assembleCatalog needs for one chain. Keys are LOWERCASE addresses. */
@@ -231,6 +272,34 @@ export interface BuildReport {
   /** [fix/catalog-continuity-drop-on-trust-loss] Continuity seeds DROPPED because they lost
    *  their trusted-list membership and their external agreement (no freeze, no silence). */
   trustLost: TrustLostSeed[]
+  /** [feat/catalog-single-source-volume] Run summary for the single-source volume rule. */
+  singleSource: SingleSourceReport
+}
+
+/** One evaluated single-source candidate — the dry-run / run-summary record. */
+export interface SingleSourceEvaluation {
+  address: `0x${string}`
+  symbol: string
+  outcome: 'admitted' | 'below-floor' | 'fetch-failed'
+  dailyVolumeUsd?: number[]
+  medianUsd?: number
+}
+
+export interface SingleSourceReport {
+  enabled: boolean
+  /** Single-source CoinGecko candidates before any volume check. */
+  candidates: number
+  /** Skipped without a history call: current 24h volume unknown or under the floor. */
+  prefiltered: number
+  /** History calls attempted (one token per call). */
+  evaluated: number
+  admitted: number
+  belowFloor: number
+  /** History unavailable → NOT admitted this run (fail-closed). */
+  fetchFailed: number
+  /** Admitted by the rule but dropped by the per-run new-token cap (ordered by 7-day median desc). */
+  deferred: Array<{ address: `0x${string}`; symbol: string; medianUsd: number }>
+  evaluations: SingleSourceEvaluation[]
 }
 
 export class CoreTokenValidationError extends Error {

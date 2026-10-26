@@ -54,7 +54,7 @@ const nextConfig = {
               // wallet icon is CSP-blocked (img-src) → generic placeholder. Mirrors media-src's blob:.
               // [fix/functional-chain-ui C8] Trust Wallet logos are served same-origin by
               // /api/proxy/logo, so GitHub's raw host is no longer allowed here.
-              "img-src 'self' data: blob: https://tokens.1inch.io https://assets.coingecko.com",
+              "img-src 'self' data: blob: https://tokens.1inch.io",
               // Fonts: all self-hosted via next/font/local (Inter, JetBrains Mono, Clash Display)
               "font-src 'self' data:",
               // Connect: aggregator APIs + RPC + WalletConnect + CoW + Etherscan

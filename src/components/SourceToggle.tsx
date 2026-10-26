@@ -6,7 +6,7 @@ import { INTEGRATED_DEX_SOURCE_NAMES } from '@/config/product-claims'
 
 // Sources shown in the toggle — the same product-claims list the landing page and the
 // "N integrated DEX sources" copy read (ADAPTER_REGISTRY minus DISABLED_SOURCES), so the
-// "x/y sources" label can never drift from either. A source that never quotes (odos, balancer,
+// "N sources enabled" label can never drift from either. A source that never quotes (odos, balancer,
 // openocean, bebop — see DISABLED_SOURCES in lib/constants.ts) would do nothing if toggled, so
 // it is never offered.
 export const TOGGLEABLE_SOURCES = [...INTEGRATED_DEX_SOURCE_NAMES] as AggregatorName[]
@@ -28,7 +28,9 @@ export default function SourceToggle({ excludedSources, onToggle }: SourceToggle
         className="flex items-center gap-1.5 rounded-lg border border-cream-08 bg-surface px-2.5 py-1 text-[11px] text-cream-50 transition hover:border-cream-15 hover:text-cream"
       >
         <span className="text-[10px]">&#9881;</span>
-        <span>{enabledCount}/{TOGGLEABLE_SOURCES.length} sources</span>
+        {/* [chore/copy-leftovers] "enabled", not "x/y": next to the quote card's "N sources queried" (how many
+            answered) a bare "8/8 sources" read as a contradiction. This is the user's toggle state only. */}
+        <span>{enabledCount === TOGGLEABLE_SOURCES.length ? `${enabledCount} sources enabled` : `${enabledCount} of ${TOGGLEABLE_SOURCES.length} sources enabled`}</span>
       </button>
 
       {open && (

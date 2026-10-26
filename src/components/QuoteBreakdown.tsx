@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { MetaQuoteResult } from '@/lib/api'
 import type { Token } from '@/lib/tokens'
 import type { PriceCheck } from '@/lib/chainlink'
+import { singleSourceLabel, type SwapPriceTierResponse } from '@/lib/swap-price-tier'
 import type { ApprovalPlan } from '@/lib/approvals'
 import { FEE_PERCENT, AGGREGATOR_META, PRICE_DEVIATION_WARN, PRICE_DEVIATION_BLOCK, type AggregatorName } from '@/lib/constants'
 import { feeMode, isFeeCollected } from '@/lib/fee-mode'
@@ -24,6 +25,9 @@ interface Props {
   slippage: number
   countdown: number
   priceCheck: PriceCheck
+  /** [feat/swap-price-tiers D1] The SERVER's price tier for the pair (useSwapPriceTier). null / undefined =
+   *  unknown → no tier notice (the client never guesses). */
+  priceTier?: SwapPriceTierResponse | null
   /** [chore/swap-fee-usd-fix] Each token's OWN Chainlink USD price (null when it
    *  has no feed). Used to value the platform fee from the reliably-priced side
    *  instead of `priceCheck.chainlinkPrice`, which falls back to the OTHER leg's
@@ -74,7 +78,7 @@ function estimatedTime(source: AggregatorName): number | undefined {
 }
 
 export default function QuoteBreakdown({
-  meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, tokenInUsdPrice, tokenOutUsdPrice, approvalPlan, onEditSlippage, gasEstimate,
+  meta, tokenIn, tokenOut, amountIn, slippage, countdown, priceCheck, priceTier, tokenInUsdPrice, tokenOutUsdPrice, approvalPlan, onEditSlippage, gasEstimate,
   smartMevApplied = false, mevExposedBest: _mevExposedBest = false, onUseGasless,
   onRefresh, refreshing = false, chainId = DEFAULT_CHAIN_ID,
 }: Props) {
@@ -207,12 +211,22 @@ export default function QuoteBreakdown({
           independently verified. It clears as soon as the feed responds.
         </div>
       )}
-      {priceCheck.oracleUnavailable && !priceCheck.oracleReadFailed && (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300">
-          <span className="font-semibold">&#9888; No Chainlink oracle</span> for{' '}
-          {(priceCheck.oracleMissingSymbols?.length ? priceCheck.oracleMissingSymbols : [tokenIn.symbol]).join(' / ')}.
-          {' '}This price isn&apos;t independently Chainlink-verified, but your swap is still protected by{' '}
-          <strong>multi-source price comparison</strong> and an <strong>on-chain minimum-output</strong> guarantee — double-check the rate looks right before swapping.
+      {/* [feat/swap-price-tiers D1] The tier notice follows the SERVER's answer (GET /api/swap-price-tier,
+          the ADR-024 quorum per leg). It replaces the 9S S2 "No Chainlink oracle … multi-source price
+          comparison" amber, which pre-dated the value gate and claimed a reference price the client never
+          had. priced → nothing; unknown (null) → nothing — the client never guesses, /api/swap decides.
+          Copy for single-source is the owner's, verbatim (2026-10-26). */}
+      {priceTier?.tier === 'single-source' && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300" data-testid="price-tier-single-source">
+          <span className="font-semibold">&#9888; Price from one source only ({singleSourceLabel(priceTier)}).</span>
+          {' '}Value-based limits use that price; double-check the rate before swapping.
+        </div>
+      )}
+      {priceTier?.tier === 'unpriced' && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300" data-testid="price-tier-unpriced">
+          <span className="font-semibold">&#9888; No reference price for this pair.</span>
+          {' '}We couldn&apos;t find a Chainlink, DefiLlama or CoinGecko price for {tokenIn.symbol} or {tokenOut.symbol}, so we
+          can&apos;t estimate this trade&apos;s USD value or apply value-based limits. You&apos;ll be asked to confirm before swapping.
         </div>
       )}
 

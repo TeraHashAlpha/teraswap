@@ -1,0 +1,12 @@
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > tab click = playTouchMP3 (touch.mp3, 0.5)
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > …and when the tab click is the visitor's FIRST interaction: touch, then the music starts (v1 does both too)
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > first click starts the music exactly like v1 (background.mp3, 0.08, loop) — and only once
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > first keydown starts the music exactly like v1 (background.mp3, 0.08, loop) — and only once
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > first scroll starts the music exactly like v1 (background.mp3, 0.08, loop) — and only once
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > ♫ off then on = toggleBackgroundMusic twice: pause, then a fresh 0.08 loop
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > ♫ as the very first interaction mutes without v1's auto-start undoing it (document listener not reached)
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > ♫ toggles ONLY the music: with it off, a tab click still plays touch.mp3
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > remounting the shell (tab navigation) neither restarts nor un-mutes the music
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sound parity — shell vs v1 (real sounds.ts, mocked audio) > help, network menu, connect and the ? / ✕ controls make no sound in v1, none in v2
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sounds that belong to later blocks are NOT wired in the shell > no shell source references waiting / quote-received / confirm / cancel / click synths
+ ✓ src/ui/v2/shell/sounds-parity.test.tsx > sounds that belong to later blocks are NOT wired in the shell > the shell calls only the v1 functions in the table (touch, background start/toggle)

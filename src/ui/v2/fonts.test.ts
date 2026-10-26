@@ -14,6 +14,8 @@ const LOADER = readFileSync(join(__dirname, 'font-loader.ts'), 'utf8')
 const README = readFileSync(join(DIR, 'README.md'), 'utf8')
 
 const FONT_FILES = ['BarlowCondensed-Bold.ttf', 'IBMPlexMono-Regular.ttf', 'IBMPlexMono-Medium.ttf', 'IBMPlexMono-Bold.ttf']
+const SUBSETS = FONT_FILES.map((f) => f.replace('.ttf', '.latin.woff2'))
+const MAX_FACE_BYTES = 60 * 1000
 const LICENCES = ['OFL-barlowcondensed.txt', 'OFL-ibmplexmono.txt']
 
 describe('v2 font files + licences', () => {
@@ -35,11 +37,36 @@ describe('v2 font files + licences', () => {
   })
 })
 
+describe('v2 Latin woff2 subsets (the files actually loaded)', () => {
+  it.each(SUBSETS)('%s is a woff2, ≤ 60 KB, and its SHA-256 + size are in the README table', (name) => {
+    const buf = readFileSync(join(DIR, 'latin', name))
+    expect(buf.subarray(0, 4).toString('latin1')).toBe('wOF2')
+    expect(buf.length).toBeLessThanOrEqual(MAX_FACE_BYTES)
+    const sha = createHash('sha256').update(buf).digest('hex')
+    expect(README).toContain(`\`${name}\``)
+    expect(README).toContain(sha)
+    expect(README).toContain(`${buf.length.toLocaleString('en-US').replace(/,/g, ' ')} B`)
+  })
+
+  it('the README names the tool and records before/after sizes for every face', () => {
+    expect(README).toMatch(/pyftsubset/)
+    expect(README).toMatch(/fontTools 4\.62\.1/)
+    for (const f of FONT_FILES) {
+      const before = readFileSync(join(DIR, f)).length.toLocaleString('en-US').replace(/,/g, ' ')
+      expect(README).toContain(`${before} B`)
+    }
+  })
+})
+
 describe('v2 font loader', () => {
   it('uses next/font/local with in-repo files only; no google/CDN', () => {
     expect(LOADER).toMatch(/from 'next\/font\/local'/)
     expect(LOADER).not.toMatch(/next\/font\/google|https?:\/\//)
-    for (const f of FONT_FILES) expect(LOADER).toContain(`./fonts/${f}`)
+  })
+
+  it('loads the Latin subsets, not the unsubset TTF masters', () => {
+    for (const f of SUBSETS) expect(LOADER).toContain(`./fonts/latin/${f}`)
+    expect(LOADER).not.toMatch(/\.ttf/)
   })
 
   it('does not load Inter again (reuses the #565 self-hosted --font-inter)', () => {
