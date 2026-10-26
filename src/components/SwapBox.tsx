@@ -14,6 +14,7 @@ import SourceToggle from './SourceToggle'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import ActiveApprovals from './ActiveApprovals'
 import { useQuote } from '@/hooks/useQuote'
+import { quoteMatchesSelection } from '@/lib/quote-identity'
 import { useSwap, type SwapStatus, type QuoteToAmountBySource } from '@/hooks/useSwap'
 import { orderExecutableFallbacks, scopeToExecutable } from '@/lib/executable-sources'
 import { useApproval } from '@/hooks/useApproval'
@@ -166,9 +167,21 @@ export default function SwapBox() {
   // execution must be settleable on this chain (quote-only sources — e.g.
   // Sushi v7/RedSnwapper — stay visible in the list but never win the
   // button), and the MEV threshold then compares against a settleable best.
+  // [fix/stale-quote-pair-flip] Single choke point: only a quote whose identity
+  // matches the CURRENT chain/pair/decimals feeds the display, the oracle gates
+  // and quoteToAmountBySource. A quote with no (or a mismatching) identity is
+  // treated as no quote — fail closed. useQuote already filters; this is the
+  // belt for the render right after a ⇅ flip or a token change.
+  const matchedRawMeta = useMemo(
+    () => (rawMeta && quoteMatchesSelection(rawMeta.identity, { chainId: activeChainId, tokenIn, tokenOut }) ? rawMeta : null),
+    [rawMeta, activeChainId, tokenIn, tokenOut],
+  )
+  // Decimals come from the quote itself, never from the (possibly already
+  // flipped) selected token — raw `toAmount` is only meaningful at its own scale.
+  const quoteDecimalsOut = matchedRawMeta?.identity.decimalsOut ?? null
   const { meta, smartMevApplied, mevExposedBest } = useMemo(
-    () => selectBestWithMevPreference(scopeToExecutable(rawMeta ?? null, activeChainId), mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
-    [rawMeta, mevProtected, activeChainId],
+    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
+    [matchedRawMeta, mevProtected, activeChainId],
   )
 
   // [SPRINT-9E] Re-resolve the selected tokens to the ACTIVE chain's addresses
@@ -245,12 +258,12 @@ export default function SwapBox() {
   // side from the stable side (≈$1): tokenOut stable → price of tokenIn (out/in); tokenIn stable
   // → price of tokenOut (in/out). The latter is NEW — it makes SELLING a stablecoin run the same
   // oracle deviation check as BUYING it (previously only the stablecoin-OUT direction was checked).
-  const { execIn, execOut } = meta?.best && tokenIn && tokenOut
+  const { execIn, execOut } = meta?.best && tokenIn && tokenOut && quoteDecimalsOut !== null
     ? (() => {
         // [11-L-01] safeBigInt: malformed toAmount → skip price computation.
         const outBig = safeBigInt(meta.best.toAmount)
         if (outBig === null) return { execIn: null, execOut: null }
-        const outAmount = Number(formatUnits(outBig, tokenOut.decimals))
+        const outAmount = Number(formatUnits(outBig, quoteDecimalsOut))
         const inAmount = Number(amountIn)
         if (inAmount <= 0 || outAmount <= 0) return { execIn: null, execOut: null }
         // [CHORE-STABLECOIN-CONSTANT] ~$1 membership is chain-keyed (single source of truth).
@@ -493,10 +506,10 @@ export default function SwapBox() {
     try { return parseUnits(amountIn, tokenIn.decimals) <= balanceIn.value } catch { return false }
   })()
   // [11-L-01] safeBigInt: malformed toAmount → display "—" instead of crashing.
-  const outputDisplay = meta?.best && tokenOut
+  const outputDisplay = meta?.best && tokenOut && quoteDecimalsOut !== null
     ? (() => {
         const v = safeBigInt(meta.best.toAmount)
-        return v !== null ? fmtToken(v, tokenOut.decimals) : '—'
+        return v !== null ? fmtToken(v, quoteDecimalsOut) : '—'
       })()
     : '0.0'
 
@@ -599,7 +612,7 @@ export default function SwapBox() {
   const estimatedSwap = useMemo(() => {
     if (!tokenIn || !amountIn || Number(amountIn) <= 0) return { usd: 0, priced: false }
     const outBig = meta?.best ? safeBigInt(meta.best.toAmount) : null
-    const amountOut = outBig !== null && tokenOut ? Number(formatUnits(outBig, tokenOut.decimals)) : null
+    const amountOut = outBig !== null && tokenOut && quoteDecimalsOut !== null ? Number(formatUnits(outBig, quoteDecimalsOut)) : null
     return estimateSwapUsd({
       tokenIn,
       tokenOut,
@@ -609,7 +622,7 @@ export default function SwapBox() {
       chainlinkPriceOut: tokenOutPriceCheck.chainlinkPrice,
       chainId: activeChainId,
     })
-  }, [tokenIn, tokenOut, amountIn, meta, priceCheck.chainlinkPrice, tokenOutPriceCheck.chainlinkPrice, activeChainId])
+  }, [tokenIn, tokenOut, amountIn, meta, quoteDecimalsOut, priceCheck.chainlinkPrice, tokenOutPriceCheck.chainlinkPrice, activeChainId])
   const estimatedSwapUsd = estimatedSwap.usd
 
   const oracleUnavailable = pairCheck.oracleUnavailable
@@ -779,7 +792,7 @@ export default function SwapBox() {
         </div>
 
         {/* No MEV-safe quote warning (force mode only) */}
-        {mevProtected && !meta && rawMeta && !quoteLoading && (
+        {mevProtected && !meta && matchedRawMeta && !quoteLoading && (
           <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
             No MEV-protected quote available. CoW Protocol may be temporarily unavailable. Try disabling Force MEV Protection or wait a moment.
           </div>

@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import { isAddress } from 'viem'
 import { NATIVE_ETH } from '@/lib/constants'
 import { isVerifiedToken, explorerTokenUrl } from '@/lib/chains/tokens'
-import { useActiveChainId } from '@/hooks/useChainId'
+import { useQuoteChainId } from '@/hooks/useChainId'
 
 function truncateAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -31,8 +31,11 @@ export default function TokenAddressBadge({
   const [copied, setCopied] = useState(false)
   // [SPRINT-9P] Verify + link against the ACTIVE chain (override via `chainId`).
   // Mainnet behaviour is unchanged; the Base catalog now shows ✓ instead of the false ⚠.
-  const activeChainId = useActiveChainId()
-  const cid = chainId ?? activeChainId
+  // [fix/stale-quote-pair-flip] useQuoteChainId (not useActiveChainId): a disconnected visitor's
+  // ChainSelector pick is the chain they are looking at — useActiveChainId would fall back to
+  // mainnet and flag every Base/Arbitrum token as an unverified import.
+  const quoteChainId = useQuoteChainId()
+  const cid = chainId ?? quoteChainId
 
   // Auto-detect native if not explicitly set
   const native = isNative ?? address.toLowerCase() === NATIVE_ETH.toLowerCase()
