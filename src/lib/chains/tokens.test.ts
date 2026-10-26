@@ -85,7 +85,9 @@ describe('remapTokenToChain — fix mainnet token addresses on Base [SPRINT-9E]'
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MAINNET_USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-const UNKNOWN_BASE_IMPORT = '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' // the prod-reported import
+// A synthetic address in no catalog. (Was the prod-reported ETHFI import; ETHFI is now admitted to the Base
+// catalog by the single-source volume rule — feat/catalog-single-source-volume — so it no longer proves ⚠.)
+const UNKNOWN_BASE_IMPORT = '0x3333333333333333333333333333333333333333'
 
 describe('isVerifiedToken — chain-aware badge auto-detect [9P]', () => {
   it('Base catalog tokens verify ✓ on Base', () => {

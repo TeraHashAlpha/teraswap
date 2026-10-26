@@ -19,6 +19,7 @@ import type {
   MarketSignal,
   PipelineConfig,
   SeedToken,
+  SingleSourceEvaluation,
   SourceCounts,
   SourceEntry,
   SourceFetchResult,
@@ -27,7 +28,21 @@ import type {
 } from './types'
 import { OutageSuspectedError } from './types'
 import type { TokenIdentity } from './verdicts'
-import { mergeByAddress, crossVerify, resolveSymbolConflicts, assembleCatalog, externalVoteCount, retainFlakySeeds } from './verify'
+import {
+  mergeByAddress,
+  crossVerify,
+  resolveSymbolConflicts,
+  assembleCatalog,
+  externalVoteCount,
+  retainFlakySeeds,
+  resolveSingleSourceConfig,
+  isSingleSourceCoingecko,
+  evaluateSingleSource,
+  compareForCap,
+  medianOf,
+  type SingleSourceVerdict,
+  type VolumeHistory,
+} from './verify'
 import { deriveGuardOutcomes } from './guard-gate'
 
 /**
@@ -91,6 +106,10 @@ export interface ChainBuildDeps {
   /** [fix/token-search-ranking-squatting Task 2] Third-phase 24h-volume fetch (CoinGecko
    *  /coins/markets), same target addresses as fetchMarket. Outage-tolerant like it. */
   fetchVolume?: (addresses: `0x${string}`[]) => Promise<SourceFetchResult>
+  /** [feat/catalog-single-source-volume] Per-token daily 24h-volume history (one CoinGecko call
+   *  per token, throttled inside the fetcher), keyed by LOWERCASE address. Omitted ⇒ the
+   *  single-source rule is inert (previous behavior). A throw is treated as every call failed. */
+  fetchVolumeHistory?: (addresses: `0x${string}`[]) => Promise<Map<string, VolumeHistory>>
   collectVerdicts: (tokens: TokenIdentity[]) => Promise<Verdict[]>
   allowlist: Allowlist
   /** Current-catalog seeds, keyed by LOWERCASE address. Never silently dropped. */
@@ -129,6 +148,8 @@ export interface ChainBuildResult {
   /** `${chainId}:${addrLower}`-keyed market signals (for reporting). */
   market: Map<string, MarketSignal>
 }
+
+const key = (chainId: number, address: string): string => `${chainId}:${address.toLowerCase()}`
 
 export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): Promise<ChainBuildResult> {
   const { config, seeds, cores, allowlist, categoryFor, logoFor, log } = deps
@@ -216,9 +237,21 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
       log(`market fetch down (build continues): ${msg}`)
     }
   }
+  // 4b. [feat/catalog-single-source-volume] single-source candidates (exactly one external vote, and
+  // it is CoinGecko) are NOT market targets above — they still need today's 24h volume as a cheap
+  // pre-filter (one /coins/markets batch covers 250) so the one-call-per-token history fetch only
+  // runs for tokens that could plausibly clear the floor.
+  const ssCfg = resolveSingleSourceConfig(config, chainId)
+  const ssActive = ssCfg.enabled && deps.fetchVolumeHistory !== undefined
+  const ssCandidates = ssActive ? candidates.filter(isSingleSourceCoingecko) : []
+  const volumeTargets = [...marketTargets]
+  if (ssCandidates.length > 0) {
+    const have = new Set(volumeTargets.map((c) => c.address.toLowerCase()))
+    for (const c of ssCandidates) if (!have.has(c.address.toLowerCase())) volumeTargets.push(c)
+  }
   if (deps.fetchVolume) {
     try {
-      const res = await deps.fetchVolume(marketTargets.map((c) => c.address))
+      const res = await deps.fetchVolume(volumeTargets.map((c) => c.address))
       if (res.market) for (const [k, v] of res.market) market.set(k, { ...market.get(k), ...v })
       if (res.note) sourceNotes.push(`${res.source} volume: ${res.note}`)
     } catch (e) {
@@ -228,12 +261,45 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     }
   }
 
+  const singleSourceVerdicts = new Map<string, SingleSourceVerdict>()
+  const ssEvaluations: SingleSourceEvaluation[] = []
+  let ssPrefiltered = 0
+  if (ssActive && ssCandidates.length > 0) {
+    const eligible = ssCandidates.filter(
+      (c) => (market.get(key(chainId, c.address))?.volume24hUsd ?? 0) >= ssCfg.minDailyVolumeUsd,
+    )
+    ssPrefiltered = ssCandidates.length - eligible.length
+    log(`single-source volume rule: ${ssCandidates.length} candidate(s), ${eligible.length} pass the 24h pre-filter → ${eligible.length} history call(s)`)
+    let history = new Map<string, VolumeHistory>()
+    if (eligible.length > 0) {
+      try {
+        history = await deps.fetchVolumeHistory!(eligible.map((c) => c.address))
+      } catch (e) {
+        const msg = String((e as Error)?.message ?? e)
+        sourceNotes.push(`DOWN single-source history: ${msg}`)
+        log(`single-source history down (nothing admitted by the rule this run): ${msg}`)
+      }
+    }
+    for (const c of eligible) {
+      const h = history.get(c.address.toLowerCase()) ?? { ok: false as const, error: 'no history result' }
+      const verdict = evaluateSingleSource(h, ssCfg)
+      singleSourceVerdicts.set(key(chainId, c.address), verdict)
+      ssEvaluations.push(
+        verdict.status === 'admitted'
+          ? { address: c.address, symbol: c.symbol, outcome: 'admitted', dailyVolumeUsd: verdict.admission.dailyVolumeUsd, medianUsd: verdict.medianUsd }
+          : verdict.status === 'below-floor'
+            ? { address: c.address, symbol: c.symbol, outcome: 'below-floor', dailyVolumeUsd: verdict.dailyVolumeUsd, medianUsd: verdict.medianUsd }
+            : { address: c.address, symbol: c.symbol, outcome: 'fetch-failed' },
+      )
+    }
+  }
+
   // re-merge when the market phase added identity votes
   const merged = entries.length > candidates.length ? mergeByAddress(entries) : candidates
 
   // 5. cross-verify + symbol-conflict resolution
   const seedKeys = new Set([...seeds.keys()].map((a) => `${chainId}:${a}`))
-  const crossVerified = crossVerify(merged, market, seedKeys, config)
+  const crossVerified = crossVerify(merged, market, seedKeys, config, singleSourceVerdicts)
 
   // 5a''. [fix/token-search-ranking-squatting Task 3] Retain a previously-verified seed
   // whose vote drop this run is attributable to a source outage, not a real delisting —
@@ -271,24 +337,27 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   const coreAddrSet = new Set(cores.map((t) => t.address.toLowerCase()))
   const cap = config.maxNewTokensPerChain[chainId] ?? Number.POSITIVE_INFINITY
   const prunedCapped: Array<{ address: `0x${string}`; symbol: string }> = []
+  const prunedDeferred: Array<{ address: `0x${string}`; symbol: string; medianUsd: number }> = []
   let kept = conflictResult.kept
   if (Number.isFinite(cap)) {
     const isNew = (c: (typeof kept)[number]) =>
       !seeds.has(c.address.toLowerCase()) && !coreAddrSet.has(c.address.toLowerCase())
     const newOnes = kept.filter(isNew)
     if (newOnes.length > cap) {
-      const rank = (c: (typeof kept)[number]) => ({
+      const item = (c: (typeof kept)[number]) => ({
+        address: c.address,
+        symbol: c.symbol,
         volume: market.get(`${chainId}:${c.address.toLowerCase()}`)?.volume24hUsd ?? 0,
         votes: externalVoteCount(c.sources),
+        admission: c.admission,
       })
-      const ranked = [...newOnes].sort((a, b) => {
-        const ra = rank(a)
-        const rb = rank(b)
-        return rb.volume - ra.volume || rb.votes - ra.votes || (a.symbol.toLowerCase() < b.symbol.toLowerCase() ? -1 : 1)
-      })
+      const ranked = [...newOnes].sort((a, b) => compareForCap(item(a), item(b)))
       const keepNew = new Set(ranked.slice(0, cap))
       kept = kept.filter((c) => !isNew(c) || keepNew.has(c))
-      for (const c of ranked.slice(cap)) prunedCapped.push({ address: c.address, symbol: c.symbol })
+      for (const c of ranked.slice(cap)) {
+        prunedCapped.push({ address: c.address, symbol: c.symbol })
+        if (c.admission) prunedDeferred.push({ address: c.address, symbol: c.symbol, medianUsd: medianOf(c.admission.dailyVolumeUsd) })
+      }
       log(`growth cap: probing top ${cap} of ${newOnes.length} new candidates (${prunedCapped.length} capped pre-guard)`)
     }
   }
@@ -380,6 +449,25 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
   report.capped.push(...prunedCapped)
   report.retained.push(...retention.retained)
   report.trustLost.push(...trustLost)
+
+  // [feat/catalog-single-source-volume] run summary for the single-source rule: counts, plus the
+  // cap-deferred list (admitted by the rule, dropped by the per-run cap) in descending 7-day median.
+  const ss = report.singleSource
+  ss.enabled = ssCfg.enabled
+  ss.candidates = ssCandidates.length
+  ss.prefiltered = ssPrefiltered
+  ss.evaluated = ssEvaluations.length
+  ss.admitted = ssEvaluations.filter((e) => e.outcome === 'admitted').length
+  ss.belowFloor = ssEvaluations.filter((e) => e.outcome === 'below-floor').length
+  ss.fetchFailed = ssEvaluations.filter((e) => e.outcome === 'fetch-failed').length
+  ss.evaluations = ssEvaluations
+  ss.deferred = [...prunedDeferred, ...ss.deferred].sort((a, b) => b.medianUsd - a.medianUsd || (a.symbol.toLowerCase() < b.symbol.toLowerCase() ? -1 : 1))
+  if (ssActive) {
+    log(`single-source volume rule: admitted ${ss.admitted}, below floor ${ss.belowFloor}, fetch failed ${ss.fetchFailed} (not admitted, fail-closed), pre-filtered ${ss.prefiltered}`)
+  }
+  if (ss.deferred.length > 0) {
+    log(`single-source deferred by the new-token cap (${ss.deferred.length}, by 7-day median desc): ${ss.deferred.map((d) => `${d.symbol} ${d.address} $${Math.round(d.medianUsd).toLocaleString('en-US')}`).join('; ')}`)
+  }
 
   // 7b. [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] AFTER
   // assembling: even a correctly-scoped drop (step 6b, previously-verified only) can still be

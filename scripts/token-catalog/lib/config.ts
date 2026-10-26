@@ -10,6 +10,10 @@
  *   immediately red that gate.
  * - maxNewTokensPerChain: growth cap for NEW (non-seed, non-core) tokens, highest-volume
  *   first. Overflow is reported (no silent caps).
+ * - singleSource (+ singleSourceByChain): [feat/catalog-single-source-volume] a token present in
+ *   exactly ONE source (CoinGecko) is admitted when its 24h USD volume was >= minDailyVolumeUsd on
+ *   EACH of the last `days` complete UTC days (requireEveryDay). Two-source tokens keep the
+ *   minSources/lowLiqMinSources rules above. Per-chain overrides merge over the default.
  * - CORE_TOKENS: fee/routing-critical allowlist — ALWAYS included, still on-chain-validated
  *   (a core failing on-chain validation FAILS the build; a source outage can never drop one).
  *   Addresses are copied from the pinned majors fixtures in src/lib/chains/token-catalog.test.ts
@@ -37,6 +41,10 @@ export const PIPELINE_CONFIG: PipelineConfig = {
   // 'arbitrumBridge' sits with 'superchain' — both are a chain's canonical bridged-token
   // registry, trusted like a tokenlist source but only fetched for their own chain.
   sourcePriority: ['curated', 'superchain', 'arbitrumBridge', 'uniswap', 'coingecko', 'oneinch', 'trustwallet', 'defillama'],
+  singleSource: { enabled: true, minDailyVolumeUsd: 100_000, days: 7, requireEveryDay: true },
+  // Mainnet OFF (owner, 27 Oct): its catalog is 987/1000 rows (token-catalog.test.ts size bound) and no
+  // mainnet dry-run has been measured. Re-enable only after a measured `--dry-run` for chain 1.
+  singleSourceByChain: { 1: { enabled: false } },
 }
 
 /** Native ETH sentinel (matches src/lib/constants NATIVE_ETH — kept literal so the
