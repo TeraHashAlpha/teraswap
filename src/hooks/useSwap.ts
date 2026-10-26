@@ -41,6 +41,18 @@ const FALLBACK_START_DELAY = 8_000   // wait 8s before activating fallback
 const SWAP_TIMEOUT_MS = 120_000      // 2 minutes hard timeout
 
 /**
+ * [feat/swap-price-tiers D3] /api/swap answered 409 `unpriced_ack_required`: the pair has no reference
+ * price on either leg (DefiLlama or Chainlink) and the user has not consented yet. NOT a failed swap —
+ * SwapBox opens the consent dialog and re-runs execute(…, { unpricedAck: true }).
+ */
+export class UnpricedAckRequiredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UnpricedAckRequiredError'
+  }
+}
+
+/**
  * Fetch swap calldata via server-side API route (avoids CORS).
  */
 async function fetchSwapViaApi(
@@ -51,6 +63,9 @@ async function fetchSwapViaApi(
    *  caller is the FeeCollector contract but tokens must land in the
    *  user's wallet. */
   recipient?: string,
+  /** [feat/swap-price-tiers D3] The user's informed consent for a pair with no reference
+   *  price; sent as the boolean `true` only, never as a default. */
+  unpricedAck?: boolean,
 ): Promise<NormalizedQuote> {
   const res = await fetch('/api/swap', {
     method: 'POST',
@@ -58,6 +73,7 @@ async function fetchSwapViaApi(
     body: JSON.stringify({
       source, src, dst, amount, from, slippage,
       srcDecimals, dstDecimals, quoteMeta, chainId, recipient,
+      ...(unpricedAck === true ? { unpricedAck: true } : {}),
     }),
   })
   const data = await res.json()
@@ -68,6 +84,10 @@ async function fetchSwapViaApi(
         data.error || 'Swap blocked by server-side price protection.',
         typeof data.deviation === 'number' ? data.deviation : 0,
       )
+    }
+    // [feat/swap-price-tiers D3] Consent required — the DCA floorAck shape (409 + code).
+    if (res.status === 409 && data.code === 'unpriced_ack_required') {
+      throw new UnpricedAckRequiredError(data.error || 'No reference price for this pair — confirmation required.')
     }
     throw new Error(data.error || `Swap API error ${res.status}`)
   }
@@ -164,6 +184,10 @@ interface UseSwapResult {
   priceGuardBlocked: boolean
   /** Oracle deviation that triggered the price guard (e.g. -0.12 = 12% below fair value) */
   priceGuardDeviation: number | null
+  /** [feat/swap-price-tiers D3] /api/swap answered 409 `unpriced_ack_required`: the pair has no reference
+   *  price on either leg and needs the user's informed consent (SwapBox opens the dialog). Cleared by
+   *  execute() and reset(). */
+  unpricedAckRequired: boolean
   /** Pre-swap simulation result: true = passed, false = would revert, null = not yet simulated */
   simulationPassed: boolean | null
   /** [P209 / FULL-L-05] True when the simulation was inconclusive (RPC
@@ -185,7 +209,7 @@ interface UseSwapResult {
    *  improvement). Null on error, on non-CoW swaps, or when the trades
    *  endpoint didn't return an executedBuyAmount. */
   mevSurplusActualWei: bigint | null
-  execute: (source: AggregatorName, fallbacks?: AggregatorName[]) => Promise<void>
+  execute: (source: AggregatorName, fallbacks?: AggregatorName[], opts?: { unpricedAck?: boolean }) => Promise<void>
   /** Confirm the pending swap after reviewing the transaction preview */
   confirmSwap: () => void
   /** [SPRINT-9U U1] Phase B: sign the frozen CoW order + submit. Only runs from 'cow_awaiting_review'. */
@@ -228,6 +252,10 @@ export function useSwap(
   const [txHashState, setTxHashState] = useState<`0x${string}` | undefined>()
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
+  // [feat/swap-price-tiers D3] /api/swap wants the user's consent for an unpriced pair (409). The
+  // ref carries the consent given to execute() into the fetch (and through the 9O fallback walk).
+  const [unpricedAckRequired, setUnpricedAckRequired] = useState(false)
+  const unpricedAckRef = useRef(false)
   const [simulationPassed, setSimulationPassed] = useState<boolean | null>(null) // null = not run yet
   const [simulationSkipped, setSimulationSkipped] = useState(false) // [P209] inconclusive sim → fail-open warning
   const [pendingSwap, setPendingSwap] = useState<PendingSwapData | null>(null)
@@ -371,6 +399,7 @@ export function useSwap(
         undefined,
         chainId, // [P219 review] thread active chain (CoW path already did this).
         apiArgs.recipient,
+        unpricedAckRef.current, // [feat/swap-price-tiers D3] consent given to execute(), if any
       )
 
       if (!swapData.tx) {
@@ -722,6 +751,15 @@ export function useSwap(
       setStatus('confirming')
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      // [feat/swap-price-tiers D3] Not a failed swap: the server wants informed consent first.
+      // Park in idle (no error banner), raise the flag for SwapBox's consent dialog; Continue
+      // re-runs execute(…, { unpricedAck: true }). Never walk to another source — every
+      // source would get the same 409 for the same pair.
+      if (err instanceof UnpricedAckRequiredError) {
+        setStatus('idle')
+        setUnpricedAckRequired(true)
+        return
+      }
       // [SPRINT-9O Part B] A best route that reverts the pre-swap simulation
       // (the mainnet Velora→Augustus RouterNotWhitelisted bug) — or otherwise
       // can't execute — must not dead-end the user. Walk to the next-best source
@@ -1102,8 +1140,15 @@ export function useSwap(
   }, [status, pendingCowOrder, address, chainId, slippage, bestNonCowGasUsd, signTypedDataAsync])
 
   // ── Main execute dispatcher ──
-  const execute = useCallback(async (source: AggregatorName, fallbacks: AggregatorName[] = []) => {
+  const execute = useCallback(async (
+    source: AggregatorName,
+    fallbacks: AggregatorName[] = [],
+    /** [feat/swap-price-tiers D3] `{ unpricedAck: true }` after the consent dialog; per attempt, never remembered. */
+    opts?: { unpricedAck?: boolean },
+  ) => {
     setFallbackNotice(null) // [SPRINT-9O] fresh swap — clear any prior auto-switch notice
+    unpricedAckRef.current = opts?.unpricedAck === true
+    setUnpricedAckRequired(false)
     if (source === 'cowswap') {
       return executeCowSwap()
     }
@@ -1312,6 +1357,8 @@ export function useSwap(
     setTxHashState(undefined)
     setPriceGuardBlocked(false)
     setPriceGuardDeviation(null)
+    setUnpricedAckRequired(false) // [feat/swap-price-tiers]
+    unpricedAckRef.current = false
     setSimulationPassed(null)
     setSimulationSkipped(false)
     setPendingSwap(null)
@@ -1321,7 +1368,7 @@ export function useSwap(
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute, confirmSwap, confirmCowOrder, reset }
+  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute, confirmSwap, confirmCowOrder, reset }
 }
 
 function parseWagmiError(error: Error): string {

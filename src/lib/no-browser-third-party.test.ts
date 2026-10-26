@@ -29,7 +29,8 @@ const SERVER_ALLOWLIST = new Set([
   'src/lib/logo-proxy.ts', // the logo fetch host allow-list
   'src/app/api/portfolio/prices/route.ts', // doc comment: why that route proxies DefiLlama
   'src/lib/defillama.ts', // server-side DefiLlama client (route handlers only)
-  'src/lib/order-engine/dca-price-quorum.ts', // /api/dca-floor-cap price quorum
+  'src/lib/order-engine/dca-price-quorum.ts', // re-export shim over price-quorum.ts (kept, rule #4)
+  'src/lib/price-quorum.ts', // the shared ADR-024 quorum: /api/dca-floor-cap + /api/swap-price-tier (server-side)
 ])
 
 function walk(dir: string): string[] {

@@ -1030,3 +1030,55 @@ describe('useSwap — [Architect ruling R3-2] a fallback is floored against its 
     expect(mockValidateFeeIntegrity).toHaveBeenCalledWith('3000000000', '3000000000', '1inch')
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [feat/swap-price-tiers D3] A pair with no reference price on either leg: /api/swap answers 409
+// `unpriced_ack_required` until the body carries `unpricedAck: true` (informed consent in SwapBox).
+// A 409 is NOT a failed swap — the hook parks in idle and raises `unpricedAckRequired` so the
+// dialog opens; confirm re-executes with the ack.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [feat/swap-price-tiers] 409 unpriced_ack_required → consent → unpricedAck', () => {
+  const ACK_409 = { error: 'No reference price for this pair', code: 'unpriced_ack_required', requiredTier: 'unpriced', unpriceable: true }
+
+  it('a 409 unpriced_ack_required is not an error: idle, no message, unpricedAckRequired=true, no 9O fallback walk', async () => {
+    const f = mockSwapFetch(ACK_409, 409)
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('1inch', ['0x']) })
+    expect(result.current.unpricedAckRequired).toBe(true)
+    expect(result.current.status).toBe('idle')
+    expect(result.current.errorMessage).toBeNull()
+    expect(result.current.priceGuardBlocked).toBe(false)
+    expect(f).toHaveBeenCalledTimes(1) // never silently walks to '0x' — the user must consent first
+  })
+
+  it('execute(…, { unpricedAck: true }) sends unpricedAck:true in the body and clears the flag; a plain execute sends no such key', async () => {
+    const f = mockSwapFetch(swapResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('1inch', [], { unpricedAck: true }) })
+    const body1 = JSON.parse(String((f.mock.calls[0][1] as RequestInit).body))
+    expect(body1.unpricedAck).toBe(true)
+    expect(result.current.unpricedAckRequired).toBe(false)
+    await act(async () => { result.current.reset() })
+    await act(async () => { await result.current.execute('1inch', []) })
+    const body2 = JSON.parse(String((f.mock.calls[1][1] as RequestInit).body))
+    expect(body2).not.toHaveProperty('unpricedAck')
+  })
+
+  it('reset() clears unpricedAckRequired (Cancel on the dialog)', async () => {
+    mockSwapFetch(ACK_409, 409)
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('1inch', []) })
+    expect(result.current.unpricedAckRequired).toBe(true)
+    await act(async () => { result.current.reset() })
+    expect(result.current.unpricedAckRequired).toBe(false)
+  })
+
+  it('a 409 with another code (e.g. CHAIN_COMING_SOON) is still an ordinary error', async () => {
+    mockSwapFetch({ error: 'Chain 42161 is not yet available for swaps', code: 'CHAIN_COMING_SOON' }, 409)
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('1inch', []) })
+    expect(result.current.unpricedAckRequired).toBe(false)
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/not yet available/)
+  })
+})
