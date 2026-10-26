@@ -3,7 +3,7 @@
 Display/copy/plumbing only. No tier, gate, quote or pricing logic; nothing under `src/ui/v2`.
 
 - [x] C1 one price notice, from the tier
-- [ ] C2 source counts that mean something
+- [x] C2 source counts that mean something
 - [ ] C3 help-content leftovers
 - [ ] C4 token-logo rate limit + CSP + Velora labels
 - [ ] C5 flaky `usePortfolio` test
@@ -23,3 +23,9 @@ Display/copy/plumbing only. No tier, gate, quote or pricing logic; nothing under
 Before = the new matrix test run against unfixed SwapBox: 4/4 failed with `legacyBlue: true`. The USD-gate notices
 (amber "high value swap", red "Swap blocked") are separate and untouched. Static guard:
 `no-legacy-oracle-notice.test.ts` (no such string under `src/components`).
+
+## 2. Source-count strings
+- Toggle: `8/8 sources` → `8 sources enabled` (none excluded) / `7 of 8 sources enabled` (partial); count = `TOGGLEABLE_SOURCES.length`,
+  asserted equal to `INTEGRATED_DEX_SOURCE_COUNT`. Quote card unchanged: `N sources queried` (= `meta.all.length`, i.e.
+  responders; "queried" is loose wording but kept as asked). Tests: SourceToggle.test.tsx (both toggle forms, no `x/y`),
+  SwapBox.price-tiers.test.tsx (`3 sources queried`).

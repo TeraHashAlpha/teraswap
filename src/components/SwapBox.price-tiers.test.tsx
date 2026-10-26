@@ -407,3 +407,12 @@ describe('SwapBox — [chore/copy-leftovers] one price notice, from the tier', (
     expect(priceNotices()).toEqual({ legacyBlue: false, ...expected })
   })
 })
+
+describe('SwapBox — [chore/copy-leftovers] source counts', () => {
+  it('"N sources queried" counts the quotes that came back (the toggle says "enabled", not "x/y")', async () => {
+    useQuoteMock.mockReturnValue(exoticQuote('5', ['1000000000000000000000', '996000000000000000000', '1004000000000000000000']))
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    expect(screen.getByText('3 sources queried')).toBeInTheDocument()
+  })
+})
