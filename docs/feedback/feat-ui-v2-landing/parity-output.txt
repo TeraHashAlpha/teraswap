@@ -1,0 +1,11 @@
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > content parity · landing: v1 LandingPage + LandingBelowFold ⊆ v2 landing > every visible v1 text node exists in v2 (allow-list: owner-removed strings only)
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > content parity · landing: v1 LandingPage + LandingBelowFold ⊆ v2 landing > every v1 href is still linked in v2
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > content parity · landing: v1 LandingPage + LandingBelowFold ⊆ v2 landing > holds on another selected chain (the chain-aware strings move together)
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > content parity · landing: v1 LandingPage + LandingBelowFold ⊆ v2 landing > holds when Limit / SL·TP go live (the roadmap empties; their feature cards stay)
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > the gate itself (so a green run means something) > flags a v1 string that v2 lacks, and a v1 href that v2 dropped
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > the gate itself (so a green run means something) > an allow-listed substring may be absent from v2 — but only that substring
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > the gate itself (so a green run means something) > a stale allow-list entry fails: one that matches nothing in v1, or whose text v2 still shows
+ ✓ src/ui/v2/__tests__/content-parity.landing.test.tsx > the gate itself (so a green run means something) > normalisation: NBSP / thin space / runs of whitespace / case compare equal; aria-hidden decoration is not content
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+v1 nodes 138 · v1 hrefs 2 · missing text 0 · missing hrefs 0 · stale allow-list 0 (probe, same assertions as the test)

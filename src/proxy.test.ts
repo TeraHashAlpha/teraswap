@@ -49,7 +49,7 @@ describe('`/` (the v1 landing)', () => {
     expect(passes(proxy(req('/', 'f'.repeat(64))))).toBe(true)
     expect(passes(proxy(req('/', signUiVersionCookie('other-secret'))))).toBe(true)
   })
-  it('UI_V2_ENABLED=true → rewritten to /v2 (whose home is the Swap tab — app/v2/page.test.tsx)', () => {
+  it('UI_V2_ENABLED=true → rewritten to /v2 (whose home is the landing, then the Swap tab — src/ui/v2/home.test.tsx)', () => {
     process.env.UI_V2_ENABLED = 'true'
     expect(rewrittenTo(proxy(req('/')))).toBe('/v2')
   })
