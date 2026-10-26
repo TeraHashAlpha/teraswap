@@ -1,0 +1,8 @@
+/* [ADR-025] Shell-only rules (everything else is utilities + tokens). Reduced motion: tokens.css sets
+   `animation: none` for the whole `.ts-v2` tree, so the toast simply appears. */
+.ts-v2-toast { animation: ts-v2-toast-in var(--t-toast) ease-out both; }
+
+@keyframes ts-v2-toast-in {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: none; }
+}
