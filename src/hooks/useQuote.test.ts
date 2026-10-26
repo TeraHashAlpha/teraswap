@@ -41,11 +41,24 @@ vi.mock('./useEthGasCost', () => ({
   })),
 }))
 
-// Skip the debounce in tests — re-export passthrough so doFetch fires
-// synchronously on input change.
-vi.mock('./useDebounce', () => ({
-  useDebounce: <T,>(v: T) => v,
-}))
+// Skip the debounce in tests — passthrough so doFetch fires synchronously on input
+// change. [fix/stale-quote-pair-flip] `realDebounce` switches in a real (timer-based)
+// debounce for the flip+type request-count tests.
+let realDebounce = false
+vi.mock('./useDebounce', async () => {
+  const { useState, useEffect } = await import('react')
+  return {
+    useDebounce: <T,>(v: T, ms: number) => {
+      const [d, setD] = useState(v)
+      useEffect(() => {
+        if (!realDebounce) return
+        const t = setTimeout(() => setD(v), ms)
+        return () => clearTimeout(t)
+      }, [v, ms])
+      return realDebounce ? d : v
+    },
+  }
+})
 
 // analyzeGasless is a pure function — let it run but stub the import
 // so we don't pull the whole adapter graph.
@@ -68,7 +81,7 @@ vi.mock('@/lib/analytics', () => ({
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useQuote } from './useQuote'
 import type { Token } from '@/lib/tokens'
-import { QUOTE_REFRESH_MS } from '@/lib/constants'
+import { QUOTE_REFRESH_MS, INPUT_DEBOUNCE_MS } from '@/lib/constants'
 
 const TOKEN_IN: Token = {
   address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
@@ -88,7 +101,25 @@ const TOKEN_OUT: Token = {
   category: 'Stablecoin',
 }
 
+/** [fix/stale-quote-pair-flip] The identity /api/quote echoes — here for WETH→USDC, 1 WETH, chain 1. */
+function echoFor(
+  tin: Token,
+  tout: Token,
+  amountIn: string,
+  chainId = 1,
+) {
+  return {
+    tokenIn: tin.address,
+    tokenOut: tout.address,
+    chainId,
+    decimalsIn: tin.decimals,
+    decimalsOut: tout.decimals,
+    amountIn,
+  }
+}
+
 const VALID_RESPONSE = {
+  ...echoFor(TOKEN_IN, TOKEN_OUT, '1000000000000000000'),
   best: { source: '1inch', toAmount: '2950000000', estimatedGas: 150000, gasUsd: 5, routes: [] },
   all: [
     { source: '1inch', toAmount: '2950000000', estimatedGas: 150000, gasUsd: 5, routes: [] },
@@ -350,7 +381,7 @@ describe('useQuote — [P208] AbortController', () => {
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
   })
 
-  it('ignores AbortError silently — no error state, no meta clear', async () => {
+  it('ignores AbortError silently — no error state, no meta clear (same pair)', async () => {
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
@@ -367,7 +398,28 @@ describe('useQuote — [P208] AbortController', () => {
     })
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
     expect(result.current.error).toBeNull()
-    expect(result.current.meta).not.toBeNull() // prior pair's quote retained
+    expect(result.current.meta).not.toBeNull() // same pair's quote retained
+  })
+
+  it('[fix/stale-quote-pair-flip] a pair change does NOT retain the prior pair\'s quote (inverts the old "retained" expectation)', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'))
+
+    const { result, rerender } = renderHook(
+      ({ tin, tout }: { tin: Token; tout: Token }) => useQuote(tin, tout, '1', true, undefined),
+      { initialProps: { tin: TOKEN_IN, tout: TOKEN_OUT } },
+    )
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    await act(async () => {
+      rerender({ tin: TOKEN_OUT, tout: TOKEN_IN })
+      await flush()
+    })
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+    expect(result.current.error).toBeNull()
+    expect(result.current.meta).toBeNull()
   })
 
   it('[fix/quote-identity-loop, acceptance 2] does NOT refetch when a caller hands a structurally identical but newly-allocated token object', async () => {
@@ -580,5 +632,246 @@ describe('useQuote — visibility-aware polling', () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
     expect(result.current.countdown).toBe(countdownAtHide)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [fix/stale-quote-pair-flip] A quote carries its identity
+// ─────────────────────────────────────────────────────────────
+describe('useQuote — [fix/stale-quote-pair-flip] quote identity', () => {
+  const flipProps = { tin: TOKEN_OUT, tout: TOKEN_IN }
+  const baseProps = { tin: TOKEN_IN, tout: TOKEN_OUT }
+  const render = (initial = baseProps, amount = '1') =>
+    renderHook(
+      ({ tin, tout }: { tin: Token; tout: Token }) => useQuote(tin, tout, amount, true, undefined),
+      { initialProps: initial },
+    )
+
+  it('tags the stored quote with the request identity (chain, pair, raw amount, decimals)', async () => {
+    mockFetchSuccess()
+    const { result } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+    expect(result.current.meta?.identity).toMatchObject({
+      chainId: 1,
+      tokenIn: TOKEN_IN.address.toLowerCase(),
+      tokenOut: TOKEN_OUT.address.toLowerCase(),
+      amountRaw: '1000000000000000000',
+      decimalsIn: 18,
+      decimalsOut: 6,
+    })
+  })
+
+  it('flip after a resolved quote → meta is null in the very next render (no stale number, no effect lag)', async () => {
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockReturnValue(new Promise<Response>(() => {})) // the flipped pair's quote never lands
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    // No act/await: the render triggered by the flip must already hide the old quote.
+    rerender(flipProps)
+    expect(result.current.meta).toBeNull()
+    await flush()
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('flipping back does NOT resurrect the earlier quote (cleared, not just hidden)', async () => {
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockReturnValue(new Promise<Response>(() => {}))
+    const { result, rerender } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    await act(async () => {
+      rerender(flipProps)
+      await flush()
+    })
+    await act(async () => {
+      rerender(baseProps)
+      await flush()
+    })
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('a LATE response for the old pair is ignored (even though the mocked fetch ignores the abort)', async () => {
+    let resolveOld: ((r: Response) => void) | undefined
+    const oldPair = new Promise<Response>((resolve) => { resolveOld = resolve })
+    vi.spyOn(global, 'fetch')
+      .mockReturnValueOnce(oldPair)
+      .mockReturnValue(new Promise<Response>(() => {}))
+    const { result, rerender } = render()
+    await Promise.resolve()
+
+    await act(async () => {
+      rerender(flipProps)
+      await flush()
+    })
+    await act(async () => {
+      resolveOld?.(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      await flush()
+    })
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('a same-pair re-quote IS rendered (refetch replaces the stored quote)', async () => {
+    const first = { ...VALID_RESPONSE, best: { ...VALID_RESPONSE.best, toAmount: '2950000000' } }
+    const second = { ...VALID_RESPONSE, best: { ...VALID_RESPONSE.best, toAmount: '2960000000' } }
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(first), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(second), { status: 200 }))
+    const { result } = render()
+    await waitFor(() => expect(result.current.meta?.best.toAmount).toBe('2950000000'))
+
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(result.current.meta?.best.toAmount).toBe('2960000000')
+  })
+
+  it('an amount change on the same pair keeps the current quote on screen until the re-quote lands', async () => {
+    vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      .mockReturnValue(new Promise<Response>(() => {}))
+    const { result, rerender } = renderHook(
+      ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+      { initialProps: { amt: '1' } },
+    )
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+
+    await act(async () => {
+      rerender({ amt: '2' })
+      await flush()
+    })
+    expect(result.current.meta).not.toBeNull()
+  })
+
+  it('a late response for a SUPERSEDED amount is ignored', async () => {
+    let resolveOld: ((r: Response) => void) | undefined
+    const oldAmount = new Promise<Response>((resolve) => { resolveOld = resolve })
+    const newer = { ...VALID_RESPONSE, ...echoFor(TOKEN_IN, TOKEN_OUT, '2000000000000000000'), best: { ...VALID_RESPONSE.best, toAmount: '5900000000' } }
+    vi.spyOn(global, 'fetch')
+      .mockReturnValueOnce(oldAmount)
+      .mockResolvedValue(new Response(JSON.stringify(newer), { status: 200 }))
+    const { result, rerender } = renderHook(
+      ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+      { initialProps: { amt: '1' } },
+    )
+    await Promise.resolve()
+    await act(async () => {
+      rerender({ amt: '2' })
+      await flush()
+    })
+    await waitFor(() => expect(result.current.meta?.best.toAmount).toBe('5900000000'))
+
+    await act(async () => {
+      resolveOld?.(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
+      await flush()
+    })
+    expect(result.current.meta?.best.toAmount).toBe('5900000000')
+  })
+
+  it('[commit 2] keys the quote from the SERVER echo: a response that echoes a different pair than the current selection is ignored', async () => {
+    // The server answers for USDC→WETH although the client asked WETH→USDC (or the
+    // request was re-pointed mid-flight): the echoed identity, not the request, decides.
+    const wrong = { ...VALID_RESPONSE, ...echoFor(TOKEN_OUT, TOKEN_IN, '1000000') }
+    mockFetchSuccess(wrong)
+    const { result } = render()
+    await flush()
+    expect(result.current.meta).toBeNull()
+    expect(result.current.error).toBeNull()
+  })
+
+  it('[commit 2] a response with NO echo is unusable → clean error, no quote (fail closed)', async () => {
+    const { tokenIn: _a, tokenOut: _b, chainId: _c, decimalsIn: _d, decimalsOut: _e, amountIn: _f, ...noEcho } = VALID_RESPONSE
+    mockFetchSuccess(noEcho)
+    const { result } = render()
+    await waitFor(() => expect(result.current.error).toMatch(/failed to fetch quotes/i))
+    expect(result.current.meta).toBeNull()
+  })
+
+  it('[commit 2] the stored identity is the echoed one and the echo fields are stripped from the quote object', async () => {
+    mockFetchSuccess()
+    const { result } = render()
+    await waitFor(() => expect(result.current.meta).not.toBeNull())
+    expect(result.current.meta?.identity).toMatchObject({ chainId: 1, decimalsIn: 18, decimalsOut: 6, amountRaw: '1000000000000000000' })
+    for (const k of ['tokenIn', 'tokenOut', 'chainId', 'decimalsIn', 'decimalsOut', 'amountIn']) {
+      expect(result.current.meta).not.toHaveProperty(k)
+    }
+  })
+
+  describe('requests per flip + type [commit 4]', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      realDebounce = true
+    })
+    afterEach(() => {
+      realDebounce = false
+      vi.useRealTimers()
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    })
+
+    const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS) })
+
+    it('a ⇅ flip then typing a new amount costs ONE /api/quote request (was two: an immediate refetch with the old debounced amount, then the settle)', async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+      const fetchSpy = mockFetchSuccess()
+      const { rerender } = renderHook(
+        ({ tin, tout, amt }: { tin: Token; tout: Token; amt: string }) => useQuote(tin, tout, amt, true, undefined),
+        { initialProps: { tin: TOKEN_IN, tout: TOKEN_OUT, amt: '1' } },
+      )
+      await settle()
+      expect(fetchSpy).toHaveBeenCalledTimes(1) // the initial quote
+      fetchSpy.mockClear()
+
+      // ⇅ — SwapBox swaps the tokens AND clears the amount in the same render.
+      await act(async () => { rerender({ tin: TOKEN_OUT, tout: TOKEN_IN, amt: '' }) })
+      expect(fetchSpy).not.toHaveBeenCalled() // no immediate refetch on the stale debounced amount
+      await settle()
+      expect(fetchSpy).not.toHaveBeenCalled() // an empty amount never fetches
+
+      // The user types the new amount.
+      await act(async () => { rerender({ tin: TOKEN_OUT, tout: TOKEN_IN, amt: '5' }) })
+      expect(fetchSpy).not.toHaveBeenCalled() // still debouncing
+      await settle()
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const url = String(fetchSpy.mock.calls[0][0])
+      expect(url).toContain(`src=${TOKEN_OUT.address}`)
+      expect(url).toContain('amount=5000000') // 5 USDC at the NEW tokenIn decimals (6), never the old 1e18-scale amount
+    })
+
+    it('a poll tick while a typed amount is still debouncing does not fetch', async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+      const fetchSpy = mockFetchSuccess()
+      const { rerender } = renderHook(
+        ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+        { initialProps: { amt: '1' } },
+      )
+      await settle()
+      fetchSpy.mockClear()
+      // Type, then let the interval fire before the debounce settles: advance to 1ms before the
+      // poll tick, type, and cross the tick while the 500ms debounce is still pending.
+      await act(async () => { await vi.advanceTimersByTimeAsync(QUOTE_REFRESH_MS - INPUT_DEBOUNCE_MS - 1 - 100) })
+      await act(async () => { rerender({ amt: '2' }) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS - 1) })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    })
+
+    it('typing on a stable pair still fetches exactly once per settled amount', async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+      const fetchSpy = mockFetchSuccess()
+      const { rerender } = renderHook(
+        ({ amt }: { amt: string }) => useQuote(TOKEN_IN, TOKEN_OUT, amt, true, undefined),
+        { initialProps: { amt: '1' } },
+      )
+      await settle()
+      fetchSpy.mockClear()
+      for (const a of ['2', '23', '234']) {
+        await act(async () => { rerender({ amt: a }) })
+        await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      }
+      expect(fetchSpy).not.toHaveBeenCalled()
+      await settle()
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
   })
 })

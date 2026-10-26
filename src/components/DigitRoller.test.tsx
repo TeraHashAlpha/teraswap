@@ -276,6 +276,8 @@ describe('SwapBox integration — DigitRoller wiring', () => {
         best: { source: '1inch', toAmount: '3000000000', estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } },
         all: [],
         fetchedAt: Date.now(),
+        // [fix/stale-quote-pair-flip] SwapBox only renders a quote whose identity matches the selected pair (default ETH→USDC, chain 1).
+        identity: { chainId: 1, tokenIn: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', tokenOut: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', amountRaw: '1000000000000000000', decimalsIn: 18, decimalsOut: 6, fetchedAt: Date.now() },
       },
       loading: false, error: null, countdown: 10, refetch: vi.fn(), refresh: vi.fn(),
     })
