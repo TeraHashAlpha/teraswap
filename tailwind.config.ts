@@ -1,7 +1,9 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
-  content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
+  // [ADR-025] The v2 tree has its own Tailwind pass (tailwind.v2.config.ts → src/ui/v2/v2.css); scanning it
+  // here would emit inert v2 utilities into the global stylesheet v1 loads (measured: +29 rules, +2 KB).
+  content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '!./src/ui/v2/**', '!./src/app/v2/**'],
   theme: {
     extend: {
       colors: {

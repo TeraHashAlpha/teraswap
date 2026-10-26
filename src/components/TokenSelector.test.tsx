@@ -33,6 +33,8 @@ vi.mock('@/hooks/useTokenImport', () => ({
     importing: false,
     error: null,
   }),
+  // [fix/imported-tokens-persist] useImportedTokens re-validates saved imports through this.
+  probeImportedToken: vi.fn(async () => 'ok'),
 }))
 
 import { renderWithProviders, fireEvent, screen, within } from '@/test-utils/render'

@@ -17,11 +17,11 @@ import { render, cleanup } from '@testing-library/react'
 import { isAddress } from 'viem'
 
 // Verification is chain-aware (isVerifiedToken) and resolved against the active
-// chain (useActiveChainId). Mock both so the verified vs imported branches are
+// chain (useQuoteChainId). Mock both so the verified vs imported branches are
 // deterministic without a wallet/provider — matching the repo's hoisted-mock style.
 let mockVerified = false
 vi.mock('@/hooks/useChainId', () => ({
-  useActiveChainId: () => 1,
+  useQuoteChainId: () => 1,
 }))
 vi.mock('@/lib/chains/tokens', () => ({
   isVerifiedToken: () => mockVerified,
