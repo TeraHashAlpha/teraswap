@@ -190,7 +190,9 @@ describe('[9Y] verified ✓ vs imported ⚠ (9P intact, extended to the long tai
   })
 
   it('a genuinely imported (non-catalog) address keeps ⚠ on each chain', () => {
-    const unknown = '0x6c240dDA6b5C336Df09a4D011139beaaA1Ea2aa2' // the prod-reported Base import
+    // synthetic address in no catalog (was the prod-reported ETHFI import — now admitted to the Base
+    // catalog by the single-source volume rule, feat/catalog-single-source-volume)
+    const unknown = '0x3333333333333333333333333333333333333333'
     expect(isVerifiedToken(unknown, BASE)).toBe(false)
     expect(isVerifiedToken(unknown, MAINNET)).toBe(false)
   })
