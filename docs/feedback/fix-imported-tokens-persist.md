@@ -2,7 +2,7 @@
 
 ## Checklist
 - [x] C1 facts (a)(b)
-- [ ] C2 localStorage persistence + tests
+- [x] C2 localStorage persistence + tests
 - [ ] C3 selector hygiene (catalog-wins dedupe, symbol-collision badge) + tests
 - [ ] Verify: suite vs origin/main, lint delta, tsc, diff --stat, compare link
 
