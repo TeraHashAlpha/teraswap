@@ -334,3 +334,127 @@ describe('assertSwapConsistentWithQuote — fee-adjusted boundary [Architect rul
     }
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [fix/stale-quote-pair-flip] Two-sided guard: |Δ| > tolerance either way refuses.
+// Tolerance unchanged: slippageBps + SWAP_QUOTE_TOLERANCE_BPS.
+// ─────────────────────────────────────────────────────────────
+describe('assertSwapConsistentWithQuote — ABOVE the quote is refused too (two-sided)', () => {
+  const QUOTED = '1000000'
+
+  it('0% slippage: ceiling = quote * 10050/10000 — AT the ceiling passes', () => {
+    expect(() => callAssert(QUOTED, '1005000', 0)).not.toThrow()
+  })
+
+  it('0% slippage: 1 wei ABOVE the ceiling throws StaleOrTamperedSwapError (kind "above")', () => {
+    try {
+      callAssert(QUOTED, '1005001', 0)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(StaleOrTamperedSwapError)
+      expect((err as StaleOrTamperedSwapError).kind).toBe('above')
+    }
+  })
+
+  it('5% slippage: ceiling = quote * 10550/10000 — AT passes, +1 throws', () => {
+    expect(() => callAssert(QUOTED, '1055000', 5)).not.toThrow()
+    expect(() => callAssert(QUOTED, '1055001', 5)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('the SAME window applies in both directions (symmetric around the basis)', () => {
+    expect(() => callAssert(QUOTED, '995000', 0)).not.toThrow()      // floor edge
+    expect(() => callAssert(QUOTED, '1005000', 0)).not.toThrow()     // ceiling edge
+    expect(() => callAssert(QUOTED, '994999', 0)).toThrow(StaleOrTamperedSwapError)
+    expect(() => callAssert(QUOTED, '1005001', 0)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('fee-routed: ceiling = (quote net of FEE_BPS) * 10050/10000 = 1_003_995 — AT passes, +1 throws', () => {
+    expect(() => callAssert(QUOTED, '1003995', 0, NON_SKIP_SOURCE, true)).not.toThrow()
+    expect(() => callAssert(QUOTED, '1003996', 0, NON_SKIP_SOURCE, true)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('the ⇅-flip shape: a 6-decimal quote against an 18-decimal swap (quote SMALLER) now refuses', () => {
+    // Recon 58: stale ETH→USDC-scale quote (~1e9) judged against a fresh USDC→ETH build (~4.2e20).
+    expect(() => callAssert('1000000000', '420471100000000000000', 0.5)).toThrow(StaleOrTamperedSwapError)
+    // …and the original direction (quote LARGER) still does.
+    expect(() => callAssert('420471100000000000000', '1000000000', 0.5)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('copy for the new direction names the + deviation against the GROSS quote and keeps the refresh hint', () => {
+    try {
+      callAssert(QUOTED, '1500000', 0)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      const e = err as StaleOrTamperedSwapError
+      expect(e.kind).toBe('above')
+      expect(e.deviationPercent).toBeCloseTo(50, 1)
+      expect(e.message).toContain('above the quote you accepted')
+      expect(e.message).toContain('+50%')
+      expect(e.message).toMatch(/route was refreshed.*review and try again/i)
+    }
+  })
+
+  it('the original "below" refusal is unchanged (kind "below", same copy)', () => {
+    try {
+      callAssert(QUOTED, '500000', 0)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      const e = err as StaleOrTamperedSwapError
+      expect(e.kind).toBe('below')
+      expect(e.message).toContain('below the quote you accepted')
+    }
+  })
+
+  it('uniswapv3 stays skip-listed in BOTH directions (fee-tier re-detection, not drift)', () => {
+    expect(() => callAssert(QUOTED, '5000000', 0, 'uniswapv3')).not.toThrow()
+    expect(() => callAssert(QUOTED, '100000', 0, 'uniswapv3')).not.toThrow()
+  })
+
+  it('the source-agnostic aggregate (source: null) is bounded above as well', () => {
+    expect(() => callAssert(QUOTED, '1005001', 0, null)).toThrow(StaleOrTamperedSwapError)
+  })
+})
+
+describe('assertSwapConsistentWithQuote — pair/chain key mismatch refuses [fix/stale-quote-pair-flip]', () => {
+  const A = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+  const B = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+  const PAIR = { chainId: 1, tokenIn: A, tokenOut: B, decimalsIn: 18, decimalsOut: 6 }
+  const call = (quotePair?: typeof PAIR, swapPair?: typeof PAIR, source: AggregatorName | null = NON_SKIP_SOURCE) =>
+    assertSwapConsistentWithQuote({
+      quoteToAmount: '1000000', swapToAmount: '1000000', slippagePercent: 0.5, source, routeViaFeeCollector: false,
+      quotePair, swapPair,
+    })
+
+  it('matching pairs (address case-insensitive) pass', () => {
+    expect(() => call(PAIR, { ...PAIR, tokenIn: A.toLowerCase() })).not.toThrow()
+  })
+
+  it('no keys supplied → behaviour unchanged (existing call sites keep working)', () => {
+    expect(() => call(undefined, undefined)).not.toThrow()
+  })
+
+  it.each([
+    ['flipped pair', { ...PAIR, tokenIn: B, tokenOut: A, decimalsIn: 6, decimalsOut: 18 }],
+    ['other chain', { ...PAIR, chainId: 8453 }],
+    ['other tokenOut', { ...PAIR, tokenOut: '0xdAC17F958D2ee523a2206206994597C13D831ec7' }],
+    ['other decimals', { ...PAIR, decimalsOut: 18 }],
+  ])('refuses on %s even when the amounts agree', (_label, other) => {
+    try {
+      call(PAIR, other)
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(StaleOrTamperedSwapError)
+      expect((err as StaleOrTamperedSwapError).kind).toBe('pair-mismatch')
+      expect((err as StaleOrTamperedSwapError).message).toMatch(/different pair or network/i)
+    }
+  })
+
+  it('a lone key (quote OR swap side only) is refused — fail closed on a wiring error', () => {
+    expect(() => call(PAIR, undefined)).toThrow(StaleOrTamperedSwapError)
+    expect(() => call(undefined, PAIR)).toThrow(StaleOrTamperedSwapError)
+  })
+
+  it('the skip list does NOT exempt a pair mismatch (it exempts fee-tier drift only)', () => {
+    expect(() => call(PAIR, { ...PAIR, chainId: 8453 }, 'uniswapv3')).toThrow(StaleOrTamperedSwapError)
+  })
+})

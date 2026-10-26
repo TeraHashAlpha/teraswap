@@ -106,9 +106,36 @@ describe('GET /api/quote — debug=sources', () => {
     const res = await callGET({ src: USDC, dst: WETH, amount: '1000000', chainId: '8453' })
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toEqual(META_RESULT)
+    expect(body).toMatchObject(META_RESULT)
     expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
     expect(diagnoseQuoteSourcesMock).not.toHaveBeenCalled()
+  })
+
+  // [fix/stale-quote-pair-flip] Response shape. BEFORE: exactly META_RESULT's keys
+  // (best, all, fetchedAt, + optional quorum fields) — no pair, decimals, amount or chain.
+  // AFTER: the same keys PLUS six additive echo fields, pinned exactly here.
+  it('[fix/stale-quote-pair-flip] echoes tokenIn/tokenOut/chainId/decimalsIn/decimalsOut/amountIn (shape pinned, original keys untouched)', async () => {
+    const res = await callGET({ src: USDC, dst: WETH, amount: '1000000', srcDecimals: '6', dstDecimals: '18', chainId: '8453' })
+    const body = await res.json()
+    expect(Object.keys(body).sort()).toEqual(
+      ['all', 'amountIn', 'best', 'chainId', 'decimalsIn', 'decimalsOut', 'fetchedAt', 'tokenIn', 'tokenOut'],
+    )
+    expect(body).toEqual({
+      ...META_RESULT,
+      tokenIn: USDC,
+      tokenOut: WETH,
+      chainId: 8453,
+      decimalsIn: 6,
+      decimalsOut: 18,
+      amountIn: '1000000',
+    })
+  })
+
+  it('[fix/stale-quote-pair-flip] chainId defaults to mainnet (1) when the request carries none, and the echo is per-response (cached result not mutated)', async () => {
+    const a = await callGET({ src: USDC, dst: WETH, amount: '1000000', srcDecimals: '6', dstDecimals: '18' })
+    expect((await a.json()).chainId).toBe(1)
+    // Same cache key (no chainId), different caller-visible echo source: the shared object must stay clean.
+    expect(Object.keys(META_RESULT)).toEqual(['best', 'all', 'fetchedAt'])
   })
 
   it('debug=sources WITHOUT auth → 401 and the diagnostic never runs', async () => {
@@ -260,7 +287,7 @@ describe('GET /api/quote — shared cache [feat/quote-before-wallet acceptance 5
     for (let i = 0; i < 5; i++) {
       const res = await callGET(params)
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual(META_RESULT)
+      expect(await res.json()).toMatchObject(META_RESULT)
     }
     expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
   })
@@ -284,7 +311,7 @@ describe('GET /api/quote — shared cache [feat/quote-before-wallet acceptance 5
     vi.mocked(kv.get).mockRejectedValueOnce(new Error('upstash unreachable'))
     const res = await callGET({ src: USDC, dst: WETH, amount: '500000000000000000', chainId: '1' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual(META_RESULT)
+    expect(await res.json()).toMatchObject(META_RESULT)
     expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(1)
   })
 })
@@ -310,6 +337,19 @@ describe('POST /api/quote — shared cache [T2]', () => {
     })
     return POST(req)
   }
+
+  it('[fix/stale-quote-pair-flip] POST echoes the same six identity fields (numeric strings coerced, chainId defaults to 1)', async () => {
+    const res = await callPOST({ src: USDC, dst: WETH, amount: 1000000, srcDecimals: '6', dstDecimals: 18 })
+    expect(await res.json()).toEqual({
+      ...META_RESULT,
+      tokenIn: USDC,
+      tokenOut: WETH,
+      chainId: 1,
+      decimalsIn: 6,
+      decimalsOut: 18,
+      amountIn: '1000000',
+    })
+  })
 
   it('N identical POST requests within the TTL produce exactly 1 upstream fetchMetaQuote call', async () => {
     const params = { src: USDC, dst: WETH, amount: '500000000000000000', chainId: 1 }
@@ -366,7 +406,7 @@ describe('GET /api/quote — process-local dampener [acceptance 1–3]', () => {
 
     for (const res of responses) {
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual(META_RESULT)
+      expect(await res.json()).toMatchObject(META_RESULT)
     }
     // The whole point: fewer than N (in fact exactly 1) upstream calls despite Upstash being
     // fully down for both reads AND writes on every one of the N requests.
@@ -471,14 +511,14 @@ describe('GET /api/quote — process-local dampener [acceptance 1–3]', () => {
       fetchMetaQuoteMock.mockResolvedValueOnce(NEW_RESULT)
       const r2 = await callGET(params)
       expect(r2.headers.get('X-Quote-Cache')).toBe('miss')
-      expect(await r2.json()).toEqual(NEW_RESULT)
+      expect(await r2.json()).toMatchObject(NEW_RESULT)
       expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
 
       // Immediately after, within the new TTL: served locally with the NEW value — proving the
       // expired entry was actually removed rather than left to be silently overwritten later.
       const r3 = await callGET(params)
       expect(r3.headers.get('X-Quote-Cache')).toBe('miss-dampened-local-cache')
-      expect(await r3.json()).toEqual(NEW_RESULT)
+      expect(await r3.json()).toMatchObject(NEW_RESULT)
       expect(fetchMetaQuoteMock).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
