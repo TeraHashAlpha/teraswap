@@ -225,7 +225,7 @@ async function run() {
       }),
       fetchMarket: makeMarketFetcher(chainId),
       fetchVolume: makeVolumeFetcher(chainId),
-      fetchVolumeHistory: makeVolumeHistoryFetcher(chainId, resolveSingleSourceConfig(PIPELINE_CONFIG, chainId).days),
+      fetchVolumeHistory: makeVolumeHistoryFetcher(chainId, resolveSingleSourceConfig(PIPELINE_CONFIG, chainId).days, undefined, log),
       collectVerdicts: (tokens) => {
         const cg = getCgSet()
         return collectVerdicts(tokens, { log, cgSets: cg ? new Map([[chainId, cg]]) : undefined })

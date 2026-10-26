@@ -177,7 +177,10 @@ const CG_MARKETS_BATCH = 250
 
 /** Batched CoinGecko 24h-volume market signal over discovered addresses. Outage-tolerant
  *  like makeMarketFetcher: a batch failure is logged and skipped, never fatal. */
-export function makeVolumeFetcher(chainId: number): (addresses: `0x${string}`[]) => Promise<SourceFetchResult> {
+export function makeVolumeFetcher(
+  chainId: number,
+  getJson: (url: string, label: string) => Promise<CgJsonResult> = sharedCgJson,
+): (addresses: `0x${string}`[]) => Promise<SourceFetchResult> {
   const platform = CG_PLATFORM[chainId]
   return async (addresses) => {
     const list = await fetchCoinsList()
@@ -199,14 +202,14 @@ export function makeVolumeFetcher(chainId: number): (addresses: `0x${string}`[])
     let failures = 0
     for (let i = 0; i < ids.length; i += CG_MARKETS_BATCH) {
       const chunk = ids.slice(i, i + CG_MARKETS_BATCH)
-      try {
-        const raw = await fetchJson(
-          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${chunk.join(',')}&per_page=${CG_MARKETS_BATCH}&page=1`,
-        )
-        for (const [k, v] of parseCoingeckoMarkets(raw, chainId, idToAddresses)) market.set(k, v)
-      } catch {
-        failures += 1
-      }
+      // [feat/catalog-single-source-volume] through the shared throttled client: an unthrottled burst of
+      // ~11 batches 429'd on the keyless tier and silently dropped most volumes (found by the dry-run).
+      const res = await getJson(
+        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${chunk.join(',')}&per_page=${CG_MARKETS_BATCH}&page=1`,
+        'coins/markets',
+      )
+      if (res.ok) for (const [k, v] of parseCoingeckoMarkets(res.json, chainId, idToAddresses)) market.set(k, v)
+      else failures += 1
     }
     if (failures > 0 && market.size === 0) throw new Error(`coingecko-volume: all ${failures} batch(es) failed`)
     return {
@@ -236,15 +239,17 @@ export interface HistoryClientDeps {
   now?: () => number
 }
 
-/** One throttled client — the throttle clock is shared by every call made through it. */
-export function makeCoingeckoHistoryClient(deps: HistoryClientDeps = {}): (coinId: string, days: number) => Promise<VolumeHistory> {
+export type CgJsonResult = { ok: true; json: unknown } | { ok: false; error: string }
+
+/** One throttled keyless-CoinGecko JSON client — the throttle clock is shared by every call made
+ *  through it. `label` only names the call in error messages. */
+export function makeCoingeckoJsonClient(deps: HistoryClientDeps = {}): (url: string, label: string) => Promise<CgJsonResult> {
   const doFetch = deps.fetchImpl ?? fetch
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const now = deps.now ?? Date.now
   let lastCallAt = Number.NEGATIVE_INFINITY
 
-  return async (coinId, days) => {
-    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+  return async (url, label) => {
     let lastError = 'unknown'
     for (let attempt = 0; attempt <= CG_HISTORY_MAX_RETRIES; attempt++) {
       const wait = lastCallAt + CG_HISTORY_MIN_INTERVAL_MS - now()
@@ -260,23 +265,35 @@ export function makeCoingeckoHistoryClient(deps: HistoryClientDeps = {}): (coinI
         } finally {
           clearTimeout(timer)
         }
-        if (res.ok) {
-          const daily = parseMarketChartDailyVolumes(await res.json())
-          return daily ? { ok: true, dailyVolumeUsd: daily } : { ok: false, error: `${coinId}: malformed market_chart payload` }
-        }
-        lastError = `${coinId}: HTTP ${res.status}`
+        if (res.ok) return { ok: true, json: await res.json() }
+        lastError = `${label}: HTTP ${res.status}`
         // 4xx other than 429 will not heal on retry (bad id, delisted coin)
         if (res.status !== 429 && res.status < 500) return { ok: false, error: lastError }
         const ra = Number(res.headers.get('retry-after'))
         if (Number.isFinite(ra) && ra > 0) retryAfterMs = ra * 1000
       } catch (e) {
-        lastError = `${coinId}: ${String((e as Error)?.message ?? e)}`
+        lastError = `${label}: ${String((e as Error)?.message ?? e)}`
       }
       if (attempt === CG_HISTORY_MAX_RETRIES) break
       const backoff = Math.min(CG_HISTORY_BACKOFF_BASE_MS * 2 ** attempt, CG_HISTORY_BACKOFF_MAX_MS)
       await sleep(Math.max(backoff, retryAfterMs ?? 0))
     }
     return { ok: false, error: `${lastError} (gave up after ${CG_HISTORY_MAX_RETRIES + 1} attempts)` }
+  }
+}
+
+// ONE process-wide client for the default wiring: /coins/markets batches (the 24h pre-filter) and
+// market_chart history calls hit the same keyless budget, so they share one throttle clock.
+const sharedCgJson = makeCoingeckoJsonClient()
+
+export function makeCoingeckoHistoryClient(deps?: HistoryClientDeps): (coinId: string, days: number) => Promise<VolumeHistory> {
+  const getJson = deps ? makeCoingeckoJsonClient(deps) : sharedCgJson
+  return async (coinId, days) => {
+    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+    const res = await getJson(url, coinId)
+    if (!res.ok) return { ok: false, error: res.error }
+    const daily = parseMarketChartDailyVolumes(res.json)
+    return daily ? { ok: true, dailyVolumeUsd: daily } : { ok: false, error: `${coinId}: malformed market_chart payload` }
   }
 }
 
@@ -290,6 +307,7 @@ export function makeVolumeHistoryFetcher(
   chainId: number,
   days: number,
   client: (coinId: string, days: number) => Promise<VolumeHistory> = makeCoingeckoHistoryClient(),
+  log: (msg: string) => void = () => {},
 ): (addresses: `0x${string}`[]) => Promise<Map<string, VolumeHistory>> {
   const platform = CG_PLATFORM[chainId]
   return async (addresses) => {
@@ -307,9 +325,12 @@ export function makeVolumeHistoryFetcher(
       for (const a of addresses) out.set(a.toLowerCase(), { ok: false, error })
       return out
     }
+    let done = 0
     for (const a of addresses) {
       const id = idByAddress.get(a.toLowerCase())
       out.set(a.toLowerCase(), id ? await client(id, days) : { ok: false, error: 'no CoinGecko coin id for address' })
+      done += 1
+      if (done % 25 === 0 || done === addresses.length) log(`single-source history: ${done}/${addresses.length}`)
     }
     return out
   }

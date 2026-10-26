@@ -19,6 +19,8 @@ import {
   CG_HISTORY_MAX_RETRIES,
   CG_HISTORY_MIN_INTERVAL_MS,
   makeCoingeckoHistoryClient,
+  makeCoingeckoJsonClient,
+  makeVolumeFetcher,
   makeVolumeHistoryFetcher,
 } from './fetch-sources'
 import { crossVerify, evaluateSingleSource, isSingleSourceCoingecko, resolveSingleSourceConfig, type SingleSourceVerdict } from './verify'
@@ -290,5 +292,26 @@ describe('end to end through buildChainCatalog (fake CoinGecko, no network)', ()
     expect(hist).not.toHaveBeenCalled()
     expect(result.tokens).toHaveLength(0)
     expect(result.report.singleSource).toMatchObject({ candidates: 2, prefiltered: 2, evaluated: 0, admitted: 0 })
+  })
+
+  it('the 24h pre-filter volume fetch (/coins/markets) rides the same throttled client: 429 is retried, an exhausted batch is counted not silently lost', async () => {
+    const a = addrOf(1)
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('/coins/list')) return ok([{ id: 'coin-full', platforms: { ethereum: a.toUpperCase().replace('0X', '0x') } }])
+      throw new Error(`unexpected url ${String(url)}`)
+    }))
+    const markets = (responses: Response[]) => {
+      let t = 0
+      const sleeps: number[] = []
+      const fetchImpl = vi.fn(async () => responses.shift()!) as unknown as typeof fetch
+      return { sleeps, fetchImpl, client: makeCoingeckoJsonClient({ fetchImpl, now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms } }) }
+    }
+    const good = markets([ok({}, 429), ok([{ id: 'coin-full', total_volume: 2_000_000 }])])
+    const res = await makeVolumeFetcher(1, good.client)([a])
+    expect(res.market?.get(`1:${a.toLowerCase()}`)).toEqual({ volume24hUsd: 2_000_000, volumeSource: 'coingecko' })
+    expect(good.sleeps).toContain(CG_HISTORY_BACKOFF_BASE_MS)
+
+    const dead = markets(Array.from({ length: CG_HISTORY_MAX_RETRIES + 1 }, () => ok({}, 429)))
+    await expect(makeVolumeFetcher(1, dead.client)([a])).rejects.toThrow(/all 1 batch/)
   })
 })
