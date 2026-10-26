@@ -33,3 +33,10 @@ Open for owner: pack's 2nd footer sentence · 180 vs 160 ms toast · tagline now
 | ToastProvider (5 types, Etherscan link) | `V2ToastProvider` (same API, max 3, chain-aware link) |
 | NotificationBanner | NoticeBanner (same hook + copy) |
 | BetaBanner / BetaDisclaimer | not carried (no beta) |
+
+## CI fixes (e5486de, fed1de1)
+**Premise corrected (owner-approved fix: committed `.d.ts`).** Goal said the 16 photo files were missing from git. They are not: `git ls-files src/ui/v2/photos` = 16 `.avif`/`.webp` at `b6a660c` and at origin `085cb02`, names match `photos.ts`, `git check-ignore` matches none, not LFS. Largest = 197,204 B (<= 200 KB); no `.gitignore` change needed.
+- **1. Cause of TS2307:** the `*.avif`/`*.webp` module types live in `next/image-types/global`, pulled in by `next-env.d.ts` (gitignored, `.gitignore:26`, written by `next dev/build`). Fresh checkout = no file = TS2307 x16. Reproduced with clean `npm ci` + `tsc`; clean with the file. Fix `fed1de1`: `src/ui/v2/photos/images.d.ts` = `/// <reference types="next/image-types/global" />`. `tsc --noEmit` exit 0 with no `next-env.d.ts`.
+- **2. Escaper (`e5486de`):** old `s.title.replace(/[()/]/g, '\\$&')` (no `\`, no `. * + ? ^ $ { } | [ ]`) -> new `escapeRegExp` = `/[.*+?^${}()|[\]\\/]/g`. Rule is `js/incomplete-sanitization` in the pack (the `CWE-116/IncompleteStringEscaping.ql` path in the goal doesn't exist; used `Security/CWE-116/IncompleteSanitization.ql`). Local `scripts/codeql-local.sh`: before = 1 (`shell.test.tsx:297`), after = 0 repo-wide. Shell test 30/30.
+- **3. Verify:** suite branch 340 files / 5341 pass vs origin/main (`2a30ad9`) 332 / 5155; lint 0 errors / 93 warnings on both (delta 0); `tsc` clean; `npm run build` exit 0. New commits touch only `shell.test.tsx`, `images.d.ts`, this file. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-shell (PR #610 exists).
+- **Edge:** any other tracked image import elsewhere relied on the same gitignored `next-env.d.ts`; none other flagged by CI.
