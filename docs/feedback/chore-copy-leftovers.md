@@ -4,7 +4,7 @@ Display/copy/plumbing only. No tier, gate, quote or pricing logic; nothing under
 
 - [x] C1 one price notice, from the tier
 - [x] C2 source counts that mean something
-- [ ] C3 help-content leftovers
+- [x] C3 help-content leftovers
 - [ ] C4 token-logo rate limit + CSP + Velora labels
 - [ ] C5 flaky `usePortfolio` test
 - [ ] Verify + evidence 1–6
@@ -29,3 +29,10 @@ Before = the new matrix test run against unfixed SwapBox: 4/4 failed with `legac
   asserted equal to `INTEGRATED_DEX_SOURCE_COUNT`. Quote card unchanged: `N sources queried` (= `meta.all.length`, i.e.
   responders; "queried" is loose wording but kept as asked). Tests: SourceToggle.test.tsx (both toggle forms, no `x/y`),
   SwapBox.price-tiers.test.tsx (`3 sources queried`).
+
+## 3. help-content (goal said :29/:38; actual :32/:41)
+- `supports Ethereum Mainnet.` → `supports ${SWAP_CHAIN_LIST_LABEL}.` (live: Ethereum Mainnet, Base, and Arbitrum One).
+- `queries 10 sources (1inch, 0x, KyberSwap, CowSwap, Uniswap V3, OpenOcean, SushiSwap, Balancer, Curve, and Velora)` →
+  `queries ${INTEGRATED_DEX_SOURCE_COUNT} sources (${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)})` = 8 live labels.
+- Found by the new "no disabled source name anywhere in help text" test: the audit answer also said `(Uniswap, Balancer, Curve, etc.)`
+  → `(Uniswap, Curve, etc.)`. Left alone (not asked): the privacy answer still says IP is "never exposed" — product-claims says that is NOT claimed.

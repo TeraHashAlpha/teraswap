@@ -1,4 +1,4 @@
-import { INTEGRATED_DEX_SOURCE_COUNT, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
+import { INTEGRATED_DEX_SOURCE_COUNT, INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
 
 export interface HelpItem {
   q: string
@@ -29,7 +29,7 @@ export const helpSections: HelpSection[] = [
       },
       {
         q: 'Which networks are supported?',
-        a: 'TeraSwap currently supports Ethereum Mainnet. More networks are on the roadmap.',
+        a: `TeraSwap currently supports ${SWAP_CHAIN_LIST_LABEL}. More networks are on the roadmap.`,
       },
     ],
   },
@@ -38,7 +38,8 @@ export const helpSections: HelpSection[] = [
     items: [
       {
         q: 'How does the meta-aggregator work?',
-        a: 'When you request a quote, TeraSwap queries 10 sources (1inch, 0x, KyberSwap, CowSwap, Uniswap V3, OpenOcean, SushiSwap, Balancer, Curve, and Velora) in parallel and ranks them by output amount. You always get the best available rate.',
+        // Count and names come from product-claims (registry minus DISABLED_SOURCES) — a disabled source is never listed.
+        a: `When you request a quote, TeraSwap queries ${INTEGRATED_DEX_SOURCE_COUNT} sources (${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}) in parallel and ranks them by output amount. You always get the best available rate.`,
       },
       {
         q: 'What is Split Routing?',
@@ -110,7 +111,7 @@ export const helpSections: HelpSection[] = [
       },
       {
         q: 'Has TeraSwap been audited?',
-        a: 'TeraSwap itself is a routing layer — it does not hold funds or run smart contracts. All swaps execute through the audited contracts of the underlying DEXs (Uniswap, Balancer, Curve, etc.). Our FeeCollector smart contract is deployed and verified on Etherscan.',
+        a: 'TeraSwap itself is a routing layer — it does not hold funds or run smart contracts. All swaps execute through the audited contracts of the underlying DEXs (Uniswap, Curve, etc.). Our FeeCollector smart contract is deployed and verified on Etherscan.',
       },
       {
         q: 'How does TeraSwap protect my privacy?',
