@@ -1,6 +1,6 @@
 # feat/ui-v2-shell — FEEDBACK
 Flow-B: code only in `src/ui/v2/**`, `src/proxy.ts`(+test), this file. Off origin/main `d4b43db` (B0 #606 merged: `src/ui/v2/version.ts` present).
-- [ ] C1 shell + feedback · [ ] C2 photos + fonts · [ ] C3 sounds + proxy + mobile · [ ] verify · [ ] evidence 1–7
+- [x] C1 shell + feedback (a0d2cf3) · [x] C2 photos + fonts · [ ] C3 sounds + proxy + mobile · [ ] verify · [ ] evidence 1–7
 
 ## Premises checked / decisions (recorded)
 - `useQuoteChainId` is exported from `src/hooks/useChainId.ts` (no `useQuoteChainId.ts` file). Used as-is, read-only.
@@ -14,6 +14,12 @@ Flow-B: code only in `src/ui/v2/**`, `src/proxy.ts`(+test), this file. Off origi
   `tailwind.v2.config.ts`, `package.json` (grep), pack `round4/desktop/30a` + `mobile/m05,m09`.
 - Root `providers.tsx` wraps `/v2` in v1's `ToastProvider` + `BackgroundMusic` (v1-styled ♫). Not editable (Flow-B) → v2 ships its own
   toast provider (same API as v1) and ♫; see C3 for the v1-♫ handling.
+- Photos: pack says "≤ 200 KB each"; 1 of 16 files (`underpass-1920.webp`, 203 178 B) was over a strict 200 000 B → re-encoded with sharp
+  (q70, 191 292 B); the test asserts 200 000 B. Only the 4 photos the shell tabs use ship (zakim, underpass, arch-night, trails); arch-light
+  (Docs/Legal/Status) and the unused highway are left out, `credits.json` is trimmed to match. `next/image` `priority` is NOT used: it would
+  preload the WebP `<img>` while AVIF browsers use the `<source>` (double hero download) → `<picture>` + eager/`fetchPriority=high`.
+- Fonts: `pyftsubset` (fontTools 4.62.1) from a venv outside the repo — no dependency added; Sonatype Guide MCP was unreachable (401) so the
+  usual pre-install check could not run. Face sizes 509 076 B → 48 028 B (README table).
 - Pack: toast motion text says 180 ms, B0 token `--t-toast` is 160 ms (ARCHITECT_BRIEF.md:24) → token kept. Pack footer carries a second
   sentence (“Provided as is…”) that is not in v1's `Footer` and not in the verbatim list → omitted; owner to decide.
 

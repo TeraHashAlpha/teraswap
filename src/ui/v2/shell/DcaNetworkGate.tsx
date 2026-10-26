@@ -24,11 +24,11 @@ export function DcaNetworkGate() {
   const ids = liveDcaChainIds()
   return (
     <section data-tab-pane="dca" data-dca-gate="" className="mx-auto w-full max-w-[880px] px-1 py-10">
-      <EyebrowLabel>DCA · Live on L2</EyebrowLabel>
+      <EyebrowLabel className="ts-v2-plate">DCA · Live on L2</EyebrowLabel>
       <h1 className="mt-4 font-v2-display text-5xl uppercase leading-[0.95] text-v2-text sm:text-7xl">
         DCA runs on {formatChainList(dcaLiveChainNames())}.
       </h1>
-      <p className="mt-6 max-w-[640px] text-lg text-v2-muted">
+      <p className="ts-v2-plate mt-6 inline-block max-w-[640px] text-lg text-v2-muted">
         {chainNameFor(chainId)} is selected. Switch network to create or manage DCA positions.
       </p>
       <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -38,7 +38,7 @@ export function DcaNetworkGate() {
           </Button>
         ))}
       </div>
-      <p className="mt-6 text-sm text-v2-muted">Positions on other networks stay visible in Orders.</p>
+      <p className="ts-v2-plate mt-6 inline-block text-sm text-v2-muted">Positions on other networks stay visible in Orders.</p>
     </section>
   )
 }

@@ -7,6 +7,7 @@ import { useQuoteChainId } from '@/hooks/useChainId'
 import '../v2.css'
 import './shell.css'
 import { v2FontClassNames } from '../font-loader'
+import { PhotoBackground } from '../photos/PhotoBackground'
 import { createV2RainbowTheme } from './rainbowkit-theme'
 import { DcaNetworkGate, shouldShowDcaGate } from './DcaNetworkGate'
 import { Footer } from './Footer'
@@ -34,12 +35,15 @@ export function AppShell({ tab, children }: { tab?: V2TabId; children?: ReactNod
   return (
     <RainbowKitProvider theme={rkTheme} locale="en">
       <V2ToastProvider>
-        <div data-ts-ui="v2" className={`ts-v2 flex min-h-screen flex-col ${v2FontClassNames}`}>
-          <Header />
-          <NoticeBanner />
-          <TabBar active={active} />
-          <main className="flex-1 px-4 py-8 sm:px-8">{pane}</main>
-          <Footer />
+        <div data-ts-ui="v2" className={`ts-v2 relative min-h-screen ${v2FontClassNames}`}>
+          <PhotoBackground tab={active} />
+          <div className="relative z-10 flex min-h-screen flex-col">
+            <Header />
+            <NoticeBanner />
+            <TabBar active={active} />
+            <main className="flex-1 px-4 py-8 sm:px-8">{pane}</main>
+            <Footer />
+          </div>
           <MusicToggle />
           <HelpFab />
         </div>

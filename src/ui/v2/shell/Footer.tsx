@@ -24,7 +24,7 @@ function footerChain(chainId: number): { name: string; blockExplorer: string } |
 }
 
 const LINK =
-  'py-2 transition-colors hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal'
+  'py-1 transition-colors hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal'
 const SEP = (
   <span aria-hidden="true" className="text-v2-dim">
     ·
@@ -45,10 +45,10 @@ export function Footer() {
   })
 
   return (
-    <footer className="px-4 pb-6 pt-4 sm:px-8">
-      <div className="border-t border-v2-border pt-4">
+    <footer data-ts-footer="" className="box-border min-h-[var(--photo-footer-band)] px-4 py-3 sm:px-8">
+      <div className="border-t border-v2-border pt-3">
         <p className="text-xs text-v2-muted">{V2_RISK_LINE}</p>
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-v2-mono text-[11px] uppercase tracking-[1.5px] text-v2-muted">
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0 font-v2-mono text-[11px] uppercase tracking-[0.5px] text-v2-muted">
           <Link href="/docs" className={LINK}>
             Docs
           </Link>

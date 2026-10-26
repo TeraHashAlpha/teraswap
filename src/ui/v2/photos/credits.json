@@ -1,0 +1,161 @@
+{
+  "note": "Photo credits for src/ui/v2/photos/. Source: Round 4 pack credits.json (trimmed to the photos the v2 shell ships; arch-light and the unused highway photo are not included). Pexels License: free for commercial use, attribution not required — the pack still prints the credit line on every screen.",
+  "photos": [
+    {
+      "id": "zakim",
+      "photographer": "Phil Evenden",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "17102595",
+      "pexelsUrl": "https://www.pexels.com/photo/leonard-p-zakim-bunker-hill-memorial-bridge-in-boston-17102595/",
+      "title": "Leonard P. Zakim Bunker Hill Memorial Bridge in Boston",
+      "tabs": [
+        "swap",
+        "limit",
+        "sltp"
+      ],
+      "files": [
+        {
+          "file": "pexels-17102595-phil-evenden-zakim-bridge-night-1920.avif",
+          "width": 1920,
+          "height": 1280,
+          "bytes": 176114
+        },
+        {
+          "file": "pexels-17102595-phil-evenden-zakim-bridge-night-1920.webp",
+          "width": 1920,
+          "height": 1280,
+          "bytes": 197204
+        },
+        {
+          "file": "pexels-17102595-phil-evenden-zakim-bridge-night-1080.avif",
+          "width": 1080,
+          "height": 720,
+          "bytes": 109039
+        },
+        {
+          "file": "pexels-17102595-phil-evenden-zakim-bridge-night-1080.webp",
+          "width": 1080,
+          "height": 720,
+          "bytes": 103056
+        }
+      ]
+    },
+    {
+      "id": "underpass",
+      "photographer": "Willbone Gallery",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "32397093",
+      "pexelsUrl": "https://www.pexels.com/photo/urban-underpass-at-night-with-concrete-structure-32397093/",
+      "title": "Urban underpass at night with concrete structure",
+      "tabs": [
+        "dca"
+      ],
+      "files": [
+        {
+          "file": "pexels-32397093-willbone-gallery-underpass-night-1920.avif",
+          "width": 1920,
+          "height": 2560,
+          "bytes": 182852
+        },
+        {
+          "file": "pexels-32397093-willbone-gallery-underpass-night-1920.webp",
+          "width": 1920,
+          "height": 2560,
+          "bytes": 191292
+        },
+        {
+          "file": "pexels-32397093-willbone-gallery-underpass-night-1080.avif",
+          "width": 1080,
+          "height": 1440,
+          "bytes": 180417
+        },
+        {
+          "file": "pexels-32397093-willbone-gallery-underpass-night-1080.webp",
+          "width": 1080,
+          "height": 1440,
+          "bytes": 139330
+        }
+      ]
+    },
+    {
+      "id": "arch-night",
+      "photographer": "Peter Dyllong",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "35632241",
+      "pexelsUrl": "https://www.pexels.com/photo/35632241/",
+      "title": null,
+      "tabs": [
+        "portfolio",
+        "orders",
+        "history"
+      ],
+      "files": [
+        {
+          "file": "pexels-35632241-peter-dyllong-arch-night-1920.avif",
+          "width": 1920,
+          "height": 1280,
+          "bytes": 181525
+        },
+        {
+          "file": "pexels-35632241-peter-dyllong-arch-night-1920.webp",
+          "width": 1920,
+          "height": 1280,
+          "bytes": 95988
+        },
+        {
+          "file": "pexels-35632241-peter-dyllong-arch-night-1080.avif",
+          "width": 1080,
+          "height": 720,
+          "bytes": 69364
+        },
+        {
+          "file": "pexels-35632241-peter-dyllong-arch-night-1080.webp",
+          "width": 1080,
+          "height": 720,
+          "bytes": 43340
+        }
+      ]
+    },
+    {
+      "id": "trails",
+      "photographer": "Yakup Gökdeniz",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "30180436",
+      "pexelsUrl": "https://www.pexels.com/photo/30180436/",
+      "title": null,
+      "tabs": [
+        "analytics"
+      ],
+      "files": [
+        {
+          "file": "pexels-30180436-yakup-gokdeniz-light-trails-1920.avif",
+          "width": 1920,
+          "height": 1390,
+          "bytes": 180319
+        },
+        {
+          "file": "pexels-30180436-yakup-gokdeniz-light-trails-1920.webp",
+          "width": 1920,
+          "height": 1390,
+          "bytes": 196088
+        },
+        {
+          "file": "pexels-30180436-yakup-gokdeniz-light-trails-1080.avif",
+          "width": 1080,
+          "height": 782,
+          "bytes": 128777
+        },
+        {
+          "file": "pexels-30180436-yakup-gokdeniz-light-trails-1080.webp",
+          "width": 1080,
+          "height": 782,
+          "bytes": 98424
+        }
+      ]
+    }
+  ]
+}
