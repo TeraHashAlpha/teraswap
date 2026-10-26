@@ -6,7 +6,7 @@ Display/copy/plumbing only. No tier, gate, quote or pricing logic; nothing under
 - [x] C2 source counts that mean something
 - [x] C3 help-content leftovers
 - [x] C4 token-logo rate limit + CSP + Velora labels
-- [ ] C5 flaky `usePortfolio` test
+- [x] C5 flaky `usePortfolio` test
 - [ ] Verify + evidence 1–6
 
 ## Premise check
@@ -48,3 +48,10 @@ Before = the new matrix test run against unfixed SwapBox: 4/4 failed with `legac
 - Velora: recorded `GET api.paraswap.io/prices` (10 WETH→USDC, 2026-10-26; one public read-only call) →
   `__fixtures__/velora-prices-mainnet.ts`; hops were `metric-v1, metric-v1, uniswapv4`, now `Velora, Uniswap V4` (known-venue map, else
   "Velora", deduped). The response names no DEX for `metric-v1`, so "where the response gives one" = only the map.
+
+## 5. Flaky `usePortfolio` (Base Alchemy-503)
+- Cause (read hook, extra read): first render is on the Alchemy path and `useBalance` gives native ETH, so `tokens` is non-empty
+  BEFORE the 503 flips to the multicall fallback; `waitFor(tokens.length > 0)` matched that ETH-only state, then USDC raced the fetch
+  continuation. Fix: 503 held behind a deferred; assert `['ETH']` first (the old wait condition), release, `waitFor` USDC (5 s cap).
+- 20× whole-file: idle 20/20 green; under 20 CPU burners 20/20 green. NOT reproduced before the fix either (0/40 red), so the 20×
+  is consistency, the `['ETH']`-before-release assertion is the deterministic proof.
