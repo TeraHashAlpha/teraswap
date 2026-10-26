@@ -33,6 +33,7 @@ export function PhotoBackground({ tab, aboveFold = true }: { tab: V2TabId; above
         </picture>
         <div className="ts-v2-photo__layer ts-v2-photo__tone" />
         <div className="ts-v2-photo__layer ts-v2-photo__veil" />
+        <div className="ts-v2-photo__layer ts-v2-photo__veil-mobile" />
         <div className="ts-v2-photo__layer ts-v2-photo__fade" />
         <div className="ts-v2-photo__layer ts-v2-photo__dots" />
         <div className="ts-v2-photo__band" />

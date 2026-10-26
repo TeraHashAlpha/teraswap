@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { config, proxy } from './proxy'
 import { isV2KitEnabled } from '@/ui/v2/kit-gate'
+import { V2_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
 import { signUiVersionCookie } from '@/ui/v2/ui-cookie'
 
 const SECRET = 'test-cookie-secret-abc123'
@@ -28,9 +29,15 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
+const TAB_PATHS = ['/swap', '/portfolio', '/dca', '/limit', '/sltp', '/orders', '/history', '/analytics']
+
 describe('matcher', () => {
-  it('covers `/` and the v2 tree only — nothing else is touched', () => {
-    expect(config.matcher).toEqual(['/', '/v2', '/v2/:path*'])
+  it('covers `/`, the 8 tab paths and the v2 tree only — nothing else is touched', () => {
+    expect(config.matcher).toEqual(['/', ...TAB_PATHS, '/v2', '/v2/:path*'])
+  })
+  it('the literal matcher (Next cannot parse a spread) and the shell tab list never drift apart', () => {
+    expect(config.matcher.slice(1, -2)).toEqual([...V2_TAB_PATHS])
+    expect(TAB_PATHS).toEqual([...V2_TAB_PATHS])
   })
 })
 
@@ -56,8 +63,40 @@ describe('`/` (the v1 landing)', () => {
   })
 })
 
+describe('the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate)', () => {
+  it.each(TAB_PATHS)('%s: no env, no cookie → untouched (v1 keeps its own page)', (path) => {
+    expect(passes(proxy(req(path)))).toBe(true)
+  })
+  it.each(TAB_PATHS)('%s: forged / wrong-secret / secret-less cookie → untouched', (path) => {
+    expect(passes(proxy(req(path, 'f'.repeat(64))))).toBe(true)
+    expect(passes(proxy(req(path, signUiVersionCookie('other-secret'))))).toBe(true)
+    const cookie = signUiVersionCookie(SECRET)
+    delete process.env.UI_V2_COOKIE_SECRET
+    expect(passes(proxy(req(path, cookie)))).toBe(true)
+  })
+  it.each(TAB_PATHS)('%s: UI_V2_ENABLED=true → rewritten to /v2%s', (path) => {
+    process.env.UI_V2_ENABLED = 'true'
+    expect(rewrittenTo(proxy(req(path)))).toBe(`/v2${path}`)
+  })
+  it.each(TAB_PATHS)('%s: valid cookie → rewritten to /v2%s', (path) => {
+    expect(rewrittenTo(proxy(req(path, signUiVersionCookie(SECRET))))).toBe(`/v2${path}`)
+  })
+  it('keeps the query string out of the decision and the path exact (no prefix matching)', () => {
+    process.env.UI_V2_ENABLED = 'true'
+    expect(rewrittenTo(proxy(req('/swap?from=ETH')))).toBe('/v2/swap')
+    // Exact match only: a look-alike is never rewritten to /v2/… (and the matcher never routes it here at all).
+    expect(passes(proxy(req('/swapx')))).toBe(true)
+    expect(passes(proxy(req('/swap/extra')))).toBe(true)
+    expect(config.matcher).not.toContain('/swapx')
+  })
+  it('every tab rewrite target is the one the shell route serves', () => {
+    process.env.UI_V2_ENABLED = 'true'
+    for (const path of TAB_PATHS) expect(rewrittenTo(proxy(req(path))).startsWith('/v2/')).toBe(true)
+  })
+})
+
 describe('direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie)', () => {
-  it.each(['/v2', '/v2/swap', '/v2/_kit', '/v2/anything/deep'])('%s with no env/cookie → real 404 path', (path) => {
+  it.each(['/v2', ...TAB_PATHS.map((p) => `/v2${p}`), '/v2/_kit', '/v2/anything/deep'])('%s with no env/cookie → real 404 path', (path) => {
     const res = proxy(req(path))
     expect(rewrittenTo(res)).toBe('/v2-disabled')
     expect(res.headers.get('x-middleware-next')).toBeNull()
@@ -65,6 +104,16 @@ describe('direct requests to /v2/* (requirement: must NOT render v2 without env/
   it('forged and wrong-secret cookies → 404 path', () => {
     expect(rewrittenTo(proxy(req('/v2', 'f'.repeat(64))))).toBe('/v2-disabled')
     expect(rewrittenTo(proxy(req('/v2/swap', signUiVersionCookie('other-secret'))))).toBe('/v2-disabled')
+    for (const path of TAB_PATHS) expect(rewrittenTo(proxy(req(`/v2${path}`, 'f'.repeat(64))))).toBe('/v2-disabled')
+  })
+  it('the 404 proof: production, no gate → every direct /v2/<tab> is rewritten to a path that has no route', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('VERCEL_ENV', 'production')
+    for (const path of TAB_PATHS) {
+      const res = proxy(req(`/v2${path}`))
+      expect(rewrittenTo(res)).toBe('/v2-disabled')
+      expect(res.headers.get('x-middleware-next')).toBeNull()
+    }
   })
   it('UI_V2_ENABLED=true → passes through', () => {
     process.env.UI_V2_ENABLED = 'true'

@@ -41,8 +41,11 @@ export function AppShell({ tab, children }: { tab?: V2TabId; children?: ReactNod
             <Header />
             <NoticeBanner />
             <TabBar active={active} />
-            <main className="flex-1 px-4 py-8 sm:px-8">{pane}</main>
-            <Footer />
+            {/* mobile (pack round4): photo behind header + tab strip only; the column below is solid, 12 px side margins */}
+            <div data-ts-column="" className="mx-3 flex flex-1 flex-col bg-v2-bg sm:mx-0 sm:bg-transparent">
+              <main className="flex-1 px-4 py-8 sm:px-8">{pane}</main>
+              <Footer />
+            </div>
           </div>
           <MusicToggle />
           <HelpFab />

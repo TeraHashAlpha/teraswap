@@ -72,6 +72,7 @@ import { useDisconnectedChainSelection } from '@/hooks/useChainId'
 import { helpSections } from '@/lib/help-content'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { AppShell } from './AppShell'
+import { resetMusicStateForTests } from './music'
 import { V2_RISK_LINE } from './Footer'
 import { shellChains } from './chains'
 
@@ -86,6 +87,7 @@ beforeEach(() => {
   h.push.mockClear()
   h.switchChain.mockClear()
   useDisconnectedChainSelection.setState({ chainId: null })
+  resetMusicStateForTests()
 })
 afterEach(cleanup)
 

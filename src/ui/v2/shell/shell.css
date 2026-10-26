@@ -6,3 +6,27 @@
   from { opacity: 0; transform: translateY(-12px); }
   to { opacity: 1; transform: none; }
 }
+
+/* Hide v1's own ♫ (the root layout mounts v1 BackgroundMusic around /v2 too; v2 renders its own). Matched by the
+   aria-label v1 sets — a test pins that label in v1's source and that the v2 button never matches. */
+body:has([data-ts-ui="v2"]) button[aria-label$="background music"] { display: none; }
+
+/* Tab strip: horizontal scroll without a scrollbar; edge fades by data-edge-*; chevrons are decorative. */
+.ts-v2-tabscroll { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.ts-v2-tabscroll::-webkit-scrollbar { display: none; }
+.ts-v2-tabscroll[data-edge-left="true"] {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 36px);
+  mask-image: linear-gradient(to right, transparent 0, #000 36px);
+}
+.ts-v2-tabscroll[data-edge-right="true"] {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 36px);
+  mask-image: linear-gradient(to left, transparent 0, #000 36px);
+}
+.ts-v2-tabscroll[data-edge-left="true"][data-edge-right="true"] {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 36px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 36px), transparent 100%);
+}
+.ts-v2-tabchevron {
+  position: absolute; top: 1rem; display: flex; align-items: center; height: 1.6rem;
+  font-family: var(--font-mono); font-size: 18px; line-height: 1; color: var(--text); pointer-events: none;
+}
