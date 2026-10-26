@@ -544,18 +544,86 @@ describe('POST /api/swap — fail-closed trade value [CHORE-ORACLE-VALUE-FAILCLO
   const WETH = VALID_BASE.src
   const USDC = VALID_BASE.dst
 
-  it('blocks (422, unpriceable) when neither token prices on DefiLlama nor Chainlink', async () => {
+  // [feat/swap-price-tiers D3] The 422 hard block became informed CONSENT: without `unpricedAck: true`
+  // the route answers 409 `unpriced_ack_required` (the DCA floorAck shape), with it the swap proceeds
+  // with SC-04 / R1 / the on-chain minimum output untouched and no value-based limit (there is no value).
+  it('neither token prices on DefiLlama nor Chainlink + no ack -> 409 unpriced_ack_required, NO calldata, no priceGuard flag', async () => {
     mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
     mockFetchDefiLlamaPrice.mockResolvedValue(null) // both sides uncovered
     mockComputeTokenAmountUsd.mockResolvedValue(null) // both sides uncovered
     const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
-    expect(res.status).toBe(422)
+    expect(res.status).toBe(409)
     const body = await res.json()
-    expect(body.priceGuard).toBe(true)
-    expect(body.blocked).toBe(true)
+    expect(body.code).toBe('unpriced_ack_required')
+    expect(body.requiredTier).toBe('unpriced')
     expect(body.unpriceable).toBe(true)
-    // The policy is a block, not a silent pass — validateSwapPrice is never even reached.
+    expect(body.priceGuard).toBeUndefined() // not a hard block: the client re-asks with consent
+    expect(body.tx).toBeUndefined()
+    expect(JSON.stringify(body)).not.toContain(VALID_SWAP_RESULT.tx.data)
+    // The policy is consent, not a silent pass — validateSwapPrice is never even reached.
     expect(mockValidateSwapPrice).not.toHaveBeenCalled()
+  })
+
+  it('the ack must be the boolean true: a string, a number or false still gets the 409', async () => {
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    for (const ack of ['true', 1, false, {}]) {
+      mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+      const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, unpricedAck: ack }))
+      expect(res.status, String(ack)).toBe(409)
+    }
+  })
+
+  it('neither token prices + unpricedAck:true -> 200 with calldata; SC-04 selector and R1 recipient checks still ran; no value-based limit', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, unpricedAck: true }))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.tx.data).toBe(VALID_SWAP_RESULT.tx.data)
+    expect(mockIsKnownSwapSelector).toHaveBeenCalledWith(VALID_SWAP_RESULT.tx.data)
+    expect(mockValidateCallDataRecipient).toHaveBeenCalled()
+    // The existing checks are kept: the DefiLlama deviation guard still runs, with the value it has (0).
+    expect(mockValidateSwapPrice).toHaveBeenCalledTimes(1)
+    expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(0)
+  })
+
+  it('the ack never bypasses SC-04: an unknown selector is still 400 with the ack present', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    mockIsKnownSwapSelector.mockReturnValueOnce(false)
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, unpricedAck: true }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/selector/i)
+  })
+
+  it('the ack never bypasses R1: a recipient mismatch is still 400 with the ack present', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockFetchDefiLlamaPrice.mockResolvedValue(null)
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    mockValidateCallDataRecipient.mockReturnValueOnce({ valid: false, extracted: '0xdead', implicitRecipient: false, reason: 'mismatch' })
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, unpricedAck: true }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/recipient/i)
+  })
+
+  it('a PRICED pair ignores the ack: thresholds unchanged (the real max(in,out) estimate reaches the guard)', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce({ ...VALID_SWAP_RESULT, toAmount: '3000000000' })
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    mockFetchDefiLlamaPrice.mockImplementation(async (addr: unknown) => (addr === USDC ? { price: 5 } : null))
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE, srcDecimals: 18, dstDecimals: 6, unpricedAck: true }))
+    expect(res.status).toBe(200)
+    expect(mockValidateSwapPrice.mock.calls[0][0].estimatedValueUsd).toBe(15_000)
+  })
+
+  it('ONE priced leg (DefiLlama only, the server\'s single source) is allowed without any ack — D2: warn, never block', async () => {
+    mockFetchSwapFromSource.mockResolvedValueOnce(VALID_SWAP_RESULT)
+    mockComputeTokenAmountUsd.mockResolvedValue(null)
+    mockFetchDefiLlamaPrice.mockImplementation(async (addr: unknown) => (addr === WETH ? { price: 2_500 } : null))
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(200)
   })
 
   it('prices the OUTPUT side when the input is uncovered (the P2 bypass, DefiLlama leg)', async () => {
