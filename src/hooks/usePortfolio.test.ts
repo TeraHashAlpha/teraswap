@@ -681,9 +681,16 @@ describe('usePortfolio — chain-aware [E-3]', () => {
       isLoading: false,
       isError: false,
     }
+    // [chore/copy-leftovers] Deterministic ordering. The hook starts on the Alchemy path (isAvailable=true) and
+    // useBalance already supplies native ETH, so `tokens` is non-empty on the FIRST render — before the 503 has
+    // switched it to the multicall fallback. The old `waitFor(tokens.length > 0)` was satisfied by that ETH-only
+    // state and then raced the fetch continuation for USDC (flaky under parallel load). The 503 is now held
+    // behind a gate: the pre-fallback state is asserted, the gate is released, and we wait for the postcondition.
+    let releaseDiscovery!: () => void
+    const discoveryGate = new Promise<void>((resolve) => { releaseDiscovery = resolve })
     fetchMock.mockImplementation((url: string) => {
       if (typeof url === 'string' && url.startsWith('/api/portfolio/tokens')) {
-        return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: 'unavailable' }) })
+        return discoveryGate.then(() => ({ ok: false, status: 503, json: async () => ({ error: 'unavailable' }) }))
       }
       return Promise.resolve({
         ok: true,
@@ -692,7 +699,16 @@ describe('usePortfolio — chain-aware [E-3]', () => {
     })
 
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Discovery was asked on the active chain (the effect fires inside renderHook's act, so this is synchronous).
+    const tokenCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/tokens'))
+    expect(tokenCalls).toHaveLength(1)
+    expect(String(tokenCalls[0][0])).toContain('chainId=8453')
+    // Before the fallback: ETH only — non-empty, which is exactly what the old wait condition matched.
+    expect(result.current.tokens.map((t) => t.token.symbol)).toEqual(['ETH'])
+
+    await act(async () => { releaseDiscovery() })
+    // Condition-based (no sleep): resolves the moment the multicall fallback has produced the Base ERC-20.
+    await waitFor(() => expect(result.current.tokens.map((t) => t.token.symbol)).toContain('USDC'), { timeout: 5000 })
 
     const symbols = result.current.tokens.map((t) => t.token.symbol)
     expect(symbols).toContain('USDC') // the BASE-catalog USDC, not the mainnet one
@@ -700,13 +716,11 @@ describe('usePortfolio — chain-aware [E-3]', () => {
     expect(usdc.token.address.toLowerCase()).toBe(BASE_USDC)
     expect(usdc.balanceFormatted).toBe('5.0000')
 
-    // Discovery + prices were asked on the active chain.
-    const tokenCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/tokens'))
-    expect(String(tokenCalls[0][0])).toContain('chainId=8453')
+    // Prices were asked on the active chain too.
     await waitFor(() => {
       const priceCalls = fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith('/api/portfolio/prices'))
       expect(priceCalls.length).toBeGreaterThan(0)
       expect(String(priceCalls[0][0])).toContain('chainId=8453')
-    })
+    }, { timeout: 5000 })
   })
 })

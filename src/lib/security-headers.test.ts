@@ -65,6 +65,13 @@ describe('[fix/functional-chain-ui C8] CSP — third parties stay behind /api', 
     expect(nextConfigImgSrc()).toEqual(expect.arrayContaining(["'self'"]))
     expect(nextConfigImgSrc().filter(s => s.includes('githubusercontent'))).toEqual([])
   })
+
+  // [chore/copy-leftovers] /api/token-logo streams CoinGecko bytes server-side (#591), so no browser <img>
+  // loads assets.coingecko.com any more. tokens.1inch.io stays: usePortfolio + importedTokenLogo still load it.
+  it('img-src allows no CoinGecko origin, but keeps tokens.1inch.io', () => {
+    expect(nextConfigImgSrc().filter(s => s.includes('coingecko'))).toEqual([])
+    expect(nextConfigImgSrc()).toContain('https://tokens.1inch.io')
+  })
 })
 
 describe('[9N] Cross-Origin-Opener-Policy', () => {

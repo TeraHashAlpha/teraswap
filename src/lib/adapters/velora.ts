@@ -2,6 +2,51 @@ import { getAdapterApiUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { clampSlippage, parseJsonOrThrow } from './shared'
 import type { DEXAdapter, NormalizedQuote, QuoteParams, SwapParams } from './types'
 
+/**
+ * [chore/copy-leftovers] Display names for the venues Velora's `swapExchanges[].exchange` reports. That field is
+ * a Velora-internal venue id, not a name: the recorded response (src/lib/__fixtures__/velora-prices-mainnet.ts)
+ * carries `metric-v1` (a market maker) beside `uniswapv4`, and the old code rendered the id as the Route.
+ * Same approach as kyberHopLabel (#591): a name only when the response gives a venue we can name, else 'Velora'.
+ * Keys are matched case-insensitively with separators stripped, so `UniswapV3` / `uniswap-v3` / `uniswapv3` agree.
+ */
+const VELORA_VENUE_NAMES: ReadonlyMap<string, string> = new Map([
+  ['uniswapv2', 'Uniswap V2'],
+  ['uniswapv3', 'Uniswap V3'],
+  ['uniswapv4', 'Uniswap V4'],
+  ['sushiswap', 'SushiSwap'],
+  ['sushiswapv3', 'SushiSwap V3'],
+  ['pancakeswapv2', 'PancakeSwap V2'],
+  ['pancakeswapv3', 'PancakeSwap V3'],
+  ['curve', 'Curve'],
+  ['curvev1', 'Curve'],
+  ['curvev2', 'Curve'],
+  ['balancerv1', 'Balancer'],
+  ['balancerv2', 'Balancer'],
+  ['balancerv3', 'Balancer'],
+  ['aerodrome', 'Aerodrome'],
+  ['aerodromeslipstream', 'Aerodrome Slipstream'],
+  ['camelotv3', 'Camelot V3'],
+])
+
+export function veloraHopLabel(exchange: unknown): string {
+  if (typeof exchange !== 'string') return 'Velora'
+  return VELORA_VENUE_NAMES.get(exchange.toLowerCase().replace(/[^a-z0-9]/g, '')) ?? 'Velora'
+}
+
+/** One label per distinct venue, in route order (two `metric-v1` hops read as one "Velora", not "Velora + Velora"). */
+export function veloraRouteLabels(priceRoute: any): string[] {
+  const labels: string[] = []
+  for (const r of priceRoute?.bestRoute ?? []) {
+    for (const s of r?.swaps ?? []) {
+      for (const e of s?.swapExchanges ?? []) {
+        const label = veloraHopLabel(e?.exchange)
+        if (!labels.includes(label)) labels.push(label)
+      }
+    }
+  }
+  return labels
+}
+
 async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> {
   const { src, dst, amount, srcDecimals = 18, dstDecimals = 18, chainId = DEFAULT_CHAIN_ID } = params
   const base = getAdapterApiUrl('velora', chainId)
@@ -27,11 +72,7 @@ async function fetchQuote(params: QuoteParams): Promise<NormalizedQuote | null> 
     toAmount: best.destAmount,
     estimatedGas: Number(best.gasCost || 0),
     gasUsd: Number(best.gasCostUSD || 0),
-    routes: best.bestRoute?.flatMap((r: any) =>
-      r.swaps?.flatMap((s: any) =>
-        s.swapExchanges?.map((e: any) => e.exchange)
-      )
-    ) ?? [],
+    routes: veloraRouteLabels(best),
   }
 }
 
@@ -88,11 +129,7 @@ async function fetchSwapData(params: SwapParams): Promise<NormalizedQuote | null
     toAmount: priceData.priceRoute.destAmount,
     estimatedGas: Number(txData.gas || priceData.priceRoute.gasCost || 0),
     gasUsd: Number(priceData.priceRoute.gasCostUSD || 0),
-    routes: priceData.priceRoute.bestRoute?.flatMap((r: any) =>
-      r.swaps?.flatMap((s: any) =>
-        s.swapExchanges?.map((e: any) => e.exchange)
-      )
-    ) ?? [],
+    routes: veloraRouteLabels(priceData.priceRoute),
     tx: {
       to: txData.to,
       data: txData.data,
