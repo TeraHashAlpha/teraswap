@@ -1,31 +1,46 @@
 # Feedback — fix/imported-tokens-persist
 
-## Checklist
-- [x] C1 facts (a)(b)
-- [x] C2 localStorage persistence + tests
-- [x] C3 selector hygiene (catalog-wins dedupe, symbol-collision badge) + tests
-- [ ] Verify: suite vs origin/main, lint delta, tsc, diff --stat, compare link
+- [x] C1 facts · [x] C2 localStorage persistence · [x] C3 catalog-wins + symbol collision · [x] verify
 
 ## 1. Facts
-**(a) Why imports vanish.** `src/lib/tokens.ts:780-781`: `// ── Custom token import cache (session-only)` /
-`let customTokens: Token[] = []` — a module-level array, written only by `addCustomToken` (`:788`, called from
-`useTokenImport.ts:118`). No sessionStorage/localStorage anywhere: any reload or new visit resets it to `[]`.
-Second gap: the selector's browse list (`TokenSelector.tsx:56-64`, `catalog`) is `DEFAULT_TOKENS`/`getChainTokenList`
-and never includes custom tokens; only the search path merges them (`:92` → `getSearchCatalog`, `chains/tokens.ts:328-337`).
-So even in-session, an imported token is findable only by searching for it.
+**(a)** `src/lib/tokens.ts:780-781` `// Custom token import cache (session-only)` / `let customTokens: Token[] = []` — module memory,
+written only by `addCustomToken` (`:787`); no storage anywhere, so reload/new visit = `[]`. Also, the browse list
+(`TokenSelector.tsx:56-64`) never merged custom tokens; only search did (`chains/tokens.ts:328`).
+**(b)** ETHFI is NOT in `token-catalog.8453.json` (311 tokens). CoinGecko `/coins/list?include_platform=true` has `ether-fi` with
+`platforms.base` (`CG_PLATFORM[8453]='base'`, `fetch-sources.ts:25`). Checked per source by script (address read from that entry,
+not typed): `tokens.coingecko.com/base` yes; Uniswap, 1inch, Trust Wallet, Superchain no → **1 vote**. Excluded by
+`verify.ts:200` `if (votes < cfg.minSources)` → `insufficient-sources` (`config.ts:31` minSources 2); DefiLlama can't rescue it,
+its fetch only targets candidates already at >= minSources (`build-chain.ts:200-202`). Volume ~$31.7M, so not the low-liq rule.
+**Change:** admit a CoinGecko-only candidate when liquid (24h vol >= $100k floor, or Llama confidence >= 0.9) and guard-clean.
+**Impact (CG markets, 2026-10-26):** 2,579 CG-only Base addresses outside the catalog; 189 >= $100k (90 >= $1M) ⇒ ~+188 besides
+ETHFI; `maxNewTokensPerChain[8453]=250` (`config.ts:35`) may bind. Pipeline/catalog untouched.
 
-**(b) ETHFI on Base.** NOT in `token-catalog.8453.json` (311 tokens, no ETHFI/ether.fi). CoinGecko `/coins/list?include_platform=true`
-(the pipeline's own platform source) has `ether-fi` with `platforms.base` set (`CG_PLATFORM[8453]='base'`, `fetch-sources.ts:25`),
-so it IS a CoinGecko candidate. Address checked against each source's Base list, read by script from that platform entry, never typed:
-`tokens.coingecko.com/base/all.json` yes; Uniswap, 1inch v1.2, Trust Wallet, Superchain: no. = **1 external vote**.
-Excluding rule: `scripts/token-catalog/lib/verify.ts:200` `if (votes < cfg.minSources)` → `insufficient-sources`
-(`config.ts:31` `minSources: 2`). DefiLlama cannot rescue it: market/identity fetch only targets candidates already at
-`>= minSources` (`build-chain.ts:200-202`). Its 24h volume (~$31.7M, CG markets) is far above `liquidityFloorUsd` (`config.ts:33`),
-so the low-liquidity 3-vote rule is not the cause.
-**Change that would include it:** let a CoinGecko-only candidate qualify when it is liquid (24h volume >= `liquidityFloorUsd`
-$100k, or DefiLlama price confidence >= 0.9) and still passes the on-chain guard — a rule exception at `verify.ts:200`.
-**Impact (estimate, CG volumes fetched 2026-10-26):** 2,579 CG-only Base addresses are outside the catalog; **189** clear $100k
-(90 clear $1M), incl. ETHFI, i.e. ~+188 others. Note `maxNewTokensPerChain[8453]=250` (`config.ts:35`) could then bind.
-**Caveat / premise:** the goal says to read the Base address from the user's import; no record of it exists in the allowed
-files (the import was lost on reload), so the address came from CoinGecko's platform list instead. Not verified equal to
-the user's import. Pipeline and catalog untouched.
+## 2. Storage schema + tests
+Key `ts:imported-tokens:v1:<chainId>` → JSON array of `{address (EIP-55), symbol, name, decimals, importedAt}`; nothing else
+(no balances/user data). Every access try/catch (`imported-tokens.ts`). Hydrated lazily per chain (`hydrateCustomTokens`), listed in
+the browse list under "Imported" with the existing ⚠ badge + Remove; re-validated on picker open over `/api/rpc?chainId=`:
+no answer from chain / decimals changed ⇒ kept, shown "Unavailable", unselectable; transport failure ⇒ not flagged (retry next open).
+Tests: `imported-tokens.test.ts` (12), `TokenSelector.imported.test.tsx` (13).
+
+## 3. Reload proof
+`vi.resetModules()` + fresh React/app, same localStorage ⇒ token listed + selectable on Base, absent on mainnet/Arbitrum (and no RPC
+for other chains); corrupt/hostile/throwing storage ⇒ no crash; Remove ⇒ gone from list+storage and after reload. Mutation check:
+no-op `hydrateCustomTokens` ⇒ 6 reload tests fail.
+
+## 4. Dedupe tests (`TokenSelector.imported-hygiene.test.tsx`, 7)
+Import at a catalog address (lower-cased) not listed, catalog row selected, record kept; pasting a catalog address creates no
+import; duplicate records list once; symbol collision (case-insens.) ⇒ md badge + explorer + warning, others unchanged.
+Mutation check: dropping the filter/flag fails 3.
+
+## 5. Verify
+Suite 326 files/5077 tests pass (origin/main 323/5045); tsc exit 0; lint 93 = 93 (origin/main 93); `git diff --stat origin/main...HEAD`:
+10 files, +1004/-34 (no catalog JSON, pipeline, quote/swap/gate). Compare:
+https://github.com/TeraHashAlpha/teraswap/compare/main...fix/imported-tokens-persist (no PR; CI not polled).
+
+## Deviations / premises (owner to confirm)
+- Goal says re-validate via "getCode/decimals"; `useTokenImport` has no getCode — it uses `eth_call` symbol/name/decimals (empty ⇒ no code).
+  Re-validation uses that same path.
+- Goal says read the Base ETHFI address "from the user's import"; no record of it is in the allowed files, so it came from CoinGecko's
+  list (not verified equal to the user's import).
+- Extra reads (in scope once recorded): `TokenAddressBadge.tsx`, `TokenSelector.test.tsx`, `useTokenImport.errors.test.ts`,
+  `test-utils/render.tsx`, `hooks/useChainId.ts`. Edited `TokenSelector.test.tsx` (+2 lines: mock gains `probeImportedToken`).
