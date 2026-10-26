@@ -734,8 +734,8 @@ export default function SwapBox() {
   }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId, unpricedPair])
 
   // [feat/swap-price-tiers D3] Consent given → the same execution path, with the ack.
-  // [fix/unpriced-ack-paths] The ack decided HERE is the one source of truth: it rides every /api/swap
-  // call — the standard path and the CoW path (useSwap, M-1) and every split leg (useSplitSwap, L-3).
+  // [fix/unpriced-ack-paths] The ack is decided HERE, once, and rides every /api/swap call — the
+  // standard path and the CoW path (useSwap, M-1) and every split leg (useSplitSwap, L-3).
   const confirmUnpricedSwap = useCallback(() => {
     setUnpricedConsentRequested(false)
     startWaitingSound()

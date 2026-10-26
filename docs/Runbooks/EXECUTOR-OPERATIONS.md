@@ -79,6 +79,34 @@ pm2 restart teraswap-executor           # graceful restart (5s delay)
 pm2 stop teraswap-executor              # stop without removing from PM2
 ```
 
+**Rolling out a keeper code change (owner-manual; Arbitrum first, then Base):** both keepers run
+from this checkout under PM2 (`teraswap-keeper-arbitrum`, and `teraswap-executor` = Base, both in
+`ecosystem.config.cjs`), so one pull + one install covers both; restart them one at a time.
+
+```bash
+cd contracts/order-engine/executor
+git pull --ff-only                        # main, after the PR merged
+npm ci --ignore-scripts                   # lockfile install, no lifecycle scripts on the host
+pm2 restart teraswap-keeper-arbitrum      # Arbitrum first
+pm2 logs teraswap-keeper-arbitrum --lines 50
+pm2 restart teraswap-executor             # then Base
+pm2 logs teraswap-executor --lines 50
+```
+
+Proof the `fix/unpriced-ack-paths` keeper change (ADR-024 amendment 2026-10-26) is live — one line
+per cycle, after the per-order `DCA price quorum:` lines and before `Cycle done:` (on a cycle that
+asked at least one DCA token; an idle cycle prints no such line):
+
+```
+  DCA price sources: tokens=4 chainlink=3 defillama=4 coingecko=4
+  Cycle done: 0 executed, 2 skipped
+```
+
+`coingecko=0` with a reason in parentheses (`429 twice on 0x…`, `budget 20000 ms exhausted, …`,
+`HTTP 400 on 0x…`) means that leg was absent THIS cycle and the quorum ran on the other two — read
+the reason before touching anything; `coingecko` now climbs with the token count (one request per
+token) instead of collapsing to 0 whenever two or more DCA tokens are registered.
+
 **Verify it's running:**
 
 | Check | Command / location |

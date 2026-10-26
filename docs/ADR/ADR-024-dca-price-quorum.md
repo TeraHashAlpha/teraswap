@@ -55,7 +55,7 @@ under a $250 cap". Two weaknesses:
 |:--|:--|:--|:--|
 | 1 | `chainlink` (on-chain) | OrderExecutorV3 `tokenUsdFeeds(token)` when `registered` (its feed + decimals); else the keeper's **mirror** of `src/lib/chains/chainlink-feeds.ts` for the chain (drift-guarded: address, decimals, pair parsed from the TS by test); the ETH leg still honours the resolved `ETH_USD_FEED` (env wins, verbatim). Integrity: `answer > 0`, `answeredInRound >= roundId`. | `updatedAt` |
 | 2 | `defillama` | `coins.llama.fi/prices/current/<slug>:<addr>` — the client the keeper already used, batched once per cycle (≤ 50 tokens/request), 5 s cap | `timestamp` |
-| 3 | `coingecko` (new) | `api.coingecko.com/api/v3/simple/token_price/<platform>?contract_addresses=…&include_last_updated_at=true`, no key required (`COINGECKO_API_KEY` optional, demo header), batched once per cycle and cached for the cycle | `last_updated_at` |
+| 3 | `coingecko` (new) | `api.coingecko.com/api/v3/simple/token_price/<platform>?contract_addresses=<ONE address>&include_last_updated_at=true`, no key required (`COINGECKO_API_KEY` optional, demo header), **one address per request** (keyless-tier limit — amendment 2026-10-26 below; was batched), sequential, once per active token per cycle and cached for the cycle | `last_updated_at` |
 
 Why CoinGecko: nothing already wired prices a token **by contract address independently of
 DefiLlama and Chainlink** — the app's multi-source compare is exactly those two, the token-catalog
@@ -128,8 +128,9 @@ retained as pure exports (no longer called by the executor) rather than deleted 
 - **Protective conservative pick compresses the band near tolerance:** two legs each at a 3 %
   spread can lift the reference by ~6 % and reject a legitimate fill until the sources converge.
   That is a delay, not a drain, and spreads that wide signal a moment not to fill.
-- **Three requests per cycle, not per order** (one DefiLlama batch, one CoinGecko batch, one
-  Chainlink read per token), so the keyless CoinGecko tier is comfortably within limits.
+- **Requests per cycle, not per order:** one DefiLlama batch, one CoinGecko request **per token**
+  (amendment 2026-10-26 — the batched form never worked keyless) and one Chainlink read per token,
+  so the keyless CoinGecko tier (~30 req/min) holds for the token counts a keeper carries.
 - **A 28b-consented pair can land in `single` mode and be capped/delayed** (Auditor round 1, M,
   2026-10-11). 28b classifies a pair at *creation* (`onchain-feed` / `offchain-price` / `unpriced`)
   and today counts only DefiLlama as its off-chain source; the keeper decides at *execution* over
@@ -166,6 +167,32 @@ retained as pure exports (no longer called by the executor) rather than deleted 
   Needs its own test row (registry bound tighter / looser than the global gate) and an owner
   decision on the second half. Not changed now: it alters which legs are present for the quorum
   on live Base/Arbitrum pairs, which is a fund-adjacent behaviour change outside the round-1 scope.
+
+## Amendment 2026-10-26 — CoinGecko keyless limit · `fix/unpriced-ack-paths`
+
+**CoinGecko keyless limit (one address per call, observed 2026-10-26).** The keyless
+`simple/token_price` tier rejects a batched `contract_addresses` list — HTTP 400, error code 10012 —
+so the "one CoinGecko request per 50 tokens" above silently emptied the whole CoinGecko leg
+whenever ≥ 2 DCA tokens were registered in a cycle (any non-2xx is "absent" by design), pushing
+cycles to `single` mode (tighter band + the $250 cap) far more often than designed. The keeper now
+issues **one address per request**, sequentially with a 250 ms pause (`COINGECKO_REQUEST_DELAY_MS`),
+honours HTTP 429 (back off `Retry-After`, clamped to [2 s, 10 s], retry once; a second 429 ends the
+leg for the cycle) and bounds the whole leg at `COINGECKO_CYCLE_BUDGET_MS` = 20 s so a sequential
+leg can never stall a cycle. `BATCH_SIZE` = 50 stays DefiLlama-only. The result shape and the
+quorum (300 bps / 600 s / $250) are unchanged — a source-availability fix, not a gate change.
+
+**Per-cycle log line.** After the order loop the keeper logs exactly one line (nothing on a cycle
+that asked no DCA token):
+
+```
+DCA price sources: tokens=<registered> chainlink=<n> defillama=<n> coingecko=<n>[ (coingecko: <reason>)]
+```
+
+Each `n` is the number of **distinct** tokens that source answered fresh this cycle; the optional
+reason is why the CoinGecko leg stopped early (`429 twice on 0x… — k of N token(s) absent`,
+`budget 20000 ms exhausted, k of N token(s) not asked`, `HTTP 400 on 0x…`). A source that is silently
+down now shows as `=0` with its reason in `pm2 logs`, next to the per-order
+`DCA price quorum: in=… out=… -> …` line. Rollout: `docs/Runbooks/EXECUTOR-OPERATIONS.md` §3.
 
 ## Verification
 
