@@ -23,6 +23,10 @@ import TokenAddressBadge from '@/components/TokenAddressBadge'
 import DigitRoller from '@/components/DigitRoller'
 import ChainIcon from './icons/ChainIcon'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
+import { useSwapPriceTier } from '@/hooks/useSwapPriceTier'
+import SwapUnpricedConsentDialog from './SwapUnpricedConsentDialog'
+import { deriveMinimumOutput } from '@/lib/minimum-output'
+import type { SwapPriceLeg } from '@/lib/swap-price-tier'
 import { useDepegCheck } from '@/hooks/useDepegCheck'
 import { evaluatePriceGate } from '@/lib/price-gate'
 import { evaluatePairOracle } from '@/lib/chainlink'
@@ -53,6 +57,15 @@ import { useToast } from '@/components/ToastProvider'
 import { QuoteBreakdownSkeleton } from '@/components/Skeleton'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
 import { trackWalletActivity } from '@/lib/wallet-activity-tracker'
+
+/**
+ * [feat/swap-price-tiers D2] A leg's USD reference from the server tier: a `priced` or `single-source`
+ * leg has one (the quorum's conservative price, or the single source's); `unpriced` / unknown has none.
+ */
+function legReferenceUsd(leg: SwapPriceLeg | undefined): number | null {
+  if (!leg || leg.tier === 'unpriced' || typeof leg.usd !== 'number') return null
+  return leg.usd
+}
 
 export default function SwapBox() {
   const [tokenIn, setTokenIn] = useState<Token | null>(findToken('ETH') ?? null)
@@ -104,6 +117,13 @@ export default function SwapBox() {
   // SECOND, independent verdict alongside acceptedDeviation. Same shape (store the ACCEPTED
   // divergence so consent auto-arms again if it worsens) and same reset-on-trade-param-change rule.
   const [acceptedDepeg, setAcceptedDepeg] = useState<number | null>(null)
+
+  // [feat/swap-price-tiers D3] Informed consent for a pair with NO reference price on either leg.
+  // Requested by the Swap click when the server's tier is `unpriced`; the dialog is ALSO open while
+  // /api/swap's 409 `unpriced_ack_required` stands (useSwap.unpricedAckRequired — the server is the
+  // authority, D1; derived below, no effect). Per attempt, never remembered: Continue re-runs
+  // execute(…, { unpricedAck: true }), which clears the hook's flag; Cancel resets the hook.
+  const [unpricedConsentRequested, setUnpricedConsentRequested] = useState(false)
 
   const handleSourceToggle = useCallback((source: string) => {
     setExcludedSources(prev => {
@@ -251,7 +271,7 @@ export default function SwapBox() {
     () => Object.fromEntries((meta?.all ?? []).map((q) => [q.source, q.toAmount])),
     [meta],
   )
-  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
+  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, quoteToAmountBySource, bestNonCowGasUsd)
 
   // [SPRINT-9S S2] Direction-agnostic execution price. Derive the USD price of the NON-stable
@@ -281,6 +301,9 @@ export default function SwapBox() {
   // [SPRINT-9S S2] Direction-agnostic oracle verdict over BOTH tokens' feeds — symmetric, and
   // warns naming whichever side lacks a feed. Drives the price gate + the QuoteBreakdown notice.
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
+  // [feat/swap-price-tiers D1] The SERVER's price tier for the pair (GET /api/swap-price-tier — the ADR-024
+  // quorum per leg). null = unknown → show nothing and let /api/swap decide; never a stricter client rule.
+  const { data: priceTier } = useSwapPriceTier(activeChainId, tokenIn?.address, tokenOut?.address)
   // [SPRINT-9W-oracle] cbETH depeg circuit-breaker verdict (market-vs-ER divergence). mode 'ok'
   // when neither token has an exchange-rate pair (the check does not apply — the common case).
   // [FIX-ORACLE-FAIL-CLOSED] A stale/failed feed is NO LONGER 'ok': it is 'unverified' and blocks.
@@ -605,10 +628,13 @@ export default function SwapBox() {
 
   // ── Security: block large swaps on tokens without Chainlink oracle ──
   // [CHORE-ORACLE-VALUE-FAILCLOSED / TM-P2] Trade value = max(inputUsd, outputUsd) via
-  // the pure helper (chain-keyed stable ≈$1, Chainlink, conservative ETH≈$2k — per
-  // side). The old input-only estimate let an unpriceable INPUT hide a measurable
-  // trade ($0 → the >$10k gate never fired). Server /api/swap is the binding gate
-  // (fail-closed there too); this mirror is UX.
+  // the pure helper (chain-keyed stable ≈$1, Chainlink, the server tier's reference
+  // price, conservative ETH≈$2k — per side). The old input-only estimate let an
+  // unpriceable INPUT hide a measurable trade ($0 → the >$10k gate never fired).
+  // [feat/swap-price-tiers D2] A `priced` or `single-source` leg's quorum price feeds
+  // the estimate, so the $1k / $10k thresholds apply from the priced value even with no
+  // Chainlink feed ("Value-based limits use that price"). Server /api/swap is the
+  // binding gate; this mirror is UX.
   const estimatedSwap = useMemo(() => {
     if (!tokenIn || !amountIn || Number(amountIn) <= 0) return { usd: 0, priced: false }
     const outBig = meta?.best ? safeBigInt(meta.best.toAmount) : null
@@ -620,20 +646,27 @@ export default function SwapBox() {
       amountOut,
       chainlinkPriceIn: priceCheck.chainlinkPrice,
       chainlinkPriceOut: tokenOutPriceCheck.chainlinkPrice,
+      referencePriceIn: legReferenceUsd(priceTier?.legs.in),
+      referencePriceOut: legReferenceUsd(priceTier?.legs.out),
       chainId: activeChainId,
     })
-  }, [tokenIn, tokenOut, amountIn, meta, quoteDecimalsOut, priceCheck.chainlinkPrice, tokenOutPriceCheck.chainlinkPrice, activeChainId])
+  }, [tokenIn, tokenOut, amountIn, meta, quoteDecimalsOut, priceCheck.chainlinkPrice, tokenOutPriceCheck.chainlinkPrice, priceTier, activeChainId])
   const estimatedSwapUsd = estimatedSwap.usd
 
   const oracleUnavailable = pairCheck.oracleUnavailable
-  // [CHORE-ORACLE-VALUE-FAILCLOSED] NEITHER side priceable → high-risk: block with a
-  // factual notice (mirrors the server fail-closed policy) instead of estimating $0 and
-  // silently skipping the >$10k gate. Gated on a live quote so an empty form or a
-  // still-loading quote never flags.
-  const valueUnverifiable = oracleUnavailable && !estimatedSwap.priced && Number(amountIn) > 0 && !!meta?.best
+  // [feat/swap-price-tiers D1/D3] The CHORE-ORACLE-VALUE-FAILCLOSED client block on "neither side
+  // priceable" (`valueUnverifiable`) is gone: it mirrored a Chainlink/stable/WETH-only rule that was
+  // STRICTER than the server's (DefiLlama or Chainlink) and refused e.g. AERO→ETHFI on Base at any size
+  // although both legs price off-chain. An unpriced pair is now informed CONSENT (the dialog below,
+  // and /api/swap's 409 `unpriced_ack_required`), never a client block; a priced leg's reference
+  // price keeps the $1k / $10k thresholds live (D2).
   const oracleWarnThreshold = oracleUnavailable && estimatedSwapUsd > UNVERIFIED_SWAP_WARN_USD
-  const oracleBlocked = oracleUnavailable && (estimatedSwapUsd > UNVERIFIED_SWAP_BLOCK_USD || valueUnverifiable)
+  const oracleBlocked = oracleUnavailable && estimatedSwapUsd > UNVERIFIED_SWAP_BLOCK_USD
   const anyBlocked = priceGateBlocked || oracleBlocked || depegBlocking
+  const unpricedPair = priceTier?.tier === 'unpriced'
+  // [feat/swap-price-tiers D1] The server asked for consent (409) → the dialog is open even when the
+  // client believed the pair was priced; the server's tier wins.
+  const unpricedConsentOpen = unpricedConsentRequested || unpricedAckRequired
 
   const handleApproveAndSwap = useCallback(async () => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -656,6 +689,9 @@ export default function SwapBox() {
     startWaitingSound()
     if (!approvalReady) { await approve(); return }
 
+    // [feat/swap-price-tiers D3] No reference price on either leg → informed consent before executing.
+    if (unpricedPair) { stopWaitingSound(); setUnpricedConsentRequested(true); return }
+
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
     } else if (meta?.best.source) {
@@ -663,7 +699,7 @@ export default function SwapBox() {
       // pre-swap simulation auto-switches to the next working source.
       executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId))
     }
-  }, [approvalReady, approve, meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId])
+  }, [approvalReady, approve, meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId, unpricedPair])
 
   const handleSwap = useCallback(() => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -682,6 +718,8 @@ export default function SwapBox() {
       }
       return // hard block
     }
+    // [feat/swap-price-tiers D3] No reference price on either leg → informed consent before executing.
+    if (unpricedPair) { setUnpricedConsentRequested(true); return }
     startWaitingSound()
     if (isSplitActive && splitResult?.bestSplit) {
       executeSplitSwap(splitResult.bestSplit)
@@ -690,7 +728,43 @@ export default function SwapBox() {
       // pre-swap simulation auto-switches to the next working source.
       executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId))
     }
-  }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId])
+  }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId, unpricedPair])
+
+  // [feat/swap-price-tiers D3] Consent given → the same execution path, with the ack. Split legs post to
+  // /api/swap WITHOUT the ack today (useSplitSwap is outside this change): the server's 409 then surfaces
+  // as the split error — fail closed, never a blind fill.
+  const confirmUnpricedSwap = useCallback(() => {
+    setUnpricedConsentRequested(false)
+    startWaitingSound()
+    if (isSplitActive && splitResult?.bestSplit) {
+      executeSplitSwap(splitResult.bestSplit)
+    } else if (meta?.best.source) {
+      executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId), { unpricedAck: true })
+    }
+  }, [meta, executeSwap, isSplitActive, splitResult, executeSplitSwap, activeChainId])
+  const cancelUnpricedSwap = useCallback(() => {
+    setUnpricedConsentRequested(false)
+    stopWaitingSound()
+    if (unpricedAckRequired) resetSwap() // clears the hook's ack-required state → closes the dialog
+  }, [unpricedAckRequired, resetSwap])
+
+  // [feat/swap-price-tiers D3] The dialog's placeholders are REAL values from the live quote: {N} =
+  // aggregator quotes that answered, {d} = their spread (max − min) / min, {minOut} = the on-chain
+  // minimum output derived exactly as useSwap derives the FeeCollector floor (deriveMinimumOutput).
+  const unpricedDialogValues = useMemo(() => {
+    const amounts = (meta?.all ?? []).map(q => safeBigInt(q.toAmount)).filter((v): v is bigint => v !== null && v > 0n)
+    let quoteSpreadPct = 0
+    if (amounts.length >= 2) {
+      const lo = amounts.reduce((a, b) => (b < a ? b : a))
+      const hi = amounts.reduce((a, b) => (b > a ? b : a))
+      quoteSpreadPct = Number(((hi - lo) * 1_000_000n) / lo) / 10_000
+    }
+    let minOut = '—'
+    if (meta?.best && quoteDecimalsOut !== null) {
+      try { minOut = fmtToken(deriveMinimumOutput(meta.best.toAmount, slippage), quoteDecimalsOut) } catch { /* unusable quote → no number */ }
+    }
+    return { quoteSourceCount: amounts.length, quoteSpreadPct, minOut }
+  }, [meta, quoteDecimalsOut, slippage])
 
   return (
     <>
@@ -809,7 +883,7 @@ export default function SwapBox() {
                   : '(MEV protected)'}
               </p>
             )}
-            <QuoteBreakdown meta={meta} chainId={activeChainId} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
+            <QuoteBreakdown meta={meta} chainId={activeChainId} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} priceTier={priceTier} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
           </div>
         )}
         {/* Quote loading skeleton */}
@@ -988,24 +1062,12 @@ export default function SwapBox() {
           <>
             {oracleBlocked ? (
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                {valueUnverifiable ? (
-                  <>
-                    {/* [CHORE-ORACLE-VALUE-FAILCLOSED] Neither side priceable → factual, non-alarmist block notice. */}
-                    <span className="font-semibold">&#9888; Swap blocked — value cannot be verified.</span>{' '}
-                    Neither token has Chainlink or reference price coverage, so the USD value of this trade cannot be estimated. Unpriceable trades are blocked for safety.
-                    <span className="mt-1 block text-xs text-danger/80">
-                      Use a pair where at least one side has price coverage (a major token or a stablecoin), or try again later.
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
-                    This token has no Chainlink price feed. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} are disabled when the price cannot be independently verified.
-                    <span className="mt-1 block text-xs text-danger/80">
-                      This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
-                    </span>
-                  </>
-                )}
+                {/* [feat/swap-price-tiers] The "value cannot be verified" branch is gone (consent dialog instead). */}
+                <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
+                This token has no Chainlink price feed. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} are disabled when the price cannot be independently verified.
+                <span className="mt-1 block text-xs text-danger/80">
+                  This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
+                </span>
               </div>
             ) : oracleWarnThreshold ? (
               <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -1232,6 +1294,19 @@ export default function SwapBox() {
           userAddress={address}
           onConfirm={confirmSplitPlan}
           onCancel={resetSplitSwap}
+        />
+      )}
+
+      {/* [feat/swap-price-tiers D3] Informed consent for a pair with no reference price (owner copy, real values). */}
+      {unpricedConsentOpen && tokenIn && tokenOut && (
+        <SwapUnpricedConsentDialog
+          symbolIn={tokenIn.symbol}
+          symbolOut={tokenOut.symbol}
+          quoteSourceCount={unpricedDialogValues.quoteSourceCount}
+          quoteSpreadPct={unpricedDialogValues.quoteSpreadPct}
+          minOut={unpricedDialogValues.minOut}
+          onConfirm={confirmUnpricedSwap}
+          onCancel={cancelUnpricedSwap}
         />
       )}
 
