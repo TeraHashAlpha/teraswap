@@ -13,9 +13,13 @@
  *                   re-homed here and BATCHED per cycle.
  *   3. coingecko  — api.coingecko.com simple/token_price by platform + contract address. The ONE new
  *                   independent off-chain source the quorum needs besides DefiLlama: no key required,
- *                   batched over every active DCA token once per cycle and cached for that cycle
- *                   (the keyless tier allows roughly 30 requests/min). COINGECKO_API_KEY (optional,
- *                   sent as the demo-tier header) raises the limit. Why CoinGecko and not something
+ *                   ONE contract address per request (the keyless tier answers HTTP 400 / error 10012
+ *                   to a batched `contract_addresses` list — observed 2026-10-26, ADR-024), issued
+ *                   sequentially with a small pause, once per active DCA token per cycle and cached
+ *                   for that cycle; HTTP 429 is honoured (back off, retry once, then absent — and no
+ *                   further CoinGecko request that cycle). The keyless tier allows roughly 30
+ *                   requests/min. COINGECKO_API_KEY (optional, sent as the demo-tier header) raises
+ *                   the limit. Why CoinGecko and not something
  *                   already wired: nothing in this repo prices a token BY CONTRACT ADDRESS
  *                   independently of DefiLlama/Chainlink — the app's multi-source compare is exactly
  *                   those two, scripts/token-catalog uses CoinGecko only for catalog metadata, and
@@ -148,8 +152,23 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 const ADDRESS_RE = /^0x[0-9a-f]{40}$/
 /** Tolerated clock skew for a quote timestamped in the future (seconds). Beyond it ⇒ absent. */
 export const FUTURE_SKEW_SEC = 300
-/** Off-chain batch size per request (URL-length safe for both vendors). */
+/** DefiLlama batch size per request (URL-length safe). DefiLlama ONLY — CoinGecko is one address per
+ *  request (COINGECKO_ADDRESSES_PER_REQUEST): its keyless tier answers HTTP 400 (error 10012) to a
+ *  batched `contract_addresses` list, which made the whole leg silently absent whenever ≥ 2 DCA
+ *  tokens were registered (observed 2026-10-26). */
 export const BATCH_SIZE = 50
+/** CoinGecko: exactly ONE contract address per simple/token_price request (keyless-tier limit). */
+export const COINGECKO_ADDRESSES_PER_REQUEST = 1
+/** Pause between consecutive CoinGecko requests in a cycle (ms) — sequential, never a burst. */
+export const COINGECKO_REQUEST_DELAY_MS = 250
+/** HTTP 429: wait (the vendor's Retry-After when given, clamped to [RETRY_DELAY, RETRY_MAX]) and retry
+ *  exactly ONCE; a second 429 ends the CoinGecko leg for the cycle (remaining tokens absent). */
+export const COINGECKO_RETRY_DELAY_MS = 2_000
+export const COINGECKO_RETRY_MAX_MS = 10_000
+/** Wall-clock budget for the whole sequential CoinGecko leg per cycle (ms). Tokens not reached inside
+ *  it are absent this cycle — sequential requests must never stall a cycle (the per-request
+ *  SOURCE_TIMEOUT_MS alone would allow 5 s × N). */
+export const COINGECKO_CYCLE_BUDGET_MS = 20_000
 /** Per-request cap — never stall a cycle on a slow vendor (same 5 s executor.js always used). */
 export const SOURCE_TIMEOUT_MS = 5_000
 
@@ -210,20 +229,38 @@ function chunks(arr, size) {
 
 const big = (v) => (typeof v === "bigint" ? v : BigInt(v))
 
-/** GET + JSON with a hard timeout; any failure (non-2xx, abort, parse) ⇒ null. Never throws. */
-async function getJson(fetchImpl, url, { timeoutMs = SOURCE_TIMEOUT_MS, headers = {} } = {}) {
-  if (typeof fetchImpl !== "function") return null
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const NO_RESPONSE = Object.freeze({ status: null, json: null, retryAfterMs: null })
+
+/** `Retry-After: <seconds>` → ms, or null when absent / not a positive number / no headers object. */
+function parseRetryAfterMs(res) {
+  const h = res && res.headers && typeof res.headers.get === "function" ? res.headers.get("retry-after") : null
+  const s = Number(h)
+  return Number.isFinite(s) && s > 0 ? s * 1000 : null
+}
+
+/** GET + JSON with a hard timeout. `{ status, json, retryAfterMs }`: status is the HTTP status (null on
+ *  abort / network / parse error), json the parsed body on 2xx only. Never throws. */
+async function getJsonStatus(fetchImpl, url, { timeoutMs = SOURCE_TIMEOUT_MS, headers = {} } = {}) {
+  if (typeof fetchImpl !== "function") return NO_RESPONSE
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetchImpl(url, { signal: controller.signal, headers })
-    if (!res || !res.ok) return null
-    return await res.json()
+    if (!res) return NO_RESPONSE
+    const status = Number.isInteger(res.status) ? res.status : null
+    if (!res.ok) return { status, json: null, retryAfterMs: parseRetryAfterMs(res) }
+    return { status, json: await res.json(), retryAfterMs: null }
   } catch {
-    return null
+    return NO_RESPONSE
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** GET + JSON with a hard timeout; any failure (non-2xx, abort, parse) ⇒ null. Never throws. */
+async function getJson(fetchImpl, url, opts) {
+  return (await getJsonStatus(fetchImpl, url, opts)).json
 }
 
 /**
@@ -330,31 +367,70 @@ export async function fetchDefiLlamaUsd({ tokens, chainId, fetchImpl, nowSec, ma
 }
 
 /**
- * Source 3 — CoinGecko simple/token_price, batched: ONE request per 50 tokens, with
+ * Source 3 — CoinGecko simple/token_price, ONE contract address per request (the keyless-tier limit;
+ * BATCH_SIZE is DefiLlama's), sequential with COINGECKO_REQUEST_DELAY_MS between requests, with
  * `include_last_updated_at=true` so the age gate has a timestamp. `apiKey` (COINGECKO_API_KEY) is
  * optional and sent as the demo-tier header; keyless works at the public rate limit.
+ *
+ * HTTP 429 is honoured: back off (Retry-After when given, clamped) and retry that token ONCE; a
+ * second 429 makes it absent AND ends the leg for this cycle — no further request (keeping going
+ * would be the opposite of honouring the limit). Any other non-2xx / junk body ⇒ that token absent,
+ * the next token is still asked. The whole leg stops at COINGECKO_CYCLE_BUDGET_MS. `onNote` receives
+ * a short reason whenever the leg stops early or a token is rejected (the per-cycle keeper log line).
+ * `sleep` / `clock` are injectable so the tests run with zero waiting. Result shape unchanged.
  * @returns {Promise<Map<string, { price: number, ts: number, source: 'coingecko' }>>}
  */
-export async function fetchCoinGeckoUsd({ tokens, chainId, fetchImpl, nowSec, maxAgeSec, apiKey, timeoutMs = SOURCE_TIMEOUT_MS }) {
+export async function fetchCoinGeckoUsd({
+  tokens,
+  chainId,
+  fetchImpl,
+  nowSec,
+  maxAgeSec,
+  apiKey,
+  timeoutMs = SOURCE_TIMEOUT_MS,
+  requestDelayMs = COINGECKO_REQUEST_DELAY_MS,
+  retryDelayMs = COINGECKO_RETRY_DELAY_MS,
+  budgetMs = COINGECKO_CYCLE_BUDGET_MS,
+  sleep = defaultSleep,
+  clock = Date.now,
+  onNote = () => {},
+}) {
   const out = new Map()
   try {
     const platform = COINGECKO_PLATFORM[Number(chainId)]
     if (!platform) return out
     const addrs = uniqueNormalized(tokens, chainId)
     const headers = apiKey ? { "x-cg-demo-api-key": apiKey } : {}
-    for (const chunk of chunks(addrs, BATCH_SIZE)) {
+    const startedAt = clock()
+    for (let i = 0; i < addrs.length; i++) {
+      const a = addrs[i]
+      if (clock() - startedAt > budgetMs) {
+        onNote(`budget ${budgetMs} ms exhausted, ${addrs.length - i} of ${addrs.length} token(s) not asked`)
+        break
+      }
+      if (i > 0) await sleep(requestDelayMs)
+      // ONE address per request — never `a,b,c` (HTTP 400 / 10012 on the keyless tier).
       const url =
         `https://api.coingecko.com/api/v3/simple/token_price/${platform}` +
-        `?contract_addresses=${chunk.join(",")}&vs_currencies=usd&include_last_updated_at=true`
-      const json = await getJson(fetchImpl, url, { timeoutMs, headers })
+        `?contract_addresses=${a}&vs_currencies=usd&include_last_updated_at=true`
+      let r = await getJsonStatus(fetchImpl, url, { timeoutMs, headers })
+      if (r.status === 429) {
+        const wait = Math.min(Math.max(r.retryAfterMs ?? retryDelayMs, retryDelayMs), COINGECKO_RETRY_MAX_MS)
+        await sleep(wait)
+        r = await getJsonStatus(fetchImpl, url, { timeoutMs, headers })
+        if (r.status === 429) {
+          onNote(`429 twice on ${a} — ${addrs.length - i} of ${addrs.length} token(s) absent`)
+          break
+        }
+      }
+      if (r.status !== null && (r.status < 200 || r.status >= 300)) onNote(`HTTP ${r.status} on ${a}`)
+      const json = r.json
       if (!json || typeof json !== "object") continue
       // CoinGecko echoes contract addresses lowercased; tolerate a checksummed echo anyway.
       const rows = new Map(Object.entries(json).map(([k, v]) => [String(k).toLowerCase(), v]))
-      for (const a of chunk) {
-        const row = rows.get(a)
-        const q = toQuote({ price: row?.usd, ts: row?.last_updated_at, source: SOURCE_COINGECKO, nowSec, maxAgeSec })
-        if (q) out.set(a, q)
-      }
+      const row = rows.get(a)
+      const q = toQuote({ price: row?.usd, ts: row?.last_updated_at, source: SOURCE_COINGECKO, nowSec, maxAgeSec })
+      if (q) out.set(a, q)
     }
   } catch {
     /* never throws */
@@ -365,10 +441,11 @@ export async function fetchCoinGeckoUsd({ tokens, chainId, fetchImpl, nowSec, ma
 /**
  * Per-CYCLE quote context: the executor creates one at the top of each cycle, registers every
  * active DCA token, then asks `legQuotes(token)` per leg. Off-chain sources are fetched ONCE per
- * cycle for the whole registered set (one DefiLlama + one CoinGecko request per 50 tokens) and
- * cached; Chainlink reads are memoized per token for the cycle. A token first seen AFTER the batch
- * went out gets one supplementary batch of its own — registration is an optimisation, never a
- * correctness requirement.
+ * cycle for the whole registered set (one DefiLlama request per 50 tokens; one CoinGecko request
+ * PER TOKEN, sequential) and cached; Chainlink reads are memoized per token for the cycle. A token
+ * first seen AFTER the batch went out gets one supplementary batch of its own — registration is an
+ * optimisation, never a correctness requirement. `summaryLine()` is the per-cycle tally the executor
+ * logs (`chainlink=n defillama=n coingecko=n`) so a silently absent source is visible in pm2 logs.
  *
  * @param {object} p
  * @param {number|string} p.chainId
@@ -378,7 +455,9 @@ export async function fetchCoinGeckoUsd({ tokens, chainId, fetchImpl, nowSec, ma
  * @param {Function} [p.fetchImpl]          defaults to globalThis.fetch; tests inject a fake
  * @param {() => number} [p.now]            unix SECONDS; tests inject a fixed clock
  * @param {object} [p.env]                  process.env by default (MAX_PRICE_AGE_SEC, COINGECKO_API_KEY)
- * @returns {{ registerTokens: (tokens: unknown[]) => void, legQuotes: (token: string) => Promise<Array<{price:number, ts:number, source:string}>>, maxAgeSec: number }}
+ * @param {(ms: number) => Promise<void>} [p.sleep]  CoinGecko pacing / back-off; tests inject a no-op
+ * @param {() => number} [p.clock]          ms clock for the CoinGecko leg budget; tests inject a fake
+ * @returns {{ registerTokens: (tokens: unknown[]) => void, legQuotes: (token: string) => Promise<Array<{price:number, ts:number, source:string}>>, sourceSummary: () => Promise<null|{tokens:number, chainlink:number, defillama:number, coingecko:number, notes:string[]}>, summaryLine: () => Promise<string|null>, maxAgeSec: number }}
  */
 export function createCycleQuoteContext({
   chainId,
@@ -388,6 +467,8 @@ export function createCycleQuoteContext({
   fetchImpl = globalThis.fetch,
   now = () => Math.floor(Date.now() / 1000),
   env = process.env,
+  sleep = defaultSleep,
+  clock = Date.now,
 }) {
   const maxAgeSec = getMaxPriceAgeSec(env)
   const apiKey = env && env.COINGECKO_API_KEY ? String(env.COINGECKO_API_KEY) : undefined
@@ -395,12 +476,14 @@ export function createCycleQuoteContext({
   const chainlinkMemo = new Map() // addr -> Promise<quote|null>
   const supplementary = new Map() // addr -> Promise<batch> for tokens seen after the main batch
   let mainBatch = null // Promise<batch>, created on first use
+  const batches = [] // every off-chain batch promise this cycle (main + supplementary) — for the tally
+  const geckoNotes = [] // why the CoinGecko leg stopped early / rejected a token — for the log line
 
   async function fetchBatch(addrs) {
     const nowSec = now()
     const [llama, gecko] = await Promise.all([
       fetchDefiLlamaUsd({ tokens: addrs, chainId, fetchImpl, nowSec, maxAgeSec }),
-      fetchCoinGeckoUsd({ tokens: addrs, chainId, fetchImpl, nowSec, maxAgeSec, apiKey }),
+      fetchCoinGeckoUsd({ tokens: addrs, chainId, fetchImpl, nowSec, maxAgeSec, apiKey, sleep, clock, onNote: (n) => geckoNotes.push(n) }),
     ])
     return { llama, gecko, covered: new Set(addrs) }
   }
@@ -416,10 +499,15 @@ export function createCycleQuoteContext({
     if (!mainBatch) {
       registered.add(addr)
       mainBatch = fetchBatch([...registered])
+      batches.push(mainBatch)
     }
     const batch = await mainBatch
     if (batch.covered.has(addr)) return batch
-    if (!supplementary.has(addr)) supplementary.set(addr, fetchBatch([addr]))
+    if (!supplementary.has(addr)) {
+      const p = fetchBatch([addr])
+      supplementary.set(addr, p)
+      batches.push(p)
+    }
     return supplementary.get(addr)
   }
 
@@ -442,5 +530,34 @@ export function createCycleQuoteContext({
     return quotes // trust order: chainlink, defillama, coingecko
   }
 
-  return { registerTokens, legQuotes, maxAgeSec }
+  /**
+   * [fix/unpriced-ack-paths] Per-cycle tally: DISTINCT tokens with a fresh quote per source over
+   * everything read this cycle (every batch, every memoized Chainlink read), plus the CoinGecko leg's
+   * notes. null when nothing was asked (an idle cycle logs nothing). Never throws.
+   */
+  async function sourceSummary() {
+    if (chainlinkMemo.size === 0 && batches.length === 0) return null
+    let chainlink = 0
+    for (const p of chainlinkMemo.values()) if (await p) chainlink++
+    const llama = new Set()
+    const gecko = new Set()
+    for (const p of batches) {
+      const b = await p.catch(() => null)
+      if (!b) continue
+      for (const k of b.llama.keys()) llama.add(k)
+      for (const k of b.gecko.keys()) gecko.add(k)
+    }
+    const tokens = new Set([...registered, ...chainlinkMemo.keys()]).size
+    return { tokens, chainlink, defillama: llama.size, coingecko: gecko.size, notes: [...geckoNotes] }
+  }
+
+  /** The ONE line per cycle the executor logs — a silently absent source shows as `=0` with its reason. */
+  async function summaryLine() {
+    const s = await sourceSummary()
+    if (!s) return null
+    const tail = s.notes.length ? ` (coingecko: ${s.notes.join("; ")})` : ""
+    return `DCA price sources: tokens=${s.tokens} chainlink=${s.chainlink} defillama=${s.defillama} coingecko=${s.coingecko}${tail}`
+  }
+
+  return { registerTokens, legQuotes, sourceSummary, summaryLine, maxAgeSec }
 }
