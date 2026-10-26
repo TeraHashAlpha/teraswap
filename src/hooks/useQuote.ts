@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { parseUnits } from 'viem'
 import { useAccount } from 'wagmi'
 import { useDebounce } from './useDebounce'
@@ -11,6 +11,14 @@ import { analyzeGasless } from '@/lib/gasless-engine'
 import { useEthGasCost } from './useEthGasCost'
 import { useQuoteChainId } from './useChainId'
 import { isChainActive } from '@/lib/chains'
+import {
+  makeQuoteKey,
+  parseQuoteEcho,
+  sameQuoteKey,
+  sameQuotePair,
+  type QuoteIdentity,
+  type QuoteKey,
+} from '@/lib/quote-identity'
 
 /**
  * Typed error carrying the /api/quote HTTP status. Lets the hook
@@ -25,6 +33,9 @@ class QuoteApiError extends Error {
     this.status = status
   }
 }
+
+/** [fix/stale-quote-pair-flip] Identity fields /api/quote echoes alongside the quote. */
+const QUOTE_ECHO_KEYS = ['tokenIn', 'tokenOut', 'chainId', 'decimalsIn', 'decimalsOut', 'amountIn'] as const
 
 /** [hotfix] Backoff ceiling on consecutive 429s. */
 const MAX_BACKOFF_MS = 120_000
@@ -82,8 +93,11 @@ async function fetchQuoteViaApi(
   return data as MetaQuoteResult
 }
 
+/** [fix/stale-quote-pair-flip] A quote tagged with the request it answered. */
+export type TaggedMetaQuote = MetaQuoteResult & { identity: QuoteIdentity }
+
 interface UseQuoteResult {
-  meta: MetaQuoteResult | null
+  meta: TaggedMetaQuote | null
   loading: boolean
   error: string | null
   countdown: number
@@ -109,7 +123,7 @@ export function useQuote(
   // visitor's ChainSelector pick must drive the quote, not a silent mainnet fallback.
   const activeChainId = useQuoteChainId()
   const { estimate: estimateGasCost } = useEthGasCost()
-  const [meta, setMeta] = useState<MetaQuoteResult | null>(null)
+  const [storedMeta, setMeta] = useState<TaggedMetaQuote | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [countdown, setCountdown] = useState(QUOTE_REFRESH_MS / 1000)
@@ -151,6 +165,11 @@ export function useQuote(
   const inBackoffRef = useRef(false)
 
   const debouncedAmount = useDebounce(amountIn, INPUT_DEBOUNCE_MS)
+  // [fix/stale-quote-pair-flip] Latest raw (undebounced) amount, for the pending-debounce check in doFetch.
+  const amountInRef = useRef(amountIn)
+  useEffect(() => {
+    amountInRef.current = amountIn
+  }, [amountIn])
   // [hotfix] Stable string form of excludeSources for the dep array —
   // the caller in SwapBox already memoises the array, but a missing
   // useMemo there would have re-triggered the whole effect chain. The
@@ -158,6 +177,58 @@ export function useQuote(
   // request URL) makes the dep cheap to compare and immune to upstream
   // array-identity changes.
   const excludeKey = excludeSources?.join(',') ?? ''
+
+  // [fix/stale-quote-pair-flip] The identity of the CURRENT selection. `meta` is
+  // only ever exposed when it was fetched for this exact chain/pair/decimals, so
+  // the render right after a ⇅ flip or a token/chain change can never show the
+  // previous pair's raw amounts under the new pair's decimals.
+  const inAddr = tokenIn?.address
+  const inDec = tokenIn?.decimals
+  const outAddr = tokenOut?.address
+  const outDec = tokenOut?.decimals
+  const currentPair = useMemo<QuoteKey | null>(
+    () =>
+      inAddr !== undefined && inDec !== undefined && outAddr !== undefined && outDec !== undefined
+        ? makeQuoteKey({
+            chainId: activeChainId,
+            tokenIn: inAddr,
+            tokenOut: outAddr,
+            amountRaw: '',
+            decimalsIn: inDec,
+            decimalsOut: outDec,
+          })
+        : null,
+    [activeChainId, inAddr, inDec, outAddr, outDec],
+  )
+  // The pair PLUS the settled amount: what an arriving response must match.
+  const currentKey = useMemo<QuoteKey | null>(() => {
+    if (!currentPair || inDec === undefined || !debouncedAmount) return null
+    try {
+      return { ...currentPair, amountRaw: parseUnits(debouncedAmount, inDec).toString() }
+    } catch {
+      return null
+    }
+  }, [currentPair, inDec, debouncedAmount])
+  const currentKeyRef = useRef<QuoteKey | null>(currentKey)
+  useEffect(() => {
+    currentKeyRef.current = currentKey
+  }, [currentKey])
+
+  // A flip / token / chain change drops the stored quote (not just hides it), so
+  // flipping A→B→A can't resurrect the old A quote. Amount changes keep it: the
+  // same pair's quote stays on screen until the re-quote lands (unchanged UX).
+  // (Reset-on-key-change during render — React's documented alternative to an
+  // effect that calls setState — so the flip commits with the old quote already gone.)
+  const [metaPair, setMetaPair] = useState(currentPair)
+  if (metaPair !== currentPair) {
+    setMetaPair(currentPair)
+    setMeta(null)
+  }
+
+  const meta = useMemo(
+    () => (storedMeta && currentPair && sameQuotePair(storedMeta.identity, currentPair) ? storedMeta : null),
+    [storedMeta, currentPair],
+  )
 
   // [hotfix] Tear down + rebuild the poll timer with the current
   // backoff interval. Called when entering or leaving backoff. Reads
@@ -184,6 +255,13 @@ export function useQuote(
   }, [])
 
   const doFetch = useCallback(async () => {
+    // [fix/stale-quote-pair-flip] A debounce is pending (the typed amount hasn't settled): the
+    // settled amount is the PREVIOUS one, so a fetch now would quote it under the new pair's
+    // decimals (⇅ flip: 1 000 000 USDC re-read as ETH) and cost a /api/quote hit (30/min/IP) for
+    // a result we'd discard. The settle changes doFetch's identity and fetches exactly once.
+    // Read via ref so this doesn't churn doFetch's identity on every keystroke.
+    if (amountInRef.current !== debouncedAmount) return
+
     if (!tokenIn || !tokenOut || !debouncedAmount || Number(debouncedAmount) <= 0) {
       setMeta(null)
       return
@@ -239,7 +317,19 @@ export function useQuote(
       const refGasUsd = refGas?.usd ?? bestNonCow?.gasUsd ?? 0
       const gasless = analyzeGasless(result.all, refGasUsd)
 
-      setMeta({ ...result, gasless })
+      // [fix/stale-quote-pair-flip] The response states what it answers (echoed by
+      // /api/quote). It is stored only if (a) it names a usable identity, (b) its
+      // request was not superseded, and (c) that identity IS the current selection +
+      // settled amount. Without (c) a late old-pair response repainted after a ⇅ flip.
+      const responseKey = parseQuoteEcho(result)
+      if (!responseKey) throw new QuoteApiError('Failed to fetch quotes', 502)
+      if (signal.aborted || !currentKeyRef.current || !sameQuoteKey(responseKey, currentKeyRef.current)) {
+        return
+      }
+      // The echo fields are routing metadata, not part of the quote itself.
+      const quote: Record<string, unknown> = { ...result }
+      for (const k of QUOTE_ECHO_KEYS) delete quote[k]
+      setMeta({ ...(quote as unknown as MetaQuoteResult), gasless, identity: { ...responseKey, fetchedAt: result.fetchedAt } })
       // [hotfix] First success after backoff — snap back to the normal
       // cadence and clear the error in one shot (we skipped that reset
       // at the top of this call). If we weren't in backoff, the

@@ -122,6 +122,22 @@ import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render
 import { fmtToken } from '@/lib/format'
 import { useBalance } from 'wagmi'
 import SwapBox from './SwapBox'
+import { findToken } from '@/lib/tokens'
+
+/** [fix/stale-quote-pair-flip] Identity of a quote fetched for SwapBox's default ETH→USDC pair on chain 1. */
+function testIdentity() {
+  const tin = findToken('ETH')!
+  const tout = findToken('USDC')!
+  return {
+    chainId: 1,
+    tokenIn: tin.address.toLowerCase(),
+    tokenOut: tout.address.toLowerCase(),
+    amountRaw: '1000000000000000000',
+    decimalsIn: tin.decimals,
+    decimalsOut: tout.decimals,
+    fetchedAt: Date.now(),
+  }
+}
 
 function setHookDefaults() {
   useQuoteMock.mockReturnValue({
@@ -309,6 +325,7 @@ describe('SwapBox — quote states', () => {
         best: { source: '1inch', toAmount: '3000000000', estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } },
         all: [],
         fetchedAt: Date.now(),
+        identity: testIdentity(),
       },
       loading: false,
       error: null,
@@ -377,6 +394,7 @@ describe('SwapBox — DigitRoller visibility [P195]', () => {
         best: { source: '1inch', toAmount: '3000000000', estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } },
         all: [],
         fetchedAt: Date.now(),
+        identity: testIdentity(),
       },
       loading: true,
       error: null,
@@ -433,6 +451,7 @@ describe('SwapBox — split route indicator', () => {
         best: { source: '1inch', toAmount: '3000000000', estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } },
         all: [],
         fetchedAt: Date.now(),
+        identity: testIdentity(),
       },
       loading: false,
       error: null,
@@ -470,10 +489,63 @@ const HEALTHY_OK = {
 
 function quoteMeta(toAmount: string) {
   return {
-    meta: { best: { source: '1inch', toAmount, estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } }, all: [], fetchedAt: Date.now() },
+    meta: { best: { source: '1inch', toAmount, estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } }, all: [], fetchedAt: Date.now(), identity: testIdentity() },
     loading: false, error: null, countdown: 10, refetch: vi.fn(), refresh: vi.fn(),
   }
 }
+
+describe('SwapBox — [fix/stale-quote-pair-flip] a quote only renders for the pair it answered', () => {
+  it('⇅ flip after a resolved quote → RECEIVE is empty, no stale number, no quote breakdown, gates see no quote', async () => {
+    useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
+    useQuoteMock.mockReturnValue(quoteMeta('2950000000')) // ETH→USDC quote, identity of that pair
+    const { container, rerender } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.getAllByTestId('digit-column').length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('quote-breakdown')).toBeInTheDocument()
+
+    // The (mock) hook keeps handing back the OLD pair's quote — exactly the stale window.
+    await act(async () => { fireEvent.click(screen.getByText('⇅')) })
+    await act(async () => { rerender(<SwapBox />) })
+    expect(screen.queryAllByTestId('digit-column')).toHaveLength(0)
+    expect(screen.queryByTestId('quote-breakdown')).toBeNull()
+    // Oracle gate inputs and the swap-time quote map are built from NO quote, not the stale one.
+    const lastPriceCall = useChainlinkPriceMock.mock.calls.at(-1)!
+    expect(lastPriceCall[1]).toBeNull()
+    expect(useSwapMock.mock.calls.at(-1)![4]).toEqual({})
+  })
+
+  it('a quote with NO identity is treated as no quote (fail closed)', async () => {
+    const q = quoteMeta('2950000000')
+    delete (q.meta as { identity?: unknown }).identity
+    useQuoteMock.mockReturnValue(q)
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.queryAllByTestId('digit-column')).toHaveLength(0)
+    expect(screen.queryByTestId('quote-breakdown')).toBeNull()
+  })
+
+  it('a quote whose decimals disagree with the selected token is not rendered (never reformatted with the wrong scale)', async () => {
+    const q = quoteMeta('420471100000000000000')
+    q.meta.identity = { ...q.meta.identity, decimalsOut: 18 } // quote priced at 18 dec, selection says USDC=6
+    useQuoteMock.mockReturnValue(q)
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.queryAllByTestId('digit-column')).toHaveLength(0)
+  })
+
+  it('a quote for the other chain is not rendered', async () => {
+    const q = quoteMeta('2950000000')
+    q.meta.identity = { ...q.meta.identity, chainId: 8453 }
+    useQuoteMock.mockReturnValue(q)
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => { fireEvent.change(input, { target: { value: '1' } }) })
+    expect(screen.queryByTestId('quote-breakdown')).toBeNull()
+  })
+})
 
 describe('SwapBox — J1 price-impact informed consent', () => {
   it('a healthy-oracle price-impact deviation is CONSENT, not the old indefinite block', async () => {
