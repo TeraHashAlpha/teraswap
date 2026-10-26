@@ -60,7 +60,17 @@ vi.mock('./TokenSelector', () => ({
     </button>
   ),
 }))
-vi.mock('./QuoteBreakdown', () => ({ default: (p: { priceTier?: { tier: string } | null }) => <div data-testid="quote-breakdown" data-tier={p.priceTier?.tier ?? ''} /> }))
+// [chore/copy-leftovers] Echo stub by default; `useRealQuoteBreakdown` swaps in the real component so the
+// notice matrix below sees SwapBox's and QuoteBreakdown's notices together, exactly as production renders them.
+let useRealQuoteBreakdown = false
+vi.mock('./QuoteBreakdown', async () => {
+  const actual = await vi.importActual<typeof import('./QuoteBreakdown')>('./QuoteBreakdown')
+  const Real = actual.default
+  return {
+    default: (p: React.ComponentProps<typeof Real>) =>
+      useRealQuoteBreakdown ? <Real {...p} /> : <div data-testid="quote-breakdown" data-tier={p.priceTier?.tier ?? ''} />,
+  }
+})
 // [SPRINT-9J J1] Expose the gate props so tests can assert the wiring
 // (priceBlocked + blockReason) without rendering the real button's wagmi deps.
 vi.mock('./SwapButton', () => ({
@@ -199,6 +209,7 @@ beforeEach(() => {
   localStorage.clear()
   mockIsConnected = true
   mockChainId = 1
+  useRealQuoteBreakdown = false
   setHookDefaults()
 })
 
@@ -365,5 +376,101 @@ describe('SwapBox — [feat/swap-price-tiers] tier matrix', () => {
     expect(reset).toHaveBeenCalled()
     await act(async () => { rerender(<SwapBox />) })
     expect(screen.queryByTestId('unpriced-consent-dialog')).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [fix/unpriced-ack-paths L-3 / Auditor 64] The ack decided in the dialog is ONE source of truth: on a
+// split route Continue hands it to useSplitSwap (every leg posts it), and the split hook's own 409 flag
+// opens the same dialog; Cancel resets THAT hook.
+// ─────────────────────────────────────────────────────────────
+describe('SwapBox — [fix/unpriced-ack-paths] split route: the ack reaches useSplitSwap; a split 409 opens the dialog', () => {
+  const bestSplit = {
+    isSplit: true, totalOutput: '1000000000000000000000', totalGasUsd: 10, improvementBps: 25,
+    legs: [
+      { source: '1inch', percent: 60, inputAmount: '3000000000000000000', outputAmount: '600000000000000000000', gasUsd: 5 },
+      { source: '0x', percent: 40, inputAmount: '2000000000000000000', outputAmount: '400000000000000000000', gasUsd: 5 },
+    ],
+  }
+  function splitActive() {
+    useSplitRouteMock.mockReturnValue({ splitResult: { bestSplit, splitRecommended: true }, analyzing: false, splitRecommended: true, useSplit: true, toggleSplit: vi.fn() })
+  }
+
+  it('unpriced + split active → Continue calls executeSplitSwap(bestSplit, { unpricedAck: true }); the single execute is never called', async () => {
+    useChainlinkPriceMock.mockReturnValue(NO_FEED)
+    useSwapPriceTierMock.mockReturnValue({ data: TIER.unpriced, loading: false })
+    useQuoteMock.mockReturnValue(exoticQuote('5'))
+    splitActive()
+    const executeSplit = vi.fn()
+    useSplitSwapMock.mockReturnValue({ ...useSplitSwapMock(), unpricedAckRequired: false, execute: executeSplit })
+    const executeSingle = vi.fn()
+    useSwapMock.mockReturnValue({ ...useSwapMock(), execute: executeSingle })
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    await act(async () => { fireEvent.click(swapBtn()) })
+    expect(executeSplit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('unpriced-consent-dialog')).toBeInTheDocument()
+    await act(async () => { fireEvent.click(screen.getByTestId('unpriced-consent-checkbox')) })
+    await act(async () => { fireEvent.click(screen.getByTestId('unpriced-consent-confirm')) })
+    expect(screen.queryByTestId('unpriced-consent-dialog')).toBeNull()
+    expect(executeSplit).toHaveBeenCalledTimes(1)
+    expect(executeSplit.mock.calls[0][0]).toBe(bestSplit)
+    expect(executeSplit.mock.calls[0][1]).toEqual({ unpricedAck: true })
+    expect(executeSingle).not.toHaveBeenCalled()
+  })
+
+  it('a split 409 (useSplitSwap.unpricedAckRequired) opens the dialog even when the client thought the pair was priced; Cancel resets the SPLIT hook', async () => {
+    useChainlinkPriceMock.mockReturnValue(NO_FEED)
+    useSwapPriceTierMock.mockReturnValue({ data: TIER.priced, loading: false })
+    useQuoteMock.mockReturnValue(exoticQuote('5'))
+    splitActive()
+    const resetSplit = vi.fn(); const resetSingle = vi.fn()
+    useSplitSwapMock.mockReturnValue({ ...useSplitSwapMock(), unpricedAckRequired: true, reset: resetSplit })
+    useSwapMock.mockReturnValue({ ...useSwapMock(), reset: resetSingle })
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    expect(screen.getByTestId('unpriced-consent-dialog')).toBeInTheDocument()
+    resetSplit.mockClear(); resetSingle.mockClear() // token picks reset both hooks — only the Cancel click matters below
+    await act(async () => { fireEvent.click(screen.getByTestId('unpriced-consent-cancel')) })
+    expect(resetSplit).toHaveBeenCalledTimes(1)
+    expect(resetSingle).not.toHaveBeenCalled() // the single hook's flag is down — nothing to reset there
+  })
+})
+
+/** The three price notices a user could see for an unverified price. Exactly one tier-driven notice, or none. */
+function priceNotices() {
+  const text = document.body.textContent ?? ''
+  return {
+    legacyBlue: /No oracle available/.test(text),
+    singleSource: !!screen.queryByTestId('price-tier-single-source'),
+    unpriced: !!screen.queryByTestId('price-tier-unpriced'),
+  }
+}
+
+describe('SwapBox — [chore/copy-leftovers] one price notice, from the tier', () => {
+  const cases: Array<[string, typeof TIER[keyof typeof TIER] | null, { singleSource: boolean; unpriced: boolean }]> = [
+    ['priced → none', TIER.priced, { singleSource: false, unpriced: false }],
+    ['single-source → the amber notice only', TIER.single, { singleSource: true, unpriced: false }],
+    ['unpriced → the "No reference price" notice only', TIER.unpriced, { singleSource: false, unpriced: true }],
+    ['unknown (null) → none — the client never guesses', null, { singleSource: false, unpriced: false }],
+  ]
+  it.each(cases)('%s (pair with no Chainlink feed, small swap)', async (_name, tier, expected) => {
+    useRealQuoteBreakdown = true
+    useChainlinkPriceMock.mockReturnValue(NO_FEED)
+    useSwapPriceTierMock.mockReturnValue({ data: tier, loading: false })
+    useQuoteMock.mockReturnValue(exoticQuote('5'))
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    expect(screen.getByText(/Rate/)).toBeInTheDocument() // the real QuoteBreakdown is on screen
+    expect(priceNotices()).toEqual({ legacyBlue: false, ...expected })
+  })
+})
+
+describe('SwapBox — [chore/copy-leftovers] source counts', () => {
+  it('"N sources queried" counts the quotes that came back (the toggle says "enabled", not "x/y")', async () => {
+    useQuoteMock.mockReturnValue(exoticQuote('5', ['1000000000000000000000', '996000000000000000000', '1004000000000000000000']))
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    expect(screen.getByText('3 sources queried')).toBeInTheDocument()
   })
 })

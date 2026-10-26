@@ -1076,3 +1076,79 @@ describe('useSplitSwap — [Auditor round 2, L-02] aggregate: single netting + f
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [fix/unpriced-ack-paths L-3 / Auditor 64] Every split leg posts to the SAME /api/swap gate as the
+// single path, so the ack decided in SwapBox must ride EVERY leg, and a 409 `unpriced_ack_required`
+// is consent — the plan is discarded and the dialog opens — never a per-leg error that ends in
+// "No split leg can execute".
+// ─────────────────────────────────────────────────────────────
+describe('useSplitSwap — [fix/unpriced-ack-paths L-3] the ack rides every leg; a 409 is consent, not an error', () => {
+  const ACK_409 = { error: 'No reference price for this pair', code: 'unpriced_ack_required', requiredTier: 'unpriced', unpriceable: true }
+  const twoLegs = () => makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
+  function captureBodies() {
+    const bodies: Array<Record<string, unknown>> = []
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
+      bodies.push(JSON.parse((init?.body as string) ?? '{}'))
+      return new Response(JSON.stringify(makeQuote()), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    return bodies
+  }
+
+  it('execute(route, { unpricedAck: true }) posts unpricedAck:true on EVERY leg', async () => {
+    const bodies = captureBodies()
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => { await result.current.execute(twoLegs(), { unpricedAck: true }) })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(bodies.map(b => b.source)).toEqual(['1inch', '0x'])
+    for (const b of bodies) expect(b.unpricedAck).toBe(true)
+    expect(result.current.unpricedAckRequired).toBe(false)
+  })
+
+  it('a plain execute(route) sends no unpricedAck key on any leg (boolean true only, never a default)', async () => {
+    const bodies = captureBodies()
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => { await result.current.execute(twoLegs()) })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(bodies).toHaveLength(2)
+    for (const b of bodies) expect(b).not.toHaveProperty('unpricedAck')
+  })
+
+  it('a 409 unpriced_ack_required on the FIRST leg discards the plan: idle, no error, flag up, no second leg posted, nothing frozen or signed', async () => {
+    const f = mockSwapFetch(() => ACK_409, 409)
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => { await result.current.execute(twoLegs()) })
+    expect(result.current.unpricedAckRequired).toBe(true)
+    expect(result.current.status).toBe('idle')
+    expect(result.current.errorMessage).toBeNull()
+    expect(result.current.plannedLegs).toEqual([])
+    expect(result.current.legs).toEqual([])
+    expect(f).toHaveBeenCalledTimes(1) // the second leg would get the same 409 — the user must consent first
+    await act(async () => { await result.current.confirmPlan() }) // no plan → no-op
+    expect(mockSendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('reset() clears the flag (Cancel); a re-run with the ack rebuilds the plan with the ack on every leg', async () => {
+    mockSwapFetch(() => ACK_409, 409)
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => { await result.current.execute(twoLegs()) })
+    expect(result.current.unpricedAckRequired).toBe(true)
+    await act(async () => { result.current.reset() })
+    expect(result.current.unpricedAckRequired).toBe(false)
+    const bodies = captureBodies() // the user consented → the server now answers 200
+    await act(async () => { await result.current.execute(twoLegs(), { unpricedAck: true }) })
+    expect(result.current.status).toBe('awaiting-review')
+    expect(bodies).toHaveLength(2)
+    for (const b of bodies) expect(b.unpricedAck).toBe(true)
+  })
+
+  it('a 409 with another code is still an ordinary per-leg error (fail-closed, unchanged)', async () => {
+    mockSwapFetch(() => ({ error: 'Chain 42161 is not yet available for swaps', code: 'CHAIN_COMING_SOON' }), 409)
+    const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
+    await act(async () => { await result.current.execute(twoLegs()) })
+    expect(result.current.unpricedAckRequired).toBe(false)
+    expect(result.current.status).toBe('error')
+    expect(result.current.errorMessage).toMatch(/No split leg can execute/)
+    expect(result.current.legs.map(l => l.status)).toEqual(['error', 'error'])
+  })
+})

@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
 import { ADAPTER_REGISTRY } from '@/lib/adapters'
+import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
 import { AGGREGATOR_META, DISABLED_SOURCES, type AggregatorName } from '@/lib/constants'
 import SourceToggle, { TOGGLEABLE_SOURCES } from './SourceToggle'
 
@@ -58,18 +59,25 @@ describe('SourceToggle — render + toggle [CHORE-2026-09-03]', () => {
     const target = TOGGLEABLE_SOURCES[0]
     const targetLabel = AGGREGATOR_META[target].label
     renderWithProviders(<SourceToggle excludedSources={new Set()} onToggle={onToggle} />)
-    fireEvent.click(screen.getByText(new RegExp(`/${TOGGLEABLE_SOURCES.length} sources`)))
+    fireEvent.click(screen.getByText(`${TOGGLEABLE_SOURCES.length} sources enabled`))
     const row = screen.getByText(targetLabel).closest('button')
     expect(row).not.toBeNull()
     fireEvent.click(row!)
     expect(onToggle).toHaveBeenCalledWith(target)
   })
 
-  it('counts an excluded source as disabled in the "N/total sources" label', () => {
+  it('labels the toggle with the enabled count — "N sources enabled" when none are excluded, never a bare "x/y"', () => {
+    renderWithProviders(<SourceToggle excludedSources={new Set()} onToggle={vi.fn()} />)
+    expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(TOGGLEABLE_SOURCES.length)
+    expect(screen.getByText(`${INTEGRATED_DEX_SOURCE_COUNT} sources enabled`)).toBeInTheDocument()
+    expect(screen.queryByText(/\d+\/\d+ sources/)).toBeNull()
+  })
+
+  it('counts an excluded source as disabled: "N of total sources enabled"', () => {
     const excluded = new Set([TOGGLEABLE_SOURCES[0]])
     renderWithProviders(<SourceToggle excludedSources={excluded} onToggle={vi.fn()} />)
     expect(
-      screen.getByText(`${TOGGLEABLE_SOURCES.length - 1}/${TOGGLEABLE_SOURCES.length} sources`)
+      screen.getByText(`${TOGGLEABLE_SOURCES.length - 1} of ${TOGGLEABLE_SOURCES.length} sources enabled`)
     ).toBeInTheDocument()
   })
 })
