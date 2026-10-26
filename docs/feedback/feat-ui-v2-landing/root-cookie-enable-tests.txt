@@ -1,0 +1,60 @@
+ ✓ src/app/v2/%5Fenable/flow.test.ts > preview opt-in flow > no cookie → v1 on `/` and the tabs
+ ✓ src/app/v2/%5Fenable/flow.test.ts > preview opt-in flow > right secret → 200 + the signed ts_ui cookie (HttpOnly, Secure, Lax, 30 d) → `/` is v2 afterwards
+ ✓ src/app/v2/%5Fenable/flow.test.ts > preview opt-in flow > wrong secret → 401, NO Set-Cookie → still v1
+ ✓ src/app/v2/%5Fenable/flow.test.ts > preview opt-in flow > no secret / no Authorization header → 401, no cookie; an unset admin secret → 503, no cookie
+ ✓ src/app/v2/%5Fenable/flow.test.ts > preview opt-in flow > a cookie signed under another secret never opens v2 (the cookie, not the form, is the gate)
+ ✓ src/app/v2/%5Fenable/flow.test.ts > preview opt-in flow > the form itself is reachable with no cookie in preview, and 404s in production
+ ✓ src/proxy.test.ts > `/` (the v1 landing) > no env, no cookie → untouched (v1)
+ ✓ src/proxy.test.ts > `/` (the v1 landing) > forged / wrong-secret cookie → untouched (v1)
+ ✓ src/proxy.test.ts > `/` (the v1 landing) > UI_V2_ENABLED=true → rewritten to /v2 (whose home is the Swap tab — app/v2/page.test.tsx)
+ ✓ src/proxy.test.ts > `/` (the v1 landing) > valid cookie → rewritten to /v2
+ ✓ src/proxy.test.ts > `/` (the v1 landing) > cookie path disabled when the secret is unset
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /swap: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /portfolio: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /dca: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /limit: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /sltp: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /orders: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /history: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /analytics: no env, no cookie → untouched (v1 keeps its own page)
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /swap: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /portfolio: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /dca: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /limit: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /sltp: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /orders: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /history: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /analytics: forged / wrong-secret / secret-less cookie → untouched
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /swap: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /portfolio: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /dca: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /limit: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /sltp: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /orders: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /history: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate) > /analytics: valid cookie → rewritten to /v2undefined
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2 with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/swap with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/portfolio with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/dca with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/limit with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/sltp with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/orders with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/history with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/analytics with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/_kit with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > /v2/anything/deep with no env/cookie → real 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > forged and wrong-secret cookies → 404 path
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > the 404 proof: production, no gate → every direct /v2/<tab> is rewritten to a path that has no route
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > UI_V2_ENABLED=true → passes through
+ ✓ src/proxy.test.ts > direct requests to /v2/* (requirement: must NOT render v2 without env/valid cookie) > valid cookie → passes through
+ ✓ src/proxy.test.ts > /v2/_kit (dev kit: Preview / next dev only, independent of the switch) > production: real 404 even with the owner cookie or UI_V2_ENABLED=true
+ ✓ src/proxy.test.ts > /v2/_kit (dev kit: Preview / next dev only, independent of the switch) > preview → passes through (no cookie needed)
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > isV2EnableEnabled NODE_ENV=production VERCEL_ENV=production → false
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > isV2EnableEnabled NODE_ENV=production VERCEL_ENV= → false
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > isV2EnableEnabled NODE_ENV=test VERCEL_ENV= → false
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > isV2EnableEnabled NODE_ENV=production VERCEL_ENV=preview → true
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > isV2EnableEnabled NODE_ENV=development VERCEL_ENV= → true
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > production: real 404 even with the owner cookie or UI_V2_ENABLED=true
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > preview with NO cookie (a v1 visitor) → passes through: this is how the cookie gets set
+ ✓ src/proxy.test.ts > /v2/_enable (preview opt-in form: reachable before the cookie exists, same gate as the kit) > development → passes through; look-alikes and the rest of /v2 stay behind the switch
