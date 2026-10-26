@@ -81,7 +81,7 @@ function SourceGraph() {
 
 export function PerformanceSection() {
   return (
-    <section id="performance" className={`${SECTION} overflow-hidden`}>
+    <section id="performance" className={`ts-v2-opaque ${SECTION} overflow-hidden`}>
       <PhotoBackground photoId="arch-night" section aboveFold={false} />
       <div className={`${WRAP} grid items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16`}>
         <div>
@@ -122,7 +122,7 @@ export function DifferentSection() {
     },
   ]
   return (
-    <section id="why-teraswap" className={SECTION}>
+    <section id="why-teraswap" className={`ts-v2-opaque ${SECTION}`}>
       <div className={WRAP}>
         <SectionHead eyebrow="Why TeraSwap">
           What Makes TeraSwap <HandUnderline className="text-v2-cream">Different</HandUnderline>
@@ -163,7 +163,7 @@ export function SecuritySection() {
     },
   ]
   return (
-    <section id="security" className={SECTION}>
+    <section id="security" data-ts-narrative="security" className={SECTION}>
       <div className={WRAP}>
         <SectionHead eyebrow="Security">
           Institutional-Grade <HandUnderline className="text-v2-cream">Security.</HandUnderline>
@@ -219,7 +219,7 @@ export function SecuritySection() {
 
 export function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" className={SECTION}>
+    <section id="experience" data-ts-narrative="experience" className={SECTION}>
       <div className={`${WRAP} grid items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16`}>
         <div>
           <EyebrowLabel>Experience</EyebrowLabel>
@@ -318,7 +318,7 @@ export function FeaturesSection() {
   const { live, roadmap } = splitFeatures()
   return (
     <>
-      <section id="features" className={SECTION}>
+      <section id="features" data-ts-narrative="features" className={SECTION}>
         <div className={WRAP}>
           <SectionHead eyebrow="Features">Built for every EVM trader.</SectionHead>
           <p className="-mt-4 mb-8 text-[15px] text-v2-muted">Every capability shipping today, plus what&apos;s next on the roadmap.</p>
@@ -335,7 +335,7 @@ export function FeaturesSection() {
         </div>
       </section>
       {roadmap.length > 0 ? (
-        <section id="roadmap" className={SECTION}>
+        <section id="roadmap" data-ts-narrative="roadmap" className={SECTION}>
           <div className={WRAP}>
             <SectionHead eyebrow="Roadmap">Coming Soon</SectionHead>
             <ul className="grid list-none gap-4 md:grid-cols-2">
@@ -364,7 +364,7 @@ export function FeaturesSection() {
 
 export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className={`${SECTION} overflow-hidden text-center`}>
+    <section className={`ts-v2-opaque ${SECTION} overflow-hidden text-center`}>
       <PhotoBackground photoId="trails" section aboveFold={false} />
       <div className="relative z-10 mx-auto max-w-[900px]">
         <h2 className={H2}>
@@ -392,7 +392,7 @@ export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 export function DocsSection() {
   return (
-    <section id="docs" className={`${SECTION} pb-24`}>
+    <section id="docs" data-ts-narrative="docs" className={`${SECTION} pb-24`}>
       <div className={WRAP}>
         <SectionHead eyebrow="Docs">Read the docs.</SectionHead>
         <Panel className="flex flex-col items-start justify-between gap-6 p-6 sm:flex-row sm:items-center sm:p-8">

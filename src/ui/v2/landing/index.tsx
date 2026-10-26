@@ -8,6 +8,7 @@ import { Footer } from '../shell/Footer'
 import { V2ToastProvider } from '../shell/toasts'
 import { Hero } from './Hero'
 import { LandingHeader } from './LandingHeader'
+import { NarrativeStack } from './NarrativeStack'
 import { BottomCtaSection, DifferentSection, DocsSection, ExperienceSection, FeaturesSection, PerformanceSection, SecuritySection } from './Sections'
 
 /** The landing's photos, in page order — the footer names each author once. */
@@ -23,6 +24,7 @@ export function LandingV2({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
     <V2ToastProvider>
       <div data-ts-ui="v2" data-ts-landing="" className={`ts-v2 relative min-h-screen ${v2FontClassNames}`}>
+        <NarrativeStack />
         <LandingHeader onLaunchApp={onLaunchApp} />
         <main>
           <Hero onLaunchApp={onLaunchApp} />
@@ -34,7 +36,9 @@ export function LandingV2({ onLaunchApp }: { onLaunchApp: () => void }) {
           <BottomCtaSection onLaunchApp={onLaunchApp} />
           <DocsSection />
         </main>
-        <Footer photos={LANDING_PHOTOS} />
+        <div className="ts-v2-opaque">
+          <Footer photos={LANDING_PHOTOS} />
+        </div>
         <MusicToggle />
         <HelpFab />
       </div>

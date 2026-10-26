@@ -21,6 +21,8 @@
   --radius-card:16px; --radius-control:10px;
 
   --t-toast:160ms; --t-shimmer:1.2s;
+  --ease-out:cubic-bezier(0.2,0.8,0.2,1); --ease-inout:cubic-bezier(0.65,0,0.35,1);
+  --t-fast:120ms; --t-base:160ms; --t-slow:180ms; --t-underline:600ms;
 
   background-color: var(--bg);
   color: var(--text);
@@ -28,7 +30,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ts-v2 { --t-toast:0ms; --t-shimmer:0s; scroll-behavior: auto; }
+  .ts-v2 { --t-toast:0ms; --t-shimmer:0s; --t-fast:0ms; --t-base:0ms; --t-slow:0ms; --t-underline:0ms; scroll-behavior: auto; }
   .ts-v2, .ts-v2 *, .ts-v2 *::before, .ts-v2 *::after {
     animation: none !important;
     transition: none !important;

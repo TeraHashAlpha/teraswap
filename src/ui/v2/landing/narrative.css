@@ -1,0 +1,37 @@
+/* [ADR-025] Scroll narrative (round-6 MOTION-SPEC §3, §6, §7). The photo files are pre-graded (recipe steps 1–3 baked
+   in), so this veil — recipe step 4, #0B0D0F at alpha 45/255 — is the same constant in every state, including
+   mid-cross-fade. Only the layers' opacity animates. */
+.ts-v2 { --nar-veil: rgba(11, 13, 15, 0.176); }
+
+.ts-v2-nar { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.ts-v2-nar__layer {
+  position: absolute; inset: 0; opacity: 0;
+  background: var(--bg) center / cover no-repeat;
+  transition: opacity var(--t-slow) var(--ease-inout);
+}
+/* The image is set only once the layer is `data-loaded` (its section is within one viewport): until then no URL exists. */
+.ts-v2-nar__layer[data-loaded] { background-image: var(--nar-d); }
+.ts-v2-nar__layer[data-active] { opacity: 1; }
+.ts-v2-nar__veil { position: absolute; inset: 0; background: var(--nar-veil); }
+@media (max-width: 600px) {
+  .ts-v2-nar__layer[data-loaded] { background-image: var(--nar-m); }
+}
+
+/* Sections that must hide the stack: positioned (so they paint after it, in DOM order) on a solid --bg. */
+.ts-v2-opaque { position: relative; background-color: var(--bg); }
+
+/* Credit: follows the active photo and fades with the same token. Round-5 position (MOTION-SPEC §7). */
+.ts-v2-nar-credit {
+  position: fixed; right: 32px; bottom: 70px; transform: translateY(50%); z-index: 5; margin: 0;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--t-slow) var(--ease-inout);
+}
+.ts-v2-nar-credit[data-active] { opacity: 1; }
+.ts-v2-nar-credit span {
+  white-space: nowrap; font: 500 9px/1 var(--font-mono); letter-spacing: 1px; text-transform: uppercase;
+  color: var(--dim); background: var(--plate-bg); padding: 3px 4px; border-radius: 4px;
+}
+.ts-v2-nar-credit em { font-style: normal; }
+@media (max-width: 600px) {
+  .ts-v2-nar-credit { right: auto; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom)); transform: translate(-50%, 50%); }
+}

@@ -157,5 +157,163 @@
         }
       ]
     }
+  ],
+  "narrativeNote": "Round-6 scroll narrative (MOTION-SPEC §2): graded derivatives of existing tab photos, recipe steps 1-3 baked in (grayscale, contrast, brightness, duotone, 65% BG shade); the constant veil is a CSS layer. Source: round6/landing/img/bg-*. Width is the long edge (1920 landscape for desktop, 1080 portrait for mobile).",
+  "narrative": [
+    {
+      "id": "highway",
+      "photographer": "Oleksiy Yeshtokyn",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "31514221",
+      "pexelsUrl": "https://www.pexels.com/photo/31514221/",
+      "section": "security",
+      "files": [
+        {
+          "file": "narrative/bg-highway-1920.avif",
+          "width": 1920,
+          "bytes": 34097
+        },
+        {
+          "file": "narrative/bg-highway-1920.webp",
+          "width": 1920,
+          "bytes": 34612
+        },
+        {
+          "file": "narrative/bg-highway-1080.avif",
+          "width": 1080,
+          "bytes": 22617
+        },
+        {
+          "file": "narrative/bg-highway-1080.webp",
+          "width": 1080,
+          "bytes": 24996
+        }
+      ]
+    },
+    {
+      "id": "footbridge",
+      "photographer": "Erik Mclean",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "8936918",
+      "pexelsUrl": "https://www.pexels.com/photo/8936918/",
+      "section": "experience",
+      "files": [
+        {
+          "file": "narrative/bg-footbridge-1920.avif",
+          "width": 1920,
+          "bytes": 22241
+        },
+        {
+          "file": "narrative/bg-footbridge-1920.webp",
+          "width": 1920,
+          "bytes": 22514
+        },
+        {
+          "file": "narrative/bg-footbridge-1080.avif",
+          "width": 1080,
+          "bytes": 21430
+        },
+        {
+          "file": "narrative/bg-footbridge-1080.webp",
+          "width": 1080,
+          "bytes": 21300
+        }
+      ]
+    },
+    {
+      "id": "tunnel",
+      "photographer": "Владимир Николаевич",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "9221575",
+      "pexelsUrl": "https://www.pexels.com/photo/9221575/",
+      "section": "features",
+      "files": [
+        {
+          "file": "narrative/bg-tunnel-1920.avif",
+          "width": 1920,
+          "bytes": 30031
+        },
+        {
+          "file": "narrative/bg-tunnel-1920.webp",
+          "width": 1920,
+          "bytes": 32898
+        },
+        {
+          "file": "narrative/bg-tunnel-1080.avif",
+          "width": 1080,
+          "bytes": 26821
+        },
+        {
+          "file": "narrative/bg-tunnel-1080.webp",
+          "width": 1080,
+          "bytes": 30084
+        }
+      ]
+    },
+    {
+      "id": "archlight",
+      "photographer": "wal_ 172619",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "36192529",
+      "pexelsUrl": "https://www.pexels.com/photo/36192529/",
+      "section": "roadmap",
+      "files": [
+        {
+          "file": "narrative/bg-archlight-1920.avif",
+          "width": 1920,
+          "bytes": 27580
+        },
+        {
+          "file": "narrative/bg-archlight-1920.webp",
+          "width": 1920,
+          "bytes": 26346
+        },
+        {
+          "file": "narrative/bg-archlight-1080.avif",
+          "width": 1080,
+          "bytes": 30811
+        },
+        {
+          "file": "narrative/bg-archlight-1080.webp",
+          "width": 1080,
+          "bytes": 28628
+        }
+      ]
+    },
+    {
+      "id": "underpass",
+      "photographer": "Willbone Gallery",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "32397093",
+      "pexelsUrl": "https://www.pexels.com/photo/32397093/",
+      "section": "docs",
+      "files": [
+        {
+          "file": "narrative/bg-underpass-1920.avif",
+          "width": 1920,
+          "bytes": 50389
+        },
+        {
+          "file": "narrative/bg-underpass-1920.webp",
+          "width": 1920,
+          "bytes": 48808
+        },
+        {
+          "file": "narrative/bg-underpass-1080.avif",
+          "width": 1080,
+          "bytes": 50720
+        },
+        {
+          "file": "narrative/bg-underpass-1080.webp",
+          "width": 1080,
+          "bytes": 50542
+        }
+      ]
+    }
   ]
 }
