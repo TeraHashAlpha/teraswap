@@ -25,7 +25,7 @@ CoinGecko coin id, fewer than 7 complete days) means **not admitted this run**, 
 
 **Raise / lower the threshold:** edit `minDailyVolumeUsd` (globally, or per chain in `singleSourceByChain`), run
 `npm run tokens:sync -- --dry-run` with `TOKENS_SYNC_CHAINS=<chain>` to preview the admissions, then ship the config
-change in a normal PR. The next scheduled refresh applies it. **Emergency off:** `enabled: false` (or per chain);
+change in a normal PR. The next scheduled refresh applies it. **Mainnet is OFF** (`singleSourceByChain: { 1: { enabled: false } }`, owner 2026-10-27): its catalog sits at 987/1000 rows (`token-catalog.test.ts` size bound) and no mainnet dry-run exists; run `TOKENS_SYNC_CHAINS=1 npm run tokens:sync -- --dry-run` and decide on the bound before removing the override. **Emergency off:** `enabled: false` (or per chain);
 rows already admitted stay in the catalog as unverified seeds on the next run — nothing is removed.
 
 ## Data and rate limits

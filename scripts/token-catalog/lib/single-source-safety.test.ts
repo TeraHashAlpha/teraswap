@@ -77,6 +77,7 @@ function run(sc: Scenario) {
       ...PIPELINE_CONFIG,
       maxNewTokensPerChain: { [CHAIN]: sc.cap ?? 400 },
       singleSource: { ...PIPELINE_CONFIG.singleSource, enabled: sc.enabled ?? true },
+      singleSourceByChain: {}, // chain 1 is OFF in the real config; these tests exercise the rule itself
     },
     categoryFor: () => 'Other',
     logoFor: () => '/logo',

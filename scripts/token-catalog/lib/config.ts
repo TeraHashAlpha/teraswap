@@ -42,7 +42,9 @@ export const PIPELINE_CONFIG: PipelineConfig = {
   // registry, trusted like a tokenlist source but only fetched for their own chain.
   sourcePriority: ['curated', 'superchain', 'arbitrumBridge', 'uniswap', 'coingecko', 'oneinch', 'trustwallet', 'defillama'],
   singleSource: { enabled: true, minDailyVolumeUsd: 100_000, days: 7, requireEveryDay: true },
-  singleSourceByChain: {},
+  // Mainnet OFF (owner, 27 Oct): its catalog is 987/1000 rows (token-catalog.test.ts size bound) and no
+  // mainnet dry-run has been measured. Re-enable only after a measured `--dry-run` for chain 1.
+  singleSourceByChain: { 1: { enabled: false } },
 }
 
 /** Native ETH sentinel (matches src/lib/constants NATIVE_ETH — kept literal so the

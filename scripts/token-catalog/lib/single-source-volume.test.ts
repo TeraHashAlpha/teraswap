@@ -38,6 +38,8 @@ function payload(days: number[]): unknown {
   return { ...RECORDED, total_volumes: [...pts, trailing] }
 }
 const FLOOR = 100_000
+/** Chain 1 is OFF in the real config (owner, 27 Oct); the e2e tests run on chain 1, so drop the per-chain overrides. */
+const RULE_ON = { ...PIPELINE_CONFIG, singleSourceByChain: {} }
 const ok = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers })
 
@@ -88,11 +90,16 @@ describe('config', () => {
   it('defaults are the owner decision (26 Oct): enabled, $100,000, 7 days, every day', () => {
     expect(PIPELINE_CONFIG.singleSource).toEqual({ enabled: true, minDailyVolumeUsd: 100_000, days: 7, requireEveryDay: true })
   })
+  it('mainnet is OFF, Base and Arbitrum are ON (owner decision 27 Oct: mainnet stays off until a measured dry-run)', () => {
+    expect(resolveSingleSourceConfig(PIPELINE_CONFIG, 1).enabled).toBe(false)
+    expect(resolveSingleSourceConfig(PIPELINE_CONFIG, 8453)).toEqual(PIPELINE_CONFIG.singleSource)
+    expect(resolveSingleSourceConfig(PIPELINE_CONFIG, 42161)).toEqual(PIPELINE_CONFIG.singleSource)
+  })
   it('per-chain override merges over the default; unset keys inherit; other chains unaffected', () => {
-    const cfg = { ...PIPELINE_CONFIG, singleSourceByChain: { 8453: { minDailyVolumeUsd: 250_000 }, 42161: { enabled: false } } }
+    const cfg = { ...PIPELINE_CONFIG, singleSourceByChain: { 8453: { minDailyVolumeUsd: 250_000 }, 42161: { enabled: false } } } // replaces the default map, so chain 1 inherits
     expect(resolveSingleSourceConfig(cfg, 8453)).toEqual({ enabled: true, minDailyVolumeUsd: 250_000, days: 7, requireEveryDay: true })
     expect(resolveSingleSourceConfig(cfg, 42161).enabled).toBe(false)
-    expect(resolveSingleSourceConfig(cfg, 1)).toEqual(PIPELINE_CONFIG.singleSource)
+    expect(resolveSingleSourceConfig(cfg, 1)).toEqual(PIPELINE_CONFIG.singleSource) // cfg overrides only 8453/42161
   })
 })
 
@@ -256,7 +263,7 @@ describe('end to end through buildChainCatalog (fake CoinGecko, no network)', ()
       allowlist: AL,
       seeds: new Map(),
       cores: [],
-      config: PIPELINE_CONFIG,
+      config: RULE_ON,
       categoryFor: () => 'Other',
       logoFor: () => '/l',
       log: () => {},
@@ -287,7 +294,7 @@ describe('end to end through buildChainCatalog (fake CoinGecko, no network)', ()
       fetchVolume: async () => ({ source: 'coingecko' as const, entries: [], market: new Map([[`1:${addrOf(1).toLowerCase()}`, { volume24hUsd: 99_999, volumeSource: 'coingecko' as const }]]) }),
       fetchVolumeHistory: hist,
       collectVerdicts: clean,
-      allowlist: AL, seeds: new Map(), cores: [], config: PIPELINE_CONFIG, categoryFor: () => 'Other', logoFor: () => '/l', log: () => {}, builtAt: '2026-10-26',
+      allowlist: AL, seeds: new Map(), cores: [], config: RULE_ON, categoryFor: () => 'Other', logoFor: () => '/l', log: () => {}, builtAt: '2026-10-26',
     })
     expect(hist).not.toHaveBeenCalled()
     expect(result.tokens).toHaveLength(0)
