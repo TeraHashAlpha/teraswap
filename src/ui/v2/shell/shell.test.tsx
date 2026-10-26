@@ -288,13 +288,16 @@ describe('footer', () => {
   })
 })
 
+// Backslash is in the class so a literal `\` in a title is escaped too (CodeQL js/incomplete-sanitization).
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+
 describe('help drawer + fabs', () => {
   it('? opens the drawer with v1\'s help sections; Esc, ✕ and the overlay close it', () => {
     render(<AppShell />)
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
     const dialog = screen.getByRole('dialog')
-    for (const s of helpSections) expect(within(dialog).getByRole('button', { name: new RegExp(s.title.replace(/[()/]/g, '\\$&')) })).toBeTruthy()
+    for (const s of helpSections) expect(within(dialog).getByRole('button', { name: new RegExp(escapeRegExp(s.title)) })).toBeTruthy()
     expect(within(dialog).getByRole('link', { name: 'Email support' }).getAttribute('href')).toBe(`mailto:${SUPPORT_EMAIL}`)
     expect(within(dialog).getByRole('link', { name: '@TeraHash on X' }).getAttribute('href')).toBe('https://x.com/TeraHash')
     fireEvent.keyDown(window, { key: 'Escape' })
