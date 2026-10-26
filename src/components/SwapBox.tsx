@@ -1078,12 +1078,7 @@ export default function SwapBox() {
                   Verify the price manually on CoinGecko or Etherscan before proceeding.
                 </span>
               </div>
-            ) : (
-              <div className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300">
-                <span className="font-semibold">&#9432; No oracle available</span> for {tokenIn?.symbol}.{' '}
-                Price is based on aggregator quotes only — not independently verified by Chainlink.
-              </div>
-            )}
+            ) : null /* [chore/copy-leftovers] Below the warn threshold the tier notice (QuoteBreakdown) is the ONLY price notice: the old blue unverified-price notice duplicated it. */}
           </>
         )}
 
