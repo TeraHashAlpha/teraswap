@@ -367,3 +367,61 @@ describe('SwapBox — [feat/swap-price-tiers] tier matrix', () => {
     expect(screen.queryByTestId('unpriced-consent-dialog')).toBeNull()
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [fix/unpriced-ack-paths L-3 / Auditor 64] The ack decided in the dialog is ONE source of truth: on a
+// split route Continue hands it to useSplitSwap (every leg posts it), and the split hook's own 409 flag
+// opens the same dialog; Cancel resets THAT hook.
+// ─────────────────────────────────────────────────────────────
+describe('SwapBox — [fix/unpriced-ack-paths] split route: the ack reaches useSplitSwap; a split 409 opens the dialog', () => {
+  const bestSplit = {
+    isSplit: true, totalOutput: '1000000000000000000000', totalGasUsd: 10, improvementBps: 25,
+    legs: [
+      { source: '1inch', percent: 60, inputAmount: '3000000000000000000', outputAmount: '600000000000000000000', gasUsd: 5 },
+      { source: '0x', percent: 40, inputAmount: '2000000000000000000', outputAmount: '400000000000000000000', gasUsd: 5 },
+    ],
+  }
+  function splitActive() {
+    useSplitRouteMock.mockReturnValue({ splitResult: { bestSplit, splitRecommended: true }, analyzing: false, splitRecommended: true, useSplit: true, toggleSplit: vi.fn() })
+  }
+
+  it('unpriced + split active → Continue calls executeSplitSwap(bestSplit, { unpricedAck: true }); the single execute is never called', async () => {
+    useChainlinkPriceMock.mockReturnValue(NO_FEED)
+    useSwapPriceTierMock.mockReturnValue({ data: TIER.unpriced, loading: false })
+    useQuoteMock.mockReturnValue(exoticQuote('5'))
+    splitActive()
+    const executeSplit = vi.fn()
+    useSplitSwapMock.mockReturnValue({ ...useSplitSwapMock(), unpricedAckRequired: false, execute: executeSplit })
+    const executeSingle = vi.fn()
+    useSwapMock.mockReturnValue({ ...useSwapMock(), execute: executeSingle })
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    await act(async () => { fireEvent.click(swapBtn()) })
+    expect(executeSplit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('unpriced-consent-dialog')).toBeInTheDocument()
+    await act(async () => { fireEvent.click(screen.getByTestId('unpriced-consent-checkbox')) })
+    await act(async () => { fireEvent.click(screen.getByTestId('unpriced-consent-confirm')) })
+    expect(screen.queryByTestId('unpriced-consent-dialog')).toBeNull()
+    expect(executeSplit).toHaveBeenCalledTimes(1)
+    expect(executeSplit.mock.calls[0][0]).toBe(bestSplit)
+    expect(executeSplit.mock.calls[0][1]).toEqual({ unpricedAck: true })
+    expect(executeSingle).not.toHaveBeenCalled()
+  })
+
+  it('a split 409 (useSplitSwap.unpricedAckRequired) opens the dialog even when the client thought the pair was priced; Cancel resets the SPLIT hook', async () => {
+    useChainlinkPriceMock.mockReturnValue(NO_FEED)
+    useSwapPriceTierMock.mockReturnValue({ data: TIER.priced, loading: false })
+    useQuoteMock.mockReturnValue(exoticQuote('5'))
+    splitActive()
+    const resetSplit = vi.fn(); const resetSingle = vi.fn()
+    useSplitSwapMock.mockReturnValue({ ...useSplitSwapMock(), unpricedAckRequired: true, reset: resetSplit })
+    useSwapMock.mockReturnValue({ ...useSwapMock(), reset: resetSingle })
+    const { container } = renderWithProviders(<SwapBox />)
+    await pickExoticPair(container, '5')
+    expect(screen.getByTestId('unpriced-consent-dialog')).toBeInTheDocument()
+    resetSplit.mockClear(); resetSingle.mockClear() // token picks reset both hooks — only the Cancel click matters below
+    await act(async () => { fireEvent.click(screen.getByTestId('unpriced-consent-cancel')) })
+    expect(resetSplit).toHaveBeenCalledTimes(1)
+    expect(resetSingle).not.toHaveBeenCalled() // the single hook's flag is down — nothing to reset there
+  })
+})
