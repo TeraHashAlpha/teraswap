@@ -122,6 +122,28 @@ describe('fmtInt / fmtFixed', () => {
   })
 })
 
+/**
+ * [fix/fmtint-bigint] A bigint is an exact integer unless the signature takes `decimals`.
+ * `useBlockNumber` returns a bigint; it was scaled as an 18-dp amount and rendered "0".
+ */
+describe('bigint is a plain integer unless decimals are given', () => {
+  it.each([
+    ['fmtInt block number', () => fmtInt(52_656_825n), `52${T}656${T}825`],
+    ['fmtInt negative', () => fmtInt(-5n), `${M}5`],
+    ['fmtInt zero', () => fmtInt(0n), '0'],
+    ['fmtInt large bigint (1e18) is an integer, not scaled', () => fmtInt(10n ** 18n), `1${T}000${T}000${T}000${T}000${T}000${T}000`],
+    ['fmtFixed', () => fmtFixed(1234n, 2), `1${T}234.00`],
+    ['fmtFixed negative', () => fmtFixed(-2n, 1), `${M}2.0`],
+    ['fmtUsd', () => fmtUsd(1234n), `$1${T}234.00`],
+    ['fmtPct', () => fmtPct(5n, 1), '5%'],
+    ['fmtGas', () => fmtGas(2n), '2'],
+    ['fmtToken still scales by decimals', () => fmtToken(10n ** 18n, 18), '1.0000'],
+    ['fmtToken 6 dp', () => fmtToken(1_500_000n, 6), '1.5000'],
+  ])('%s', (_n, run, out) => {
+    expect(run()).toBe(out)
+  })
+})
+
 describe('fmtGas (§3)', () => {
   const rows: Array<[number | undefined | string, string]> = [
     [0.0000012, '0.0000012'],
