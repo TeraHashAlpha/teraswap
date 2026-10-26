@@ -11,6 +11,7 @@ import {
   type Token,
 } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getFullCatalog } from '@/lib/chains/tokens'
 import { probeImportedToken } from '@/hooks/useTokenImport'
 
 /** `${chainId}:${addr}` of imports probed this page-load, so two selectors / reopens don't re-probe. */
@@ -39,7 +40,9 @@ export async function revalidateImportedTokens(chainId: number): Promise<void> {
 }
 
 /**
- * The user's imports for `chainId`, hydrated from localStorage on mount.
+ * The user's imports for `chainId`, hydrated from localStorage on mount. Catalog wins: an import
+ * whose address is (now) in the chain's catalog is not listed — the catalog entry already shows and
+ * an import must never shadow it. Its saved record is left alone, so it reappears if the catalog drops it.
  */
 export function useImportedTokens(chainId: number) {
   const version = useSyncExternalStore(subscribeCustomTokens, getCustomTokensVersion, () => 0)
@@ -49,7 +52,10 @@ export function useImportedTokens(chainId: number) {
   }, [chainId])
 
   const tokens = useMemo((): Token[] => {
-    return getCustomTokens().filter((t) => (t.chainId ?? DEFAULT_CHAIN_ID) === chainId)
+    const inCatalog = new Set(getFullCatalog(chainId).map((t) => t.address.toLowerCase()))
+    return getCustomTokens().filter(
+      (t) => (t.chainId ?? DEFAULT_CHAIN_ID) === chainId && !inCatalog.has(t.address.toLowerCase()),
+    )
     // `version` is the change signal for the module-level store behind getCustomTokens().
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainId, version])

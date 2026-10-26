@@ -11,7 +11,7 @@ import { useTokenImport } from '@/hooks/useTokenImport'
 import { useImportedTokens } from '@/hooks/useImportedTokens'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { getChainTokenList, getPopularTokens, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
+import { getChainTokenList, getFullCatalog, getPopularTokens, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, SEARCH_RESULT_LIMIT } from '@/lib/chains/tokens'
 
 // ── Popular tokens shown as quick-select chips ────────────
 const POPULAR_SYMBOLS = ['ETH', 'USDC', 'USDT', 'WBTC', 'DAI', 'WETH', 'LINK', 'UNI']
@@ -69,6 +69,11 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
   )
 
   const importedAddrs = useMemo(() => new Set(importedTokens.map((t) => t.address.toLowerCase())), [importedTokens])
+  // Symbols the chain's catalog already uses — an import sharing one is an impersonation risk.
+  const catalogSymbols = useMemo(
+    () => new Set(getFullCatalog(activeChainId).map((t) => t.symbol.toLowerCase())),
+    [activeChainId],
+  )
 
   // [SPRINT token-selector-ux P4] Categories actually present in the active catalog,
   // ordered by CATEGORY_DISPLAY_ORDER. Empty categories (e.g. 'Stocks' — no tokens
@@ -207,6 +212,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
         token={token}
         onSelect={handleSelect}
         balance={balanceMap.get(addr)?.formatted}
+        symbolCollision={imported && catalogSymbols.has(token.symbol.toLowerCase())}
         onRemove={imported ? removeImported : undefined}
       />
     )
@@ -399,11 +405,14 @@ function TokenRow({
   token,
   onSelect,
   balance,
+  symbolCollision = false,
   onRemove,
 }: {
   token: Token
   onSelect: (t: Token) => void
   balance?: string
+  /** Imported token whose symbol is already used by a catalog token on this chain. */
+  symbolCollision?: boolean
   onRemove?: (address: string) => void
 }) {
   const unavailable = token.unavailable === true
@@ -417,7 +426,13 @@ function TokenRow({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-cream-gold">{token.symbol}</div>
         <div className="truncate text-xs text-cream-35">{token.name}</div>
-        <TokenAddressBadge address={token.address} size="sm" showExplorerLink={false} />
+        {/* A symbol clash with a listed token gets the full address treatment (copy + explorer link). */}
+        <TokenAddressBadge address={token.address} size={symbolCollision ? 'md' : 'sm'} showExplorerLink={symbolCollision} />
+        {symbolCollision && (
+          <div className="mt-0.5 text-[10px] leading-snug text-amber-300/80">
+            Same symbol as a listed token — verify the contract address
+          </div>
+        )}
         {unavailable && (
           <div className="mt-0.5 text-[10px] leading-snug text-danger">
             Unavailable — this chain no longer returns a valid ERC-20 at this address
