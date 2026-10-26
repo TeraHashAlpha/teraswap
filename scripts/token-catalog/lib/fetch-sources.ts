@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { MarketSignal, SourceFetchResult } from './types'
-import { parseTokenList, parseOneInchMap, parseDefiLlamaCoins, parseCoingeckoMarkets } from './sources'
+import type { VolumeHistory } from './verify'
+import { parseTokenList, parseOneInchMap, parseDefiLlamaCoins, parseCoingeckoMarkets, parseMarketChartDailyVolumes } from './sources'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..', '..', '..')
@@ -214,5 +215,102 @@ export function makeVolumeFetcher(chainId: number): (addresses: `0x${string}`[])
       market,
       note: failures > 0 ? `${failures} batch(es) failed — partial volume coverage` : undefined,
     }
+  }
+}
+
+// [feat/catalog-single-source-volume] Per-token 7-day volume history for the single-source rule.
+// CoinGecko's KEYLESS public tier is documented at roughly 5-15 calls/min (shared, varies with
+// global load), and market_chart takes ONE coin id per call — so calls are strictly sequential and
+// spaced >= CG_HISTORY_MIN_INTERVAL_MS (6 s = 10 calls/min, inside that band). A 429 (or 5xx / network
+// error) backs off exponentially — honouring Retry-After when sent — and after CG_HISTORY_MAX_RETRIES
+// the token is reported as a FAILED fetch (the rule is fail-closed: never admitted on a failure).
+// No API key is read or sent; the keyless endpoint is the contract.
+export const CG_HISTORY_MIN_INTERVAL_MS = 6_000
+export const CG_HISTORY_BACKOFF_BASE_MS = 15_000
+export const CG_HISTORY_BACKOFF_MAX_MS = 120_000
+export const CG_HISTORY_MAX_RETRIES = 4
+
+export interface HistoryClientDeps {
+  fetchImpl?: typeof fetch
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+/** One throttled client — the throttle clock is shared by every call made through it. */
+export function makeCoingeckoHistoryClient(deps: HistoryClientDeps = {}): (coinId: string, days: number) => Promise<VolumeHistory> {
+  const doFetch = deps.fetchImpl ?? fetch
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const now = deps.now ?? Date.now
+  let lastCallAt = Number.NEGATIVE_INFINITY
+
+  return async (coinId, days) => {
+    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+    let lastError = 'unknown'
+    for (let attempt = 0; attempt <= CG_HISTORY_MAX_RETRIES; attempt++) {
+      const wait = lastCallAt + CG_HISTORY_MIN_INTERVAL_MS - now()
+      if (wait > 0) await sleep(wait)
+      lastCallAt = now()
+      let retryAfterMs: number | null = null
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+        let res: Response
+        try {
+          res = await doFetch(url, { signal: controller.signal, headers: { accept: 'application/json' } })
+        } finally {
+          clearTimeout(timer)
+        }
+        if (res.ok) {
+          const daily = parseMarketChartDailyVolumes(await res.json())
+          return daily ? { ok: true, dailyVolumeUsd: daily } : { ok: false, error: `${coinId}: malformed market_chart payload` }
+        }
+        lastError = `${coinId}: HTTP ${res.status}`
+        // 4xx other than 429 will not heal on retry (bad id, delisted coin)
+        if (res.status !== 429 && res.status < 500) return { ok: false, error: lastError }
+        const ra = Number(res.headers.get('retry-after'))
+        if (Number.isFinite(ra) && ra > 0) retryAfterMs = ra * 1000
+      } catch (e) {
+        lastError = `${coinId}: ${String((e as Error)?.message ?? e)}`
+      }
+      if (attempt === CG_HISTORY_MAX_RETRIES) break
+      const backoff = Math.min(CG_HISTORY_BACKOFF_BASE_MS * 2 ** attempt, CG_HISTORY_BACKOFF_MAX_MS)
+      await sleep(Math.max(backoff, retryAfterMs ?? 0))
+    }
+    return { ok: false, error: `${lastError} (gave up after ${CG_HISTORY_MAX_RETRIES + 1} attempts)` }
+  }
+}
+
+/**
+ * Address → daily-volume history for the given single-source candidates. The CoinGecko coin id is
+ * resolved from the /coins/list snapshot by the candidate's address (taken from the source payload,
+ * compared lower-cased — an address is never typed here). An address with no coin id yields a failed
+ * fetch (fail-closed), not a skip.
+ */
+export function makeVolumeHistoryFetcher(
+  chainId: number,
+  days: number,
+  client: (coinId: string, days: number) => Promise<VolumeHistory> = makeCoingeckoHistoryClient(),
+): (addresses: `0x${string}`[]) => Promise<Map<string, VolumeHistory>> {
+  const platform = CG_PLATFORM[chainId]
+  return async (addresses) => {
+    const out = new Map<string, VolumeHistory>()
+    let idByAddress: Map<string, string>
+    try {
+      const list = await fetchCoinsList()
+      idByAddress = new Map()
+      for (const coin of list) {
+        const addr = coin.platforms?.[platform]
+        if (addr) idByAddress.set(addr.toLowerCase(), coin.id)
+      }
+    } catch (e) {
+      const error = `coins/list unavailable: ${String((e as Error)?.message ?? e)}`
+      for (const a of addresses) out.set(a.toLowerCase(), { ok: false, error })
+      return out
+    }
+    for (const a of addresses) {
+      const id = idByAddress.get(a.toLowerCase())
+      out.set(a.toLowerCase(), id ? await client(id, days) : { ok: false, error: 'no CoinGecko coin id for address' })
+    }
+    return out
   }
 }

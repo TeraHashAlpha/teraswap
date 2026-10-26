@@ -16,6 +16,9 @@ import type {
   PipelineConfig,
   Rejection,
   RetainedSeed,
+  SingleSourceAdmission,
+  SingleSourceConfig,
+  SingleSourceReport,
   SourceEntry,
   SourceId,
   SymbolConflict,
@@ -28,6 +31,8 @@ import { PIPELINE_CONFIG } from './config'
 // the thin/low-liquidity tokens the >=3-source floor targets — so it may never count as
 // an agreement vote. It remains in `sources` as provenance and supplies the market signal.
 const NON_VOTING: ReadonlySet<SourceId> = new Set<SourceId>(['curated', 'native', 'defillama'])
+
+const cp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 function key(chainId: number, address: string): string {
   return `${chainId}:${address.toLowerCase()}`
@@ -180,15 +185,86 @@ function voteCount(c: Candidate): number {
 }
 
 /**
+ * [feat/catalog-single-source-volume] Effective single-source rule for one chain: the default
+ * `cfg.singleSource` with that chain's partial override from `cfg.singleSourceByChain` merged on top.
+ */
+export function resolveSingleSourceConfig(cfg: PipelineConfig, chainId: number): SingleSourceConfig {
+  return { ...cfg.singleSource, ...(cfg.singleSourceByChain?.[chainId] ?? {}) }
+}
+
+/** The rule only ever applies to a candidate with EXACTLY ONE external vote, and that vote is CoinGecko. */
+export function isSingleSourceCoingecko(c: Candidate): boolean {
+  return externalVoteCount(c.sources) === 1 && c.sources.includes('coingecko')
+}
+
+export function medianOf(values: number[]): number {
+  const v = [...values].sort((a, b) => a - b)
+  if (v.length === 0) return 0
+  const mid = Math.floor(v.length / 2)
+  return v.length % 2 === 1 ? v[mid] : (v[mid - 1] + v[mid]) / 2
+}
+
+/** Daily 24h-USD-volume history for one token, oldest → newest, or why it could not be read. */
+export type VolumeHistory = { ok: true; dailyVolumeUsd: number[] } | { ok: false; error: string }
+
+export type SingleSourceVerdict =
+  | { status: 'admitted'; admission: SingleSourceAdmission; medianUsd: number }
+  | { status: 'below-floor'; dailyVolumeUsd: number[]; medianUsd: number; detail: string }
+  | { status: 'fetch-failed'; detail: string }
+
+const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+
+/**
+ * [feat/catalog-single-source-volume] Pure verdict for one single-source candidate. Fail-closed:
+ * any unreadable/malformed history is 'fetch-failed' (never admitted); fewer than `days` complete
+ * days of history is 'below-floor' (no evidence the token traded for the whole window).
+ * requireEveryDay=true ⇒ every one of the last `days` values must be >= minDailyVolumeUsd;
+ * false ⇒ their median must be.
+ */
+export function evaluateSingleSource(history: VolumeHistory, cfg: SingleSourceConfig): SingleSourceVerdict {
+  if (!history.ok) return { status: 'fetch-failed', detail: history.error }
+  if (history.dailyVolumeUsd.some((v) => typeof v !== 'number' || !Number.isFinite(v) || v < 0)) {
+    return { status: 'fetch-failed', detail: 'malformed volume history' }
+  }
+  const window = history.dailyVolumeUsd.slice(-cfg.days)
+  const medianUsd = medianOf(window)
+  if (window.length < cfg.days) {
+    return { status: 'below-floor', dailyVolumeUsd: window, medianUsd, detail: `only ${window.length} of ${cfg.days} daily volume values` }
+  }
+  const pass = cfg.requireEveryDay ? window.every((v) => v >= cfg.minDailyVolumeUsd) : medianUsd >= cfg.minDailyVolumeUsd
+  if (!pass) {
+    const worst = Math.min(...window)
+    return {
+      status: 'below-floor',
+      dailyVolumeUsd: window,
+      medianUsd,
+      detail: `${cfg.requireEveryDay ? `min ${usd(worst)}` : `median ${usd(medianUsd)}`} < ${usd(cfg.minDailyVolumeUsd)} over ${cfg.days} days`,
+    }
+  }
+  return {
+    status: 'admitted',
+    medianUsd,
+    admission: { rule: 'single-source-volume', dailyVolumeUsd: window, minDailyVolumeUsd: cfg.minDailyVolumeUsd, days: cfg.days },
+  }
+}
+
+/**
  * Source-agreement gate: >= minSources distinct external sources on the same
  * (chainId, address); >= lowLiqMinSources when the market signal is weak/unknown.
  * NEW (non-seed) tokens must also count the required trusted source.
+ *
+ * [feat/catalog-single-source-volume] `singleSource` (key `${chainId}:${addrLower}`) carries the
+ * volume-rule verdicts for candidates with exactly one CoinGecko vote. It can only ADD a
+ * qualification: an 'admitted' verdict lets that one candidate skip the vote floors (it still
+ * faces the requiredSourceForNew check), anything else leaves the existing rejection. Two-source
+ * candidates never consult it.
  */
 export function crossVerify(
   candidates: Candidate[],
   market: Map<string, MarketSignal>,
   seeds: Set<string>,
   cfg: PipelineConfig,
+  singleSource?: Map<string, SingleSourceVerdict>,
 ): { qualified: Candidate[]; rejected: Rejection[] } {
   const qualified: Candidate[] = []
   const rejected: Rejection[] = []
@@ -197,11 +273,22 @@ export function crossVerify(
     const votes = voteCount(c)
     const lowLiq = isLowLiquidity(market.get(k), cfg)
     const required = lowLiq ? cfg.lowLiqMinSources : cfg.minSources
+    let admission: SingleSourceAdmission | undefined
     if (votes < cfg.minSources) {
-      rejected.push({ chainId: c.chainId, address: c.address, symbol: c.symbol, reason: 'insufficient-sources', detail: `${votes} source vote(s)` })
-      continue
-    }
-    if (votes < required) {
+      const verdict = isSingleSourceCoingecko(c) ? singleSource?.get(k) : undefined
+      if (verdict?.status !== 'admitted') {
+        const base = { chainId: c.chainId, address: c.address, symbol: c.symbol, reason: 'insufficient-sources' as const }
+        if (verdict?.status === 'below-floor') {
+          rejected.push({ ...base, detail: `${votes} source vote(s); single-source-volume: ${verdict.detail}`, singleSource: 'below-floor' })
+        } else if (verdict?.status === 'fetch-failed') {
+          rejected.push({ ...base, detail: `${votes} source vote(s); single-source-volume: history unavailable (${verdict.detail})`, singleSource: 'fetch-failed' })
+        } else {
+          rejected.push({ ...base, detail: `${votes} source vote(s)` })
+        }
+        continue
+      }
+      admission = verdict.admission
+    } else if (votes < required) {
       rejected.push({ chainId: c.chainId, address: c.address, symbol: c.symbol, reason: 'insufficient-sources-low-liquidity', detail: `${votes} vote(s) < ${required} required for low-liquidity` })
       continue
     }
@@ -209,9 +296,37 @@ export function crossVerify(
       rejected.push({ chainId: c.chainId, address: c.address, symbol: c.symbol, reason: 'missing-required-source', detail: `new token lacks '${cfg.requiredSourceForNew}'` })
       continue
     }
-    qualified.push(c)
+    qualified.push(admission ? { ...c, admission } : c)
   }
   return { qualified, rejected }
+}
+
+/**
+ * [feat/catalog-single-source-volume] Ordering for the per-run NEW-token cap, shared by the
+ * pre-guard prune (build-chain.ts) and the assemble-time cap so they can never disagree.
+ * Two-source tokens (today's rules) rank FIRST, exactly as before (volume, votes, symbol);
+ * single-source admissions fill whatever slots remain, by descending 7-day median volume — so the
+ * new rule can never displace a token that would have been admitted without it.
+ */
+export interface CapRankItem {
+  address: string
+  symbol: string
+  volume: number
+  votes: number
+  admission?: SingleSourceAdmission
+}
+export function compareForCap(a: CapRankItem, b: CapRankItem): number {
+  const ta = a.admission ? 1 : 0
+  const tb = b.admission ? 1 : 0
+  if (ta !== tb) return ta - tb
+  if (a.admission && b.admission) {
+    return (
+      medianOf(b.admission.dailyVolumeUsd) - medianOf(a.admission.dailyVolumeUsd) ||
+      cp(a.symbol.toLowerCase(), b.symbol.toLowerCase()) ||
+      cp(a.address.toLowerCase(), b.address.toLowerCase())
+    )
+  }
+  return b.volume - a.volume || b.votes - a.votes || cp(a.symbol.toLowerCase(), b.symbol.toLowerCase()) || cp(a.address.toLowerCase(), b.address.toLowerCase())
 }
 
 /**
@@ -291,8 +406,6 @@ function guardReason(outcome: GuardOutcome | undefined): Rejection['reason'] | n
   return outcome.status === 'fatal' ? 'guard-fatal' : 'guard-unverifiable'
 }
 
-const cp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
-
 /** [fix/token-search-ranking-squatting Task 2] volume24hUsd/volumeSource/volumeFetchedAt
  *  for one row — NULL across all three when no source resolved a volume (never a 0, which
  *  would sort as "worse than a confirmed zero-liquidity squatter"). */
@@ -329,6 +442,7 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
     capped: [],
     retained: [],
     trustLost: [],
+    singleSource: emptySingleSourceReport(false),
   }
 
   // 1. qualified candidates → guard gate (the existing catalog guard, reused)
@@ -347,6 +461,7 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
         verified: true,
         sources: c.sources,
         ...volumeFields(addrLower, market, builtAt),
+        ...(c.admission ? { admission: c.admission } : {}),
       })
     } else if (seeds.has(addrLower)) {
       // seed failed the guard — keep it, honest ⚠, loudly flagged
@@ -363,18 +478,22 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
   const cap = config.maxNewTokensPerChain[chainId] ?? Number.POSITIVE_INFINITY
   const newRows = [...rows.entries()].filter(([k]) => !seeds.has(k) && !coreAddrs.has(k))
   if (newRows.length > cap) {
-    const rank = (k: string, r: CatalogRow) => ({
+    // same comparator as the pre-guard prune (compareForCap): two-source tokens first, then
+    // single-source admissions by descending 7-day median volume
+    const item = (k: string, r: CatalogRow): CapRankItem => ({
+      address: r.address,
+      symbol: r.symbol,
       volume: market.get(k)?.volume24hUsd ?? 0,
       votes: r.sources.filter((s) => !NON_VOTING.has(s)).length,
+      admission: r.admission,
     })
-    newRows.sort(([ka, a], [kb, b]) => {
-      const ra = rank(ka, a)
-      const rb = rank(kb, b)
-      return rb.volume - ra.volume || rb.votes - ra.votes || cp(a.symbol.toLowerCase(), b.symbol.toLowerCase())
-    })
+    newRows.sort(([ka, a], [kb, b]) => compareForCap(item(ka, a), item(kb, b)))
     for (const [k, r] of newRows.slice(cap)) {
       rows.delete(k)
       report.capped.push({ address: r.address, symbol: r.symbol })
+      if (r.admission) {
+        report.singleSource.deferred.push({ address: r.address, symbol: r.symbol, medianUsd: medianOf(r.admission.dailyVolumeUsd) })
+      }
     }
   }
 
@@ -458,6 +577,10 @@ export function assembleCatalog(input: AssembleInput): { tokens: CatalogRow[]; r
   report.included = tokens.length
   report.verified = tokens.filter((t) => t.verified).length
   return { tokens, report }
+}
+
+export function emptySingleSourceReport(enabled: boolean): SingleSourceReport {
+  return { enabled, candidates: 0, prefiltered: 0, evaluated: 0, admitted: 0, belowFloor: 0, fetchFailed: 0, deferred: [], evaluations: [] }
 }
 
 function seedRow(
