@@ -805,7 +805,9 @@ describe('useSplitSwap — Base split legMinOutput freshness [CHORE-SPLITROUTE-C
 
     // FRESH build: toAmount differs from the (stale) analysis quote so the
     // assertion can tell them apart.
-    const FRESH_OUT = '2000000000'  // 2,000 USDC from the fresh /api/swap build
+    // [fix/stale-quote-pair-flip] The quote-vs-swap guard is now two-sided, so the fresh build must sit
+    // inside the tolerance window of the analysis quote (1% = 0.5% slippage + 50 bps) — still distinguishable.
+    const FRESH_OUT = '1505000000'  // 1,505 USDC from the fresh /api/swap build
     const STALE_OUT = '1500000000'  // 1,500 USDC in the analysis-time leg quote
     const bodies: Array<Record<string, unknown>> = []
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
@@ -909,13 +911,14 @@ describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on th
   })
 
   it('[R3-4] a uniswapv3 leg skips its own floor exactly like the single path', async () => {
-    // uniswapv3 comes back 80% under its quoted share and is NOT refused: the
+    // uniswapv3 comes back 2% under its quoted share — below its own per-leg floor
+    // (494_505_000 for a fee-routed 500M share at 1% combined) — and is NOT refused: the
     // per-leg call passes `source`, so the same skip list the single path uses
     // applies (its /swap build re-detects the fee tier, adapters/uniswapv3.ts:
-    // 247-271). The 1inch leg over-delivers, so the source-agnostic aggregate
-    // still clears and the plan freezes — which is only possible if the
-    // uniswapv3 leg was never floored.
-    mockSwapFetch((body) => makeQuote({ toAmount: body.source === 'uniswapv3' ? '100000000' : '900000000' }))
+    // 247-271). The 1inch leg over-delivers by 0.8% (inside its own ceiling, the guard is now
+    // two-sided), so the source-agnostic aggregate (994M within 989.01M..1008.99M) still clears
+    // and the plan freezes — which is only possible if the uniswapv3 leg was never floored.
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === 'uniswapv3' ? '490000000' : '504000000' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     await act(async () => {
       await result.current.execute(makeSplitRoute(legFor('uniswapv3', 50, QUOTED), legFor('1inch', 50, QUOTED)))
@@ -977,11 +980,12 @@ describe('useSplitSwap — [Auditor round 2, L-01] the per-leg floor is independ
     }
   }
 
-  it('the 0x leg lands at 10% of its quote while the total still matches the aggregate — only the per-leg check refuses it', async () => {
+  it('the 0x leg lands below its own floor while the total still clears the aggregate — only the per-leg check refuses it', async () => {
     const QUOTED = '500000000' // each leg's quoted share
-    // 1inch overshoots to 950M, 0x craters to 50M (10% of its 500M quote). Summed: 1_000_000_000,
-    // exactly 500M + 500M — the aggregate alone sees NO shortfall at all.
-    mockSwapFetch((body) => makeQuote({ toAmount: body.source === '0x' ? '50000000' : '950000000' }))
+    // [fix/stale-quote-pair-flip] Two-sided guard: 1inch can only overshoot to inside its own ceiling
+    // (504M < 504.495M), 0x lands at 490M (< its 494.505M floor). Summed: 994M — inside the
+    // aggregate window (989.01M..1008.99M), so the aggregate alone sees NO problem.
+    mockSwapFetch((body) => makeQuote({ toAmount: body.source === '0x' ? '490000000' : '504000000' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     await act(async () => {
       await result.current.execute(makeSplitRoute(legFor('1inch', 50, QUOTED), legFor('0x', 50, QUOTED)))

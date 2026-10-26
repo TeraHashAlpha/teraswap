@@ -20,6 +20,7 @@
 import { fmtPct } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
 import { FEE_BPS, type AggregatorName } from '@/lib/constants'
+import { sameQuotePair, type QuotePairRef } from '@/lib/quote-identity'
 
 export class UnusableQuoteError extends Error {
   /** Raw toAmount as received (truncated) — for diagnostics, never re-parsed. */
@@ -123,22 +124,34 @@ export function feeAdjustedQuoteBasis(quoteToAmount: bigint, routeViaFeeCollecto
   return (quoteToAmount * (10_000n - BigInt(FEE_BPS))) / 10_000n
 }
 
+/** Why a swap was refused against the accepted quote. 'below' is the original floor breach. */
+export type StaleOrTamperedKind = 'below' | 'above' | 'pair-mismatch'
+
 export class StaleOrTamperedSwapError extends Error {
-  /** Positive percentage the swap output landed below the accepted quote, or
-   *  null when there was NO usable accepted quote to compare against. */
+  /** Positive percentage the swap output landed away from the accepted quote
+   *  (below it for 'below', above it for 'above'), or null when there was NO
+   *  usable accepted quote to compare against, or the pair did not match. */
   readonly deviationPercent: number | null
+  readonly kind: StaleOrTamperedKind
 
   /** @param deviationPercent null = no accepted quote at all (fail-closed). */
-  constructor(deviationPercent: number | null) {
+  constructor(deviationPercent: number | null, kind: StaleOrTamperedKind = 'below') {
     super(
-      deviationPercent === null
-        ? 'No accepted quote to compare this swap against — swap refused. ' +
+      kind === 'pair-mismatch'
+        ? 'The quote you accepted was for a different pair or network — swap refused. ' +
             'Please refresh the quote and try again.'
-        : `Swap output is below the quote you accepted (−${fmtPct(deviationPercent, 1)}). ` +
-            'The route was refreshed — please review and try again.',
+        : deviationPercent === null
+          ? 'No accepted quote to compare this swap against — swap refused. ' +
+            'Please refresh the quote and try again.'
+          : kind === 'above'
+            ? `Swap output is above the quote you accepted (+${fmtPct(deviationPercent, 1)}). ` +
+              'The route was refreshed — please review and try again.'
+            : `Swap output is below the quote you accepted (−${fmtPct(deviationPercent, 1)}). ` +
+              'The route was refreshed — please review and try again.',
     )
     this.name = 'StaleOrTamperedSwapError'
     this.deviationPercent = deviationPercent
+    this.kind = kind
   }
 }
 
@@ -159,6 +172,11 @@ export interface AssertSwapConsistentWithQuoteParams {
    *  Pass false when the basis handed in is ALREADY net of the fee (the split
    *  aggregate nets it per leg, since legs can be mixed). */
   routeViaFeeCollector: boolean
+  /** [fix/stale-quote-pair-flip] Chain/pair/decimals the accepted quote answered. */
+  quotePair?: QuotePairRef
+  /** [fix/stale-quote-pair-flip] Chain/pair/decimals this /swap response was built for.
+   *  Supply BOTH or NEITHER: one without the other is a wiring error and is refused. */
+  swapPair?: QuotePairRef
 }
 
 /**
@@ -169,6 +187,17 @@ export interface AssertSwapConsistentWithQuoteParams {
  *   basis = routeViaFeeCollector ? quote * (10000 - FEE_BPS) / 10000 : quote
  *   floor = basis * (10000 - slippageBps - SWAP_QUOTE_TOLERANCE_BPS) / 10000
  *   throws  ⟺  swapToAmount < floor
+ *
+ * [fix/stale-quote-pair-flip] The check is TWO-SIDED with the same tolerance:
+ *
+ *   ceiling = basis * (10000 + slippageBps + SWAP_QUOTE_TOLERANCE_BPS) / 10000
+ *   throws  ⟺  swapToAmount > ceiling      (kind 'above')
+ *
+ * A quote in a SMALLER raw scale than the fresh swap (e.g. a 6-decimal USDC quote
+ * against an 18-decimal ETH swap — the ⇅-flip stale-quote shape) used to pass
+ * silently because only "swap below quote" was refused. Also refuses (kind
+ * 'pair-mismatch') when `quotePair`/`swapPair` are given and differ — checked
+ * BEFORE the skip list, which exempts fee-tier drift, never a different pair.
  *
  * (BigInt floor division throughout, mirroring `deriveMinimumOutput`'s own bps
  * arithmetic.)
@@ -191,7 +220,13 @@ export interface AssertSwapConsistentWithQuoteParams {
  * @throws StaleOrTamperedSwapError when `swapToAmount` is below the floor.
  */
 export function assertSwapConsistentWithQuote(params: AssertSwapConsistentWithQuoteParams): void {
-  const { quoteToAmount, swapToAmount, slippagePercent, source, routeViaFeeCollector } = params
+  const { quoteToAmount, swapToAmount, slippagePercent, source, routeViaFeeCollector, quotePair, swapPair } = params
+  if (quotePair !== undefined || swapPair !== undefined) {
+    // Both or neither; a lone key can't prove anything, so it refuses (fail closed).
+    if (quotePair === undefined || swapPair === undefined || !sameQuotePair(quotePair, swapPair)) {
+      throw new StaleOrTamperedSwapError(null, 'pair-mismatch')
+    }
+  }
   if (source !== null && QUOTE_FLOOR_SKIP_SOURCES.includes(source)) return
 
   const quotedBn = safeBigInt(quoteToAmount)
@@ -208,6 +243,13 @@ export function assertSwapConsistentWithQuote(params: AssertSwapConsistentWithQu
   const slippageBpsBn = BigInt(Math.max(0, Math.round(slippagePercent * 100)))
   const combinedBpsBn = slippageBpsBn + BigInt(SWAP_QUOTE_TOLERANCE_BPS)
   const floorBn = combinedBpsBn >= 10_000n ? 0n : (basisBn * (10_000n - combinedBpsBn)) / 10_000n
+
+  const ceilingBn = (basisBn * (10_000n + combinedBpsBn)) / 10_000n
+  if (swappedBn > ceilingBn) {
+    // Against the GROSS quote, same as the floor branch: the figure the user accepted.
+    const deviationPercent = Number(((swappedBn - quotedBn) * 10_000n) / quotedBn) / 100
+    throw new StaleOrTamperedSwapError(deviationPercent, 'above')
+  }
 
   if (swappedBn < floorBn) {
     // Reported against the GROSS quote, not the fee-adjusted basis: the figure

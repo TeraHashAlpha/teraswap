@@ -52,6 +52,27 @@ function onKvTimeout<T>(fallback: T) {
  */
 
 /**
+ * [fix/stale-quote-pair-flip] Echo what the quote answers (additive fields). The client
+ * keys a stored quote by THIS identity — never by what it believes it asked — so a
+ * response can't be mistaken for another pair's. Built per response over a COPY: the
+ * shared-cache result is never mutated and its keys/TTL are untouched.
+ */
+function withQuoteEcho<T extends object>(
+  result: T,
+  q: { src: string; dst: string; amount: string | number; srcDecimals: number | string; dstDecimals: number | string; chainId: number | undefined },
+) {
+  return {
+    ...result,
+    tokenIn: q.src,
+    tokenOut: q.dst,
+    chainId: q.chainId ?? DEFAULT_CHAIN_ID,
+    decimalsIn: Number(q.srcDecimals),
+    decimalsOut: Number(q.dstDecimals),
+    amountIn: String(q.amount),
+  }
+}
+
+/**
  * Shared 503 response for when the circuit breaker has halted routing.
  * Returns Retry-After: 300 (5 min) so clients back off without hammering.
  */
@@ -196,7 +217,7 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
     )
 
     // Serialize BigInt-safe (toAmount is already a string in NormalizedQuote)
-    return NextResponse.json(result, {
+    return NextResponse.json(withQuoteEcho(result, { src, dst, amount, srcDecimals, dstDecimals, chainId }), {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
         'X-Quote-Cache': cacheHeader,
@@ -292,7 +313,7 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
       () => fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, undefined, chainId),
     )
 
-    return NextResponse.json(result, {
+    return NextResponse.json(withQuoteEcho(result, { src, dst, amount, srcDecimals, dstDecimals, chainId }), {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
         'X-Quote-Cache': cacheHeader,
