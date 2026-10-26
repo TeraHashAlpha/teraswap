@@ -124,6 +124,15 @@ describe('mobile photo treatment', () => {
   })
 })
 
+describe('fabs vs footer (mobile)', () => {
+  it('the footer keeps bottom padding below sm so the risk line can scroll clear of the fixed ♫ / ? buttons', () => {
+    render(<AppShell />)
+    const footer = document.querySelector('[data-ts-footer]') as HTMLElement
+    expect(footer.className).toMatch(/\bpb-20\b/)
+    expect(footer.className).toMatch(/sm:pb-3/)
+  })
+})
+
 describe('v1 ♫ under v2', () => {
   it('v1 BackgroundMusic still labels its button "… background music" (the selector the hide rule relies on)', () => {
     const v1 = readFileSync(join(__dirname, '..', '..', '..', 'components', 'BackgroundMusic.tsx'), 'utf8')
