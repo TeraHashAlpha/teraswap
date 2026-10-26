@@ -1,0 +1,36 @@
+/*
+ * [ADR-025] UI v2 tokens — Round 2 pack README §4 (README.md:87-94). Dark only (D3).
+ * Scoped to `.ts-v2` instead of `:root`: the v2 kit/pages render inside the v1 root layout, whose
+ * globals.css (with its own light-theme overrides) is always loaded, so tokens must not leak to v1 elements.
+ * Font stacks lead with the next/font/local CSS variables (src/ui/v2/font-loader.ts): next/font
+ * emits hashed family names, so the literal §4 family only works as the fallback.
+ * Motion: only the values the pack states (ARCHITECT_BRIEF.md:24) — no easing curves are specified.
+ */
+.ts-v2 {
+  color-scheme: dark;
+
+  --bg:#0B0D0F; --surface:#15171A; --surface-2:#1B1E22; --border:#2A2D31;
+  --cream:#EADFB6; --teal:#6B9B94; --text:#F2EEE3; --muted:#A8A498; --dim:#8C887F;
+  --red:#FF5C7A; --green:#7FC8A0; --amber:#E3B341;
+
+  --font-display:var(--font-barlow),"Barlow Condensed",sans-serif;
+  --font-sans:var(--font-inter),Inter,sans-serif;
+  --font-mono:var(--font-plex-mono),"IBM Plex Mono",monospace;
+  --font-hand:Caveat,cursive;
+
+  --radius-card:16px; --radius-control:10px;
+
+  --t-toast:160ms; --t-shimmer:1.2s;
+
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-v2 { --t-toast:0ms; --t-shimmer:0s; scroll-behavior: auto; }
+  .ts-v2, .ts-v2 *, .ts-v2 *::before, .ts-v2 *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
