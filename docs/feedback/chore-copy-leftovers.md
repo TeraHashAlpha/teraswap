@@ -5,7 +5,7 @@ Display/copy/plumbing only. No tier, gate, quote or pricing logic; nothing under
 - [x] C1 one price notice, from the tier
 - [x] C2 source counts that mean something
 - [x] C3 help-content leftovers
-- [ ] C4 token-logo rate limit + CSP + Velora labels
+- [x] C4 token-logo rate limit + CSP + Velora labels
 - [ ] C5 flaky `usePortfolio` test
 - [ ] Verify + evidence 1–6
 
@@ -36,3 +36,15 @@ Before = the new matrix test run against unfixed SwapBox: 4/4 failed with `legac
   `queries ${INTEGRATED_DEX_SOURCE_COUNT} sources (${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)})` = 8 live labels.
 - Found by the new "no disabled source name anywhere in help text" test: the audit answer also said `(Uniswap, Balancer, Curve, etc.)`
   → `(Uniswap, Curve, etc.)`. Left alone (not asked): the privacy answer still says IP is "never exposed" — product-claims says that is NOT claimed.
+
+## 4. token-logo / CSP / Velora
+- Limit: `token-logo:<trustedClientIp>` 300/min, 429 + `Cache-Control: no-store`, local const (kv-rate-limiter.ts was read-only).
+  Why 300: catalogs hold 987 / 311 / 296 tokens (ETH / Base / Arb) → one Base/Arb full-list render ≈ 300 logos; = `RPC_RATE_LIMIT`;
+  only cache misses reach the function. Test: 300 pass, 301st → 429 no-store, no upstream fetch, per-IP, own key (32 route tests pass).
+- CSP `img-src`: `… https://tokens.1inch.io https://assets.coingecko.com` → `… https://tokens.1inch.io`. Grep (src, public):
+  `assets.coingecko.com` appears only in `token-logo/route.ts` + `logo-proxy.ts` (server fetch/allow-list), 0 client loads, 0 in the
+  generated catalogs. 1inch kept: `usePortfolio.ts:75`, `tokens.ts:819`. Test in security-headers.test.ts.
+  Left: `images.remotePatterns` (next.config.js:9) still lists coingecko — outside the "CSP img-src only" read scope.
+- Velora: recorded `GET api.paraswap.io/prices` (10 WETH→USDC, 2026-10-26; one public read-only call) →
+  `__fixtures__/velora-prices-mainnet.ts`; hops were `metric-v1, metric-v1, uniswapv4`, now `Velora, Uniswap V4` (known-venue map, else
+  "Velora", deduped). The response names no DEX for `metric-v1`, so "where the response gives one" = only the map.
