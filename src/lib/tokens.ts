@@ -1,5 +1,6 @@
 import { NATIVE_ETH } from './constants'
 import { DEFAULT_CHAIN_ID } from './chains/registry'
+import { loadImportedTokens, removeImportedToken, saveImportedToken } from './imported-tokens'
 
 export type TokenCategory =
   | 'Native'
@@ -45,6 +46,9 @@ export interface Token {
    *  (CoinGecko /coins/markets), when resolvable — the search-ranking squatter signal.
    *  undefined/null means "no data", NOT zero liquidity; see rankSearchMatches. */
   liquidityUsd?: number | null
+  /** [fix/imported-tokens-persist] A saved import the chain no longer answers for as an ERC-20
+   *  (contract gone / decimals changed). Kept and shown, never selectable, until the user removes it. */
+  unavailable?: boolean
 }
 
 // ── Logo helper (server-side CoinGecko-first resolver route, chainId-aware) ───
@@ -777,8 +781,60 @@ export const DEFAULT_TOKENS: Token[] = [
   },
 ]
 
-// ── Custom token import cache (session-only) ─────────────
+// ── Custom token imports ─────────────────────────────────
+// [fix/imported-tokens-persist] In-memory view of the user's imports, backed by per-chain
+// localStorage (src/lib/imported-tokens.ts). It used to be session-only: a reload or a new visit
+// reset it to []. Chains are hydrated lazily (hydrateCustomTokens) so SSR never touches storage.
 let customTokens: Token[] = []
+const hydratedChains = new Set<number>()
+const customListeners = new Set<() => void>()
+let customVersion = 0
+
+function customChain(t: Token): number {
+  return t.chainId ?? DEFAULT_CHAIN_ID
+}
+
+function sameCustom(t: Token, address: string, chainId: number): boolean {
+  return t.address.toLowerCase() === address.toLowerCase() && customChain(t) === chainId
+}
+
+// Replaced (never mutated) on every change, so React can key memoisation off the version.
+function setCustomTokens(next: Token[]): void {
+  customTokens = next
+  customVersion++
+  customListeners.forEach((l) => l())
+}
+
+export function subscribeCustomTokens(listener: () => void): () => void {
+  customListeners.add(listener)
+  return () => {
+    customListeners.delete(listener)
+  }
+}
+
+export function getCustomTokensVersion(): number {
+  return customVersion
+}
+
+export const importedTokenLogo = (address: string): string => `https://tokens.1inch.io/${address.toLowerCase()}.png`
+
+/** Load this chain's saved imports into the in-memory store (once per chain per page-load). */
+export function hydrateCustomTokens(chainId: number): void {
+  if (hydratedChains.has(chainId)) return
+  hydratedChains.add(chainId)
+  const fresh = loadImportedTokens(chainId)
+    .filter((r) => !customTokens.some((t) => sameCustom(t, r.address, chainId)))
+    .map((r): Token => ({
+      address: r.address,
+      symbol: r.symbol,
+      name: r.name,
+      decimals: r.decimals,
+      logoURI: importedTokenLogo(r.address),
+      category: 'Imported',
+      chainId,
+    }))
+  if (fresh.length > 0) setCustomTokens([...customTokens, ...fresh])
+}
 
 export function getAllTokens(): Token[] {
   return [...DEFAULT_TOKENS, ...customTokens]
@@ -789,11 +845,31 @@ export function addCustomToken(token: Token): void {
   // a different token on a different chain, so an import on Base must not be shadowed
   // by (or shadow) a mainnet token at the same address. Untagged ⇒ mainnet.
   const cid = token.chainId ?? DEFAULT_CHAIN_ID
-  const exists = customTokens.find(
-    t => t.address.toLowerCase() === token.address.toLowerCase() && (t.chainId ?? DEFAULT_CHAIN_ID) === cid,
-  )
-  if (!exists) {
-    customTokens.push({ ...token, chainId: cid, category: token.category || 'Imported' })
+  const entry: Token = { ...token, chainId: cid, category: token.category || 'Imported' }
+  const existing = customTokens.find((t) => sameCustom(t, token.address, cid))
+  // A re-import over an unavailable entry (the chain answers again) replaces it; otherwise a no-op.
+  if (existing && !existing.unavailable) return
+  setCustomTokens(existing ? customTokens.map((t) => (t === existing ? entry : t)) : [...customTokens, entry])
+  if (entry.category === 'Imported') {
+    saveImportedToken(cid, { address: entry.address, symbol: entry.symbol, name: entry.name, decimals: entry.decimals })
+  }
+}
+
+/** Flag/unflag a saved import as unavailable. The entry stays in memory AND in storage. */
+export function setCustomTokenUnavailable(address: string, chainId: number, unavailable: boolean): void {
+  const existing = customTokens.find((t) => sameCustom(t, address, chainId))
+  if (!existing || (existing.unavailable === true) === unavailable) return
+  const next: Token = { ...existing }
+  if (unavailable) next.unavailable = true
+  else delete next.unavailable
+  setCustomTokens(customTokens.map((t) => (t === existing ? next : t)))
+}
+
+/** The user's explicit Remove — the only path that deletes a saved import. */
+export function removeCustomToken(address: string, chainId: number): void {
+  removeImportedToken(chainId, address)
+  if (customTokens.some((t) => sameCustom(t, address, chainId))) {
+    setCustomTokens(customTokens.filter((t) => !sameCustom(t, address, chainId)))
   }
 }
 
