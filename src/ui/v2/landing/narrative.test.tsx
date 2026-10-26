@@ -176,12 +176,14 @@ describe('NarrativeStack: observers and lazy photos', () => {
     settle()
     expect(credit().textContent).toBe('Photo Erik Mclean / Pexels')
     expect(credit().hasAttribute('data-active')).toBe(true)
+    expect(credit().hasAttribute('aria-hidden')).toBe(false)
     scrollTo(-2700)
     settle()
     expect(credit().textContent).toBe('Photo wal_ 172619 / Pexels')
     scrollTo(-6000)
     settle()
     expect(credit().hasAttribute('data-active')).toBe(false)
+    expect(credit().getAttribute('aria-hidden')).toBe('true') // invisible → not announced
     expect(credit().textContent).toBe('Photo wal_ 172619 / Pexels')
   })
 
@@ -217,6 +219,19 @@ describe('narrative.css (what is allowed to animate)', () => {
     expect(Math.round(0.176 * 255)).toBe(45)
     expect(rule('.ts-v2-nar__veil')).toMatch(/background:\s*var\(--nar-veil\)/)
     expect(rule('.ts-v2-nar__veil')).not.toMatch(/transition|opacity/)
+  })
+
+  it('credit: desktop right 32 px / bottom 70 px, centred on its baseline (translateY 50%); hidden at ≤ 600 px', () => {
+    const credit = rule('.ts-v2-nar-credit')
+    expect(credit).toMatch(/position:\s*fixed/)
+    expect(credit).toMatch(/right:\s*32px/)
+    expect(credit).toMatch(/bottom:\s*70px/)
+    expect(credit).toMatch(/transform:\s*translateY\(50%\)/)
+    expect(credit).toMatch(/z-index:\s*12/) // over the section wrapper (z-10): a card must not cover it; under the header (z-20)
+    expect(credit).toMatch(/transition:\s*opacity var\(--t-slow\) var\(--ease-inout\)/) // fades with the photo token
+    const mobile = /@media \(max-width: 600px\)\s*\{\s*\.ts-v2-nar-credit\s*\{([^}]*)\}/.exec(CSS)![1]
+    expect(mobile).toMatch(/display:\s*none/)
+    expect(mobile).not.toMatch(/bottom|left|right/) // no mobile placement left to collide with the cards
   })
 
   it('no scroll-linked effects: no scroll-snap, scroll-timeline, parallax, or background-attachment', () => {

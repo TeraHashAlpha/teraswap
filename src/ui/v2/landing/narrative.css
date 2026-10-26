@@ -22,7 +22,9 @@
 
 /* Credit: follows the active photo and fades with the same token. Round-5 position (MOTION-SPEC §7). */
 .ts-v2-nar-credit {
-  position: fixed; right: 32px; bottom: 70px; transform: translateY(50%); z-index: 5; margin: 0;
+  position: fixed; right: 32px; bottom: 70px; transform: translateY(50%); margin: 0;
+  /* above the sections' content wrapper (z-10) so a card never hides it, below the header (z-20) and the fabs (z-50) */
+  z-index: 12;
   opacity: 0; pointer-events: none;
   transition: opacity var(--t-slow) var(--ease-inout);
 }
@@ -32,8 +34,9 @@
   color: var(--dim); background: var(--plate-bg); padding: 3px 4px; border-radius: 4px;
 }
 .ts-v2-nar-credit em { font-style: normal; }
+/* ≤ 600 px: no floating credit — it could sit over card text. The footer band lists every photographer instead. */
 @media (max-width: 600px) {
-  .ts-v2-nar-credit { right: auto; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom)); transform: translate(-50%, 50%); }
+  .ts-v2-nar-credit { display: none; }
 }
 
 /* ── Entrance (MOTION-SPEC §4) — plays once ────────────────────────────────────────────────────────────────────

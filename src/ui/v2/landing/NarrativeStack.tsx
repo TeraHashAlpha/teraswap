@@ -187,7 +187,7 @@ export function NarrativeStack() {
         ))}
         <div className="ts-v2-nar__veil" />
       </div>
-      <p className="ts-v2-nar-credit" data-active={active ? '' : undefined} data-ts-narrative-credit="">
+      <p className="ts-v2-nar-credit" data-active={active ? '' : undefined} aria-hidden={active ? undefined : true} data-ts-narrative-credit="">
         <span>
           Photo <em>{creditName}</em> / Pexels
         </span>

@@ -112,6 +112,23 @@ describe('structure: ten sections in the pack order', () => {
     expect(document.querySelector('#roadmap')).toBeNull()
   })
 
+  it('credit: desktop line unchanged; ≤ 600 px a second footer line lists every photographer on the page, once', () => {
+    mount()
+    const footer = document.querySelector('[data-ts-footer]')!
+    const desktop = footer.querySelector('.ts-v2-photo-credit--desktop')!
+    const mobile = footer.querySelector('.ts-v2-photo-credit--mobile')!
+    expect(desktop.textContent).toBe('Photo Yakup Gökdeniz · Peter Dyllong / Pexels')
+    expect(mobile.textContent).toBe('Photo Yakup Gökdeniz · Peter Dyllong · Oleksiy Yeshtokyn · Владимир Николаевич · Willbone Gallery / Pexels')
+    // the mobile map's three photos only: Footbridge and Arch-in-light never show at ≤ 600 px, so they are not named there
+    expect(mobile.textContent).not.toMatch(/Erik Mclean|wal_/)
+    // the fixed narrative credit is the only other credit element, and it is not in the footer
+    expect(document.querySelectorAll('.ts-v2-nar-credit')).toHaveLength(1)
+    expect(footer.contains(document.querySelector('.ts-v2-nar-credit'))).toBe(false)
+    const css = readFileSync(join(SRC, '..', 'photos', 'photo.css'), 'utf8')
+    expect(css).toMatch(/\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*none;/)
+    expect(css).toMatch(/@media \(max-width: 600px\)\s*\{\s*\.ts-v2-photo-credit--desktop\s*\{\s*display:\s*none;\s*\}\s*\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*inline-block;/)
+  })
+
   it('the shell footer closes the page and carries both photo authors, in the footer container only', () => {
     mount()
     const footer = document.querySelector('[data-ts-footer]')!
@@ -365,6 +382,14 @@ describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
     expect(cards.length).toBeGreaterThan(5)
     expect(cards.map((c) => staggerDelayMs(idx(c)))).toEqual(cards.map((_, i) => Math.min(i, 4) * 40))
     expect(Math.max(...cards.map((c) => staggerDelayMs(idx(c))))).toBe(160)
+  })
+
+  it('muted copy sits straight on the photo only in security / experience / features (narrative-contrast.test.ts models exactly that)', () => {
+    mount()
+    const offPanel = (id: string) =>
+      Array.from(document.querySelectorAll(`#${id} [class*="text-v2-muted"]`)).filter((el) => !el.closest('[class*="bg-v2-surface"]'))
+    for (const id of ['security', 'experience', 'features']) expect(offPanel(id).length, id).toBeGreaterThan(0)
+    for (const id of ['roadmap', 'docs']) expect(offPanel(id).map((e) => e.textContent), id).toEqual([])
   })
 
   it('every headline underline is inside a narrative section h2 (so the draw-once CSS reaches it)', () => {
