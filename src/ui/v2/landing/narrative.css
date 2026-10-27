@@ -1,17 +1,23 @@
 /* [ADR-025] Scroll narrative (round-6 MOTION-SPEC §3, §6, §7). The photo files are pre-graded (recipe steps 1–3 baked
    in), so this veil — recipe step 4, #0B0D0F at alpha 45/255 — is the same constant in every state, including
-   mid-cross-fade. Only the layers' opacity animates. */
+   mid-cross-fade. Only the layers' opacity and transform animate. */
 .ts-v2 { --nar-veil: rgba(11, 13, 15, 0.176); }
 
-.ts-v2-nar { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.ts-v2-nar { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+/* Cross-fade 900 ms (--t-photo, --ease-inout) + a slow scale (--t-photo-scale, --ease-out): the incoming layer settles
+   1.04 → 1.00, the outgoing one drifts 1.00 → 1.03 while it fades. Opacity and transform only; nothing reads the scroll
+   position. Owner decision (26 Oct review): supersedes MOTION-SPEC §3 "180 ms". */
 .ts-v2-nar__layer {
-  position: absolute; inset: 0; opacity: 0;
+  position: absolute; inset: 0; opacity: 0; transform: scale(1.03);
   background: var(--bg) center / cover no-repeat;
-  transition: opacity var(--t-slow) var(--ease-inout);
+  transition: opacity var(--t-photo) var(--ease-inout), transform var(--t-photo-scale) var(--ease-out);
 }
 /* The image is set only once the layer is `data-loaded` (its section is within one viewport): until then no URL exists. */
 .ts-v2-nar__layer[data-loaded] { background-image: var(--nar-d); }
-.ts-v2-nar__layer[data-active] { opacity: 1; }
+/* Entering: the keyframe owns `transform` while active. Leaving: the animation is dropped and the transition above carries
+   the layer from where the animation left it to 1.03. */
+.ts-v2-nar__layer[data-active] { opacity: 1; transform: none; animation: ts-v2-nar-in var(--t-photo-scale) var(--ease-out) both; }
+@keyframes ts-v2-nar-in { from { transform: scale(1.04); } to { transform: scale(1); } }
 .ts-v2-nar__veil { position: absolute; inset: 0; background: var(--nar-veil); }
 @media (max-width: 600px) {
   .ts-v2-nar__layer[data-loaded] { background-image: var(--nar-m); }
@@ -20,13 +26,13 @@
 /* Sections that must hide the stack: positioned (so they paint after it, in DOM order) on a solid --bg. */
 .ts-v2-opaque { position: relative; background-color: var(--bg); }
 
-/* Credit: follows the active photo and fades with the same token. Round-5 position (MOTION-SPEC §7). */
+/* Credit: follows the active photo and fades with the photo's token (--t-photo). Round-5 position (MOTION-SPEC §7). */
 .ts-v2-nar-credit {
   position: fixed; right: 32px; bottom: 70px; transform: translateY(50%); margin: 0;
   /* above the sections' content wrapper (z-10) so a card never hides it, below the header (z-20) and the fabs (z-50) */
   z-index: 12;
   opacity: 0; pointer-events: none;
-  transition: opacity var(--t-slow) var(--ease-inout);
+  transition: opacity var(--t-photo) var(--ease-inout);
 }
 .ts-v2-nar-credit[data-active] { opacity: 1; }
 .ts-v2-nar-credit span {

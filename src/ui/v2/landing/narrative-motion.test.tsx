@@ -103,7 +103,10 @@ describe('entrance: plays once when the section crosses the 40 % line', () => {
     expect(CSS).toMatch(/h2 svg\s*\{\s*clip-path:\s*inset\(-50% 100% -50% -4px\);\s*\}/)
     expect(CSS).toMatch(/transition:\s*clip-path var\(--t-underline\) var\(--ease-out\) var\(--t-base\)/)
     expect(TOKENS).toMatch(/--t-underline:600ms/)
-    expect(CSS).not.toMatch(/animation|infinite|@keyframes/)
+    // the only keyframe in the file is the photo layer's one-shot settle (narrative.test.tsx pins it); nothing loops
+    expect(CSS).not.toMatch(/infinite|animation-iteration-count/)
+    expect(Array.from(CSS.matchAll(/@keyframes\s+([\w-]+)/g), (m) => m[1])).toEqual(['ts-v2-nar-in'])
+    expect(Array.from(CSS.matchAll(/(?<![\w-])animation:\s*([^;}]+)/g), (m) => m[1].split(' ')[0])).toEqual(['ts-v2-nar-in'])
   })
 
   it('without IntersectionObserver nothing is hidden (no data-nar-js)', () => {

@@ -209,11 +209,21 @@ describe('narrative.css (what is allowed to animate)', () => {
   const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
   const rule = (sel: string) => new RegExp(`${escapeRegExp(sel)}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? ''
 
-  it('a layer animates only `opacity`, with --t-slow and --ease-inout', () => {
+  it('a layer animates only `opacity` (--t-photo, --ease-inout) and `transform` (--t-photo-scale, --ease-out)', () => {
     const layerRule = rule('.ts-v2-nar__layer')
     const transitions = Array.from(layerRule.matchAll(/transition:\s*([^;]+);/g)).map((m) => m[1].trim())
-    expect(transitions).toEqual(['opacity var(--t-slow) var(--ease-inout)'])
-    expect(layerRule).not.toMatch(/transform|filter|animation|will-change/)
+    expect(transitions).toEqual(['opacity var(--t-photo) var(--ease-inout), transform var(--t-photo-scale) var(--ease-out)'])
+    expect(layerRule).not.toMatch(/filter|animation|will-change|var\(--t-slow\)/)
+    expect(layerRule).toMatch(/transform:\s*scale\(1\.03\)/) // outgoing rest: 1.00 → 1.03
+  })
+
+  it('the incoming layer settles 1.04 → 1.00 over --t-photo-scale with --ease-out; the keyframe touches only `transform`', () => {
+    expect(rule('.ts-v2-nar__layer[data-active]')).toMatch(/opacity:\s*1/)
+    expect(rule('.ts-v2-nar__layer[data-active]')).toMatch(/animation:\s*ts-v2-nar-in var\(--t-photo-scale\) var\(--ease-out\)/)
+    const frames = /@keyframes ts-v2-nar-in\s*\{([^@]*?\})\s*\}/.exec(CSS)![1]
+    expect(frames).toMatch(/from\s*\{\s*transform:\s*scale\(1\.04\);\s*\}/)
+    expect(frames).toMatch(/to\s*\{\s*transform:\s*scale\(1\);\s*\}/)
+    expect(frames.replace(/transform:\s*scale\([\d.]+\)/g, '')).not.toMatch(/opacity|filter|translate|rotate|top|left/)
   })
 
   it('the veil is a constant: BG at alpha 45/255, no transition, never toggled', () => {
@@ -230,7 +240,7 @@ describe('narrative.css (what is allowed to animate)', () => {
     expect(credit).toMatch(/bottom:\s*70px/)
     expect(credit).toMatch(/transform:\s*translateY\(50%\)/)
     expect(credit).toMatch(/z-index:\s*12/) // over the section wrapper (z-10): a card must not cover it; under the header (z-20)
-    expect(credit).toMatch(/transition:\s*opacity var\(--t-slow\) var\(--ease-inout\)/) // fades with the photo token
+    expect(credit).toMatch(/transition:\s*opacity var\(--t-photo\) var\(--ease-inout\)/) // fades with the photo's token
     const mobile = /@media \(max-width: 600px\)\s*\{\s*\.ts-v2-nar-credit\s*\{([^}]*)\}/.exec(CSS)![1]
     expect(mobile).toMatch(/display:\s*none/)
     expect(mobile).not.toMatch(/bottom|left|right/) // no mobile placement left to collide with the cards
