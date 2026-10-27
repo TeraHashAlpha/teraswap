@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { composite, contrastRatio, hexToRgb, luminance, type RGB } from '../photos/contrast'
 import { PHOTO_TOKENS } from '../photos/photo-tokens'
 import { V2_COLORS } from '../tokens'
-import { NARRATIVE_SECTIONS, SECTION_PHOTO, photosFor, type NarrativeSectionId } from './narrative'
+import { NARRATIVE_SECTIONS, SECTION_PHOTO, STILL_PHOTO, photosFor, type NarrativeSectionId } from './narrative'
 import type { NarrativePhotoId } from '../photos/narrative'
 
 const CSS = readFileSync(join(__dirname, 'narrative.css'), 'utf8')
@@ -100,6 +100,14 @@ async function buildStates() {
           }
         }
         states.push(worst)
+        // t = 450 ms of the 900 ms fade: --ease-inout is symmetric, so BOTH layers sit at exactly 0.5 (checked below)
+        for (const [order, mixed] of [
+          ['B below A', over(a, 0.5, over(b, 0.5, flat(a.length / 3)))],
+          ['A below B', over(b, 0.5, over(a, 0.5, flat(a.length / 3)))],
+        ] as const) {
+          const l = veiledLuminances(mixed)
+          states.push({ name: `${vp} ${ext} mid-fade 50 % ${ids[i]}→${ids[i + 1]} (${order})`, sections: both, p95: p95(l), max: l[l.length - 1] })
+        }
       }
     }
   }
@@ -137,9 +145,10 @@ const report: string[] = []
 describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async () => {
   await buildStates()
 
-  it('covers every state: 5 desktop + 3 mobile photos and every neighbouring cross-fade, in AVIF and WebP', () => {
-    // per ext: desktop 5 photos + 4 fades, mobile 3 photos + 2 fades
-    expect(states).toHaveLength(2 * (5 + 4 + 3 + 2))
+  it('covers every state: 5 desktop + 3 mobile photos, every neighbouring cross-fade (worst of 0.1…0.9) and its two 50 % mid-fade orders, in AVIF and WebP', () => {
+    // per ext: desktop 5 photos + 4 fades + 4×2 mid-fades, mobile 3 photos + 2 fades + 2×2 mid-fades
+    expect(states).toHaveLength(2 * (5 + 4 + 8 + 3 + 2 + 4))
+    expect(states.filter((st) => st.name.includes('mid-fade 50 %'))).toHaveLength(2 * (8 + 4))
     expect(NARRATIVE_SECTIONS).toHaveLength(5)
     expect(VEIL_A).toBeCloseTo(45 / 255, 3)
   })
@@ -154,6 +163,26 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     }
     report.push(`on photo  ${token.padEnd(5)} need ${need}  worst ${worst.toFixed(2)}  @ ${where}`)
     expect(worst, where).toBeGreaterThanOrEqual(need)
+  })
+
+  it('450 ms into the 900 ms fade both layers are at opacity 0.5: --ease-inout is symmetric', () => {
+    const tokens = readFileSync(join(__dirname, '..', 'tokens.css'), 'utf8')
+    expect(/--t-photo:900ms/.test(tokens) && /--ease-inout:cubic-bezier\(0\.65,0,0\.35,1\)/.test(tokens)).toBe(true)
+    // cubic-bezier(0.65, 0, 0.35, 1): solve x(u) = 0.5 by bisection, read y(u)
+    const bez = (a: number, b: number, u: number) => 3 * (1 - u) ** 2 * u * a + 3 * (1 - u) * u ** 2 * b + u ** 3
+    let [lo, hi] = [0, 1]
+    for (let k = 0; k < 60; k++) (bez(0.65, 0.35, (lo + hi) / 2) < 0.5 ? (lo = (lo + hi) / 2) : (hi = (lo + hi) / 2))
+    expect(bez(0, 1, (lo + hi) / 2)).toBeCloseTo(0.5, 6)
+  })
+
+  it.each(Object.entries(STILL_PHOTO))('still section "%s" (baked %s photo, static): h2 text ≥ 3 and cream second line ≥ 3 on the veiled photo, both sizes', (_section, photo) => {
+    const own = states.filter((st) => st.name.includes(` ${photo} (also: reduced motion)`))
+    expect(own.length).toBeGreaterThan(0)
+    for (const token of ['text', 'cream'] as const) {
+      const worst = Math.min(...own.map((st) => ratioOnLuminance(tok(token), st.p95)))
+      report.push(`still ${_section.padEnd(11)} ${token.padEnd(5)} need 3  worst ${worst.toFixed(2)}  (large, on ${photo})`)
+      expect(worst).toBeGreaterThanOrEqual(3)
+    }
   })
 
   it('the credit (dim, 9 px) on its plate (#0B0D0F @ 92 %) over the brightest veiled pixel of any state ≥ 4.5', () => {

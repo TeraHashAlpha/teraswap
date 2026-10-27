@@ -8,7 +8,6 @@ import { getChainConfig } from '@/lib/chains/registry'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { fmtInt } from '@/lib/format'
 import { PhotoCredit } from '../photos/PhotoCredit'
-import type { ShellPhoto } from '../photos/photos'
 
 // Mainnet block time is ~12 s; polling faster only reissues eth_blockNumber calls (same value and rationale as v1).
 export const V2_FOOTER_BLOCK_POLL_MS = 12_000
@@ -40,7 +39,7 @@ const SEP = (
  * inside this container (left), away from the floating ? / ♫; `mobilePhotos` adds the photographers that only show at
  * ≤ 600 px (the landing's narrative photos), as one extra line.
  */
-export function Footer({ photos, mobilePhotos }: { photos?: readonly ShellPhoto[]; mobilePhotos?: readonly { photographer: string }[] }) {
+export function Footer({ photos, mobilePhotos }: { photos?: readonly { photographer: string }[]; mobilePhotos?: readonly { photographer: string }[] }) {
   const chainId = useQuoteChainId()
   const chain = footerChain(chainId)
   const { data: blockNumber } = useBlockNumber({
