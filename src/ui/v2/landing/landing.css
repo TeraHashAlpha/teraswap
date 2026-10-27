@@ -14,7 +14,7 @@
 
 /* ── Round 7 (D2/D3/D4): local scrims, badges as text, route race, numbered features list ────────────────────────
    Values are tokens (tokens.css = the round7 landing.css literals). The scrim is a ::after at z-index 1: above the photo
-   (the fixed stack or a section's own PhotoBackground, both z-index 0), below the content wrapper (z-10). */
+   (the fixed stack or a section's own NarrativeStill, both z-index 0), below the content wrapper (z-10). */
 .ts-v2-scrim { position: relative; }
 .ts-v2-scrim::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: var(--scrim-left); }
 .ts-v2-scrim--race::after { background: var(--scrim-left-race); }

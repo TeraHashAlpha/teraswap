@@ -117,8 +117,8 @@ describe('structure: ten sections in the pack order', () => {
     const footer = document.querySelector('[data-ts-footer]')!
     const desktop = footer.querySelector('.ts-v2-photo-credit--desktop')!
     const mobile = footer.querySelector('.ts-v2-photo-credit--mobile')!
-    expect(desktop.textContent).toBe('Photo Yakup Gökdeniz · Peter Dyllong / Pexels')
-    expect(mobile.textContent).toBe('Photo Yakup Gökdeniz · Peter Dyllong · Oleksiy Yeshtokyn · Владимир Николаевич · Willbone Gallery / Pexels')
+    expect(desktop.textContent).toBe('Photo Yakup Gökdeniz · Владимир Николаевич · Oleksiy Yeshtokyn / Pexels') // hero raster · the two stills
+    expect(mobile.textContent).toBe('Photo Yakup Gökdeniz · Владимир Николаевич · Oleksiy Yeshtokyn · Willbone Gallery / Pexels')
     // the mobile map's three photos only: Footbridge and Arch-in-light never show at ≤ 600 px, so they are not named there
     expect(mobile.textContent).not.toMatch(/Erik Mclean|wal_/)
     // the fixed narrative credit is the only other credit element, and it is not in the footer
@@ -129,17 +129,40 @@ describe('structure: ten sections in the pack order', () => {
     expect(css).toMatch(/@media \(max-width: 600px\)\s*\{\s*\.ts-v2-photo-credit--desktop\s*\{\s*display:\s*none;\s*\}\s*\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*inline-block;/)
   })
 
-  it('the shell footer closes the page and carries both photo authors, in the footer container only', () => {
+  it('one grade: Performance and the bottom CTA paint a baked bg-* still (lazy, veiled); only the hero keeps a round-4/5 raster', () => {
+    mount()
+    const still = (host: Element | null) => host?.querySelector<HTMLElement>('[data-ts-narrative-still]') ?? null
+    const perf = still(document.querySelector('#performance'))
+    const cta = still(document.querySelector('#performance ~ section:not([id]), section.ts-v2-opaque:not([id])'))
+    expect(perf?.dataset.photo).toBe('tunnel')
+    expect(cta?.dataset.photo).toBe('highway')
+    for (const el of [perf!, cta!]) {
+      const id = el.dataset.photo!
+      const srcs = Array.from(el.querySelectorAll('source, img'), (n) => n.getAttribute('srcset') ?? n.getAttribute('src'))
+      expect(srcs).toHaveLength(4)
+      for (const u of srcs) expect(u).toContain(`bg-${id}-`)
+      expect(el.querySelector('img')!.getAttribute('loading')).toBe('lazy')
+      expect(el.querySelector('.ts-v2-nar-still__veil')).not.toBeNull()
+    }
+    // no round-4/5 PhotoBackground (grade + halftone layers) anywhere but the hero
+    const old = Array.from(document.querySelectorAll('.ts-v2-photo'))
+    expect(old).toHaveLength(1)
+    expect(document.querySelector('#hero')!.contains(old[0])).toBe(true)
+    expect(document.querySelectorAll('.ts-v2-photo__dots')).toHaveLength(1)
+  })
+
+  it('the shell footer closes the page and carries every still-photo author, in the footer container only', () => {
     mount()
     const footer = document.querySelector('[data-ts-footer]')!
-    expect(footer.textContent).toContain('Photo Yakup Gökdeniz · Peter Dyllong / Pexels')
+    expect(footer.textContent).toContain('Photo Yakup Gökdeniz · Владимир Николаевич · Oleksiy Yeshtokyn / Pexels')
     expect(footer.textContent).toContain('Smart contracts have not been externally audited. Use at your own risk.')
     expect(footer.textContent).toContain('Fee 0.7%')
     for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(footer.contains(fab)).toBe(false)
     }
-    // photos sit inside their sections (absolute), not as a second fixed layer
-    expect(document.querySelectorAll('.ts-v2-photo--section')).toHaveLength(3)
+    // photos sit inside their sections (absolute), not as a second fixed layer: the hero raster + the two baked stills
+    expect(document.querySelectorAll('.ts-v2-photo--section')).toHaveLength(1)
+    expect(document.querySelectorAll('.ts-v2-nar-still')).toHaveLength(2)
     expect(document.querySelectorAll('.ts-v2-photo:not(.ts-v2-photo--section)')).toHaveLength(0)
   })
 })

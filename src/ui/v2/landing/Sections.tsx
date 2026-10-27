@@ -25,8 +25,8 @@ import {
 } from '@/config/product-claims'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { Button, EyebrowLabel, HandUnderline, Surface } from '../primitives'
-import { PhotoBackground } from '../photos/PhotoBackground'
-import { rvAt } from './narrative'
+import { NarrativeStill } from './NarrativeStill'
+import { STILL_PHOTO, rvAt } from './narrative'
 import { RouteRace } from './RouteRace'
 import { securityStats } from './slots'
 
@@ -49,7 +49,7 @@ function SectionHead({ eyebrow, children, reveal = false }: { eyebrow: string; c
 export function PerformanceSection() {
   return (
     <section id="performance" className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--race ${SECTION} overflow-hidden`}>
-      <PhotoBackground photoId="arch-night" section aboveFold={false} />
+      <NarrativeStill photoId={STILL_PHOTO.performance} />
       <div className={`${WRAP} grid items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16`}>
         <div>
           <EyebrowLabel>Performance</EyebrowLabel>
@@ -334,7 +334,7 @@ export function FeaturesSection() {
 export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
     <section className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden text-center`}>
-      <PhotoBackground photoId="trails" section aboveFold={false} />
+      <NarrativeStill photoId={STILL_PHOTO.cta} />
       <div className="relative z-10 mx-auto max-w-[900px]">
         <h2 className={H2}>
           <span className="block">Don&apos;t leave</span>

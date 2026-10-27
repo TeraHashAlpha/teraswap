@@ -17,9 +17,22 @@ export const SECTION_PHOTO: Record<NarrativeSectionId, { desktop: NarrativePhoto
   docs: { desktop: 'underpass', mobile: 'underpass' },
 }
 
+/**
+ * The opaque sections that paint their own photo (they hide the fixed stack). Owner review 26 Oct: one grade, so these use
+ * the baked `bg-*` set too — the round-4/5 `arch-night` / `trails` files carried a halftone the narrative photos do not.
+ * The hero keeps its own raster (round 7 replaces it).
+ */
+export const STILL_PHOTO = { performance: 'tunnel', cta: 'highway' } as const satisfies Record<string, NarrativePhotoId>
+
 /** The viewport width at and below which the mobile map, the portrait files and the footer-only credit apply. */
 export const MOBILE_MAX_WIDTH = 600
 export const MOBILE_QUERY = `(max-width: ${MOBILE_MAX_WIDTH}px)`
+
+/**
+ * How long a replaced photo layer stays `data-leaving`: just over `--t-photo-scale` (1600 ms, tokens.css), its slowest
+ * transition. A test pins the two together. Reduced motion has no stack, so nothing waits on it.
+ */
+export const PHOTO_SETTLE_MS = 1700
 
 /** A section is active while it crosses this fraction of the viewport height (MOTION-SPEC §3 "Trigger"). */
 export const ACTIVE_LINE = 0.4
