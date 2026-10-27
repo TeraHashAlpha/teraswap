@@ -28,5 +28,6 @@ Security→Experience, animations seeked to t. out/in opacity 1/0 → .5/.5 → 
 
 ## Findings
 - **Edge case:** a CSS keyframe for the incoming layer + a transition for the outgoing one did NOT work in Chromium (outgoing sat at 1.03 from t=0; no transform transition). Replaced by plain transitions and a `data-leaving` state set in the same commit as `data-active` (released after 1700 ms, pinned > `--t-photo-scale` by a test).
+- **Owner waivers (27 Oct, explicit):** "bytes at scroll 0 unchanged" → "must not increase" (lower accepted); read-scope waived for the two items below.
 - **Process:** read `src/proxy.ts` (outside the read list, not needed) and edited `shell/Footer.tsx` (one-line `photos` type widening so the footer takes the new credits; inside `src/ui/v2/**`, not on the read list).
 - Chrome headless cannot emulate `prefers-reduced-transparency`; covered by the shared CSS block + mocks (as in B2b).
