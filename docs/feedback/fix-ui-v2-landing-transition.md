@@ -24,7 +24,7 @@ Security→Experience, animations seeked to t. out/in opacity 1/0 → .5/.5 → 
 - Contrast (`contrast.txt`, 52 states incl. explicit 50 % mid-fade, both layer orders, AVIF+WebP, the 2 stills): 0 fails; muted body 5.87, still h2 ≥ 11.2.
 - LCP median, 7 runs/side vs origin/main: desktop 348→348 ms, mobile 336→336 (limit +100). Hero file identical. **Image bytes at scroll 0 are lower, not unchanged**: 361,844→210,350 B desktop, 198,141→155,598 mobile (lazy Performance 181 KB→30 KB). All files ≤ 200 KB (`lcp-bytes.txt`).
 - Suite 352 files / **5583** tests (B2b 5575); lint 93 = 93 (0 errors); tsc 0; build 0. v1: 0 files changed outside `src/ui/v2/**`, non-`/v2` route table identical.
-- `git diff --stat origin/main`: 21 files, +~330/−44 (9 code, 5 tests, 7 evidence/docs). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/ui-v2-landing-transition
+- `git diff --stat origin/main`: 21 files, +304/−44 — `src/ui/v2/` 14 (landing 10, photos 1, shell 1, tokens 2), feedback 7; 6 signed commits. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/ui-v2-landing-transition
 
 ## Findings
 - **Edge case:** a CSS keyframe for the incoming layer + a transition for the outgoing one did NOT work in Chromium (outgoing sat at 1.03 from t=0; no transform transition). Replaced by plain transitions and a `data-leaving` state set in the same commit as `data-active` (released after 1700 ms, pinned > `--t-photo-scale` by a test).
