@@ -1,17 +1,32 @@
-# Feedback — feat/ui-v2-round7-language
+# feat/ui-v2-round7-language — feedback
 
-Round 7 "no-box" language for v2 (owner decisions D1–D4, 26 Oct). Base: origin/main 5610beb (B2b merged). Code only under `src/ui/v2/**`.
+Branch off origin/main `5610beb` (B2b merged). Round 7 D1–D4 on v2 only. No PR (owner opens it). All commits SSH-signed, noreply. Files: `feat-ui-v2-round7-language/` (webp, outputs).
 
 ## Checklist
-- [x] C1 fonts + tokens (Plex Sans, Latin ≤ 60 KB, guard, hairline/scrim/CTA tokens) — 725f382
-- [x] C2 primitives (Surface, Button, Tabs, Chip, Input, Toggle, Skeleton) + `/v2/_kit`
-- [ ] C3 shell + landing (§2 route race, §6 numbered list, scrims)
-- [ ] Evidence 1–7 below
+- [x] C1 fonts + tokens 725f382 · [x] C2 primitives c8355c4 · [x] C3 shell + landing f780ce4 · [x] evidence 1–7
 
-## Premises recorded
-- `/v2/_kit` is `src/app/v2/%5Fkit/` — outside `src/ui/v2/**`. **Owner answer (27 Oct): allow exactly `kit-demo.tsx` + `page.test.tsx` there**; diff scope = `src/ui/v2/**` + those two files + this feedback file. Supersedes the goal's wording.
-- Goal says `--font-body`; the repo's token was `--font-sans` (Tailwind `v2-sans` reads it; `tailwind.v2.config.ts` is outside scope). Both now exist: `--font-body` = Plex Sans, `--font-sans` = alias.
-- Pack ships no OFL text for Plex Sans; `OFL-ibmplexsans.txt` = the Plex Mono OFL (same holder/RFN). Architect to confirm.
-- `Panel` stays frozen at its legacy boxed look through C2 (not yet an alias of `Surface`): unboxing it before the landing has scrims would leave text on bare photo. C3 migrates every caller and flips it to the alias.
-- Input idle underline uses `--hairline-ring` (α .47 = 3.91:1 on --bg), not `--hairline` (α .16 = 1.45:1): WCAG 1.4.11 needs ≥ 3:1 for a field edge. Separators stay at .16 (decorative).
-- Dropped one invalid contrast case I first wrote (text over a scrim over pure white): scrims sit on pre-graded photos, never white. Worst valid case (brightest graded pixel): thinnest margin is `muted` on `--scrim-left-race` = 4.72.
+## Owner answer / premises (supersede the goal text)
+- **Kit scope (asked, answered "allow 2 files"):** `/v2/_kit` is `src/app/v2/%5Fkit/`; edited only `kit-demo.tsx` + `page.test.tsx` (body lives in `ui/v2/primitives/KitSheet.tsx`).
+- Goal said `--font-body`; repo token was `--font-sans` (Tailwind `v2-sans`, config out of scope) → both exist, `--font-sans` = alias. Pack has no OFL text for Plex Sans: `OFL-ibmplexsans.txt` = the Plex Mono OFL (same holder/RFN) — Architect to confirm.
+
+## Evidence
+1. **Fonts:** Plex Sans variable wght 400–700, pack woff2 66 976 B → Latin subset **30 528 B** (≤ 60 000; fontTools 4.62.1, same recipe as the other faces); loaded via `next/font/local`; Inter/`--font-inter` absent from every v2 source (guard in `fonts.test.ts`; the repo-wide #565 guard `__tests__/no-next-font-google` also green). RainbowKit uses the hashed family (portalled outside `.ts-v2`).
+2. **Matrix:** Surface {plain, edge top/bottom/left/both/rule, sheet top/left, strip bottom + 5 accents, popover, bare} · Button {primary, text, text-danger, icon, deprecated secondary} × enabled/disabled · Tabs + Segmented · Chip × 3 · Input field/amount × idle/invalid/disabled · Toggle × 3 · Skeleton · 5 scrims = **46 pinned kit cells**; 27+ render tests. `kit-desktop.webp`, `kit-375.webp`.
+3. **Contrast** (`contrast-primitives.txt`, `contrast-narrative.txt`): all text tokens ≥ 4.5 on --bg / --surface / credit plate; on each scrim's weakest stop over the brightest graded pixel: thinnest `muted` × `--scrim-left-race` **4.72**; narrative states (28, real photos, p95): muted **5.25**, text 11.29, cream 9.80 (veil-only muted was 3.64 → the scrim does the work); app scrim: all body tokens ≥ 4.5 incl. mobile. Input idle underline `--hairline-ring` 3.91:1 (≥ 3 for a field edge); separators .16 = 1.45 (decorative, recorded, not asserted).
+4. **Shell** vs round7 01/03/05/m02/m09: `shell-*.webp` (network menu, help drawer, DCA gate, idle, 375 + 375 help). Same structure; deviations below.
+5. **Landing:** `landing-s2-race-*` and `landing-s6-features-*` (1440 + 375). §2: one bar per source (8 real), cream winner, label verbatim. §6: numbered list, 2 cols → 1 at ≤ 600. Parity: `content-parity.landing.test` **0 missing text, 0 missing hrefs** (4 chain/gating variants).
+6. **LCP of `/`** (`next start`, headless Chromium, 9 runs/side, medians): desktop **352 → 348 ms**, 375 **336 → 336 ms** (limit +100). `lcp.json`.
+7. **v1 module-identical:** all 8 v1 pages load an **identical content-hashed chunk set** (Δ 0 B raw/gz, 0 v2-marked chunks; positive control: 6 v2 chunks carry markers); route table identical (54). Suite base 352 files / 5575 → branch **355 / 5701**; lint **93 = 93** (0 errors); tsc 0; build 0 both sides. Diff: **54 files, +1873/−357** (before this docs commit); 0 files outside `src/ui/v2/**`, the 2 kit files, feedback. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-round7-language
+
+## Content-map delta (v1 → v2, this slice) — 0 v1 strings lost
+- §2 radial graph (group "Liquidity sources") → route race. New text, **verbatim from round7 `landing/index.html`** (goal said "no copy beyond D4's label"): `NET OUTPUT AFTER GAS · {N} SOURCES`, `BEST · ROUTE A`, `ROUTE B…H`, `SOURCES QUERIED:`, aria-label. Sources line uses registry names (v1's graph labels, needed for parity), not display labels — Architect to choose.
+- §6: same titles/copy; added aria-hidden numerals. Badges (`PRE-SWAP`, `SOON`, tab/dropdown "Soon") are text with a CSS `· `; accessible names unchanged.
+
+## Concerns / decisions for the owner
+- **§6 shows 01–08 on the live claims here** (DCA not live on the selected chain, so it sits on the roadmap); 01–09 holds when DCA is live. Numbering follows the live list.
+- Round7 shell frames still draw boxed SOON chips and an outlined wallet modal; D2/D3 say unboxed, so v2 follows the rule, not the frames.
+- Round7 app recipe's uniform scrim added to the shell photo (`PHOTO_TOKENS.appScrim` .47); app panes are still skeletons, so B2+ content inherits it. Skeleton bars read as heavy blocks until real panes land.
+- `Panel` kept as deprecated `Surface` alias (0 callers; rule #4). Landing header "Launch app" is now a text button; the hero's is the one solid CTA.
+- Merge risk: `origin/fix/ui-v2-landing-transition` also edits Performance/CTA sections of `Sections.tsx`.
+- Test gap: reduced-motion/flat modes for the race are pinned by CSS text + mocks, not a real browser. Pre-existing: DCA/limit panes not built; ports 3101/3102 held by other sessions' servers (not touched).
+- Caught late: my first `fonts.test.ts` tripped the repo-wide font guard (only visible in the full suite); fixed by building the patterns from parts.
