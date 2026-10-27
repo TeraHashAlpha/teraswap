@@ -78,16 +78,22 @@ describe('§4 radius, fonts, motion', () => {
     expect(VARS['--font-hand']).toBe('Caveat,cursive')
   })
 
-  it('motion tokens are exactly the pack-stated values (ARCHITECT_BRIEF.md:24); no invented easing', () => {
+  it('motion tokens are the pack values (ARCHITECT_BRIEF.md:24) plus the §4 "Motion language" table (MOTION-SPEC, round 6)', () => {
     expect(VARS['--t-toast']).toBe('160ms')
     expect(VARS['--t-shimmer']).toBe('1.2s')
-    expect(CSS).not.toMatch(/--ease-|cubic-bezier/)
+    expect(VARS['--ease-out']).toBe('cubic-bezier(0.2,0.8,0.2,1)')
+    expect(VARS['--ease-inout']).toBe('cubic-bezier(0.65,0,0.35,1)')
+    expect(VARS['--t-fast']).toBe('120ms')
+    expect(VARS['--t-base']).toBe('160ms')
+    expect(VARS['--t-slow']).toBe('180ms')
+    expect(VARS['--t-underline']).toBe('600ms')
   })
 
   it('prefers-reduced-motion zeroes the v2 motion tokens and kills transitions + animations', () => {
     const rm = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*)\n\}/.exec(CSS)?.[1] ?? ''
     expect(rm).toMatch(/--t-toast:0ms/)
     expect(rm).toMatch(/--t-shimmer:0s/)
+    for (const t of ['--t-fast', '--t-base', '--t-slow', '--t-underline']) expect(rm).toContain(`${t}:0ms`)
     expect(rm).toMatch(/animation:\s*none\s*!important/)
     expect(rm).toMatch(/transition:\s*none\s*!important/)
   })

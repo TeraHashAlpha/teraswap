@@ -75,6 +75,9 @@ import { helpSections } from '@/lib/help-content'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { AppShell } from './AppShell'
 import { resetMusicStateForTests } from './music'
+
+/** Which speaker the ♫ button shows (round-6 icons replaced the ♫ / ✕ glyphs). */
+const icon = (btn: HTMLElement) => btn.querySelector('svg[data-music-icon]')?.getAttribute('data-music-icon')
 import { V2_RISK_LINE } from './Footer'
 import { NETWORK_SUBTITLE, shellChains } from './chains'
 
@@ -442,16 +445,16 @@ describe('help drawer + fabs', () => {
     expect(within(dialog).queryByText(first.q)).toBeNull()
   })
 
-  it('♫ is a toggle button (on by default, ♫ ↔ ✕)', async () => {
+  it('♫ is a toggle button (on by default, speaker ↔ muted speaker)', async () => {
     const sounds = await import('@/lib/sounds')
     const spy = vi.spyOn(sounds, 'toggleBackgroundMusic').mockReturnValueOnce(false).mockReturnValueOnce(true)
     render(<AppShell />)
     const btn = screen.getByRole('button', { name: 'Turn music off' })
-    expect(btn.textContent).toBe('♫')
+    expect(icon(btn)).toBe('on')
     await act(async () => void fireEvent.click(btn))
-    expect(screen.getByRole('button', { name: 'Turn music on' }).textContent).toBe('✕')
+    expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Turn music on' })))
-    expect(screen.getByRole('button', { name: 'Turn music off' }).textContent).toBe('♫')
+    expect(icon(screen.getByRole('button', { name: 'Turn music off' }))).toBe('on')
     spy.mockRestore()
   })
 })

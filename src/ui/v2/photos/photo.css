@@ -33,6 +33,13 @@
   font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim);
 }
 
+/* Landing: a second, longer credit line for ≤ 600 px (see PhotoCredit); the desktop line is hidden there. */
+.ts-v2-photo-credit--mobile { display: none; letter-spacing: 0.5px; }
+@media (max-width: 600px) {
+  .ts-v2-photo-credit--desktop { display: none; }
+  .ts-v2-photo-credit--mobile { display: inline-block; }
+}
+
 /* Text on open photo gets a solid #0B0D0F plate (92%); contrast pairs are asserted in photo.test.ts. */
 .ts-v2-plate {
   background: var(--plate-bg); border-radius: 6px; padding: 2px 8px;

@@ -58,6 +58,7 @@ vi.mock('@/config/product-claims', async () => {
 
 import { INTEGRATED_DEX_SOURCE_NAMES, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
 import { LandingV2 } from './index'
+import { NARRATIVE_SECTIONS, staggerDelayMs } from './narrative'
 import { heroStats, securityStats } from './slots'
 
 const SRC = join(__dirname)
@@ -109,6 +110,23 @@ describe('structure: ten sections in the pack order', () => {
     h.orderLive = new Set(['dca', 'limit', 'stopLoss'])
     mount()
     expect(document.querySelector('#roadmap')).toBeNull()
+  })
+
+  it('credit: desktop line unchanged; ≤ 600 px a second footer line lists every photographer on the page, once', () => {
+    mount()
+    const footer = document.querySelector('[data-ts-footer]')!
+    const desktop = footer.querySelector('.ts-v2-photo-credit--desktop')!
+    const mobile = footer.querySelector('.ts-v2-photo-credit--mobile')!
+    expect(desktop.textContent).toBe('Photo Yakup Gökdeniz · Peter Dyllong / Pexels')
+    expect(mobile.textContent).toBe('Photo Yakup Gökdeniz · Peter Dyllong · Oleksiy Yeshtokyn · Владимир Николаевич · Willbone Gallery / Pexels')
+    // the mobile map's three photos only: Footbridge and Arch-in-light never show at ≤ 600 px, so they are not named there
+    expect(mobile.textContent).not.toMatch(/Erik Mclean|wal_/)
+    // the fixed narrative credit is the only other credit element, and it is not in the footer
+    expect(document.querySelectorAll('.ts-v2-nar-credit')).toHaveLength(1)
+    expect(footer.contains(document.querySelector('.ts-v2-nar-credit'))).toBe(false)
+    const css = readFileSync(join(SRC, '..', 'photos', 'photo.css'), 'utf8')
+    expect(css).toMatch(/\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*none;/)
+    expect(css).toMatch(/@media \(max-width: 600px\)\s*\{\s*\.ts-v2-photo-credit--desktop\s*\{\s*display:\s*none;\s*\}\s*\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*inline-block;/)
   })
 
   it('the shell footer closes the page and carries both photo authors, in the footer container only', () => {
@@ -322,5 +340,60 @@ describe('home split', () => {
       mount()
     })
     expect(screen.getAllByRole('button', { name: 'Launch app' }).length).toBeGreaterThan(0)
+  })
+})
+
+describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
+  const rvOf = (id: string) => Array.from(document.querySelectorAll<HTMLElement>(`#${id} .ts-v2-rv`))
+  const idx = (el: HTMLElement) => (el.style.getPropertyValue('--i') === '' ? 0 : Number(el.style.getPropertyValue('--i')))
+
+  it('only §4–§7 and §9 are narrative sections; the hero, §2, §3 and §8 stay opaque (they cover the stack), as does the footer', () => {
+    mount()
+    const narrative = Array.from(document.querySelectorAll('[data-ts-narrative]')).map((s) => s.id)
+    expect(narrative).toEqual(['security', 'experience', 'features', 'roadmap', 'docs'])
+    expect(narrative).toEqual([...NARRATIVE_SECTIONS])
+    const opaque = Array.from(document.querySelectorAll('main > .ts-v2-opaque')).map((s) => s.id || '(cta)')
+    expect(opaque).toEqual(['hero', 'performance', 'why-teraswap', '(cta)'])
+    for (const id of NARRATIVE_SECTIONS) expect(document.getElementById(id)!.classList.contains('ts-v2-opaque')).toBe(false)
+    expect(document.querySelector('[data-ts-footer]')!.closest('.ts-v2-opaque')).not.toBeNull()
+  })
+
+  it('the stack sits before the header, outside <main>, and only the narrative sections carry .ts-v2-rv', () => {
+    mount()
+    const stack = document.querySelector('[data-ts-narrative-stack]')!
+    expect(document.querySelector('main')!.contains(stack)).toBe(false)
+    expect(stack.compareDocumentPosition(screen.getByRole('banner')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    for (const id of ['hero', 'performance', 'why-teraswap']) expect(rvOf(id)).toHaveLength(0)
+    for (const id of NARRATIVE_SECTIONS) expect(rvOf(id).length).toBeGreaterThan(0)
+  })
+
+  it('headers, copy blocks and cards carry .rv, indexed in order for the stagger', () => {
+    mount()
+    expect(rvOf('security').map(idx)).toEqual([0, 0, 0, 1, 2]) // head, copy, 2 checks, stats panel
+    expect(rvOf('experience').map(idx)).toEqual([0, 0, 0]) // head, copy, permit card
+    expect(rvOf('features').map(idx)).toEqual([0, 0, ...Array.from({ length: rvOf('features').length - 2 }, (_, i) => i)])
+    expect(rvOf('roadmap').map(idx)).toEqual([0, 0, 1])
+    expect(rvOf('docs').map(idx)).toEqual([0, 0])
+  })
+
+  it('a long card list staggers 0, 40, 80, 120, 160 ms and then holds at 160 ms (capped at index 4)', () => {
+    mount()
+    const cards = rvOf('features').slice(2)
+    expect(cards.length).toBeGreaterThan(5)
+    expect(cards.map((c) => staggerDelayMs(idx(c)))).toEqual(cards.map((_, i) => Math.min(i, 4) * 40))
+    expect(Math.max(...cards.map((c) => staggerDelayMs(idx(c))))).toBe(160)
+  })
+
+  it('muted copy sits straight on the photo only in security / experience / features (narrative-contrast.test.ts models exactly that)', () => {
+    mount()
+    const offPanel = (id: string) =>
+      Array.from(document.querySelectorAll(`#${id} [class*="text-v2-muted"]`)).filter((el) => !el.closest('[class*="bg-v2-surface"]'))
+    for (const id of ['security', 'experience', 'features']) expect(offPanel(id).length, id).toBeGreaterThan(0)
+    for (const id of ['roadmap', 'docs']) expect(offPanel(id).map((e) => e.textContent), id).toEqual([])
+  })
+
+  it('every headline underline is inside a narrative section h2 (so the draw-once CSS reaches it)', () => {
+    mount()
+    for (const id of ['security', 'experience']) expect(document.querySelectorAll(`#${id} h2 svg`).length).toBeGreaterThan(0)
   })
 })

@@ -1,0 +1,76 @@
+/* [ADR-025] Scroll narrative (round-6 MOTION-SPEC §3, §6, §7). The photo files are pre-graded (recipe steps 1–3 baked
+   in), so this veil — recipe step 4, #0B0D0F at alpha 45/255 — is the same constant in every state, including
+   mid-cross-fade. Only the layers' opacity animates. */
+.ts-v2 { --nar-veil: rgba(11, 13, 15, 0.176); }
+
+.ts-v2-nar { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.ts-v2-nar__layer {
+  position: absolute; inset: 0; opacity: 0;
+  background: var(--bg) center / cover no-repeat;
+  transition: opacity var(--t-slow) var(--ease-inout);
+}
+/* The image is set only once the layer is `data-loaded` (its section is within one viewport): until then no URL exists. */
+.ts-v2-nar__layer[data-loaded] { background-image: var(--nar-d); }
+.ts-v2-nar__layer[data-active] { opacity: 1; }
+.ts-v2-nar__veil { position: absolute; inset: 0; background: var(--nar-veil); }
+@media (max-width: 600px) {
+  .ts-v2-nar__layer[data-loaded] { background-image: var(--nar-m); }
+}
+
+/* Sections that must hide the stack: positioned (so they paint after it, in DOM order) on a solid --bg. */
+.ts-v2-opaque { position: relative; background-color: var(--bg); }
+
+/* Credit: follows the active photo and fades with the same token. Round-5 position (MOTION-SPEC §7). */
+.ts-v2-nar-credit {
+  position: fixed; right: 32px; bottom: 70px; transform: translateY(50%); margin: 0;
+  /* above the sections' content wrapper (z-10) so a card never hides it, below the header (z-20) and the fabs (z-50) */
+  z-index: 12;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--t-slow) var(--ease-inout);
+}
+.ts-v2-nar-credit[data-active] { opacity: 1; }
+.ts-v2-nar-credit span {
+  white-space: nowrap; font: 500 9px/1 var(--font-mono); letter-spacing: 1px; text-transform: uppercase;
+  color: var(--dim); background: var(--plate-bg); padding: 3px 4px; border-radius: 4px;
+}
+.ts-v2-nar-credit em { font-style: normal; }
+/* ≤ 600 px: no floating credit — it could sit over card text. The footer band lists every photographer instead. */
+@media (max-width: 600px) {
+  .ts-v2-nar-credit { display: none; }
+}
+
+/* ── Entrance (MOTION-SPEC §4) — plays once ────────────────────────────────────────────────────────────────────
+   A section is marked `data-nar-js` by NarrativeStack when it takes over; before that (SSR, no JS, no
+   IntersectionObserver) nothing is hidden. It gets `data-nar-in` when it crosses the 40 % line (or is already above it). */
+.ts-v2 { --enter-y: 12px; --stagger: 40ms; --stagger-max: 4; }
+
+[data-ts-narrative][data-nar-js] .ts-v2-rv { opacity: 0; transform: translateY(var(--enter-y)); }
+[data-ts-narrative][data-nar-js][data-nar-in] .ts-v2-rv {
+  opacity: 1; transform: none;
+  transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+  transition-delay: calc(min(var(--i, 0), var(--stagger-max)) * var(--stagger));
+}
+
+/* The hand underline draws once, left to right, over --t-underline, starting after --t-base. */
+[data-ts-narrative][data-nar-js] h2 svg { clip-path: inset(-50% 100% -50% -4px); }
+[data-ts-narrative][data-nar-js][data-nar-in] h2 svg {
+  clip-path: inset(-50% -4px -50% -4px);
+  transition: clip-path var(--t-underline) var(--ease-out) var(--t-base);
+}
+
+/* ── prefers-reduced-motion (§5): no stack; every section paints its own photo + veil; text and underline static ── */
+[data-ts-narrative][data-nar-static] { background: linear-gradient(var(--nar-veil), var(--nar-veil)), var(--nar-d) center / cover no-repeat; }
+@media (max-width: 600px) {
+  [data-ts-narrative][data-nar-static] { background: linear-gradient(var(--nar-veil), var(--nar-veil)), var(--nar-m) center / cover no-repeat; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-v2-nar, .ts-v2-nar-credit { display: none; }
+  [data-ts-narrative] .ts-v2-rv { opacity: 1 !important; transform: none !important; transition: none !important; }
+  [data-ts-narrative] h2 svg { clip-path: none !important; transition: none !important; }
+}
+
+/* ── reduced transparency / more contrast / forced colours (§5): flat --bg, no photo, no credit ──────────────── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  .ts-v2-nar, .ts-v2-nar-credit { display: none; }
+  [data-ts-narrative][data-nar-static] { background: none; }
+}

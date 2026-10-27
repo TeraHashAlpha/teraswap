@@ -105,7 +105,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
   const stats = heroStats(chainId)
 
   return (
-    <section id="hero" className="relative overflow-hidden px-4 pb-16 pt-8 sm:px-8 sm:pb-24 sm:pt-16">
+    <section id="hero" className="ts-v2-opaque relative overflow-hidden px-4 pb-16 pt-8 sm:px-8 sm:pb-24 sm:pt-16">
       <PhotoBackground photoId="trails" section />
       {/* Under lg both columns are `contents`, so the four blocks order themselves as pack m01 does (copy · stats · chips ·
           preview); from lg up they are the 7/5 columns of pack 10a. */}
