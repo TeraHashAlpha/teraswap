@@ -118,10 +118,15 @@ describe('Round 7 D1 guard — Inter is out of v2, and nothing in v2 reaches a C
   })
 
   it('no v2 source uses the Google font loader, an @import of a remote sheet, or a remote @font-face', () => {
-    // written with escapes / joins so this file does not itself contain the literals the repo-wide guard
-    // (__tests__/no-next-font-google.test.ts) searches for
-    const remote = new RegExp(['next\\/font\\/goo' + 'gle', '@import\\s+ur' + 'l\\(', 'fonts\\.(goo' + 'gleapis|gstatic)\\.com', '@font-face[^}]*ur' + 'l\\(\\s*[\'"]?https?:'].join('|'))
-    const hits = SOURCES.filter((f) => remote.test(readFileSync(f, 'utf8')))
+    // written with joins so this file does not itself contain the literals the repo-wide guard
+    // (__tests__/no-next-font-google.test.ts) searches for. Plain substrings for the loader and the two font hosts (no
+    // host regex: nothing to anchor), regexes only for the two structural patterns.
+    const needles = ['next/font/goo' + 'gle', 'fonts.goo' + 'gleapis.com', 'fonts.gs' + 'tatic.com']
+    const patterns = [new RegExp('@import\\s+ur' + 'l\\('), new RegExp('@font-face[^}]*ur' + 'l\\(\\s*[\'"]?https?:')]
+    const hits = SOURCES.filter((f) => {
+      const text = readFileSync(f, 'utf8')
+      return needles.some((n) => text.includes(n)) || patterns.some((r) => r.test(text))
+    })
     expect(hits).toEqual([])
   })
 
