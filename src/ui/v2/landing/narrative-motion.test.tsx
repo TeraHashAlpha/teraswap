@@ -204,7 +204,7 @@ describe.each(FLAT_QUERIES)('%s: flat --bg, no photo, no credit', (query) => {
 describe('CSS: flat modes', () => {
   it('one media block for the three preferences hides the stack and the credit and clears the section background', () => {
     const block = /@media \(prefers-reduced-transparency: reduce\), \(prefers-contrast: more\), \(forced-colors: active\)\s*\{([\s\S]*?)\n\}/.exec(CSS)![1]
-    expect(block).toMatch(/\.ts-v2-nar, \.ts-v2-nar-credit\s*\{\s*display:\s*none;/)
+    expect(block).toMatch(/\.ts-v2-nar, \.ts-v2-nar-credit, \.ts-v2-nar-still\s*\{\s*display:\s*none;/)
     expect(block).toMatch(/\[data-nar-static\]\s*\{\s*background:\s*none;/)
   })
 })

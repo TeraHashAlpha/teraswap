@@ -10,6 +10,7 @@ import {
   MOBILE_QUERY,
   NEAR_ROOT_MARGIN,
   NARRATIVE_SECTIONS,
+  PHOTO_SETTLE_MS,
   REDUCED_MOTION_QUERY,
   photoFor,
   photosFor,
@@ -20,6 +21,17 @@ import {
 import './narrative.css'
 
 type Section = { id: NarrativeSectionId; el: HTMLElement }
+/** The photo on screen, and the ones still fading / drifting out (so they keep their transition for one settle). */
+type Stack = { active: NarrativePhotoId | null; leaving: ReadonlySet<NarrativePhotoId> }
+
+/** Move the active photo; the one it replaces is `leaving` in the SAME commit, so its opacity and scale transition out. */
+function moveTo(prev: Stack, next: NarrativePhotoId | null): Stack {
+  if (prev.active === next) return prev
+  const leaving = new Set(prev.leaving)
+  if (next) leaving.delete(next)
+  if (prev.active) leaving.add(prev.active)
+  return { active: next, leaving }
+}
 
 function findSections(): Section[] {
   return NARRATIVE_SECTIONS.flatMap((id) => {
@@ -37,8 +49,9 @@ function imageVars(id: NarrativePhotoId): Record<'--nar-d' | '--nar-m', string> 
 /**
  * [ADR-025] The scroll narrative (round-6 MOTION-SPEC §3–§6), driven entirely by IntersectionObserver — no scroll
  * listener, no snap, no parallax:
- *  - `stack` (default): a fixed stack of photo layers + one constant veil; only a layer's `opacity` animates. The active
- *    layer follows the section crossing the 40 % line and the credit follows it. A layer has no image until its section
+ *  - `stack` (default): a fixed stack of photo layers + one constant veil; only a layer's `opacity` and `transform`
+ *    (a slow scale) transition. The active layer follows the section crossing the 40 % line and the credit follows it;
+ *    the layer it replaces is `data-leaving` until its transitions have run. A layer has no image until its section
  *    is within one viewport.
  *  - `static` (prefers-reduced-motion): no stack. Each section paints its own photo + veil (still lazy), text is shown
  *    at once, the underline is drawn.
@@ -49,7 +62,7 @@ function imageVars(id: NarrativePhotoId): Record<'--nar-d' | '--nar-m', string> 
 export function NarrativeStack() {
   const [mode, setMode] = useState<NarrativeMode>('stack')
   const [mobile, setMobile] = useState(false)
-  const [active, setActive] = useState<NarrativePhotoId | null>(null)
+  const [{ active, leaving }, setStack] = useState<Stack>({ active: null, leaving: new Set() })
   const [credited, setCredited] = useState<NarrativePhotoId | null>(null)
   const [loaded, setLoaded] = useState<ReadonlySet<NarrativePhotoId>>(() => new Set())
 
@@ -99,7 +112,7 @@ export function NarrativeStack() {
         load(photo)
         setCredited(photo)
       }
-      setActive(photo)
+      setStack((prev) => moveTo(prev, photo))
     }
     const applyMode = () => {
       current = modeNow()
@@ -112,7 +125,7 @@ export function NarrativeStack() {
         for (const s of sections) if (near.has(s.el)) load(photoFor(s.id, mqMobile.matches))
         pick()
       } else {
-        setActive(null)
+        setStack((prev) => moveTo(prev, null))
       }
     }
 
@@ -170,6 +183,13 @@ export function NarrativeStack() {
     }
   }, [])
 
+  // A leaving layer is released once its slowest transition (the scale) has run; until then it keeps its `transition`.
+  useEffect(() => {
+    if (leaving.size === 0) return
+    const t = setTimeout(() => setStack((prev) => (prev.leaving.size ? { ...prev, leaving: new Set() } : prev)), PHOTO_SETTLE_MS)
+    return () => clearTimeout(t)
+  }, [leaving])
+
   if (mode !== 'stack') return null
   const creditName = credited ? NARRATIVE_PHOTOS[credited].photographer : ''
   return (
@@ -181,6 +201,7 @@ export function NarrativeStack() {
             className="ts-v2-nar__layer"
             data-photo={id}
             data-active={active === id ? '' : undefined}
+            data-leaving={leaving.has(id) ? '' : undefined}
             data-loaded={loaded.has(id) ? '' : undefined}
             style={loaded.has(id) ? (imageVars(id) as CSSProperties) : undefined}
           />

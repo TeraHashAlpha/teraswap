@@ -89,11 +89,17 @@ describe('§4 radius, fonts, motion', () => {
     expect(VARS['--t-underline']).toBe('600ms')
   })
 
+  it('landing photo tokens: 900 ms cross-fade + 1600 ms scale (owner decision, 26 Oct review — supersedes MOTION-SPEC §3 "180 ms")', () => {
+    expect(VARS['--t-photo']).toBe('900ms')
+    expect(VARS['--t-photo-scale']).toBe('1600ms')
+    expect(VARS['--t-slow']).toBe('180ms') // untouched: still the pack value for everything that is not the photo stack
+  })
+
   it('prefers-reduced-motion zeroes the v2 motion tokens and kills transitions + animations', () => {
     const rm = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*)\n\}/.exec(CSS)?.[1] ?? ''
     expect(rm).toMatch(/--t-toast:0ms/)
     expect(rm).toMatch(/--t-shimmer:0s/)
-    for (const t of ['--t-fast', '--t-base', '--t-slow', '--t-underline']) expect(rm).toContain(`${t}:0ms`)
+    for (const t of ['--t-fast', '--t-base', '--t-slow', '--t-underline', '--t-photo', '--t-photo-scale']) expect(rm).toContain(`${t}:0ms`)
     expect(rm).toMatch(/animation:\s*none\s*!important/)
     expect(rm).toMatch(/transition:\s*none\s*!important/)
   })
