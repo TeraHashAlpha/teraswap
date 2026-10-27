@@ -6,12 +6,15 @@
  * possible pixel (white through the CSS grade + cream multiply + veil), and — stricter — pure white under the plate.
  * Large text (hero headline) also has to clear 3:1 straight on the graded photo, no plate.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import sharp from 'sharp'
+import { afterAll, describe, expect, it } from 'vitest'
 import { V2_COLORS } from '../tokens'
-import { composite, contrastRatio, hexToRgb, type RGB } from './contrast'
+import { composite, contrastRatio, hexToRgb, luminance, type RGB } from './contrast'
+import type { NarrativePhotoId } from './narrative'
 import { PHOTO_TOKENS } from './photo-tokens'
+import { TAB_PHOTO } from './tab-photos'
 
 const BG = hexToRgb(V2_COLORS.bg)
 const WHITE: RGB = [255, 255, 255]
@@ -74,14 +77,48 @@ describe('Round 7 app scrim: content sits on the shell photo with no box', () =>
     expect(css).toContain(`--photo-app-scrim: ${PHOTO_TOKENS.appScrim};`)
   })
 
-  it.each(['text', 'muted', 'cream', 'teal', 'green', 'amber', 'red'] as const)('%s body text clears 4.5 over the brightest graded pixel + app scrim (and on mobile, the extra veil)', (name) => {
+  // Owner addition (round 7): the shell paints each tab's BAKED photo, so the worst case is no longer the CSS grade's
+  // theoretical white but the shipped files — the 95th-percentile pixel of every tab's photo (the landing's narrative-contrast
+  // method), under the constant veil, the app scrim and (≤ 639 px) the extra mobile veil, at both file sizes and formats.
+  const TABS = Object.entries(TAB_PHOTO) as [string, NarrativePhotoId][]
+  const SIZES = [['desktop', 1920, 192, 108], ['mobile', 1080, 108, 192]] as const
+  const BODY_ON_APP = ['text', 'muted', 'cream', 'teal', 'green', 'amber', 'red'] as const
+  const VEIL: RGB = BG
+
+  async function appLuminances(photo: NarrativePhotoId, file: 1920 | 1080, w: number, h: number, ext: 'avif' | 'webp', mobile: boolean): Promise<number[]> {
+    const { data } = await sharp(join(__dirname, 'narrative', `bg-${photo}-${file}.${ext}`)).resize(w, h, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+    const out: number[] = []
+    for (let i = 0; i < data.length; i += 3) {
+      let c = composite(VEIL, PHOTO_TOKENS.bakedVeil, [data[i], data[i + 1], data[i + 2]])
+      if (mobile) c = composite(BG, PHOTO_TOKENS.veilMobile, c) // ≤ 639 px: the extra mobile veil sits UNDER the scrim in the DOM
+      out.push(luminance(composite(BG, PHOTO_TOKENS.appScrim, c)))
+    }
+    return out.sort((a, b) => a - b)
+  }
+  const p95 = (l: number[]) => l[Math.min(l.length - 1, Math.floor(l.length * 0.95))]
+  const ratioOnL = (fg: RGB, bgL: number) => {
+    const [hi, lo] = [luminance(fg), bgL].sort((a, b) => b - a)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  it.each(BODY_ON_APP)('%s body text clears 4.5 over every tab\'s baked photo (p95 pixel) + veil + app scrim, desktop and mobile, AVIF and WebP', async (name) => {
     const fg = hexToRgb(V2_COLORS[name])
-    const scrimmed = composite(BG, PHOTO_TOKENS.appScrim, worstGradedPhotoPixel())
-    const mobile = composite(BG, PHOTO_TOKENS.veilMobile, scrimmed)
-    const r = contrastRatio(fg, scrimmed)
-    rows.push(`app    ${name.padEnd(6)} ${V2_COLORS[name]}  graded worst + app scrim ${fmt(r)}  mobile ${fmt(contrastRatio(fg, mobile))}  (min 4.5)`)
-    expect(r).toBeGreaterThanOrEqual(4.5)
-    expect(contrastRatio(fg, mobile)).toBeGreaterThanOrEqual(4.5)
+    let worst = Infinity
+    let where = ''
+    for (const [tab, photo] of TABS) {
+      for (const [vp, file, w, h] of SIZES) {
+        for (const ext of ['avif', 'webp'] as const) {
+          const r = ratioOnL(fg, p95(await appLuminances(photo, file, w, h, ext, vp === 'mobile')))
+          if (r < worst) [worst, where] = [r, `${tab}=${photo} ${vp} ${ext}`]
+        }
+      }
+    }
+    rows.push(`app    ${name.padEnd(6)} ${V2_COLORS[name]}  8 baked tab photos + veil + app scrim: worst ${fmt(worst)} @ ${where}  (min 4.5)`)
+    expect(worst, where).toBeGreaterThanOrEqual(4.5)
+  })
+
+  afterAll(() => {
+    if (process.env.TS_CONTRAST_OUT) writeFileSync(process.env.TS_CONTRAST_OUT, rows.filter((r) => r.startsWith('app ')).join('\n') + '\n')
   })
 })
 

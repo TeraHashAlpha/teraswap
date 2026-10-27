@@ -338,9 +338,13 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
 
   it.each([
     ['swap', 'Phil Evenden'],
+    ['portfolio', 'Владимир Николаевич'],
     ['dca', 'Willbone Gallery'],
-    ['portfolio', 'Peter Dyllong'],
-    ['analytics', 'Yakup Gökdeniz'],
+    ['limit', 'Oleksiy Yeshtokyn'],
+    ['sltp', 'wal_ 172619'],
+    ['orders', 'Peter Dyllong'],
+    ['history', 'Erik Mclean'],
+    ['analytics', 'MAG Photography'],
   ] as const)('%s → credit names the photographer of that tab\'s photo', (tab, who) => {
     render(<AppShell tab={tab} />)
     expect(screen.getByText(`Photo ${who} / Pexels`)).toBeTruthy()

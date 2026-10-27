@@ -4,6 +4,8 @@
 .ts-v2 {
   --photo-veil: 0.45;
   --photo-app-scrim: 0.47;
+  /* Round 7: the veil over a BAKED photo (the landing's `--nar-veil`, #0B0D0F at 45/255) — the shell's tab photos. */
+  --photo-baked-veil: 0.176;
   --photo-footer-band: 96px;
   --photo-footer-band-alpha: 0.94;
   --photo-grade: grayscale(1) contrast(1.15) brightness(0.5);
@@ -13,6 +15,9 @@
 .ts-v2-photo { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; isolation: isolate; }
 .ts-v2-photo--section { position: absolute; z-index: 0; }
 .ts-v2-photo__img { object-fit: cover; filter: var(--photo-grade); }
+/* Baked photo (a shell tab's): the grade is in the file. A plain <img>, so it needs its own fill. */
+.ts-v2-photo__img--baked { position: absolute; inset: 0; width: 100%; height: 100%; filter: none; }
+.ts-v2-photo__baked-veil { background: rgba(11, 13, 15, var(--photo-baked-veil)); }
 .ts-v2-photo__layer { position: absolute; inset: 0; }
 .ts-v2-photo__tone { background: #EADFB6; mix-blend-mode: multiply; }
 .ts-v2-photo__veil { background: rgba(11, 13, 15, var(--photo-veil)); }

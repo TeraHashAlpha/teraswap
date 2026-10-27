@@ -2,7 +2,8 @@
 
 import Image from 'next/image'
 import './photo.css'
-import { PHOTOS, photoForTab, type PhotoId } from './photos'
+import { PHOTOS, type PhotoId } from './photos'
+import { photoForTab } from './tab-photos'
 import type { V2TabId } from '../shell/tab-paths'
 
 /**
@@ -12,6 +13,10 @@ import type { V2TabId } from '../shell/tab-paths'
  * is `PhotoCredit`, rendered inside the footer. `aboveFold` (the shell: always)
  * makes it eager + `fetchPriority="high"`; otherwise it is lazy. next/image's own `priority` is NOT used: it emits a
  * preload for the <img> (WebP) while AVIF browsers take the `<source>`, i.e. a wasted second download of the hero.
+ *
+ * Two kinds of photo. A `tab` (the shell) paints the landing's baked `bg-*` set (round 7, owner addition): the grade is in
+ * the file, so the layers are just a constant veil, the app scrim, the fades and the footer band — no CSS grade, duotone or
+ * halftone. A `photoId` (the landing hero's round-4 raster) keeps the original CSS-graded recipe.
  */
 export function PhotoBackground({
   tab,
@@ -30,7 +35,32 @@ export function PhotoBackground({
   /** Round 7: the app shell's uniform scrim (content sits on the photo with no box). The landing uses local scrims instead. */
   appScrim?: boolean
 }) {
-  const photo = photoId ? PHOTOS[photoId] : photoForTab(tab ?? 'swap')
+  if (!photoId) {
+    const baked = photoForTab(tab ?? 'swap')
+    return (
+      <div aria-hidden="true" data-photo={baked.id} data-photo-baked="" className={section ? 'ts-v2-photo ts-v2-photo--section' : 'ts-v2-photo'}>
+        <picture>
+          <source type="image/avif" media="(max-width: 600px)" srcSet={baked.avif.w1080} />
+          <source type="image/avif" srcSet={baked.avif.w1920} />
+          <source type="image/webp" media="(max-width: 600px)" srcSet={baked.webp.w1080} />
+          <img
+            src={baked.webp.w1920}
+            alt=""
+            loading={aboveFold ? 'eager' : 'lazy'}
+            fetchPriority={aboveFold ? 'high' : 'auto'}
+            decoding="async"
+            className="ts-v2-photo__img ts-v2-photo__img--baked"
+          />
+        </picture>
+        <div className="ts-v2-photo__layer ts-v2-photo__baked-veil" />
+        <div className="ts-v2-photo__layer ts-v2-photo__veil-mobile" />
+        {appScrim ? <div data-photo-scrim="" className="ts-v2-photo__layer ts-v2-photo__scrim" /> : null}
+        <div className="ts-v2-photo__layer ts-v2-photo__fade" />
+        {section ? null : <div className="ts-v2-photo__band" />}
+      </div>
+    )
+  }
+  const photo = PHOTOS[photoId]
   return (
     <div aria-hidden="true" data-photo={photo.id} className={section ? 'ts-v2-photo ts-v2-photo--section' : 'ts-v2-photo'}>
       <picture>
