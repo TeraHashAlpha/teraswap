@@ -1,8 +1,9 @@
 # UI v2 fonts (next/font/local)
 
 Loaded by `src/ui/v2/font-loader.ts`. Source: Round 2 pack `assets/fonts/` (copied byte-for-byte; the pack has no
-top-level `fonts/`). Both families: SIL Open Font License 1.1 — licence text alongside (`OFL-*.txt`, ADR-012 OK:
-permissive, no copyleft dependency). Inter is not duplicated here: v2 reuses the #565 self-hosted Inter (`src/fonts/inter`).
+top-level `fonts/`). All families: SIL Open Font License 1.1 — licence text alongside (`OFL-*.txt`, ADR-012 OK:
+permissive, no copyleft dependency). Round 7 D1: the body face is **IBM Plex Sans** and Inter has left v2 entirely
+(v1 still loads Inter in `src/app/layout.tsx`; nothing under `src/ui/v2` references it — asserted in `fonts.test.ts`).
 The TTFs below are the unmodified pack masters (kept, not loaded). What ships to the browser are the Latin woff2 subsets in
 `latin/`, generated from them (no repo dependency; tool below).
 
@@ -12,6 +13,12 @@ The TTFs below are the unmodified pack masters (kept, not loaded). What ships to
 | `IBMPlexMono-Regular.ttf` | `OFL-ibmplexmono.txt` | ab08018ccd276b79fb2c636bb95b9c543598f9d50505fe92506fcb4dae7810cd |
 | `IBMPlexMono-Medium.ttf` | `OFL-ibmplexmono.txt` | 8ae925744d53758b67a77ea35c2fc46d7b688c7d8c04da3b579902bed0ca0e17 |
 | `IBMPlexMono-Bold.ttf` | `OFL-ibmplexmono.txt` | dbd2a2fb024579438d6400a84e57579bfd2dbe67c306c8fd9fde92a61e4f2eea |
+| `IBMPlexSans-wght400-700.woff2` | `OFL-ibmplexsans.txt` | 23c481d845e75a6e77bfab7ed0e9a9d4f586fb5e3884a31e4c05562e2a27842c |
+
+`IBMPlexSans-wght400-700.woff2` (66 976 B) is the Round 7 pack's `landing/landing/fonts/` file, byte-for-byte: a variable
+woff2 (wght 400–700, Latin + Cyrillic, 549 glyphs), so there is no TTF master for it. The pack ships no licence file for it;
+`OFL-ibmplexsans.txt` is the same IBM Plex OFL 1.1 text as `OFL-ibmplexmono.txt` (same copyright holder, same Reserved Font
+Name "Plex") — flagged for the Architect in the PR feedback.
 
 Caveat (`--font-hand`, pack §4) is not loaded: the hand underline is an inline SVG and no commit here needs the typeface.
 
@@ -32,4 +39,8 @@ pyftsubset <Face>.ttf --unicodes="$UNI" --flavor=woff2 --layout-features='*' --n
 | `IBMPlexMono-Medium.latin.woff2` | 134 956 B | 10 608 B | −92.1% | f916b1d8fdd480a65a33062abcd1d8fff5daf7d07ae413ab4647eec986b16c2d |
 | `IBMPlexMono-Bold.latin.woff2` | 136 008 B | 10 628 B | −92.2% | c4823cb3090ed72b3bb4b68b48524b7b97ae049eb2b3895a0bc9825645bf1519 |
 
-Total 509 076 B → 48 028 B. Target ≤ 60 KB per face (asserted in `fonts.test.ts`). Glyphs outside the subset (`✓ ✕ ♫ ⌄` UI marks) already fall back to the system font.
+| `IBMPlexSans-wght400-700.latin.woff2` | 66 976 B (pack woff2) | 30 528 B | −54.4% | 4675accfe6c34b09cfe0b5e942c96ede1dc6c6edb275d1fdbfe4b64f3947be69 |
+
+The Plex Sans row was subset from the pack woff2 (not a TTF) with the same command, `UNI` and tool versions; the variable
+`wght 400–700` axis is kept (267 glyphs, no Cyrillic, `→` U+2192 and `é` present). Barlow + Mono: 509 076 B → 48 028 B; with Plex Sans, all five
+loaded faces: 576 052 B → 78 556 B. Target ≤ 60 KB per face (asserted in `fonts.test.ts`). Glyphs outside the subset (`✓ ✕ ♫ ⌄` UI marks) already fall back to the system font.

@@ -1,8 +1,9 @@
 import { darkTheme } from '@rainbow-me/rainbowkit'
+import { v2BodyFontFamily } from '../font-loader'
 import { V2_COLORS } from '../tokens'
 
 /**
- * [ADR-025] RainbowKit connect-modal theme (pack 04): accent cream, background surface, radius 18, Inter, dark only.
+ * [ADR-025] RainbowKit connect-modal theme (pack 04): accent cream, background surface, radius 18, IBM Plex Sans (Round 7 D1), dark only.
  * Applied by a nested RainbowKitProvider inside the shell, so v1's root provider (gold accent, light/dark by user
  * preference) is untouched. The wallet list itself is `wagmiConfig`'s — nothing is re-declared here.
  */
@@ -26,6 +27,6 @@ export function createV2RainbowTheme() {
       menuItemBackground: V2_COLORS.surface2,
     },
     radii: { ...base.radii, modal: '18px' },
-    fonts: { body: 'var(--font-inter), Inter, sans-serif' },
+    fonts: { body: v2BodyFontFamily },
   }
 }

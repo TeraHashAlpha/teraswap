@@ -25,7 +25,7 @@ vi.mock('wagmi', () => ({
   useBlockNumber: () => ({ data: 23_541_870n }),
 }))
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 vi.mock('@/hooks/useChainId', () => ({ useQuoteChainId: () => h.chainId }))
 vi.mock('@/hooks/useQuote', () => ({ useQuote: () => h.quote }))
 vi.mock('@/lib/sounds', async () => ({ ...(await vi.importActual<typeof import('@/lib/sounds')>('@/lib/sounds')), playTouchMP3: h.touch }))

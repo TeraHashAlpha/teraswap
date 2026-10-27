@@ -41,7 +41,7 @@ vi.mock('wagmi', () => ({
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }))
 // v1 loads its below-fold half through next/dynamic; here the two halves are rendered explicitly.
 vi.mock('next/dynamic', () => ({ default: () => () => null }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 vi.mock('@/hooks/useChainId', () => ({ useQuoteChainId: () => h.chainId }))
 vi.mock('@/hooks/useQuote', () => ({
   useQuote: () => ({ meta: { best: { toAmount: '1266342000' } }, loading: false, error: null }),

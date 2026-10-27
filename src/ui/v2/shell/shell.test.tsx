@@ -46,7 +46,7 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => h.pathname, useRouter: () => ({ push: h.push }) }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 // Base / Arbitrum FeeCollectors are env-driven (unset under test) → every chain would be "coming soon".
 // Only that gate is overridden, as in v1's ChainSelector test.
 vi.mock('@/lib/chains/registry', async () => {
