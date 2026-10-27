@@ -1,0 +1,48 @@
+worst graded photo pixel rgb(69,67,57)
+solid  --bg (sheet · strip · drawer)    text  16.79
+solid  --bg (sheet · strip · drawer)    muted  7.81
+solid  --bg (sheet · strip · drawer)    cream 14.58
+solid  --bg (sheet · strip · drawer)    red    6.55
+solid  --bg (sheet · strip · drawer)    green  9.89
+solid  --bg (sheet · strip · drawer)    amber 10.00
+solid  --bg (sheet · strip · drawer)    teal   6.25
+solid  --surface (popover)              text  15.49
+solid  --surface (popover)              muted  7.21
+solid  --surface (popover)              cream 13.45
+solid  --surface (popover)              red    6.04
+solid  --surface (popover)              green  9.13
+solid  --surface (popover)              amber  9.23
+solid  --surface (popover)              teal   5.76
+solid  credit plate over worst photo    text  16.31
+solid  credit plate over worst photo    muted  7.59
+solid  credit plate over worst photo    cream 14.16
+solid  credit plate over worst photo    red    6.36
+solid  credit plate over worst photo    green  9.61
+solid  credit plate over worst photo    amber  9.71
+solid  credit plate over worst photo    teal   6.07
+solid  credit plate over white          text  14.06
+solid  credit plate over white          muted  6.54
+solid  credit plate over white          cream 12.21
+solid  credit plate over white          red    5.48
+solid  credit plate over white          green  8.29
+solid  credit plate over white          amber  8.38
+solid  credit plate over white          teal   5.23
+scrim  --scrim-left             weakest α0.30 text  10.94  (photo worst case)
+scrim  --scrim-left             weakest α0.30 muted  5.09  (photo worst case)
+scrim  --scrim-left             weakest α0.30 cream  9.50  (photo worst case)
+scrim  --scrim-left-race        weakest α0.20 text  10.15  (photo worst case)
+scrim  --scrim-left-race        weakest α0.20 muted  4.72  (photo worst case)
+scrim  --scrim-left-race        weakest α0.20 cream  8.82  (photo worst case)
+scrim  --scrim-left-features    weakest α0.25 text  10.46  (photo worst case)
+scrim  --scrim-left-features    weakest α0.25 muted  4.87  (photo worst case)
+scrim  --scrim-left-features    weakest α0.25 cream  9.09  (photo worst case)
+scrim  --scrim-down             weakest α0.45 text  12.27  (photo worst case)
+scrim  --scrim-down             weakest α0.45 muted  5.71  (photo worst case)
+scrim  --scrim-down             weakest α0.45 cream 10.65  (photo worst case)
+scrim  --scrim-down-features    weakest α0.42 text  12.07  (photo worst case)
+scrim  --scrim-down-features    weakest α0.42 muted  5.61  (photo worst case)
+scrim  --scrim-down-features    weakest α0.42 cream 10.48  (photo worst case)
+edge   --hairline-ring α0.47   3.91  (min 3.0)
+edge   --hairline-underline α0.6   5.70  (min 3.0)
+sep    --hairline α0.16   1.45  (decorative, exempt)
+sep    --hairline-rule α0.35   2.67  (decorative, exempt)

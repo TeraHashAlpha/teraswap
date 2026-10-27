@@ -18,7 +18,7 @@ import { formatDisplay } from '@/lib/format'
 import { playTouchMP3 } from '@/lib/sounds'
 import { findToken, type Token } from '@/lib/tokens'
 import { safeBigInt } from '@/lib/utils'
-import { Button, EyebrowLabel, HandUnderline, Panel } from '../primitives'
+import { Button, EyebrowLabel, HandUnderline, Surface } from '../primitives'
 import { PhotoBackground } from '../photos/PhotoBackground'
 import { heroStats } from './slots'
 
@@ -50,11 +50,12 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
   })()
   const hasResolvedQuote = receiveDisplay !== null && !error && !pairUnavailable
 
-  const ROW = 'flex items-center justify-between rounded-v2-control border border-v2-border bg-v2-bg px-4 py-3'
-  const CHIP = 'rounded-v2-chip border border-v2-border bg-v2-surface2 px-3 py-1.5 font-v2-mono text-sm text-v2-text'
+  // Round 7: amount rows are underline fields, the token is text — no boxes, no chips.
+  const ROW = 'ts-v2-rule-b flex items-center justify-between py-3'
+  const CHIP = 'font-v2-mono text-sm text-v2-text'
   return (
     <div className="mx-auto w-full max-w-[470px]">
-      <Panel overPhoto className="flex flex-col gap-3 p-5">
+      <Surface edge="rule" className="flex flex-col gap-3 py-2">
         <div className="flex items-center justify-between">
           <span className="font-v2-mono text-[11px] font-bold uppercase tracking-[2px] text-v2-muted">Swap</span>
           <span className="text-sm text-v2-text">Try it live →</span>
@@ -81,7 +82,9 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
             </div>
           </div>
         ) : null}
+        {/* the hero's one solid CTA is "Launch app"; the preview's action is a text button (Round 7 D3 item 6) */}
         <Button
+          variant="text"
           className="mt-1 w-full"
           onClick={() => {
             playTouchMP3()
@@ -90,7 +93,7 @@ function SwapPreview({ onLaunchApp }: { onLaunchApp: () => void }) {
         >
           Swap →
         </Button>
-      </Panel>
+      </Surface>
     </div>
   )
 }
@@ -105,14 +108,14 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
   const stats = heroStats(chainId)
 
   return (
-    <section id="hero" className="ts-v2-opaque relative overflow-hidden px-4 pb-16 pt-8 sm:px-8 sm:pb-24 sm:pt-16">
+    <section id="hero" className="ts-v2-opaque ts-v2-scrim relative overflow-hidden px-4 pb-16 pt-8 sm:px-8 sm:pb-24 sm:pt-16">
       <PhotoBackground photoId="trails" section />
       {/* Under lg both columns are `contents`, so the four blocks order themselves as pack m01 does (copy · stats · chips ·
           preview); from lg up they are the 7/5 columns of pack 10a. */}
       <div className="relative z-10 mx-auto grid max-w-[1240px] items-start gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
         <div className="contents text-left lg:block">
           <div className="ts-v2-rise order-1 lg:order-none">
-          <EyebrowLabel className="ts-v2-plate">Meta-Aggregator</EyebrowLabel>
+          <EyebrowLabel>Meta-Aggregator</EyebrowLabel>
           <h1 className="mt-6 font-v2-display text-[56px] font-bold uppercase leading-[0.95] tracking-[-0.01em] text-v2-text sm:text-[96px] lg:text-[112px]">
             <span className="block">One swap.</span>{' '}
             <span className="block">{INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP} routes.</span>{' '}
@@ -120,7 +123,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
               <HandUnderline>Verified.</HandUnderline>
             </span>
           </h1>
-          <p className="ts-v2-plate mt-8 inline-block max-w-xl text-[16px] leading-relaxed text-v2-muted sm:text-[18px]">
+          <p className="mt-8 max-w-xl text-[16px] leading-relaxed text-v2-muted sm:text-[18px]">
             TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade, verifies the price against
             Chainlink oracles, and offers MEV-protected routes via CoW Protocol.
           </p>
@@ -136,7 +139,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
             </Button>
             <a
               href="#performance"
-              className="ts-v2-plate inline-flex items-center justify-center gap-1.5 text-[15px] text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 text-[15px] text-v2-text hover:text-v2-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
             >
               See the routing engine <span aria-hidden="true">→</span>
             </a>
@@ -149,7 +152,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
               'Powered by Chainlink',
               PRIVACY_BADGE,
             ].map((chip) => (
-              <span key={chip} className="ts-v2-plate border-l-2 border-v2-cream pl-2">
+              <span key={chip} className="border-l-2 border-v2-cream pl-2">
                 {chip}
               </span>
             ))}
@@ -157,7 +160,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
         </div>
 
         <div className="contents lg:flex lg:flex-col lg:gap-4 lg:pt-4">
-          <Panel overPhoto className="ts-v2-rise order-2 p-5 lg:order-none">
+          <Surface edge="both" className="ts-v2-rise order-2 py-5 lg:order-none">
             <dl className="grid grid-cols-3 gap-x-4">
               {stats.map((s) => (
                 <div key={s.label} className="flex min-w-0 flex-col-reverse justify-end gap-2">
@@ -166,7 +169,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
                 </div>
               ))}
             </dl>
-          </Panel>
+          </Surface>
           <div className="ts-v2-rise order-4 lg:order-none">
             <SwapPreview onLaunchApp={onLaunchApp} />
           </div>

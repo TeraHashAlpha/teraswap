@@ -27,7 +27,7 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => '/portfolio', useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 
 import { AppShell } from './AppShell'
 
@@ -106,14 +106,14 @@ describe('tab strip scroll', () => {
 })
 
 describe('mobile photo treatment', () => {
-  it('the column below the tabs is solid on mobile with 12 px side margins, transparent from sm up', () => {
+  it('Round 7 D2: no solid column on mobile — the photo (with its uniform scrim) sits behind the content at every width', () => {
     render(<AppShell />)
     const col = document.querySelector('[data-ts-column]') as HTMLElement
-    expect(col.className).toMatch(/\bmx-3\b/)
-    expect(col.className).toMatch(/\bbg-v2-bg\b/)
-    expect(col.className).toMatch(/sm:mx-0/)
-    expect(col.className).toMatch(/sm:bg-transparent/)
+    expect(col.className).not.toMatch(/\bbg-v2-|\bmx-3\b|sm:bg-/)
     expect(col.contains(screen.getByRole('contentinfo'))).toBe(true)
+    expect(document.querySelector('[data-photo-scrim].ts-v2-photo__scrim')).not.toBeNull()
+    expect(PHOTO_CSS).toContain('--photo-app-scrim: 0.47;')
+    expect(PHOTO_CSS).toMatch(/\.ts-v2-photo__scrim \{ background: rgba\(11, 13, 15, var\(--photo-app-scrim\)\); \}/)
   })
 
   it('extra 35% veil is a token, shown only below 640 px', () => {

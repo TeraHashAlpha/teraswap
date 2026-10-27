@@ -8,7 +8,6 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT,
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_LABELS,
-  INTEGRATED_DEX_SOURCE_NAMES,
   OUTLIER_MEDIAN_MULTIPLE,
   POST_EXECUTION_SHORTFALL_WARN_PCT,
   PRICE_DEVIATION_BLOCK_PCT,
@@ -25,9 +24,10 @@ import {
   type OrderTypeId,
 } from '@/config/product-claims'
 import { useQuoteChainId } from '@/hooks/useChainId'
-import { Button, EyebrowLabel, HandUnderline, Panel } from '../primitives'
+import { Button, EyebrowLabel, HandUnderline, Surface } from '../primitives'
 import { NarrativeStill } from './NarrativeStill'
 import { STILL_PHOTO, rvAt } from './narrative'
+import { RouteRace } from './RouteRace'
 import { securityStats } from './slots'
 
 const H2 = 'font-v2-display font-bold uppercase leading-[0.98] tracking-[-0.005em] text-v2-text text-[44px] sm:text-[64px] lg:text-[80px]'
@@ -35,71 +35,37 @@ const BODY = 'max-w-[640px] text-[16px] leading-relaxed text-v2-muted'
 const SECTION = 'relative scroll-mt-8 px-4 py-16 sm:px-8 sm:py-24'
 const WRAP = 'relative z-10 mx-auto max-w-[1240px]'
 
-function SectionHead({ eyebrow, children, onPhoto = false, reveal = false }: { eyebrow: string; children: ReactNode; onPhoto?: boolean; reveal?: boolean }) {
+function SectionHead({ eyebrow, children, reveal = false }: { eyebrow: string; children: ReactNode; reveal?: boolean }) {
   return (
     <div className={reveal ? 'ts-v2-rv mb-8 sm:mb-10' : 'mb-8 sm:mb-10'}>
-      <EyebrowLabel className={onPhoto ? 'ts-v2-plate' : undefined}>{eyebrow}</EyebrowLabel>
+      <EyebrowLabel>{eyebrow}</EyebrowLabel>
       <h2 className={`mt-4 ${H2}`}>{children}</h2>
     </div>
   )
 }
 
-// ── 2 · Performance (pack 10 §2: landing-b routing block + source graph) ─────────────────────────────────────
-
-function SourceGraph() {
-  const RX = 42
-  const RY = 36
-  const names = INTEGRATED_DEX_SOURCE_NAMES
-  const points = names.map((_, i) => {
-    const angle = -Math.PI / 2 + (i / names.length) * 2 * Math.PI
-    return { x: 50 + RX * Math.cos(angle), y: 50 + RY * Math.sin(angle) }
-  })
-  return (
-    <Panel overPhoto className="p-4 sm:p-6">
-      <div role="group" aria-label="Liquidity sources" className="relative mx-auto aspect-square w-full max-w-[560px]">
-        <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          {points.map((p, i) => (
-            <line key={names[i]} x1="50" y1="50" x2={p.x} y2={p.y} stroke="#6B9B94" strokeOpacity="0.55" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
-          ))}
-        </svg>
-        <div className="absolute left-1/2 top-1/2 flex h-14 w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-v2-cream bg-v2-bg sm:h-20 sm:w-32">
-          <span className="font-v2-display text-lg uppercase text-v2-cream sm:text-2xl">TeraSwap</span>
-        </div>
-        {names.map((name, i) => (
-          <div
-            key={name}
-            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-            style={{ left: `${points[i].x}%`, top: `${points[i].y}%` }}
-          >
-            <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-v2-teal" />
-            <span className="mt-1.5 whitespace-nowrap font-v2-mono text-[10px] text-v2-text sm:text-[12px]">{name}</span>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  )
-}
+// ── 2 · Performance (Round 7 D4: the route race replaces the radial source graph) ─────────────────────────────
 
 export function PerformanceSection() {
   return (
-    <section id="performance" className={`ts-v2-opaque ${SECTION} overflow-hidden`}>
+    <section id="performance" className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--race ${SECTION} overflow-hidden`}>
       <NarrativeStill photoId={STILL_PHOTO.performance} />
       <div className={`${WRAP} grid items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16`}>
         <div>
-          <EyebrowLabel className="ts-v2-plate">Performance</EyebrowLabel>
+          <EyebrowLabel>Performance</EyebrowLabel>
           <h2 className={`mt-4 ${H2}`}>
             <span className="block">
               <HandUnderline>Limitless Liquidity.</HandUnderline>
             </span>
             <span className="block text-v2-cream">Relentless Execution.</span>
           </h2>
-          <p className={`ts-v2-plate mt-6 inline-block ${BODY}`}>
+          <p className={`mt-6 ${BODY}`}>
             Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously scans {INTEGRATED_DEX_SOURCE_COUNT_WORDS}{' '}
             liquidity sources across {SWAP_CHAIN_LIST_LABEL} — identifying and executing the optimal route to deliver the highest net output
             on every single swap. Gas costs are folded into the ranking, so the quote you see is the one your wallet actually feels.
           </p>
         </div>
-        <SourceGraph />
+        <RouteRace />
       </div>
     </section>
   )
@@ -131,11 +97,11 @@ export function DifferentSection() {
         <ol className="grid list-none gap-4 lg:grid-cols-3">
           {BLOCKS.map((b, i) => (
             <li key={b.title}>
-              <Panel className="h-full p-6 sm:p-8">
+              <Surface edge="rule" className="h-full py-1">
                 <span className="font-v2-display text-5xl font-bold text-v2-cream">{String(i + 1).padStart(2, '0')}</span>
                 <h3 className="mt-5 text-xl text-v2-text">{b.title}</h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-v2-muted">{b.desc}</p>
-              </Panel>
+              </Surface>
             </li>
           ))}
         </ol>
@@ -164,7 +130,7 @@ export function SecuritySection() {
     },
   ]
   return (
-    <section id="security" data-ts-narrative="security" className={SECTION}>
+    <section id="security" data-ts-narrative="security" className={`ts-v2-scrim ${SECTION}`}>
       <div className={WRAP}>
         <SectionHead eyebrow="Security" reveal>
           Institutional-Grade <HandUnderline className="text-v2-cream">Security.</HandUnderline>
@@ -190,18 +156,16 @@ export function SecuritySection() {
           <ul className="grid list-none gap-4 sm:grid-cols-2">
             {CHECKS.map((c, i) => (
               <li key={c.tag} className="ts-v2-rv" style={rvAt(i)}>
-                <Panel className="h-full p-5">
-                  <span className="inline-block rounded border border-v2-border bg-v2-surface2 px-2 py-1 font-v2-mono text-[10px] font-bold tracking-[1.5px] text-v2-cream">
-                    {c.tag}
-                  </span>
+                <Surface edge="rule" className="h-full py-1">
+                  <span className="ts-v2-badge">{c.tag}</span>
                   <div className="mt-4 text-[17px] text-v2-text">{c.title}</div>
                   <p className="mt-2 text-[14px] leading-relaxed text-v2-muted">{c.body}</p>
-                </Panel>
+                </Surface>
               </li>
             ))}
           </ul>
         </div>
-        <Panel className="ts-v2-rv mt-8 p-6 sm:p-8" style={rvAt(CHECKS.length)}>
+        <Surface edge="both" className="ts-v2-rv mt-8 py-6 sm:py-8" style={rvAt(CHECKS.length)}>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-6 lg:grid-cols-4">
             {stats.map((s) => (
               <div key={s.label} className="flex min-w-0 flex-col-reverse justify-end gap-2">
@@ -210,7 +174,7 @@ export function SecuritySection() {
               </div>
             ))}
           </dl>
-        </Panel>
+        </Surface>
       </div>
     </section>
   )
@@ -220,7 +184,7 @@ export function SecuritySection() {
 
 export function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section id="experience" data-ts-narrative="experience" className={SECTION}>
+    <section id="experience" data-ts-narrative="experience" className={`ts-v2-scrim ${SECTION}`}>
       <div className={`${WRAP} grid items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16`}>
         <div>
           <div className="ts-v2-rv">
@@ -238,15 +202,11 @@ export function ExperienceSection({ onLaunchApp }: { onLaunchApp: () => void }) 
             Because visual clarity is the first step toward financial clarity.
           </p>
         </div>
-        <Panel className="ts-v2-rv flex items-center justify-center p-8" style={rvAt(0)}>
-          <button
-            type="button"
-            onClick={onLaunchApp}
-            className="inline-flex min-h-[46px] items-center gap-2 font-v2-mono text-sm font-bold uppercase tracking-[1.5px] text-v2-cream hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
-          >
-            Launch the full app <span aria-hidden="true">→</span>
-          </button>
-        </Panel>
+        <Surface edge="rule" className="ts-v2-rv flex items-center py-8" style={rvAt(0)}>
+          <Button variant="text" onClick={onLaunchApp}>
+            Launch the full app <span aria-hidden="true">&nbsp;→</span>
+          </Button>
+        </Surface>
       </div>
     </section>
   )
@@ -321,42 +281,44 @@ export function FeaturesSection() {
   const { live, roadmap } = splitFeatures()
   return (
     <>
-      <section id="features" data-ts-narrative="features" className={SECTION}>
+      <section id="features" data-ts-narrative="features" className={`ts-v2-scrim ts-v2-scrim--features ${SECTION}`}>
         <div className={WRAP}>
           <SectionHead eyebrow="Features" reveal>
             Built for every EVM trader.
           </SectionHead>
           <p className="ts-v2-rv -mt-4 mb-8 text-[15px] text-v2-muted">Every capability shipping today, plus what&apos;s next on the roadmap.</p>
-          <ul className="grid list-none gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Round 7 D4: a numbered editorial list — hairline above each item, two columns from 601 px, one below, no boxes. */}
+          <ol data-ts-flist="" className="m-0 grid list-none grid-cols-1 p-0 sm:grid-cols-2 sm:gap-x-[72px]">
             {live.map((f, i) => (
-              <li key={f.title} className="ts-v2-rv" style={rvAt(i)}>
-                <Panel className="h-full p-5 sm:p-6">
-                  <h3 className="border-l-[3px] border-v2-cream pl-3 text-[17px] text-v2-text">{f.title}</h3>
-                  <p className="mt-3 text-[14px] leading-relaxed text-v2-muted">{f.desc}</p>
-                </Panel>
+              <li key={f.title} className="ts-v2-rv ts-v2-rule-t grid grid-cols-[44px_1fr] py-4 sm:grid-cols-[56px_1fr] sm:py-5" style={rvAt(i)}>
+                <span aria-hidden="true" data-list-index="" className="font-v2-display text-2xl font-bold leading-none text-v2-cream sm:text-[28px]">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <div>
+                  <h3 className="text-[17px] font-semibold leading-snug text-v2-text">{f.title}</h3>
+                  <p className="mt-1.5 text-[14px] leading-[22px] text-v2-muted">{f.desc}</p>
+                </div>
               </li>
             ))}
-          </ul>
+          </ol>
         </div>
       </section>
       {roadmap.length > 0 ? (
-        <section id="roadmap" data-ts-narrative="roadmap" className={SECTION}>
+        <section id="roadmap" data-ts-narrative="roadmap" className={`ts-v2-scrim ${SECTION}`}>
           <div className={WRAP}>
             <SectionHead eyebrow="Roadmap" reveal>
               Coming Soon
             </SectionHead>
-            <ul className="grid list-none gap-4 md:grid-cols-2">
+            <ul className="grid list-none gap-6 md:grid-cols-2 md:gap-8">
               {roadmap.map((f, i) => (
                 <li key={f.title} className="ts-v2-rv" style={rvAt(i)}>
-                  <Panel className="h-full p-6 sm:p-8">
+                  <Surface edge="rule" className="h-full py-1">
                     <div className="flex items-start justify-between gap-3">
                       <h3 className="text-xl text-v2-text">{f.title}</h3>
-                      <span className="shrink-0 rounded border border-v2-border px-1.5 py-0.5 font-v2-mono text-[10px] font-bold uppercase tracking-[1.5px] text-v2-dim">
-                        Soon
-                      </span>
+                      <span className="ts-v2-badge ts-v2-badge--soon shrink-0 uppercase">Soon</span>
                     </div>
                     <p className="mt-4 text-[15px] leading-relaxed text-v2-muted">{f.desc}</p>
-                  </Panel>
+                  </Surface>
                 </li>
               ))}
             </ul>
@@ -371,7 +333,7 @@ export function FeaturesSection() {
 
 export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className={`ts-v2-opaque ${SECTION} overflow-hidden text-center`}>
+    <section className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden text-center`}>
       <NarrativeStill photoId={STILL_PHOTO.cta} />
       <div className="relative z-10 mx-auto max-w-[900px]">
         <h2 className={H2}>
@@ -381,7 +343,7 @@ export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
           </span>
           <span className="block">on the table.</span>
         </h2>
-        <p className="ts-v2-plate mx-auto mt-6 inline-block max-w-[520px] text-[16px] leading-relaxed text-v2-muted">
+        <p className="mx-auto mt-6 max-w-[520px] text-[16px] leading-relaxed text-v2-muted">
           Experience decentralized trading engineered to work harder than any single exchange ever could.
         </p>
         <div className="mt-8">
@@ -389,7 +351,7 @@ export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
             Launch app
           </Button>
         </div>
-        <div className="ts-v2-plate mt-6 inline-block font-v2-mono text-[11px] font-medium uppercase tracking-[1.5px] text-v2-muted">
+        <div className="mt-6 font-v2-mono text-[11px] font-medium uppercase tracking-[1.5px] text-v2-muted">
           Non-custodial · {SWAP_CHAIN_LIST_LABEL} · Powered by Chainlink · {PRIVACY_BADGE}
         </div>
       </div>
@@ -399,20 +361,21 @@ export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
 
 export function DocsSection() {
   return (
-    <section id="docs" data-ts-narrative="docs" className={`${SECTION} pb-24`}>
+    <section id="docs" data-ts-narrative="docs" className={`ts-v2-scrim ${SECTION} pb-24`}>
       <div className={WRAP}>
         <SectionHead eyebrow="Docs" reveal>
           Read the docs.
         </SectionHead>
-        <Panel className="ts-v2-rv flex flex-col items-start justify-between gap-6 p-6 sm:flex-row sm:items-center sm:p-8" style={rvAt(0)}>
+        <Surface edge="rule" className="ts-v2-rv flex flex-col items-start justify-between gap-6 py-2 sm:flex-row sm:items-center" style={rvAt(0)}>
           <span className="font-v2-mono text-sm text-v2-cream">/docs</span>
+          {/* Round 7 D3 item 7: text + hairline underline, no outline box */}
           <Link
             href="/docs"
-            className="inline-flex min-h-[46px] items-center gap-2 rounded-v2-control border border-v2-border bg-v2-surface2 px-5 font-v2-mono text-[13px] font-bold uppercase tracking-[1.5px] text-v2-text hover:border-v2-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
+            className="ts-v2-underline inline-flex min-h-[44px] items-center gap-2 bg-transparent px-1 font-v2-mono text-[12px] font-medium uppercase tracking-[1.5px] text-v2-cream hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
           >
             Read the docs <span aria-hidden="true">→</span>
           </Link>
-        </Panel>
+        </Surface>
       </div>
     </section>
   )

@@ -11,3 +11,31 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
+
+/* ── Round 7 (D2/D3/D4): local scrims, badges as text, route race, numbered features list ────────────────────────
+   Values are tokens (tokens.css = the round7 landing.css literals). The scrim is a ::after at z-index 1: above the photo
+   (the fixed stack or a section's own NarrativeStill, both z-index 0), below the content wrapper (z-10). */
+.ts-v2-scrim { position: relative; }
+.ts-v2-scrim::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: var(--scrim-left); }
+.ts-v2-scrim--race::after { background: var(--scrim-left-race); }
+.ts-v2-scrim--features::after { background: var(--scrim-left-features); }
+.ts-v2-scrim--center::after { background: var(--scrim-down); }
+@media (max-width: 600px) {
+  .ts-v2-scrim::after, .ts-v2-scrim--race::after { background: var(--scrim-down); }
+  .ts-v2-scrim--features::after { background: var(--scrim-down-features); }
+}
+
+/* Badges are text labels: `· PRE-SWAP` (no chip). */
+.ts-v2-badge { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--cream); }
+.ts-v2-badge::before { content: "· "; }
+.ts-v2-badge--soon { color: var(--muted); }
+
+/* Route race (D4): 8 bars by net output, winner cream, illustrative. The bars grow in from the left once the figure is within
+   one viewport; before that (or with no JS / IntersectionObserver) they are full width — nothing is hidden by default. */
+.ts-v2-race__bar { display: block; height: 8px; border-radius: 4px; background: rgba(107, 155, 148, 0.6); transform-origin: left;
+  transition: transform var(--bar-dur) var(--bar-ease); }
+.ts-v2-race__row[data-win] .ts-v2-race__bar { background: var(--cream); }
+.ts-v2-race[data-race-js]:not([data-race-near]) .ts-v2-race__bar { transform: scaleX(0.05); }
+@media (prefers-reduced-motion: reduce) {
+  .ts-v2-race__bar, .ts-v2-race[data-race-js]:not([data-race-near]) .ts-v2-race__bar { transform: none !important; transition: none !important; }
+}

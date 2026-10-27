@@ -1,6 +1,11 @@
+export { Surface, type SurfaceProps, type SurfaceVariant, type SurfaceEdge, type SurfaceAccent } from './Surface'
+/** @deprecated Round 7: use `Surface`. */
 export { Panel, type PanelProps } from './Panel'
-export { Button, type ButtonProps, type ButtonVariant } from './Button'
-export { Tabs, type TabsProps, type TabItem } from './Tabs'
+export { Button, type ButtonProps, type ButtonVariant, type ButtonTone } from './Button'
+export { Tabs, Segmented, type TabsProps, type TabItem } from './Tabs'
+export { Chip, type ChipProps } from './Chip'
+export { Input, type InputProps } from './Input'
+export { Toggle, type ToggleProps } from './Toggle'
 export { EyebrowLabel, type EyebrowLabelProps } from './EyebrowLabel'
 export { HandUnderline, type HandUnderlineProps } from './HandUnderline'
 export { Skeleton, type SkeletonProps } from './Skeleton'

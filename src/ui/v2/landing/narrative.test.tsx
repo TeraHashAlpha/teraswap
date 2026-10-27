@@ -90,6 +90,10 @@ describe('section → photo map (MOTION-SPEC §2)', () => {
       tunnel: 'Владимир Николаевич',
       archlight: 'wal_ 172619',
       underpass: 'Willbone Gallery',
+      // round 7 (owner addition): the app shell's per-tab photos share this set
+      zakim: 'Phil Evenden',
+      archnight: 'Peter Dyllong',
+      overpass: 'MAG Photography',
     })
     for (const s of NARRATIVE_SECTIONS) for (const k of ['desktop', 'mobile'] as const) expect(NARRATIVE_PHOTOS[SECTION_PHOTO[s][k]]).toBeDefined()
   })

@@ -37,7 +37,7 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => '/swap', useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 
 type Event = { op: 'play' | 'pause'; src: string; volume: number; loop: boolean }
 let log: Event[] = []

@@ -46,7 +46,7 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => h.pathname, useRouter: () => ({ push: h.push }) }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 // Base / Arbitrum FeeCollectors are env-driven (unset under test) → every chain would be "coming soon".
 // Only that gate is overridden, as in v1's ChainSelector test.
 vi.mock('@/lib/chains/registry', async () => {
@@ -338,9 +338,13 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
 
   it.each([
     ['swap', 'Phil Evenden'],
+    ['portfolio', 'Владимир Николаевич'],
     ['dca', 'Willbone Gallery'],
-    ['portfolio', 'Peter Dyllong'],
-    ['analytics', 'Yakup Gökdeniz'],
+    ['limit', 'Oleksiy Yeshtokyn'],
+    ['sltp', 'wal_ 172619'],
+    ['orders', 'Peter Dyllong'],
+    ['history', 'Erik Mclean'],
+    ['analytics', 'MAG Photography'],
   ] as const)('%s → credit names the photographer of that tab\'s photo', (tab, who) => {
     render(<AppShell tab={tab} />)
     expect(screen.getByText(`Photo ${who} / Pexels`)).toBeTruthy()

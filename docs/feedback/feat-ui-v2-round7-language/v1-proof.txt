@@ -1,0 +1,10 @@
+index      chunks 30->30  identical set: YES  raw 2758361 -> 2758361 (d 0)  gz 768043 -> 768043 (d 0)  v2-marked chunks base/branch 0/0
+swap       chunks 30->30  identical set: YES  raw 2744753 -> 2744753 (d 0)  gz 763637 -> 763637 (d 0)  v2-marked chunks base/branch 0/0
+analytics  chunks 25->25  identical set: YES  raw 2297823 -> 2297823 (d 0)  gz 631624 -> 631624 (d 0)  v2-marked chunks base/branch 0/0
+docs       chunks 27->27  identical set: YES  raw 2473928 -> 2473928 (d 0)  gz 687842 -> 687842 (d 0)  v2-marked chunks base/branch 0/0
+privacy    chunks 25->25  identical set: YES  raw 2314100 -> 2314100 (d 0)  gz 637132 -> 637132 (d 0)  v2-marked chunks base/branch 0/0
+terms      chunks 25->25  identical set: YES  raw 2314098 -> 2314098 (d 0)  gz 637132 -> 637132 (d 0)  v2-marked chunks base/branch 0/0
+status     chunks 10->10  identical set: YES  raw 618724 -> 618724 (d 0)  gz 193627 -> 193627 (d 0)  v2-marked chunks base/branch 0/0
+admin      chunks 13->13  identical set: YES  raw 917146 -> 917146 (d 0)  gz 272881 -> 272881 (d 0)  v2-marked chunks base/branch 0/0
+
+ALL v1 pages load an identical chunk set: true

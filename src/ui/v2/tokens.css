@@ -14,21 +14,34 @@
   --red:#FF5C7A; --green:#7FC8A0; --amber:#E3B341;
 
   --font-display:var(--font-barlow),"Barlow Condensed",sans-serif;
-  --font-sans:var(--font-inter),Inter,sans-serif;
+  --font-body:var(--font-plex-sans),"IBM Plex Sans",system-ui,sans-serif;
+  --font-sans:var(--font-body);
   --font-mono:var(--font-plex-mono),"IBM Plex Mono",monospace;
   --font-hand:Caveat,cursive;
 
   --radius-card:16px; --radius-control:10px;
 
+  /* Round 7 (D2/D3) — no-box language. One cream hairline separates content; the single filled shape is a square CTA.
+     Values are the round7 landing.css literals (EADFB6 = --cream, 0B0D0F = --bg). */
+  --hairline:rgba(234,223,182,.16); --hairline-rule:rgba(234,223,182,.35);
+  --hairline-ring:rgba(234,223,182,.47); --hairline-underline:rgba(234,223,182,.6);
+  --radius-cta:0px;
+  --scrim-left:linear-gradient(90deg,rgba(11,13,15,.8) 0%,rgba(11,13,15,.6) 45%,rgba(11,13,15,.3) 75%,rgba(11,13,15,.3) 100%);
+  --scrim-left-race:linear-gradient(90deg,rgba(11,13,15,.8) 0%,rgba(11,13,15,.6) 40%,rgba(11,13,15,.2) 65%,rgba(11,13,15,.2) 100%);
+  --scrim-left-features:linear-gradient(90deg,rgba(11,13,15,.82) 0%,rgba(11,13,15,.62) 38%,rgba(11,13,15,.25) 70%,rgba(11,13,15,.25) 100%);
+  --scrim-down:linear-gradient(180deg,rgba(11,13,15,.55),rgba(11,13,15,.45));
+  --scrim-down-features:linear-gradient(180deg,rgba(11,13,15,.5),rgba(11,13,15,.42));
+
   --t-toast:160ms; --t-shimmer:1.2s;
   --ease-out:cubic-bezier(0.2,0.8,0.2,1); --ease-inout:cubic-bezier(0.65,0,0.35,1);
+  --bar-dur:900ms; --bar-ease:cubic-bezier(.2,.7,.2,1);
   --t-fast:120ms; --t-base:160ms; --t-slow:180ms; --t-underline:600ms;
   /* Landing photo cross-fade + slow scale. Owner decision (26 Oct review): supersedes MOTION-SPEC §3 "180 ms" (--t-slow). */
   --t-photo:900ms; --t-photo-scale:1600ms;
 
   background-color: var(--bg);
   color: var(--text);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
 }
 
 @media (prefers-reduced-motion: reduce) {

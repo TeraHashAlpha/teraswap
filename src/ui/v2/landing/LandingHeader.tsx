@@ -57,7 +57,7 @@ export function LandingHeader({ onLaunchApp }: { onLaunchApp: () => void }) {
       </nav>
       <div className="flex items-center gap-2">
         <Button
-          className="h-11 min-h-0 px-4 sm:px-6"
+          variant="text"
           onClick={() => {
             playTouchMP3()
             onLaunchApp()
@@ -70,7 +70,7 @@ export function LandingHeader({ onLaunchApp }: { onLaunchApp: () => void }) {
           aria-label="Menu"
           aria-expanded={menu}
           onClick={() => setMenu((m) => !m)}
-          className="flex h-11 w-11 items-center justify-center rounded-v2-control border border-v2-border bg-v2-surface text-v2-muted hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal md:hidden"
+          className="flex h-11 w-11 items-center justify-center bg-transparent text-v2-muted hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal md:hidden"
         >
           <span aria-hidden="true">{menu ? '✕' : '☰'}</span>
         </button>
@@ -78,7 +78,7 @@ export function LandingHeader({ onLaunchApp }: { onLaunchApp: () => void }) {
       {menu ? (
         <nav
           aria-label="Sections"
-          className={cx('absolute inset-x-0 top-full z-30 flex flex-col gap-4 border-b border-v2-border bg-v2-bg/95 p-4 md:hidden')}
+          className={cx('ts-v2-rule-b absolute inset-x-0 top-full z-30 flex flex-col gap-4 bg-v2-bg p-4 md:hidden')}
         >
           {links}
         </nav>

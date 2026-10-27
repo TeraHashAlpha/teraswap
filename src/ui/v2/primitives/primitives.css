@@ -1,8 +1,9 @@
-/* [ADR-025] Skeleton: cream 5% sweep on surface-2, shimmer = --t-shimmer (1.2s, pack ARCHITECT_BRIEF.md:24
-   + foundation 00). Reduced motion: no shimmer (tokens.css also zeroes animation inside .ts-v2). */
+/* [ADR-025] Skeleton: cream sweep on a hairline-cream bar, shimmer = --t-shimmer (1.2s, pack ARCHITECT_BRIEF.md:24
+   + foundation 00). Round 7 (D2): unboxed — square, no border, no surface-2 block. Reduced motion: no shimmer
+   (tokens.css also zeroes animation inside .ts-v2). */
 .ts-v2-skeleton {
-  background-color: var(--surface-2);
-  background-image: linear-gradient(90deg, transparent 0%, rgba(234, 223, 182, 0.05) 50%, transparent 100%);
+  background-color: var(--hairline);
+  background-image: linear-gradient(90deg, transparent 0%, rgba(234, 223, 182, 0.1) 50%, transparent 100%);
   background-repeat: no-repeat;
   background-size: 200% 100%;
   animation: ts-v2-shimmer var(--t-shimmer) linear infinite;
@@ -16,3 +17,44 @@
 @media (prefers-reduced-motion: reduce) {
   .ts-v2-skeleton { background-image: none; }
 }
+
+/* ── Round 7 no-box language (D2/D3): one hairline family, values from tokens.css ─────────────────────────────── */
+.ts-v2-rule-t { border-top: 1px solid var(--hairline); }
+.ts-v2-rule-b { border-bottom: 1px solid var(--hairline); }
+.ts-v2-rule-l { border-left: 1px solid var(--hairline); }
+.ts-v2-rule-accent { border-left: 2px solid var(--hairline-rule); padding-left: 22px; }
+
+/* Text button / selected chip: the hairline underline is an inset shadow so it never shifts layout. */
+.ts-v2-underline { box-shadow: inset 0 -1px 0 var(--hairline-underline); }
+.ts-v2-underline[data-tone='danger'] { box-shadow: inset 0 -1px 0 var(--red); }
+.ts-v2-underline:disabled { box-shadow: none; }
+.ts-v2-chip[data-selected] { box-shadow: inset 0 -1px 0 var(--cream); }
+
+/* Underline input: transparent, no box, no radius. Idle underline = --hairline-ring (≥ 3:1 on --bg); focus cream; error red
+   (declared last: error wins over focus). The focus indicator is the underline itself, thickened to 2 px. */
+.ts-v2-input {
+  border: 0; border-radius: 0; border-bottom: 1px solid var(--hairline-ring);
+  padding: 8px 0; min-height: 44px; outline: none; box-shadow: none;
+  transition: border-color var(--t-fast) var(--ease-out);
+}
+.ts-v2-input:hover { border-bottom-color: var(--hairline-underline); }
+.ts-v2-input:focus-visible { border-bottom: 2px solid var(--cream); padding-bottom: 7px; }
+.ts-v2-input[aria-invalid='true'], .ts-v2-input[aria-invalid='true']:focus-visible { border-bottom-color: var(--red); }
+.ts-v2-input:disabled { color: var(--dim); border-bottom-color: var(--hairline); cursor: not-allowed; }
+
+/* Switch (kept by the owner, D3 item 10): 40×22 track, the only rounded shape besides the FAB ring. */
+.ts-v2-switch {
+  position: relative; flex: none; width: 40px; height: 22px; border-radius: 999px; padding: 0;
+  background: transparent; box-shadow: inset 0 0 0 1px var(--hairline-ring);
+  transition: background-color var(--t-base) var(--ease-out);
+}
+.ts-v2-switch[aria-checked='true'] { background: var(--cream); box-shadow: none; }
+.ts-v2-switch:disabled { opacity: 0.5; }
+.ts-v2-switch__thumb {
+  position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 999px; background: var(--muted);
+  transition: transform var(--t-base) var(--ease-out), background-color var(--t-base) var(--ease-out);
+}
+.ts-v2-switch[aria-checked='true'] .ts-v2-switch__thumb { transform: translateX(18px); background: var(--bg); }
+
+/* Tab badge ("soon"): a plain text marker, `· ` supplied here so the accessible name stays the bare label (round7 .badge::before). */
+[data-tab-badge]::before { content: '· '; }

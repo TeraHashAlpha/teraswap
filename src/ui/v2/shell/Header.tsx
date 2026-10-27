@@ -11,7 +11,7 @@ import { NetworkMenu } from './NetworkMenu'
  */
 export function Header({ onLogoClick }: { onLogoClick?: () => void }) {
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-v2-border px-4 py-4 sm:px-8">
+    <header className="ts-v2-rule-b flex items-center justify-between gap-3 px-4 py-4 sm:px-8">
       <Link
         href="/"
         onClick={(e) => {

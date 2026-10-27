@@ -8,7 +8,7 @@ import '../v2.css'
 import './shell.css'
 import { v2FontClassNames } from '../font-loader'
 import { PhotoBackground } from '../photos/PhotoBackground'
-import { photoForTab } from '../photos/photos'
+import { photoForTab } from '../photos/tab-photos'
 import { createV2RainbowTheme } from './rainbowkit-theme'
 import { DcaNetworkGate, shouldShowDcaGate } from './DcaNetworkGate'
 import { Footer } from './Footer'
@@ -38,13 +38,13 @@ export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; childr
     <RainbowKitProvider theme={rkTheme} locale="en">
       <V2ToastProvider>
         <div data-ts-ui="v2" className={`ts-v2 relative min-h-screen ${v2FontClassNames}`}>
-          <PhotoBackground tab={active} />
+          <PhotoBackground tab={active} appScrim />
           <div className="relative z-10 flex min-h-screen flex-col">
             <Header onLogoClick={onLogoClick} />
             <NoticeBanner />
             <TabBar active={active} />
-            {/* mobile (pack round4): photo behind header + tab strip only; the column below is solid, 12 px side margins */}
-            <div data-ts-column="" className="mx-3 flex flex-1 flex-col bg-v2-bg sm:mx-0 sm:bg-transparent">
+            {/* Round 7 D2: no solid column on mobile either — the photo (with its uniform scrim) sits behind every screen */}
+            <div data-ts-column="" className="flex flex-1 flex-col">
               <main className="flex-1 px-4 py-8 sm:px-8">{pane}</main>
               <Footer photos={[photoForTab(active)]} />
             </div>
