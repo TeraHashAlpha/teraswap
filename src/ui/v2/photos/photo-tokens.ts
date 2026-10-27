@@ -7,6 +7,8 @@ export const PHOTO_TOKENS = {
   veil: 0.45,
   /** Extra veil below 640 px (pack round4 "Mobile": 35%). */
   veilMobile: 0.35,
+  /** Round 7 app recipe: a uniform #0B0D0F scrim (α 120/255) over the shell's photo so content can sit on it unboxed. */
+  appScrim: 0.47,
   /** Solid footer band, last 96 px of the page (recipe step 7: #0B0D0F, alpha 240/255). */
   footerBandPx: 96,
   footerBandAlpha: 0.94,

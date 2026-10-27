@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
-import { cx } from '../primitives/cx'
+import { Surface, type SurfaceAccent } from '../primitives'
 
 /**
  * [ADR-025] v2 toasts (pack 05): top-right stack, max 3 visible, newest on top, left bar by type, a loading toast is
@@ -101,12 +101,13 @@ export function V2ToastProvider({ children }: { children: ReactNode }) {
   )
 }
 
-const BAR: Record<ToastType, string> = {
-  loading: 'bg-v2-cream',
-  success: 'bg-v2-green',
-  warning: 'bg-v2-amber',
-  error: 'bg-v2-red',
-  info: 'bg-v2-teal',
+/** Round 7 D3 item 14: a solid strip with a 2 px left accent in the status colour — no border, no radius. */
+const ACCENT: Record<ToastType, SurfaceAccent> = {
+  loading: 'cream',
+  success: 'green',
+  warning: 'amber',
+  error: 'red',
+  info: 'teal',
 }
 
 function txUrl(txHash: string, chainId: number): string {
@@ -120,12 +121,13 @@ function txUrl(txHash: string, chainId: number): string {
 function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const selectedChain = useQuoteChainId()
   return (
-    <div
+    <Surface
+      variant="strip"
+      accent={ACCENT[t.type]}
       role={t.type === 'error' ? 'alert' : 'status'}
       data-toast-type={t.type}
-      className="ts-v2-toast pointer-events-auto relative flex gap-3 overflow-hidden rounded-v2-card border border-v2-border bg-v2-surface py-3 pl-5 pr-3"
+      className="ts-v2-toast pointer-events-auto relative flex gap-3 py-3 pl-4 pr-3"
     >
-      <span aria-hidden="true" className={cx('absolute inset-y-0 left-0 w-1', BAR[t.type])} />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-v2-text">{t.title}</p>
         {t.description ? <p className="mt-0.5 text-xs text-v2-muted">{t.description}</p> : null}
@@ -143,6 +145,6 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: () => voi
       <button type="button" onClick={onDismiss} aria-label="Dismiss notification" className="flex h-8 w-8 shrink-0 items-center justify-center self-start text-v2-muted hover:text-v2-text">
         <span aria-hidden="true">✕</span>
       </button>
-    </div>
+    </Surface>
   )
 }

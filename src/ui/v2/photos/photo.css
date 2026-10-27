@@ -3,6 +3,7 @@
    fades → 96 px solid footer band → cream halftone. Numbers are tokens (photo-tokens.ts pins them). */
 .ts-v2 {
   --photo-veil: 0.45;
+  --photo-app-scrim: 0.47;
   --photo-footer-band: 96px;
   --photo-footer-band-alpha: 0.94;
   --photo-grade: grayscale(1) contrast(1.15) brightness(0.5);
@@ -39,6 +40,9 @@
   .ts-v2-photo-credit--desktop { display: none; }
   .ts-v2-photo-credit--mobile { display: inline-block; }
 }
+
+/* Round 7: the shell's photo carries a uniform dark scrim (round7 app recipe) — content sits on it, unboxed (D2). */
+.ts-v2-photo__scrim { background: rgba(11, 13, 15, var(--photo-app-scrim)); }
 
 /* Text on open photo gets a solid #0B0D0F plate (92%); contrast pairs are asserted in photo.test.ts. */
 .ts-v2-plate {

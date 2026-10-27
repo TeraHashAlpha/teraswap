@@ -6,7 +6,7 @@ import { mainnet } from 'wagmi/chains'
 import { getChainConfig } from '@/lib/chains/registry'
 import { fmtToken } from '@/lib/format'
 import { useQuoteChainId } from '@/hooks/useChainId'
-import { Button } from '../primitives'
+import { Button, Surface } from '../primitives'
 import { shortAddress } from './format-address'
 
 /**
@@ -52,24 +52,26 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
   if (!open || !address) return null
 
   const chain = getChainConfig(chainId)
+  // Round 7: three text actions, each with the hairline underline — no cells, no fills.
   const action =
-    'flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-v2-control border border-v2-border bg-v2-surface2 px-2 py-2 text-[11px] text-v2-muted hover:text-v2-text'
+    'ts-v2-underline flex min-h-[44px] items-center justify-center bg-transparent px-2 py-2 font-v2-mono text-[11px] uppercase tracking-[1.5px] text-v2-cream hover:text-v2-text'
 
   return (
-    <div
+    <Surface
+      variant="popover"
       ref={ref}
       role="dialog"
       aria-label="Account"
-      className="absolute right-0 top-full z-50 mt-2 w-[320px] max-w-[calc(100vw-2rem)] rounded-v2-card border border-v2-border bg-v2-surface p-4 shadow-2xl shadow-black/40"
+      className="absolute right-0 top-full z-50 mt-2 w-[320px] max-w-[calc(100vw-2rem)] p-4"
     >
       <div className="flex flex-col items-center gap-2 pb-3 text-center">
         {ensAvatar ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={ensAvatar} alt="ENS avatar" className="h-14 w-14 rounded-full border border-v2-border object-cover" />
+          <img src={ensAvatar} alt="ENS avatar" className="h-14 w-14 rounded-full object-cover" />
         ) : (
           <span
             aria-hidden="true"
-            className="flex h-14 w-14 items-center justify-center rounded-full border border-v2-border bg-v2-surface2 font-v2-mono text-sm text-v2-muted"
+            className="flex h-14 w-14 items-center justify-center rounded-full border border-[color:var(--hairline-ring)] font-v2-mono text-sm text-v2-muted"
           >
             0x
           </span>
@@ -85,13 +87,13 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
           <span className="text-xl">{balance ? fmtToken(balance.formatted) : '—'}</span>
           <span className="text-sm text-v2-muted">{balance?.symbol ?? chain.nativeCurrency.symbol}</span>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-v2-surface2 px-2.5 py-1 font-v2-mono text-[10px] uppercase tracking-wider text-v2-muted">
+        <span className="inline-flex items-center gap-1.5 font-v2-mono text-[10px] uppercase tracking-wider text-v2-muted">
           <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-v2-green" />
           {chain.name}
         </span>
       </div>
 
-      <div className="flex items-center justify-between border-y border-v2-border py-2 text-xs">
+      <div className="ts-v2-rule-t ts-v2-rule-b flex items-center justify-between py-2 text-xs">
         <span className="text-v2-dim">Connected via</span>
         <span className="text-v2-muted">{connector?.name ?? 'Wallet'}</span>
       </div>
@@ -109,8 +111,9 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
       </div>
 
       <Button
-        variant="secondary"
-        className="w-full text-v2-red"
+        variant="text"
+        tone="danger"
+        className="w-full"
         onClick={() => {
           disconnect()
           onClose()
@@ -118,6 +121,6 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
       >
         Disconnect
       </Button>
-    </div>
+    </Surface>
   )
 }

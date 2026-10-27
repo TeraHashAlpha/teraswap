@@ -34,6 +34,7 @@
 
   --t-toast:160ms; --t-shimmer:1.2s;
   --ease-out:cubic-bezier(0.2,0.8,0.2,1); --ease-inout:cubic-bezier(0.65,0,0.35,1);
+  --bar-dur:900ms; --bar-ease:cubic-bezier(.2,.7,.2,1);
   --t-fast:120ms; --t-base:160ms; --t-slow:180ms; --t-underline:600ms;
 
   background-color: var(--bg);

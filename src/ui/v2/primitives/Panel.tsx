@@ -1,25 +1,19 @@
-import type { HTMLAttributes } from 'react'
-import { cx } from './cx'
+import { Surface, type SurfaceProps } from './Surface'
 
-export interface PanelProps extends HTMLAttributes<HTMLDivElement> {
-  /** Over a photo the panel stays 95% opaque (pack foundation 00: "over photo: 92–98% opaque"). */
+export interface PanelProps extends SurfaceProps {
+  /** @deprecated No effect since Round 7: nothing is a 95 %-opaque box any more; text over a photo gets a scrim. */
   overPhoto?: boolean
 }
 
 /**
  * @deprecated Round 7 D2 (no boxes) — use `Surface` (`variant="plain"` for content). Kept under its old name (CLAUDE.md
- * rule #4). Frozen at the pre-Round-7 look (surface + 1px border + 16px radius) until the in-tree callers move to
- * `Surface`, so no screen is left half-unboxed with text on a photo and no scrim; it becomes a `Surface` alias then.
+ * rule #4): it now renders `<Surface variant="plain">` — no fill, border or radius — and `overPhoto` is accepted and ignored.
+ * Nothing in the tree calls it any more.
  */
-export function Panel({ overPhoto = false, className, ...rest }: PanelProps) {
-  return (
-    <div
-      className={cx(
-        'rounded-v2-card border border-v2-border',
-        overPhoto ? 'bg-v2-surface/95' : 'bg-v2-surface',
-        className,
-      )}
-      {...rest}
-    />
-  )
+export function Panel({
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- accepted and ignored, see PanelProps
+  overPhoto,
+  ...rest
+}: PanelProps) {
+  return <Surface variant="plain" {...rest} />
 }

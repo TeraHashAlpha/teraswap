@@ -176,7 +176,14 @@ describe('numbers are slots', () => {
 
   it('no stray typed number: every numeral in the page text is a mocked slot or part of verbatim v1 copy', () => {
     mount()
-    const landing = Array.from(document.querySelectorAll('main, header')).map((n) => n.textContent ?? '').join(' ')
+    // the Features list indices (01…) are position markers, not claims: pinned separately in round7.test.tsx
+    const landing = Array.from(document.querySelectorAll('main, header'))
+      .map((n) => {
+        const c = n.cloneNode(true) as Element
+        c.querySelectorAll('[data-list-index]').forEach((i) => i.remove())
+        return c.textContent ?? ''
+      })
+      .join(' ')
     const found = new Set(landing.match(/\d+(?:\.\d+)?/g))
     const slots = new Set([
       '11', '13', '3', '31', '0.7', // sources · checks · stages (mocked) · feeds (Ethereum) · fee
@@ -221,8 +228,10 @@ describe('numbers are slots', () => {
   it('chains and sources in the copy come from the claims, not typed', () => {
     mount()
     expect(text()).toContain(SWAP_CHAIN_LIST_LABEL)
-    const graph = within(screen.getByRole('group', { name: 'Liquidity sources' }))
-    for (const name of INTEGRATED_DEX_SOURCE_NAMES) expect(graph.getAllByText(name).length).toBeGreaterThan(0)
+    // Round 7 D4: the route race lists the queried sources once, in one line, from the claims module
+    expect(screen.getByRole('img', { name: /Illustrative route race/ })).toBeTruthy()
+    expect(text()).toContain(`SOURCES QUERIED: ${INTEGRATED_DEX_SOURCE_NAMES.join(' · ')}`)
+    expect(text()).toContain('NET OUTPUT AFTER GAS · 11 SOURCES') // the mocked count, not a typed 8
   })
 })
 
@@ -384,16 +393,96 @@ describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
     expect(Math.max(...cards.map((c) => staggerDelayMs(idx(c))))).toBe(160)
   })
 
-  it('muted copy sits straight on the photo only in security / experience / features (narrative-contrast.test.ts models exactly that)', () => {
+  it('Round 7 D2: every narrative section has its own local scrim and no box — copy sits straight on the photo', () => {
     mount()
-    const offPanel = (id: string) =>
-      Array.from(document.querySelectorAll(`#${id} [class*="text-v2-muted"]`)).filter((el) => !el.closest('[class*="bg-v2-surface"]'))
-    for (const id of ['security', 'experience', 'features']) expect(offPanel(id).length, id).toBeGreaterThan(0)
-    for (const id of ['roadmap', 'docs']) expect(offPanel(id).map((e) => e.textContent), id).toEqual([])
+    const BOXED = /\b(bg-v2-surface2?(\/\d+)?|border-v2-border|rounded-v2-(card|control|chip))\b/
+    for (const id of NARRATIVE_SECTIONS) {
+      const sec = document.getElementById(id)!
+      expect(sec.classList.contains('ts-v2-scrim'), id).toBe(true)
+      expect(Array.from(sec.querySelectorAll('[class]')).filter((e) => BOXED.test(e.getAttribute('class')!)).map((e) => e.className), id).toEqual([])
+    }
+    expect(document.getElementById('features')!.classList.contains('ts-v2-scrim--features')).toBe(true)
+    // and no opaque text plate is left anywhere in the landing (the credit chip is the one kept container)
+    expect(document.querySelectorAll('main .ts-v2-plate')).toHaveLength(0)
   })
 
   it('every headline underline is inside a narrative section h2 (so the draw-once CSS reaches it)', () => {
     mount()
     for (const id of ['security', 'experience']) expect(document.querySelectorAll(`#${id} h2 svg`).length).toBeGreaterThan(0)
+  })
+})
+
+describe('Round 7 language (D2–D4) on the mounted landing', () => {
+  const primaries = () => Array.from(document.querySelectorAll('button[data-variant="primary"]'))
+
+  it('§2 is the route race: one figure, one bar per (mocked) source, one cream winner, illustrative label', () => {
+    mount()
+    const perf = document.getElementById('performance')!
+    const rows = perf.querySelectorAll('.ts-v2-race__row')
+    expect(rows).toHaveLength(11)
+    expect(perf.querySelectorAll('.ts-v2-race__row[data-win]')).toHaveLength(1)
+    expect(perf.querySelectorAll('figure')).toHaveLength(1)
+    expect(perf.textContent).toContain('ILLUSTRATIVE · NOT A LIVE QUOTE')
+    expect(perf.querySelector('[role="group"][aria-label="Liquidity sources"]')).toBeNull() // the radial graph is gone
+  })
+
+  it('§6 is a numbered list 01…N: one column below 601 px, two from there, a hairline above every item', () => {
+    mount()
+    const list = document.querySelector('[data-ts-flist]')!
+    expect(list.tagName).toBe('OL')
+    expect(list.className).toMatch(/\bgrid-cols-1\b/)
+    expect(list.className).toMatch(/sm:grid-cols-2/)
+    const items = Array.from(list.children)
+    expect(items).toHaveLength(9) // 11 features, Limit and SL/TP not live → on the roadmap
+    expect(items.map((li) => li.querySelector('[data-list-index]')!.textContent)).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09'])
+    for (const li of items) {
+      expect(li.className).toMatch(/ts-v2-rule-t/)
+      expect(li.className).not.toMatch(/\bborder\b|\bbg-v2-|rounded/)
+      expect(li.querySelector('h3')).not.toBeNull()
+    }
+  })
+
+  it('…and numbers on past 09 when Limit and SL/TP go live (no roadmap then)', () => {
+    h.orderLive = new Set(['dca', 'limit', 'stopLoss'])
+    mount()
+    const idx = Array.from(document.querySelectorAll('[data-ts-flist] [data-list-index]')).map((n) => n.textContent)
+    expect(idx).toHaveLength(11)
+    expect(idx[9]).toBe('10')
+    expect(idx[10]).toBe('11')
+    expect(document.getElementById('roadmap')).toBeNull()
+  })
+
+  it('every photo section has a local scrim: hero, §2 (race), §8 (centred) and the five narrative sections', () => {
+    mount()
+    const hero = document.getElementById('hero')!
+    const perf = document.getElementById('performance')!
+    const cta = document.querySelector('main > section.ts-v2-scrim--center')!
+    expect(hero.classList.contains('ts-v2-scrim')).toBe(true)
+    expect(perf.classList.contains('ts-v2-scrim--race')).toBe(true)
+    expect(cta).not.toBeNull()
+    // the opaque "why" section sits on --bg, with no photo: it needs no scrim
+    expect(document.getElementById('why-teraswap')!.classList.contains('ts-v2-scrim')).toBe(false)
+  })
+
+  it('ONE solid cream square CTA per screen: the header has none, the hero has one, the bottom CTA has one', () => {
+    mount()
+    expect(document.querySelectorAll('header button[data-variant="primary"]')).toHaveLength(0)
+    expect(document.querySelectorAll('#hero button[data-variant="primary"]')).toHaveLength(1)
+    expect(primaries()).toHaveLength(2)
+    const heroCta = document.querySelector('#hero button[data-variant="primary"]')!
+    expect(heroCta.textContent).toBe('Launch app')
+    expect(heroCta.className).toMatch(/rounded-\[var\(--radius-cta\)\]/) // square, from the token
+    // every other action is text: the header's Launch app, the preview's Swap →, the Experience launch
+    const textBtn = (label: string | RegExp) => screen.getAllByRole('button', { name: label }).filter((b) => b.getAttribute('data-variant') === 'text')
+    expect(textBtn('Launch app').length).toBeGreaterThan(0)
+    expect(textBtn('Swap →')).toHaveLength(1)
+    expect(textBtn(/Launch the full app/)).toHaveLength(1)
+  })
+
+  it('Docs link is a text button (hairline underline), not an outlined box', () => {
+    mount()
+    const link = screen.getByRole('link', { name: /Read the docs/ })
+    expect(link.className).toMatch(/ts-v2-underline/)
+    expect(link.className).not.toMatch(/\bborder\b|bg-v2-surface|rounded/)
   })
 })

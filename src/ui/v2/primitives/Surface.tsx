@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from 'react'
+import { forwardRef, type HTMLAttributes } from 'react'
 import { cx } from './cx'
 import './primitives.css'
 
@@ -7,18 +7,20 @@ import './primitives.css'
  * the photo behind a local scrim and is separated from its neighbours by one cream hairline. The other three are the
  * functional overlays FUNCTIONAL-CONTAINERS.md keeps, in their minimal form: solid, square, hairline only.
  *
- *   plain    no fill · no border · no radius              (cards, rows, panels, summaries — formerly `Panel`)
+ *   plain    no fill · no border · no radius              (cards, rows, panels, summaries — formerly `Panel`;
+ *                                                          a card keeps one 2 px cream rule: `edge="rule"`)
  *   sheet    solid --bg · top hairline (or left, a drawer)  (modals — full-bleed — and the help drawer)
  *   strip    solid --bg · bottom hairline, or a 2 px accent  (mobile header/tab strip, toasts, the notice banner)
  *   popover  solid --surface · 1 px hairline · no shadow       (dropdown menu; `bare` = no hairline, for a tooltip)
  */
 export type SurfaceVariant = 'plain' | 'sheet' | 'strip' | 'popover'
-export type SurfaceEdge = 'top' | 'bottom' | 'left' | 'both'
+export type SurfaceEdge = 'top' | 'bottom' | 'left' | 'both' | 'rule'
 export type SurfaceAccent = 'cream' | 'teal' | 'red' | 'green' | 'amber'
 
 export interface SurfaceProps extends HTMLAttributes<HTMLDivElement> {
   variant?: SurfaceVariant
-  /** Which side carries the hairline. Default: plain none · sheet top · strip bottom. `both` = top + bottom (stats). */
+  /** Which side carries the hairline. Default: plain none · sheet top · strip bottom. `both` = top + bottom (stats);
+   *  `rule` = the 2 px cream rule on the left that stands in for a card's box (Round 7 `.card`). */
   edge?: SurfaceEdge
   /** strip only: a 2 px left accent in the status colour instead of the bottom hairline (toasts, banner). */
   accent?: SurfaceAccent
@@ -31,6 +33,7 @@ const EDGE: Record<SurfaceEdge, string> = {
   bottom: 'ts-v2-rule-b',
   left: 'ts-v2-rule-l',
   both: 'ts-v2-rule-t ts-v2-rule-b',
+  rule: 'ts-v2-rule-accent',
 }
 
 const ACCENT: Record<SurfaceAccent, string> = {
@@ -42,11 +45,14 @@ const ACCENT: Record<SurfaceAccent, string> = {
 }
 
 /** No radius anywhere (square is the language). Layout and padding are the caller's, via className. */
-export function Surface({ variant = 'plain', edge, accent, bare = false, className, ...rest }: SurfaceProps) {
+export const Surface = forwardRef<HTMLDivElement, SurfaceProps>(function Surface(
+  { variant = 'plain', edge, accent, bare = false, className, ...rest },
+  ref,
+) {
   let look: string
   if (variant === 'sheet') look = cx('bg-v2-bg', EDGE[edge ?? 'top'])
   else if (variant === 'strip') look = cx('bg-v2-bg', accent ? cx('border-l-2', ACCENT[accent]) : EDGE[edge ?? 'bottom'])
   else if (variant === 'popover') look = cx('bg-v2-surface', !bare && 'border border-[color:var(--hairline)]')
   else look = edge ? EDGE[edge] : ''
-  return <div data-surface={variant} className={cx(look, className)} {...rest} />
-}
+  return <div ref={ref} data-surface={variant} className={cx(look, className)} {...rest} />
+})

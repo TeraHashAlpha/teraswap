@@ -18,6 +18,7 @@ export function PhotoBackground({
   photoId,
   aboveFold = true,
   section = false,
+  appScrim = false,
 }: {
   /** The shell: one fixed photo per tab (pack round4 assignment). */
   tab?: V2TabId
@@ -26,6 +27,8 @@ export function PhotoBackground({
   aboveFold?: boolean
   /** Fill the nearest positioned ancestor (a landing section) instead of the viewport; no footer band. */
   section?: boolean
+  /** Round 7: the app shell's uniform scrim (content sits on the photo with no box). The landing uses local scrims instead. */
+  appScrim?: boolean
 }) {
   const photo = photoId ? PHOTOS[photoId] : photoForTab(tab ?? 'swap')
   return (
@@ -47,6 +50,7 @@ export function PhotoBackground({
       <div className="ts-v2-photo__layer ts-v2-photo__tone" />
       <div className="ts-v2-photo__layer ts-v2-photo__veil" />
       <div className="ts-v2-photo__layer ts-v2-photo__veil-mobile" />
+      {appScrim ? <div data-photo-scrim="" className="ts-v2-photo__layer ts-v2-photo__scrim" /> : null}
       <div className="ts-v2-photo__layer ts-v2-photo__fade" />
       <div className="ts-v2-photo__layer ts-v2-photo__dots" />
       {section ? null : <div className="ts-v2-photo__band" />}

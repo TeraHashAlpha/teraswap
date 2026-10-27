@@ -18,7 +18,7 @@ import KitPage from './page'
 
 /** The pinned Round 7 kit matrix: <Primitive>/<variant>/<state>, in page order. */
 const KIT_CELLS = [
-  'Surface/plain/default', 'Surface/plain/edge-both', 'Surface/sheet/top', 'Surface/sheet/left', 'Surface/strip/bottom',
+  'Surface/plain/default', 'Surface/plain/edge-both', 'Surface/plain/edge-rule', 'Surface/sheet/top', 'Surface/sheet/left', 'Surface/strip/bottom',
   'Surface/strip/accent-cream', 'Surface/strip/accent-teal', 'Surface/strip/accent-red', 'Surface/strip/accent-green',
   'Surface/strip/accent-amber', 'Surface/popover/hairline', 'Surface/popover/bare', 'Panel/deprecated/default',
   'Button/primary/enabled', 'Button/primary/disabled', 'Button/text/enabled', 'Button/text/disabled', 'Button/text/danger',

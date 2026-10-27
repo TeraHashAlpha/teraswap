@@ -6,6 +6,8 @@
  * possible pixel (white through the CSS grade + cream multiply + veil), and — stricter — pure white under the plate.
  * Large text (hero headline) also has to clear 3:1 straight on the graded photo, no plate.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { V2_COLORS } from '../tokens'
 import { composite, contrastRatio, hexToRgb, type RGB } from './contrast'
@@ -62,6 +64,24 @@ describe('text plates (token pairs)', () => {
       ].join('\n'),
     )
     expect(rows.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Round 7 app scrim: content sits on the shell photo with no box', () => {
+  it('the scrim is the recipe\'s BG α 120/255 and the CSS twin says the same', () => {
+    expect(PHOTO_TOKENS.appScrim).toBeCloseTo(120 / 255, 2)
+    const css = readFileSync(join(__dirname, 'photo.css'), 'utf8')
+    expect(css).toContain(`--photo-app-scrim: ${PHOTO_TOKENS.appScrim};`)
+  })
+
+  it.each(['text', 'muted', 'cream', 'teal', 'green', 'amber', 'red'] as const)('%s body text clears 4.5 over the brightest graded pixel + app scrim (and on mobile, the extra veil)', (name) => {
+    const fg = hexToRgb(V2_COLORS[name])
+    const scrimmed = composite(BG, PHOTO_TOKENS.appScrim, worstGradedPhotoPixel())
+    const mobile = composite(BG, PHOTO_TOKENS.veilMobile, scrimmed)
+    const r = contrastRatio(fg, scrimmed)
+    rows.push(`app    ${name.padEnd(6)} ${V2_COLORS[name]}  graded worst + app scrim ${fmt(r)}  mobile ${fmt(contrastRatio(fg, mobile))}  (min 4.5)`)
+    expect(r).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(fg, mobile)).toBeGreaterThanOrEqual(4.5)
   })
 })
 

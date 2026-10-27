@@ -50,7 +50,7 @@ export function Footer({ photos, mobilePhotos }: { photos?: readonly ShellPhoto[
 
   return (
     <footer data-ts-footer="" className="box-border min-h-[var(--photo-footer-band)] px-4 pb-20 pt-3 sm:px-8 sm:pb-3">
-      <div className="border-t border-v2-border pt-3">
+      <div className="ts-v2-rule-t pt-3">
         <p className="text-xs text-v2-muted">{V2_RISK_LINE}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0 font-v2-mono text-[11px] uppercase tracking-[0.5px] text-v2-muted">
           <Link href="/docs" className={LINK}>

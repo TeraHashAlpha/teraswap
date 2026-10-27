@@ -26,8 +26,9 @@ describe('Surface', () => {
     expect(el.className).not.toMatch(BOX)
   })
 
-  it('plain separates with one hairline on the requested edge(s)', () => {
+  it('plain separates with one hairline on the requested edge(s); `rule` is the 2 px accent that replaces a card box', () => {
     render(<>
+      <Surface data-testid="r" edge="rule" />
       <Surface data-testid="t" edge="top" />
       <Surface data-testid="b" edge="bottom" />
       <Surface data-testid="l" edge="left" />
@@ -37,6 +38,9 @@ describe('Surface', () => {
     expect(screen.getByTestId('b').className).toBe('ts-v2-rule-b')
     expect(screen.getByTestId('l').className).toBe('ts-v2-rule-l')
     expect(screen.getByTestId('x').className).toBe('ts-v2-rule-t ts-v2-rule-b')
+    expect(screen.getByTestId('r').className).toBe('ts-v2-rule-accent')
+    expect(CSS).toMatch(/\.ts-v2-rule-accent \{ border-left: 2px solid var\(--hairline-rule\);/)
+    expect(screen.getByTestId('r').className).not.toMatch(BOX)
   })
 
   it('sheet: solid --bg with a top hairline only (a drawer takes the left); no radius, no outline', () => {
@@ -73,18 +77,27 @@ describe('Surface', () => {
   })
 })
 
-describe('Panel (deprecated, frozen until the callers move to Surface)', () => {
-  it('still renders the pre-Round-7 look: surface + 1px border + card radius, 95 % over a photo', () => {
-    render(<Panel data-testid="p" className="p-5">hello</Panel>)
+describe('Panel (deprecated re-export)', () => {
+  it('still exists and renders an unboxed plain Surface; overPhoto is accepted and ignored', () => {
+    render(<Panel data-testid="p" overPhoto className="p-5">hello</Panel>)
     const el = screen.getByTestId('p')
     expect(el.textContent).toBe('hello')
-    expect(el.className).toMatch(/\bbg-v2-surface\b/)
-    expect(el.className).toMatch(/\bborder\b/)
-    expect(el.className).toMatch(/rounded-v2-card/)
+    expect(el.getAttribute('data-surface')).toBe('plain')
     expect(el.className).toMatch(/\bp-5\b/)
-    cleanup()
-    render(<Panel data-testid="o" overPhoto>x</Panel>)
-    expect(screen.getByTestId('o').className).toMatch(/bg-v2-surface\/95/)
+    expect(el.className).not.toMatch(BOX)
+    expect(el.hasAttribute('overphoto')).toBe(false)
+  })
+
+  it('nothing in the v2 tree calls it any more (callers moved to Surface)', () => {
+    const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs')
+    const root = join(__dirname, '..')
+    const walk = (d: string): string[] =>
+      readdirSync(d).flatMap((n) => {
+        const f = join(d, n)
+        return statSync(f).isDirectory() ? walk(f) : /\.tsx$/.test(n) && !/\.test\.tsx$/.test(n) && !f.includes('/primitives/') ? [f] : []
+      })
+    const callers = walk(root).filter((f) => /<Panel\b/.test(readFileSync(f, 'utf8')))
+    expect(callers).toEqual([])
   })
 })
 

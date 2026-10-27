@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import ChainIcon from '@/components/icons/ChainIcon'
+import { Surface } from '../primitives'
 import { cx } from '../primitives/cx'
 import { shellChains } from './chains'
 import { useShellChain } from './use-shell-chain'
@@ -74,7 +75,7 @@ export function NetworkMenu() {
         aria-controls={open ? listId : undefined}
         aria-label={`Network: ${active.name}`}
         onClick={() => (open ? close(false) : openMenu())}
-        className="inline-flex h-11 items-center gap-2 rounded-full border border-v2-border bg-v2-surface px-3 text-sm text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
+        className="ts-v2-underline inline-flex h-11 items-center gap-2 bg-transparent px-1 text-sm text-v2-text hover:text-v2-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
       >
         <ChainIcon chainId={active.chainId} className="h-5 w-5 shrink-0" />
         <span className="hidden sm:inline">{active.name}</span>
@@ -84,11 +85,12 @@ export function NetworkMenu() {
       </button>
 
       {open ? (
-        <div
+        <Surface
+          variant="popover"
           id={listId}
           role="listbox"
           aria-label="Networks"
-          className="absolute right-0 top-full z-50 mt-2 w-[250px] rounded-v2-card border border-v2-border bg-v2-surface p-2 shadow-2xl shadow-black/40"
+          className="absolute right-0 top-full z-50 mt-2 w-[250px] p-2"
         >
           {chains.map((c, i) => {
             const selected = c.chainId === chainId
@@ -103,8 +105,9 @@ export function NetworkMenu() {
                 onMouseEnter={() => setHighlight(i)}
                 onClick={() => choose(c.chainId)}
                 className={cx(
-                  'flex w-full items-center gap-3 rounded-v2-control px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50',
-                  (selected || i === highlight) && 'bg-v2-surface2',
+                  'flex w-full items-center gap-3 px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50',
+                  // Round 7: the current / highlighted row is set off by two hairlines, not a fill
+                  (selected || i === highlight) && 'shadow-[inset_0_1px_0_var(--hairline),inset_0_-1px_0_var(--hairline)]',
                 )}
               >
                 <ChainIcon chainId={c.chainId} className="h-6 w-6 shrink-0 rounded-full" />
@@ -113,7 +116,7 @@ export function NetworkMenu() {
                   <span className="block text-[11px] text-v2-muted">{c.subtitle}</span>
                 </span>
                 {!c.selectable ? (
-                  <span className="rounded-v2-chip border border-v2-border px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-v2-dim">Soon</span>
+                  <span data-soon="" className="text-[9px] uppercase tracking-wide text-v2-dim">Soon</span>
                 ) : null}
                 {selected ? (
                   <span aria-hidden="true" className="text-v2-text">
@@ -123,7 +126,7 @@ export function NetworkMenu() {
               </button>
             )
           })}
-        </div>
+        </Surface>
       ) : null}
     </div>
   )

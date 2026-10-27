@@ -7,7 +7,10 @@
  *    veil (`--nar-veil`, read from narrative.css) over them. States: every photo × desktop (1920) / mobile (1080), the
  *    cross-fade between every neighbouring pair (both layer orders, progress 0.1 … 0.9 — the layers fade in opposite
  *    directions over the page `--bg`), and reduced motion (the same veiled photo painted on the section).
- *  - text on panels, badges and the credit plate: fixed token pairs (the plate over the brightest pixel of any state).
+ *  - Round 7 (D2): there are no panels any more — ALL text sits straight on the photo, under the section's local scrim
+ *    (tokens.css `--scrim-*`, the gradient the section actually uses at that width). Worst case = the scrim's WEAKEST stop
+ *    over the 95th-percentile pixel, for text anywhere in the section (a left-column text sits under a stronger stop).
+ *  - the credit plate: a fixed token pair (the plate over the brightest pixel of any state); popover / flat: token pairs.
  *  - flat modes (reduced transparency / more contrast / forced colours): tokens straight on `--bg`.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -21,10 +24,23 @@ import { NARRATIVE_SECTIONS, SECTION_PHOTO, photosFor, type NarrativeSectionId }
 import type { NarrativePhotoId } from '../photos/narrative'
 
 const CSS = readFileSync(join(__dirname, 'narrative.css'), 'utf8')
+const TOKENS = readFileSync(join(__dirname, '..', 'tokens.css'), 'utf8')
 const [VEIL_R, VEIL_G, VEIL_B, VEIL_A] = /--nar-veil:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/.exec(CSS)!.slice(1).map(Number)
 const VEIL: RGB = [VEIL_R, VEIL_G, VEIL_B]
 const BG = hexToRgb(V2_COLORS.bg)
 const tok = (name: keyof typeof V2_COLORS) => hexToRgb(V2_COLORS[name])
+
+/** The weakest stop (lowest alpha) of a scrim token in tokens.css. */
+function weakestStop(token: string): number {
+  const m = new RegExp(`${token}:([^;]+);`).exec(TOKENS)
+  if (!m) throw new Error(`${token} not in tokens.css`)
+  return Math.min(...[...m[1].matchAll(/rgba\(11,13,15,([\d.]+)\)/g)].map((x) => Number(x[1])))
+}
+/** Which scrim a section paints at a viewport (landing.css: `.ts-v2-scrim`, `--features`; ≤ 600 px → the vertical pair). */
+function scrimFor(section: NarrativeSectionId, vp: 'desktop' | 'mobile'): { token: string; alpha: number } {
+  const token = vp === 'mobile' ? (section === 'features' ? '--scrim-down-features' : '--scrim-down') : section === 'features' ? '--scrim-left-features' : '--scrim-left'
+  return { token, alpha: weakestStop(token) }
+}
 
 type Viewport = 'desktop' | 'mobile'
 const SIZE: Record<Viewport, { file: 1920 | 1080; w: number; h: number }> = {
@@ -48,6 +64,15 @@ function veiledLuminances(px: Float32Array): number[] {
   }
   return out.sort((a, b) => a - b)
 }
+/** Veil, then the section's scrim at `alpha`, over a backdrop: the sorted luminance list the text actually sits on. */
+function scrimmedLuminances(px: Float32Array, alpha: number): number[] {
+  const out: number[] = []
+  for (let i = 0; i < px.length; i += 3) {
+    const veiled = composite(VEIL, VEIL_A, [Math.round(px[i]), Math.round(px[i + 1]), Math.round(px[i + 2])])
+    out.push(luminance(composite(BG, alpha, veiled)))
+  }
+  return out.sort((a, b) => a - b)
+}
 const p95 = (sorted: number[]) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
 const lum = (c: RGB) => luminance(c)
 const ratioOnLuminance = (fg: RGB, bgLum: number) => {
@@ -68,6 +93,9 @@ interface State {
   /** Luminance of the veiled backdrop's 95th percentile and its brightest pixel. */
   p95: number
   max: number
+  vp: Viewport
+  /** The (unveiled) backdrop pixels, kept so the scrim can be composited per section. */
+  px: Float32Array
 }
 
 const sectionsOf = (photo: NarrativePhotoId, vp: Viewport) => NARRATIVE_SECTIONS.filter((s) => SECTION_PHOTO[s][vp] === photo)
@@ -80,11 +108,11 @@ async function buildStates() {
       const px = Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await pixels(id, vp, ext)])))
       for (const id of ids) {
         const l = veiledLuminances(px[id])
-        states.push({ name: `${vp} ${ext} ${id} (also: reduced motion)`, sections: sectionsOf(id, vp), p95: p95(l), max: l[l.length - 1] })
+        states.push({ name: `${vp} ${ext} ${id} (also: reduced motion)`, sections: sectionsOf(id, vp), p95: p95(l), max: l[l.length - 1], vp, px: px[id] })
       }
       for (let i = 0; i < ids.length - 1; i++) {
         const [a, b] = [px[ids[i]], px[ids[i + 1]]]
-        let worst: State = { name: '', sections: [], p95: 0, max: 0 }
+        let worst: State = { name: '', sections: [], p95: 0, max: 0, vp, px: a }
         // the fade runs where one group ends and the next begins: the last section of A and the first of B are the ones on screen
         const outgoing = sectionsOf(ids[i], vp)
         const both = [outgoing[outgoing.length - 1], sectionsOf(ids[i + 1], vp)[0]]
@@ -96,7 +124,7 @@ async function buildStates() {
           const bOverA = over(b, t, over(a, 1 - t, base)) // DOM order: A below B
           for (const mixed of [aOverB, bOverA]) {
             const l = veiledLuminances(mixed)
-            if (p95(l) > worst.p95) worst = { name: `${vp} ${ext} cross-fade ${ids[i]}→${ids[i + 1]} (worst of t=0.1…0.9, both layer orders)`, sections: both, p95: p95(l), max: l[l.length - 1] }
+            if (p95(l) > worst.p95) worst = { name: `${vp} ${ext} cross-fade ${ids[i]}→${ids[i + 1]} (worst of t=0.1…0.9, both layer orders)`, sections: both, p95: p95(l), max: l[l.length - 1], vp, px: mixed }
           }
         }
         states.push(worst)
@@ -106,26 +134,24 @@ async function buildStates() {
 }
 
 /**
- * Text that sits straight on the photo (everything else is on an opaque Panel). Per section, from Sections.tsx:
- * security — eyebrow, h2, h3 lead, 16 px copy + semibold emphasis · experience — eyebrow, h2 + second line, 16 px copy ·
- * features — eyebrow, h2, 15 px subline · roadmap, docs — eyebrow, h2 only (landing.test.tsx pins "muted copy only in
- * those three sections").
+ * Text that sits straight on the photo + scrim. Round 7 unboxed everything, so EVERY narrative section carries the same set
+ * (Sections.tsx): eyebrow (cream, 12 px mono) · h2 (text, 44–80 px; second line / h3 lead / stat numerals / list numerals in
+ * cream, large) · copy, sublines, card + list descriptions and stat labels (muted, 14–17 px) · titles, emphasis, link labels
+ * (text / cream, 12–20 px) · badges (cream; the SOON badge is MUTED, not dim — dim does not clear 4.5 on a scrim).
  */
+const ALL: NarrativeSectionId[] = [...NARRATIVE_SECTIONS]
 const ON_PHOTO: { token: keyof typeof V2_COLORS; kind: 'body' | 'large'; need: number; use: string; sections: NarrativeSectionId[] }[] = [
-  { token: 'muted', kind: 'body', need: 4.5, use: 'copy / subline 15–16 px', sections: ['security', 'experience', 'features'] },
-  { token: 'text', kind: 'body', need: 4.5, use: 'semibold emphasis 16 px', sections: ['security'] },
-  { token: 'cream', kind: 'body', need: 4.5, use: 'eyebrow 12 px', sections: [...NARRATIVE_SECTIONS] },
-  { token: 'text', kind: 'large', need: 3, use: 'h2 headline 44–80 px', sections: [...NARRATIVE_SECTIONS] },
-  { token: 'cream', kind: 'large', need: 3, use: 'h2 second line / h3 lead 30–52 px', sections: ['security', 'experience'] },
+  { token: 'muted', kind: 'body', need: 4.5, use: 'copy / sublines / descriptions / labels 13–17 px', sections: ALL },
+  { token: 'text', kind: 'body', need: 4.5, use: 'titles + emphasis + link 12–20 px', sections: ALL },
+  { token: 'cream', kind: 'body', need: 4.5, use: 'eyebrow / badge / mono link 10–12 px', sections: ALL },
+  { token: 'text', kind: 'large', need: 3, use: 'h2 headline 44–80 px', sections: ALL },
+  { token: 'cream', kind: 'large', need: 3, use: 'h2 second line / h3 lead / numerals 24–56 px', sections: ALL },
 ]
 
 const PANELS = [
-  { bg: 'surface', fg: 'text', need: 4.5, use: 'card title 17 px' },
-  { bg: 'surface', fg: 'muted', need: 4.5, use: 'card copy 13–16 px' },
-  { bg: 'surface', fg: 'cream', need: 4.5, use: 'stat numeral / label' },
-  { bg: 'surface', fg: 'dim', need: 4.5, use: 'SOON badge 10 px' },
-  { bg: 'surface2', fg: 'cream', need: 4.5, use: 'PRE-SWAP / POST-SWAP badge 10 px' },
-  { bg: 'surface2', fg: 'text', need: 4.5, use: 'docs button' },
+  { bg: 'surface', fg: 'text', need: 4.5, use: 'popover / help drawer title' },
+  { bg: 'surface', fg: 'muted', need: 4.5, use: 'popover subtitle' },
+  { bg: 'surface', fg: 'cream', need: 4.5, use: 'popover action' },
   { bg: 'bg', fg: 'text', need: 4.5, use: 'flat mode: body' },
   { bg: 'bg', fg: 'muted', need: 4.5, use: 'flat mode: copy' },
   { bg: 'bg', fg: 'cream', need: 4.5, use: 'flat mode: eyebrow' },
@@ -144,16 +170,31 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     expect(VEIL_A).toBeCloseTo(45 / 255, 3)
   })
 
-  it.each(ON_PHOTO)('$kind text: $token ($use) ≥ $need on the veiled photo in every state that shows it', ({ token, need, sections }) => {
+  it.each(ON_PHOTO)('$kind text: $token ($use) ≥ $need under the local scrim in every state that shows it', ({ token, need, sections }) => {
     const fg = tok(token)
     let worst = Infinity
     let where = ''
-    for (const s of states.filter((st) => st.sections.some((id) => sections.includes(id)))) {
-      const r = ratioOnLuminance(fg, s.p95)
-      if (r < worst) [worst, where] = [r, s.name]
+    for (const s of states) {
+      for (const sec of s.sections.filter((id) => sections.includes(id))) {
+        const { alpha, token: scrim } = scrimFor(sec, s.vp)
+        const r = ratioOnLuminance(fg, p95(scrimmedLuminances(s.px, alpha)))
+        if (r < worst) [worst, where] = [r, `${s.name} · ${sec} · ${scrim} α${alpha}`]
+      }
     }
-    report.push(`on photo  ${token.padEnd(5)} need ${need}  worst ${worst.toFixed(2)}  @ ${where}`)
+    report.push(`on photo+scrim  ${token.padEnd(5)} need ${need}  worst ${worst.toFixed(2)}  @ ${where}`)
     expect(worst, where).toBeGreaterThanOrEqual(need)
+  })
+
+  it('the scrim only ever helps: the scrimmed worst case is never below the veil-only worst case', () => {
+    const fg = tok('muted')
+    let veilOnly = Infinity
+    let scrimmed = Infinity
+    for (const s of states) {
+      veilOnly = Math.min(veilOnly, ratioOnLuminance(fg, s.p95))
+      for (const sec of s.sections) scrimmed = Math.min(scrimmed, ratioOnLuminance(fg, p95(scrimmedLuminances(s.px, scrimFor(sec, s.vp).alpha))))
+    }
+    report.push(`muted worst: veil only ${veilOnly.toFixed(2)} → with scrim ${scrimmed.toFixed(2)}`)
+    expect(scrimmed).toBeGreaterThanOrEqual(veilOnly)
   })
 
   it('the credit (dim, 9 px) on its plate (#0B0D0F @ 92 %) over the brightest veiled pixel of any state ≥ 4.5', () => {

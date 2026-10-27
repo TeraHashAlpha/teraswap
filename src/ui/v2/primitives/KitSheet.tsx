@@ -50,6 +50,9 @@ export function KitSheet() {
         <Cell id="Surface/plain/edge-both">
           <Surface edge="both" className="w-56 py-4">between two hairlines</Surface>
         </Cell>
+        <Cell id="Surface/plain/edge-rule">
+          <Surface edge="rule" className="w-56 py-1">card as a 2 px rule</Surface>
+        </Cell>
         <Cell id="Surface/sheet/top">
           <Surface variant="sheet" className="w-56 p-4">modal sheet</Surface>
         </Cell>
@@ -71,7 +74,7 @@ export function KitSheet() {
           <Surface variant="popover" bare className="w-56 p-3 text-[13px]">tooltip</Surface>
         </Cell>
         <Cell id="Panel/deprecated/default">
-          <Panel className="w-56 p-4">Panel (deprecated, legacy look)</Panel>
+          <Panel className="w-56 p-4">Panel (deprecated alias)</Panel>
         </Cell>
       </Row>
 

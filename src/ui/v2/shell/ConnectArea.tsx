@@ -5,9 +5,10 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { AccountPanel } from './AccountPanel'
 import { shortAddress } from './format-address'
 
+// Round 7 D3 item 5: a text button — status dot + hairline underline, no pill, no fill.
 const PILL =
-  'inline-flex h-11 items-center gap-2 rounded-full border border-v2-cream bg-transparent px-4 font-v2-mono text-[13px] font-bold uppercase tracking-[1.5px] text-v2-cream ' +
-  'hover:bg-v2-cream hover:text-v2-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal sm:px-5'
+  'ts-v2-underline inline-flex h-11 items-center gap-2 bg-transparent px-1 font-v2-mono text-[13px] font-bold uppercase tracking-[1.5px] text-v2-cream ' +
+  'hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal'
 
 /**
  * [ADR-025] Connect / connected-address control. Disconnected → RainbowKit's connect modal (its wallet list is the
