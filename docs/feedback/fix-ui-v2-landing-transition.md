@@ -18,7 +18,7 @@ Security→Experience, animations seeked to t. out/in opacity 1/0 → .5/.5 → 
 | Security · Experience · Features · Roadmap · Docs | `bg-highway · footbridge · tunnel · archlight · underpass` | same (already all baked) |
 | Bottom CTA (spec §8) | round-4/5 `trails` + halftone | baked `bg-highway` (lazy) |
 
-**Premise corrected:** the five narrative sections were already 100 % `bg-*`; the halftone the owner saw is the round-5 grade on Performance/CTA, which MOTION-SPEC §1 kept "unchanged". Per the brief those two now use the baked set (same veil). Footer credit follows (hero · tunnel · highway authors).
+**Premise corrected:** the five narrative sections were already 100 % `bg-*`; the halftone the owner saw is the round-5 grade on Performance/CTA, which MOTION-SPEC §1 kept "unchanged". Per the brief those two now use the baked set (same veil). Footer credit follows (hero · tunnel · highway authors). **Owner answer (27 Oct, asked after the push — I proceeded first, which the brief said to ask about): keep the swap** (Performance=tunnel, CTA=highway); the lower scroll-0 bytes below are accepted.
 
 ## 4 · Verification
 - Contrast (`contrast.txt`, 52 states incl. explicit 50 % mid-fade, both layer orders, AVIF+WebP, the 2 stills): 0 fails; muted body 5.87, still h2 ≥ 11.2.
@@ -28,4 +28,5 @@ Security→Experience, animations seeked to t. out/in opacity 1/0 → .5/.5 → 
 
 ## Findings
 - **Edge case:** a CSS keyframe for the incoming layer + a transition for the outgoing one did NOT work in Chromium (outgoing sat at 1.03 from t=0; no transform transition). Replaced by plain transitions and a `data-leaving` state set in the same commit as `data-active` (released after 1700 ms, pinned > `--t-photo-scale` by a test).
+- **Process:** read `src/proxy.ts` (outside the read list, not needed) and edited `shell/Footer.tsx` (one-line `photos` type widening so the footer takes the new credits; inside `src/ui/v2/**`, not on the read list).
 - Chrome headless cannot emulate `prefers-reduced-transparency`; covered by the shared CSS block + mocks (as in B2b).
