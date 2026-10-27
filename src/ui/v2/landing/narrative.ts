@@ -28,6 +28,12 @@ export const STILL_PHOTO = { performance: 'tunnel', cta: 'highway' } as const sa
 export const MOBILE_MAX_WIDTH = 600
 export const MOBILE_QUERY = `(max-width: ${MOBILE_MAX_WIDTH}px)`
 
+/**
+ * How long a replaced photo layer stays `data-leaving`: just over `--t-photo-scale` (1600 ms, tokens.css), its slowest
+ * transition. A test pins the two together. Reduced motion has no stack, so nothing waits on it.
+ */
+export const PHOTO_SETTLE_MS = 1700
+
 /** A section is active while it crosses this fraction of the viewport height (MOTION-SPEC §3 "Trigger"). */
 export const ACTIVE_LINE = 0.4
 /** Entrance IO margin: a line at ACTIVE_LINE (MOTION-SPEC §4). */

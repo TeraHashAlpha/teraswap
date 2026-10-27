@@ -15,6 +15,7 @@ import {
   ACTIVE_THRESHOLDS,
   NARRATIVE_SECTIONS,
   NEAR_ROOT_MARGIN,
+  PHOTO_SETTLE_MS,
   SECTION_PHOTO,
   photoFor,
   photosFor,
@@ -169,6 +170,50 @@ describe('NarrativeStack: observers and lazy photos', () => {
     expect(activeLayers()).toEqual([])
   })
 
+  it('the layer a photo replaces is `data-leaving` in the same commit (so its fade + scale run), then released after the scale', () => {
+    vi.useFakeTimers()
+    try {
+      const leavingLayers = () => Array.from(document.querySelectorAll('.ts-v2-nar__layer[data-leaving]')).map((l) => l.getAttribute('data-photo'))
+      mountPage()
+      scrollTo(0)
+      settle()
+      expect(activeLayers()).toEqual(['highway'])
+      expect(leavingLayers()).toEqual([]) // nothing was replaced yet
+
+      scrollTo(-900)
+      settle()
+      expect(activeLayers()).toEqual(['footbridge'])
+      expect(leavingLayers()).toEqual(['highway']) // never a commit where highway is neither active nor leaving
+
+      scrollTo(-1800) // a second switch inside the settle window: both outgoing layers keep their transition
+      settle()
+      expect(leavingLayers().sort()).toEqual(['footbridge', 'highway'])
+
+      act(() => void vi.advanceTimersByTime(PHOTO_SETTLE_MS))
+      expect(leavingLayers()).toEqual([])
+      expect(activeLayers()).toEqual(['tunnel'])
+
+      scrollTo(-6000) // nothing active: the last photo leaves
+      settle()
+      expect(activeLayers()).toEqual([])
+      expect(leavingLayers()).toEqual(['tunnel'])
+
+      scrollTo(-1800) // scrolling back to a leaving photo makes it active again, not leaving
+      settle()
+      expect(activeLayers()).toEqual(['tunnel'])
+      expect(leavingLayers()).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('PHOTO_SETTLE_MS outlasts --t-photo-scale (the slowest layer transition) by a margin, not by a magic number', () => {
+    const tokens = readFileSync(join(__dirname, '..', 'tokens.css'), 'utf8')
+    const scaleMs = Number(/--t-photo-scale:(\d+)ms/.exec(tokens)![1])
+    expect(PHOTO_SETTLE_MS).toBeGreaterThan(scaleMs)
+    expect(PHOTO_SETTLE_MS - scaleMs).toBeLessThanOrEqual(200)
+  })
+
   it('the credit follows the active photo (and keeps the last name while it fades out)', () => {
     mountPage()
     const credit = () => document.querySelector('.ts-v2-nar-credit')!
@@ -209,21 +254,22 @@ describe('narrative.css (what is allowed to animate)', () => {
   const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
   const rule = (sel: string) => new RegExp(`${escapeRegExp(sel)}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? ''
 
-  it('a layer animates only `opacity` (--t-photo, --ease-inout) and `transform` (--t-photo-scale, --ease-out)', () => {
-    const layerRule = rule('.ts-v2-nar__layer')
-    const transitions = Array.from(layerRule.matchAll(/transition:\s*([^;]+);/g)).map((m) => m[1].trim())
+  it('layer states: idle has no transition; active and leaving carry opacity 900 ms (--t-photo, --ease-inout) + transform 1600 ms (--t-photo-scale, --ease-out)', () => {
+    const idle = rule('.ts-v2-nar__layer')
+    expect(idle).toMatch(/opacity:\s*0/)
+    expect(idle).toMatch(/transform:\s*scale\(1\.04\)/) // rest: the incoming layer starts here
+    expect(idle).not.toMatch(/transition|animation|will-change|filter/) // the move back to idle never animates
+    const moving = rule('.ts-v2-nar__layer[data-active], .ts-v2-nar__layer[data-leaving]')
+    const transitions = Array.from(moving.matchAll(/transition:\s*([^;]+);/g)).map((m) => m[1].trim())
     expect(transitions).toEqual(['opacity var(--t-photo) var(--ease-inout), transform var(--t-photo-scale) var(--ease-out)'])
-    expect(layerRule).not.toMatch(/filter|animation|will-change|var\(--t-slow\)/)
-    expect(layerRule).toMatch(/transform:\s*scale\(1\.03\)/) // outgoing rest: 1.00 → 1.03
+    expect(CSS).not.toMatch(/var\(--t-slow\)/) // the 180 ms token is not used anywhere in the stack any more
   })
 
-  it('the incoming layer settles 1.04 → 1.00 over --t-photo-scale with --ease-out; the keyframe touches only `transform`', () => {
-    expect(rule('.ts-v2-nar__layer[data-active]')).toMatch(/opacity:\s*1/)
-    expect(rule('.ts-v2-nar__layer[data-active]')).toMatch(/animation:\s*ts-v2-nar-in var\(--t-photo-scale\) var\(--ease-out\)/)
-    const frames = /@keyframes ts-v2-nar-in\s*\{([^@]*?\})\s*\}/.exec(CSS)![1]
-    expect(frames).toMatch(/from\s*\{\s*transform:\s*scale\(1\.04\);\s*\}/)
-    expect(frames).toMatch(/to\s*\{\s*transform:\s*scale\(1\);\s*\}/)
-    expect(frames.replace(/transform:\s*scale\([\d.]+\)/g, '')).not.toMatch(/opacity|filter|translate|rotate|top|left/)
+  it('incoming settles 1.04 → 1.00, outgoing drifts 1.00 → 1.03: opacity + transform only', () => {
+    expect(rule('.ts-v2-nar__layer[data-active]')).toMatch(/opacity:\s*1;\s*transform:\s*scale\(1\)/)
+    // its own rule (the combined `[data-active], [data-leaving]` selector above only carries the transition)
+    expect(/\n\.ts-v2-nar__layer\[data-leaving\]\s*\{\s*transform:\s*scale\(1\.03\);\s*\}/.test(CSS)).toBe(true)
+    expect(CSS).not.toMatch(/@keyframes|animation/) // plain transitions: a keyframe hand-off to a transition does not run in Chromium
   })
 
   it('the veil is a constant: BG at alpha 45/255, no transition, never toggled', () => {

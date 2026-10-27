@@ -15,7 +15,6 @@ export function NarrativeStill({ photoId }: { photoId: NarrativePhotoId }) {
         <source type="image/avif" media="(max-width: 600px)" srcSet={photo.avif.w1080} />
         <source type="image/avif" srcSet={photo.avif.w1920} />
         <source type="image/webp" media="(max-width: 600px)" srcSet={photo.webp.w1080} />
-        {/* eslint-disable-next-line @next/next/no-img-element -- baked files shipped as-is: no optimizer, no re-encode (same as PhotoBackground) */}
         <img src={photo.webp.w1920} alt="" loading="lazy" decoding="async" className="ts-v2-nar-still__img" />
       </picture>
       <div className="ts-v2-nar-still__veil" />
