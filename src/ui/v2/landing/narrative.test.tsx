@@ -205,7 +205,9 @@ describe('NarrativeStack: observers and lazy photos', () => {
 
 describe('narrative.css (what is allowed to animate)', () => {
   const CSS = readFileSync(join(__dirname, 'narrative.css'), 'utf8')
-  const rule = (sel: string) => new RegExp(`${sel.replace(/[.[\]]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? ''
+  // Backslash is in the class so a literal `\` in a selector is escaped too (CodeQL js/incomplete-sanitization).
+  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+  const rule = (sel: string) => new RegExp(`${escapeRegExp(sel)}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? ''
 
   it('a layer animates only `opacity`, with --t-slow and --ease-inout', () => {
     const layerRule = rule('.ts-v2-nar__layer')
