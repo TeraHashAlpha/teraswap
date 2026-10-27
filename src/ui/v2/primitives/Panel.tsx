@@ -6,7 +6,11 @@ export interface PanelProps extends HTMLAttributes<HTMLDivElement> {
   overPhoto?: boolean
 }
 
-/** surface + 1px border + 16px radius (README §4). Layout/padding is the caller's via className. */
+/**
+ * @deprecated Round 7 D2 (no boxes) — use `Surface` (`variant="plain"` for content). Kept under its old name (CLAUDE.md
+ * rule #4). Frozen at the pre-Round-7 look (surface + 1px border + 16px radius) until the in-tree callers move to
+ * `Surface`, so no screen is left half-unboxed with text on a photo and no scrim; it becomes a `Surface` alias then.
+ */
 export function Panel({ overPhoto = false, className, ...rest }: PanelProps) {
   return (
     <div
