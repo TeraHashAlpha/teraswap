@@ -1,0 +1,10 @@
+_global-error chunks 2->2  identical names: YES  raw 33706->33706 (+0, +0.00%)  gz 11449->11449 (+0)  v2-marked chunks base/branch 0/0
+_not-found chunks 4->4  identical names: no  raw 109855->109855 (+0, +0.00%)  gz 27512->27512 (+0)  v2-marked chunks base/branch 0/0
+admin      chunks 8->8  identical names: no  raw 427158->427158 (+0, +0.00%)  gz 113439->113439 (+0)  v2-marked chunks base/branch 0/0
+analytics  chunks 20->20  identical names: no  raw 1807835->1807835 (+0, +0.00%)  gz 472182->472182 (+0)  v2-marked chunks base/branch 0/0
+docs       chunks 22->22  identical names: no  raw 1983940->1983940 (+0, +0.00%)  gz 528400->528400 (+0)  v2-marked chunks base/branch 0/0
+index      chunks 25->27  identical names: no  raw 2268373->2271212 (+2839, +0.13%)  gz 608601->611378 (+2777)  v2-marked chunks base/branch 0/0
+privacy    chunks 20->20  identical names: no  raw 1824112->1824112 (+0, +0.00%)  gz 477690->477690 (+0)  v2-marked chunks base/branch 0/0
+status     chunks 5->5  identical names: no  raw 128736->128736 (+0, +0.00%)  gz 34185->34185 (+0)  v2-marked chunks base/branch 0/0
+swap       chunks 25->26  identical names: no  raw 2254765->2257147 (+2382, +0.11%)  gz 604195->606945 (+2750)  v2-marked chunks base/branch 0/0
+terms      chunks 20->20  identical names: no  raw 1824110->1824110 (+0, +0.00%)  gz 477690->477690 (+0)  v2-marked chunks base/branch 0/0
