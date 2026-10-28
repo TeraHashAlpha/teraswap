@@ -6,7 +6,7 @@ Off origin/main `a61d9d6` (B4 merged, #619). Worktree `~/ts-worktrees/ui-v2-swap
 ## Checklist
 - [x] C1 Confirm → real path (gates mirror, hooks, approval, consent/409, CoW, split)
 - [x] C2 pending / success / failure (28a/b/c), wrong network (29), toasts (05), sounds, m03
-- [ ] C3 a11y + stale-quote + edge states
+- [x] C3 a11y + stale-quote + edge states
 - [ ] Evidence 1–7, push, compare link
 
 ## Premises that did not hold (owner answered in-session — the answers supersede the goal text)

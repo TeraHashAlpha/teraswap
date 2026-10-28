@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { AGGREGATOR_META } from '@/lib/constants'
 import { Button } from '../../primitives'
 import { Notice } from '../QuotePanel'
@@ -32,6 +32,8 @@ export interface ExecutionPanelProps {
   /** v1's pre-swap simulation lines + 9O fallback notice, under the same conditions. */
   simulation: { passed: boolean | null; skipped: boolean; swapStatus: string }
   fallback: { from: string; to: string } | null
+  /** A sheet (review / consent / Permit2 / …) is on screen: it owns focus. */
+  sheetOpen: boolean
   onNewSwap: () => void
 }
 
@@ -61,6 +63,12 @@ function Node({ state }: { state: TimelineStep['state'] }) {
  * surplus, v1's wording) or v1's error text verbatim. The retry is the CTA's `Error — retry` (SwapButton's), not a second button.
  */
 export function ExecutionPanel(p: ExecutionPanelProps) {
+  const ref = useRef<HTMLElement>(null)
+  // Focus has to land somewhere when the review sheet hands over to the running swap (its opener, the CTA, is now disabled): the
+  // progress itself. It never takes focus from a sheet that is still open.
+  useEffect(() => {
+    if (!p.sheetOpen) ref.current?.focus({ preventScroll: true })
+  }, [p.sheetOpen])
   const link = (label: ReactNode) =>
     p.txHash ? (
       <a href={`${p.explorerUrl}/tx/${p.txHash}`} target="_blank" rel="noopener noreferrer" className="text-v2-text underline-offset-2 hover:underline" data-testid="exec-tx-link">
@@ -68,7 +76,7 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
       </a>
     ) : null
   return (
-    <section data-testid="execution" data-phase={p.phase} aria-label="Execution" className="ts-exec">
+    <section ref={ref} tabIndex={-1} data-testid="execution" data-phase={p.phase} aria-label="Execution" className="ts-exec focus:outline-none">
       <h2 className="font-v2-mono text-[11px] font-semibold uppercase tracking-[1.5px] text-v2-muted">Execution</h2>
       <ol className="ts-exec-steps" aria-live="polite">
         {p.steps.map((s) => (

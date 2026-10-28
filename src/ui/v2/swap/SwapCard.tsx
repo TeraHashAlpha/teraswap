@@ -274,6 +274,22 @@ export function SwapCard() {
     tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice,
   })
 
+  // v1 resets both swap hooks and drops any review whenever the trade changes under them (typed amount, 50% / MAX, ⇅, a token pick), and
+  // the hooks reset themselves on a chain / account switch. One key covers all of them, so a sheet opened for one trade can never
+  // confirm another: the review closes (v1's behaviour — no notice) and any state a hook holds for the old trade is reset.
+  const tradeKey = `${activeChainId}:${tokenIn?.address ?? ''}:${tokenOut?.address ?? ''}:${amountIn}`
+  const [prevTradeKey, setPrevTradeKey] = useState(tradeKey)
+  if (tradeKey !== prevTradeKey) {
+    setPrevTradeKey(tradeKey)
+    setReviewRequested(false)
+    setConfirmedModel(null)
+  }
+  const resetAll = lc.resetAll
+  useEffect(() => {
+    resetAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the trade alone: `resetAll` is a new function every render
+  }, [tradeKey])
+
   // v1 toasts a quote error once per distinct message (the useQuote poll re-raises the same string every cycle); dedupKey replaces.
   const lastQuoteError = useRef<string | null>(null)
   useEffect(() => {
@@ -333,11 +349,10 @@ export function SwapCard() {
       : '0.0'
   const balanceDisplay = balanceIn ? fmtToken(balanceIn.value, balanceIn.decimals) : null
 
-  // v1 resets both swap hooks whenever the trade changes under them (typed amount, 50% / MAX, ⇅, a token pick) — without it a stale
-  // `success` from a smaller amount survives into the next cycle (BUG-SWAP-APPROVE-STALE-SUCCESS).
+  // A changed trade resets both swap hooks (see `tradeKey`) — without it a stale `success` from a smaller amount survives into the
+  // next cycle (v1: BUG-SWAP-APPROVE-STALE-SUCCESS).
   function setAmount(clean: string) {
     setDisplayAmountIn(thin(formatWithSeparator(clean)))
-    lc.resetAll()
   }
   function onAmountChange(raw: string) {
     const clean = raw.replace(/\s/g, '')
@@ -362,6 +377,9 @@ export function SwapCard() {
   const singleReviewOpen =
     !lc.isSplitActive && reviewOpen({ requested: reviewRequested, ackRequired: lc.swap.unpricedAckRequired }) && !SIGNING_STATUSES.has(swapSt) && swapSt !== 'success' && swapSt !== 'cow_awaiting_review'
   const splitConsentOpen = lc.isSplitActive && (lc.consentRequested || lc.split.unpricedAckRequired)
+  const splitReviewOpen = lc.isSplitActive && lc.split.status === 'awaiting-review' && !!address
+  const cowReviewOpen = lc.swap.status === 'cow_awaiting_review' && !!lc.swap.pendingCowOrder && !!address
+  const anySheetOpen = showSlippage || tokenPicker !== null || needsPermit2Education || singleReviewOpen || splitConsentOpen || splitReviewOpen || cowReviewOpen
   const confirmBtn = confirmButtonState({ approvalStatus: approval.status, approvalReady: approval.isReady, swapStatus: swapSt })
 
   // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
@@ -536,6 +554,7 @@ export function SwapCard() {
             legs={lc.isSplitActive ? { rows: lc.split.legs, completed: lc.split.completedLegs, total: lc.split.totalLegs } : undefined}
             simulation={{ passed: lc.swap.simulationPassed, skipped: lc.swap.simulationSkipped, swapStatus: lc.swap.status }}
             fallback={lc.swap.fallbackNotice}
+            sheetOpen={anySheetOpen}
             onNewSwap={onNewSwap}
           />
         ) : view && meta && tokenIn && tokenOut ? (
@@ -667,20 +686,16 @@ export function SwapCard() {
       {splitConsentOpen && meta && tokenIn && tokenOut && (
         <ConsentSheet values={unpricedConsentValues(meta, tokenIn, tokenOut, slippage, quoteDecimalsOut ?? tokenOut.decimals)} onContinue={() => void lc.confirm({ unpricedAck: true })} onCancel={lc.cancel} />
       )}
-      {lc.isSplitActive && lc.split.status === 'awaiting-review' && address && (
+      {splitReviewOpen && address && (
         <SplitReviewSheet plannedLegs={lc.split.plannedLegs} tokenIn={tokenIn} tokenOut={tokenOut} userAddress={address} onConfirm={() => void lc.split.confirmPlan()} onCancel={lc.cancel} />
       )}
-      {lc.swap.status === 'cow_awaiting_review' && lc.swap.pendingCowOrder && address && (
+      {cowReviewOpen && lc.swap.pendingCowOrder && (
         <CowOrderReviewSheet order={lc.swap.pendingCowOrder} onConfirm={() => void lc.swap.confirmCowOrder()} onCancel={lc.cancel} />
       )}
       {tokenPicker && (
         <TokenSheet
           disabledAddress={(tokenPicker === 'sell' ? tokenOut : tokenIn)?.address}
-          onSelect={(t) => {
-            if (tokenPicker === 'sell') setSelectedIn(t)
-            else setSelectedOut(t)
-            lc.resetAll()
-          }}
+          onSelect={(t) => (tokenPicker === 'sell' ? setSelectedIn(t) : setSelectedOut(t))}
           onClose={() => setTokenPicker(null)}
         />
       )}

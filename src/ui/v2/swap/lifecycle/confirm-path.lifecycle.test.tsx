@@ -181,7 +181,7 @@ describe('standard route (1inch/0x/Velora/Kyber/…): the same execute(source, f
       openReview()
       h.swap = swapHook({ status })
       v2.rerender(<SwapCard />)
-      expect((within(screen.getByRole('dialog')).getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(true)
+      expect(within(screen.getByRole('dialog')).getByRole('button', { name: label }).getAttribute('aria-disabled')).toBe('true') // held, but it keeps focus
       cleanup()
     }
   })
