@@ -6,8 +6,10 @@
  * Differences from v1's QuoteBreakdown, each deliberate and recorded in docs/feedback/feat-ui-v2-swap-card.md:
  *  - Min. output: v1 multiplies a float (`out * (1 - slippage/100)`). Here it is `deriveMinimumOutput` (bigint, bps) — the
  *    same derivation useSwap uses for the FeeCollector floor and SwapBox uses for the unpriced dialog's {minOut}.
- *  - Route: a hop is a NAME. v1 swaps a hop that IS an address for the source label; a hop that merely CONTAINS one
- *    ("Pool 0xabc…") passed through. Here any 0x-address anywhere in a hop falls back to the source label.
+ *  - Route: a hop is a NAME from an allow-list of venues (route-names.ts), else the source's own label. v1 prints whatever string
+ *    the adapter forwards — KyberSwap's `fermi` / `metric-v1`, a hash, a pool id ("Pool 0xabc…" passed v1's address check).
+ *  - Est. gas: USD first from either the live estimate or the quote's own `gasUsd`, ETH at 2 significant digits, never "~0"
+ *    (see formatGas — KyberSwap quotes arrive with `estimatedGas: 0` and the cost in `gasUsd`).
  */
 import { formatUnits, parseUnits } from 'viem'
 import type { MetaQuoteResult, NormalizedQuote } from '@/lib/adapters/types'
@@ -21,21 +23,35 @@ import { isExecutableSource } from '@/lib/executable-sources'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { fmtGas, fmtPct, fmtToken, fmtUsd, formatWithSeparator } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
-
-const ADDRESS_IN_TEXT = /0x[0-9a-fA-F]{40}/
+import { knownDexName } from './route-names'
 
 export function sourceLabel(source: AggregatorName): string {
   return AGGREGATOR_META[source]?.label || source
 }
 
-/** One route hop as a name — never a raw address (a pool address falls back to the source's label). */
+/**
+ * One route hop as a name: a venue from the allow-list (route-names.ts), else the SOURCE's own label. An internal id
+ * (`fermi`, `metric-v1`), a pool address or hash, free text, an empty hop — none of them is ever shown.
+ */
 export function routeHopLabel(hop: string, source: AggregatorName): string {
-  return ADDRESS_IN_TEXT.test(hop) || hop.trim() === '' ? sourceLabel(source) : hop
+  return knownDexName(hop) ?? sourceLabel(source)
 }
 
-/** "Dexalot + PancakeSwap V3 + Dexalot": the hops by name; an empty route is the source's own label. */
+/**
+ * "Dexalot + PancakeSwap V3 + Dexalot": the hops by name; an empty route is the source's own label. Consecutive hops that fell back
+ * to the source label read once ("KyberSwap", not "KyberSwap + KyberSwap + KyberSwap"); named venues are never merged.
+ */
 export function routeText(quote: NormalizedQuote): string {
-  return quote.routes.map((r) => routeHopLabel(r, quote.source)).join(' + ') || sourceLabel(quote.source)
+  const fallback = sourceLabel(quote.source)
+  const names: string[] = []
+  let prevWasFallback = false
+  for (const hop of quote.routes) {
+    const named = knownDexName(hop)
+    if (named === null && prevWasFallback) continue
+    names.push(named ?? fallback)
+    prevWasFallback = named === null
+  }
+  return names.join(' + ') || fallback
 }
 
 export interface CompareRow {
@@ -99,6 +115,31 @@ export interface QuoteViewInput {
   tokenInUsdPrice?: number | null
   tokenOutUsdPrice?: number | null
   gasEstimate?: (gasUnits: number) => { eth: number; usd: number } | null
+  /** ETH/USD (Chainlink, useEthGasCost.ethPrice): lets a USD-only gas cost (KyberSwap's `gasUsd`) also show its ETH amount. */
+  ethUsdPrice?: number | null
+}
+
+const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
+
+/**
+ * The Est. gas line. USD first whenever a price exists — the live estimate's, else the quote's own `gasUsd` — with the ETH amount
+ * at 2 significant digits beside it; ETH alone when only that is known; v1's `~N gas` when only units are known; `—` when nothing
+ * is: never "~0 ETH".
+ *
+ * Why v1 (and the first v2 build) showed "~0 ETH" on Ethereum: the KyberSwap adapter reports `estimatedGas: route.gasUsd ? 0 : route.gas`
+ * and the cost in `gasUsd`, so the units are 0, `useEthGasCost.estimate(0)` is { eth: 0, usd: 0 } (not null), the USD branch fails
+ * its `> 0` test and `fmtGas(0)` prints "0". The USD was never absent — it was in `gasUsd`, which nothing read.
+ */
+export function formatGas(best: Pick<NormalizedQuote, 'estimatedGas' | 'gasUsd'>, intentBased: boolean, gasEstimate: QuoteViewInput['gasEstimate'], ethUsdPrice?: number | null): string {
+  if (best.estimatedGas === 0 && intentBased) return 'Free (solver-paid)'
+  const cost = gasEstimate?.(best.estimatedGas) ?? null
+  const usd = positive(cost?.usd) ? cost.usd : positive(best.gasUsd) ? best.gasUsd : null
+  let eth = positive(cost?.eth) ? cost.eth : null
+  if (eth === null && usd !== null && positive(ethUsdPrice)) eth = usd / ethUsdPrice
+  if (usd !== null) return eth !== null ? `${fmtUsd(usd)} (~${fmtGas(eth)} ETH)` : fmtUsd(usd)
+  if (eth !== null) return `~${fmtGas(eth)} ETH`
+  if (best.estimatedGas > 0) return `~${formatWithSeparator(best.estimatedGas.toString()).replace(/\s/g, '\u2009')} gas`
+  return '—'
 }
 
 /** v1's `outputAmountValid` / `Number(formatUnits(...))`, kept so a malformed `toAmount` renders `—`, not a crash. */
@@ -126,17 +167,8 @@ export function buildQuoteView(i: QuoteViewInput): QuoteView {
     : null
   const feeUsdValue = collected ? feeUsd(notional, FEE_PERCENT) : null
 
-  let gas: string
   const gasFree = best.estimatedGas === 0 && intentBased
-  if (gasFree) gas = 'Free (solver-paid)'
-  else {
-    const cost = i.gasEstimate?.(best.estimatedGas)
-    if (!cost) gas = `~${formatWithSeparator(best.estimatedGas.toString()).replace(/ /g, ' ')} gas`
-    else {
-      const eth = `~${fmtGas(cost.eth)} ETH`
-      gas = Number.isFinite(cost.usd) && cost.usd > 0 ? `${fmtUsd(cost.usd)} (${eth})` : eth
-    }
-  }
+  const gas = formatGas(best, intentBased, i.gasEstimate, i.ethUsdPrice)
 
   let minOutput = '—'
   try {

@@ -213,7 +213,7 @@ export function SwapCard() {
   const priceCheck = useChainlinkPrice(tokenIn?.address, execIn)
   const tokenOutPriceCheck = useChainlinkPrice(tokenOut?.address, execOut)
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
-  const { estimate: gasEstimate } = useEthGasCost()
+  const { estimate: gasEstimate, ethPrice: ethUsdPrice } = useEthGasCost()
   // [feat/swap-price-tiers D1] The SERVER's tier for the pair; null = unknown → no notice (the client never guesses).
   const { data: priceTier } = useSwapPriceTier(activeChainId, tokenIn?.address, tokenOut?.address)
 
@@ -250,7 +250,7 @@ export function SwapCard() {
   // Cheap and pure; not memoised because useEthGasCost rebuilds `gasEstimate` on every render (v1 passes it straight through too).
   const view =
     meta && tokenIn && tokenOut && hasAmount
-      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate })
+      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate, ethUsdPrice })
       : null
 
   const outputDisplay =
