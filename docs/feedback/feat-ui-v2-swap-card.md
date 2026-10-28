@@ -3,7 +3,7 @@
 Branch off origin/main `96e2e0b` (B1b merged). Dedicated worktree `~/ts-worktrees/ui-v2-swap-card`, real `npm ci`. No PR (owner opens it). Commits SSH-signed, noreply. Diff only under `src/ui/v2/**` + this file; v1 hooks/lib/api untouched.
 
 ## Checklist
-- [x] C1 states 21a / 21b / 20 · [ ] C2 tier notices + CTA (24 / 29) · [ ] C3 per-photo scrim + real bg-zakim · [ ] evidence 1–7
+- [x] C1 states 21a / 21b / 20 `e07ed21` · [x] C2 tier notices + CTA + sound · [ ] C3 per-photo scrim + real bg-zakim · [ ] evidence 1–7
 
 ## Premises / owner answers (supersede the goal text)
 - Goal says `src/hooks/useQuoteChainId.ts`; `useQuoteChainId` lives in `src/hooks/useChainId.ts` (no such file). Reused unchanged.
@@ -18,6 +18,7 @@ Branch off origin/main `96e2e0b` (B1b merged). Dedicated worktree `~/ts-worktree
 - B4/B5 stubs, all real controls: token buttons (`data-b4-stub="token-modal"`, goal only named ✎), Max-slippage ✎, the CTA click (`data-b5-stub`). Slippage is auto (v1 default) and derived, not stored. Untrusted `/api/spender` answer is dropped silently (v1 also toasts).
 - Not in this slice (B5 price gates): oracle-unavailable warn/block banners, price-impact + depeg consent, DefiLlama guard, split visualiser, simulation/tx/share lines. The CTA therefore reads Review swap where v1's gates would block; nothing can execute (no click path).
 - Frame copy not in v1 and not a slot (idle "QUOTE BREAKDOWN" heading + hint, trust chips, `STATE:` notes) is omitted per "no copy beyond slots".
+- C2: CTA wrong-network is a text button "Switch to Ethereum" (v1's target; the frame's "Switch to Base" needs selector ≠ wallet, unreachable since the shell selector follows the wallet) — its click is B5. Sound: `playQuoteReceived` in v1's own effect shape, keyed on the picked best source + chain (a same-winner re-quote is silent); no other sounds-import in `swap/` (B5).
 - Existing shell tests (`shell`, `round7`, `sounds-parity`) stub `SwapCard` (they test the shell); the `panes` test no longer lists swap as a placeholder.
 
 ## Content-map delta (v1 → v2, quote state)

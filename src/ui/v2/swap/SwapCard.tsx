@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAccount, useBalance } from 'wagmi'
-import { formatUnits } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import DigitRoller from '@/components/DigitRoller'
 import ChainIcon from '@/components/icons/ChainIcon'
 import { calculateAutoSlippage } from '@/components/SlippageModal'
@@ -11,6 +11,7 @@ import { useQuoteChainId } from '@/hooks/useChainId'
 import { useChainlinkPrice } from '@/hooks/useChainlinkPrice'
 import { useEthGasCost } from '@/hooks/useEthGasCost'
 import { useApproval } from '@/hooks/useApproval'
+import { useSwapPriceTier } from '@/hooks/useSwapPriceTier'
 import { quoteMatchesSelection } from '@/lib/quote-identity'
 import { scopeToExecutable } from '@/lib/executable-sources'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
@@ -22,6 +23,8 @@ import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { AGGREGATOR_META, DEFAULT_SLIPPAGE, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { fmtToken, formatWithSeparator, stripSeparator, fmtUsd } from '@/lib/format'
+import { playQuoteReceived } from '@/lib/sounds'
+import { CHAIN_ID } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
 import { Button, Input, Skeleton, Surface, Toggle } from '../primitives'
@@ -30,6 +33,7 @@ import './swap.css'
 import { ctaFor } from './cta'
 import { buildQuoteView, quoteIsForAmount } from './quote-model'
 import { QuotePanel, Notice } from './QuotePanel'
+import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
 import { Tip } from './Tip'
 import { TokenButton } from './TokenButton'
@@ -154,11 +158,16 @@ export function SwapCard() {
   })()
 
   // The approval plan v1 shows as the "Approval" row — same spender fetch + allow-list check as SwapBox, read-only here.
-  const spenderKey = meta?.best.source ? `${meta.best.source}:${activeChainId}` : null
+  // v1's one effect on a new best source: play the quote-received blip, and fetch that source's spender. Keyed on the picked
+  // quote (v1's `meta`, which survives an amount change), NOT on the amount-gated `meta` above: a re-quote that lands the same
+  // winner is not a new arrival (no second blip), exactly as in SwapBox.
+  const pickedSource = pickedMeta?.best.source
+  const spenderKey = pickedSource ? `${pickedSource}:${activeChainId}` : null
   useEffect(() => {
-    if (!spenderKey || !meta?.best.source) return
+    if (!spenderKey || !pickedSource) return
+    playQuoteReceived()
     const controller = new AbortController()
-    fetch(`/api/spender?source=${meta.best.source}${activeChainId !== 1 ? `&chainId=${activeChainId}` : ''}`, { signal: controller.signal })
+    fetch(`/api/spender?source=${pickedSource}${activeChainId !== 1 ? `&chainId=${activeChainId}` : ''}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         if (!data.spender) return
@@ -192,10 +201,38 @@ export function SwapCard() {
   const tokenOutPriceCheck = useChainlinkPrice(tokenOut?.address, execOut)
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
   const { estimate: gasEstimate } = useEthGasCost()
+  // [feat/swap-price-tiers D1] The SERVER's tier for the pair; null = unknown → no notice (the client never guesses).
+  const { data: priceTier } = useSwapPriceTier(activeChainId, tokenIn?.address, tokenOut?.address)
 
   const hasAmount = !!amountIn && Number(amountIn) > 0
   const quoting = hasAmount && !meta && (quoteLoading || (!!pickedMeta && !quoteCurrent))
-  const cta = ctaFor({ isConnected, hasAmount, quoteLoading: quoting, hasQuote: !!meta })
+  // [BUGFIX in v1] parseUnits throws on malformed input ("1.2.3") — that is "insufficient", never a crash.
+  const hasSufficientBalance =
+    !hasAmount ||
+    !balanceIn ||
+    !tokenIn ||
+    (() => {
+      try {
+        return parseUnits(amountIn, tokenIn.decimals) <= balanceIn.value
+      } catch {
+        return false
+      }
+    })()
+  const cta = ctaFor({
+    isConnected,
+    isCorrectChain,
+    targetChainName: (() => {
+      try {
+        return getChainConfig(CHAIN_ID).name
+      } catch {
+        return 'Ethereum'
+      }
+    })(),
+    hasAmount,
+    hasSufficientBalance,
+    quoteLoading: quoting,
+    hasQuote: !!meta,
+  })
 
   // Cheap and pure; not memoised because useEthGasCost rebuilds `gasEstimate` on every render (v1 passes it straight through too).
   const view =
@@ -352,6 +389,7 @@ export function SwapCard() {
             lowConfidence={!!meta.lowConfidence}
             sourceCount={meta.all.length}
             onUseGasless={() => setMevProtected(true)}
+            tierNotice={<TierNotice tier={priceTier} />}
           />
         ) : (
           <div aria-hidden="true" data-skeleton={quoting ? 'quoting' : 'idle'} className="ts-swap-skeleton">
@@ -366,9 +404,16 @@ export function SwapCard() {
       </Surface>
 
       <div className="ts-swap-cta">
-        <Button variant="primary" className="w-full" disabled={cta.disabled} data-cta={cta.kind} data-b5-stub="">
-          {cta.label}
-        </Button>
+        {cta.kind === 'wrong-network' ? (
+          // round7 29: the wrong-network state is a text button (amber), not the solid CTA — one filled shape per screen stays true.
+          <Button variant="text" className="w-full !text-v2-amber" data-cta={cta.kind} data-b5-stub="">
+            {cta.label}
+          </Button>
+        ) : (
+          <Button variant="primary" className="w-full" disabled={cta.disabled} data-cta={cta.kind} data-b5-stub="">
+            {cta.label}
+          </Button>
+        )}
         {meta?.gasless?.recommended && meta.best.source !== 'cowswap' && (
           <Button
             variant="text"

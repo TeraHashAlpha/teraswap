@@ -163,4 +163,34 @@ describe('Swap: v1 SwapBox + QuoteBreakdown → v2 SwapCard, quote state', () =>
     report('notices', r)
     expect(r.missingText).toEqual([])
   })
+
+  it('tier: single-source — the amber notice is v1\'s, verbatim (0 missing, no allow entry)', () => {
+    const { v1, v2 } = renderBoth(() => {
+      h.account = { address: addr, isConnected: true, chain: { id: 1 } }
+      h.tier = { data: { tier: 'single-source', legs: { in: { tier: 'single-source', sources: ['defillama'], usd: 2490 }, out: { tier: 'single-source', sources: ['defillama'], usd: 1 } } }, loading: false }
+    })
+    const r = compareContent(v1, v2, ALLOW)
+    report('single-source', r)
+    expect(r.missingText).toEqual([])
+    expect(v1.textContent).toContain('Price from one source only (DefiLlama).')
+  })
+
+  it('tier: unpriced — v1\'s three-sentence notice becomes the owner\'s one line; ONLY those sentences are allowed to go', () => {
+    const UNPRICED: AllowedRemoval[] = [
+      { text: '⚠ No reference price for this pair.', reason: 'B3 goal: unpriced = one line `No reference price — consent required before swapping`; the informed-consent dialog is B4' },
+      { text: "We couldn't find a Chainlink, DefiLlama or CoinGecko price for", reason: 'same: the explanation moves into the B4 consent dialog (it already carries these words)' },
+      { text: ", so we can't estimate this trade's USD value or apply value-based limits. You'll be asked to confirm before swapping.", reason: 'same' },
+    ]
+    const { v1, v2 } = renderBoth(() => {
+      h.account = { address: addr, isConnected: true, chain: { id: 1 } }
+      h.tier = { data: { tier: 'unpriced', legs: { in: { tier: 'unpriced', sources: [] }, out: { tier: 'unpriced', sources: [] } } }, loading: false }
+    })
+    const withAllow = compareContent(v1, v2, [...ALLOW, ...UNPRICED])
+    report('unpriced (allow-listed)', withAllow)
+    expect(withAllow.missingText).toEqual([])
+    expect(withAllow.staleAllow).toEqual([])
+    expect(v2.textContent).toContain('No reference price — consent required before swapping')
+    // and without the allow-list the gate would catch the change (the entries are load-bearing, not decoration)
+    expect(compareContent(v1, v2, ALLOW).missingText.length).toBeGreaterThan(0)
+  })
 })

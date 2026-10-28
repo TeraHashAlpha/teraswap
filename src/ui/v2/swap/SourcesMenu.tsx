@@ -35,10 +35,10 @@ export function SourcesMenu({ excluded, onToggle }: { excluded: Set<string>; onT
       </button>
 
       {open && (
-        <Surface id={panelId} variant="popover" className="absolute left-0 top-full z-20 mt-1 w-full min-w-[260px] max-w-[360px] p-4">
+        <Surface id={panelId} variant="popover" className="absolute left-0 top-full z-20 mt-1 w-[min(340px,calc(100vw-32px))] p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <span className="text-[14px] font-semibold text-v2-text">Liquidity Sources</span>
-            <span className="flex items-center gap-1">
+            <span className="whitespace-nowrap text-[14px] font-semibold text-v2-text">Liquidity Sources</span>
+            <span className="flex items-center gap-1 whitespace-nowrap">
               <Button variant="text" onClick={toggleAll}>
                 {excluded.size === 0 ? 'Deselect all' : 'Select all'}
               </Button>

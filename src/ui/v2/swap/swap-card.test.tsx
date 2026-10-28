@@ -224,6 +224,93 @@ describe('20 — quote', () => {
   })
 })
 
+const CONNECTED = { address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }
+const TIER = {
+  priced: { tier: 'priced', legs: { in: { tier: 'priced', sources: ['chainlink', 'defillama'], usd: 2490 }, out: { tier: 'priced', sources: ['chainlink', 'defillama'], usd: 1 } } },
+  single: { tier: 'single-source', legs: { in: { tier: 'single-source', sources: ['defillama'], usd: 2490 }, out: { tier: 'single-source', sources: ['defillama'], usd: 1 } } },
+  unpriced: { tier: 'unpriced', legs: { in: { tier: 'unpriced', sources: [] }, out: { tier: 'unpriced', sources: [] } } },
+}
+
+describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
+  function quoteWithTier(data: unknown) {
+    h.account = CONNECTED
+    h.tier = { data, loading: false }
+    h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1') }
+    render(<SwapCard />)
+    type('1')
+  }
+  it('priced → nothing; unknown → nothing', () => {
+    quoteWithTier(TIER.priced)
+    expect(document.querySelector('[data-testid^="price-tier"]')).toBeNull()
+    cleanup()
+    quoteWithTier(null)
+    expect(document.querySelector('[data-testid^="price-tier"]')).toBeNull()
+  })
+  it('single-source → the verbatim amber notice', () => {
+    quoteWithTier(TIER.single)
+    expect(document.querySelector('[data-testid="price-tier-single-source"]')?.textContent).toBe(
+      '⚠ Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
+    )
+  })
+  it('unpriced → the one-line notice, and the CTA still reads Review swap (the dialog is B4)', () => {
+    quoteWithTier(TIER.unpriced)
+    expect(document.querySelector('[data-testid="price-tier-unpriced"]')?.textContent).toBe('No reference price — consent required before swapping')
+    expect((document.querySelector('[data-cta]') as HTMLElement).textContent).toBe('Review swap')
+  })
+  it('no notice without a quote: the panel owns it, as in v1', () => {
+    h.account = CONNECTED
+    h.tier = { data: TIER.single, loading: false }
+    render(<SwapCard />)
+    type('1')
+    expect(document.querySelector('[data-testid="price-tier-single-source"]')).toBeNull()
+  })
+})
+
+describe('CTA states in the card (21a / 20 / 29)', () => {
+  const cta = () => document.querySelector('[data-cta]') as HTMLElement
+  it('connected, no amount → Enter amount (disabled)', () => {
+    h.account = CONNECTED
+    render(<SwapCard />)
+    expect(cta().textContent).toBe('Enter amount')
+    expect((cta() as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('amount above the balance → Insufficient balance (disabled), even with a quote', () => {
+    h.account = CONNECTED
+    h.balance = { value: 1_000_000_000_000_000n, decimals: 18 } // 0.001 ETH
+    h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1') }
+    render(<SwapCard />)
+    type('1')
+    expect(cta().textContent).toBe('Insufficient balance')
+    expect((cta() as HTMLButtonElement).disabled).toBe(true)
+    type('0.0005')
+    expect(cta().textContent).not.toBe('Insufficient balance')
+  })
+  it('a malformed amount is insufficient, never a crash', () => {
+    h.account = CONNECTED
+    h.balance = { value: 10n ** 18n, decimals: 18 }
+    render(<SwapCard />)
+    expect(() => fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1.' } })).not.toThrow()
+  })
+  it('wrong network (29): a text button "Switch to Ethereum", not the solid CTA; nothing is quoted', () => {
+    h.account = { address: CONNECTED.address, isConnected: true, chain: { id: 137 } }
+    render(<SwapCard />)
+    type('1')
+    expect(cta().textContent).toBe('Switch to Ethereum')
+    expect(cta().getAttribute('data-variant')).toBe('text')
+    expect(document.querySelectorAll('[data-variant="primary"]').length).toBe(0)
+    expect(h.useQuoteArgs[3]).toBe(false) // isChainOkForQuote: connected on an unsupported chain
+  })
+  it('review (20): the one solid cream CTA, enabled', () => {
+    h.account = CONNECTED
+    h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1') }
+    render(<SwapCard />)
+    type('1')
+    expect(cta().textContent).toBe('Review swap')
+    expect(cta().getAttribute('data-variant')).toBe('primary')
+    expect(document.querySelectorAll('[data-variant="primary"]').length).toBe(1)
+  })
+})
+
 describe('#604 — a stale quote never feeds the display', () => {
   it('a quote for the OTHER pair is treated as no quote', () => {
     h.account = { address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }
