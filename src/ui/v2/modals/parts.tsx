@@ -6,12 +6,13 @@ import { cx } from '../primitives/cx'
 import type { ConsentValues } from './review-model'
 
 /** A review line: muted label left, mono value right — separated by whitespace, not boxes. */
-export function ReviewRow({ label, children, tone, className, testId }: { label: ReactNode; children: ReactNode; tone?: 'green' | 'amber' | 'red' | 'cream' | 'muted'; className?: string; testId?: string }) {
+export function ReviewRow({ label, children, tone, className, testId, wrap = false }: { label: ReactNode; children: ReactNode; tone?: 'green' | 'amber' | 'red' | 'cream' | 'muted'; className?: string; testId?: string; wrap?: boolean }) {
   const color = { green: 'text-v2-green', amber: 'text-v2-amber', red: 'text-v2-red', cream: 'text-v2-cream', muted: 'text-v2-muted' }[tone ?? 'muted']
   return (
     <div data-testid={testId} className={cx('flex items-start justify-between gap-6 py-[7px] text-[14px]', className)}>
-      <span className="shrink-0 text-v2-muted">{label}</span>
-      <span className={cx('min-w-0 text-right font-v2-mono tabular-nums', tone ? color : 'text-v2-text/90')}>{children}</span>
+      <span className="min-w-0 text-v2-muted">{label}</span>
+      {/* An amount never breaks across lines on a phone (its thin-space groups are break points); the label wraps instead. Text values opt in to wrapping. */}
+      <span className={cx('text-right font-v2-mono tabular-nums', wrap ? 'min-w-0 break-words' : 'shrink-0 whitespace-nowrap', tone ? color : 'text-v2-text/90')}>{children}</span>
     </div>
   )
 }

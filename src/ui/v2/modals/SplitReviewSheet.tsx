@@ -63,14 +63,14 @@ function Leg({ leg, index, tokenIn, tokenOut, userAddress }: { leg: PlannedLeg; 
             </ReviewRow>
           )}
           <ReviewRow label="Router">{truncAddr(leg.routerAddress)}</ReviewRow>
-          <ReviewRow label="Recipient">
+          <ReviewRow label="Recipient" wrap>
             {recipient ? truncAddr(recipient) : 'msg.sender'}{' '}
             {badge === 'match' && <Mark>Your wallet</Mark>}
             {badge === 'implicit' && <Mark tone="cream">Implicit</Mark>}
             {badge === 'feecollector' && <Mark tone="cream">FeeCollector</Mark>}
             {badge === 'other' && <Mark tone="amber">Unknown</Mark>}
           </ReviewRow>
-          <ReviewRow label="Validation" tone={preview?.validated ? 'green' : 'amber'}>
+          <ReviewRow label="Validation" tone={preview?.validated ? 'green' : 'amber'} wrap>
             {preview?.validated ? (
               <>
                 <span aria-hidden="true">✓</span> Validated selector <span className="text-v2-muted">{preview.selector}</span>

@@ -134,24 +134,24 @@ export function ReviewSheet({
         <ReviewRow label="Rate" testId="review-rate">
           {model.rate}
         </ReviewRow>
-        <ReviewRow label="Route" testId="review-route">
+        <ReviewRow label="Route" testId="review-route" wrap>
           <span className="break-words">{model.route}</span>
           {pending?.routeViaFeeCollector && <span className="block text-v2-cream">Via TeraSwap FeeCollector (0.1% fee)</span>}
         </ReviewRow>
         <ReviewRow label="Max slippage" testId="review-slippage">
           {model.slippage}
         </ReviewRow>
-        <ReviewRow label="Est. gas" tone={model.gasFree ? 'green' : undefined} testId="review-gas">
+        <ReviewRow label="Est. gas" tone={model.gasFree ? 'green' : undefined} testId="review-gas" wrap>
           {model.gas}
         </ReviewRow>
-        <ReviewRow label={model.feeLabel} tone={model.feeValue ? undefined : 'green'} testId="review-fee">
+        <ReviewRow label={model.feeLabel} tone={model.feeValue ? undefined : 'green'} testId="review-fee" wrap>
           {model.feeValue ?? 'Free'}
         </ReviewRow>
       </div>
 
       {preview && recipient && (
         <div className="mt-2 ts-v2-rule-t pt-2" data-testid="review-decoded">
-          <ReviewRow label="Recipient" testId="review-recipient">
+          <ReviewRow label="Recipient" testId="review-recipient" wrap>
             {recipient.text}{' '}
             {recipient.badge === 'match' && <Mark>Your wallet</Mark>}
             {recipient.badge === 'implicit' && <Mark tone="cream">Implicit</Mark>}
@@ -159,7 +159,7 @@ export function ReviewSheet({
             {recipient.badge === 'other' && <Mark tone="amber">Unknown</Mark>}
           </ReviewRow>
           {preview.deadline != null && preview.deadline > 0 && <ReviewRow label="Deadline">{formatDeadline(preview.deadline)}</ReviewRow>}
-          <ReviewRow label="Validation" tone={preview.validated ? 'green' : 'amber'} testId="review-validation">
+          <ReviewRow label="Validation" tone={preview.validated ? 'green' : 'amber'} testId="review-validation" wrap>
             {preview.validated ? (
               <>
                 <span aria-hidden="true">✓</span> Validated selector

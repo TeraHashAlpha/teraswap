@@ -53,7 +53,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
         <ReviewRow label="Receive (min)" testId="cow-buy">
           {fmtAmount(message.buyAmount, tokenOut.decimals, tokenOut.symbol)}
         </ReviewRow>
-        <ReviewRow label="Recipient">
+        <ReviewRow label="Recipient" wrap>
           <span data-testid="cow-receiver">{truncAddr(message.receiver)}</span> {receiverIsSelf ? <Mark>Your wallet</Mark> : <Mark tone="amber">Other</Mark>}
         </ReviewRow>
         <ReviewRow label="CoW network fee" testId="cow-fee">

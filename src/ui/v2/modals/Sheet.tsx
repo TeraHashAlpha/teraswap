@@ -48,7 +48,8 @@ export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, 
     const panel = panelRef.current
     const focusables = () => (panel ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => !el.hasAttribute('hidden') && el.getAttribute('aria-hidden') !== 'true') : [])
     // Focus the requested control, else the first one; a panel with nothing focusable holds focus itself.
-    ;(initialFocusRef?.current ?? focusables()[0] ?? panel)?.focus()
+    // preventScroll: a long sheet (review) must open at its title, not scrolled down to a footer button that took focus.
+    ;(initialFocusRef?.current ?? focusables()[0] ?? panel)?.focus({ preventScroll: true })
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {

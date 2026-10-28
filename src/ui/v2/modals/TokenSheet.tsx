@@ -39,7 +39,7 @@ function AddressLine({ token, chainId, full }: { token: Token; chainId: number; 
           setCopied(true)
           setTimeout(() => setCopied(false), 1500)
         }}
-        className="inline-flex min-h-[44px] items-center px-1 text-v2-muted hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-v2-teal"
+        className="-my-3 inline-flex min-h-[44px] items-center px-1 text-v2-muted hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-v2-teal"
       >
         <span aria-hidden="true">{copied ? '✓' : '⧉'}</span>
       </button>
