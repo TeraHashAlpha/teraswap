@@ -39,6 +39,9 @@ import { Tip } from './Tip'
 import { TokenButton } from './TokenButton'
 import { SlippageSheet } from '../modals/SlippageSheet'
 import { TokenSheet } from '../modals/TokenSheet'
+import { Permit2Sheet } from '../modals/Permit2Sheet'
+import { ReviewSheet } from '../modals/ReviewSheet'
+import { buildReviewModel, reviewOpen } from '../modals/review-model'
 
 const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
@@ -100,6 +103,7 @@ export function SwapCard() {
   const [isAutoSlippage, setIsAutoSlippage] = useState(true)
   const [showSlippage, setShowSlippage] = useState(false)
   const [tokenPicker, setTokenPicker] = useState<'sell' | 'receive' | null>(null)
+  const [reviewRequested, setReviewRequested] = useState(false)
 
   const dismissMevHint = useCallback(() => {
     setMevHintDismissed(true)
@@ -189,7 +193,7 @@ export function SwapCard() {
   }, [spenderKey])
   // An answer only counts for the (source, chain) it was fetched for — the "clear when there is no quote" of v1, derived.
   const spender = spenderAnswer && spenderAnswer.key === spenderKey ? spenderAnswer.spender : undefined
-  const { plan: approvalPlan } = useApproval(tokenIn, amountIn, spender)
+  const { plan: approvalPlan, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } = useApproval(tokenIn, amountIn, spender)
 
   // Direction-agnostic execution price (SwapBox, SPRINT-9S S2): the non-stable side priced off the stable side.
   const { execIn, execOut } =
@@ -419,7 +423,14 @@ export function SwapCard() {
             {cta.label}
           </Button>
         ) : (
-          <Button variant="primary" className="w-full" disabled={cta.disabled} data-cta={cta.kind} data-b5-stub="">
+          <Button
+            variant="primary"
+            className="w-full"
+            disabled={cta.disabled}
+            data-cta={cta.kind}
+            data-b5-stub={cta.kind === 'review' ? undefined : ''}
+            onClick={cta.kind === 'review' ? () => setReviewRequested(true) : undefined}
+          >
             {cta.label}
           </Button>
         )}
@@ -445,6 +456,17 @@ export function SwapCard() {
           tokenInSymbol={tokenIn?.symbol}
           tokenOutSymbol={tokenOut?.symbol}
           chainId={activeChainId}
+        />
+      )}
+      {needsPermit2Education && (
+        <Permit2Sheet amount={amountIn} tokenSymbol={tokenIn?.symbol} onConfirm={confirmPermit2Education} onCancel={cancelPermit2Education} />
+      )}
+      {reviewOpen({ requested: reviewRequested, ackRequired: false }) && view && meta && tokenIn && tokenOut && (
+        <ReviewSheet
+          model={buildReviewModel({ view, meta, tokenIn, tokenOut, amountIn, slippage, tier: priceTier })}
+          // B5: `pending` (the frozen calldata), `ackRequired` (the /api/swap 409) and Confirm → sign arrive with the wallet lifecycle.
+          onConfirm={() => {}}
+          onCancel={() => setReviewRequested(false)}
         />
       )}
       {tokenPicker && (

@@ -1,7 +1,7 @@
 # feat/ui-v2-swap-modals — feedback (B4)
 
 Off origin/main `9e7aefa` (B3 merged). Dedicated worktree, real `npm ci`. No PR (owner opens it). SSH-signed, noreply. Code diff only under `src/ui/v2/**`; v1 components/hooks/lib/api untouched. Display only — no wallet action is sent (B5 wires Confirm → sign).
-- [ ] C1 slippage (22) + token selector (23/m02) · [ ] C2 Permit2 (25) + review (26/m03) + split/CoW (27) · [ ] C3 route label + gas · [ ] evidence 1–7
+- [x] C1 `730c638` slippage (22) + token selector (23/m02) · [x] C2 Permit2 (25) + review (26/m03) + split/CoW (27) · [ ] C3 route label + gas · [ ] evidence 1–7
 
 ## Premises (recorded; owner answered in-session)
 - **No `SwapReview*` exists.** Frame 26/m03 "Review Transaction" is v1 `TransactionPreview.tsx`; frame 27 is `SplitReviewModal.tsx` + `CowOrderReviewModal.tsx`. Owner: **add those three to read-only scope**, and the review sheet shows **frame 26's fields + the goal's extras** (slippage / fee / gas / tier line from the quote object).
@@ -12,3 +12,6 @@ Off origin/main `9e7aefa` (B3 merged). Dedicated worktree, real `npm ci`. No PR 
 ## Findings so far
 - v1 `SlippageModal`: an empty custom field + OK sets **0.01 %** (`Number('')`→0→clamped up). v2 disables OK / Enter on an empty field; the 0.01–15 clamp is otherwise identical (bounds unchanged, tested against v1's calls).
 - v1 modals each hand-roll (or lack) focus handling; v2 has one `modals/Sheet` (trap, Esc, restore focus, bottom sheet ≤ 600 px) tested once.
+- v1 `TransactionPreview` prints "Raw calldata (N bytes)" as `calldata.length / 2` **including the `0x`** → one byte too many (65 for 64). Copied as-is for parity; a v1 Low.
+- v1 `format.ts` `fmtToken` goes through a float for bigints past 2^53 (a 30-digit amount prints with wrong low digits). The review/min-output display inherits it; the signed floor is `deriveMinimumOutput` (exact) — display only. Tested at 14 digits.
+- B4 has no frozen tx: the review sheet renders the quote half from the card; Recipient / Validation / Selector / Raw calldata (v1's decoder) appear when B5 passes `pending`. Parity vs v1's TransactionPreview is run with `pending` supplied.

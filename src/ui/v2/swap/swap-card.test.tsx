@@ -13,7 +13,7 @@ const h = vi.hoisted(() => ({
   chainId: 1,
   quote: { meta: null as unknown, loading: false, error: null as string | null, countdown: 12, refresh: vi.fn() },
   oracle: { chainlinkPrice: 2490 as number | null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false } as Record<string, unknown>,
-  approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown },
+  approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown } as Record<string, unknown>,
   tier: { data: null as unknown, loading: false },
   useQuoteArgs: [] as unknown[],
 }))
@@ -48,6 +48,7 @@ beforeEach(() => {
   h.quote = { meta: null, loading: false, error: null, countdown: 12, refresh: vi.fn() }
   h.oracle = { ...NO_ORACLE, chainlinkPrice: 2490 }
   h.tier = { data: null, loading: false }
+  h.approval = { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } }
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) })))
   try {
     localStorage.clear()
@@ -274,7 +275,7 @@ describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
       '⚠ Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
     )
   })
-  it('unpriced → the one-line notice, and the CTA still reads Review swap (the dialog is B4)', () => {
+  it('unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet — see 26)', () => {
     quoteWithTier(TIER.unpriced)
     expect(document.querySelector('[data-testid="price-tier-unpriced"]')?.textContent).toBe('No reference price — consent required before swapping')
     expect((document.querySelector('[data-cta]') as HTMLElement).textContent).toBe('Review swap')
@@ -372,5 +373,75 @@ describe('tokens used in the fixtures resolve', () => {
   it('ETH is native and USDC is not', () => {
     expect(ETH.symbol).toBe('ETH')
     expect(USDC.symbol).toBe('USDC')
+  })
+})
+
+describe('26 / 25 — the review and Permit2 sheets opened from the card (B4, display only)', () => {
+  const quote = (tier: unknown = null) => {
+    h.account = CONNECTED
+    h.tier = { data: tier, loading: false }
+    h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1') }
+    render(<SwapCard />)
+    type('1')
+  }
+  const cta = () => document.querySelector('[data-cta]') as HTMLButtonElement
+
+  it('Review swap opens the review sheet with the card\'s own numbers; Cancel closes it and returns focus to the CTA', () => {
+    quote()
+    expect(cta().hasAttribute('data-b5-stub')).toBe(false) // the click does something now (it opens a display-only sheet)
+    cta().focus()
+    fireEvent.click(cta())
+    const dlg = screen.getByRole('dialog', { name: 'Review Transaction' })
+    const panel = document.querySelector('[data-quote-panel]')!.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
+    const sheet = dlg.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
+    for (const s of ['2 480.2211 USDC', '0.001 ETH ($2.49)', '$0.03 (~0.000012 ETH)', '0.3%']) {
+      expect(panel).toContain(s)
+      expect(sheet).toContain(s)
+    }
+    expect(within(dlg).getByRole('button', { name: 'Confirm & Sign' }).getAttribute('data-b5-stub')).toBe('') // Confirm is B5's
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(cta())
+  })
+
+  it('the sheet follows a changed slippage', () => {
+    quote()
+    fireEvent.click(document.querySelector('[data-edit-slippage]') as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: '1%' }))
+    fireEvent.click(cta())
+    expect(screen.getByTestId('review-slippage').textContent).toContain('1%')
+  })
+
+  it('unpriced tier: the consent sits in the sheet and gates Confirm; single-source shows the amber line only', () => {
+    quote(TIER.unpriced)
+    fireEvent.click(cta())
+    expect((screen.getByRole('button', { name: 'Confirm & Sign' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('unpriced-consent-body').textContent).toContain('5 sources quoted within 0.27% of each other')
+    fireEvent.click(screen.getByTestId('unpriced-consent-checkbox'))
+    expect((screen.getByRole('button', { name: 'Confirm & Sign' }) as HTMLButtonElement).disabled).toBe(false)
+    cleanup()
+    quote(TIER.single)
+    fireEvent.click(cta())
+    expect(within(screen.getByRole('dialog')).getByTestId('price-tier-single-source')).toBeTruthy()
+    expect(screen.queryByTestId('unpriced-consent')).toBeNull()
+  })
+
+  it('no sheet opens for a state that has no review: Enter amount / Connect wallet', () => {
+    render(<SwapCard />)
+    fireEvent.click(cta())
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('useApproval says Permit2 education is needed → the Permit2 sheet; Continue / Cancel are useApproval\'s own callbacks', () => {
+    const confirm = vi.fn()
+    const cancel = vi.fn()
+    h.approval = { ...h.approval, needsPermit2Education: true, confirmPermit2Education: confirm, cancelPermit2Education: cancel }
+    quote()
+    const dlg = screen.getByRole('dialog', { name: 'About to sign a Permit2 approval' })
+    expect(within(dlg).getByText('1 ETH')).toBeTruthy()
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Continue to signature' }))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Escape' })
+    expect(cancel).toHaveBeenCalledTimes(1)
   })
 })
