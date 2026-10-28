@@ -24,7 +24,9 @@ const h = vi.hoisted(() => ({
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }),
   useBalance: () => ({ data: { value: 3n * 10n ** 18n, decimals: 18 } }),
+  useSwitchChain: () => ({ switchChain: () => {} }),
 }))
+vi.mock('@rainbow-me/rainbowkit', () => ({ useConnectModal: () => ({ openConnectModal: () => {} }) }))
 vi.mock('@/hooks/useQuote', () => ({ useQuote: () => h.quote }))
 vi.mock('@/hooks/useChainId', () => ({ useQuoteChainId: () => 1, useActiveChainId: () => 1 }))
 vi.mock('@/hooks/useChainlinkPrice', () => ({ useChainlinkPrice: () => ({ ...NO_ORACLE, chainlinkPrice: 2490 }) }))

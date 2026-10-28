@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useAccount, useBalance } from 'wagmi'
+import { useAccount, useBalance, useSwitchChain } from 'wagmi'
+import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import DigitRoller from '@/components/DigitRoller'
 import ChainIcon from '@/components/icons/ChainIcon'
@@ -49,9 +50,10 @@ import { useV2Toast } from '../shell/toasts'
 import { GateNotices } from './lifecycle/GateNotices'
 import { SplitRoutePanel } from './lifecycle/SplitRoutePanel'
 import { ApprovalStep } from './lifecycle/ApprovalStep'
+import { ExecutionPanel } from './lifecycle/ExecutionPanel'
 import { useSwapGates } from './lifecycle/use-swap-gates'
 import { useSwapLifecycle } from './lifecycle/use-swap-lifecycle'
-import { confirmButtonState, SIGNING_STATUSES } from './lifecycle/lifecycle-view'
+import { buildTimeline, confirmButtonState, SIGNING_STATUSES } from './lifecycle/lifecycle-view'
 
 const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
@@ -118,6 +120,8 @@ export function SwapCard() {
   // The review model as it stood when Confirm was pressed: the sheet keeps describing what was confirmed while the quote polls on.
   const [confirmedModel, setConfirmedModel] = useState<ReviewModel | null>(null)
   const { toast } = useV2Toast()
+  const { openConnectModal } = useConnectModal()
+  const { switchChain } = useSwitchChain()
 
   const dismissMevHint = useCallback(() => {
     setMevHintDismissed(true)
@@ -360,6 +364,22 @@ export function SwapCard() {
   const splitConsentOpen = lc.isSplitActive && (lc.consentRequested || lc.split.unpricedAckRequired)
   const confirmBtn = confirmButtonState({ approvalStatus: approval.status, approvalReady: approval.isReady, swapStatus: swapSt })
 
+  // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
+  const executionActive = lc.status !== 'idle'
+  const explorerUrl = (() => {
+    try {
+      return getChainConfig(activeChainId).blockExplorer
+    } catch {
+      return getChainConfig(1).blockExplorer
+    }
+  })()
+  function onNewSwap() {
+    lc.resetAll()
+    setConfirmedModel(null)
+    setReviewRequested(false)
+    setDisplayAmountIn('')
+  }
+
   async function onReviewConfirm(c: { unpricedAck: boolean }) {
     playTouchMP3()
     if (frozenSwap) {
@@ -376,6 +396,10 @@ export function SwapCard() {
   }
   function onCta() {
     playTouchMP3() // v1: SwapButton plays the touch sound on every click
+    if (cta.kind === 'connect') {
+      openConnectModal?.()
+      return
+    }
     if (lc.isSplitActive && (cta.kind === 'split-swap' || cta.kind === 'retry')) {
       void lc.confirm() // v1's Swap click on a split: straight to the plan
       return
@@ -496,7 +520,25 @@ export function SwapCard() {
       </Surface>
 
       <Surface edge="top" className="ts-swap-quote" aria-busy={quoting || undefined}>
-        {view && meta && tokenIn && tokenOut ? (
+        {executionActive && tokenIn && tokenOut ? (
+          <ExecutionPanel
+            steps={buildTimeline({ route: lc.route, status: lc.status, lastActive: lc.lastActive })}
+            phase={lc.status === 'success' ? 'success' : lc.status === 'error' ? 'failure' : 'pending'}
+            symbolIn={tokenIn.symbol}
+            symbolOut={tokenOut.symbol}
+            amountIn={amountIn}
+            summary={lc.success}
+            txHash={lc.swap.txHash}
+            explorerUrl={explorerUrl}
+            error={lc.error}
+            failureTitle={lc.isSplitActive ? (lc.split.status === 'partial' ? 'Split swap partially complete' : 'Split swap failed') : 'Swap failed'}
+            cowPending={lc.swap.status === 'cow_pending'}
+            legs={lc.isSplitActive ? { rows: lc.split.legs, completed: lc.split.completedLegs, total: lc.split.totalLegs } : undefined}
+            simulation={{ passed: lc.swap.simulationPassed, skipped: lc.swap.simulationSkipped, swapStatus: lc.swap.status }}
+            fallback={lc.swap.fallbackNotice}
+            onNewSwap={onNewSwap}
+          />
+        ) : view && meta && tokenIn && tokenOut ? (
           <QuotePanel
             view={view}
             symbolIn={tokenIn.symbol}
@@ -535,7 +577,15 @@ export function SwapCard() {
       <div className="ts-swap-cta">
         {cta.kind === 'wrong-network' ? (
           // round7 29: the wrong-network state is a text button (amber), not the solid CTA — one filled shape per screen stays true.
-          <Button variant="text" className="w-full !text-v2-amber" data-cta={cta.kind} data-b5-stub="">
+          <Button
+            variant="text"
+            className="w-full !text-v2-amber"
+            data-cta={cta.kind}
+            onClick={() => {
+              playTouchMP3()
+              switchChain({ chainId: CHAIN_ID }) // v1's SwapButton: the default chain, whatever the label's `Switch to {chain}` names
+            }}
+          >
             {cta.label}
           </Button>
         ) : (
@@ -545,9 +595,8 @@ export function SwapCard() {
             disabled={cta.disabled}
             data-cta={cta.kind}
             data-recoverable={cta.recoverable === undefined ? undefined : String(cta.recoverable)}
-            data-b5-stub={cta.kind === 'connect' ? '' : undefined}
             aria-busy={cta.kind === 'in-flight' || undefined}
-            onClick={cta.kind === 'connect' ? undefined : onCta}
+            onClick={onCta}
           >
             {cta.label}
           </Button>

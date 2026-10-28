@@ -16,12 +16,16 @@ const h = vi.hoisted(() => ({
   approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown, status: 'ready', error: null, approve: async () => {}, isReady: true } as Record<string, unknown>,
   tier: { data: null as unknown, loading: false },
   useQuoteArgs: [] as unknown[],
+  switchChain: vi.fn(),
+  openConnectModal: vi.fn(),
 }))
 
 vi.mock('wagmi', () => ({
   useAccount: () => h.account,
   useBalance: () => ({ data: h.balance }),
+  useSwitchChain: () => ({ switchChain: h.switchChain }),
 }))
+vi.mock('@rainbow-me/rainbowkit', () => ({ useConnectModal: () => ({ openConnectModal: h.openConnectModal }) }))
 vi.mock('@/hooks/useQuote', () => ({
   useQuote: (...args: unknown[]) => {
     h.useQuoteArgs = args

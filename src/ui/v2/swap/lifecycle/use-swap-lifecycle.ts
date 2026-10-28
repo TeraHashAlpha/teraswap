@@ -17,7 +17,8 @@ import { isNativeETH, type Token } from '@/lib/tokens'
 import { playCancelOrderMP3, playSwapConfirmMP3, startWaitingSound, stopWaitingSound } from '@/lib/sounds'
 import { useV2Toast } from '../../shell/toasts'
 import type { SwapGateState } from './use-swap-gates'
-import { buildSuccessSummary, effectiveSwapStatus, type SuccessSummary } from './lifecycle-view'
+import type { SwapStatus } from '@/hooks/useSwap'
+import { buildSuccessSummary, effectiveSwapStatus, TRACKED_STATUSES, type SuccessSummary } from './lifecycle-view'
 
 export interface LifecycleArgs {
   tokenIn: Token | null
@@ -66,6 +67,12 @@ export function useSwapLifecycle(a: LifecycleArgs) {
   const error = isSplitActive ? split.errorMessage : swap.errorMessage
   // v1: the 409 reopens the consent whichever hook raised it.
   const ackRequired = swap.unpricedAckRequired || split.unpricedAckRequired
+
+  // The last in-flight status before a failure — the timeline draws the failure on the step that was running. Adjusting state during
+  // render (React's documented derive-from-props pattern), not in an effect.
+  const [lastActive, setLastActive] = useState<SwapStatus>('idle')
+  if (status === 'idle' && lastActive !== 'idle') setLastActive('idle')
+  else if (TRACKED_STATUSES.has(status) && status !== lastActive) setLastActive(status)
 
   // The split path has no pre-review sheet (v1 goes straight to the plan), so its consent is a sheet of its own; this is v1's
   // `unpricedConsentRequested`.
@@ -269,6 +276,9 @@ export function useSwapLifecycle(a: LifecycleArgs) {
     consentRequested,
     /** The summary of the swap that just succeeded (standard path); null otherwise. */
     success,
+    lastActive,
+    /** The route the timeline follows: CoW signs an order, everything else sends a transaction. */
+    route: ((confirmedQuote ?? meta)?.best.source === 'cowswap' ? 'cow' : 'standard') as 'cow' | 'standard',
     confirm,
     cancel,
     resetAll,

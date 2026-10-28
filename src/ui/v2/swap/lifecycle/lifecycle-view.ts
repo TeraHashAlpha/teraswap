@@ -31,6 +31,8 @@ export function effectiveSwapStatus(i: { isSplitActive: boolean; swapStatus: Swa
 export const SIGNING_STATUSES: ReadonlySet<SwapStatus> = new Set(['swapping', 'cow_signing', 'cow_pending'])
 /** Statuses where the hook is working towards a frozen review (build / simulate). */
 export const PREPARING_STATUSES: ReadonlySet<SwapStatus> = new Set(['fetching_swap', 'simulating'])
+/** Every status the timeline can sit on while a swap is running (the frozen CoW review included). */
+export const TRACKED_STATUSES: ReadonlySet<SwapStatus> = new Set(['fetching_swap', 'simulating', 'confirming', 'swapping', 'cow_awaiting_review', 'cow_signing', 'cow_pending'])
 /** Everything that is "in flight" for v1's `isSpinning`. */
 export const IN_FLIGHT_STATUSES: ReadonlySet<SwapStatus> = new Set(['fetching_swap', 'simulating', 'confirming', 'swapping', 'cow_signing', 'cow_pending'])
 
@@ -93,4 +95,51 @@ export function buildSuccessSummary(i: { meta: MetaQuoteResult; tokenOut: Token;
   const outBig = safeBigInt(i.meta.best.toAmount)
   const outNumber = outBig !== null ? Number(formatUnits(outBig, i.tokenOut.decimals)) : null
   return { outDisplay: outNumber !== null ? fmtToken(outNumber) : '—', outNumber, savingsLine, realisedSurplusWei }
+}
+
+// ── The execution timeline (round7 28a / 28b / 28c) ──────────────────────────────────────────────────────────────────────────
+// The steps are SwapButton's own labels, in the order the hooks walk them; nothing here is a new word.
+
+export type StepState = 'done' | 'active' | 'todo' | 'failed'
+export interface TimelineStep {
+  label: string
+  state: StepState
+}
+export type TimelineRoute = 'standard' | 'cow'
+
+const STANDARD_STEPS = ['Preparing swap...', 'Simulating transaction...', 'Review transaction...', 'Executing swap...', 'Swap complete'] as const
+const COW_STEPS = ['Preparing swap...', 'Sign order in wallet...', 'Waiting for solver...', 'Swap complete'] as const
+
+/** Which step a hook status sits on. `-1` = not started. A status that belongs to the other route maps to its nearest step. */
+function stepIndex(route: TimelineRoute, status: SwapStatus): number {
+  if (route === 'cow') {
+    return { fetching_swap: 0, simulating: 0, cow_awaiting_review: 0, confirming: 0, cow_signing: 1, cow_pending: 2, swapping: 2, success: 3 }[status as string] ?? -1
+  }
+  return { fetching_swap: 0, simulating: 1, confirming: 2, cow_awaiting_review: 2, swapping: 3, cow_signing: 3, cow_pending: 3, success: 4 }[status as string] ?? -1
+}
+
+/**
+ * `lastActive` is the last in-flight status the hook was in before it failed (the card tracks it): a failure is drawn on the step
+ * that was running — "Executing swap..." for a revert or a wallet rejection, "Simulating transaction..." for a simulated revert.
+ */
+export function buildTimeline(i: { route: TimelineRoute; status: SwapStatus; lastActive: SwapStatus }): TimelineStep[] {
+  const labels = i.route === 'cow' ? COW_STEPS : STANDARD_STEPS
+  const at = i.status === 'error' ? Math.max(0, stepIndex(i.route, i.lastActive)) : stepIndex(i.route, i.status)
+  return labels.map((label, n) => {
+    let state: StepState
+    if (i.status === 'success') state = 'done'
+    else if (i.status === 'error') state = n < at ? 'done' : n === at ? 'failed' : 'todo'
+    else state = n < at ? 'done' : n === at ? 'active' : 'todo'
+    return { label, state }
+  })
+}
+
+/** SwapBox's `ETHERSCAN_TX` is mainnet-only; the order chain's own explorer, named as its host names itself (Etherscan / Basescan / Arbiscan). */
+export function explorerName(blockExplorerUrl: string): string {
+  try {
+    const sld = new URL(blockExplorerUrl).hostname.split('.').slice(-2, -1)[0] ?? ''
+    return sld ? sld[0].toUpperCase() + sld.slice(1) : 'explorer'
+  } catch {
+    return 'explorer'
+  }
 }
