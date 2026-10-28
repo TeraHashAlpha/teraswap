@@ -1,0 +1,7 @@
+[parity] connected + balance: v1 text nodes 77, v1 links 0, missing text 0, missing hrefs 0, stale allow 0
+[parity] disconnected: v1 text nodes 73, v1 links 0, missing text 0, missing hrefs 0, stale allow 0
+[parity] USDC → ETH: v1 text nodes 10, v1 links 0, missing text 0, missing hrefs 0, stale allow 4 ["⟳ — matches nothing in v1 (refresh: decorative glyph, aria-hidden in v2; the control keeps its accessible name)","✎ — matches nothing in v1 (max-slippage edit: decorative glyph, aria-hidden in v2; the control keeps its accessible name)","⚙ — matches nothing in v1 (sources trigger: decorative glyph, aria-hidden in v2; the control keeps its accessible name)","× — matches nothing in v1 (dismiss MEV hint: decorative glyph, aria-hidden in v2; the control keeps its accessible name)"]
+[parity] CoW best: v1 text nodes 89, v1 links 0, missing text 0, missing hrefs 0, stale allow 1 ["× — matches nothing in v1 (dismiss MEV hint: decorative glyph, aria-hidden in v2; the control keeps its accessible name)"]
+[parity] notices: v1 text nodes 80, v1 links 0, missing text 0, missing hrefs 0, stale allow 0
+[parity] single-source: v1 text nodes 77, v1 links 0, missing text 0, missing hrefs 0, stale allow 0
+[parity] unpriced (allow-listed): v1 text nodes 79, v1 links 0, missing text 0, missing hrefs 0, stale allow 0

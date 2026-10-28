@@ -147,7 +147,7 @@
       "status": "rejected"
     }
   ],
-  "narrativeNote": "Round-6 scroll narrative (MOTION-SPEC §2): graded derivatives of existing tab photos, recipe steps 1-3 baked in (grayscale, contrast, brightness, duotone, 65% BG shade); the constant veil is a CSS layer. Source: round6/landing/img/bg-*. Width is the long edge (1920 landscape for desktop, 1080 portrait for mobile). Round 7 (owner addition, 26 Oct preview review): the app shell's per-tab photos use this same baked set — zakim, archnight and overpass are added (tab = the shell tab that shows it). archnight and overpass are the pack's round7 files, byte for byte; zakim has no baked file in the pack, so it was baked here with a tone curve measured on the pack's baked highway (README in narrative/).",
+  "narrativeNote": "Round-6 scroll narrative (MOTION-SPEC §2): graded derivatives of existing tab photos, recipe steps 1-3 baked in (grayscale, contrast, brightness, duotone, 65% BG shade); the constant veil is a CSS layer. Source: round6/landing/img/bg-*. Width is the long edge (1920 landscape for desktop, 1080 portrait for mobile). Round 7 (owner addition, 26 Oct preview review): the app shell's per-tab photos use this same baked set — zakim, archnight and overpass are added (tab = the shell tab that shows it). archnight and overpass are the pack's round7 files, byte for byte; zakim is the pack's round7 `bg-zakim` zip (landing/img, prep7_zakim.py), byte for byte (it first shipped baked locally, before the pack had the files; README in narrative/).",
   "narrative": [
     {
       "id": "highway",
@@ -321,22 +321,22 @@
         {
           "file": "narrative/bg-zakim-1920.avif",
           "width": 1920,
-          "bytes": 41391
+          "bytes": 47819
         },
         {
           "file": "narrative/bg-zakim-1920.webp",
           "width": 1920,
-          "bytes": 51114
+          "bytes": 59334
         },
         {
           "file": "narrative/bg-zakim-1080.avif",
           "width": 1080,
-          "bytes": 42886
+          "bytes": 51831
         },
         {
           "file": "narrative/bg-zakim-1080.webp",
           "width": 1080,
-          "bytes": 51224
+          "bytes": 61190
         }
       ]
     },

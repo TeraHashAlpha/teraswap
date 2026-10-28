@@ -1,0 +1,9 @@
+photo      scrim  min    muted   teal   dim(large)  (worst of desktop/mobile × avif/webp)
+zakim      0.00   0.00   5.71    4.57   4.03
+tunnel     0.00   0.00   6.73    5.39   4.75
+underpass  0.47   0.40   5.88    4.70   4.15
+highway    0.00   0.00   6.05    4.84   4.27
+archlight  0.00   0.00   5.64    4.51   3.98
+archnight  0.00   0.00   5.64    4.51   3.98
+footbridge 0.00   0.00   5.96    4.76   4.20
+overpass   0.00   0.00   6.00    4.80   4.23
