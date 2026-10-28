@@ -1,0 +1,16 @@
+route table: head 54, base 54, identical=true
+v2-marked chunks in v1 routes: 0
+/                                  head   2270907  base   2271212  Δ    -305  v2-marked chunks: 0
+/_global-error                     head     33706  base     33706  Δ       0  v2-marked chunks: 0
+/_not-found                        head    109855  base    109855  Δ       0  v2-marked chunks: 0
+/admin                             head    427158  base    427158  Δ       0  v2-marked chunks: 0
+/analytics                         head   1807835  base   1807835  Δ       0  v2-marked chunks: 0
+/docs                              head   1983940  base   1983940  Δ       0  v2-marked chunks: 0
+/privacy                           head   1824112  base   1824112  Δ       0  v2-marked chunks: 0
+/status                            head    128736  base    128736  Δ       0  v2-marked chunks: 0
+/swap                              head   2257299  base   2257147  Δ     152  v2-marked chunks: 0
+/terms                             head   1824110  base   1824110  Δ       0  v2-marked chunks: 0
+/v2                                head   2271837  base   2212015  Δ   59822  v2-marked chunks: (v2 route)
+/v2/[tab]                          head   2238780  base   2178522  Δ   60258  v2-marked chunks: (v2 route)
+/v2/_enable                        head    143343  base    141776  Δ    1567  v2-marked chunks: (v2 route)
+/v2/_kit                           head    148205  base    146638  Δ    1567  v2-marked chunks: (v2 route)

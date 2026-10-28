@@ -5,7 +5,7 @@ import type { Token } from '@/lib/tokens'
 
 /**
  * Round 7 item 2: the token selector is a TEXT button — logo, symbol, chevron, no fill, a ≥ 44 px hit area. The list it
- * opens (frame 23) is a B4 modal, so `onOpen` is a stub here (`data-b4-stub`); the button is real and accessible.
+ * opens (frame 23) is `modals/TokenSheet`; this is only the trigger.
  */
 export function TokenButton({ token, side, onOpen }: { token: Token | null; side: 'sell' | 'receive'; onOpen?: () => void }) {
   const [logoFailed, setLogoFailed] = useState(false)
@@ -13,7 +13,7 @@ export function TokenButton({ token, side, onOpen }: { token: Token | null; side
     <button
       type="button"
       aria-label={`${side === 'sell' ? 'Sell' : 'Receive'} token: ${token?.symbol ?? 'none'}. Change token`}
-      data-b4-stub="token-modal"
+      aria-haspopup="dialog"
       onClick={onOpen}
       className="ts-swap-token inline-flex min-h-[44px] items-center gap-2 font-v2-mono text-[15px] font-semibold text-v2-text hover:text-v2-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
     >

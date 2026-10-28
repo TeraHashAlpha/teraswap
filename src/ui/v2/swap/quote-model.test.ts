@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseUnits } from 'viem'
 import type { NormalizedQuote } from '@/lib/adapters/types'
-import { buildQuoteView, priceImpact, quoteIsForAmount, routeHopLabel, routeText } from './quote-model'
+import { buildQuoteView, formatGas, priceImpact, quoteIsForAmount, routeHopLabel, routeText } from './quote-model'
+import { knownDexName } from './route-names'
 import { ETH, USDC, fixtureMeta, NO_ORACLE } from './test-fixtures'
 
 const THIN = ' '
@@ -43,8 +44,12 @@ describe('numbers go through @/lib/format (README §3)', () => {
     expect(tiny.gas).toBe('<$0.01 (~0.0000081 ETH)')
     expect(tiny.gas).not.toMatch(/0\.0000(?!\d)/)
   })
-  it('gas without a price source falls back to units, grouped with a thin space', () => {
-    expect(buildQuoteView({ ...base, meta: fixtureMeta() }).gas).toBe(`~210${THIN}000 gas`)
+  it('gas with no live estimate: the quote\'s own USD (v2: USD first whenever a price exists); units only when there is no price at all', () => {
+    expect(buildQuoteView({ ...base, meta: fixtureMeta() }).gas).toBe('$0.03') // fixture quotes carry gasUsd 0.03
+    const noPrice = fixtureMeta()
+    noPrice.best = { ...noPrice.best, gasUsd: 0 }
+    noPrice.all = [noPrice.best, ...noPrice.all.slice(1)]
+    expect(buildQuoteView({ ...base, meta: noPrice }).gas).toBe(`~210${THIN}000 gas`)
   })
   it('platform fee: "(0.1%)" in the label, token + USD in the value', () => {
     expect(v.feeLabel).toBe('Platform fee (0.1%)')
@@ -128,5 +133,89 @@ describe('price impact row (v1 rule: reference present AND deviation > 0.5 %)', 
     expect(priceImpact({ ...NO_ORACLE, chainlinkPrice: 2500, executionPrice: 2490, deviation: 0.01 })).toEqual({ text: '~1%', tone: 'plain' })
     expect(priceImpact({ ...NO_ORACLE, chainlinkPrice: 2500, executionPrice: 2490, deviation: 0.025 })?.tone).toBe('warn')
     expect(priceImpact({ ...NO_ORACLE, chainlinkPrice: 2500, executionPrice: 2490, deviation: 0.04 })?.tone).toBe('danger')
+  })
+})
+
+describe('route: only known DEX names pass (table)', () => {
+  // [hop as an adapter forwards it, source, shown]
+  const rows: Array<[string, Parameters<typeof routeHopLabel>[1], string]> = [
+    // KyberSwap internal ids and opaque strings → the source's own name
+    ['fermi', 'kyberswap', 'KyberSwap'],
+    ['metric-v1', 'kyberswap', 'KyberSwap'],
+    ['metric-propamm/uniswapv3', 'kyberswap', 'KyberSwap'],
+    ['pmm-1/uniswapv3', 'kyberswap', 'KyberSwap'],
+    ['hashflow-v3/uniswapv3', 'kyberswap', 'KyberSwap'],
+    ['uniswap-v4-stable-stable', 'kyberswap', 'KyberSwap'],
+    ['fluid-dex-t1', 'kyberswap', 'KyberSwap'],
+    ['0x1f98431c8ad98523631ae4a59f267346ea31f984', 'kyberswap', 'KyberSwap'], // a pool address
+    ['0xdeadbeefcafe', 'kyberswap', 'KyberSwap'], // a short hash / id
+    ['0x' + 'ab'.repeat(32), 'kyberswap', 'KyberSwap'], // a 32-byte hash
+    ['Pool 0xabc', 'kyberswap', 'KyberSwap'],
+    ['', 'kyberswap', 'KyberSwap'],
+    ['   ', 'kyberswap', 'KyberSwap'],
+    // the same ids from another source fall back to THAT source
+    ['metric-v1', 'velora', 'Velora'],
+    ['fermi', 'sushiswap', 'SushiSwap'],
+    // known venues pass, whichever way they are spelled
+    ['uniswapv3', 'kyberswap', 'Uniswap V3'],
+    ['uniswap-v3', 'kyberswap', 'Uniswap V3'],
+    ['Uniswap V3', 'kyberswap', 'Uniswap V3'],
+    ['UNISWAPV4', 'kyberswap', 'Uniswap V4'],
+    ['pancakeswapv3', 'velora', 'PancakeSwap V3'],
+    ['PancakeSwap V3', 'velora', 'PancakeSwap V3'],
+    ['curve', 'velora', 'Curve'],
+    ['balancerv2', 'velora', 'Balancer'],
+    ['aerodrome-slipstream', 'velora', 'Aerodrome Slipstream'],
+    ['Dexalot', 'velora', 'Dexalot'],
+  ]
+  it.each(rows)('%s (%s) → %s', (hop, source, shown) => {
+    expect(routeHopLabel(hop, source)).toBe(shown)
+  })
+
+  it('a recorded KyberSwap route reads as names: unknown ids collapse into one "KyberSwap", named venues stay', () => {
+    const hops = ['uniswapv3', 'hashflow-v3/uniswapv3', 'pmm-1/uniswapv3', 'metric-propamm/uniswapv3', 'uniswap-v4-stable-stable', 'fluid-dex-t1']
+    expect(routeText({ ...fixtureMeta().best, source: 'kyberswap', routes: hops })).toBe('Uniswap V3 + KyberSwap')
+    expect(routeText({ ...fixtureMeta().best, source: 'kyberswap', routes: ['fermi'] })).toBe('KyberSwap')
+    expect(routeText({ ...fixtureMeta().best, source: 'kyberswap', routes: ['fermi', 'metric-v1', '0xabc0abc0abc0'] })).toBe('KyberSwap')
+    expect(routeText({ ...fixtureMeta().best, source: 'kyberswap', routes: ['fermi', 'curve', 'metric-v1'] })).toBe('KyberSwap + Curve + KyberSwap')
+  })
+
+  it('whatever the hops, the text is only allow-listed names and the source label', () => {
+    const hops = ['fermi', 'metric-v1', 'uniswapv3', '0x1234', 'Dexalot', 'x/y/z', 'pmm-1/uniswapv3', 'curve v2', '']
+    const text = routeText({ ...fixtureMeta().best, source: 'kyberswap', routes: hops })
+    for (const part of text.split(' + ')) expect(part === 'KyberSwap' || knownDexName(part) === part).toBe(true)
+  })
+})
+
+describe('est. gas: USD first, ETH at 2 significant digits, never "~0"', () => {
+  const est = (eth: number, usd: number) => () => ({ eth, usd })
+  const zero = () => ({ eth: 0, usd: 0 }) // useEthGasCost.estimate(0): not null, but zero
+  const rows: Array<[string, Parameters<typeof formatGas>, string]> = [
+    ['live estimate: USD (ETH)', [{ estimatedGas: 210_000, gasUsd: 0.03 }, false, est(0.000012, 0.03)], '$0.03 (~0.000012 ETH)'],
+    ['tiny USD keeps the < $0.01 floor, ETH stays 2 sf', [{ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.0000081, 0.004)], '<$0.01 (~0.0000081 ETH)'],
+    ['KyberSwap on Ethereum: estimatedGas 0 + gasUsd, ETH from the oracle (the owner\'s ~0 ETH)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, zero, 2490], '$1.23 (~0.00049 ETH)'],
+    ['same, estimate fn absent', [{ estimatedGas: 0, gasUsd: 1.23 }, false, undefined, 2490], '$1.23 (~0.00049 ETH)'],
+    ['same, no ETH price → USD alone, not a guess', [{ estimatedGas: 0, gasUsd: 1.23 }, false, zero], '$1.23'],
+    ['same, estimate returns null (no gas price yet)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, () => null, 2490], '$1.23 (~0.00049 ETH)'],
+    ['units known, no price anywhere → v1\'s unit fallback', [{ estimatedGas: 210_000, gasUsd: 0 }, false, undefined], `~210${THIN}000 gas`],
+    ['ETH known but no USD (no oracle price) → ETH, 2 sf', [{ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.0031, 0)], '~0.0031 ETH'],
+    ['nothing known (0 units, no USD) → a dash, never ~0', [{ estimatedGas: 0, gasUsd: 0 }, false, zero], '—'],
+    ['0 units, 0 USD, no estimate → a dash', [{ estimatedGas: 0, gasUsd: 0 }, false, undefined], '—'],
+    ['NaN / negative USD is not a price', [{ estimatedGas: 0, gasUsd: Number.NaN }, false, zero], '—'],
+    ['intent order (CoW): the solver pays', [{ estimatedGas: 0, gasUsd: 0 }, true, zero], 'Free (solver-paid)'],
+  ]
+  it.each(rows)('%s', (_name, args, expected) => {
+    const out = formatGas(...args)
+    expect(out.replace(/[\u00a0\u2009\u202f]/g, ' ')).toBe(expected.replace(/[\u00a0\u2009\u202f]/g, ' '))
+    expect(out).not.toMatch(/~0(?![.\d])/) // never "~0 ETH"
+  })
+
+  it('through buildQuoteView: a KyberSwap best quote on mainnet', () => {
+    const m = fixtureMeta()
+    m.best = { ...m.best, source: 'kyberswap', estimatedGas: 0, gasUsd: 1.23 }
+    m.all = [m.best, ...m.all.slice(1)]
+    const v = buildQuoteView({ ...base, meta: m, tokenInUsdPrice: 2490, gasEstimate: () => ({ eth: 0, usd: 0 }), ethUsdPrice: 2490 })
+    expect(v.gas).toBe('$1.23 (~0.00049 ETH)')
+    expect(v.gasFree).toBe(false)
   })
 })

@@ -13,7 +13,7 @@ const h = vi.hoisted(() => ({
   chainId: 1,
   quote: { meta: null as unknown, loading: false, error: null as string | null, countdown: 12, refresh: vi.fn() },
   oracle: { chainlinkPrice: 2490 as number | null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false } as Record<string, unknown>,
-  approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown },
+  approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown } as Record<string, unknown>,
   tier: { data: null as unknown, loading: false },
   useQuoteArgs: [] as unknown[],
 }))
@@ -34,6 +34,7 @@ vi.mock('@/hooks/useEthGasCost', () => ({ useEthGasCost: () => ({ ethPrice: 2490
 vi.mock('@/hooks/useApproval', () => ({ useApproval: () => h.approval }))
 vi.mock('@/hooks/useSwapPriceTier', () => ({ useSwapPriceTier: () => h.tier }))
 vi.mock('@/lib/sounds', () => ({ playQuoteReceived: vi.fn() }))
+vi.mock('@/hooks/useTokenBalances', () => ({ useTokenBalances: () => ({ balances: new Map() }) }))
 
 import { SwapCard } from './SwapCard'
 
@@ -47,6 +48,7 @@ beforeEach(() => {
   h.quote = { meta: null, loading: false, error: null, countdown: 12, refresh: vi.fn() }
   h.oracle = { ...NO_ORACLE, chainlinkPrice: 2490 }
   h.tier = { data: null, loading: false }
+  h.approval = { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } }
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) })))
   try {
     localStorage.clear()
@@ -208,12 +210,33 @@ describe('20 — quote', () => {
     expect(sessionStorage.getItem('teraswap:rateInverted')).toBe('1')
   })
 
-  it('Max slippage ✎ is a B4 stub: a real button, no modal, no crash', () => {
+  it('Max slippage ✎ opens the slippage sheet (B4); a preset changes the row and the Min. output, Esc restores focus', () => {
     withQuote()
-    const edit = document.querySelector('[data-b4-stub="slippage-modal"]') as HTMLButtonElement
+    const edit = document.querySelector('[data-edit-slippage]') as HTMLButtonElement
     expect(edit.textContent).toContain('0.3%')
+    const minBefore = document.body.textContent
+    edit.focus()
     fireEvent.click(edit)
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Max slippage' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '1%' }))
+    expect(screen.queryByRole('dialog')).toBeNull() // v1: a choice closes the modal
+    expect((document.querySelector('[data-edit-slippage]') as HTMLElement).textContent).toContain('1%')
+    expect(document.body.textContent).not.toBe(minBefore) // Min. output follows the value
+    fireEvent.click(document.querySelector('[data-edit-slippage]') as HTMLElement)
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a token button opens the token sheet (B4); choosing a token swaps that side and the sheet hides the other side', () => {
+    withQuote()
+    fireEvent.click(screen.getByRole('button', { name: /Receive token: USDC/ }))
+    expect(screen.getByRole('dialog', { name: 'Select token' })).toBeTruthy()
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-token-row]'))
+    const sym = (r: HTMLElement) => r.querySelector('.ts-token-sym')?.textContent
+    expect(rows.some((r) => sym(r) === 'ETH')).toBe(false) // the sell side's token is hidden
+    fireEvent.click(rows.find((r) => sym(r) === 'USDT')!)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: /Receive token: USDT/ })).toBeTruthy()
   })
 
   it('MEV: the row is a switch; v1\'s exposure hint offers Enable, which flips it', () => {
@@ -252,7 +275,7 @@ describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
       '⚠ Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
     )
   })
-  it('unpriced → the one-line notice, and the CTA still reads Review swap (the dialog is B4)', () => {
+  it('unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet — see 26)', () => {
     quoteWithTier(TIER.unpriced)
     expect(document.querySelector('[data-testid="price-tier-unpriced"]')?.textContent).toBe('No reference price — consent required before swapping')
     expect((document.querySelector('[data-cta]') as HTMLElement).textContent).toBe('Review swap')
@@ -350,5 +373,75 @@ describe('tokens used in the fixtures resolve', () => {
   it('ETH is native and USDC is not', () => {
     expect(ETH.symbol).toBe('ETH')
     expect(USDC.symbol).toBe('USDC')
+  })
+})
+
+describe('26 / 25 — the review and Permit2 sheets opened from the card (B4, display only)', () => {
+  const quote = (tier: unknown = null) => {
+    h.account = CONNECTED
+    h.tier = { data: tier, loading: false }
+    h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1') }
+    render(<SwapCard />)
+    type('1')
+  }
+  const cta = () => document.querySelector('[data-cta]') as HTMLButtonElement
+
+  it('Review swap opens the review sheet with the card\'s own numbers; Cancel closes it and returns focus to the CTA', () => {
+    quote()
+    expect(cta().hasAttribute('data-b5-stub')).toBe(false) // the click does something now (it opens a display-only sheet)
+    cta().focus()
+    fireEvent.click(cta())
+    const dlg = screen.getByRole('dialog', { name: 'Review Transaction' })
+    const panel = document.querySelector('[data-quote-panel]')!.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
+    const sheet = dlg.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
+    for (const s of ['2 480.2211 USDC', '0.001 ETH ($2.49)', '$0.03 (~0.000012 ETH)', '0.3%']) {
+      expect(panel).toContain(s)
+      expect(sheet).toContain(s)
+    }
+    expect(within(dlg).getByRole('button', { name: 'Confirm & Sign' }).getAttribute('data-b5-stub')).toBe('') // Confirm is B5's
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(cta())
+  })
+
+  it('the sheet follows a changed slippage', () => {
+    quote()
+    fireEvent.click(document.querySelector('[data-edit-slippage]') as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: '1%' }))
+    fireEvent.click(cta())
+    expect(screen.getByTestId('review-slippage').textContent).toContain('1%')
+  })
+
+  it('unpriced tier: the consent sits in the sheet and gates Confirm; single-source shows the amber line only', () => {
+    quote(TIER.unpriced)
+    fireEvent.click(cta())
+    expect((screen.getByRole('button', { name: 'Confirm & Sign' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('unpriced-consent-body').textContent).toContain('5 sources quoted within 0.27% of each other')
+    fireEvent.click(screen.getByTestId('unpriced-consent-checkbox'))
+    expect((screen.getByRole('button', { name: 'Confirm & Sign' }) as HTMLButtonElement).disabled).toBe(false)
+    cleanup()
+    quote(TIER.single)
+    fireEvent.click(cta())
+    expect(within(screen.getByRole('dialog')).getByTestId('price-tier-single-source')).toBeTruthy()
+    expect(screen.queryByTestId('unpriced-consent')).toBeNull()
+  })
+
+  it('no sheet opens for a state that has no review: Enter amount / Connect wallet', () => {
+    render(<SwapCard />)
+    fireEvent.click(cta())
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('useApproval says Permit2 education is needed → the Permit2 sheet; Continue / Cancel are useApproval\'s own callbacks', () => {
+    const confirm = vi.fn()
+    const cancel = vi.fn()
+    h.approval = { ...h.approval, needsPermit2Education: true, confirmPermit2Education: confirm, cancelPermit2Education: cancel }
+    quote()
+    const dlg = screen.getByRole('dialog', { name: 'About to sign a Permit2 approval' })
+    expect(within(dlg).getByText('1 ETH')).toBeTruthy()
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Continue to signature' }))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Escape' })
+    expect(cancel).toHaveBeenCalledTimes(1)
   })
 })

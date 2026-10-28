@@ -37,6 +37,11 @@ import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
 import { Tip } from './Tip'
 import { TokenButton } from './TokenButton'
+import { SlippageSheet } from '../modals/SlippageSheet'
+import { TokenSheet } from '../modals/TokenSheet'
+import { Permit2Sheet } from '../modals/Permit2Sheet'
+import { ReviewSheet } from '../modals/ReviewSheet'
+import { buildReviewModel, reviewOpen } from '../modals/review-model'
 
 const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
@@ -93,6 +98,12 @@ export function SwapCard() {
     }
   })
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
+  // v1's SwapBox state, same names and defaults: slippage is Auto until the user picks otherwise (frame 22).
+  const [manualSlippage, setManualSlippage] = useState(DEFAULT_SLIPPAGE)
+  const [isAutoSlippage, setIsAutoSlippage] = useState(true)
+  const [showSlippage, setShowSlippage] = useState(false)
+  const [tokenPicker, setTokenPicker] = useState<'sell' | 'receive' | null>(null)
+  const [reviewRequested, setReviewRequested] = useState(false)
 
   const dismissMevHint = useCallback(() => {
     setMevHintDismissed(true)
@@ -122,8 +133,10 @@ export function SwapCard() {
   // selection is state and the chain's token is derived, so there is never a render with a Base pair on mainnet addresses.
   const tokenIn = useMemo(() => remapTokenToChain(selectedIn, activeChainId), [selectedIn, activeChainId])
   const tokenOut = useMemo(() => remapTokenToChain(selectedOut, activeChainId), [selectedOut, activeChainId])
-  // Auto slippage (v1's default mode). The editor is a B4 modal, so until then the value is derived, not stored.
-  const slippage = tokenIn && tokenOut ? calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId) : DEFAULT_SLIPPAGE
+  // v1 re-runs calculateAutoSlippage in an effect whenever the pair/chain changes while Auto is on; here Auto is derived, so there
+  // is never a render where the pair has changed and the value has not.
+  const autoSlippage = tokenIn && tokenOut ? calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId) : DEFAULT_SLIPPAGE
+  const slippage = isAutoSlippage ? autoSlippage : manualSlippage
 
   const { data: balanceIn } = useBalance({
     address,
@@ -180,7 +193,7 @@ export function SwapCard() {
   }, [spenderKey])
   // An answer only counts for the (source, chain) it was fetched for — the "clear when there is no quote" of v1, derived.
   const spender = spenderAnswer && spenderAnswer.key === spenderKey ? spenderAnswer.spender : undefined
-  const { plan: approvalPlan } = useApproval(tokenIn, amountIn, spender)
+  const { plan: approvalPlan, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } = useApproval(tokenIn, amountIn, spender)
 
   // Direction-agnostic execution price (SwapBox, SPRINT-9S S2): the non-stable side priced off the stable side.
   const { execIn, execOut } =
@@ -200,7 +213,7 @@ export function SwapCard() {
   const priceCheck = useChainlinkPrice(tokenIn?.address, execIn)
   const tokenOutPriceCheck = useChainlinkPrice(tokenOut?.address, execOut)
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
-  const { estimate: gasEstimate } = useEthGasCost()
+  const { estimate: gasEstimate, ethPrice: ethUsdPrice } = useEthGasCost()
   // [feat/swap-price-tiers D1] The SERVER's tier for the pair; null = unknown → no notice (the client never guesses).
   const { data: priceTier } = useSwapPriceTier(activeChainId, tokenIn?.address, tokenOut?.address)
 
@@ -237,7 +250,7 @@ export function SwapCard() {
   // Cheap and pure; not memoised because useEthGasCost rebuilds `gasEstimate` on every render (v1 passes it straight through too).
   const view =
     meta && tokenIn && tokenOut && hasAmount
-      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate })
+      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate, ethUsdPrice })
       : null
 
   const outputDisplay =
@@ -288,7 +301,7 @@ export function SwapCard() {
               onChange={(e) => onAmountChange(e.target.value)}
               aria-label="Sell amount"
             />
-            <TokenButton token={tokenIn} side="sell" />
+            <TokenButton token={tokenIn} side="sell" onOpen={() => setTokenPicker('sell')} />
           </div>
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-v2-muted">
@@ -322,7 +335,7 @@ export function SwapCard() {
             <span data-receive="" className="ts-swap-out font-v2-mono text-[28px] text-v2-cream">
               {meta?.best ? <DigitRoller value={outputDisplay} prefix="~" /> : quoting ? <Skeleton height={28} width="70%" /> : <span className="text-v2-dim">0.0</span>}
             </span>
-            <TokenButton token={tokenOut} side="receive" />
+            <TokenButton token={tokenOut} side="receive" onOpen={() => setTokenPicker('receive')} />
           </div>
           {showSources && (
             <div className="mt-1 flex items-center justify-between gap-3">
@@ -383,7 +396,7 @@ export function SwapCard() {
             refreshing={quoteLoading}
             priceCheck={pairCheck}
             approvalPlan={approvalPlan}
-            onEditSlippage={() => {}}
+            onEditSlippage={() => setShowSlippage(true)}
             smartMevApplied={smartMevApplied}
             gasless={meta.gasless}
             lowConfidence={!!meta.lowConfidence}
@@ -410,7 +423,14 @@ export function SwapCard() {
             {cta.label}
           </Button>
         ) : (
-          <Button variant="primary" className="w-full" disabled={cta.disabled} data-cta={cta.kind} data-b5-stub="">
+          <Button
+            variant="primary"
+            className="w-full"
+            disabled={cta.disabled}
+            data-cta={cta.kind}
+            data-b5-stub={cta.kind === 'review' ? undefined : ''}
+            onClick={cta.kind === 'review' ? () => setReviewRequested(true) : undefined}
+          >
             {cta.label}
           </Button>
         )}
@@ -425,6 +445,37 @@ export function SwapCard() {
           </Button>
         )}
       </div>
+
+      {showSlippage && (
+        <SlippageSheet
+          value={slippage}
+          onChange={setManualSlippage}
+          onClose={() => setShowSlippage(false)}
+          isAuto={isAutoSlippage}
+          onAutoChange={setIsAutoSlippage}
+          tokenInSymbol={tokenIn?.symbol}
+          tokenOutSymbol={tokenOut?.symbol}
+          chainId={activeChainId}
+        />
+      )}
+      {needsPermit2Education && (
+        <Permit2Sheet amount={amountIn} tokenSymbol={tokenIn?.symbol} onConfirm={confirmPermit2Education} onCancel={cancelPermit2Education} />
+      )}
+      {reviewOpen({ requested: reviewRequested, ackRequired: false }) && view && meta && tokenIn && tokenOut && (
+        <ReviewSheet
+          model={buildReviewModel({ view, meta, tokenIn, tokenOut, amountIn, slippage, tier: priceTier })}
+          // B5: `pending` (the frozen calldata), `ackRequired` (the /api/swap 409) and Confirm → sign arrive with the wallet lifecycle.
+          onConfirm={() => {}}
+          onCancel={() => setReviewRequested(false)}
+        />
+      )}
+      {tokenPicker && (
+        <TokenSheet
+          disabledAddress={(tokenPicker === 'sell' ? tokenOut : tokenIn)?.address}
+          onSelect={(t) => (tokenPicker === 'sell' ? setSelectedIn(t) : setSelectedOut(t))}
+          onClose={() => setTokenPicker(null)}
+        />
+      )}
     </section>
   )
 }

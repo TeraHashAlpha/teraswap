@@ -1,0 +1,33 @@
+/* [ADR-025] Round 7 item 13: modals are full-bleed sheets. The page behind is dimmed; the content sits on a solid --bg surface with a
+   top hairline only (Surface variant="sheet" supplies the fill + hairline) — no radius, no outline, no shadow. A phone gets a bottom sheet. */
+.ts-sheet-root { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center; align-items: flex-start; padding: 12vh 16px 16px; }
+.ts-sheet-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.72); }
+.ts-sheet {
+  position: relative; width: 100%; max-height: 80vh; overflow-y: auto; padding: 24px 26px 26px; outline: none;
+  border-radius: 0; box-shadow: none; overscroll-behavior: contain;
+}
+.ts-sheet[data-size='sm'] { max-width: 400px; }
+.ts-sheet[data-size='md'] { max-width: 440px; }
+.ts-sheet[data-size='lg'] { max-width: 520px; }
+.ts-sheet[data-size='xl'] { max-width: 1000px; }
+.ts-sheet-grab { display: none; }
+
+/* Bottom sheet (mobile, m02/m03): anchored to the foot, full width, a short grab bar, the safe-area inset under the last control. */
+@media (max-width: 600px) {
+  .ts-sheet-root { align-items: flex-end; padding: 0; }
+  .ts-sheet, .ts-sheet[data-size] { max-width: none; max-height: 88vh; padding: 12px 20px calc(env(safe-area-inset-bottom, 0px) + 20px); }
+  .ts-sheet-grab { display: block; width: 40px; height: 2px; margin: 0 auto 18px; background: var(--hairline-ring); }
+}
+
+/* Lists inside a sheet: hairline separators, no row boxes. */
+.ts-sheet-row { border-bottom: 1px solid var(--hairline); }
+.ts-sheet-row:last-child { border-bottom: 0; }
+.ts-sheet-list { max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 600px) { .ts-sheet-list { max-height: 52vh; } }
+
+/* Token row: the whole row is one button; the keyboard cursor is a cream underline (no fill, no box). */
+.ts-token-row:focus-visible, .ts-token-row[data-active='true'] { outline: none; box-shadow: inset 0 -1px 0 var(--cream); }
+.ts-token-row:hover { background: transparent; }
+.ts-token-row:hover .ts-token-sym { color: var(--cream); }
+.ts-scroll-x { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.ts-scroll-x::-webkit-scrollbar { display: none; }
