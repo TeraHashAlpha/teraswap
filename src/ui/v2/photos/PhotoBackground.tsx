@@ -4,6 +4,7 @@ import Image from 'next/image'
 import './photo.css'
 import { PHOTOS, type PhotoId } from './photos'
 import { photoForTab } from './tab-photos'
+import { photoScrim } from './photo-scrim'
 import type { V2TabId } from '../shell/tab-paths'
 
 /**
@@ -54,7 +55,14 @@ export function PhotoBackground({
         </picture>
         <div className="ts-v2-photo__layer ts-v2-photo__baked-veil" />
         <div className="ts-v2-photo__layer ts-v2-photo__veil-mobile" />
-        {appScrim ? <div data-photo-scrim="" className="ts-v2-photo__layer ts-v2-photo__scrim" /> : null}
+        {appScrim ? (
+          // B3 C3: this photo's own scrim (photo-scrim.ts), not one value for all eight
+          <div
+            data-photo-scrim={photoScrim[baked.id]}
+            className="ts-v2-photo__layer ts-v2-photo__scrim"
+            style={{ ['--photo-app-scrim' as string]: photoScrim[baked.id] }}
+          />
+        ) : null}
         <div className="ts-v2-photo__layer ts-v2-photo__fade" />
         {section ? null : <div className="ts-v2-photo__band" />}
       </div>
