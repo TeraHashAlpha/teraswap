@@ -121,3 +121,25 @@ export function reviewOpen(i: { requested: boolean; ackRequired: boolean }): boo
 export function consentRequired(model: Pick<ReviewModel, 'tier'>, ackRequired: boolean): boolean {
   return model.tier?.tier === 'unpriced' || ackRequired
 }
+
+/**
+ * B5: once the hook has frozen the transaction (`useSwap.pendingSwap`), Send / Receive / Source come from THAT snapshot — v1's
+ * TransactionPreview renders them from `pendingSwap`, never from live quote state, so the sheet always matches the calldata being
+ * signed (including after a 9O source fallback). Pure display: `fmtToken` over the frozen raw amounts.
+ */
+export function withFrozenSwap(
+  model: ReviewModel,
+  frozen: { source: AggregatorName; rawAmountBn: bigint; swapToAmount: string; tokenIn: Token; tokenOut: Token },
+  sourceLabel: string,
+): ReviewModel {
+  const out = safeBigInt(frozen.swapToAmount)
+  return {
+    ...model,
+    source: frozen.source,
+    sourceLabel,
+    symbolIn: frozen.tokenIn.symbol,
+    symbolOut: frozen.tokenOut.symbol,
+    send: fmtToken(frozen.rawAmountBn, frozen.tokenIn.decimals),
+    receive: out !== null ? fmtToken(out, frozen.tokenOut.decimals) : '—',
+  }
+}

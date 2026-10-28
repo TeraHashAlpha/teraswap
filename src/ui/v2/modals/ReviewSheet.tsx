@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { decodeTransactionPreview } from '@/lib/calldata-decoder'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 import { fmtToken } from '@/lib/format'
@@ -47,12 +47,16 @@ function formatDeadline(timestamp: number): string {
  * TransactionPreview (source, send / receive, minimum output, recipient, route, deadline, validation, selector, raw calldata) plus
  * the owner's extras from the quote object (rate, route path, max slippage, platform fee, est. gas, price-tier line). The unpriced
  * consent (#608) sits inline and GATES Confirm; a server 409 (`ackRequired`) brings it back unticked. Confirm is the screen's one
- * solid cream CTA and a stub here — B5 wires it to the signing path.
+ * solid cream CTA; B5 drives its label and handler from the swap hooks.
  */
 export function ReviewSheet({
   model,
   pending,
   ackRequired = false,
+  confirmLabel = 'Confirm & Sign',
+  confirmBusy = false,
+  confirmTone = 'primary',
+  step,
   onConfirm,
   onCancel,
 }: {
@@ -60,6 +64,13 @@ export function ReviewSheet({
   pending?: ReviewPending
   /** /api/swap answered 409 `unpriced_ack_required` (useSwap.unpricedAckRequired / the split hook's). */
   ackRequired?: boolean
+  /** B5: the button's words follow the hooks' state (v1's SwapButton labels); B4's default when nothing is in flight. */
+  confirmLabel?: string
+  /** B5: a hook is working (approving / building / simulating) — the button is held and the sheet reads as busy. */
+  confirmBusy?: boolean
+  confirmTone?: 'primary' | 'loading' | 'error'
+  /** B5: v1's approval stepper / exact-approval note, between the details and the buttons. */
+  step?: ReactNode
   onConfirm: (c: ReviewConfirm) => void
   onCancel: () => void
 }) {
@@ -86,7 +97,7 @@ export function ReviewSheet({
   const enforcedMinOut =
     pending && pending.routeViaFeeCollector && pending.minimumOutput != null && pending.minimumOutput > 0n ? `${fmtToken(pending.minimumOutput, pending.decimalsOut)} ${model.symbolOut}` : null
 
-  const confirmDisabled = needsConsent && !ack
+  const confirmDisabled = confirmBusy || (needsConsent && !ack)
 
   return (
     <Sheet name="review" size="md" title="Review Transaction" subtitle="Verify the details before signing" onClose={onCancel} initialFocusRef={cancelRef}>
@@ -196,9 +207,19 @@ export function ReviewSheet({
       )}
       {needsConsent && <ConsentBlock values={model.consent} checked={ack} onChange={setAck} />}
 
+      {step}
+
       <div className="mt-6 flex flex-col gap-1">
-        <Button variant="primary" className="w-full" disabled={confirmDisabled} onClick={() => onConfirm({ unpricedAck: needsConsent && ack })} data-b5-stub="" data-testid="review-confirm">
-          Confirm &amp; Sign
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={confirmDisabled}
+          aria-busy={confirmBusy || undefined}
+          data-tone={confirmTone}
+          onClick={() => onConfirm({ unpricedAck: needsConsent && ack })}
+          data-testid="review-confirm"
+        >
+          {confirmLabel === 'Confirm & Sign' ? <>Confirm &amp; Sign</> : confirmLabel}
         </Button>
         <Button ref={cancelRef} variant="text" className="w-full" onClick={onCancel} data-testid="review-cancel">
           Cancel

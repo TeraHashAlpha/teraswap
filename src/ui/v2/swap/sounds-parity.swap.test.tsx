@@ -31,6 +31,18 @@ vi.mock('@/hooks/useChainlinkPrice', () => ({ useChainlinkPrice: () => ({ ...NO_
 vi.mock('@/hooks/useEthGasCost', () => ({ useEthGasCost: () => ({ ethPrice: 2490, gasPriceGwei: 0.1, estimate: () => ({ eth: 0.000012, usd: 0.03 }) }) }))
 vi.mock('@/hooks/useApproval', () => ({ useApproval: () => ({ plan: null }) }))
 vi.mock('@/hooks/useSwapPriceTier', () => ({ useSwapPriceTier: () => ({ data: null, loading: false }) }))
+vi.mock('./lifecycle/use-swap-lifecycle', async () => {
+  const m = await import('./lifecycle/test-stubs')
+  return { useSwapLifecycle: () => m.idleLifecycle() }
+})
+vi.mock('@/hooks/useDepegCheck', async () => {
+  const m = await import('./lifecycle/test-stubs')
+  return { useDepegCheck: () => m.OK_DEPEG }
+})
+vi.mock('../shell/toasts', async () => {
+  const m = await import('./lifecycle/test-stubs')
+  return { useV2Toast: () => m.TOAST_STUB }
+})
 
 type Event = { op: 'start' | 'stop'; type: string; freq: number }
 let log: Event[] = []
@@ -189,17 +201,21 @@ describe('everything else in the card is silent in v1, so silent in v2', () => {
   })
 })
 
-describe('sounds that belong to later blocks are NOT wired in the card', () => {
-  const files = readdirSync(__dirname).filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f) && f !== 'test-fixtures.ts')
-  it('the only @/lib/sounds import in src/ui/v2/swap is playQuoteReceived', () => {
+describe('the card only ever calls the sounds v1 calls (B5 wires the click path: the full table is lifecycle/sounds-parity.lifecycle.test.tsx)', () => {
+  const dirs = [__dirname, join(__dirname, 'lifecycle')]
+  const files = dirs.flatMap((d) => readdirSync(d).filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f) && !/^test-/.test(f)).map((f) => join(d, f)))
+  // The six functions SwapBox / SwapButton import from @/lib/sounds — nothing else (no synth playClick / playApproval / playError …).
+  const V1 = ['playQuoteReceived', 'playTouchMP3', 'playSwapConfirmMP3', 'playCancelOrderMP3', 'startWaitingSound', 'stopWaitingSound']
+  it('every @/lib/sounds import in src/ui/v2/swap is one of the six v1 calls', () => {
     const used = new Set<string>()
     for (const f of files) {
-      for (const m of readFileSync(join(__dirname, f), 'utf8').matchAll(/import \{([^}]+)\} from '@\/lib\/sounds'/g)) m[1].split(',').forEach((n) => used.add(n.trim()))
+      for (const m of readFileSync(f, 'utf8').matchAll(/import \{([^}]+)\} from '@\/lib\/sounds'/g)) m[1].split(',').forEach((n) => used.add(n.trim()))
     }
-    expect([...used]).toEqual(['playQuoteReceived'])
+    expect([...used].every((n) => V1.includes(n))).toBe(true)
+    expect([...used]).toContain('playQuoteReceived')
   })
-  it('no waiting / confirm / cancel / touch / click synth is referenced (B5 wires them with the click path)', () => {
-    const forbidden = /startWaitingSound|stopWaitingSound|playSwapConfirmMP3|playCancelOrderMP3|playTouchMP3|playClick|playTokenSelect|playApproval|playSwapInitiated|playSwapSuccess|playError/
-    expect(files.filter((f) => forbidden.test(readFileSync(join(__dirname, f), 'utf8')))).toEqual([])
+  it('no synth sound v1 does not play at these moments is referenced', () => {
+    const forbidden = /playClick|playTokenSelect|playApproval|playSwapInitiated|playSwapSuccess|playDCABuy|playLimitPlaced|playTriggerAlert|playError/
+    expect(files.filter((f) => forbidden.test(readFileSync(f, 'utf8')))).toEqual([])
   })
 })
