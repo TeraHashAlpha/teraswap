@@ -78,13 +78,15 @@ export function useSwapLifecycle(a: LifecycleArgs) {
   // `unpricedConsentRequested`.
   const [consentRequested, setConsentRequested] = useState(false)
 
-  // The quote the user confirmed, frozen: the success toast, the history row and the success sheet describe what was signed even
-  // if a re-quote lands while the wallet prompt is open (v1 reads the live quote at settle time — identical unless that happens).
-  const [confirmedQuote, setConfirmedQuote] = useState<MetaQuoteResult | null>(null)
+  // The quote the user confirmed, frozen with the price its "you saved" line is valued at: the success toast, the history row and the
+  // success sheet describe what was signed even if a re-quote or a price tick lands while the wallet prompt is open or after it settles
+  // (v1 reads the live quote at settle time — identical unless that happens).
+  const [confirmed, setConfirmed] = useState<{ quote: MetaQuoteResult | null; tokenOutUsdPrice: number | null } | null>(null)
+  const confirmedQuote = confirmed?.quote ?? null
 
   const run = useCallback(
     (unpricedAck: boolean) => {
-      setConfirmedQuote(meta)
+      setConfirmed({ quote: meta, tokenOutUsdPrice: a.tokenOutUsdPrice })
       if (isSplitActive && splitRoute.splitResult?.bestSplit) {
         if (unpricedAck) split.execute(splitRoute.splitResult.bestSplit, { unpricedAck: true })
         else split.execute(splitRoute.splitResult.bestSplit)
@@ -96,7 +98,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- swap/split are fresh objects each render; their `execute` callbacks are what matter
-    [meta, isSplitActive, splitRoute.splitResult, split.execute, swap.execute, activeChainId],
+    [meta, a.tokenOutUsdPrice, isSplitActive, splitRoute.splitResult, split.execute, swap.execute, activeChainId],
   )
 
   /**
@@ -155,9 +157,10 @@ export function useSwapLifecycle(a: LifecycleArgs) {
 
   // ── Track swap success: toast, history, approvals ──
   const successQuote = confirmedQuote ?? meta
+  const successUsdPrice = confirmed ? confirmed.tokenOutUsdPrice : a.tokenOutUsdPrice
   const success = useMemo<SuccessSummary | null>(
-    () => (swap.status === 'success' && tokenOut && successQuote?.best ? buildSuccessSummary({ meta: successQuote, tokenOut, mevSurplusActualWei: swap.mevSurplusActualWei, tokenOutUsdPrice: a.tokenOutUsdPrice }) : null),
-    [swap.status, swap.mevSurplusActualWei, tokenOut, successQuote, a.tokenOutUsdPrice],
+    () => (swap.status === 'success' && tokenOut && successQuote?.best ? buildSuccessSummary({ meta: successQuote, tokenOut, mevSurplusActualWei: swap.mevSurplusActualWei, tokenOutUsdPrice: successUsdPrice }) : null),
+    [swap.status, swap.mevSurplusActualWei, tokenOut, successQuote, successUsdPrice],
   )
   useEffect(() => {
     const quote = successQuote
@@ -168,7 +171,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
 
       // [LP-05] MEV savings: the pre-swap estimate and the post-swap realised surplus are both logged; only a realised CoW surplus is shown.
       const mevEstimate = estimateMevSavings(quote)
-      const summary = buildSuccessSummary({ meta: quote, tokenOut, mevSurplusActualWei: swap.mevSurplusActualWei, tokenOutUsdPrice: a.tokenOutUsdPrice })
+      const summary = buildSuccessSummary({ meta: quote, tokenOut, mevSurplusActualWei: swap.mevSurplusActualWei, tokenOutUsdPrice: successUsdPrice })
       toast({
         type: 'success',
         title: 'Swap confirmed!',
