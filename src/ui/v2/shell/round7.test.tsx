@@ -32,6 +32,8 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => '/swap', useRouter: () => ({ push: vi.fn() }) }))
+// B3: these tests are about the shell, not the Swap card (its own tests mock the hooks it reads): the Swap tab pane is a placeholder here.
+vi.mock('../swap/SwapCard', () => ({ SwapCard: () => <section data-tab-pane="swap" aria-busy="true" /> }))
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font, "IBM Plex Sans", system-ui, sans-serif' }))
 vi.mock('@/hooks/useOrderNotifications', () => ({
   useNotificationPrompt: () => ({ shouldShow: h.notice, request: h.request, dismiss: h.dismiss }),

@@ -17,6 +17,7 @@ import { Header } from './Header'
 import { NoticeBanner } from './NoticeBanner'
 import { TabBar } from './TabBar'
 import { TabPane } from './TabPane'
+import { SwapCard } from '../swap/SwapCard'
 import { tabIdFromPathname, type V2TabId } from './tab-paths'
 import { V2ToastProvider } from './toasts'
 
@@ -31,8 +32,9 @@ export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; childr
   const active = tab ?? tabIdFromPathname(pathname)
   const rkTheme = useMemo(() => createV2RainbowTheme(), [])
 
+  // B3: the Swap tab is the real card; every other tab is still a placeholder until its block lands.
   const pane =
-    children ?? (active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : <TabPane tab={active} />)
+    children ?? (active === 'swap' ? <SwapCard /> : active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : <TabPane tab={active} />)
 
   return (
     <RainbowKitProvider theme={rkTheme} locale="en">

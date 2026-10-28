@@ -46,6 +46,8 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => h.pathname, useRouter: () => ({ push: h.push }) }))
+// B3: these tests are about the shell, not the Swap card (its own tests mock the hooks it reads): the Swap tab pane is a placeholder here.
+vi.mock('../swap/SwapCard', () => ({ SwapCard: () => <section data-tab-pane="swap" aria-busy="true" /> }))
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 // Base / Arbitrum FeeCollectors are env-driven (unset under test) → every chain would be "coming soon".
 // Only that gate is overridden, as in v1's ChainSelector test.
@@ -352,7 +354,14 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
 })
 
 describe('panes', () => {
-  it.each(['swap', 'portfolio', 'dca', 'limit', 'sltp', 'orders', 'history', 'analytics'] as const)('%s is a Skeleton placeholder', (tab) => {
+  it('swap mounts the Swap card (B3), not the placeholder', () => {
+    render(<AppShell tab="swap" />)
+    const pane = document.querySelector('[data-tab-pane="swap"]')
+    expect(pane).not.toBeNull() // the stubbed card above; the real one is tested in swap/
+    expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
+  })
+
+  it.each(['portfolio', 'dca', 'limit', 'sltp', 'orders', 'history', 'analytics'] as const)('%s is a Skeleton placeholder', (tab) => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell tab={tab} />)
     const pane = document.querySelector(`[data-tab-pane="${tab}"]`)
