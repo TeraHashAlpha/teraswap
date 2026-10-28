@@ -29,6 +29,7 @@ import { CHAIN_ID } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
 import { Button, Input, Skeleton, Surface, Toggle } from '../primitives'
+import { CtaButton } from './CtaButton'
 import { shortAddress } from '../shell/format-address'
 import './swap.css'
 import { ctaFor } from './cta'
@@ -398,6 +399,11 @@ export function SwapCard() {
     setDisplayAmountIn('')
   }
 
+  function onWrongNetwork() {
+    playTouchMP3()
+    switchChain({ chainId: CHAIN_ID }) // v1's SwapButton: the default chain, whatever the label's `Switch to {chain}` names
+  }
+
   async function onReviewConfirm(c: { unpricedAck: boolean }) {
     playTouchMP3()
     if (frozenSwap) {
@@ -594,32 +600,7 @@ export function SwapCard() {
       )}
 
       <div className="ts-swap-cta">
-        {cta.kind === 'wrong-network' ? (
-          // round7 29: the wrong-network state is a text button (amber), not the solid CTA — one filled shape per screen stays true.
-          <Button
-            variant="text"
-            className="w-full !text-v2-amber"
-            data-cta={cta.kind}
-            onClick={() => {
-              playTouchMP3()
-              switchChain({ chainId: CHAIN_ID }) // v1's SwapButton: the default chain, whatever the label's `Switch to {chain}` names
-            }}
-          >
-            {cta.label}
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            className="w-full"
-            disabled={cta.disabled}
-            data-cta={cta.kind}
-            data-recoverable={cta.recoverable === undefined ? undefined : String(cta.recoverable)}
-            aria-busy={cta.kind === 'in-flight' || undefined}
-            onClick={onCta}
-          >
-            {cta.label}
-          </Button>
-        )}
+        <CtaButton cta={cta} onClick={cta.kind === 'wrong-network' ? onWrongNetwork : onCta} />
         {meta?.gasless?.recommended && meta.best.source !== 'cowswap' && (
           <Button
             variant="text"

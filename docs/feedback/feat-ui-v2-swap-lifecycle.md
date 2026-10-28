@@ -1,23 +1,37 @@
 # feat/ui-v2-swap-lifecycle — feedback (B5)
 
-Off origin/main `a61d9d6` (B4 merged, #619). Worktree `~/ts-worktrees/ui-v2-swap-lifecycle`, real `npm ci`. Signed, noreply, no PR. Diff only `src/ui/v2/**` + this file.
-**AUDITOR-NOTE:** wires the real sign/send path (approve → permit/sign → send) — review with B6 before the v2 flag reaches production. Tests mock wallet/RPC; no wallet was connected and no transaction was sent.
+Off origin/main `a61d9d6`. Signed, noreply, no PR. Diff only `src/ui/v2/**` + this file/folder. C1 `a6cbe52` Confirm → real hook path · C2 `47bf2bc` pending/success/failure/wrong-network/toasts/sounds · C3 `4e91bb1` a11y + edge · this edit = evidence.
+**AUDITOR-NOTE:** wires the real sign/send path — review with B6 before the v2 flag reaches production. Tests mock wallet/RPC; no wallet connected, no transaction sent.
 
-## Checklist
-- [x] C1 Confirm → real path (gates mirror, hooks, approval, consent/409, CoW, split)
-- [x] C2 pending / success / failure (28a/b/c), wrong network (29), toasts (05), sounds, m03
-- [x] C3 a11y + stale-quote + edge states
-- [ ] Evidence 1–7, push, compare link
+**Premises that did not hold (owner answered; answers supersede the goal):** (1) no `TransactionStatus*` in v1 — 28a/b/c built from SwapButton labels + toasts; (2) v1's `anyBlocked` gates live in SwapBox handlers → **mirrored incl. consent checkboxes**; (3) split unreachable → **`useSplitRoute` + v1 toggle copy wired**; (4) no v1 "quote updated" notice → **v1 behaviour: trade key changes → review closes, hooks reset**.
+**Extra read-only v1 reads:** `SwapUnpricedConsentDialog`, `SplitRouteVisualizer`, `useSplitRoute`, `useDepegCheck`, `lib/{price-gate,chainlink,swap-usd-estimate,executable-sources,mev-savings}`. Screenshots: temporary uncommitted harness (real B5 components in the real `AppShell`, fixture props, left card static) — not the live hooks.
 
-## Premises that did not hold (owner answered in-session — the answers supersede the goal text)
-1. **No `TransactionStatus*` exists in v1.** v1 has no pending/success/failure screen: the lifecycle is SwapButton's labels/stepper, toasts and a Etherscan link. 28a/b/c are new v2 surfaces built from those v1 states + copy.
-2. **v1's `anyBlocked` price gates live in SwapBox's click handlers, not SwapButton.** Owner: **mirror them including the consent checkboxes** (price-impact, depeg) — done with v1's own evaluators (`evaluatePriceGate`, `evaluatePairOracle`, `estimateSwapUsd`, `useDepegCheck`) and v1's copy.
-3. **Split toggle unreachable in v2.** Owner: **wire `useSplitRoute` + v1's `SplitRouteVisualizer` toggle copy** (extra read of `SplitRouteVisualizer.tsx`).
-4. **v1 has no "quote updated" notice.** Owner: **v1 behaviour — auto-close**: a changed quote key resets the hooks and closes the sheet (no new copy).
+**Findings:** (a) 409 equality test caught `{unpricedAck}` being gated on the client tier (fixed C1). (b) v1 leaves the `waiting` loop running after a cancelled review and after an approval error; v2 stops it (rows below). (c) v1 overwrites the loading-toast id on `cow_signing→cow_pending`, leaving the first sticky; v2 dismisses it. (d) v2 success/history/toast use the quote frozen at Confirm (v1: live quote at settle) — identical unless a re-quote lands mid-flight. (e) 9O fallback shown from `fallbackNotice`; the failed timeline step is inferred from the last in-flight status (display only). (f) Mobile: the ♫ fab overlaps Cancel in the bottom sheet (shell fab placement, not B5). (g) v1's blocked-handler `trackWalletActivity` is unreachable (button disabled) — guard mirrored, tracking not.
 
-Extra v1 reads beyond the goal list, all read-only: `SwapUnpricedConsentDialog` (exports), `SplitRouteVisualizer`, `useSplitRoute`, `useDepegCheck`, `lib/price-gate`, `lib/chainlink` (`evaluatePairOracle`), `lib/swap-usd-estimate`, `lib/executable-sources`, `lib/mev-savings`.
+## Evidence (`feat-ui-v2-swap-lifecycle/`)
+**1. Call sites** (v1 `SwapBox.tsx` → v2 `swap/lifecycle/use-swap-lifecycle.ts`)
+| v1 | v2 |
+|---|---|
+| `:699` `executeSplitSwap(splitResult.bestSplit)` / `:743` `…, { unpricedAck: true }` | `:89-90` same two calls |
+| `:703` `executeSwap(best, orderExecutableFallbacks(meta, best, chain))` / `:745` `…, { unpricedAck: true }` | `:93-95` same, ack only when consent produced it |
+| `:692-693` `startWaitingSound(); if (!approvalReady) { await approve(); return }` | `:110-113` same order |
+| `:696` unpriced & no ack → stop sound, open dialog, return | `:117-119` same (review sheet / consent sheet) |
+| `:1269` `onConfirm={confirmSwap}` · `:1281` `confirmCowOrder` · `:1294` `confirmSplitPlan` | `SwapCard.tsx:410`, `:674`, `:671` |
+| `:1270/1281/1295` `onCancel={reset…}`; `:751-752` consent cancel resets the raising hook | `use-swap-lifecycle.ts:128-` `cancel` |
+**2.** `swap/lifecycle/confirm-path.lifecycle.test.tsx` (14): v1's SwapBox and v2's card on the same mocked hooks; args/order/count equal for standard, approval-first, unpriced no-ack (no call), ack (`{unpricedAck:true}`), CoW (`execute('cowswap')` + `confirmCowOrder`; ack), split (`execute(bestSplit[,ack])`, 2 legs), 409 single + split (reopens unticked, Cancel resets raising hook). `gates.lifecycle.test.tsx` (16) incl. v1 `SwapButton` label parity for all 7 block reasons.
+**3.** `{28a,28b,28c,29,05,m03,m03-success}-frame-vs-v2.webp` (round7 frame left, v2 right; 05 shows the 3-toast cap by design).
+**4. Sounds** (`sounds-toasts-parity.lifecycle.test.tsx`, v1 and v2 driven through identical statuses → equal sounds + toasts)
+| moment | sounds (v1 = v2) | toast |
+|---|---|---|
+| Swap/Approve pressed | touch · `startWaitingSound` (v2: touch also on "Review swap"; loop starts once) | — |
+| broadcast / CoW sign / submitted | — | loading `Transaction pending...` / `Signing CoW order...` / `CoW order submitted — …` |
+| success | `stopWaitingSound` · `playSwapConfirmMP3` | `Swap confirmed!` + tx (chain-aware) |
+| failure / rejection | `stopWaitingSound` · `playCancelOrderMP3` | `Swap failed` |
+| split ok / partial / error | stop · confirm / cancel / cancel | `Split swap complete!` / `…partially complete` / `…failed` |
+| **approval error** | v1 none · **v2 stop** | `Approval failed` |
+| **review cancelled** | v1 none · **v2 stop** | — |
+**5.** `a11y-edge.lifecycle.test.tsx` (19): focus stays in the one dialog through approving→simulating→frozen (busy Confirm is `aria-disabled`), 409 focuses the consent, Esc/Cancel/backdrop dead while approving/preparing/simulating and live when idle/frozen/error, stale-trade auto-close (amount, chain, frozen review; no resurrection), focus handed to Execution, `aria-live` timeline, reduced-motion CSS scan.
+**7.** Suite base 368 files/5933 tests → head **374/6043**; `eslint .` 93 = 93 (0 errors); tsc 0; `next build` 0 both. v1: route table 55 = 55, **0 v2-marked chunks in v1 routes**, v1 routes unchanged except `/` and `/swap` first-load **+1 302 B** (shared-chunk regroup now that v2 imports more v1 hooks; no v2 code in them — `v1-proof.txt`); module-identical: no file outside `src/ui/v2/**` + feedback changed (`git diff --stat`: 29 files, +2 927/−52). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-swap-lifecycle
 
-## Findings
-- v1: cancelling `TransactionPreview`/`CowOrderReviewModal`/`SplitReviewModal` calls only `reset…` — the `waiting` loop started by the Swap click keeps playing (stopped only on success/error). v2 stops it on cancel (documented deviation, sound table).
-- v1's blocked-handler `trackWalletActivity` call is unreachable (the button is disabled when `anyBlocked`); the guard is mirrored, the tracking is not.
-- Caught by the 409 equality test (fixed in C1): gating `{ unpricedAck }` on the client tier would have dropped the ack after a server 409 on a pair the client thought priced; v1's `confirmUnpricedSwap` passes it whenever consent was given. v2 passes the ack the attempt's consent produced.
+## Content-map delta (v1 → v2)
+0 v1 strings lost on the covered states. **Not carried:** Share button (`Share — saved X%` / `Share swap`, not in frame 28b or the goal); `🛡` glyph on the server-guard banner; v1 `fixed` centred modals (→ sheets). **Frame copy not used (v1 wins):** loading title `Executing swap…` (v1 `Transaction pending...`), `Sent/Received/Via` rows (v1 arrow line `1 ETH → 2 487.6842 USDC`), `You saved ~X vs second best` (v1: CoW realised-surplus line only), `Transaction reverted / No funds left…` (v1 error text), `Wrong network` toast + `Switch to Base` (v1: no toast, label `Switch to Ethereum` = SwapButton's). **v2-only:** `Execution` eyebrow, `New swap` and `View on explorer ↗` (goal-specified; v1 `View on Etherscan ↗`), explorer name per chain (`Transaction sent — track on Arbiscan ↗`), consent sheet wrapper (v1 strings). **Changed:** CTA states render as status-colour text (one filled shape per screen); Confirm label follows the hooks (`Approve & Swap` … `Confirm & Sign`).

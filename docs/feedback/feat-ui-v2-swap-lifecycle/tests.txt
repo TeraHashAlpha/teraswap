@@ -1,0 +1,134 @@
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > not connected
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > not connected, with an amount and a quote
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > connected, wrong network (29)
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > wrong network wins over everything below
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > the switch names the target chain it is given
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > no amount
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > amount above the balance
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > balance beats quoting
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > quoting (21b)
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > quoting, even with a stale quote at hand
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > settled with no quote
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > ready (20)
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > exactly the five goal states are reachable on the happy-path inputs: Connect wallet · Enter amount · Insufficient balance · Review swap · Wrong network
+ ✓ src/ui/v2/swap/cta.test.ts > CTA matrix (v1 SwapButton order; Swap → Review swap) > only the ready state is both enabled and a swap: the others either prompt (connect / switch) or are disabled
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > price-gate block beats approval and swap states
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > approving
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > signing the approval
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > approval error → retry
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > approval still needed (single route: the review sheet carries "Approve & Swap")
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > approval still needed (split route: no review → v1's own label)
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > ready, split route
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > preparing
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > simulating
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > review transaction
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > CoW: sign in wallet
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > CoW: waiting for solver
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > executing
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > complete
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > error → retry
+ ✓ src/ui/v2/swap/cta.test.ts > B5 — SwapButton's remaining states, in v1's order and words > the B3 states still win over every lifecycle state (wrong network beats an in-flight swap)
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'connect', label: 'Connect wallet', disabled: false } → primary
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'review', label: 'Review swap', disabled: false } → primary
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'split-swap', label: 'Swap', disabled: false } → primary
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'enter-amount', label: 'Enter amount', disabled: true } → primary
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'wrong-network', label: 'Switch to Ethereum', disabled: false } → text
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'in-flight', label: 'Executing swap...', disabled: true } → text
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'complete', label: 'Swap complete', disabled: true } → text
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'retry', label: 'Error — retry', disabled: false } → text
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'blocked', label: 'Confirm price impact to swap', disabled: true, recoverable: true } → text
+ ✓ src/ui/v2/swap/cta-button.test.tsx > one filled shape per screen: only the actionable states are the cream CTA; reporting states are text in the status colour (28a/b/c, 29) > { kind: 'blocked', label: 'Asset depegged — swap blocked', disabled: true, recoverable: false } → text
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > buildTimeline (the steps are SwapButton's labels, in the order the hooks walk them) > standard: each status lights its own step, the earlier ones are done
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > buildTimeline (the steps are SwapButton's labels, in the order the hooks walk them) > success: everything done
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > buildTimeline (the steps are SwapButton's labels, in the order the hooks walk them) > failure is drawn on the step that was running (28c): a revert / rejection at "Executing swap...", a failed simulation at "Simulating transaction..."
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > buildTimeline (the steps are SwapButton's labels, in the order the hooks walk them) > CoW: Sign order in wallet... → Waiting for solver... → Swap complete
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > buildTimeline (the steps are SwapButton's labels, in the order the hooks walk them) > explorerName: the chain's own explorer, named as its host names itself
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > computeGates = SwapBox's verdicts > a clean pair: nothing blocks
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > computeGates = SwapBox's verdicts > oracle integrity failure → hard block "oracle-stale"; an extreme deviation → hard block "extreme"
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > computeGates = SwapBox's verdicts > a healthy-oracle deviation → consent; ticking it at the live deviation clears it; a worse deviation re-arms it
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > computeGates = SwapBox's verdicts > depeg: consent band / hard block / unverified (could not check → blocks, never worded as a depeg)
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > computeGates = SwapBox's verdicts > no oracle: warn above $1k, block above $10k (v1 constants, strictly greater)
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > computeGates = SwapBox's verdicts > precedence is v1's: depeg-block > extreme > oracle-stale > depeg-unverified > depeg-consent > price-impact > oracle
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > price-impact
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > oracle-stale
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > extreme
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > oracle
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > depeg-consent
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > depeg-block
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > block labels = v1 SwapButton, word for word > depeg-unverified
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > quote-received sound: v2 = v1 > baseline: v1 plays a sub-bass + a ping (4 node events)
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > the card never reaches a hook while blocked > hard blocks: the CTA says v1's words, is disabled, opens nothing, executes nothing
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > the card never reaches a hook while blocked > depeg consent: blocked until v1's checkbox is ticked (amber, recoverable); un-ticks itself on a new amount
+ ✓ src/ui/v2/swap/lifecycle/gates.lifecycle.test.tsx > the card never reaches a hook while blocked > a hard block is not click-through-able: no checkbox is offered for it
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28a — pending > replaces the quote panel with the Execution column: the timeline on "Executing swap...", the tx link on the ORDER chain's explorer
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28a — pending > chain 8453 → its own explorer
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28a — pending > chain 42161 → its own explorer
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28a — pending > CoW pending: v1's MEV-protected line and the Waiting for solver step
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28a — pending > a fallback and an inconclusive simulation are told in v1's words
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28a — pending > split: v1's per-leg progress, with v1's leg words
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > standard tx broadcast (swapping)
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > CoW: signing then order submitted
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > success (txHash set)
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > failure: wallet rejection after the broadcast step
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > focus stays in the sheet while the hooks move > Confirm pressed → approving → ready → preparing → simulating → frozen review: the SAME dialog, focus never leaves it
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > focus stays in the sheet while the hooks move > a busy Confirm does nothing when pressed (aria-disabled is not a click target)
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > focus stays in the sheet while the hooks move > a 409 after Confirm: the consent returns unticked and takes focus (it would otherwise fall to the page behind)
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > quote-received sound: v2 = v1 > a quote arrives → exactly v1's sound, once
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > quote-received sound: v2 = v1 > the poll re-quotes and the same source still wins → silence (no new arrival)
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > quote-received sound: v2 = v1 > the winner changes → one more blip
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28b — success > the timeline completes; the received amount is v1's arrow line; View on explorer; New swap
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28b — success > a CoW fill with realised surplus: v1's "You saved" wording, from the same source (mevSurplusActualWei × the Chainlink price)
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28b — success > New swap: starts over — both hooks reset, the amount clears, the quote panel returns
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28c — failure > v1's error text verbatim under v1's toast title; the step that failed; the retry is the CTA "Error — retry"
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28c — failure > a real run: swapping → error draws the failure on "Executing swap..."; a simulated revert says no gas was spent
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28c — failure > no message → v1's fallback copy; split titles follow v1 (failed / partially complete)
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 28c — failure > Error — retry opens the review again with the hook reset (v1 re-runs execute from the error state)
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 29 — wrong network & connect: v1's SwapButton actions > a wallet on an unsupported chain: the amber text button "Switch to Ethereum" (v1's label); the click is v1's switchChain({ chainId: CHAIN_ID })
+ ✓ src/ui/v2/swap/lifecycle/execution.lifecycle.test.tsx > 29 — wrong network & connect: v1's SwapButton actions > not connected: "Connect wallet" opens RainbowKit's modal, as v1
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > focus stays in the sheet while the hooks move > Tab cycles inside the sheet (the trap is the shared Sheet's) — including the busy button, which stays in the tab order
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > approving: Esc and Cancel do nothing, the hooks are untouched
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > signing the approval: Esc and Cancel do nothing, the hooks are untouched
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > preparing the swap: Esc and Cancel do nothing, the hooks are untouched
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > simulating: Esc and Cancel do nothing, the hooks are untouched
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > standard route (1inch/0x/Velora/Kyber/…): the same execute(source, fallbacks) — and no third argument > approval ready → v1 Swap = v2 Review swap → Confirm & Sign
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > standard route (1inch/0x/Velora/Kyber/…): the same execute(source, fallbacks) — and no third argument > approval needed → v1 "Approve & Swap" = v2 Confirm "Approve & Swap": approve() once, execute not called, in that order
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > failure with no message → v1 fallback copy
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > split: all legs done
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > split: partial
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > split: error
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > the toasts are what the sound rows promise (the table, as data)
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > same transitions → same sounds and same toasts > a CoW fill with realised surplus carries v1's "you saved" line, and only then
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > quote-received sound: v2 = v1 > amount typed while a quote is on screen: the quote goes stale (skeleton) and the same winner re-arriving is NOT a new blip
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > everything else in the card is silent in v1, so silent in v2 > ⇅, MEV switch, sources menu, Compare, ⇄, ✎, tooltips, refresh, 50% / MAX: no audio
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > the card only ever calls the sounds v1 calls (B5 wires the click path: the full table is lifecycle/sounds-parity.lifecycle.test.tsx) > every @/lib/sounds import in src/ui/v2/swap is one of the six v1 calls
+ ✓ src/ui/v2/swap/sounds-parity.swap.test.tsx > the card only ever calls the sounds v1 calls (B5 wires the click path: the full table is lifecycle/sounds-parity.lifecycle.test.tsx) > no synth sound v1 does not play at these moments is referenced
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > standard route (1inch/0x/Velora/Kyber/…): the same execute(source, fallbacks) — and no third argument > the approval states surface as v1 words: Approving... / Signing... / Approval error — retry; then the swap states
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > standard route (1inch/0x/Velora/Kyber/…): the same execute(source, fallbacks) — and no third argument > frozen review (status confirming): Confirm calls confirmSwap, exactly as v1's TransactionPreview
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > unpriced pair (#608 / #613): consent gates execute; the ack rides execute as { unpricedAck: true } > without the ack → no hook call at all (v1: Swap opens the dialog; v2: Confirm is disabled until ticked)
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > idle review: Esc cancels, returns focus to the CTA
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > frozen review (confirming): Esc cancels → the hook is reset (v1: onCancel={resetSwap}) and nothing is signed
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > Esc: dead while a wallet step is in flight, live everywhere else (v1: no way out of an in-flight state; every review cancels) > error state: the sheet is dismissible again (the failure is on the Execution column)
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > stale-quote guard = v1 (owner): the trade changed → the review closes, the hooks reset, nothing is confirmable > a new amount while the review is open
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > stale-quote guard = v1 (owner): the trade changed → the review closes, the hooks reset, nothing is confirmable > a chain switch under an open review (the hooks reset themselves; the card drops the review it held)
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > the press → waiting loop (the one place the click path differs by design: two clicks in v2, one in v1) > Swap/Approve pressed: v1 = touch + start; v2 = touch (Review swap) then touch + start (Confirm) — the loop starts exactly once
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > the press → waiting loop (the one place the click path differs by design: two clicks in v2, one in v1) > "Approve & Swap": the loop starts on the approval press too, in both
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > DEVIATIONS — v2 stops a loop that v1 leaves running (feedback finding) > approval error: v1 toasts and plays nothing; v2 toasts the same and stops the loop
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > DEVIATIONS — v2 stops a loop that v1 leaves running (feedback finding) > review cancelled: v1 calls only reset(); v2 calls reset() and stops the loop
+ ✓ src/ui/v2/swap/lifecycle/sounds-toasts-parity.lifecycle.test.tsx > quote errors: one toast per distinct message (v1's dedup), and the spender allow-list toast > the poll re-raising the same string toasts once; a new string toasts again; v2 = v1
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > stale-quote guard = v1 (owner): the trade changed → the review closes, the hooks reset, nothing is confirmable > a frozen review (confirming) whose trade changed: the hook that holds it is reset (v1: handleAmountChange → resetSwap)
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > stale-quote guard = v1 (owner): the trade changed → the review closes, the hooks reset, nothing is confirmable > a quote refresh for the SAME trade does not close the review (the key is the trade, not the price)
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > focus is handed to the running swap when the sheet leaves > Confirm → signing: the review closes, focus lands on the Execution column (the CTA that opened it is disabled)
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > focus is handed to the running swap when the sheet leaves > the timeline is announced politely and marks the current step
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > reduced motion: the timeline's only animation is wrapped in prefers-reduced-motion: no-preference > swap.css: every `animation` declaration sits inside that media query
+ ✓ src/ui/v2/swap/lifecycle/a11y-edge.lifecycle.test.tsx > reduced motion: the timeline's only animation is wrapped in prefers-reduced-motion: no-preference > the timeline has no transition/animation utility classes of its own (the active node pulse is CSS-only)
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > unpriced pair (#608 / #613): consent gates execute; the ack rides execute as { unpricedAck: true } > with the ack → execute(source, fallbacks, { unpricedAck: true }) — v1 dialog Continue = v2 tick + Confirm
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > unpriced pair (#608 / #613): consent gates execute; the ack rides execute as { unpricedAck: true } > the tick never leaks into a priced pair: no options argument there
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > CoW route: execute("cowswap", …) then the frozen order is signed by confirmCowOrder > standard CoW: the same execute call; the review is the CoW order sheet; Confirm = confirmCowOrder
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > CoW route: execute("cowswap", …) then the frozen order is signed by confirmCowOrder > CoW + unpriced ack: execute("cowswap", fallbacks, { unpricedAck: true }) — the same consent as the standard path (M-1)
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > split route: execute(bestSplit[, { unpricedAck: true }]) — both legs, one call (the hook walks the legs) > split ON, priced: v1 Swap = v2 CTA "Swap" → splitExecute(bestSplit); the single hook is untouched
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > split route: execute(bestSplit[, { unpricedAck: true }]) — both legs, one call (the hook walks the legs) > split ON, unpriced: consent first (v1 dialog / v2 consent sheet), then execute(bestSplit, { unpricedAck: true })
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > split route: execute(bestSplit[, { unpricedAck: true }]) — both legs, one call (the hook walks the legs) > the plan awaits review (status awaiting-review) → the split sheet; Confirm = confirmPlan, as v1's SplitReviewModal
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > 409 unpriced_ack_required: the consent comes back, unticked, even after a Cancel — and Cancel resets the hook that raised it > single: swap.unpricedAckRequired reopens the review (v1: the dialog); Continue re-runs execute with the ack; Cancel → reset()
+ ✓ src/ui/v2/swap/lifecycle/confirm-path.lifecycle.test.tsx > 409 unpriced_ack_required: the consent comes back, unticked, even after a Cancel — and Cancel resets the hook that raised it > split: split.unpricedAckRequired reopens the consent; Continue → execute(bestSplit, { unpricedAck: true }); Cancel → the split hook's reset()
+ Test Files  8 passed (8)
+      Tests  132 passed (132)
