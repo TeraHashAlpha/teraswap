@@ -180,7 +180,8 @@ describe('everything else in the card is silent in v1, so silent in v2', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Flip rate direction' }))
     fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
     fireEvent.click(screen.getByRole('button', { name: 'Platform fee info' }))
-    act(() => void fireEvent.click(document.querySelector('[data-b4-stub="slippage-modal"]') as HTMLElement))
+    act(() => void fireEvent.click(document.querySelector('[data-edit-slippage]') as HTMLElement)) // opens the slippage sheet — silent too
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: '50%' })) // these two change the amount: the panel goes stale, so they come after the panel's controls
     fireEvent.click(screen.getByRole('button', { name: 'MAX' }))
     fireEvent.click(screen.getByRole('switch', { name: /Force MEV Protection/ })) // last: forcing MEV hides non-CoW quotes

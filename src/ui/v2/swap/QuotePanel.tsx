@@ -48,7 +48,7 @@ export interface QuotePanelProps {
   refreshing: boolean
   priceCheck: PriceCheck
   approvalPlan: ApprovalPlan | null
-  /** Max-slippage ✎ — the editor itself is a B4 modal. */
+  /** Max-slippage ✎ — opens `modals/SlippageSheet`. */
   onEditSlippage: () => void
   smartMevApplied: boolean
   gasless: MetaQuoteResult['gasless']
@@ -239,7 +239,8 @@ export function QuotePanel(p: QuotePanelProps) {
           <button
             type="button"
             onClick={p.onEditSlippage}
-            data-b4-stub="slippage-modal"
+            aria-haspopup="dialog"
+            data-edit-slippage=""
             className="ts-swap-val inline-flex min-h-[44px] items-center gap-1 font-v2-mono tabular-nums text-v2-text/90 hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
           >
             {v.slippage} <span aria-hidden="true">&#9998;</span>

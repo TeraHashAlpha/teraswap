@@ -37,6 +37,8 @@ import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
 import { Tip } from './Tip'
 import { TokenButton } from './TokenButton'
+import { SlippageSheet } from '../modals/SlippageSheet'
+import { TokenSheet } from '../modals/TokenSheet'
 
 const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
@@ -93,6 +95,11 @@ export function SwapCard() {
     }
   })
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
+  // v1's SwapBox state, same names and defaults: slippage is Auto until the user picks otherwise (frame 22).
+  const [manualSlippage, setManualSlippage] = useState(DEFAULT_SLIPPAGE)
+  const [isAutoSlippage, setIsAutoSlippage] = useState(true)
+  const [showSlippage, setShowSlippage] = useState(false)
+  const [tokenPicker, setTokenPicker] = useState<'sell' | 'receive' | null>(null)
 
   const dismissMevHint = useCallback(() => {
     setMevHintDismissed(true)
@@ -122,8 +129,10 @@ export function SwapCard() {
   // selection is state and the chain's token is derived, so there is never a render with a Base pair on mainnet addresses.
   const tokenIn = useMemo(() => remapTokenToChain(selectedIn, activeChainId), [selectedIn, activeChainId])
   const tokenOut = useMemo(() => remapTokenToChain(selectedOut, activeChainId), [selectedOut, activeChainId])
-  // Auto slippage (v1's default mode). The editor is a B4 modal, so until then the value is derived, not stored.
-  const slippage = tokenIn && tokenOut ? calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId) : DEFAULT_SLIPPAGE
+  // v1 re-runs calculateAutoSlippage in an effect whenever the pair/chain changes while Auto is on; here Auto is derived, so there
+  // is never a render where the pair has changed and the value has not.
+  const autoSlippage = tokenIn && tokenOut ? calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId) : DEFAULT_SLIPPAGE
+  const slippage = isAutoSlippage ? autoSlippage : manualSlippage
 
   const { data: balanceIn } = useBalance({
     address,
@@ -288,7 +297,7 @@ export function SwapCard() {
               onChange={(e) => onAmountChange(e.target.value)}
               aria-label="Sell amount"
             />
-            <TokenButton token={tokenIn} side="sell" />
+            <TokenButton token={tokenIn} side="sell" onOpen={() => setTokenPicker('sell')} />
           </div>
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-v2-muted">
@@ -322,7 +331,7 @@ export function SwapCard() {
             <span data-receive="" className="ts-swap-out font-v2-mono text-[28px] text-v2-cream">
               {meta?.best ? <DigitRoller value={outputDisplay} prefix="~" /> : quoting ? <Skeleton height={28} width="70%" /> : <span className="text-v2-dim">0.0</span>}
             </span>
-            <TokenButton token={tokenOut} side="receive" />
+            <TokenButton token={tokenOut} side="receive" onOpen={() => setTokenPicker('receive')} />
           </div>
           {showSources && (
             <div className="mt-1 flex items-center justify-between gap-3">
@@ -383,7 +392,7 @@ export function SwapCard() {
             refreshing={quoteLoading}
             priceCheck={pairCheck}
             approvalPlan={approvalPlan}
-            onEditSlippage={() => {}}
+            onEditSlippage={() => setShowSlippage(true)}
             smartMevApplied={smartMevApplied}
             gasless={meta.gasless}
             lowConfidence={!!meta.lowConfidence}
@@ -425,6 +434,26 @@ export function SwapCard() {
           </Button>
         )}
       </div>
+
+      {showSlippage && (
+        <SlippageSheet
+          value={slippage}
+          onChange={setManualSlippage}
+          onClose={() => setShowSlippage(false)}
+          isAuto={isAutoSlippage}
+          onAutoChange={setIsAutoSlippage}
+          tokenInSymbol={tokenIn?.symbol}
+          tokenOutSymbol={tokenOut?.symbol}
+          chainId={activeChainId}
+        />
+      )}
+      {tokenPicker && (
+        <TokenSheet
+          disabledAddress={(tokenPicker === 'sell' ? tokenOut : tokenIn)?.address}
+          onSelect={(t) => (tokenPicker === 'sell' ? setSelectedIn(t) : setSelectedOut(t))}
+          onClose={() => setTokenPicker(null)}
+        />
+      )}
     </section>
   )
 }

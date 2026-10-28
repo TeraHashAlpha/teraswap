@@ -34,6 +34,7 @@ vi.mock('@/hooks/useEthGasCost', () => ({ useEthGasCost: () => ({ ethPrice: 2490
 vi.mock('@/hooks/useApproval', () => ({ useApproval: () => h.approval }))
 vi.mock('@/hooks/useSwapPriceTier', () => ({ useSwapPriceTier: () => h.tier }))
 vi.mock('@/lib/sounds', () => ({ playQuoteReceived: vi.fn() }))
+vi.mock('@/hooks/useTokenBalances', () => ({ useTokenBalances: () => ({ balances: new Map() }) }))
 
 import { SwapCard } from './SwapCard'
 
@@ -208,12 +209,33 @@ describe('20 — quote', () => {
     expect(sessionStorage.getItem('teraswap:rateInverted')).toBe('1')
   })
 
-  it('Max slippage ✎ is a B4 stub: a real button, no modal, no crash', () => {
+  it('Max slippage ✎ opens the slippage sheet (B4); a preset changes the row and the Min. output, Esc restores focus', () => {
     withQuote()
-    const edit = document.querySelector('[data-b4-stub="slippage-modal"]') as HTMLButtonElement
+    const edit = document.querySelector('[data-edit-slippage]') as HTMLButtonElement
     expect(edit.textContent).toContain('0.3%')
+    const minBefore = document.body.textContent
+    edit.focus()
     fireEvent.click(edit)
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Max slippage' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '1%' }))
+    expect(screen.queryByRole('dialog')).toBeNull() // v1: a choice closes the modal
+    expect((document.querySelector('[data-edit-slippage]') as HTMLElement).textContent).toContain('1%')
+    expect(document.body.textContent).not.toBe(minBefore) // Min. output follows the value
+    fireEvent.click(document.querySelector('[data-edit-slippage]') as HTMLElement)
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a token button opens the token sheet (B4); choosing a token swaps that side and the sheet hides the other side', () => {
+    withQuote()
+    fireEvent.click(screen.getByRole('button', { name: /Receive token: USDC/ }))
+    expect(screen.getByRole('dialog', { name: 'Select token' })).toBeTruthy()
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-token-row]'))
+    const sym = (r: HTMLElement) => r.querySelector('.ts-token-sym')?.textContent
+    expect(rows.some((r) => sym(r) === 'ETH')).toBe(false) // the sell side's token is hidden
+    fireEvent.click(rows.find((r) => sym(r) === 'USDT')!)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: /Receive token: USDT/ })).toBeTruthy()
   })
 
   it('MEV: the row is a switch; v1\'s exposure hint offers Enable, which flips it', () => {
