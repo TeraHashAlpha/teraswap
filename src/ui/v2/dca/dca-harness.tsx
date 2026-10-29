@@ -28,13 +28,16 @@ export const h = {
     dcaOrders: [] as unknown[],
     latestEvent: null as unknown,
   },
-  sounds: {
-    playClick: vi.fn(), playTouchMP3: vi.fn(), playSwapConfirmMP3: vi.fn(), playCancelOrderMP3: vi.fn(),
-    startWaitingSound: vi.fn(), stopWaitingSound: vi.fn(),
-  },
+  /** every sounds.ts call, in order, by name — the table test compares v1's sequence with v2's */
+  soundLog: [] as string[],
+  sounds: {} as Record<'playClick' | 'playTouchMP3' | 'playSwapConfirmMP3' | 'playCancelOrderMP3' | 'startWaitingSound' | 'stopWaitingSound', ReturnType<typeof vi.fn>>,
   switchChain: vi.fn(),
   openConnectModal: vi.fn(),
-  toast: vi.fn(() => 'toast-id'),
+  toast: vi.fn((_t?: unknown) => 'toast-id'),
+}
+
+for (const name of ['playClick', 'playTouchMP3', 'playSwapConfirmMP3', 'playCancelOrderMP3', 'startWaitingSound', 'stopWaitingSound'] as const) {
+  h.sounds[name] = vi.fn(() => { h.soundLog.push(name) })
 }
 
 export const unpricedInfo = (over: Partial<PairFloorInfo> = {}): PairFloorInfo => ({
@@ -72,4 +75,5 @@ export function resetHarness() {
   h.engine.dcaOrders = []
   h.engine.latestEvent = null
   vi.clearAllMocks()
+  h.soundLog.length = 0
 }
