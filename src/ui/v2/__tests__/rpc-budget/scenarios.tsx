@@ -3,7 +3,7 @@
  *
  * Mounts the REAL provider tree (`src/app/providers.tsx`: wagmi config + QueryClient defaults) and the REAL Swap / landing
  * components, with fake timers and the counting transport from `rpc-harness.ts`. A test file must
- * `vi.mock('@/lib/rpc-guarded-transport', ...)` itself (vi.mock is hoisted per file) — see `rpc-budget.harness.test.tsx`.
+ * `vi.mock('@/lib/rpc-guarded-transport', ...)` itself (vi.mock is hoisted per file) — see `harness.test.tsx`.
  *
  * Window definition (kept identical for BEFORE and AFTER so the tables compare):
  *   mount  = every call in the first SETTLE_MS after mount  (one-time page-load burst, reported not budgeted per minute)
@@ -14,9 +14,52 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { vi } from 'vitest'
 import { connect, disconnect } from 'wagmi/actions'
 import { mock } from 'wagmi/connectors'
-import { rpcCounter, resetRpcCounter, totalRpcCalls } from './rpc-harness'
+import { fixtureMeta } from '@/ui/v2/swap/test-fixtures'
+import { rpcCounter, resetRpcCounter, totalRpcCalls } from '@/test-utils/rpc-harness'
 
 export type Ui = 'v1' | 'v2'
+/**
+ * Globals every harness test file needs (call from `beforeAll`). The test file itself must also hoist these mocks:
+ * `@/lib/rpc-guarded-transport` (→ `mockGuardedTransportModule()`), `@/components/BackgroundMusic`, `@/components/UsageTracker`,
+ * `@/lib/sounds`, `@/ui/v2/font-loader`, `@/components/ParticleNetwork` — see `harness.test.tsx`.
+ */
+export function installHarnessGlobals(): void {
+  // jsdom has no IntersectionObserver (framer-motion's useInView on the landing needs one).
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() { return [] }
+    },
+  )
+  vi.stubEnv('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID', 'test_projectid_0123456789abcdef')
+  // /api/quote answers with a real-shaped 5-source quote (HTTP is not RPC; the quote only has to EXIST so the oracle /
+  // approval hooks that key off it are active, exactly as for a user who typed an amount). Everything else: `{}`.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      let body: unknown = {}
+      if (url.includes('/api/quote')) {
+        // Echo the request's identity exactly as /api/quote does (useQuote rejects a quote that does not name its pair).
+        const q = new URL(url, 'http://localhost').searchParams
+        body = {
+          ...fixtureMeta({ fetchedAt: Date.now() }),
+          tokenIn: q.get('src'),
+          tokenOut: q.get('dst'),
+          chainId: Number(q.get('chainId') ?? 1),
+          decimalsIn: Number(q.get('srcDecimals')),
+          decimalsOut: Number(q.get('dstDecimals')),
+          amountIn: q.get('amount'),
+        }
+      }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    }),
+  )
+}
+
 /** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) */
 export type State = 'a0' | 'a' | 'b' | 'c' | 'c20'
 

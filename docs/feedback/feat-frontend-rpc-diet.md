@@ -1,40 +1,41 @@
 # Feedback — feat/frontend-rpc-diet (2026-10-29, base origin/main 2c0849c)
 
-Env NAMES only; no RPC URLs/keys. Goal: ≥90 % less browser RPC per tab, nothing visible changes, quote/swap semantics untouched.
+Env NAMES only; no RPC URLs/keys. Goal: ≥90 % less browser RPC per tab, nothing visible changes, quote/swap/oracle semantics untouched. **Result: budgets met in every state; the ≥90 % headline is NOT met (see §3).**
 
-## Checklist
-- [x] C1 harness (`src/test-utils/rpc-{harness,scenarios,budget.harness.test}`) + BEFORE table
-- [x] C2 diet (v1+v2 shared hooks) + change table
-- [ ] C3 AFTER table + budget guards + parity/suite/lint/tsc/build
-- [ ] push + compare link
+- [x] C1 harness · [x] C2 diet · [x] C3 AFTER + guards · [x] push (no PR)
 
 ## Owner decisions / premise notes
-- **a0 (landing `/`)**: only on-chain figure is the footer "Block #N" (static stats come from `product-claims.ts`, no RPC). A 24 h server cache would show a wrong block, so the owner chose: **keep it live, a0 budget relaxed from 0 to ≤1 call/min** (60 s poll, visibility-gated).
-- Recon #70 figures are **modelled from code, not measured** (its own header). This harness is the first measurement.
-- Recon correction: a **visitor** (no wallet) makes **no** Chainlink/depeg reads — `useChainlinkPrice`/`useDepegCheck` resolve their chain from `useAccount().chain` (undefined without a wallet) and stay disabled. Visitor polling is the footer block only.
-- Windows: `mount` = first 5 s (one-time page-load burst, not a per-minute rate); `steady` = next 60 s; hidden = 60 s after the tab goes hidden; `return` = 5 s after it becomes visible. Production-only `eth_chainId` guard probes are mocked out (≈1/endpoint/page load).
+- **a0 (landing `/`)**: the only on-chain figure is the footer "Block #N" (landing stats are static `product-claims.ts`, no RPC). A 24 h server cache would show a wrong block, so owner chose: keep it live, **a0 budget 0 → ≤ 1 call/min**.
+- Recon #70's numbers are **modelled, not measured** (its own header); a visitor makes **no** oracle/depeg reads (chain comes from `useAccount().chain`, undefined without a wallet) — visitor polling is the footer only.
+- Windows: mount = first 5 s (page-load burst); steady = next 60 s; hidden = 60 s after the tab hides (BEFORE already 0: TanStack pauses `refetchInterval`); return = 5 s after it shows again. The fake clock batches same-tick reads perfectly, so real tabs read ≥ these. Harness: `src/test-utils/rpc-harness.ts` + `src/ui/v2/__tests__/rpc-budget/{scenarios,harness.test,guards.test}` (under `ui/v2` because `isolation.test.ts` forbids `ui/v2` references elsewhere).
 
-## 1. BEFORE (origin/main 2c0849c; `npx vitest run src/test-utils/rpc-budget.harness.test.tsx`)
-Real `providers.tsx` + wagmi config + hooks, counting transport, fake clock. c = mock wallet, ETH→USDC, 1 ETH typed; c20 = same, USDC→ETH (ERC-20 sell). Mount burst = block + 2 fee reads + 1 Chainlink/gas multicall (+ wallet reads).
+## 1+3. BEFORE → AFTER (steady calls/min; mount burst; return burst)
+| UI · state | BEFORE | AFTER | cut | mount b→a | return b→a |
+|---|---:|---:|---:|---|---|
+| v1+v2 · a0 landing, a swap idle, b visitor+amount | 5 | **1** | −80 % | 4→4 | 4→4 |
+| v1 · c wallet (ETH→USDC) | 14 | **6** | −57 % | 10→8 | 9→7 |
+| v1 · c20 wallet, ERC-20 sell | 14 | **6** | −57 % | 11→9 | 10→8 |
+| v2 · c wallet | 8 | **4** | −50 % | 7→7 | 6→6 |
+| v2 · c20 wallet, ERC-20 sell | 8 | **4** | −50 % | 9→9 | 8→8 |
+| hidden 60 s (all) | 0 | **0** | — | | |
 
-| UI | state | mount burst | steady calls/min | steady by method | hidden 60 s | on return (5 s) |
-|---|---|---:|---:|---|---:|---:|
-| v1 | a0 landing | 4 | 5 | blockNumber×5 | 0 | 4 |
-| v1 | a swap, idle | 4 | 5 | blockNumber×5 | 0 | 4 |
-| v1 | b visitor+amount | 4 | 5 | blockNumber×5 | 0 | 4 |
-| v1 | c wallet | 10 | 14 | blockNumber×5 eth_call×9 | 0 | 9 |
-| v1 | c20 wallet, ERC-20 | 11 | 14 | blockNumber×5 eth_call×9 | 0 | 10 |
-| v2 | a0 / a / b | 4 | 5 | blockNumber×5 | 0 | 4 |
-| v2 | c wallet | 7 | 8 | blockNumber×5 eth_call×3 | 0 | 6 |
-| v2 | c20 wallet, ERC-20 | 9 | 8 | blockNumber×5 eth_call×3 | 0 | 8 |
-
-Reading: visitor 5/min = 7.2K/day, exactly recon row 1. v1 wallet 14/min ≈ 20K/day, at the low end of recon's browser rows 1–4 (16–45K/day): the fake clock batches every same-tick read into one Multicall3 `eth_call` perfectly, a real tab batches less, so real counts are ≥ these. Hidden tabs already pause TanStack `refetchInterval` (0 hidden) — the waste is the *visible* poll and the focus-return burst.
-
-## 2. Changes (each measured by reverting it alone in the harness)
+## 2. Changes (each measured by reverting it alone)
 | file:line | before | after | calls/min saved |
 |---|---|---|---|
-| `src/lib/rpc-polling.ts:15` (new) → `components/Footer.tsx:14`, `ui/v2/shell/Footer.tsx:14` | `eth_blockNumber` every 12 s (v1 and v2 had separate constants) | one shared `BLOCK_POLL_MS` = 60 s; still `refetchIntervalInBackground:false` | **4 in every state** (5 → 1) |
-| `src/lib/wagmiConfig.ts:142` | `batch.multicall` default `batchSize` 1 024 B → the v1 token-list balance refresh (30 s) was split into ~5 `eth_call`s | `batch: { multicall: { batchSize: 16_384 } }` → 1 call per refresh (Arbitrum's 227 tokens ≈ 3) | **4 on v1 wallet states** (v2 mounts the list only inside its modal: 0) |
-| tests: `Footer.test.tsx`, `shell.test.tsx` | pinned 12 000 | pinned 60 000 | — |
+| `lib/rpc-polling.ts:13` (new) → `components/Footer.tsx:14`, `ui/v2/shell/Footer.tsx:14` | `eth_blockNumber` every 12 s, two constants | one shared `BLOCK_POLL_MS` = 60 s, still hidden-tab-paused | **4 in every state** |
+| `lib/wagmiConfig.ts:142` | `batch.multicall.batchSize` default 1 024 B → v1 token-list balance refresh (30 s) split into ~5 `eth_call`s | `batchSize: 16_384` → 1 call/refresh (Arbitrum 227 tokens ≈ 3) | **4 on v1 wallet** (v2 list lives in a modal: 0) |
+| tests `Footer.test.tsx`, `shell.test.tsx` | pinned 12 000 | pinned 60 000 | — |
 
-Tried and **dropped** (not needed, measured 0): polling Chainlink/depeg `decimals()`/`description()` only until first success + `staleTime:Infinity` (saved 0 requests: they share a tick with `latestRoundData` and merge into the same Multicall3 `eth_call`; it would have touched fail-closed gates for nothing). Also not done, not needed for any budget: wagmi `pollingInterval` (would slow approve/receipt UX; nothing but receipts uses it), `useBlockNumber({watch})` (already absent), visibility hook (TanStack already pauses; hidden = 0 BEFORE), balances `watch:false` + event refetch (would add quote-refresh-driven reads; the 30 s poll is cheaper once batched).
+Dropped, measured 0 requests saved: reading Chainlink/depeg `decimals()`/`description()` once (they share a tick with `latestRoundData`, same Multicall3 request; would have touched fail-closed gates). Not needed for any budget, not done: wagmi `pollingInterval` (slows approve/receipt UX), `watch` removal (already absent), visibility hook (TanStack already pauses), balance event-refetch.
+
+**Why not 90 %:** visitors are capped at −80 % by the ≤ 1 call/min budget (a 120 s poll would be −90 %, but a 2-min-old "live" block). Wallet states keep the 30 s `latestRoundData` oracle/depeg freshness polls (fund-flow gates, out of scope) + 30 s balances. Safe next levers if wanted: poll balances only while the token list is open (−2/min v1), align the two Chainlink legs' timers so they share one request (−2/min), 120 s block poll (−0.5/min).
+
+## 4. Budget tests (`rpc-budget/guards.test.tsx`, v1 and v2)
+a0/a ≤ 1 · b ≤ 6 · c, c20 ≤ 12 calls/min; hidden = 0; return > 0 and ≤ mount burst; wallet-less polls only `eth_blockNumber`; mount ceilings 4/12. Mutation-checked: restoring 12 s + 1 KiB batch fails 6 of 12 (e.g. "expected 14 ≤ 12", "expected 5 ≤ 1").
+
+## 5. Verification
+Suite 377 files / 6 068 tests green (main 375 / 6 046 + 2 files, 22 tests) · parity (`content-parity.swap`, `sounds-parity.swap`, `__tests__` content-parity) 45 green, content-map untouched, no copy changed · lint 93 warnings = baseline 93, 0 errors · `tsc --noEmit` clean · `next build` OK · no new deps/secrets/force-push; `src/app/api`, price-quorum, order engine, quote cadence untouched.
+
+## 6. Diff
+11 files, +592 / −7 (`git diff --stat origin/main...HEAD`): prod code = `Footer.tsx` ±7, `ui/v2/shell/Footer.tsx` ±5, `wagmiConfig.ts` +5, `rpc-polling.ts` +13 (new); everything else is tests/harness (`rpc-harness.ts` 183, `scenarios.tsx` 234, `harness.test.tsx` 54, `guards.test.tsx` 53) and this file.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/frontend-rpc-diet

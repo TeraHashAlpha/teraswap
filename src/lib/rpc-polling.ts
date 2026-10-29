@@ -1,6 +1,6 @@
 /**
  * [feat/frontend-rpc-diet] The browser's block-polling cadence, shared by the v1 and v2 footers so the two cannot
- * drift. The per-tab RPC budgets that pin it live in `src/test-utils/rpc-budget.guards.test.tsx`.
+ * drift. The per-tab RPC budgets that pin it live in the `rpc-budget/guards.test.tsx` budget tests.
  *
  * TanStack's `refetchInterval` already pauses in hidden tabs (`refetchIntervalInBackground` defaults to false) and
  * stops when the last observer unmounts, so no extra visibility logic is needed here.
