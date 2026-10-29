@@ -112,6 +112,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
     async (c: { unpricedAck: boolean } = { unpricedAck: false }, onExecute?: () => void) => {
       if (!a.chainActive) return // [P223]
       if (a.gates.anyBlocked) return // hard block — never execute above the deviation threshold or an unverified large swap
+      if (!meta) return // [A69 L-1] nothing to execute: the waiting loop below would start and never get its settle
       startWaitingSound()
       if (!approval.isReady) {
         await approval.approve()
@@ -127,7 +128,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
       onExecute?.()
       run(c.unpricedAck) // the ack is whatever THIS attempt's consent produced — also after a 409 the client tier did not predict
     },
-    [a.chainActive, a.gates.anyBlocked, a.unpricedPair, approval, run],
+    [a.chainActive, a.gates.anyBlocked, a.unpricedPair, approval, run, meta],
   )
 
   /** SwapBox's `cancelUnpricedSwap` + the review modals' `onCancel={resetSwap | resetSplitSwap}`. */

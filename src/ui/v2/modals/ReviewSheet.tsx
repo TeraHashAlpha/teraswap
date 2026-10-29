@@ -57,6 +57,7 @@ export function ReviewSheet({
   ackRequired = false,
   confirmLabel = 'Confirm & Sign',
   confirmBusy = false,
+  confirmDisabled = false,
   confirmTone = 'primary',
   step,
   onConfirm,
@@ -70,6 +71,8 @@ export function ReviewSheet({
   confirmLabel?: string
   /** B5: a hook is working (approving / building / simulating) — the button is held and the sheet reads as busy. */
   confirmBusy?: boolean
+  /** [A69 L-1] Confirm cannot be pressed at all (a price-gate block, no quote to execute): a real `disabled`, with `confirmLabel` saying why. */
+  confirmDisabled?: boolean
   confirmTone?: 'primary' | 'loading' | 'error'
   /** B5: v1's approval stepper / exact-approval note, between the details and the buttons. */
   step?: ReactNode
@@ -229,13 +232,13 @@ export function ReviewSheet({
       <div className="mt-6 flex flex-col gap-1">
         <Button
           variant="primary"
-          disabled={consentGated}
+          disabled={consentGated || confirmDisabled}
           aria-disabled={confirmBusy || undefined}
           aria-busy={confirmBusy || undefined}
           data-tone={confirmTone}
           className="w-full aria-disabled:cursor-wait aria-disabled:bg-v2-surface2 aria-disabled:text-v2-dim"
           onClick={() => {
-            if (!confirmBusy) onConfirm({ unpricedAck: needsConsent && ack })
+            if (!confirmBusy && !confirmDisabled) onConfirm({ unpricedAck: needsConsent && ack })
           }}
           data-testid="review-confirm"
         >

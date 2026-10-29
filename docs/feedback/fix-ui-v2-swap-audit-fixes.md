@@ -6,7 +6,7 @@ Scope: only `src/ui/v2/**` + this file. Hooks / lib / api / v1 components untouc
 - [x] C1 H-1 min output = decoded calldata floor (direct route)
 - [x] C2 M-1 re-snapshot `confirmedModel` on the executing press
 - [x] C3 M-2 hook-argument equality v1 vs v2 (6 scenarios)
-- [ ] C4 L-1 Confirm gated · L-2 CoW Cancel resets review · L-3 Permit2 not stacked
+- [x] C4 L-1 Confirm gated · L-2 CoW Cancel resets review · L-3 Permit2 not stacked
 - [ ] Evidence 1–5 below · push · compare link
 
 ## Scope / premise notes (owner answers supersede the goal text)
