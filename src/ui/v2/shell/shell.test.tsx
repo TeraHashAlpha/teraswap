@@ -405,7 +405,7 @@ describe('footer', () => {
     render(<AppShell />)
     const link = within(screen.getByRole('contentinfo')).getByRole('link', { name: `${name} · Block #23\u2009541\u2009870` })
     expect(link.getAttribute('href')).toBe(`${explorer}/block/23541870`)
-    expect(h.blockCalls.at(-1)).toMatchObject({ chainId, query: { refetchInterval: 12_000, refetchIntervalInBackground: false } })
+    expect(h.blockCalls.at(-1)).toMatchObject({ chainId, query: { refetchInterval: 60_000, refetchIntervalInBackground: false } })
   })
 
   it('a connected wallet\'s chain wins over a stale disconnected pick', () => {
