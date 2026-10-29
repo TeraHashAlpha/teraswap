@@ -140,7 +140,7 @@ describe('Footer block-number polling', () => {
   })
 
   it('pins the configured footer poll interval so a future regression is caught', () => {
-    expect(FOOTER_BLOCK_POLL_MS).toBe(12_000)
+    expect(FOOTER_BLOCK_POLL_MS).toBe(60_000)
   })
 })
 

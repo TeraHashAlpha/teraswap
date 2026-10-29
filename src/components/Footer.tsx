@@ -7,10 +7,11 @@ import { useBlockNumber } from 'wagmi'
 import { COPYRIGHT_YEAR } from '@/config/product-claims'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains'
+import { BLOCK_POLL_MS } from '@/lib/rpc-polling'
 
-// Mainnet block time is ~12s; polling faster only reissues eth_blockNumber
-// calls that cannot return new information.
-export const FOOTER_BLOCK_POLL_MS = 12_000
+// [feat/frontend-rpc-diet] 60 s (was 12 s): the block line is informational and a wallet-less visitor pays for
+// nothing else, so this is the whole per-minute cost of an idle tab. See src/lib/rpc-polling.ts.
+export const FOOTER_BLOCK_POLL_MS = BLOCK_POLL_MS
 
 /** The one neutral risk line shown on every page (replaces the old banner and per-panel disclaimers). */
 export const FOOTER_RISK_LINE = 'Smart contracts have not been externally audited. Use at your own risk.'

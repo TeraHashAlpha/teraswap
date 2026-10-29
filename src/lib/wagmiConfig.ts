@@ -135,5 +135,10 @@ export const config = getDefaultConfig({
       guardedHttp('https://arb1.arbitrum.io/rpc', arbitrum.id),
     ]),
   },
+  // [feat/frontend-rpc-diet] viem splits a Multicall3 into calldata chunks of `batchSize` bytes — default 1 024, i.e.
+  // ~5 balanceOf reads per eth_call — so refreshing a 30-token balance list cost ~6 provider calls instead of 1.
+  // 16 KiB keeps one refresh of the largest catalog (Arbitrum, 227 tokens) at ~3 calls, far below every provider's
+  // request-size and eth_call-gas limits. `wait` stays 0: no added latency, same-tick reads still share a request.
+  batch: { multicall: { batchSize: 16_384 } },
   ssr: true,
 })
