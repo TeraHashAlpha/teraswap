@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { decodeTransactionPreview } from '@/lib/calldata-decoder'
 import { FEE_COLLECTOR_ADDRESS } from '@/lib/constants'
 import { fmtToken } from '@/lib/format'
-import { Button } from '../primitives'
+import { Button, Skeleton } from '../primitives'
 import { shortAddress } from '../shell/format-address'
 import { TierNotice } from '../swap/TierNotice'
 import { Sheet } from './Sheet'
 import { ConsentBlock, Mark, ReviewRow } from './parts'
-import { consentRequired, type ReviewModel } from './review-model'
+import { consentRequired, decodedMinimumOutput, type ReviewModel } from './review-model'
 
 /**
  * The frozen, signable half of the review — what `useSwap` holds once /api/swap has answered (`pendingSwap`). B4 has none (display
@@ -25,8 +25,10 @@ export interface ReviewPending {
   routeViaFeeCollector: boolean
   /** [H-04] FeeCollector-enforced minimum output, raw. Only meaningful when routeViaFeeCollector. */
   minimumOutput?: bigint
-  /** For the enforced-minimum line: decimals of the buy token. */
+  /** For the minimum-output line: decimals of the buy token. */
   decimalsOut: number
+  /** [A69 H-1] The buy token's address — the decoded router floor is only shown when the calldata's buy token is this one (v1's `formatDecodedAmount` guard). */
+  tokenOutAddress: string
 }
 
 export interface ReviewConfirm {
@@ -102,6 +104,11 @@ export function ReviewSheet({
   }, [pending, preview])
   const enforcedMinOut =
     pending && pending.routeViaFeeCollector && pending.minimumOutput != null && pending.minimumOutput > 0n ? `${fmtToken(pending.minimumOutput, pending.decimalsOut)} ${model.symbolOut}` : null
+  // [A69 H-1] Otherwise the router floor decoded from the FROZEN calldata — TransactionPreview.tsx:113,208-213. Never a figure the card
+  // computed from the quote: until the hook has frozen the transaction there is nothing to show (a skeleton while it works, else no row).
+  const decodedMinOut = pending && preview ? decodedMinimumOutput(preview, pending.tokenOutAddress) : null
+  const minOutShown = enforcedMinOut ?? (decodedMinOut !== null && pending ? `${fmtToken(decodedMinOut, pending.decimalsOut)} ${model.symbolOut}` : null)
+  const awaitingFrozen = !pending && confirmBusy
 
   // The consent gate is a real `disabled` (the button was never the focus there). A busy hook is NOT: the button the user just pressed
   // keeps focus (`aria-disabled`) so the sheet never drops it to the page behind while approving / preparing / simulating.
@@ -134,19 +141,21 @@ export function ReviewSheet({
         <ReviewRow label="Receive (est.)" testId="review-receive">
           {model.receive} {model.symbolOut}
         </ReviewRow>
-        <div className="mt-1 ts-v2-rule-t pt-1">
-          <ReviewRow
-            label={
-              <span className="inline-flex flex-wrap items-center gap-x-2">
-                Minimum output
-                {enforcedMinOut && <Mark>Enforced on-chain</Mark>}
-              </span>
-            }
-            testId="review-min"
-          >
-            {enforcedMinOut ?? `${model.minOutput} ${model.symbolOut}`}
-          </ReviewRow>
-        </div>
+        {(minOutShown !== null || awaitingFrozen) && (
+          <div className="mt-1 ts-v2-rule-t pt-1">
+            <ReviewRow
+              label={
+                <span className="inline-flex flex-wrap items-center gap-x-2">
+                  Minimum output
+                  {enforcedMinOut && <Mark>Enforced on-chain</Mark>}
+                </span>
+              }
+              testId={minOutShown !== null ? 'review-min' : 'review-min-pending'}
+            >
+              {minOutShown ?? <Skeleton height={14} width={96} />}
+            </ReviewRow>
+          </div>
+        )}
       </div>
 
       <div className="mt-2 ts-v2-rule-t pt-2">

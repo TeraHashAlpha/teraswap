@@ -641,6 +641,7 @@ export function SwapCard() {
                   routeViaFeeCollector: frozenSwap.routeViaFeeCollector,
                   minimumOutput: frozenSwap.minimumOutput,
                   decimalsOut: frozenSwap.tokenOut.decimals,
+                  tokenOutAddress: frozenSwap.tokenOut.address,
                 }
               : undefined
           }
