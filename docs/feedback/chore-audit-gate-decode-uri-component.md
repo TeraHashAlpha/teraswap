@@ -48,4 +48,4 @@ audit-gate PASSED — no un-allowlisted high/critical advisories.
 
 - `npm test`: 377 files, 6068 tests pass (same counts as origin/main `320cc26`; diff is JSON + docs only, no code).
 - `npm run build`: completes. `npm run lint`: 0 errors, 93 warnings (delta 0 vs recorded baseline 93).
-- `git diff --stat origin/main`: `audit-allowlist.json` +10, feedback file new.
+- `git diff --stat origin/main`: `audit-allowlist.json` +9, feedback file new (2 files, +60).
