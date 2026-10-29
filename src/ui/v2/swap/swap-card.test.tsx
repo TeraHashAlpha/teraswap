@@ -13,15 +13,19 @@ const h = vi.hoisted(() => ({
   chainId: 1,
   quote: { meta: null as unknown, loading: false, error: null as string | null, countdown: 12, refresh: vi.fn() },
   oracle: { chainlinkPrice: 2490 as number | null, executionPrice: null, deviation: 0, level: 'none', message: null, oracleUnavailable: false } as Record<string, unknown>,
-  approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown } as Record<string, unknown>,
+  approval: { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } as unknown, status: 'ready', error: null, approve: async () => {}, isReady: true } as Record<string, unknown>,
   tier: { data: null as unknown, loading: false },
   useQuoteArgs: [] as unknown[],
+  switchChain: vi.fn(),
+  openConnectModal: vi.fn(),
 }))
 
 vi.mock('wagmi', () => ({
   useAccount: () => h.account,
   useBalance: () => ({ data: h.balance }),
+  useSwitchChain: () => ({ switchChain: h.switchChain }),
 }))
+vi.mock('@rainbow-me/rainbowkit', () => ({ useConnectModal: () => ({ openConnectModal: h.openConnectModal }) }))
 vi.mock('@/hooks/useQuote', () => ({
   useQuote: (...args: unknown[]) => {
     h.useQuoteArgs = args
@@ -33,8 +37,21 @@ vi.mock('@/hooks/useChainlinkPrice', () => ({ useChainlinkPrice: () => h.oracle 
 vi.mock('@/hooks/useEthGasCost', () => ({ useEthGasCost: () => ({ ethPrice: 2490, gasPriceGwei: 0.1, estimate: () => ({ eth: 0.000012, usd: 0.03 }) }) }))
 vi.mock('@/hooks/useApproval', () => ({ useApproval: () => h.approval }))
 vi.mock('@/hooks/useSwapPriceTier', () => ({ useSwapPriceTier: () => h.tier }))
-vi.mock('@/lib/sounds', () => ({ playQuoteReceived: vi.fn() }))
+vi.mock('@/lib/sounds', () => ({ playQuoteReceived: vi.fn(), playTouchMP3: vi.fn(), stopWaitingSound: vi.fn() }))
 vi.mock('@/hooks/useTokenBalances', () => ({ useTokenBalances: () => ({ balances: new Map() }) }))
+
+vi.mock('./lifecycle/use-swap-lifecycle', async () => {
+  const m = await import('./lifecycle/test-stubs')
+  return { useSwapLifecycle: () => m.idleLifecycle() }
+})
+vi.mock('@/hooks/useDepegCheck', async () => {
+  const m = await import('./lifecycle/test-stubs')
+  return { useDepegCheck: () => m.OK_DEPEG }
+})
+vi.mock('../shell/toasts', async () => {
+  const m = await import('./lifecycle/test-stubs')
+  return { useV2Toast: () => m.TOAST_STUB }
+})
 
 import { SwapCard } from './SwapCard'
 
@@ -48,7 +65,7 @@ beforeEach(() => {
   h.quote = { meta: null, loading: false, error: null, countdown: 12, refresh: vi.fn() }
   h.oracle = { ...NO_ORACLE, chainlinkPrice: 2490 }
   h.tier = { data: null, loading: false }
-  h.approval = { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 } }
+  h.approval = { plan: { method: 'exact', needsOnChainApprove: false, label: 'No approval needed', extraGas: 0 }, status: 'ready', error: null, approve: async () => {}, isReady: true }
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) })))
   try {
     localStorage.clear()
@@ -376,7 +393,7 @@ describe('tokens used in the fixtures resolve', () => {
   })
 })
 
-describe('26 / 25 — the review and Permit2 sheets opened from the card (B4, display only)', () => {
+describe('26 / 25 — the review and Permit2 sheets opened from the card (B4 sheets; Confirm is B5)', () => {
   const quote = (tier: unknown = null) => {
     h.account = CONNECTED
     h.tier = { data: tier, loading: false }
@@ -398,7 +415,7 @@ describe('26 / 25 — the review and Permit2 sheets opened from the card (B4, di
       expect(panel).toContain(s)
       expect(sheet).toContain(s)
     }
-    expect(within(dlg).getByRole('button', { name: 'Confirm & Sign' }).getAttribute('data-b5-stub')).toBe('') // Confirm is B5's
+    expect(within(dlg).getByRole('button', { name: 'Confirm & Sign' }).hasAttribute('data-b5-stub')).toBe(false) // Confirm is wired (lifecycle tests)
     fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(cta())
