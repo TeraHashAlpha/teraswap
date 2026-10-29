@@ -410,8 +410,13 @@ export function SwapCard() {
       lc.swap.confirmSwap() // v1: <TransactionPreview onConfirm={confirmSwap}>
       return
     }
+    // The first press freezes the sheet (it keeps describing what was confirmed while the quote polls on during an approval).
     if (liveModel && !confirmedModel) setConfirmedModel(liveModel)
-    await lc.confirm(c)
+    // [A69 M-1] …and the press that actually executes re-freezes it from the quote it hands the hook, so the sheet, the hook's arguments and the
+    // success summary all describe one quote. v1 freezes at `execute` too (useSwap.ts:733), not at the click that only approves.
+    await lc.confirm(c, () => {
+      if (liveModel) setConfirmedModel(liveModel)
+    })
   }
   function onReviewCancel() {
     setReviewRequested(false)
