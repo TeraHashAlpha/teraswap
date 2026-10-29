@@ -1,7 +1,7 @@
 # Feedback — fix/ui-v2-swap-audit-fixes (A69 @ 320cc26: 0C/1H/2M/3L → all six fixed)
 
 Only `src/ui/v2/**` + this file; hooks/lib/api/v1 untouched. 4 signed commits (code head `8197ca6`). No PR — Auditor re-check A69b follows.
-Owner answers: `src/ui/v2/modals/**` in read/edit scope. Goal's `feat-…` file name read as typo → `fix-ui-v2-swap-audit-fixes.md` (`git mv` if wrong).
+Owner answers (supersede the goal text): `src/ui/v2/modals/**` in read/edit scope; feedback file keeps the repo-convention name `fix-ui-v2-swap-audit-fixes.md`, not the goal's `feat-…`.
 
 ## 1. Per finding (fails-on-old = new tests run against origin/main sources)
 | id | old file:line | change | test (file) | origin/main |
