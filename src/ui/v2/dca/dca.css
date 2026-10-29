@@ -20,8 +20,8 @@
 
 /* A choice row (buys / interval / expiry): mono chips that wrap, 44 px hit areas from the Chip primitive. */
 .ts-dca-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; }
-.ts-dca-chips--buys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (min-width: 480px) { .ts-dca-chips--buys { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.ts-dca-chips--buys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.ts-dca-chips--buys .ts-v2-chip { justify-content: center; padding-inline: 0; }
 
 /* Orders list: hairline rows, no card. */
 .ts-dca-row { border-top: 1px solid var(--hairline); padding: 12px 0; }
