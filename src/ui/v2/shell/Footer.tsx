@@ -7,10 +7,11 @@ import { useQuoteChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { fmtInt } from '@/lib/format'
+import { BLOCK_POLL_MS } from '@/lib/rpc-polling'
 import { PhotoCredit } from '../photos/PhotoCredit'
 
-// Mainnet block time is ~12 s; polling faster only reissues eth_blockNumber calls (same value and rationale as v1).
-export const V2_FOOTER_BLOCK_POLL_MS = 12_000
+// [feat/frontend-rpc-diet] Same 60 s as v1 (one shared constant): the block line is informational — see src/lib/rpc-polling.ts.
+export const V2_FOOTER_BLOCK_POLL_MS = BLOCK_POLL_MS
 
 /** The one neutral risk line, verbatim (v1 `FOOTER_RISK_LINE`; a test pins both to this literal). */
 export const V2_RISK_LINE = 'Smart contracts have not been externally audited. Use at your own risk.'

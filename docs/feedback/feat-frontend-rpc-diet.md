@@ -4,7 +4,7 @@ Env NAMES only; no RPC URLs/keys. Goal: ≥90 % less browser RPC per tab, nothin
 
 ## Checklist
 - [x] C1 harness (`src/test-utils/rpc-{harness,scenarios,budget.harness.test}`) + BEFORE table
-- [ ] C2 diet (v1+v2 shared hooks) + change table
+- [x] C2 diet (v1+v2 shared hooks) + change table
 - [ ] C3 AFTER table + budget guards + parity/suite/lint/tsc/build
 - [ ] push + compare link
 
@@ -29,3 +29,12 @@ Real `providers.tsx` + wagmi config + hooks, counting transport, fake clock. c =
 | v2 | c20 wallet, ERC-20 | 9 | 8 | blockNumber×5 eth_call×3 | 0 | 8 |
 
 Reading: visitor 5/min = 7.2K/day, exactly recon row 1. v1 wallet 14/min ≈ 20K/day, at the low end of recon's browser rows 1–4 (16–45K/day): the fake clock batches every same-tick read into one Multicall3 `eth_call` perfectly, a real tab batches less, so real counts are ≥ these. Hidden tabs already pause TanStack `refetchInterval` (0 hidden) — the waste is the *visible* poll and the focus-return burst.
+
+## 2. Changes (each measured by reverting it alone in the harness)
+| file:line | before | after | calls/min saved |
+|---|---|---|---|
+| `src/lib/rpc-polling.ts:15` (new) → `components/Footer.tsx:14`, `ui/v2/shell/Footer.tsx:14` | `eth_blockNumber` every 12 s (v1 and v2 had separate constants) | one shared `BLOCK_POLL_MS` = 60 s; still `refetchIntervalInBackground:false` | **4 in every state** (5 → 1) |
+| `src/lib/wagmiConfig.ts:142` | `batch.multicall` default `batchSize` 1 024 B → the v1 token-list balance refresh (30 s) was split into ~5 `eth_call`s | `batch: { multicall: { batchSize: 16_384 } }` → 1 call per refresh (Arbitrum's 227 tokens ≈ 3) | **4 on v1 wallet states** (v2 mounts the list only inside its modal: 0) |
+| tests: `Footer.test.tsx`, `shell.test.tsx` | pinned 12 000 | pinned 60 000 | — |
+
+Tried and **dropped** (not needed, measured 0): polling Chainlink/depeg `decimals()`/`description()` only until first success + `staleTime:Infinity` (saved 0 requests: they share a tick with `latestRoundData` and merge into the same Multicall3 `eth_call`; it would have touched fail-closed gates for nothing). Also not done, not needed for any budget: wagmi `pollingInterval` (would slow approve/receipt UX; nothing but receipts uses it), `useBlockNumber({watch})` (already absent), visibility hook (TanStack already pauses; hidden = 0 BEFORE), balances `watch:false` + event refetch (would add quote-refresh-driven reads; the 30 s poll is cheaper once batched).
