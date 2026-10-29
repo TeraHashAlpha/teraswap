@@ -167,10 +167,10 @@ export function capUsd(info: PairFloorInfo | null): number {
   return typeof c === 'number' && Number.isFinite(c) && c > 0 ? Math.min(c, DCA_NO_PRICE_FILL_CAP_MAX_USD) : DCA_NO_PRICE_FILL_CAP_MAX_USD
 }
 
-/** The Summary's "Protection" value: null while the server has not answered; the on-chain feed has no badge (pack 31). */
-export function protectionLabel(info: PairFloorInfo | null): { text: string; tone: 'muted' | 'amber'; title?: string } | null {
+/** The Summary's "Protection" value, ONLY from v1's own strings (FLOOR_TIER_BADGE): null while the server has not answered, and for the on-chain feed (v1's badge renders nothing there — no frame copy). */
+export function protectionLabel(info: PairFloorInfo | null): { text: string; tone: 'amber'; title?: string } | null {
   if (!info) return null
-  if (info.tier === 'onchain-feed') return { text: 'On-chain price feed', tone: 'muted' }
+  if (info.tier === 'onchain-feed') return null
   const b = FLOOR_TIER_BADGE[info.tier]
   return { text: b.label, tone: 'amber', title: b.title }
 }

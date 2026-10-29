@@ -88,7 +88,9 @@ import DCAPanel from '@/components/DCAPanel'
 import { useDisconnectedChainSelection } from '@/hooks/useChainId'
 import { findChainToken, getCanonicalUsdc } from '@/lib/chains/tokens'
 import { getWrappedNative } from '@/lib/chains/registry'
-import { DcaNetworkGate, shouldShowDcaGate } from '../shell/DcaNetworkGate'
+import { DcaNetworkGate, dcaGateChainIds, dcaGateChainNames, shouldShowDcaGate } from '../shell/DcaNetworkGate'
+import { DCA_CHAINS } from '@/lib/dca-launch'
+import { getChainConfig } from '@/lib/chains/registry'
 import { DcaCard } from './DcaCard'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { OrderType } from '@/lib/order-engine'
@@ -99,6 +101,7 @@ beforeEach(() => {
   resetHarness()
   h.balances = new Map([[weth().address.toLowerCase(), { raw: 2_000_000_000_000_000_000n, formatted: '2.0' }]])
   useDisconnectedChainSelection.setState({ chainId: 1 })
+  process.env.NEXT_PUBLIC_DCA_ENABLED = 'true'
 })
 afterEach(cleanup)
 
@@ -116,6 +119,23 @@ describe('(5a) chain gate', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('DCA runs on Base and Arbitrum One.')
     expect([screen.getByRole('button', { name: 'Switch to Base' }).textContent, screen.getByRole('button', { name: 'Switch to Arbitrum One' }).textContent]).toEqual(v1Buttons)
     expect(document.body.textContent).not.toMatch(/soon/i)
+  })
+
+  it("the chain list is the SAME source as v1's: DCA_CHAINS, named by the registry (v1's panel and the v2 gate list equal chains)", () => {
+    h.account = { ...h.account, isConnected: false, chain: undefined }
+    render(<ComingSoonPanel mode="dca" chainId={1} onSwap={() => {}} />)
+    const v1Ids = screen.getAllByTestId(/^switch-to-/).map((b) => Number(b.getAttribute('data-testid')!.replace('switch-to-', '')))
+    cleanup()
+    expect(dcaGateChainIds()).toEqual(DCA_CHAINS)
+    expect([...dcaGateChainIds()]).toEqual(v1Ids)
+    expect(dcaGateChainNames()).toEqual(v1Ids.map((id) => getChainConfig(id).name))
+  })
+
+  it("the gate shows exactly when v1's page does: launch flag on AND the selected chain is not a DCA chain", () => {
+    for (const flag of ['true', 'false', '']) {
+      process.env.NEXT_PUBLIC_DCA_ENABLED = flag
+      for (const id of [1, 8453, 42161, 10]) expect(shouldShowDcaGate(id)).toBe(flag === 'true' && !DCA_CHAINS.includes(id))
+    }
   })
 
   it('the switch buttons use v1\'s mechanism: the disconnected selection store, or wagmi switchChain when a wallet is connected', () => {

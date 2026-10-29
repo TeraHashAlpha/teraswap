@@ -319,9 +319,11 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             <Row label="Total duration" testId="dca-sum-duration">{hasAmount ? form.totalDuration : '—'}</Row>
             <Row label="Execution" testId="dca-sum-exec">{hasAmount ? `Every ${form.interval.label}` : '—'}</Row>
             <Row label="Expires" testId="dca-sum-expires">{hasAmount ? form.expiry.label : '—'}</Row>
-            <Row label="Protection" testId="dca-sum-protection" tone={protection?.tone === 'amber' ? 'amber' : undefined}>
-              {loadingTier ? <Skeleton height={14} width={96} /> : protection ? <span title={protection.title}>{protection.text}</span> : '—'}
-            </Row>
+            {(loadingTier || protection) && (
+              <Row label="Protection" testId="dca-sum-protection" tone="amber">
+                {loadingTier ? <Skeleton height={14} width={96} /> : <span title={protection?.title}>{protection?.text}</span>}
+              </Row>
+            )}
           </div>
           <p className="mt-3 text-[12px] text-v2-muted">
             Each buy routes through {INTEGRATED_DEX_SOURCE_COUNT} DEX sources via 1inch aggregation. Orders execute autonomously — no browser needed.

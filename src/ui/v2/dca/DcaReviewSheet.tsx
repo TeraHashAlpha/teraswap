@@ -93,9 +93,11 @@ export function DcaReviewSheet({
         {view.floorTotal != null && (
           <ReviewRow label="Signed floor per order (total)" testId="dca-review-floor">≥ {view.floorTotal} {view.symbolOut}{view.floorPerBuy != null ? ` — ≥ ${view.floorPerBuy} ${view.symbolOut} enforced per buy` : ''}</ReviewRow>
         )}
-        <ReviewRow label="Protection" testId="dca-review-protection" tone={protection?.tone === 'amber' ? 'amber' : undefined}>
-          {protection ? protection.text : '—'}
-        </ReviewRow>
+        {protection && (
+          <ReviewRow label="Protection" testId="dca-review-protection" tone="amber">
+            {protection.text}
+          </ReviewRow>
+        )}
       </div>
 
       {hint && (

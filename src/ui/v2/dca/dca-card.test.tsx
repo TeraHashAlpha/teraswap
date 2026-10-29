@@ -213,7 +213,7 @@ describe('(4) cap, floor and tier lines are v1\'s own strings', () => {
     expect(screen.getByTestId('dca-sum-protection').textContent).toContain('No price source')
   })
 
-  it('offchain-price: v1\'s hint and badge label; on-chain feed: no hint (the badge-less row of pack 31)', async () => {
+  it('offchain-price: v1\'s hint and badge label; on-chain feed: v1 shows nothing (no row, no hint)', async () => {
     h.floor = offchainInfo()
     const { unmount } = render(<DcaCard chainId={BASE} />)
     expect((await screen.findByTestId('dca-tier-hint')).textContent).toBe('Protected by executor price checks (no Chainlink feed registered yet)')
@@ -221,8 +221,11 @@ describe('(4) cap, floor and tier lines are v1\'s own strings', () => {
     unmount()
     h.floor = onchainInfo()
     render(<DcaCard chainId={BASE} />)
-    await waitFor(() => expect(screen.getByTestId('dca-sum-protection').textContent).toContain('On-chain price feed'))
+    await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeNull())
+    // v1 renders nothing for the on-chain feed (FloorTierBadge → null): no row, no hint, and no frame copy
+    expect(screen.queryByTestId('dca-sum-protection')).toBeNull()
     expect(screen.queryByTestId('dca-tier-hint')).toBeNull()
+    expect(document.body.textContent).not.toContain('On-chain price feed')
   })
 
   it('the consent body keeps v1\'s words and numbers: {N}, the symbols and the cap come from the server answer', () => {

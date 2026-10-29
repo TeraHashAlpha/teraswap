@@ -93,6 +93,7 @@ beforeEach(() => {
   h.blockCalls = []
   h.dcaLive = new Set([8453])
   h.limitLive = false
+  process.env.NEXT_PUBLIC_DCA_ENABLED = 'true' // v1's launch flag: the gate is `flag && !DCA_CHAINS.includes(chain)`
   h.push.mockClear()
   h.switchChain.mockClear()
   useDisconnectedChainSelection.setState({ chainId: null })
@@ -208,26 +209,30 @@ describe('tabs', () => {
 })
 
 describe('DCA tab', () => {
-  it('Ethereum: "DCA runs on …" + switch buttons for the LIVE chains only (Arbitrum dark today)', () => {
+  it('Ethereum: the gate names every DCA chain (v1\'s DCA_CHAINS) with a switch for each — whatever is live', () => {
     h.pathname = '/dca'
-    render(<AppShell />)
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('DCA runs on Base.')
-    expect(screen.getByRole('button', { name: 'Switch to Base' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Switch to Arbitrum One/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to Base' }))
-    expect(useDisconnectedChainSelection.getState().chainId).toBe(8453)
+    for (const live of [new Set([8453]), new Set([8453, 42161]), new Set<number>()]) {
+      h.dcaLive = live
+      render(<AppShell />)
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('DCA runs on Base and Arbitrum One.')
+      expect(screen.getAllByRole('button', { name: /^Switch to / }).map((b) => b.textContent)).toEqual(['Switch to Base', 'Switch to Arbitrum One'])
+      cleanup()
+    }
   })
 
-  it('both live → the spec text "DCA runs on Base and Arbitrum One." with both switches', () => {
+  it('the switch buttons select that network', () => {
     h.pathname = '/dca'
-    h.dcaLive = new Set([8453, 42161])
     render(<AppShell />)
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('DCA runs on Base and Arbitrum One.')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Base' }))
+    expect(useDisconnectedChainSelection.getState().chainId).toBe(8453)
+    cleanup()
+    useDisconnectedChainSelection.setState({ chainId: null })
+    render(<AppShell />)
     fireEvent.click(screen.getByRole('button', { name: 'Switch to Arbitrum One' }))
     expect(useDisconnectedChainSelection.getState().chainId).toBe(42161)
   })
 
-  it('on a DCA chain, or when nothing is live, the plain pane shows — no claim, never "Soon"', () => {
+  it('on a DCA chain, or with the launch flag off, the plain pane shows — no claim, never "Soon"', () => {
     h.pathname = '/dca'
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell />)
@@ -235,7 +240,7 @@ describe('DCA tab', () => {
     expect(document.querySelector('[data-tab-pane="dca"]')).not.toBeNull()
     cleanup()
     useDisconnectedChainSelection.setState({ chainId: null })
-    h.dcaLive = new Set()
+    process.env.NEXT_PUBLIC_DCA_ENABLED = 'false'
     render(<AppShell />)
     expect(document.querySelector('[data-dca-gate]')).toBeNull()
     expect(screen.queryByText(/DCA runs on/)).toBeNull()
@@ -244,27 +249,19 @@ describe('DCA tab', () => {
   })
 })
 
-describe('DCA tab · per selected network × live set (the gate, never the skeleton, when DCA runs elsewhere)', () => {
-  const NONE: number[] = []
-  const BASE_ONLY = [8453]
-  const BOTH = [8453, 42161]
+describe('DCA tab · per selected network (the gate, never the skeleton, when DCA runs elsewhere)', () => {
   const NAMES: Record<number, string> = { 1: 'Ethereum', 8453: 'Base', 42161: 'Arbitrum One' }
 
-  // [selected chain, live chains, heading or null (= plain pane), switch buttons]
-  const CASES: Array<[number, number[], string | null, string[]]> = [
-    [1, BASE_ONLY, 'DCA runs on Base.', ['Switch to Base']],
-    [1, BOTH, 'DCA runs on Base and Arbitrum One.', ['Switch to Base', 'Switch to Arbitrum One']],
-    [1, NONE, null, []],
-    [8453, BASE_ONLY, null, []],
-    [8453, BOTH, null, []],
-    // Arbitrum is in DCA_CHAINS: the gate is about the NETWORK not being a DCA network, so it never shows there.
-    [42161, BASE_ONLY, null, []],
-    [42161, BOTH, null, []],
+  // [selected chain, heading or null (= the DCA pane, no gate), switch buttons]
+  const CASES: Array<[number, string | null, string[]]> = [
+    [1, 'DCA runs on Base and Arbitrum One.', ['Switch to Base', 'Switch to Arbitrum One']],
+    // Both are in DCA_CHAINS: the gate is about the NETWORK not being a DCA network, so it never shows there.
+    [8453, null, []],
+    [42161, null, []],
   ]
 
-  it.each(CASES)('chain %i, live %j → %j', (chainId, live, heading, buttons) => {
+  it.each(CASES)('chain %i → %j', (chainId, heading, buttons) => {
     h.pathname = '/dca'
-    h.dcaLive = new Set(live)
     useDisconnectedChainSelection.setState({ chainId })
     render(<AppShell />)
     const pane = document.querySelector('[data-tab-pane="dca"]')!
@@ -275,20 +272,11 @@ describe('DCA tab · per selected network × live set (the gate, never the skele
       return
     }
     expect(document.querySelector('[data-dca-gate]')).not.toBeNull()
-    // The skeleton does not cover it: no busy pane, no skeleton blocks.
     expect(pane.hasAttribute('aria-busy')).toBe(false)
     expect(pane.querySelector('.ts-v2-skeleton')).toBeNull()
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(heading)
     expect(screen.getByText(`${NAMES[chainId]} is selected. Switch network to create or manage DCA positions.`)).toBeTruthy()
     expect(screen.getAllByRole('button', { name: /^Switch to / }).map((b) => b.textContent)).toEqual(buttons)
-  })
-
-  it('every switch button selects that network', () => {
-    h.pathname = '/dca'
-    h.dcaLive = new Set(BOTH)
-    render(<AppShell />)
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to Arbitrum One' }))
-    expect(useDisconnectedChainSelection.getState().chainId).toBe(42161)
   })
 
   it('connected on Ethereum: the buttons call wagmi switchChain', () => {
