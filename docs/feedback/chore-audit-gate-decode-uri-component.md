@@ -59,12 +59,12 @@ teraswap@0.1.0
 
 ## 4. Suite / build / lint — both sides measured 2026-10-29 (same node_modules; pkg+lock identical)
 
-| | origin/main `320cc26` | branch `acde971`-ish |
+| | origin/main `320cc26` | branch (code+config identical from `071b961`) |
 |---|---|---|
 | `npm test` | 377 files / 6068 pass | 377 files / 6068 pass |
 | `npm run lint` | 0 err / 93 warn | 0 err / 93 warn (delta 0) |
 | `audit-gate` | FAILED (1 un-allowlisted HIGH) | PASSED |
 | `npm run build` | — | completes |
 
-`git diff --stat origin/main`: `audit-allowlist.json` +9, feedback file new (2 files, +60 before this edit).
+`git diff --stat origin/main`: `audit-allowlist.json` +9, feedback file new (2 files, +79 final).
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/audit-gate-decode-uri-component
