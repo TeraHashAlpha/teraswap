@@ -39,3 +39,30 @@ describe('CTA matrix (v1 SwapButton order; Swap → Review swap)', () => {
     }
   })
 })
+
+describe('B5 — SwapButton\'s remaining states, in v1\'s order and words', () => {
+  const full: [string, Partial<CtaInput>, string, string, boolean][] = [
+    ['price-gate block beats approval and swap states', { blockReason: 'oracle', approvalStatus: 'approving_permit2' }, 'blocked', 'No oracle — swap blocked', true],
+    ['approving', { approvalStatus: 'approving_permit2', approvalReady: false }, 'in-flight', 'Approving...', true],
+    ['signing the approval', { approvalStatus: 'signing', approvalReady: false }, 'in-flight', 'Signing...', true],
+    ['approval error → retry', { approvalStatus: 'error', approvalReady: false }, 'retry', 'Approval error — retry', false],
+    ['approval still needed (single route: the review sheet carries "Approve & Swap")', { approvalReady: false }, 'review', 'Review swap', false],
+    ['approval still needed (split route: no review → v1\'s own label)', { approvalReady: false, splitActive: true }, 'split-swap', 'Approve & Swap', false],
+    ['ready, split route', { approvalReady: true, splitActive: true }, 'split-swap', 'Swap', false],
+    ['preparing', { approvalReady: true, swapStatus: 'fetching_swap' }, 'in-flight', 'Preparing swap...', true],
+    ['simulating', { approvalReady: true, swapStatus: 'simulating' }, 'in-flight', 'Simulating transaction...', true],
+    ['review transaction', { approvalReady: true, swapStatus: 'confirming' }, 'in-flight', 'Review transaction...', true],
+    ['CoW: sign in wallet', { approvalReady: true, swapStatus: 'cow_signing' }, 'in-flight', 'Sign order in wallet...', true],
+    ['CoW: waiting for solver', { approvalReady: true, swapStatus: 'cow_pending' }, 'in-flight', 'Waiting for solver...', true],
+    ['executing', { approvalReady: true, swapStatus: 'swapping' }, 'in-flight', 'Executing swap...', true],
+    ['complete', { approvalReady: true, swapStatus: 'success' }, 'complete', 'Swap complete', true],
+    ['error → retry', { approvalReady: true, swapStatus: 'error' }, 'retry', 'Error — retry', false],
+  ]
+  it.each(full)('%s', (_n, over, kind, label, disabled) => {
+    const r = row(over)
+    expect({ kind: r.kind, label: r.label, disabled: r.disabled }).toEqual({ kind, label, disabled })
+  })
+  it('the B3 states still win over every lifecycle state (wrong network beats an in-flight swap)', () => {
+    expect(row({ isCorrectChain: false, swapStatus: 'swapping', blockReason: 'oracle' }).kind).toBe('wrong-network')
+  })
+})

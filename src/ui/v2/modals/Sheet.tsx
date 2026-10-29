@@ -23,6 +23,8 @@ export interface SheetProps {
   closeButton?: boolean
   /** A click on the dimmed page closes the sheet (default). Consent-style sheets keep it off. */
   dismissOnBackdrop?: boolean
+  /** Esc closes the sheet (default). Off while a wallet step is in flight: there is nothing a dismissal could undo, and v1 offers no way out of that state either. */
+  dismissOnEscape?: boolean
   /** Extra test/hook marker, e.g. `review`. */
   name?: string
   children: ReactNode
@@ -34,11 +36,13 @@ export interface SheetProps {
  * closes it, and focus returns to whatever opened it. One component for every v2 swap modal so none of them re-implements
  * the keyboard contract (v1's modals each carry their own copy, and the slippage / token / review ones have no trap at all).
  */
-export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, closeButton = false, dismissOnBackdrop = true, name, children }: SheetProps) {
+export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, closeButton = false, dismissOnBackdrop = true, dismissOnEscape = true, name, children }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
+  const escRef = useRef(dismissOnEscape)
   useEffect(() => {
     closeRef.current = onClose
+    escRef.current = dismissOnEscape
   })
   const titleId = useId()
   const descId = useId()
@@ -53,8 +57,8 @@ export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, 
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.stopPropagation()
-        closeRef.current()
+        e.stopPropagation() // the page behind must not act on it either
+        if (escRef.current) closeRef.current()
         return
       }
       if (e.key !== 'Tab' || !panel) return
@@ -90,7 +94,7 @@ export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, 
 
   return (
     <div data-sheet-root="" className="ts-sheet-root">
-      <div aria-hidden="true" data-sheet-backdrop="" className="ts-sheet-backdrop" onClick={dismissOnBackdrop ? onClose : undefined} />
+      <div aria-hidden="true" data-sheet-backdrop="" className="ts-sheet-backdrop" onClick={dismissOnBackdrop && dismissOnEscape ? onClose : undefined} />
       <Surface
         ref={panelRef}
         variant="sheet"

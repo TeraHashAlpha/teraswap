@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useAccount, useBalance } from 'wagmi'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAccount, useBalance, useSwitchChain } from 'wagmi'
+import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import DigitRoller from '@/components/DigitRoller'
 import ChainIcon from '@/components/icons/ChainIcon'
@@ -23,11 +24,12 @@ import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { AGGREGATOR_META, DEFAULT_SLIPPAGE, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { fmtToken, formatWithSeparator, stripSeparator, fmtUsd } from '@/lib/format'
-import { playQuoteReceived } from '@/lib/sounds'
+import { playQuoteReceived, playTouchMP3 } from '@/lib/sounds'
 import { CHAIN_ID } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
 import { Button, Input, Skeleton, Surface, Toggle } from '../primitives'
+import { CtaButton } from './CtaButton'
 import { shortAddress } from '../shell/format-address'
 import './swap.css'
 import { ctaFor } from './cta'
@@ -41,7 +43,18 @@ import { SlippageSheet } from '../modals/SlippageSheet'
 import { TokenSheet } from '../modals/TokenSheet'
 import { Permit2Sheet } from '../modals/Permit2Sheet'
 import { ReviewSheet } from '../modals/ReviewSheet'
-import { buildReviewModel, reviewOpen } from '../modals/review-model'
+import { ConsentSheet } from '../modals/ConsentSheet'
+import { CowOrderReviewSheet } from '../modals/CowOrderReviewSheet'
+import { SplitReviewSheet } from '../modals/SplitReviewSheet'
+import { buildReviewModel, reviewOpen, unpricedConsentValues, withFrozenSwap, type ReviewModel } from '../modals/review-model'
+import { useV2Toast } from '../shell/toasts'
+import { GateNotices } from './lifecycle/GateNotices'
+import { SplitRoutePanel } from './lifecycle/SplitRoutePanel'
+import { ApprovalStep } from './lifecycle/ApprovalStep'
+import { ExecutionPanel } from './lifecycle/ExecutionPanel'
+import { useSwapGates } from './lifecycle/use-swap-gates'
+import { useSwapLifecycle } from './lifecycle/use-swap-lifecycle'
+import { buildTimeline, confirmButtonState, SIGNING_STATUSES } from './lifecycle/lifecycle-view'
 
 const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
@@ -79,9 +92,10 @@ function TokenIdentity({ token, chainId }: { token: Token; chainId: number }) {
 }
 
 /**
- * [ADR-025] The Swap tab (B3): round7 frames 20 / 21a / 21b. It reuses v1's hooks UNCHANGED — the same quote, oracle, gas
- * and approval-plan reads SwapBox makes — and is display-only: the wallet lifecycle (review sheet, signing, approvals,
- * price gates) is B4/B5, so the CTA says the right thing but its click path is not wired here (`data-b5-stub`).
+ * [ADR-025] The Swap tab: round7 frames 20 / 21a / 21b (B3), the review / consent / Permit2 sheets (B4) and — B5 — the wallet
+ * lifecycle. It reuses v1's hooks UNCHANGED: the same quote, oracle, gas and approval reads SwapBox makes, and the same
+ * `useSwap` / `useSplitSwap` / `useApproval` calls (see `lifecycle/use-swap-lifecycle.ts`). The card never computes an amount,
+ * a minimum output or calldata: it hands the hooks the quote and renders what they freeze.
  */
 export function SwapCard() {
   const [selectedIn, setSelectedIn] = useState<Token | null>(findToken('ETH') ?? null)
@@ -104,6 +118,11 @@ export function SwapCard() {
   const [showSlippage, setShowSlippage] = useState(false)
   const [tokenPicker, setTokenPicker] = useState<'sell' | 'receive' | null>(null)
   const [reviewRequested, setReviewRequested] = useState(false)
+  // The review model as it stood when Confirm was pressed: the sheet keeps describing what was confirmed while the quote polls on.
+  const [confirmedModel, setConfirmedModel] = useState<ReviewModel | null>(null)
+  const { toast } = useV2Toast()
+  const { openConnectModal } = useConnectModal()
+  const { switchChain } = useSwitchChain()
 
   const dismissMevHint = useCallback(() => {
     setMevHintDismissed(true)
@@ -185,7 +204,12 @@ export function SwapCard() {
       .then((data) => {
         if (!data.spender) return
         // [FULL-H-02] a compromised /api/spender must never become a trusted spender
-        setSpenderAnswer({ key: spenderKey, spender: isTrustedSpender(data.spender, activeChainId) ? (data.spender as `0x${string}`) : undefined })
+        const trusted = isTrustedSpender(data.spender, activeChainId)
+        if (!trusted) {
+          console.error('[Security] Untrusted spender address from /api/spender:', data.spender)
+          toast({ type: 'error', title: 'Swap unavailable', description: 'Spender validation failed. Please try again or choose another route.' })
+        }
+        setSpenderAnswer({ key: spenderKey, spender: trusted ? (data.spender as `0x${string}`) : undefined })
       })
       .catch(() => {})
     return () => controller.abort()
@@ -193,7 +217,8 @@ export function SwapCard() {
   }, [spenderKey])
   // An answer only counts for the (source, chain) it was fetched for — the "clear when there is no quote" of v1, derived.
   const spender = spenderAnswer && spenderAnswer.key === spenderKey ? spenderAnswer.spender : undefined
-  const { plan: approvalPlan, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } = useApproval(tokenIn, amountIn, spender)
+  const approval = useApproval(tokenIn, amountIn, spender)
+  const { plan: approvalPlan, needsPermit2Education, confirmPermit2Education, cancelPermit2Education } = approval
 
   // Direction-agnostic execution price (SwapBox, SPRINT-9S S2): the non-stable side priced off the stable side.
   const { execIn, execOut } =
@@ -219,6 +244,64 @@ export function SwapCard() {
 
   const hasAmount = !!amountIn && Number(amountIn) > 0
   const quoting = hasAmount && !meta && (quoteLoading || (!!pickedMeta && !quoteCurrent))
+  const chainActive = isChainActive(activeChainId) // [P223] swaps are disabled on a coming-soon chain
+  // v1's `priceCheckStale`: the amount changed and no quote for it has landed — the gate banners wait so they never flash on old data.
+  const priceCheckStale = hasAmount && !meta
+  const gates = useSwapGates({
+    tokenIn,
+    tokenOut,
+    amountIn,
+    meta,
+    quoteDecimalsOut,
+    activeChainId,
+    pairCheck,
+    tokenInChainlinkPrice: priceCheck.chainlinkPrice,
+    tokenOutChainlinkPrice: tokenOutPriceCheck.chainlinkPrice,
+    priceTier,
+  })
+  const unpricedPair = priceTier?.tier === 'unpriced'
+  const lc = useSwapLifecycle({
+    tokenIn,
+    tokenOut,
+    amountIn,
+    slippage,
+    meta,
+    activeChainId,
+    isChainOkForQuote,
+    chainActive,
+    unpricedPair,
+    gates,
+    approval,
+    tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice,
+  })
+
+  // v1 resets both swap hooks and drops any review whenever the trade changes under them (typed amount, 50% / MAX, ⇅, a token pick), and
+  // the hooks reset themselves on a chain / account switch. One key covers all of them, so a sheet opened for one trade can never
+  // confirm another: the review closes (v1's behaviour — no notice) and any state a hook holds for the old trade is reset.
+  const tradeKey = `${activeChainId}:${tokenIn?.address ?? ''}:${tokenOut?.address ?? ''}:${amountIn}`
+  const [prevTradeKey, setPrevTradeKey] = useState(tradeKey)
+  if (tradeKey !== prevTradeKey) {
+    setPrevTradeKey(tradeKey)
+    setReviewRequested(false)
+    setConfirmedModel(null)
+  }
+  const resetAll = lc.resetAll
+  useEffect(() => {
+    resetAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the trade alone: `resetAll` is a new function every render
+  }, [tradeKey])
+
+  // v1 toasts a quote error once per distinct message (the useQuote poll re-raises the same string every cycle); dedupKey replaces.
+  const lastQuoteError = useRef<string | null>(null)
+  useEffect(() => {
+    if (!quoteError) {
+      lastQuoteError.current = null
+      return
+    }
+    if (quoteError === lastQuoteError.current) return
+    lastQuoteError.current = quoteError
+    toast({ type: 'warning', title: 'Quote unavailable', description: quoteError, duration: 6000, dedupKey: 'quote-error' })
+  }, [quoteError, toast])
   // [BUGFIX in v1] parseUnits throws on malformed input ("1.2.3") — that is "insufficient", never a crash.
   const hasSufficientBalance =
     !hasAmount ||
@@ -245,6 +328,11 @@ export function SwapCard() {
     hasSufficientBalance,
     quoteLoading: quoting,
     hasQuote: !!meta,
+    blockReason: gates.blockReason,
+    approvalStatus: approval.status,
+    approvalReady: approval.isReady,
+    swapStatus: lc.status,
+    splitActive: lc.isSplitActive,
   })
 
   // Cheap and pure; not memoised because useEthGasCost rebuilds `gasEstimate` on every render (v1 passes it straight through too).
@@ -262,6 +350,8 @@ export function SwapCard() {
       : '0.0'
   const balanceDisplay = balanceIn ? fmtToken(balanceIn.value, balanceIn.decimals) : null
 
+  // A changed trade resets both swap hooks (see `tradeKey`) — without it a stale `success` from a smaller amount survives into the
+  // next cycle (v1: BUG-SWAP-APPROVE-STALE-SUCCESS).
   function setAmount(clean: string) {
     setDisplayAmountIn(thin(formatWithSeparator(clean)))
   }
@@ -273,9 +363,77 @@ export function SwapCard() {
     setSelectedIn(tokenOut)
     setSelectedOut(tokenIn)
     setDisplayAmountIn('')
+    lc.resetAll()
   }
 
   const showSources = shouldShowSourceToggle(meta?.all.length ?? null, excludedSources.size)
+
+  // ── B5: which sheet the hooks' state calls for ──
+  const liveModel = view && meta && tokenIn && tokenOut ? buildReviewModel({ view, meta, tokenIn, tokenOut, amountIn, slippage, tier: priceTier }) : null
+  const baseModel = confirmedModel ?? liveModel
+  const frozenSwap = lc.swap.status === 'confirming' ? lc.swap.pendingSwap : null
+  const sheetModel = baseModel && frozenSwap ? withFrozenSwap(baseModel, frozenSwap, AGGREGATOR_META[frozenSwap.source]?.label ?? frozenSwap.source) : baseModel
+  const swapSt = lc.swap.status
+  // The single-route review is on screen from the CTA until the signature is requested; a split has no such review (v1 goes straight to the plan).
+  const singleReviewOpen =
+    !lc.isSplitActive && reviewOpen({ requested: reviewRequested, ackRequired: lc.swap.unpricedAckRequired }) && !SIGNING_STATUSES.has(swapSt) && swapSt !== 'success' && swapSt !== 'cow_awaiting_review'
+  const splitConsentOpen = lc.isSplitActive && (lc.consentRequested || lc.split.unpricedAckRequired)
+  const splitReviewOpen = lc.isSplitActive && lc.split.status === 'awaiting-review' && !!address
+  const cowReviewOpen = lc.swap.status === 'cow_awaiting_review' && !!lc.swap.pendingCowOrder && !!address
+  const anySheetOpen = showSlippage || tokenPicker !== null || needsPermit2Education || singleReviewOpen || splitConsentOpen || splitReviewOpen || cowReviewOpen
+  const confirmBtn = confirmButtonState({ approvalStatus: approval.status, approvalReady: approval.isReady, swapStatus: swapSt })
+
+  // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
+  const executionActive = lc.status !== 'idle'
+  const explorerUrl = (() => {
+    try {
+      return getChainConfig(activeChainId).blockExplorer
+    } catch {
+      return getChainConfig(1).blockExplorer
+    }
+  })()
+  function onNewSwap() {
+    lc.resetAll()
+    setConfirmedModel(null)
+    setReviewRequested(false)
+    setDisplayAmountIn('')
+  }
+
+  function onWrongNetwork() {
+    playTouchMP3()
+    switchChain({ chainId: CHAIN_ID }) // v1's SwapButton: the default chain, whatever the label's `Switch to {chain}` names
+  }
+
+  async function onReviewConfirm(c: { unpricedAck: boolean }) {
+    playTouchMP3()
+    if (frozenSwap) {
+      lc.swap.confirmSwap() // v1: <TransactionPreview onConfirm={confirmSwap}>
+      return
+    }
+    if (liveModel && !confirmedModel) setConfirmedModel(liveModel)
+    await lc.confirm(c)
+  }
+  function onReviewCancel() {
+    setReviewRequested(false)
+    setConfirmedModel(null)
+    lc.cancel()
+  }
+  function onCta() {
+    playTouchMP3() // v1: SwapButton plays the touch sound on every click
+    if (cta.kind === 'connect') {
+      openConnectModal?.()
+      return
+    }
+    if (lc.isSplitActive && (cta.kind === 'split-swap' || cta.kind === 'retry')) {
+      void lc.confirm() // v1's Swap click on a split: straight to the plan
+      return
+    }
+    if (cta.kind === 'review' || cta.kind === 'retry') {
+      if (lc.swap.status === 'error') lc.resetAll() // v1 re-runs execute() from the error state, which clears it
+      setConfirmedModel(null)
+      setReviewRequested(true)
+    }
+  }
 
   return (
     <section data-swap-card="" data-quoting={quoting ? '' : undefined} aria-label="Swap" className="ts-swap">
@@ -386,7 +544,26 @@ export function SwapCard() {
       </Surface>
 
       <Surface edge="top" className="ts-swap-quote" aria-busy={quoting || undefined}>
-        {view && meta && tokenIn && tokenOut ? (
+        {executionActive && tokenIn && tokenOut ? (
+          <ExecutionPanel
+            steps={buildTimeline({ route: lc.route, status: lc.status, lastActive: lc.lastActive })}
+            phase={lc.status === 'success' ? 'success' : lc.status === 'error' ? 'failure' : 'pending'}
+            symbolIn={tokenIn.symbol}
+            symbolOut={tokenOut.symbol}
+            amountIn={amountIn}
+            summary={lc.success}
+            txHash={lc.swap.txHash}
+            explorerUrl={explorerUrl}
+            error={lc.error}
+            failureTitle={lc.isSplitActive ? (lc.split.status === 'partial' ? 'Split swap partially complete' : 'Split swap failed') : 'Swap failed'}
+            cowPending={lc.swap.status === 'cow_pending'}
+            legs={lc.isSplitActive ? { rows: lc.split.legs, completed: lc.split.completedLegs, total: lc.split.totalLegs } : undefined}
+            simulation={{ passed: lc.swap.simulationPassed, skipped: lc.swap.simulationSkipped, swapStatus: lc.swap.status }}
+            fallback={lc.swap.fallbackNotice}
+            sheetOpen={anySheetOpen}
+            onNewSwap={onNewSwap}
+          />
+        ) : view && meta && tokenIn && tokenOut ? (
           <QuotePanel
             view={view}
             symbolIn={tokenIn.symbol}
@@ -416,24 +593,14 @@ export function SwapCard() {
         )}
       </Surface>
 
+      {/* B5: v1's price-gate banners (and the consent checkboxes that clear the recoverable ones), right above the button. */}
+      <GateNotices gates={gates} pairCheck={pairCheck} hasQuote={!!meta} hasAmount={hasAmount} stale={priceCheckStale} priceGuard={{ blocked: lc.swap.priceGuardBlocked, deviation: lc.swap.priceGuardDeviation }} />
+      {lc.splitRoute.splitResult?.bestSplit.isSplit && tokenOut && (
+        <SplitRoutePanel splitResult={lc.splitRoute.splitResult} tokenOut={tokenOut} useSplit={lc.splitRoute.useSplit} onToggle={lc.splitRoute.toggleSplit} analyzing={lc.splitRoute.analyzing} />
+      )}
+
       <div className="ts-swap-cta">
-        {cta.kind === 'wrong-network' ? (
-          // round7 29: the wrong-network state is a text button (amber), not the solid CTA — one filled shape per screen stays true.
-          <Button variant="text" className="w-full !text-v2-amber" data-cta={cta.kind} data-b5-stub="">
-            {cta.label}
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            className="w-full"
-            disabled={cta.disabled}
-            data-cta={cta.kind}
-            data-b5-stub={cta.kind === 'review' ? undefined : ''}
-            onClick={cta.kind === 'review' ? () => setReviewRequested(true) : undefined}
-          >
-            {cta.label}
-          </Button>
-        )}
+        <CtaButton cta={cta} onClick={cta.kind === 'wrong-network' ? onWrongNetwork : onCta} />
         {meta?.gasless?.recommended && meta.best.source !== 'cowswap' && (
           <Button
             variant="text"
@@ -461,13 +628,50 @@ export function SwapCard() {
       {needsPermit2Education && (
         <Permit2Sheet amount={amountIn} tokenSymbol={tokenIn?.symbol} onConfirm={confirmPermit2Education} onCancel={cancelPermit2Education} />
       )}
-      {reviewOpen({ requested: reviewRequested, ackRequired: false }) && view && meta && tokenIn && tokenOut && (
+      {singleReviewOpen && sheetModel && tokenIn && tokenOut && (
         <ReviewSheet
-          model={buildReviewModel({ view, meta, tokenIn, tokenOut, amountIn, slippage, tier: priceTier })}
-          // B5: `pending` (the frozen calldata), `ackRequired` (the /api/swap 409) and Confirm → sign arrive with the wallet lifecycle.
-          onConfirm={() => {}}
-          onCancel={() => setReviewRequested(false)}
+          model={sheetModel}
+          pending={
+            frozenSwap && address
+              ? {
+                  calldata: frozenSwap.routerCalldata,
+                  routerAddress: frozenSwap.routerAddress,
+                  source: frozenSwap.source,
+                  userAddress: address,
+                  routeViaFeeCollector: frozenSwap.routeViaFeeCollector,
+                  minimumOutput: frozenSwap.minimumOutput,
+                  decimalsOut: frozenSwap.tokenOut.decimals,
+                }
+              : undefined
+          }
+          ackRequired={lc.ackRequired}
+          confirmLabel={confirmBtn.label}
+          confirmBusy={confirmBtn.disabled}
+          confirmTone={confirmBtn.tone}
+          step={
+            <>
+              {lc.error && lc.swap.status === 'error' && (
+                <div className="mt-4">
+                  <Notice tone="red" testId="review-error">
+                    {lc.error}
+                  </Notice>
+                </div>
+              )}
+              <ApprovalStep approvalStatus={approval.status} approvalReady={approval.isReady} swapStatus={lc.swap.status} showNote={hasAmount && !!meta && !quoting} />
+            </>
+          }
+          onConfirm={onReviewConfirm}
+          onCancel={onReviewCancel}
         />
+      )}
+      {splitConsentOpen && meta && tokenIn && tokenOut && (
+        <ConsentSheet values={unpricedConsentValues(meta, tokenIn, tokenOut, slippage, quoteDecimalsOut ?? tokenOut.decimals)} onContinue={() => void lc.confirm({ unpricedAck: true })} onCancel={lc.cancel} />
+      )}
+      {splitReviewOpen && address && (
+        <SplitReviewSheet plannedLegs={lc.split.plannedLegs} tokenIn={tokenIn} tokenOut={tokenOut} userAddress={address} onConfirm={() => void lc.split.confirmPlan()} onCancel={lc.cancel} />
+      )}
+      {cowReviewOpen && lc.swap.pendingCowOrder && (
+        <CowOrderReviewSheet order={lc.swap.pendingCowOrder} onConfirm={() => void lc.swap.confirmCowOrder()} onCancel={lc.cancel} />
       )}
       {tokenPicker && (
         <TokenSheet

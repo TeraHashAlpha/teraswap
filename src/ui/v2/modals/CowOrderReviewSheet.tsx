@@ -75,7 +75,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
       </p>
 
       <div className="mt-6 flex flex-col gap-1">
-        <Button variant="primary" className="w-full" onClick={onConfirm} data-b5-stub="" data-testid="cow-confirm">
+        <Button variant="primary" className="w-full" onClick={onConfirm} data-testid="cow-confirm">
           Confirm &amp; Sign Order
         </Button>
         <Button ref={cancelRef} variant="text" className="w-full" onClick={onCancel}>

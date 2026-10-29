@@ -137,7 +137,7 @@ export function SplitReviewSheet({
       </div>
       {consent && <ConsentBlock values={consent} checked={ack} onChange={setAck} />}
       <div className="mt-6 flex flex-col gap-1">
-        <Button variant="primary" className="w-full" disabled={signable === 0 || (!!consent && !ack)} onClick={() => onConfirm({ unpricedAck: !!consent && ack })} data-b5-stub="" data-testid="split-confirm">
+        <Button variant="primary" className="w-full" disabled={signable === 0 || (!!consent && !ack)} onClick={() => onConfirm({ unpricedAck: !!consent && ack })} data-testid="split-confirm">
           Confirm &amp; Sign {signable} {signable === 1 ? 'leg' : 'legs'}
         </Button>
         <Button ref={cancelRef} variant="text" className="w-full" onClick={onCancel}>

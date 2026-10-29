@@ -54,6 +54,8 @@ vi.mock('@/lib/analytics', () => ({ updateSwapStatus: () => {}, logQuoteToSupaba
 vi.mock('@/lib/wallet-activity-tracker', () => ({ trackWalletActivity: () => {} }))
 vi.mock('@/lib/sounds', () => ({ playQuoteReceived: () => {}, playTouchMP3: () => {}, playSwapConfirmMP3: () => {}, playCancelOrderMP3: () => {}, startWaitingSound: () => {}, stopWaitingSound: () => {} }))
 
+vi.mock('../shell/toasts', () => ({ useV2Toast: () => ({ toast: () => 'toast-id', dismiss: () => {}, update: () => {} }) }))
+
 import SwapBox from '@/components/SwapBox'
 import { SwapCard } from './SwapCard'
 

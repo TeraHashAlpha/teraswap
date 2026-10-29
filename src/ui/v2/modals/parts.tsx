@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { UNPRICED_CONSENT_CHECKBOX, UNPRICED_CONSENT_HEADING, unpricedConsentCopy } from '@/components/SwapUnpricedConsentDialog'
 import { cx } from '../primitives/cx'
 import type { ConsentValues } from './review-model'
@@ -28,7 +28,7 @@ export function Mark({ children, tone = 'green' }: { children: ReactNode; tone?:
  * exports (`UNPRICED_CONSENT_HEADING`, `unpricedConsentCopy`, `UNPRICED_CONSENT_CHECKBOX`), so the words cannot drift; only the
  * placement changed: inline in the review sheet, gating its Confirm.
  */
-export function ConsentBlock({ values, checked, onChange }: { values: ConsentValues; checked: boolean; onChange: (v: boolean) => void }) {
+export function ConsentBlock({ values, checked, onChange, checkboxRef }: { values: ConsentValues; checked: boolean; onChange: (v: boolean) => void; checkboxRef?: Ref<HTMLInputElement> }) {
   return (
     <section data-testid="unpriced-consent" aria-labelledby="v2-unpriced-consent-h" className="mt-4 border-l-2 border-v2-amber py-1 pl-4">
       <h3 id="v2-unpriced-consent-h" data-testid="unpriced-consent-heading" className="text-[14px] font-semibold text-v2-text">
@@ -38,7 +38,7 @@ export function ConsentBlock({ values, checked, onChange }: { values: ConsentVal
         {unpricedConsentCopy(values)}
       </p>
       <label className="mt-3 flex min-h-[44px] cursor-pointer items-center gap-3 text-[14px] text-v2-text">
-        <input type="checkbox" data-testid="unpriced-consent-checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-[#EADFB6]" />
+        <input ref={checkboxRef} type="checkbox" data-testid="unpriced-consent-checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-[#EADFB6]" />
         {UNPRICED_CONSENT_CHECKBOX}
       </label>
     </section>
