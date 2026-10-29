@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
-import { useSwitchChain } from 'wagmi'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useAccount, useSwitchChain } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits } from 'viem'
 import ChainIcon from '@/components/icons/ChainIcon'
@@ -19,12 +19,19 @@ import {
   clampCustomIntervalNumber,
 } from '@/lib/order-engine'
 import { perChunkRaw } from '@/lib/dca-quick-fill'
-import { fmtPct } from '@/lib/format'
-import { playTouchMP3 } from '@/lib/sounds'
-import { Button, Chip, Input, Skeleton, Surface } from '../primitives'
+import { fmtPct, fmtToken } from '@/lib/format'
+import { playCancelOrderMP3, playSwapConfirmMP3, playTouchMP3, stopWaitingSound } from '@/lib/sounds'
+import { trackTrade } from '@/lib/analytics-tracker'
+import { useOrderEngine } from '@/hooks/useOrderEngine'
+import { useOrderNotifications } from '@/hooks/useOrderNotifications'
+import type { CreateOrderConfig } from '@/lib/order-engine'
+import { Button, Chip, Input, Segmented, Skeleton, Surface } from '../primitives'
 import { Notice } from '../swap/QuotePanel'
 import { TokenButton } from '../swap/TokenButton'
 import { TokenSheet } from '../modals/TokenSheet'
+import { useV2Toast } from '../shell/toasts'
+import { DcaOrdersList } from './DcaOrdersList'
+import { DcaReviewSheet, type DcaReviewView } from './DcaReviewSheet'
 import '../swap/swap.css'
 import './dca.css'
 import { protectionHint, protectionLabel, sanitizeAmountInput } from './dca-model'
@@ -399,13 +406,120 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
   )
 }
 
-/** The DCA tab. `chainId` is the SELECTED chain (v1 passes the selector chain, not wagmi's). */
-export function DcaCard({ chainId }: { chainId: number }) {
-  const form = useDcaForm(chainId, false)
-  const [, setReview] = useState<PreparedReview | null>(null)
+/** What the review sheet prints for a prepared review: the form's own display strings, plus the signed floor when v3 derived one. */
+export function reviewViewFor(form: DcaForm, review: PreparedReview): DcaReviewView {
+  const { draft } = review
+  const floor = form.v3Enabled && draft.minAmountOut !== '1' ? BigInt(draft.minAmountOut) : null
+  return {
+    symbolIn: draft.tokenIn.symbol,
+    symbolOut: draft.tokenOut.symbol,
+    chainName: form.chainDisplayName,
+    total: thin(fmtToken(BigInt(draft.amountIn), draft.tokenIn.decimals)),
+    perBuy: thin(form.perPart),
+    buys: form.parts,
+    every: form.interval.label,
+    duration: form.totalDuration,
+    expires: form.expiry.label,
+    floorTotal: floor == null ? null : thin(fmtToken(floor, draft.tokenOut.decimals)),
+    floorPerBuy: floor == null || form.parts <= 0 ? null : thin(fmtToken(perChunkRaw(floor, form.parts), draft.tokenOut.decimals)),
+  }
+}
+
+const ACTIVE_STATUSES = ['active', 'executing', 'partially_filled', 'signing']
+const HISTORY_STATUSES = ['filled', 'expired', 'cancelled', 'error']
+
+/** v1's freeze-403 message starts "New DCA orders are temporarily paused…". */
+const DCA_PAUSED_RE = /temporarily paused/i
+
+/**
+ * The DCA tab (round7 30b / 31 / 35). `chainId` is the SELECTED chain (v1 passes the selector chain, not wagmi's). The order list and the
+ * cancel actions are v1's `useOrderEngine`, unchanged; the Create CTA ends in a STUB (the review's `Create DCA`) — B6b wires signing.
+ */
+export function DcaCard({ chainId, onCreate }: { chainId: number; onCreate?: (draft: CreateOrderConfig) => void }) {
+  const { address } = useAccount()
+  const { dcaOrders, latestEvent, cancelOrder, cancelAllOrders, removeOrder } = useOrderEngine()
+  const { toast } = useV2Toast()
+  const [frozen, setFrozen] = useState(false)
+  const [tab, setTab] = useState<'create' | 'positions'>('create')
+  const [review, setReview] = useState<PreparedReview | null>(null)
+  const form = useDcaForm(chainId, frozen)
+  useOrderNotifications(latestEvent)
+  // v1 latches `frozen` on the freeze-403 inside its event effect; the same latch, set while rendering the event in (no effect-set).
+  const [seenEvent, setSeenEvent] = useState(latestEvent)
+  if (latestEvent !== seenEvent) {
+    setSeenEvent(latestEvent)
+    if (latestEvent?.type === 'order_error' && DCA_PAUSED_RE.test(latestEvent.error || '')) setFrozen(true)
+  }
+
+  // v1's sound + toast per engine event (DCAPanel), same calls, same copy.
+  useEffect(() => {
+    if (!latestEvent) return
+    if (latestEvent.type === 'order_created') {
+      stopWaitingSound()
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'DCA order placed', description: 'Your DCA is live — it will execute automatically on schedule.' })
+    }
+    if (latestEvent.type === 'dca_execution') {
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'DCA buy executed', description: `Buy #${latestEvent.executionNumber} completed autonomously.` })
+    }
+    if (latestEvent.type === 'order_filled') {
+      playSwapConfirmMP3()
+      toast({ type: 'success', title: 'DCA complete!', description: 'All DCA buys executed successfully.', txHash: latestEvent.txHash, duration: 10000 })
+      if (address) {
+        trackTrade({ type: 'dca_buy', wallet: address, tokenIn: '', tokenInAddress: '', tokenOut: '', tokenOutAddress: '', amountIn: '0', amountOut: '0', volumeUsd: 0, source: 'teraswap_order_engine', txHash: latestEvent.txHash || '' })
+      }
+    }
+    if (latestEvent.type === 'order_cancelled') {
+      playCancelOrderMP3()
+      toast({ type: 'success', title: 'DCA order cancelled', description: 'Your DCA order has been cancelled on-chain.' })
+    }
+    if (latestEvent.type === 'order_error') {
+      stopWaitingSound()
+      playCancelOrderMP3()
+      if (DCA_PAUSED_RE.test(latestEvent.error || '')) {
+        toast({ type: 'error', title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' })
+      } else {
+        toast({ type: 'error', title: 'DCA order failed', description: latestEvent.error || 'Order could not be submitted.' })
+      }
+    }
+    // v1 depends on the event alone: re-running on a new toast identity would replay the sound.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestEvent])
+
+  const active = dcaOrders.filter((o) => ACTIVE_STATUSES.includes(o.status))
+  const history = dcaOrders.filter((o) => HISTORY_STATUSES.includes(o.status))
+
   return (
     <section data-dca-card="" aria-label="DCA" className="ts-dca">
-      <DcaCreate form={form} onReviewReady={setReview} />
+      <div className="ts-dca-tabs">
+        <Segmented
+          label="DCA"
+          active={tab}
+          onSelect={(id) => setTab(id as 'create' | 'positions')}
+          tabs={[
+            { id: 'create', label: 'New DCA' },
+            { id: 'positions', label: `Positions${active.length > 0 ? ` (${active.length})` : ''}` },
+          ]}
+        />
+      </div>
+      {tab === 'create' ? (
+        <DcaCreate form={form} onReviewReady={setReview} />
+      ) : (
+        <div className="ts-dca-wide">
+          <DcaOrdersList
+            active={active}
+            history={history}
+            latestEvent={latestEvent}
+            connectedChainId={chainId}
+            onCancel={cancelOrder}
+            onCancelAll={cancelAllOrders}
+            onRemove={removeOrder}
+            onCreate={() => setTab('create')}
+          />
+        </div>
+      )}
+      {review && <DcaReviewSheet review={review} view={reviewViewFor(form, review)} onCreate={onCreate} onClose={() => setReview(null)} />}
     </section>
   )
 }

@@ -298,8 +298,6 @@ describe('the CTA', () => {
 const GLYPH = 'decorative glyph, aria-hidden in v2; the control keeps its accessible name'
 const ALLOW: AllowedRemoval[] = [
   { text: '▸', reason: `Advanced settings chevron: ${GLYPH}` },
-  { text: 'New DCA', reason: 'sub-tabs are the Positions block (B6a commit 2) — asserted there' },
-  { text: 'Positions', reason: 'sub-tabs are the Positions block (B6a commit 2) — asserted there' },
   { text: '↓', reason: `buy/sell separator: ${GLYPH}` },
 ]
 
