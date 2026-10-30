@@ -30,6 +30,7 @@ import { TokenButton } from '../swap/TokenButton'
 import { TokenSheet } from '../modals/TokenSheet'
 import { useV2Toast } from '../shell/toasts'
 import { DcaOrdersList } from './DcaOrdersList'
+import { DcaCancelSheet } from './DcaCancelSheet'
 import { DcaReviewSheet, type DcaReviewView } from './DcaReviewSheet'
 import { DcaSignSheet } from './DcaSignSheet'
 import '../swap/swap.css'
@@ -440,7 +441,8 @@ export function DcaCard({ chainId }: { chainId: number }) {
   const { address } = useAccount()
   const { switchChain } = useSwitchChain()
   const engine = useOrderEngine()
-  const { dcaOrders, latestEvent, cancelOrder, cancelAllOrders, removeOrder } = engine
+  // v1 DCAPanel.tsx:295-297 — the list's Cancel / Cancel All / Remove are the engine's own; Cancel and Cancel All only FREEZE a plan.
+  const { dcaOrders, latestEvent, cancelOrder, cancelAllOrders, removeOrder, pendingCancel, confirmCancel, clearPendingCancel } = engine
   const { toast } = useV2Toast()
   const [frozen, setFrozen] = useState(false)
   const [tab, setTab] = useState<'create' | 'positions'>('create')
@@ -559,6 +561,8 @@ export function DcaCard({ chainId }: { chainId: number }) {
           onDone={() => { lc.done(); form.setTotalDisplay('') }}
         />
       )}
+      {/* [CANCEL-REVIEW] v1 DCAPanel.tsx:257 — no cancel / invalidate executes until the user confirms the frozen plan. */}
+      {pendingCancel && <DcaCancelSheet review={pendingCancel} onConfirm={() => void confirmCancel()} onCancel={clearPendingCancel} />}
     </section>
   )
 }
