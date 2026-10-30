@@ -23,6 +23,27 @@ const RULES: EnvRule[] = [
     label: 'Primary RPC URL (Alchemy/Infura)',
     pattern: /^https?:\/\//,
   },
+  // [FEAT-SERVER-RPC-ENV-SPLIT] Server-only RPC per chain. Optional: when absent the server falls
+  // back to the browser env (then the public default), which the browser Alchemy domain allowlist
+  // rejects — so set these in production. The label names the fallback per chain.
+  {
+    key: 'RPC_URL_1',
+    required: false,
+    serverOnly: true,
+    label: 'Server-only Ethereum RPC — falls back to RPC_URL, then NEXT_PUBLIC_RPC_URL, then the public default',
+  },
+  {
+    key: 'RPC_URL_8453',
+    required: false,
+    serverOnly: true,
+    label: 'Server-only Base RPC — falls back to NEXT_PUBLIC_BASE_RPC_URL, then the public default',
+  },
+  {
+    key: 'RPC_URL_42161',
+    required: false,
+    serverOnly: true,
+    label: 'Server-only Arbitrum RPC — falls back to NEXT_PUBLIC_ARBITRUM_RPC_URL, then the public default',
+  },
   // ── WalletConnect ──
   {
     key: 'NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID',

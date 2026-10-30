@@ -1,5 +1,6 @@
 import { createPublicClient, http, custom, type PublicClient, type EIP1193RequestFn } from 'viem'
 import { mainnet } from 'viem/chains'
+import { serverRpcUrl } from '@/lib/rpc-env'
 
 /**
  * Privacy-preserving RPC client.
@@ -13,10 +14,9 @@ import { mainnet } from 'viem/chains'
 
 const isServer = typeof window === 'undefined'
 
-/** Server-side RPC URL — only used in API routes / SSR */
-const DIRECT_RPC_URL = process.env.RPC_URL
-  || process.env.NEXT_PUBLIC_RPC_URL
-  || 'https://eth.llamarpc.com'
+/** Server-side RPC URL — only used in API routes / SSR.
+ *  [FEAT-SERVER-RPC-ENV-SPLIT] Resolved by rpc-env (RPC_URL_1 -> RPC_URL -> NEXT_PUBLIC_RPC_URL -> llamarpc). */
+const directRpcUrl = () => serverRpcUrl(1)
 
 /**
  * Custom EIP-1193 transport that routes requests through /api/rpc.
@@ -54,7 +54,7 @@ export function getPrivateClient(): PublicClient {
   if (isServer) {
     return createPublicClient({
       chain: mainnet,
-      transport: http(DIRECT_RPC_URL),
+      transport: http(directRpcUrl()),
     })
   }
 
@@ -70,6 +70,6 @@ export function getPrivateClient(): PublicClient {
  * In server context, returns the direct RPC URL.
  */
 export function getRpcUrl(): string {
-  if (isServer) return DIRECT_RPC_URL
+  if (isServer) return directRpcUrl()
   return '/api/rpc'
 }

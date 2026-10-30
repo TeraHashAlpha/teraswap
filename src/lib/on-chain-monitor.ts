@@ -44,6 +44,7 @@ import { emitTransitionAlert } from './alert-wrapper'
 // [E-4] Multi-chain: targets + clients resolve per chain from the registry.
 import { DEFAULT_CHAIN_ID, getChainConfig, getSupportedChainIds } from './chains/registry'
 import { getPublicClientForChain } from './chains/clients'
+import { serverRpcUrl } from './rpc-env'
 
 // ── Types ────────────────────────────────────────────────
 
@@ -345,9 +346,8 @@ function getServerClient(chainId: number = DEFAULT_CHAIN_ID): PublicClient {
   // resolution + llamarpc fallback as before). Other chains route through the
   // per-chain client factory (registry RPC).
   if (chainId === DEFAULT_CHAIN_ID) {
-    const rpcUrl = process.env.RPC_URL
-      || process.env.NEXT_PUBLIC_RPC_URL
-      || 'https://eth.llamarpc.com'
+    // [FEAT-SERVER-RPC-ENV-SPLIT] Same order plus RPC_URL_1 first (rpc-env), same llamarpc default.
+    const rpcUrl = serverRpcUrl(DEFAULT_CHAIN_ID)
 
     return createPublicClient({
       chain: mainnet,
