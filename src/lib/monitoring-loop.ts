@@ -26,6 +26,7 @@ import {
   shouldProbeNow,
 } from './source-state-machine'
 import { shouldRunRpcProbe, probeAllServerRpcs } from './rpc-health'
+import { getAlertChannelStatus } from './alert-channels/status'
 import {
   loadBaseline,
   getBaselineState,
@@ -133,6 +134,8 @@ export interface MonitoringTickResult {
   /** [Auditor M2 / PR #497] Per-chain keeper liveness (gas balance + overdue-fill signal). Runs
    *  every tick — see keeper-health-monitor.ts. */
   keeperHealth?: KeeperChainHealth[]
+  /** False when NO alert delivery channel is configured (every alert is then dropped). */
+  alertsConfigured?: boolean
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
   /** True when tick was skipped due to concurrent lock. */
@@ -185,6 +188,17 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
 
   // Invalidate per-tick cache (fresh reads from KV)
   beginTick()
+
+  // ── Alert delivery sanity (once per run) ──────────────
+  // With no channel configured every transition/P0 alert is dropped with only a per-channel warn, so
+  // the system looks healthy while telling nobody (the 2026-10-29/30 outage). One loud line per tick.
+  const alertChannels = getAlertChannelStatus()
+  if (!alertChannels.anyConfigured) {
+    console.error(
+      '[ALERT] no delivery channel configured — alerts are NOT reaching anyone. Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, ' +
+      'DISCORD_WEBHOOK_URL, or RESEND_API_KEY + ALERT_EMAIL_TO (docs/Runbooks/MONITORING-ALERTS.md)',
+    )
+  }
 
   // ── Warmup detection (gap-based) ──────────────────────
   const warmup = await detectWarmup()
@@ -386,6 +400,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(circuitBreakerResult ? { circuitBreaker: circuitBreakerResult } : {}),
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(keeperHealth ? { keeperHealth } : {}),
+    alertsConfigured: alertChannels.anyConfigured,
     ...(warmup ? { warmup: true } : {}),
     ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
     ...(h2Status ? { h2Status, h2Reason } : {}),
