@@ -11,6 +11,7 @@ import {
   isExpensiveMethod,
   exceedsBatchLimit,
   clampGetLogsRange,
+  rpcRateLimitUnits,
   MAX_RPC_BATCH_SIZE,
   MAX_GET_LOGS_BLOCK_RANGE,
 } from './rpc-cost-policy'
@@ -87,5 +88,16 @@ describe('clampGetLogsRange — bound eth_getLogs cost without breaking the call
     expect(() => clampGetLogsRange({ method: 'eth_getLogs', params: null })).not.toThrow()
     expect(() => clampGetLogsRange({ method: 'eth_getLogs' })).not.toThrow()
     expect(clampGetLogsRange({ method: 'eth_getLogs', params: [{ fromBlock: 'not-hex', toBlock: '0x5' }] }).clamped).toBe(false)
+  })
+})
+
+describe('rpcRateLimitUnits [FEAT-SERVER-RPC-ENV-SPLIT]', () => {
+  const arr = (n: number) => Array.from({ length: n }, () => ({}))
+  it('one unit per call in a batch up to the cap', () => {
+    expect(rpcRateLimitUnits(arr(1))).toBe(1)
+    expect(rpcRateLimitUnits(arr(25))).toBe(25)
+  })
+  it('1 for single, empty, non-JSON-RPC and over-cap bodies (the latter are rejected unforwarded)', () => {
+    for (const b of [{}, [], null, undefined, 'x', 7, arr(26), arr(5000)]) expect(rpcRateLimitUnits(b)).toBe(1)
   })
 })
