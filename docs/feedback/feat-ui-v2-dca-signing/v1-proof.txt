@@ -1,0 +1,17 @@
+route table: head 14, base 14, identical=true
+/                head   2762148 (30 chunks) base   2762247 Δ     -99 (-0.0036 %) v2-marked chunks: 0
+/_global-error   head    590295 ( 8 chunks) base    590295 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/_not-found      head    599843 ( 9 chunks) base    599843 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/admin           head    917146 (13 chunks) base    917146 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/analytics       head   2297774 (25 chunks) base   2297774 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/docs            head   2473879 (27 chunks) base   2473879 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/privacy         head   2314051 (25 chunks) base   2314051 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/status          head    618724 (10 chunks) base    618724 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/swap            head   2748540 (30 chunks) base   2748639 Δ     -99 (-0.0036 %) v2-marked chunks: 0
+/terms           head   2314049 (25 chunks) base   2314049 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/v2              head   2900570 (31 chunks) base   2877798 Δ   22772 (v2 route)
+/v2/[tab]        head   2871866 (31 chunks) base   2849094 Δ   22772 (v2 route)
+/v2/_enable      head    609043 (10 chunks) base    609043 Δ       0 (v2 route)
+/v2/_kit         head    613905 (10 chunks) base    613905 Δ       0 (v2 route)
+v2-marked chunks in v1 routes: 0
+largest v1 route delta: /swap -99 B = -0.0036 %
