@@ -16,7 +16,7 @@ Off origin/main `d8d658c`. Signed, noreply, no PR. Diff only `src/ui/v2/dca/**` 
 **3. Screenshots:** `34-frame-vs-v2.webp` frozen · `28a/28b/28c-frame-vs-v2-*.webp` signing/created/failed (no DCA frames exist for these states; the swap frames are the nearest) · `41-frame-vs-v2.webp` cancel · `41-v2-cancel-all.webp` · `m-v2-….webp`.
 **4. Sounds** (v1 = v2 unless marked): form press touch·start · weaker tier stop at consent, start at Create · created stop·confirm · error stop·cancel · cancelled cancel · review Cancel/Esc/draft change **v2 stop** (v1 none).
 **5. a11y + edge** (20 tests): one dialog frozen→signing→created (busy = `aria-disabled`) · Esc dead in flight, live on review / outcomes · draft change closes the review, drops a frozen order · double press → one call · reduced motion.
-**6. Verify** (on `f852ee3`; later commits are docs): suite 387/6179 → 390/6221 (`tests.txt`) · `eslint .` 93 = 93 · tsc 0 · `next build` 0 (head, base) · rpc-budget green · **v1 proof** (`v1-proof.txt`): only `src/ui/v2/dca/` + feedback, `isolation.test` green, 0 v2-marked chunks in v1 routes, `/` and `/swap` −99 B.
+**6. Verify** (pushed head): suite 395 files / 6271 tests, 0 failed · `eslint .` 93 = 93 · tsc 0 · `next build` 0 (head, base) · rpc-budget green · **v1 proof** (`v1-proof.txt`, vs `f507e0f`): only `src/ui/v2/dca/` + feedback, `isolation.test` green, 0 v2-marked chunks in v1 routes, `/` and `/swap` −99 B · one screen: `feedback-one-screen.webp`.
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-dca-signing
 
 ## Content-map delta (v1 → v2)
