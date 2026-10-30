@@ -9,7 +9,7 @@ import { Button } from '../primitives'
 import { Sheet } from '../modals/Sheet'
 import { ReviewRow } from '../modals/parts'
 import { Notice } from '../swap/QuotePanel'
-import { failureCopy, signSteps, type DcaSignPhase } from './dca-model'
+import { failureCopy, signSteps, totalDurationText, type DcaSignPhase } from './dca-model'
 
 /**
  * [ADR-025 / B6b] Round 7 frame 34 — v1's OrderReviewModal as a sheet: the DECODED frozen struct (`pendingOrder.order`, what
@@ -62,7 +62,8 @@ export function DcaSignSheet({
 
   const primary = (() => {
     if (phase === 'created') return { label: 'View positions', onPress: onViewPositions, testId: 'dca-sign-view-positions' }
-    if (phase === 'failed') return { label: 'Retry', onPress: onRetry, testId: 'dca-sign-retry' }
+    // Owner (2026-10-30): the retry wears v1's form CTA (`Start DCA — N buys over D`, DCAPanel.tsx:1524), from the frozen struct.
+    if (phase === 'failed') return { label: `Start DCA — ${Number(o.dcaTotal)} buys over ${totalDurationText(Number(o.dcaTotal), Number(o.dcaInterval))}`, onPress: onRetry, testId: 'dca-sign-retry' }
     if (phase === 'signing') return { label: 'Signing order...', onPress: () => {}, testId: 'dca-sign-confirm' }
     if (approval.needsApproval) {
       // v1 OrderReviewModal.tsx:163-167

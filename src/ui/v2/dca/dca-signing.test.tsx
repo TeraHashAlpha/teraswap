@@ -299,6 +299,7 @@ describe('failure', () => {
     expect(h.toast.mock.calls.map((c) => c[0])).toEqual([{ type: 'error', title: 'DCA order failed', description: 'Signature rejected in wallet.' }])
     expect(dlg.querySelector('[data-step="failed"]')?.textContent).toContain('Signing order...')
     expect(document.activeElement).toBe(retry)
+    expect(retry.textContent).toBe('Start DCA — 10 buys over 10.0 days') // owner 2026-10-30: v1's form CTA wording, from the frozen struct
 
     fake.sign = async () => ({ event: { type: 'order_created', orderId: 'o2', orderHash: '0xhash2' }, posted: true })
     fireEvent.click(retry)
