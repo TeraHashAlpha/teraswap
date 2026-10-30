@@ -10,10 +10,13 @@
  *   - flagged:    deviation > threshold on 2/2 pairs → disable source + alert
  *   - correlated: ≥3 sources flagged simultaneously → force-disable all (P0) + alert
  *
- * Runs every 5th monitoring tick (every ~5 min) to stay within rate limits.
+ * Runs every 15th monitoring tick (every ~15 min) to stay within rate limits. It was every 5th
+ * tick (= the 300 s 429 cooldown), which made the quorum the half-open probe of a rate-limited
+ * source on every cycle (fix/monitor-self-source-alerts). Sources whose breaker is OPEN are not
+ * called at all (see runQuorumCheck).
  * Consumes fetchMetaQuote() output — does NOT duplicate adapter fan-out.
  *
- * API call budget per quorum cycle (every 5 ticks / 5 min):
+ * API call budget per quorum cycle (every 15 ticks / 15 min):
  * - 2 reference pairs × N active sources = ~22 calls (if all 11 active)
  * - Combined with H1 (11 calls/min): peak burst = ~33 calls in 1 min
  * - Known rate-limit-sensitive adapters: 1inch (free tier), KyberSwap
@@ -28,7 +31,7 @@ import { WETH_ADDRESS } from './constants'
 import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'
 import { getAllStatuses, getStatus, getThresholds, forceDisable } from './source-state-machine'
-import { getCircuitBreaker, circuitKey } from './adapters/circuit-breaker'
+import { getCircuitBreaker, circuitKey, getOpenBreakerSources } from './adapters/circuit-breaker'
 
 // ── Token addresses (Ethereum mainnet) ──────────────────
 
@@ -113,7 +116,7 @@ export interface QuorumCheckResult {
 // ── KV keys ────────────────────────────────────────────
 
 const TICK_COUNTER_KEY = 'teraswap:monitor:quorumTickCounter'
-const QUORUM_TICK_INTERVAL = 5
+export const QUORUM_TICK_INTERVAL = 15
 const LAST_QUORUM_KEY = 'teraswap:monitor:lastQuorumResult'
 const KILLSWITCH_AUDIT_PREFIX = 'teraswap:quorum:killswitch:'
 
@@ -250,6 +253,7 @@ function getMaxDeviation(sourceId: string, pair: ReferencePair): number {
 async function analyzePair(
   pair: ReferencePair,
   activeSourceIds: Set<string>,
+  excludeSources: string[],
 ): Promise<PairResult> {
   const result: PairResult = {
     label: pair.label,
@@ -270,6 +274,7 @@ async function analyzePair(
       pair.amount,
       pair.srcDecimals,
       pair.dstDecimals,
+      excludeSources,
     )
   } catch (err) {
     console.warn(`[QUORUM] fetchMetaQuote failed for ${pair.label}:`, err instanceof Error ? err.message : err)
@@ -375,10 +380,18 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
     }
   }
 
+  // A source whose breaker is OPEN is backing off (e.g. CoW after a 429): the monitor must not call
+  // it, or it becomes the half-open probe and draws the next 429. Excluded sources simply yield no
+  // quote (MIN_QUOTES_PER_PAIR still guards the median).
+  const excludeSources = await getOpenBreakerSources()
+  if (excludeSources.length > 0) {
+    console.log(`[QUORUM] not calling sources with OPEN breaker: ${excludeSources.join(', ')}`)
+  }
+
   // Analyze each reference pair
   const pairResults: PairResult[] = []
   for (const pair of QUORUM_REFERENCE_PAIRS) {
-    const result = await analyzePair(pair, activeSourceIds)
+    const result = await analyzePair(pair, activeSourceIds, excludeSources)
     pairResults.push(result)
   }
 

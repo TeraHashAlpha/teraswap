@@ -124,7 +124,7 @@ export interface MonitoringTickResult {
   transitions: string[]
   recovered: string[]
   statuses: Awaited<ReturnType<typeof getAllStatuses>>
-  /** Present only on quorum ticks (every 5th tick). */
+  /** Present only on quorum ticks (every 15th tick). */
   quorum?: QuorumCheckResult
   /** Circuit breaker evaluation result (present when ≥1 source is disabled). */
   circuitBreaker?: CircuitBreakerResult
@@ -285,7 +285,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     }
   }
 
-  // ── H5: Quorum cross-check (every 5th tick) ──────────
+  // ── H5: Quorum cross-check (every 15th tick; the on-chain scan below stays every 5th) ──
   let quorumResult: QuorumCheckResult | undefined
   try {
     if (await shouldRunQuorum()) {

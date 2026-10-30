@@ -1,6 +1,6 @@
 # Feedback — fix/monitor-self-source-alerts
 
-Tasks: [x] 1 recon · [x] 2 self-source/breaker state machine · [ ] 3 cadence + CoW · [ ] 4 alerts + daily audit · [ ] 5 verify + compare link
+Tasks: [x] 1 recon · [x] 2 self-source/breaker state machine · [x] 3 cadence + CoW · [ ] 4 alerts + daily audit · [ ] 5 verify + compare link
 
 ## 1. Recon (file:line, base d8d658c)
 - **`teraswap-self` is not an adapter/quote source.** It is a site-liveness probe in `MONITORED_ENDPOINTS` (`monitored-endpoints.ts:20`): `HEAD https://www.teraswap.app/`, 8 s timeout (`health-check.ts:46-58`, `:17`). No pair, no chain, no RPC. Only 2 non-test refs exist in src/ (this + `health-check.ts:32`); no adapter has that name, so the `[CB] teraswap-self: pre-seeded OPEN` line is a breaker nobody calls (`circuit-breaker.ts:292-299` opens a breaker for *any* non-active id). Users did not lose a source via `teraswap-self`; the same mechanism DOES hide real degraded/disabled sources.
@@ -18,6 +18,7 @@ Tasks: [x] 1 recon · [x] 2 self-source/breaker state machine · [ ] 3 cadence +
 
 ## Owner answers (supersede the goal text)
 Cadence: Worker stays 60 s; quorum + on-chain scan move 5 → 15 ticks. Self probe: fix the state machine AND add a server-RPC probe.
+**Deviation:** the on-chain scan stays every 5th tick. 15 would break `minRequiredBlocksPerScan` (Base needs 900 vs cap 500, Arbitrum 7200 vs 3000) and means raising `eth_getLogs` ranges on possibly public RPCs for admin-event detection. Follow-up if wanted.
 
 ## Plan
 - C2: infra vs source split in `HealthCheckResult` (transport errors on the self probe are infra: no failureCount), disable needs N failures AND a minimum failing window, verified recovery disabled → degraded → active on probe successes replaces the blind 10-min flip. Tests.
