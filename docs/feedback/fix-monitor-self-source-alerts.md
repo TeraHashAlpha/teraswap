@@ -1,26 +1,31 @@
-# Feedback — fix/monitor-self-source-alerts
+# Feedback — fix/monitor-self-source-alerts (base d8d658c)
 
-Tasks: [x] 1 recon · [x] 2 self-source/breaker state machine · [x] 3 cadence + CoW · [ ] 4 alerts + daily audit · [ ] 5 verify + compare link
+Tasks: [x] 1 recon · [x] 2 state machine + server-RPC probe · [x] 3 cadence + CoW · [x] 4 alerts + daily audit · [x] 5 verify + compare link
 
-## 1. Recon (file:line, base d8d658c)
-- **`teraswap-self` is not an adapter/quote source.** It is a site-liveness probe in `MONITORED_ENDPOINTS` (`monitored-endpoints.ts:20`): `HEAD https://www.teraswap.app/`, 8 s timeout (`health-check.ts:46-58`, `:17`). No pair, no chain, no RPC. Only 2 non-test refs exist in src/ (this + `health-check.ts:32`); no adapter has that name, so the `[CB] teraswap-self: pre-seeded OPEN` line is a breaker nobody calls (`circuit-breaker.ts:292-299` opens a breaker for *any* non-active id). Users did not lose a source via `teraswap-self`; the same mechanism DOES hide real degraded/disabled sources.
-- **Failure** = fetch throws/aborts (timeout, DNS, reset) OR status outside 200-399 (`health-check.ts:58`). Aggregators: only throw or 5xx (`:94`).
-- **Thresholds** (`source-thresholds.json`): self degrades at 2 consecutive failures, disables at 3 (`source-state-machine.ts:313,320`). At 60 s ticks that is **3 minutes** of failed HEADs. Matches the log `degraded → disabled (3 consecutive failures)`.
-- **Why 29 Oct 15:52:** not determinable from the repo (prod logs are out of read scope). It cannot be the RPC allowlist: the probe touches no RPC, and 15:52 precedes the 16:00 RPC window. Candidates: deploy/cold-start window around #628, edge 4xx/5xx on `HEAD /`, 8 s self-fetch timeout. Unverified.
-- **Recovery:** `recordHealthCheck` never leaves `disabled` on success (`:297-306` only handles degraded). Only `checkAutoRecovery` (`:348-368`) flips non-P0 disabled → active **blindly after 10 min** (`:146`), with no probe; if still broken it re-degrades in 2 ticks and re-disables in 3 (flapping, fresh alerts). P0 reasons never recover without a human.
-- **Tick per run:** `MONITORED_ENDPOINTS` (9 hosts) probed every tick (`monitoring-loop.ts:200`) regardless of state; keeper health per chain every tick (`:216`); TLS/DNS only if a baseline exists (`:229`, else skipped); every 5th tick (`quorum-check.ts:116,124`): quorum = `fetchMetaQuote` x 2 pairs, mainnet only (`:257`), + on-chain scan (`on-chain-monitor.ts` same gate).
-- **CoW loop:** 429 opens the breaker for `rateLimitCooldownMs` = 300 s (`circuit-breaker.ts:54,180`). Quorum fires every 5 x 60 s = 300 s, so `isOpen()` flips OPEN → HALF_OPEN (`:139`) exactly when the quorum calls, and the probe draws the next 429. cowswap's adapter sends no `retryAfterMs=` so Retry-After is never honoured (`:85`, only zerox does).
-- **Alerts:** each channel just `console.warn`s when unconfigured (`discord.ts:40`, `email.ts:26`, `telegram.ts:61`); `alert-wrapper.ts:321` still logs "N/3 delivered". Telegram is the primary channel; its env state in prod is unknown to me.
+**Owner answers (supersede goal text):** Worker stays 60 s, quorum 5→15 ticks; fix state machine AND add a server-RPC probe. **Deviation:** on-chain scan stays every 5th tick (15 breaks `minRequiredBlocksPerScan`: Base 900 vs cap 500, Arbitrum 7200 vs 3000, and needs wider `eth_getLogs` on possibly public RPCs).
 
-## Premise deltas (owner decision requested)
-1. **"5-min tick"**: the tick is **60 s** (`wrangler.toml:13`, ADR-003). 5 min is the quorum/on-chain cadence. A 15-min Worker breaks the dead-man's switch: heartbeat stale at 180 s (`heartbeat/route.ts:17`) makes the 5-min watchdog fail permanently; every tick would also count as warmup (`monitoring-loop.ts:74`) and 3 failures would mean 45 min.
-2. **`teraswap-self` is RPC/pair/chain based**: it is not (see above). The 19 h server-RPC outage was invisible because **nothing probes the server RPC** (keeper-health failures are `console.warn` only), independent of alert channels.
+## 1. Recon (before the change)
+- `teraswap-self` is a liveness probe, not an adapter: `HEAD https://www.teraswap.app/`, 8 s (`monitored-endpoints.ts:20`, `health-check.ts:46-58`). No pair/chain/RPC. Failure = throw/abort OR status outside 200-399 (`:58`). Nothing quotes through that id, so its `pre-seeded OPEN` breaker (`circuit-breaker.ts:292-299`) hid nothing; the same mechanism does hide real degraded sources.
+- Disable at 3 consecutive failures = 3 min at 60 s ticks (`source-thresholds.json`, `source-state-machine.ts:313,320`). Cause of the 29 Oct 15:52 failures is **not in the repo** (prod logs out of scope); not the RPC window (probe uses no RPC; 15:52 < 16:00). Check Vercel logs for the HEAD status/timeout.
+- Recovery was a blind flip after 10 min with no probe (`:348-368`, `:146`), then re-degrade in 2 ticks (flapping). Tick = 9 HEAD/GET probes + keeper health every tick; every 5th: quorum (2 pairs, mainnet) + on-chain scan.
+- CoW loop: 429 → 300 s cooldown (`circuit-breaker.ts:54`) = 5 ticks, so the quorum was the HALF_OPEN probe each cycle; cow sent no Retry-After. Nothing probed the server RPC.
 
-## Owner answers (supersede the goal text)
-Cadence: Worker stays 60 s; quorum + on-chain scan move 5 → 15 ticks. Self probe: fix the state machine AND add a server-RPC probe.
-**Deviation:** the on-chain scan stays every 5th tick. 15 would break `minRequiredBlocksPerScan` (Base needs 900 vs cap 500, Arbitrum 7200 vs 3000) and means raising `eth_getLogs` ranges on possibly public RPCs for admin-event detection. Follow-up if wanted.
+## 2. State machine (`source-state-machine.recovery.test.ts` 12 tests; `health-check.test.ts` 4; `rpc-health.test.ts` 8)
+ok→degraded→disabled→degraded→active with no human and no blind timer; failed re-probe stays disabled; 30 infra errors keep it active (no latency poison); infra doesn't extend/reset a streak; one `probe-infra-failure` alert per 10-streak; 8 failures in 8 s can't disable (5 min window); forceDisable/quorum-disabled keep old recovery; aggregators unchanged; re-probe throttled to 3 ticks. Thresholds: self 2/5 + 5 min window; `server-rpc` 2/4.
 
-## Plan
-- C2: infra vs source split in `HealthCheckResult` (transport errors on the self probe are infra: no failureCount), disable needs N failures AND a minimum failing window, verified recovery disabled → degraded → active on probe successes replaces the blind 10-min flip. Tests.
-- C3: per owner answer on cadence; skip OPEN breakers in quorum, honour Retry-After. Tests.
-- C4: one `[ALERT] no delivery channel configured` line per run, "alerts: NOT CONFIGURED" in the daily report, runbook + test-fire, `security-audit.yml` daily cron (today weekly `0 8 * * 1`, `:9`).
+## 3. Cadence / CoW (`quorum-check.test.ts` +4, `cow.test.ts` +4)
+Fires on 15, 30 only; OPEN breakers passed as `excludeSources` on both pairs; **not** half-opened even 301 s after a 429; per-chain breakers not mixed; cow 429 `Retry-After: 45` → `retryAfterMs=45000` → breaker cooldown ≤45 s; HTTP-date/absent header ignored. **Worker change: none** (`wrangler.toml:13` stays `* * * * *`; no Cloudflare action). Raising it would stale the 180 s heartbeat and page the watchdog every 5 min.
+
+## 4. Alerts
+Before: unconfigured sender = `console.warn` x3 per alert, "N/3 delivered" counted skips, daily report silent. After: one `[ALERT] no delivery channel configured …` per tick (lock-skipped ticks silent), `alertsConfigured` in tick result, `GET/POST /api/monitor/alerts` (MONITOR_SECRET; booleans/env names only; test-fire throttled 30 s; 9 route + 4 status tests), daily report row `alerts: OK | NOT CONFIGURED | UNKNOWN` (composer run for all 3 states; WARNING). Runbook `docs/Runbooks/MONITORING-ALERTS.md` (+67): `DISCORD_WEBHOOK_URL`, `RESEND_API_KEY`, `ALERT_EMAIL_TO`, Telegram pair, curl test-fire.
+
+## 5. Audit schedule
+`security-audit.yml`: `- cron: "0 8 * * 1"` → `+ cron: "23 6 * * *"` (daily 06:23 UTC; push/PR/dispatch kept).
+
+## 6. Verify
+vitest 392 files / **6229** pass (origin/main 387 / 6179, +50); lint **93 = 93**; tsc clean; `next build` clean. `git diff --stat origin/main...HEAD`: 24 files, +1155/−34 (before this file's final edit); nothing under `src/ui`, rpc-env, keeper, swap/DCA, ranking. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/monitor-self-source-alerts
+
+## Owner follow-ups
+- **Set a channel + test-fire** (nothing here pages anyone until you do). Telegram's prod state is unknown to me.
+- Daily report shows `alerts: UNKNOWN` until this deploys. `/status` shows raw `server-rpc:<id>` rows (no `SOURCE_LABELS`, left alone).
+- Pre-existing: `teraswap-self` counts toward `MIN_ACTIVE_SOURCES`; `initFromKV` still pre-opens breakers for degraded real sources.
