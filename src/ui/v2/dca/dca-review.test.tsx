@@ -2,7 +2,7 @@
 /**
  * [ADR-025] B6a commit 2 — the review sheet, the consent block and the Positions list.
  *   (4) consent GATES the CTA (both weaker tiers), its words are v1's with the real {N} / symbols / cap, a 409 REOPENS it for the tier
- *       the server named (never a weaker one); the CTA is a stub that hands the acknowledged draft to `onCreate` and nothing else;
+ *       the server named (never a weaker one); the CTA hands the acknowledged draft to `onCreate` — v1's `createOrder`, wired by the card (B6b);
  *   the list shows v1's fields for the SAME order objects v1's DCADashboard renders; the empty state is v1's; Cancel is the v1 hook.
  */
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
@@ -85,7 +85,7 @@ describe('review sheet · consent gates the CTA (server tier = authority)', () =
 
   it('the words are v1\'s: heading, checkbox label and body (real {N}, symbols and cap) come from v1\'s own exports', () => {
     const info = unpricedInfo({ registeredFeedCount: 3, effectiveCap: 250 })
-    render(<DcaReviewSheet review={reviewFor(info)} view={VIEW} onClose={() => {}} />)
+    render(<DcaReviewSheet review={reviewFor(info)} view={VIEW} onCreate={() => {}} onClose={() => {}} />)
     expect(screen.getByTestId('dca-consent-heading').textContent).toBe(FLOOR_CONSENT_HEADING)
     expect(screen.getByTestId('dca-consent-checkbox').closest('label')?.textContent).toBe(FLOOR_CONSENT_CHECKBOX)
     const body = screen.getByTestId('dca-consent-body').textContent
@@ -95,13 +95,13 @@ describe('review sheet · consent gates the CTA (server tier = authority)', () =
   })
 
   it('the cap line (the tier line) shows the REAL cap, clamped to v1\'s ceiling', () => {
-    render(<DcaReviewSheet review={reviewFor(unpricedInfo({ effectiveCap: 100 }))} view={VIEW} onClose={() => {}} />)
+    render(<DcaReviewSheet review={reviewFor(unpricedInfo({ effectiveCap: 100 }))} view={VIEW} onCreate={() => {}} onClose={() => {}} />)
     expect(screen.getByTestId('dca-review-tier').textContent).toContain('No market price source right now — buys capped at $100 and flagged')
     expect(screen.getByTestId('dca-consent-body').textContent).toContain('capped at $100')
   })
 
   it('shows the schedule table: total, per buy, buys, execution, duration, expiry, the signed floor and Protection', () => {
-    render(<DcaReviewSheet review={reviewFor(offchainInfo())} view={VIEW} onClose={() => {}} />)
+    render(<DcaReviewSheet review={reviewFor(offchainInfo())} view={VIEW} onCreate={() => {}} onClose={() => {}} />)
     const t = (id: string) => screen.getByTestId(id).textContent
     expect(t('dca-review-total')).toContain('0.5 WETH')
     expect(t('dca-review-per-buy')).toContain('0.05 WETH')
@@ -141,10 +141,10 @@ describe('review sheet · a 409 reopens the consent', () => {
 
   it('an acknowledgement given for offchain-price does not survive a 409 naming unpriced', () => {
     const review = reviewFor(offchainInfo())
-    const { rerender } = render(<DcaReviewSheet review={review} view={VIEW} onClose={() => {}} />)
+    const { rerender } = render(<DcaReviewSheet review={review} view={VIEW} onCreate={() => {}} onClose={() => {}} />)
     fireEvent.click(screen.getByTestId('dca-consent-checkbox'))
     expect(screen.getByRole('button', { name: 'Create DCA' })).toHaveProperty('disabled', false)
-    rerender(<DcaReviewSheet review={review} view={VIEW} conflictTier="unpriced" onClose={() => {}} />)
+    rerender(<DcaReviewSheet review={review} view={VIEW} conflictTier="unpriced" onCreate={() => {}} onClose={() => {}} />)
     expect((screen.getByTestId('dca-consent-checkbox') as HTMLInputElement).checked).toBe(false)
     expect(screen.getByRole('button', { name: 'Create DCA' })).toHaveProperty('disabled', true)
     expect(screen.getByTestId('dca-consent-body').textContent).toContain('capped at $250') // the unpriced words, not the off-chain ones
@@ -152,9 +152,9 @@ describe('review sheet · a 409 reopens the consent', () => {
 
   it('a 409 naming a weaker tier than the one on screen changes nothing', () => {
     const review = reviewFor(unpricedInfo())
-    const { rerender } = render(<DcaReviewSheet review={review} view={VIEW} onClose={() => {}} />)
+    const { rerender } = render(<DcaReviewSheet review={review} view={VIEW} onCreate={() => {}} onClose={() => {}} />)
     fireEvent.click(screen.getByTestId('dca-consent-checkbox'))
-    rerender(<DcaReviewSheet review={review} view={VIEW} conflictTier="offchain-price" onClose={() => {}} />)
+    rerender(<DcaReviewSheet review={review} view={VIEW} conflictTier="offchain-price" onCreate={() => {}} onClose={() => {}} />)
     expect(screen.getByTestId('dca-consent').getAttribute('data-tier')).toBe('unpriced')
     expect(screen.getByRole('button', { name: 'Create DCA' })).toHaveProperty('disabled', false)
   })
@@ -163,7 +163,7 @@ describe('review sheet · a 409 reopens the consent', () => {
 describe('review sheet · keyboard', () => {
   it('Cancel is the default focus, Esc closes, Tab stays inside, a click on the dimmed page does not dismiss', () => {
     const onClose = vi.fn()
-    render(<DcaReviewSheet review={reviewFor(unpricedInfo())} view={VIEW} onClose={onClose} />)
+    render(<DcaReviewSheet review={reviewFor(unpricedInfo())} view={VIEW} onCreate={() => {}} onClose={onClose} />)
     expect(document.activeElement).toBe(screen.getByTestId('dca-review-cancel'))
     fireEvent.click(document.querySelector('[data-sheet-backdrop]') as HTMLElement)
     expect(onClose).not.toHaveBeenCalled()

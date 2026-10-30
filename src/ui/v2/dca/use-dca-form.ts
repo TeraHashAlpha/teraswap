@@ -67,7 +67,8 @@ export type PrepareResult = { ok: true; review: PreparedReview } | { ok: false }
 /**
  * [ADR-025] The DCA form's state: v1's `CreateDCAForm` state and derivations, one for one, over v1's own hooks (balances, Chainlink,
  * depeg, floor-tier ask) and lib (presets, schedule-fit, dust guard, min-output derivation). `prepare()` is v1's `handleCreate` up to
- * the point where it would hand the config to `createOrder`: same guards, same order, same sounds — and then it stops (B6b signs).
+ * the point where it would hand the config to `createOrder`: same guards, same order, same sounds — the review's Create (B6b,
+ * `use-dca-lifecycle.ts`) then makes that very call.
  */
 export function useDcaForm(chainId: number, paused: boolean) {
   const { address: _address, isConnected, chain: walletChain } = useAccount()
@@ -349,8 +350,10 @@ export function useDcaForm(chainId: number, paused: boolean) {
         return { ok: false }
       }
     }
-    // v1 keeps the waiting sound until `createOrder` reports; with no submission here nothing will, so it ends with the prepare.
-    stopWaitingSound()
+    // v1 stops the loop only where it opens the consent dialog (DCAPanel.tsx:895) — the review carries that consent for the weaker
+    // tiers, so it stops here for them. On the on-chain tier v1 goes straight to the EIP-712 modal with the loop running (:825 → :993)
+    // and so does v2 (B6b): the review's Create hands over to `createOrder` with no new start; the engine's event ends it.
+    if (consentTier(info)) stopWaitingSound()
     const draft = buildDcaDraft({
       tokenIn, tokenOut, amountIn, minAmountOut, maxSlippageBps: maxSlippageBpsForConfig,
       expirySeconds: expiry.seconds, router: defaultRouter.address, priceInUsd: livePriceIn,
