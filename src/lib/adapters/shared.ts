@@ -4,6 +4,7 @@ import {
   NATIVE_ETH,
 } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { serverRpcUrl, serverRpcEnvUrl } from '@/lib/rpc-env'
 import type { Address } from 'viem'
 
 // ── Slippage safety clamp ────────────────────────────────
@@ -98,7 +99,7 @@ export function isNativeEth(token: string): boolean {
  *  Server: hits the configured RPC directly. */
 export function getRpcUrl(): string {
   if (typeof window === 'undefined') {
-    return process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+    return serverRpcUrl(DEFAULT_CHAIN_ID)
   }
   return '/api/rpc'
 }
@@ -115,7 +116,10 @@ export function getRpcUrl(): string {
 export function getRpcUrlForChain(chainId: number = DEFAULT_CHAIN_ID): string {
   if (chainId === DEFAULT_CHAIN_ID) return getRpcUrl()
   const { rpc } = getChainConfig(chainId)
-  return rpc.primary || rpc.fallbacks?.[0] || ''
+  // [FEAT-SERVER-RPC-ENV-SPLIT] Server: RPC_URL_<id> (else the NEXT_PUBLIC_* the registry holds)
+  // wins; the browser keeps the registry value untouched.
+  const configured = typeof window === 'undefined' ? serverRpcEnvUrl(chainId) : undefined
+  return configured || rpc.primary || rpc.fallbacks?.[0] || ''
 }
 
 /**
