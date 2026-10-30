@@ -62,7 +62,12 @@ export interface ReviewModel {
   route: string
   /** `0.3%`. */
   slippage: string
-  /** The displayed floor (bigint bps), without the symbol. NOT the signed value — the frozen one comes from `pending`. */
+  /**
+   * The quote × (1 − slippage) floor, without the symbol. NOT the signed value.
+   * @deprecated [A69 H-1] The review sheet no longer renders this: the minimum output it shows is the FeeCollector-enforced value or
+   * the router floor decoded from the frozen calldata (`decodedMinimumOutput`), exactly as v1's TransactionPreview. Kept (rule #4) so
+   * the model's shape does not move; the quote panel has its own copy of the estimate (`QuoteView.minOutput`).
+   */
   minOutput: string
   feeLabel: string
   /** null when no fee is collected (the row reads Free, as in the quote panel). */
@@ -109,6 +114,23 @@ export function buildReviewModel(i: {
     gasFree: v.gasFree,
     tier: i.tier ?? null,
     consent: unpricedConsentValues(meta, tokenIn, tokenOut, i.slippage),
+  }
+}
+
+/**
+ * [A69 H-1] The router floor DECODED FROM THE FROZEN CALLDATA, as a raw bigint — v1's `formatDecodedAmount(preview.amountOutMin,
+ * tokenOut, preview.tokenOut)` (TransactionPreview.tsx:54-69) without the formatting: null when nothing was decoded, when it decoded
+ * to zero or to something that is not an integer, and when the decoded buy token is not the token the user is buying. A decoded
+ * token that is absent is not a mismatch (v1 trusts the buy token then).
+ */
+export function decodedMinimumOutput(preview: { amountOutMin?: string; tokenOut?: string } | null, buyTokenAddress: string): bigint | null {
+  if (!preview?.amountOutMin) return null
+  if (preview.tokenOut && preview.tokenOut.toLowerCase() !== buyTokenAddress.toLowerCase()) return null
+  try {
+    const wei = BigInt(preview.amountOutMin)
+    return wei === 0n ? null : wei
+  } catch {
+    return null
   }
 }
 

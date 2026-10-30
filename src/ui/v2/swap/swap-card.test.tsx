@@ -413,8 +413,10 @@ describe('26 / 25 — the review and Permit2 sheets opened from the card (B4 she
     const sheet = dlg.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
     for (const s of ['2 480.2211 USDC', '0.001 ETH ($2.49)', '$0.03 (~0.000012 ETH)', '0.3%']) {
       expect(panel).toContain(s)
-      expect(sheet).toContain(s)
+      if (s !== '2 480.2211 USDC') expect(sheet).toContain(s)
     }
+    // [A69 H-1] The quote panel's estimate stays; the sheet shows no minimum output until the hook has frozen the transaction (its calldata floor).
+    expect(sheet).not.toContain('Minimum output')
     expect(within(dlg).getByRole('button', { name: 'Confirm & Sign' }).hasAttribute('data-b5-stub')).toBe(false) // Confirm is wired (lifecycle tests)
     fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()

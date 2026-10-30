@@ -375,13 +375,25 @@ export function SwapCard() {
   const sheetModel = baseModel && frozenSwap ? withFrozenSwap(baseModel, frozenSwap, AGGREGATOR_META[frozenSwap.source]?.label ?? frozenSwap.source) : baseModel
   const swapSt = lc.swap.status
   // The single-route review is on screen from the CTA until the signature is requested; a split has no such review (v1 goes straight to the plan).
+  // [A69 L-3] The Permit2 explainer takes the screen INSTEAD of the review (it used to render underneath it, unreachable): v1 puts it before any
+  // review too — `<Permit2EducationModal open={needsPermit2Education}>` (SwapBox.tsx:1242) opens off the approve click, and TransactionPreview
+  // (SwapBox.tsx:1252) only exists once the hook has frozen the transaction. Continue / Cancel bring the review back (it stays requested).
   const singleReviewOpen =
-    !lc.isSplitActive && reviewOpen({ requested: reviewRequested, ackRequired: lc.swap.unpricedAckRequired }) && !SIGNING_STATUSES.has(swapSt) && swapSt !== 'success' && swapSt !== 'cow_awaiting_review'
+    !lc.isSplitActive &&
+    !needsPermit2Education &&
+    reviewOpen({ requested: reviewRequested, ackRequired: lc.swap.unpricedAckRequired }) &&
+    !SIGNING_STATUSES.has(swapSt) &&
+    swapSt !== 'success' &&
+    swapSt !== 'cow_awaiting_review'
   const splitConsentOpen = lc.isSplitActive && (lc.consentRequested || lc.split.unpricedAckRequired)
   const splitReviewOpen = lc.isSplitActive && lc.split.status === 'awaiting-review' && !!address
   const cowReviewOpen = lc.swap.status === 'cow_awaiting_review' && !!lc.swap.pendingCowOrder && !!address
   const anySheetOpen = showSlippage || tokenPicker !== null || needsPermit2Education || singleReviewOpen || splitConsentOpen || splitReviewOpen || cowReviewOpen
   const confirmBtn = confirmButtonState({ approvalStatus: approval.status, approvalReady: approval.isReady, swapStatus: swapSt })
+  // [A69 L-1] Confirm is gated like the CTA behind it (v1's SwapButton order): a price-gate block lands, or the quote it would execute is gone. It says
+  // the CTA's own words and is disabled — never a press that silently does nothing. A hook already working keeps its in-flight label, and a frozen
+  // transaction (v1's TransactionPreview) is signed regardless, as in v1.
+  const confirmGated = !frozenSwap && !confirmBtn.disabled && (cta.kind === 'blocked' || cta.kind === 'finding-route' || cta.kind === 'no-quotes')
 
   // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
   const executionActive = lc.status !== 'idle'
@@ -410,8 +422,13 @@ export function SwapCard() {
       lc.swap.confirmSwap() // v1: <TransactionPreview onConfirm={confirmSwap}>
       return
     }
+    // The first press freezes the sheet (it keeps describing what was confirmed while the quote polls on during an approval).
     if (liveModel && !confirmedModel) setConfirmedModel(liveModel)
-    await lc.confirm(c)
+    // [A69 M-1] …and the press that actually executes re-freezes it from the quote it hands the hook, so the sheet, the hook's arguments and the
+    // success summary all describe one quote. v1 freezes at `execute` too (useSwap.ts:733), not at the click that only approves.
+    await lc.confirm(c, () => {
+      if (liveModel) setConfirmedModel(liveModel)
+    })
   }
   function onReviewCancel() {
     setReviewRequested(false)
@@ -641,13 +658,15 @@ export function SwapCard() {
                   routeViaFeeCollector: frozenSwap.routeViaFeeCollector,
                   minimumOutput: frozenSwap.minimumOutput,
                   decimalsOut: frozenSwap.tokenOut.decimals,
+                  tokenOutAddress: frozenSwap.tokenOut.address,
                 }
               : undefined
           }
           ackRequired={lc.ackRequired}
-          confirmLabel={confirmBtn.label}
+          confirmLabel={confirmGated ? cta.label : confirmBtn.label}
           confirmBusy={confirmBtn.disabled}
-          confirmTone={confirmBtn.tone}
+          confirmDisabled={confirmGated}
+          confirmTone={confirmGated ? 'error' : confirmBtn.tone}
           step={
             <>
               {lc.error && lc.swap.status === 'error' && (
@@ -671,7 +690,7 @@ export function SwapCard() {
         <SplitReviewSheet plannedLegs={lc.split.plannedLegs} tokenIn={tokenIn} tokenOut={tokenOut} userAddress={address} onConfirm={() => void lc.split.confirmPlan()} onCancel={lc.cancel} />
       )}
       {cowReviewOpen && lc.swap.pendingCowOrder && (
-        <CowOrderReviewSheet order={lc.swap.pendingCowOrder} onConfirm={() => void lc.swap.confirmCowOrder()} onCancel={lc.cancel} />
+        <CowOrderReviewSheet order={lc.swap.pendingCowOrder} onConfirm={() => void lc.swap.confirmCowOrder()} onCancel={onReviewCancel} />
       )}
       {tokenPicker && (
         <TokenSheet
