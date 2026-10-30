@@ -2,7 +2,7 @@
 
 Checklist
 - [x] C1 resolver `src/lib/rpc-env.ts` + call sites rewired + env-validation + `.env.example` + `docs/Runbooks/ENV-RPC.md`
-- [ ] C2 proof tests (set/unset, guard, log line)
+- [x] C2 proof tests (set/unset, guard, log line)
 - [ ] C3 `/api/rpc` per-call rate-limit units
 - [ ] Evidence 1–5 below
 
