@@ -18,6 +18,8 @@ import { NoticeBanner } from './NoticeBanner'
 import { TabBar } from './TabBar'
 import { TabPane } from './TabPane'
 import { SwapCard } from '../swap/SwapCard'
+import { DcaCard } from '../dca/DcaCard'
+import { isDcaLive } from '@/lib/dca-launch'
 import { tabIdFromPathname, type V2TabId } from './tab-paths'
 import { V2ToastProvider } from './toasts'
 
@@ -34,7 +36,7 @@ export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; childr
 
   // B3: the Swap tab is the real card; every other tab is still a placeholder until its block lands.
   const pane =
-    children ?? (active === 'swap' ? <SwapCard /> : active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : <TabPane tab={active} />)
+    children ?? (active === 'swap' ? <SwapCard /> : active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : active === 'dca' && isDcaLive(chainId) ? <DcaCard key={chainId} chainId={chainId} /> : <TabPane tab={active} />)
 
   return (
     <RainbowKitProvider theme={rkTheme} locale="en">
