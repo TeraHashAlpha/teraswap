@@ -166,9 +166,22 @@ async function postCowQuoteWithFeeFallback(
     err = await res.json().catch(() => ({}))
     desc = String(err.description || err.errorType || '')
   }
-  const e = new Error(desc || 'quote failed') as Error & { cowStatus?: number }
+  const e = new Error(desc || 'quote failed') as Error & { cowStatus?: number; cowRetryAfterMs?: number }
   e.cowStatus = res.status
+  // [fix/monitor-self-source-alerts] Carry the upstream's own Retry-After (seconds) so the circuit
+  // breaker backs off for as long as CoW asked instead of its fixed 5-min fallback (same contract
+  // as zerox.ts: `retryAfterMs=<n>` in the message, read by classifyFailure).
+  if (res.status === 429) {
+    const sec = Number(res.headers.get('retry-after'))
+    if (Number.isFinite(sec) && sec > 0) e.cowRetryAfterMs = Math.round(sec * 1000)
+  }
   throw e
+}
+
+/** ` retryAfterMs=<n>` suffix for a CoW error carrying a 429 Retry-After, else ''. */
+function cowRetryAfterSuffix(e: unknown): string {
+  const ms = (e as { cowRetryAfterMs?: number }).cowRetryAfterMs
+  return ms ? ` retryAfterMs=${ms}` : ''
 }
 
 /**
@@ -206,7 +219,7 @@ async function fetchCowSwapQuote(
     if (desc.includes('SellAmountDoesNotCoverFee') || desc.includes('NoLiquidity')) {
       throw new Error(`CoW: Amount too small or no liquidity for this pair`)
     }
-    throw new Error(`CoW ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}`)
+    throw new Error(`CoW ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}${cowRetryAfterSuffix(e)}`)
   })
   const quote = data.quote
 
@@ -262,7 +275,7 @@ async function fetchCowSwapOrder(
     signingScheme: 'eip712',
   })).catch((e: unknown) => {
     const desc = e instanceof Error ? e.message : 'failed'
-    throw new Error(`CoW quote ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}`)
+    throw new Error(`CoW quote ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}${cowRetryAfterSuffix(e)}`)
   })
   const quote = quoteData.quote
 

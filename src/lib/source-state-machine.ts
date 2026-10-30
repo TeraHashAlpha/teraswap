@@ -39,12 +39,24 @@ export interface SourceStatus {
   disabledReason?: string
   disabledAt?: number
   lastTransitionAt: number
+  /** [fix/monitor-self-source-alerts] Start (ms) of the current consecutive-failure streak; cleared on success. */
+  failingSince?: number
+  /** Consecutive transport-level probe errors (`kind: 'infra'`); never counted toward failureCount. */
+  infraFailures?: number
+  lastInfraAt?: number
+  /** 'health' when the disable came from consecutive probe failures — eligible for probe-verified recovery. */
+  disabledBy?: 'health'
 }
 
 export interface HealthCheckResult {
   ok: boolean
   latencyMs: number
   error?: string
+  /**
+   * 'infra' = the probe itself could not complete (transport/timeout on the probe path), which says
+   * nothing about the source's health. Recorded separately; never counts as a source failure.
+   */
+  kind?: 'infra'
 }
 
 // ── Per-source thresholds ───────────────────────────────
@@ -58,6 +70,8 @@ export interface SourceThresholds {
   quorumMaxDeviationPercent?: number
   /** H5 quorum: max deviation % for stablecoin pairs (default 2) */
   quorumStableMaxDeviationPercent?: number
+  /** Minimum wall-clock span (ms) of the failure streak before degraded → disabled (default 0 = off). */
+  minFailingWindowMs?: number
 }
 
 interface ThresholdsConfig {
@@ -93,6 +107,11 @@ function validateThresholds(t: SourceThresholds, sourceId: string): SourceThresh
     console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: p95LatencyThresholdMs must be >= 100, using defaults`)
     return HARDCODED_DEFAULTS
   }
+  const w = t.minFailingWindowMs
+  if (w !== undefined && (!Number.isInteger(w) || w < 0)) {
+    console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: minFailingWindowMs must be a non-negative integer, using defaults`)
+    return HARDCODED_DEFAULTS
+  }
   return t
 }
 
@@ -117,7 +136,8 @@ function loadThresholds(): ThresholdsConfig {
 
 export function getThresholds(sourceId: string): SourceThresholds {
   const config = loadThresholds()
-  const override = config.overrides[sourceId]
+  // Per-chain ids ("server-rpc:8453") fall back to the bare-name override ("server-rpc").
+  const override = config.overrides[sourceId] ?? config.overrides[sourceId.split(':')[0]]
   if (!override) return config.defaults
 
   const merged: SourceThresholds = {
@@ -131,6 +151,7 @@ export function getThresholds(sourceId: string): SourceThresholds {
     // disabled type-checking on these security-relevant deviation thresholds.
     quorumMaxDeviationPercent: override.quorumMaxDeviationPercent ?? config.defaults.quorumMaxDeviationPercent,
     quorumStableMaxDeviationPercent: override.quorumStableMaxDeviationPercent ?? config.defaults.quorumStableMaxDeviationPercent,
+    minFailingWindowMs: override.minFailingWindowMs ?? config.defaults.minFailingWindowMs,
   }
   return validateThresholds(merged, sourceId)
 }
@@ -145,6 +166,11 @@ export function _resetThresholdsCache(): void {
 const P95_RECOVERY_THRESHOLD = 2000
 const AUTO_RECOVERY_MS = 10 * 60_000
 const MAX_LATENCY_HISTORY = 10
+/** Consecutive infra (probe-path) errors before ONE "probe can't reach it" alert per streak. */
+const INFRA_ALERT_AFTER = 10
+/** A health-disabled source is re-probed this often (ticks are ~60 s, so K = 3 ticks). */
+export const DISABLED_REPROBE_MS = 3 * 60_000
+const TICK_JITTER_MS = 5_000
 
 // ── KV key helpers ──────────────────────────────────────
 
@@ -283,7 +309,26 @@ export async function recordHealthCheck(
 ): Promise<void> {
   const s = await loadFromKV(sourceId)
   const t = getThresholds(sourceId)
-  s.lastCheckAt = Date.now()
+  const now = Date.now()
+  s.lastCheckAt = now
+
+  // [fix/monitor-self-source-alerts] "Probe failed" is not "source unhealthy": a probe that could not
+  // complete (transport/timeout on the probe path) is tracked on its own counter and never moves the
+  // state machine — a transient blip must not disable a source for users. A streak that persists is
+  // still surfaced (one alert per streak), never silently ignored.
+  if (!result.ok && result.kind === 'infra') {
+    s.infraFailures = (s.infraFailures ?? 0) + 1
+    s.lastInfraAt = now
+    console.warn(`[STATE] ${forLog(sourceId)}: probe infra error #${s.infraFailures} (not counted as source failure): ${forLog(result.error ?? 'unknown')}`)
+    if (s.infraFailures === INFRA_ALERT_AFTER) {
+      emitTransitionAlert(sourceId, s.state, s.state, `probe-infra-failure: ${INFRA_ALERT_AFTER} consecutive probe errors — ${result.error ?? 'unknown'}`).catch(err => {
+        console.error('[STATE] infra alert emission failed for %s:', forLog(sourceId), forLog(err instanceof Error ? err.message : err))
+      })
+    }
+    await saveToKV(s)
+    return
+  }
+  if (s.infraFailures) s.infraFailures = 0
 
   // [WARMUP] Skip latency recording on cold-start ticks — inflated measurements
   // would push p95 above threshold and cause false degradation alerts.
@@ -297,8 +342,16 @@ export async function recordHealthCheck(
   if (result.ok) {
     s.successCount++
     s.failureCount = 0
+    s.failingSince = undefined
 
-    if (s.state === 'degraded') {
+    if (s.state === 'disabled' && s.disabledBy === 'health') {
+      // Probe-verified recovery: a disabled source that answers again re-enters as degraded and then
+      // earns `active` through the normal successesToActive rule below (no blind timer, no human).
+      s.disabledAt = undefined
+      s.disabledReason = undefined
+      s.disabledBy = undefined
+      transition(s, 'degraded', 'probe recovered after disable')
+    } else if (s.state === 'degraded') {
       const p95 = calcP95(s.latencyHistory)
       if (s.successCount >= t.successesToActive && p95 < P95_RECOVERY_THRESHOLD) {
         transition(s, 'active', `${t.successesToActive} consecutive successes, p95=${Math.round(p95)}ms`)
@@ -307,6 +360,7 @@ export async function recordHealthCheck(
   } else {
     s.failureCount++
     s.successCount = 0
+    if (s.failingSince === undefined) s.failingSince = now
 
     if (s.state === 'active') {
       const p95 = calcP95(s.latencyHistory)
@@ -317,20 +371,35 @@ export async function recordHealthCheck(
       }
     }
 
-    if (s.state === 'degraded' && s.failureCount >= t.failuresToDisabled) {
+    // Disabling needs N consecutive failures AND the streak to span the minimum window, so a burst of
+    // back-to-back ticks (retries, lock fail-open) cannot disable a source in seconds.
+    const windowMs = t.minFailingWindowMs ?? 0
+    const windowMet = windowMs <= 0 || (s.failingSince !== undefined && now - s.failingSince >= windowMs)
+    if (s.state === 'degraded' && s.failureCount >= t.failuresToDisabled && windowMet) {
       transition(s, 'disabled', `${s.failureCount} consecutive failures`)
-      s.disabledAt = Date.now()
+      s.disabledAt = now
       s.disabledReason = result.error || 'health-check-failures'
+      s.disabledBy = 'health'
     }
   }
 
   await saveToKV(s)
 }
 
+/**
+ * Whether H1 should probe this source this tick. A health-disabled source is re-probed every
+ * DISABLED_REPROBE_MS (K = 3 ticks) instead of every tick; everything else is probed every tick.
+ */
+export function shouldProbeNow(s: SourceStatus, now: number = Date.now()): boolean {
+  if (s.state !== 'disabled' || s.disabledBy !== 'health') return true
+  return now - s.lastCheckAt >= DISABLED_REPROBE_MS - TICK_JITTER_MS
+}
+
 export async function forceDisable(sourceId: string, reason: string): Promise<void> {
   const s = await loadFromKV(sourceId)
   s.disabledReason = reason
   s.disabledAt = Date.now()
+  s.disabledBy = undefined // a forced disable is never probe-recovered
   transition(s, 'disabled', `force: ${reason}`)
   await saveToKV(s)
 }
@@ -339,8 +408,11 @@ export async function forceActivate(sourceId: string): Promise<void> {
   const s = await loadFromKV(sourceId)
   s.failureCount = 0
   s.successCount = 0
+  s.failingSince = undefined
+  s.infraFailures = 0
   s.disabledReason = undefined
   s.disabledAt = undefined
+  s.disabledBy = undefined
   transition(s, 'active', 'force activated')
   await saveToKV(s)
 }
@@ -353,6 +425,8 @@ export async function checkAutoRecovery(): Promise<string[]> {
   for (const s of all) {
     if (s.state !== 'disabled' || !s.disabledAt) continue
     if (isP0Reason(s.disabledReason)) continue
+    // Health-disabled sources recover through probe verification (recordHealthCheck), not a blind timer.
+    if (s.disabledBy === 'health') continue
     if (now - s.disabledAt >= AUTO_RECOVERY_MS) {
       s.failureCount = 0
       s.successCount = 0

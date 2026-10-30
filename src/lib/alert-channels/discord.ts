@@ -8,7 +8,7 @@
 import type { AlertPayload } from '../alert-wrapper'
 import { CHANNEL_FETCH_TIMEOUT_MS } from './utils'
 
-const VALID_WEBHOOK_PREFIXES = [
+export const VALID_WEBHOOK_PREFIXES = [
   'https://discord.com/api/webhooks/',
   'https://discordapp.com/api/webhooks/',
 ]
