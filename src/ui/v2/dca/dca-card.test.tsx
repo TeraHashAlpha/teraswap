@@ -21,15 +21,12 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   return { ConnectButton: () => <button data-testid="rk-connect">Connect</button>, useConnectModal: () => ({ openConnectModal: h.openConnectModal }) }
 })
 vi.mock('@/hooks/useOrderEngine', async () => {
+  const { engineMock } = await import('./dca-harness')
+  return { useOrderEngine: () => engineMock() }
+})
+vi.mock('@/hooks/useOrderApproval', async () => {
   const { h } = await import('./dca-harness')
-  return {
-    useOrderEngine: () => ({
-      dcaOrders: h.engine.dcaOrders, activeOrders: [], historyOrders: [], latestEvent: h.engine.latestEvent, isSubmitting: false,
-      createOrder: h.engine.createOrder, pendingOrder: null, confirmOrder: vi.fn(), clearPendingOrder: vi.fn(),
-      pendingCancel: null, confirmCancel: vi.fn(), clearPendingCancel: vi.fn(), cancelOrder: h.engine.cancelOrder,
-      cancelAllOrders: h.engine.cancelAllOrders, removeOrder: h.engine.removeOrder,
-    }),
-  }
+  return { useOrderApproval: (...a: unknown[]) => (h.approvalArgs.push(a), h.approval) }
 })
 vi.mock('@/hooks/useTokenBalances', async () => {
   const { h } = await import('./dca-harness')

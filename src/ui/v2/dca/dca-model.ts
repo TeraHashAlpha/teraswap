@@ -206,6 +206,52 @@ export function consentBody(info: PairFloorInfo, symbols: readonly string[]): st
   return floorConsentCopy({ tier, symbols, effectiveCapUsd: info.effectiveCap, registeredFeedCount: info.registeredFeedCount })
 }
 
+/**
+ * [B6b] The server's 409 (api/orders): `Acknowledgement required: this pair is "<tier>". Resubmit with floorAck.tier = "<tier>".`
+ * v1's API client keeps only `json.error` of that body (order-engine/supabase.ts `throw new Error(json.error …)`) and the engine
+ * surfaces it as an `order_error` (useOrderEngine `err.message.slice(0, 120)` — the sentence is 85 characters); the `requiredTier`
+ * field itself never reaches the UI. The tier is read back from the server's own sentence, so the review can reopen for it.
+ */
+const REQUIRED_TIER_RE = /^Acknowledgement required: this pair is "(offchain-price|unpriced)"\./
+export function requiredTierFromError(error: string | null | undefined): WeakerTier | null {
+  const m = error ? REQUIRED_TIER_RE.exec(error) : null
+  return m ? (m[1] as WeakerTier) : null
+}
+
+// ── the sign step (round7 34) ────────────────────────────────────────────────
+
+/** Where the frozen order is: on the EIP-712 review, with the wallet (sign + POST — v1 exposes no boundary between the two), placed, or failed. */
+export type DcaSignPhase = 'frozen' | 'signing' | 'created' | 'failed'
+
+export interface SignStep {
+  label: string
+  state: 'done' | 'active' | 'todo' | 'failed'
+}
+
+/**
+ * The sign sheet's timeline, in v1's own words: the approve button (`Approve {sym}`, OrderReviewModal), the form CTA while the engine
+ * submits (`Signing order...`, DCAPanel) and the success toast's title (`DCA order placed`). The approve step is listed only when the
+ * sheet opened on an order that still needed the exact approval (v1 renders that button XOR the sign button).
+ */
+export function signSteps(i: { phase: DcaSignPhase; approvalListed: boolean; approvalReady: boolean; symbolIn: string }): SignStep[] {
+  const steps: SignStep[] = []
+  if (i.approvalListed) {
+    steps.push({ label: `Approve ${i.symbolIn}`, state: i.phase === 'frozen' ? (i.approvalReady ? 'done' : 'active') : 'done' })
+  }
+  const signState: SignStep['state'] =
+    i.phase === 'signing' ? 'active' : i.phase === 'created' ? 'done' : i.phase === 'failed' ? 'failed' : i.approvalListed && !i.approvalReady ? 'todo' : 'active'
+  steps.push({ label: 'Signing order...', state: signState })
+  steps.push({ label: 'DCA order placed', state: i.phase === 'created' ? 'done' : 'todo' })
+  return steps
+}
+
+/** v1's DCAPanel event effect: the freeze-403 is told as a pause, everything else as a failure. Same titles, same descriptions. */
+export const DCA_PAUSED_RE = /temporarily paused/i
+export function failureCopy(error: string | null): { title: string; description: string } {
+  if (DCA_PAUSED_RE.test(error || '')) return { title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' }
+  return { title: 'DCA order failed', description: error || 'Order could not be submitted.' }
+}
+
 // ── the oracle gate ──────────────────────────────────────────────────────────
 
 export interface DcaOracleGate {

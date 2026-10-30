@@ -19,15 +19,12 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   return { ConnectButton: () => <button>Connect</button>, useConnectModal: () => ({ openConnectModal: h.openConnectModal }) }
 })
 vi.mock('@/hooks/useOrderEngine', async () => {
+  const { engineMock } = await import('./dca-harness')
+  return { useOrderEngine: () => engineMock() }
+})
+vi.mock('@/hooks/useOrderApproval', async () => {
   const { h } = await import('./dca-harness')
-  return {
-    useOrderEngine: () => ({
-      dcaOrders: h.engine.dcaOrders, activeOrders: [], historyOrders: [], latestEvent: h.engine.latestEvent, isSubmitting: false,
-      createOrder: h.engine.createOrder, pendingOrder: null, confirmOrder: vi.fn(), clearPendingOrder: vi.fn(),
-      pendingCancel: null, confirmCancel: vi.fn(), clearPendingCancel: vi.fn(), cancelOrder: h.engine.cancelOrder,
-      cancelAllOrders: h.engine.cancelAllOrders, removeOrder: h.engine.removeOrder,
-    }),
-  }
+  return { useOrderApproval: (...a: unknown[]) => (h.approvalArgs.push(a), h.approval) }
 })
 vi.mock('@/hooks/useTokenBalances', async () => {
   const { h } = await import('./dca-harness')
@@ -209,14 +206,14 @@ describe('(5b) sounds: the same sounds.ts calls as v1 for the same actions', () 
     expect(v2[1]).toEqual(v1[1])
   })
 
-  it('CTA on an on-chain-feed pair: v1 keeps the wait going into signing; v2 (no signing, B6a) ends it — the ONE documented difference', async () => {
+  it('CTA on an on-chain-feed pair: the wait runs on into the EIP-712 review in BOTH (B6b closed B6a\'s one documented difference)', async () => {
     h.floor = { tier: 'onchain-feed', legs: { in: { registered: true, priced: true }, out: { registered: true, priced: true } }, registeredFeedCount: 2, effectiveCap: 250 }
     const type = (c: HTMLElement) => fireEvent.change(c.querySelector('input[inputmode="decimal"]') as HTMLInputElement, { target: { value: '0.5' } })
     const v1 = await soundsFor('v1', [type, () => { fireEvent.click(screen.getByRole('button', { name: /^Start DCA/ })) }])
     h.soundLog.length = 0
     const v2 = await soundsFor('v2', [type, () => { fireEvent.click(screen.getByRole('button', { name: /^Review DCA$/ })) }])
     expect(v1[1]).toEqual(['playTouchMP3', 'startWaitingSound'])
-    expect(v2[1]).toEqual(['playTouchMP3', 'startWaitingSound', 'stopWaitingSound'])
+    expect(v2[1]).toEqual(v1[1])
   })
 
   const ORDER_EVENTS = [

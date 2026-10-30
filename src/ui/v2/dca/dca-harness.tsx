@@ -27,7 +27,27 @@ export const h = {
     removeOrder: vi.fn(),
     dcaOrders: [] as unknown[],
     latestEvent: null as unknown,
+    // B6b: the two-phase gates of v1's engine (freeze → confirm), controllable per test
+    pendingOrder: null as unknown,
+    confirmOrder: vi.fn(async () => {}),
+    clearPendingOrder: vi.fn(),
+    isSubmitting: false,
+    pendingCancel: null as unknown,
+    confirmCancel: vi.fn(async () => {}),
+    clearPendingCancel: vi.fn(),
   },
+  /** `useOrderApproval` (v1's approve-then-sign gate inside the EIP-712 review), as the test wants it. */
+  approval: {
+    spender: '0x3333333333333333333333333333333333333333' as `0x${string}` | null,
+    allowance: 0n as bigint | undefined,
+    isApproved: true,
+    needsApproval: false,
+    status: 'idle' as 'idle' | 'approving' | 'confirming' | 'ready' | 'error',
+    error: null as string | null,
+    approve: vi.fn(async () => {}),
+  },
+  /** every `useOrderApproval(...)` argument list a tree made (v1's OrderReviewModal vs the v2 sign sheet must agree) */
+  approvalArgs: [] as unknown[][],
   /** every sounds.ts call, in order, by name — the table test compares v1's sequence with v2's */
   soundLog: [] as string[],
   sounds: {} as Record<'playClick' | 'playTouchMP3' | 'playSwapConfirmMP3' | 'playCancelOrderMP3' | 'startWaitingSound' | 'stopWaitingSound', ReturnType<typeof vi.fn>>,
@@ -74,6 +94,21 @@ export function resetHarness() {
   h.v3Chains = [BASE, 42161]
   h.engine.dcaOrders = []
   h.engine.latestEvent = null
+  h.engine.pendingOrder = null
+  h.engine.isSubmitting = false
+  h.engine.pendingCancel = null
+  h.approval = { spender: '0x3333333333333333333333333333333333333333', allowance: 0n, isApproved: true, needsApproval: false, status: 'idle', error: null, approve: vi.fn(async () => {}) }
+  h.approvalArgs = []
   vi.clearAllMocks()
   h.soundLog.length = 0
+}
+
+/** The `useOrderEngine()` answer every DCA test mounts v1's DCAPanel and the v2 card on — one object, read from `h.engine` at render. */
+export function engineMock() {
+  return {
+    dcaOrders: h.engine.dcaOrders, activeOrders: [], historyOrders: [], latestEvent: h.engine.latestEvent, isSubmitting: h.engine.isSubmitting,
+    createOrder: h.engine.createOrder, pendingOrder: h.engine.pendingOrder, confirmOrder: h.engine.confirmOrder, clearPendingOrder: h.engine.clearPendingOrder,
+    pendingCancel: h.engine.pendingCancel, confirmCancel: h.engine.confirmCancel, clearPendingCancel: h.engine.clearPendingCancel,
+    cancelOrder: h.engine.cancelOrder, cancelAllOrders: h.engine.cancelAllOrders, removeOrder: h.engine.removeOrder,
+  }
 }

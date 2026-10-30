@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAccount, useSwitchChain } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits } from 'viem'
@@ -24,18 +24,20 @@ import { playCancelOrderMP3, playSwapConfirmMP3, playTouchMP3, stopWaitingSound 
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useOrderEngine } from '@/hooks/useOrderEngine'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import type { CreateOrderConfig } from '@/lib/order-engine'
 import { Button, Chip, Input, Segmented, Skeleton, Surface } from '../primitives'
 import { Notice } from '../swap/QuotePanel'
 import { TokenButton } from '../swap/TokenButton'
 import { TokenSheet } from '../modals/TokenSheet'
 import { useV2Toast } from '../shell/toasts'
 import { DcaOrdersList } from './DcaOrdersList'
+import { DcaCancelSheet } from './DcaCancelSheet'
 import { DcaReviewSheet, type DcaReviewView } from './DcaReviewSheet'
+import { DcaSignSheet } from './DcaSignSheet'
 import '../swap/swap.css'
 import './dca.css'
-import { protectionHint, protectionLabel, sanitizeAmountInput } from './dca-model'
+import { DCA_PAUSED_RE, protectionHint, protectionLabel, sanitizeAmountInput } from './dca-model'
 import { useDcaForm, type DcaForm, type PreparedReview } from './use-dca-form'
+import { useDcaLifecycle } from './use-dca-lifecycle'
 
 /** README §3: the thousands separator is a thin space (v1's `fmtToken` groups with U+0020). */
 const thin = (s: string) => s.replace(/ /g, '\u2009')
@@ -430,22 +432,35 @@ export function reviewViewFor(form: DcaForm, review: PreparedReview): DcaReviewV
 const ACTIVE_STATUSES = ['active', 'executing', 'partially_filled', 'signing']
 const HISTORY_STATUSES = ['filled', 'expired', 'cancelled', 'error']
 
-/** v1's freeze-403 message starts "New DCA orders are temporarily paused…". */
-const DCA_PAUSED_RE = /temporarily paused/i
-
 /**
- * The DCA tab (round7 30b / 31 / 35). `chainId` is the SELECTED chain (v1 passes the selector chain, not wagmi's). The order list and the
- * cancel actions are v1's `useOrderEngine`, unchanged; the Create CTA ends in a STUB (the review's `Create DCA`) — B6b wires signing.
+ * The DCA tab (round7 30b / 31 / 34 / 35). `chainId` is the SELECTED chain (v1 passes the selector chain, not wagmi's). ONE
+ * `useOrderEngine()` (v1's hook, unchanged) serves the list, the cancel actions and the create path: the review's Create DCA is
+ * `createOrder` (the engine freezes), the sign sheet's confirm is `confirmOrder` (the engine signs + POSTs) — `use-dca-lifecycle.ts`.
  */
-export function DcaCard({ chainId, onCreate }: { chainId: number; onCreate?: (draft: CreateOrderConfig) => void }) {
+export function DcaCard({ chainId }: { chainId: number }) {
   const { address } = useAccount()
-  const { dcaOrders, latestEvent, cancelOrder, cancelAllOrders, removeOrder } = useOrderEngine()
+  const { switchChain } = useSwitchChain()
+  const engine = useOrderEngine()
+  // v1 DCAPanel.tsx:295-297 — the list's Cancel / Cancel All / Remove are the engine's own; Cancel and Cancel All only FREEZE a plan.
+  const { dcaOrders, latestEvent, cancelOrder, cancelAllOrders, removeOrder, pendingCancel, confirmCancel, clearPendingCancel } = engine
   const { toast } = useV2Toast()
   const [frozen, setFrozen] = useState(false)
   const [tab, setTab] = useState<'create' | 'positions'>('create')
-  const [review, setReview] = useState<PreparedReview | null>(null)
   const form = useDcaForm(chainId, frozen)
+  const lc = useDcaLifecycle(engine)
   useOrderNotifications(latestEvent)
+
+  // B5's trade-key rule, owner: the draft changed under an open sheet → the review closes and anything the engine froze for it is
+  // dropped (`clearPendingOrder`, the engine's own reset). One key over everything `prepare()` reads into the draft.
+  const draftKey = `${chainId}:${form.tokenIn?.address ?? ''}:${form.tokenOut?.address ?? ''}:${form.totalDisplay}:${form.parts}:${form.interval.seconds}:${form.expiry.seconds}:${form.maxSlippageBps}`
+  const prevDraftKey = useRef(draftKey)
+  const reset = lc.reset
+  useEffect(() => {
+    if (prevDraftKey.current === draftKey) return
+    prevDraftKey.current = draftKey
+    reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the draft alone: `reset` is a new function every render
+  }, [draftKey])
   // v1 latches `frozen` on the freeze-403 inside its event effect; the same latch, set while rendering the event in (no effect-set).
   const [seenEvent, setSeenEvent] = useState(latestEvent)
   if (latestEvent !== seenEvent) {
@@ -506,7 +521,7 @@ export function DcaCard({ chainId, onCreate }: { chainId: number; onCreate?: (dr
         />
       </div>
       {tab === 'create' ? (
-        <DcaCreate form={form} onReviewReady={setReview} />
+        <DcaCreate form={form} onReviewReady={lc.open} />
       ) : (
         <div className="ts-dca-wide">
           <DcaOrdersList
@@ -521,7 +536,33 @@ export function DcaCard({ chainId, onCreate }: { chainId: number; onCreate?: (dr
           />
         </div>
       )}
-      {review && <DcaReviewSheet review={review} view={reviewViewFor(form, review)} onCreate={onCreate} onClose={() => setReview(null)} />}
+      {(lc.phase === 'review' || lc.phase === 'creating') && lc.review && (
+        <DcaReviewSheet
+          review={lc.review}
+          view={reviewViewFor(form, lc.review)}
+          conflictTier={lc.conflictTier}
+          busy={lc.phase === 'creating'}
+          switchNetwork={form.cta.kind === 'wrong-network' ? { label: form.cta.label, onSwitch: () => void switchChain({ chainId }) } : undefined}
+          onCreate={(draft) => void lc.create(draft)}
+          onClose={lc.closeReview}
+        />
+      )}
+      {(lc.phase === 'frozen' || lc.phase === 'signing' || lc.phase === 'created' || lc.phase === 'failed') && lc.frozen && (
+        <DcaSignSheet
+          pending={lc.frozen}
+          phase={lc.phase}
+          error={lc.outcome?.kind === 'failed' ? lc.outcome.error : null}
+          onConfirm={lc.sign}
+          // v1 clears the amount right after the freeze (DCAPanel.tsx:994 `setTotalDisplay('')`, before the modal is even answered);
+          // v2 clears it when the sign sheet closes — the same end state, and the draft key above holds while the sheet is up.
+          onCancel={() => { lc.cancelSign(); form.setTotalDisplay('') }}
+          onRetry={lc.retry}
+          onViewPositions={() => { lc.done(); form.setTotalDisplay(''); setTab('positions') }}
+          onDone={() => { lc.done(); form.setTotalDisplay('') }}
+        />
+      )}
+      {/* [CANCEL-REVIEW] v1 DCAPanel.tsx:257 — no cancel / invalidate executes until the user confirms the frozen plan. */}
+      {pendingCancel && <DcaCancelSheet review={pendingCancel} onConfirm={() => void confirmCancel()} onCancel={clearPendingCancel} />}
     </section>
   )
 }
