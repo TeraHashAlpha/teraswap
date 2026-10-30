@@ -6,5 +6,5 @@ Off origin/main `d8d658c` (#624 B6a merged). Signed, noreply, no PR. Diff only `
 ## Checklist
 - [x] C1 Create DCA → v1 path (createOrder → EIP-712 review → confirmOrder), consent/409, signing/created/failure, wrong network
 - [x] C2 cancel → v1 path (cancelOrder → cancel review → confirmCancel), Cancel All, positions from the engine
-- [ ] C3 a11y + edge (focus, Esc, draft key, double press, reduced motion)
+- [x] C3 a11y + edge (focus, Esc, draft key, double press, reduced motion)
 - [ ] evidence 1-6
