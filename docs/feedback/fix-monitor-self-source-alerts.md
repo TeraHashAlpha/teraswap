@@ -1,6 +1,6 @@
 # Feedback — fix/monitor-self-source-alerts
 
-Tasks: [x] 1 recon · [ ] 2 self-source/breaker state machine · [ ] 3 cadence + CoW · [ ] 4 alerts + daily audit · [ ] 5 verify + compare link
+Tasks: [x] 1 recon · [x] 2 self-source/breaker state machine · [ ] 3 cadence + CoW · [ ] 4 alerts + daily audit · [ ] 5 verify + compare link
 
 ## 1. Recon (file:line, base d8d658c)
 - **`teraswap-self` is not an adapter/quote source.** It is a site-liveness probe in `MONITORED_ENDPOINTS` (`monitored-endpoints.ts:20`): `HEAD https://www.teraswap.app/`, 8 s timeout (`health-check.ts:46-58`, `:17`). No pair, no chain, no RPC. Only 2 non-test refs exist in src/ (this + `health-check.ts:32`); no adapter has that name, so the `[CB] teraswap-self: pre-seeded OPEN` line is a breaker nobody calls (`circuit-breaker.ts:292-299` opens a breaker for *any* non-active id). Users did not lose a source via `teraswap-self`; the same mechanism DOES hide real degraded/disabled sources.
@@ -15,6 +15,9 @@ Tasks: [x] 1 recon · [ ] 2 self-source/breaker state machine · [ ] 3 cadence +
 ## Premise deltas (owner decision requested)
 1. **"5-min tick"**: the tick is **60 s** (`wrangler.toml:13`, ADR-003). 5 min is the quorum/on-chain cadence. A 15-min Worker breaks the dead-man's switch: heartbeat stale at 180 s (`heartbeat/route.ts:17`) makes the 5-min watchdog fail permanently; every tick would also count as warmup (`monitoring-loop.ts:74`) and 3 failures would mean 45 min.
 2. **`teraswap-self` is RPC/pair/chain based**: it is not (see above). The 19 h server-RPC outage was invisible because **nothing probes the server RPC** (keeper-health failures are `console.warn` only), independent of alert channels.
+
+## Owner answers (supersede the goal text)
+Cadence: Worker stays 60 s; quorum + on-chain scan move 5 → 15 ticks. Self probe: fix the state machine AND add a server-RPC probe.
 
 ## Plan
 - C2: infra vs source split in `HealthCheckResult` (transport errors on the self probe are infra: no failureCount), disable needs N failures AND a minimum failing window, verified recovery disabled → degraded → active on probe successes replaces the blind 10-min flip. Tests.

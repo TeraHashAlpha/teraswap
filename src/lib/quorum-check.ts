@@ -354,7 +354,9 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
 
   // Get all active sources — only include active in quorum
   const allStatuses = await getAllStatuses()
-  const activeSources = allStatuses.filter(s => s.state === 'active')
+  // `server-rpc:<chainId>` entries are liveness probes, not quote sources — they must not count toward
+  // MIN_ACTIVE_SOURCES (fix/monitor-self-source-alerts).
+  const activeSources = allStatuses.filter(s => s.state === 'active' && !s.id.startsWith('server-rpc:'))
   const activeSourceIds = new Set(activeSources.map(s => s.id))
 
   // [API-H-02] Trust model: quorum assumes majority of active sources are honest.

@@ -81,6 +81,13 @@ vi.mock('./health-check', () => ({
   runHealthCheck: vi.fn(async () => ({ ok: true, latencyMs: 50 })),
 }))
 
+// ── Mock rpc-health (no network; probe cadence/outcomes are tested in rpc-health.test.ts) ──
+
+vi.mock('./rpc-health', () => ({
+  shouldRunRpcProbe: vi.fn(async () => false),
+  probeAllServerRpcs: vi.fn(async () => []),
+}))
+
 // ── Mock monitored-endpoints ───────────────────────────
 
 vi.mock('./monitored-endpoints', () => ({

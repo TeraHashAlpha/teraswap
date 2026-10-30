@@ -22,7 +22,10 @@ import {
   checkAutoRecovery,
   forceDisable,
   getAllStatuses,
+  getStatus,
+  shouldProbeNow,
 } from './source-state-machine'
+import { shouldRunRpcProbe, probeAllServerRpcs } from './rpc-health'
 import {
   loadBaseline,
   getBaselineState,
@@ -199,11 +202,28 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   // Warmup ticks still run checks (availability matters) but skip latency recording
   await Promise.allSettled(
     MONITORED_ENDPOINTS.map(async (ep) => {
+      // A health-disabled source is re-probed every K ticks (shouldProbeNow), not every tick.
+      if (!shouldProbeNow(await getStatus(ep.id))) return
       const result = await runHealthCheck(ep)
       await recordHealthCheck(ep.id, result, { skipLatency: warmup })
       if (!result.ok) failures++
     })
   )
+
+  // ── Server-RPC liveness (every 5th tick, per chain) ───
+  // Nothing probed the server RPC before; a failing resolver now degrades `server-rpc:<chainId>` and
+  // pages through the normal alert path. Never blocks or fails the tick.
+  try {
+    if (await shouldRunRpcProbe()) {
+      const outcomes = await probeAllServerRpcs()
+      await Promise.all(outcomes.map(async (o) => {
+        await recordHealthCheck(o.id, o.result, { skipLatency: warmup })
+        if (!o.result.ok) failures++
+      }))
+    }
+  } catch (err) {
+    console.warn('[MONITOR] Server-RPC probe failed:', err instanceof Error ? err.message : err)
+  }
 
   // ── Keeper liveness (per chain, every tick) ───────────
   // [Auditor M2 / PR #497] Gas balance + overdue-DCA-fill signal for every chain in
