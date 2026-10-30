@@ -26,6 +26,15 @@
       "added": "2026-10-23",
       "expires": "2026-11-22",
       "reason": "Two transitive 3.x copies under @coinbase/cdp-sdk (^3.25.76) and @reown/appkit-wallet (3.22.4, exact) have no patched 3.x release; moving them to zod 4 is a breaking major for those packages. Reachability: both validate wallet/SDK messages with fixed-shape schemas, not attacker-sized collections; the root app copy is 4.6.6. Re-check weekly for a 3.x patch or upstream bumps of cdp-sdk/appkit; delete on first fix."
+    },
+    {
+      "id": "GHSA-qr28-fpjm-wq7f",
+      "package": "decode-uri-component",
+      "vulnerableRange": "<=0.5.0",
+      "fixedIn": "0.5.1",
+      "added": "2026-10-29",
+      "expires": "2026-10-30",
+      "reason": "Patched 0.5.1 was published 2026-10-23T12:48Z, so it is under .npmrc min-release-age=7 until 2026-10-30T12:48Z and cannot be installed yet. Single path: wagmi > @wagmi/connectors > @walletconnect/ethereum-provider > @walletconnect/utils > query-string@7.1.3; currently forced to 0.5.0 by an existing overrides pin. Reachability: client-side only (a DoS of the user's own tab); not assessed beyond the dependency path. Re-check on 2026-10-30: bump the overrides pin to 0.5.1 and delete this entry."
     }
   ]
 }
