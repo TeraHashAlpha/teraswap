@@ -139,12 +139,21 @@ jobs:
           set -euo pipefail
           if [ -z "${MONITOR_SECRET:-}" ]; then
             echo "code=NOSECRET" >> "$GITHUB_OUTPUT"
+            echo "alerts=UNKNOWN" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
             -H "Authorization: Bearer ${MONITOR_SECRET}" \
             "$SITE_URL/api/monitor" || echo "000")
           echo "code=$code" >> "$GITHUB_OUTPUT"
+
+          # Alert-delivery status (booleans only, never values): OK | NOT_CONFIGURED | UNKNOWN.
+          # Without a configured channel the monitor pages nobody (2026-10-29/30 outage went unreported).
+          alerts_body=$(curl -s --max-time 15 \
+            -H "Authorization: Bearer ${MONITOR_SECRET}" \
+            "$SITE_URL/api/monitor/alerts" || echo "")
+          alerts=$(node -e 'try{const r=JSON.parse(process.argv[1]);process.stdout.write(r.status==="OK"?"OK":r.status==="NOT CONFIGURED"?"NOT_CONFIGURED":"UNKNOWN")}catch{process.stdout.write("UNKNOWN")}' "$alerts_body")
+          echo "alerts=$alerts" >> "$GITHUB_OUTPUT"
 
       - name: Check keeper gas balance (per chain)
         id: gas
@@ -243,6 +252,7 @@ jobs:
           SSL_END: ${{ steps.site.outputs.ssl_end }}
           SSL_DAYS: ${{ steps.site.outputs.ssl_days }}
           MONITOR_CODE: ${{ steps.monitor.outputs.code }}
+          ALERTS_STATUS: ${{ steps.monitor.outputs.alerts }}
           GAS_CHAINS: ${{ steps.gas.outputs.chains }}
           GIT_COUNT: ${{ steps.git.outputs.count }}
         run: |
@@ -327,6 +337,21 @@ jobs:
             }
           }
 
+          // Alert delivery: a monitor that cannot reach a human is not monitoring. Computed BEFORE
+          // `overall` so the bump below is reflected in the headline status.
+          let alertsRow
+          if (e.ALERTS_STATUS === 'OK') {
+            alertsRow = '| Alerts (/api/monitor/alerts) | ✅ | alerts: OK — at least one delivery channel configured |'
+          } else if (e.ALERTS_STATUS === 'NOT_CONFIGURED') {
+            alertsRow = '| Alerts (/api/monitor/alerts) | ⚠️ | **alerts: NOT CONFIGURED** — no delivery channel; every monitor alert is dropped |'
+            requiresAttention.push('alerts: NOT CONFIGURED — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, or RESEND_API_KEY + ALERT_EMAIL_TO in Vercel, then test-fire (docs/Runbooks/MONITORING-ALERTS.md).')
+            bump(1)
+          } else {
+            alertsRow = '| Alerts (/api/monitor/alerts) | ⚠️ | alerts: UNKNOWN — status could not be read (MONITOR_SECRET unset, endpoint not deployed yet, or unreachable) |'
+            requiresAttention.push('alerts: UNKNOWN — /api/monitor/alerts could not be read, so alert delivery is unverified.')
+            bump(1)
+          }
+
           const overall = severity === 2 ? '🔴 CRITICAL' : severity === 1 ? '🟡 WARNING' : '🟢 OK'
 
           // Every ⚠️/❌ table row gets a corresponding bullet here — a WARNING/CRITICAL report
@@ -364,6 +389,7 @@ jobs:
               : '| SSL Certificate | ⚠️ | Could not read certificate expiry |',
           )
           lines.push(`| Monitor (/api/monitor) | ${monitorLine} |`)
+          lines.push(alertsRow)
           lines.push(...gasLines) // [Auditor M2 / PR #497] one row per monitored/not-monitored chain
           lines.push(`| Git Activity (origin/main) | ℹ️ | ${e.GIT_COUNT} commits in the last 24h |`, '')
           lines.push('## Actions Taken')

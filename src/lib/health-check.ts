@@ -20,6 +20,8 @@ export interface HealthCheckResult {
   ok: boolean
   latencyMs: number
   error?: string
+  /** 'infra' = the probe path itself failed (transport/timeout); not evidence about the source. */
+  kind?: 'infra'
 }
 
 /**
@@ -34,11 +36,14 @@ export async function runHealthCheck(endpoint: MonitoredEndpoint): Promise<Healt
     }
     return await checkAggregator(endpoint, start)
   } catch (err) {
-    return {
-      ok: false,
-      latencyMs: Date.now() - start,
-      error: err instanceof Error ? err.message : String(err),
+    const error = err instanceof Error ? err.message : String(err)
+    // The self probe is our lambda fetching our own public URL: a thrown fetch (timeout, DNS, reset)
+    // is a probe-path problem, not proof the site is down for users, so it is reported as infra and
+    // never counts toward degraded/disabled. An HTTP response (any status) is still a real result.
+    if (endpoint.id === 'teraswap-self') {
+      return { ok: false, latencyMs: Date.now() - start, error: `transport: ${error}`, kind: 'infra' }
     }
+    return { ok: false, latencyMs: Date.now() - start, error }
   }
 }
 

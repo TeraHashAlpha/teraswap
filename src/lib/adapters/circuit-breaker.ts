@@ -265,6 +265,20 @@ export function getAllCircuitStates(): Array<ReturnType<CircuitBreaker['getInfo'
   return Array.from(breakers.values()).map(cb => cb.getInfo())
 }
 
+/**
+ * [fix/monitor-self-source-alerts] Mainnet sources whose breaker is OPEN right now (after the KV
+ * pre-seed). Read via the PURE getState() — never isOpen() — so asking does not flip OPEN → HALF_OPEN
+ * and the monitor never becomes the half-open probe of a source that is backing off (a 429'd source
+ * would otherwise be re-hit by the quorum the instant its cooldown elapses). Real user traffic is the
+ * only thing that half-opens a breaker.
+ */
+export async function getOpenBreakerSources(): Promise<string[]> {
+  await ensureInitialized()
+  return Array.from(breakers.values())
+    .filter(cb => cb.getState() === 'OPEN' && !cb.name.includes(':'))
+    .map(cb => cb.name)
+}
+
 /** Reset all circuit breakers (for testing) */
 export function resetAllCircuitBreakers(): void {
   breakers.clear()
