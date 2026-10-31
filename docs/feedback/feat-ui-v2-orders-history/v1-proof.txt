@@ -49,3 +49,5 @@ lazy group 801313: base 3 chunks / 17 modules · head 4 chunks / 21 modules · m
 ## reading: every base module is present in head (0 missing); the 4 extra ids are v1's own lib/dca/position-stats, route-source,
 ##   FloorTierBadge and order-engine/usd — inlined into their importers in base, kept as shared modules now that v2 imports them too
 ##   (hence the 'different code' = import-by-id instead of inlined copy + minifier renames). 0 v2-marked chunks/modules in any v1 route.
+## OWNER 2026-10-31: this module-level proof is ACCEPTED as the B7 'v1 module-identical' check (byte identity would need v2 to
+##   copy position-stats / usd / route-source / FloorTierBadge, i.e. compute its own P&L — rejected).

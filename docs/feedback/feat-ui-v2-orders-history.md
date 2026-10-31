@@ -1,14 +1,13 @@
 # feat/ui-v2-orders-history — feedback (B7: DCA positions parity · Orders · History)
 Off origin/main `0a642a9` (#633). Signed, noreply. C0 `afec8dc` · C1 `82409e6` positions · C2 `4f1a86a` Orders · C3
-`b212a8f` History + a11y · C4 `cff1e68` view split · C5 `2a98b0c` + C6 `b430f91` guard lines. Mocked; nothing
-signed.
-**PR #635 (owner, not draft) merged C0 only (`4d84b5c`, 13:46)** → C1+ need a NEW **DRAFT** PR (Auditor note: cancel
-path).
+`b212a8f` History + a11y · C4 `cff1e68` view split · C5 `2a98b0c` + C6 `b430f91` guard lines. Mocked; nothing signed.
+**PR #635 (owner, not draft) merged C0 only (`4d84b5c`, 13:46)** → C1+ need a NEW **DRAFT** PR (Auditor: cancel path).
 Diff: `src/ui/v2/**` + this file/folder + ONE owner-approved line in `src/lib/order-engine/usd-scope-guard.test.ts`.
-**Asked → owner answer 2026-10-31 (supersedes the goal text):** v1's per-fill USD (`fillUsd`) tripped the
-APPROX_PRICES importer guard (src/lib) → **allow-list v2**: C5 lists `ui/v2/dca/positions-model.ts` (display only,
-gates/signs nothing); C6 lets that test file name the path in the v2 isolation guard (data, never an import, never
-bundled).
+**Asked → owner answers 2026-10-31 (supersede the goal text):** (1) v1's per-fill USD (`fillUsd`) tripped the
+APPROX_PRICES importer guard (src/lib) → **allow-list v2**: C5 lists `ui/v2/dca/positions-model.ts` (display only); C6
+lets that test name the path in the v2 isolation guard (data, never bundled). (2) v1's lazy Orders/DCA tabs
+re-partition once v2 shares 4 v1 lib modules (+33 B loader table on `/`, `/swap`) → **module-level proof ACCEPTED**
+as "v1 module-identical" (`v1-proof.txt`).
 **Premises (no blocker, recorded):** (a) v1 History has no hook (fetch inline in WalletHistory) →
 `use-wallet-history.ts` restates it, URL + read-sig headers = v1 (test). (b) v1 hard-codes chain 1 for Orders /
 ExecutionTimeline tx links → v2 uses the ORDER chain (owner rule; a v1 bug for Base/Arb). (c) v1 History rows show
