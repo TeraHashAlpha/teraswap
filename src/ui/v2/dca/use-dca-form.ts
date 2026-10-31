@@ -64,6 +64,23 @@ export interface PreparedReview {
 
 export type PrepareResult = { ok: true; review: PreparedReview } | { ok: false }
 
+export interface PrepareOptions {
+  /**
+   * A tier the user just acknowledged — v1's `handleCreate(ack)` (DCAPanel.tsx:1209 via the consent dialog's confirm): the server is
+   * NOT asked again, the draft carries `floorAck = { tier: ack, acknowledgedAt: now }`. Never a stored ack: the caller passes the tier
+   * whose box is ticked on the sheet in front of the user right now.
+   */
+  ack?: WeakerTier
+  /**
+   * v1 starts the waiting loop at the top of every `handleCreate` (:825). The review's Create on the on-chain tier is the one press
+   * where the loop the form press started is still running and v1 starts nothing new. Default true.
+   */
+  startSound?: boolean
+}
+
+/** `form.prepare` — the lifecycle's Create and Retry call it afresh on every press. */
+export type PrepareFn = (opts?: PrepareOptions) => Promise<PrepareResult>
+
 /**
  * [ADR-025] The DCA form's state: v1's `CreateDCAForm` state and derivations, one for one, over v1's own hooks (balances, Chainlink,
  * depeg, floor-tier ask) and lib (presets, schedule-fit, dust guard, min-output derivation). `prepare()` is v1's `handleCreate` up to
@@ -282,7 +299,8 @@ export function useDcaForm(chainId: number, paused: boolean) {
    * v1's `handleCreate` up to `onSubmit(config)`: the same guards in the same order, the same sounds. Resolves `{ ok: false }` where v1
    * returns early (a banner or consent explains why) and `{ ok: true, review }` where v1 would build the config and sign — B6b's cue.
    */
-  async function prepare(): Promise<PrepareResult> {
+  async function prepare(opts: PrepareOptions = {}): Promise<PrepareResult> {
+    const { ack, startSound = true } = opts
     if (!canCreate || !tokenIn || !tokenOut) return { ok: false }
     if (!scheduleFit.fits || minChunkGuard.blocked || depegBlocking || oracleBlocked) return { ok: false }
     setRouteBlock(null)
@@ -292,7 +310,7 @@ export function useDcaForm(chainId: number, paused: boolean) {
       setRouteBlock(NO_ROUTER_FOR_CHAIN_REASON)
       return { ok: false }
     }
-    startWaitingSound()
+    if (startSound) startWaitingSound()
     let amountIn: string
     try {
       amountIn = parseUnits(totalDisplay, tokenIn.decimals).toString()
@@ -326,9 +344,10 @@ export function useDcaForm(chainId: number, paused: boolean) {
         return { ok: false }
       }
     }
-    // The server is asked afresh (v1 does not trust the preview); its answer is the tier the sheet asks consent for.
+    // The server is asked afresh (v1 does not trust the preview); its answer is the tier the sheet asks consent for. With an `ack` it is
+    // not asked again (v1: "a confirmed ack is the tier the user just accepted") — the server re-classifies on POST and 409s if it differs.
     let info: PairFloorInfo = pairFloor ?? { tier: 'onchain-feed', legs: { in: { registered: null, priced: null }, out: { registered: null, priced: null } }, registeredFeedCount: null, effectiveCap: null }
-    if (v3Enabled) info = await fetchPairFloorInfo({ chainId, tokenIn: tokenIn.address, tokenOut: tokenOut.address })
+    if (v3Enabled && !ack) info = await fetchPairFloorInfo({ chainId, tokenIn: tokenIn.address, tokenOut: tokenOut.address })
 
     let minAmountOut: string
     let maxSlippageBpsForConfig: number | undefined
@@ -353,17 +372,21 @@ export function useDcaForm(chainId: number, paused: boolean) {
     // v1 stops the loop only where it opens the consent dialog (DCAPanel.tsx:895) — the review carries that consent for the weaker
     // tiers, so it stops here for them. On the on-chain tier v1 goes straight to the EIP-712 modal with the loop running (:825 → :993)
     // and so does v2 (B6b): the review's Create hands over to `createOrder` with no new start; the engine's event ends it.
-    if (consentTier(info)) stopWaitingSound()
+    if (!ack && consentTier(info)) stopWaitingSound()
     const draft = buildDcaDraft({
       tokenIn, tokenOut, amountIn, minAmountOut, maxSlippageBps: maxSlippageBpsForConfig,
       expirySeconds: expiry.seconds, router: defaultRouter.address, priceInUsd: livePriceIn,
       dcaInterval: interval.seconds, dcaTotal: parts,
+      ...(v3Enabled && ack ? { floorAck: { tier: ack, acknowledgedAt: new Date().toISOString() } } : {}),
     })
     return { ok: true, review: { draft, info, symbols: affectedSymbols(info, tokenIn.symbol, tokenOut.symbol), minAmountOut } }
   }
 
+  // Every price `prepare()` reads into the draft (the floor derivation's four prices; `priceInUsd` is `livePriceIn`).
+  const priceKey = `${chainlinkPriceIn ?? ''}:${chainlinkPriceOut ?? ''}:${llamaPriceIn ?? ''}:${llamaPriceOut ?? ''}`
+
   return {
-    chainId, chainDisplayName, isConnected, v3Enabled,
+    chainId, chainDisplayName, isConnected, v3Enabled, priceKey,
     tokenIn, setTokenIn, tokenOut, buySelection, setBuySelection,
     totalDisplay, setTotalDisplay, balanceDisplay, presetsDisabled, fillPct, hasNativeOnly,
     partsIdx, setPartsIdx, intervalIdx, setIntervalIdx, expiryIdx, setExpiryIdx,

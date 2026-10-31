@@ -53,7 +53,7 @@ const VIEW: DcaReviewView = {
 }
 
 describe('review sheet · consent gates the CTA (server tier = authority)', () => {
-  it('on-chain feed: nothing to consent to — Create DCA is live and hands over the draft WITHOUT an acknowledgement', () => {
+  it('on-chain feed: nothing to consent to — Create DCA is live and hands over NO acknowledgement (the card re-runs prepare(); the sheet holds no draft to send)', () => {
     const onCreate = vi.fn()
     render(<DcaReviewSheet review={reviewFor(onchainInfo())} view={VIEW} onCreate={onCreate} onClose={() => {}} />)
     expect(screen.queryByTestId('dca-consent')).toBeNull()
@@ -61,8 +61,7 @@ describe('review sheet · consent gates the CTA (server tier = authority)', () =
     expect(cta).toHaveProperty('disabled', false)
     fireEvent.click(cta)
     expect(onCreate).toHaveBeenCalledTimes(1)
-    expect(onCreate.mock.calls[0][0]).toEqual(reviewFor(onchainInfo()).draft)
-    expect(onCreate.mock.calls[0][0].floorAck).toBeUndefined()
+    expect(onCreate.mock.calls[0]).toEqual([undefined])
   })
 
   it.each([
@@ -79,8 +78,7 @@ describe('review sheet · consent gates the CTA (server tier = authority)', () =
     expect(cta).toHaveProperty('disabled', false)
     fireEvent.click(cta)
     expect(onCreate).toHaveBeenCalledTimes(1)
-    expect(onCreate.mock.calls[0][0].floorAck.tier).toBe(tier)
-    expect(Number.isFinite(Date.parse(onCreate.mock.calls[0][0].floorAck.acknowledgedAt))).toBe(true)
+    expect(onCreate.mock.calls[0]).toEqual([tier])
   })
 
   it('the words are v1\'s: heading, checkbox label and body (real {N}, symbols and cap) come from v1\'s own exports', () => {
@@ -136,7 +134,7 @@ describe('review sheet · a 409 reopens the consent', () => {
     expect(screen.getByRole('button', { name: 'Create DCA' })).toHaveProperty('disabled', true)
     fireEvent.click(screen.getByTestId('dca-consent-checkbox'))
     fireEvent.click(screen.getByRole('button', { name: 'Create DCA' }))
-    expect(onCreate.mock.calls[0][0].floorAck.tier).toBe('unpriced')
+    expect(onCreate.mock.calls[0]).toEqual(['unpriced'])
   })
 
   it('an acknowledgement given for offchain-price does not survive a 409 naming unpriced', () => {
