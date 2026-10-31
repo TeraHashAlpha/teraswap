@@ -192,6 +192,15 @@ export class ExecutorMonitor {
       "# TYPE teraswap_executor_uptime_seconds gauge",
       `teraswap_executor_uptime_seconds ${uptimeSeconds}`,
       "",
+      // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001 — the paused state (rpc-auth.js).
+      "# HELP teraswap_executor_paused 1 while the keeper reports this paused state",
+      "# TYPE teraswap_executor_paused gauge",
+      `teraswap_executor_paused{reason="rpc-auth"} ${this.stats.paused === "rpc-auth" ? 1 : 0}`,
+      "",
+      "# HELP teraswap_executor_rpc_auth_consecutive_errors Consecutive RPC auth/allowlist rejections",
+      "# TYPE teraswap_executor_rpc_auth_consecutive_errors gauge",
+      `teraswap_executor_rpc_auth_consecutive_errors ${Number(this.stats.rpcAuth?.consecutiveAuthErrors) || 0}`,
+      "",
     ].join("\n")
   }
 

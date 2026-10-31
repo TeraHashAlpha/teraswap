@@ -280,6 +280,12 @@ CREATE TABLE IF NOT EXISTS keeper_runtime_config (
   chain_id              INTEGER PRIMARY KEY,
   no_price_fill_cap_usd NUMERIC,
   keeper_version        TEXT,
-  updated_at            TIMESTAMPTZ
+  updated_at            TIMESTAMPTZ,
+  -- [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: NULL = working, 'rpc-auth' = the RPC
+  -- provider rejects the keeper's credentials. Reporting only. See
+  -- supabase/migrations/20261031120000_keeper_runtime_config_paused.sql.
+  paused                TEXT
+    CONSTRAINT keeper_runtime_config_paused_valid CHECK (paused IS NULL OR paused IN ('rpc-auth')),
+  paused_since          TIMESTAMPTZ
 );
 ALTER TABLE keeper_runtime_config ENABLE ROW LEVEL SECURITY;

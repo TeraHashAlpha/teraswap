@@ -105,3 +105,81 @@ export async function publishRuntimeConfig({ supabaseFetch, row, log = () => {} 
     return { ok: false, status: null, reason: `threw: ${msg}`, missingTable: false }
   }
 }
+
+// ── [fix/executor-alert-masking-rpc-auth] The keeper's explicit paused state ─────────────────────
+// INC-2026-10-30-001: the provider rejected every RPC call for ~20 h and nothing outside the host
+// could tell. The monitor, the daily report and the web app all run OFF the keeper host (which is
+// SSM-only), and none of them can reach its /health — Supabase is the one channel they share with
+// it. So the state rpc-auth.js reports also lands on this chain's keeper_runtime_config row
+// (`paused`, `paused_since` — migration 20261031120000_keeper_runtime_config_paused.sql).
+
+/** Every value `paused` may take (mirrors the migration's CHECK constraint). */
+export const PAUSED_VALUES = Object.freeze(["rpc-auth"])
+export const PAUSED_MIGRATION = "supabase/migrations/20261031120000_keeper_runtime_config_paused.sql"
+
+const MISSING_COLUMN_RE = /PGRST204|42703|column[^.]*paused|paused[^.]*does not exist|Could not find the 'paused/i
+
+/**
+ * Record (`paused` = "rpc-auth") or clear (`paused` = null) the paused state. Setting only touches a
+ * row that is NOT already paused (`paused=is.null`), so `paused_since` keeps the FIRST moment across
+ * reminders and pm2 restarts; clearing only touches a row that IS paused. A PATCH never creates the
+ * row (the boot publish does). Every outcome is logged; nothing throws. Bounded by `timeoutMs`: the
+ * boot-refusal path awaits this before process.exit, and a hung Supabase must never turn a refused
+ * boot into a process that pm2 shows as "online" and never restarts.
+ * @param {{ supabaseFetch: Function, chainId: number|string, paused: string|null, nowIso: string,
+ *   log?: (m: string) => void, timeoutMs?: number }} p
+ * @returns {Promise<{ ok: boolean, status: number|null, rows: number|null, reason: string, missingColumn: boolean }>}
+ */
+export async function publishPausedState({ supabaseFetch, chainId, paused, nowIso, log = () => {}, timeoutMs = 5_000 }) {
+  const chain = Number(chainId)
+  const fail = (reason) => {
+    log(`  WARNING: ${RUNTIME_CONFIG_TABLE} paused-state publish skipped (non-fatal): ${reason}`)
+    return { ok: false, status: null, rows: null, reason, missingColumn: false }
+  }
+  if (!Number.isInteger(chain) || chain <= 0) return fail(`invalid chainId '${chainId}'`)
+  if (paused !== null && !PAUSED_VALUES.includes(paused)) return fail(`invalid paused '${paused}'`)
+  if (typeof nowIso !== "string" || Number.isNaN(Date.parse(nowIso))) return fail(`invalid nowIso '${nowIso}'`)
+  if (typeof supabaseFetch !== "function") return fail("no Supabase client")
+
+  const filter = paused ? `chain_id=eq.${chain}&paused=is.null` : `chain_id=eq.${chain}&paused=not.is.null`
+  const patch = paused
+    ? { paused, paused_since: nowIso, updated_at: nowIso }
+    : { paused: null, paused_since: null, updated_at: nowIso }
+  try {
+    const res = await supabaseFetch(`${RUNTIME_CONFIG_TABLE}?${filter}&select=chain_id`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    const status = res && Number.isFinite(res.status) ? res.status : null
+    if (res && res.ok) {
+      let rows = null
+      try {
+        const json = await res.json()
+        rows = Array.isArray(json) ? json.length : null
+      } catch {
+        rows = null
+      }
+      const what = rows === 0 ? "no row changed (already in that state, or no row for this chain yet)" : `${rows ?? "?"} row(s)`
+      log(`  ${RUNTIME_CONFIG_TABLE}: chain ${chain} paused=${paused ?? "null"} — ${what}`)
+      return { ok: true, status, rows, reason: "published", missingColumn: false }
+    }
+    let body = ""
+    try {
+      body = res && typeof res.text === "function" ? String(await res.text()).slice(0, 200) : ""
+    } catch {
+      body = ""
+    }
+    const missingColumn = MISSING_COLUMN_RE.test(body)
+    const reason = missingColumn
+      ? `columns paused/paused_since are not there yet (HTTP ${status}) — apply ${PAUSED_MIGRATION}`
+      : `HTTP ${status}${body ? ` ${body}` : ""}`
+    log(`  WARNING: ${RUNTIME_CONFIG_TABLE} paused-state publish failed (non-fatal): ${reason}`)
+    return { ok: false, status, rows: null, reason, missingColumn }
+  } catch (err) {
+    const msg = redactError(err, { max: 160 })
+    log(`  WARNING: ${RUNTIME_CONFIG_TABLE} paused-state publish threw (non-fatal): ${msg}`)
+    return { ok: false, status: null, rows: null, reason: `threw: ${msg}`, missingColumn: false }
+  }
+}

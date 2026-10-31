@@ -114,7 +114,9 @@ export async function sendTelegramAlert(message) {
  */
 export async function sendTelegramHeartbeat(stats) {
   const msg = [
-    `✅ Executor alive`,
+    // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: "alive" arrived on schedule for the
+    // whole ~20 h the provider rejected every call. Alive is not the same as working.
+    stats.paused ? `⏸️ Executor alive but PAUSED: ${esc(stats.paused)} since ${esc(stats.rpcAuth?.pausedSince || "?")}` : `✅ Executor alive`,
     `Cycles: ${stats.totalCycles}`,
     `Executed: ${stats.totalExecuted}`,
     `Errors: ${stats.totalErrors}`,
@@ -300,6 +302,41 @@ export async function alertUnexplainedOutflow({ outflowEth, thresholdEth, wallet
 
   await sendTelegramAlert(body)
   return body
+}
+
+/**
+ * [fix/executor-alert-masking-rpc-auth] Alert: the RPC provider REJECTS this keeper's credentials
+ * (rpc-auth.js — FATAL-OPS, never transient). Urgency is stated, not scored: no Freeze-urgency line,
+ * because freezing DCA does not fix a key — a human fixing the key/allowlist does. The second line is
+ * the same grep-able line the keeper logs.
+ * @param {{ phase: 'boot'|'runtime'|'recovered', chainId: number|string, source: string,
+ *   signal?: string|null, consecutive?: number, threshold?: number, origin?: string,
+ *   since?: string|null, suppressed?: number }} p
+ * @returns {Promise<string>} the HTML body that was sent
+ */
+export async function alertRpcAuth({ phase, chainId, source, signal, consecutive, threshold, origin, since, suppressed = 0 }) {
+  const suppressedLine = suppressed > 0 ? [`${esc(suppressed)} repeat(s) suppressed since the last alert`] : []
+  const body =
+    phase === "recovered"
+      ? [
+          `✅ <b>RPC auth recovered</b>`,
+          `chain=${esc(chainId)} source=${esc(source)} — paused: rpc-auth cleared (paused since ${esc(since || "?")})`,
+          ...suppressedLine,
+        ]
+      : [
+          `🔐 <b>RPC AUTH REJECTED</b> — Urgency: HIGH`,
+          `rpc: AUTH REJECTED chain=${esc(chainId)} source=${esc(source)} — check provider allowlist/key`,
+          `Signal: ${esc(signal || "?")}`,
+          phase === "boot"
+            ? `Phase: boot — chain-verify refused; the keeper is NOT running and will not start until the key/allowlist is fixed`
+            : `Phase: runtime — ${esc(consecutive)} consecutive auth errors (threshold ${esc(threshold)}), last from ${esc(origin)}`,
+          `State: paused: rpc-auth${since ? ` since ${esc(since)}` : ""} — every RPC call is refused; no order can execute`,
+          ...suppressedLine,
+          `Runbook: docs/Runbooks/EXECUTOR-OPERATIONS.md § Changing an RPC key`,
+        ]
+  const text = body.join("\n")
+  await sendTelegramAlert(text)
+  return text
 }
 
 /**
