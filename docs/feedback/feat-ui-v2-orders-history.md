@@ -8,6 +8,7 @@ APPROX_PRICES importer guard (src/lib) → **allow-list v2**: C5 lists `ui/v2/dc
 lets that test name the path in the v2 isolation guard (data, never bundled). (2) v1's lazy Orders/DCA tabs
 re-partition once v2 shares 4 v1 lib modules (+33 B loader table on `/`, `/swap`) → **module-level proof ACCEPTED**
 as "v1 module-identical" (`v1-proof.txt`).
+(3) Goal text not met literally because of (1)+(2) → **keep both answers; the owner ends the goal (`/goal clear`)**.
 **Premises (no blocker, recorded):** (a) v1 History has no hook (fetch inline in WalletHistory) →
 `use-wallet-history.ts` restates it, URL + read-sig headers = v1 (test). (b) v1 hard-codes chain 1 for Orders /
 ExecutionTimeline tx links → v2 uses the ORDER chain (owner rule; a v1 bug for Base/Arb). (c) v1 History rows show
