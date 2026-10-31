@@ -334,3 +334,19 @@ describe('B7 · P&L: v2 = v1 for the same fixture (number equality, the lib is t
     expect(v2None.container.textContent).toMatch(/Position summary/)
   })
 })
+
+describe('B7 · Positions keyboard', () => {
+  it('↑ / ↓ / Home / End walk every row control (Cancel, fill tx links, explorer, View receipt, Remove)', () => {
+    render(<DcaOrdersList active={[A1]} history={[H1, H2]} {...props} />)
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[data-row-nav]'))
+    // a1: 4 fill links + Cancel · h1: explorer + receipt + Remove · h2: receipt + Remove
+    expect(items.map((n) => n.textContent?.trim().slice(0, 12))).toHaveLength(4 + 1 + 3 + 2)
+    items[0].focus()
+    fireEvent.keyDown(items[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(items[1])
+    fireEvent.keyDown(items[1], { key: 'End' })
+    expect(document.activeElement).toBe(items[items.length - 1])
+    fireEvent.keyDown(items[items.length - 1], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(items[0])
+  })
+})

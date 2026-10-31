@@ -17,3 +17,15 @@
   .ts-orders-detail { padding-left: 0; }
   .ts-orders-notice { flex-direction: column; align-items: flex-start; gap: 4px; }
 }
+
+/* History rows (round7 43): glyph · amounts + status · time / tx, one hairline each. */
+.ts-history-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline); }
+.ts-history-row:first-child { border-top: 0; }
+.ts-history-action {
+  display: inline-flex; min-height: 44px; align-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase; text-decoration: underline; text-decoration-color: var(--hairline-underline); text-underline-offset: 6px;
+}
+.ts-history-action:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .ts-history-row .ts-orders-glyph { display: none; }
+}

@@ -7,7 +7,7 @@ Off origin/main `0a642a9` (#633). Signed, noreply, no PR (owner opens it as DRAF
 - [x] C1 tests: content parity v1 DCADashboard ⊆ v2 (0 missing), countdown = v1, P&L = v1 (number equality)
 - [x] C2 Orders tab: types, filters, status, chain, created/expiry, cancel via the reused DcaCancelSheet, empty/loading/error
 - [x] C2 tests: per type + status, filter parity, cancel args = v1 per cancellable type
-- [ ] C3 History tab: swaps + DCA fills, tx links (tx chain), CSV export (v1 has it), mobile 375, keyboard nav, focus restore
-- [ ] C3 tests: per state
+- [x] C3 History tab: swaps + DCA fills, tx links (tx chain), CSV export (v1 has it), mobile 375, keyboard nav, focus restore
+- [x] C3 tests: per state
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc, build, v1 module-identical proof, rpc-budget guards
 - [ ] Evidence 1–7 + content-map delta; compare link

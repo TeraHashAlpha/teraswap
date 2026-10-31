@@ -20,6 +20,7 @@ import { TabPane } from './TabPane'
 import { SwapCard } from '../swap/SwapCard'
 import { DcaCard } from '../dca/DcaCard'
 import { OrdersTab } from '../orders/OrdersTab'
+import { HistoryTab } from '../history/HistoryTab'
 import { isDcaLive } from '@/lib/dca-launch'
 import { tabIdFromPathname, type V2TabId } from './tab-paths'
 import { V2ToastProvider } from './toasts'
@@ -35,9 +36,9 @@ export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; childr
   const active = tab ?? tabIdFromPathname(pathname)
   const rkTheme = useMemo(() => createV2RainbowTheme(), [])
 
-  // B3: the Swap tab is the real card; B6: DCA; B7: Orders (v1 OrderDashboard). Every other tab is still a placeholder until its block lands.
+  // B3: the Swap tab is the real card; B6: DCA; B7: Orders (v1 OrderDashboard) and History (v1 WalletHistory). Every other tab is still a placeholder until its block lands.
   const pane =
-    children ?? (active === 'swap' ? <SwapCard /> : active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : active === 'dca' && isDcaLive(chainId) ? <DcaCard key={chainId} chainId={chainId} /> : active === 'orders' ? <OrdersTab /> : <TabPane tab={active} />)
+    children ?? (active === 'swap' ? <SwapCard /> : active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : active === 'dca' && isDcaLive(chainId) ? <DcaCard key={chainId} chainId={chainId} /> : active === 'orders' ? <OrdersTab /> : active === 'history' ? <HistoryTab /> : <TabPane tab={active} />)
 
   return (
     <RainbowKitProvider theme={rkTheme} locale="en">

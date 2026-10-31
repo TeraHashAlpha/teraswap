@@ -12,6 +12,7 @@ import { fmtToken } from '@/lib/format'
 import { playClick } from '@/lib/sounds'
 import { Button } from '../primitives'
 import { Mark } from '../modals/parts'
+import { rowNavKeyDown } from '../orders/keyboard'
 import { FillsTimeline } from './FillsTimeline'
 import { NextBuyRing, CountdownText, useReducedMotion } from './NextBuyRing'
 import { PositionSummary } from './PositionSummary'
@@ -183,7 +184,7 @@ export function DcaPositionCard({ order, latestEvent, connectedChainId, onCancel
       {((isLive && onCancel) || (!isLive && !isSigning && onRemove)) && (
         <div className="ts-dca-pos-actions flex justify-end gap-3">
           {isLive && onCancel && (
-            <Button variant="text" tone="danger" onClick={() => { playClick(); onCancel(order.id) }} data-testid="order-cancel"
+            <Button variant="text" tone="danger" onClick={() => { playClick(); onCancel(order.id) }} data-testid="order-cancel" data-row-nav=""
               title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}>
               {chainMismatch ? `Switch to ${chainName}` : 'Cancel'}
             </Button>
@@ -227,7 +228,7 @@ export function DcaHistoryRow({ order, onCancel, onRemove }: { order: Autonomous
             <Button variant="text" tone="danger" onClick={() => { playClick(); onCancel(order.id) }} data-testid="order-cancel">Cancel</Button>
           )}
           {!isActive && onRemove && (
-            <Button variant="text" onClick={() => { playClick(); onRemove(order.id) }} data-testid="order-remove">Remove</Button>
+            <Button variant="text" onClick={() => { playClick(); onRemove(order.id) }} data-testid="order-remove" data-row-nav="">Remove</Button>
           )}
         </span>
       </div>
@@ -286,7 +287,8 @@ export function DcaOrdersList({
     )
   }
   return (
-    <div data-testid="dca-orders">
+    // ↑ / ↓ / Home / End walk the rows' controls (Cancel, tx links, View receipt, Remove); Tab order is untouched.
+    <div data-testid="dca-orders" onKeyDown={rowNavKeyDown('[data-row-nav]')}>
       {active.length > 1 && (
         <div className="flex justify-end">
           <Button variant="text" tone="danger" onClick={() => { onCancelAll(); playClick() }} data-testid="orders-cancel-all">Cancel All</Button>
