@@ -94,6 +94,11 @@ export interface KeeperChainHealth {
   /** [Task 2] DCA orders on this chain whose next scheduled fill is >2 poll intervals overdue
    *  with no fill/heartbeat seen since. */
   overdueOrderCount?: number
+  /** [fix/executor-alert-masking-rpc-auth] The keeper's SELF-REPORTED paused state
+   *  (keeper_runtime_config.paused, e.g. 'rpc-auth'). Present only while the keeper says it is
+   *  paused — absent when it is working or when the state could not be read. */
+  paused?: string
+  pausedSince?: string | null
 }
 
 // ── Gas balance check ────────────────────────────────────
@@ -169,21 +174,83 @@ async function countOverdueDcaOrders(chainId: number): Promise<number> {
   }
 }
 
+// ── Keeper self-reported paused state ───────────────────
+// [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: the Base keeper's RPC provider rejected
+// every call for ~20 h and nothing off the keeper host could tell (the host is SSM-only; nothing
+// reads its /health). The keeper now records `paused` ('rpc-auth') + `paused_since` on its own
+// keeper_runtime_config row (contracts/order-engine/executor/rpc-auth.js; migration
+// 20261031120000_keeper_runtime_config_paused.sql). This is the off-host READ of that state — by
+// the monitor tick (alert) and GET /api/monitor/keepers (daily report).
+
+export interface KeeperPausedState {
+  chainId: number
+  /** false when the row could not be read (no Supabase, query error, migration not applied yet). */
+  readable: boolean
+  paused: string | null
+  pausedSince: string | null
+}
+
+/** Supabase/PostgREST "column does not exist" — the paused migration is not applied yet. */
+const MISSING_PAUSED_COLUMN = /42703|PGRST204|paused/i
+
+/** Never throws. A missing row (no boot publish yet) reads as "not paused", readable. */
+export async function readKeeperPausedState(chainId: number): Promise<KeeperPausedState> {
+  const unreadable: KeeperPausedState = { chainId, readable: false, paused: null, pausedSince: null }
+  const supabase = getSupabase()
+  if (!supabase) return unreadable
+  try {
+    const { data, error } = await supabase
+      .from('keeper_runtime_config')
+      .select('paused, paused_since')
+      .eq('chain_id', chainId)
+      .maybeSingle()
+    if (error) {
+      // A pending migration is expected and documented — stay quiet about it every 60 s tick.
+      const text = `${(error as { code?: string }).code ?? ''} ${(error as { message?: string }).message ?? ''}`
+      if (!MISSING_PAUSED_COLUMN.test(text)) console.warn(`[KEEPER] paused-state read failed (chain ${chainId}): ${text.trim()}`)
+      return unreadable
+    }
+    const row = (data ?? null) as { paused?: unknown; paused_since?: unknown } | null
+    const paused = typeof row?.paused === 'string' && row.paused ? row.paused : null
+    const pausedSince = paused && typeof row?.paused_since === 'string' ? row.paused_since : null
+    return { chainId, readable: true, paused, pausedSince }
+  } catch {
+    return unreadable
+  }
+}
+
+/** Every chain in KEEPER_CHAINS — for GET /api/monitor/keepers (the daily report's read). */
+export async function readAllKeeperPausedStates(): Promise<Array<KeeperPausedState & { active: boolean }>> {
+  return Promise.all(
+    KEEPER_CHAINS.map(async (c) => ({ ...(await readKeeperPausedState(c.chainId)), active: isChainActive(c.chainId) })),
+  )
+}
+
+function pausedFields(s: KeeperPausedState): Pick<KeeperChainHealth, 'paused' | 'pausedSince'> {
+  return s.paused ? { paused: s.paused, pausedSince: s.pausedSince } : {}
+}
+
 // ── Per-chain check (the ONE rule Task 2 asks for) ───────
 
 export async function checkKeeperChain(cfg: KeeperChainConfig): Promise<KeeperChainHealth> {
   const address = process.env[cfg.envVar]
 
-  if (!address || !isChainActive(cfg.chainId)) {
+  if (!isChainActive(cfg.chainId)) {
     return { chainId: cfg.chainId, monitored: false }
   }
+  if (!address) {
+    // [fix/executor-alert-masking-rpc-auth] The paused state is the keeper's own report and needs no
+    // keeper address — an unmonitored-but-active chain still surfaces it (never silent).
+    return { chainId: cfg.chainId, monitored: false, ...pausedFields(await readKeeperPausedState(cfg.chainId)) }
+  }
 
-  const [{ gasStatus, balanceEth }, overdueOrderCount] = await Promise.all([
+  const [{ gasStatus, balanceEth }, overdueOrderCount, pausedState] = await Promise.all([
     checkGasBalance(cfg.chainId, address as `0x${string}`),
     countOverdueDcaOrders(cfg.chainId),
+    readKeeperPausedState(cfg.chainId),
   ])
 
-  return { chainId: cfg.chainId, monitored: true, gasStatus, balanceEth, overdueOrderCount }
+  return { chainId: cfg.chainId, monitored: true, gasStatus, balanceEth, overdueOrderCount, ...pausedFields(pausedState) }
 }
 
 export async function checkAllKeeperChains(): Promise<KeeperChainHealth[]> {
@@ -197,6 +264,18 @@ export async function checkAllKeeperChains(): Promise<KeeperChainHealth[]> {
 
 export async function alertOnKeeperTrouble(results: KeeperChainHealth[]): Promise<void> {
   for (const r of results) {
+    // [fix/executor-alert-masking-rpc-auth] A keeper that says it is paused (e.g. its RPC provider
+    // rejects its key) cannot execute anything — 'disabled', whether or not its gas is monitored.
+    // emitTransitionAlert dedups per {sourceId, from, to} (1 h), so this is ~hourly, not per tick.
+    if (r.paused) {
+      const reason = `keeper-paused: chain ${r.chainId} ${r.paused} since ${r.pausedSince ?? 'unknown'}`
+      try {
+        await emitTransitionAlert(`keeper-paused-${r.chainId}`, 'active', 'disabled', reason)
+      } catch (err) {
+        console.warn('[KEEPER] Alert dispatch failed:', err instanceof Error ? err.message : err)
+      }
+    }
+
     if (!r.monitored) continue
 
     if (r.gasStatus === 'critical' || r.gasStatus === 'rpc-unreachable') {
@@ -227,12 +306,16 @@ export async function alertOnKeeperTrouble(results: KeeperChainHealth[]): Promis
 /** e.g. "8453: ok (0.0421 ETH)" / "42161: not monitored" / "42161: critical (0.0001 ETH)". Never
  *  silent — every chain in KEEPER_CHAINS produces a line, monitored or not. */
 export function describeKeeperHealth(health: KeeperChainHealth): string {
-  if (!health.monitored) return `${health.chainId}: not monitored`
+  // [fix/executor-alert-masking-rpc-auth] e.g. "8453: ok (0.04 ETH), PAUSED rpc-auth since 2026-…"
+  const pausedPart = health.paused ? `, PAUSED ${health.paused} since ${health.pausedSince ?? 'unknown'}` : ''
+  if (!health.monitored) return `${health.chainId}: not monitored${pausedPart}`
 
   const gasPart =
     health.gasStatus === 'rpc-unreachable'
       ? 'rpc-unreachable'
       : `${health.gasStatus} (${health.balanceEth} ETH)`
   const overdue = health.overdueOrderCount ?? 0
-  return overdue > 0 ? `${health.chainId}: ${gasPart}, ${overdue} overdue fill(s)` : `${health.chainId}: ${gasPart}`
+  return overdue > 0
+    ? `${health.chainId}: ${gasPart}, ${overdue} overdue fill(s)${pausedPart}`
+    : `${health.chainId}: ${gasPart}${pausedPart}`
 }

@@ -14,9 +14,10 @@
 --    - paused_since  when the CURRENT pause began (kept across reminders and pm2 restarts: the keeper
 --                    only sets it on a row that is not already paused).
 --
---  Reporting only — not a gate: the keeper never reads these columns back. The web app's reader
---  (GET /api/dca-floor-cap) selects no_price_fill_cap_usd only, so it is unaffected. Wiring the
---  monitor / daily report to READ `paused` is a follow-up (see the PR's feedback file).
+--  Reporting only — not a gate: the keeper never reads these columns back. Readers: the monitor
+--  tick (src/lib/keeper-health-monitor.ts — alerts keeper-paused-<chain>) and the daily report
+--  (GET /api/monitor/keepers). GET /api/dca-floor-cap selects no_price_fill_cap_usd only and is
+--  unaffected.
 --
 --  Additive, nullable, no default, no index, no RLS change (service role only, as before).
 --  Idempotent. OPS: apply to the LIVE Supabase DB manually; the keeper tolerates the columns being

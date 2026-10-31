@@ -137,7 +137,7 @@ The executor itself does NOT push alerts. Alerting goes through the existing Ter
 | Gas-cap hit (no execution despite triggered order) | Supabase: `order_executions` row with `status='skipped'` and `reason` containing `gas` | Manual audit |
 | Execution failure streak | Repeated rows with `status='failed'` for the same order | Manual audit |
 | Process OOM / crash loop | PM2 logs, `pm2 status` | Host-level monitoring (out of scope here) |
-| RPC provider rejects the key (allowlist / invalid key / 401 / 403) | Keeper itself (`rpc-auth.js`, INC-2026-10-30-001) | Telegram `🔐 RPC AUTH REJECTED — Urgency: HIGH`: once at boot (rate-limited across pm2 restarts), or once after 3 consecutive rejections at runtime, then at most hourly; one `RPC auth recovered` when it clears. State: `/health` `paused: "rpc-auth"`, `/metrics` `teraswap_executor_paused{reason="rpc-auth"} 1`, heartbeat `alive but PAUSED`, Supabase `keeper_runtime_config.paused`. Fix: § 7 |
+| RPC provider rejects the key (allowlist / invalid key / 401 / 403) | Keeper itself (`rpc-auth.js`, INC-2026-10-30-001) | Telegram `🔐 RPC AUTH REJECTED — Urgency: HIGH`: once at boot (rate-limited across pm2 restarts), or once after 3 consecutive rejections at runtime, then at most hourly; one `RPC auth recovered` when it clears. State: `/health` `paused: "rpc-auth"`, `/metrics` `teraswap_executor_paused{reason="rpc-auth"} 1`, heartbeat `alive but PAUSED`, Supabase `keeper_runtime_config.paused` → monitor tick alert `keeper-paused-<chain>` (hourly) + daily report ❌ "Keeper state" row (`GET /api/monitor/keepers`). Fix: § 7 |
 
 **Where to look first:**
 - `pm2 status` and `pm2 logs teraswap-executor` for process health.
