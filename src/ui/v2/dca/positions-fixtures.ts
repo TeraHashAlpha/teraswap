@@ -128,11 +128,11 @@ export function useOrderExecutionsFixture(orderId: string, _wallet: string | und
     const t = e.created_at ? Date.parse(e.created_at) : NaN
     return Number.isFinite(t) && t > max ? t : max
   }, -Infinity)
-  return { executions: rows, orderMeta: null, lastFillAtMs: rows.length && last !== -Infinity ? last : null, loading: false }
+  return { executions: rows, orderMeta: opts.enabled === false ? null : ((ORDER_META[orderId] as never) ?? null), lastFillAtMs: rows.length && last !== -Infinity ? last : null, loading: false }
 }
 
 /** `/api/portfolio/prices` answers (lower-cased address → USD). */
-export const PRICES: Record<string, number> = { [USDC_BASE]: 1, [WETH_BASE]: 2489.11, [USDC_ARB]: 1, [WETH_ARB]: 2489.11 }
+export const PRICES: Record<string, number> = { [USDC_BASE]: 1, [WETH_BASE]: 2489.11, [USDC_ARB]: 1, [WETH_ARB]: 2489.11, '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 1, '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 2489.11 }
 
 /** The receipt `buildSettlementReceipt` "decodes" for H1 (the lib is mocked in the tests — it reads chain events). */
 export const RECEIPT: SettlementReceipt = {
@@ -161,3 +161,29 @@ export const RECEIPT: SettlementReceipt = {
     aggregationValueRaw: i === 0 ? null : '1000000000000',
   })),
 }
+
+// ── [B7 C2] the Orders tab: every type v1 lists ────────────────────────────────
+
+/** Limit, Base, active: `@ $2 400.00`, live price from the feed. */
+export const L1 = order({ id: 'l1', orderType: OrderType.LIMIT, dcaExecuted: 0, dcaTotal: 1, createdAt: NOW - 2 * H, expiresAt: NOW + 6 * D + 5 * H, order: { orderType: OrderType.LIMIT, condition: PriceCondition.BELOW, targetPrice: 240_000_000_000n, priceFeed: FEED, amountIn: 250_000_000n, dcaInterval: 0n, dcaTotal: 1n } })
+/** Take Profit (STOP_LOSS + ABOVE), Base, active, under an hour left. */
+export const T1 = order({ id: 't1', orderType: OrderType.STOP_LOSS, tokenInSymbol: 'WETH', tokenInDecimals: 18, tokenOutSymbol: 'USDC', tokenOutDecimals: 6, dcaExecuted: 0, dcaTotal: 1, createdAt: NOW - D, expiresAt: NOW + 42 * 60_000, order: { orderType: OrderType.STOP_LOSS, condition: PriceCondition.ABOVE, targetPrice: 300_000_000_000n, priceFeed: FEED, tokenIn: WETH_BASE, tokenOut: USDC_BASE, amountIn: 500_000_000_000_000_000n, dcaInterval: 0n, dcaTotal: 1n } })
+/** Stop Loss (STOP_LOSS + BELOW), Base, active, 5 h left (v1 lists it even though creation is deferred to v4). */
+export const S1 = order({ id: 's1', orderType: OrderType.STOP_LOSS, tokenInSymbol: 'WETH', tokenInDecimals: 18, tokenOutSymbol: 'USDC', tokenOutDecimals: 6, dcaExecuted: 0, dcaTotal: 1, createdAt: NOW - D, expiresAt: NOW + 5 * H + 10 * 60_000, order: { orderType: OrderType.STOP_LOSS, condition: PriceCondition.BELOW, targetPrice: 200_000_000_000n, priceFeed: FEED, tokenIn: WETH_BASE, tokenOut: USDC_BASE, amountIn: 500_000_000_000_000_000n, dcaInterval: 0n, dcaTotal: 1n } })
+/** Limit, Base, filled: Executed + Received + tx, and NO per-fill rows → v1's synthetic execution entry from the order's own columns. */
+export const L2 = order({ id: 'l2', orderType: OrderType.LIMIT, status: 'filled', dcaExecuted: 0, dcaTotal: 1, createdAt: NOW - 9 * D, executedAt: NOW - 8 * D, expiresAt: NOW - 2 * D, amountOut: '101000000000000000', txHash: `0x5d0a3c19${'2'.repeat(48)}b81e42c7`, order: { orderType: OrderType.LIMIT, condition: PriceCondition.BELOW, targetPrice: 245_000_000_000n, priceFeed: FEED, amountIn: 250_000_000n, dcaInterval: 0n, dcaTotal: 1n } })
+/** A legacy Ethereum DCA (v2 executor), active, wallet on Base → "Switch to Ethereum". */
+export const E1 = order({ id: 'e1', chainId: ETH, dcaExecuted: 1, dcaTotal: 4, order: { tokenIn: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', tokenOut: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', router: '0x111111125421ca6dc452d289314280a0f8842a65', amountIn: 400_000_000n } })
+FILLS.e1 = [fill('e1', 1, E1.createdAt + D, { amount_in: '100000000', amount_out: '40100000000000000', price_at_execution: '249000000000', gas_used: '1200000000000000' })]
+FILLS.l1 = []
+FILLS.t1 = []
+FILLS.s1 = []
+FILLS.l2 = []
+
+/** `/api/orders/:id/executions` → `order` (v1 ExecutionTimeline's OrderMeta): the parent order's columns. */
+export const ORDER_META: Record<string, Record<string, unknown>> = {
+  l2: { tx_hash: L2.txHash, amount_out: L2.amountOut, gas_used: '210000000000000', executed_at: new Date(L2.executedAt as number).toISOString(), executed_price: '244800000000', dca_total: 1, dca_executed: 0 },
+}
+
+/** Every order the Orders tab lists, v1's engine order (newest last is irrelevant: the tab keeps the engine's order). */
+export const ALL_ORDERS = [A1, L1, T1, S1, E1, A3, H1, L2, H2, H3, H4]

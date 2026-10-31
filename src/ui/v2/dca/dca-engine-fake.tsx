@@ -26,12 +26,17 @@ export const fake = {
   posts: [] as unknown[],
   /** The stored orders the trees list (`dcaOrders`). */
   orders: [] as AutonomousOrder[],
+  /** [B7] The engine's first-load flag and the W6-M-01 read-signature denial, as the Orders test wants them. */
+  isLoading: false,
+  readAuthDenied: false,
 }
 
 export function resetFake() {
   fake.seq = []
   fake.posts = []
   fake.orders = []
+  fake.isLoading = false
+  fake.readAuthDenied = false
   fake.sign = async () => ({ event: { type: 'order_created', orderId: 'o1', orderHash: '0xhash' }, posted: true })
   fake.cancelOutcome = async (orderId) => ({ type: 'order_cancelled', orderId })
 }
@@ -136,10 +141,17 @@ export function useFakeOrderEngine() {
     setOrders((prev) => prev.filter((o) => o.id !== orderId))
   }, [])
 
+  const requestOrdersReadAuth = useCallback(async () => {
+    fake.seq.push(['requestOrdersReadAuth'])
+  }, [])
+
+  // [B7] v1's derived lists (useOrderEngine.ts:1342-1350), so the Orders tab sees what v1's OrderDashboard sees.
+  const activeOrders = orders.filter((o) => o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled' || o.status === 'signing')
+  const historyOrders = orders.filter((o) => o.status === 'filled' || o.status === 'expired' || o.status === 'cancelled' || o.status === 'error')
   const dcaOrders = orders
   return {
-    orders, activeOrders: [], historyOrders: [], limitOrders: [], stopLossOrders: [], dcaOrders,
-    latestEvent, isSubmitting, isLoading: false, readAuthDenied: false, requestOrdersReadAuth: async () => {}, currentNonce: 0n,
+    orders, activeOrders, historyOrders, limitOrders: [], stopLossOrders: [], dcaOrders,
+    latestEvent, isSubmitting, isLoading: fake.isLoading, readAuthDenied: fake.readAuthDenied, requestOrdersReadAuth, currentNonce: 0n,
     createOrder, pendingOrder, confirmOrder, clearPendingOrder, pendingCancel, confirmCancel, clearPendingCancel, cancelOrder, cancelAllOrders, removeOrder,
   }
 }

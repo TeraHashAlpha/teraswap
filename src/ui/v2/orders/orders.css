@@ -1,0 +1,19 @@
+/* [ADR-025 / B7] Orders + History (round7 40 / 42 / 43 / 46 / m07): typography on the photo, one hairline per row, no card, no fill. */
+.ts-orders { width: 100%; max-width: 860px; margin: 0 auto; }
+.ts-orders-filters { margin-top: 20px; border-bottom: 1px solid var(--hairline-ring); }
+.ts-orders-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.ts-orders-tabs > button { justify-content: center; }
+.ts-orders-row { border-top: 1px solid var(--hairline); padding: 14px 0; }
+.ts-orders-row:first-child { border-top: 0; }
+.ts-orders-head { display: flex; width: 100%; align-items: flex-start; gap: 12px; min-height: 44px; text-align: left; }
+.ts-orders-head:focus-visible { outline: 2px solid var(--teal); outline-offset: 4px; }
+.ts-orders-glyph { width: 24px; flex: none; padding-top: 2px; text-align: center; font-size: 15px; color: var(--muted); }
+.ts-orders-detail { margin-top: 14px; padding-left: 36px; }
+.ts-orders-exec { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.ts-orders-exec-row { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; }
+.ts-orders-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 0; text-align: center; }
+.ts-orders-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-left: 14px; border-left: 2px solid var(--cream); }
+@media (max-width: 600px) {
+  .ts-orders-detail { padding-left: 0; }
+  .ts-orders-notice { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
